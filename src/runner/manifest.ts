@@ -70,6 +70,12 @@ export interface SessionRecord {
   backendSessionIdAtEnd: string | null;
 }
 
+export interface AssignmentInfo {
+  name: string;
+  sourcePath: string;
+  workspacePath: string;
+}
+
 export interface RunManifest {
   schemaVersion: 1;
   runId: string;
@@ -77,6 +83,7 @@ export interface RunManifest {
     name: string;
     sourcePath: string;
   };
+  assignment: AssignmentInfo | null;
   backend: string;
   model: string | null;
   effort: string | null;
@@ -94,6 +101,7 @@ export interface RunManifest {
   tasksCompleted: number;
   tasksTotal: number;
   backendSessionId: string | null;
+  runtimeVars: Record<string, unknown>;
   finalTasks: Record<string, TaskSnapshot>;
   sessionCount: number;
   sessions: SessionRecord[];

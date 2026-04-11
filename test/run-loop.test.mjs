@@ -3,16 +3,23 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { loadAgentConfig } from "../dist/config/loader.js";
+import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
 import { runAgent } from "../dist/runner/run-loop.js";
 
-const THREE_TASKS = `---
+const THREE_AGENT = `---
 schemaVersion: 1
 name: three
 backend: claude
 model: claude-sonnet-4-6
 effort: high
 maxRetries: 2
+---
+Agent prompt.
+`;
+
+const THREE_ASSIGNMENT = `---
+schemaVersion: 1
+name: three-work
 tasks:
   - id: t1
     title: First
@@ -24,7 +31,7 @@ tasks:
     title: Third
     body: Do the third thing.
 ---
-Agent prompt. Plan at {{assignment_path}}.
+Work on the repo. Plan at {{assignment_path}}.
 `;
 
 function tempDir() {
@@ -37,6 +44,19 @@ function writeAgent(baseDir, name, body) {
   const path = join(agentDir, "agent.md");
   writeFileSync(path, body);
   return path;
+}
+
+function writeAssignment(baseDir, name, body) {
+  const dir = join(baseDir, "assignments", name);
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, "assignment.md");
+  writeFileSync(path, body);
+  return path;
+}
+
+function writeAgentAndAssignment(baseDir) {
+  writeAgent(baseDir, "three", THREE_AGENT);
+  writeAssignment(baseDir, "three-work", THREE_ASSIGNMENT);
 }
 
 function editStatus(content, taskId, newStatus) {
@@ -52,6 +72,7 @@ function editStatus(content, taskId, newStatus) {
 
 async function runWithMock(baseDir, mockInvoke, overrides = {}) {
   const loaded = loadAgentConfig("three", baseDir);
+  const loadedAssignment = loadAssignmentConfig("three-work", baseDir);
   const backend = {
     id: "mock",
     invoke: mockInvoke,
@@ -63,6 +84,7 @@ async function runWithMock(baseDir, mockInvoke, overrides = {}) {
   try {
     const outcome = await runAgent({
       loaded,
+      loadedAssignment,
       cliVars: {},
       backend,
       overrides,
@@ -81,7 +103,7 @@ async function runWithMock(baseDir, mockInvoke, overrides = {}) {
 
 test("effort level from frontmatter is forwarded to backend", async () => {
   const dir = tempDir();
-  writeAgent(dir, "three", THREE_TASKS);
+  writeAgentAndAssignment(dir);
 
   let seenEffort;
   const { outcome } = await runWithMock(dir, async (ctx) => {
@@ -110,7 +132,7 @@ test("effort level from frontmatter is forwarded to backend", async () => {
 
 test("effort override beats the frontmatter value", async () => {
   const dir = tempDir();
-  writeAgent(dir, "three", THREE_TASKS);
+  writeAgentAndAssignment(dir);
 
   let seenEffort;
   const { outcome } = await runWithMock(
@@ -143,7 +165,7 @@ test("effort override beats the frontmatter value", async () => {
 
 test("happy path: mock marks all tasks completed in one attempt → exit 0", async () => {
   const dir = tempDir();
-  writeAgent(dir, "three", THREE_TASKS);
+  writeAgentAndAssignment(dir);
 
   let invocations = 0;
   const { outcome, stdout, stderr } = await runWithMock(dir, async (ctx) => {
@@ -185,7 +207,7 @@ test("happy path: mock marks all tasks completed in one attempt → exit 0", asy
 
 test("retry path: first attempt leaves one incomplete, second completes → exit 0", async () => {
   const dir = tempDir();
-  writeAgent(dir, "three", THREE_TASKS);
+  writeAgentAndAssignment(dir);
 
   let invocations = 0;
   let lastPrompt = "";
@@ -228,7 +250,7 @@ test("retry path: first attempt leaves one incomplete, second completes → exit
 
 test("blocked path: marking one task blocked → exit 2, no further retries", async () => {
   const dir = tempDir();
-  writeAgent(dir, "three", THREE_TASKS);
+  writeAgentAndAssignment(dir);
 
   let invocations = 0;
   const { outcome } = await runWithMock(dir, async (ctx) => {
@@ -261,7 +283,7 @@ test("blocked path: marking one task blocked → exit 2, no further retries", as
 
 test("exhausted path: never completes → exit 1 after maxRetries+1 attempts", async () => {
   const dir = tempDir();
-  writeAgent(dir, "three", THREE_TASKS);
+  writeAgentAndAssignment(dir);
 
   let invocations = 0;
   const { outcome } = await runWithMock(dir, async () => {
@@ -285,7 +307,7 @@ test("exhausted path: never completes → exit 1 after maxRetries+1 attempts", a
 
 test("session resume: first attempt session ID passed on retry", async () => {
   const dir = tempDir();
-  writeAgent(dir, "three", THREE_TASKS);
+  writeAgentAndAssignment(dir);
 
   const seenResumeIds = [];
   let invocations = 0;
@@ -321,7 +343,7 @@ test("session resume: first attempt session ID passed on retry", async () => {
 
 test("in-run resume rejection stops the run with an error", async () => {
   const dir = tempDir();
-  writeAgent(dir, "three", THREE_TASKS);
+  writeAgentAndAssignment(dir);
 
   let invocations = 0;
   const { outcome, stderr } = await runWithMock(
@@ -361,5 +383,5 @@ test("in-run resume rejection stops the run with an error", async () => {
   assert.equal(outcome.exitCode, 4);
   assert.equal(outcome.summary.status, "error");
   assert.equal(invocations, 2, "stops after the rejected retry");
-  assert.ok(stderr.includes("claude rejected the resume session"));
+  assert.ok(stderr.includes("backend rejected the resume session"));
 });

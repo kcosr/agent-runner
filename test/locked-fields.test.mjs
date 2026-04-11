@@ -3,10 +3,11 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { loadAgentConfig } from "../dist/config/loader.js";
+import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
 import { LockedFieldError, runAgent } from "../dist/runner/run-loop.js";
 
-const THREE_TASKS_LOCKED_MODEL = `---
+// ─── locked model agent + its one-task assignment ───────────────────────────
+const LOCKED_MODEL_AGENT = `---
 schemaVersion: 1
 name: locked
 backend: claude
@@ -14,40 +15,63 @@ model: claude-sonnet-4-6
 effort: medium
 lockedFields: [model, effort]
 maxRetries: 1
+---
+Agent prompt.
+`;
+
+const LOCKED_MODEL_ASSIGNMENT = `---
+schemaVersion: 1
+name: locked-work
 tasks:
   - id: t1
     title: First
 ---
-Agent prompt. Plan at {{assignment_path}}.
+Work on the repo. Plan at {{assignment_path}}.
 `;
 
-const WITH_DEFAULT_MESSAGE = `---
+// ─── agent with default message on the assignment ───────────────────────────
+const WITH_MSG_AGENT = `---
 schemaVersion: 1
 name: with-msg
 backend: claude
 model: claude-sonnet-4-6
-message: default message from frontmatter
 maxRetries: 1
+---
+Agent prompt.
+`;
+
+const WITH_MSG_ASSIGNMENT = `---
+schemaVersion: 1
+name: with-msg-work
+message: default message from frontmatter
 tasks:
   - id: t1
     title: First
 ---
-Agent prompt. Plan at {{assignment_path}}.
+Work on the repo. Plan at {{assignment_path}}.
 `;
 
-const LOCKED_MESSAGE = `---
+// ─── agent that locks `message`; assignment carries the default value ──────
+const LOCKED_MSG_AGENT = `---
 schemaVersion: 1
 name: locked-msg
 backend: claude
 model: claude-sonnet-4-6
-message: fixed message
 lockedFields: [message]
 maxRetries: 1
+---
+Agent prompt.
+`;
+
+const LOCKED_MSG_ASSIGNMENT = `---
+schemaVersion: 1
+name: locked-msg-work
+message: fixed message
 tasks:
   - id: t1
     title: First
 ---
-Agent prompt. Plan at {{assignment_path}}.
+Work on the repo. Plan at {{assignment_path}}.
 `;
 
 function tempDir() {
@@ -58,6 +82,14 @@ function writeAgent(baseDir, name, body) {
   const agentDir = join(baseDir, "agents", name);
   mkdirSync(agentDir, { recursive: true });
   const path = join(agentDir, "agent.md");
+  writeFileSync(path, body);
+  return path;
+}
+
+function writeAssignment(baseDir, name, body) {
+  const dir = join(baseDir, "assignments", name);
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, "assignment.md");
   writeFileSync(path, body);
   return path;
 }
@@ -93,13 +125,17 @@ const okBackend = () => ({
   },
 });
 
-async function runIn(baseDir, agentName, overrides) {
+async function runIn(baseDir, agentName, overrides, assignmentName) {
   const loaded = loadAgentConfig(agentName, baseDir);
+  const loadedAssignment = assignmentName
+    ? loadAssignmentConfig(assignmentName, baseDir)
+    : undefined;
   const originalCwd = process.cwd();
   process.chdir(baseDir);
   try {
     return await runAgent({
       loaded,
+      loadedAssignment,
       cliVars: {},
       backend: okBackend(),
       overrides,
@@ -111,25 +147,43 @@ async function runIn(baseDir, agentName, overrides) {
   }
 }
 
+function setupLockedModel(dir) {
+  writeAgent(dir, "locked", LOCKED_MODEL_AGENT);
+  writeAssignment(dir, "locked-work", LOCKED_MODEL_ASSIGNMENT);
+}
+
+function setupWithMsg(dir) {
+  writeAgent(dir, "with-msg", WITH_MSG_AGENT);
+  writeAssignment(dir, "with-msg-work", WITH_MSG_ASSIGNMENT);
+}
+
+function setupLockedMsg(dir) {
+  writeAgent(dir, "locked-msg", LOCKED_MSG_AGENT);
+  writeAssignment(dir, "locked-msg-work", LOCKED_MSG_ASSIGNMENT);
+}
+
 test("locked: overriding a locked field throws LockedFieldError", async () => {
   const dir = tempDir();
-  writeAgent(dir, "locked", THREE_TASKS_LOCKED_MODEL);
-  await assert.rejects(() => runIn(dir, "locked", { model: "claude-opus-4-6" }), LockedFieldError);
+  setupLockedModel(dir);
+  await assert.rejects(
+    () => runIn(dir, "locked", { model: "claude-opus-4-6" }, "locked-work"),
+    LockedFieldError,
+  );
 });
 
 test("locked: overriding a non-locked field is fine", async () => {
   const dir = tempDir();
-  writeAgent(dir, "locked", THREE_TASKS_LOCKED_MODEL);
-  const outcome = await runIn(dir, "locked", { maxRetries: 5 });
+  setupLockedModel(dir);
+  const outcome = await runIn(dir, "locked", { maxRetries: 5 }, "locked-work");
   assert.equal(outcome.exitCode, 0);
   assert.equal(outcome.manifest.model, "claude-sonnet-4-6");
 });
 
 test("locked: error message names the locked field and current value", async () => {
   const dir = tempDir();
-  writeAgent(dir, "locked", THREE_TASKS_LOCKED_MODEL);
+  setupLockedModel(dir);
   await assert.rejects(
-    () => runIn(dir, "locked", { effort: "max" }),
+    () => runIn(dir, "locked", { effort: "max" }, "locked-work"),
     (err) => {
       assert.ok(err instanceof LockedFieldError);
       assert.equal(err.field, "effort");
@@ -150,9 +204,6 @@ schemaVersion: 1
 name: bad
 backend: claude
 lockedFields: [modle]
-tasks:
-  - id: t1
-    title: First
 ---
 body
 `,
@@ -160,26 +211,26 @@ body
   assert.throws(() => loadAgentConfig("bad", dir));
 });
 
-test("message: default from frontmatter is used when no override", async () => {
+test("message: default from assignment is used when no override", async () => {
   const dir = tempDir();
-  writeAgent(dir, "with-msg", WITH_DEFAULT_MESSAGE);
-  const outcome = await runIn(dir, "with-msg", undefined);
+  setupWithMsg(dir);
+  const outcome = await runIn(dir, "with-msg", undefined, "with-msg-work");
   assert.equal(outcome.manifest.message, "default message from frontmatter");
   const lastPrompt = outcome.manifest.attemptRecords[0].prompt;
   assert.ok(lastPrompt.includes("default message from frontmatter"));
 });
 
-test("message: CLI override beats frontmatter default when not locked", async () => {
+test("message: CLI override beats assignment default when not locked", async () => {
   const dir = tempDir();
-  writeAgent(dir, "with-msg", WITH_DEFAULT_MESSAGE);
-  const outcome = await runIn(dir, "with-msg", { message: "caller override" });
+  setupWithMsg(dir);
+  const outcome = await runIn(dir, "with-msg", { message: "caller override" }, "with-msg-work");
   assert.equal(outcome.manifest.message, "caller override");
   const lastPrompt = outcome.manifest.attemptRecords[0].prompt;
   assert.ok(lastPrompt.includes("caller override"));
   assert.ok(!lastPrompt.includes("default message from frontmatter"));
 });
 
-test("message: no override + no frontmatter default means null in manifest", async () => {
+test("message: no override + no assignment default means null in manifest", async () => {
   const dir = tempDir();
   writeAgent(
     dir,
@@ -189,22 +240,32 @@ schemaVersion: 1
 name: plain
 backend: claude
 maxRetries: 1
+---
+Plain agent.
+`,
+  );
+  writeAssignment(
+    dir,
+    "plain-work",
+    `---
+schemaVersion: 1
+name: plain-work
 tasks:
   - id: t1
     title: First
 ---
-Plain agent. Plan at {{assignment_path}}.
+Work on the repo. Plan at {{assignment_path}}.
 `,
   );
-  const outcome = await runIn(dir, "plain", undefined);
+  const outcome = await runIn(dir, "plain", undefined, "plain-work");
   assert.equal(outcome.manifest.message, null);
 });
 
 test("message: locked message rejects caller override", async () => {
   const dir = tempDir();
-  writeAgent(dir, "locked-msg", LOCKED_MESSAGE);
+  setupLockedMsg(dir);
   await assert.rejects(
-    () => runIn(dir, "locked-msg", { message: "try to override" }),
+    () => runIn(dir, "locked-msg", { message: "try to override" }, "locked-msg-work"),
     (err) => {
       assert.ok(err instanceof LockedFieldError);
       assert.equal(err.field, "message");
@@ -213,9 +274,9 @@ test("message: locked message rejects caller override", async () => {
   );
 });
 
-test("message: locked message still uses the frontmatter default when caller stays silent", async () => {
+test("message: locked message still uses the assignment default when caller stays silent", async () => {
   const dir = tempDir();
-  writeAgent(dir, "locked-msg", LOCKED_MESSAGE);
-  const outcome = await runIn(dir, "locked-msg", undefined);
+  setupLockedMsg(dir);
+  const outcome = await runIn(dir, "locked-msg", undefined, "locked-msg-work");
   assert.equal(outcome.manifest.message, "fixed message");
 });

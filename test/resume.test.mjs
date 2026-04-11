@@ -3,16 +3,23 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { loadAgentConfig } from "../dist/config/loader.js";
+import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
 import { ResumeError, resolveResumeTarget } from "../dist/runner/manifest.js";
 import { runAgent } from "../dist/runner/run-loop.js";
 
-const THREE_TASKS = `---
+const THREE_AGENT = `---
 schemaVersion: 1
 name: three
 backend: claude
 model: claude-sonnet-4-6
 maxRetries: 2
+---
+Agent prompt.
+`;
+
+const THREE_ASSIGNMENT = `---
+schemaVersion: 1
+name: three-work
 tasks:
   - id: t1
     title: First
@@ -24,7 +31,7 @@ tasks:
     title: Third
     body: Do the third thing.
 ---
-Agent prompt. Plan at {{assignment_path}}.
+Work on the repo. Plan at {{assignment_path}}.
 `;
 
 function tempDir() {
@@ -37,6 +44,19 @@ function writeAgent(baseDir, name, body) {
   const path = join(agentDir, "agent.md");
   writeFileSync(path, body);
   return path;
+}
+
+function writeAssignment(baseDir, name, body) {
+  const dir = join(baseDir, "assignments", name);
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, "assignment.md");
+  writeFileSync(path, body);
+  return path;
+}
+
+function writeAgentAndAssignment(baseDir) {
+  writeAgent(baseDir, "three", THREE_AGENT);
+  writeAssignment(baseDir, "three-work", THREE_ASSIGNMENT);
 }
 
 function editStatus(content, taskId, newStatus) {
@@ -69,11 +89,15 @@ function mockBackend(handler) {
 
 async function runIn(baseDir, opts) {
   const loaded = loadAgentConfig("three", baseDir);
+  // On resume, `--assignment` is forbidden; only pass loadedAssignment for
+  // fresh runs.
+  const loadedAssignment = opts.resume ? undefined : loadAssignmentConfig("three-work", baseDir);
   const originalCwd = process.cwd();
   process.chdir(baseDir);
   try {
     return await runAgent({
       loaded,
+      loadedAssignment,
       cliVars: {},
       backend: opts.backend,
       overrides: opts.overrides,
@@ -88,7 +112,7 @@ async function runIn(baseDir, opts) {
 
 test("resume: happy path — original blocks, resume completes, same workspace", async () => {
   const dir = tempDir();
-  writeAgent(dir, "three", THREE_TASKS);
+  writeAgentAndAssignment(dir);
 
   // Session 0 — blocks on t2
   const first = await runIn(dir, {
@@ -159,7 +183,7 @@ test("resume: happy path — original blocks, resume completes, same workspace",
 
 test("resume: attempt numbers are monotonic across sessions", async () => {
   const dir = tempDir();
-  writeAgent(dir, "three", THREE_TASKS);
+  writeAgentAndAssignment(dir);
 
   // Session 0 — exhausts (3 attempts, nothing changes)
   let calls = 0;
@@ -219,7 +243,7 @@ test("resume: attempt numbers are monotonic across sessions", async () => {
 
 test("resume: non-completed tasks normalized to pending, notes preserved", async () => {
   const dir = tempDir();
-  writeAgent(dir, "three", THREE_TASKS);
+  writeAgentAndAssignment(dir);
 
   const first = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
@@ -292,7 +316,7 @@ test("resume: non-completed tasks normalized to pending, notes preserved", async
 
 test("resume: --add-task alone (no message) is allowed on resume", async () => {
   const dir = tempDir();
-  writeAgent(dir, "three", THREE_TASKS);
+  writeAgentAndAssignment(dir);
 
   const first = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
@@ -351,7 +375,7 @@ test("resume: --add-task alone (no message) is allowed on resume", async () => {
 
 test("resume: missing both message and --add-task is a hard error", async () => {
   const dir = tempDir();
-  writeAgent(dir, "three", THREE_TASKS);
+  writeAgentAndAssignment(dir);
 
   const first = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
@@ -394,7 +418,7 @@ test("resume: missing both message and --add-task is a hard error", async () => 
 
 test("resume: missing backend session id is a hard error", async () => {
   const dir = tempDir();
-  writeAgent(dir, "three", THREE_TASKS);
+  writeAgentAndAssignment(dir);
 
   const first = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
@@ -438,7 +462,7 @@ test("resume: missing backend session id is a hard error", async () => {
 
 test("resume: claude rejecting the resume on first attempt fails hard", async () => {
   const dir = tempDir();
-  writeAgent(dir, "three", THREE_TASKS);
+  writeAgentAndAssignment(dir);
 
   const first = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
@@ -482,7 +506,7 @@ test("resume: claude rejecting the resume on first attempt fails hard", async ()
 
 test("resume: resolveResumeTarget finds the workspace by slug in cwd", async () => {
   const dir = tempDir();
-  writeAgent(dir, "three", THREE_TASKS);
+  writeAgentAndAssignment(dir);
 
   const first = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
@@ -515,15 +539,17 @@ test("resume: resolveResumeTarget throws for unknown slug", () => {
 
 test("resume: text summary includes the resume-run hint with the run id", async () => {
   const dir = tempDir();
-  writeAgent(dir, "three", THREE_TASKS);
+  writeAgentAndAssignment(dir);
 
   const stderrChunks = [];
   const loaded = loadAgentConfig("three", dir);
+  const loadedAssignment = loadAssignmentConfig("three-work", dir);
   const originalCwd = process.cwd();
   process.chdir(dir);
   try {
     const outcome = await runAgent({
       loaded,
+      loadedAssignment,
       cliVars: {},
       backend: mockBackend(async (ctx) => {
         const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);

@@ -28,6 +28,7 @@ export const LOCKABLE_FIELDS = [
   "cwd",
   "model",
   "effort",
+  "instructions",
   "message",
   "timeoutSec",
   "unrestricted",
@@ -37,21 +38,40 @@ export const LOCKABLE_FIELDS = [
 
 export type LockableField = (typeof LOCKABLE_FIELDS)[number];
 
-export const agentConfigSchema = z
+// ─────────────────────────────────────────────────────────────────────────────
+// Agent schema — identity, backend config, role instructions, locks.
+// No vars, no tasks, no message. Those live on assignments.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const agentConfigSchema = z.object({
+  schemaVersion: z.literal(1),
+  name: z.string().min(1),
+  backend: z.enum(["claude", "codex"]),
+  model: z.string().optional(),
+  effort: z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]).optional(),
+  timeoutSec: z.number().int().positive().default(3600),
+  unrestricted: z.boolean().default(false),
+  cwd: z.string().default("."),
+  maxRetries: z.number().int().min(0).max(20).default(3),
+  lockedFields: z.array(z.enum(LOCKABLE_FIELDS)).default([]),
+});
+
+export type AgentConfig = z.infer<typeof agentConfigSchema>;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Assignment schema — the work. Vars, tasks, optional message default,
+// optional work-instructions body, optional locks.
+// No backend/model/effort/etc. Those live on agents.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const assignmentConfigSchema = z
   .object({
     schemaVersion: z.literal(1),
     name: z.string().min(1),
-    backend: z.enum(["claude", "codex"]),
-    model: z.string().optional(),
-    effort: z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]).optional(),
     message: z.string().optional(),
-    timeoutSec: z.number().int().positive().default(3600),
-    unrestricted: z.boolean().default(false),
-    cwd: z.string().default("."),
-    maxRetries: z.number().int().min(0).max(20).default(3),
-    lockedFields: z.array(z.enum(LOCKABLE_FIELDS)).default([]),
     vars: z.record(z.string(), varDefSchema).default({}),
     tasks: z.array(taskDefSchema).max(100).default([]),
+    lockedFields: z.array(z.enum(LOCKABLE_FIELDS)).default([]),
   })
   .refine(
     (c) => {
@@ -65,6 +85,6 @@ export const agentConfigSchema = z
     { message: "task ids must be unique", path: ["tasks"] },
   );
 
-export type AgentConfig = z.infer<typeof agentConfigSchema>;
+export type AssignmentConfig = z.infer<typeof assignmentConfigSchema>;
 export type TaskDef = z.infer<typeof taskDefSchema>;
 export type VarDef = z.infer<typeof varDefSchema>;

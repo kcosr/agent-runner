@@ -3,21 +3,27 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { loadAgentConfig } from "../dist/config/loader.js";
+import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
 import { resolveResumeTarget } from "../dist/runner/manifest.js";
 import { runAgent } from "../dist/runner/run-loop.js";
 
-const ONE_TASK = `---
+const ONE_AGENT = `---
 schemaVersion: 1
 name: one
 backend: claude
 model: claude-sonnet-4-6
 maxRetries: 1
+---
+You are an assistant.
+`;
+
+const ONE_ASSIGNMENT = `---
+schemaVersion: 1
+name: one-work
 tasks:
   - id: t1
     title: Do it
 ---
-You are an assistant.
 `;
 
 const ZERO_TASKS = `---
@@ -42,6 +48,19 @@ function writeAgent(baseDir, name, body) {
   return path;
 }
 
+function writeAssignment(baseDir, name, body) {
+  const dir = join(baseDir, "assignments", name);
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, "assignment.md");
+  writeFileSync(path, body);
+  return path;
+}
+
+function setupOne(dir) {
+  writeAgent(dir, "one", ONE_AGENT);
+  writeAssignment(dir, "one-work", ONE_ASSIGNMENT);
+}
+
 function editStatus(content, taskId, newStatus) {
   const marker = `<!-- task-id: ${taskId} -->`;
   const start = content.indexOf(marker);
@@ -59,11 +78,18 @@ function mockBackend(handler) {
 
 async function runIn(baseDir, agentName, opts = {}) {
   const loaded = loadAgentConfig(agentName, baseDir);
+  // Resume never accepts loadedAssignment; fresh runs load the named
+  // assignment if the caller provided one.
+  const loadedAssignment =
+    !opts.resume && opts.assignmentName
+      ? loadAssignmentConfig(opts.assignmentName, baseDir)
+      : undefined;
   const originalCwd = process.cwd();
   process.chdir(baseDir);
   try {
     return await runAgent({
       loaded,
+      loadedAssignment,
       cliVars: {},
       backend: opts.backend,
       overrides: opts.overrides,
@@ -78,10 +104,11 @@ async function runIn(baseDir, agentName, opts = {}) {
 
 test("workflow: fresh run with tasks injects the workflow template at end of body", async () => {
   const dir = tempDir();
-  writeAgent(dir, "one", ONE_TASK);
+  setupOne(dir);
 
   let seenPrompt;
   await runIn(dir, "one", {
+    assignmentName: "one-work",
     backend: mockBackend(async (ctx) => {
       seenPrompt = ctx.prompt;
       const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
@@ -113,12 +140,13 @@ test("workflow: fresh run with tasks injects the workflow template at end of bod
   assert.ok(bodyIdx < workflowIdx, "body comes before workflow");
 });
 
-test("workflow: fresh run with CLI message places message above body", async () => {
+test("workflow: fresh run with CLI message places message below body and workflow", async () => {
   const dir = tempDir();
-  writeAgent(dir, "one", ONE_TASK);
+  setupOne(dir);
 
   let seenPrompt;
   await runIn(dir, "one", {
+    assignmentName: "one-work",
     overrides: { message: "focus on X right now" },
     backend: mockBackend(async (ctx) => {
       seenPrompt = ctx.prompt;
@@ -144,8 +172,8 @@ test("workflow: fresh run with CLI message places message above body", async () 
   assert.ok(msgIdx >= 0, "message present");
   assert.ok(bodyIdx >= 0, "body present");
   assert.ok(workflowIdx >= 0, "workflow present");
-  assert.ok(msgIdx < bodyIdx, "message comes before body");
   assert.ok(bodyIdx < workflowIdx, "body comes before workflow");
+  assert.ok(workflowIdx < msgIdx, "workflow comes before message (message last)");
 });
 
 test("workflow: fresh run with zero tasks does NOT inject workflow", async () => {
@@ -177,10 +205,11 @@ test("workflow: fresh run with zero tasks does NOT inject workflow", async () =>
 
 test("workflow: resume session does NOT re-inject workflow when prior sessions had tasks", async () => {
   const dir = tempDir();
-  writeAgent(dir, "one", ONE_TASK);
+  setupOne(dir);
 
   // Session 0 — block
   const first = await runIn(dir, "one", {
+    assignmentName: "one-work",
     backend: mockBackend(async (ctx) => {
       const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
       const absPlan = `./${match[0]}`;
@@ -228,9 +257,10 @@ test("workflow: resume session does NOT re-inject workflow when prior sessions h
 
 test("workflow: resume session with --add-task (prior had tasks) appends reminder only", async () => {
   const dir = tempDir();
-  writeAgent(dir, "one", ONE_TASK);
+  setupOne(dir);
 
   const first = await runIn(dir, "one", {
+    assignmentName: "one-work",
     backend: mockBackend(async (ctx) => {
       const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
       const absPlan = `./${match[0]}`;
@@ -281,7 +311,7 @@ test("workflow: resume session with --add-task (prior had tasks) appends reminde
   assert.ok(!seenPrompt.includes("Set the task's"), "full workflow not re-injected");
   const msgIdx = seenPrompt.indexOf("also do these");
   const reminderIdx = seenPrompt.indexOf("2 new tasks have been added");
-  assert.ok(msgIdx < reminderIdx, "message comes before reminder");
+  assert.ok(reminderIdx < msgIdx, "reminder comes before message (message last)");
 });
 
 test("workflow: resume session that introduces tasks for the first time injects full workflow", async () => {
@@ -345,5 +375,5 @@ test("workflow: resume session that introduces tasks for the first time injects 
   );
   const msgIdx = seenPrompt.indexOf("now please actually do this work");
   const workflowIdx = seenPrompt.indexOf("Your assignment is at");
-  assert.ok(msgIdx < workflowIdx, "message comes before workflow");
+  assert.ok(workflowIdx < msgIdx, "workflow comes before message (message last)");
 });

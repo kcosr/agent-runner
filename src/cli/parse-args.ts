@@ -3,6 +3,7 @@ export type OutputFormat = "text" | "json";
 export interface ParsedArgs {
   command: string;
   agent?: string;
+  assignment?: string;
   resumeRun?: string;
   vars: Record<string, string>;
   cwd?: string;
@@ -56,6 +57,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
       const next = args.shift();
       if (next === undefined) throw new Error("--resume-run requires a value");
       result.resumeRun = next;
+    } else if (arg === "--assignment") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--assignment requires a value");
+      result.assignment = next;
     } else if (arg === "--var") {
       const pair = args.shift();
       if (pair === undefined) throw new Error("--var requires key=value");

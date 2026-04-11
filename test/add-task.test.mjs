@@ -3,25 +3,34 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { loadAgentConfig } from "../dist/config/loader.js";
+import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
 import { resolveResumeTarget } from "../dist/runner/manifest.js";
 import { InvalidAddedTaskError, LockedFieldError, runAgent } from "../dist/runner/run-loop.js";
 
-const TWO_TASKS = `---
+// ─── two-task assignment with an agent ──────────────────────────────────────
+const TWO_AGENT = `---
 schemaVersion: 1
 name: two
 backend: claude
 model: claude-sonnet-4-6
 maxRetries: 1
+---
+Agent prompt.
+`;
+
+const TWO_ASSIGNMENT = `---
+schemaVersion: 1
+name: two-work
 tasks:
   - id: t1
     title: First
   - id: t2
     title: Second
 ---
-Agent prompt. Assignment at {{assignment_path}}.
+Work on the repo. Assignment at {{assignment_path}}.
 `;
 
+// ─── chat-mode agent (no tasks, no assignment) ─────────────────────────────
 const NO_TASKS = `---
 schemaVersion: 1
 name: notasks
@@ -29,21 +38,29 @@ backend: claude
 model: claude-sonnet-4-6
 maxRetries: 1
 ---
-Agent prompt. Assignment at {{assignment_path}}.
+Agent prompt.
 `;
 
-const LOCKED_TASKS = `---
+// ─── agent locks `tasks` (union locks; agent-side is fine) ─────────────────
+const LOCKED_TASKS_AGENT = `---
 schemaVersion: 1
 name: locked-tasks
 backend: claude
 model: claude-sonnet-4-6
 lockedFields: [tasks]
 maxRetries: 1
+---
+Agent prompt.
+`;
+
+const LOCKED_TASKS_ASSIGNMENT = `---
+schemaVersion: 1
+name: locked-tasks-work
 tasks:
   - id: t1
     title: First
 ---
-Agent prompt. Assignment at {{assignment_path}}.
+Work on the repo. Assignment at {{assignment_path}}.
 `;
 
 function tempDir() {
@@ -56,6 +73,24 @@ function writeAgent(baseDir, name, body) {
   const path = join(agentDir, "agent.md");
   writeFileSync(path, body);
   return path;
+}
+
+function writeAssignment(baseDir, name, body) {
+  const dir = join(baseDir, "assignments", name);
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, "assignment.md");
+  writeFileSync(path, body);
+  return path;
+}
+
+function setupTwo(dir) {
+  writeAgent(dir, "two", TWO_AGENT);
+  writeAssignment(dir, "two-work", TWO_ASSIGNMENT);
+}
+
+function setupLockedTasks(dir) {
+  writeAgent(dir, "locked-tasks", LOCKED_TASKS_AGENT);
+  writeAssignment(dir, "locked-tasks-work", LOCKED_TASKS_ASSIGNMENT);
 }
 
 function editStatus(content, taskId, newStatus) {
@@ -83,13 +118,17 @@ function mockBackend(handler) {
   return { id: "mock", invoke: handler };
 }
 
-async function runIn(baseDir, agentName, overrides, backend) {
+async function runIn(baseDir, agentName, overrides, backend, assignmentName) {
   const loaded = loadAgentConfig(agentName, baseDir);
+  const loadedAssignment = assignmentName
+    ? loadAssignmentConfig(assignmentName, baseDir)
+    : undefined;
   const originalCwd = process.cwd();
   process.chdir(baseDir);
   try {
     return await runAgent({
       loaded,
+      loadedAssignment,
       cliVars: {},
       backend,
       overrides,
@@ -103,7 +142,7 @@ async function runIn(baseDir, agentName, overrides, backend) {
 
 test("add-task: CLI-added task is appended to the frontmatter list on fresh run", async () => {
   const dir = tempDir();
-  writeAgent(dir, "two", TWO_TASKS);
+  setupTwo(dir);
 
   let seenIds;
   const outcome = await runIn(
@@ -124,6 +163,7 @@ test("add-task: CLI-added task is appended to the frontmatter list on fresh run"
         rawStderr: "",
       };
     }),
+    "two-work",
   );
 
   assert.equal(outcome.exitCode, 0);
@@ -139,7 +179,7 @@ test("add-task: CLI-added task is appended to the frontmatter list on fresh run"
 
 test("add-task: multiple added tasks preserve order", async () => {
   const dir = tempDir();
-  writeAgent(dir, "two", TWO_TASKS);
+  setupTwo(dir);
 
   const outcome = await runIn(
     dir,
@@ -159,6 +199,7 @@ test("add-task: multiple added tasks preserve order", async () => {
         rawStderr: "",
       };
     }),
+    "two-work",
   );
 
   assert.equal(outcome.manifest.tasksTotal, 5);
@@ -172,7 +213,7 @@ test("add-task: multiple added tasks preserve order", async () => {
 
 test("add-task: works on resume — appends after task normalization", async () => {
   const dir = tempDir();
-  writeAgent(dir, "two", TWO_TASKS);
+  setupTwo(dir);
 
   const first = await runIn(
     dir,
@@ -195,6 +236,7 @@ test("add-task: works on resume — appends after task normalization", async () 
         rawStderr: "",
       };
     }),
+    "two-work",
   );
 
   const target = resolveResumeTarget(first.runId, dir);
@@ -261,6 +303,7 @@ test("add-task: frontmatter with no tasks and one --add-task runs successfully",
         rawStderr: "",
       };
     }),
+    undefined,
   );
 
   assert.equal(outcome.exitCode, 0);
@@ -288,6 +331,7 @@ test("add-task: 0-task run succeeds with one backend invocation", async () => {
         rawStderr: "",
       };
     }),
+    undefined,
   );
 
   assert.equal(outcome.exitCode, 0);
@@ -299,7 +343,7 @@ test("add-task: 0-task run succeeds with one backend invocation", async () => {
 
 test("add-task: empty title rejected with InvalidAddedTaskError", async () => {
   const dir = tempDir();
-  writeAgent(dir, "two", TWO_TASKS);
+  setupTwo(dir);
 
   await assert.rejects(
     () =>
@@ -316,6 +360,7 @@ test("add-task: empty title rejected with InvalidAddedTaskError", async () => {
           rawStdout: "",
           rawStderr: "",
         })),
+        "two-work",
       ),
     InvalidAddedTaskError,
   );
@@ -323,7 +368,7 @@ test("add-task: empty title rejected with InvalidAddedTaskError", async () => {
 
 test("add-task: title over 200 chars rejected", async () => {
   const dir = tempDir();
-  writeAgent(dir, "two", TWO_TASKS);
+  setupTwo(dir);
   const longTitle = "x".repeat(201);
 
   await assert.rejects(
@@ -341,6 +386,7 @@ test("add-task: title over 200 chars rejected", async () => {
           rawStdout: "",
           rawStderr: "",
         })),
+        "two-work",
       ),
     InvalidAddedTaskError,
   );
@@ -348,7 +394,7 @@ test("add-task: title over 200 chars rejected", async () => {
 
 test("add-task: --add-task rejected when `tasks` is locked", async () => {
   const dir = tempDir();
-  writeAgent(dir, "locked-tasks", LOCKED_TASKS);
+  setupLockedTasks(dir);
 
   await assert.rejects(
     () =>
@@ -365,6 +411,7 @@ test("add-task: --add-task rejected when `tasks` is locked", async () => {
           rawStdout: "",
           rawStderr: "",
         })),
+        "locked-tasks-work",
       ),
     LockedFieldError,
   );
@@ -372,7 +419,7 @@ test("add-task: --add-task rejected when `tasks` is locked", async () => {
 
 test("add-task: locked `tasks` still allows runs without --add-task", async () => {
   const dir = tempDir();
-  writeAgent(dir, "locked-tasks", LOCKED_TASKS);
+  setupLockedTasks(dir);
 
   const outcome = await runIn(
     dir,
@@ -392,6 +439,7 @@ test("add-task: locked `tasks` still allows runs without --add-task", async () =
         rawStderr: "",
       };
     }),
+    "locked-tasks-work",
   );
   assert.equal(outcome.exitCode, 0);
   assert.equal(outcome.manifest.tasksTotal, 1);

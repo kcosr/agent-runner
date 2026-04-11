@@ -3,16 +3,23 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { loadAgentConfig } from "../dist/config/loader.js";
+import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
 import { runAgent } from "../dist/runner/run-loop.js";
 
-const THREE_TASKS = `---
+const THREE_AGENT = `---
 schemaVersion: 1
 name: three
 backend: claude
 model: claude-sonnet-4-6
 effort: medium
 maxRetries: 2
+---
+Agent prompt.
+`;
+
+const THREE_ASSIGNMENT = `---
+schemaVersion: 1
+name: three-work
 tasks:
   - id: t1
     title: First
@@ -24,7 +31,7 @@ tasks:
     title: Third
     body: Do the third thing.
 ---
-Agent prompt. Plan at {{assignment_path}}.
+Work on the repo. Plan at {{assignment_path}}.
 `;
 
 function tempDir() {
@@ -37,6 +44,19 @@ function writeAgent(baseDir, name, body) {
   const path = join(agentDir, "agent.md");
   writeFileSync(path, body);
   return path;
+}
+
+function writeAssignment(baseDir, name, body) {
+  const dir = join(baseDir, "assignments", name);
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, "assignment.md");
+  writeFileSync(path, body);
+  return path;
+}
+
+function writeAgentAndAssignment(baseDir) {
+  writeAgent(baseDir, "three", THREE_AGENT);
+  writeAssignment(baseDir, "three-work", THREE_ASSIGNMENT);
 }
 
 function editStatus(content, taskId, newStatus) {
@@ -64,12 +84,14 @@ function editNotes(content, taskId, notesText) {
 
 async function runWithMock(baseDir, mockInvoke, overrides = {}) {
   const loaded = loadAgentConfig("three", baseDir);
+  const loadedAssignment = loadAssignmentConfig("three-work", baseDir);
   const backend = { id: "mock", invoke: mockInvoke };
   const originalCwd = process.cwd();
   process.chdir(baseDir);
   try {
     const outcome = await runAgent({
       loaded,
+      loadedAssignment,
       cliVars: {},
       backend,
       overrides,
@@ -84,7 +106,7 @@ async function runWithMock(baseDir, mockInvoke, overrides = {}) {
 
 test("manifest: run.json is written and matches outcome.manifest", async () => {
   const dir = tempDir();
-  writeAgent(dir, "three", THREE_TASKS);
+  writeAgentAndAssignment(dir);
 
   const outcome = await runWithMock(dir, async (ctx) => {
     const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
@@ -143,7 +165,7 @@ test("manifest: run.json is written and matches outcome.manifest", async () => {
 
 test("manifest: attempt records snapshot state after each attempt", async () => {
   const dir = tempDir();
-  writeAgent(dir, "three", THREE_TASKS);
+  writeAgentAndAssignment(dir);
 
   let call = 0;
   const outcome = await runWithMock(dir, async (ctx) => {
@@ -197,7 +219,7 @@ test("manifest: attempt records snapshot state after each attempt", async () => 
 
 test("manifest: blocked run records status and captures final state", async () => {
   const dir = tempDir();
-  writeAgent(dir, "three", THREE_TASKS);
+  writeAgentAndAssignment(dir);
 
   const outcome = await runWithMock(dir, async (ctx) => {
     const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
@@ -226,7 +248,7 @@ test("manifest: blocked run records status and captures final state", async () =
 
 test("manifest: exhausted run records all attempts", async () => {
   const dir = tempDir();
-  writeAgent(dir, "three", THREE_TASKS);
+  writeAgentAndAssignment(dir);
 
   let call = 0;
   const outcome = await runWithMock(dir, async () => {
@@ -251,7 +273,7 @@ test("manifest: exhausted run records all attempts", async () => {
 
 test("manifest: captures effort override on the run metadata", async () => {
   const dir = tempDir();
-  writeAgent(dir, "three", THREE_TASKS);
+  writeAgentAndAssignment(dir);
 
   const outcome = await runWithMock(
     dir,
@@ -281,7 +303,7 @@ test("manifest: captures effort override on the run metadata", async () => {
 
 test("manifest: invalid statuses are recorded on the attempt record", async () => {
   const dir = tempDir();
-  writeAgent(dir, "three", THREE_TASKS);
+  writeAgentAndAssignment(dir);
 
   let call = 0;
   const outcome = await runWithMock(dir, async (ctx) => {

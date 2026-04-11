@@ -6,7 +6,7 @@ import { parseAssignment } from "../assignment/parser.js";
 import { renderAssignment } from "../assignment/writer.js";
 import type { Backend, BackendInvokeResult } from "../backends/types.js";
 import { interpolate } from "../config/interpolate.js";
-import type { LoadedAgent } from "../config/loader.js";
+import type { LoadedAgent, LoadedAssignment } from "../config/loader.js";
 import type { LockableField, VarDef } from "../config/schema.js";
 import { shortId } from "../util/short-id.js";
 import {
@@ -37,6 +37,7 @@ export interface RunOverrides {
 
 export interface RunOptions {
   loaded: LoadedAgent;
+  loadedAssignment?: LoadedAssignment;
   cliVars: Record<string, string>;
   backend: Backend;
   overrides?: RunOverrides;
@@ -67,10 +68,9 @@ export class EmptyPromptError extends Error {
   constructor() {
     super(
       "agent has no prompt content\n" +
-        "  the agent has no instructions body, no `message` (frontmatter or\n" +
-        "  CLI positional), and no tasks. At least one is required. Add\n" +
-        "  instructions to the agent.md body, pass a positional message, or\n" +
-        "  add tasks via `tasks:` in frontmatter or `--add-task`.",
+        "  the run has no agent instructions, no assignment instructions,\n" +
+        "  no `message` (CLI positional or assignment default), and no tasks.\n" +
+        "  At least one is required.",
     );
     this.name = "EmptyPromptError";
   }
@@ -94,33 +94,43 @@ export class LockedFieldError extends Error {
         : typeof currentValue === "string"
           ? `"${currentValue}"`
           : String(currentValue);
-    super(`cannot override locked field: ${field}\n  this agent fixes it to ${valStr}`);
+    super(`cannot override locked field: ${field}\n  this run fixes it to ${valStr}`);
     this.name = "LockedFieldError";
   }
 }
 
 function checkLockedFields(
-  config: LoadedAgent["config"],
+  agentConfig: LoadedAgent["config"],
+  assignmentConfig: LoadedAssignment["config"] | undefined,
+  agentInstructions: string,
+  assignmentInstructions: string,
   overrides: RunOverrides | undefined,
+  addedTasks: string[],
 ): void {
-  if (!overrides || config.lockedFields.length === 0) return;
-  const locked = new Set<LockableField>(config.lockedFields);
-  const overrideEntries: [LockableField, unknown][] = [
-    ["cwd", overrides.cwd],
-    ["model", overrides.model],
-    ["effort", overrides.effort],
-    ["message", overrides.message],
-    ["timeoutSec", overrides.timeoutSec],
-    ["unrestricted", overrides.unrestricted],
-    ["maxRetries", overrides.maxRetries],
+  const locked = new Set<LockableField>([
+    ...agentConfig.lockedFields,
+    ...(assignmentConfig?.lockedFields ?? []),
+  ]);
+  if (locked.size === 0) return;
+
+  const overrideEntries: [LockableField, unknown, unknown][] = [
+    ["cwd", overrides?.cwd, agentConfig.cwd],
+    ["model", overrides?.model, agentConfig.model],
+    ["effort", overrides?.effort, agentConfig.effort],
+    ["message", overrides?.message, assignmentConfig?.message],
+    ["timeoutSec", overrides?.timeoutSec, agentConfig.timeoutSec],
+    ["unrestricted", overrides?.unrestricted, agentConfig.unrestricted],
+    ["maxRetries", overrides?.maxRetries, agentConfig.maxRetries],
+    ["tasks", addedTasks.length > 0 ? addedTasks : undefined, assignmentConfig?.tasks ?? []],
     [
-      "tasks",
-      overrides.addedTasks && overrides.addedTasks.length > 0 ? overrides.addedTasks : undefined,
+      "instructions",
+      assignmentInstructions.trim().length > 0 ? assignmentInstructions : undefined,
+      agentInstructions,
     ],
   ];
-  for (const [key, value] of overrideEntries) {
+
+  for (const [key, value, currentValue] of overrideEntries) {
     if (value !== undefined && locked.has(key)) {
-      const currentValue = (config as Record<string, unknown>)[key];
       throw new LockedFieldError(key, currentValue);
     }
   }
@@ -174,11 +184,11 @@ function coerceVar(key: string, value: unknown, def: VarDef): unknown {
 }
 
 function resolveVars(
-  loaded: LoadedAgent,
+  varsSchema: Record<string, VarDef>,
   cliVars: Record<string, string>,
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  for (const [key, def] of Object.entries(loaded.config.vars)) {
+  for (const [key, def] of Object.entries(varsSchema)) {
     let value: unknown;
 
     if (def.source === "cli" || def.source === "either") {
@@ -227,13 +237,14 @@ function normalizeResumeStatus(status: TaskStatus): TaskStatus {
   return status === "completed" ? "completed" : "pending";
 }
 
-function rebuildTasksFromSnapshot(
-  config: LoadedAgent["config"],
+function rebuildTasksFromAssignmentAndSnapshot(
+  assignment: LoadedAssignment | undefined,
   snapshot: Record<string, TaskSnapshot>,
   normalize: boolean,
 ): Map<string, TaskState> {
   const tasks = new Map<string, TaskState>();
-  for (const t of config.tasks) {
+  const source = assignment?.config.tasks ?? [];
+  for (const t of source) {
     const prior = snapshot[t.id];
     tasks.set(t.id, {
       id: t.id,
@@ -243,30 +254,58 @@ function rebuildTasksFromSnapshot(
       notes: prior?.notes ?? "",
     });
   }
+  // Tasks that existed in the prior run but not in any current assignment
+  // (e.g. chat mode with --add-task on the prior run) still come forward.
+  for (const [id, snap] of Object.entries(snapshot)) {
+    if (tasks.has(id)) continue;
+    tasks.set(id, {
+      id,
+      title: snap.title,
+      body: snap.body,
+      status: normalize ? normalizeResumeStatus(snap.status) : snap.status,
+      notes: snap.notes,
+    });
+  }
   return tasks;
 }
 
 export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
-  const { loaded, cliVars, backend, overrides, resume, stderr, stdout } = opts;
-  const config = loaded.config;
+  const { loaded, loadedAssignment, cliVars, backend, overrides, resume, stderr, stdout } = opts;
+  const agentConfig = loaded.config;
+  const assignmentConfig = loadedAssignment?.config;
   const resumeFailureDetector = opts.resumeFailureDetector ?? defaultResumeFailureDetector;
 
-  checkLockedFields(config, overrides);
-
   const isResume = Boolean(resume);
+  if (isResume && loadedAssignment) {
+    throw new ResumeError("--assignment cannot be combined with --resume-run");
+  }
+
+  const addedTitles = overrides?.addedTasks ?? [];
+  const agentInstructions = loaded.instructions.trim();
+  const assignmentInstructions = loadedAssignment?.instructions.trim() ?? "";
+
+  checkLockedFields(
+    agentConfig,
+    assignmentConfig,
+    agentInstructions,
+    assignmentInstructions,
+    overrides,
+    addedTitles,
+  );
+
   const baseDir = process.cwd();
-  const cwd = resolveCwd(overrides?.cwd ?? config.cwd, baseDir);
-  const model = overrides?.model ?? config.model;
-  const effort = overrides?.effort ?? config.effort;
-  const message = overrides?.message ?? config.message ?? null;
-  const timeoutSec = overrides?.timeoutSec ?? config.timeoutSec;
-  const unrestricted = overrides?.unrestricted ?? config.unrestricted;
-  const maxRetries = overrides?.maxRetries ?? config.maxRetries;
+  const cwd = resolveCwd(overrides?.cwd ?? agentConfig.cwd, baseDir);
+  const model = overrides?.model ?? agentConfig.model;
+  const effort = overrides?.effort ?? agentConfig.effort;
+  const message = overrides?.message ?? assignmentConfig?.message ?? null;
+  const timeoutSec = overrides?.timeoutSec ?? agentConfig.timeoutSec;
+  const unrestricted = overrides?.unrestricted ?? agentConfig.unrestricted;
+  const maxRetries = overrides?.maxRetries ?? agentConfig.maxRetries;
   const maxAttempts = maxRetries + 1;
 
   if (isResume) {
     const hasMessage = Boolean(message && message.trim().length > 0);
-    const hasAddedTasks = (overrides?.addedTasks ?? []).length > 0;
+    const hasAddedTasks = addedTitles.length > 0;
     if (!hasMessage && !hasAddedTasks) {
       throw new ResumeError(
         "resuming a run requires either a follow-up message or at least one --add-task",
@@ -279,7 +318,9 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     }
   }
 
-  const runtimeVars = resolveVars(loaded, cliVars);
+  // Vars live on the assignment. Chat mode (no assignment) has no var
+  // schema; unknown --var flags are silently ignored in that case.
+  const runtimeVars = resolveVars(assignmentConfig?.vars ?? {}, cliVars);
 
   const runId = isResume && resume ? resume.manifest.runId : shortId();
   const workspaceDir =
@@ -293,10 +334,9 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
   const tasks =
     isResume && resume
-      ? rebuildTasksFromSnapshot(config, resume.manifest.finalTasks, true)
-      : rebuildTasksFromSnapshot(config, {}, false);
+      ? rebuildTasksFromAssignmentAndSnapshot(undefined, resume.manifest.finalTasks, true)
+      : rebuildTasksFromAssignmentAndSnapshot(loadedAssignment, {}, false);
 
-  const addedTitles = overrides?.addedTasks ?? [];
   for (let i = 0; i < addedTitles.length; i++) {
     const rawTitle = addedTitles[i];
     if (rawTitle === undefined) continue;
@@ -326,37 +366,46 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     cwd,
   };
 
-  const instructionsBody = loaded.instructions.trim();
   const trimmedMessage = message?.trim() ?? "";
 
+  // Prompt composition (Option B: broad → specific → mechanics → ask).
+  //
+  // Fresh run parts (non-empty only, joined with `\n\n`):
+  //   1. agent instructions (role)
+  //   2. assignment instructions (work context)
+  //   3. task workflow (mechanics, if tasks exist)
+  //   4. message (specific ask)
+  //
+  // Resume follow-up parts:
+  //   1. workflow (only if firstTimeTasksAppear) OR new-tasks reminder
+  //   2. message
+  //
+  // Both message-last. Fresh runs error if parts is empty.
   let initialPrompt: string;
   if (isResume) {
-    // Resume sessions have either a message, added tasks, or both
-    // (enforced above). Message is optional when --add-task is used.
     const parts: string[] = [];
-    if (trimmedMessage.length > 0) {
-      parts.push(trimmedMessage);
-    }
     if (firstTimeTasksAppear) {
-      // Prior sessions had no tasks, so the cached session never saw
-      // the workflow. Inject it into this follow-up message.
       parts.push(interpolate(TASK_WORKFLOW_TEMPLATE, injectedVars));
     } else if (resumeAddedNewTasks) {
-      // The agent already knows the workflow; just nudge it that new
-      // tasks appeared.
       parts.push(buildAddedTasksReminder(addedTitles.length, assignmentPath));
+    }
+    if (trimmedMessage.length > 0) {
+      parts.push(trimmedMessage);
     }
     initialPrompt = parts.join("\n\n");
   } else {
     const parts: string[] = [];
-    if (trimmedMessage.length > 0) {
-      parts.push(trimmedMessage);
+    if (agentInstructions.length > 0) {
+      parts.push(interpolate(agentInstructions, injectedVars));
     }
-    if (instructionsBody.length > 0) {
-      parts.push(interpolate(instructionsBody, injectedVars));
+    if (assignmentInstructions.length > 0) {
+      parts.push(interpolate(assignmentInstructions, injectedVars));
     }
     if (hasTasks) {
       parts.push(interpolate(TASK_WORKFLOW_TEMPLATE, injectedVars));
+    }
+    if (trimmedMessage.length > 0) {
+      parts.push(trimmedMessage);
     }
     if (parts.length === 0) {
       throw new EmptyPromptError();
@@ -375,7 +424,6 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     isResume && resume
       ? {
           ...resume.manifest,
-          message: resume.manifest.message,
           model: model ?? null,
           effort: effort ?? null,
           unrestricted,
@@ -395,10 +443,17 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
           schemaVersion: 1,
           runId,
           agent: {
-            name: config.name,
+            name: agentConfig.name,
             sourcePath: loaded.sourcePath,
           },
-          backend: config.backend,
+          assignment: loadedAssignment
+            ? {
+                name: loadedAssignment.config.name,
+                sourcePath: loadedAssignment.sourcePath,
+                workspacePath: assignmentPath,
+              }
+            : null,
+          backend: agentConfig.backend,
           model: model ?? null,
           effort: effort ?? null,
           message,
@@ -415,6 +470,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
           tasksCompleted: 0,
           tasksTotal: tasks.size,
           backendSessionId: null,
+          runtimeVars,
           finalTasks: snapshotTasks(tasks),
           sessionCount: 1,
           sessions: [],
@@ -427,7 +483,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     endedAt: null,
     status: "running",
     exitCode: null,
-    message: isResume ? message : message,
+    message,
     firstAttempt: null,
     lastAttempt: null,
     maxAttempts,
@@ -439,8 +495,11 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   writeManifest(workspaceDir, manifest);
 
   stderr(
-    `task-runner: agent=${config.name} run=${runId}${isResume ? ` (session ${sessionIndex})` : ""}\n`,
+    `task-runner: agent=${agentConfig.name} run=${runId}${isResume ? ` (session ${sessionIndex})` : ""}\n`,
   );
+  if (loadedAssignment) {
+    stderr(`             source=${loadedAssignment.sourcePath}\n`);
+  }
   stderr(`             assignment=${assignmentPath}\n`);
   stderr(`             cwd=${cwd}\n`);
   stderr("\n");
@@ -542,7 +601,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
     if (resumeRejected) {
       terminal = { status: "error", exitCode: 4 };
-      stderr("task-runner: claude rejected the resume session; stopping.\n");
+      stderr("task-runner: backend rejected the resume session; stopping.\n");
       break;
     }
 

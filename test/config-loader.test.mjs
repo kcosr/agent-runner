@@ -6,20 +6,31 @@ import { test } from "node:test";
 import {
   AgentConfigError,
   AgentNotFoundError,
+  AssignmentConfigError,
+  AssignmentNotFoundError,
   loadAgentConfig,
+  loadAssignmentConfig,
   resolveAgentPath,
+  resolveAssignmentPath,
 } from "../dist/config/loader.js";
 
-const MINIMAL = `---
+const MINIMAL_AGENT = `---
 schemaVersion: 1
 name: demo
 backend: claude
+---
+You are an assistant.
+`;
+
+const MINIMAL_ASSIGNMENT = `---
+schemaVersion: 1
+name: demo-work
 tasks:
   - id: t1
     title: Do the thing
     body: First thing to do.
 ---
-You are an assistant. Plan at {{assignment_path}}.
+Work on the repo. Plan at {{assignment_path}}.
 `;
 
 function writeAgent(baseDir, name, body) {
@@ -30,13 +41,21 @@ function writeAgent(baseDir, name, body) {
   return path;
 }
 
+function writeAssignment(baseDir, name, body) {
+  const dir = join(baseDir, "assignments", name);
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, "assignment.md");
+  writeFileSync(path, body);
+  return path;
+}
+
 function tempDir() {
   return mkdtempSync(join(tmpdir(), "task-runner-test-"));
 }
 
 test("loadAgentConfig parses a minimal agent.md", () => {
   const dir = tempDir();
-  writeAgent(dir, "demo", MINIMAL);
+  writeAgent(dir, "demo", MINIMAL_AGENT);
 
   const loaded = loadAgentConfig("demo", dir);
   assert.equal(loaded.config.name, "demo");
@@ -44,9 +63,7 @@ test("loadAgentConfig parses a minimal agent.md", () => {
   assert.equal(loaded.config.maxRetries, 3);
   assert.equal(loaded.config.timeoutSec, 3600);
   assert.equal(loaded.config.unrestricted, false);
-  assert.equal(loaded.config.tasks.length, 1);
-  assert.equal(loaded.config.tasks[0].id, "t1");
-  assert.ok(loaded.instructions.includes("{{assignment_path}}"));
+  assert.ok(loaded.instructions.includes("You are an assistant."));
 });
 
 test("loadAgentConfig throws AgentConfigError on bad frontmatter", () => {
@@ -57,9 +74,6 @@ test("loadAgentConfig throws AgentConfigError on bad frontmatter", () => {
     `---
 schemaVersion: 1
 backend: claude
-tasks:
-  - id: t1
-    title: First
 ---
 body
 `,
@@ -69,26 +83,31 @@ body
   assert.throws(() => loadAgentConfig("bad", dir), AgentConfigError);
 });
 
-test("loadAgentConfig accepts agent with empty tasks array", () => {
+test("loadAgentConfig silently drops `tasks` (which belongs on assignments)", () => {
   const dir = tempDir();
   writeAgent(
     dir,
-    "empty",
+    "with-tasks",
     `---
 schemaVersion: 1
-name: empty
+name: with-tasks
 backend: claude
-tasks: []
+tasks:
+  - id: t1
+    title: First
 ---
 body
 `,
   );
 
-  const loaded = loadAgentConfig("empty", dir);
-  assert.equal(loaded.config.tasks.length, 0);
+  // `tasks` moved to the assignment schema. The agent schema uses zod's default
+  // strip behavior, so unknown keys are quietly dropped on load.
+  const loaded = loadAgentConfig("with-tasks", dir);
+  assert.equal(loaded.config.name, "with-tasks");
+  assert.ok(!("tasks" in loaded.config), "tasks stripped from agent config");
 });
 
-test("loadAgentConfig accepts agent with no tasks field at all", () => {
+test("loadAgentConfig accepts agent with no tasks/vars/message fields", () => {
   const dir = tempDir();
   writeAgent(
     dir,
@@ -103,7 +122,7 @@ body
   );
 
   const loaded = loadAgentConfig("notasks", dir);
-  assert.equal(loaded.config.tasks.length, 0);
+  assert.equal(loaded.config.name, "notasks");
 });
 
 test("loadAgentConfig throws AgentNotFoundError for missing agent", () => {
@@ -113,21 +132,44 @@ test("loadAgentConfig throws AgentNotFoundError for missing agent", () => {
 
 test("resolveAgentPath accepts a direct path", () => {
   const dir = tempDir();
-  const agentPath = writeAgent(dir, "demo", MINIMAL);
+  const agentPath = writeAgent(dir, "demo", MINIMAL_AGENT);
 
   const resolved = resolveAgentPath(agentPath, dir);
   assert.equal(resolved, agentPath);
 });
 
-test("schema rejects duplicate task ids", () => {
+test("loadAssignmentConfig parses a minimal assignment.md", () => {
   const dir = tempDir();
-  writeAgent(
+  writeAssignment(dir, "demo-work", MINIMAL_ASSIGNMENT);
+
+  const loaded = loadAssignmentConfig("demo-work", dir);
+  assert.equal(loaded.config.name, "demo-work");
+  assert.equal(loaded.config.tasks.length, 1);
+  assert.equal(loaded.config.tasks[0].id, "t1");
+  assert.ok(loaded.instructions.includes("{{assignment_path}}"));
+});
+
+test("loadAssignmentConfig throws AssignmentNotFoundError for missing assignment", () => {
+  const dir = tempDir();
+  assert.throws(() => loadAssignmentConfig("nope-work", dir), AssignmentNotFoundError);
+});
+
+test("resolveAssignmentPath accepts a direct path", () => {
+  const dir = tempDir();
+  const assignmentPath = writeAssignment(dir, "demo-work", MINIMAL_ASSIGNMENT);
+
+  const resolved = resolveAssignmentPath(assignmentPath, dir);
+  assert.equal(resolved, assignmentPath);
+});
+
+test("assignment schema rejects duplicate task ids", () => {
+  const dir = tempDir();
+  writeAssignment(
     dir,
     "dup",
     `---
 schemaVersion: 1
 name: dup
-backend: claude
 tasks:
   - id: t1
     title: First
@@ -138,5 +180,5 @@ body
 `,
   );
 
-  assert.throws(() => loadAgentConfig("dup", dir), AgentConfigError);
+  assert.throws(() => loadAssignmentConfig("dup", dir), AssignmentConfigError);
 });

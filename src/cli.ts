@@ -4,8 +4,12 @@ import { type ParsedArgs, overridesFromParsedArgs, parseArgs } from "./cli/parse
 import {
   AgentConfigError,
   AgentNotFoundError,
+  AssignmentConfigError,
+  AssignmentNotFoundError,
   type LoadedAgent,
+  type LoadedAssignment,
   loadAgentConfig,
+  loadAssignmentConfig,
 } from "./config/loader.js";
 import { ResumeError, resolveResumeTarget } from "./runner/manifest.js";
 import {
@@ -16,14 +20,13 @@ import {
   runAgent,
 } from "./runner/run-loop.js";
 
-const HELP = `Usage: task-runner run [--agent <name-or-path>] [options] [message]
+const HELP = `Usage: task-runner run [--agent <name-or-path>] [--assignment <name-or-path>] [options] [message]
 
 Arguments:
-  [message]               Positional text. For a fresh run, appended to
-                          the agent's instructions (or used in place of
-                          the agent's default \`message\` field). For a
-                          resume run, required — sent as the sole prompt
-                          for the new session.
+  [message]               Positional text. For a fresh run, appended as
+                          the "specific ask" at the end of the prompt.
+                          For a resume run, sent as (part of) the sole
+                          follow-up prompt for the new session.
 
 Options:
   --agent <name|path>     Agent name (resolved against ./agents/<name>/agent.md
@@ -31,31 +34,36 @@ Options:
                           direct path to an agent.md file. Required for fresh
                           runs; optional for --resume-run (taken from the
                           prior manifest if omitted).
-  --resume-run <id|path>  Continue an existing run by its short id (e.g.
-                          "k7m2xq") or a path to a workspace directory or
-                          run.json file. Reads the prior manifest, reloads
-                          the agent, normalizes non-completed tasks to
-                          pending, and starts a new session within the
-                          same workspace. Requires a positional message.
-  --var <key>=<value>     Set an input variable (repeatable).
-  --add-task <title>      Append a task to the agent's task list with the
+  --assignment <n|path>   Assignment name (resolved against
+                          ./assignments/<n>/assignment.md or
+                          $TASK_RUNNER_HOME/assignments/<n>/assignment.md) or
+                          a direct path to an assignment.md file. Assignments
+                          supply tasks, vars, and optional work instructions.
+                          Forbidden on --resume-run.
+  --resume-run <id|path>  Continue an existing run by its short id or path
+                          to its workspace / run.json. Reads the prior
+                          manifest, reloads the agent, normalizes
+                          non-completed tasks to pending, and starts a new
+                          session. Requires a follow-up message OR
+                          --add-task. Cannot be combined with --assignment.
+  --var <key>=<value>     Set an input variable (repeatable). Validated
+                          against the assignment's var schema.
+  --add-task <title>      Append a task to the run's task list with the
                           given title (repeatable). IDs are auto-generated
                           as \`cli-<short-id>\`. Rejected if \`tasks\` is
-                          listed in the agent's \`lockedFields\`.
+                          listed in the run's locked fields.
   --cwd <path>            Override the agent's cwd.
   --model <id>            Override the agent's model.
-  --effort <level>        Override effort level (low, medium, high, max).
+  --effort <level>        Override effort level (off, minimal, low, medium,
+                          high, xhigh, max).
   --timeout-sec <n>       Override the per-attempt timeout.
   --max-retries <n>       Override the max number of retries (default 3).
-  --unrestricted          Pass --dangerously-skip-permissions to Claude.
-  --output-format <fmt>   Output format: "text" (default) streams agent
-                          text live to stdout and prints a summary to
-                          stderr; "json" suppresses chrome and prints
-                          the full run manifest to stdout at the end.
+  --unrestricted          Bypass the backend's approval prompts.
+  --output-format <fmt>   Output format: "text" (default) or "json".
   --help, -h              Print this message.
 
 Exit codes:
-  0  All tasks completed successfully
+  0  All tasks completed successfully (or 0-task run succeeded)
   1  Retries exhausted with incomplete tasks
   2  One or more tasks reported as blocked
   3  Config / validation / resume error before any run started
@@ -80,6 +88,11 @@ async function main(): Promise<void> {
   if (parsed.command !== "run") {
     process.stderr.write(`task-runner: unknown command "${parsed.command}"\n`);
     process.stderr.write(HELP);
+    process.exit(3);
+  }
+
+  if (parsed.resumeRun !== undefined && parsed.assignment !== undefined) {
+    process.stderr.write("task-runner: --assignment cannot be combined with --resume-run\n");
     process.exit(3);
   }
 
@@ -124,6 +137,20 @@ async function main(): Promise<void> {
     process.exit(3);
   }
 
+  let loadedAssignment: LoadedAssignment | undefined;
+  if (parsed.assignment !== undefined) {
+    try {
+      loadedAssignment = loadAssignmentConfig(parsed.assignment);
+    } catch (err) {
+      if (err instanceof AssignmentNotFoundError || err instanceof AssignmentConfigError) {
+        process.stderr.write(`task-runner: ${err.message}\n`);
+      } else {
+        process.stderr.write(`task-runner: ${(err as Error).message}\n`);
+      }
+      process.exit(3);
+    }
+  }
+
   let backend: ReturnType<typeof resolveBackend>;
   try {
     backend = resolveBackend(loaded.config.backend);
@@ -140,6 +167,7 @@ async function main(): Promise<void> {
   try {
     const outcome = await runAgent({
       loaded,
+      loadedAssignment,
       cliVars: parsed.vars,
       backend,
       resume: resumeTarget,

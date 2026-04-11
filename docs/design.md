@@ -36,27 +36,31 @@ manifest is the source of truth.
 ## High-level flow
 
 ```
-task-runner run --agent <name> [--var k=v]... [--output-format text|json]
-                               [message]
+task-runner run --agent <name> [--assignment <name>] [--var k=v]...
+                               [--output-format text|json] [message]
    │
    ▼
-1. Load + validate agent.md (zod schema)
-2. Resolve vars (CLI → env → defaults)
-3. Create workspace: <cwd>/.task-runner/<short-id>/
-4. Build in-memory task map from agent.md `tasks:`
-5. Write initial assignment.md + run.json
-6. Render prompt with {{var}} + {{assignment_path}} + {{run_id}} substitution
-7. Loop:
-     a. Invoke Claude subprocess (stream-json, normalize for user output)
-     b. Parse assignment.md back, merge status/notes into in-memory map
-     c. Snapshot everything into the manifest + rewrite run.json
+1. Load + validate agent.md (identity, config, role instructions)
+2. If --assignment: load + validate assignment.md (vars, tasks, message)
+3. Resolve vars (CLI → env → defaults) against the assignment's schema
+4. Check locks (union of agent.lockedFields + assignment.lockedFields)
+5. Create workspace: <cwd>/.task-runner/<short-id>/
+6. Build in-memory task map from the assignment's `tasks:` (+ CLI --add-task)
+7. Re-render a fresh assignment.md into the workspace; source file is never
+   touched
+8. Compose prompt: agent instructions → assignment instructions → workflow
+   → message (non-empty parts only, joined with blank lines)
+9. Loop:
+     a. Invoke backend (Claude subprocess or Codex app-server JSON-RPC)
+     b. Parse workspace assignment.md back, merge status/notes into in-memory
+     c. Snapshot into manifest + rewrite run.json
      d. Decide: done? blocked? retry? fail?
-     e. If retry: merge missing sections back into assignment.md, build nudge,
-        re-invoke with --resume <session-id>
-8. Rewrite run.json with terminal state
-9. Emit final output (text mode: stderr summary; json mode: print manifest
-   to stdout)
-10. Exit with status code
+     e. If retry: merge missing sections, build nudge, re-invoke with
+        backend session resume
+10. Rewrite run.json with terminal state
+11. Emit final output (text summary on stderr, or full manifest on stdout
+    when --output-format json)
+12. Exit with status code
 ```
 
 ## Repo layout
@@ -73,174 +77,287 @@ task-runner/
 │   └── design.md          # this file
 ├── src/
 │   ├── cli.ts             # argv parsing, entry point
+│   ├── cli/
+│   │   └── parse-args.ts  # argv → ParsedArgs + overridesFromParsedArgs
 │   ├── config/
-│   │   ├── schema.ts      # zod AgentConfig schema
-│   │   ├── loader.ts      # locate + parse agent.md with gray-matter
+│   │   ├── schema.ts      # zod AgentConfig + AssignmentConfig schemas
+│   │   ├── loader.ts      # locate + parse agent.md AND assignment.md
 │   │   └── interpolate.ts # {{var}} substitution
 │   ├── assignment/
 │   │   ├── model.ts       # TaskState types
 │   │   ├── writer.ts      # serialize in-memory map -> assignment.md
 │   │   ├── parser.ts      # parse assignment.md -> status/notes updates
-│   │   └── merge.ts       # merge: missing sections only, preserve agent edits
+│   │   └── merge.ts       # merge: missing sections only, preserve edits
 │   ├── backends/
 │   │   ├── types.ts       # Backend interface
-│   │   └── claude.ts      # Claude CLI subprocess adapter
+│   │   ├── registry.ts    # name → adapter lookup
+│   │   ├── claude.ts      # Claude CLI subprocess adapter
+│   │   └── codex.ts       # Codex JSON-RPC adapter (stdio + ws transports)
 │   ├── runner/
 │   │   ├── run-loop.ts    # seed → invoke → parse → retry
 │   │   ├── manifest.ts    # RunManifest types + writer for run.json
+│   │   ├── task-workflow.ts # injected task workflow template + reminder
 │   │   ├── nudge.ts       # retry prompt builder
 │   │   └── output.ts      # summary for text mode
 │   └── util/
 │       ├── short-id.ts    # 6-char base32 nonce
 │       └── spawn.ts       # subprocess helper (timeout, SIGINT/SIGKILL)
 ├── agents/
-│   └── example/agent.md   # reference agent definition
+│   ├── example/agent.md           # reference agent — identity only
+│   ├── basic/agent.md
+│   ├── chat/agent.md              # 0-task chat agent
+│   ├── codex-example/agent.md
+│   └── codex-chat/agent.md
+├── assignments/
+│   ├── repo-orientation/assignment.md   # tasks + vars for repo tour
+│   └── repo-diagnostics/assignment.md   # tasks for quick diagnostics
 └── test/
     ├── assignment-roundtrip.test.mjs
     ├── config-loader.test.mjs
-    ├── nudge.test.mjs
     ├── manifest.test.mjs
-    └── run-loop.test.mjs
+    ├── run-loop.test.mjs
+    ├── resume.test.mjs
+    ├── add-task.test.mjs
+    ├── auto-workflow.test.mjs
+    ├── empty-prompt.test.mjs
+    ├── locked-fields.test.mjs
+    ├── nudge.test.mjs
+    ├── claude-effort.test.mjs
+    ├── codex-effort.test.mjs
+    ├── backend-registry.test.mjs
+    └── cli-parse-args.test.mjs
 ```
 
-## Agent definition schema
+## Agent and assignment definitions
 
-Agent definitions are Markdown files with YAML frontmatter, parsed with
-`gray-matter` and validated with `zod`. The type is inferred from the zod
-schema so the two never drift.
+A run is defined by two files:
+
+- **`agent.md`** — stable identity. Backend config, role instructions,
+  locks. No tasks, no vars, no message. Used across many different
+  assignments without change.
+- **`assignment.md`** — the work. Task list, var schema, optional
+  message default, optional work-context instructions, optional locks.
+
+Both are Markdown files with YAML frontmatter, parsed with `gray-matter`
+and validated with `zod`. Types are inferred from the zod schemas so the
+two never drift.
+
+### Agent schema
 
 ```yaml
 ---
 schemaVersion: 1                  # required, must be 1
-name: example                     # required, string
-backend: claude                   # required; one of "claude" | "codex"
-model: claude-sonnet-4-6          # optional, plain string (no enum wrapper)
-effort: medium                    # optional; low | medium | high | max
-message: "focus on auth"          # optional default message (see `message` below)
+name: claude-worker               # required, string
+backend: claude                   # required; "claude" | "codex"
+model: claude-sonnet-4-6          # optional
+effort: medium                    # optional; off|minimal|low|medium|high|xhigh|max
 timeoutSec: 3600                  # optional, default 3600
-unrestricted: false               # optional, default false; maps to --dangerously-skip-permissions
-cwd: .                            # optional, interpolatable with {{var}}
+unrestricted: false               # optional, default false
+cwd: .                            # optional, default "."
 maxRetries: 3                     # optional, default 3
 lockedFields: [model, effort]     # optional; caller cannot override these
+---
+You are a coding assistant working on `{{repo_path}}`.
+Record findings in each task's notes block.
+```
+
+**Agent fields** — identity and capability only:
+
+| Field | Purpose |
+|---|---|
+| `schemaVersion` | Future migrations |
+| `name` | Identity in errors/logs |
+| `backend` | Adapter dispatch (`claude` or `codex`) |
+| `model` | Model identifier; per-backend namespace prefix is stripped |
+| `effort` | Canonical effort enum; mapped per-adapter |
+| `timeoutSec` | Per-invocation wall clock |
+| `unrestricted` | Backend permission bypass |
+| `cwd` | Subprocess / invocation working directory |
+| `maxRetries` | Retry budget per session |
+| `lockedFields` | Fields the caller cannot override |
+| _(body)_ | Agent's **role instructions** — renders as part of every fresh-run prompt |
+
+Agent frontmatter **does not contain** `vars`, `tasks`, or `message` —
+those are assignment-level concepts.
+
+### Assignment schema
+
+```yaml
+---
+schemaVersion: 1
+name: repo-orientation
 vars:
   repo_path:
     type: string                  # string | number | boolean | enum
     required: true                # default false
-    source: cli                   # cli | env | either; default "cli"
+    source: cli                   # cli | env | either
     envName: REPO_PATH            # only when source includes env
     default: null                 # optional fallback
     description: Path to target repo
     sensitive: false              # default false
     values: [a, b, c]             # only for type: enum
+message: "focus on the auth layer first"   # optional default
+lockedFields: [message]           # optional
 tasks:
-  - id: t1_read_conventions       # stable ID, [A-Za-z0-9._:-]+, max 128 chars
+  - id: t1_conventions            # stable ID, [A-Za-z0-9._:-]+, max 128 chars
     title: Check repo conventions # required, short label
     body: |                       # optional, multi-line description
       Read AGENTS.md and CLAUDE.md.
+  - id: t2_inventory
+    title: Inventory packages
 ---
-You are a code exploration assistant working on {{repo_path}}.
-
-Your assignment is at `{{assignment_path}}`. Read it, complete each task, and update
-the Status field for each task as you go.
+This is a repository orientation. Capture findings in each task's notes
+block; no code changes.
 ```
 
-### Field rationale
+**Assignment fields** — the work:
 
-| Field | Why kept | What was dropped |
-|---|---|---|
-| `schemaVersion` | Future migrations | — |
-| `name` | Identity in errors/logs | — |
-| `backend` | Adapter dispatch, extension point | — |
-| `model` | Simple string; agent-runner's `{type, values, default}` enum wrapper is overkill here | — |
-| `effort` | Maps to Claude CLI `--effort <low|medium|high|max>` | — |
-| `message` | First-class caller input, appended to instructions; overridable via CLI positional arg | — |
-| `timeoutSec` | Per-run wall clock | — |
-| `unrestricted` | Claude permission bypass | — |
-| `cwd` | Subprocess working directory | — |
-| `maxRetries` | The point of the retry loop | `hooks.maxReinvokes` — renamed |
-| `lockedFields` | Simple allowlist-style version of agent-runner's `overridePolicy` | `overridePolicy.default` toggle, nested key paths |
-| `vars` | CLI input validation + template substitution | `requiredAt` phase split |
-| `tasks` | Seeds the assignment and the manifest | Per-task `completed`/`active` state — runner owns that |
-| instructions (body) | Rendered prompt with `{{var}}` | — |
+| Field | Purpose |
+|---|---|
+| `schemaVersion` | Future migrations |
+| `name` | Identity in errors/logs |
+| `vars` | CLI/env input schema (validated at run time) |
+| `message` | Default follow-up message for the run |
+| `tasks` | Task checklist, stable IDs, max 100 per assignment |
+| `lockedFields` | Fields the caller cannot override (union with agent's) |
+| _(body)_ | Assignment's **work-context instructions** — renders after the agent body |
 
-Dropped entirely from agent-runner: `executionMode`, `adapterExecutionMode`,
-`outputFormat` (as a per-agent config — we have a per-invocation CLI flag
-instead), `handleMode`, `passArgs`, `tools`, `events`, `hooks`,
-`hookMutationPolicy`, `runtimeRequirements`, `environment`, `lineage`.
+Assignments **do not contain** `backend`, `model`, `effort`, `cwd`,
+`timeoutSec`, `unrestricted`, or `maxRetries` — those are agent-level.
+
+### Invocation shape
+
+```bash
+task-runner run --agent <name-or-path> \
+                [--assignment <name-or-path>] \
+                [--var k=v]... \
+                [--add-task <title>]... \
+                [--model ...] [--effort ...] [other overrides] \
+                [message]
+```
+
+Fresh run with a named assignment:
+
+```bash
+task-runner run --agent claude-worker --assignment repo-orientation \
+                --var repo_path=/home/kevin/repo
+```
+
+Fresh run with an orchestrator-generated assignment file:
+
+```bash
+task-runner run --agent claude-worker \
+                --assignment /tmp/work-abc/assignment.md
+```
+
+Chat mode (no assignment, no tasks):
+
+```bash
+task-runner run --agent chat "hello"
+```
+
+### Resolution
+
+`--agent <arg>`:
+1. If `<arg>` contains `/`, `\`, or starts with `.` → direct path
+2. Else look for `<cwd>/agents/<arg>/agent.md`
+3. Else look for `<TASK_RUNNER_HOME>/agents/<arg>/agent.md`
+4. Else → `AgentNotFoundError`
+
+`--assignment <arg>`: same pattern, `assignments/` directory and
+`assignment.md` filename.
+
+### Workspace layout
+
+The runner **copies**, never mutates, the caller's assignment file:
+
+1. Generate short ID, create `<cwd>/.task-runner/<short-id>/`
+2. Re-render a fresh `assignment.md` into the workspace from the parsed
+   task list. This is the runner's ephemeral scratch copy — the agent
+   edits it in place during the run.
+3. Source file (the caller's `--assignment` target) is never touched.
+4. `run.json.assignment` captures both paths so tooling can correlate:
+
+   ```json
+   "assignment": {
+     "name": "repo-orientation",
+     "sourcePath": "/tmp/work-abc/assignment.md",
+     "workspacePath": "/abs/.task-runner/k7m2xq/assignment.md"
+   }
+   ```
 
 ## Message
 
-The `message` field is first-class caller input. It can be set three ways,
-in precedence order:
+The `message` field is a caller-provided ask. Resolution order:
 
 1. **CLI positional argument** — `task-runner run --agent X "focus on auth"`
-2. **`message:` in agent.md frontmatter** — a default if no positional is given
+2. **`message:` in assignment.md frontmatter** — default if no positional
 3. **Unset** — no message at all
 
-When set, the resolved message is appended to the rendered instructions
-with a blank-line separator:
+The resolved message goes at the **end** of the composed prompt, after
+the agent instructions, the assignment instructions, and the workflow
+template. See [Automatic task workflow](#automatic-task-workflow) for
+the full composition order.
 
-```
-<rendered instructions body>
-
-<message>
-```
-
-That's the only mechanism. No template placeholder (no `{{message}}`
-interpolation), no system/user split — just concatenation. If the agent
-author wants to control where the message lands, they write the rest of
-the instructions accordingly (i.e., end the instructions at the point the
-message should appear).
-
-The resolved message is exposed at the top of `run.json` as
-`manifest.message`, alongside `model`, `effort`, etc. The per-attempt
-`AttemptRecord.prompt` field contains the full composed text that was
-sent to the backend, including the message.
+Resolved message appears at the top of `run.json` as `manifest.message`,
+and on each session record as `sessions[N].message`. The per-attempt
+`AttemptRecord.prompt` field contains the full composed text.
 
 ## Locked fields
 
-`lockedFields: [<key>, ...]` in agent.md frontmatter declares which
-top-level override fields cannot be overridden at run time. Valid entries:
+Both agents and assignments can declare `lockedFields`. At run time the
+two lists are unioned; a field locked on either side rejects overrides.
+
+Valid entries:
 
 ```
-cwd  model  effort  message  timeoutSec  unrestricted  maxRetries  tasks
+cwd  model  effort  instructions  message  timeoutSec  unrestricted  maxRetries  tasks
 ```
 
-The zod schema rejects any entry outside this set at load time, so typos
-fail fast instead of silently granting no protection.
+The zod schemas reject any entry outside this set at load time, so typos
+fail fast.
+
+**Who typically locks what**:
+
+| Field | Typical lock owner |
+|---|---|
+| `cwd`, `model`, `effort`, `timeoutSec`, `unrestricted`, `maxRetries` | agent — agent-owned config, agent decides CLI override rules |
+| `instructions` | agent — refuses assignments with non-empty body |
+| `message`, `tasks` | either — agent-wide prohibition OR per-assignment canonical value |
 
 **Runtime check** — early in `runAgent()`, before any work starts, the
-runner iterates over the provided overrides and throws `LockedFieldError`
-if any locked field has a non-undefined value in the overrides. The CLI
-catches the error and exits with code 3:
+runner builds the union of `agentConfig.lockedFields` and
+`assignmentConfig?.lockedFields` and checks every override against it.
+On violation, throws `LockedFieldError` with the field name and current
+value. CLI catches it and exits with code 3:
 
 ```
 task-runner: cannot override locked field: model
-  this agent fixes it to "claude-sonnet-4-6"
+  this run fixes it to "claude-sonnet-4-6"
 ```
 
-**Semantics** — locking only prevents *overrides*. If the caller doesn't
-pass any value for a locked field, the frontmatter value is used silently,
-same as any other field. Locking also doesn't affect `vars`: those have
-their own schema (`required`, `source`, `sensitive`) and are outside this
-mechanism.
+**Semantics**:
 
-**Task-specific note** — locking `tasks` prevents `--add-task` from the
-CLI. The frontmatter `tasks:` array stays authoritative. Unlocked agents
-allow callers to append new tasks via `--add-task` (see
-[Adding tasks from the CLI](#adding-tasks-from-the-cli) below).
+- Locking only prevents *overrides*. If the caller doesn't pass a value
+  for a locked field, the frontmatter default (from agent or assignment)
+  is used silently.
+- `lockedFields: [tasks]` means `--add-task` is rejected.
+- `lockedFields: [instructions]` on an **agent** means `--assignment`
+  values with non-empty body are rejected.
+- `lockedFields: [message]` on an **assignment** means a CLI positional
+  message is rejected (and the assignment's default message is used).
+- Locks do not cover `vars`: those have their own schema (`required`,
+  `source`, `sensitive`) and are outside the lock mechanism.
 
 **What this replaces** — agent-runner had a richer `overridePolicy` with
 `{default: allow|deny, allow: [...], deny: [...]}`. We took the simplest
-shape that solves the real concern (preventing callers from bumping
-`effort` to `max` on a cost-sensitive agent, or flipping `unrestricted`
-on a safety-sensitive one). A full allow/deny with a tri-state default is
-easy to add if it becomes needed.
+shape that solves the real concern. A full allow/deny with a tri-state
+default is easy to add if it becomes needed.
 
 ## Adding tasks from the CLI
 
-Callers can append ad-hoc tasks to an agent's task list at invocation
-time using the repeatable `--add-task <title>` flag:
+Callers can append ad-hoc tasks at invocation time using the repeatable
+`--add-task <title>` flag:
 
 ```
 task-runner run --agent example \
@@ -261,29 +378,39 @@ task-runner run --agent example \
 
 **Interaction with fresh vs resume runs:**
 
-- **Fresh run**: added tasks are appended after the frontmatter tasks.
+- **Fresh run**: added tasks are appended after the assignment's tasks
+  (if an assignment was provided) or start as the entire task list (if
+  no assignment).
 - **Resume run**: after loading `parent.finalTasks` and normalizing
   non-completed tasks to `pending`, added tasks are appended with fresh
-  IDs. They enter the resumed session as `pending`.
+  IDs. They enter the resumed session as `pending`. Note: `--assignment`
+  is forbidden on resume; only `--add-task` can extend the task list.
 
-**Optional frontmatter tasks:**
+**Zero-task runs are valid:**
 
-The frontmatter `tasks:` field is optional. An agent.md may omit it
-entirely or declare an empty array. Zero-task runs are valid — the
-runner invokes the agent once with just the instructions (and any
-positional `[message]`), captures the transcript, and exits `success`.
-The run loop's decision table handles zero tasks naturally: "all tasks
-completed" is vacuously true, so the run terminates after attempt 1.
+Chat mode is `--agent X` with no `--assignment`. The runner invokes the
+backend once with just the agent's role instructions and any positional
+message, captures the transcript, and exits `success`. The run loop's
+0-task branch bypasses retries — one attempt, success if the backend
+exited cleanly.
 
 ```yaml
 ---
-name: assistant
+# agents/chat/agent.md — minimal chat agent
+schemaVersion: 1
+name: chat
 backend: claude
-# no tasks — pure chat/Q&A agent
+unrestricted: true
 ---
 ```
 
-This pattern lets `task-runner` double as a generic claude wrapper for
+Invocation:
+
+```bash
+task-runner run --agent chat "what is 2 plus 2?"
+```
+
+This pattern lets `task-runner` double as a generic backend wrapper for
 one-shot Q&A, with the full manifest/session/resume machinery still
 available. A resume of a zero-task run can later introduce tasks via
 `--add-task`; see [Automatic task workflow](#automatic-task-workflow)
@@ -291,10 +418,10 @@ for how the workflow instructions get injected on that transition.
 
 **Locked tasks:**
 
-If the agent has `lockedFields: [tasks]`, any `--add-task` from the CLI
-triggers `LockedFieldError` (exit 3), same as any other locked field.
-The run still works without `--add-task` — locking only prevents
-extension, not normal execution.
+If either the agent or the assignment has `lockedFields: [tasks]`, any
+`--add-task` from the CLI triggers `LockedFieldError` (exit 3). The run
+still works without `--add-task` — locking only prevents extension, not
+normal execution.
 
 ## Automatic task workflow
 
@@ -325,78 +452,83 @@ There is no opt-out toggle. The block is interpolated with the same
 ### Injection rules
 
 The exact behavior depends on what kind of session is starting and
-whether tasks existed before:
+whether tasks existed before. Composition uses a parts array joined with
+blank lines, non-empty parts only:
 
 | Scenario | Prompt composition |
 |---|---|
-| Fresh run, `tasks.size > 0` | `<message>` → `<body>` → `<workflow>` |
-| Fresh run, `tasks.size === 0` | `<message>` → `<body>` (no workflow) |
-| Resume, prior sessions had tasks, no `--add-task` | `<message>` only |
-| Resume, prior sessions had tasks, `--add-task` used | `<message>` + short reminder line |
-| Resume, prior sessions had zero tasks, this session has tasks | `<message>` → `<workflow>` |
+| Fresh, `tasks.size > 0` | `<agent instructions>` → `<assignment instructions>` → `<workflow>` → `<message>` |
+| Fresh, `tasks.size === 0` | `<agent instructions>` → `<assignment instructions>` → `<message>` |
+| Resume, prior had tasks, no `--add-task` | `<message>` only |
+| Resume, prior had tasks, `--add-task` used | short "new tasks" reminder → `<message>` |
+| Resume, prior had 0 tasks, this session has tasks | `<workflow>` → `<message>` |
 
-The "message-above-body" order for fresh runs puts the caller's specific
-ask before the agent's standing role and context — the ask frames the
-context rather than the other way around. Matches how you'd brief a
-human collaborator.
+The order goes **broad to specific**: role identity first, work context
+second, mechanical task instructions third, the caller's immediate ask
+last. Matches standard prompt engineering patterns where the specific
+request comes after all the setup.
 
-On resume sessions, the instructions body is **never** re-sent, because
-claude has it in the cached conversation from a prior session. The
-workflow is only injected on the first session that has tasks (session
-0 for runs that start with tasks; the later resume session for runs
-that started with zero and later added some).
+On resume sessions, neither the agent's role instructions nor the
+assignment's work instructions are re-sent — the backend's cached
+conversation already has them. The workflow is only injected on the
+first session that has tasks (session 0 for runs that start with tasks;
+the later resume session for runs that started with zero and later
+added some).
 
 ### New-tasks reminder
 
 When `--add-task` is used on a resume session and the prior sessions
-already had tasks, claude has the workflow cached but doesn't know new
-tasks were just written to `assignment.md`. The runner appends a short
-parenthetical reminder to the follow-up message:
+already had tasks, the backend has the workflow cached but doesn't know
+new tasks were just written to `assignment.md`. The runner prepends a
+short parenthetical reminder before the caller's follow-up message:
 
 ```
-<caller's message>
-
 (task-runner: 2 new tasks have been added to your assignment since
 the last session — please re-read /abs/path/assignment.md before
 continuing.)
+
+<caller's message>
 ```
 
-Just enough to make claude re-read the file. Not the full workflow.
+Just enough to make the agent re-read the file. Not the full workflow.
+If no positional message was provided (`--add-task` alone), the reminder
+becomes the entire follow-up prompt.
 
 ### Empty prompt guard
 
-The three prompt parts — message, instructions body, and auto-workflow
-— are independently optional. Any combination works, except all three
-empty:
+The four prompt parts — agent instructions, assignment instructions,
+auto-workflow, and message — are independently optional. Any
+combination works, except all four empty:
 
-| body | message | tasks | outcome |
-|---|---|---|---|
-| ✓ | ✓ | ✓ | message + body + workflow |
-| ✓ | ✓ |   | message + body |
-| ✓ |   | ✓ | body + workflow |
-| ✓ |   |   | body only |
-|   | ✓ | ✓ | message + workflow |
-|   | ✓ |   | message only (pure Q&A) |
-|   |   | ✓ | workflow only (agent reads assignment.md) |
-|   |   |   | **EmptyPromptError** (exit 3) |
+| agent instr | assignment instr | tasks | message | outcome |
+|---|---|---|---|---|
+| ✓ | ✓ | ✓ | ✓ | agent + assignment + workflow + message |
+| ✓ | ✓ | ✓ |   | agent + assignment + workflow |
+| ✓ | ✓ |   | ✓ | agent + assignment + message |
+| ✓ |   |   | ✓ | agent + message |
+| ✓ |   |   |   | agent only |
+|   |   | ✓ |   | workflow only (agent reads assignment.md) |
+|   |   |   | ✓ | message only (pure Q&A) |
+|   |   |   |   | **EmptyPromptError** (exit 3) |
 
 `EmptyPromptError` is thrown before any backend invocation if the
 composed prompt would be empty. Error shape:
 
 ```
 task-runner: agent has no prompt content
-  the agent has no instructions body, no `message` (frontmatter or
-  CLI positional), and no tasks. At least one is required. Add
-  instructions to the agent.md body, pass a positional message, or
-  add tasks via `tasks:` in frontmatter or `--add-task`.
+  the agent has no instructions, no assignment instructions, no tasks,
+  and no `message` (assignment frontmatter or CLI positional). At
+  least one is required. Add instructions to the agent.md or
+  assignment.md body, pass a positional message, or add tasks via
+  `tasks:` in an assignment or `--add-task`.
 ```
 
 The composition itself is built as a parts array: each non-empty part
-is pushed in order (message, body, workflow) and joined with a single
-blank line. This avoids stray `\n\n` sequences when any part is
-missing.
+is pushed in Option B order (agent instructions, assignment
+instructions, workflow, message) and joined with a single blank line.
+This avoids stray `\n\n` sequences when any part is missing.
 
-## Agent resolution
+## Agent and assignment resolution
 
 Given `--agent <name>`:
 
@@ -405,6 +537,18 @@ Given `--agent <name>`:
 3. Else look for `<TASK_RUNNER_HOME>/agents/<name>/agent.md`
    (`TASK_RUNNER_HOME` defaults to `~/.task-runner`)
 4. Else → `AGENT_NOT_FOUND`
+
+Given `--assignment <name>` (optional):
+
+1. If `<name>` contains `/`, `\`, or starts with `.` → treat as a direct path
+2. Else look for `<cwd>/assignments/<name>/assignment.md`
+3. Else look for `<TASK_RUNNER_HOME>/assignments/<name>/assignment.md`
+4. Else → `ASSIGNMENT_NOT_FOUND`
+
+The source assignment file is never mutated. On a fresh run the runner
+copies it into the workspace as `assignment.md`; that copy is the
+ephemeral buffer the agent edits. On resume the existing workspace
+copy is reused and `--assignment` is not accepted.
 
 ## Variable interpolation
 
@@ -479,12 +623,14 @@ Every session:
 - Has its own `maxAttempts` budget (the retry counter resets per session)
 - Contributes its attempts to the single flat `manifest.attemptRecords[]`
   array with monotonic attempt numbers
-- Starts by reloading the latest `agent.md` (changes since the prior
-  session are picked up)
-- Re-checks overrides against the reloaded agent's `lockedFields`
+- Starts by reloading the latest `agent.md` and the workspace
+  `assignment.md` (changes since the prior session are picked up)
+- Re-checks overrides against the combined `lockedFields`
+  (agent ∪ assignment)
 - For resume sessions (index > 0), the first attempt's prompt is
-  **only the follow-up message** — the instructions body is not
-  re-rendered because claude has it in the cached conversation
+  **only the follow-up message** (plus the new-tasks reminder if
+  applicable) — the instructions are not re-rendered because the
+  backend has them in the cached conversation
 
 The top-level `manifest.status`, `manifest.exitCode`, and
 `manifest.endedAt` always reflect the **latest** session. Earlier
@@ -505,14 +651,20 @@ interface RunManifest {
   schemaVersion: 1;
   runId: string;
   agent: { name: string; sourcePath: string };
+  assignment: {                    // null if the run had no --assignment
+    name: string;
+    sourcePath: string;            // source path the assignment was loaded from
+    workspacePath: string;         // copied workspace assignment.md
+  } | null;
   backend: string;
   model: string | null;
   effort: string | null;
   message: string | null;          // session 0's initial message
   unrestricted: boolean;
   cwd: string;
-  assignmentPath: string;
+  assignmentPath: string;          // workspace assignment.md (the I/O buffer)
   workspaceDir: string;
+  runtimeVars: Record<string, unknown>;  // resolved vars used for this run
   startedAt: string;               // ISO-8601; session 0 start
   endedAt: string | null;          // latest session's end, null while running
   status: ManifestStatus;          // latest session's terminal state
@@ -634,23 +786,23 @@ The runner holds an in-memory `Map<taskId, TaskState>` that drives the run.
 the canonical record. The relationship:
 
 ```
-agent.md `tasks:`  ──►  in-memory Map  ──►  rendered to assignment.md
-                             │                      │
-                             │                      ▼
-                             │                agent edits
-                             │                      │
-                             ▼                      │
-                     snapshot into run.json   ◄─────┘
-                          (canonical)        parsed back
+assignment.md `tasks:`  ──►  in-memory Map  ──►  rendered to workspace assignment.md
+                                   │                      │
+                                   │                      ▼
+                                   │                agent edits
+                                   │                      │
+                                   ▼                      │
+                           snapshot into run.json   ◄─────┘
+                                (canonical)        parsed back
 ```
 
 ```ts
 type TaskStatus = "pending" | "in_progress" | "completed" | "blocked";
 
 interface TaskState {
-  id: string;           // from agent.md, stable
-  title: string;        // from agent.md, never updated from file
-  body: string;         // from agent.md, never updated from file
+  id: string;           // from assignment.md, stable
+  title: string;        // from assignment.md, never updated from file
+  body: string;         // from assignment.md, never updated from file
   status: TaskStatus;   // updated from file each round
   notes: string;        // updated from file each round
 }
@@ -1036,6 +1188,7 @@ The raw JSON events are still captured verbatim into
 
 ```
 task-runner run [--agent <name-or-path>]
+               [--assignment <name-or-path>]
                [--resume-run <id|path>]
                [--var k=v]...
                [--add-task <title>]...
@@ -1053,6 +1206,16 @@ task-runner run [--agent <name-or-path>]
 `--agent` becomes optional — the runner reloads `agent.md` from the path
 stored in the prior manifest.
 
+`--assignment` is optional on fresh runs. When supplied, the named or
+pathed `assignment.md` is loaded, its tasks and `message` seed the run,
+and a copy is placed in the workspace as `assignment.md`. The source
+file is never mutated. When omitted, the run starts with no tasks
+unless `--add-task` is used.
+
+`--assignment` is **forbidden** with `--resume-run`. The existing
+workspace `assignment.md` is authoritative on resume; use `--add-task`
+and/or a follow-up `[message]` to extend the run.
+
 `--resume-run <id|path>` extends an existing run:
 
 - `<id>` is the short slug from `.task-runner/<id>/`, resolved against
@@ -1068,18 +1231,21 @@ stored in the prior manifest.
   `ResumeError` and exit 3.
 - Non-completed tasks from the prior run are normalized to `pending`
   (with their notes preserved); completed tasks stay completed.
-- The reloaded `agent.md` is authoritative for all fields, including
-  `lockedFields` — overrides are re-checked against the fresh file.
+- The reloaded `agent.md` is authoritative for all agent fields, and
+  the reloaded assignment info is re-checked against the prior
+  workspace `assignment.md` — `lockedFields` from both files union and
+  override attempts are re-checked.
 - The first attempt of the new session sends **only the follow-up
-  message** as its prompt. The instructions body is not re-rendered,
-  because claude already has it in the cached session from the prior
-  run.
+  message** (plus the new-tasks reminder if applicable) as its prompt.
+  The instructions are not re-rendered, because the backend already
+  has them in the cached session from the prior run.
 
-CLI flags (and the positional `message`) override agent.md values for:
-`cwd`, `model`, `effort`, `message`, `timeoutSec`, `unrestricted`,
-`maxRetries`. `--add-task` extends the agent's `tasks:` array. Any field
-listed in the agent's `lockedFields` rejects override attempts with
-`LockedFieldError` and exit code 3 — see [Locked fields](#locked-fields).
+CLI flags (and the positional `message`) override agent/assignment
+values for: `cwd`, `model`, `effort`, `message`, `timeoutSec`,
+`unrestricted`, `maxRetries`. `--add-task` extends the assignment's
+`tasks:` array. Any field listed in the combined `lockedFields`
+(agent ∪ assignment) rejects override attempts with `LockedFieldError`
+and exit code 3 — see [Locked fields](#locked-fields).
 
 Vars are passed via repeated `--var key=value` flags. Env-sourced vars
 read from `process.env[envName]`. The CLI validates each var against the
