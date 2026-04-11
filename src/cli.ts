@@ -17,6 +17,7 @@ import {
   loadAssignmentConfig,
 } from "./config/loader.js";
 import {
+  type ManifestStatus,
   ResumeError,
   type RunManifest,
   resolveResumeTarget,
@@ -109,7 +110,7 @@ Options:
                           as \`cli-<short-id>\`. Rejected if \`tasks\` is
                           listed in the run's locked fields.
   --cwd <path>            Override the agent's cwd.
-  --backend <id>          Override the agent's backend (claude or codex).
+  --backend <id>          Override the agent's backend (claude, codex, or passive).
                           Forbidden with --resume-run. The agent's model is
                           dropped on backend override unless --model is also
                           passed (model strings are backend-specific).
@@ -285,6 +286,22 @@ async function main(): Promise<void> {
       process.exit(3);
     }
     throw err;
+  }
+
+  // Passive agents are never executed: task-runner acts as a sidecar
+  // checklist service, and the agent is driven externally through
+  // `task set` / `task add`. `init` is allowed (prepares the
+  // workspace and prints the bootstrap). `run` — fresh or resume — is
+  // rejected with a clear pointer to the right commands.
+  if (parsed.command === "run" && backendId === "passive") {
+    const runId = resumeTarget?.manifest.runId;
+    const hint = runId
+      ? `task-runner task set ${runId} <task-id> --status in_progress\n  task-runner status ${runId}`
+      : "task-runner init --agent <passive-agent> --assignment <...>\n  task-runner task set <run-id> <task-id> --status in_progress";
+    process.stderr.write(
+      `task-runner: cannot run passive agent "${loaded.config.name}" — passive agents are driven externally via task commands. Use:\n  ${hint}\n`,
+    );
+    process.exit(3);
   }
 
   const isJson = parsed.outputFormat === "json";
@@ -516,7 +533,64 @@ function persistTaskMap(
   resolved.manifest.finalTasks = snapshotTasks(tasks);
   resolved.manifest.tasksCompleted = ordered.filter((t) => t.status === "completed").length;
   resolved.manifest.tasksTotal = ordered.length;
+
+  // Passive runs self-finalize: after any mutation, re-derive the
+  // manifest status from the task map so scripts driving a passive
+  // run can check `status == "success"` instead of computing the
+  // counts themselves. Non-passive runs are untouched — their state
+  // machine is still owned by the run-loop.
+  if (resolved.manifest.backend === "passive") {
+    applyPassiveFinalization(resolved.manifest, ordered);
+  }
+
   writeManifest(resolved.workspaceDir, resolved.manifest);
+}
+
+// For a passive run, derive the next state from the task map:
+//   - 0 tasks, or any pending / in_progress → "initialized"
+//   - all terminal, at least one blocked      → "blocked" (exit code 2)
+//   - all completed                           → "success" (exit code 0)
+//
+// Only stamp endedAt / exitCode on an **actual transition**. A
+// notes-only edit on an already-terminal run must preserve the
+// existing endedAt so the manifest's audit trail stays accurate
+// (a post-hoc notes correction is not "the run finished again").
+// Self-healing is still supported: reopening a completed task
+// transitions back from a terminal state and clears endedAt/exitCode.
+function applyPassiveFinalization(manifest: RunManifest, ordered: TaskState[]): void {
+  let hasOpen = false;
+  let hasBlocked = false;
+  for (const t of ordered) {
+    if (t.status === "pending" || t.status === "in_progress") hasOpen = true;
+    if (t.status === "blocked") hasBlocked = true;
+  }
+
+  let derived: ManifestStatus;
+  if (ordered.length === 0 || hasOpen) {
+    derived = "initialized";
+  } else if (hasBlocked) {
+    derived = "blocked";
+  } else {
+    derived = "success";
+  }
+
+  // No-op on same-state calls (e.g. notes-only edit after the run
+  // was already finalized). Preserves endedAt + exitCode.
+  if (manifest.status === derived) {
+    return;
+  }
+
+  manifest.status = derived;
+  if (derived === "initialized") {
+    manifest.endedAt = null;
+    manifest.exitCode = null;
+  } else if (derived === "blocked") {
+    manifest.endedAt = new Date().toISOString();
+    manifest.exitCode = 2;
+  } else {
+    manifest.endedAt = new Date().toISOString();
+    manifest.exitCode = 0;
+  }
 }
 
 function runTaskSet(parsed: ParsedArgs): never {
