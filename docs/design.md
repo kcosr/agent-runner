@@ -311,7 +311,7 @@ two lists are unioned; a field locked on either side rejects overrides.
 Valid entries:
 
 ```
-cwd  model  effort  instructions  message  timeoutSec  unrestricted  maxRetries  tasks
+cwd  backend  model  effort  instructions  message  timeoutSec  unrestricted  maxRetries  tasks
 ```
 
 The zod schemas reject any entry outside this set at load time, so typos
@@ -321,7 +321,7 @@ fail fast.
 
 | Field | Typical lock owner |
 |---|---|
-| `cwd`, `model`, `effort`, `timeoutSec`, `unrestricted`, `maxRetries` | agent — agent-owned config, agent decides CLI override rules |
+| `cwd`, `backend`, `model`, `effort`, `timeoutSec`, `unrestricted`, `maxRetries` | agent — agent-owned config, agent decides CLI override rules |
 | `instructions` | agent — refuses assignments with non-empty body |
 | `message`, `tasks` | either — agent-wide prohibition OR per-assignment canonical value |
 
@@ -1203,6 +1203,7 @@ task-runner <run|init>
                [--var k=v]...
                [--add-task <title>]...
                [--cwd <path>]
+               [--backend <claude|codex>]
                [--model <model>]
                [--effort <level>]
                [--max-retries <n>]
@@ -1307,11 +1308,26 @@ from a prior session):
   has them in the cached session from the prior run.
 
 CLI flags (and the positional `message`) override agent/assignment
-values for: `cwd`, `model`, `effort`, `message`, `timeoutSec`,
-`unrestricted`, `maxRetries`. `--add-task` extends the assignment's
-`tasks:` array. Any field listed in the combined `lockedFields`
-(agent ∪ assignment) rejects override attempts with `LockedFieldError`
-and exit code 3 — see [Locked fields](#locked-fields).
+values for: `cwd`, `backend`, `model`, `effort`, `message`,
+`timeoutSec`, `unrestricted`, `maxRetries`. `--add-task` extends the
+assignment's `tasks:` array. Any field listed in the combined
+`lockedFields` (agent ∪ assignment) rejects override attempts with
+`LockedFieldError` and exit code 3 — see [Locked fields](#locked-fields).
+
+`--backend <claude|codex>` is special:
+
+- Forbidden with `--resume-run`. Backend session ids aren't portable
+  across backends, so a resume must use the same backend the run was
+  created with. The CLI reads `backend` from the prior manifest on
+  resume, ignoring the reloaded agent.md.
+- When set on a fresh run, the agent's `model` is **dropped** unless
+  `--model` is also passed. Model strings are backend-specific
+  (`claude-sonnet-4-6` vs `gpt-5.4`), so an agent declared with a
+  claude model would otherwise fail at backend invocation. The
+  pattern is `--backend codex --model gpt-5.4`.
+- The `backend` field stored in the manifest is the override value
+  (or the agent's default if no override), so `run.json` always
+  reflects what was actually used.
 
 Vars are passed via repeated `--var key=value` flags. Env-sourced vars
 read from `process.env[envName]`. The CLI validates each var against the

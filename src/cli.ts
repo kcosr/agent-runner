@@ -67,6 +67,10 @@ Options:
                           as \`cli-<short-id>\`. Rejected if \`tasks\` is
                           listed in the run's locked fields.
   --cwd <path>            Override the agent's cwd.
+  --backend <id>          Override the agent's backend (claude or codex).
+                          Forbidden with --resume-run. The agent's model is
+                          dropped on backend override unless --model is also
+                          passed (model strings are backend-specific).
   --model <id>            Override the agent's model.
   --effort <level>        Override effort level (off, minimal, low, medium,
                           high, xhigh, max).
@@ -113,6 +117,12 @@ async function main(): Promise<void> {
   }
   if (parsed.resumeRun !== undefined && parsed.assignment !== undefined) {
     process.stderr.write("task-runner: --assignment cannot be combined with --resume-run\n");
+    process.exit(3);
+  }
+  if (parsed.resumeRun !== undefined && parsed.backend !== undefined) {
+    process.stderr.write(
+      "task-runner: --backend cannot be combined with --resume-run (backend is locked to the run that created the session)\n",
+    );
     process.exit(3);
   }
 
@@ -192,9 +202,20 @@ async function main(): Promise<void> {
     }
   }
 
+  // Resolution order for which backend to use:
+  //   1. CLI --backend override (fresh runs only)
+  //   2. The prior manifest's `backend` (resume — must match what
+  //      created the run, since session ids aren't portable across
+  //      backends)
+  //   3. The reloaded agent's `backend` field
+  //
+  // For execute-after-init the prior manifest's backend wins for the
+  // same reason — init froze it.
+  const backendId = parsed.backend ?? resumeTarget?.manifest.backend ?? loaded.config.backend;
+
   let backend: ReturnType<typeof resolveBackend>;
   try {
-    backend = resolveBackend(loaded.config.backend);
+    backend = resolveBackend(backendId);
   } catch (err) {
     if (err instanceof UnknownBackendError) {
       process.stderr.write(`task-runner: ${err.message}\n`);

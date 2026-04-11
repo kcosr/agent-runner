@@ -1,4 +1,5 @@
 export type OutputFormat = "text" | "json";
+export type BackendId = "claude" | "codex";
 
 export interface ParsedArgs {
   command: string;
@@ -7,6 +8,7 @@ export interface ParsedArgs {
   resumeRun?: string;
   vars: Record<string, string>;
   cwd?: string;
+  backend?: BackendId;
   model?: string;
   effort?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   timeoutSec?: number;
@@ -20,6 +22,7 @@ export interface ParsedArgs {
 
 const EFFORT_VALUES = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const OUTPUT_FORMATS = ["text", "json"] as const;
+const BACKEND_VALUES = ["claude", "codex"] as const;
 
 export function parseArgs(argv: string[]): ParsedArgs {
   const args = argv.slice(2);
@@ -75,6 +78,13 @@ export function parseArgs(argv: string[]): ParsedArgs {
       const next = args.shift();
       if (next === undefined) throw new Error("--cwd requires a value");
       result.cwd = next;
+    } else if (arg === "--backend") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--backend requires a value");
+      if (!(BACKEND_VALUES as readonly string[]).includes(next)) {
+        throw new Error(`--backend must be one of: ${BACKEND_VALUES.join(", ")}`);
+      }
+      result.backend = next as BackendId;
     } else if (arg === "--model") {
       const next = args.shift();
       if (next === undefined) throw new Error("--model requires a value");
@@ -129,6 +139,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
 export function overridesFromParsedArgs(parsed: ParsedArgs) {
   return {
     cwd: parsed.cwd,
+    backend: parsed.backend,
     model: parsed.model,
     effort: parsed.effort,
     message: parsed.message,

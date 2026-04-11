@@ -26,6 +26,7 @@ export const varDefSchema = z
 
 export const LOCKABLE_FIELDS = [
   "cwd",
+  "backend",
   "model",
   "effort",
   "instructions",

@@ -26,6 +26,7 @@ import { TASK_WORKFLOW_TEMPLATE, buildAddedTasksReminder } from "./task-workflow
 
 export interface RunOverrides {
   cwd?: string;
+  backend?: "claude" | "codex";
   model?: string;
   effort?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   message?: string;
@@ -117,6 +118,7 @@ function checkLockedFields(
 
   const overrideEntries: [LockableField, unknown, unknown][] = [
     ["cwd", overrides?.cwd, agentConfig.cwd],
+    ["backend", overrides?.backend, agentConfig.backend],
     ["model", overrides?.model, agentConfig.model],
     ["effort", overrides?.effort, agentConfig.effort],
     ["message", overrides?.message, assignmentConfig?.message],
@@ -311,7 +313,11 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
   const baseDir = process.cwd();
   const cwd = resolveCwd(overrides?.cwd ?? agentConfig.cwd, baseDir);
-  const model = overrides?.model ?? agentConfig.model;
+  // When --backend overrides the agent's backend, the agent's `model`
+  // is also dropped (since model strings are backend-specific). Pass
+  // --model alongside --backend to set one for the new backend.
+  const backendOverridden = overrides?.backend !== undefined;
+  const model = overrides?.model ?? (backendOverridden ? undefined : agentConfig.model);
   const effort = overrides?.effort ?? agentConfig.effort;
   const message = overrides?.message ?? assignmentConfig?.message ?? null;
   const timeoutSec = overrides?.timeoutSec ?? agentConfig.timeoutSec;
@@ -503,7 +509,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
             workspacePath: assignmentPath,
           }
         : null,
-      backend: agentConfig.backend,
+      backend: overrides?.backend ?? agentConfig.backend,
       model: model ?? null,
       effort: effort ?? null,
       message,
