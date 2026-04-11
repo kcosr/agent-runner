@@ -200,6 +200,9 @@ function checkLockedFieldsFromManifest(
     ["sessionName", overrides?.sessionName, manifest.sessionName],
     ["timeoutSec", overrides?.timeoutSec, manifest.timeoutSec],
     ["unrestricted", overrides?.unrestricted, manifest.unrestricted],
+    // maxRetries is stored on the manifest as maxAttempts (= retries + 1)
+    // so the error message subtracts back to the authored value.
+    ["maxRetries", overrides?.maxRetries, manifest.maxAttempts - 1],
     ["tasks", addedTasks.length > 0 ? addedTasks : undefined, undefined],
   ];
 

@@ -465,7 +465,7 @@ Common options:
 | `--backend-session-id <id>` | Adopt an existing backend session id (claude UUID, codex thread id). Validated before workspace creation. Forbidden with `--resume-run` (the resume target already carries one). |
 | `--output-format <text\|json>` | Default `text`. `json` writes the full manifest to stdout once at end of run. |
 
-On `--resume-run`, the four "legitimate mid-run" overrides — `--model`,
+On `--resume-run`, the "legitimate mid-run" overrides — `--model`,
 `--effort`, `--timeout-sec`, `--max-retries`, `--unrestricted`,
 `--session-name` — are still accepted (and still vetted against the
 frozen `manifest.lockedFields`). **Execute-after-init** (resuming a
