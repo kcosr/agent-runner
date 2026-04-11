@@ -1581,6 +1581,35 @@ process, the runner overlays an incremented depth so a nested
   runaway recursive chain dies cheaply with no workspace, no
   manifest, no attempt log written.
 
+## External codex interrupts
+
+Codex managed mode (especially over websocket) lets multiple clients
+attach to the same thread at once — useful for "watch what the agent
+is doing" or "step in mid-task". When another client cancels the
+turn from the side, codex emits `turn/completed` with
+`status: "interrupted"` to *all* connected clients, including
+task-runner.
+
+Without special handling, task-runner sees the interrupted status,
+counts it as "tasks not all done", and re-invokes the agent on its
+next retry — exactly the wrong thing if the user wanted to take
+over the conversation.
+
+The runner detects this case and treats it like a Ctrl+C:
+`status: "aborted"`, exit 130, no retry, fully resumable. The check
+is `state.turnStatus === "interrupted" && !timedOut && !aborted` —
+both the timeout path and the runner's own SIGINT path also produce
+`status: "interrupted"` (since the runner calls `turn/interrupt`
+itself), but in those cases the corresponding flag is already set.
+An interrupted status with neither flag set means the cancellation
+came from outside.
+
+When detected, the codex backend writes a hint to stderr telling the
+user that the turn was interrupted externally and how to resume.
+The pure detection helper `isExternalInterrupt(turnStatus,
+timedOut, aborted)` is exported from `src/backends/codex.ts` and
+unit-tested directly.
+
 ## User interrupts (Ctrl+C)
 
 The CLI installs a `SIGINT` handler that:

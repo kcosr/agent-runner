@@ -40,6 +40,25 @@ function normalizeCodexModel(model: string): string {
 }
 
 /**
+ * Decide whether the turn was interrupted by something *outside* this
+ * runner (e.g. a user connected directly to the codex websocket and
+ * cancelled the turn from another client). Both our own timeout path
+ * and our own SIGINT/abort path cause codex to emit
+ * `turn/completed { status: "interrupted" }` because we call
+ * `turn/interrupt` ourselves — but in those cases the corresponding
+ * flag (`timedOut` / `aborted`) is already set. So an interrupt with
+ * neither flag set means somebody else pulled the plug, and the run
+ * loop should treat it as a clean abort instead of retrying.
+ */
+export function isExternalInterrupt(
+  turnStatus: string,
+  ourTimedOut: boolean,
+  ourAborted: boolean,
+): boolean {
+  return turnStatus === "interrupted" && !ourTimedOut && !ourAborted;
+}
+
+/**
  * Compute a paragraph-break separator to insert before `delta` so that
  * two adjacent streamed message bodies don't get glued together.
  *
@@ -784,6 +803,21 @@ export const codexBackend: Backend = {
             // ignore — we're bailing anyway
           }
         }
+      }
+
+      // Detect a turn that codex marked `interrupted` without any
+      // input from us. This happens when another client connected to
+      // the same codex thread (e.g. a developer using the codex CLI
+      // alongside task-runner) cancels the turn from the side. The
+      // run loop should treat this as a clean abort, not as a
+      // failure that triggers another retry.
+      if (isExternalInterrupt(state.turnStatus, timedOut, aborted)) {
+        aborted = true;
+        ctx.onStderrText?.(
+          "\ncodex: turn was interrupted externally (e.g. cancelled from another " +
+            "client connected to the same thread); marking the run aborted instead " +
+            "of retrying. Resume with `task-runner run --resume-run <id>` when ready.\n",
+        );
       }
     } catch (err) {
       const message = (err as Error).message;
