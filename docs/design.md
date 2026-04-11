@@ -255,10 +255,13 @@ vars:
     envName: REPO_PATH            # only when source includes env
     default: null                 # optional fallback
     description: Path to target repo
-    sensitive: false              # default false
     values: [a, b, c]             # only for type: enum
 message: "focus on the auth layer first"   # optional default
 lockedFields: [message]           # optional
+callerInstructions: |             # optional; printed to the CALLER,
+  Run this with --output-format   # not sent to the backend. See
+  json to get a structured        # "Caller instructions" section below.
+  report for run {{run_id}}.
 tasks:
   - id: t1_conventions            # stable ID, [A-Za-z0-9._:-]+, max 128 chars
     title: Check repo conventions # required, short label
@@ -281,12 +284,68 @@ block; no code changes.
 | `maxRetries` | Retry budget per session (int, 0–20, default 3). Caps the number of attempts the run loop makes against this assignment before giving up. |
 | `vars` | CLI/env input schema (validated at run time) |
 | `message` | Default follow-up message for the run |
+| `callerInstructions` | Optional documentation text for the **caller** of task-runner. Printed to stderr on fresh `run` and `init` (never on `--resume-run`). Never composed into the prompt sent to the backend. See [Caller instructions](#caller-instructions) below. |
 | `tasks` | Task checklist, stable IDs, max 100 per assignment |
 | `lockedFields` | Fields the caller cannot override (union with agent's) |
 | _(body)_ | Assignment's **work-context instructions** — renders after the agent body |
 
 Assignments **do not contain** `backend`, `model`, `effort`, `cwd`,
 `timeoutSec`, or `unrestricted` — those are agent-level.
+
+#### Caller instructions
+
+`callerInstructions` is an assignment-level field that exists purely
+to let the assignment author leave explanatory text for the *human
+or script invoking task-runner*. It is **never composed into the
+prompt sent to the backend** — neither the claude/codex subprocess
+prompt nor the passive bootstrap (`pendingPrompt`) contains it. The
+model / sidecar driver never sees it.
+
+**Audience split.** task-runner has two distinct audiences to brief:
+
+1. The **callee** (the AI agent doing the work): briefed via the
+   agent body, assignment body, and the workflow template. All of
+   this gets composed into the backend prompt.
+2. The **caller** (the human or script running `task-runner run` /
+   `init`): briefed via `callerInstructions`. Shown to them on
+   stderr when they first meet the assignment.
+
+**Freeze and interpolation.** `callerInstructions` is read from
+`assignmentConfig.callerInstructions` at first write, interpolated
+against the same `injectedVars` as other body fields
+(`{{run_id}}`, `{{repo_path}}`, `{{assignment_path}}`, etc.), and
+frozen into `manifest.callerInstructions` as a top-level `string |
+null` field. Resume never re-reads the source assignment, so the
+frozen manifest value is the authoritative copy.
+
+**Print rule.** Shown on stderr with a visible separator:
+
+```
+── caller instructions ──
+<interpolated text>
+── end caller instructions ──
+```
+
+Printed on `task-runner init` and on fresh `task-runner run`
+(without `--resume-run`). **Not printed** on any `--resume-run`
+invocation, including execute-after-init and true resume — the
+caller already saw the instructions at init or fresh-run time, and
+reprinting on every session adds noise.
+
+**Re-fetching after the fact.** A caller who needs the instructions
+again can always read them via the JSON status inspector:
+
+```bash
+task-runner status <run-id> --output-format json --field callerInstructions
+```
+
+`status` text output deliberately does **not** reprint the field —
+it's a read-only inspector, not a UX surface.
+
+**Absent or empty field.** Assignments that don't carry
+`callerInstructions` (or that set it to an empty string) end up
+with `manifest.callerInstructions: null`, and nothing is printed.
+The field is purely opt-in.
 
 #### Session naming
 
@@ -444,7 +503,7 @@ task-runner: cannot override locked field: model
 - `lockedFields: [message]` on an **assignment** means a CLI positional
   message is rejected (and the assignment's default message is used).
 - Locks do not cover `vars`: those have their own schema (`required`,
-  `source`, `sensitive`) and are outside the lock mechanism.
+  `source`) and are outside the lock mechanism.
 
 **What this replaces** — agent-runner had a richer `overridePolicy` with
 `{default: allow|deny, allow: [...], deny: [...]}`. We took the simplest
@@ -847,6 +906,7 @@ interface RunManifest {
   tasksTotal: number;
   backendSessionId: string | null; // most recently captured claude session id
   pendingPrompt: string | null;    // frozen by `init`; cleared once session 0 runs
+  callerInstructions: string | null; // assignment documentation for the CALLER (not sent to the backend); see "Caller instructions" under Assignment schema
   finalTasks: Record<string, TaskSnapshot>;
   sessionCount: number;            // 0 for initialized-only runs, 1 for initial
                                    // executed run, 2 after first resume, etc.
@@ -1977,8 +2037,6 @@ the plug; nothing went wrong." A subsequent `task-runner run
 
 ## Open questions / deferred
 
-- **Sensitive var redaction**: `sensitive: true` fields should be redacted
-  from manifest `prompt` fields and from logs. Not yet implemented.
 - **Tool permissions / allowlists**: Claude CLI supports `--allowedTools`,
   `--permission-mode`, etc. Not in scope until an agent actually needs it.
   A middle-ground permission mode (e.g., `acceptEdits` only) would be a

@@ -17,7 +17,6 @@ export const varDefSchema = z
     envName: z.string().optional(),
     default: z.unknown().optional(),
     description: z.string().optional(),
-    sensitive: z.boolean().default(false),
     values: z.array(z.string()).optional(),
   })
   .refine((v) => v.type !== "enum" || (v.values !== undefined && v.values.length > 0), {
@@ -72,6 +71,15 @@ export const assignmentConfigSchema = z
     sessionName: z.string().min(1).optional(),
     message: z.string().optional(),
     maxRetries: z.number().int().min(0).max(20).default(3),
+    // Documentation surface for the human / script invoking
+    // task-runner, NOT part of the prompt sent to the backend.
+    // Printed to stderr on fresh `run` and `init` (never on
+    // --resume-run). Interpolated against runtime vars and the
+    // runner-injected vars ({{run_id}}, {{assignment_path}}, etc.).
+    // Frozen into `manifest.callerInstructions` at first write so
+    // `status --output-format json --field callerInstructions` can
+    // always re-fetch it.
+    callerInstructions: z.string().optional(),
     vars: z.record(z.string(), varDefSchema).default({}),
     tasks: z.array(taskDefSchema).max(100).default([]),
     lockedFields: z.array(z.enum(LOCKABLE_FIELDS)).default([]),

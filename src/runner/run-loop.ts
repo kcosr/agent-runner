@@ -232,6 +232,21 @@ function resolveCwd(input: string | undefined, fallback: string): string {
   return isAbsolute(input) ? input : resolve(fallback, input);
 }
 
+// Print the assignment's `callerInstructions` block to stderr with a
+// visible separator. Called exactly once per run: on `init` and on
+// fresh `run` (rule: resume and execute-after-init skip so the
+// caller only sees it at the moment they first meet the assignment).
+// No-op when the manifest has no callerInstructions.
+function writeCallerInstructions(
+  callerInstructions: string | null,
+  stderr: (text: string) => void,
+): void {
+  if (!callerInstructions || callerInstructions.length === 0) return;
+  stderr("\n── caller instructions ──\n");
+  stderr(`${callerInstructions.trim()}\n`);
+  stderr("── end caller instructions ──\n");
+}
+
 function coerceVar(key: string, value: unknown, def: VarDef): unknown {
   if (typeof value !== "string") return value;
   switch (def.type) {
@@ -709,6 +724,18 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         ...(assignmentConfig?.lockedFields ?? []),
       ]),
     );
+    // Freeze assignment.callerInstructions (if any) into the manifest
+    // with {{var}} refs interpolated. This is documentation for the
+    // CALLER of task-runner, not content sent to the backend — see
+    // the field comment on RunManifest.callerInstructions.
+    //
+    // Trim before the length check: a whitespace-only value (like
+    // `callerInstructions: "   "`) would otherwise freeze into the
+    // manifest as whitespace and later render as an empty banner at
+    // print time. Treat it as absent.
+    const rawCallerInstructions = assignmentConfig?.callerInstructions?.trim() ?? "";
+    const frozenCallerInstructions =
+      rawCallerInstructions.length > 0 ? interpolate(rawCallerInstructions, injectedVars) : null;
     manifest = {
       schemaVersion: 2,
       runId,
@@ -755,6 +782,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       backendSessionId: opts.bootstrapBackendSessionId ?? null,
       runtimeVars,
       pendingPrompt: isInitialize ? initialPrompt : null,
+      callerInstructions: frozenCallerInstructions,
       finalTasks: snapshotTasks(tasks),
       sessionCount: isInitialize ? 0 : 1,
       sessions: [],
@@ -791,6 +819,10 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     } else {
       stderr(`             resume with: task-runner run --resume-run ${runId}\n`);
     }
+    // Caller-instructions banner. Init is always a "first exposure"
+    // moment, so we always print here if the assignment supplied the
+    // field. Interpolation already happened at manifest construction.
+    writeCallerInstructions(manifest.callerInstructions, stderr);
     return {
       summary: {
         status: "initialized",
@@ -838,6 +870,14 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     stderr(`             session=${sessionName}\n`);
   }
   stderr(`             cwd=${cwd}\n`);
+
+  // Caller-instructions banner on fresh runs only. Resume and
+  // execute-after-init skip the banner (the caller already saw it
+  // on init or on the fresh run that created the workspace). See
+  // the `callerInstructions` field doc on RunManifest for the rule.
+  if (!isResume && !priorInitialized) {
+    writeCallerInstructions(manifest.callerInstructions, stderr);
+  }
   stderr("\n");
 
   let sessionAttempts = 0;

@@ -122,6 +122,14 @@ chat output.
 - **Locked fields**: agents and assignments can declare which fields
   the caller is allowed to override. Useful for distributing an
   agent that pins its own model or working directory.
+- **Caller instructions**: assignments can carry a
+  `callerInstructions` field with documentation for the *human or
+  script* invoking task-runner (as opposed to the agent doing the
+  work). Printed to stderr on fresh `run` / `init` with `{{var}}`
+  interpolation, never sent to the backend, and always retrievable
+  via `status --output-format json --field callerInstructions`. The
+  audience split — one text block for the agent, one for the caller
+  — keeps each free of noise meant for the other.
 - **Recursion guard**: a hard cap (default 1) on nested
   `task-runner run` invocations, propagated through the env, so an
   orchestrator agent can't accidentally fork-bomb itself. If the cap
@@ -251,6 +259,14 @@ vars:
     type: string
     required: true
     source: cli
+# Optional: documentation printed to the CALLER (the human or script
+# running task-runner), never sent to the backend. Shown on stderr at
+# fresh `run` / `init` only. Interpolates {{vars}} like other body
+# fields. Re-fetch any time with:
+#   task-runner status <id> --output-format json --field callerInstructions
+callerInstructions: |
+  Your run id is {{run_id}}. The structured report lands in
+  {{assignment_path}} — parse per-task notes blocks for findings.
 tasks:
   - id: t1_read_conventions
     title: Check repo conventions
@@ -836,7 +852,6 @@ vars:
     envName: REPO_PATH          # only when source includes env
     default: null               # optional fallback
     description: Path to target repo
-    sensitive: false            # default false
     values: [a, b, c]           # only for type: enum
 ```
 
