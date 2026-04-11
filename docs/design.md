@@ -161,10 +161,10 @@ two never drift.
 ---
 schemaVersion: 1                  # required, must be 1
 name: claude-worker               # required, string
-backend: claude                   # required; "claude" | "codex"
-model: claude-sonnet-4-6          # optional
+backend: claude                   # required; "claude" | "codex" | "passive"
+model: claude-sonnet-4-6          # optional; ignored for backend=passive
 effort: medium                    # optional; off|minimal|low|medium|high|xhigh|max
-timeoutSec: 3600                  # optional, default 3600
+timeoutSec: 3600                  # optional, default 3600; ignored for backend=passive
 unrestricted: false               # optional, default false
 cwd: .                            # optional, default "."
 lockedFields: [model, effort]     # optional; caller cannot override these
@@ -179,14 +179,14 @@ Record findings in each task's notes block.
 |---|---|
 | `schemaVersion` | Future migrations |
 | `name` | Identity in errors/logs |
-| `backend` | Adapter dispatch (`claude` or `codex`) |
-| `model` | Model identifier; per-backend namespace prefix is stripped |
-| `effort` | Canonical effort enum; mapped per-adapter |
-| `timeoutSec` | Per-invocation wall clock |
+| `backend` | Adapter dispatch (`claude`, `codex`, or `passive`) |
+| `model` | Model identifier; per-backend namespace prefix is stripped. Ignored for `passive` |
+| `effort` | Canonical effort enum; mapped per-adapter. Ignored for `passive` |
+| `timeoutSec` | Per-invocation wall clock. Ignored for `passive` (no invocation) |
 | `unrestricted` | Backend permission bypass |
 | `cwd` | Subprocess / invocation working directory |
 | `lockedFields` | Fields the caller cannot override |
-| _(body)_ | Agent's **role instructions** — renders as part of every fresh-run prompt |
+| _(body)_ | Agent's **role instructions** — renders as part of every fresh-run prompt (and into `pendingPrompt` for `passive` agents so the external driver can re-fetch it) |
 
 Agent frontmatter **does not contain** `vars`, `tasks`, `message`, or
 `maxRetries` — those are assignment-level concepts.
@@ -816,6 +816,37 @@ attempt 1 and used for `--resume` on subsequent attempts. The per-attempt
 was passed in and what came out on each attempt (useful for diagnosing
 resume failures).
 
+**Passive runs.** The manifest shape is identical for `backend:
+passive` runs, but several fields have different lifecycles:
+
+- **`pendingPrompt`** is written at init time like any other run, but
+  **never cleared**. For claude/codex, `pendingPrompt` is consumed
+  (set to `null`) when execute-after-init flips the run to `running`.
+  For passive, there is no execute step, so the composed bootstrap
+  persists for the lifetime of the run and is queryable via
+  `task-runner status <id> --output-format json --field pendingPrompt`.
+- **`status` / `endedAt` / `exitCode`** are managed by
+  `applyPassiveFinalization`, not the run loop. After every successful
+  `task set` / `task add`, the function re-derives the status from the
+  task map:
+  - any `pending` or `in_progress` task → `initialized` (clears
+    `endedAt` and `exitCode` if they were set)
+  - all terminal, at least one `blocked` → `blocked`, `exitCode: 2`
+  - all `completed` → `success`, `exitCode: 0`
+  
+  `endedAt` is stamped only on an **actual transition** into a
+  terminal state. A notes-only edit on an already-finalized passive
+  run preserves the prior `endedAt` so the audit trail records the
+  real completion time, not the last time someone touched the notes.
+- **`attempts`, `maxAttempts`, `sessionCount`**, and the `sessions`
+  and `attemptRecords` arrays stay at their zero/empty values —
+  passive runs have no backend attempts and no sessions. The
+  `task-runner status` text renderer hides the `Attempts` / `Sessions`
+  lines for passive runs to avoid the noise; the JSON output still
+  carries all zero-valued fields for schema stability.
+- **`backendSessionId`** stays `null` forever — there is no backend
+  session to capture.
+
 ### Attempt logs
 
 Each attempt writes one sidecar file at `attempts/NN.json` (zero-padded
@@ -989,7 +1020,9 @@ stop and report it instead of retrying.
 
 One small interface. Backends live under `src/backends/` and are registered
 in `src/backends/registry.ts`. Current backends: **claude** (subprocess),
-**codex** (JSON-RPC over stdio or WebSocket).
+**codex** (JSON-RPC over stdio or WebSocket), and **passive** (null-object
+for sidecar-only runs; see [Passive implementation](#passive-implementation)
+below).
 
 ```ts
 type EffortLevel =
@@ -1185,6 +1218,65 @@ Model names are normalized by stripping any provider-namespace prefix
 (e.g., `openai-codex/gpt-5.4` → `gpt-5.4`, `anthropic/claude-sonnet-4-6`
 → `claude-sonnet-4-6`). Each adapter does its own normalization.
 
+### Passive implementation
+
+A **null-object** backend used for sidecar-only runs. `src/backends/
+passive.ts` exports a `Backend` whose `invoke()` throws
+`PassiveBackendNotInvokableError` unconditionally. Defense in depth —
+the CLI rejects `task-runner run` on passive agents before control
+ever reaches `invoke()` (see [`task-runner init`](#task-runner-init)
+and [`--resume-run <id|path>`](#--resume-run-idpath) for the lifecycle
+rules), so `.invoke()` should only fire if something tries to drive a
+passive backend programmatically — in which case the throw surfaces
+the contract violation loudly.
+
+The passive backend has:
+
+- `id: "passive"` for registry resolution.
+- **No `validateSessionId` method** — passive runs have no sessions
+  to validate. The `--backend-session-id` import flow doesn't apply.
+- **No effort / model / timeout handling** — these fields are
+  accepted on the agent schema but ignored at runtime because nothing
+  is ever invoked. Agents declaring `backend: passive` typically omit
+  them. The `unrestricted` flag and `cwd` are still persisted to the
+  manifest for audit / workspace-path purposes.
+
+**Who drives a passive run?** An external agent or script, through
+the task commands:
+
+- `task-runner init` writes the workspace + manifest and (for passive)
+  prints the composed bootstrap to stdout
+- `task-runner task set <run> <task-id> [--status ...] [--notes ...]`
+  updates a single task
+- `task-runner task add <run> --title "..."` appends a new task
+- `task-runner status <run>` reads progress
+
+All four commands go through the same `resolveResumeTarget` →
+manifest-load pipeline as resume. `task set` / `task add` then call
+`applyPassiveFinalization` to re-derive the manifest status from the
+task map after each mutation (see
+[Passive auto-finalization](#--resume-run-idpath)).
+
+**Prompt composition for passive init.** Passive agents use a
+distinct `PASSIVE_TASK_WORKFLOW_TEMPLATE` in place of the default
+`TASK_WORKFLOW_TEMPLATE`. The difference: the passive template
+teaches the external driver to use the CLI (`task-runner task set
+<run> <task-id> --status in_progress`) instead of editing
+`assignment.md` directly. The composed prompt — agent role
+instructions + assignment instructions + passive workflow template +
+message — is stored in `manifest.pendingPrompt` and **never cleared**
+(execute-after-init never fires for passive runs), so the driver can
+re-fetch it at any time with
+`task-runner status <run> --output-format json --field pendingPrompt`.
+
+**Locking recommendation.** A passive agent should declare
+`lockedFields: [backend]` so callers can't subvert it with
+`--backend claude` / `--backend codex` at init time and turn a
+sidecar-only agent into an executable one. The bundled
+`agents/passive-example/` does this and serves as the reference shape.
+The lock check uses the same `checkLockedFields` machinery as every
+other locked field — no passive-specific lock handling exists.
+
 ## Session resume
 
 Session resume comes in two flavors that share the same underlying
@@ -1260,14 +1352,18 @@ The raw JSON events are still captured verbatim into
 ## CLI shape
 
 ```
-task-runner <run|init|status>
+task-runner <run|init|status|task> [options] [args]
+
+# run / init shared flag set
+task-runner <run|init>
                [--agent <name-or-path>]
                [--assignment <name-or-path>]
-               [--resume-run <id|path>]       (run only)
+               [--resume-run <id|path>]         (run only)
+               [--backend-session-id <id>]      (fresh run only)
                [--var k=v]...
                [--add-task <title>]...
                [--cwd <path>]
-               [--backend <claude|codex>]
+               [--backend <claude|codex|passive>]
                [--model <model>]
                [--effort <level>]
                [--max-retries <n>]
@@ -1276,19 +1372,56 @@ task-runner <run|init|status>
                [--session-name <name>]
                [--output-format <text|json>]
                [message]
+
+# status — read-only inspector
+task-runner status <id|path>
+               [--output-format <text|json>]
+               [--field <name>]...              (json only; repeatable)
+
+# task — mutate an existing run's checklist without invoking a backend
+task-runner task set <id> <task-id>
+               [--status <pending|in_progress|completed|blocked>]
+               [--notes <text>]
+               [--output-format <text|json>]
+
+task-runner task add <id>
+               --title <text>
+               [--output-format <text|json>]
 ```
 
-Two subcommands share the same flag set:
+Subcommands:
 
 - **`run`** — execute an agent. Either a fresh run, a resume of an
   already-executed run, or an execute-after-init (when `--resume-run`
-  points at a manifest with `status: "initialized"`).
+  points at a manifest with `status: "initialized"`). **Rejected on
+  passive agents** — use `init` + `task set` / `task add` instead.
 - **`init`** — prepare a run without invoking the backend. Resolves
   agent + assignment, composes the full fresh-run prompt, writes the
   workspace (`assignment.md` with task fences, `run.json` with
   `status: "initialized"` and a frozen `pendingPrompt`), then exits.
-  The caller picks the run up later with
-  `task-runner run --resume-run <id>`.
+  For non-passive agents, the caller picks the run up later with
+  `task-runner run --resume-run <id>`. For passive agents, the caller
+  drives the run through `task set` / `task add`; there is no
+  execute step.
+- **`status`** — read-only inspector. Resolves a run by short id or
+  workspace path, parses the manifest, and prints either a
+  human-readable status block (with task checklist and notes) or the
+  full manifest JSON. When the run's manifest status is `running`,
+  status also parses the workspace `assignment.md` and overlays the
+  live task states onto the output — useful for watching an in-flight
+  attempt without attaching to the process.
+- **`task set`** / **`task add`** — mutate a run's task list without
+  invoking a backend. Both go through the same manifest-resolve
+  pipeline as `resume`, apply the mutation (merging any live
+  assignment.md edits first), rewrite both `assignment.md` and
+  `manifest.finalTasks` atomically, and for passive runs re-derive
+  the manifest status via `applyPassiveFinalization`. Both commands
+  are rejected while manifest `status == "running"` — a live backend
+  attempt owns the workspace and a concurrent CLI write would race
+  the attempt's parse/merge cycle. Allowed on `initialized` and every
+  terminal state. `task add` respects the `tasks` locked field via
+  the same `checkLockedFields` path used by `--add-task` on fresh
+  runs.
 
 `--agent` is required for fresh runs. When `--resume-run` is supplied,
 `--agent` becomes optional — the runner reloads `agent.md` from the path
@@ -1723,8 +1856,22 @@ the plug; nothing went wrong." A subsequent `task-runner run
   `--permission-mode`, etc. Not in scope until an agent actually needs it.
   A middle-ground permission mode (e.g., `acceptEdits` only) would be a
   nice alternative to the blunt `unrestricted: true` toggle.
-- **Non-Claude backends**: Codex, Gemini, etc. Backend interface is
-  designed to admit them; implementation is not yet in scope.
+- **Additional backends**: Codex shipped in M5 (JSON-RPC over stdio
+  and websocket transports). Passive shipped as a null-object backend
+  for sidecar-only runs. Future adapters (Gemini, Ollama, etc.) can
+  be added to `src/backends/registry.ts` by implementing the `Backend`
+  interface — no other code should need to know about them.
+- **Manifest canonicalization**: on resume we currently re-read
+  `agent.md` via `loadAgentConfig(manifest.agent.sourcePath)` to
+  resolve fields like `model`, `effort`, `timeoutSec`, role
+  instructions, and `lockedFields`. Anything the manifest doesn't
+  carry is pulled from the (possibly-edited) file. This means CLI
+  overrides for those fields are not preserved across resume
+  sessions (the file's current value wins absent a fresh override),
+  and it rules out "ad-hoc" agents assembled entirely from CLI flags
+  with no source file. The planned fix is to freeze every resolvable
+  agent field into the manifest at first write and stop re-reading
+  the source file on resume — tracked as a follow-up branch.
 - **Task ID uniqueness**: enforced via zod `refine` at load time.
 - **Max task count**: enforced at 100 in schema.
 - **Concurrent resume**: two `task-runner run --resume-run <id>`
