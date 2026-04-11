@@ -24,6 +24,18 @@ export const varDefSchema = z
     message: "enum vars must declare a non-empty `values` array",
   });
 
+export const LOCKABLE_FIELDS = [
+  "cwd",
+  "model",
+  "effort",
+  "message",
+  "timeoutSec",
+  "unrestricted",
+  "maxRetries",
+] as const;
+
+export type LockableField = (typeof LOCKABLE_FIELDS)[number];
+
 export const agentConfigSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -31,10 +43,12 @@ export const agentConfigSchema = z
     backend: z.string().min(1),
     model: z.string().optional(),
     effort: z.enum(["low", "medium", "high", "max"]).optional(),
+    message: z.string().optional(),
     timeoutSec: z.number().int().positive().default(3600),
     unrestricted: z.boolean().default(false),
     cwd: z.string().default("."),
     maxRetries: z.number().int().min(0).max(20).default(3),
+    lockedFields: z.array(z.enum(LOCKABLE_FIELDS)).default([]),
     vars: z.record(z.string(), varDefSchema).default({}),
     tasks: z.array(taskDefSchema).min(1).max(100),
   })

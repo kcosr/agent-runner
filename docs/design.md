@@ -37,7 +37,7 @@ manifest is the source of truth.
 
 ```
 task-runner run --agent <name> [--var k=v]... [--output-format text|json]
-                               [extra prompt]
+                               [message]
    │
    ▼
 1. Load + validate agent.md (zod schema)
@@ -116,10 +116,12 @@ name: example                     # required, string
 backend: claude                   # required; "claude" only for now
 model: claude-sonnet-4-6          # optional, plain string (no enum wrapper)
 effort: medium                    # optional; low | medium | high | max
+message: "focus on auth"          # optional default message (see `message` below)
 timeoutSec: 3600                  # optional, default 3600
 unrestricted: false               # optional, default false; maps to --dangerously-skip-permissions
 cwd: .                            # optional, interpolatable with {{var}}
 maxRetries: 3                     # optional, default 3
+lockedFields: [model, effort]     # optional; caller cannot override these
 vars:
   repo_path:
     type: string                  # string | number | boolean | enum
@@ -151,10 +153,12 @@ the Status field for each task as you go.
 | `backend` | Adapter dispatch, extension point | — |
 | `model` | Simple string; agent-runner's `{type, values, default}` enum wrapper is overkill here | — |
 | `effort` | Maps to Claude CLI `--effort <low|medium|high|max>` | — |
+| `message` | First-class caller input, appended to instructions; overridable via CLI positional arg | — |
 | `timeoutSec` | Per-run wall clock | — |
 | `unrestricted` | Claude permission bypass | — |
 | `cwd` | Subprocess working directory | — |
 | `maxRetries` | The point of the retry loop | `hooks.maxReinvokes` — renamed |
+| `lockedFields` | Simple allowlist-style version of agent-runner's `overridePolicy` | `overridePolicy.default` toggle, nested key paths |
 | `vars` | CLI input validation + template substitution | `requiredAt` phase split |
 | `tasks` | Seeds the plan and the manifest | Per-task `completed`/`active` state — runner owns that |
 | instructions (body) | Rendered prompt with `{{var}}` | — |
@@ -162,8 +166,71 @@ the Status field for each task as you go.
 Dropped entirely from agent-runner: `executionMode`, `adapterExecutionMode`,
 `outputFormat` (as a per-agent config — we have a per-invocation CLI flag
 instead), `handleMode`, `passArgs`, `tools`, `events`, `hooks`,
-`overridePolicy`, `hookMutationPolicy`, `runtimeRequirements`, `environment`,
-`lineage`.
+`hookMutationPolicy`, `runtimeRequirements`, `environment`, `lineage`.
+
+## Message
+
+The `message` field is first-class caller input. It can be set three ways,
+in precedence order:
+
+1. **CLI positional argument** — `task-runner run --agent X "focus on auth"`
+2. **`message:` in agent.md frontmatter** — a default if no positional is given
+3. **Unset** — no message at all
+
+When set, the resolved message is appended to the rendered instructions
+with a blank-line separator:
+
+```
+<rendered instructions body>
+
+<message>
+```
+
+That's the only mechanism. No template placeholder (no `{{message}}`
+interpolation), no system/user split — just concatenation. If the agent
+author wants to control where the message lands, they write the rest of
+the instructions accordingly (i.e., end the instructions at the point the
+message should appear).
+
+The resolved message is exposed at the top of `run.json` as
+`manifest.message`, alongside `model`, `effort`, etc. The per-attempt
+`AttemptRecord.prompt` field contains the full composed text that was
+sent to the backend, including the message.
+
+## Locked fields
+
+`lockedFields: [<key>, ...]` in agent.md frontmatter declares which
+top-level override fields cannot be overridden at run time. Valid entries:
+
+```
+cwd  model  effort  message  timeoutSec  unrestricted  maxRetries
+```
+
+The zod schema rejects any entry outside this set at load time, so typos
+fail fast instead of silently granting no protection.
+
+**Runtime check** — early in `runAgent()`, before any work starts, the
+runner iterates over the provided overrides and throws `LockedFieldError`
+if any locked field has a non-undefined value in the overrides. The CLI
+catches the error and exits with code 3:
+
+```
+task-runner: cannot override locked field: model
+  this agent fixes it to "claude-sonnet-4-6"
+```
+
+**Semantics** — locking only prevents *overrides*. If the caller doesn't
+pass any value for a locked field, the frontmatter value is used silently,
+same as any other field. Locking also doesn't affect `vars`: those have
+their own schema (`required`, `source`, `sensitive`) and are outside this
+mechanism.
+
+**What this replaces** — agent-runner had a richer `overridePolicy` with
+`{default: allow|deny, allow: [...], deny: [...]}`. We took the simplest
+shape that solves the real concern (preventing callers from bumping
+`effort` to `max` on a cost-sensitive agent, or flipping `unrestricted`
+on a safety-sensitive one). A full allow/deny with a tri-state default is
+easy to add if it becomes needed.
 
 ## Agent resolution
 
@@ -622,15 +689,18 @@ task-runner run --agent <name-or-path>
                [--timeout-sec <n>]
                [--unrestricted]
                [--output-format <text|json>]
-               [extra prompt text]
+               [message]
 ```
 
-CLI flags override agent.md values for: `cwd`, `model`, `effort`,
-`timeoutSec`, `unrestricted`, `maxRetries`.
+CLI flags (and the positional `message`) override agent.md values for:
+`cwd`, `model`, `effort`, `message`, `timeoutSec`, `unrestricted`,
+`maxRetries`. Any field listed in the agent's `lockedFields` rejects
+override attempts with `LockedFieldError` and exit code 3 — see
+[Locked fields](#locked-fields).
 
-Vars are passed via repeated `--var key=value` flags. Env-sourced vars read
-from `process.env[envName]`. The CLI validates each var against the schema
-before starting the run.
+Vars are passed via repeated `--var key=value` flags. Env-sourced vars
+read from `process.env[envName]`. The CLI validates each var against the
+schema before starting the run.
 
 ## Output modes
 

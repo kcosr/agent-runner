@@ -3,7 +3,7 @@ import { isAbsolute, resolve } from "node:path";
 import type { Backend, BackendInvokeResult } from "../backends/types.js";
 import { interpolate } from "../config/interpolate.js";
 import type { LoadedAgent } from "../config/loader.js";
-import type { VarDef } from "../config/schema.js";
+import type { LockableField, VarDef } from "../config/schema.js";
 import { mergeIntoFile, mergeUpdates } from "../plan/merge.js";
 import type { TaskState } from "../plan/model.js";
 import { parsePlan } from "../plan/parser.js";
@@ -23,6 +23,7 @@ export interface RunOverrides {
   cwd?: string;
   model?: string;
   effort?: "low" | "medium" | "high" | "max";
+  message?: string;
   timeoutSec?: number;
   unrestricted?: boolean;
   maxRetries?: number;
@@ -32,7 +33,6 @@ export interface RunOptions {
   loaded: LoadedAgent;
   cliVars: Record<string, string>;
   backend: Backend;
-  extraPrompt?: string;
   overrides?: RunOverrides;
   stderr: (text: string) => void;
   stdout: (text: string) => void;
@@ -53,6 +53,45 @@ export class VarResolutionError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "VarResolutionError";
+  }
+}
+
+export class LockedFieldError extends Error {
+  constructor(
+    public readonly field: LockableField,
+    public readonly currentValue: unknown,
+  ) {
+    const valStr =
+      currentValue === undefined || currentValue === null
+        ? "(unset)"
+        : typeof currentValue === "string"
+          ? `"${currentValue}"`
+          : String(currentValue);
+    super(`cannot override locked field: ${field}\n  this agent fixes it to ${valStr}`);
+    this.name = "LockedFieldError";
+  }
+}
+
+function checkLockedFields(
+  config: LoadedAgent["config"],
+  overrides: RunOverrides | undefined,
+): void {
+  if (!overrides || config.lockedFields.length === 0) return;
+  const locked = new Set<LockableField>(config.lockedFields);
+  const overrideEntries: [LockableField, unknown][] = [
+    ["cwd", overrides.cwd],
+    ["model", overrides.model],
+    ["effort", overrides.effort],
+    ["message", overrides.message],
+    ["timeoutSec", overrides.timeoutSec],
+    ["unrestricted", overrides.unrestricted],
+    ["maxRetries", overrides.maxRetries],
+  ];
+  for (const [key, value] of overrideEntries) {
+    if (value !== undefined && locked.has(key)) {
+      const currentValue = (config as Record<string, unknown>)[key];
+      throw new LockedFieldError(key, currentValue);
+    }
   }
 }
 
@@ -140,14 +179,17 @@ function countBy(tasks: Map<string, TaskState>, predicate: (t: TaskState) => boo
 }
 
 export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
-  const { loaded, cliVars, backend, extraPrompt, overrides, stderr, stdout } = opts;
+  const { loaded, cliVars, backend, overrides, stderr, stdout } = opts;
   const config = loaded.config;
   const resumeFailureDetector = opts.resumeFailureDetector ?? defaultResumeFailureDetector;
+
+  checkLockedFields(config, overrides);
 
   const baseDir = process.cwd();
   const cwd = resolveCwd(overrides?.cwd ?? config.cwd, baseDir);
   const model = overrides?.model ?? config.model;
   const effort = overrides?.effort ?? config.effort;
+  const message = overrides?.message ?? config.message ?? null;
   const timeoutSec = overrides?.timeoutSec ?? config.timeoutSec;
   const unrestricted = overrides?.unrestricted ?? config.unrestricted;
   const maxRetries = overrides?.maxRetries ?? config.maxRetries;
@@ -178,7 +220,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     cwd,
   };
   const basePrompt = interpolate(loaded.instructions, injectedVars);
-  const initialPrompt = extraPrompt ? `${basePrompt}\n\n${extraPrompt}` : basePrompt;
+  const initialPrompt = message ? `${basePrompt}\n\n${message}` : basePrompt;
 
   writeFileSync(planPath, renderPlan(Array.from(tasks.values())), "utf8");
 
@@ -193,6 +235,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     backend: config.backend,
     model: model ?? null,
     effort: effort ?? null,
+    message,
     unrestricted,
     cwd,
     planPath,

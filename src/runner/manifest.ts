@@ -63,6 +63,7 @@ export interface RunManifest {
   backend: string;
   model: string | null;
   effort: string | null;
+  message: string | null;
   unrestricted: boolean;
   cwd: string;
   planPath: string;

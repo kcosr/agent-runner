@@ -6,7 +6,7 @@ import {
   type LoadedAgent,
   loadAgentConfig,
 } from "./config/loader.js";
-import { VarResolutionError, runAgent } from "./runner/run-loop.js";
+import { LockedFieldError, VarResolutionError, runAgent } from "./runner/run-loop.js";
 
 type OutputFormat = "text" | "json";
 
@@ -21,14 +21,20 @@ interface ParsedArgs {
   unrestricted?: boolean;
   maxRetries?: number;
   outputFormat: OutputFormat;
-  extraPrompt?: string;
+  message?: string;
   showHelp: boolean;
 }
 
 const EFFORT_VALUES = ["low", "medium", "high", "max"] as const;
 const OUTPUT_FORMATS = ["text", "json"] as const;
 
-const HELP = `Usage: task-runner run --agent <name-or-path> [options] [extra prompt]
+const HELP = `Usage: task-runner run --agent <name-or-path> [options] [message]
+
+Arguments:
+  [message]               Optional positional text appended to the agent's
+                          instructions. Overrides the agent's default
+                          \`message\` field if present, unless \`message\` is
+                          listed in the agent's \`lockedFields\`.
 
 Options:
   --agent <name|path>     Agent name (resolved against ./agents/<name>/agent.md
@@ -141,7 +147,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   }
 
   if (positional.length > 0) {
-    result.extraPrompt = positional.join(" ");
+    result.message = positional.join(" ");
   }
 
   return result;
@@ -192,11 +198,11 @@ async function main(): Promise<void> {
       loaded,
       cliVars: parsed.vars,
       backend: claudeBackend,
-      extraPrompt: parsed.extraPrompt,
       overrides: {
         cwd: parsed.cwd,
         model: parsed.model,
         effort: parsed.effort,
+        message: parsed.message,
         timeoutSec: parsed.timeoutSec,
         unrestricted: parsed.unrestricted,
         maxRetries: parsed.maxRetries,
@@ -209,7 +215,7 @@ async function main(): Promise<void> {
     }
     process.exit(outcome.exitCode);
   } catch (err) {
-    if (err instanceof VarResolutionError) {
+    if (err instanceof VarResolutionError || err instanceof LockedFieldError) {
       process.stderr.write(`task-runner: ${err.message}\n`);
       process.exit(3);
     }
