@@ -204,3 +204,23 @@ body
 
   assert.throws(() => loadAssignmentConfig("multiline-title", dir), AssignmentConfigError);
 });
+
+test("assignment schema rejects incompatible var defaults", () => {
+  const dir = tempDir();
+  writeAssignment(
+    dir,
+    "bad-default",
+    `---
+schemaVersion: 1
+name: bad-default
+vars:
+  retries:
+    type: number
+    default: nope
+---
+body
+`,
+  );
+
+  assert.throws(() => loadAssignmentConfig("bad-default", dir), AssignmentConfigError);
+});

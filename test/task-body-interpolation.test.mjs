@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
-import { runAgent } from "../dist/runner/run-loop.js";
+import { VarResolutionError, runAgent } from "../dist/runner/run-loop.js";
 
 const INTERP_AGENT = `---
 schemaVersion: 1
@@ -157,4 +157,19 @@ test("workspace assignment.md on disk contains interpolated task bodies", async 
   assert.match(plan, /Work against the repository at `\/tmp\/fake-repo`/);
   assert.match(plan, /Scope is\s+`staged`/);
   assert.doesNotMatch(plan, /\{\{/);
+});
+
+test("unknown CLI vars are rejected when the assignment declares a schema", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "interp", INTERP_AGENT);
+  writeAssignment(dir, "interp-work", INTERP_ASSIGNMENT);
+
+  await assert.rejects(
+    () => runIn(dir, { repo_path: "/tmp/fake-repo", extra_scope: "staged" }),
+    (err) => {
+      assert.ok(err instanceof VarResolutionError);
+      assert.match(err.message, /unknown --var key\(s\): extra_scope/);
+      return true;
+    },
+  );
 });

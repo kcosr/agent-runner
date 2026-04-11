@@ -62,6 +62,23 @@ tasks:
 Work.
 `;
 
+const STATUS_ENV_ASSIGNMENT = `---
+schemaVersion: 1
+name: status-env-work
+maxRetries: 1
+vars:
+  secret_token:
+    type: string
+    source: env
+    envName: TASK_RUNNER_STATUS_SECRET
+    required: true
+tasks:
+  - id: t1
+    title: First
+---
+Work.
+`;
+
 const CLI_PATH = resolvePath(new URL("../dist/cli.js", import.meta.url).pathname);
 
 function tempDir() {
@@ -114,9 +131,9 @@ const okBackend = () => ({
   },
 });
 
-async function runFresh(baseDir) {
+async function runFresh(baseDir, assignmentName = "status-work") {
   const loaded = loadAgentConfig("status-agent", baseDir);
-  const loadedAssignment = loadAssignmentConfig("status-work", baseDir);
+  const loadedAssignment = loadAssignmentConfig(assignmentName, baseDir);
   const originalCwd = process.cwd();
   process.chdir(baseDir);
   try {
@@ -172,6 +189,29 @@ test("status: --output-format json prints the full manifest", async () => {
   assert.equal(parsed.tasksCompleted, 2);
   assert.equal(parsed.sessionName, "status test");
   assert.ok(Array.isArray(parsed.attemptRecords));
+});
+
+test("status: --output-format json redacts env-backed runtime vars", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "status-agent", STATUS_AGENT);
+  writeAssignment(dir, "status-env-work", STATUS_ENV_ASSIGNMENT);
+
+  const previous = process.env.TASK_RUNNER_STATUS_SECRET;
+  process.env.TASK_RUNNER_STATUS_SECRET = "super-secret-token";
+  try {
+    const outcome = await runFresh(dir, "status-env-work");
+    const out = runCli(["status", outcome.runId, "--output-format", "json"], { cwd: dir });
+    const parsed = JSON.parse(out);
+
+    assert.deepEqual(parsed.runtimeVars.secret_token, {
+      redacted: true,
+      source: "env",
+      envName: "TASK_RUNNER_STATUS_SECRET",
+    });
+  } finally {
+    if (previous === undefined) process.env.TASK_RUNNER_STATUS_SECRET = undefined;
+    else process.env.TASK_RUNNER_STATUS_SECRET = previous;
+  }
 });
 
 test("status: --field projects to a subset of top-level fields", async () => {

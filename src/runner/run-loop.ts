@@ -277,24 +277,80 @@ function coerceVar(key: string, value: unknown, def: VarDef): unknown {
   }
 }
 
+type ResolvedVarSource = "cli" | "env" | "default";
+
+interface ResolvedVarsResult {
+  values: Record<string, unknown>;
+  sources: Record<string, ResolvedVarSource>;
+}
+
+interface RedactedRuntimeVar {
+  redacted: true;
+  source: "env";
+  envName: string;
+}
+
+function redactRuntimeVars(
+  values: Record<string, unknown>,
+  sources: Record<string, ResolvedVarSource>,
+  varsSchema: Record<string, VarDef>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(values)) {
+    if (sources[key] === "env") {
+      const envName = varsSchema[key]?.envName ?? key;
+      const redacted: RedactedRuntimeVar = {
+        redacted: true,
+        source: "env",
+        envName,
+      };
+      out[key] = redacted;
+      continue;
+    }
+    out[key] = value;
+  }
+  return out;
+}
+
+function assertKnownCliVars(
+  varsSchema: Record<string, VarDef>,
+  cliVars: Record<string, string>,
+): void {
+  const declared = new Set(Object.keys(varsSchema));
+  const unknown = Object.keys(cliVars).filter((key) => !declared.has(key));
+  if (unknown.length === 0) return;
+  throw new VarResolutionError(
+    `unknown --var key(s): ${unknown.join(", ")}. Declare them under assignment.vars or remove the extra --var flag(s).`,
+  );
+}
+
 function resolveVars(
   varsSchema: Record<string, VarDef>,
   cliVars: Record<string, string>,
-): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
+): ResolvedVarsResult {
+  const values: Record<string, unknown> = {};
+  const sources: Record<string, ResolvedVarSource> = {};
   for (const [key, def] of Object.entries(varsSchema)) {
     let value: unknown;
+    let source: ResolvedVarSource | undefined;
 
     if (def.source === "cli" || def.source === "either") {
-      if (cliVars[key] !== undefined) value = cliVars[key];
+      if (cliVars[key] !== undefined) {
+        value = cliVars[key];
+        source = "cli";
+      }
     }
     if (value === undefined && (def.source === "env" || def.source === "either")) {
       const envName = def.envName ?? key;
       const envValue = process.env[envName];
-      if (envValue !== undefined) value = envValue;
+      if (envValue !== undefined) {
+        value = envValue;
+        source = "env";
+      }
     }
     if (value === undefined && def.default !== undefined) {
       value = def.default;
+      source = "default";
     }
     if (value === undefined) {
       if (def.required) {
@@ -303,9 +359,10 @@ function resolveVars(
       continue;
     }
 
-    out[key] = coerceVar(key, value, def);
+    values[key] = coerceVar(key, value, def);
+    if (source) sources[key] = source;
   }
-  return out;
+  return { values, sources };
 }
 
 function defaultResumeFailureDetector(result: BackendInvokeResult): boolean {
@@ -529,8 +586,14 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   // verbatim for session 0's first attempt.
 
   // Vars live on the assignment. Chat mode (no assignment) has no var
-  // schema; unknown --var flags are silently ignored in that case.
-  const runtimeVars = resolveVars(assignmentConfig?.vars ?? {}, cliVars);
+  // schema, so there is nothing to validate against or resolve from.
+  const varsSchema = assignmentConfig?.vars ?? {};
+  if (assignmentConfig) {
+    assertKnownCliVars(varsSchema, cliVars);
+  }
+  const resolvedVars = resolveVars(varsSchema, cliVars);
+  const runtimeVars = resolvedVars.values;
+  const persistedRuntimeVars = redactRuntimeVars(runtimeVars, resolvedVars.sources, varsSchema);
 
   const reusingWorkspace = (isResume && resume) || (priorInitialized && resume);
   const runId = reusingWorkspace && resume ? resume.manifest.runId : shortId();
@@ -782,7 +845,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       // local also seeds from this so the very first invocation does
       // a backend resume instead of starting a fresh session.
       backendSessionId: opts.bootstrapBackendSessionId ?? null,
-      runtimeVars,
+      runtimeVars: persistedRuntimeVars,
       pendingPrompt: isInitialize ? initialPrompt : null,
       callerInstructions: frozenCallerInstructions,
       finalTasks: snapshotTasks(tasks),
