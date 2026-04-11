@@ -1,6 +1,31 @@
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { runProcess } from "../util/spawn.js";
 import { streamBoundarySeparator } from "./codex.js";
-import type { Backend, BackendInvokeContext, BackendInvokeResult, EffortLevel } from "./types.js";
+import type {
+  Backend,
+  BackendInvokeContext,
+  BackendInvokeResult,
+  EffortLevel,
+  ValidateSessionContext,
+  ValidateSessionResult,
+} from "./types.js";
+
+/**
+ * Claude encodes the working directory of a session into the
+ * `~/.claude/projects/<encoded>/` directory name by replacing every
+ * `/` and `.` in the path with `-`. So `/home/kevin/.claude/foo.bar`
+ * becomes `-home-kevin--claude-foo-bar`. Verified by sampling real
+ * project dirs on disk; the rule covers every case observed.
+ */
+export function encodeClaudeProjectDir(cwd: string): string {
+  return cwd.replace(/[/.]/g, "-");
+}
+
+export function claudeSessionFilePath(cwd: string, sessionId: string): string {
+  return join(homedir(), ".claude", "projects", encodeClaudeProjectDir(cwd), `${sessionId}.jsonl`);
+}
 
 function mapEffortToClaude(effort: EffortLevel): string | null {
   switch (effort) {
@@ -175,8 +200,20 @@ export function isResumeFailure(stderr: string, exitCode: number | null): boolea
   );
 }
 
+async function validateClaudeSession(ctx: ValidateSessionContext): Promise<ValidateSessionResult> {
+  const path = claudeSessionFilePath(ctx.cwd, ctx.sessionId);
+  if (!existsSync(path)) {
+    return {
+      valid: false,
+      reason: `claude session "${ctx.sessionId}" not found under cwd "${ctx.cwd}"\n  expected file: ${path}\n  the session must have been created with the same working directory; claude keys session storage by encoded cwd.`,
+    };
+  }
+  return { valid: true };
+}
+
 export const claudeBackend: Backend = {
   id: "claude",
+  validateSessionId: validateClaudeSession,
   async invoke(ctx: BackendInvokeContext): Promise<BackendInvokeResult> {
     const args: string[] = ["--print", "--output-format", "stream-json", "--verbose"];
 

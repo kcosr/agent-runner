@@ -6,6 +6,7 @@ export interface ParsedArgs {
   agent?: string;
   assignment?: string;
   resumeRun?: string;
+  backendSessionId?: string;
   vars: Record<string, string>;
   cwd?: string;
   backend?: BackendId;
@@ -63,6 +64,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
       const next = args.shift();
       if (next === undefined) throw new Error("--resume-run requires a value");
       result.resumeRun = next;
+    } else if (arg === "--backend-session-id") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--backend-session-id requires a value");
+      if (next.trim().length === 0) throw new Error("--backend-session-id cannot be empty");
+      result.backendSessionId = next;
     } else if (arg === "--assignment") {
       const next = args.shift();
       if (next === undefined) throw new Error("--assignment requires a value");

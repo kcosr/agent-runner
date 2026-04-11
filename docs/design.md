@@ -1498,6 +1498,55 @@ stdout.
 | 4 | Backend invocation error (binary not found, spawn failed, etc.) |
 | 130 | Run interrupted by the user (Ctrl+C / SIGINT) |
 
+## Importing an existing backend session
+
+`task-runner` can adopt an existing backend session (claude session
+UUID, codex thread id) instead of starting a fresh one. The flag is
+`--backend-session-id <id>` and works on `init` and on a fresh
+`run` (forbidden with `--resume-run`, since the resume target
+already carries one).
+
+### Validation
+
+Before any workspace creation, `runAgent` calls
+`backend.validateSessionId(...)` — a cheap, read-only check that
+the id exists *and* was created under the same `cwd` we're about
+to operate under. On failure it throws `InvalidBackendSessionError`
+and the CLI exits with code 3.
+
+- **claude**: filesystem-only. The session is stored at
+  `~/.claude/projects/<encoded-cwd>/<id>.jsonl` where
+  `<encoded-cwd>` is the cwd path with every `/` and `.` replaced
+  by `-`. We `existsSync` that path. No subprocess, no network.
+- **codex**: opens the JSON-RPC transport (stdio or websocket),
+  completes the `initialize` + `initialized` handshake, sends one
+  `thread/read { threadId }` call, closes the transport. The
+  response carries a `Thread` whose `cwd: PathBuf` field is
+  compared to ours; mismatched cwd is a hard error even though
+  codex itself allows it on resume (mismatched cwd almost always
+  means the user is confused, and silent semantic drift is worse
+  than a hard error).
+
+Backends that don't implement `validateSessionId` are treated as
+"always valid" and the first real invocation discovers the truth.
+
+### Wiring
+
+If validation passes, the imported id is persisted to the
+manifest's `backendSessionId` at construction time and used as the
+initial `resumeSessionId` for the very first attempt. From there
+the run flows through the existing resume path — retries, abort,
+status, and resume all work without any new code. An init that
+imported a session writes the id into the initialized manifest;
+the subsequent execute-after-init reads it back from the manifest
+and continues normally.
+
+The cwd lock is the main constraint: if you imported a claude
+session created under `/home/kevin/foo`, you must pass `--cwd
+/home/kevin/foo` (or have it as the agent's default) on the
+import call. Otherwise validation fails with a clear "expected
+file" / "cwd mismatch" message.
+
 ## Recursion depth guard
 
 When an orchestrator agent itself shells out to `task-runner run` to

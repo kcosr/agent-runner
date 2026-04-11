@@ -52,6 +52,17 @@ export interface RunOptions {
   overrides?: RunOverrides;
   resume?: ResolvedResumeTarget;
   initialize?: boolean;
+  /**
+   * Adopt an existing backend session id (claude session UUID, codex
+   * thread id) instead of starting a fresh backend session. Forbidden
+   * with `--resume-run` (the resume target already carries one).
+   * `runAgent` validates the id via `backend.validateSessionId` (if
+   * the backend implements it) before any workspace creation; on
+   * failure, throws `InvalidBackendSessionError` and exits cleanly.
+   * On success, the id is persisted as `manifest.backendSessionId`
+   * and used as the initial `resumeSessionId` for the first attempt.
+   */
+  bootstrapBackendSessionId?: string;
   abortSignal?: AbortSignal;
   stderr: (text: string) => void;
   stdout: (text: string) => void;
@@ -91,6 +102,16 @@ export class InvalidAddedTaskError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "InvalidAddedTaskError";
+  }
+}
+
+export class InvalidBackendSessionError extends Error {
+  constructor(
+    public readonly sessionId: string,
+    public readonly reason: string,
+  ) {
+    super(`invalid backend session id "${sessionId}":\n${reason}`);
+    this.name = "InvalidBackendSessionError";
   }
 }
 
@@ -312,6 +333,12 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   if (priorInitialized && (overrides?.addedTasks?.length ?? 0) > 0) {
     throw new ResumeError("--add-task cannot be combined with resuming an initialized run");
   }
+  if (opts.bootstrapBackendSessionId !== undefined && (isResume || priorInitialized)) {
+    // The CLI also rejects this combination with a friendlier message,
+    // but enforce it here too as defense in depth — programmatic
+    // callers shouldn't be able to bypass it.
+    throw new ResumeError("--backend-session-id cannot be combined with --resume-run");
+  }
 
   const addedTitles = overrides?.addedTasks ?? [];
   const agentInstructions = loaded.instructions.trim();
@@ -354,6 +381,22 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       throw new ResumeError(
         `cannot resume run ${resume?.manifest.runId ?? "<unknown>"} — prior sessions captured no backend session id`,
       );
+    }
+  }
+
+  // If the caller is importing an existing backend session, validate
+  // it via the backend's read-only check before any workspace
+  // creation. Skipped silently for backends that don't implement
+  // `validateSessionId`. We pass the resolved cwd because both
+  // backends key session storage by it.
+  if (opts.bootstrapBackendSessionId !== undefined && backend.validateSessionId) {
+    const result = await backend.validateSessionId({
+      sessionId: opts.bootstrapBackendSessionId,
+      cwd,
+      env: process.env as Record<string, string>,
+    });
+    if (!result.valid) {
+      throw new InvalidBackendSessionError(opts.bootstrapBackendSessionId, result.reason);
     }
   }
 
@@ -560,7 +603,11 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       maxAttempts,
       tasksCompleted: 0,
       tasksTotal: tasks.size,
-      backendSessionId: null,
+      // If the caller imported an existing backend session, persist it
+      // here at construction time. The first attempt's `sessionId`
+      // local also seeds from this so the very first invocation does
+      // a backend resume instead of starting a fresh session.
+      backendSessionId: opts.bootstrapBackendSessionId ?? null,
       runtimeVars,
       pendingPrompt: isInitialize ? initialPrompt : null,
       finalTasks: snapshotTasks(tasks),
@@ -635,7 +682,17 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   stderr("\n");
 
   let sessionAttempts = 0;
-  let sessionId: string | null = isResume && resume ? resume.manifest.backendSessionId : null;
+  // Seed the per-attempt session id from one of three sources:
+  //   1. resume target's manifest (regular resume OR execute-after-init
+  //      against a manifest that imported a session via init time
+  //      `--backend-session-id` — the value lives on the persisted manifest)
+  //   2. bootstrapBackendSessionId (caller imported an existing session
+  //      on a fresh run)
+  //   3. null (fresh session — backend allocates a new id on first invoke)
+  let sessionId: string | null =
+    ((isResume || priorInitialized) && resume ? resume.manifest.backendSessionId : null) ??
+    opts.bootstrapBackendSessionId ??
+    null;
   let currentPrompt = initialPrompt;
   const attemptTranscripts: string[] = [];
   let terminal: { status: RunStatus; exitCode: number } | null = null;

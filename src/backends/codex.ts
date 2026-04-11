@@ -1,6 +1,13 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { WebSocket } from "ws";
-import type { Backend, BackendInvokeContext, BackendInvokeResult, EffortLevel } from "./types.js";
+import type {
+  Backend,
+  BackendInvokeContext,
+  BackendInvokeResult,
+  EffortLevel,
+  ValidateSessionContext,
+  ValidateSessionResult,
+} from "./types.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Effort and model helpers
@@ -552,8 +559,76 @@ function buildThreadParams(
   return params;
 }
 
+/**
+ * Validate that a codex thread id exists and was created under the
+ * supplied cwd. Opens a transport, completes the JSON-RPC handshake,
+ * issues a single read-only `thread/read` call, and tears down. No
+ * LLM call, no turn/start. Returns a structured result so the caller
+ * can surface a useful error message.
+ *
+ * `thread/read` returns a `Thread` whose `cwd: PathBuf` field carries
+ * the working directory captured when the thread was created
+ * (codex-rs/.../v2.rs Thread struct, field `cwd`). We enforce a
+ * strict equality check against the cwd we're about to operate
+ * under: codex itself allows mismatched cwd on resume but it almost
+ * always means the user is confused, and silent semantic drift is
+ * worse than a hard error.
+ */
+async function validateCodexSession(ctx: ValidateSessionContext): Promise<ValidateSessionResult> {
+  let transport: Transport | undefined;
+  let client: CodexClient | undefined;
+  try {
+    transport = await openTransport({
+      // Only cwd/env are read by openTransport. The rest of
+      // BackendInvokeContext is unused for the validation handshake.
+      prompt: "",
+      cwd: ctx.cwd,
+      env: ctx.env ?? (process.env as Record<string, string>),
+      timeoutSec: 60,
+    });
+    client = createClient(transport);
+
+    await client.call("initialize", {
+      clientInfo: {
+        name: "task-runner",
+        title: "task-runner",
+        version: "0.1.0",
+      },
+      capabilities: { experimentalApi: true },
+    });
+    client.sendNotification("initialized");
+
+    const result = await client.call<unknown>("thread/read", {
+      threadId: ctx.sessionId,
+    });
+
+    if (!isRecord(result) || !isRecord(result.thread)) {
+      return {
+        valid: false,
+        reason: `codex thread/read for "${ctx.sessionId}" returned an unexpected response shape`,
+      };
+    }
+    const threadCwd = typeof result.thread.cwd === "string" ? result.thread.cwd : null;
+    if (threadCwd !== null && threadCwd !== ctx.cwd) {
+      return {
+        valid: false,
+        reason: `codex thread "${ctx.sessionId}" was created under cwd "${threadCwd}",\n  but this run's cwd is "${ctx.cwd}". Pass --cwd ${threadCwd} to import\n  this thread, or use a different thread id.`,
+      };
+    }
+    return { valid: true };
+  } catch (err) {
+    return {
+      valid: false,
+      reason: `codex thread "${ctx.sessionId}" not found: ${(err as Error).message}`,
+    };
+  } finally {
+    await client?.close().catch(() => {});
+  }
+}
+
 export const codexBackend: Backend = {
   id: "codex",
+  validateSessionId: validateCodexSession,
   async invoke(ctx: BackendInvokeContext): Promise<BackendInvokeResult> {
     const startedAt = Date.now();
     const rawStdoutChunks: string[] = [];

@@ -18,6 +18,7 @@ import { type LiveTaskOverlay, applyLiveOverlay, renderManifestStatus } from "./
 import {
   EmptyPromptError,
   InvalidAddedTaskError,
+  InvalidBackendSessionError,
   LockedFieldError,
   RecursionDepthError,
   VarResolutionError,
@@ -61,6 +62,12 @@ Options:
                           a direct path to an assignment.md file. Assignments
                           supply tasks, vars, and optional work instructions.
                           Forbidden on --resume-run.
+  --backend-session-id    Adopt an existing backend session id (claude session
+                          UUID, codex thread id) instead of starting a fresh
+                          one. Cannot be combined with --resume-run. Validated
+                          via the backend's read-only check before any
+                          workspace creation; the cwd must match the cwd the
+                          session was originally created under.
   --resume-run <id|path>  Continue an existing run by its short id or path
                           to its workspace / run.json. Reads the prior
                           manifest, reloads the agent, normalizes
@@ -142,6 +149,12 @@ async function main(): Promise<void> {
   if (parsed.resumeRun !== undefined && parsed.backend !== undefined) {
     process.stderr.write(
       "task-runner: --backend cannot be combined with --resume-run (backend is locked to the run that created the session)\n",
+    );
+    process.exit(3);
+  }
+  if (parsed.resumeRun !== undefined && parsed.backendSessionId !== undefined) {
+    process.stderr.write(
+      "task-runner: --backend-session-id cannot be combined with --resume-run (the resume target already carries a backend session id)\n",
     );
     process.exit(3);
   }
@@ -275,6 +288,7 @@ async function main(): Promise<void> {
       backend,
       resume: resumeTarget,
       initialize: isInitCommand,
+      bootstrapBackendSessionId: parsed.backendSessionId,
       abortSignal: abortController.signal,
       overrides: overridesFromParsedArgs(parsed),
       stderr: isJson ? noop : (text) => process.stderr.write(text),
@@ -291,7 +305,8 @@ async function main(): Promise<void> {
       err instanceof ResumeError ||
       err instanceof InvalidAddedTaskError ||
       err instanceof EmptyPromptError ||
-      err instanceof RecursionDepthError
+      err instanceof RecursionDepthError ||
+      err instanceof InvalidBackendSessionError
     ) {
       process.stderr.write(`task-runner: ${err.message}\n`);
       process.exit(3);

@@ -26,7 +26,25 @@ export interface BackendInvokeResult {
   rawStderr: string;
 }
 
+export interface ValidateSessionContext {
+  sessionId: string;
+  cwd: string;
+  env?: Record<string, string>;
+}
+
+export type ValidateSessionResult = { valid: true } | { valid: false; reason: string };
+
 export interface Backend {
   id: string;
   invoke(ctx: BackendInvokeContext): Promise<BackendInvokeResult>;
+  /**
+   * Optional. Cheap, read-only check that the given backend session id
+   * exists and is compatible with the supplied `cwd`. Used by the
+   * `--backend-session-id` import flow at the top of `runAgent`,
+   * before any workspace creation. Backends that can't cheaply
+   * validate may omit this method; the runner treats omission as
+   * "always valid" and lets the first real invocation discover the
+   * truth.
+   */
+  validateSessionId?(ctx: ValidateSessionContext): Promise<ValidateSessionResult>;
 }
