@@ -272,6 +272,30 @@ path. `--assignment` is optional — running an agent with no
 assignment is "chat mode" (no enforced task list, just a single
 backend invocation).
 
+**`--agent` is also optional.** When omitted, task-runner synthesizes
+an **ad-hoc agent** from CLI overrides — useful for quick one-off
+runs, scripted orchestration, or any flow where a dedicated
+`agent.md` file would be overkill. Ad-hoc agents are named `ad-hoc`
+(a reserved name — on-disk agents can't use it), have no role
+instructions body, and require `--backend` to be passed explicitly
+(everything else falls back to sensible defaults). For example:
+
+```bash
+# Passive ad-hoc run — no agent file, no model calls, just a
+# structured checklist driven by task set / task add.
+task-runner init --backend passive --assignment repo-diagnostics \
+  --var repo_path=.
+
+# Codex ad-hoc run — backend + model from the CLI, assignment for
+# the task list, no agent.md required.
+task-runner run --backend codex --model gpt-5.4 --effort high \
+  --assignment code-review --var repo_path=. --var range=HEAD~3..HEAD
+```
+
+Ad-hoc agents have `lockedFields: []` (nothing is locked by default)
+and an empty role-instructions body. If you need role instructions
+or locks, create a real `agent.md`.
+
 ### Tasks and the workflow
 
 A run progresses through a small state machine; terminal states map
@@ -373,9 +397,10 @@ with three things in it:
   rewritten after every attempt, and one final time on terminal
   state. A single JSON document — never JSONL, never append-only —
   so you can `cat` or `jq` it at any moment. Contains the agent
-  identity, the assignment metadata, every attempt record, the
-  final per-task snapshot, the resolved vars, and the captured
-  backend session id.
+  identity *and* a frozen snapshot of the agent's role instructions,
+  locked fields, and timeout budget, plus the assignment metadata,
+  every attempt record, the final per-task snapshot, the resolved
+  vars, and the captured backend session id.
 - **`assignment.md`** — the I/O buffer the agent edits in place. The
   *source* assignment file is never mutated; the runner copies it
   here on a fresh run and re-reads it after every turn.
@@ -383,8 +408,20 @@ with three things in it:
   start/end timestamps), one per backend invocation. Useful for
   forensics.
 
-The manifest is the load-bearing piece: every other CLI command
-(`status`, `run --resume-run`) operates by reading it.
+The manifest is the load-bearing piece: **it is the canonical source
+of truth for a run after first write**. Every other CLI command
+(`status`, `run --resume-run`, `task set` / `task add`) reads from
+the manifest and **never re-reads the agent's source file on
+resume**. Moving, editing, or deleting `agent.md` after a run has
+started has no effect on that run — it lives off the frozen snapshot
+in `run.json`. This also makes ad-hoc agents (see above) possible:
+once the manifest is written, the agent had no source file to begin
+with and the run doesn't care.
+
+Manifest schema is versioned — the current generation is
+`schemaVersion: 2`. Older runs (v1, pre-canonical) are not resumable
+under this version of task-runner; attempting to do so surfaces a
+clear error and you're expected to start a fresh run.
 
 For the full schema and the rationale, see
 [`docs/design.md`](docs/design.md).
@@ -412,21 +449,30 @@ Common options:
 
 | Flag | Purpose |
 |---|---|
-| `--agent <name|path>` | Agent name or direct path. Required for fresh runs; optional on resume (taken from the prior manifest). |
-| `--assignment <name|path>` | Assignment name or direct path. Optional on fresh runs. Forbidden on resume. |
-| `--resume-run <id|path>` | Continue an existing run by short id or workspace path. See [Resuming, aborting, importing](#resuming-aborting-importing). |
-| `--var key=value` (repeatable) | Set an input variable. Validated against the assignment's `vars` schema. |
+| `--agent <name\|path>` | Agent name or direct path. **Optional on fresh runs** — when omitted, task-runner synthesizes an ad-hoc agent from CLI overrides (in that case `--backend` is required). **Forbidden with `--resume-run`** — the agent is reconstructed from the frozen manifest, not re-read from disk. |
+| `--assignment <name\|path>` | Assignment name or direct path. Optional on fresh runs. Forbidden on resume. |
+| `--resume-run <id\|path>` | Continue an existing run by short id or workspace path. See [Resuming, aborting, importing](#resuming-aborting-importing) for the full resume-override policy. |
+| `--var key=value` (repeatable) | Set an input variable. Validated against the assignment's `vars` schema. **Forbidden with `--resume-run`** — vars are resolved once at first write and frozen into the manifest; they aren't re-resolved on resume. |
 | `--add-task "<title>"` (repeatable) | Append an ad-hoc task with auto-generated id `cli-<short>`. |
-| `--cwd <path>` | Override the agent's `cwd`. |
-| `--backend <claude|codex>` | Override the agent's backend. Drops the agent's `model` unless `--model` is also passed. Forbidden with `--resume-run` (the backend is locked to the session that created the run). |
+| `--cwd <path>` | Override the agent's `cwd`. **Forbidden with `--resume-run`** — backend sessions are bound to their creation cwd, so a new cwd would invalidate the captured session id. Create a fresh run if you need a different cwd. |
+| `--backend <claude\|codex\|passive>` | Override the agent's backend. Drops the agent's `model` unless `--model` is also passed. Forbidden with `--resume-run` (the backend is locked to the session that created the run). Required when `--agent` is omitted (ad-hoc synthesis). |
 | `--model <id>` | Override the model. Backend-specific (`claude-sonnet-4-6`, `gpt-5.4`, etc.). |
-| `--effort <off|minimal|low|medium|high|xhigh|max>` | Reasoning effort. Mapped per backend. |
+| `--effort <off\|minimal\|low\|medium\|high\|xhigh\|max>` | Reasoning effort. Mapped per backend. |
 | `--max-retries <n>` | Override the per-run retry budget (default 3). |
 | `--timeout-sec <n>` | Override the per-attempt timeout (default 3600). |
 | `--unrestricted` | Bypass the backend's approval prompts. |
 | `--session-name <name>` | Override the assignment's `sessionName` (the backend display label). Vars are interpolated. |
 | `--backend-session-id <id>` | Adopt an existing backend session id (claude UUID, codex thread id). Validated before workspace creation. Forbidden with `--resume-run` (the resume target already carries one). |
-| `--output-format <text|json>` | Default `text`. `json` writes the full manifest to stdout once at end of run. |
+| `--output-format <text\|json>` | Default `text`. `json` writes the full manifest to stdout once at end of run. |
+
+On `--resume-run`, the "legitimate mid-run" overrides — `--model`,
+`--effort`, `--timeout-sec`, `--max-retries`, `--unrestricted`,
+`--session-name` — are still accepted (and still vetted against the
+frozen `manifest.lockedFields`). **Execute-after-init** (resuming a
+run whose prior status was `initialized`) rejects **every** override —
+init deliberately froze every resolvable field and the only valid
+invocation is `task-runner run --resume-run <id>`. See
+[Resuming, aborting, importing](#resume) for the full matrix.
 
 ### `task-runner init`
 
@@ -696,14 +742,39 @@ task-runner run --resume-run <id> "follow-up message"
 
 Picks up the prior run from its workspace, normalizes any
 non-completed tasks back to `pending` (preserving their notes),
-and starts a new session. The first attempt of the new session
-sends *only* the follow-up message — the role instructions and task
-workflow are not re-rendered, because the backend already has them
-cached in the session it's resuming.
+and starts a new session. Under the manifest-canonical design,
+**the agent config is reconstructed from the frozen manifest** —
+the source `agent.md` is not re-read. The first attempt of the new
+session sends *only* the follow-up message (the role instructions
+and task workflow aren't re-rendered, since the backend already
+has them cached in the session it's resuming).
 
 `--add-task "<title>"` works alongside (or instead of) a follow-up
 message; the runner prepends a short reminder telling the agent
 to re-read the workspace `assignment.md`.
+
+**What's overridable on resume.** The manifest carries the frozen
+agent state, so most CLI overrides either don't apply or would
+actively break the captured backend session. The rules:
+
+- **Rejected on any resume** (regular *or* execute-after-init):
+  `--agent`, `--assignment`, `--backend`, `--backend-session-id`,
+  `--cwd` (sessions are cwd-bound), `--var` (vars are frozen into
+  the manifest at first write).
+- **Allowed on regular resume** (still vetted against the run's
+  frozen `lockedFields`): `--model`, `--effort`, `--timeout-sec`,
+  `--max-retries`, `--unrestricted`, `--session-name`, `--add-task`,
+  positional `[message]`.
+- **Execute-after-init** (resuming a run whose prior status was
+  `initialized`): **no overrides at all**. Init deliberately froze
+  every resolvable field; the only valid call is
+  `task-runner run --resume-run <id>`. If you need different values,
+  create a fresh run.
+
+The frozen values live under `manifest.agent.instructions`,
+`manifest.lockedFields`, `manifest.timeoutSec`, and the usual
+top-level fields — you can read the full state with
+`task-runner status <id> --output-format json`.
 
 ### Abort (Ctrl+C)
 

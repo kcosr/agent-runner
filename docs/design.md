@@ -191,6 +191,54 @@ Record findings in each task's notes block.
 Agent frontmatter **does not contain** `vars`, `tasks`, `message`, or
 `maxRetries` — those are assignment-level concepts.
 
+**Reserved name.** `name: ad-hoc` is reserved for CLI-synthesized
+ad-hoc agents (see [Ad-hoc agents](#ad-hoc-agents) below).
+`loadAgentConfig` rejects any on-disk agent file that tries to claim
+this name so there can't be ambiguity between "a run created with
+`--agent ad-hoc`" and "a CLI-synthesized one".
+
+### Ad-hoc agents
+
+An **ad-hoc agent** is an `AgentConfig` synthesized on-the-fly from
+CLI overrides, used when `task-runner run` / `init` is invoked
+without `--agent`. The synthesized config has:
+
+- `name: "ad-hoc"` (hardcoded, reserved)
+- `sourcePath: null` (no file)
+- Empty role instructions body (there is no `--instructions` flag;
+  ad-hoc agents rely on assignment instructions + positional
+  `[message]` to supply context if needed)
+- `lockedFields: []` (nothing is locked — ad-hoc runs have no
+  authored contract to enforce)
+- `backend`, `model`, `effort`, `timeoutSec`, `unrestricted`, `cwd`
+  all come from the corresponding CLI flags (with schema defaults
+  applied for anything unset)
+
+**`--backend` is required** when `--agent` is omitted — the runner
+needs to know which backend to dispatch to, and there's no defensible
+default. Missing `--backend` exits with code 3 and a clear error.
+
+Ad-hoc agents pair naturally with the `passive` backend for pure
+sidecar flows:
+
+```bash
+task-runner init --backend passive --assignment repo-diagnostics \
+  --var repo_path=.
+```
+
+and with codex/claude for scripted orchestration:
+
+```bash
+task-runner run --backend codex --model gpt-5.4 --effort high \
+  --assignment code-review --var repo_path=. --var range=HEAD~3..HEAD
+```
+
+Once the manifest is written, an ad-hoc run is indistinguishable
+from a file-backed run in terms of resume/status/task semantics —
+every field needed is frozen under `manifest.agent.*` and reachable
+via the same code paths as any other manifest. No special-casing
+past the first-write synthesis.
+
 ### Assignment schema
 
 ```yaml
@@ -686,14 +734,36 @@ Every session:
 - Has its own `maxAttempts` budget (the retry counter resets per session)
 - Contributes its attempts to the single flat `manifest.attemptRecords[]`
   array with monotonic attempt numbers
-- Starts by reloading the latest `agent.md` and the workspace
-  `assignment.md` (changes since the prior session are picked up)
-- Re-checks overrides against the combined `lockedFields`
-  (agent ∪ assignment)
+- Reads the workspace `assignment.md` to pick up mid-run status /
+  notes edits (either from the agent's own writes during the prior
+  session, or from `task set` / `task add` CLI calls made against
+  the run in between sessions)
+- Re-checks any CLI overrides it accepts against the **frozen**
+  `manifest.lockedFields` — the union of agent ∪ assignment locks
+  captured at first write
 - For resume sessions (index > 0), the first attempt's prompt is
   **only the follow-up message** (plus the new-tasks reminder if
-  applicable) — the instructions are not re-rendered because the
-  backend has them in the cached conversation
+  applicable) — the role instructions and workflow template aren't
+  re-rendered because the backend has them in the cached
+  conversation
+
+**Resume under the manifest-canonical rule.** Every resume reads the
+agent definition from the frozen manifest via
+`loadedAgentFromManifest`, not from the original `agent.md`. Once
+the run is created, the source `agent.md` has **no further effect**
+on any session — it can be moved, edited, or deleted and the run is
+unaffected. Likewise for the assignment: task data lives in the
+workspace `assignment.md` and `manifest.finalTasks` exclusively, and
+the assignment's locked-field set is frozen into `manifest.lockedFields`
+at first write (so a post-init change to the assignment file cannot
+bypass or tighten a lock mid-run). The only per-run state that
+evolves between sessions is what's explicitly writable: the workspace
+`assignment.md` (task status + notes), manifest fields managed by
+the run loop (attempts, sessions, finalTasks, status/exitCode/endedAt),
+and whatever CLI overrides each resume legally applies (model,
+effort, timeoutSec, maxRetries, unrestricted, sessionName — see
+[CLI shape → resume overrides](#--resume-run-idpath) for the full
+matrix).
 
 The top-level `manifest.status`, `manifest.exitCode`, and
 `manifest.endedAt` always reflect the **latest** session. Earlier
@@ -707,6 +777,31 @@ rewritten one last time when the run reaches a terminal state. It is a
 single JSON document — never JSONL, never append-only — so you can always
 `cat` or `jq` the latest version.
 
+**Manifest-canonical rule.** The manifest is the **sole source of
+truth for a run after first write**. Every field needed to resume or
+inspect a run — including the agent's role instructions, locked
+fields, and per-attempt timeout budget — is frozen into the manifest
+at first write (fresh run or `init`) and read from the manifest on
+every subsequent operation. Resume never re-reads the source
+`agent.md`. Consequences:
+
+- CLI overrides for model / effort / cwd / timeoutSec / etc. on
+  resume persist across further resumes (the new value is written
+  into the manifest, not transiently applied to the session).
+- Moving, editing, or deleting the original `agent.md` after a run
+  has started has no effect on that run.
+- Ad-hoc agents — runs created with `--agent` omitted and the agent
+  config synthesized from CLI overrides — work naturally: the
+  reserved `name: "ad-hoc"`, `sourcePath: null`, and empty role
+  instructions are written into the manifest at first write and
+  carried forward like any other agent.
+
+**Schema versioning.** `schemaVersion: 2` is the manifest-canonical
+generation. Manifests written by earlier task-runner versions have
+`schemaVersion: 1` and are **not resumable** by this version —
+`resolveResumeTarget` rejects them with a clear error and tells the
+caller to start a fresh run. No automatic migration.
+
 ```ts
 type ManifestStatus =
   | "initialized"   // `init` prepared the workspace but no session has run
@@ -718,9 +813,13 @@ type ManifestStatus =
   | "error";
 
 interface RunManifest {
-  schemaVersion: 1;
+  schemaVersion: 2;
   runId: string;
-  agent: { name: string; sourcePath: string };
+  agent: {
+    name: string;
+    sourcePath: string | null;     // null for ad-hoc agents (no source file)
+    instructions: string;          // frozen role-instructions body (interpolated)
+  };
   assignment: {                    // null if the run had no --assignment
     name: string;
     sourcePath: string;            // source path the assignment was loaded from
@@ -733,6 +832,8 @@ interface RunManifest {
   sessionName: string | null;      // backend-side display name (resolved + interpolated)
   unrestricted: boolean;
   cwd: string;
+  lockedFields: LockableField[];   // union of agent + assignment locks, frozen
+  timeoutSec: number;              // per-attempt wall clock, frozen
   assignmentPath: string;          // workspace assignment.md (the I/O buffer)
   workspaceDir: string;
   runtimeVars: Record<string, unknown>;  // resolved vars used for this run
@@ -1423,9 +1524,22 @@ Subcommands:
   the same `checkLockedFields` path used by `--add-task` on fresh
   runs.
 
-`--agent` is required for fresh runs. When `--resume-run` is supplied,
-`--agent` becomes optional — the runner reloads `agent.md` from the path
-stored in the prior manifest.
+`--agent` is **optional**:
+
+- **With `--resume-run`**: the agent config is reconstructed from
+  the frozen manifest (`loadedAgentFromManifest`). `agent.md` is
+  never re-read. If `--agent` is also passed on resume, it is
+  ignored for field resolution — the manifest wins. (Passing it is
+  harmless but unnecessary.)
+- **Fresh run / init with `--agent <name|path>`**: the on-disk
+  `agent.md` is loaded normally and the frozen snapshot is written
+  into the manifest on first write.
+- **Fresh run / init without `--agent`**: the agent is synthesized
+  on-the-fly as an **ad-hoc agent** (`name: "ad-hoc"`,
+  `sourcePath: null`, empty role instructions, empty locks).
+  **`--backend` is required** in this case — missing it exits with
+  code 3. See [Ad-hoc agents](#ad-hoc-agents) for the full
+  synthesis rules.
 
 `--assignment` is optional on fresh runs. When supplied, the named or
 pathed `assignment.md` is loaded, its tasks and `message` seed the run,
@@ -1538,14 +1652,19 @@ read progress through `status`. Specifically:
 
 - Starts session 0 — the first real session for this run.
 - The stored `pendingPrompt` is sent verbatim as the first attempt's
-  prompt. The current `agent.md` is reloaded only to resolve the
-  backend; role instructions are not re-composed.
-- No `--message`, `--add-task`, `--var`, or override flags are
-  accepted. If the workflow needs to change, re-run `init`. (This
-  keeps the init → execute handoff honest: whatever was composed at
-  init time is what runs.)
-- `--assignment` is forbidden (it's baked into the stored prompt and
-  workspace).
+  prompt. The agent config is reconstructed from the frozen manifest
+  via `loadedAgentFromManifest` (no re-read of the source `agent.md`
+  under the manifest-canonical design). Role instructions, locked
+  fields, backend, model, effort, timeoutSec, etc. all come from the
+  manifest.
+- **No overrides are accepted.** Init deliberately froze every
+  resolvable field at creation time, so the only valid invocation
+  is `task-runner run --resume-run <id>` — any of `message`,
+  `--add-task`, `--var`, `--agent`, `--assignment`, `--backend`,
+  `--backend-session-id`, `--cwd`, `--model`, `--effort`,
+  `--timeout-sec`, `--max-retries`, `--unrestricted`, or
+  `--session-name` will exit 3 with a clear error. If you need
+  different values, create a fresh run.
 - `backendSessionId` is *not* required to be non-null (init leaves it
   `null` by definition).
 - After this call, `pendingPrompt` is cleared and `sessionCount` goes
@@ -1588,40 +1707,48 @@ from a prior session):
   `ResumeError` and exit 3.
 - Non-completed tasks from the prior run are normalized to `pending`
   (with their notes preserved); completed tasks stay completed.
-- The reloaded `agent.md` is authoritative for all agent fields, and
-  the reloaded assignment info is re-checked against the prior
-  workspace `assignment.md` — `lockedFields` from both files union and
-  override attempts are re-checked.
+- The agent config is reconstructed from the frozen manifest via
+  `loadedAgentFromManifest`. The source `agent.md` is not re-read.
+  `manifest.lockedFields` is consulted directly for override checks
+  (the assignment's lock contribution was frozen into the same
+  union at first write).
 - The first attempt of the new session sends **only the follow-up
   message** (plus the new-tasks reminder if applicable) as its prompt.
   The instructions are not re-rendered, because the backend already
   has them in the cached session from the prior run.
 
-CLI flags (and the positional `message`) override agent/assignment
-values for: `cwd`, `backend`, `model`, `effort`, `message`,
-`sessionName`, `timeoutSec`, `unrestricted`, `maxRetries`. `--add-task`
-extends the assignment's `tasks:` array. Any field listed in the
-combined `lockedFields` (agent ∪ assignment) rejects override attempts
-with `LockedFieldError` and exit code 3 — see [Locked fields](#locked-fields).
+**Resume override matrix.** All override validation for `--resume-run`
+lives in a single `validateResumeOverrides` function in `src/cli.ts`
+that runs right after `resolveResumeTarget`. The rules:
 
-`--backend <claude|codex>` is special:
+| Flag | Regular resume | Execute-after-init | Reason |
+|---|---|---|---|
+| `--agent` | rejected | rejected | Manifest is the source of truth for agent state; silently ignoring would mislead users who edit `agent.md` and expect it to take effect |
+| `--assignment` | rejected | rejected | Baked into the workspace at first write |
+| `--backend` | rejected | rejected | Backend session ids aren't portable across backends |
+| `--backend-session-id` | rejected | rejected | The resume target already carries one |
+| `--cwd` | rejected | rejected | Backend sessions are cwd-bound — a new cwd would invalidate `manifest.backendSessionId`. Create a fresh run if a different cwd is needed |
+| `--var` | rejected | rejected | Vars are resolved from the assignment once at first write and frozen into `manifest.runtimeVars`; they're not re-resolved on resume, so passing `--var` was previously a silent no-op |
+| `--model` | allowed | rejected | Per-turn setting; safe to change mid-thread. Init freezes it |
+| `--effort` | allowed | rejected | Per-turn setting. Init freezes it |
+| `--timeout-sec` | allowed | rejected | Per-attempt wall clock. Init freezes it |
+| `--max-retries` | allowed | rejected | Per-session retry budget. Init freezes it |
+| `--unrestricted` | allowed | rejected | Per-attempt spawn flag. Init freezes it |
+| `--session-name` | allowed | rejected | Display-only label. Init freezes it (and an assignment-locked `sessionName` could otherwise be bypassed via init-then-resume) |
+| `--add-task` | allowed | rejected | Legitimate mid-run task list extension. Init froze the task list |
+| `[message]` | required | rejected | Required on regular resume; init pre-composed the prompt |
+| `--output-format`, `--field` | allowed | allowed | Read-only; no state effect |
 
-- Forbidden with `--resume-run`. Backend session ids aren't portable
-  across backends, so a resume must use the same backend the run was
-  created with. The CLI reads `backend` from the prior manifest on
-  resume, ignoring the reloaded agent.md.
-- When set on a fresh run, the agent's `model` is **dropped** unless
-  `--model` is also passed. Model strings are backend-specific
-  (`claude-sonnet-4-6` vs `gpt-5.4`), so an agent declared with a
-  claude model would otherwise fail at backend invocation. The
-  pattern is `--backend codex --model gpt-5.4`.
-- The `backend` field stored in the manifest is the override value
-  (or the agent's default if no override), so `run.json` always
-  reflects what was actually used.
+The `allowed` overrides on regular resume are still vetted by
+`checkLockedFields` against the frozen `manifest.lockedFields` — so
+a run that locked any of them (e.g. `lockedFields: [model]`) still
+rejects the override with `LockedFieldError`.
 
-Vars are passed via repeated `--var key=value` flags. Env-sourced vars
-read from `process.env[envName]`. The CLI validates each var against the
-schema before starting the run.
+Vars are passed via repeated `--var key=value` flags at fresh-run /
+init time only. Env-sourced vars read from `process.env[envName]`.
+The CLI validates each var against the schema before starting the
+run. On resume, `--var` is rejected (vars are frozen into
+`manifest.runtimeVars` at first write).
 
 ## Output modes
 
@@ -1861,17 +1988,6 @@ the plug; nothing went wrong." A subsequent `task-runner run
   for sidecar-only runs. Future adapters (Gemini, Ollama, etc.) can
   be added to `src/backends/registry.ts` by implementing the `Backend`
   interface — no other code should need to know about them.
-- **Manifest canonicalization**: on resume we currently re-read
-  `agent.md` via `loadAgentConfig(manifest.agent.sourcePath)` to
-  resolve fields like `model`, `effort`, `timeoutSec`, role
-  instructions, and `lockedFields`. Anything the manifest doesn't
-  carry is pulled from the (possibly-edited) file. This means CLI
-  overrides for those fields are not preserved across resume
-  sessions (the file's current value wins absent a fresh override),
-  and it rules out "ad-hoc" agents assembled entirely from CLI flags
-  with no source file. The planned fix is to freeze every resolvable
-  agent field into the manifest at first write and stop re-reading
-  the source file on resume — tracked as a follow-up branch.
 - **Task ID uniqueness**: enforced via zod `refine` at load time.
 - **Max task count**: enforced at 100 in schema.
 - **Concurrent resume**: two `task-runner run --resume-run <id>`

@@ -176,6 +176,43 @@ function checkLockedFields(
   }
 }
 
+// Re-check overrides against the frozen manifest's lockedFields. Used
+// for execute-after-init (priorInitialized) as a defense-in-depth
+// backstop — the explicit per-field "no overrides on init" list
+// above should already have rejected everything, but if a future
+// RunOverrides field is added and someone forgets to add it to the
+// explicit list, this re-check still enforces any relevant lock
+// against the frozen manifest state. Cheap and catches regressions.
+function checkLockedFieldsFromManifest(
+  manifest: RunManifest,
+  overrides: RunOverrides | undefined,
+  addedTasks: string[],
+): void {
+  const locked = new Set<LockableField>(manifest.lockedFields);
+  if (locked.size === 0) return;
+
+  const overrideEntries: [LockableField, unknown, unknown][] = [
+    ["cwd", overrides?.cwd, manifest.cwd],
+    ["backend", overrides?.backend, manifest.backend],
+    ["model", overrides?.model, manifest.model],
+    ["effort", overrides?.effort, manifest.effort],
+    ["message", overrides?.message, manifest.message],
+    ["sessionName", overrides?.sessionName, manifest.sessionName],
+    ["timeoutSec", overrides?.timeoutSec, manifest.timeoutSec],
+    ["unrestricted", overrides?.unrestricted, manifest.unrestricted],
+    // maxRetries is stored on the manifest as maxAttempts (= retries + 1)
+    // so the error message subtracts back to the authored value.
+    ["maxRetries", overrides?.maxRetries, manifest.maxAttempts - 1],
+    ["tasks", addedTasks.length > 0 ? addedTasks : undefined, undefined],
+  ];
+
+  for (const [key, value, currentValue] of overrideEntries) {
+    if (value !== undefined && locked.has(key)) {
+      throw new LockedFieldError(key, currentValue);
+    }
+  }
+}
+
 const MAX_TITLE_LENGTH = 200;
 
 function validateAddedTaskTitle(title: string, index: number): void {
@@ -338,26 +375,76 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   if (isInitialize && resume) {
     throw new ResumeError("--init cannot be combined with --resume-run");
   }
-  if (isResume && loadedAssignment) {
-    throw new ResumeError("--assignment cannot be combined with --resume-run");
-  }
-  if (priorInitialized && loadedAssignment) {
-    throw new ResumeError("--assignment cannot be combined with resuming an initialized run");
-  }
-  if (priorInitialized && (overrides?.addedTasks?.length ?? 0) > 0) {
-    throw new ResumeError("--add-task cannot be combined with resuming an initialized run");
-  }
-  if (opts.bootstrapBackendSessionId !== undefined && (isResume || priorInitialized)) {
-    // The CLI also rejects this combination with a friendlier message,
-    // but enforce it here too as defense in depth — programmatic
-    // callers shouldn't be able to bypass it.
-    throw new ResumeError("--backend-session-id cannot be combined with --resume-run");
+
+  // Resume override policy. The CLI also enforces most of these
+  // earlier (with flag-level error messages), but these checks are
+  // defense in depth for programmatic callers that construct
+  // `RunOptions` directly — they bypass the CLI entirely and would
+  // otherwise be able to violate the manifest-canonical contract.
+  // Mirrors the policy matrix documented in docs/design.md under
+  // "--resume-run".
+  if (isResume || priorInitialized) {
+    // Fields that are never valid on any resume (regular or
+    // execute-after-init), regardless of prior status.
+    if (loadedAssignment) {
+      throw new ResumeError(
+        priorInitialized
+          ? "--assignment cannot be combined with resuming an initialized run"
+          : "--assignment cannot be combined with --resume-run",
+      );
+    }
+    if (opts.bootstrapBackendSessionId !== undefined) {
+      throw new ResumeError("--backend-session-id cannot be combined with --resume-run");
+    }
+    if (overrides?.cwd !== undefined) {
+      throw new ResumeError(
+        "--cwd cannot be combined with --resume-run — backend sessions are bound to the cwd they were created in, so a different cwd would invalidate the captured session id. Create a fresh run if you need a different cwd.",
+      );
+    }
+    if (overrides?.backend !== undefined) {
+      throw new ResumeError(
+        "--backend cannot be combined with --resume-run (backend is locked to the run that created the session)",
+      );
+    }
+    if (Object.keys(cliVars).length > 0) {
+      throw new ResumeError(
+        "--var cannot be combined with --resume-run — runtime vars are resolved from the assignment once at first write and frozen into the manifest; they are not re-resolved on resume.",
+      );
+    }
+
+    // Execute-after-init is stricter: no overrides at all. Init
+    // deliberately froze every resolvable field at creation time,
+    // and the only valid invocation is `run --resume-run <id>`.
+    if (priorInitialized) {
+      const forbidden: string[] = [];
+      if (overrides?.message && overrides.message.trim().length > 0) forbidden.push("message");
+      if ((overrides?.addedTasks?.length ?? 0) > 0) forbidden.push("--add-task");
+      if (overrides?.model !== undefined) forbidden.push("--model");
+      if (overrides?.effort !== undefined) forbidden.push("--effort");
+      if (overrides?.timeoutSec !== undefined) forbidden.push("--timeout-sec");
+      if (overrides?.maxRetries !== undefined) forbidden.push("--max-retries");
+      if (overrides?.unrestricted !== undefined) forbidden.push("--unrestricted");
+      if (overrides?.sessionName !== undefined) forbidden.push("--session-name");
+      if (forbidden.length > 0) {
+        throw new ResumeError(
+          `resuming an initialized run does not accept ${forbidden.join(", ")} — init froze these at creation. If you need different values, create a fresh run.`,
+        );
+      }
+    }
   }
 
   const addedTitles = overrides?.addedTasks ?? [];
   const agentInstructions = loaded.instructions.trim();
   const assignmentInstructions = loadedAssignment?.instructions.trim() ?? "";
 
+  // Locked-field enforcement. For fresh runs and regular resumes,
+  // `checkLockedFields` vets every CLI override against the agent's
+  // and assignment's lockedFields. For execute-after-init we run a
+  // defensive second pass against the **frozen** `manifest.lockedFields`
+  // union — the per-field override list above should already have
+  // rejected everything, but if a future addition to RunOverrides
+  // forgets to be added to that list, this catches the regression
+  // instead of silently letting it through.
   if (!priorInitialized) {
     checkLockedFields(
       agentConfig,
@@ -367,6 +454,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       overrides,
       addedTitles,
     );
+  } else if (resume) {
+    checkLockedFieldsFromManifest(resume.manifest, overrides, addedTitles);
   }
 
   const baseDir = process.cwd();
@@ -570,6 +659,13 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
   let manifest: RunManifest;
   if (isResume && resume) {
+    // On resume, the new manifest spreads the prior one and then
+    // overrides only the fields that can legitimately change across
+    // sessions. `agent.instructions`, `lockedFields`, and
+    // `agent.sourcePath` are frozen at first write and preserved by
+    // the spread. `timeoutSec` is persisted so a `--timeout-sec`
+    // override on resume stays in effect for the next resume too,
+    // matching the model/effort behavior.
     manifest = {
       ...resume.manifest,
       model: model ?? null,
@@ -577,6 +673,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       sessionName,
       unrestricted,
       cwd,
+      timeoutSec,
       assignmentPath,
       workspaceDir,
       endedAt: null,
@@ -602,12 +699,28 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       pendingPrompt: null,
     };
   } else {
+    // Freeze the union of agent + assignment lockedFields into the
+    // manifest at first write. Resume consults this union (the
+    // assignment is forbidden on resume, so there's no other source
+    // of lock info post-creation).
+    const frozenLockedFields: LockableField[] = Array.from(
+      new Set<LockableField>([
+        ...agentConfig.lockedFields,
+        ...(assignmentConfig?.lockedFields ?? []),
+      ]),
+    );
     manifest = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       runId,
       agent: {
         name: agentConfig.name,
         sourcePath: loaded.sourcePath,
+        // Role instructions with `{{var}}` references already
+        // interpolated against `injectedVars`. Frozen here so resume
+        // never re-reads the source file AND never needs to
+        // re-interpolate (vars can't change on resume anyway).
+        instructions:
+          agentInstructions.length > 0 ? interpolate(agentInstructions, injectedVars) : "",
       },
       assignment: loadedAssignment
         ? {
@@ -623,6 +736,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       sessionName,
       unrestricted,
       cwd,
+      lockedFields: frozenLockedFields,
+      timeoutSec,
       assignmentPath,
       workspaceDir,
       startedAt: now,

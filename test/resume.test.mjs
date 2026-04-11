@@ -537,6 +537,112 @@ test("resume: resolveResumeTarget throws for unknown slug", () => {
   assert.throws(() => resolveResumeTarget("notarealid", dir), ResumeError);
 });
 
+// Resume override policy — runAgent-layer enforcement. The CLI layer
+// in src/cli.ts rejects these flags earlier with flag-level messages,
+// but these tests drive runAgent directly to cover the defense-in-depth
+// check inside the run loop. A programmatic caller constructing
+// RunOptions must not be able to bypass the manifest-canonical rule.
+
+test("resume: runAgent rejects overrides.cwd (backend sessions are cwd-bound)", async () => {
+  const dir = tempDir();
+  writeAgentAndAssignment(dir);
+
+  // Session 0 — complete happy path so we have a resumable terminal run.
+  const first = await runIn(dir, {
+    backend: mockBackend(async (ctx) => {
+      const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
+      const absPlan = `./${match[0]}`;
+      let plan = readFileSync(absPlan, "utf8");
+      for (const id of ["t1", "t2", "t3"]) plan = editStatus(plan, id, "completed");
+      writeFileSync(absPlan, plan, "utf8");
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "sess-cwd-test",
+        transcript: "done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    }),
+  });
+  assert.equal(first.manifest.status, "success");
+
+  // Attempt a resume with --cwd — must throw ResumeError.
+  const target = resolveResumeTarget(first.runId, dir);
+  await assert.rejects(
+    async () =>
+      runIn(dir, {
+        resume: target,
+        overrides: { cwd: "/tmp/some-other-cwd", message: "continue" },
+        backend: mockBackend(async () => {
+          throw new Error("backend should not be invoked");
+        }),
+      }),
+    (err) => {
+      assert.ok(err instanceof ResumeError);
+      assert.match(err.message, /--cwd cannot be combined with --resume-run/);
+      assert.match(err.message, /bound to the cwd/);
+      return true;
+    },
+  );
+});
+
+test("resume: runAgent rejects cliVars non-empty on resume", async () => {
+  const dir = tempDir();
+  writeAgentAndAssignment(dir);
+
+  const first = await runIn(dir, {
+    backend: mockBackend(async (ctx) => {
+      const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
+      const absPlan = `./${match[0]}`;
+      let plan = readFileSync(absPlan, "utf8");
+      for (const id of ["t1", "t2", "t3"]) plan = editStatus(plan, id, "completed");
+      writeFileSync(absPlan, plan, "utf8");
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "sess-vars-test",
+        transcript: "done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    }),
+  });
+
+  // Programmatic caller passes cliVars with content on resume —
+  // currently a silent no-op because resume doesn't re-resolve vars.
+  // runAgent must reject loudly.
+  const target = resolveResumeTarget(first.runId, dir);
+  const loaded = loadAgentConfig("three", dir);
+  const originalCwd = process.cwd();
+  process.chdir(dir);
+  try {
+    await assert.rejects(
+      async () =>
+        runAgent({
+          loaded,
+          cliVars: { forced: "value" },
+          backend: mockBackend(async () => {
+            throw new Error("backend should not be invoked");
+          }),
+          overrides: { message: "continue" },
+          resume: target,
+          stderr: () => {},
+          stdout: () => {},
+        }),
+      (err) => {
+        assert.ok(err instanceof ResumeError);
+        assert.match(err.message, /--var cannot be combined with --resume-run/);
+        return true;
+      },
+    );
+  } finally {
+    process.chdir(originalCwd);
+  }
+});
+
 test("resume: text summary includes the resume-run hint with the run id", async () => {
   const dir = tempDir();
   writeAgentAndAssignment(dir);
