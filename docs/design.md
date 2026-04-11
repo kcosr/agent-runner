@@ -1059,8 +1059,11 @@ stored in the prior manifest.
   the current cwd.
 - `<path>` can be a workspace directory or a direct path to a `run.json`
   file.
-- A positional `[message]` is **required** when `--resume-run` is set —
-  the runner throws `ResumeError` without one.
+- At least one of a positional `[message]` **or** one or more
+  `--add-task` flags is required when `--resume-run` is set. The runner
+  throws `ResumeError` if both are absent. `--add-task` alone is valid:
+  the "new tasks added" reminder becomes the entire follow-up prompt
+  and tells the agent to re-read the assignment file.
 - The prior manifest's `backendSessionId` must be non-null — else
   `ResumeError` and exit 3.
 - Non-completed tasks from the prior run are normalized to `pending`

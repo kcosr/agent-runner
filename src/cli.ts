@@ -85,8 +85,12 @@ async function main(): Promise<void> {
 
   let resumeTarget: ReturnType<typeof resolveResumeTarget> | undefined;
   if (parsed.resumeRun !== undefined) {
-    if (!parsed.message || parsed.message.trim().length === 0) {
-      process.stderr.write("task-runner: --resume-run requires a follow-up message\n");
+    const hasMessage = Boolean(parsed.message && parsed.message.trim().length > 0);
+    const hasAddedTasks = parsed.addedTasks.length > 0;
+    if (!hasMessage && !hasAddedTasks) {
+      process.stderr.write(
+        "task-runner: --resume-run requires a follow-up message or at least one --add-task\n",
+      );
       process.exit(3);
     }
     try {

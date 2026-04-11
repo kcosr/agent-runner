@@ -265,8 +265,12 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const maxAttempts = maxRetries + 1;
 
   if (isResume) {
-    if (!message || message.trim().length === 0) {
-      throw new ResumeError("resuming a run requires a follow-up message");
+    const hasMessage = Boolean(message && message.trim().length > 0);
+    const hasAddedTasks = (overrides?.addedTasks ?? []).length > 0;
+    if (!hasMessage && !hasAddedTasks) {
+      throw new ResumeError(
+        "resuming a run requires either a follow-up message or at least one --add-task",
+      );
     }
     if (!resume?.manifest.backendSessionId) {
       throw new ResumeError(
@@ -327,14 +331,19 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
   let initialPrompt: string;
   if (isResume) {
-    // Resume sessions always have a message (enforced above).
-    const parts: string[] = [trimmedMessage];
+    // Resume sessions have either a message, added tasks, or both
+    // (enforced above). Message is optional when --add-task is used.
+    const parts: string[] = [];
+    if (trimmedMessage.length > 0) {
+      parts.push(trimmedMessage);
+    }
     if (firstTimeTasksAppear) {
-      // Prior sessions had no tasks, so claude's cached session never saw the workflow.
-      // Inject it into this follow-up message.
+      // Prior sessions had no tasks, so the cached session never saw
+      // the workflow. Inject it into this follow-up message.
       parts.push(interpolate(TASK_WORKFLOW_TEMPLATE, injectedVars));
     } else if (resumeAddedNewTasks) {
-      // Claude already knows the workflow; just nudge it that new tasks appeared.
+      // The agent already knows the workflow; just nudge it that new
+      // tasks appeared.
       parts.push(buildAddedTasksReminder(addedTitles.length, assignmentPath));
     }
     initialPrompt = parts.join("\n\n");

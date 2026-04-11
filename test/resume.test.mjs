@@ -290,7 +290,66 @@ test("resume: non-completed tasks normalized to pending, notes preserved", async
   assert.equal(second.manifest.finalTasks.t2.status, "completed");
 });
 
-test("resume: missing follow-up message is a hard error", async () => {
+test("resume: --add-task alone (no message) is allowed on resume", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_TASKS);
+
+  const first = await runIn(dir, {
+    backend: mockBackend(async (ctx) => {
+      const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
+      const absPlan = `./${match[0]}`;
+      let plan = readFileSync(absPlan, "utf8");
+      for (const id of ["t1", "t2", "t3"]) {
+        plan = editStatus(plan, id, "completed");
+      }
+      writeFileSync(absPlan, plan, "utf8");
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "sess-addtask-only",
+        transcript: "all done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    }),
+  });
+  assert.equal(first.exitCode, 0);
+
+  const target = resolveResumeTarget(first.runId, dir);
+  const firstPlanPath = join(first.workspaceDir, "assignment.md");
+  let seenPrompt;
+  const second = await runIn(dir, {
+    backend: mockBackend(async (ctx) => {
+      seenPrompt = ctx.prompt;
+      let plan = readFileSync(firstPlanPath, "utf8");
+      const ids = [...plan.matchAll(/<!-- task-id:\s*(cli-[A-Za-z0-9]+)\s*-->/g)].map((m) => m[1]);
+      for (const id of ids) {
+        plan = editStatus(plan, id, "completed");
+      }
+      writeFileSync(firstPlanPath, plan, "utf8");
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "sess-addtask-only",
+        transcript: "new tasks done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    }),
+    overrides: { addedTasks: ["follow-up task"] },
+    resume: target,
+  });
+
+  assert.equal(second.exitCode, 0);
+  // The prompt should be ONLY the new-tasks reminder, no leading whitespace.
+  assert.ok(seenPrompt.startsWith("(task-runner:"), "prompt starts with the reminder");
+  assert.ok(seenPrompt.includes("1 new task has been added"));
+  assert.ok(!seenPrompt.includes("\n\n\n"), "no triple newlines from empty message slot");
+});
+
+test("resume: missing both message and --add-task is a hard error", async () => {
   const dir = tempDir();
   writeAgent(dir, "three", THREE_TASKS);
 
