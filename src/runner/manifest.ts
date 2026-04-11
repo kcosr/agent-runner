@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { InvalidStatusReport, TaskState, TaskStatus } from "../assignment/model.js";
 import type { LockableField } from "../config/schema.js";
+import { writeTextFileAtomic } from "../util/write-file-atomic.js";
 
 export type ManifestStatus =
   | "initialized"
@@ -35,7 +36,7 @@ export function writeAttemptLog(workspaceDir: string, log: AttemptLog): string {
   const relPath = attemptLogRelativePath(log.attempt);
   const absPath = join(workspaceDir, relPath);
   mkdirSync(dirname(absPath), { recursive: true });
-  writeFileSync(absPath, `${JSON.stringify(log, null, 2)}\n`, "utf8");
+  writeTextFileAtomic(absPath, `${JSON.stringify(log, null, 2)}\n`);
   return relPath;
 }
 
@@ -172,11 +173,15 @@ export function snapshotTasks(tasks: Map<string, TaskState>): Record<string, Tas
 
 export function writeManifest(workspaceDir: string, manifest: RunManifest): void {
   const path = join(workspaceDir, MANIFEST_FILENAME);
-  writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  writeTextFileAtomic(path, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 export function manifestPath(workspaceDir: string): string {
   return join(workspaceDir, MANIFEST_FILENAME);
+}
+
+export function workspaceAssignmentPath(workspaceDir: string): string {
+  return join(workspaceDir, "assignment.md");
 }
 
 export class ResumeError extends Error {
@@ -241,7 +246,19 @@ export function resolveResumeTarget(
     if (!isRunManifest(parsed)) {
       throw new ResumeError(`manifest at ${candidate} does not look like a task-runner run.json`);
     }
-    return { workspaceDir: dirname(candidate), manifest: parsed };
+    const resolvedWorkspaceDir = dirname(candidate);
+    const expectedAssignmentPath = workspaceAssignmentPath(resolvedWorkspaceDir);
+    if (parsed.workspaceDir !== resolvedWorkspaceDir) {
+      throw new ResumeError(
+        `manifest at ${candidate} has workspaceDir "${parsed.workspaceDir}", but it was loaded from "${resolvedWorkspaceDir}"`,
+      );
+    }
+    if (parsed.assignmentPath !== expectedAssignmentPath) {
+      throw new ResumeError(
+        `manifest at ${candidate} has assignmentPath "${parsed.assignmentPath}", but expected "${expectedAssignmentPath}"`,
+      );
+    }
+    return { workspaceDir: resolvedWorkspaceDir, manifest: parsed };
   }
 
   throw new ResumeError(

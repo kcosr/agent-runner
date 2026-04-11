@@ -1588,9 +1588,9 @@ Subcommands:
 
 - **With `--resume-run`**: the agent config is reconstructed from
   the frozen manifest (`loadedAgentFromManifest`). `agent.md` is
-  never re-read. If `--agent` is also passed on resume, it is
-  ignored for field resolution — the manifest wins. (Passing it is
-  harmless but unnecessary.)
+  never re-read. If `--agent` is also passed on resume, the CLI
+  rejects it with exit code 3 — resume always uses the manifest's
+  frozen agent snapshot.
 - **Fresh run / init with `--agent <name|path>`**: the on-disk
   `agent.md` is loaded normally and the frozen snapshot is written
   into the manifest on first write.

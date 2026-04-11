@@ -1,14 +1,14 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
-import { mergeIntoFile, mergeUpdates } from "../assignment/merge.js";
+import { mergeIntoFile } from "../assignment/merge.js";
 import type { TaskState, TaskStatus } from "../assignment/model.js";
-import { parseAssignment } from "../assignment/parser.js";
 import { renderAssignment } from "../assignment/writer.js";
 import type { Backend, BackendInvokeResult } from "../backends/types.js";
 import { interpolate } from "../config/interpolate.js";
 import type { LoadedAgent, LoadedAssignment } from "../config/loader.js";
 import type { LockableField, VarDef } from "../config/schema.js";
 import { shortId } from "../util/short-id.js";
+import { writeTextFileAtomic } from "../util/write-file-atomic.js";
 import {
   type AttemptRecord,
   type ResolvedResumeTarget,
@@ -16,7 +16,7 @@ import {
   type RunManifest,
   type SessionRecord,
   type TaskSnapshot,
-  snapshotTasks,
+  workspaceAssignmentPath,
   writeAttemptLog,
   writeManifest,
 } from "./manifest.js";
@@ -34,6 +34,7 @@ import {
   TASK_WORKFLOW_TEMPLATE,
   buildAddedTasksReminder,
 } from "./task-workflow.js";
+import { mergeWorkspaceAssignmentIntoTaskMap, syncManifestTaskState } from "./workspace-state.js";
 
 export interface RunOverrides {
   cwd?: string;
@@ -275,24 +276,80 @@ function coerceVar(key: string, value: unknown, def: VarDef): unknown {
   }
 }
 
+type ResolvedVarSource = "cli" | "env" | "default";
+
+interface ResolvedVarsResult {
+  values: Record<string, unknown>;
+  sources: Record<string, ResolvedVarSource>;
+}
+
+interface RedactedRuntimeVar {
+  redacted: true;
+  source: "env";
+  envName: string;
+}
+
+function redactRuntimeVars(
+  values: Record<string, unknown>,
+  sources: Record<string, ResolvedVarSource>,
+  varsSchema: Record<string, VarDef>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(values)) {
+    if (sources[key] === "env") {
+      const envName = varsSchema[key]?.envName ?? key;
+      const redacted: RedactedRuntimeVar = {
+        redacted: true,
+        source: "env",
+        envName,
+      };
+      out[key] = redacted;
+      continue;
+    }
+    out[key] = value;
+  }
+  return out;
+}
+
+function assertKnownCliVars(
+  varsSchema: Record<string, VarDef>,
+  cliVars: Record<string, string>,
+): void {
+  const declared = new Set(Object.keys(varsSchema));
+  const unknown = Object.keys(cliVars).filter((key) => !declared.has(key));
+  if (unknown.length === 0) return;
+  throw new VarResolutionError(
+    `unknown --var key(s): ${unknown.join(", ")}. Declare them under assignment.vars or remove the extra --var flag(s).`,
+  );
+}
+
 function resolveVars(
   varsSchema: Record<string, VarDef>,
   cliVars: Record<string, string>,
-): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
+): ResolvedVarsResult {
+  const values: Record<string, unknown> = {};
+  const sources: Record<string, ResolvedVarSource> = {};
   for (const [key, def] of Object.entries(varsSchema)) {
     let value: unknown;
+    let source: ResolvedVarSource | undefined;
 
     if (def.source === "cli" || def.source === "either") {
-      if (cliVars[key] !== undefined) value = cliVars[key];
+      if (cliVars[key] !== undefined) {
+        value = cliVars[key];
+        source = "cli";
+      }
     }
     if (value === undefined && (def.source === "env" || def.source === "either")) {
       const envName = def.envName ?? key;
       const envValue = process.env[envName];
-      if (envValue !== undefined) value = envValue;
+      if (envValue !== undefined) {
+        value = envValue;
+        source = "env";
+      }
     }
     if (value === undefined && def.default !== undefined) {
       value = def.default;
+      source = "default";
     }
     if (value === undefined) {
       if (def.required) {
@@ -301,9 +358,10 @@ function resolveVars(
       continue;
     }
 
-    out[key] = coerceVar(key, value, def);
+    values[key] = coerceVar(key, value, def);
+    if (source) sources[key] = source;
   }
-  return out;
+  return { values, sources };
 }
 
 function defaultResumeFailureDetector(result: BackendInvokeResult): boolean {
@@ -527,15 +585,21 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   // verbatim for session 0's first attempt.
 
   // Vars live on the assignment. Chat mode (no assignment) has no var
-  // schema; unknown --var flags are silently ignored in that case.
-  const runtimeVars = resolveVars(assignmentConfig?.vars ?? {}, cliVars);
+  // schema, so there is nothing to validate against or resolve from.
+  const varsSchema = assignmentConfig?.vars ?? {};
+  if (assignmentConfig) {
+    assertKnownCliVars(varsSchema, cliVars);
+  }
+  const resolvedVars = resolveVars(varsSchema, cliVars);
+  const runtimeVars = resolvedVars.values;
+  const persistedRuntimeVars = redactRuntimeVars(runtimeVars, resolvedVars.sources, varsSchema);
 
   const reusingWorkspace = (isResume && resume) || (priorInitialized && resume);
   const runId = reusingWorkspace && resume ? resume.manifest.runId : shortId();
   const workspaceDir =
     reusingWorkspace && resume ? resume.workspaceDir : resolve(cwd, ".task-runner", runId);
   mkdirSync(workspaceDir, { recursive: true });
-  const assignmentPath = resolve(workspaceDir, "assignment.md");
+  const assignmentPath = workspaceAssignmentPath(workspaceDir);
 
   // `injectedVars` has to be built *before* the task-map rebuild so
   // that fresh-run task titles and bodies get `{{var}}` references
@@ -664,7 +728,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     initialPrompt = parts.join("\n\n");
   }
 
-  writeFileSync(assignmentPath, renderAssignment(Array.from(tasks.values())), "utf8");
+  writeTextFileAtomic(assignmentPath, renderAssignment(Array.from(tasks.values())));
 
   const now = new Date().toISOString();
   const priorAttemptCount = isResume && resume ? resume.manifest.attemptRecords.length : 0;
@@ -695,9 +759,9 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       status: "running",
       exitCode: null,
       maxAttempts,
-      finalTasks: snapshotTasks(tasks),
-      tasksCompleted: countBy(tasks, (t) => t.status === "completed"),
-      tasksTotal: tasks.size,
+      finalTasks: {},
+      tasksCompleted: 0,
+      tasksTotal: 0,
       sessionCount: priorSessionCount + 1,
     };
   } else if (priorInitialized && resume) {
@@ -780,15 +844,17 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       // local also seeds from this so the very first invocation does
       // a backend resume instead of starting a fresh session.
       backendSessionId: opts.bootstrapBackendSessionId ?? null,
-      runtimeVars,
+      runtimeVars: persistedRuntimeVars,
       pendingPrompt: isInitialize ? initialPrompt : null,
       callerInstructions: frozenCallerInstructions,
-      finalTasks: snapshotTasks(tasks),
+      finalTasks: {},
       sessionCount: isInitialize ? 0 : 1,
       sessions: [],
       attemptRecords: [],
     };
   }
+
+  syncManifestTaskState(manifest, tasks);
 
   // `init` stops here: persist the prepared workspace + manifest and
   // return a terminal "initialized" outcome. No session is created; the
@@ -939,20 +1005,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       manifest.backendSessionId = invokeResult.sessionId;
     }
 
-    let rawAssignment: string;
-    try {
-      rawAssignment = readFileSync(assignmentPath, "utf8");
-    } catch {
-      rawAssignment = "";
-    }
-
-    if (rawAssignment.trim().length === 0) {
-      rawAssignment = renderAssignment(Array.from(tasks.values()));
-      writeFileSync(assignmentPath, rawAssignment, "utf8");
-    }
-
-    const updates = parseAssignment(rawAssignment);
-    const mergeInfo = mergeUpdates(tasks, updates);
+    const { rawAssignment, mergeInfo } = mergeWorkspaceAssignmentIntoTaskMap(manifest, tasks);
 
     const logPath = writeAttemptLog(workspaceDir, {
       schemaVersion: 1,
@@ -965,6 +1018,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       stderr: invokeResult.rawStderr,
     });
 
+    syncManifestTaskState(manifest, tasks);
     const attemptRecord: AttemptRecord = {
       attempt: globalAttemptNumber,
       sessionIndex,
@@ -978,13 +1032,11 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       timedOut: invokeResult.timedOut,
       transcript: invokeResult.transcript,
       logPath,
-      tasksAfter: snapshotTasks(tasks),
+      tasksAfter: manifest.finalTasks,
       invalidStatuses: mergeInfo.invalidStatuses,
     };
     manifest.attemptRecords.push(attemptRecord);
     manifest.attempts = manifest.attemptRecords.length;
-    manifest.tasksCompleted = countBy(tasks, (t) => t.status === "completed");
-    manifest.finalTasks = snapshotTasks(tasks);
 
     if (sessionRecord.firstAttempt === null) {
       sessionRecord.firstAttempt = globalAttemptNumber;
@@ -1036,7 +1088,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
     const merged = mergeIntoFile(rawAssignment, tasks);
     if (merged !== rawAssignment) {
-      writeFileSync(assignmentPath, merged, "utf8");
+      writeTextFileAtomic(assignmentPath, merged);
     }
 
     const incompleteCount = countBy(tasks, (t) => t.status !== "completed");
@@ -1051,7 +1103,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     terminal = { status: "error", exitCode: 4 };
   }
 
-  const tasksCompleted = countBy(tasks, (t) => t.status === "completed");
+  const orderedTasks = syncManifestTaskState(manifest, tasks);
+  const tasksCompleted = manifest.tasksCompleted;
   const endedAt = new Date().toISOString();
 
   sessionRecord.status = terminal.status;
@@ -1062,8 +1115,6 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   manifest.status = terminal.status;
   manifest.exitCode = terminal.exitCode;
   manifest.endedAt = endedAt;
-  manifest.tasksCompleted = tasksCompleted;
-  manifest.finalTasks = snapshotTasks(tasks);
   writeManifest(workspaceDir, manifest);
 
   const summary: RunSummary = {
@@ -1071,7 +1122,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     attempts: sessionAttempts,
     maxAttempts,
     tasksCompleted,
-    tasksTotal: tasks.size,
+    tasksTotal: orderedTasks.length,
     assignmentPath,
     tasks: Array.from(tasks.values()),
     runId,

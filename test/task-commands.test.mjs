@@ -326,6 +326,18 @@ test("task add: rejects empty title", async () => {
   assert.match(result.stderr, /title cannot be empty/);
 });
 
+test("task add: rejects multiline title", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+
+  const result = runCliExpectFail(["task", "add", outcome.runId, "--title", "Line 1\nLine 2"], {
+    cwd: dir,
+  });
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /title must be a single line/);
+});
+
 test("task add: --output-format json returns new task snapshot", async () => {
   const dir = tempDir();
   writeBundle(dir);
@@ -359,6 +371,86 @@ test("task set: works on a terminal-status run after it has been resolved", asyn
   const after = readManifest(outcome.workspaceDir);
   assert.equal(after.status, "success");
   assert.equal(after.finalTasks.t1.notes, "Post-hoc annotation");
+});
+
+test("task set: notes-only update on terminal non-passive run ignores workspace status drift", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+
+  const manifestPath = join(outcome.workspaceDir, "run.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  manifest.status = "success";
+  manifest.endedAt = new Date().toISOString();
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+  let plan = readFileSync(outcome.assignmentPath, "utf8");
+  plan = plan.replace(/(<!-- task-id: t2 -->[\s\S]*?\*\*Status:\*\*) pending/, "$1 completed");
+  writeFileSync(outcome.assignmentPath, plan, "utf8");
+
+  runCli(["task", "set", outcome.runId, "t1", "--notes", "Post-hoc annotation"], { cwd: dir });
+
+  const after = readManifest(outcome.workspaceDir);
+  assert.equal(after.status, "success");
+  assert.equal(after.finalTasks.t1.notes, "Post-hoc annotation");
+  assert.equal(after.finalTasks.t1.status, "pending");
+  assert.equal(after.finalTasks.t2.status, "pending");
+
+  const persistedPlan = readFileSync(outcome.assignmentPath, "utf8");
+  assert.match(persistedPlan, /<!-- task-id: t2 -->[\s\S]*?\*\*Status:\*\* pending/);
+});
+
+test("task set: rejects status changes on a terminal non-passive run", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+
+  const manifestPath = join(outcome.workspaceDir, "run.json");
+  const m = JSON.parse(readFileSync(manifestPath, "utf8"));
+  m.status = "success";
+  m.endedAt = new Date().toISOString();
+  writeFileSync(manifestPath, `${JSON.stringify(m, null, 2)}\n`);
+
+  const result = runCliExpectFail(["task", "set", outcome.runId, "t1", "--status", "completed"], {
+    cwd: dir,
+  });
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /cannot change task status on a terminal non-passive run/);
+});
+
+test("task add: rejects terminal non-passive runs", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+
+  const manifestPath = join(outcome.workspaceDir, "run.json");
+  const m = JSON.parse(readFileSync(manifestPath, "utf8"));
+  m.status = "success";
+  m.endedAt = new Date().toISOString();
+  writeFileSync(manifestPath, `${JSON.stringify(m, null, 2)}\n`);
+
+  const result = runCliExpectFail(["task", "add", outcome.runId, "--title", "Follow-up"], {
+    cwd: dir,
+  });
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /cannot add tasks to a terminal non-passive run/);
+});
+
+test("task set: rejects manifests whose assignmentPath does not match the workspace", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+
+  const manifestPath = join(outcome.workspaceDir, "run.json");
+  const m = JSON.parse(readFileSync(manifestPath, "utf8"));
+  m.assignmentPath = join(dir, "elsewhere.md");
+  writeFileSync(manifestPath, `${JSON.stringify(m, null, 2)}\n`);
+
+  const result = runCliExpectFail(["task", "set", outcome.runId, "t1", "--notes", "nope"], {
+    cwd: dir,
+  });
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /has assignmentPath/);
 });
 
 test("task command: missing subcommand prints usage and exits 3", async () => {

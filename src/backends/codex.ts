@@ -39,6 +39,9 @@ function normalizeCodexModel(model: string): string {
   return stripped.length > 0 ? stripped : model;
 }
 
+const TURN_INTERRUPT_GRACE_MS = 1_000;
+const TURN_INTERRUPT_RETRY_MS = 5_000;
+
 /**
  * Decide whether the turn was interrupted by something *outside* this
  * runner (e.g. a user connected directly to the codex websocket and
@@ -415,6 +418,7 @@ function createClient(transport: Transport, opts: CreateClientOptions = {}): Cod
 interface AccumulatorState {
   threadId: string | null;
   turnId: string | null;
+  turnIdWaiters: Array<(turnId: string) => void>;
   streamedText: string;
   completedText: string;
   /**
@@ -429,6 +433,60 @@ interface AccumulatorState {
   turnCompleted: boolean;
   onText: (text: string) => void;
   resolveCompleted: (() => void) | null;
+}
+
+function setTurnId(state: AccumulatorState, turnId: string): void {
+  if (state.turnId) return;
+  state.turnId = turnId;
+  const waiters = state.turnIdWaiters.splice(0);
+  for (const waiter of waiters) waiter(turnId);
+}
+
+export function waitForTurnId(state: AccumulatorState, timeoutMs: number): Promise<string | null> {
+  if (state.turnId) return Promise.resolve(state.turnId);
+  return new Promise((resolve) => {
+    const onTurnId = (turnId: string) => {
+      clearTimeout(timeoutHandle);
+      resolve(turnId);
+    };
+    const timeoutHandle = setTimeout(() => {
+      const idx = state.turnIdWaiters.indexOf(onTurnId);
+      if (idx >= 0) state.turnIdWaiters.splice(idx, 1);
+      resolve(state.turnId);
+    }, timeoutMs);
+    state.turnIdWaiters.push(onTurnId);
+  });
+}
+
+export async function interruptTurnWithGrace(
+  client: Pick<CodexClient, "call">,
+  state: AccumulatorState,
+  timeoutMs = TURN_INTERRUPT_GRACE_MS,
+): Promise<boolean> {
+  const turnId = await waitForTurnId(state, timeoutMs);
+  if (!state.threadId || !turnId) return false;
+  try {
+    await client.call("turn/interrupt", {
+      threadId: state.threadId,
+      turnId,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function interruptTurnWithRetry(
+  client: Pick<CodexClient, "call">,
+  state: AccumulatorState,
+  retryWindowsMs = [TURN_INTERRUPT_GRACE_MS, TURN_INTERRUPT_RETRY_MS],
+): Promise<boolean> {
+  for (const timeoutMs of retryWindowsMs) {
+    if (await interruptTurnWithGrace(client, state, timeoutMs)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function extractTextFromContent(content: unknown): string {
@@ -457,7 +515,7 @@ function handleNotification(state: AccumulatorState, method: string, params: unk
     case "turn/started": {
       const turn = params.turn;
       if (isRecord(turn) && typeof turn.id === "string") {
-        state.turnId = turn.id;
+        setTurnId(state, turn.id);
       }
       return;
     }
@@ -659,6 +717,7 @@ export const codexBackend: Backend = {
     const state: AccumulatorState = {
       threadId: null,
       turnId: null,
+      turnIdWaiters: [],
       streamedText: "",
       completedText: "",
       lastStreamItemId: null,
@@ -775,7 +834,7 @@ export const codexBackend: Backend = {
         .call<unknown>("turn/start", turnStartPayload)
         .then((result) => {
           if (isRecord(result) && isRecord(result.turn) && typeof result.turn.id === "string") {
-            state.turnId ??= result.turn.id;
+            setTurnId(state, result.turn.id);
           }
         });
 
@@ -793,16 +852,7 @@ export const codexBackend: Backend = {
       if (race === "timeout" || race === "abort") {
         if (race === "timeout") timedOut = true;
         if (race === "abort") aborted = true;
-        if (state.threadId && state.turnId) {
-          try {
-            await client.call("turn/interrupt", {
-              threadId: state.threadId,
-              turnId: state.turnId,
-            });
-          } catch {
-            // ignore — we're bailing anyway
-          }
-        }
+        await interruptTurnWithRetry(client, state);
       }
 
       // Detect a turn that codex marked `interrupted` without any

@@ -24,6 +24,18 @@ const KILL_GRACE_MS = 5_000;
 
 export function runProcess(opts: SpawnOptions): Promise<SpawnResult> {
   return new Promise((resolve, reject) => {
+    if (opts.abortSignal?.aborted) {
+      resolve({
+        exitCode: null,
+        signal: null,
+        stdoutText: "",
+        stderrText: "",
+        timedOut: false,
+        aborted: true,
+      });
+      return;
+    }
+
     let child: ChildProcess;
     try {
       child = spawn(opts.command, opts.args, {
@@ -75,11 +87,7 @@ export function runProcess(opts: SpawnOptions): Promise<SpawnResult> {
     };
 
     if (opts.abortSignal) {
-      if (opts.abortSignal.aborted) {
-        onAbort();
-      } else {
-        opts.abortSignal.addEventListener("abort", onAbort, { once: true });
-      }
+      opts.abortSignal.addEventListener("abort", onAbort, { once: true });
     }
 
     child.stdout?.on("data", (chunk: Buffer) => {

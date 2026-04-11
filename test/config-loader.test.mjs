@@ -183,3 +183,44 @@ body
 
   assert.throws(() => loadAssignmentConfig("dup", dir), AssignmentConfigError);
 });
+
+test("assignment schema rejects multiline task titles", () => {
+  const dir = tempDir();
+  writeAssignment(
+    dir,
+    "multiline-title",
+    `---
+schemaVersion: 1
+name: multiline-title
+tasks:
+  - id: t1
+    title: |-
+      Line 1
+      Line 2
+---
+body
+`,
+  );
+
+  assert.throws(() => loadAssignmentConfig("multiline-title", dir), AssignmentConfigError);
+});
+
+test("assignment schema rejects incompatible var defaults", () => {
+  const dir = tempDir();
+  writeAssignment(
+    dir,
+    "bad-default",
+    `---
+schemaVersion: 1
+name: bad-default
+vars:
+  retries:
+    type: number
+    default: nope
+---
+body
+`,
+  );
+
+  assert.throws(() => loadAssignmentConfig("bad-default", dir), AssignmentConfigError);
+});

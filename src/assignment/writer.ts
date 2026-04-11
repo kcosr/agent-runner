@@ -1,3 +1,4 @@
+import { escapeStructuralText } from "./escaping.js";
 import type { TaskState } from "./model.js";
 
 const HEADER = `# Assignment
@@ -15,12 +16,13 @@ instead of retrying.
 `;
 
 export function renderSection(index: number, task: TaskState): string {
-  const body = task.body.trim();
-  const notes = task.notes.trim();
+  const title = task.title.replace(/[\r\n]+/g, " ").trim();
+  const body = escapeStructuralText(task.body.trim());
+  const notes = escapeStructuralText(task.notes.trim());
 
   const lines: string[] = [];
   lines.push(`<!-- task-id: ${task.id} -->`);
-  lines.push(`## Task ${index + 1}: ${task.title}`);
+  lines.push(`## Task ${index + 1}: ${title}`);
   lines.push("");
   if (body) {
     lines.push(body);

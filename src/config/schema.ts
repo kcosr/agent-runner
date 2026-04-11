@@ -5,9 +5,37 @@ export const taskDefSchema = z.object({
     .string()
     .regex(/^[A-Za-z0-9._:-]+$/, "task id must match [A-Za-z0-9._:-]+")
     .max(128),
-  title: z.string().min(1).max(200),
+  title: z
+    .string()
+    .min(1)
+    .max(200)
+    .refine((value) => !/[\r\n]/.test(value), "task title must be a single line"),
   body: z.string().optional().default(""),
 });
+
+function isValidVarDefault(value: unknown, def: { type: string; values?: string[] }): boolean {
+  switch (def.type) {
+    case "string":
+      return typeof value === "string";
+    case "number":
+      return (
+        typeof value === "number" ||
+        (typeof value === "string" && value.trim().length > 0 && !Number.isNaN(Number(value)))
+      );
+    case "boolean":
+      return (
+        typeof value === "boolean" ||
+        value === "true" ||
+        value === "false" ||
+        value === "1" ||
+        value === "0"
+      );
+    case "enum":
+      return typeof value === "string" && (def.values?.includes(value) ?? false);
+    default:
+      return false;
+  }
+}
 
 export const varDefSchema = z
   .object({
@@ -19,8 +47,21 @@ export const varDefSchema = z
     description: z.string().optional(),
     values: z.array(z.string()).optional(),
   })
-  .refine((v) => v.type !== "enum" || (v.values !== undefined && v.values.length > 0), {
-    message: "enum vars must declare a non-empty `values` array",
+  .superRefine((v, ctx) => {
+    if (v.type === "enum" && (v.values === undefined || v.values.length === 0)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["values"],
+        message: "enum vars must declare a non-empty `values` array",
+      });
+    }
+    if (v.default !== undefined && !isValidVarDefault(v.default, v)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["default"],
+        message: `default is incompatible with var type "${v.type}"`,
+      });
+    }
   });
 
 export const LOCKABLE_FIELDS = [

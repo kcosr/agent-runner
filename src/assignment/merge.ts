@@ -7,7 +7,7 @@ import {
 import type { ParsedSectionUpdate } from "./parser.js";
 import { renderSection } from "./writer.js";
 
-const TASK_ID_MARKER = /<!--\s*task-id:\s*([A-Za-z0-9._:-]+)\s*-->/g;
+const TASK_ID_MARKER = /^<!--\s*task-id:\s*([A-Za-z0-9._:-]+)\s*-->\s*$/gm;
 
 export interface MergeResult {
   invalidStatuses: InvalidStatusReport[];
@@ -15,9 +15,15 @@ export interface MergeResult {
   unknownInFile: string[];
 }
 
+export interface MergeOptions {
+  applyStatus?: boolean;
+  applyNotes?: boolean;
+}
+
 export function mergeUpdates(
   tasks: Map<string, TaskState>,
   updates: ParsedSectionUpdate[],
+  opts: MergeOptions = {},
 ): MergeResult {
   const result: MergeResult = {
     invalidStatuses: [],
@@ -27,6 +33,10 @@ export function mergeUpdates(
   const seen = new Set<string>();
 
   for (const update of updates) {
+    if (seen.has(update.taskId)) {
+      result.unknownInFile.push(update.taskId);
+      continue;
+    }
     const task = tasks.get(update.taskId);
     if (!task) {
       result.unknownInFile.push(update.taskId);
@@ -34,7 +44,7 @@ export function mergeUpdates(
     }
     seen.add(update.taskId);
 
-    if (update.status !== undefined) {
+    if (opts.applyStatus !== false && update.status !== undefined) {
       if (isValidStatus(update.status)) {
         task.status = update.status as TaskStatus;
       } else {
@@ -44,7 +54,7 @@ export function mergeUpdates(
         });
       }
     }
-    if (update.notes !== undefined) {
+    if (opts.applyNotes !== false && update.notes !== undefined) {
       task.notes = update.notes;
     }
   }

@@ -35,3 +35,6 @@ Thumbs.db
 
 # codemap
 .codemap/
+
+# codex
+.codex
