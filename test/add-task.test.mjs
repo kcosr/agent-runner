@@ -5,12 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { loadAgentConfig } from "../dist/config/loader.js";
 import { resolveResumeTarget } from "../dist/runner/manifest.js";
-import {
-  EmptyTaskListError,
-  InvalidAddedTaskError,
-  LockedFieldError,
-  runAgent,
-} from "../dist/runner/run-loop.js";
+import { InvalidAddedTaskError, LockedFieldError, runAgent } from "../dist/runner/run-loop.js";
 
 const TWO_TASKS = `---
 schemaVersion: 1
@@ -272,28 +267,34 @@ test("add-task: frontmatter with no tasks and one --add-task runs successfully",
   assert.equal(outcome.manifest.tasksTotal, 1);
 });
 
-test("add-task: empty task list from agent + no --add-task is EmptyTaskListError", async () => {
+test("add-task: 0-task run succeeds with one backend invocation", async () => {
   const dir = tempDir();
   writeAgent(dir, "notasks", NO_TASKS);
 
-  await assert.rejects(
-    () =>
-      runIn(
-        dir,
-        "notasks",
-        undefined,
-        mockBackend(async () => ({
-          exitCode: 0,
-          signal: null,
-          timedOut: false,
-          sessionId: null,
-          transcript: null,
-          rawStdout: "",
-          rawStderr: "",
-        })),
-      ),
-    EmptyTaskListError,
+  let invocations = 0;
+  const outcome = await runIn(
+    dir,
+    "notasks",
+    undefined,
+    mockBackend(async () => {
+      invocations++;
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "sess-empty",
+        transcript: "hello back",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    }),
   );
+
+  assert.equal(outcome.exitCode, 0);
+  assert.equal(outcome.manifest.status, "success");
+  assert.equal(outcome.manifest.tasksTotal, 0);
+  assert.equal(outcome.manifest.tasksCompleted, 0);
+  assert.equal(invocations, 1);
 });
 
 test("add-task: empty title rejected with InvalidAddedTaskError", async () => {

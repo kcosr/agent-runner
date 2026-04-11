@@ -9,7 +9,6 @@ import {
 } from "./config/loader.js";
 import { ResumeError, resolveResumeTarget } from "./runner/manifest.js";
 import {
-  EmptyTaskListError,
   InvalidAddedTaskError,
   LockedFieldError,
   VarResolutionError,
@@ -141,7 +140,6 @@ async function main(): Promise<void> {
       err instanceof VarResolutionError ||
       err instanceof LockedFieldError ||
       err instanceof ResumeError ||
-      err instanceof EmptyTaskListError ||
       err instanceof InvalidAddedTaskError
     ) {
       process.stderr.write(`task-runner: ${err.message}\n`);

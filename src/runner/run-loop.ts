@@ -22,6 +22,7 @@ import {
 } from "./manifest.js";
 import { buildNudgeMessage } from "./nudge.js";
 import { type RunStatus, type RunSummary, renderSummary } from "./output.js";
+import { TASK_WORKFLOW_TEMPLATE, buildAddedTasksReminder } from "./task-workflow.js";
 
 export interface RunOverrides {
   cwd?: string;
@@ -59,17 +60,6 @@ export class VarResolutionError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "VarResolutionError";
-  }
-}
-
-export class EmptyTaskListError extends Error {
-  constructor() {
-    super(
-      "agent has no tasks\n" +
-        "  the agent's `tasks:` frontmatter is empty and no --add-task arguments\n" +
-        "  were provided. Add at least one task to the agent or pass --add-task.",
-    );
-    this.name = "EmptyTaskListError";
   }
 }
 
@@ -280,6 +270,10 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   mkdirSync(workspaceDir, { recursive: true });
   const assignmentPath = resolve(workspaceDir, "assignment.md");
 
+  const priorHadTasks = Boolean(
+    isResume && resume && Object.keys(resume.manifest.finalTasks).length > 0,
+  );
+
   const tasks =
     isResume && resume
       ? rebuildTasksFromSnapshot(config, resume.manifest.finalTasks, true)
@@ -304,9 +298,9 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     });
   }
 
-  if (tasks.size === 0) {
-    throw new EmptyTaskListError();
-  }
+  const hasTasks = tasks.size > 0;
+  const firstTimeTasksAppear = isResume && !priorHadTasks && hasTasks;
+  const resumeAddedNewTasks = isResume && priorHadTasks && addedTitles.length > 0;
 
   const injectedVars: Record<string, unknown> = {
     ...runtimeVars,
@@ -314,12 +308,28 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     run_id: runId,
     cwd,
   };
-  const basePrompt = interpolate(loaded.instructions, injectedVars);
+
+  // Fresh run: append the auto-workflow to the body if tasks exist, then interpolate the whole thing.
+  const freshBodySource =
+    hasTasks && !isResume
+      ? `${loaded.instructions}\n\n${TASK_WORKFLOW_TEMPLATE}`
+      : loaded.instructions;
+  const basePrompt = interpolate(freshBodySource, injectedVars);
+
   let initialPrompt: string;
   if (isResume) {
-    initialPrompt = message ?? "";
+    const parts: string[] = [message ?? ""];
+    if (firstTimeTasksAppear) {
+      // Prior sessions had no tasks, so claude's cached session never saw the workflow.
+      // Inject it into this follow-up message.
+      parts.push(interpolate(TASK_WORKFLOW_TEMPLATE, injectedVars));
+    } else if (resumeAddedNewTasks) {
+      // Claude already knows the workflow; just nudge it that new tasks appeared.
+      parts.push(buildAddedTasksReminder(addedTitles.length, assignmentPath));
+    }
+    initialPrompt = parts.join("\n\n");
   } else {
-    initialPrompt = message ? `${basePrompt}\n\n${message}` : basePrompt;
+    initialPrompt = message ? `${message}\n\n${basePrompt}` : basePrompt;
   }
 
   writeFileSync(assignmentPath, renderAssignment(Array.from(tasks.values())), "utf8");

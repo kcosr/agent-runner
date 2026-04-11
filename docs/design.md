@@ -269,24 +269,25 @@ task-runner run --agent example \
 **Optional frontmatter tasks:**
 
 The frontmatter `tasks:` field is optional. An agent.md may omit it
-entirely or declare an empty array:
+entirely or declare an empty array. Zero-task runs are valid — the
+runner invokes the agent once with just the instructions (and any
+positional `[message]`), captures the transcript, and exits `success`.
+The run loop's decision table handles zero tasks naturally: "all tasks
+completed" is vacuously true, so the run terminates after attempt 1.
 
 ```yaml
 ---
 name: assistant
 backend: claude
-# no tasks — caller must provide them via --add-task
+# no tasks — pure chat/Q&A agent
 ---
 ```
 
-If the combined task list (frontmatter + CLI) is still empty at runtime,
-the runner throws `EmptyTaskListError` (exit 3):
-
-```
-task-runner: agent has no tasks
-  the agent's `tasks:` frontmatter is empty and no --add-task arguments
-  were provided. Add at least one task to the agent or pass --add-task.
-```
+This pattern lets `task-runner` double as a generic claude wrapper for
+one-shot Q&A, with the full manifest/session/resume machinery still
+available. A resume of a zero-task run can later introduce tasks via
+`--add-task`; see [Automatic task workflow](#automatic-task-workflow)
+for how the workflow instructions get injected on that transition.
 
 **Locked tasks:**
 
@@ -294,6 +295,73 @@ If the agent has `lockedFields: [tasks]`, any `--add-task` from the CLI
 triggers `LockedFieldError` (exit 3), same as any other locked field.
 The run still works without `--add-task` — locking only prevents
 extension, not normal execution.
+
+## Automatic task workflow
+
+Agent authors do not write the "how to interact with tasks" boilerplate
+in their `agent.md` bodies. The runner injects a fixed workflow block
+automatically whenever the run has tasks:
+
+```
+Your assignment is at `{{assignment_path}}`. Read it first. Work through
+each task in order. For each task:
+
+1. Set the task's **Status** to `in_progress`.
+2. Do the work described in the task body.
+3. Record your findings in the task's **Notes** block.
+4. Set the task's **Status** to `completed`.
+
+Valid statuses are `pending`, `in_progress`, `completed`, and `blocked`.
+If you cannot complete a task, set its status to `blocked` and explain
+why in the Notes block — the runner will stop and surface the blocker
+rather than retrying.
+
+Do not delete or reorder tasks in `{{assignment_path}}`.
+```
+
+There is no opt-out toggle. The block is interpolated with the same
+`{{assignment_path}}` value used elsewhere.
+
+### Injection rules
+
+The exact behavior depends on what kind of session is starting and
+whether tasks existed before:
+
+| Scenario | Prompt composition |
+|---|---|
+| Fresh run, `tasks.size > 0` | `<message>` → `<body>` → `<workflow>` |
+| Fresh run, `tasks.size === 0` | `<message>` → `<body>` (no workflow) |
+| Resume, prior sessions had tasks, no `--add-task` | `<message>` only |
+| Resume, prior sessions had tasks, `--add-task` used | `<message>` + short reminder line |
+| Resume, prior sessions had zero tasks, this session has tasks | `<message>` → `<workflow>` |
+
+The "message-above-body" order for fresh runs puts the caller's specific
+ask before the agent's standing role and context — the ask frames the
+context rather than the other way around. Matches how you'd brief a
+human collaborator.
+
+On resume sessions, the instructions body is **never** re-sent, because
+claude has it in the cached conversation from a prior session. The
+workflow is only injected on the first session that has tasks (session
+0 for runs that start with tasks; the later resume session for runs
+that started with zero and later added some).
+
+### New-tasks reminder
+
+When `--add-task` is used on a resume session and the prior sessions
+already had tasks, claude has the workflow cached but doesn't know new
+tasks were just written to `assignment.md`. The runner appends a short
+parenthetical reminder to the follow-up message:
+
+```
+<caller's message>
+
+(task-runner: 2 new tasks have been added to your assignment since
+the last session — please re-read /abs/path/assignment.md before
+continuing.)
+```
+
+Just enough to make claude re-read the file. Not the full workflow.
 
 ## Agent resolution
 
