@@ -337,3 +337,16 @@ A dimension with no real issues produces no findings in that
 task. Say "No issues found in this dimension" and move on.
 Padding the review to look thorough is worse than a short
 honest review.
+
+**Delegating via subagents.** For a large doc set, you may
+delegate independent dimensions to subagents to parallelize —
+e.g. run the commands/flags/API accuracy pass (t05) and the
+examples runnability pass (t06) as separate subagents while
+you continue with the structure pass. Do not delegate the
+inventory task (t01) or the synthesis task (t12); both depend
+on your own accumulated context. When a subagent returns,
+fold its findings into the task's Notes block in the same
+severity/format used by the rest of the review so the
+synthesis pass sees a consistent shape. Delegation is
+optional — for a small project, working the tasks yourself is
+usually faster.

@@ -325,3 +325,15 @@ A dimension with no real issues produces no findings in that
 task. Say "No issues found in this dimension" and move on.
 Padding the review to look thorough is worse than a short honest
 review.
+
+**Delegating via subagents.** For a large review, you may
+delegate independent task dimensions to subagents to
+parallelize — e.g. run the concurrency review and the security
+review as separate subagents while you prepare the synthesis.
+Do not delegate the orient task (t01) or the synthesis task
+(t12); both depend on your own accumulated context. When a
+subagent returns, fold its findings into the task's Notes
+block in the same severity/format used by the rest of the
+review so the synthesis pass sees a consistent shape.
+Delegation is optional — for a small or ranged review, working
+the tasks yourself is usually faster.
