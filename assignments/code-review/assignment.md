@@ -22,6 +22,83 @@ vars:
         - `HEAD~N..HEAD`                — N commits back to HEAD
         - `main..<branch>`              — branch divergence
         - any other git range spec      — passed through to git
+callerInstructions: |
+  This run produces a structured code review in the task notes.
+  Read it, implement the fixes you agree with, then resume this
+  same run for a delta re-review. The reviewer's synthesis in
+  `t12_synthesis.notes` is the ranked top-findings list; each
+  individual task (t02 architecture, t03 concurrency, …, t11 docs
+  drift) carries the raw findings for its dimension with severity
+  tags.
+
+  ## Reviewing findings
+
+  Pull the full review:
+
+      task-runner status {{run_id}}                         # human-readable
+      task-runner status {{run_id}} --output-format json    # machine-readable
+
+  Each finding in a task's notes block follows this format:
+
+      [SEVERITY] file:line — short title
+        Observation: ...
+        Why it matters: ...
+        Suggested fix: ...
+
+  Severity tags range from NIT → LOW → MEDIUM → HIGH → CRITICAL.
+  Not every finding requires a fix. The reviewer has been
+  calibrated to surface real issues (including "no issues found in
+  this dimension" as a valid answer), so feel free to be
+  selective: decline findings that are out of scope for your
+  current change, pre-existing issues you've already triaged, or
+  ones you genuinely disagree with.
+
+  ## Implementing fixes
+
+  Apply the changes you agree with, run your normal check
+  pipeline (tests, lint, build), and commit. Keep the diff small
+  and targeted — a focused fix commit is easier to delta-review
+  than a sprawling one.
+
+  ## Requesting a delta re-review
+
+  After implementing fixes, resume this same run with a follow-up
+  message that tells the reviewer what you did:
+
+      task-runner run --resume-run {{run_id}} "<your follow-up>"
+
+  The follow-up message should cover, for each prior finding:
+    - **resolved** — cite the file:line or commit of the fix so
+      the reviewer can verify it landed correctly
+    - **declined** — explain why the finding isn't worth
+      addressing (out of scope, disagree with framing, etc.)
+    - **deferred** — if you agree but are tracking it for a
+      follow-up branch, say so
+
+  Any context that matters for the delta pass — pre-existing bugs
+  you're leaving alone, design decisions you made along the way,
+  scope limitations — should also go in the follow-up.
+
+  The reviewer has been instructed to do a **focused delta pass**
+  on resume, not a full 12-task re-walk. It will verify each prior
+  finding's resolution status, scan for any new issues the fixes
+  may have introduced, and rewrite the t12 synthesis with a
+  "Delta review" structure. Tasks t02–t11 retain their original
+  findings as the audit trail from the first pass, so you can
+  always see how findings evolved across rounds.
+
+  Typical reviews settle in one or two delta passes. If a finding
+  legitimately needs more discussion than a one-shot exchange
+  supports, resume, discuss, and iterate as needed.
+
+  ## Disagreements
+
+  If you disagree with a finding, say so in the follow-up message
+  with your reasoning. The reviewer is instructed to accept caller
+  decisions and not re-flag declined findings on the next pass —
+  the audit trail preserves the original finding, and the delta
+  synthesis records that you declined it. A finding you push back
+  on is not a failed review; it's a calibration datapoint.
 tasks:
   - id: t01_orient
     title: Repo orientation and scope resolution
