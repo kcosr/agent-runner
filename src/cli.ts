@@ -12,6 +12,7 @@ import {
   loadAssignmentConfig,
 } from "./config/loader.js";
 import { ResumeError, resolveResumeTarget } from "./runner/manifest.js";
+import { renderManifestStatus } from "./runner/output.js";
 import {
   EmptyPromptError,
   InvalidAddedTaskError,
@@ -20,7 +21,7 @@ import {
   runAgent,
 } from "./runner/run-loop.js";
 
-const HELP = `Usage: task-runner <run|init> [--agent <name-or-path>] [--assignment <name-or-path>] [options] [message]
+const HELP = `Usage: task-runner <run|init|status> [options] [args]
 
 Commands:
   run                     Execute an agent. Either a fresh run, a resume,
@@ -31,6 +32,12 @@ Commands:
                           stores a manifest with status=initialized and a
                           frozen pendingPrompt. Resume later with
                           \`task-runner run --resume-run <id>\`.
+  status <id|path>        Read a run's persisted manifest and print its
+                          current status, agent/assignment/backend, task
+                          checklist with statuses and notes, and a hint
+                          for resuming. Read-only — touches no state.
+                          Supports --output-format json and --field for
+                          selective JSON output.
 
 Arguments:
   [message]               Positional text. For a fresh run or init,
@@ -81,6 +88,9 @@ Options:
                           backend display label — claude --name / codex
                           thread/name/set). Vars are interpolated.
   --output-format <fmt>   Output format: "text" (default) or "json".
+  --field <name>          (status only, repeatable) When --output-format
+                          is json, restrict output to these top-level
+                          manifest fields.
   --help, -h              Print this message.
 
 Exit codes:
@@ -104,6 +114,10 @@ async function main(): Promise<void> {
   if (parsed.showHelp) {
     process.stdout.write(HELP);
     process.exit(0);
+  }
+
+  if (parsed.command === "status") {
+    runStatus(parsed);
   }
 
   if (parsed.command !== "run" && parsed.command !== "init") {
@@ -281,6 +295,62 @@ async function main(): Promise<void> {
     process.stderr.write(`task-runner: ${(err as Error).message}\n`);
     process.exit(4);
   }
+}
+
+function runStatus(parsed: ParsedArgs): never {
+  // The positional run id/path lands in `parsed.message` because the
+  // parser collects positionals into a single string. The status command
+  // expects exactly one positional.
+  const target = parsed.message?.trim();
+  if (!target || target.length === 0) {
+    process.stderr.write("task-runner: status requires a run id or workspace path\n");
+    process.stderr.write(
+      "Usage: task-runner status <id-or-path> [--output-format json] [--field name]...\n",
+    );
+    process.exit(3);
+  }
+
+  let resolved: ReturnType<typeof resolveResumeTarget>;
+  try {
+    resolved = resolveResumeTarget(target);
+  } catch (err) {
+    if (err instanceof ResumeError) {
+      process.stderr.write(`task-runner: ${err.message}\n`);
+    } else {
+      process.stderr.write(`task-runner: ${(err as Error).message}\n`);
+    }
+    process.exit(3);
+  }
+
+  if (parsed.outputFormat === "json") {
+    if (parsed.fields.length > 0) {
+      const projection: Record<string, unknown> = {};
+      const manifest = resolved.manifest as unknown as Record<string, unknown>;
+      const missing: string[] = [];
+      for (const field of parsed.fields) {
+        if (field in manifest) {
+          projection[field] = manifest[field];
+        } else {
+          missing.push(field);
+        }
+      }
+      if (missing.length > 0) {
+        process.stderr.write(`task-runner: unknown manifest field(s): ${missing.join(", ")}\n`);
+        process.exit(3);
+      }
+      process.stdout.write(`${JSON.stringify(projection, null, 2)}\n`);
+    } else {
+      process.stdout.write(`${JSON.stringify(resolved.manifest, null, 2)}\n`);
+    }
+  } else {
+    if (parsed.fields.length > 0) {
+      process.stderr.write("task-runner: --field requires --output-format json\n");
+      process.exit(3);
+    }
+    process.stdout.write(renderManifestStatus(resolved.manifest));
+  }
+
+  process.exit(0);
 }
 
 main();

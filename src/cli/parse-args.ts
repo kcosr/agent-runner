@@ -18,6 +18,7 @@ export interface ParsedArgs {
   outputFormat: OutputFormat;
   message?: string;
   addedTasks: string[];
+  fields: string[];
   showHelp: boolean;
 }
 
@@ -32,6 +33,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     vars: {},
     outputFormat: "text",
     addedTasks: [],
+    fields: [],
     showHelp: false,
   };
 
@@ -118,6 +120,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
       if (next === undefined) throw new Error("--session-name requires a value");
       if (next.trim().length === 0) throw new Error("--session-name cannot be empty");
       result.sessionName = next;
+    } else if (arg === "--field") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--field requires a value");
+      if (next.trim().length === 0) throw new Error("--field cannot be empty");
+      result.fields.push(next);
     } else if (arg === "--output-format") {
       const next = args.shift();
       if (next === undefined) throw new Error("--output-format requires a value");

@@ -1,4 +1,5 @@
 import type { TaskState } from "../assignment/model.js";
+import type { RunManifest } from "./manifest.js";
 
 export type RunStatus = "initialized" | "success" | "blocked" | "exhausted" | "aborted" | "error";
 
@@ -68,6 +69,71 @@ export function renderSummary(summary: RunSummary): string {
   lines.push("");
   lines.push("To continue this run with a follow-up message:");
   lines.push(`  task-runner run --resume-run ${summary.runId} "..."`);
+
+  return `${lines.join("\n")}\n`;
+}
+
+export function renderManifestStatus(manifest: RunManifest): string {
+  const lines: string[] = [];
+  lines.push("");
+  lines.push(`── run ${manifest.runId} ──`);
+  lines.push(
+    `Status: ${manifest.status}${manifest.exitCode !== null ? ` (exit ${manifest.exitCode})` : ""}`,
+  );
+  lines.push(`Agent: ${manifest.agent.name}`);
+  if (manifest.assignment) {
+    lines.push(`Assignment: ${manifest.assignment.name}`);
+  }
+  lines.push(`Backend: ${manifest.backend}${manifest.model ? ` (${manifest.model})` : ""}`);
+  if (manifest.sessionName) {
+    lines.push(`Session name: ${manifest.sessionName}`);
+  }
+  if (manifest.backendSessionId) {
+    lines.push(`Backend session: ${manifest.backendSessionId}`);
+  }
+  lines.push(`Cwd: ${manifest.cwd}`);
+  lines.push(`Workspace: ${manifest.workspaceDir}`);
+  lines.push(`Assignment file: ${manifest.assignmentPath}`);
+  lines.push(`Started: ${manifest.startedAt}`);
+  if (manifest.endedAt) {
+    lines.push(`Ended: ${manifest.endedAt}`);
+  }
+  lines.push(
+    `Tasks completed: ${manifest.tasksCompleted}/${manifest.tasksTotal}    Attempts: ${manifest.attempts}/${manifest.maxAttempts}    Sessions: ${manifest.sessionCount}`,
+  );
+
+  const taskEntries = Object.values(manifest.finalTasks);
+  if (taskEntries.length > 0) {
+    lines.push("");
+    lines.push("Tasks:");
+    for (const task of taskEntries) {
+      lines.push(`  - ${task.id} — ${task.title} [${task.status}]`);
+      const notes = task.notes.trim();
+      if (notes) {
+        for (const noteLine of notes.split("\n")) {
+          lines.push(`      ${noteLine}`);
+        }
+      }
+    }
+  }
+
+  if (manifest.status === "running") {
+    lines.push("");
+    lines.push("(run is still in progress; status reflects the most recent persisted attempt)");
+  } else if (manifest.status === "initialized") {
+    lines.push("");
+    lines.push("To execute this run:");
+    lines.push(`  task-runner run --resume-run ${manifest.runId}`);
+  } else if (
+    manifest.status === "blocked" ||
+    manifest.status === "exhausted" ||
+    manifest.status === "aborted" ||
+    manifest.status === "error"
+  ) {
+    lines.push("");
+    lines.push("To resume this run:");
+    lines.push(`  task-runner run --resume-run ${manifest.runId} "..."`);
+  }
 
   return `${lines.join("\n")}\n`;
 }

@@ -1233,7 +1233,7 @@ The raw JSON events are still captured verbatim into
 ## CLI shape
 
 ```
-task-runner <run|init>
+task-runner <run|init|status>
                [--agent <name-or-path>]
                [--assignment <name-or-path>]
                [--resume-run <id|path>]       (run only)
@@ -1276,6 +1276,28 @@ unless `--add-task` is used.
 `--assignment` is **forbidden** with `--resume-run`. The existing
 workspace `assignment.md` is authoritative on resume; use `--add-task`
 and/or a follow-up `[message]` to extend the run.
+
+### `task-runner status`
+
+`task-runner status <id|path>` is a read-only inspector for an
+existing run. It resolves the manifest the same way `--resume-run`
+does (slug under `.task-runner/`, workspace dir, or direct
+`run.json` path) and prints either a human-readable summary or the
+manifest as JSON. It never invokes a backend, never writes to disk,
+never touches state.
+
+- **Default (text)**: a status block with the run id, agent,
+  assignment, backend/model, sessionName, cwd, workspace path,
+  start/end timestamps, attempt counts, and the per-task checklist
+  with statuses and notes. Trailing hint matches the run's status
+  (resume command for terminal states, execute command for
+  initialized runs).
+- **`--output-format json`**: prints the manifest verbatim as
+  pretty-printed JSON. Byte-identical to `cat run.json`.
+- **`--field <name>` (repeatable, json mode only)**: projects to
+  the named top-level manifest fields and prints just those as a
+  JSON object. Unknown field names exit with code 3. Use this for
+  scripts that only care about, say, `status` and `tasksCompleted`.
 
 ### `task-runner init`
 
