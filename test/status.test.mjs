@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
@@ -328,9 +328,9 @@ test("status: missing workspace assignment.md falls back gracefully", async () =
     m.status = "running";
     m.exitCode = null;
     m.endedAt = null;
-    // Point assignmentPath at a file that doesn't exist
-    m.assignmentPath = join(outcome.workspaceDir, "does-not-exist.md");
   });
+
+  rmSync(join(outcome.workspaceDir, "assignment.md"));
 
   const text = runCli(["status", outcome.runId], { cwd: dir });
   assert.match(text, /Status: running/);

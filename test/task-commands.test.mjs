@@ -361,6 +361,59 @@ test("task set: works on a terminal-status run after it has been resolved", asyn
   assert.equal(after.finalTasks.t1.notes, "Post-hoc annotation");
 });
 
+test("task set: rejects status changes on a terminal non-passive run", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+
+  const manifestPath = join(outcome.workspaceDir, "run.json");
+  const m = JSON.parse(readFileSync(manifestPath, "utf8"));
+  m.status = "success";
+  m.endedAt = new Date().toISOString();
+  writeFileSync(manifestPath, `${JSON.stringify(m, null, 2)}\n`);
+
+  const result = runCliExpectFail(["task", "set", outcome.runId, "t1", "--status", "completed"], {
+    cwd: dir,
+  });
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /cannot change task status on a terminal non-passive run/);
+});
+
+test("task add: rejects terminal non-passive runs", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+
+  const manifestPath = join(outcome.workspaceDir, "run.json");
+  const m = JSON.parse(readFileSync(manifestPath, "utf8"));
+  m.status = "success";
+  m.endedAt = new Date().toISOString();
+  writeFileSync(manifestPath, `${JSON.stringify(m, null, 2)}\n`);
+
+  const result = runCliExpectFail(["task", "add", outcome.runId, "--title", "Follow-up"], {
+    cwd: dir,
+  });
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /cannot add tasks to a terminal non-passive run/);
+});
+
+test("task set: rejects manifests whose assignmentPath does not match the workspace", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+
+  const manifestPath = join(outcome.workspaceDir, "run.json");
+  const m = JSON.parse(readFileSync(manifestPath, "utf8"));
+  m.assignmentPath = join(dir, "elsewhere.md");
+  writeFileSync(manifestPath, `${JSON.stringify(m, null, 2)}\n`);
+
+  const result = runCliExpectFail(["task", "set", outcome.runId, "t1", "--notes", "nope"], {
+    cwd: dir,
+  });
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /has assignmentPath/);
+});
+
 test("task command: missing subcommand prints usage and exits 3", async () => {
   const result = runCliExpectFail(["task"], {});
   assert.equal(result.status, 3);

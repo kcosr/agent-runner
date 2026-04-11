@@ -1,7 +1,11 @@
-const TASK_ID_MARKER = /<!--\s*task-id:\s*([A-Za-z0-9._:-]+)\s*-->/g;
-const NOTES_START_MARKER = /<!--\s*notes:start\s*-->/;
-const NOTES_END_MARKER = /<!--\s*notes:end\s*-->/;
-const STATUS_LINE = /^\s*\*\*Status:\*\*\s*(.*?)\s*$/m;
+const TASK_ID_MARKER = /^<!--\s*task-id:\s*([A-Za-z0-9._:-]+)\s*-->\s*$/gm;
+const NOTES_START_MARKER = "<!-- notes:start -->";
+const NOTES_END_MARKER = "<!-- notes:end -->";
+const STATUS_LINE = /^\s*\*\*Status:\*\*\s*(.*?)\s*$/gm;
+
+function clonePattern(pattern: RegExp): RegExp {
+  return new RegExp(pattern.source, pattern.flags);
+}
 
 export interface ParsedSectionUpdate {
   taskId: string;
@@ -11,10 +15,12 @@ export interface ParsedSectionUpdate {
 
 export function parseAssignment(raw: string): ParsedSectionUpdate[] {
   const markers: { id: string; start: number }[] = [];
-  for (const match of raw.matchAll(TASK_ID_MARKER)) {
+  const seen = new Set<string>();
+  for (const match of raw.matchAll(clonePattern(TASK_ID_MARKER))) {
     if (match.index !== undefined) {
       const id = match[1];
-      if (id !== undefined) {
+      if (id !== undefined && !seen.has(id)) {
+        seen.add(id);
         markers.push({ id, start: match.index });
       }
     }
@@ -29,18 +35,23 @@ export function parseAssignment(raw: string): ParsedSectionUpdate[] {
     const section = raw.slice(current.start, end);
     const update: ParsedSectionUpdate = { taskId: current.id };
 
-    const statusMatch = section.match(STATUS_LINE);
-    if (statusMatch?.[1] !== undefined) {
-      update.status = statusMatch[1].trim();
+    let lastStatus: string | undefined;
+    for (const statusMatch of section.matchAll(clonePattern(STATUS_LINE))) {
+      if (statusMatch[1] !== undefined) {
+        lastStatus = statusMatch[1].trim();
+      }
+    }
+    if (lastStatus !== undefined) {
+      update.status = lastStatus;
     }
 
-    const startMatch = section.match(NOTES_START_MARKER);
-    if (startMatch?.index !== undefined) {
-      const startOffset = startMatch.index + startMatch[0].length;
+    const startIndex = section.lastIndexOf(NOTES_START_MARKER);
+    if (startIndex >= 0) {
+      const startOffset = startIndex + NOTES_START_MARKER.length;
       const tail = section.slice(startOffset);
-      const endMatch = tail.match(NOTES_END_MARKER);
-      if (endMatch?.index !== undefined) {
-        update.notes = tail.slice(0, endMatch.index).trim();
+      const endIndex = tail.indexOf(NOTES_END_MARKER);
+      if (endIndex >= 0) {
+        update.notes = tail.slice(0, endIndex).trim();
       } else {
         update.notes = tail.trim();
       }

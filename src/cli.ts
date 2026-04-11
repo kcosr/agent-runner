@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { mergeUpdates } from "./assignment/merge.js";
 import { type TaskState, VALID_STATUSES, isValidStatus } from "./assignment/model.js";
 import { parseAssignment } from "./assignment/parser.js";
@@ -24,6 +24,7 @@ import {
   type RunManifest,
   resolveResumeTarget,
   snapshotTasks,
+  workspaceAssignmentPath,
   writeManifest,
 } from "./runner/manifest.js";
 import { type LiveTaskOverlay, applyLiveOverlay, renderManifestStatus } from "./runner/output.js";
@@ -37,6 +38,7 @@ import {
   runAgent,
 } from "./runner/run-loop.js";
 import { shortId } from "./util/short-id.js";
+import { writeTextFileAtomic } from "./util/write-file-atomic.js";
 
 const HELP = `Usage: task-runner <run|init|status|task> [options] [args]
 
@@ -493,7 +495,7 @@ function runStatus(parsed: ParsedArgs): never {
   let liveOverlay: LiveTaskOverlay | undefined;
   if (resolved.manifest.status === "running") {
     try {
-      const raw = readFileSync(resolved.manifest.assignmentPath, "utf8");
+      const raw = readFileSync(workspaceAssignmentPath(resolved.workspaceDir), "utf8");
       const updates = parseAssignment(raw);
       if (updates.length > 0) {
         liveOverlay = new Map();
@@ -572,6 +574,14 @@ const MUTATION_ALLOWED_STATUSES = new Set([
   "error",
 ]);
 
+const TERMINAL_MUTATION_STATUSES = new Set<ManifestStatus>([
+  "success",
+  "blocked",
+  "exhausted",
+  "aborted",
+  "error",
+]);
+
 function resolveRunOrExit(target: string): ReturnType<typeof resolveResumeTarget> {
   try {
     return resolveResumeTarget(target);
@@ -594,6 +604,10 @@ function requireMutableStatus(manifest: RunManifest): void {
   }
 }
 
+function isTerminalNonPassiveRun(manifest: RunManifest): boolean {
+  return manifest.backend !== "passive" && TERMINAL_MUTATION_STATUSES.has(manifest.status);
+}
+
 // Build a task Map from the manifest snapshot, then overlay any live
 // status/notes edits present in the workspace assignment.md. Object
 // insertion order on `finalTasks` preserves the run's original task
@@ -611,7 +625,7 @@ function buildTaskMapFromManifest(manifest: RunManifest): Map<string, TaskState>
   }
 
   try {
-    const raw = readFileSync(manifest.assignmentPath, "utf8");
+    const raw = readFileSync(workspaceAssignmentPath(manifest.workspaceDir), "utf8");
     const updates = parseAssignment(raw);
     if (updates.length > 0) mergeUpdates(tasks, updates);
   } catch {
@@ -626,7 +640,7 @@ function persistTaskMap(
   tasks: Map<string, TaskState>,
 ): void {
   const ordered = Array.from(tasks.values());
-  writeFileSync(resolved.manifest.assignmentPath, renderAssignment(ordered), "utf8");
+  writeTextFileAtomic(workspaceAssignmentPath(resolved.workspaceDir), renderAssignment(ordered));
   resolved.manifest.finalTasks = snapshotTasks(tasks);
   resolved.manifest.tasksCompleted = ordered.filter((t) => t.status === "completed").length;
   resolved.manifest.tasksTotal = ordered.length;
@@ -724,6 +738,17 @@ function runTaskSet(parsed: ParsedArgs): never {
     process.exit(3);
   }
 
+  if (
+    parsed.taskStatus !== undefined &&
+    parsed.taskStatus !== target.status &&
+    isTerminalNonPassiveRun(resolved.manifest)
+  ) {
+    process.stderr.write(
+      "task-runner: cannot change task status on a terminal non-passive run; use task-runner run --resume-run <id> with a follow-up message instead\n",
+    );
+    process.exit(3);
+  }
+
   if (parsed.taskStatus !== undefined) {
     target.status = parsed.taskStatus as TaskState["status"];
   }
@@ -774,6 +799,13 @@ function runTaskAdd(parsed: ParsedArgs): never {
 
   const resolved = resolveRunOrExit(runArg);
   requireMutableStatus(resolved.manifest);
+
+  if (isTerminalNonPassiveRun(resolved.manifest)) {
+    process.stderr.write(
+      'task-runner: cannot add tasks to a terminal non-passive run; use task-runner run --resume-run <id> --add-task "..." instead\n',
+    );
+    process.exit(3);
+  }
 
   // Check the frozen manifest-level lockedFields instead of re-reading
   // the agent + assignment source files. Under the manifest-canonical

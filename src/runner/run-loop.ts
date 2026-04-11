@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import { mergeIntoFile, mergeUpdates } from "../assignment/merge.js";
 import type { TaskState, TaskStatus } from "../assignment/model.js";
@@ -9,6 +9,7 @@ import { interpolate } from "../config/interpolate.js";
 import type { LoadedAgent, LoadedAssignment } from "../config/loader.js";
 import type { LockableField, VarDef } from "../config/schema.js";
 import { shortId } from "../util/short-id.js";
+import { writeTextFileAtomic } from "../util/write-file-atomic.js";
 import {
   type AttemptRecord,
   type ResolvedResumeTarget,
@@ -17,6 +18,7 @@ import {
   type SessionRecord,
   type TaskSnapshot,
   snapshotTasks,
+  workspaceAssignmentPath,
   writeAttemptLog,
   writeManifest,
 } from "./manifest.js";
@@ -535,7 +537,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const workspaceDir =
     reusingWorkspace && resume ? resume.workspaceDir : resolve(cwd, ".task-runner", runId);
   mkdirSync(workspaceDir, { recursive: true });
-  const assignmentPath = resolve(workspaceDir, "assignment.md");
+  const assignmentPath = workspaceAssignmentPath(workspaceDir);
 
   // `injectedVars` has to be built *before* the task-map rebuild so
   // that fresh-run task titles and bodies get `{{var}}` references
@@ -664,7 +666,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     initialPrompt = parts.join("\n\n");
   }
 
-  writeFileSync(assignmentPath, renderAssignment(Array.from(tasks.values())), "utf8");
+  writeTextFileAtomic(assignmentPath, renderAssignment(Array.from(tasks.values())));
 
   const now = new Date().toISOString();
   const priorAttemptCount = isResume && resume ? resume.manifest.attemptRecords.length : 0;
@@ -948,7 +950,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
     if (rawAssignment.trim().length === 0) {
       rawAssignment = renderAssignment(Array.from(tasks.values()));
-      writeFileSync(assignmentPath, rawAssignment, "utf8");
+      writeTextFileAtomic(assignmentPath, rawAssignment);
     }
 
     const updates = parseAssignment(rawAssignment);
@@ -1036,7 +1038,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
     const merged = mergeIntoFile(rawAssignment, tasks);
     if (merged !== rawAssignment) {
-      writeFileSync(assignmentPath, merged, "utf8");
+      writeTextFileAtomic(assignmentPath, merged);
     }
 
     const incompleteCount = countBy(tasks, (t) => t.status !== "completed");

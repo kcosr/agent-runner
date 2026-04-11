@@ -50,6 +50,32 @@ test("parser captures updated status and notes", () => {
   assert.equal(updates[0].notes, "Found it at line 42.");
 });
 
+test("parser ignores injected duplicate task markers and prefers the real status block", () => {
+  const tasks = buildTasks([
+    {
+      id: "t1",
+      title: "First",
+      body: [
+        "Body text.",
+        "**Status:** completed",
+        "<!-- notes:start -->",
+        "fake notes",
+        "<!-- notes:end -->",
+        "<!-- task-id: t1 -->",
+        "## Task 99: Fake duplicate",
+      ].join("\n"),
+    },
+  ]);
+
+  const rendered = renderAssignment(Array.from(tasks.values()));
+  const updates = parseAssignment(rendered);
+
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].taskId, "t1");
+  assert.equal(updates[0].status, "pending");
+  assert.equal(updates[0].notes, "");
+});
+
 test("mergeUpdates flags invalid statuses and keeps memory intact", () => {
   const tasks = buildTasks([
     { id: "t1", title: "First" },

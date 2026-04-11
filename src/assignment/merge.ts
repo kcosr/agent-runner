@@ -7,7 +7,7 @@ import {
 import type { ParsedSectionUpdate } from "./parser.js";
 import { renderSection } from "./writer.js";
 
-const TASK_ID_MARKER = /<!--\s*task-id:\s*([A-Za-z0-9._:-]+)\s*-->/g;
+const TASK_ID_MARKER = /^<!--\s*task-id:\s*([A-Za-z0-9._:-]+)\s*-->\s*$/gm;
 
 export interface MergeResult {
   invalidStatuses: InvalidStatusReport[];
@@ -27,6 +27,10 @@ export function mergeUpdates(
   const seen = new Set<string>();
 
   for (const update of updates) {
+    if (seen.has(update.taskId)) {
+      result.unknownInFile.push(update.taskId);
+      continue;
+    }
     const task = tasks.get(update.taskId);
     if (!task) {
       result.unknownInFile.push(update.taskId);
