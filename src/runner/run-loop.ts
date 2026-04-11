@@ -43,6 +43,7 @@ export interface RunOptions {
   overrides?: RunOverrides;
   resume?: ResolvedResumeTarget;
   initialize?: boolean;
+  abortSignal?: AbortSignal;
   stderr: (text: string) => void;
   stdout: (text: string) => void;
   resumeFailureDetector?: (result: BackendInvokeResult) => boolean;
@@ -609,6 +610,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       unrestricted,
       timeoutSec,
       resumeSessionId: sessionId ?? undefined,
+      abortSignal: opts.abortSignal,
       onStdoutText: (text) => stdout(text),
       onStderrText: (text) => stderr(text),
     });
@@ -680,6 +682,12 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     sessionRecord.lastAttempt = globalAttemptNumber;
 
     writeManifest(workspaceDir, manifest);
+
+    if (invokeResult.aborted) {
+      terminal = { status: "aborted", exitCode: 130 };
+      stderr("\ntask-runner: interrupted by user; stopping.\n");
+      break;
+    }
 
     if (resumeRejected) {
       terminal = { status: "error", exitCode: 4 };

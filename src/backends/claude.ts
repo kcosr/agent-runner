@@ -184,6 +184,7 @@ export const claudeBackend: Backend = {
       cwd: ctx.cwd,
       env: ctx.env,
       timeoutMs: ctx.timeoutSec * 1000,
+      abortSignal: ctx.abortSignal,
       onStdout: (chunk) => feed(state, chunk.toString("utf8")),
       onStderr: (chunk) => ctx.onStderrText?.(chunk.toString("utf8")),
     });
@@ -199,6 +200,7 @@ export const claudeBackend: Backend = {
       exitCode: result.exitCode,
       signal: result.signal,
       timedOut: result.timedOut,
+      aborted: result.aborted,
       sessionId: state.sessionId,
       transcript,
       rawStdout: result.stdoutText,

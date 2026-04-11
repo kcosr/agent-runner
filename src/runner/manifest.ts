@@ -8,6 +8,7 @@ export type ManifestStatus =
   | "success"
   | "blocked"
   | "exhausted"
+  | "aborted"
   | "error";
 
 const ATTEMPT_LOG_DIR = "attempts";

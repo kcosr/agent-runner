@@ -1,6 +1,6 @@
 import type { TaskState } from "../assignment/model.js";
 
-export type RunStatus = "initialized" | "success" | "blocked" | "exhausted" | "error";
+export type RunStatus = "initialized" | "success" | "blocked" | "exhausted" | "aborted" | "error";
 
 export interface RunSummary {
   status: RunStatus;
@@ -32,6 +32,16 @@ export function renderSummary(summary: RunSummary): string {
     lines.push("");
     lines.push("To execute this run:");
     lines.push(`  task-runner run --resume-run ${summary.runId}`);
+    return `${lines.join("\n")}\n`;
+  }
+
+  if (summary.status === "aborted") {
+    lines.push(`Tasks completed: ${summary.tasksCompleted}/${summary.tasksTotal}`);
+    lines.push(`Attempts: ${summary.attempts}/${summary.maxAttempts}`);
+    lines.push(`Assignment file: ${summary.assignmentPath}`);
+    lines.push("");
+    lines.push("Run was interrupted by the user. To resume:");
+    lines.push(`  task-runner run --resume-run ${summary.runId} "..."`);
     return `${lines.join("\n")}\n`;
   }
 

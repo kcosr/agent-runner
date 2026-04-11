@@ -511,6 +511,7 @@ export const codexBackend: Backend = {
     let transport: Transport | undefined;
     let client: CodexClient | undefined;
     let timedOut = false;
+    let aborted = false;
 
     const state: AccumulatorState = {
       threadId: null,
@@ -592,11 +593,25 @@ export const codexBackend: Backend = {
       };
 
       const turnTimeoutMs = ctx.timeoutSec * 1000;
+      let timeoutHandle: NodeJS.Timeout | undefined;
       const turnDeadline = new Promise<"timeout">((resolve) => {
-        setTimeout(() => resolve("timeout"), turnTimeoutMs);
+        timeoutHandle = setTimeout(() => resolve("timeout"), turnTimeoutMs);
       });
 
-      // Fire turn/start and wait for either completion or timeout.
+      // Wait for an external abort signal (Ctrl+C). Resolves to "abort"
+      // and cleans up its listener when the race settles.
+      let abortListener: (() => void) | undefined;
+      const turnAbort = new Promise<"abort">((resolve) => {
+        if (!ctx.abortSignal) return;
+        if (ctx.abortSignal.aborted) {
+          resolve("abort");
+          return;
+        }
+        abortListener = () => resolve("abort");
+        ctx.abortSignal.addEventListener("abort", abortListener, { once: true });
+      });
+
+      // Fire turn/start and wait for either completion, timeout, or abort.
       const turnStartPromise = client
         .call<unknown>("turn/start", turnStartPayload)
         .then((result) => {
@@ -608,10 +623,17 @@ export const codexBackend: Backend = {
       const race = await Promise.race([
         Promise.all([turnStartPromise, turnCompletedPromise]).then(() => "done" as const),
         turnDeadline,
+        turnAbort,
       ]);
 
-      if (race === "timeout") {
-        timedOut = true;
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      if (abortListener && ctx.abortSignal) {
+        ctx.abortSignal.removeEventListener("abort", abortListener);
+      }
+
+      if (race === "timeout" || race === "abort") {
+        if (race === "timeout") timedOut = true;
+        if (race === "abort") aborted = true;
         if (state.threadId && state.turnId) {
           try {
             await client.call("turn/interrupt", {
@@ -630,6 +652,7 @@ export const codexBackend: Backend = {
         exitCode: 1,
         signal: null,
         timedOut,
+        aborted,
         sessionId: state.threadId,
         transcript: null,
         rawStdout: rawStdoutChunks.join("\n"),
@@ -643,7 +666,7 @@ export const codexBackend: Backend = {
     const transcript = state.completedText.trim() || state.streamedText.trim() || null;
 
     const exitCode = (() => {
-      if (timedOut) return 1;
+      if (timedOut || aborted) return 1;
       if (state.turnStatus === "completed") return 0;
       if (state.turnStatus === "failed" || state.turnStatus === "interrupted") return 1;
       return 1; // unknown / incomplete
@@ -656,6 +679,7 @@ export const codexBackend: Backend = {
       exitCode,
       signal: null,
       timedOut,
+      aborted,
       sessionId: state.threadId,
       transcript,
       rawStdout: rawStdoutChunks.join("\n"),

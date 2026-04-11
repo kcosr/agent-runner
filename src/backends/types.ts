@@ -9,6 +9,7 @@ export interface BackendInvokeContext {
   unrestricted?: boolean;
   timeoutSec: number;
   resumeSessionId?: string;
+  abortSignal?: AbortSignal;
   onStdoutText?: (text: string) => void;
   onStderrText?: (text: string) => void;
 }
@@ -17,6 +18,7 @@ export interface BackendInvokeResult {
   exitCode: number | null;
   signal: NodeJS.Signals | null;
   timedOut: boolean;
+  aborted: boolean;
   sessionId: string | null;
   transcript: string | null;
   rawStdout: string;

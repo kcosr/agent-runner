@@ -205,6 +205,27 @@ async function main(): Promise<void> {
 
   const isJson = parsed.outputFormat === "json";
   const noop = (_text: string): void => {};
+
+  // Install a SIGINT handler that aborts the in-flight backend invocation
+  // on the first Ctrl+C and force-exits on the second. The first Ctrl+C
+  // gives the run loop a chance to send `turn/interrupt` to codex (or
+  // SIGINT to the claude child) and persist the manifest as `aborted`.
+  const abortController = new AbortController();
+  let sigintCount = 0;
+  const onSigint = (): void => {
+    sigintCount++;
+    if (sigintCount === 1) {
+      process.stderr.write(
+        "\ntask-runner: caught Ctrl+C — interrupting backend (Ctrl+C again to force-exit)\n",
+      );
+      abortController.abort();
+      return;
+    }
+    process.stderr.write("\ntask-runner: forced exit\n");
+    process.exit(130);
+  };
+  process.on("SIGINT", onSigint);
+
   try {
     const outcome = await runAgent({
       loaded,
@@ -213,6 +234,7 @@ async function main(): Promise<void> {
       backend,
       resume: resumeTarget,
       initialize: isInitCommand,
+      abortSignal: abortController.signal,
       overrides: overridesFromParsedArgs(parsed),
       stderr: isJson ? noop : (text) => process.stderr.write(text),
       stdout: isJson ? noop : (text) => process.stdout.write(text),

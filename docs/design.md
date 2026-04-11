@@ -651,6 +651,7 @@ type ManifestStatus =
   | "success"
   | "blocked"
   | "exhausted"
+  | "aborted"       // user pressed Ctrl+C; backend was interrupted cleanly
   | "error";
 
 interface RunManifest {
@@ -1386,6 +1387,32 @@ stdout.
 | 2 | One or more tasks reported as blocked |
 | 3 | Config / validation error before any run started |
 | 4 | Backend invocation error (binary not found, spawn failed, etc.) |
+| 130 | Run interrupted by the user (Ctrl+C / SIGINT) |
+
+## User interrupts (Ctrl+C)
+
+The CLI installs a `SIGINT` handler that:
+
+1. **First Ctrl+C**: aborts the in-flight `backend.invoke()` via an
+   `AbortController`. Each backend handles the abort cleanly:
+   - **claude**: sends `SIGINT` to the child, then `SIGKILL` after a
+     5s grace period.
+   - **codex**: races the abort signal alongside the per-attempt
+     timeout in the turn-wait loop. On abort, sends `turn/interrupt`
+     to the codex app-server (same path the timeout takes), then
+     closes the transport.
+   The run loop sees `invokeResult.aborted === true`, sets
+   `manifest.status = "aborted"`, persists the manifest, and exits
+   with code 130. The aborted run is resumable like any other
+   terminal state.
+2. **Second Ctrl+C**: bypasses the run loop entirely and force-exits
+   the process with 130. Use this if the backend is wedged and
+   doesn't respond to the interrupt within a few seconds.
+
+The `aborted` manifest status is distinct from `error` (backend
+failure) and `exhausted` (out of retries). It signals "user pulled
+the plug; nothing went wrong." A subsequent `task-runner run
+--resume-run <id>` picks up exactly where the aborted run left off.
 
 ## Milestones
 
