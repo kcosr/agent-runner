@@ -191,6 +191,54 @@ Record findings in each task's notes block.
 Agent frontmatter **does not contain** `vars`, `tasks`, `message`, or
 `maxRetries` — those are assignment-level concepts.
 
+**Reserved name.** `name: ad-hoc` is reserved for CLI-synthesized
+ad-hoc agents (see [Ad-hoc agents](#ad-hoc-agents) below).
+`loadAgentConfig` rejects any on-disk agent file that tries to claim
+this name so there can't be ambiguity between "a run created with
+`--agent ad-hoc`" and "a CLI-synthesized one".
+
+### Ad-hoc agents
+
+An **ad-hoc agent** is an `AgentConfig` synthesized on-the-fly from
+CLI overrides, used when `task-runner run` / `init` is invoked
+without `--agent`. The synthesized config has:
+
+- `name: "ad-hoc"` (hardcoded, reserved)
+- `sourcePath: null` (no file)
+- Empty role instructions body (there is no `--instructions` flag;
+  ad-hoc agents rely on assignment instructions + positional
+  `[message]` to supply context if needed)
+- `lockedFields: []` (nothing is locked — ad-hoc runs have no
+  authored contract to enforce)
+- `backend`, `model`, `effort`, `timeoutSec`, `unrestricted`, `cwd`
+  all come from the corresponding CLI flags (with schema defaults
+  applied for anything unset)
+
+**`--backend` is required** when `--agent` is omitted — the runner
+needs to know which backend to dispatch to, and there's no defensible
+default. Missing `--backend` exits with code 3 and a clear error.
+
+Ad-hoc agents pair naturally with the `passive` backend for pure
+sidecar flows:
+
+```bash
+task-runner init --backend passive --assignment repo-diagnostics \
+  --var repo_path=.
+```
+
+and with codex/claude for scripted orchestration:
+
+```bash
+task-runner run --backend codex --model gpt-5.4 --effort high \
+  --assignment code-review --var repo_path=. --var range=HEAD~3..HEAD
+```
+
+Once the manifest is written, an ad-hoc run is indistinguishable
+from a file-backed run in terms of resume/status/task semantics —
+every field needed is frozen under `manifest.agent.*` and reachable
+via the same code paths as any other manifest. No special-casing
+past the first-write synthesis.
+
 ### Assignment schema
 
 ```yaml
@@ -707,6 +755,31 @@ rewritten one last time when the run reaches a terminal state. It is a
 single JSON document — never JSONL, never append-only — so you can always
 `cat` or `jq` the latest version.
 
+**Manifest-canonical rule.** The manifest is the **sole source of
+truth for a run after first write**. Every field needed to resume or
+inspect a run — including the agent's role instructions, locked
+fields, and per-attempt timeout budget — is frozen into the manifest
+at first write (fresh run or `init`) and read from the manifest on
+every subsequent operation. Resume never re-reads the source
+`agent.md`. Consequences:
+
+- CLI overrides for model / effort / cwd / timeoutSec / etc. on
+  resume persist across further resumes (the new value is written
+  into the manifest, not transiently applied to the session).
+- Moving, editing, or deleting the original `agent.md` after a run
+  has started has no effect on that run.
+- Ad-hoc agents — runs created with `--agent` omitted and the agent
+  config synthesized from CLI overrides — work naturally: the
+  reserved `name: "ad-hoc"`, `sourcePath: null`, and empty role
+  instructions are written into the manifest at first write and
+  carried forward like any other agent.
+
+**Schema versioning.** `schemaVersion: 2` is the manifest-canonical
+generation. Manifests written by earlier task-runner versions have
+`schemaVersion: 1` and are **not resumable** by this version —
+`resolveResumeTarget` rejects them with a clear error and tells the
+caller to start a fresh run. No automatic migration.
+
 ```ts
 type ManifestStatus =
   | "initialized"   // `init` prepared the workspace but no session has run
@@ -718,9 +791,13 @@ type ManifestStatus =
   | "error";
 
 interface RunManifest {
-  schemaVersion: 1;
+  schemaVersion: 2;
   runId: string;
-  agent: { name: string; sourcePath: string };
+  agent: {
+    name: string;
+    sourcePath: string | null;     // null for ad-hoc agents (no source file)
+    instructions: string;          // frozen role-instructions body (interpolated)
+  };
   assignment: {                    // null if the run had no --assignment
     name: string;
     sourcePath: string;            // source path the assignment was loaded from
@@ -733,6 +810,8 @@ interface RunManifest {
   sessionName: string | null;      // backend-side display name (resolved + interpolated)
   unrestricted: boolean;
   cwd: string;
+  lockedFields: LockableField[];   // union of agent + assignment locks, frozen
+  timeoutSec: number;              // per-attempt wall clock, frozen
   assignmentPath: string;          // workspace assignment.md (the I/O buffer)
   workspaceDir: string;
   runtimeVars: Record<string, unknown>;  // resolved vars used for this run
@@ -1423,9 +1502,22 @@ Subcommands:
   the same `checkLockedFields` path used by `--add-task` on fresh
   runs.
 
-`--agent` is required for fresh runs. When `--resume-run` is supplied,
-`--agent` becomes optional — the runner reloads `agent.md` from the path
-stored in the prior manifest.
+`--agent` is **optional**:
+
+- **With `--resume-run`**: the agent config is reconstructed from
+  the frozen manifest (`loadedAgentFromManifest`). `agent.md` is
+  never re-read. If `--agent` is also passed on resume, it is
+  ignored for field resolution — the manifest wins. (Passing it is
+  harmless but unnecessary.)
+- **Fresh run / init with `--agent <name|path>`**: the on-disk
+  `agent.md` is loaded normally and the frozen snapshot is written
+  into the manifest on first write.
+- **Fresh run / init without `--agent`**: the agent is synthesized
+  on-the-fly as an **ad-hoc agent** (`name: "ad-hoc"`,
+  `sourcePath: null`, empty role instructions, empty locks).
+  **`--backend` is required** in this case — missing it exits with
+  code 3. See [Ad-hoc agents](#ad-hoc-agents) for the full
+  synthesis rules.
 
 `--assignment` is optional on fresh runs. When supplied, the named or
 pathed `assignment.md` is loaded, its tasks and `message` seed the run,
@@ -1861,17 +1953,6 @@ the plug; nothing went wrong." A subsequent `task-runner run
   for sidecar-only runs. Future adapters (Gemini, Ollama, etc.) can
   be added to `src/backends/registry.ts` by implementing the `Backend`
   interface — no other code should need to know about them.
-- **Manifest canonicalization**: on resume we currently re-read
-  `agent.md` via `loadAgentConfig(manifest.agent.sourcePath)` to
-  resolve fields like `model`, `effort`, `timeoutSec`, role
-  instructions, and `lockedFields`. Anything the manifest doesn't
-  carry is pulled from the (possibly-edited) file. This means CLI
-  overrides for those fields are not preserved across resume
-  sessions (the file's current value wins absent a fresh override),
-  and it rules out "ad-hoc" agents assembled entirely from CLI flags
-  with no source file. The planned fix is to freeze every resolvable
-  agent field into the manifest at first write and stop re-reading
-  the source file on resume — tracked as a follow-up branch.
 - **Task ID uniqueness**: enforced via zod `refine` at load time.
 - **Max task count**: enforced at 100 in schema.
 - **Concurrent resume**: two `task-runner run --resume-run <id>`

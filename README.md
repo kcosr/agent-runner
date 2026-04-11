@@ -272,6 +272,30 @@ path. `--assignment` is optional — running an agent with no
 assignment is "chat mode" (no enforced task list, just a single
 backend invocation).
 
+**`--agent` is also optional.** When omitted, task-runner synthesizes
+an **ad-hoc agent** from CLI overrides — useful for quick one-off
+runs, scripted orchestration, or any flow where a dedicated
+`agent.md` file would be overkill. Ad-hoc agents are named `ad-hoc`
+(a reserved name — on-disk agents can't use it), have no role
+instructions body, and require `--backend` to be passed explicitly
+(everything else falls back to sensible defaults). For example:
+
+```bash
+# Passive ad-hoc run — no agent file, no model calls, just a
+# structured checklist driven by task set / task add.
+task-runner init --backend passive --assignment repo-diagnostics \
+  --var repo_path=.
+
+# Codex ad-hoc run — backend + model from the CLI, assignment for
+# the task list, no agent.md required.
+task-runner run --backend codex --model gpt-5.4 --effort high \
+  --assignment code-review --var repo_path=. --var range=HEAD~3..HEAD
+```
+
+Ad-hoc agents have `lockedFields: []` (nothing is locked by default)
+and an empty role-instructions body. If you need role instructions
+or locks, create a real `agent.md`.
+
 ### Tasks and the workflow
 
 A run progresses through a small state machine; terminal states map
@@ -373,9 +397,10 @@ with three things in it:
   rewritten after every attempt, and one final time on terminal
   state. A single JSON document — never JSONL, never append-only —
   so you can `cat` or `jq` it at any moment. Contains the agent
-  identity, the assignment metadata, every attempt record, the
-  final per-task snapshot, the resolved vars, and the captured
-  backend session id.
+  identity *and* a frozen snapshot of the agent's role instructions,
+  locked fields, and timeout budget, plus the assignment metadata,
+  every attempt record, the final per-task snapshot, the resolved
+  vars, and the captured backend session id.
 - **`assignment.md`** — the I/O buffer the agent edits in place. The
   *source* assignment file is never mutated; the runner copies it
   here on a fresh run and re-reads it after every turn.
@@ -383,8 +408,20 @@ with three things in it:
   start/end timestamps), one per backend invocation. Useful for
   forensics.
 
-The manifest is the load-bearing piece: every other CLI command
-(`status`, `run --resume-run`) operates by reading it.
+The manifest is the load-bearing piece: **it is the canonical source
+of truth for a run after first write**. Every other CLI command
+(`status`, `run --resume-run`, `task set` / `task add`) reads from
+the manifest and **never re-reads the agent's source file on
+resume**. Moving, editing, or deleting `agent.md` after a run has
+started has no effect on that run — it lives off the frozen snapshot
+in `run.json`. This also makes ad-hoc agents (see above) possible:
+once the manifest is written, the agent had no source file to begin
+with and the run doesn't care.
+
+Manifest schema is versioned — the current generation is
+`schemaVersion: 2`. Older runs (v1, pre-canonical) are not resumable
+under this version of task-runner; attempting to do so surfaces a
+clear error and you're expected to start a fresh run.
 
 For the full schema and the rationale, see
 [`docs/design.md`](docs/design.md).

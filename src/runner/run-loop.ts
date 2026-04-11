@@ -570,6 +570,13 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
   let manifest: RunManifest;
   if (isResume && resume) {
+    // On resume, the new manifest spreads the prior one and then
+    // overrides only the fields that can legitimately change across
+    // sessions. `agent.instructions`, `lockedFields`, and
+    // `agent.sourcePath` are frozen at first write and preserved by
+    // the spread. `timeoutSec` is persisted so a `--timeout-sec`
+    // override on resume stays in effect for the next resume too,
+    // matching the model/effort behavior.
     manifest = {
       ...resume.manifest,
       model: model ?? null,
@@ -577,6 +584,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       sessionName,
       unrestricted,
       cwd,
+      timeoutSec,
       assignmentPath,
       workspaceDir,
       endedAt: null,
@@ -602,12 +610,28 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       pendingPrompt: null,
     };
   } else {
+    // Freeze the union of agent + assignment lockedFields into the
+    // manifest at first write. Resume consults this union (the
+    // assignment is forbidden on resume, so there's no other source
+    // of lock info post-creation).
+    const frozenLockedFields: LockableField[] = Array.from(
+      new Set<LockableField>([
+        ...agentConfig.lockedFields,
+        ...(assignmentConfig?.lockedFields ?? []),
+      ]),
+    );
     manifest = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       runId,
       agent: {
         name: agentConfig.name,
         sourcePath: loaded.sourcePath,
+        // Role instructions with `{{var}}` references already
+        // interpolated against `injectedVars`. Frozen here so resume
+        // never re-reads the source file AND never needs to
+        // re-interpolate (vars can't change on resume anyway).
+        instructions:
+          agentInstructions.length > 0 ? interpolate(agentInstructions, injectedVars) : "",
       },
       assignment: loadedAssignment
         ? {
@@ -623,6 +647,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       sessionName,
       unrestricted,
       cwd,
+      lockedFields: frozenLockedFields,
+      timeoutSec,
       assignmentPath,
       workspaceDir,
       startedAt: now,

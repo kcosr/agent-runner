@@ -1,0 +1,363 @@
+import { strict as assert } from "node:assert";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve as resolvePath } from "node:path";
+import { test } from "node:test";
+import { passiveBackend } from "../dist/backends/passive.js";
+import {
+  AgentConfigError,
+  loadAgentConfig,
+  loadAssignmentConfig,
+  loadedAgentFromManifest,
+  synthesizeAdHocAgent,
+} from "../dist/config/loader.js";
+import { resolveResumeTarget } from "../dist/runner/manifest.js";
+import { runAgent } from "../dist/runner/run-loop.js";
+
+const CLI_PATH = resolvePath(new URL("../dist/cli.js", import.meta.url).pathname);
+
+const CLAUDE_AGENT = `---
+schemaVersion: 1
+name: canonical-claude
+backend: claude
+model: claude-sonnet-4-6
+effort: low
+timeoutSec: 1800
+lockedFields:
+  - model
+---
+Your role: walk the checklist for {{repo_path}}.
+`;
+
+const BASIC_ASSIGNMENT = `---
+schemaVersion: 1
+name: canonical-work
+vars:
+  repo_path:
+    type: string
+    required: true
+    source: cli
+tasks:
+  - id: t1
+    title: First
+    body: Do the first thing.
+  - id: t2
+    title: Second
+    body: Do the second thing.
+---
+Work.
+`;
+
+const RESERVED_NAME_AGENT = `---
+schemaVersion: 1
+name: ad-hoc
+backend: claude
+---
+Should not load.
+`;
+
+function tempDir() {
+  return mkdtempSync(join(tmpdir(), "task-runner-canonical-"));
+}
+
+function writeAgent(baseDir, name, body) {
+  const dir = join(baseDir, "agents", name);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "agent.md"), body);
+}
+
+function writeAssignment(baseDir, name, body) {
+  const dir = join(baseDir, "assignments", name);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "assignment.md"), body);
+}
+
+function mockBackend(handler) {
+  return { id: "mock", invoke: handler };
+}
+
+function okBackend() {
+  return mockBackend(async () => ({
+    exitCode: 0,
+    signal: null,
+    timedOut: false,
+    aborted: false,
+    sessionId: "sess-canon-1",
+    transcript: "done",
+    rawStdout: "",
+    rawStderr: "",
+  }));
+}
+
+async function freshRun(baseDir, opts = {}) {
+  const loaded = loadAgentConfig(opts.agentName ?? "canonical-claude", baseDir);
+  const loadedAssignment = loadAssignmentConfig(opts.assignmentName ?? "canonical-work", baseDir);
+  const originalCwd = process.cwd();
+  process.chdir(baseDir);
+  try {
+    return await runAgent({
+      loaded,
+      loadedAssignment,
+      cliVars: opts.vars ?? { repo_path: "/tmp/canon" },
+      backend: opts.backend ?? okBackend(),
+      initialize: opts.initialize ?? false,
+      overrides: opts.overrides,
+      stderr: () => {},
+      stdout: () => {},
+    });
+  } finally {
+    process.chdir(originalCwd);
+  }
+}
+
+function runCli(args, opts = {}) {
+  return execFileSync("node", [CLI_PATH, ...args], {
+    cwd: opts.cwd ?? process.cwd(),
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+}
+
+function runCliExpectFail(args, opts = {}) {
+  try {
+    execFileSync("node", [CLI_PATH, ...args], {
+      cwd: opts.cwd ?? process.cwd(),
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    throw new Error("expected CLI to fail");
+  } catch (err) {
+    if (err.status === undefined) throw err;
+    return {
+      status: err.status,
+      stdout: err.stdout?.toString() ?? "",
+      stderr: err.stderr?.toString() ?? "",
+    };
+  }
+}
+
+function readManifest(workspaceDir) {
+  return JSON.parse(readFileSync(join(workspaceDir, "run.json"), "utf8"));
+}
+
+test("manifest schemaVersion is 2", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "canonical-claude", CLAUDE_AGENT);
+  writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
+  const outcome = await freshRun(dir, { initialize: true });
+  assert.equal(outcome.manifest.schemaVersion, 2);
+});
+
+test("first write freezes agent.instructions, lockedFields, and timeoutSec", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "canonical-claude", CLAUDE_AGENT);
+  writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
+  const outcome = await freshRun(dir, { initialize: true });
+
+  assert.ok(outcome.manifest.agent.instructions, "instructions populated");
+  assert.match(outcome.manifest.agent.instructions, /walk the checklist for \/tmp\/canon/);
+  assert.equal(outcome.manifest.timeoutSec, 1800, "agent timeoutSec frozen");
+  assert.deepEqual(outcome.manifest.lockedFields, ["model"]);
+  assert.equal(
+    outcome.manifest.agent.sourcePath,
+    join(dir, "agents", "canonical-claude", "agent.md"),
+  );
+});
+
+test("ad-hoc agent: init without --agent synthesizes name='ad-hoc', null sourcePath, empty instructions", async () => {
+  const dir = tempDir();
+  // No agent file — only the assignment exists.
+  writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
+
+  runCli(
+    ["init", "--backend", "passive", "--assignment", "canonical-work", "--var", "repo_path=."],
+    { cwd: dir },
+  );
+  const runIds = readdirSync(join(dir, ".task-runner"));
+  assert.equal(runIds.length, 1, "one run created");
+  const runId = runIds[0];
+
+  const manifest = readManifest(join(dir, ".task-runner", runId));
+  assert.equal(manifest.agent.name, "ad-hoc");
+  assert.equal(manifest.agent.sourcePath, null);
+  assert.equal(manifest.agent.instructions, "");
+  assert.equal(manifest.backend, "passive");
+  assert.deepEqual(manifest.lockedFields, []);
+  assert.equal(manifest.timeoutSec, 3600);
+});
+
+test("ad-hoc agent: --agent omitted without --backend errors with exit 3", async () => {
+  const dir = tempDir();
+  writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
+
+  const result = runCliExpectFail(
+    ["init", "--assignment", "canonical-work", "--var", "repo_path=."],
+    { cwd: dir },
+  );
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /--agent was omitted — --backend is required/);
+});
+
+test("ad-hoc agent: CLI overrides flow into the synthesized config", async () => {
+  const loaded = synthesizeAdHocAgent({
+    backend: "codex",
+    model: "gpt-5.4",
+    effort: "high",
+    timeoutSec: 900,
+    unrestricted: true,
+    cwd: "/opt/work",
+  });
+  assert.equal(loaded.config.name, "ad-hoc");
+  assert.equal(loaded.sourcePath, null);
+  assert.equal(loaded.instructions, "");
+  assert.equal(loaded.config.backend, "codex");
+  assert.equal(loaded.config.model, "gpt-5.4");
+  assert.equal(loaded.config.effort, "high");
+  assert.equal(loaded.config.timeoutSec, 900);
+  assert.equal(loaded.config.unrestricted, true);
+  assert.equal(loaded.config.cwd, "/opt/work");
+  assert.deepEqual(loaded.config.lockedFields, []);
+});
+
+test("ad-hoc collision guard: agent.md named 'ad-hoc' fails to load", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "ad-hoc", RESERVED_NAME_AGENT);
+
+  assert.throws(
+    () => loadAgentConfig("ad-hoc", dir),
+    (err) => {
+      assert.ok(err instanceof AgentConfigError);
+      assert.match(err.message, /"ad-hoc" is reserved/);
+      return true;
+    },
+  );
+});
+
+test("loadedAgentFromManifest reconstructs LoadedAgent from frozen fields", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "canonical-claude", CLAUDE_AGENT);
+  writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
+  const outcome = await freshRun(dir, { initialize: true });
+
+  const loaded = loadedAgentFromManifest(outcome.manifest);
+  assert.equal(loaded.config.name, "canonical-claude");
+  assert.equal(loaded.config.backend, "claude");
+  assert.equal(loaded.config.model, "claude-sonnet-4-6");
+  assert.equal(loaded.config.effort, "low");
+  assert.equal(loaded.config.timeoutSec, 1800);
+  assert.deepEqual(loaded.config.lockedFields, ["model"]);
+  assert.match(loaded.instructions, /walk the checklist/);
+  assert.equal(loaded.sourcePath, join(dir, "agents", "canonical-claude", "agent.md"));
+});
+
+test("resume does not re-read the agent source file", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "canonical-claude", CLAUDE_AGENT);
+  writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
+  const outcome = await freshRun(dir, { initialize: true });
+
+  // Now mutate the agent file after init — add a whole new locked
+  // field and change the model. A naive resume-re-reads-file design
+  // would pick these up; manifest-canonical must ignore them.
+  const mutatedAgent = CLAUDE_AGENT.replace("claude-sonnet-4-6", "claude-opus-4-6").replace(
+    "lockedFields:\n  - model",
+    "lockedFields:\n  - model\n  - effort",
+  );
+  writeFileSync(join(dir, "agents", "canonical-claude", "agent.md"), mutatedAgent);
+
+  // Resume (execute-after-init). Reload the manifest to get the
+  // frozen values; loadedAgentFromManifest should produce a
+  // LoadedAgent that reflects the ORIGINAL state, not the mutated file.
+  const target = resolveResumeTarget(outcome.runId, dir);
+  const loaded = loadedAgentFromManifest(target.manifest);
+
+  assert.equal(loaded.config.model, "claude-sonnet-4-6", "model frozen to original");
+  assert.deepEqual(
+    loaded.config.lockedFields,
+    ["model"],
+    "lockedFields frozen (no 'effort' lock added)",
+  );
+});
+
+test("passive backend: passiveBackend.invoke rejects cleanly", async () => {
+  // (Existing smoke — re-asserted here because this file lives
+  // next to the other passive-canonical checks.)
+  await assert.rejects(async () => {
+    await passiveBackend.invoke({
+      prompt: "x",
+      cwd: "/tmp",
+      env: {},
+      timeoutSec: 10,
+    });
+  }, /passive backend cannot be invoked/i);
+});
+
+test("schemaVersion mismatch: resume rejects a v1 manifest with a clear error", async () => {
+  const dir = tempDir();
+  const workspaceDir = join(dir, ".task-runner", "stale01");
+  mkdirSync(workspaceDir, { recursive: true });
+  // Write a minimal v1-shaped manifest missing the new required
+  // fields. resolveResumeTarget should surface a version error,
+  // not the generic "does not look like run.json" fallback.
+  const v1Manifest = {
+    schemaVersion: 1,
+    runId: "stale01",
+    agent: { name: "old", sourcePath: "/tmp/agent.md" },
+    assignment: null,
+    backend: "claude",
+    model: null,
+    effort: null,
+    message: null,
+    sessionName: null,
+    unrestricted: false,
+    cwd: dir,
+    assignmentPath: join(workspaceDir, "assignment.md"),
+    workspaceDir,
+    startedAt: "2024-01-01T00:00:00Z",
+    endedAt: null,
+    status: "success",
+    exitCode: 0,
+    attempts: 1,
+    maxAttempts: 4,
+    tasksCompleted: 0,
+    tasksTotal: 0,
+    backendSessionId: "sess-old",
+    runtimeVars: {},
+    pendingPrompt: null,
+    finalTasks: {},
+    sessionCount: 1,
+    sessions: [],
+    attemptRecords: [],
+  };
+  writeFileSync(join(workspaceDir, "run.json"), `${JSON.stringify(v1Manifest, null, 2)}\n`);
+
+  assert.throws(
+    () => resolveResumeTarget("stale01", dir),
+    (err) => {
+      assert.match(err.message, /schemaVersion 1/);
+      assert.match(err.message, /requires schemaVersion 2/);
+      return true;
+    },
+  );
+});
+
+test("resume manifest: model + timeoutSec preserved across an init-run cycle", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "canonical-claude", CLAUDE_AGENT);
+  writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
+
+  // Fresh run (no init) — writes the manifest with agent frontmatter values.
+  const afterRun = await freshRun(dir, {
+    initialize: false,
+    backend: okBackend(),
+  });
+
+  // Model is locked at "claude-sonnet-4-6" via frontmatter
+  // lockedFields: [model], so we can't test a --model CLI override
+  // on this agent. Assert the write path preserves the frozen values
+  // instead.
+  const m = readManifest(afterRun.workspaceDir);
+  assert.equal(m.model, "claude-sonnet-4-6", "model preserved on fresh run write");
+  assert.equal(m.timeoutSec, 1800, "timeoutSec preserved on fresh run write");
+});

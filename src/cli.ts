@@ -15,6 +15,8 @@ import {
   type LoadedAssignment,
   loadAgentConfig,
   loadAssignmentConfig,
+  loadedAgentFromManifest,
+  synthesizeAdHocAgent,
 } from "./config/loader.js";
 import {
   type ManifestStatus,
@@ -233,23 +235,46 @@ async function main(): Promise<void> {
     }
   }
 
-  const agentRef = parsed.agent ?? resumeTarget?.manifest.agent.sourcePath;
-  if (!agentRef) {
-    process.stderr.write("task-runner: --agent is required for fresh runs\n");
-    process.stderr.write(HELP);
-    process.exit(3);
-  }
-
+  // Agent resolution has three paths:
+  //   1. Resume — reconstruct the LoadedAgent from the frozen
+  //      manifest. `agent.md` is never re-read on resume, so a moved
+  //      or edited source file has no effect on a resumed run.
+  //   2. `--agent <name|path>` — load the on-disk agent file.
+  //   3. No `--agent` flag, no resume target — synthesize an ad-hoc
+  //      agent from CLI overrides. Requires `--backend`.
   let loaded: LoadedAgent;
-  try {
-    loaded = loadAgentConfig(agentRef);
-  } catch (err) {
-    if (err instanceof AgentNotFoundError || err instanceof AgentConfigError) {
-      process.stderr.write(`task-runner: ${err.message}\n`);
-    } else {
-      process.stderr.write(`task-runner: ${(err as Error).message}\n`);
+  if (resumeTarget !== undefined) {
+    loaded = loadedAgentFromManifest(resumeTarget.manifest);
+  } else if (parsed.agent !== undefined) {
+    try {
+      loaded = loadAgentConfig(parsed.agent);
+    } catch (err) {
+      if (err instanceof AgentNotFoundError || err instanceof AgentConfigError) {
+        process.stderr.write(`task-runner: ${err.message}\n`);
+      } else {
+        process.stderr.write(`task-runner: ${(err as Error).message}\n`);
+      }
+      process.exit(3);
     }
-    process.exit(3);
+  } else {
+    // Ad-hoc synthesis: --agent omitted on a fresh run or init.
+    // Require --backend so we know which backend to dispatch to;
+    // every other field gets a sensible default.
+    if (parsed.backend === undefined) {
+      process.stderr.write(
+        "task-runner: --agent was omitted — --backend is required to synthesize an ad-hoc agent\n",
+      );
+      process.stderr.write(HELP);
+      process.exit(3);
+    }
+    loaded = synthesizeAdHocAgent({
+      backend: parsed.backend,
+      model: parsed.model,
+      effort: parsed.effort,
+      timeoutSec: parsed.timeoutSec,
+      unrestricted: parsed.unrestricted,
+      cwd: parsed.cwd,
+    });
   }
 
   let loadedAssignment: LoadedAssignment | undefined;
@@ -678,36 +703,16 @@ function runTaskAdd(parsed: ParsedArgs): never {
   const resolved = resolveRunOrExit(runArg);
   requireMutableStatus(resolved.manifest);
 
-  // Reload the run's agent (and assignment if present) so we can check
-  // lockedFields. `tasks` in the union forbids any mutation that adds
-  // new entries. We intentionally do NOT check this for `task set` —
-  // status/notes are never a locked field.
-  try {
-    const agent = loadAgentConfig(resolved.manifest.agent.sourcePath);
-    const assignment = resolved.manifest.assignment
-      ? loadAssignmentConfig(resolved.manifest.assignment.sourcePath)
-      : undefined;
-    const locked = new Set<string>([
-      ...agent.config.lockedFields,
-      ...(assignment?.config.lockedFields ?? []),
-    ]);
-    if (locked.has("tasks")) {
-      process.stderr.write(
-        "task-runner: task add: the `tasks` field is locked for this run — cannot add tasks\n",
-      );
-      process.exit(3);
-    }
-  } catch (err) {
-    if (
-      err instanceof AgentNotFoundError ||
-      err instanceof AgentConfigError ||
-      err instanceof AssignmentNotFoundError ||
-      err instanceof AssignmentConfigError
-    ) {
-      process.stderr.write(`task-runner: task add: cannot verify locked fields — ${err.message}\n`);
-      process.exit(3);
-    }
-    throw err;
+  // Check the frozen manifest-level lockedFields instead of re-reading
+  // the agent + assignment source files. Under the manifest-canonical
+  // design, `manifest.lockedFields` is the authoritative union of
+  // agent + assignment locks captured at first write. We intentionally
+  // do NOT check this for `task set` — status/notes are never locked.
+  if (resolved.manifest.lockedFields.includes("tasks")) {
+    process.stderr.write(
+      "task-runner: task add: the `tasks` field is locked for this run — cannot add tasks\n",
+    );
+    process.exit(3);
   }
 
   const tasks = buildTaskMapFromManifest(resolved.manifest);
