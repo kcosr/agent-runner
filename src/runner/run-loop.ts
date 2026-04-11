@@ -9,7 +9,13 @@ import type { TaskState } from "../plan/model.js";
 import { parsePlan } from "../plan/parser.js";
 import { renderPlan } from "../plan/writer.js";
 import { shortId } from "../util/short-id.js";
-import { type AttemptRecord, type RunManifest, snapshotTasks, writeManifest } from "./manifest.js";
+import {
+  type AttemptRecord,
+  type RunManifest,
+  snapshotTasks,
+  writeAttemptLog,
+  writeManifest,
+} from "./manifest.js";
 import { buildNudgeMessage } from "./nudge.js";
 import { type RunStatus, type RunSummary, renderSummary } from "./output.js";
 
@@ -267,6 +273,16 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     const updates = parsePlan(rawPlan);
     const mergeInfo = mergeUpdates(tasks, updates);
 
+    const logPath = writeAttemptLog(workspaceDir, {
+      schemaVersion: 1,
+      runId,
+      attempt: attempts,
+      startedAt: attemptStartedAt,
+      endedAt: attemptEndedAt,
+      stdout: invokeResult.rawStdout,
+      stderr: invokeResult.rawStderr,
+    });
+
     const attemptRecord: AttemptRecord = {
       attempt: attempts,
       startedAt: attemptStartedAt,
@@ -278,8 +294,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       signal: invokeResult.signal,
       timedOut: invokeResult.timedOut,
       assistantMessage: invokeResult.assistantMessage,
-      rawStdout: invokeResult.rawStdout,
-      rawStderr: invokeResult.rawStderr,
+      logPath,
       tasksAfter: snapshotTasks(tasks),
       invalidStatuses: mergeInfo.invalidStatuses,
     };

@@ -102,7 +102,7 @@ test("manifest: run.json is written and matches outcome.manifest", async () => {
       sessionId: "sess-abc-123",
       assistantMessage: "all three done",
       rawStdout: "raw stdout text",
-      rawStderr: "",
+      rawStderr: "raw stderr text",
     };
   });
 
@@ -122,13 +122,23 @@ test("manifest: run.json is written and matches outcome.manifest", async () => {
   assert.equal(onDisk.model, "claude-sonnet-4-6");
   assert.equal(onDisk.effort, "medium");
   assert.equal(onDisk.attemptRecords.length, 1);
-  assert.equal(onDisk.attemptRecords[0].rawStdout, "raw stdout text");
   assert.equal(onDisk.attemptRecords[0].assistantMessage, "all three done");
+  assert.equal(onDisk.attemptRecords[0].logPath, "attempts/01.json");
+  assert.equal(onDisk.attemptRecords[0].rawStdout, undefined, "no raw output in manifest");
   assert.equal(onDisk.finalTasks.t1.status, "completed");
   assert.equal(onDisk.finalTasks.t1.notes, "first done");
   assert.equal(onDisk.finalTasks.t1.title, "First");
   assert.equal(onDisk.finalTasks.t1.body.trim(), "Do the first thing.");
   assert.deepEqual(onDisk, outcome.manifest);
+
+  const logPath = join(outcome.workspaceDir, "attempts", "01.json");
+  assert.ok(existsSync(logPath), "attempts/01.json exists");
+  const log = JSON.parse(readFileSync(logPath, "utf8"));
+  assert.equal(log.schemaVersion, 1);
+  assert.equal(log.runId, outcome.runId);
+  assert.equal(log.attempt, 1);
+  assert.equal(log.stdout, "raw stdout text");
+  assert.equal(log.stderr, "raw stderr text");
 });
 
 test("manifest: attempt records snapshot state after each attempt", async () => {
@@ -163,6 +173,15 @@ test("manifest: attempt records snapshot state after each attempt", async () => 
   const m = outcome.manifest;
   assert.equal(m.attempts, 2);
   assert.equal(m.attemptRecords.length, 2);
+
+  assert.equal(m.attemptRecords[0].logPath, "attempts/01.json");
+  assert.equal(m.attemptRecords[1].logPath, "attempts/02.json");
+  const log1 = JSON.parse(readFileSync(join(outcome.workspaceDir, "attempts", "01.json"), "utf8"));
+  const log2 = JSON.parse(readFileSync(join(outcome.workspaceDir, "attempts", "02.json"), "utf8"));
+  assert.equal(log1.stdout, "raw 1");
+  assert.equal(log2.stdout, "raw 2");
+  assert.equal(log1.attempt, 1);
+  assert.equal(log2.attempt, 2);
 
   assert.equal(m.attemptRecords[0].tasksAfter.t1.status, "completed");
   assert.equal(m.attemptRecords[0].tasksAfter.t2.status, "pending");

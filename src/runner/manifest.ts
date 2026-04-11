@@ -1,8 +1,33 @@
-import { writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { InvalidStatusReport, TaskState, TaskStatus } from "../plan/model.js";
 
 export type ManifestStatus = "running" | "success" | "blocked" | "exhausted" | "error";
+
+const ATTEMPT_LOG_DIR = "attempts";
+
+export function attemptLogRelativePath(attempt: number): string {
+  const padded = String(attempt).padStart(2, "0");
+  return `${ATTEMPT_LOG_DIR}/${padded}.json`;
+}
+
+export interface AttemptLog {
+  schemaVersion: 1;
+  runId: string;
+  attempt: number;
+  startedAt: string;
+  endedAt: string;
+  stdout: string;
+  stderr: string;
+}
+
+export function writeAttemptLog(workspaceDir: string, log: AttemptLog): string {
+  const relPath = attemptLogRelativePath(log.attempt);
+  const absPath = join(workspaceDir, relPath);
+  mkdirSync(dirname(absPath), { recursive: true });
+  writeFileSync(absPath, `${JSON.stringify(log, null, 2)}\n`, "utf8");
+  return relPath;
+}
 
 export interface TaskSnapshot {
   id: string;
@@ -23,8 +48,7 @@ export interface AttemptRecord {
   signal: string | null;
   timedOut: boolean;
   assistantMessage: string | null;
-  rawStdout: string;
-  rawStderr: string;
+  logPath: string; // relative to workspaceDir, e.g. "attempts/01.json"
   tasksAfter: Record<string, TaskSnapshot>;
   invalidStatuses: InvalidStatusReport[];
 }
