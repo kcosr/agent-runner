@@ -1,0 +1,38 @@
+{
+  "name": "task-runner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Minimal CLI that invokes an AI agent with a seeded task list and enforces completion via retries.",
+  "bin": {
+    "task-runner": "./dist/cli.js"
+  },
+  "scripts": {
+    "setup": "npm install",
+    "build": "tsc -b",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "lint-staged": "lint-staged",
+    "check": "npm run lint",
+    "test": "npm run build && node --test \"test/**/*.test.mjs\"",
+    "prepare": "husky install",
+    "clean": "rimraf dist *.tsbuildinfo",
+    "task-runner": "node dist/cli.js"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx,mjs,cjs,json}": ["biome format --write --files-ignore-unknown=true"]
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.0",
+    "@types/node": "^20.11.30",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.2.0",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.5.4"
+  },
+  "dependencies": {
+    "gray-matter": "^4.0.3",
+    "zod": "^3.23.8"
+  }
+}
