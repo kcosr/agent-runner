@@ -6,6 +6,7 @@ import {
   type LoadedAgent,
   loadAgentConfig,
 } from "./config/loader.js";
+import { ResumeError, resolveResumeTarget } from "./runner/manifest.js";
 import { LockedFieldError, VarResolutionError, runAgent } from "./runner/run-loop.js";
 
 type OutputFormat = "text" | "json";
@@ -13,6 +14,7 @@ type OutputFormat = "text" | "json";
 interface ParsedArgs {
   command: string;
   agent?: string;
+  resumeRun?: string;
   vars: Record<string, string>;
   cwd?: string;
   model?: string;
@@ -28,18 +30,27 @@ interface ParsedArgs {
 const EFFORT_VALUES = ["low", "medium", "high", "max"] as const;
 const OUTPUT_FORMATS = ["text", "json"] as const;
 
-const HELP = `Usage: task-runner run --agent <name-or-path> [options] [message]
+const HELP = `Usage: task-runner run [--agent <name-or-path>] [options] [message]
 
 Arguments:
-  [message]               Optional positional text appended to the agent's
-                          instructions. Overrides the agent's default
-                          \`message\` field if present, unless \`message\` is
-                          listed in the agent's \`lockedFields\`.
+  [message]               Positional text. For a fresh run, appended to
+                          the agent's instructions (or used in place of
+                          the agent's default \`message\` field). For a
+                          resume run, required — sent as the sole prompt
+                          for the new session.
 
 Options:
   --agent <name|path>     Agent name (resolved against ./agents/<name>/agent.md
                           or $TASK_RUNNER_HOME/agents/<name>/agent.md) or a
-                          direct path to an agent.md file.
+                          direct path to an agent.md file. Required for fresh
+                          runs; optional for --resume-run (taken from the
+                          prior manifest if omitted).
+  --resume-run <id|path>  Continue an existing run by its short id (e.g.
+                          "k7m2xq") or a path to a workspace directory or
+                          run.json file. Reads the prior manifest, reloads
+                          the agent, normalizes non-completed tasks to
+                          pending, and starts a new session within the
+                          same workspace. Requires a positional message.
   --var <key>=<value>     Set an input variable (repeatable).
   --cwd <path>            Override the agent's cwd.
   --model <id>            Override the agent's model.
@@ -57,7 +68,7 @@ Exit codes:
   0  All tasks completed successfully
   1  Retries exhausted with incomplete tasks
   2  One or more tasks reported as blocked
-  3  Config or validation error before any run started
+  3  Config / validation / resume error before any run started
   4  Backend invocation error
 `;
 
@@ -92,6 +103,10 @@ function parseArgs(argv: string[]): ParsedArgs {
       const next = args.shift();
       if (next === undefined) throw new Error("--agent requires a value");
       result.agent = next;
+    } else if (arg === "--resume-run") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--resume-run requires a value");
+      result.resumeRun = next;
     } else if (arg === "--var") {
       const pair = args.shift();
       if (pair === undefined) throw new Error("--var requires key=value");
@@ -173,15 +188,35 @@ async function main(): Promise<void> {
     process.stderr.write(HELP);
     process.exit(3);
   }
-  if (!parsed.agent) {
-    process.stderr.write("task-runner: --agent is required\n");
+
+  let resumeTarget: ReturnType<typeof resolveResumeTarget> | undefined;
+  if (parsed.resumeRun !== undefined) {
+    if (!parsed.message || parsed.message.trim().length === 0) {
+      process.stderr.write("task-runner: --resume-run requires a follow-up message\n");
+      process.exit(3);
+    }
+    try {
+      resumeTarget = resolveResumeTarget(parsed.resumeRun);
+    } catch (err) {
+      if (err instanceof ResumeError) {
+        process.stderr.write(`task-runner: ${err.message}\n`);
+      } else {
+        process.stderr.write(`task-runner: ${(err as Error).message}\n`);
+      }
+      process.exit(3);
+    }
+  }
+
+  const agentRef = parsed.agent ?? resumeTarget?.manifest.agent.sourcePath;
+  if (!agentRef) {
+    process.stderr.write("task-runner: --agent is required for fresh runs\n");
     process.stderr.write(HELP);
     process.exit(3);
   }
 
   let loaded: LoadedAgent;
   try {
-    loaded = loadAgentConfig(parsed.agent);
+    loaded = loadAgentConfig(agentRef);
   } catch (err) {
     if (err instanceof AgentNotFoundError || err instanceof AgentConfigError) {
       process.stderr.write(`task-runner: ${err.message}\n`);
@@ -198,6 +233,7 @@ async function main(): Promise<void> {
       loaded,
       cliVars: parsed.vars,
       backend: claudeBackend,
+      resume: resumeTarget,
       overrides: {
         cwd: parsed.cwd,
         model: parsed.model,
@@ -215,7 +251,11 @@ async function main(): Promise<void> {
     }
     process.exit(outcome.exitCode);
   } catch (err) {
-    if (err instanceof VarResolutionError || err instanceof LockedFieldError) {
+    if (
+      err instanceof VarResolutionError ||
+      err instanceof LockedFieldError ||
+      err instanceof ResumeError
+    ) {
       process.stderr.write(`task-runner: ${err.message}\n`);
       process.exit(3);
     }

@@ -312,42 +312,47 @@ test("session resume: first attempt session ID passed on retry", async () => {
   assert.equal(seenResumeIds[1], "sess-12345", "retry uses extracted session id");
 });
 
-test("resume failure falls back to fresh invocation", async () => {
+test("in-run resume rejection stops the run with an error", async () => {
   const dir = tempDir();
   writeAgent(dir, "three", THREE_TASKS);
 
-  const seenResumeIds = [];
   let invocations = 0;
   const { outcome, stderr } = await runWithMock(
     dir,
     async (ctx) => {
       invocations++;
-      seenResumeIds.push(ctx.resumeSessionId ?? null);
-      const match = ctx.prompt.match(/\.task-runner\/\S+?\/tasks\.md/);
-      const absPlan = `./${match[0]}`;
-      let plan = readFileSync(absPlan, "utf8");
-      if (invocations === 3) {
-        plan = editStatus(plan, "t1", "completed");
-        plan = editStatus(plan, "t2", "completed");
-        plan = editStatus(plan, "t3", "completed");
+      // attempt 1 succeeds but leaves tasks incomplete; attempt 2 is the retry
+      // that carries --resume; the mock pretends claude rejects that session
+      if (invocations === 1) {
+        const match = ctx.prompt.match(/\.task-runner\/\S+?\/tasks\.md/);
+        const absPlan = `./${match[0]}`;
+        const plan = readFileSync(absPlan, "utf8");
+        writeFileSync(absPlan, editStatus(plan, "t1", "completed"), "utf8");
+        return {
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+          sessionId: "sess-expired",
+          transcript: "got the first one",
+          rawStdout: "",
+          rawStderr: "",
+        };
       }
-      writeFileSync(absPlan, plan, "utf8");
       return {
-        exitCode: invocations === 2 ? 1 : 0,
+        exitCode: 1,
         signal: null,
         timedOut: false,
-        sessionId: "sess-12345",
-        transcript: `msg ${invocations}`,
+        sessionId: null,
+        transcript: null,
         rawStdout: "",
-        rawStderr: invocations === 2 ? "session not found" : "",
+        rawStderr: "session not found",
       };
     },
     { maxRetries: 3 },
   );
 
-  assert.equal(outcome.exitCode, 0);
-  assert.equal(seenResumeIds[0], null);
-  assert.equal(seenResumeIds[1], "sess-12345");
-  assert.equal(seenResumeIds[2], null, "resume cleared after failure");
-  assert.ok(stderr.includes("resume failed"));
+  assert.equal(outcome.exitCode, 4);
+  assert.equal(outcome.summary.status, "error");
+  assert.equal(invocations, 2, "stops after the rejected retry");
+  assert.ok(stderr.includes("claude rejected the resume session"));
 });

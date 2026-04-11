@@ -10,6 +10,7 @@ export interface RunSummary {
   tasksTotal: number;
   planPath: string;
   tasks: TaskState[];
+  runId: string;
 }
 
 export function renderSummary(summary: RunSummary): string {
@@ -37,6 +38,9 @@ export function renderSummary(summary: RunSummary): string {
 
   lines.push("");
   lines.push(`Review ${summary.planPath} for additional agent output.`);
+  lines.push("");
+  lines.push("To continue this run with a follow-up message:");
+  lines.push(`  task-runner run --resume-run ${summary.runId} "..."`);
 
   return `${lines.join("\n")}\n`;
 }

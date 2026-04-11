@@ -5,13 +5,17 @@ import { interpolate } from "../config/interpolate.js";
 import type { LoadedAgent } from "../config/loader.js";
 import type { LockableField, VarDef } from "../config/schema.js";
 import { mergeIntoFile, mergeUpdates } from "../plan/merge.js";
-import type { TaskState } from "../plan/model.js";
+import type { TaskState, TaskStatus } from "../plan/model.js";
 import { parsePlan } from "../plan/parser.js";
 import { renderPlan } from "../plan/writer.js";
 import { shortId } from "../util/short-id.js";
 import {
   type AttemptRecord,
+  type ResolvedResumeTarget,
+  ResumeError,
   type RunManifest,
+  type SessionRecord,
+  type TaskSnapshot,
   snapshotTasks,
   writeAttemptLog,
   writeManifest,
@@ -34,6 +38,7 @@ export interface RunOptions {
   cliVars: Record<string, string>;
   backend: Backend;
   overrides?: RunOverrides;
+  resume?: ResolvedResumeTarget;
   stderr: (text: string) => void;
   stdout: (text: string) => void;
   resumeFailureDetector?: (result: BackendInvokeResult) => boolean;
@@ -178,13 +183,37 @@ function countBy(tasks: Map<string, TaskState>, predicate: (t: TaskState) => boo
   return n;
 }
 
+function normalizeResumeStatus(status: TaskStatus): TaskStatus {
+  return status === "completed" ? "completed" : "pending";
+}
+
+function rebuildTasksFromSnapshot(
+  config: LoadedAgent["config"],
+  snapshot: Record<string, TaskSnapshot>,
+  normalize: boolean,
+): Map<string, TaskState> {
+  const tasks = new Map<string, TaskState>();
+  for (const t of config.tasks) {
+    const prior = snapshot[t.id];
+    tasks.set(t.id, {
+      id: t.id,
+      title: t.title,
+      body: t.body ?? "",
+      status: prior ? (normalize ? normalizeResumeStatus(prior.status) : prior.status) : "pending",
+      notes: prior?.notes ?? "",
+    });
+  }
+  return tasks;
+}
+
 export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
-  const { loaded, cliVars, backend, overrides, stderr, stdout } = opts;
+  const { loaded, cliVars, backend, overrides, resume, stderr, stdout } = opts;
   const config = loaded.config;
   const resumeFailureDetector = opts.resumeFailureDetector ?? defaultResumeFailureDetector;
 
   checkLockedFields(config, overrides);
 
+  const isResume = Boolean(resume);
   const baseDir = process.cwd();
   const cwd = resolveCwd(overrides?.cwd ?? config.cwd, baseDir);
   const model = overrides?.model ?? config.model;
@@ -195,23 +224,29 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const maxRetries = overrides?.maxRetries ?? config.maxRetries;
   const maxAttempts = maxRetries + 1;
 
+  if (isResume) {
+    if (!message || message.trim().length === 0) {
+      throw new ResumeError("resuming a run requires a follow-up message");
+    }
+    if (!resume?.manifest.backendSessionId) {
+      throw new ResumeError(
+        `cannot resume run ${resume?.manifest.runId ?? "<unknown>"} — prior sessions captured no backend session id`,
+      );
+    }
+  }
+
   const runtimeVars = resolveVars(loaded, cliVars);
 
-  const runId = shortId();
-  const workspaceDir = resolve(cwd, ".task-runner", runId);
+  const runId = isResume && resume ? resume.manifest.runId : shortId();
+  const workspaceDir =
+    isResume && resume ? resume.workspaceDir : resolve(cwd, ".task-runner", runId);
   mkdirSync(workspaceDir, { recursive: true });
   const planPath = resolve(workspaceDir, "tasks.md");
 
-  const tasks = new Map<string, TaskState>();
-  for (const t of config.tasks) {
-    tasks.set(t.id, {
-      id: t.id,
-      title: t.title,
-      body: t.body ?? "",
-      status: "pending",
-      notes: "",
-    });
-  }
+  const tasks =
+    isResume && resume
+      ? rebuildTasksFromSnapshot(config, resume.manifest.finalTasks, true)
+      : rebuildTasksFromSnapshot(config, {}, false);
 
   const injectedVars: Record<string, unknown> = {
     ...runtimeVars,
@@ -220,54 +255,104 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     cwd,
   };
   const basePrompt = interpolate(loaded.instructions, injectedVars);
-  const initialPrompt = message ? `${basePrompt}\n\n${message}` : basePrompt;
+  let initialPrompt: string;
+  if (isResume) {
+    initialPrompt = message ?? "";
+  } else {
+    initialPrompt = message ? `${basePrompt}\n\n${message}` : basePrompt;
+  }
 
   writeFileSync(planPath, renderPlan(Array.from(tasks.values())), "utf8");
 
-  const startedAt = new Date().toISOString();
-  const manifest: RunManifest = {
-    schemaVersion: 1,
-    runId,
-    agent: {
-      name: config.name,
-      sourcePath: loaded.sourcePath,
-    },
-    backend: config.backend,
-    model: model ?? null,
-    effort: effort ?? null,
-    message,
-    unrestricted,
-    cwd,
-    planPath,
-    workspaceDir,
-    startedAt,
+  const now = new Date().toISOString();
+  const priorAttemptCount = isResume && resume ? resume.manifest.attemptRecords.length : 0;
+  const priorSessionCount = isResume && resume ? resume.manifest.sessions.length : 0;
+  const sessionIndex = priorSessionCount;
+
+  const manifest: RunManifest =
+    isResume && resume
+      ? {
+          ...resume.manifest,
+          message: resume.manifest.message,
+          model: model ?? null,
+          effort: effort ?? null,
+          unrestricted,
+          cwd,
+          planPath,
+          workspaceDir,
+          endedAt: null,
+          status: "running",
+          exitCode: null,
+          maxAttempts,
+          finalTasks: snapshotTasks(tasks),
+          tasksCompleted: countBy(tasks, (t) => t.status === "completed"),
+          tasksTotal: tasks.size,
+          sessionCount: priorSessionCount + 1,
+        }
+      : {
+          schemaVersion: 1,
+          runId,
+          agent: {
+            name: config.name,
+            sourcePath: loaded.sourcePath,
+          },
+          backend: config.backend,
+          model: model ?? null,
+          effort: effort ?? null,
+          message,
+          unrestricted,
+          cwd,
+          planPath,
+          workspaceDir,
+          startedAt: now,
+          endedAt: null,
+          status: "running",
+          exitCode: null,
+          attempts: 0,
+          maxAttempts,
+          tasksCompleted: 0,
+          tasksTotal: tasks.size,
+          backendSessionId: null,
+          finalTasks: snapshotTasks(tasks),
+          sessionCount: 1,
+          sessions: [],
+          attemptRecords: [],
+        };
+
+  const sessionRecord: SessionRecord = {
+    sessionIndex,
+    startedAt: now,
     endedAt: null,
     status: "running",
     exitCode: null,
-    attempts: 0,
+    message: isResume ? message : message,
+    firstAttempt: null,
+    lastAttempt: null,
     maxAttempts,
-    tasksCompleted: 0,
-    tasksTotal: tasks.size,
-    backendSessionId: null,
-    finalTasks: snapshotTasks(tasks),
-    attemptRecords: [],
+    backendSessionIdAtStart: isResume && resume ? resume.manifest.backendSessionId : null,
+    backendSessionIdAtEnd: null,
   };
+  manifest.sessions.push(sessionRecord);
+
   writeManifest(workspaceDir, manifest);
 
-  stderr(`task-runner: agent=${config.name} run=${runId}\n`);
+  stderr(
+    `task-runner: agent=${config.name} run=${runId}${isResume ? ` (session ${sessionIndex})` : ""}\n`,
+  );
   stderr(`             plan=${planPath}\n`);
   stderr(`             cwd=${cwd}\n`);
   stderr("\n");
 
-  let attempts = 0;
-  let sessionId: string | null = null;
+  let sessionAttempts = 0;
+  let sessionId: string | null = isResume && resume ? resume.manifest.backendSessionId : null;
   let currentPrompt = initialPrompt;
   const attemptTranscripts: string[] = [];
   let terminal: { status: RunStatus; exitCode: number } | null = null;
 
-  while (attempts < maxAttempts && !terminal) {
-    attempts++;
-    stderr(`── attempt ${attempts} ──\n`);
+  while (sessionAttempts < maxAttempts && !terminal) {
+    sessionAttempts++;
+    const globalAttemptNumber = priorAttemptCount + sessionAttempts;
+    stderr(`── attempt ${globalAttemptNumber} ──\n`);
 
     const sessionIdAtStart = sessionId;
     const attemptStartedAt = new Date().toISOString();
@@ -291,12 +376,12 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       attemptTranscripts.push(invokeResult.transcript);
     }
 
-    if (attempts === 1 && invokeResult.sessionId) {
+    const invokedWithResume = sessionIdAtStart !== null;
+    const resumeRejected = invokedWithResume && resumeFailureDetector(invokeResult);
+
+    if (!resumeRejected && invokeResult.sessionId) {
       sessionId = invokeResult.sessionId;
       manifest.backendSessionId = invokeResult.sessionId;
-    } else if (sessionId && resumeFailureDetector(invokeResult)) {
-      stderr("task-runner: resume failed, falling back to fresh invocation\n");
-      sessionId = null;
     }
 
     let rawPlan: string;
@@ -317,7 +402,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     const logPath = writeAttemptLog(workspaceDir, {
       schemaVersion: 1,
       runId,
-      attempt: attempts,
+      attempt: globalAttemptNumber,
+      sessionIndex,
       startedAt: attemptStartedAt,
       endedAt: attemptEndedAt,
       stdout: invokeResult.rawStdout,
@@ -325,7 +411,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     });
 
     const attemptRecord: AttemptRecord = {
-      attempt: attempts,
+      attempt: globalAttemptNumber,
+      sessionIndex,
       startedAt: attemptStartedAt,
       endedAt: attemptEndedAt,
       prompt: currentPrompt,
@@ -340,10 +427,22 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       invalidStatuses: mergeInfo.invalidStatuses,
     };
     manifest.attemptRecords.push(attemptRecord);
-    manifest.attempts = attempts;
+    manifest.attempts = manifest.attemptRecords.length;
     manifest.tasksCompleted = countBy(tasks, (t) => t.status === "completed");
     manifest.finalTasks = snapshotTasks(tasks);
+
+    if (sessionRecord.firstAttempt === null) {
+      sessionRecord.firstAttempt = globalAttemptNumber;
+    }
+    sessionRecord.lastAttempt = globalAttemptNumber;
+
     writeManifest(workspaceDir, manifest);
+
+    if (resumeRejected) {
+      terminal = { status: "error", exitCode: 4 };
+      stderr("task-runner: claude rejected the resume session; stopping.\n");
+      break;
+    }
 
     const allCompleted = countBy(tasks, (t) => t.status === "completed") === tasks.size;
     const noInvalid = mergeInfo.invalidStatuses.length === 0;
@@ -357,7 +456,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       terminal = { status: "blocked", exitCode: 2 };
       break;
     }
-    if (attempts >= maxAttempts) {
+    if (sessionAttempts >= maxAttempts) {
       terminal = { status: "exhausted", exitCode: 1 };
       break;
     }
@@ -380,22 +479,29 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   }
 
   const tasksCompleted = countBy(tasks, (t) => t.status === "completed");
+  const endedAt = new Date().toISOString();
+
+  sessionRecord.status = terminal.status;
+  sessionRecord.exitCode = terminal.exitCode;
+  sessionRecord.endedAt = endedAt;
+  sessionRecord.backendSessionIdAtEnd = manifest.backendSessionId;
 
   manifest.status = terminal.status;
   manifest.exitCode = terminal.exitCode;
-  manifest.endedAt = new Date().toISOString();
+  manifest.endedAt = endedAt;
   manifest.tasksCompleted = tasksCompleted;
   manifest.finalTasks = snapshotTasks(tasks);
   writeManifest(workspaceDir, manifest);
 
   const summary: RunSummary = {
     status: terminal.status,
-    attempts,
+    attempts: sessionAttempts,
     maxAttempts,
     tasksCompleted,
     tasksTotal: tasks.size,
     planPath,
     tasks: Array.from(tasks.values()),
+    runId,
   };
   stderr(renderSummary(summary));
 
