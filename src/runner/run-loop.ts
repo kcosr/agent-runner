@@ -224,9 +224,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
   while (attempts < maxAttempts && !terminal) {
     attempts++;
-    const divider = `── attempt ${attempts} ──\n`;
-    stderr(divider);
-    stdout(divider);
+    stderr(`── attempt ${attempts} ──\n`);
 
     const sessionIdAtStart = sessionId;
     const attemptStartedAt = new Date().toISOString();
@@ -339,10 +337,6 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   }
 
   const tasksCompleted = countBy(tasks, (t) => t.status === "completed");
-  const blockedTasks = Array.from(tasks.values()).filter((t) => t.status === "blocked");
-  const incompleteTasks = Array.from(tasks.values()).filter(
-    (t) => t.status !== "completed" && t.status !== "blocked",
-  );
 
   manifest.status = terminal.status;
   manifest.exitCode = terminal.exitCode;
@@ -358,8 +352,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     tasksCompleted,
     tasksTotal: tasks.size,
     planPath,
-    blockedTasks,
-    incompleteTasks,
+    tasks: Array.from(tasks.values()),
   };
   stderr(renderSummary(summary));
 

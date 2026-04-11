@@ -9,8 +9,7 @@ export interface RunSummary {
   tasksCompleted: number;
   tasksTotal: number;
   planPath: string;
-  blockedTasks: TaskState[];
-  incompleteTasks: TaskState[];
+  tasks: TaskState[];
 }
 
 export function renderSummary(summary: RunSummary): string {
@@ -22,11 +21,11 @@ export function renderSummary(summary: RunSummary): string {
   lines.push(`Attempts: ${summary.attempts}/${summary.maxAttempts}`);
   lines.push(`Plan file: ${summary.planPath}`);
 
-  if (summary.blockedTasks.length > 0) {
+  if (summary.tasks.length > 0) {
     lines.push("");
-    lines.push("Blocked tasks:");
-    for (const task of summary.blockedTasks) {
-      lines.push(`  - ${task.id} — ${task.title}`);
+    lines.push("Task results:");
+    for (const task of summary.tasks) {
+      lines.push(`  - ${task.id} — ${task.title} [${task.status}]`);
       const notes = task.notes.trim();
       if (notes) {
         for (const noteLine of notes.split("\n")) {
@@ -36,13 +35,8 @@ export function renderSummary(summary: RunSummary): string {
     }
   }
 
-  if (summary.status === "exhausted" && summary.incompleteTasks.length > 0) {
-    lines.push("");
-    lines.push("Incomplete tasks:");
-    for (const task of summary.incompleteTasks) {
-      lines.push(`  - ${task.id} (${task.status}) — ${task.title}`);
-    }
-  }
+  lines.push("");
+  lines.push(`Review ${summary.planPath} for additional agent output.`);
 
   return `${lines.join("\n")}\n`;
 }

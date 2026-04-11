@@ -651,7 +651,7 @@ before starting the run.
 - **Stderr**: runner chrome — startup banner (agent name, run ID, plan
   path, cwd), attempt dividers, retry notifications, final summary.
 
-Final summary on stderr:
+Final summary on stderr, including per-task results with notes:
 
 ```
 ── summary ──
@@ -659,7 +659,25 @@ Status: success
 Tasks completed: 3/3
 Attempts: 2/4
 Plan file: /abs/path/.task-runner/k7m2xq/tasks.md
+
+Task results:
+  - t1_read_conventions — Check repo conventions [completed]
+      2-space indent; prefer node:test; PRs squash-merge to main.
+  - t2_audit_auth — Audit authentication flow [completed]
+      OAuth2 via middleware/auth.ts; no session tokens stored at rest.
+  - t3_summary — Summary [completed]
+      Small monorepo for agent tooling; three packages under src/.
+
+Review /abs/path/.task-runner/k7m2xq/tasks.md for additional agent output.
 ```
+
+The `Task results` section is built from the in-memory task map, so it
+always shows every declared task with its final status and any notes the
+agent wrote. The final review hint is a reminder that the plan file on
+disk may contain content outside the structured notes fences (the agent
+sometimes edits task bodies or adds scratch paragraphs) — if the
+structured per-task notes above look thin, the file itself is worth a
+glance.
 
 ### json
 

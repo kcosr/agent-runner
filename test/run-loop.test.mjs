@@ -146,7 +146,7 @@ test("happy path: mock marks all tasks completed in one attempt → exit 0", asy
   writeAgent(dir, "three", THREE_TASKS);
 
   let invocations = 0;
-  const { outcome, stdout } = await runWithMock(dir, async (ctx) => {
+  const { outcome, stdout, stderr } = await runWithMock(dir, async (ctx) => {
     invocations++;
     const plan = readFileSync(`./${ctx.prompt.match(/\.task-runner\/\S+?\/tasks\.md/)[0]}`, "utf8");
     let updated = plan;
@@ -170,7 +170,10 @@ test("happy path: mock marks all tasks completed in one attempt → exit 0", asy
   assert.equal(outcome.summary.status, "success");
   assert.equal(outcome.summary.tasksCompleted, 3);
   assert.equal(outcome.summary.attempts, 1);
-  assert.ok(stdout.includes("── attempt 1 ──"));
+  assert.ok(stderr.includes("── attempt 1 ──"), "divider on stderr");
+  assert.ok(!stdout.includes("── attempt 1 ──"), "divider not on stdout");
+  assert.ok(stderr.includes("Task results:"), "summary shows task results section");
+  assert.ok(stderr.includes("Review "), "summary shows plan file review hint");
 });
 
 test("retry path: first attempt leaves one incomplete, second completes → exit 0", async () => {
@@ -244,8 +247,9 @@ test("blocked path: marking one task blocked → exit 2, no further retries", as
   assert.equal(invocations, 1, "should not retry when a task is blocked");
   assert.equal(outcome.exitCode, 2);
   assert.equal(outcome.summary.status, "blocked");
-  assert.equal(outcome.summary.blockedTasks.length, 1);
-  assert.equal(outcome.summary.blockedTasks[0].id, "t2");
+  const blocked = outcome.summary.tasks.filter((t) => t.status === "blocked");
+  assert.equal(blocked.length, 1);
+  assert.equal(blocked[0].id, "t2");
 });
 
 test("exhausted path: never completes → exit 1 after maxRetries+1 attempts", async () => {
