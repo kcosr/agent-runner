@@ -979,13 +979,35 @@ printed to stdout.
   be the *first* step of a conversation: run this once, then
   follow up in the same session with `--resume-run <id> "your
   real task"` and the agent already has the repo loaded.
-- **`assignments/code-review/`** — twelve-task deep code review
+- **`assignments/code-review/`** — fourteen-task deep code review
   (orientation, architecture, concurrency, error handling, state
   machine, resources, security, types/schema, simplification &
-  duplication, test coverage, doc drift, synthesis). Takes a
-  `range` var defaulting to `full`; pass any git-style spec
-  (`unstaged`, `staged`, `last commit`, `HEAD~3..HEAD`,
-  `main..branch`) to scope the review to that range.
+  duplication, test coverage, doc drift, plan coverage, synthesis,
+  approval). Takes a `range` var defaulting to `full`; pass any
+  git-style spec (`unstaged`, `staged`, `last commit`,
+  `HEAD~3..HEAD`, `main..branch`) to scope the review to that
+  range. Also accepts an optional `implementation_plan` var
+  pointing at a task-runner workspace `assignment.md`; when set
+  (typically from a `plan-feature`-driven implementer run) the
+  reviewer verifies every planned task actually shipped and
+  flags silent deferrals. The final `t14_approval` task is an
+  explicit ship / no-ship decision: runs that approve exit
+  `success` (code 0); runs where the reviewer cannot approve
+  exit `blocked` (code 2), so scripts can gate on the terminal
+  status directly.
+- **`assignments/plan-feature/`** — meta-assignment that turns a
+  free-form feature description into an executable task-runner
+  plan. Takes a `repo_path` var; the feature brief comes in as
+  the positional message body so it is not length-limited. The
+  planner surveys conventions, impact, reuse opportunities, and
+  risks; copies a template into `.task-runner/drafts/`; fills in
+  every placeholder with concrete file-level detail; then runs
+  `task-runner init` to freeze the draft into a new run
+  workspace. The resulting run can be executed by any agent via
+  `task-runner run --resume-run <new-id>`. Execution requires
+  `TASK_RUNNER_MAX_CALL_DEPTH=2` because the generated plan
+  nests a `task-runner run` against the `code-reviewer` agent
+  for its internal review step.
 - **`assignments/doc-review/`** — twelve-task documentation review
   (inventory, elevator pitch, quickstart, concepts, commands/API
   accuracy, examples, completeness gaps, structure & navigation,
