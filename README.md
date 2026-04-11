@@ -605,6 +605,14 @@ printed to stdout.
   oriented in any repo. Takes a `repo_path` var.
 - **`assignments/repo-diagnostics/`** — two simple shell tasks
   (`pwd`, `date`) used as a smoke test.
+- **`assignments/familiarize/`** — eight-task deep onboarding:
+  read the primary docs, run `codemap --budget 15000` for a
+  compact code map, inventory the directory structure, identify
+  entry points, sketch the subsystem map, capture conventions,
+  list known unknowns, and run a self-check summary. Designed to
+  be the *first* step of a conversation: run this once, then
+  follow up in the same session with `--resume-run <id> "your
+  real task"` and the agent already has the repo loaded.
 - **`assignments/code-review/`** — twelve-task deep code review
   (orientation, architecture, concurrency, error handling, state
   machine, resources, security, types/schema, simplification &
@@ -622,6 +630,15 @@ printed to stdout.
 ### Running them
 
 ```bash
+# Load a repo into an agent's context first, then drive it
+# conversationally after familiarization finishes.
+task-runner run \
+  --agent code-reviewer \
+  --assignment familiarize \
+  --var repo_path=/home/you/path/to/some/project
+# ... familiarization tasks complete ...
+task-runner run --resume-run <id> "now review the auth layer for security issues"
+
 # Full code review of this repo
 task-runner run \
   --agent code-reviewer \
