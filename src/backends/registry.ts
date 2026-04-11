@@ -1,10 +1,12 @@
 import { claudeBackend } from "./claude.js";
 import { codexBackend } from "./codex.js";
+import { passiveBackend } from "./passive.js";
 import type { Backend } from "./types.js";
 
 const BACKENDS: Record<string, Backend> = {
   claude: claudeBackend,
   codex: codexBackend,
+  passive: passiveBackend,
 };
 
 export class UnknownBackendError extends Error {

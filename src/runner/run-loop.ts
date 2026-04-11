@@ -29,7 +29,11 @@ import {
 } from "./recursion-guard.js";
 
 export { RecursionDepthError } from "./recursion-guard.js";
-import { TASK_WORKFLOW_TEMPLATE, buildAddedTasksReminder } from "./task-workflow.js";
+import {
+  PASSIVE_TASK_WORKFLOW_TEMPLATE,
+  TASK_WORKFLOW_TEMPLATE,
+  buildAddedTasksReminder,
+} from "./task-workflow.js";
 
 export interface RunOverrides {
   cwd?: string;
@@ -526,6 +530,15 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     }
     initialPrompt = parts.join("\n\n");
   } else {
+    // Passive agents compose the same prompt structure as regular
+    // agents but with the CLI-based workflow template (drive the
+    // checklist via `task-runner task set` instead of editing the
+    // assignment file). The composed prompt is stored in
+    // `pendingPrompt` for the sidecar driver to read via
+    // `status --field pendingPrompt`; it is never sent to a backend
+    // because `task-runner run` is rejected on passive agents.
+    const workflowTemplate =
+      agentConfig.backend === "passive" ? PASSIVE_TASK_WORKFLOW_TEMPLATE : TASK_WORKFLOW_TEMPLATE;
     const parts: string[] = [];
     if (agentInstructions.length > 0) {
       parts.push(interpolate(agentInstructions, injectedVars));
@@ -534,7 +547,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       parts.push(interpolate(assignmentInstructions, injectedVars));
     }
     if (hasTasks) {
-      parts.push(interpolate(TASK_WORKFLOW_TEMPLATE, injectedVars));
+      parts.push(interpolate(workflowTemplate, injectedVars));
     }
     if (trimmedMessage.length > 0) {
       parts.push(trimmedMessage);
@@ -634,10 +647,14 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
   // `init` stops here: persist the prepared workspace + manifest and
   // return a terminal "initialized" outcome. No session is created; the
-  // caller will follow up with `task-runner run --resume-run <id>`.
+  // caller will follow up with `task-runner run --resume-run <id>` —
+  // or, for passive agents, with `task-runner task set` / `task add`.
   if (isInitialize) {
     writeManifest(workspaceDir, manifest);
-    stderr(`task-runner: initialized agent=${agentConfig.name} run=${runId}\n`);
+    const isPassive = agentConfig.backend === "passive";
+    stderr(
+      `task-runner: initialized ${isPassive ? "passive " : ""}agent=${agentConfig.name} run=${runId}\n`,
+    );
     if (loadedAssignment) {
       stderr(`             source=${loadedAssignment.sourcePath}\n`);
     }
@@ -646,7 +663,17 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       stderr(`             session=${sessionName}\n`);
     }
     stderr(`             cwd=${cwd}\n`);
-    stderr(`             resume with: task-runner run --resume-run ${runId}\n`);
+    if (isPassive) {
+      stderr(`             drive with: task-runner task set ${runId} <task-id> ...\n`);
+      // The full bootstrap (composed pendingPrompt) goes to stdout so
+      // callers can pipe or capture it cleanly — e.g.
+      // `task-runner init --agent passive-example ... > /tmp/brief.txt`.
+      if (initialPrompt.length > 0) {
+        stdout(`${initialPrompt}\n`);
+      }
+    } else {
+      stderr(`             resume with: task-runner run --resume-run ${runId}\n`);
+    }
     return {
       summary: {
         status: "initialized",

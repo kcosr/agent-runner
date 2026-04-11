@@ -48,7 +48,7 @@ export type LockableField = (typeof LOCKABLE_FIELDS)[number];
 export const agentConfigSchema = z.object({
   schemaVersion: z.literal(1),
   name: z.string().min(1),
-  backend: z.enum(["claude", "codex"]),
+  backend: z.enum(["claude", "codex", "passive"]),
   model: z.string().optional(),
   effort: z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]).optional(),
   timeoutSec: z.number().int().positive().default(3600),

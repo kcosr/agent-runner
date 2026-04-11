@@ -153,9 +153,16 @@ export function renderManifestStatus(
   if (manifest.endedAt) {
     lines.push(`Ended: ${manifest.endedAt}`);
   }
-  lines.push(
-    `Tasks completed: ${manifest.tasksCompleted}/${manifest.tasksTotal}    Attempts: ${manifest.attempts}/${manifest.maxAttempts}    Sessions: ${manifest.sessionCount}`,
-  );
+  // Passive runs never run backend attempts or create sessions, so
+  // the Attempts / Sessions fields are always `0/0` / `0` and add
+  // noise. Hide them for passive.
+  if (manifest.backend === "passive") {
+    lines.push(`Tasks completed: ${manifest.tasksCompleted}/${manifest.tasksTotal}`);
+  } else {
+    lines.push(
+      `Tasks completed: ${manifest.tasksCompleted}/${manifest.tasksTotal}    Attempts: ${manifest.attempts}/${manifest.maxAttempts}    Sessions: ${manifest.sessionCount}`,
+    );
+  }
 
   const taskEntries = Object.values(manifest.finalTasks);
   if (taskEntries.length > 0) {
@@ -172,6 +179,8 @@ export function renderManifestStatus(
     }
   }
 
+  const isPassive = manifest.backend === "passive";
+
   if (manifest.status === "running") {
     lines.push("");
     if (opts.isLive) {
@@ -183,8 +192,16 @@ export function renderManifestStatus(
     }
   } else if (manifest.status === "initialized") {
     lines.push("");
-    lines.push("To execute this run:");
-    lines.push(`  task-runner run --resume-run ${manifest.runId}`);
+    if (isPassive) {
+      lines.push("Drive this run externally:");
+      lines.push(`  task-runner task set ${manifest.runId} <task-id> --status in_progress`);
+      lines.push(
+        `  task-runner task set ${manifest.runId} <task-id> --status completed --notes "..."`,
+      );
+    } else {
+      lines.push("To execute this run:");
+      lines.push(`  task-runner run --resume-run ${manifest.runId}`);
+    }
   } else if (
     manifest.status === "blocked" ||
     manifest.status === "exhausted" ||
@@ -192,8 +209,13 @@ export function renderManifestStatus(
     manifest.status === "error"
   ) {
     lines.push("");
-    lines.push("To resume this run:");
-    lines.push(`  task-runner run --resume-run ${manifest.runId} "..."`);
+    if (isPassive) {
+      lines.push("Reopen tasks to continue:");
+      lines.push(`  task-runner task set ${manifest.runId} <task-id> --status in_progress`);
+    } else {
+      lines.push("To resume this run:");
+      lines.push(`  task-runner run --resume-run ${manifest.runId} "..."`);
+    }
   }
 
   return `${lines.join("\n")}\n`;

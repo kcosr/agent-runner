@@ -13,6 +13,37 @@ rather than retrying.
 
 Do not delete or reorder tasks in \`{{assignment_path}}\`.`;
 
+// Passive variant: the agent works the checklist through task-runner
+// CLI calls instead of editing {{assignment_path}} directly. Used when
+// the agent's backend is `passive` and task-runner is acting as a
+// sidecar checklist service rather than an LLM invoker.
+export const PASSIVE_TASK_WORKFLOW_TEMPLATE = `You are working through a task list maintained by task-runner. Your
+run id is \`{{run_id}}\`. The task list lives at \`{{assignment_path}}\`
+and is the source of truth for what's left to do.
+
+For each task in the list:
+
+1. Claim it:
+   \`task-runner task set {{run_id}} <task-id> --status in_progress\`
+2. Do the work described in the task body.
+3. Report completion with your findings:
+   \`task-runner task set {{run_id}} <task-id> --status completed --notes "..."\`
+
+If a task cannot be completed, mark it \`blocked\` instead and explain
+why in the notes — the run auto-finalizes to \`blocked\` status and
+exit code 2:
+   \`task-runner task set {{run_id}} <task-id> --status blocked --notes "..."\`
+
+Check remaining work at any time:
+   \`task-runner status {{run_id}}\`
+
+To re-fetch these instructions later:
+   \`task-runner status {{run_id}} --output-format json --field pendingPrompt\`
+
+When every task reaches a terminal status (\`completed\` / \`blocked\`),
+the run automatically transitions to \`success\` (if all completed) or
+\`blocked\` (if any blocked).`;
+
 export function buildAddedTasksReminder(addedCount: number, assignmentPath: string): string {
   const noun = addedCount === 1 ? "task has" : "tasks have";
   return `(task-runner: ${addedCount} new ${noun} been added to your assignment since the last session — please re-read ${assignmentPath} before continuing.)`;

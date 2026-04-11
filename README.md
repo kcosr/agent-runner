@@ -34,6 +34,9 @@ the work, and writes a single canonical record per run.
   - [`task-runner status`](#task-runner-status)
   - [`task-runner task set` / `task add`](#task-runner-task-set--task-runner-task-add)
 - [Backends](#backends)
+  - [Claude](#claude)
+  - [Codex](#codex)
+  - [Passive](#passive)
 - [Resuming, aborting, importing](#resuming-aborting-importing)
 - [Variables and interpolation](#variables-and-interpolation)
 - [Locked fields](#locked-fields)
@@ -72,8 +75,10 @@ chat output.
 
 ## Features
 
-- **Two backends**: Claude (subprocess wrapping `claude --print`) and
-  Codex (JSON-RPC managed mode over stdio or websocket).
+- **Three backends**: Claude (subprocess wrapping `claude --print`),
+  Codex (JSON-RPC managed mode over stdio or websocket), and Passive
+  (null-object for sidecar flows — `init` + `task set` / `task add`
+  only, task-runner never invokes a model).
 - **Structured task tracking**: tasks have stable ids and statuses
   (`pending`, `in_progress`, `completed`, `blocked`) that the agent
   updates in place; the runner parses the workspace `assignment.md`
@@ -98,10 +103,10 @@ chat output.
   attaching to anything.
 - **Sidecar task mutation**: `task-runner task set` / `task add` let
   an external agent or script drive a run's task list through the CLI
-  without task-runner ever invoking a backend. The natural pairing is
-  `init` (no backend call) → external agent works through tasks → CLI
-  updates status/notes → `status` reads progress. Useful for agents
-  that can't be invoked as a task-runner subprocess.
+  without task-runner ever invoking a backend. Pair with the
+  [Passive backend](#passive) for a first-class sidecar agent that
+  rejects `run` entirely and auto-finalizes the manifest to `success`
+  or `blocked` once every task reaches a terminal status.
 - **Clean Ctrl+C**: SIGINT aborts the in-flight backend invocation
   cleanly (claude gets SIGINT, codex gets `turn/interrupt`), persists
   the manifest as `aborted`, and exits 130. Resume any time with
@@ -595,6 +600,82 @@ start, optionally `thread/name/set` if the assignment provided a
 `sessionName`, then `turn/start` for each attempt and `turn/interrupt`
 on timeout, abort, or external Ctrl+C.
 
+### Passive
+
+A null-object backend for runs that task-runner will never execute.
+Passive agents are driven externally — a script or out-of-process
+agent calls `task-runner init` to create the run, reads the task list
+and role instructions via `status`, and reports progress back
+through `task set` / `task add`. task-runner acts purely as a
+structured checklist service, with no LLM involvement.
+
+Declare a passive agent like any other:
+
+```yaml
+---
+schemaVersion: 1
+name: my-passive-agent
+backend: passive
+lockedFields:
+  - backend
+---
+Role instructions for the external driver (a human reader or the
+agent that will run the task list).
+```
+
+Passive-specific behavior:
+
+- **`task-runner run` is rejected** on passive agents with a clear
+  pointer to `init` and `task set`. Applies to fresh runs and
+  `--resume-run` alike.
+- **`task-runner init` prints the full bootstrap** — the composed
+  agent instructions + assignment context + CLI workflow reminder —
+  to **stdout**, so you can pipe it: `task-runner init ... >
+  /tmp/brief.txt`. Brief progress lines still go to stderr.
+- **`task set` / `task add` auto-finalize** the run. After every
+  mutation, the manifest status is re-derived from the task map:
+  - any `pending` or `in_progress` task → `initialized`
+  - all terminal, at least one `blocked` → `blocked` (exit code 2)
+  - all `completed` → `success` (exit code 0)
+  
+  Self-healing: reopening a completed task or adding a new one on a
+  `success` run flips the status back to `initialized`.
+- **Locking `backend`** in the agent's `lockedFields` is strongly
+  recommended. It prevents callers from overriding the backend at
+  `init` time (e.g. `--backend claude`) and turning a passive agent
+  into an executable one. The bundled `agents/passive-example/`
+  does this.
+- **Hidden status fields**: `task-runner status` omits the
+  `Attempts:` and `Sessions:` lines for passive runs since they're
+  always zero.
+- **Re-orient an external driver**: the composed bootstrap is
+  persisted in `manifest.pendingPrompt` and never consumed, so an
+  agent can refetch it any time with:
+  
+  ```bash
+  task-runner status <run-id> --output-format json --field pendingPrompt
+  ```
+
+Sidecar driver loop:
+
+```bash
+# 1. Prepare the run (prints the full bootstrap to stdout)
+task-runner init --agent passive-example --assignment <work> \
+  --var repo_path=. 2>/dev/null > /tmp/brief.txt
+
+# 2. Parse out the run id from the earlier stderr, or from JSON mode:
+RUN=$(task-runner init --agent passive-example --assignment <work> \
+  --var repo_path=. --output-format json | jq -r .runId)
+
+# 3. Walk the task list (agent-specific logic omitted)
+task-runner task set $RUN t1 --status in_progress
+# ...do the work...
+task-runner task set $RUN t1 --status completed --notes "..."
+
+# 4. When every task is terminal, the run auto-finalizes.
+task-runner status $RUN | grep "Status: success"
+```
+
 ---
 
 ## Resuming, aborting, importing
@@ -781,6 +862,11 @@ printed to stdout.
   documentation review. Same model/effort as code-reviewer but a
   different mindset: drift detection, example runnability,
   completeness, and proposing mermaid diagrams where they'd help.
+- **`agents/passive-example/`** — sidecar-only agent with
+  `backend: passive` and `lockedFields: [backend]`. task-runner
+  never invokes it; callers use `init` to seed the workspace and
+  `task set` / `task add` to drive the checklist externally. See
+  [Passive backend](#passive).
 
 ### Assignments
 

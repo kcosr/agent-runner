@@ -287,6 +287,22 @@ async function main(): Promise<void> {
     throw err;
   }
 
+  // Passive agents are never executed: task-runner acts as a sidecar
+  // checklist service, and the agent is driven externally through
+  // `task set` / `task add`. `init` is allowed (prepares the
+  // workspace and prints the bootstrap). `run` — fresh or resume — is
+  // rejected with a clear pointer to the right commands.
+  if (parsed.command === "run" && backendId === "passive") {
+    const runId = resumeTarget?.manifest.runId;
+    const hint = runId
+      ? `task-runner task set ${runId} <task-id> --status in_progress\n  task-runner status ${runId}`
+      : "task-runner init --agent <passive-agent> --assignment <...>\n  task-runner task set <run-id> <task-id> --status in_progress";
+    process.stderr.write(
+      `task-runner: cannot run passive agent "${loaded.config.name}" — passive agents are driven externally via task commands. Use:\n  ${hint}\n`,
+    );
+    process.exit(3);
+  }
+
   const isJson = parsed.outputFormat === "json";
   const noop = (_text: string): void => {};
 
@@ -516,7 +532,57 @@ function persistTaskMap(
   resolved.manifest.finalTasks = snapshotTasks(tasks);
   resolved.manifest.tasksCompleted = ordered.filter((t) => t.status === "completed").length;
   resolved.manifest.tasksTotal = ordered.length;
+
+  // Passive runs self-finalize: after any mutation, re-derive the
+  // manifest status from the task map so scripts driving a passive
+  // run can check `status == "success"` instead of computing the
+  // counts themselves. Non-passive runs are untouched — their state
+  // machine is still owned by the run-loop.
+  if (resolved.manifest.backend === "passive") {
+    applyPassiveFinalization(resolved.manifest, ordered);
+  }
+
   writeManifest(resolved.workspaceDir, resolved.manifest);
+}
+
+// For a passive run, derive the next terminal state from the task map:
+//   - any pending / in_progress → "initialized" (still work to do)
+//   - all terminal, at least one blocked → "blocked" (exit code 2)
+//   - all completed → "success" (exit code 0)
+// Self-healing: reopening a completed task on a finalized run flips
+// status back to "initialized" and clears exitCode/endedAt.
+function applyPassiveFinalization(manifest: RunManifest, ordered: TaskState[]): void {
+  let hasOpen = false;
+  let hasBlocked = false;
+  for (const t of ordered) {
+    if (t.status === "pending" || t.status === "in_progress") hasOpen = true;
+    if (t.status === "blocked") hasBlocked = true;
+  }
+  // A 0-task passive run never auto-finalizes — it stays in
+  // `initialized` forever. That's consistent with how non-passive
+  // chat-mode runs behave (they can reach a terminal state only via
+  // explicit session termination).
+  if (ordered.length === 0) {
+    manifest.status = "initialized";
+    manifest.endedAt = null;
+    manifest.exitCode = null;
+    return;
+  }
+  if (hasOpen) {
+    manifest.status = "initialized";
+    manifest.endedAt = null;
+    manifest.exitCode = null;
+    return;
+  }
+  if (hasBlocked) {
+    manifest.status = "blocked";
+    manifest.endedAt = new Date().toISOString();
+    manifest.exitCode = 2;
+    return;
+  }
+  manifest.status = "success";
+  manifest.endedAt = new Date().toISOString();
+  manifest.exitCode = 0;
 }
 
 function runTaskSet(parsed: ParsedArgs): never {
