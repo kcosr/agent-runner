@@ -13,7 +13,6 @@ name: claude-agent
 backend: claude
 model: claude-sonnet-4-6
 effort: medium
-maxRetries: 1
 ---
 Agent role.
 `;
@@ -24,7 +23,6 @@ name: locked-backend
 backend: claude
 model: claude-sonnet-4-6
 lockedFields: [backend]
-maxRetries: 1
 ---
 Agent role.
 `;
@@ -32,6 +30,7 @@ Agent role.
 const ONE_TASK_ASSIGNMENT = `---
 schemaVersion: 1
 name: one-work
+maxRetries: 1
 tasks:
   - id: t1
     title: First

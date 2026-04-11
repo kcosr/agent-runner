@@ -72,7 +72,6 @@ schemaVersion: 1
 name: empty
 backend: claude
 model: claude-sonnet-4-6
-maxRetries: 1
 ---
 `;
 
@@ -83,13 +82,13 @@ schemaVersion: 1
 name: body-less-tasks
 backend: claude
 model: claude-sonnet-4-6
-maxRetries: 1
 ---
 `;
 
 const BODY_LESS_TASKS_ASSIGNMENT = `---
 schemaVersion: 1
 name: body-less-tasks-work
+maxRetries: 1
 tasks:
   - id: t1
     title: Do it
@@ -103,7 +102,6 @@ schemaVersion: 1
 name: body-less
 backend: claude
 model: claude-sonnet-4-6
-maxRetries: 1
 ---
 `;
 

@@ -10,7 +10,6 @@ const INTERP_AGENT = `---
 schemaVersion: 1
 name: interp
 backend: claude
-maxRetries: 1
 ---
 Agent role.
 `;
@@ -18,6 +17,7 @@ Agent role.
 const INTERP_ASSIGNMENT = `---
 schemaVersion: 1
 name: interp-work
+maxRetries: 1
 vars:
   repo_path:
     type: string

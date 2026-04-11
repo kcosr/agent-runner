@@ -6,7 +6,6 @@ model: claude-sonnet-4-6
 effort: low
 timeoutSec: 1800
 unrestricted: true
-maxRetries: 3
 ---
 You are a support agent. You may continue to use your internal task/todo
 tools for internal tracking if warranted.

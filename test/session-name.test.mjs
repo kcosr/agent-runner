@@ -12,7 +12,6 @@ const NAMED_AGENT = `---
 schemaVersion: 1
 name: named
 backend: claude
-maxRetries: 1
 ---
 Agent role.
 `;
@@ -20,6 +19,7 @@ Agent role.
 const NAMED_ASSIGNMENT = `---
 schemaVersion: 1
 name: named-work
+maxRetries: 1
 sessionName: build {{repo_name}} integration
 vars:
   repo_name:
@@ -36,6 +36,7 @@ Work.
 const STATIC_NAME_ASSIGNMENT = `---
 schemaVersion: 1
 name: static-name-work
+maxRetries: 1
 sessionName: nightly-cleanup
 tasks:
   - id: t1
@@ -47,6 +48,7 @@ Work.
 const NO_NAME_ASSIGNMENT = `---
 schemaVersion: 1
 name: noname-work
+maxRetries: 1
 tasks:
   - id: t1
     title: First
@@ -316,6 +318,7 @@ test("sessionName: lockedFields: [sessionName] rejects --session-name override",
     `---
 schemaVersion: 1
 name: locked-name-work
+maxRetries: 1
 sessionName: fixed-name
 lockedFields: [sessionName]
 tasks:

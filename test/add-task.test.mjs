@@ -13,7 +13,6 @@ schemaVersion: 1
 name: two
 backend: claude
 model: claude-sonnet-4-6
-maxRetries: 1
 ---
 Agent prompt.
 `;
@@ -21,6 +20,7 @@ Agent prompt.
 const TWO_ASSIGNMENT = `---
 schemaVersion: 1
 name: two-work
+maxRetries: 1
 tasks:
   - id: t1
     title: First
@@ -36,7 +36,6 @@ schemaVersion: 1
 name: notasks
 backend: claude
 model: claude-sonnet-4-6
-maxRetries: 1
 ---
 Agent prompt.
 `;
@@ -48,7 +47,6 @@ name: locked-tasks
 backend: claude
 model: claude-sonnet-4-6
 lockedFields: [tasks]
-maxRetries: 1
 ---
 Agent prompt.
 `;
@@ -56,6 +54,7 @@ Agent prompt.
 const LOCKED_TASKS_ASSIGNMENT = `---
 schemaVersion: 1
 name: locked-tasks-work
+maxRetries: 1
 tasks:
   - id: t1
     title: First

@@ -6,7 +6,6 @@ model: gpt-5.3-codex
 effort: high
 timeoutSec: 3600
 unrestricted: true
-maxRetries: 3
 ---
 You are a senior technical writer reviewing a project's
 documentation. You read prose like a sceptical new contributor: if

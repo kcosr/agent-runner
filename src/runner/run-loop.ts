@@ -154,7 +154,7 @@ function checkLockedFields(
     ["sessionName", overrides?.sessionName, assignmentConfig?.sessionName],
     ["timeoutSec", overrides?.timeoutSec, agentConfig.timeoutSec],
     ["unrestricted", overrides?.unrestricted, agentConfig.unrestricted],
-    ["maxRetries", overrides?.maxRetries, agentConfig.maxRetries],
+    ["maxRetries", overrides?.maxRetries, assignmentConfig?.maxRetries],
     ["tasks", addedTasks.length > 0 ? addedTasks : undefined, assignmentConfig?.tasks ?? []],
     [
       "instructions",
@@ -374,7 +374,10 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const message = overrides?.message ?? assignmentConfig?.message ?? null;
   const timeoutSec = overrides?.timeoutSec ?? agentConfig.timeoutSec;
   const unrestricted = overrides?.unrestricted ?? agentConfig.unrestricted;
-  const maxRetries = overrides?.maxRetries ?? agentConfig.maxRetries;
+  // maxRetries lives on the assignment. In chat mode (no assignment
+  // loaded), fall back to a hard default of 3 to match the assignment
+  // schema's own default.
+  const maxRetries = overrides?.maxRetries ?? assignmentConfig?.maxRetries ?? 3;
   const maxAttempts = maxRetries + 1;
 
   if (isResume) {

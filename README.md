@@ -212,7 +212,6 @@ backend: claude
 model: claude-sonnet-4-6
 effort: medium
 unrestricted: true
-maxRetries: 3
 ---
 You are a repository orientation assistant. Be concrete and cite
 file paths and line numbers.
@@ -225,6 +224,7 @@ A minimal assignment:
 schemaVersion: 1
 name: repo-orientation
 sessionName: orient {{repo_path}}      # optional display label
+maxRetries: 3                          # retry budget per session, default 3
 vars:
   repo_path:
     type: string

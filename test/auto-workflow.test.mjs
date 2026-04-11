@@ -12,7 +12,6 @@ schemaVersion: 1
 name: one
 backend: claude
 model: claude-sonnet-4-6
-maxRetries: 1
 ---
 You are an assistant.
 `;
@@ -20,6 +19,7 @@ You are an assistant.
 const ONE_ASSIGNMENT = `---
 schemaVersion: 1
 name: one-work
+maxRetries: 1
 tasks:
   - id: t1
     title: Do it
@@ -31,7 +31,6 @@ schemaVersion: 1
 name: zero
 backend: claude
 model: claude-sonnet-4-6
-maxRetries: 1
 ---
 You are a chat assistant.
 `;

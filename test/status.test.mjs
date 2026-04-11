@@ -44,7 +44,6 @@ schemaVersion: 1
 name: status-agent
 backend: claude
 model: claude-sonnet-4-6
-maxRetries: 1
 ---
 Agent.
 `;
@@ -52,6 +51,7 @@ Agent.
 const STATUS_ASSIGNMENT = `---
 schemaVersion: 1
 name: status-work
+maxRetries: 1
 sessionName: status test
 tasks:
   - id: t1

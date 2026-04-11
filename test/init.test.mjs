@@ -12,7 +12,6 @@ schemaVersion: 1
 name: two
 backend: claude
 model: claude-sonnet-4-6
-maxRetries: 2
 ---
 Agent role instructions.
 `;
@@ -20,6 +19,7 @@ Agent role instructions.
 const TWO_ASSIGNMENT = `---
 schemaVersion: 1
 name: two-work
+maxRetries: 2
 message: the-ask
 vars:
   repo_path:

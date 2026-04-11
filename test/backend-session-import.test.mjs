@@ -29,7 +29,6 @@ schemaVersion: 1
 name: import-agent
 backend: claude
 model: claude-sonnet-4-6
-maxRetries: 1
 ---
 Agent.
 `;
@@ -37,6 +36,7 @@ Agent.
 const IMPORT_ASSIGNMENT = `---
 schemaVersion: 1
 name: import-work
+maxRetries: 1
 tasks:
   - id: t1
     title: First

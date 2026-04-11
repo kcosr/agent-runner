@@ -154,7 +154,6 @@ effort: medium                    # optional; off|minimal|low|medium|high|xhigh|
 timeoutSec: 3600                  # optional, default 3600
 unrestricted: false               # optional, default false
 cwd: .                            # optional, default "."
-maxRetries: 3                     # optional, default 3
 lockedFields: [model, effort]     # optional; caller cannot override these
 ---
 You are a coding assistant working on `{{repo_path}}`.
@@ -173,12 +172,11 @@ Record findings in each task's notes block.
 | `timeoutSec` | Per-invocation wall clock |
 | `unrestricted` | Backend permission bypass |
 | `cwd` | Subprocess / invocation working directory |
-| `maxRetries` | Retry budget per session |
 | `lockedFields` | Fields the caller cannot override |
 | _(body)_ | Agent's **role instructions** — renders as part of every fresh-run prompt |
 
-Agent frontmatter **does not contain** `vars`, `tasks`, or `message` —
-those are assignment-level concepts.
+Agent frontmatter **does not contain** `vars`, `tasks`, `message`, or
+`maxRetries` — those are assignment-level concepts.
 
 ### Assignment schema
 
@@ -187,6 +185,7 @@ those are assignment-level concepts.
 schemaVersion: 1
 name: repo-orientation
 sessionName: orient {{repo_path}}      # optional display name on the backend
+maxRetries: 3                          # optional, default 3; retry budget per session
 vars:
   repo_path:
     type: string                  # string | number | boolean | enum
@@ -218,6 +217,7 @@ block; no code changes.
 | `schemaVersion` | Future migrations |
 | `name` | Identity in errors/logs |
 | `sessionName` | Display name for the backend session (claude `--name`, codex `thread/name/set`). Vars are interpolated. Optional |
+| `maxRetries` | Retry budget per session (int, 0–20, default 3). Caps the number of attempts the run loop makes against this assignment before giving up. |
 | `vars` | CLI/env input schema (validated at run time) |
 | `message` | Default follow-up message for the run |
 | `tasks` | Task checklist, stable IDs, max 100 per assignment |
@@ -225,7 +225,7 @@ block; no code changes.
 | _(body)_ | Assignment's **work-context instructions** — renders after the agent body |
 
 Assignments **do not contain** `backend`, `model`, `effort`, `cwd`,
-`timeoutSec`, `unrestricted`, or `maxRetries` — those are agent-level.
+`timeoutSec`, or `unrestricted` — those are agent-level.
 
 #### Session naming
 
@@ -357,9 +357,9 @@ fail fast.
 
 | Field | Typical lock owner |
 |---|---|
-| `cwd`, `backend`, `model`, `effort`, `timeoutSec`, `unrestricted`, `maxRetries` | agent — agent-owned config, agent decides CLI override rules |
+| `cwd`, `backend`, `model`, `effort`, `timeoutSec`, `unrestricted` | agent — agent-owned config, agent decides CLI override rules |
 | `instructions` | agent — refuses assignments with non-empty body |
-| `message`, `tasks`, `sessionName` | either — agent-wide prohibition OR per-assignment canonical value |
+| `message`, `tasks`, `sessionName`, `maxRetries` | either — agent-wide prohibition OR per-assignment canonical value |
 
 **Runtime check** — early in `runAgent()`, before any work starts, the
 runner builds the union of `agentConfig.lockedFields` and

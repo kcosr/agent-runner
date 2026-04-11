@@ -86,7 +86,6 @@ const DEPTH_AGENT = `---
 schemaVersion: 1
 name: depth-agent
 backend: claude
-maxRetries: 1
 ---
 Agent.
 `;
@@ -94,6 +93,7 @@ Agent.
 const DEPTH_ASSIGNMENT = `---
 schemaVersion: 1
 name: depth-work
+maxRetries: 1
 tasks:
   - id: t1
     title: First

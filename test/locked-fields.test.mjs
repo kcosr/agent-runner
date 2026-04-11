@@ -14,7 +14,6 @@ backend: claude
 model: claude-sonnet-4-6
 effort: medium
 lockedFields: [model, effort]
-maxRetries: 1
 ---
 Agent prompt.
 `;
@@ -22,6 +21,7 @@ Agent prompt.
 const LOCKED_MODEL_ASSIGNMENT = `---
 schemaVersion: 1
 name: locked-work
+maxRetries: 1
 tasks:
   - id: t1
     title: First
@@ -35,7 +35,6 @@ schemaVersion: 1
 name: with-msg
 backend: claude
 model: claude-sonnet-4-6
-maxRetries: 1
 ---
 Agent prompt.
 `;
@@ -43,6 +42,7 @@ Agent prompt.
 const WITH_MSG_ASSIGNMENT = `---
 schemaVersion: 1
 name: with-msg-work
+maxRetries: 1
 message: default message from frontmatter
 tasks:
   - id: t1
@@ -58,7 +58,6 @@ name: locked-msg
 backend: claude
 model: claude-sonnet-4-6
 lockedFields: [message]
-maxRetries: 1
 ---
 Agent prompt.
 `;
@@ -66,6 +65,7 @@ Agent prompt.
 const LOCKED_MSG_ASSIGNMENT = `---
 schemaVersion: 1
 name: locked-msg-work
+maxRetries: 1
 message: fixed message
 tasks:
   - id: t1
@@ -239,7 +239,6 @@ test("message: no override + no assignment default means null in manifest", asyn
 schemaVersion: 1
 name: plain
 backend: claude
-maxRetries: 1
 ---
 Plain agent.
 `,
@@ -250,6 +249,7 @@ Plain agent.
     `---
 schemaVersion: 1
 name: plain-work
+maxRetries: 1
 tasks:
   - id: t1
     title: First

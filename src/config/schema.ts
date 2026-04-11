@@ -54,7 +54,6 @@ export const agentConfigSchema = z.object({
   timeoutSec: z.number().int().positive().default(3600),
   unrestricted: z.boolean().default(false),
   cwd: z.string().default("."),
-  maxRetries: z.number().int().min(0).max(20).default(3),
   lockedFields: z.array(z.enum(LOCKABLE_FIELDS)).default([]),
 });
 
@@ -72,6 +71,7 @@ export const assignmentConfigSchema = z
     name: z.string().min(1),
     sessionName: z.string().min(1).optional(),
     message: z.string().optional(),
+    maxRetries: z.number().int().min(0).max(20).default(3),
     vars: z.record(z.string(), varDefSchema).default({}),
     tasks: z.array(taskDefSchema).max(100).default([]),
     lockedFields: z.array(z.enum(LOCKABLE_FIELDS)).default([]),

@@ -60,9 +60,9 @@ test("loadAgentConfig parses a minimal agent.md", () => {
   const loaded = loadAgentConfig("demo", dir);
   assert.equal(loaded.config.name, "demo");
   assert.equal(loaded.config.backend, "claude");
-  assert.equal(loaded.config.maxRetries, 3);
   assert.equal(loaded.config.timeoutSec, 3600);
   assert.equal(loaded.config.unrestricted, false);
+  assert.ok(!("maxRetries" in loaded.config), "maxRetries moved to assignment schema");
   assert.ok(loaded.instructions.includes("You are an assistant."));
 });
 
@@ -146,6 +146,7 @@ test("loadAssignmentConfig parses a minimal assignment.md", () => {
   assert.equal(loaded.config.name, "demo-work");
   assert.equal(loaded.config.tasks.length, 1);
   assert.equal(loaded.config.tasks[0].id, "t1");
+  assert.equal(loaded.config.maxRetries, 3, "maxRetries defaults to 3 on assignment");
   assert.ok(loaded.instructions.includes("{{assignment_path}}"));
 });
 

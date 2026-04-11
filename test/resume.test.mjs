@@ -12,7 +12,6 @@ schemaVersion: 1
 name: three
 backend: claude
 model: claude-sonnet-4-6
-maxRetries: 2
 ---
 Agent prompt.
 `;
@@ -20,6 +19,7 @@ Agent prompt.
 const THREE_ASSIGNMENT = `---
 schemaVersion: 1
 name: three-work
+maxRetries: 2
 tasks:
   - id: t1
     title: First

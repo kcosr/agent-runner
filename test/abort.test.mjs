@@ -10,7 +10,6 @@ const ABORT_AGENT = `---
 schemaVersion: 1
 name: aborter
 backend: claude
-maxRetries: 2
 ---
 Agent role.
 `;
@@ -18,6 +17,7 @@ Agent role.
 const ABORT_ASSIGNMENT = `---
 schemaVersion: 1
 name: aborter-work
+maxRetries: 2
 tasks:
   - id: t1
     title: First
