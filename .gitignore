@@ -32,3 +32,6 @@ Thumbs.db
 
 # task-runner workspaces (created per-run)
 .task-runner/
+
+# codemap
+.codemap/
