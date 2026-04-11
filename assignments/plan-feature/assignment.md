@@ -28,7 +28,7 @@ callerInstructions: |
   planner doesn't need special role instructions — the detail
   lives in this assignment's task bodies. It does need shell
   access (`unrestricted: true`) so it can run
-  `task-runner init` in `t07_init_run`.
+  `task-runner init` in `t08_init_run`.
 
   ## What the planner does
 
@@ -50,7 +50,7 @@ callerInstructions: |
 
   ## After planning
 
-  Pull the new run id from the `t08_handoff` task's notes block:
+  Pull the new run id from the `t09_handoff` task's notes block:
 
       task-runner status {{run_id}}
       task-runner status {{run_id}} --output-format json \
@@ -83,7 +83,7 @@ callerInstructions: |
   new run id, or resume the run with a follow-up message.
 
   The planner is instructed to delete the draft (or rename it
-  to `*.init-source` for audit) at the end of `t07_init_run`
+  to `*.init-source` for audit) at the end of `t08_init_run`
   so it cannot be confused with the live plan. If you see a
   leftover draft, the planning run did not finish cleanly —
   ignore it and work from the new run id.
@@ -118,9 +118,6 @@ tasks:
         - What problem does it solve? What's the motivation?
         - What is explicitly in scope?
         - What is explicitly out of scope?
-        - What assumptions are you making where the brief is
-          silent? List each one — they become validation
-          points for the review step later.
 
       If the brief included a rough implementation plan,
       capture every concrete step mentioned, even the ones
@@ -128,10 +125,114 @@ tasks:
       to refine those steps into an executable task list,
       not to discard them.
 
-      If the brief is ambiguous on something material, write
-      the ambiguity down and state the assumption you are
-      making. Do not block — the caller will confirm or
-      correct in the handoff review.
+      ## Contract dimensions (ambiguity gate)
+
+      Before you move on, walk the list of **contract
+      dimensions** relevant to the type of feature you are
+      planning and check whether the brief actually pins
+      each one down. Do not guess; do not fill gaps with
+      assumptions. An unanswered contract question at this
+      stage becomes silently-wrong code later.
+
+      Identify the feature type first:
+        - **CLI feature** — adds or changes a command,
+          subcommand, flag, or argument.
+        - **API / library feature** — adds or changes an
+          exported function, HTTP endpoint, RPC method,
+          or public type.
+        - **Data / schema feature** — adds or changes a
+          persisted shape, config file, database schema,
+          or migration.
+        - **UI feature** — adds or changes a screen, flow,
+          component, or interaction model.
+        - **Refactor** — restructures existing code
+          without an intended external behavior change.
+        - **Other** — infrastructure, tooling, build, etc.
+
+      Then apply the dimension checklist for that type:
+
+      **CLI**: exact command/subcommand name, exact flag
+      names and short/long forms, required vs optional
+      args, default values, text output format, JSON
+      output format if any, exit codes per failure mode,
+      behavior on malformed input, behavior on duplicate
+      or missing resources.
+
+      **API / library**: function/endpoint name, argument
+      types and names, return type, error types and when
+      each is raised, auth/permission model, request
+      schema, response schema, backwards compatibility
+      requirements.
+
+      **Data / schema**: exact field names and types,
+      nullability, defaults, indexes, migration direction
+      (additive only vs destructive), rollback plan,
+      behavior on pre-existing data.
+
+      **UI**: entry point, state transitions, loading
+      and error states, empty states, keyboard /
+      accessibility requirements, responsive behavior.
+
+      **Refactor**: scope boundaries (what files are in
+      and out), behavior-preservation criteria (what
+      existing tests must still pass), rollback plan.
+
+      For **every** dimension above that is relevant to
+      the feature type, ask: does the brief give me the
+      answer, or am I about to make it up? Write each
+      dimension and its status into Notes as:
+
+          - <dimension>: <answer from brief> — OR —
+          - <dimension>: **ambiguous**
+
+      ## If anything is ambiguous, block
+
+      If any relevant dimension is `ambiguous`, **mark this
+      task `blocked`** with the following in Notes:
+
+        1. The list of ambiguous dimensions.
+        2. Up to three **targeted, concrete** questions
+           you need the caller to answer before you can
+           plan. "What should this do?" is not targeted;
+           "Should `task list agents` print JSON by
+           default, or only with `--output-format json`
+           like the other commands?" is.
+        3. A one-sentence summary of what you have
+           understood so far, so the caller can confirm
+           your framing.
+
+      Task-runner will halt the run cleanly (exit 2). The
+      caller resumes with a follow-up message answering
+      your questions:
+
+          task-runner run --resume-run {{run_id}} \
+            "answers: <your answers here>"
+
+      On resume, the runner normalizes `blocked` back to
+      `pending` and you re-enter this task with the
+      caller's answers in the new turn. Update the Notes
+      block with the resolved dimensions and mark the
+      task `completed`.
+
+      **Do not assume**. Do not proceed to t03 with
+      unresolved ambiguity — your whole plan will be
+      built on a guess, and the ambiguity compounds
+      through impact survey, implementation tasks, and
+      review. A blocked run with three targeted
+      questions is faster than a bad plan you have to
+      throw away.
+
+      ## After the gate
+
+      Once every contract dimension is resolved (either
+      from the brief or from a caller follow-up), also
+      list in Notes any **remaining** assumptions you are
+      making on non-contract details (naming, directory
+      placement, test file naming, etc.). These become
+      validation points the reviewer will check in its
+      plan-coverage pass later, but they do not block —
+      the contract gate only fires on the enumerated
+      dimensions above.
   - id: t03_impact_survey
     title: Survey the impact surface
     body: |
@@ -195,7 +296,131 @@ tasks:
       uses to gate commits (e.g. `npm run check`,
       `cargo test`, `pytest`). These will be cited verbatim
       by the generated plan's check-gate task.
-  - id: t06_draft_plan
+  - id: t06_contract_artifact
+    title: Produce the feature contract artifact
+    body: |
+      Before you draft the plan, pin down the exact shape
+      of what the implementer is going to build. The
+      contract dimensions you walked in t02 were the
+      *requirements check*; this task is the *deliverable*
+      — a concrete, greppable artifact the implementer and
+      reviewer both work from.
+
+      Write the contract into this task's Notes using the
+      format appropriate for the feature type. The contract
+      must be specific enough that two people reading it
+      would produce identical implementations on the
+      observable surface. Vague contracts produce drifting
+      implementations and weak reviews.
+
+      **CLI features** — a command reference table:
+
+          ## `<command-name>`
+
+          **Synopsis**: `<binary> <command> [flags] <args>`
+
+          **Description**: one sentence on what it does.
+
+          **Args**:
+            - `<arg1>` — type, required/optional, default.
+
+          **Flags**:
+            - `--flag-name` — type, required/optional,
+              default, one-sentence description.
+
+          **Output (text)**:
+              <paste a sample block showing exactly what
+              the text output looks like for the happy
+              path>
+
+          **Output (json)**:
+              ```json
+              { "example": "exact shape" }
+              ```
+
+          **Exit codes**:
+            - 0 — success case
+            - 1 — specific failure case
+            - ... etc.
+
+          **Error behaviors**:
+            - malformed input → exit code, stderr message
+            - missing resource → exit code, stderr message
+            - duplicate / ambiguous match → exit code,
+              stderr message
+
+          **Examples**:
+              <2-3 real invocations with their output>
+
+      **API / library features** — a signature block plus
+      error matrix:
+
+          ## `<function-or-endpoint>`
+
+          **Signature**: exact type signature (TS, Go,
+          Python, etc.) or HTTP method/path + request
+          body schema.
+
+          **Returns**: exact return type / response shape.
+
+          **Errors**: table of `Error type → When raised
+          → Caller remediation`.
+
+          **Auth**: required permissions / tokens, if any.
+
+          **Backwards-compat**: additive-only, deprecation
+          path, or breaking with migration notes.
+
+      **Data / schema features** — a schema diff plus
+      migration:
+
+          ## Schema change
+
+          **Before**: existing shape.
+          **After**: new shape.
+          **Migration**: forward and rollback commands.
+          **Pre-existing data**: how it is handled.
+
+      **UI features** — a state-transition sketch:
+
+          ## Interaction model
+
+          **Entry points**: where the user enters.
+          **States**: list of states and transitions.
+          **Loading / empty / error states**: each with
+          a one-line description of what the user sees.
+          **Accessibility**: keyboard, screen-reader,
+          responsive requirements.
+
+      **Refactor** — a scope and behavior-preservation
+      statement:
+
+          ## Scope
+          **Files in scope**: list.
+          **Files out of scope**: list.
+          **Behavior preserved**: list of existing tests
+          that must still pass verbatim.
+          **Rollback**: one-line plan.
+
+      **Other** — adapt the nearest format above, or
+      produce a short "what success looks like" bullet
+      list if none of the above fit.
+
+      Once the contract artifact is written, paste the
+      entire block into this task's Notes. It will be
+      copied verbatim into the generated plan's
+      `<<PLACEHOLDER_FEATURE_CONTRACT>>` marker in t07,
+      so the implementer reads it on every fresh task
+      attempt and the reviewer cross-checks the final
+      code against it in plan-coverage.
+
+      If you are mid-task and realize the contract is
+      still ambiguous on a dimension you missed in t02,
+      mark **this** task `blocked` with the missing
+      dimension and targeted questions — same gate as
+      t02. It is better to catch a contract gap here
+      than to let the implementer discover it.
+  - id: t07_draft_plan
     title: Draft the plan assignment file
     body: |
       Locate the reference template. It lives alongside this
@@ -256,6 +481,22 @@ tasks:
           The template's default task list is already
           tagged. If you add, rename, or replace tasks,
           you must tag every new or modified task.
+        - Every **code-bearing** task in the plan must
+          include a `**Done when:**` block immediately
+          after the Category line. The block lists
+          specific, test-backed completion criteria: not
+          "implement foo" but "implement `foo()` in
+          `src/bar.ts` such that `npm test -- bar.test.ts`
+          passes and contains at least 3 new test cases
+          covering the happy path, error path, and empty
+          input." Vague "Done when" fields ("the feature
+          works") defeat the purpose — the reviewer will
+          flag them in plan-coverage. Hybrid tasks should
+          include a "Done when" block only if they
+          produce code; skip it for purely-process hybrid
+          cases. Process tasks do not need "Done when"
+          lines — their deliverable is the Notes block
+          itself.
         - Keep a dedicated internal-review task that
           launches `task-runner run --agent code-reviewer
           --assignment code-review --var
@@ -272,12 +513,12 @@ tasks:
           feature genuinely touches no documentation.
 
       Fill in every `<<PLACEHOLDER>>` marker with concrete,
-      file-level detail from tasks t01–t05. Placeholders
+      file-level detail from tasks t01–t06. Placeholders
       that remain are a draft-quality failure — they leak
       into the implementer's workspace and produce vague
       execution.
 
-      Two placeholders are load-bearing for the reviewer's
+      Three placeholders are load-bearing for the reviewer's
       plan-coverage pass:
         - `<<PLACEHOLDER_FEATURE_BRIEF>>` in the generated
           plan's first task — paste a 3-5 sentence summary
@@ -285,6 +526,14 @@ tasks:
           why, in-scope, out-of-scope). The reviewer reads
           this via `implementation_plan` to know what it is
           verifying.
+        - `<<PLACEHOLDER_FEATURE_CONTRACT>>` in the same
+          task — paste the entire contract artifact from
+          your t06 notes, verbatim, inside a fenced block.
+          The reviewer cross-checks the final implementation
+          against this contract: every listed flag,
+          every listed exit code, every listed sample
+          output. A missing or stale contract here makes
+          plan-coverage weaker than it should be.
         - `<<PLACEHOLDER_FEATURE_ASSUMPTIONS>>` in the same
           task — paste the explicit assumptions list you
           captured in t02 as a bulleted list. The reviewer
@@ -301,10 +550,10 @@ tasks:
       correct YAML indentation, balanced quoting, no TAB
       characters. Report the final draft path in this
       task's Notes.
-  - id: t07_init_run
+  - id: t08_init_run
     title: Initialize the plan run
     body: |
-      Run `task-runner init` against the draft from t06:
+      Run `task-runner init` against the draft from t07:
 
           task-runner init \
             --agent <planner-or-caller-choice> \
@@ -314,7 +563,7 @@ tasks:
       Pick the agent the caller is most likely to use for
       execution. If you are uncertain, use the same agent
       that is executing this planning run — the handoff
-      summary in t08 will make it clear the caller can pick
+      summary in t09 will make it clear the caller can pick
       a different agent if they prefer.
 
       Capture the new run id from the init output in this
@@ -340,7 +589,7 @@ tasks:
       path. Fix the draft in place, re-run init, and record
       both the failure and the fix in Notes. A rejected
       draft is usually a frontmatter bug.
-  - id: t08_handoff
+  - id: t09_handoff
     title: Handoff summary
     body: |
       Write a short Notes block capturing everything the
@@ -352,7 +601,7 @@ tasks:
       the wrong file.
 
       Include:
-        - **New run id** from t07 (this is the primary
+        - **New run id** from t08 (this is the primary
           handoff — the caller resumes this id to execute).
         - **Feature summary** (one or two sentences from
           t02).
@@ -385,11 +634,11 @@ Work on the repository at `{{repo_path}}`. You may read any
 file under that repo freely. Do not modify any file under
 `{{repo_path}}` — the only files you should write are:
   - Your own workspace plan at `{{assignment_path}}`.
-  - The draft plan file you create in t06 under
+  - The draft plan file you create in t07 under
     `{{cwd}}/.task-runner/drafts/`.
 
 Work the tasks in order. Earlier tasks build context the
-later ones depend on. The draft plan in t06 should cite
+later ones depend on. The draft plan in t07 should cite
 specific files, functions, and commands from your earlier
 notes — vague plans produce vague execution.
 
@@ -398,11 +647,13 @@ code-review assignment for its internal review step, invoked
 as a nested `task-runner run`. This means whoever executes
 the plan must export `TASK_RUNNER_MAX_CALL_DEPTH=2` before
 calling `task-runner run --resume-run`. Surface this
-requirement in the t08 handoff summary so the caller does not
+requirement in the t09 handoff summary so the caller does not
 get bitten by it.
 
 You may delegate repo exploration (t03) or duplication
 scanning (t04) to native subagents if that would parallelize
-your work. Do not delegate t02 (feature capture), t06 (draft
-writing), t07 (init run), or t08 (handoff) — those need to
+your work. Do not delegate t02 (feature capture — the
+ambiguity gate must live in your own context), t06 (contract
+artifact — the contract is your deliverable), t07 (draft
+writing), t08 (init run), or t09 (handoff) — those need to
 live in your own context.

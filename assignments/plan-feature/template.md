@@ -40,6 +40,30 @@ callerInstructions: |
   planning, pass `--agent` on the first resume; after that,
   the resumed agent is locked in.
 
+  ## How the reviewer sees your work
+
+  The internal-review task launches a nested `task-runner run`
+  against the `code-reviewer` agent with
+  `--var implementation_plan={{assignment_path}}` — which is
+  the absolute path to **this run's own** workspace
+  `assignment.md`. The reviewer opens that file, walks every
+  task in it, and runs its plan-coverage pass against the
+  Notes blocks you wrote.
+
+  What this means in practice: when you edit a task's Notes
+  block during execution, **you are writing directly to the
+  reviewer's input**. There is no intermediate synthesis —
+  the reviewer reads your tasks and your notes, not a
+  summary of them. Concrete, specific notes (file paths,
+  exit codes, commit shas, test counts) produce sharp
+  reviews. Vague notes ("done", "implemented", "fixed")
+  produce plan-coverage findings flagged as silent
+  deferrals, even when the underlying work is fine.
+
+  This is intentional, not a leaky abstraction — the
+  contract is "the plan's Notes blocks are the deliverable
+  the reviewer consumes." Write them for that audience.
+
   ## Reading the result
 
   The final self-check task (the last task in this plan)
@@ -72,6 +96,21 @@ tasks:
       **Brief**:
 
       <<PLACEHOLDER_FEATURE_BRIEF>>
+
+      **Contract**:
+
+      <<PLACEHOLDER_FEATURE_CONTRACT>>
+
+      The contract above is the load-bearing spec. Every
+      implementation task below must match it on the
+      observable surface: every named flag, every exit
+      code, every sample output, every signature. The
+      reviewer's plan-coverage pass cross-checks your
+      final implementation against this contract. If you
+      discover the contract is wrong mid-implementation,
+      mark the affected task `blocked` with an
+      explanation rather than quietly diverging — the
+      caller can update the contract and resume.
 
       **Open assumptions** — verify each one still holds
       during implementation and flag any that break:
@@ -142,6 +181,8 @@ tasks:
     body: |
       **Category**: code-bearing
 
+      **Done when:** <<PLACEHOLDER_CORE_DONE_WHEN>>
+
       <<PLACEHOLDER_CORE_IMPLEMENTATION_STEPS>>
 
       Cite every file you will edit or create in the task
@@ -158,6 +199,8 @@ tasks:
     title: Add and update tests
     body: |
       **Category**: code-bearing
+
+      **Done when:** <<PLACEHOLDER_TESTS_DONE_WHEN>>
 
       <<PLACEHOLDER_TEST_PLAN>>
 
@@ -362,6 +405,8 @@ tasks:
     title: Documentation drift
     body: |
       **Category**: code-bearing
+
+      **Done when:** <<PLACEHOLDER_DOCS_DONE_WHEN>>
 
       For every documentation surface touched by this
       feature, update accordingly:
