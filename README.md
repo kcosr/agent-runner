@@ -306,32 +306,32 @@ One run attempt, from CLI to backend and back:
 sequenceDiagram
     participant User
     participant CLI as task-runner run
-    participant Loop as run-loop
+    participant Runner as run-loop
     participant Backend as Backend adapter
     participant Agent as Agent process
     participant WS as workspace/
     User->>CLI: --agent X --assignment Y
-    CLI->>Loop: runAgent(opts)
-    Loop->>WS: write assignment.md
-    Loop->>WS: write run.json (status=running)
+    CLI->>Runner: runAgent(opts)
+    Runner->>WS: write assignment.md
+    Runner->>WS: write run.json (status=running)
     loop until done or retries exhausted
-        Loop->>Backend: invoke(prompt, sessionId)
+        Runner->>Backend: invoke(prompt, sessionId)
         Backend->>Agent: spawn / JSON-RPC
         Agent->>WS: edit assignment.md in place
         Agent-->>Backend: turn complete
-        Backend-->>Loop: result + new sessionId
-        Loop->>WS: parse assignment.md
+        Backend-->>Runner: result + new sessionId
+        Runner->>WS: parse assignment.md
         alt all tasks completed
-            Loop->>WS: run.json (status=success)
+            Runner->>WS: run.json (status=success)
         else tasks blocked
-            Loop->>WS: run.json (status=blocked)
+            Runner->>WS: run.json (status=blocked)
         else incomplete, retries left
-            Loop->>Loop: build nudge message
+            Runner->>Runner: build nudge message
         else retries exhausted
-            Loop->>WS: run.json (status=exhausted)
+            Runner->>WS: run.json (status=exhausted)
         end
     end
-    Loop-->>CLI: RunOutcome
+    Runner-->>CLI: RunOutcome
     CLI-->>User: summary + exit code
 ```
 
