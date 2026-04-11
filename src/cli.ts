@@ -796,6 +796,10 @@ function runTaskAdd(parsed: ParsedArgs): never {
     );
     process.exit(3);
   }
+  if (/[\r\n]/.test(title)) {
+    process.stderr.write("task-runner: task add: --title must be a single line\n");
+    process.exit(3);
+  }
 
   const resolved = resolveRunOrExit(runArg);
   requireMutableStatus(resolved.manifest);

@@ -1,10 +1,44 @@
+import { unescapeStructuralText } from "./escaping.js";
+
 const TASK_ID_MARKER = /^<!--\s*task-id:\s*([A-Za-z0-9._:-]+)\s*-->\s*$/gm;
-const NOTES_START_MARKER = "<!-- notes:start -->";
-const NOTES_END_MARKER = "<!-- notes:end -->";
+const NOTES_START_MARKER = /^<!-- notes:start -->\s*$/gm;
+const NOTES_END_MARKER = /^<!-- notes:end -->\s*$/gm;
 const STATUS_LINE = /^\s*\*\*Status:\*\*\s*(.*?)\s*$/gm;
 
 function clonePattern(pattern: RegExp): RegExp {
   return new RegExp(pattern.source, pattern.flags);
+}
+
+function findLastMatch(
+  text: string,
+  pattern: RegExp,
+): { index: number; match: string; length: number } | null {
+  let lastMatch: { index: number; match: string; length: number } | null = null;
+  for (const match of text.matchAll(clonePattern(pattern))) {
+    if (match.index !== undefined) {
+      lastMatch = {
+        index: match.index,
+        match: match[0],
+        length: match[0].length,
+      };
+    }
+  }
+  return lastMatch;
+}
+
+function findFirstMatch(
+  text: string,
+  pattern: RegExp,
+  fromIndex = 0,
+): { index: number; match: string; length: number } | null {
+  const sliced = text.slice(fromIndex);
+  const match = clonePattern(pattern).exec(sliced);
+  if (match?.index === undefined) return null;
+  return {
+    index: fromIndex + match.index,
+    match: match[0],
+    length: match[0].length,
+  };
 }
 
 export interface ParsedSectionUpdate {
@@ -45,15 +79,14 @@ export function parseAssignment(raw: string): ParsedSectionUpdate[] {
       update.status = lastStatus;
     }
 
-    const startIndex = section.lastIndexOf(NOTES_START_MARKER);
-    if (startIndex >= 0) {
-      const startOffset = startIndex + NOTES_START_MARKER.length;
-      const tail = section.slice(startOffset);
-      const endIndex = tail.indexOf(NOTES_END_MARKER);
-      if (endIndex >= 0) {
-        update.notes = tail.slice(0, endIndex).trim();
+    const startMatch = findLastMatch(section, NOTES_START_MARKER);
+    if (startMatch) {
+      const startOffset = startMatch.index + startMatch.length;
+      const endMatch = findFirstMatch(section, NOTES_END_MARKER, startOffset);
+      if (endMatch) {
+        update.notes = unescapeStructuralText(section.slice(startOffset, endMatch.index).trim());
       } else {
-        update.notes = tail.trim();
+        update.notes = unescapeStructuralText(section.slice(startOffset).trim());
       }
     }
 

@@ -5,7 +5,11 @@ export const taskDefSchema = z.object({
     .string()
     .regex(/^[A-Za-z0-9._:-]+$/, "task id must match [A-Za-z0-9._:-]+")
     .max(128),
-  title: z.string().min(1).max(200),
+  title: z
+    .string()
+    .min(1)
+    .max(200)
+    .refine((value) => !/[\r\n]/.test(value), "task title must be a single line"),
   body: z.string().optional().default(""),
 });
 

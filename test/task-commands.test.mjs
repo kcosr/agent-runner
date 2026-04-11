@@ -326,6 +326,18 @@ test("task add: rejects empty title", async () => {
   assert.match(result.stderr, /title cannot be empty/);
 });
 
+test("task add: rejects multiline title", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+
+  const result = runCliExpectFail(["task", "add", outcome.runId, "--title", "Line 1\nLine 2"], {
+    cwd: dir,
+  });
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /title must be a single line/);
+});
+
 test("task add: --output-format json returns new task snapshot", async () => {
   const dir = tempDir();
   writeBundle(dir);
