@@ -359,7 +359,7 @@ fail fast.
 |---|---|
 | `cwd`, `backend`, `model`, `effort`, `timeoutSec`, `unrestricted`, `maxRetries` | agent — agent-owned config, agent decides CLI override rules |
 | `instructions` | agent — refuses assignments with non-empty body |
-| `message`, `tasks` | either — agent-wide prohibition OR per-assignment canonical value |
+| `message`, `tasks`, `sessionName` | either — agent-wide prohibition OR per-assignment canonical value |
 
 **Runtime check** — early in `runAgent()`, before any work starts, the
 runner builds the union of `agentConfig.lockedFields` and
