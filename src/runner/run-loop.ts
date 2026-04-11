@@ -9,6 +9,7 @@ import type { TaskState } from "../plan/model.js";
 import { parsePlan } from "../plan/parser.js";
 import { renderPlan } from "../plan/writer.js";
 import { shortId } from "../util/short-id.js";
+import { type AttemptRecord, type RunManifest, snapshotTasks, writeManifest } from "./manifest.js";
 import { buildNudgeMessage } from "./nudge.js";
 import { type RunStatus, type RunSummary, renderSummary } from "./output.js";
 
@@ -39,6 +40,7 @@ export interface RunOutcome {
   runId: string;
   planPath: string;
   workspaceDir: string;
+  manifest: RunManifest;
 }
 
 export class VarResolutionError extends Error {
@@ -123,6 +125,14 @@ function defaultResumeFailureDetector(result: BackendInvokeResult): boolean {
   );
 }
 
+function countBy(tasks: Map<string, TaskState>, predicate: (t: TaskState) => boolean): number {
+  let n = 0;
+  for (const task of tasks.values()) {
+    if (predicate(task)) n++;
+  }
+  return n;
+}
+
 export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const { loaded, cliVars, backend, extraPrompt, overrides, stderr, stdout } = opts;
   const config = loaded.config;
@@ -166,6 +176,35 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
   writeFileSync(planPath, renderPlan(Array.from(tasks.values())), "utf8");
 
+  const startedAt = new Date().toISOString();
+  const manifest: RunManifest = {
+    schemaVersion: 1,
+    runId,
+    agent: {
+      name: config.name,
+      sourcePath: loaded.sourcePath,
+    },
+    backend: config.backend,
+    model: model ?? null,
+    effort: effort ?? null,
+    unrestricted,
+    cwd,
+    planPath,
+    workspaceDir,
+    startedAt,
+    endedAt: null,
+    status: "running",
+    exitCode: null,
+    attempts: 0,
+    maxAttempts,
+    tasksCompleted: 0,
+    tasksTotal: tasks.size,
+    backendSessionId: null,
+    finalTasks: snapshotTasks(tasks),
+    attemptRecords: [],
+  };
+  writeManifest(workspaceDir, manifest);
+
   stderr(`task-runner: agent=${config.name} run=${runId}\n`);
   stderr(`             plan=${planPath}\n`);
   stderr(`             cwd=${cwd}\n`);
@@ -183,6 +222,9 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     stderr(divider);
     stdout(divider);
 
+    const sessionIdAtStart = sessionId;
+    const attemptStartedAt = new Date().toISOString();
+
     const invokeResult = await backend.invoke({
       prompt: currentPrompt,
       cwd,
@@ -196,6 +238,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       onStderrText: (text) => stderr(text),
     });
     stdout("\n");
+    const attemptEndedAt = new Date().toISOString();
 
     if (invokeResult.assistantMessage) {
       attemptMessages.push(invokeResult.assistantMessage);
@@ -203,6 +246,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
     if (attempts === 1 && invokeResult.sessionId) {
       sessionId = invokeResult.sessionId;
+      manifest.backendSessionId = invokeResult.sessionId;
     } else if (sessionId && resumeFailureDetector(invokeResult)) {
       stderr("task-runner: resume failed, falling back to fresh invocation\n");
       sessionId = null;
@@ -223,15 +267,37 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     const updates = parsePlan(rawPlan);
     const mergeInfo = mergeUpdates(tasks, updates);
 
-    const allCompleted = Array.from(tasks.values()).every((t) => t.status === "completed");
+    const attemptRecord: AttemptRecord = {
+      attempt: attempts,
+      startedAt: attemptStartedAt,
+      endedAt: attemptEndedAt,
+      prompt: currentPrompt,
+      sessionIdAtStart,
+      sessionIdCaptured: invokeResult.sessionId,
+      exitCode: invokeResult.exitCode,
+      signal: invokeResult.signal,
+      timedOut: invokeResult.timedOut,
+      assistantMessage: invokeResult.assistantMessage,
+      rawStdout: invokeResult.rawStdout,
+      rawStderr: invokeResult.rawStderr,
+      tasksAfter: snapshotTasks(tasks),
+      invalidStatuses: mergeInfo.invalidStatuses,
+    };
+    manifest.attemptRecords.push(attemptRecord);
+    manifest.attempts = attempts;
+    manifest.tasksCompleted = countBy(tasks, (t) => t.status === "completed");
+    manifest.finalTasks = snapshotTasks(tasks);
+    writeManifest(workspaceDir, manifest);
+
+    const allCompleted = countBy(tasks, (t) => t.status === "completed") === tasks.size;
     const noInvalid = mergeInfo.invalidStatuses.length === 0;
-    const blocked = Array.from(tasks.values()).filter((t) => t.status === "blocked");
+    const blockedCount = countBy(tasks, (t) => t.status === "blocked");
 
     if (allCompleted && noInvalid) {
       terminal = { status: "success", exitCode: 0 };
       break;
     }
-    if (blocked.length > 0) {
+    if (blockedCount > 0) {
       terminal = { status: "blocked", exitCode: 2 };
       break;
     }
@@ -245,9 +311,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       writeFileSync(planPath, merged, "utf8");
     }
 
-    const incompleteCount = Array.from(tasks.values()).filter(
-      (t) => t.status !== "completed",
-    ).length;
+    const incompleteCount = countBy(tasks, (t) => t.status !== "completed");
     stderr(
       `\ntask-runner: retrying — ${incompleteCount} incomplete, ${mergeInfo.invalidStatuses.length} invalid status${mergeInfo.invalidStatuses.length === 1 ? "" : "es"}\n\n`,
     );
@@ -259,11 +323,18 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     terminal = { status: "error", exitCode: 4 };
   }
 
-  const tasksCompleted = Array.from(tasks.values()).filter((t) => t.status === "completed").length;
+  const tasksCompleted = countBy(tasks, (t) => t.status === "completed");
   const blockedTasks = Array.from(tasks.values()).filter((t) => t.status === "blocked");
   const incompleteTasks = Array.from(tasks.values()).filter(
     (t) => t.status !== "completed" && t.status !== "blocked",
   );
+
+  manifest.status = terminal.status;
+  manifest.exitCode = terminal.exitCode;
+  manifest.endedAt = new Date().toISOString();
+  manifest.tasksCompleted = tasksCompleted;
+  manifest.finalTasks = snapshotTasks(tasks);
+  writeManifest(workspaceDir, manifest);
 
   const summary: RunSummary = {
     status: terminal.status,
@@ -284,5 +355,6 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     runId,
     planPath,
     workspaceDir,
+    manifest,
   };
 }

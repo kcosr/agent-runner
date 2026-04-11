@@ -8,6 +8,8 @@ import {
 } from "./config/loader.js";
 import { VarResolutionError, runAgent } from "./runner/run-loop.js";
 
+type OutputFormat = "text" | "json";
+
 interface ParsedArgs {
   command: string;
   agent?: string;
@@ -18,11 +20,13 @@ interface ParsedArgs {
   timeoutSec?: number;
   unrestricted?: boolean;
   maxRetries?: number;
+  outputFormat: OutputFormat;
   extraPrompt?: string;
   showHelp: boolean;
 }
 
 const EFFORT_VALUES = ["low", "medium", "high", "max"] as const;
+const OUTPUT_FORMATS = ["text", "json"] as const;
 
 const HELP = `Usage: task-runner run --agent <name-or-path> [options] [extra prompt]
 
@@ -37,6 +41,10 @@ Options:
   --timeout-sec <n>       Override the per-attempt timeout.
   --max-retries <n>       Override the max number of retries (default 3).
   --unrestricted          Pass --dangerously-skip-permissions to Claude.
+  --output-format <fmt>   Output format: "text" (default) streams agent
+                          text live to stdout and prints a summary to
+                          stderr; "json" suppresses chrome and prints
+                          the full run manifest to stdout at the end.
   --help, -h              Print this message.
 
 Exit codes:
@@ -49,7 +57,12 @@ Exit codes:
 
 function parseArgs(argv: string[]): ParsedArgs {
   const args = argv.slice(2);
-  const result: ParsedArgs = { command: "", vars: {}, showHelp: false };
+  const result: ParsedArgs = {
+    command: "",
+    vars: {},
+    outputFormat: "text",
+    showHelp: false,
+  };
 
   if (args.length === 0) {
     result.showHelp = true;
@@ -110,6 +123,13 @@ function parseArgs(argv: string[]): ParsedArgs {
       result.maxRetries = n;
     } else if (arg === "--unrestricted") {
       result.unrestricted = true;
+    } else if (arg === "--output-format") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--output-format requires a value");
+      if (!(OUTPUT_FORMATS as readonly string[]).includes(next)) {
+        throw new Error(`--output-format must be one of: ${OUTPUT_FORMATS.join(", ")}`);
+      }
+      result.outputFormat = next as OutputFormat;
     } else if (arg === "--") {
       positional.push(...args);
       break;
@@ -165,6 +185,8 @@ async function main(): Promise<void> {
     process.exit(3);
   }
 
+  const isJson = parsed.outputFormat === "json";
+  const noop = (_text: string): void => {};
   try {
     const outcome = await runAgent({
       loaded,
@@ -179,9 +201,12 @@ async function main(): Promise<void> {
         unrestricted: parsed.unrestricted,
         maxRetries: parsed.maxRetries,
       },
-      stderr: (text) => process.stderr.write(text),
-      stdout: (text) => process.stdout.write(text),
+      stderr: isJson ? noop : (text) => process.stderr.write(text),
+      stdout: isJson ? noop : (text) => process.stdout.write(text),
     });
+    if (isJson) {
+      process.stdout.write(`${JSON.stringify(outcome.manifest, null, 2)}\n`);
+    }
     process.exit(outcome.exitCode);
   } catch (err) {
     if (err instanceof VarResolutionError) {
