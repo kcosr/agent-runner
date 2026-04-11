@@ -645,7 +645,13 @@ single JSON document — never JSONL, never append-only — so you can always
 `cat` or `jq` the latest version.
 
 ```ts
-type ManifestStatus = "running" | "success" | "blocked" | "exhausted" | "error";
+type ManifestStatus =
+  | "initialized"   // `init` prepared the workspace but no session has run
+  | "running"
+  | "success"
+  | "blocked"
+  | "exhausted"
+  | "error";
 
 interface RunManifest {
   schemaVersion: 1;
@@ -674,8 +680,10 @@ interface RunManifest {
   tasksCompleted: number;
   tasksTotal: number;
   backendSessionId: string | null; // most recently captured claude session id
+  pendingPrompt: string | null;    // frozen by `init`; cleared once session 0 runs
   finalTasks: Record<string, TaskSnapshot>;
-  sessionCount: number;            // 1 for initial, 2 after first resume, etc.
+  sessionCount: number;            // 0 for initialized-only runs, 1 for initial
+                                   // executed run, 2 after first resume, etc.
   sessions: SessionRecord[];       // one per session, in order
   attemptRecords: AttemptRecord[]; // flat, monotonic across all sessions
 }
@@ -1187,9 +1195,10 @@ The raw JSON events are still captured verbatim into
 ## CLI shape
 
 ```
-task-runner run [--agent <name-or-path>]
+task-runner <run|init>
+               [--agent <name-or-path>]
                [--assignment <name-or-path>]
-               [--resume-run <id|path>]
+               [--resume-run <id|path>]       (run only)
                [--var k=v]...
                [--add-task <title>]...
                [--cwd <path>]
@@ -1201,6 +1210,18 @@ task-runner run [--agent <name-or-path>]
                [--output-format <text|json>]
                [message]
 ```
+
+Two subcommands share the same flag set:
+
+- **`run`** — execute an agent. Either a fresh run, a resume of an
+  already-executed run, or an execute-after-init (when `--resume-run`
+  points at a manifest with `status: "initialized"`).
+- **`init`** — prepare a run without invoking the backend. Resolves
+  agent + assignment, composes the full fresh-run prompt, writes the
+  workspace (`assignment.md` with task fences, `run.json` with
+  `status: "initialized"` and a frozen `pendingPrompt`), then exits.
+  The caller picks the run up later with
+  `task-runner run --resume-run <id>`.
 
 `--agent` is required for fresh runs. When `--resume-run` is supplied,
 `--agent` becomes optional — the runner reloads `agent.md` from the path
@@ -1216,7 +1237,51 @@ unless `--add-task` is used.
 workspace `assignment.md` is authoritative on resume; use `--add-task`
 and/or a follow-up `[message]` to extend the run.
 
-`--resume-run <id|path>` extends an existing run:
+### `task-runner init`
+
+`init` is `run` that stops short of invoking the backend. It:
+
+1. Resolves agent + assignment and runs the same locked-field checks,
+   var resolution, and prompt composition as a fresh run.
+2. Creates the workspace directory (`.task-runner/<short-id>/`),
+   writes the task-fenced `assignment.md`, and writes `run.json` with
+   `status: "initialized"`, `sessionCount: 0`, empty `sessions` and
+   `attemptRecords`, and the composed prompt frozen in
+   `pendingPrompt`.
+3. Prints the run id and the exact resume command on stderr and exits
+   with code 0.
+
+`init` is forbidden with `--resume-run` (you cannot initialize a run
+that already exists). An `init` run does nothing that a later `run`
+can't also do on the first session — its purpose is to separate the
+*seeding* step from the *execution* step, so an orchestrator can
+prepare work for an agent and hand off a resumable run id without
+committing to running it immediately.
+
+### `--resume-run <id|path>`
+
+`--resume-run` serves two modes depending on the prior manifest's
+`status`:
+
+**Execute-after-init** (`status: "initialized"`):
+
+- Starts session 0 — the first real session for this run.
+- The stored `pendingPrompt` is sent verbatim as the first attempt's
+  prompt. The current `agent.md` is reloaded only to resolve the
+  backend; role instructions are not re-composed.
+- No `--message`, `--add-task`, `--var`, or override flags are
+  accepted. If the workflow needs to change, re-run `init`. (This
+  keeps the init → execute handoff honest: whatever was composed at
+  init time is what runs.)
+- `--assignment` is forbidden (it's baked into the stored prompt and
+  workspace).
+- `backendSessionId` is *not* required to be non-null (init leaves it
+  `null` by definition).
+- After this call, `pendingPrompt` is cleared and `sessionCount` goes
+  to 1.
+
+**Resume of an already-executed run** (`status` is a terminal state
+from a prior session):
 
 - `<id>` is the short slug from `.task-runner/<id>/`, resolved against
   the current cwd.

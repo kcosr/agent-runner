@@ -42,6 +42,7 @@ export interface RunOptions {
   backend: Backend;
   overrides?: RunOverrides;
   resume?: ResolvedResumeTarget;
+  initialize?: boolean;
   stderr: (text: string) => void;
   stdout: (text: string) => void;
   resumeFailureDetector?: (result: BackendInvokeResult) => boolean;
@@ -275,23 +276,37 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const assignmentConfig = loadedAssignment?.config;
   const resumeFailureDetector = opts.resumeFailureDetector ?? defaultResumeFailureDetector;
 
-  const isResume = Boolean(resume);
+  const isInitialize = opts.initialize === true;
+  const priorInitialized = resume?.manifest.status === "initialized";
+  const isResume = Boolean(resume) && !priorInitialized;
+
+  if (isInitialize && resume) {
+    throw new ResumeError("--init cannot be combined with --resume-run");
+  }
   if (isResume && loadedAssignment) {
     throw new ResumeError("--assignment cannot be combined with --resume-run");
+  }
+  if (priorInitialized && loadedAssignment) {
+    throw new ResumeError("--assignment cannot be combined with resuming an initialized run");
+  }
+  if (priorInitialized && (overrides?.addedTasks?.length ?? 0) > 0) {
+    throw new ResumeError("--add-task cannot be combined with resuming an initialized run");
   }
 
   const addedTitles = overrides?.addedTasks ?? [];
   const agentInstructions = loaded.instructions.trim();
   const assignmentInstructions = loadedAssignment?.instructions.trim() ?? "";
 
-  checkLockedFields(
-    agentConfig,
-    assignmentConfig,
-    agentInstructions,
-    assignmentInstructions,
-    overrides,
-    addedTitles,
-  );
+  if (!priorInitialized) {
+    checkLockedFields(
+      agentConfig,
+      assignmentConfig,
+      agentInstructions,
+      assignmentInstructions,
+      overrides,
+      addedTitles,
+    );
+  }
 
   const baseDir = process.cwd();
   const cwd = resolveCwd(overrides?.cwd ?? agentConfig.cwd, baseDir);
@@ -318,13 +333,19 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     }
   }
 
+  // `priorInitialized` short-circuits most of the fresh-run setup below
+  // because the workspace and prompt were already persisted by the earlier
+  // `init`. We reuse the runId + workspace and use the stored prompt
+  // verbatim for session 0's first attempt.
+
   // Vars live on the assignment. Chat mode (no assignment) has no var
   // schema; unknown --var flags are silently ignored in that case.
   const runtimeVars = resolveVars(assignmentConfig?.vars ?? {}, cliVars);
 
-  const runId = isResume && resume ? resume.manifest.runId : shortId();
+  const reusingWorkspace = (isResume && resume) || (priorInitialized && resume);
+  const runId = reusingWorkspace && resume ? resume.manifest.runId : shortId();
   const workspaceDir =
-    isResume && resume ? resume.workspaceDir : resolve(cwd, ".task-runner", runId);
+    reusingWorkspace && resume ? resume.workspaceDir : resolve(cwd, ".task-runner", runId);
   mkdirSync(workspaceDir, { recursive: true });
   const assignmentPath = resolve(workspaceDir, "assignment.md");
 
@@ -332,10 +353,14 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     isResume && resume && Object.keys(resume.manifest.finalTasks).length > 0,
   );
 
-  const tasks =
-    isResume && resume
-      ? rebuildTasksFromAssignmentAndSnapshot(undefined, resume.manifest.finalTasks, true)
-      : rebuildTasksFromAssignmentAndSnapshot(loadedAssignment, {}, false);
+  let tasks: Map<string, TaskState>;
+  if (isResume && resume) {
+    tasks = rebuildTasksFromAssignmentAndSnapshot(undefined, resume.manifest.finalTasks, true);
+  } else if (priorInitialized && resume) {
+    tasks = rebuildTasksFromAssignmentAndSnapshot(undefined, resume.manifest.finalTasks, false);
+  } else {
+    tasks = rebuildTasksFromAssignmentAndSnapshot(loadedAssignment, {}, false);
+  }
 
   for (let i = 0; i < addedTitles.length; i++) {
     const rawTitle = addedTitles[i];
@@ -380,9 +405,19 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   //   1. workflow (only if firstTimeTasksAppear) OR new-tasks reminder
   //   2. message
   //
+  // Execute-after-init: reuse the stored pendingPrompt verbatim.
+  //
   // Both message-last. Fresh runs error if parts is empty.
   let initialPrompt: string;
-  if (isResume) {
+  if (priorInitialized && resume) {
+    const stored = resume.manifest.pendingPrompt ?? "";
+    if (stored.length === 0) {
+      throw new ResumeError(
+        `cannot resume initialized run ${resume.manifest.runId} — manifest has no pendingPrompt`,
+      );
+    }
+    initialPrompt = stored;
+  } else if (isResume) {
     const parts: string[] = [];
     if (firstTimeTasksAppear) {
       parts.push(interpolate(TASK_WORKFLOW_TEMPLATE, injectedVars));
@@ -418,64 +453,112 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const now = new Date().toISOString();
   const priorAttemptCount = isResume && resume ? resume.manifest.attemptRecords.length : 0;
   const priorSessionCount = isResume && resume ? resume.manifest.sessions.length : 0;
-  const sessionIndex = priorSessionCount;
+  // `priorInitialized` runs start at session 0 — init never created a session.
+  const sessionIndex = priorInitialized ? 0 : priorSessionCount;
 
-  const manifest: RunManifest =
-    isResume && resume
-      ? {
-          ...resume.manifest,
-          model: model ?? null,
-          effort: effort ?? null,
-          unrestricted,
-          cwd,
-          assignmentPath,
-          workspaceDir,
-          endedAt: null,
-          status: "running",
-          exitCode: null,
-          maxAttempts,
-          finalTasks: snapshotTasks(tasks),
-          tasksCompleted: countBy(tasks, (t) => t.status === "completed"),
-          tasksTotal: tasks.size,
-          sessionCount: priorSessionCount + 1,
-        }
-      : {
-          schemaVersion: 1,
-          runId,
-          agent: {
-            name: agentConfig.name,
-            sourcePath: loaded.sourcePath,
-          },
-          assignment: loadedAssignment
-            ? {
-                name: loadedAssignment.config.name,
-                sourcePath: loadedAssignment.sourcePath,
-                workspacePath: assignmentPath,
-              }
-            : null,
-          backend: agentConfig.backend,
-          model: model ?? null,
-          effort: effort ?? null,
-          message,
-          unrestricted,
-          cwd,
-          assignmentPath,
-          workspaceDir,
-          startedAt: now,
-          endedAt: null,
-          status: "running",
-          exitCode: null,
-          attempts: 0,
-          maxAttempts,
-          tasksCompleted: 0,
-          tasksTotal: tasks.size,
-          backendSessionId: null,
-          runtimeVars,
-          finalTasks: snapshotTasks(tasks),
-          sessionCount: 1,
-          sessions: [],
-          attemptRecords: [],
-        };
+  let manifest: RunManifest;
+  if (isResume && resume) {
+    manifest = {
+      ...resume.manifest,
+      model: model ?? null,
+      effort: effort ?? null,
+      unrestricted,
+      cwd,
+      assignmentPath,
+      workspaceDir,
+      endedAt: null,
+      status: "running",
+      exitCode: null,
+      maxAttempts,
+      finalTasks: snapshotTasks(tasks),
+      tasksCompleted: countBy(tasks, (t) => t.status === "completed"),
+      tasksTotal: tasks.size,
+      sessionCount: priorSessionCount + 1,
+    };
+  } else if (priorInitialized && resume) {
+    // Execute-after-init: the manifest was persisted by `init`. Flip it
+    // to "running", promote sessionCount to 1, and clear pendingPrompt
+    // (it has now been consumed by this first real session).
+    manifest = {
+      ...resume.manifest,
+      endedAt: null,
+      status: "running",
+      exitCode: null,
+      sessionCount: 1,
+      pendingPrompt: null,
+    };
+  } else {
+    manifest = {
+      schemaVersion: 1,
+      runId,
+      agent: {
+        name: agentConfig.name,
+        sourcePath: loaded.sourcePath,
+      },
+      assignment: loadedAssignment
+        ? {
+            name: loadedAssignment.config.name,
+            sourcePath: loadedAssignment.sourcePath,
+            workspacePath: assignmentPath,
+          }
+        : null,
+      backend: agentConfig.backend,
+      model: model ?? null,
+      effort: effort ?? null,
+      message,
+      unrestricted,
+      cwd,
+      assignmentPath,
+      workspaceDir,
+      startedAt: now,
+      endedAt: null,
+      status: isInitialize ? "initialized" : "running",
+      exitCode: null,
+      attempts: 0,
+      maxAttempts,
+      tasksCompleted: 0,
+      tasksTotal: tasks.size,
+      backendSessionId: null,
+      runtimeVars,
+      pendingPrompt: isInitialize ? initialPrompt : null,
+      finalTasks: snapshotTasks(tasks),
+      sessionCount: isInitialize ? 0 : 1,
+      sessions: [],
+      attemptRecords: [],
+    };
+  }
+
+  // `init` stops here: persist the prepared workspace + manifest and
+  // return a terminal "initialized" outcome. No session is created; the
+  // caller will follow up with `task-runner run --resume-run <id>`.
+  if (isInitialize) {
+    writeManifest(workspaceDir, manifest);
+    stderr(`task-runner: initialized agent=${agentConfig.name} run=${runId}\n`);
+    if (loadedAssignment) {
+      stderr(`             source=${loadedAssignment.sourcePath}\n`);
+    }
+    stderr(`             assignment=${assignmentPath}\n`);
+    stderr(`             cwd=${cwd}\n`);
+    stderr(`             resume with: task-runner run --resume-run ${runId}\n`);
+    return {
+      summary: {
+        status: "initialized",
+        attempts: 0,
+        maxAttempts,
+        tasksCompleted: 0,
+        tasksTotal: tasks.size,
+        assignmentPath,
+        tasks: Array.from(tasks.values()),
+        runId,
+      },
+      exitCode: 0,
+      attemptTranscripts: [],
+      runId,
+      assignmentPath,
+      workspaceDir,
+      manifest,
+    };
+  }
 
   const sessionRecord: SessionRecord = {
     sessionIndex,
@@ -483,7 +566,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     endedAt: null,
     status: "running",
     exitCode: null,
-    message,
+    message: priorInitialized && resume ? resume.manifest.message : message,
     firstAttempt: null,
     lastAttempt: null,
     maxAttempts,
@@ -494,9 +577,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
   writeManifest(workspaceDir, manifest);
 
-  stderr(
-    `task-runner: agent=${agentConfig.name} run=${runId}${isResume ? ` (session ${sessionIndex})` : ""}\n`,
-  );
+  const sessionSuffix = isResume ? ` (session ${sessionIndex})` : "";
+  stderr(`task-runner: agent=${agentConfig.name} run=${runId}${sessionSuffix}\n`);
   if (loadedAssignment) {
     stderr(`             source=${loadedAssignment.sourcePath}\n`);
   }

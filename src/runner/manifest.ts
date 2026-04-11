@@ -2,7 +2,13 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { InvalidStatusReport, TaskState, TaskStatus } from "../assignment/model.js";
 
-export type ManifestStatus = "running" | "success" | "blocked" | "exhausted" | "error";
+export type ManifestStatus =
+  | "initialized"
+  | "running"
+  | "success"
+  | "blocked"
+  | "exhausted"
+  | "error";
 
 const ATTEMPT_LOG_DIR = "attempts";
 const MANIFEST_FILENAME = "run.json";
@@ -102,6 +108,7 @@ export interface RunManifest {
   tasksTotal: number;
   backendSessionId: string | null;
   runtimeVars: Record<string, unknown>;
+  pendingPrompt: string | null;
   finalTasks: Record<string, TaskSnapshot>;
   sessionCount: number;
   sessions: SessionRecord[];

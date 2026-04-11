@@ -20,20 +20,31 @@ import {
   runAgent,
 } from "./runner/run-loop.js";
 
-const HELP = `Usage: task-runner run [--agent <name-or-path>] [--assignment <name-or-path>] [options] [message]
+const HELP = `Usage: task-runner <run|init> [--agent <name-or-path>] [--assignment <name-or-path>] [options] [message]
+
+Commands:
+  run                     Execute an agent. Either a fresh run, a resume,
+                          or execute-after-init (when --resume-run points
+                          at an initialized run).
+  init                    Prepare a run without invoking the backend. Writes
+                          the workspace, seeds assignment.md from tasks, and
+                          stores a manifest with status=initialized and a
+                          frozen pendingPrompt. Resume later with
+                          \`task-runner run --resume-run <id>\`.
 
 Arguments:
-  [message]               Positional text. For a fresh run, appended as
-                          the "specific ask" at the end of the prompt.
-                          For a resume run, sent as (part of) the sole
-                          follow-up prompt for the new session.
+  [message]               Positional text. For a fresh run or init,
+                          appended as the "specific ask" at the end of the
+                          prompt. For a resume run, sent as (part of) the
+                          sole follow-up prompt for the new session.
+                          Forbidden when resuming an initialized run.
 
 Options:
   --agent <name|path>     Agent name (resolved against ./agents/<name>/agent.md
                           or $TASK_RUNNER_HOME/agents/<name>/agent.md) or a
                           direct path to an agent.md file. Required for fresh
-                          runs; optional for --resume-run (taken from the
-                          prior manifest if omitted).
+                          runs and init; optional for --resume-run (taken from
+                          the prior manifest if omitted).
   --assignment <n|path>   Assignment name (resolved against
                           ./assignments/<n>/assignment.md or
                           $TASK_RUNNER_HOME/assignments/<n>/assignment.md) or
@@ -45,7 +56,10 @@ Options:
                           manifest, reloads the agent, normalizes
                           non-completed tasks to pending, and starts a new
                           session. Requires a follow-up message OR
-                          --add-task. Cannot be combined with --assignment.
+                          --add-task, unless the prior manifest has
+                          status=initialized (in which case the stored
+                          pendingPrompt is executed as session 0). Cannot
+                          be combined with --assignment.
   --var <key>=<value>     Set an input variable (repeatable). Validated
                           against the assignment's var schema.
   --add-task <title>      Append a task to the run's task list with the
@@ -85,12 +99,18 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  if (parsed.command !== "run") {
+  if (parsed.command !== "run" && parsed.command !== "init") {
     process.stderr.write(`task-runner: unknown command "${parsed.command}"\n`);
     process.stderr.write(HELP);
     process.exit(3);
   }
 
+  const isInitCommand = parsed.command === "init";
+
+  if (isInitCommand && parsed.resumeRun !== undefined) {
+    process.stderr.write("task-runner: init cannot be combined with --resume-run\n");
+    process.exit(3);
+  }
   if (parsed.resumeRun !== undefined && parsed.assignment !== undefined) {
     process.stderr.write("task-runner: --assignment cannot be combined with --resume-run\n");
     process.exit(3);
@@ -98,14 +118,6 @@ async function main(): Promise<void> {
 
   let resumeTarget: ReturnType<typeof resolveResumeTarget> | undefined;
   if (parsed.resumeRun !== undefined) {
-    const hasMessage = Boolean(parsed.message && parsed.message.trim().length > 0);
-    const hasAddedTasks = parsed.addedTasks.length > 0;
-    if (!hasMessage && !hasAddedTasks) {
-      process.stderr.write(
-        "task-runner: --resume-run requires a follow-up message or at least one --add-task\n",
-      );
-      process.exit(3);
-    }
     try {
       resumeTarget = resolveResumeTarget(parsed.resumeRun);
     } catch (err) {
@@ -115,6 +127,35 @@ async function main(): Promise<void> {
         process.stderr.write(`task-runner: ${(err as Error).message}\n`);
       }
       process.exit(3);
+    }
+
+    const priorInitialized = resumeTarget.manifest.status === "initialized";
+    if (priorInitialized) {
+      const forbidden: string[] = [];
+      if (parsed.message && parsed.message.trim().length > 0) forbidden.push("message");
+      if (parsed.addedTasks.length > 0) forbidden.push("--add-task");
+      if (Object.keys(parsed.vars).length > 0) forbidden.push("--var");
+      if (parsed.cwd !== undefined) forbidden.push("--cwd");
+      if (parsed.model !== undefined) forbidden.push("--model");
+      if (parsed.effort !== undefined) forbidden.push("--effort");
+      if (parsed.timeoutSec !== undefined) forbidden.push("--timeout-sec");
+      if (parsed.maxRetries !== undefined) forbidden.push("--max-retries");
+      if (parsed.unrestricted !== undefined) forbidden.push("--unrestricted");
+      if (forbidden.length > 0) {
+        process.stderr.write(
+          `task-runner: resuming an initialized run does not accept ${forbidden.join(", ")}\n`,
+        );
+        process.exit(3);
+      }
+    } else {
+      const hasMessage = Boolean(parsed.message && parsed.message.trim().length > 0);
+      const hasAddedTasks = parsed.addedTasks.length > 0;
+      if (!hasMessage && !hasAddedTasks) {
+        process.stderr.write(
+          "task-runner: --resume-run requires a follow-up message or at least one --add-task\n",
+        );
+        process.exit(3);
+      }
     }
   }
 
@@ -171,6 +212,7 @@ async function main(): Promise<void> {
       cliVars: parsed.vars,
       backend,
       resume: resumeTarget,
+      initialize: isInitCommand,
       overrides: overridesFromParsedArgs(parsed),
       stderr: isJson ? noop : (text) => process.stderr.write(text),
       stdout: isJson ? noop : (text) => process.stdout.write(text),
