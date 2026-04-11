@@ -1,6 +1,9 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+import { mergeUpdates } from "./assignment/merge.js";
+import { type TaskState, VALID_STATUSES, isValidStatus } from "./assignment/model.js";
 import { parseAssignment } from "./assignment/parser.js";
+import { renderAssignment } from "./assignment/writer.js";
 import { UnknownBackendError, resolveBackend } from "./backends/registry.js";
 import { type ParsedArgs, overridesFromParsedArgs, parseArgs } from "./cli/parse-args.js";
 import {
@@ -13,7 +16,13 @@ import {
   loadAgentConfig,
   loadAssignmentConfig,
 } from "./config/loader.js";
-import { ResumeError, resolveResumeTarget } from "./runner/manifest.js";
+import {
+  ResumeError,
+  type RunManifest,
+  resolveResumeTarget,
+  snapshotTasks,
+  writeManifest,
+} from "./runner/manifest.js";
 import { type LiveTaskOverlay, applyLiveOverlay, renderManifestStatus } from "./runner/output.js";
 import {
   EmptyPromptError,
@@ -24,8 +33,9 @@ import {
   VarResolutionError,
   runAgent,
 } from "./runner/run-loop.js";
+import { shortId } from "./util/short-id.js";
 
-const HELP = `Usage: task-runner <run|init|status> [options] [args]
+const HELP = `Usage: task-runner <run|init|status|task> [options] [args]
 
 Commands:
   run                     Execute an agent. Either a fresh run, a resume,
@@ -42,6 +52,15 @@ Commands:
                           for resuming. Read-only — touches no state.
                           Supports --output-format json and --field for
                           selective JSON output.
+  task set <id> <task>    Update a task's status and/or notes on a run
+                          without invoking the backend. Requires at least
+                          one of --status / --notes. Rewrites the
+                          workspace assignment.md and persists the
+                          manifest. Rejected while status=running.
+  task add <id>           Append a new task to a run's task list. Requires
+                          --title. Generates a \`cli-<short-id>\` task id.
+                          Respects the \`tasks\` locked field. Rejected
+                          while status=running.
 
 Arguments:
   [message]               Positional text. For a fresh run or init,
@@ -49,6 +68,12 @@ Arguments:
                           prompt. For a resume run, sent as (part of) the
                           sole follow-up prompt for the new session.
                           Forbidden when resuming an initialized run.
+
+Task command options:
+  --status <s>            (task set) Target status: pending, in_progress,
+                          completed, or blocked.
+  --notes <text>          (task set) Replacement notes body.
+  --title <text>          (task add) Title for the new task.
 
 Options:
   --agent <name|path>     Agent name (resolved against ./agents/<name>/agent.md
@@ -129,6 +154,10 @@ async function main(): Promise<void> {
 
   if (parsed.command === "status") {
     runStatus(parsed);
+  }
+
+  if (parsed.command === "task") {
+    runTaskCommand(parsed);
   }
 
   if (parsed.command !== "run" && parsed.command !== "init") {
@@ -400,6 +429,236 @@ function runStatus(parsed: ParsedArgs): never {
     process.stdout.write(renderManifestStatus(manifestView, { isLive: liveOverlay !== undefined }));
   }
 
+  process.exit(0);
+}
+
+function runTaskCommand(parsed: ParsedArgs): never {
+  if (parsed.subcommand === "set") {
+    runTaskSet(parsed);
+  }
+  if (parsed.subcommand === "add") {
+    runTaskAdd(parsed);
+  }
+  process.stderr.write(
+    `task-runner: task command requires a subcommand: set | add (got "${parsed.subcommand ?? ""}")\n`,
+  );
+  process.stderr.write("Usage: task-runner task set <run-id> <task-id> [--status s] [--notes n]\n");
+  process.stderr.write('       task-runner task add <run-id> --title "..."\n');
+  process.exit(3);
+}
+
+// States in which `task set` / `task add` are allowed. Everything else is
+// either `running` (live agent would race us) or an unreachable value.
+const MUTATION_ALLOWED_STATUSES = new Set([
+  "initialized",
+  "success",
+  "blocked",
+  "exhausted",
+  "aborted",
+  "error",
+]);
+
+function resolveRunOrExit(target: string): ReturnType<typeof resolveResumeTarget> {
+  try {
+    return resolveResumeTarget(target);
+  } catch (err) {
+    if (err instanceof ResumeError) {
+      process.stderr.write(`task-runner: ${err.message}\n`);
+    } else {
+      process.stderr.write(`task-runner: ${(err as Error).message}\n`);
+    }
+    process.exit(3);
+  }
+}
+
+function requireMutableStatus(manifest: RunManifest): void {
+  if (!MUTATION_ALLOWED_STATUSES.has(manifest.status)) {
+    process.stderr.write(
+      `task-runner: cannot mutate tasks on a ${manifest.status} run (task-runner task set/add is rejected while a run is in-flight)\n`,
+    );
+    process.exit(3);
+  }
+}
+
+// Build a task Map from the manifest snapshot, then overlay any live
+// status/notes edits present in the workspace assignment.md. Object
+// insertion order on `finalTasks` preserves the run's original task
+// order; live overlay can only modify status/notes on known ids.
+function buildTaskMapFromManifest(manifest: RunManifest): Map<string, TaskState> {
+  const tasks = new Map<string, TaskState>();
+  for (const [id, snap] of Object.entries(manifest.finalTasks)) {
+    tasks.set(id, {
+      id: snap.id,
+      title: snap.title,
+      body: snap.body,
+      status: snap.status,
+      notes: snap.notes,
+    });
+  }
+
+  try {
+    const raw = readFileSync(manifest.assignmentPath, "utf8");
+    const updates = parseAssignment(raw);
+    if (updates.length > 0) mergeUpdates(tasks, updates);
+  } catch {
+    // workspace file missing or unreadable — fall back to manifest snapshot
+  }
+
+  return tasks;
+}
+
+function persistTaskMap(
+  resolved: ReturnType<typeof resolveResumeTarget>,
+  tasks: Map<string, TaskState>,
+): void {
+  const ordered = Array.from(tasks.values());
+  writeFileSync(resolved.manifest.assignmentPath, renderAssignment(ordered), "utf8");
+  resolved.manifest.finalTasks = snapshotTasks(tasks);
+  resolved.manifest.tasksCompleted = ordered.filter((t) => t.status === "completed").length;
+  resolved.manifest.tasksTotal = ordered.length;
+  writeManifest(resolved.workspaceDir, resolved.manifest);
+}
+
+function runTaskSet(parsed: ParsedArgs): never {
+  const [runArg, taskId] = parsed.positionals;
+  if (!runArg || !taskId) {
+    process.stderr.write("task-runner: task set requires <run-id> <task-id>\n");
+    process.stderr.write(
+      "Usage: task-runner task set <run-id> <task-id> [--status s] [--notes n]\n",
+    );
+    process.exit(3);
+  }
+
+  if (parsed.taskStatus === undefined && parsed.taskNotes === undefined) {
+    process.stderr.write("task-runner: task set requires at least one of --status / --notes\n");
+    process.exit(3);
+  }
+
+  if (parsed.taskStatus !== undefined && !isValidStatus(parsed.taskStatus)) {
+    process.stderr.write(
+      `task-runner: invalid --status "${parsed.taskStatus}" — expected one of: ${VALID_STATUSES.join(", ")}\n`,
+    );
+    process.exit(3);
+  }
+
+  const resolved = resolveRunOrExit(runArg);
+  requireMutableStatus(resolved.manifest);
+
+  const tasks = buildTaskMapFromManifest(resolved.manifest);
+  const target = tasks.get(taskId);
+  if (!target) {
+    process.stderr.write(
+      `task-runner: task "${taskId}" not found in run ${resolved.manifest.runId}\n`,
+    );
+    process.exit(3);
+  }
+
+  if (parsed.taskStatus !== undefined) {
+    target.status = parsed.taskStatus as TaskState["status"];
+  }
+  if (parsed.taskNotes !== undefined) {
+    target.notes = parsed.taskNotes;
+  }
+
+  persistTaskMap(resolved, tasks);
+
+  if (parsed.outputFormat === "json") {
+    process.stdout.write(`${JSON.stringify(resolved.manifest.finalTasks[taskId], null, 2)}\n`);
+  } else {
+    process.stdout.write(
+      `task-runner: updated ${taskId} (status=${target.status}) in run ${resolved.manifest.runId}\n`,
+    );
+  }
+  process.exit(0);
+}
+
+function runTaskAdd(parsed: ParsedArgs): never {
+  const [runArg, extra] = parsed.positionals;
+  if (!runArg) {
+    process.stderr.write("task-runner: task add requires <run-id>\n");
+    process.stderr.write('Usage: task-runner task add <run-id> --title "..."\n');
+    process.exit(3);
+  }
+  if (extra !== undefined) {
+    process.stderr.write(
+      `task-runner: task add takes exactly one positional (<run-id>); got extra "${extra}"\n`,
+    );
+    process.exit(3);
+  }
+  if (parsed.taskTitle === undefined) {
+    process.stderr.write("task-runner: task add requires --title\n");
+    process.exit(3);
+  }
+  const title = parsed.taskTitle.trim();
+  if (title.length === 0) {
+    process.stderr.write("task-runner: task add: --title cannot be empty\n");
+    process.exit(3);
+  }
+  if (title.length > 200) {
+    process.stderr.write(
+      `task-runner: task add: --title exceeds 200 characters (${title.length})\n`,
+    );
+    process.exit(3);
+  }
+
+  const resolved = resolveRunOrExit(runArg);
+  requireMutableStatus(resolved.manifest);
+
+  // Reload the run's agent (and assignment if present) so we can check
+  // lockedFields. `tasks` in the union forbids any mutation that adds
+  // new entries. We intentionally do NOT check this for `task set` —
+  // status/notes are never a locked field.
+  try {
+    const agent = loadAgentConfig(resolved.manifest.agent.sourcePath);
+    const assignment = resolved.manifest.assignment
+      ? loadAssignmentConfig(resolved.manifest.assignment.sourcePath)
+      : undefined;
+    const locked = new Set<string>([
+      ...agent.config.lockedFields,
+      ...(assignment?.config.lockedFields ?? []),
+    ]);
+    if (locked.has("tasks")) {
+      process.stderr.write(
+        "task-runner: task add: the `tasks` field is locked for this run — cannot add tasks\n",
+      );
+      process.exit(3);
+    }
+  } catch (err) {
+    if (
+      err instanceof AgentNotFoundError ||
+      err instanceof AgentConfigError ||
+      err instanceof AssignmentNotFoundError ||
+      err instanceof AssignmentConfigError
+    ) {
+      process.stderr.write(`task-runner: task add: cannot verify locked fields — ${err.message}\n`);
+      process.exit(3);
+    }
+    throw err;
+  }
+
+  const tasks = buildTaskMapFromManifest(resolved.manifest);
+  let newId: string;
+  do {
+    newId = `cli-${shortId()}`;
+  } while (tasks.has(newId));
+
+  tasks.set(newId, {
+    id: newId,
+    title,
+    body: "",
+    status: "pending",
+    notes: "",
+  });
+
+  persistTaskMap(resolved, tasks);
+
+  if (parsed.outputFormat === "json") {
+    process.stdout.write(`${JSON.stringify(resolved.manifest.finalTasks[newId], null, 2)}\n`);
+  } else {
+    process.stdout.write(
+      `task-runner: added task ${newId} "${title}" to run ${resolved.manifest.runId}\n`,
+    );
+  }
   process.exit(0);
 }
 
