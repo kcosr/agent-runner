@@ -73,6 +73,67 @@ test("overridesFromParsedArgs: addedTasks is undefined when empty (so locked-fie
   assert.equal(overrides.addedTasks, undefined);
 });
 
+// ── list/show command parsing ────────────────────────────────────────
+
+test("parseArgs: list agents is parsed as command=list subcommand=agents", () => {
+  const parsed = parseArgs(argv("list", "agents"));
+  assert.equal(parsed.command, "list");
+  assert.equal(parsed.subcommand, "agents");
+});
+
+test("parseArgs: list assignments is parsed as command=list subcommand=assignments", () => {
+  const parsed = parseArgs(argv("list", "assignments"));
+  assert.equal(parsed.command, "list");
+  assert.equal(parsed.subcommand, "assignments");
+});
+
+test("parseArgs: list with --output-format json", () => {
+  const parsed = parseArgs(argv("list", "agents", "--output-format", "json"));
+  assert.equal(parsed.command, "list");
+  assert.equal(parsed.subcommand, "agents");
+  assert.equal(parsed.outputFormat, "json");
+});
+
+test("parseArgs: list with no kind still parses (validation in handler)", () => {
+  const parsed = parseArgs(argv("list"));
+  assert.equal(parsed.command, "list");
+  assert.equal(parsed.subcommand, undefined);
+});
+
+test("parseArgs: show agent parses with positional target", () => {
+  const parsed = parseArgs(argv("show", "agent", "example"));
+  assert.equal(parsed.command, "show");
+  assert.equal(parsed.subcommand, "agent");
+  assert.deepEqual(parsed.positionals, ["example"]);
+});
+
+test("parseArgs: show assignment parses with positional target", () => {
+  const parsed = parseArgs(argv("show", "assignment", "repo-orientation"));
+  assert.equal(parsed.command, "show");
+  assert.equal(parsed.subcommand, "assignment");
+  assert.deepEqual(parsed.positionals, ["repo-orientation"]);
+});
+
+test("parseArgs: show agent with --output-format json", () => {
+  const parsed = parseArgs(argv("show", "agent", "example", "--output-format", "json"));
+  assert.equal(parsed.command, "show");
+  assert.equal(parsed.subcommand, "agent");
+  assert.equal(parsed.outputFormat, "json");
+});
+
+test("parseArgs: show with no kind still parses (validation in handler)", () => {
+  const parsed = parseArgs(argv("show"));
+  assert.equal(parsed.command, "show");
+  assert.equal(parsed.subcommand, undefined);
+});
+
+test("parseArgs: show agent with path positional", () => {
+  const parsed = parseArgs(argv("show", "agent", "./agents/example/agent.md"));
+  assert.equal(parsed.command, "show");
+  assert.equal(parsed.subcommand, "agent");
+  assert.deepEqual(parsed.positionals, ["./agents/example/agent.md"]);
+});
+
 test("overridesFromParsedArgs: all other overrides plumbed through", () => {
   const parsed = parseArgs(
     argv(

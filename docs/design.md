@@ -1513,7 +1513,7 @@ The raw JSON events are still captured verbatim into
 ## CLI shape
 
 ```
-task-runner <run|init|status|task> [options] [args]
+task-runner <run|init|status|task|list|show> [options] [args]
 
 # run / init shared flag set
 task-runner <run|init>
@@ -1547,6 +1547,14 @@ task-runner task set <id> <task-id>
 
 task-runner task add <id>
                --title <text>
+               [--output-format <text|json>]
+
+# list — enumerate available definitions (read-only)
+task-runner list <agents|assignments>
+               [--output-format <text|json>]
+
+# show — print details of a specific definition (read-only)
+task-runner show <agent|assignment> <name|path>
                [--output-format <text|json>]
 ```
 
@@ -1583,6 +1591,16 @@ Subcommands:
   terminal state. `task add` respects the `tasks` locked field via
   the same `checkLockedFields` path used by `--add-task` on fresh
   runs.
+- **`list`** — enumerate available definitions from local
+  (`./agents/` or `./assignments/`) and global
+  (`$TASK_RUNNER_HOME/...`) roots. Local definitions shadow global
+  ones with the same name. Strictly read-only — creates no workspace
+  or manifest artifacts.
+- **`show`** — print details of a named or path-specified definition.
+  Loads and validates the frontmatter (same code path as `--agent` /
+  `--assignment` on a fresh run) and prints config fields plus the
+  instructions body. Supports `--output-format json` for scripted
+  consumption. Strictly read-only.
 
 `--agent` is **optional**:
 

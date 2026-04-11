@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -8,6 +8,9 @@ import {
   AgentNotFoundError,
   AssignmentConfigError,
   AssignmentNotFoundError,
+  DefinitionListError,
+  listAgents,
+  listAssignments,
   loadAgentConfig,
   loadAssignmentConfig,
   resolveAgentPath,
@@ -223,4 +226,102 @@ body
   );
 
   assert.throws(() => loadAssignmentConfig("bad-default", dir), AssignmentConfigError);
+});
+
+// ── catalog / list tests ────────────────────────────────────────────
+
+test("listAgents discovers local agents", () => {
+  const dir = tempDir();
+  writeAgent(dir, "alpha", MINIMAL_AGENT);
+  writeAgent(dir, "beta", MINIMAL_AGENT);
+
+  const entries = listAgents(dir);
+  const names = entries.map((e) => e.name);
+  assert.ok(names.includes("alpha"));
+  assert.ok(names.includes("beta"));
+  assert.equal(entries[0].root, "local");
+});
+
+test("listAssignments discovers local assignments", () => {
+  const dir = tempDir();
+  writeAssignment(dir, "work-a", MINIMAL_ASSIGNMENT);
+  writeAssignment(dir, "work-b", MINIMAL_ASSIGNMENT);
+
+  const entries = listAssignments(dir);
+  const names = entries.map((e) => e.name);
+  assert.ok(names.includes("work-a"));
+  assert.ok(names.includes("work-b"));
+});
+
+test("listAgents returns sorted names", () => {
+  const dir = tempDir();
+  writeAgent(dir, "zeta", MINIMAL_AGENT);
+  writeAgent(dir, "alpha", MINIMAL_AGENT);
+  writeAgent(dir, "mid", MINIMAL_AGENT);
+
+  const entries = listAgents(dir);
+  const names = entries.map((e) => e.name);
+  assert.deepEqual(names, ["alpha", "mid", "zeta"]);
+});
+
+test("listAgents returns empty array when no agents exist", () => {
+  const dir = tempDir();
+  const entries = listAgents(dir);
+  assert.deepEqual(entries, []);
+});
+
+test("listAssignments returns empty array when no assignments exist", () => {
+  const dir = tempDir();
+  const entries = listAssignments(dir);
+  assert.deepEqual(entries, []);
+});
+
+test("listAgents skips directories without agent.md", () => {
+  const dir = tempDir();
+  writeAgent(dir, "real", MINIMAL_AGENT);
+  mkdirSync(join(dir, "agents", "empty"), { recursive: true });
+
+  const entries = listAgents(dir);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].name, "real");
+});
+
+test("listAgents local root shadows global root for same name", () => {
+  const dir = tempDir();
+  const globalDir = tempDir();
+  writeAgent(dir, "shared", MINIMAL_AGENT);
+  writeAgent(globalDir, "shared", MINIMAL_AGENT);
+  writeAgent(globalDir, "global-only", MINIMAL_AGENT);
+
+  const origEnv = process.env.TASK_RUNNER_HOME;
+  try {
+    process.env.TASK_RUNNER_HOME = globalDir;
+    const entries = listAgents(dir);
+    const names = entries.map((e) => e.name);
+    assert.ok(names.includes("shared"));
+    assert.ok(names.includes("global-only"));
+    const shared = entries.find((e) => e.name === "shared");
+    assert.equal(shared.root, "local");
+    const globalOnly = entries.find((e) => e.name === "global-only");
+    assert.equal(globalOnly.root, "global");
+  } finally {
+    if (origEnv === undefined) {
+      process.env.TASK_RUNNER_HOME = undefined;
+    } else {
+      process.env.TASK_RUNNER_HOME = origEnv;
+    }
+  }
+});
+
+test("listAgents throws DefinitionListError when agents directory is unreadable", () => {
+  const dir = tempDir();
+  const agentsDir = join(dir, "agents");
+  mkdirSync(agentsDir, { recursive: true });
+  writeAgent(dir, "visible", MINIMAL_AGENT);
+  chmodSync(agentsDir, 0o000);
+  try {
+    assert.throws(() => listAgents(dir), DefinitionListError);
+  } finally {
+    chmodSync(agentsDir, 0o755);
+  }
 });
