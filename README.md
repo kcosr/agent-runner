@@ -564,9 +564,17 @@ task-runner task add abc123 --title "Follow-up: address flakey test"
 # 5. Loop until status JSON shows all tasks terminal.
 ```
 
-The run stays in `initialized` state the whole time. If you later want
-to hand it to a subprocess agent (e.g. to finish up), `task-runner run
---resume-run abc123` still works — the init state is fully resumable.
+For a **non-passive backend** (claude or codex), the run stays in
+`initialized` state the whole time and is still fully resumable: if
+you later want to hand it to a subprocess agent, `task-runner run
+--resume-run abc123` executes it normally. The CLI task commands and
+the subprocess execution path compose cleanly.
+
+For a **passive backend** the contract is different: task mutations
+*auto-finalize* the manifest (success / blocked / initialized is
+re-derived from the task map on every call), and `task-runner run`
+is rejected outright. See the [Passive backend](#passive) section
+below for the full lifecycle.
 
 ---
 

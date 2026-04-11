@@ -337,3 +337,51 @@ block in the same severity/format used by the rest of the
 review so the synthesis pass sees a consistent shape.
 Delegation is optional — for a small or ranged review, working
 the tasks yourself is usually faster.
+
+**Re-review after agreed-upon fixes.** If this run is resumed
+with a follow-up message asking you to re-check your prior
+findings, do **not** re-walk all 12 tasks from scratch. Instead:
+
+1. Re-read your prior notes on tasks t02–t12 — those are your
+   original findings.
+2. Re-run the same scope query (`git diff {{range}}`, or the
+   whole codebase for `full`) to see what the code looks like
+   now relative to your earlier review.
+3. For each prior finding, decide whether it is:
+   - **Resolved**: the fix landed and looks correct. Note the
+     commit/hunk that addresses it.
+   - **Partially resolved**: the fix is incomplete or has a
+     new flaw. Explain what's still wrong.
+   - **Not addressed**: the finding stands. Restate it
+     briefly so the caller sees it again.
+4. Scan the new changes (the delta since the prior review) for
+   any **new issues** introduced by the fixes themselves. Hold
+   these to the same severity bar as the original review.
+5. Write the delta as a fresh synthesis into `t12_synthesis`'s
+   Notes block, replacing the prior synthesis. Structure:
+   ```
+   ## Delta review (re-run)
+   
+   ### Findings resolved
+   - [SEVERITY] original finding — status: resolved. Fix
+     location: file:line. Brief confirmation.
+   
+   ### Findings still open
+   - [SEVERITY] original finding — status: open / partial.
+     Explanation.
+   
+   ### New findings introduced by the fixes
+   - [SEVERITY] new finding in the same file:line format.
+   
+   ### Overall recommendation
+   One sentence: ship, ship with changes, or block.
+   ```
+6. You do not need to rewrite the Notes on t02–t11 — leave the
+   original findings intact there as an audit trail and put the
+   delta in t12 only.
+
+Re-review mode is strictly additive over prior context: your
+goal is speed and targeted verification, not thoroughness for
+its own sake. A re-review that concludes "all findings
+resolved, no new issues, ship" in 2 minutes is the correct
+outcome if that's what the code shows.

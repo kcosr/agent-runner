@@ -37,7 +37,9 @@ import {
 
 export interface RunOverrides {
   cwd?: string;
-  backend?: "claude" | "codex";
+  // Must stay in sync with `agentConfigSchema.backend` in
+  // src/config/schema.ts and the backend registry.
+  backend?: "claude" | "codex" | "passive";
   model?: string;
   effort?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   message?: string;

@@ -17,6 +17,7 @@ import {
   loadAssignmentConfig,
 } from "./config/loader.js";
 import {
+  type ManifestStatus,
   ResumeError,
   type RunManifest,
   resolveResumeTarget,
@@ -545,12 +546,17 @@ function persistTaskMap(
   writeManifest(resolved.workspaceDir, resolved.manifest);
 }
 
-// For a passive run, derive the next terminal state from the task map:
-//   - any pending / in_progress → "initialized" (still work to do)
-//   - all terminal, at least one blocked → "blocked" (exit code 2)
-//   - all completed → "success" (exit code 0)
-// Self-healing: reopening a completed task on a finalized run flips
-// status back to "initialized" and clears exitCode/endedAt.
+// For a passive run, derive the next state from the task map:
+//   - 0 tasks, or any pending / in_progress → "initialized"
+//   - all terminal, at least one blocked      → "blocked" (exit code 2)
+//   - all completed                           → "success" (exit code 0)
+//
+// Only stamp endedAt / exitCode on an **actual transition**. A
+// notes-only edit on an already-terminal run must preserve the
+// existing endedAt so the manifest's audit trail stays accurate
+// (a post-hoc notes correction is not "the run finished again").
+// Self-healing is still supported: reopening a completed task
+// transitions back from a terminal state and clears endedAt/exitCode.
 function applyPassiveFinalization(manifest: RunManifest, ordered: TaskState[]): void {
   let hasOpen = false;
   let hasBlocked = false;
@@ -558,31 +564,33 @@ function applyPassiveFinalization(manifest: RunManifest, ordered: TaskState[]): 
     if (t.status === "pending" || t.status === "in_progress") hasOpen = true;
     if (t.status === "blocked") hasBlocked = true;
   }
-  // A 0-task passive run never auto-finalizes — it stays in
-  // `initialized` forever. That's consistent with how non-passive
-  // chat-mode runs behave (they can reach a terminal state only via
-  // explicit session termination).
-  if (ordered.length === 0) {
-    manifest.status = "initialized";
-    manifest.endedAt = null;
-    manifest.exitCode = null;
+
+  let derived: ManifestStatus;
+  if (ordered.length === 0 || hasOpen) {
+    derived = "initialized";
+  } else if (hasBlocked) {
+    derived = "blocked";
+  } else {
+    derived = "success";
+  }
+
+  // No-op on same-state calls (e.g. notes-only edit after the run
+  // was already finalized). Preserves endedAt + exitCode.
+  if (manifest.status === derived) {
     return;
   }
-  if (hasOpen) {
-    manifest.status = "initialized";
+
+  manifest.status = derived;
+  if (derived === "initialized") {
     manifest.endedAt = null;
     manifest.exitCode = null;
-    return;
-  }
-  if (hasBlocked) {
-    manifest.status = "blocked";
+  } else if (derived === "blocked") {
     manifest.endedAt = new Date().toISOString();
     manifest.exitCode = 2;
-    return;
+  } else {
+    manifest.endedAt = new Date().toISOString();
+    manifest.exitCode = 0;
   }
-  manifest.status = "success";
-  manifest.endedAt = new Date().toISOString();
-  manifest.exitCode = 0;
 }
 
 function runTaskSet(parsed: ParsedArgs): never {

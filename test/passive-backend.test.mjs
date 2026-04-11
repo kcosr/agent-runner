@@ -361,6 +361,55 @@ test("passive backend: invoke() throws PassiveBackendNotInvokableError", async (
   }, /passive backend cannot be invoked/i);
 });
 
+test("passive finalized run: notes-only task set preserves endedAt and exitCode", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "passive-agent", PASSIVE_AGENT);
+  writeAssignment(dir, "two-task", TWO_TASK_ASSIGNMENT);
+  const outcome = await initPassive(dir);
+
+  // Finalize the run to success.
+  runCli(["task", "set", outcome.runId, "t1", "--status", "completed"], { cwd: dir });
+  runCli(["task", "set", outcome.runId, "t2", "--status", "completed"], { cwd: dir });
+  const finalized = readManifest(outcome.workspaceDir);
+  assert.equal(finalized.status, "success");
+  assert.equal(finalized.exitCode, 0);
+  const originalEndedAt = finalized.endedAt;
+  assert.ok(originalEndedAt, "endedAt stamped on finalization");
+
+  // Brief pause so a Date.now() rewrite would produce a different
+  // timestamp and the equality assertion would catch the regression.
+  await new Promise((r) => setTimeout(r, 20));
+
+  // Notes-only edit on an already-completed task. Status stays
+  // "completed", terminal state stays "success", endedAt should be
+  // frozen.
+  runCli(
+    [
+      "task",
+      "set",
+      outcome.runId,
+      "t1",
+      "--notes",
+      "Post-hoc annotation added after finalization.",
+    ],
+    { cwd: dir },
+  );
+
+  const afterNote = readManifest(outcome.workspaceDir);
+  assert.equal(afterNote.status, "success", "status still success");
+  assert.equal(afterNote.exitCode, 0, "exitCode preserved");
+  assert.equal(
+    afterNote.endedAt,
+    originalEndedAt,
+    "endedAt preserved across notes-only edit on terminal run",
+  );
+  assert.equal(
+    afterNote.finalTasks.t1.notes,
+    "Post-hoc annotation added after finalization.",
+    "notes mutation still applied",
+  );
+});
+
 test("passive re-orient: status --field pendingPrompt returns the bootstrap text", async () => {
   const dir = tempDir();
   writeAgent(dir, "passive-agent", PASSIVE_AGENT);

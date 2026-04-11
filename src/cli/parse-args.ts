@@ -1,5 +1,7 @@
 export type OutputFormat = "text" | "json";
-export type BackendId = "claude" | "codex";
+// Kept in sync with `agentConfigSchema.backend` in src/config/schema.ts
+// and the backend registry in src/backends/registry.ts.
+export type BackendId = "claude" | "codex" | "passive";
 
 export interface ParsedArgs {
   command: string;
@@ -32,7 +34,7 @@ export interface ParsedArgs {
 
 const EFFORT_VALUES = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const OUTPUT_FORMATS = ["text", "json"] as const;
-const BACKEND_VALUES = ["claude", "codex"] as const;
+const BACKEND_VALUES = ["claude", "codex", "passive"] as const;
 
 export function parseArgs(argv: string[]): ParsedArgs {
   const args = argv.slice(2);

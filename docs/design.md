@@ -1380,12 +1380,28 @@ can't also do on the first session — its purpose is to separate the
 prepare work for an agent and hand off a resumable run id without
 committing to running it immediately.
 
+**Passive backend exception.** When the agent declares
+`backend: passive`, `init` still writes the workspace and the
+manifest, but there is no later execution step. The run is
+sidecar-only: callers drive it through `task set` / `task add` and
+read progress through `status`. Specifically:
+
+- The composed `pendingPrompt` uses `PASSIVE_TASK_WORKFLOW_TEMPLATE`
+  (CLI-based workflow) instead of `TASK_WORKFLOW_TEMPLATE` (file-edit
+  workflow). The frozen prompt exists as a re-orientation payload,
+  not as text that will be sent to a model.
+- The bootstrap (composed prompt) is printed to **stdout** for
+  piping; the brief progress lines stay on stderr.
+- The stderr footer hints at `task set`, not `run --resume-run`.
+- Task mutations auto-finalize the manifest (see "Passive
+  auto-finalization" below).
+
 ### `--resume-run <id|path>`
 
 `--resume-run` serves two modes depending on the prior manifest's
 `status`:
 
-**Execute-after-init** (`status: "initialized"`):
+**Execute-after-init** (`status: "initialized"`, non-passive backend):
 
 - Starts session 0 — the first real session for this run.
 - The stored `pendingPrompt` is sent verbatim as the first attempt's
@@ -1401,6 +1417,27 @@ committing to running it immediately.
   `null` by definition).
 - After this call, `pendingPrompt` is cleared and `sessionCount` goes
   to 1.
+
+**Passive-backend exception**: `task-runner run` (fresh or
+`--resume-run`) is rejected with exit code 3 when the resolved
+backend is `passive`. Execute-after-init does not apply. The stored
+`pendingPrompt` persists for the lifetime of the run as a
+re-orientation payload for the external driver, accessible via
+`task-runner status <id> --output-format json --field pendingPrompt`.
+
+**Passive auto-finalization**: for a passive run, every successful
+`task set` / `task add` re-derives `manifest.status` from the task
+map after the mutation:
+
+- any `pending` / `in_progress` → `initialized`
+- all terminal, any `blocked`   → `blocked` (exit code 2)
+- all `completed`               → `success` (exit code 0)
+
+`endedAt` and `exitCode` are stamped only on an actual transition
+into a terminal state (so a notes-only edit on an already-finalized
+run preserves the recorded completion time). Self-healing: reopening
+a completed task on a terminal passive run transitions back to
+`initialized` and clears `endedAt` / `exitCode`.
 
 **Resume of an already-executed run** (`status` is a terminal state
 from a prior session):
