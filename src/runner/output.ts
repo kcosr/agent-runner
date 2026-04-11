@@ -1,5 +1,16 @@
-import type { TaskState } from "../assignment/model.js";
-import type { RunManifest } from "./manifest.js";
+import type { TaskState, TaskStatus } from "../assignment/model.js";
+import type { RunManifest, TaskSnapshot } from "./manifest.js";
+
+const VALID_TASK_STATUSES: ReadonlySet<TaskStatus> = new Set([
+  "pending",
+  "in_progress",
+  "completed",
+  "blocked",
+]);
+
+function isTaskStatus(s: string): s is TaskStatus {
+  return VALID_TASK_STATUSES.has(s as TaskStatus);
+}
 
 export type RunStatus = "initialized" | "success" | "blocked" | "exhausted" | "aborted" | "error";
 
@@ -73,7 +84,51 @@ export function renderSummary(summary: RunSummary): string {
   return `${lines.join("\n")}\n`;
 }
 
-export function renderManifestStatus(manifest: RunManifest): string {
+/**
+ * A `taskId → {status?, notes?}` overlay parsed live from the workspace
+ * `assignment.md` (via `parseAssignment`). Status strings from the file
+ * are not yet validated against `TaskStatus` — `applyLiveOverlay` does
+ * the validation when constructing the overlaid manifest.
+ */
+export type LiveTaskOverlay = Map<string, { status?: string; notes?: string }>;
+
+/**
+ * Build a non-mutating clone of `manifest` with `finalTasks` and
+ * `tasksCompleted` overlaid from the live workspace parse. Invalid
+ * status strings (anything not in the `TaskStatus` enum) fall back to
+ * the manifest's snapshot value for that task. The original manifest
+ * is never mutated.
+ *
+ * Top-level `manifest.status` is **not** changed: a run that has all
+ * tasks marked complete on disk is still `running` until the run loop
+ * sees that and writes the terminal state itself.
+ */
+export function applyLiveOverlay(manifest: RunManifest, overlay: LiveTaskOverlay): RunManifest {
+  const overlaidTasks: Record<string, TaskSnapshot> = {};
+  for (const [id, snap] of Object.entries(manifest.finalTasks)) {
+    const live = overlay.get(id);
+    const liveStatus =
+      live?.status !== undefined && isTaskStatus(live.status) ? live.status : snap.status;
+    overlaidTasks[id] = {
+      ...snap,
+      status: liveStatus,
+      notes: live?.notes ?? snap.notes,
+    };
+  }
+  const completedCount = Object.values(overlaidTasks).filter(
+    (t) => t.status === "completed",
+  ).length;
+  return {
+    ...manifest,
+    finalTasks: overlaidTasks,
+    tasksCompleted: completedCount,
+  };
+}
+
+export function renderManifestStatus(
+  manifest: RunManifest,
+  opts: { isLive?: boolean } = {},
+): string {
   const lines: string[] = [];
   lines.push("");
   lines.push(`── run ${manifest.runId} ──`);
@@ -119,7 +174,13 @@ export function renderManifestStatus(manifest: RunManifest): string {
 
   if (manifest.status === "running") {
     lines.push("");
-    lines.push("(run is still in progress; status reflects the most recent persisted attempt)");
+    if (opts.isLive) {
+      lines.push(
+        "(task statuses above are read live from the workspace assignment.md; the current attempt may still be in progress)",
+      );
+    } else {
+      lines.push("(run is still in progress; status reflects the most recent persisted attempt)");
+    }
   } else if (manifest.status === "initialized") {
     lines.push("");
     lines.push("To execute this run:");

@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { readFileSync } from "node:fs";
+import { parseAssignment } from "./assignment/parser.js";
 import { UnknownBackendError, resolveBackend } from "./backends/registry.js";
 import { type ParsedArgs, overridesFromParsedArgs, parseArgs } from "./cli/parse-args.js";
 import {
@@ -12,7 +14,7 @@ import {
   loadAssignmentConfig,
 } from "./config/loader.js";
 import { ResumeError, resolveResumeTarget } from "./runner/manifest.js";
-import { renderManifestStatus } from "./runner/output.js";
+import { type LiveTaskOverlay, applyLiveOverlay, renderManifestStatus } from "./runner/output.js";
 import {
   EmptyPromptError,
   InvalidAddedTaskError,
@@ -322,10 +324,40 @@ function runStatus(parsed: ParsedArgs): never {
     process.exit(3);
   }
 
+  // For a `running` manifest, parse the workspace assignment.md so the
+  // checklist reflects the agent's mid-attempt edits instead of the
+  // last-persisted snapshot. Read-only — never written back. Failures
+  // (file missing, parse errors) silently fall through to the manifest
+  // snapshot.
+  let liveOverlay: LiveTaskOverlay | undefined;
+  if (resolved.manifest.status === "running") {
+    try {
+      const raw = readFileSync(resolved.manifest.assignmentPath, "utf8");
+      const updates = parseAssignment(raw);
+      if (updates.length > 0) {
+        liveOverlay = new Map();
+        for (const u of updates) {
+          liveOverlay.set(u.taskId, { status: u.status, notes: u.notes });
+        }
+      }
+    } catch {
+      // workspace file missing or unreadable — fall back to manifest snapshot
+    }
+  }
+
+  // Build the manifest view used for both text and JSON output. When a
+  // live overlay applies, clone `finalTasks` and recompute the
+  // completed count so JSON consumers see the live numbers too. The
+  // original `resolved.manifest` is never mutated.
+  const manifestView =
+    liveOverlay !== undefined
+      ? applyLiveOverlay(resolved.manifest, liveOverlay)
+      : resolved.manifest;
+
   if (parsed.outputFormat === "json") {
     if (parsed.fields.length > 0) {
       const projection: Record<string, unknown> = {};
-      const manifest = resolved.manifest as unknown as Record<string, unknown>;
+      const manifest = manifestView as unknown as Record<string, unknown>;
       const missing: string[] = [];
       for (const field of parsed.fields) {
         if (field in manifest) {
@@ -340,14 +372,14 @@ function runStatus(parsed: ParsedArgs): never {
       }
       process.stdout.write(`${JSON.stringify(projection, null, 2)}\n`);
     } else {
-      process.stdout.write(`${JSON.stringify(resolved.manifest, null, 2)}\n`);
+      process.stdout.write(`${JSON.stringify(manifestView, null, 2)}\n`);
     }
   } else {
     if (parsed.fields.length > 0) {
       process.stderr.write("task-runner: --field requires --output-format json\n");
       process.exit(3);
     }
-    process.stdout.write(renderManifestStatus(resolved.manifest));
+    process.stdout.write(renderManifestStatus(manifestView, { isLive: liveOverlay !== undefined }));
   }
 
   process.exit(0);

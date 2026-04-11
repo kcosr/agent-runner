@@ -1299,6 +1299,39 @@ never touches state.
   JSON object. Unknown field names exit with code 3. Use this for
   scripts that only care about, say, `status` and `tasksCompleted`.
 
+#### Live overlay during a `running` attempt
+
+`run.json` is only persisted *between* attempts (see "When the
+manifest is written") so it's stale during a long-running attempt.
+To avoid that, when `status` resolves a manifest with
+`status: "running"` it also reads the workspace `assignment.md`,
+parses it with the same parser the run loop uses, and overlays
+the live task statuses + notes onto the rendered output.
+
+- The overlay is **read-only**. The status command never writes
+  to `run.json` or `assignment.md`.
+- The overlay only fires when `manifest.status === "running"`.
+  Terminal manifests (success / blocked / exhausted / aborted /
+  error / initialized) use the snapshot — there's nothing live to
+  read.
+- Both text and JSON output are overlaid: `finalTasks` and
+  `tasksCompleted` reflect the live values, so a script reading
+  `--field tasksCompleted` mid-attempt sees the agent's progress.
+- The top-level `manifest.status` is **not** changed by the
+  overlay. A run with all tasks marked complete on disk is still
+  `running` until the run loop sees that and writes the terminal
+  state itself. Status flipping is the run loop's job, not the
+  inspector's.
+- Invalid status strings in the workspace file (anything not in
+  the `TaskStatus` enum) fall back to the manifest's snapshot
+  value for that task. Better to under-report progress than to
+  surface a corrupt status.
+- Missing or unparseable workspace files fall through silently to
+  the manifest snapshot — the overlay is best-effort.
+- Text output adds a marker line:
+  `(task statuses above are read live from the workspace
+  assignment.md; the current attempt may still be in progress)`
+
 ### `task-runner init`
 
 `init` is `run` that stops short of invoking the backend. It:

@@ -4,8 +4,40 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
+import { renderAssignment } from "../dist/assignment/writer.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
 import { runAgent } from "../dist/runner/run-loop.js";
+
+function patchManifest(workspaceDir, mutator) {
+  const manifestPath = join(workspaceDir, "run.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  mutator(manifest);
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+/**
+ * Simulate "run is mid-attempt" by patching the manifest back to
+ * `running` with everything pending, and re-rendering the workspace
+ * assignment.md from the (now-pending) finalTasks. After this, the
+ * workspace looks like a fresh attempt that just started — at which
+ * point the test can edit assignment.md to simulate the agent's
+ * mid-attempt edits.
+ */
+function rewindToRunning(outcome) {
+  patchManifest(outcome.workspaceDir, (m) => {
+    m.status = "running";
+    m.exitCode = null;
+    m.endedAt = null;
+    m.tasksCompleted = 0;
+    for (const id of Object.keys(m.finalTasks)) {
+      m.finalTasks[id].status = "pending";
+      m.finalTasks[id].notes = "";
+    }
+  });
+  const manifest = JSON.parse(readFileSync(join(outcome.workspaceDir, "run.json"), "utf8"));
+  const tasks = Object.values(manifest.finalTasks);
+  writeFileSync(join(outcome.workspaceDir, "assignment.md"), renderAssignment(tasks), "utf8");
+}
 
 const STATUS_AGENT = `---
 schemaVersion: 1
@@ -207,6 +239,103 @@ test("status: missing positional fails", () => {
   }
   assert.ok(caught, "expected runCli to throw");
   assert.equal(caught.status, 3);
+});
+
+test("status: live overlay reflects mid-attempt edits when manifest is running", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "status-agent", STATUS_AGENT);
+  writeAssignment(dir, "status-work", STATUS_ASSIGNMENT);
+  const outcome = await runFresh(dir);
+  rewindToRunning(outcome);
+
+  // Agent has "marked" t1 as in_progress mid-attempt.
+  const planPath = join(outcome.workspaceDir, "assignment.md");
+  let plan = readFileSync(planPath, "utf8");
+  plan = editStatus(plan, "t1", "in_progress");
+  writeFileSync(planPath, plan, "utf8");
+
+  const text = runCli(["status", outcome.runId], { cwd: dir });
+  assert.match(text, /Status: running/);
+  assert.match(text, /- t1 — First \[in_progress\]/);
+  assert.match(text, /- t2 — Second \[pending\]/);
+  assert.match(text, /read live from the workspace/);
+});
+
+test("status: live overlay updates JSON tasksCompleted and finalTasks too", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "status-agent", STATUS_AGENT);
+  writeAssignment(dir, "status-work", STATUS_ASSIGNMENT);
+  const outcome = await runFresh(dir);
+  rewindToRunning(outcome);
+
+  const planPath = join(outcome.workspaceDir, "assignment.md");
+  let plan = readFileSync(planPath, "utf8");
+  plan = editStatus(plan, "t1", "completed");
+  plan = editStatus(plan, "t2", "in_progress");
+  writeFileSync(planPath, plan, "utf8");
+
+  const out = runCli(["status", outcome.runId, "--output-format", "json"], { cwd: dir });
+  const parsed = JSON.parse(out);
+  // Top-level run status stays "running" — only finalTasks/tasksCompleted overlay.
+  assert.equal(parsed.status, "running");
+  assert.equal(parsed.tasksCompleted, 1);
+  assert.equal(parsed.finalTasks.t1.status, "completed");
+  assert.equal(parsed.finalTasks.t2.status, "in_progress");
+});
+
+test("status: live overlay only fires when manifest.status === 'running'", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "status-agent", STATUS_AGENT);
+  writeAssignment(dir, "status-work", STATUS_ASSIGNMENT);
+  const outcome = await runFresh(dir);
+
+  // Manifest is "success". Even if we mess with the workspace file
+  // afterward, status should still show the snapshot.
+  const planPath = join(outcome.workspaceDir, "assignment.md");
+  let plan = readFileSync(planPath, "utf8");
+  plan = editStatus(plan, "t1", "blocked");
+  writeFileSync(planPath, plan, "utf8");
+
+  const text = runCli(["status", outcome.runId], { cwd: dir });
+  assert.match(text, /- t1 — First \[completed\]/, "snapshot wins for terminal manifest");
+  assert.doesNotMatch(text, /read live from the workspace/);
+});
+
+test("status: invalid live status string falls back to manifest snapshot", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "status-agent", STATUS_AGENT);
+  writeAssignment(dir, "status-work", STATUS_ASSIGNMENT);
+  const outcome = await runFresh(dir);
+  rewindToRunning(outcome);
+
+  const planPath = join(outcome.workspaceDir, "assignment.md");
+  let plan = readFileSync(planPath, "utf8");
+  // Agent wrote a typo
+  plan = editStatus(plan, "t1", "in-progress");
+  writeFileSync(planPath, plan, "utf8");
+
+  const text = runCli(["status", outcome.runId], { cwd: dir });
+  assert.match(text, /- t1 — First \[pending\]/, "invalid status falls back to manifest");
+});
+
+test("status: missing workspace assignment.md falls back gracefully", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "status-agent", STATUS_AGENT);
+  writeAssignment(dir, "status-work", STATUS_ASSIGNMENT);
+  const outcome = await runFresh(dir);
+
+  patchManifest(outcome.workspaceDir, (m) => {
+    m.status = "running";
+    m.exitCode = null;
+    m.endedAt = null;
+    // Point assignmentPath at a file that doesn't exist
+    m.assignmentPath = join(outcome.workspaceDir, "does-not-exist.md");
+  });
+
+  const text = runCli(["status", outcome.runId], { cwd: dir });
+  assert.match(text, /Status: running/);
+  // Falls back to the non-live message
+  assert.match(text, /run is still in progress/);
 });
 
 test("status: unknown run id fails with exit 3", () => {
