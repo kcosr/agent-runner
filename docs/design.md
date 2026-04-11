@@ -363,6 +363,39 @@ continuing.)
 
 Just enough to make claude re-read the file. Not the full workflow.
 
+### Empty prompt guard
+
+The three prompt parts — message, instructions body, and auto-workflow
+— are independently optional. Any combination works, except all three
+empty:
+
+| body | message | tasks | outcome |
+|---|---|---|---|
+| ✓ | ✓ | ✓ | message + body + workflow |
+| ✓ | ✓ |   | message + body |
+| ✓ |   | ✓ | body + workflow |
+| ✓ |   |   | body only |
+|   | ✓ | ✓ | message + workflow |
+|   | ✓ |   | message only (pure Q&A) |
+|   |   | ✓ | workflow only (agent reads assignment.md) |
+|   |   |   | **EmptyPromptError** (exit 3) |
+
+`EmptyPromptError` is thrown before any backend invocation if the
+composed prompt would be empty. Error shape:
+
+```
+task-runner: agent has no prompt content
+  the agent has no instructions body, no `message` (frontmatter or
+  CLI positional), and no tasks. At least one is required. Add
+  instructions to the agent.md body, pass a positional message, or
+  add tasks via `tasks:` in frontmatter or `--add-task`.
+```
+
+The composition itself is built as a parts array: each non-empty part
+is pushed in order (message, body, workflow) and joined with a single
+blank line. This avoids stray `\n\n` sequences when any part is
+missing.
+
 ## Agent resolution
 
 Given `--agent <name>`:

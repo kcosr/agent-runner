@@ -63,6 +63,19 @@ export class VarResolutionError extends Error {
   }
 }
 
+export class EmptyPromptError extends Error {
+  constructor() {
+    super(
+      "agent has no prompt content\n" +
+        "  the agent has no instructions body, no `message` (frontmatter or\n" +
+        "  CLI positional), and no tasks. At least one is required. Add\n" +
+        "  instructions to the agent.md body, pass a positional message, or\n" +
+        "  add tasks via `tasks:` in frontmatter or `--add-task`.",
+    );
+    this.name = "EmptyPromptError";
+  }
+}
+
 export class InvalidAddedTaskError extends Error {
   constructor(message: string) {
     super(message);
@@ -309,16 +322,13 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     cwd,
   };
 
-  // Fresh run: append the auto-workflow to the body if tasks exist, then interpolate the whole thing.
-  const freshBodySource =
-    hasTasks && !isResume
-      ? `${loaded.instructions}\n\n${TASK_WORKFLOW_TEMPLATE}`
-      : loaded.instructions;
-  const basePrompt = interpolate(freshBodySource, injectedVars);
+  const instructionsBody = loaded.instructions.trim();
+  const trimmedMessage = message?.trim() ?? "";
 
   let initialPrompt: string;
   if (isResume) {
-    const parts: string[] = [message ?? ""];
+    // Resume sessions always have a message (enforced above).
+    const parts: string[] = [trimmedMessage];
     if (firstTimeTasksAppear) {
       // Prior sessions had no tasks, so claude's cached session never saw the workflow.
       // Inject it into this follow-up message.
@@ -329,7 +339,20 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     }
     initialPrompt = parts.join("\n\n");
   } else {
-    initialPrompt = message ? `${message}\n\n${basePrompt}` : basePrompt;
+    const parts: string[] = [];
+    if (trimmedMessage.length > 0) {
+      parts.push(trimmedMessage);
+    }
+    if (instructionsBody.length > 0) {
+      parts.push(interpolate(instructionsBody, injectedVars));
+    }
+    if (hasTasks) {
+      parts.push(interpolate(TASK_WORKFLOW_TEMPLATE, injectedVars));
+    }
+    if (parts.length === 0) {
+      throw new EmptyPromptError();
+    }
+    initialPrompt = parts.join("\n\n");
   }
 
   writeFileSync(assignmentPath, renderAssignment(Array.from(tasks.values())), "utf8");
