@@ -342,6 +342,7 @@ function createClient(transport: Transport): CodexClient {
 
 interface AccumulatorState {
   threadId: string | null;
+  turnId: string | null;
   streamedText: string;
   completedText: string;
   turnStatus: "in_progress" | "completed" | "failed" | "interrupted" | "unknown";
@@ -371,6 +372,13 @@ function handleNotification(state: AccumulatorState, method: string, params: unk
       const thread = params.thread;
       if (isRecord(thread) && typeof thread.id === "string") {
         state.threadId = thread.id;
+      }
+      return;
+    }
+    case "turn/started": {
+      const turn = params.turn;
+      if (isRecord(turn) && typeof turn.id === "string") {
+        state.turnId = turn.id;
       }
       return;
     }
@@ -475,7 +483,6 @@ function buildThreadParams(
   }
   if (ctx.unrestricted) {
     params.approvalPolicy = "never";
-    params.sandbox = "danger-full-access";
   }
   return params;
 }
@@ -491,6 +498,7 @@ export const codexBackend: Backend = {
 
     const state: AccumulatorState = {
       threadId: null,
+      turnId: null,
       streamedText: "",
       completedText: "",
       turnStatus: "in_progress",
@@ -569,7 +577,6 @@ export const codexBackend: Backend = {
       }
       if (ctx.unrestricted) {
         turnStartPayload.approvalPolicy = "never";
-        turnStartPayload.sandboxPolicy = "danger-full-access";
       }
 
       const turnTimeoutMs = ctx.timeoutSec * 1000;
@@ -578,7 +585,13 @@ export const codexBackend: Backend = {
       });
 
       // Fire turn/start and wait for either completion or timeout.
-      const turnStartPromise = client.call<unknown>("turn/start", turnStartPayload);
+      const turnStartPromise = client
+        .call<unknown>("turn/start", turnStartPayload)
+        .then((result) => {
+          if (isRecord(result) && isRecord(result.turn) && typeof result.turn.id === "string") {
+            state.turnId ??= result.turn.id;
+          }
+        });
 
       const race = await Promise.race([
         Promise.all([turnStartPromise, turnCompletedPromise]).then(() => "done" as const),
@@ -587,13 +600,15 @@ export const codexBackend: Backend = {
 
       if (race === "timeout") {
         timedOut = true;
-        try {
-          await client.call("turn/interrupt", {
-            threadId: state.threadId,
-            turnId: null,
-          });
-        } catch {
-          // ignore — we're bailing anyway
+        if (state.threadId && state.turnId) {
+          try {
+            await client.call("turn/interrupt", {
+              threadId: state.threadId,
+              turnId: state.turnId,
+            });
+          } catch {
+            // ignore — we're bailing anyway
+          }
         }
       }
     } catch (err) {

@@ -537,6 +537,18 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       break;
     }
 
+    // Zero-task runs have no enforcement loop — the success criterion is
+    // just "backend invocation succeeded". One attempt, check the backend
+    // result, done.
+    if (tasks.size === 0) {
+      if (invokeResult.exitCode === 0 && !invokeResult.timedOut) {
+        terminal = { status: "success", exitCode: 0 };
+      } else {
+        terminal = { status: "error", exitCode: 4 };
+      }
+      break;
+    }
+
     const allCompleted = countBy(tasks, (t) => t.status === "completed") === tasks.size;
     const noInvalid = mergeInfo.invalidStatuses.length === 0;
     const blockedCount = countBy(tasks, (t) => t.status === "blocked");
