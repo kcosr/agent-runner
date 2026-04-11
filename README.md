@@ -33,6 +33,8 @@ the work, and writes a single canonical record per run.
   - [`task-runner init`](#task-runner-init)
   - [`task-runner status`](#task-runner-status)
   - [`task-runner task set` / `task add`](#task-runner-task-set--task-runner-task-add)
+  - [`task-runner list`](#task-runner-list)
+  - [`task-runner show`](#task-runner-show)
 - [Backends](#backends)
   - [Claude](#claude)
   - [Codex](#codex)
@@ -640,6 +642,49 @@ For a **passive backend** the contract is different: task mutations
 re-derived from the task map on every call), and `task-runner run`
 is rejected outright. See the [Passive backend](#passive) section
 below for the full lifecycle.
+
+### `task-runner list`
+
+Enumerate available agent or assignment definitions. Discovers from
+local (`./agents/` or `./assignments/`) and global
+(`$TASK_RUNNER_HOME/agents/` or `$TASK_RUNNER_HOME/assignments/`)
+roots, with local taking precedence when both define the same name.
+Read-only — touches no state.
+
+```bash
+# List all agents
+task-runner list agents
+
+# List all assignments (JSON output)
+task-runner list assignments --output-format json
+```
+
+Options:
+
+| Flag | Purpose |
+|---|---|
+| `--output-format <text\|json>` | Default `text`. `json` returns an array of `{ name, path, root }` objects. |
+
+### `task-runner show`
+
+Print details of a specific agent or assignment definition. Accepts
+a name (resolved via the same local-then-global precedence as
+`--agent` / `--assignment`) or a direct file path. Read-only.
+
+```bash
+# Show an agent by name
+task-runner show agent example
+
+# Show an assignment by path (JSON output)
+task-runner show assignment ./assignments/repo-orientation/assignment.md \
+  --output-format json
+```
+
+Options:
+
+| Flag | Purpose |
+|---|---|
+| `--output-format <text\|json>` | Default `text`. `json` returns `{ config, instructions, sourcePath }`. |
 
 ---
 

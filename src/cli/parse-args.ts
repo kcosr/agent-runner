@@ -62,7 +62,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   // Grouped commands shift one more token as their subcommand so that
   // `task set <run> <task>` parses cleanly without colliding with the
   // positional collector below.
-  if (result.command === "task") {
+  if (result.command === "task" || result.command === "list" || result.command === "show") {
     const next = args[0];
     if (next !== undefined && !next.startsWith("-")) {
       result.subcommand = args.shift();

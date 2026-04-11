@@ -9,8 +9,12 @@ import {
   AgentNotFoundError,
   AssignmentConfigError,
   AssignmentNotFoundError,
+  type DefinitionKind,
+  DefinitionListError,
   type LoadedAgent,
   type LoadedAssignment,
+  listAgents,
+  listAssignments,
   loadAgentConfig,
   loadAssignmentConfig,
   loadedAgentFromManifest,
@@ -36,7 +40,7 @@ import {
 import { loadWorkspaceTaskMap, persistWorkspaceTaskState } from "./runner/workspace-state.js";
 import { shortId } from "./util/short-id.js";
 
-const HELP = `Usage: task-runner <run|init|status|task> [options] [args]
+const HELP = `Usage: task-runner <run|init|status|task|list|show> [options] [args]
 
 Commands:
   run                     Execute an agent. Either a fresh run, a resume,
@@ -62,6 +66,14 @@ Commands:
                           --title. Generates a \`cli-<short-id>\` task id.
                           Respects the \`tasks\` locked field. Rejected
                           while status=running.
+  list <agents|assignments>
+                          Enumerate available definitions from local
+                          (./agents/ or ./assignments/) and global
+                          ($TASK_RUNNER_HOME) roots. Read-only.
+                          Supports --output-format json.
+  show <agent|assignment> <name|path>
+                          Print details of a specific definition.
+                          Read-only. Supports --output-format json.
 
 Arguments:
   [message]               Positional text. For a fresh run or init,
@@ -180,6 +192,14 @@ async function main(): Promise<void> {
 
   if (parsed.command === "task") {
     runTaskCommand(parsed);
+  }
+
+  if (parsed.command === "list") {
+    runListCommand(parsed);
+  }
+
+  if (parsed.command === "show") {
+    runShowCommand(parsed);
   }
 
   if (parsed.command !== "run" && parsed.command !== "init") {
@@ -539,6 +559,150 @@ function runStatus(parsed: ParsedArgs): never {
       process.exit(3);
     }
     process.stdout.write(renderManifestStatus(manifestView, { isLive: liveOverlay !== undefined }));
+  }
+
+  process.exit(0);
+}
+
+const DEFINITION_KINDS: Record<string, DefinitionKind> = {
+  agents: "agent",
+  assignments: "assignment",
+  agent: "agent",
+  assignment: "assignment",
+};
+
+function runListCommand(parsed: ParsedArgs): never {
+  const kindArg = parsed.subcommand;
+  if (!kindArg || !(kindArg in DEFINITION_KINDS)) {
+    process.stderr.write(
+      `task-runner: list requires a kind: agents or assignments${kindArg ? ` (got "${kindArg}")` : ""}\n`,
+    );
+    process.stderr.write("Usage: task-runner list <agents|assignments> [--output-format json]\n");
+    process.exit(3);
+  }
+
+  const kind = DEFINITION_KINDS[kindArg];
+  let entries: ReturnType<typeof listAgents>;
+  try {
+    entries = kind === "agent" ? listAgents() : listAssignments();
+  } catch (err) {
+    if (err instanceof DefinitionListError) {
+      process.stderr.write(`task-runner: ${err.message}\n`);
+      process.exit(3);
+    }
+    throw err;
+  }
+
+  if (parsed.outputFormat === "json") {
+    process.stdout.write(`${JSON.stringify(entries, null, 2)}\n`);
+  } else {
+    if (entries.length === 0) {
+      process.stdout.write(`No ${kind} definitions found.\n`);
+    } else {
+      for (const entry of entries) {
+        const tag = entry.root === "global" ? " (global)" : "";
+        process.stdout.write(`  ${entry.name}${tag}\n`);
+      }
+    }
+  }
+  process.exit(0);
+}
+
+function runShowCommand(parsed: ParsedArgs): never {
+  const kindArg = parsed.subcommand;
+  if (!kindArg || (kindArg !== "agent" && kindArg !== "assignment")) {
+    process.stderr.write(
+      `task-runner: show requires a kind: agent or assignment${kindArg ? ` (got "${kindArg}")` : ""}\n`,
+    );
+    process.stderr.write(
+      "Usage: task-runner show <agent|assignment> <name|path> [--output-format json]\n",
+    );
+    process.exit(3);
+  }
+
+  const target = parsed.positionals[0];
+  if (!target || target.length === 0) {
+    process.stderr.write(`task-runner: show ${kindArg} requires a name or path\n`);
+    process.stderr.write(
+      "Usage: task-runner show <agent|assignment> <name|path> [--output-format json]\n",
+    );
+    process.exit(3);
+  }
+
+  if (kindArg === "agent") {
+    let loaded: LoadedAgent;
+    try {
+      loaded = loadAgentConfig(target);
+    } catch (err) {
+      if (err instanceof AgentNotFoundError || err instanceof AgentConfigError) {
+        process.stderr.write(`task-runner: ${err.message}\n`);
+      } else {
+        process.stderr.write(`task-runner: ${(err as Error).message}\n`);
+      }
+      process.exit(3);
+    }
+
+    if (parsed.outputFormat === "json") {
+      process.stdout.write(
+        `${JSON.stringify({ config: loaded.config, instructions: loaded.instructions, sourcePath: loaded.sourcePath }, null, 2)}\n`,
+      );
+    } else {
+      process.stdout.write(`Agent: ${loaded.config.name}\n`);
+      process.stdout.write(`  backend:      ${loaded.config.backend}\n`);
+      if (loaded.config.model) process.stdout.write(`  model:        ${loaded.config.model}\n`);
+      if (loaded.config.effort) process.stdout.write(`  effort:       ${loaded.config.effort}\n`);
+      process.stdout.write(`  timeoutSec:   ${loaded.config.timeoutSec}\n`);
+      process.stdout.write(`  unrestricted: ${loaded.config.unrestricted}\n`);
+      process.stdout.write(`  cwd:          ${loaded.config.cwd}\n`);
+      if (loaded.config.lockedFields.length > 0) {
+        process.stdout.write(`  lockedFields: ${loaded.config.lockedFields.join(", ")}\n`);
+      }
+      process.stdout.write(`  source:       ${loaded.sourcePath}\n`);
+      if (loaded.instructions) {
+        process.stdout.write(`\n${loaded.instructions}\n`);
+      }
+    }
+  } else {
+    let loaded: LoadedAssignment;
+    try {
+      loaded = loadAssignmentConfig(target);
+    } catch (err) {
+      if (err instanceof AssignmentNotFoundError || err instanceof AssignmentConfigError) {
+        process.stderr.write(`task-runner: ${err.message}\n`);
+      } else {
+        process.stderr.write(`task-runner: ${(err as Error).message}\n`);
+      }
+      process.exit(3);
+    }
+
+    if (parsed.outputFormat === "json") {
+      process.stdout.write(
+        `${JSON.stringify({ config: loaded.config, instructions: loaded.instructions, sourcePath: loaded.sourcePath }, null, 2)}\n`,
+      );
+    } else {
+      process.stdout.write(`Assignment: ${loaded.config.name}\n`);
+      if (loaded.config.sessionName) {
+        process.stdout.write(`  sessionName:  ${loaded.config.sessionName}\n`);
+      }
+      process.stdout.write(`  maxRetries:   ${loaded.config.maxRetries}\n`);
+      if (loaded.config.tasks.length > 0) {
+        process.stdout.write(`  tasks:        ${loaded.config.tasks.length}\n`);
+        for (const t of loaded.config.tasks) {
+          process.stdout.write(`    - ${t.id}: ${t.title}\n`);
+        }
+      }
+      const varNames = Object.keys(loaded.config.vars);
+      if (varNames.length > 0) {
+        process.stdout.write(`  vars:         ${varNames.join(", ")}\n`);
+      }
+      if (loaded.config.lockedFields.length > 0) {
+        process.stdout.write(`  lockedFields: ${loaded.config.lockedFields.join(", ")}\n`);
+      }
+      process.stdout.write(`  source:       ${loaded.sourcePath}\n`);
+      if (loaded.instructions) {
+        process.stdout.write(`\n${loaded.instructions}\n`);
+      }
+    }
   }
 
   process.exit(0);

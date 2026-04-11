@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 import matter from "gray-matter";
@@ -81,13 +81,18 @@ function looksLikePath(arg: string): boolean {
   return arg.includes("/") || arg.includes("\\") || arg.startsWith(".");
 }
 
+function definitionLayout(kind: "agent" | "assignment"): { dirName: string; fileName: string } {
+  return kind === "agent"
+    ? { dirName: "agents", fileName: "agent.md" }
+    : { dirName: "assignments", fileName: "assignment.md" };
+}
+
 function resolveDefinitionPath(
   kind: "agent" | "assignment",
   arg: string,
   cwd: string,
 ): { path: string; searched: string[] } {
-  const dirName = kind === "agent" ? "agents" : "assignments";
-  const fileName = kind === "agent" ? "agent.md" : "assignment.md";
+  const { dirName, fileName } = definitionLayout(kind);
 
   if (looksLikePath(arg)) {
     const abs = isAbsolute(arg) ? arg : resolve(cwd, arg);
@@ -219,4 +224,69 @@ export function loadAssignmentConfig(arg: string, cwd: string = process.cwd()): 
     instructions: parsed.content.trim(),
     sourcePath,
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Definition catalog — enumerate available definitions from local and
+// $TASK_RUNNER_HOME roots. Used by the `list` and `show` commands.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type DefinitionKind = "agent" | "assignment";
+
+export interface DefinitionEntry {
+  name: string;
+  path: string;
+  root: "local" | "global";
+}
+
+export class DefinitionListError extends Error {
+  constructor(
+    public readonly dir: string,
+    cause: unknown,
+  ) {
+    const msg = cause instanceof Error ? cause.message : String(cause);
+    super(`Failed to read definition directory ${dir}: ${msg}`);
+    this.name = "DefinitionListError";
+  }
+}
+
+function discoverDefinitions(kind: DefinitionKind, cwd: string = process.cwd()): DefinitionEntry[] {
+  const { dirName, fileName } = definitionLayout(kind);
+  const seen = new Set<string>();
+  const entries: DefinitionEntry[] = [];
+
+  const roots: Array<{ dir: string; root: "local" | "global" }> = [
+    { dir: resolve(cwd, dirName), root: "local" },
+    { dir: resolve(taskRunnerHome(), dirName), root: "global" },
+  ];
+
+  for (const { dir, root } of roots) {
+    if (!existsSync(dir)) continue;
+    let children: string[];
+    try {
+      children = readdirSync(dir, { withFileTypes: true })
+        .filter((d) => d.isDirectory())
+        .map((d) => d.name);
+    } catch (err) {
+      throw new DefinitionListError(dir, err);
+    }
+    for (const name of children.sort()) {
+      if (seen.has(name)) continue;
+      const defPath = resolve(dir, name, fileName);
+      if (existsSync(defPath)) {
+        seen.add(name);
+        entries.push({ name, path: defPath, root });
+      }
+    }
+  }
+
+  return entries;
+}
+
+export function listAgents(cwd?: string): DefinitionEntry[] {
+  return discoverDefinitions("agent", cwd);
+}
+
+export function listAssignments(cwd?: string): DefinitionEntry[] {
+  return discoverDefinitions("assignment", cwd);
 }
