@@ -865,18 +865,29 @@ runtime decision based on the env var. Agent.md frontmatter is unchanged
 
 Every `invoke()` call opens a fresh transport and runs one full lifecycle:
 
-1. **`initialize`** — handshake request with `clientInfo` and `capabilities`.
-2. **`thread/start`** (fresh) or **`thread/resume`** (with
+1. **`initialize`** — handshake request with `clientInfo` and
+   `capabilities`. Client/server negotiate version and supported
+   features.
+2. **`initialized`** — bare notification (no id, no params,
+   just `{jsonrpc: "2.0", method: "initialized"}`). LSP-style handshake
+   completion. Codex expects this between the `initialize` response and
+   any subsequent request.
+3. **`thread/start`** (fresh) or **`thread/resume`** (with
    `ctx.resumeSessionId` as `threadId`). Params include `cwd`, normalized
    `model`, mapped `effort`, and when `unrestricted` is true,
-   `approvalPolicy: "never"` plus `sandbox: "danger-full-access"`.
-3. **`turn/start`** — sends the prompt as `{input: [{type: "text", text: prompt}]}`
-   along with per-turn `model`/`effort`/`approvalPolicy`/`sandboxPolicy`
-   overrides. Awaits both the response and a `turn/completed` notification
-   before returning.
-4. **Notification stream** — while the turn runs, the client receives
+   `approvalPolicy: "never"`. The `sandbox` field is never set —
+   `approvalPolicy: "never"` is sufficient to bypass approvals, and
+   codex's SandboxPolicy enum has inconsistent wire formats across
+   versions. Matches agent-runner's managed.ts.
+4. **`turn/start`** — sends the prompt as
+   `{threadId, input: [{type: "text", text: prompt}]}`. Nothing else —
+   `model`, `effort`, and `approvalPolicy` are set once at the thread
+   level and apply for the thread's lifetime. Awaits both the response
+   and a `turn/completed` notification before returning.
+5. **Notification stream** — while the turn runs, the client receives
    notifications:
    - `thread/started` → capture `thread.id` as session ID
+   - `turn/started` → capture `turn.id` (needed for interrupt)
    - `item/agentMessage/delta` → stream `params.delta` to `onStdoutText`
    - `item/completed` with `item.type === "agentMessage"` → capture
      `item.text` as the definitive transcript for the turn
@@ -885,15 +896,29 @@ Every `invoke()` call opens a fresh transport and runs one full lifecycle:
      promise
    - Everything else (reasoning deltas, command execution, file change
      deltas, etc.) is silent
-5. **Transport close** — after the turn completes (or times out), the
+6. **Transport close** — after the turn completes (or times out), the
    transport is closed. For stdio, this sends `SIGINT` to the subprocess
    and escalates to `SIGKILL` after 5s. For ws, this closes the socket.
+
+#### Raw capture for the attempt log
+
+Every inbound and outbound JSON-RPC frame is tee'd into the attempt log
+(`attempts/NN.json`) via `CreateClientOptions.onRawIncoming` and
+`onRawOutgoing`. Incoming frames are prefixed with `>` and outgoing with
+`<` so the log reads as a transcript of the conversation with the
+server. This gives full forensic visibility into any failed or
+unexpected run without needing to enable debug flags.
 
 #### Timeout and cancel
 
 On timeout (`ctx.timeoutSec` elapsed before `turn/completed`), the adapter
-sends a `turn/interrupt` request, then closes the transport. The invoke
-returns with `timedOut: true`.
+sends a `turn/interrupt` request with `{threadId, turnId}` (both captured
+during the turn — threadId from `thread/start` response, turnId from the
+`turn/started` notification or the `turn/start` response, whichever
+arrives first). Then closes the transport. The invoke returns with
+`timedOut: true`. If the turnId was never captured (e.g., timeout fired
+before the server produced it), the interrupt is skipped and only the
+transport close happens.
 
 #### Session ID
 

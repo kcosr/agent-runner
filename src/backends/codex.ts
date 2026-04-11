@@ -250,13 +250,19 @@ type NotificationHandler = (method: string, params: unknown) => void;
 
 interface CodexClient {
   call<T>(method: string, params: unknown): Promise<T>;
+  sendNotification(method: string, params?: unknown): void;
   notify(handler: NotificationHandler): void;
   close(): Promise<void>;
   stderr: string;
   closeReason: string | null;
 }
 
-function createClient(transport: Transport): CodexClient {
+interface CreateClientOptions {
+  onRawIncoming?: (line: string) => void;
+  onRawOutgoing?: (line: string) => void;
+}
+
+function createClient(transport: Transport, opts: CreateClientOptions = {}): CodexClient {
   let nextId = 1;
   const pending = new Map<
     number,
@@ -271,6 +277,7 @@ function createClient(transport: Transport): CodexClient {
   });
 
   transport.onMessage((line) => {
+    opts.onRawIncoming?.(line);
     let parsed: unknown;
     try {
       parsed = JSON.parse(line);
@@ -313,12 +320,21 @@ function createClient(transport: Transport): CodexClient {
           reject,
         });
         try {
-          transport.send(JSON.stringify(payload));
+          const line = JSON.stringify(payload);
+          opts.onRawOutgoing?.(line);
+          transport.send(line);
         } catch (err) {
           pending.delete(id);
           reject(err as Error);
         }
       });
+    },
+    sendNotification(method, params) {
+      const payload: Record<string, unknown> = { jsonrpc: "2.0", method };
+      if (params !== undefined) payload.params = params;
+      const line = JSON.stringify(payload);
+      opts.onRawOutgoing?.(line);
+      transport.send(line);
     },
     notify(handler) {
       notificationHandler = handler;
@@ -511,18 +527,20 @@ export const codexBackend: Backend = {
     try {
       transport = await openTransport(ctx);
 
-      // Capture a raw record of every message for the attempt log.
-      transport.onMessage((line) => {
-        rawStdoutChunks.push(line);
-      });
+      // Stderr goes straight to the run loop's stderr sink; raw JSON-RPC
+      // capture is wired into the client itself so both incoming and
+      // outgoing frames land in the attempt log.
       transport.onStderr((text) => {
         ctx.onStderrText?.(text);
       });
 
-      client = createClient(transport);
+      client = createClient(transport, {
+        onRawIncoming: (line) => rawStdoutChunks.push(`> ${line}`),
+        onRawOutgoing: (line) => rawStdoutChunks.push(`< ${line}`),
+      });
       client.notify((method, params) => handleNotification(state, method, params));
 
-      // 1. initialize
+      // 1. initialize (request/response)
       await client.call("initialize", {
         clientInfo: {
           name: "task-runner",
@@ -531,6 +549,10 @@ export const codexBackend: Backend = {
         },
         capabilities: { experimentalApi: true },
       });
+
+      // 1a. initialized notification — LSP-style handshake. Codex expects
+      // this after the initialize response before any thread request.
+      client.sendNotification("initialized");
 
       // 2. thread/start or thread/resume
       let threadIdFromStart: string | null = null;
@@ -561,23 +583,13 @@ export const codexBackend: Backend = {
         state.resolveCompleted = resolve;
       });
 
+      // turn/start params are minimal — model/effort/approvalPolicy are
+      // set once at thread/start (or thread/resume) time and apply for the
+      // lifetime of the thread. Matches agent-runner's managed.ts.
       const turnStartPayload: Record<string, unknown> = {
         threadId: state.threadId,
         input: [{ type: "text", text: ctx.prompt }],
       };
-      // Carry over model/effort overrides at the turn level too.
-      if (ctx.model) {
-        turnStartPayload.model = normalizeCodexModel(ctx.model);
-      }
-      if (ctx.effort) {
-        const mapped = mapEffortToCodex(ctx.effort);
-        if (mapped !== null) {
-          turnStartPayload.effort = mapped;
-        }
-      }
-      if (ctx.unrestricted) {
-        turnStartPayload.approvalPolicy = "never";
-      }
 
       const turnTimeoutMs = ctx.timeoutSec * 1000;
       const turnDeadline = new Promise<"timeout">((resolve) => {
