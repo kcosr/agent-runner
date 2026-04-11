@@ -104,11 +104,12 @@ Options:
   --help, -h              Print this message.
 
 Exit codes:
-  0  All tasks completed successfully (or 0-task run succeeded)
-  1  Retries exhausted with incomplete tasks
-  2  One or more tasks reported as blocked
-  3  Config / validation / resume error before any run started
-  4  Backend invocation error
+  0    All tasks completed successfully (or 0-task run succeeded)
+  1    Retries exhausted with incomplete tasks
+  2    One or more tasks reported as blocked
+  3    Config / validation / resume error before any run started
+  4    Backend invocation error
+  130  Run interrupted by user (Ctrl+C) or external cancellation
 `;
 
 async function main(): Promise<void> {

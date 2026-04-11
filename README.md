@@ -1,15 +1,16 @@
 # task-runner
 
-A small, focused CLI for invoking an AI coding agent against a structured
-task list and making sure it actually finishes.
+A small, focused CLI that drives an AI coding agent through a structured
+task list, tracks per-task status, and retries until every task is
+marked done or blocked.
 
 You write a checklist. `task-runner` hands it to a backend (Claude or
-Codex), the agent works through it and updates each task as it goes,
-and the runner enforces completion: if any task is still `pending` when
-the agent ends its turn, the agent gets re-invoked with a nudge — up
-to a configurable retry budget. Blocked tasks halt the run cleanly.
-Aborted runs (Ctrl+C, external interrupt, timeout) persist their state
-and can be resumed later.
+Codex), the agent works through it and updates each task's status in
+place, and the runner loops until the agent has accounted for every
+task: if any are still `pending` when the agent ends its turn, it gets
+re-invoked with a nudge — up to a configurable retry budget. Blocked
+tasks halt the run cleanly. Aborted runs (Ctrl+C, external interrupt,
+timeout) persist their state and can be resumed later.
 
 It is intentionally not a daemon, not a web console, and not an
 orchestration framework. It is one binary that runs an agent, watches
@@ -72,10 +73,14 @@ chat output.
 
 - **Two backends**: Claude (subprocess wrapping `claude --print`) and
   Codex (JSON-RPC managed mode over stdio or websocket).
-- **Structured task enforcement**: tasks have stable ids and statuses
-  (`pending`, `in_progress`, `completed`, `blocked`); the runner
-  parses the workspace `assignment.md` after every turn and re-invokes
-  the agent with a precise list of what's still incomplete.
+- **Structured task tracking**: tasks have stable ids and statuses
+  (`pending`, `in_progress`, `completed`, `blocked`) that the agent
+  updates in place; the runner parses the workspace `assignment.md`
+  after every turn and re-invokes with a precise list of what the
+  agent hasn't yet marked done. The runner does not independently
+  verify work — it trusts the status the agent wrote — so the checklist
+  acts as a structured reminder and audit trail, not a proof of
+  completion. See [What the checklist does and doesn't do](#what-the-checklist-does-and-doesnt-do).
 - **Retries with budget**: configurable per-attempt timeout and per-run
   retry count. Blocked tasks short-circuit the loop.
 - **Resumable runs**: every run persists a canonical `run.json`
@@ -107,7 +112,9 @@ chat output.
   agent that pins its own model or working directory.
 - **Recursion guard**: a hard cap (default 1) on nested
   `task-runner run` invocations, propagated through the env, so an
-  orchestrator agent can't accidentally fork-bomb itself.
+  orchestrator agent can't accidentally fork-bomb itself. If the cap
+  is hit, the runner exits with a clear error telling you to raise
+  `TASK_RUNNER_MAX_CALL_DEPTH` if the nesting is intentional.
 - **JSON output mode** for scripting: the full manifest as
   pretty-printed JSON, byte-identical to `run.json` on disk.
 
@@ -122,11 +129,9 @@ Requirements:
   app-server reachable over WebSocket via
   `TASK_RUNNER_CODEX_WS_URL=ws://host:port`.
 
-Build:
+Build (from the repo root):
 
 ```bash
-git clone <this-repo>
-cd task-runner
 npm install
 npm run build
 ```
@@ -135,6 +140,10 @@ The CLI is now at `node dist/cli.js`. Either alias it, add the bin
 via `npm link`, or invoke it through `npm run task-runner -- ...`.
 
 ## Quickstart
+
+The examples below assume `task-runner` is on your `PATH` (via
+`npm link` or a shell alias). If it isn't, substitute `node
+dist/cli.js` for `task-runner` in every command.
 
 ```bash
 # Run the bundled "example" agent against the bundled "repo-orientation"
@@ -253,6 +262,27 @@ backend invocation).
 
 ### Tasks and the workflow
 
+A run progresses through a small state machine; terminal states map
+1-to-1 onto process exit codes.
+
+```mermaid
+stateDiagram-v2
+    [*] --> initialized: task-runner init
+    [*] --> running: task-runner run
+    initialized --> running: run --resume-run <id>
+    running --> running: retry (tasks still pending)
+    running --> success: all tasks completed (exit 0)
+    running --> exhausted: retries out, tasks incomplete (exit 1)
+    running --> blocked: any task blocked (exit 2)
+    running --> aborted: Ctrl+C or external interrupt (exit 130)
+    running --> error: backend invocation failure (exit 4)
+    aborted --> running: run --resume-run <id>
+    success --> [*]
+    exhausted --> [*]
+    blocked --> [*]
+    error --> [*]
+```
+
 When a run starts, the runner renders the assignment's task list to
 the workspace `assignment.md` as a fenced markdown document with one
 section per task. Each task section contains a `**Status:**` field
@@ -274,6 +304,53 @@ After every backend invocation, the runner re-reads the workspace
 
 Task ids are stable across invocations so retries can address
 incomplete work precisely.
+
+#### What the checklist does and doesn't do
+
+The runner trusts the `**Status:**` string the agent writes — it does
+not independently verify that a task's work was actually done. What
+the structure *does* buy you is that the agent cannot silently skip
+an item: every task must be explicitly accounted for (`completed`,
+`blocked`, or left `pending` and retried), and the per-task Notes
+block captures evidence you can audit after the fact. If you need
+harder guarantees, encode them into the task body itself — e.g.,
+"run `npm test` and paste the exit code into Notes," or "open the
+file at `src/foo.ts` and paste the top-level exports."
+
+One run attempt, from CLI to backend and back:
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant CLI as task-runner run
+    participant Runner as run-loop
+    participant Backend as Backend adapter
+    participant Agent as Agent process
+    participant WS as workspace/
+    User->>CLI: --agent X --assignment Y
+    CLI->>Runner: runAgent(opts)
+    Runner->>WS: write assignment.md
+    Runner->>WS: write run.json (status=running)
+    loop until done or retries exhausted
+        Runner->>Backend: invoke(prompt, sessionId)
+        Backend->>Agent: spawn / JSON-RPC
+        Agent->>WS: edit assignment.md in place
+        Agent-->>Backend: turn complete
+        Backend-->>Runner: result + new sessionId
+        Runner->>WS: parse assignment.md
+        alt all tasks completed
+            Runner->>WS: run.json (status=success)
+        else tasks blocked
+            Runner->>WS: run.json (status=blocked)
+        else incomplete, retries left
+            Runner->>Runner: build nudge message
+        else retries exhausted
+            Runner->>WS: run.json (status=exhausted)
+        end
+    end
+    Runner-->>CLI: RunOutcome
+    CLI-->>User: summary + exit code
+```
 
 ### Workspaces and the run manifest
 
@@ -325,17 +402,18 @@ Common options:
 |---|---|
 | `--agent <name|path>` | Agent name or direct path. Required for fresh runs; optional on resume (taken from the prior manifest). |
 | `--assignment <name|path>` | Assignment name or direct path. Optional on fresh runs. Forbidden on resume. |
+| `--resume-run <id|path>` | Continue an existing run by short id or workspace path. See [Resuming, aborting, importing](#resuming-aborting-importing). |
 | `--var key=value` (repeatable) | Set an input variable. Validated against the assignment's `vars` schema. |
 | `--add-task "<title>"` (repeatable) | Append an ad-hoc task with auto-generated id `cli-<short>`. |
 | `--cwd <path>` | Override the agent's `cwd`. |
-| `--backend <claude|codex>` | Override the agent's backend. Drops the agent's `model` unless `--model` is also passed. |
+| `--backend <claude|codex>` | Override the agent's backend. Drops the agent's `model` unless `--model` is also passed. Forbidden with `--resume-run` (the backend is locked to the session that created the run). |
 | `--model <id>` | Override the model. Backend-specific (`claude-sonnet-4-6`, `gpt-5.4`, etc.). |
 | `--effort <off|minimal|low|medium|high|xhigh|max>` | Reasoning effort. Mapped per backend. |
 | `--max-retries <n>` | Override the per-run retry budget (default 3). |
 | `--timeout-sec <n>` | Override the per-attempt timeout (default 3600). |
 | `--unrestricted` | Bypass the backend's approval prompts. |
-| `--session-name <name>` | Override the assignment's `sessionName` (the backend display label). |
-| `--backend-session-id <id>` | Adopt an existing backend session id (claude UUID, codex thread id). Validated before workspace creation. |
+| `--session-name <name>` | Override the assignment's `sessionName` (the backend display label). Vars are interpolated. |
+| `--backend-session-id <id>` | Adopt an existing backend session id (claude UUID, codex thread id). Validated before workspace creation. Forbidden with `--resume-run` (the resume target already carries one). |
 | `--output-format <text|json>` | Default `text`. `json` writes the full manifest to stdout once at end of run. |
 
 ### `task-runner init`
@@ -373,6 +451,13 @@ task-runner status <id> --output-format json
 task-runner status <id> --output-format json \
   --field status --field tasksCompleted --field tasksTotal
 ```
+
+Options:
+
+| Flag | Purpose |
+|---|---|
+| `--output-format <text|json>` | Default `text`. `json` prints the full manifest as JSON. |
+| `--field <name>` (repeatable) | When `--output-format json`, restrict output to these top-level manifest fields. |
 
 When the resolved manifest's status is `running` (i.e. an attempt is
 currently in flight), `status` *also* parses the workspace
@@ -588,7 +673,9 @@ printed to stdout.
 
 - **`agents/example/`** — repo orientation assistant (Claude).
 - **`agents/basic/`** — minimal Claude agent with no special setup.
-- **`agents/chat/`** — 0-task Claude "chat mode" agent.
+- **`agents/chat/`** — 0-task Claude "chat mode" agent. Requires a
+  positional message — with no agent body, no assignment, and no
+  tasks, there's nothing else to prompt with.
 - **`agents/codex-example/`** — Codex equivalent of `example`.
 - **`agents/codex-chat/`** — 0-task Codex chat mode agent.
 - **`agents/code-reviewer/`** — senior staff engineer tuned for
@@ -685,6 +772,61 @@ real subprocesses are a couple of `runProcess` smoke tests against
 
 ## Project layout
 
+Subsystem boundaries: the run loop is the center of gravity; backends
+are swappable, persistence is a flat workspace directory.
+
+```mermaid
+flowchart TD
+    subgraph CLI["CLI layer"]
+        cli["cli.ts"]
+        parse["cli/parse-args.ts"]
+    end
+    subgraph Config["Config"]
+        loader["config/loader.ts"]
+        schema["config/schema.ts"]
+        interp["config/interpolate.ts"]
+    end
+    subgraph Runner["Runner"]
+        loop["runner/run-loop.ts"]
+        manifest["runner/manifest.ts"]
+        nudge["runner/nudge.ts"]
+        workflow["runner/task-workflow.ts"]
+        guard["runner/recursion-guard.ts"]
+        output["runner/output.ts"]
+    end
+    subgraph Assignment["Assignment I/O"]
+        parser["assignment/parser.ts"]
+        writer["assignment/writer.ts"]
+        merge["assignment/merge.ts"]
+    end
+    subgraph Backends["Backends"]
+        registry["backends/registry.ts"]
+        claude["backends/claude.ts"]
+        codex["backends/codex.ts"]
+    end
+    subgraph Workspace[".task-runner/&lt;run-id&gt;/"]
+        runjson["run.json"]
+        assignmd["assignment.md"]
+        attempts["attempts/NN.json"]
+    end
+    cli --> parse
+    cli --> loop
+    cli --> manifest
+    cli --> output
+    loop --> loader
+    loop --> registry
+    loop --> writer
+    loop --> parser
+    loop --> merge
+    loop --> nudge
+    loop --> workflow
+    loop --> guard
+    loop --> manifest
+    loop --> Workspace
+    registry --> claude
+    registry --> codex
+```
+
 ```
 src/
 ├── cli.ts                  # CLI entry point and dispatcher
@@ -703,7 +845,9 @@ src/
 │   ├── recursion-guard.ts  # TASK_RUNNER_CALL_DEPTH safety
 │   ├── nudge.ts            # retry-prompt builder
 │   └── task-workflow.ts    # injected workflow preamble
-└── util/spawn.ts           # subprocess wrapper with abort/timeout
+└── util/
+    ├── spawn.ts            # subprocess wrapper with abort/timeout
+    └── short-id.ts         # 6-char base32 run id generator
 
 agents/                     # reference agent definitions
 assignments/                # reference assignments
