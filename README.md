@@ -467,7 +467,7 @@ Common options:
 |---|---|
 | `--agent <name\|path>` | Agent name or direct path. **Optional on fresh runs** — when omitted, task-runner synthesizes an ad-hoc agent from CLI overrides (in that case `--backend` is required). **Forbidden with `--resume-run`** — the agent is reconstructed from the frozen manifest, not re-read from disk. |
 | `--assignment <name\|path>` | Assignment name or direct path. Optional on fresh runs. Forbidden on resume. |
-| `--resume-run <id\|path>` | Continue an existing run by short id or workspace path. See [Resuming, aborting, importing](#resuming-aborting-importing) for the full resume-override policy. |
+| `--resume-run <id\|path>` | Continue an existing run by short id, workspace path, or direct `run.json` path. See [Resuming, aborting, importing](#resuming-aborting-importing) for the full resume-override policy. |
 | `--var key=value` (repeatable) | Set an input variable. Validated against the assignment's `vars` schema. **Forbidden with `--resume-run`** — vars are resolved once at first write and frozen into the manifest; they aren't re-resolved on resume. |
 | `--add-task "<title>"` (repeatable) | Append an ad-hoc task with auto-generated id `cli-<short>`. |
 | `--cwd <path>` | Override the agent's `cwd`. **Forbidden with `--resume-run`** — backend sessions are bound to their creation cwd, so a new cwd would invalidate the captured session id. Create a fresh run if you need a different cwd. |
@@ -559,7 +559,9 @@ Both commands:
   all terminal states (`success`, `blocked`, `exhausted`, `aborted`,
   `error`).
 - Rewrite both the workspace `assignment.md` and `run.json.finalTasks`
-  atomically (`status` consumers stay coherent).
+  via separate atomic file replacements (`status` consumers never see
+  a half-written canonical file, but there is no single cross-file
+  transaction).
 - Respect any status/notes edits already present in `assignment.md`
   that aren't yet reflected in the manifest snapshot (they are merged
   in before the CLI mutation is applied, CLI wins on conflict).

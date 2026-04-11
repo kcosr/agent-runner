@@ -1,8 +1,7 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
-import { mergeIntoFile, mergeUpdates } from "../assignment/merge.js";
+import { mergeIntoFile } from "../assignment/merge.js";
 import type { TaskState, TaskStatus } from "../assignment/model.js";
-import { parseAssignment } from "../assignment/parser.js";
 import { renderAssignment } from "../assignment/writer.js";
 import type { Backend, BackendInvokeResult } from "../backends/types.js";
 import { interpolate } from "../config/interpolate.js";
@@ -17,7 +16,6 @@ import {
   type RunManifest,
   type SessionRecord,
   type TaskSnapshot,
-  snapshotTasks,
   workspaceAssignmentPath,
   writeAttemptLog,
   writeManifest,
@@ -36,6 +34,7 @@ import {
   TASK_WORKFLOW_TEMPLATE,
   buildAddedTasksReminder,
 } from "./task-workflow.js";
+import { mergeWorkspaceAssignmentIntoTaskMap, syncManifestTaskState } from "./workspace-state.js";
 
 export interface RunOverrides {
   cwd?: string;
@@ -760,9 +759,9 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       status: "running",
       exitCode: null,
       maxAttempts,
-      finalTasks: snapshotTasks(tasks),
-      tasksCompleted: countBy(tasks, (t) => t.status === "completed"),
-      tasksTotal: tasks.size,
+      finalTasks: {},
+      tasksCompleted: 0,
+      tasksTotal: 0,
       sessionCount: priorSessionCount + 1,
     };
   } else if (priorInitialized && resume) {
@@ -848,12 +847,14 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       runtimeVars: persistedRuntimeVars,
       pendingPrompt: isInitialize ? initialPrompt : null,
       callerInstructions: frozenCallerInstructions,
-      finalTasks: snapshotTasks(tasks),
+      finalTasks: {},
       sessionCount: isInitialize ? 0 : 1,
       sessions: [],
       attemptRecords: [],
     };
   }
+
+  syncManifestTaskState(manifest, tasks);
 
   // `init` stops here: persist the prepared workspace + manifest and
   // return a terminal "initialized" outcome. No session is created; the
@@ -1004,20 +1005,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       manifest.backendSessionId = invokeResult.sessionId;
     }
 
-    let rawAssignment: string;
-    try {
-      rawAssignment = readFileSync(assignmentPath, "utf8");
-    } catch {
-      rawAssignment = "";
-    }
-
-    if (rawAssignment.trim().length === 0) {
-      rawAssignment = renderAssignment(Array.from(tasks.values()));
-      writeTextFileAtomic(assignmentPath, rawAssignment);
-    }
-
-    const updates = parseAssignment(rawAssignment);
-    const mergeInfo = mergeUpdates(tasks, updates);
+    const { rawAssignment, mergeInfo } = mergeWorkspaceAssignmentIntoTaskMap(manifest, tasks);
 
     const logPath = writeAttemptLog(workspaceDir, {
       schemaVersion: 1,
@@ -1030,6 +1018,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       stderr: invokeResult.rawStderr,
     });
 
+    syncManifestTaskState(manifest, tasks);
     const attemptRecord: AttemptRecord = {
       attempt: globalAttemptNumber,
       sessionIndex,
@@ -1043,13 +1032,11 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       timedOut: invokeResult.timedOut,
       transcript: invokeResult.transcript,
       logPath,
-      tasksAfter: snapshotTasks(tasks),
+      tasksAfter: manifest.finalTasks,
       invalidStatuses: mergeInfo.invalidStatuses,
     };
     manifest.attemptRecords.push(attemptRecord);
     manifest.attempts = manifest.attemptRecords.length;
-    manifest.tasksCompleted = countBy(tasks, (t) => t.status === "completed");
-    manifest.finalTasks = snapshotTasks(tasks);
 
     if (sessionRecord.firstAttempt === null) {
       sessionRecord.firstAttempt = globalAttemptNumber;
@@ -1116,7 +1103,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     terminal = { status: "error", exitCode: 4 };
   }
 
-  const tasksCompleted = countBy(tasks, (t) => t.status === "completed");
+  const orderedTasks = syncManifestTaskState(manifest, tasks);
+  const tasksCompleted = manifest.tasksCompleted;
   const endedAt = new Date().toISOString();
 
   sessionRecord.status = terminal.status;
@@ -1127,8 +1115,6 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   manifest.status = terminal.status;
   manifest.exitCode = terminal.exitCode;
   manifest.endedAt = endedAt;
-  manifest.tasksCompleted = tasksCompleted;
-  manifest.finalTasks = snapshotTasks(tasks);
   writeManifest(workspaceDir, manifest);
 
   const summary: RunSummary = {
@@ -1136,7 +1122,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     attempts: sessionAttempts,
     maxAttempts,
     tasksCompleted,
-    tasksTotal: tasks.size,
+    tasksTotal: orderedTasks.length,
     assignmentPath,
     tasks: Array.from(tasks.values()),
     runId,
