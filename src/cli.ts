@@ -7,7 +7,13 @@ import {
   loadAgentConfig,
 } from "./config/loader.js";
 import { ResumeError, resolveResumeTarget } from "./runner/manifest.js";
-import { LockedFieldError, VarResolutionError, runAgent } from "./runner/run-loop.js";
+import {
+  EmptyTaskListError,
+  InvalidAddedTaskError,
+  LockedFieldError,
+  VarResolutionError,
+  runAgent,
+} from "./runner/run-loop.js";
 
 type OutputFormat = "text" | "json";
 
@@ -24,6 +30,7 @@ interface ParsedArgs {
   maxRetries?: number;
   outputFormat: OutputFormat;
   message?: string;
+  addedTasks: string[];
   showHelp: boolean;
 }
 
@@ -52,6 +59,10 @@ Options:
                           pending, and starts a new session within the
                           same workspace. Requires a positional message.
   --var <key>=<value>     Set an input variable (repeatable).
+  --add-task <title>      Append a task to the agent's task list with the
+                          given title (repeatable). IDs are auto-generated
+                          as \`cli-<short-id>\`. Rejected if \`tasks\` is
+                          listed in the agent's \`lockedFields\`.
   --cwd <path>            Override the agent's cwd.
   --model <id>            Override the agent's model.
   --effort <level>        Override effort level (low, medium, high, max).
@@ -78,6 +89,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     command: "",
     vars: {},
     outputFormat: "text",
+    addedTasks: [],
     showHelp: false,
   };
 
@@ -113,6 +125,10 @@ function parseArgs(argv: string[]): ParsedArgs {
       const eq = pair.indexOf("=");
       if (eq < 0) throw new Error(`--var expected key=value, got "${pair}"`);
       result.vars[pair.slice(0, eq)] = pair.slice(eq + 1);
+    } else if (arg === "--add-task") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--add-task requires a task title");
+      result.addedTasks.push(next);
     } else if (arg === "--cwd") {
       const next = args.shift();
       if (next === undefined) throw new Error("--cwd requires a value");
@@ -254,7 +270,9 @@ async function main(): Promise<void> {
     if (
       err instanceof VarResolutionError ||
       err instanceof LockedFieldError ||
-      err instanceof ResumeError
+      err instanceof ResumeError ||
+      err instanceof EmptyTaskListError ||
+      err instanceof InvalidAddedTaskError
     ) {
       process.stderr.write(`task-runner: ${err.message}\n`);
       process.exit(3);

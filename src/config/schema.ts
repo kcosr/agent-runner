@@ -32,6 +32,7 @@ export const LOCKABLE_FIELDS = [
   "timeoutSec",
   "unrestricted",
   "maxRetries",
+  "tasks",
 ] as const;
 
 export type LockableField = (typeof LOCKABLE_FIELDS)[number];
@@ -50,7 +51,7 @@ export const agentConfigSchema = z
     maxRetries: z.number().int().min(0).max(20).default(3),
     lockedFields: z.array(z.enum(LOCKABLE_FIELDS)).default([]),
     vars: z.record(z.string(), varDefSchema).default({}),
-    tasks: z.array(taskDefSchema).min(1).max(100),
+    tasks: z.array(taskDefSchema).max(100).default([]),
   })
   .refine(
     (c) => {

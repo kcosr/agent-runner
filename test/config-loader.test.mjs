@@ -56,7 +56,27 @@ test("loadAgentConfig throws AgentConfigError on bad frontmatter", () => {
     "bad",
     `---
 schemaVersion: 1
-name: bad
+backend: claude
+tasks:
+  - id: t1
+    title: First
+---
+body
+`,
+  );
+
+  // missing required `name` field
+  assert.throws(() => loadAgentConfig("bad", dir), AgentConfigError);
+});
+
+test("loadAgentConfig accepts agent with empty tasks array", () => {
+  const dir = tempDir();
+  writeAgent(
+    dir,
+    "empty",
+    `---
+schemaVersion: 1
+name: empty
 backend: claude
 tasks: []
 ---
@@ -64,7 +84,26 @@ body
 `,
   );
 
-  assert.throws(() => loadAgentConfig("bad", dir), AgentConfigError);
+  const loaded = loadAgentConfig("empty", dir);
+  assert.equal(loaded.config.tasks.length, 0);
+});
+
+test("loadAgentConfig accepts agent with no tasks field at all", () => {
+  const dir = tempDir();
+  writeAgent(
+    dir,
+    "notasks",
+    `---
+schemaVersion: 1
+name: notasks
+backend: claude
+---
+body
+`,
+  );
+
+  const loaded = loadAgentConfig("notasks", dir);
+  assert.equal(loaded.config.tasks.length, 0);
 });
 
 test("loadAgentConfig throws AgentNotFoundError for missing agent", () => {

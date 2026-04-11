@@ -31,6 +31,7 @@ export interface RunOverrides {
   timeoutSec?: number;
   unrestricted?: boolean;
   maxRetries?: number;
+  addedTasks?: string[];
 }
 
 export interface RunOptions {
@@ -58,6 +59,24 @@ export class VarResolutionError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "VarResolutionError";
+  }
+}
+
+export class EmptyTaskListError extends Error {
+  constructor() {
+    super(
+      "agent has no tasks\n" +
+        "  the agent's `tasks:` frontmatter is empty and no --add-task arguments\n" +
+        "  were provided. Add at least one task to the agent or pass --add-task.",
+    );
+    this.name = "EmptyTaskListError";
+  }
+}
+
+export class InvalidAddedTaskError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidAddedTaskError";
   }
 }
 
@@ -91,12 +110,30 @@ function checkLockedFields(
     ["timeoutSec", overrides.timeoutSec],
     ["unrestricted", overrides.unrestricted],
     ["maxRetries", overrides.maxRetries],
+    [
+      "tasks",
+      overrides.addedTasks && overrides.addedTasks.length > 0 ? overrides.addedTasks : undefined,
+    ],
   ];
   for (const [key, value] of overrideEntries) {
     if (value !== undefined && locked.has(key)) {
       const currentValue = (config as Record<string, unknown>)[key];
       throw new LockedFieldError(key, currentValue);
     }
+  }
+}
+
+const MAX_TITLE_LENGTH = 200;
+
+function validateAddedTaskTitle(title: string, index: number): void {
+  const trimmed = title.trim();
+  if (trimmed.length === 0) {
+    throw new InvalidAddedTaskError(`--add-task #${index + 1}: title cannot be empty`);
+  }
+  if (trimmed.length > MAX_TITLE_LENGTH) {
+    throw new InvalidAddedTaskError(
+      `--add-task #${index + 1}: title exceeds ${MAX_TITLE_LENGTH} characters (${trimmed.length})`,
+    );
   }
 }
 
@@ -247,6 +284,29 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     isResume && resume
       ? rebuildTasksFromSnapshot(config, resume.manifest.finalTasks, true)
       : rebuildTasksFromSnapshot(config, {}, false);
+
+  const addedTitles = overrides?.addedTasks ?? [];
+  for (let i = 0; i < addedTitles.length; i++) {
+    const rawTitle = addedTitles[i];
+    if (rawTitle === undefined) continue;
+    validateAddedTaskTitle(rawTitle, i);
+    const title = rawTitle.trim();
+    let id: string;
+    do {
+      id = `cli-${shortId()}`;
+    } while (tasks.has(id));
+    tasks.set(id, {
+      id,
+      title,
+      body: "",
+      status: "pending",
+      notes: "",
+    });
+  }
+
+  if (tasks.size === 0) {
+    throw new EmptyTaskListError();
+  }
 
   const injectedVars: Record<string, unknown> = {
     ...runtimeVars,

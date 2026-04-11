@@ -203,7 +203,7 @@ sent to the backend, including the message.
 top-level override fields cannot be overridden at run time. Valid entries:
 
 ```
-cwd  model  effort  message  timeoutSec  unrestricted  maxRetries
+cwd  model  effort  message  timeoutSec  unrestricted  maxRetries  tasks
 ```
 
 The zod schema rejects any entry outside this set at load time, so typos
@@ -225,12 +225,75 @@ same as any other field. Locking also doesn't affect `vars`: those have
 their own schema (`required`, `source`, `sensitive`) and are outside this
 mechanism.
 
+**Task-specific note** — locking `tasks` prevents `--add-task` from the
+CLI. The frontmatter `tasks:` array stays authoritative. Unlocked agents
+allow callers to append new tasks via `--add-task` (see
+[Adding tasks from the CLI](#adding-tasks-from-the-cli) below).
+
 **What this replaces** — agent-runner had a richer `overridePolicy` with
 `{default: allow|deny, allow: [...], deny: [...]}`. We took the simplest
 shape that solves the real concern (preventing callers from bumping
 `effort` to `max` on a cost-sensitive agent, or flipping `unrestricted`
 on a safety-sensitive one). A full allow/deny with a tri-state default is
 easy to add if it becomes needed.
+
+## Adding tasks from the CLI
+
+Callers can append ad-hoc tasks to an agent's task list at invocation
+time using the repeatable `--add-task <title>` flag:
+
+```
+task-runner run --agent example \
+  --add-task "Check the logs" \
+  --add-task "Verify the backup"
+```
+
+**Semantics:**
+
+- Each `--add-task` appends one task to the end of the task list.
+- The value is the task **title** only. No body, no structured fields.
+  For structured tasks, edit the agent's `agent.md` frontmatter.
+- IDs are auto-generated as `cli-<6-char-short-id>`, collision-resistant
+  against frontmatter IDs.
+- Added tasks start as `pending`.
+- Title is validated: non-empty, max 200 characters. Violations throw
+  `InvalidAddedTaskError` (exit 3).
+
+**Interaction with fresh vs resume runs:**
+
+- **Fresh run**: added tasks are appended after the frontmatter tasks.
+- **Resume run**: after loading `parent.finalTasks` and normalizing
+  non-completed tasks to `pending`, added tasks are appended with fresh
+  IDs. They enter the resumed session as `pending`.
+
+**Optional frontmatter tasks:**
+
+The frontmatter `tasks:` field is optional. An agent.md may omit it
+entirely or declare an empty array:
+
+```yaml
+---
+name: assistant
+backend: claude
+# no tasks — caller must provide them via --add-task
+---
+```
+
+If the combined task list (frontmatter + CLI) is still empty at runtime,
+the runner throws `EmptyTaskListError` (exit 3):
+
+```
+task-runner: agent has no tasks
+  the agent's `tasks:` frontmatter is empty and no --add-task arguments
+  were provided. Add at least one task to the agent or pass --add-task.
+```
+
+**Locked tasks:**
+
+If the agent has `lockedFields: [tasks]`, any `--add-task` from the CLI
+triggers `LockedFieldError` (exit 3), same as any other locked field.
+The run still works without `--add-task` — locking only prevents
+extension, not normal execution.
 
 ## Agent resolution
 
@@ -750,6 +813,7 @@ The raw JSON events are still captured verbatim into
 task-runner run [--agent <name-or-path>]
                [--resume-run <id|path>]
                [--var k=v]...
+               [--add-task <title>]...
                [--cwd <path>]
                [--model <model>]
                [--effort <level>]
@@ -785,9 +849,9 @@ stored in the prior manifest.
 
 CLI flags (and the positional `message`) override agent.md values for:
 `cwd`, `model`, `effort`, `message`, `timeoutSec`, `unrestricted`,
-`maxRetries`. Any field listed in the agent's `lockedFields` rejects
-override attempts with `LockedFieldError` and exit code 3 — see
-[Locked fields](#locked-fields).
+`maxRetries`. `--add-task` extends the agent's `tasks:` array. Any field
+listed in the agent's `lockedFields` rejects override attempts with
+`LockedFieldError` and exit code 3 — see [Locked fields](#locked-fields).
 
 Vars are passed via repeated `--var key=value` flags. Env-sourced vars
 read from `process.env[envName]`. The CLI validates each var against the
