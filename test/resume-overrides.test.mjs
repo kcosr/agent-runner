@@ -411,6 +411,7 @@ function baseManifest(runId, workspaceDir) {
     backendSessionId: "sess-base",
     runtimeVars: {},
     pendingPrompt: null,
+    callerInstructions: null,
     finalTasks: {
       t1: {
         id: "t1",

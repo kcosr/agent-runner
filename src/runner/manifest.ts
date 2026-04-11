@@ -138,6 +138,18 @@ export interface RunManifest {
   backendSessionId: string | null;
   runtimeVars: Record<string, unknown>;
   pendingPrompt: string | null;
+  // Assignment-level documentation surface for the caller of
+  // task-runner (the human or script invoking `run` / `init`).
+  // Frozen at first write from `assignmentConfig.callerInstructions`
+  // with `{{var}}` references interpolated against the same
+  // injectedVars as other body fields. `null` when no assignment
+  // was supplied or the assignment didn't carry the field.
+  //
+  // Unlike `pendingPrompt`, this text is **never** sent to the
+  // backend — it's strictly for the caller, printed to stderr on
+  // fresh `run` and `init` and always included in
+  // `status --output-format json` for later retrieval.
+  callerInstructions: string | null;
   finalTasks: Record<string, TaskSnapshot>;
   sessionCount: number;
   sessions: SessionRecord[];
@@ -279,6 +291,11 @@ function isRunManifest(value: unknown): value is RunManifest {
   // so these need explicit null rejection.
   if (!obj.finalTasks || typeof obj.finalTasks !== "object") return false;
   if (!obj.runtimeVars || typeof obj.runtimeVars !== "object") return false;
+
+  // callerInstructions is string | null.
+  if (obj.callerInstructions !== null && typeof obj.callerInstructions !== "string") {
+    return false;
+  }
 
   // Nested agent record.
   if (!obj.agent || typeof obj.agent !== "object") return false;
