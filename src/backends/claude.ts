@@ -1,4 +1,5 @@
 import { runProcess } from "../util/spawn.js";
+import { streamBoundarySeparator } from "./codex.js";
 import type { Backend, BackendInvokeContext, BackendInvokeResult, EffortLevel } from "./types.js";
 
 function mapEffortToClaude(effort: EffortLevel): string | null {
@@ -38,6 +39,14 @@ interface StreamState {
   streamedText: string;
   sawDelta: boolean;
   buffer: string;
+  /**
+   * The `id` of the most recently observed message_start event. When a
+   * later message_start arrives with a different id, we insert a
+   * paragraph break before the next text_delta so two adjacent message
+   * bodies don't get glued: "...sentence one.Sentence two...".
+   */
+  lastMessageId: string | null;
+  pendingMessageBoundary: boolean;
   onText: (text: string) => void;
 }
 
@@ -103,9 +112,33 @@ function processLine(state: StreamState, line: string): void {
 
   if (event.type === "stream_event" && isRecord(event.event)) {
     const inner = event.event;
+    if (inner.type === "message_start" && isRecord(inner.message)) {
+      const messageId = typeof inner.message.id === "string" ? inner.message.id : null;
+      // A new message inside the same turn (e.g. after a tool result).
+      // Mark a pending boundary so the first text_delta of this message
+      // gets a paragraph break prepended.
+      if (
+        messageId !== null &&
+        state.lastMessageId !== null &&
+        messageId !== state.lastMessageId &&
+        state.streamedText.length > 0
+      ) {
+        state.pendingMessageBoundary = true;
+      }
+      if (messageId !== null) state.lastMessageId = messageId;
+      return;
+    }
     if (inner.type === "content_block_delta" && isRecord(inner.delta)) {
       const delta = inner.delta;
       if (delta.type === "text_delta" && typeof delta.text === "string") {
+        if (state.pendingMessageBoundary) {
+          const sep = streamBoundarySeparator(state.streamedText, delta.text);
+          if (sep.length > 0) {
+            state.streamedText += sep;
+            state.onText(sep);
+          }
+          state.pendingMessageBoundary = false;
+        }
         state.streamedText += delta.text;
         state.sawDelta = true;
         state.onText(delta.text);
@@ -176,6 +209,8 @@ export const claudeBackend: Backend = {
       streamedText: "",
       sawDelta: false,
       buffer: "",
+      lastMessageId: null,
+      pendingMessageBoundary: false,
       onText: (text) => ctx.onStdoutText?.(text),
     };
 

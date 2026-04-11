@@ -32,6 +32,36 @@ function normalizeCodexModel(model: string): string {
   return stripped.length > 0 ? stripped : model;
 }
 
+/**
+ * Compute a paragraph-break separator to insert before `delta` so that
+ * two adjacent streamed message bodies don't get glued together.
+ *
+ * Returns the separator string only ("" if no padding is needed). The
+ * caller is responsible for emitting `separator + delta` to its sink.
+ *
+ * Rules:
+ *   - If `prior` is empty, no separator (this is the first byte streamed).
+ *   - Otherwise, ensure exactly two trailing newlines on the joined
+ *     stream — accounting for any newlines already at the end of `prior`
+ *     and at the start of `delta`. Two newlines render as a paragraph
+ *     break in a terminal.
+ */
+function streamBoundarySeparator(prior: string, delta: string): string {
+  if (prior.length === 0) return "";
+  let trailing = 0;
+  for (let i = prior.length - 1; i >= 0; i--) {
+    if (prior[i] === "\n") trailing++;
+    else break;
+  }
+  let leading = 0;
+  for (let i = 0; i < delta.length; i++) {
+    if (delta[i] === "\n") leading++;
+    else break;
+  }
+  const needed = Math.max(0, 2 - trailing - leading);
+  return "\n".repeat(needed);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // JSON-RPC 2.0 types
 // ─────────────────────────────────────────────────────────────────────────────
@@ -361,6 +391,13 @@ interface AccumulatorState {
   turnId: string | null;
   streamedText: string;
   completedText: string;
+  /**
+   * The `item_id` of the most recently streamed agentMessage delta. Used
+   * to detect message boundaries within a single turn — when the next
+   * delta arrives with a different `item_id`, we insert a paragraph
+   * break so the two messages don't get glued together.
+   */
+  lastStreamItemId: string | null;
   turnStatus: "in_progress" | "completed" | "failed" | "interrupted" | "unknown";
   turnError: string | null;
   turnCompleted: boolean;
@@ -400,10 +437,22 @@ function handleNotification(state: AccumulatorState, method: string, params: unk
     }
     case "item/agentMessage/delta": {
       const delta = typeof params.delta === "string" ? params.delta : "";
-      if (delta.length > 0) {
-        state.streamedText += delta;
-        state.onText(delta);
+      if (delta.length === 0) return;
+      const itemId = typeof params.itemId === "string" ? params.itemId : null;
+      // Insert a paragraph break when the model emits a fresh
+      // agentMessage in the same turn (e.g. before/after a tool call).
+      // Without this, the tail of message N and the head of message N+1
+      // get glued: "...sentence one.Sentence two...".
+      if (itemId !== null && state.lastStreamItemId !== null && itemId !== state.lastStreamItemId) {
+        const sep = streamBoundarySeparator(state.streamedText, delta);
+        if (sep.length > 0) {
+          state.streamedText += sep;
+          state.onText(sep);
+        }
       }
+      state.streamedText += delta;
+      state.onText(delta);
+      if (itemId !== null) state.lastStreamItemId = itemId;
       return;
     }
     case "item/completed": {
@@ -518,6 +567,7 @@ export const codexBackend: Backend = {
       turnId: null,
       streamedText: "",
       completedText: "",
+      lastStreamItemId: null,
       turnStatus: "in_progress",
       turnError: null,
       turnCompleted: false,
@@ -704,7 +754,7 @@ export const codexBackend: Backend = {
 };
 
 // Exported for tests
-export { mapEffortToCodex, normalizeCodexModel };
+export { mapEffortToCodex, normalizeCodexModel, streamBoundarySeparator };
 export type { Transport, CodexClient };
 
 export function isCodexAuthFailure(stderr: string): boolean {
