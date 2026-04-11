@@ -22,7 +22,7 @@ test("nudge lists incomplete tasks with status and title", () => {
     { id: "t2", title: "Second", status: "in_progress" },
     { id: "t3", title: "Third", status: "pending" },
   ]);
-  const msg = buildNudgeMessage(tasks, [], "/tmp/tasks.md");
+  const msg = buildNudgeMessage(tasks, [], "/tmp/assignment.md");
 
   assert.ok(msg.includes("t2 (status: in_progress) — Second"));
   assert.ok(msg.includes("t3 (status: pending) — Third"));
@@ -31,14 +31,14 @@ test("nudge lists incomplete tasks with status and title", () => {
 
 test("nudge reports invalid status values", () => {
   const tasks = buildTasks([{ id: "t1", title: "First", status: "pending" }]);
-  const msg = buildNudgeMessage(tasks, [{ taskId: "t1", rawValue: "done" }], "/tmp/tasks.md");
+  const msg = buildNudgeMessage(tasks, [{ taskId: "t1", rawValue: "done" }], "/tmp/assignment.md");
   assert.ok(msg.includes("Invalid status values:"));
   assert.ok(msg.includes('t1 had status "done"'));
 });
 
 test("nudge mentions valid statuses and blocked fallback", () => {
   const tasks = buildTasks([{ id: "t1", title: "First" }]);
-  const msg = buildNudgeMessage(tasks, [], "/tmp/tasks.md");
+  const msg = buildNudgeMessage(tasks, [], "/tmp/assignment.md");
   assert.ok(msg.includes("pending, in_progress, completed, blocked"));
   assert.ok(msg.includes("blocked"));
 });

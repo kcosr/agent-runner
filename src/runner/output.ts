@@ -1,4 +1,4 @@
-import type { TaskState } from "../plan/model.js";
+import type { TaskState } from "../assignment/model.js";
 
 export type RunStatus = "success" | "blocked" | "exhausted" | "error";
 
@@ -8,7 +8,7 @@ export interface RunSummary {
   maxAttempts: number;
   tasksCompleted: number;
   tasksTotal: number;
-  planPath: string;
+  assignmentPath: string;
   tasks: TaskState[];
   runId: string;
 }
@@ -20,7 +20,7 @@ export function renderSummary(summary: RunSummary): string {
   lines.push(`Status: ${summary.status}`);
   lines.push(`Tasks completed: ${summary.tasksCompleted}/${summary.tasksTotal}`);
   lines.push(`Attempts: ${summary.attempts}/${summary.maxAttempts}`);
-  lines.push(`Plan file: ${summary.planPath}`);
+  lines.push(`Assignment file: ${summary.assignmentPath}`);
 
   if (summary.tasks.length > 0) {
     lines.push("");
@@ -37,7 +37,7 @@ export function renderSummary(summary: RunSummary): string {
   }
 
   lines.push("");
-  lines.push(`Review ${summary.planPath} for additional agent output.`);
+  lines.push(`Review ${summary.assignmentPath} for additional agent output.`);
   lines.push("");
   lines.push("To continue this run with a follow-up message:");
   lines.push(`  task-runner run --resume-run ${summary.runId} "..."`);

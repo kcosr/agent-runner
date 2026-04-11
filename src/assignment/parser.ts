@@ -9,7 +9,7 @@ export interface ParsedSectionUpdate {
   notes?: string;
 }
 
-export function parsePlan(raw: string): ParsedSectionUpdate[] {
+export function parseAssignment(raw: string): ParsedSectionUpdate[] {
   const markers: { id: string; start: number }[] = [];
   for (const match of raw.matchAll(TASK_ID_MARKER)) {
     if (match.index !== undefined) {

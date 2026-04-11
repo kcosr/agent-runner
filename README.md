@@ -12,10 +12,10 @@ full design.
    frontmatter that declares a prompt, some input variables, and a list of
    tasks.
 2. You run `task-runner run --agent <name> --var k=v`.
-3. The runner seeds a `tasks.md` file in a per-run workspace directory and
+3. The runner seeds a `assignment.md` file in a per-run workspace directory and
    invokes the agent (Claude for now) with a prompt that instructs it to
    work through the list and update the status of each task as it goes.
-4. After the agent exits, the runner parses `tasks.md` back. If every task
+4. After the agent exits, the runner parses `assignment.md` back. If every task
    is marked `completed`, the runner returns the concatenated agent output
    and exits `0`. If tasks are still incomplete, it re-invokes the agent
    with a nudge message — up to `maxRetries` times. If any task is marked

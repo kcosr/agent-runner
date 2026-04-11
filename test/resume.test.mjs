@@ -24,7 +24,7 @@ tasks:
     title: Third
     body: Do the third thing.
 ---
-Agent prompt. Plan at {{plan_path}}.
+Agent prompt. Plan at {{assignment_path}}.
 `;
 
 function tempDir() {
@@ -93,7 +93,7 @@ test("resume: happy path — original blocks, resume completes, same workspace",
   // Session 0 — blocks on t2
   const first = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
-      const match = ctx.prompt.match(/\.task-runner\/\S+?\/tasks\.md/);
+      const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
       const absPlan = `./${match[0]}`;
       let plan = readFileSync(absPlan, "utf8");
       plan = editStatus(plan, "t1", "completed");
@@ -120,7 +120,7 @@ test("resume: happy path — original blocks, resume completes, same workspace",
   assert.equal(first.manifest.backendSessionId, "sess-original");
 
   // Resume — fix everything. Plan path is known from the first run.
-  const firstPlanPath = join(first.workspaceDir, "tasks.md");
+  const firstPlanPath = join(first.workspaceDir, "assignment.md");
   const target = resolveResumeTarget(first.runId, dir);
   const second = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
@@ -182,7 +182,7 @@ test("resume: attempt numbers are monotonic across sessions", async () => {
   assert.equal(first.manifest.attemptRecords.at(-1).attempt, 3);
 
   // Resume — succeed on first attempt
-  const firstPlanPath = join(first.workspaceDir, "tasks.md");
+  const firstPlanPath = join(first.workspaceDir, "assignment.md");
   const target = resolveResumeTarget(first.runId, dir);
   const second = await runIn(dir, {
     backend: mockBackend(async (_ctx) => {
@@ -223,7 +223,7 @@ test("resume: non-completed tasks normalized to pending, notes preserved", async
 
   const first = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
-      const match = ctx.prompt.match(/\.task-runner\/\S+?\/tasks\.md/);
+      const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
       const absPlan = `./${match[0]}`;
       let plan = readFileSync(absPlan, "utf8");
       plan = editStatus(plan, "t1", "completed");
@@ -245,7 +245,7 @@ test("resume: non-completed tasks normalized to pending, notes preserved", async
   assert.equal(first.manifest.status, "blocked");
 
   // Resume — inspect the in-memory state after normalization by reading tasks.md
-  const firstPlanPath = join(first.workspaceDir, "tasks.md");
+  const firstPlanPath = join(first.workspaceDir, "assignment.md");
   const target = resolveResumeTarget(first.runId, dir);
   const second = await runIn(dir, {
     backend: mockBackend(async (_ctx) => {
@@ -296,7 +296,7 @@ test("resume: missing follow-up message is a hard error", async () => {
 
   const first = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
-      const match = ctx.prompt.match(/\.task-runner\/\S+?\/tasks\.md/);
+      const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
       const absPlan = `./${match[0]}`;
       let plan = readFileSync(absPlan, "utf8");
       plan = editStatus(plan, "t1", "blocked");
@@ -339,7 +339,7 @@ test("resume: missing backend session id is a hard error", async () => {
 
   const first = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
-      const match = ctx.prompt.match(/\.task-runner\/\S+?\/tasks\.md/);
+      const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
       const absPlan = `./${match[0]}`;
       let plan = readFileSync(absPlan, "utf8");
       plan = editStatus(plan, "t1", "blocked");
@@ -383,7 +383,7 @@ test("resume: claude rejecting the resume on first attempt fails hard", async ()
 
   const first = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
-      const match = ctx.prompt.match(/\.task-runner\/\S+?\/tasks\.md/);
+      const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
       const absPlan = `./${match[0]}`;
       let plan = readFileSync(absPlan, "utf8");
       plan = editStatus(plan, "t1", "blocked");
@@ -427,7 +427,7 @@ test("resume: resolveResumeTarget finds the workspace by slug in cwd", async () 
 
   const first = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
-      const match = ctx.prompt.match(/\.task-runner\/\S+?\/tasks\.md/);
+      const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
       const absPlan = `./${match[0]}`;
       let plan = readFileSync(absPlan, "utf8");
       for (const id of ["t1", "t2", "t3"]) plan = editStatus(plan, id, "completed");
@@ -467,7 +467,7 @@ test("resume: text summary includes the resume-run hint with the run id", async 
       loaded,
       cliVars: {},
       backend: mockBackend(async (ctx) => {
-        const match = ctx.prompt.match(/\.task-runner\/\S+?\/tasks\.md/);
+        const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
         const absPlan = `./${match[0]}`;
         let plan = readFileSync(absPlan, "utf8");
         for (const id of ["t1", "t2", "t3"]) plan = editStatus(plan, id, "completed");

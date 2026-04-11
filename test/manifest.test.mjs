@@ -24,7 +24,7 @@ tasks:
     title: Third
     body: Do the third thing.
 ---
-Agent prompt. Plan at {{plan_path}}.
+Agent prompt. Plan at {{assignment_path}}.
 `;
 
 function tempDir() {
@@ -87,7 +87,7 @@ test("manifest: run.json is written and matches outcome.manifest", async () => {
   writeAgent(dir, "three", THREE_TASKS);
 
   const outcome = await runWithMock(dir, async (ctx) => {
-    const match = ctx.prompt.match(/\.task-runner\/\S+?\/tasks\.md/);
+    const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
     const absPlan = `./${match[0]}`;
     let plan = readFileSync(absPlan, "utf8");
     for (const id of ["t1", "t2", "t3"]) {
@@ -148,7 +148,7 @@ test("manifest: attempt records snapshot state after each attempt", async () => 
   let call = 0;
   const outcome = await runWithMock(dir, async (ctx) => {
     call++;
-    const match = ctx.prompt.match(/\.task-runner\/\S+?\/tasks\.md/);
+    const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
     const absPlan = `./${match[0]}`;
     let plan = readFileSync(absPlan, "utf8");
     if (call === 1) {
@@ -200,7 +200,7 @@ test("manifest: blocked run records status and captures final state", async () =
   writeAgent(dir, "three", THREE_TASKS);
 
   const outcome = await runWithMock(dir, async (ctx) => {
-    const match = ctx.prompt.match(/\.task-runner\/\S+?\/tasks\.md/);
+    const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
     const absPlan = `./${match[0]}`;
     let plan = readFileSync(absPlan, "utf8");
     plan = editStatus(plan, "t1", "completed");
@@ -256,7 +256,7 @@ test("manifest: captures effort override on the run metadata", async () => {
   const outcome = await runWithMock(
     dir,
     async (ctx) => {
-      const match = ctx.prompt.match(/\.task-runner\/\S+?\/tasks\.md/);
+      const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
       const absPlan = `./${match[0]}`;
       let plan = readFileSync(absPlan, "utf8");
       for (const id of ["t1", "t2", "t3"]) {
@@ -286,7 +286,7 @@ test("manifest: invalid statuses are recorded on the attempt record", async () =
   let call = 0;
   const outcome = await runWithMock(dir, async (ctx) => {
     call++;
-    const match = ctx.prompt.match(/\.task-runner\/\S+?\/tasks\.md/);
+    const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
     const absPlan = `./${match[0]}`;
     let plan = readFileSync(absPlan, "utf8");
     if (call === 1) {

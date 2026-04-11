@@ -15,8 +15,8 @@ sure it completes this list, return the output."
 
 The canonical record of every run is a machine-readable manifest
 (`run.json`) written to the per-run workspace directory. Each run also
-writes an ephemeral scratch file (`tasks.md`) that the agent edits in place
-during the run; after the run ends, `tasks.md` is purely diagnostic — the
+writes an ephemeral scratch file (`assignment.md`) that the agent edits in place
+during the run; after the run ends, `assignment.md` is purely diagnostic — the
 manifest is the source of truth.
 
 ## Non-goals
@@ -44,14 +44,14 @@ task-runner run --agent <name> [--var k=v]... [--output-format text|json]
 2. Resolve vars (CLI → env → defaults)
 3. Create workspace: <cwd>/.task-runner/<short-id>/
 4. Build in-memory task map from agent.md `tasks:`
-5. Write initial tasks.md + run.json
-6. Render prompt with {{var}} + {{plan_path}} + {{run_id}} substitution
+5. Write initial assignment.md + run.json
+6. Render prompt with {{var}} + {{assignment_path}} + {{run_id}} substitution
 7. Loop:
      a. Invoke Claude subprocess (stream-json, normalize for user output)
-     b. Parse tasks.md back, merge status/notes into in-memory map
+     b. Parse assignment.md back, merge status/notes into in-memory map
      c. Snapshot everything into the manifest + rewrite run.json
      d. Decide: done? blocked? retry? fail?
-     e. If retry: merge missing sections back into tasks.md, build nudge,
+     e. If retry: merge missing sections back into assignment.md, build nudge,
         re-invoke with --resume <session-id>
 8. Rewrite run.json with terminal state
 9. Emit final output (text mode: stderr summary; json mode: print manifest
@@ -77,10 +77,10 @@ task-runner/
 │   │   ├── schema.ts      # zod AgentConfig schema
 │   │   ├── loader.ts      # locate + parse agent.md with gray-matter
 │   │   └── interpolate.ts # {{var}} substitution
-│   ├── plan/
+│   ├── assignment/
 │   │   ├── model.ts       # TaskState types
-│   │   ├── writer.ts      # serialize in-memory map -> tasks.md
-│   │   ├── parser.ts      # parse tasks.md -> status/notes updates
+│   │   ├── writer.ts      # serialize in-memory map -> assignment.md
+│   │   ├── parser.ts      # parse assignment.md -> status/notes updates
 │   │   └── merge.ts       # merge: missing sections only, preserve agent edits
 │   ├── backends/
 │   │   ├── types.ts       # Backend interface
@@ -96,7 +96,7 @@ task-runner/
 ├── agents/
 │   └── example/agent.md   # reference agent definition
 └── test/
-    ├── plan-roundtrip.test.mjs
+    ├── assignment-roundtrip.test.mjs
     ├── config-loader.test.mjs
     ├── nudge.test.mjs
     ├── manifest.test.mjs
@@ -140,7 +140,7 @@ tasks:
 ---
 You are a code exploration assistant working on {{repo_path}}.
 
-Your plan is at `{{plan_path}}`. Read it, complete each task, and update
+Your assignment is at `{{assignment_path}}`. Read it, complete each task, and update
 the Status field for each task as you go.
 ```
 
@@ -160,7 +160,7 @@ the Status field for each task as you go.
 | `maxRetries` | The point of the retry loop | `hooks.maxReinvokes` — renamed |
 | `lockedFields` | Simple allowlist-style version of agent-runner's `overridePolicy` | `overridePolicy.default` toggle, nested key paths |
 | `vars` | CLI input validation + template substitution | `requiredAt` phase split |
-| `tasks` | Seeds the plan and the manifest | Per-task `completed`/`active` state — runner owns that |
+| `tasks` | Seeds the assignment and the manifest | Per-task `completed`/`active` state — runner owns that |
 | instructions (body) | Rendered prompt with `{{var}}` | — |
 
 Dropped entirely from agent-runner: `executionMode`, `adapterExecutionMode`,
@@ -258,7 +258,7 @@ renders into user-visible text.
 
 In addition to user-declared vars from the CLI/env, the runner provides:
 
-- `{{plan_path}}` — absolute path to `tasks.md` for this run
+- `{{assignment_path}}` — absolute path to `assignment.md` for this run
 - `{{run_id}}` — the short ID for this run
 - `{{cwd}}` — resolved absolute working directory
 
@@ -271,7 +271,7 @@ invocations:
 ```
 <cwd>/.task-runner/<short-id>/
 ├── run.json              # canonical manifest (accumulates across sessions)
-├── tasks.md              # ephemeral scratch file the agent edits in place
+├── assignment.md              # ephemeral scratch file the agent edits in place
 └── attempts/
     ├── 01.json           # session 0, attempt 1
     ├── 02.json           # session 0, attempt 2
@@ -294,7 +294,7 @@ field so you can filter which attempts belonged to which session.
 
 The directory is left on disk after each invocation (success or failure)
 for inspection and for future resume invocations. `run.json` is the
-thing you archive, share, or grep; `tasks.md` is a diagnostic artifact
+thing you archive, share, or grep; `assignment.md` is a diagnostic artifact
 that shows what the markdown looked like at the end of the latest
 session; `attempts/NN.json` holds the raw, unfiltered backend output for
 each attempt (see [Attempt logs](#attempt-logs) below). Users should add
@@ -347,7 +347,7 @@ interface RunManifest {
   message: string | null;          // session 0's initial message
   unrestricted: boolean;
   cwd: string;
-  planPath: string;
+  assignmentPath: string;
   workspaceDir: string;
   startedAt: string;               // ISO-8601; session 0 start
   endedAt: string | null;          // latest session's end, null while running
@@ -419,7 +419,7 @@ at the end of the run. Each `AttemptRecord.tasksAfter` is a point-in-time
 snapshot after that attempt's parse/merge step. Because `tasksAfter` contains
 the full `TaskSnapshot` (including `title`, `body`, and `notes`), you can
 reconstruct a complete history of the run from the manifest alone — no need
-to look at `tasks.md`.
+to look at `assignment.md`.
 
 **Session ID**: `backendSessionId` is the claude session ID captured from
 attempt 1 and used for `--resume` on subsequent attempts. The per-attempt
@@ -466,11 +466,11 @@ cross-run resume becomes desirable later, it will be an explicit opt-in
 ## Task state model
 
 The runner holds an in-memory `Map<taskId, TaskState>` that drives the run.
-`tasks.md` is an I/O buffer between the runner and the agent. `run.json` is
+`assignment.md` is an I/O buffer between the runner and the agent. `run.json` is
 the canonical record. The relationship:
 
 ```
-agent.md `tasks:`  ──►  in-memory Map  ──►  rendered to tasks.md
+agent.md `tasks:`  ──►  in-memory Map  ──►  rendered to assignment.md
                              │                      │
                              │                      ▼
                              │                agent edits
@@ -492,13 +492,13 @@ interface TaskState {
 }
 ```
 
-## `tasks.md` format
+## `assignment.md` format
 
 Written by the runner, edited by the agent. Ephemeral — the definitive
 state lives in `run.json.finalTasks`.
 
 ```markdown
-# Plan
+# Assignment
 
 The runner tracks your progress through this file. For each task below,
 update the **Status** and **Notes** fields as you work. Do not delete or
@@ -549,7 +549,7 @@ For each task ID in memory **not** found in the file:
 
 **On retry**:
 
-1. Read current `tasks.md`. If missing/empty/unparseable → fall back to full
+1. Read current `assignment.md`. If missing/empty/unparseable → fall back to full
    re-seed from memory.
 2. Find all `<!-- task-id: X -->` markers currently present.
 3. For each task ID in memory **not** present in the file: append a fresh
@@ -581,7 +581,7 @@ After each invocation (and after each attempt's manifest snapshot):
 Built from the in-memory map + any invalid-status errors captured during parse:
 
 ```
-Some tasks in /abs/path/tasks.md are not yet completed. Please continue.
+Some tasks in /abs/path/assignment.md are not yet completed. Please continue.
 
 Remaining tasks:
 - t1_read_conventions (status: pending) — Check repo conventions
@@ -809,8 +809,9 @@ schema before starting the run.
   ── attempt 2 ──
   <agent stdout>
   ```
-- **Stderr**: runner chrome — startup banner (agent name, run ID, plan
-  path, cwd), attempt dividers, retry notifications, final summary.
+- **Stderr**: runner chrome — startup banner (agent name, run ID,
+  assignment path, cwd), attempt dividers, retry notifications, final
+  summary.
 
 Final summary on stderr, including per-task results with notes:
 
@@ -819,7 +820,7 @@ Final summary on stderr, including per-task results with notes:
 Status: success
 Tasks completed: 3/3
 Attempts: 2/4
-Plan file: /abs/path/.task-runner/k7m2xq/tasks.md
+Assignment file: /abs/path/.task-runner/k7m2xq/assignment.md
 
 Task results:
   - t1_read_conventions — Check repo conventions [completed]
@@ -829,16 +830,16 @@ Task results:
   - t3_summary — Summary [completed]
       Small monorepo for agent tooling; three packages under src/.
 
-Review /abs/path/.task-runner/k7m2xq/tasks.md for additional agent output.
+Review /abs/path/.task-runner/k7m2xq/assignment.md for additional agent output.
 ```
 
 The `Task results` section is built from the in-memory task map, so it
 always shows every declared task with its final status and any notes the
-agent wrote. The final review hint is a reminder that the plan file on
-disk may contain content outside the structured notes fences (the agent
-sometimes edits task bodies or adds scratch paragraphs) — if the
-structured per-task notes above look thin, the file itself is worth a
-glance.
+agent wrote. The final review hint is a reminder that the assignment
+file on disk may contain content outside the structured notes fences
+(the agent sometimes edits task bodies or adds scratch paragraphs) — if
+the structured per-task notes above look thin, the file itself is worth
+a glance.
 
 ### json
 
@@ -867,7 +868,7 @@ stdout.
 
 1. **M1 — Scaffold**: repo layout, package.json, biome/husky, tsconfig,
    design doc, example agent.md, README.
-2. **M2 — Happy path**: config loader, plan writer, Claude subprocess
+2. **M2 — Happy path**: config loader, assignment writer, Claude subprocess
    backend with stream-json parsing + session ID extraction, minimal run
    loop, manifest module, single-task happy path. Tests with a mock
    backend.

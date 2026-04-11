@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import type { InvalidStatusReport, TaskState, TaskStatus } from "../plan/model.js";
+import type { InvalidStatusReport, TaskState, TaskStatus } from "../assignment/model.js";
 
 export type ManifestStatus = "running" | "success" | "blocked" | "exhausted" | "error";
 
@@ -83,7 +83,7 @@ export interface RunManifest {
   message: string | null;
   unrestricted: boolean;
   cwd: string;
-  planPath: string;
+  assignmentPath: string;
   workspaceDir: string;
   startedAt: string;
   endedAt: string | null;

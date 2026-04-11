@@ -18,7 +18,7 @@ tasks:
   - id: t1
     title: First
 ---
-Agent prompt. Plan at {{plan_path}}.
+Agent prompt. Plan at {{assignment_path}}.
 `;
 
 const WITH_DEFAULT_MESSAGE = `---
@@ -32,7 +32,7 @@ tasks:
   - id: t1
     title: First
 ---
-Agent prompt. Plan at {{plan_path}}.
+Agent prompt. Plan at {{assignment_path}}.
 `;
 
 const LOCKED_MESSAGE = `---
@@ -47,7 +47,7 @@ tasks:
   - id: t1
     title: First
 ---
-Agent prompt. Plan at {{plan_path}}.
+Agent prompt. Plan at {{assignment_path}}.
 `;
 
 function tempDir() {
@@ -75,7 +75,7 @@ function editStatus(content, taskId, newStatus) {
 const okBackend = () => ({
   id: "mock",
   async invoke(ctx) {
-    const match = ctx.prompt.match(/\.task-runner\/\S+?\/tasks\.md/);
+    const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
     if (match) {
       const absPlan = `./${match[0]}`;
       const plan = readFileSync(absPlan, "utf8");
@@ -193,7 +193,7 @@ tasks:
   - id: t1
     title: First
 ---
-Plain agent. Plan at {{plan_path}}.
+Plain agent. Plan at {{assignment_path}}.
 `,
   );
   const outcome = await runIn(dir, "plain", undefined);

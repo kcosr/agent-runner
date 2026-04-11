@@ -1,6 +1,6 @@
 import type { TaskState } from "./model.js";
 
-const HEADER = `# Plan
+const HEADER = `# Assignment
 
 The runner tracks your progress through this file. For each task below,
 update the **Status** and **Notes** fields as you work. Do not delete or
@@ -40,7 +40,7 @@ export function renderSection(index: number, task: TaskState): string {
   return lines.join("\n");
 }
 
-export function renderPlan(tasks: TaskState[]): string {
+export function renderAssignment(tasks: TaskState[]): string {
   const sections = tasks.map((task, index) => renderSection(index, task));
   return `${HEADER}\n${sections.join("\n")}`;
 }

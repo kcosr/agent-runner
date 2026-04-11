@@ -19,7 +19,7 @@ tasks:
     title: Do the thing
     body: First thing to do.
 ---
-You are an assistant. Plan at {{plan_path}}.
+You are an assistant. Plan at {{assignment_path}}.
 `;
 
 function writeAgent(baseDir, name, body) {
@@ -46,7 +46,7 @@ test("loadAgentConfig parses a minimal agent.md", () => {
   assert.equal(loaded.config.unrestricted, false);
   assert.equal(loaded.config.tasks.length, 1);
   assert.equal(loaded.config.tasks[0].id, "t1");
-  assert.ok(loaded.instructions.includes("{{plan_path}}"));
+  assert.ok(loaded.instructions.includes("{{assignment_path}}"));
 });
 
 test("loadAgentConfig throws AgentConfigError on bad frontmatter", () => {

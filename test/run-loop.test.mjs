@@ -24,7 +24,7 @@ tasks:
     title: Third
     body: Do the third thing.
 ---
-Agent prompt. Plan at {{plan_path}}.
+Agent prompt. Plan at {{assignment_path}}.
 `;
 
 function tempDir() {
@@ -86,7 +86,7 @@ test("effort level from frontmatter is forwarded to backend", async () => {
   let seenEffort;
   const { outcome } = await runWithMock(dir, async (ctx) => {
     seenEffort = ctx.effort;
-    const match = ctx.prompt.match(/\.task-runner\/\S+?\/tasks\.md/);
+    const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
     const absPlan = `./${match[0]}`;
     let plan = readFileSync(absPlan, "utf8");
     plan = editStatus(plan, "t1", "completed");
@@ -117,7 +117,7 @@ test("effort override beats the frontmatter value", async () => {
     dir,
     async (ctx) => {
       seenEffort = ctx.effort;
-      const match = ctx.prompt.match(/\.task-runner\/\S+?\/tasks\.md/);
+      const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
       const absPlan = `./${match[0]}`;
       let plan = readFileSync(absPlan, "utf8");
       plan = editStatus(plan, "t1", "completed");
@@ -148,12 +148,19 @@ test("happy path: mock marks all tasks completed in one attempt → exit 0", asy
   let invocations = 0;
   const { outcome, stdout, stderr } = await runWithMock(dir, async (ctx) => {
     invocations++;
-    const plan = readFileSync(`./${ctx.prompt.match(/\.task-runner\/\S+?\/tasks\.md/)[0]}`, "utf8");
+    const plan = readFileSync(
+      `./${ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/)[0]}`,
+      "utf8",
+    );
     let updated = plan;
     for (const id of ["t1", "t2", "t3"]) {
       updated = editStatus(updated, id, "completed");
     }
-    writeFileSync(`./${ctx.prompt.match(/\.task-runner\/\S+?\/tasks\.md/)[0]}`, updated, "utf8");
+    writeFileSync(
+      `./${ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/)[0]}`,
+      updated,
+      "utf8",
+    );
     return {
       exitCode: 0,
       signal: null,
@@ -185,7 +192,7 @@ test("retry path: first attempt leaves one incomplete, second completes → exit
   const { outcome } = await runWithMock(dir, async (ctx) => {
     invocations++;
     lastPrompt = ctx.prompt;
-    const match = ctx.prompt.match(/\.task-runner\/\S+?\/tasks\.md/);
+    const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
     const planPath = match ? match[0] : null;
     const absPlan = planPath ? `./${planPath}` : null;
     if (!absPlan) throw new Error(`no plan path in prompt: ${ctx.prompt}`);
@@ -226,7 +233,7 @@ test("blocked path: marking one task blocked → exit 2, no further retries", as
   let invocations = 0;
   const { outcome } = await runWithMock(dir, async (ctx) => {
     invocations++;
-    const match = ctx.prompt.match(/\.task-runner\/\S+?\/tasks\.md/);
+    const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
     const absPlan = `./${match[0]}`;
     let plan = readFileSync(absPlan, "utf8");
     plan = editStatus(plan, "t1", "completed");
@@ -285,7 +292,7 @@ test("session resume: first attempt session ID passed on retry", async () => {
   const { outcome } = await runWithMock(dir, async (ctx) => {
     invocations++;
     seenResumeIds.push(ctx.resumeSessionId ?? null);
-    const match = ctx.prompt.match(/\.task-runner\/\S+?\/tasks\.md/);
+    const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
     const absPlan = `./${match[0]}`;
     let plan = readFileSync(absPlan, "utf8");
     if (invocations === 1) {
@@ -324,7 +331,7 @@ test("in-run resume rejection stops the run with an error", async () => {
       // attempt 1 succeeds but leaves tasks incomplete; attempt 2 is the retry
       // that carries --resume; the mock pretends claude rejects that session
       if (invocations === 1) {
-        const match = ctx.prompt.match(/\.task-runner\/\S+?\/tasks\.md/);
+        const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
         const absPlan = `./${match[0]}`;
         const plan = readFileSync(absPlan, "utf8");
         writeFileSync(absPlan, editStatus(plan, "t1", "completed"), "utf8");

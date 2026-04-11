@@ -1,9 +1,9 @@
-import { type InvalidStatusReport, type TaskState, VALID_STATUSES } from "../plan/model.js";
+import { type InvalidStatusReport, type TaskState, VALID_STATUSES } from "../assignment/model.js";
 
 export function buildNudgeMessage(
   tasks: Map<string, TaskState>,
   invalid: InvalidStatusReport[],
-  planPath: string,
+  assignmentPath: string,
 ): string {
   const incomplete: TaskState[] = [];
   for (const task of tasks.values()) {
@@ -11,7 +11,7 @@ export function buildNudgeMessage(
   }
 
   const lines: string[] = [];
-  lines.push(`Some tasks in ${planPath} are not yet completed. Please continue.`);
+  lines.push(`Some tasks in ${assignmentPath} are not yet completed. Please continue.`);
   lines.push("");
   lines.push("Remaining tasks:");
   for (const task of incomplete) {

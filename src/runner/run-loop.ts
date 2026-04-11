@@ -1,13 +1,13 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
+import { mergeIntoFile, mergeUpdates } from "../assignment/merge.js";
+import type { TaskState, TaskStatus } from "../assignment/model.js";
+import { parseAssignment } from "../assignment/parser.js";
+import { renderAssignment } from "../assignment/writer.js";
 import type { Backend, BackendInvokeResult } from "../backends/types.js";
 import { interpolate } from "../config/interpolate.js";
 import type { LoadedAgent } from "../config/loader.js";
 import type { LockableField, VarDef } from "../config/schema.js";
-import { mergeIntoFile, mergeUpdates } from "../plan/merge.js";
-import type { TaskState, TaskStatus } from "../plan/model.js";
-import { parsePlan } from "../plan/parser.js";
-import { renderPlan } from "../plan/writer.js";
 import { shortId } from "../util/short-id.js";
 import {
   type AttemptRecord,
@@ -49,7 +49,7 @@ export interface RunOutcome {
   exitCode: number;
   attemptTranscripts: string[];
   runId: string;
-  planPath: string;
+  assignmentPath: string;
   workspaceDir: string;
   manifest: RunManifest;
 }
@@ -241,7 +241,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const workspaceDir =
     isResume && resume ? resume.workspaceDir : resolve(cwd, ".task-runner", runId);
   mkdirSync(workspaceDir, { recursive: true });
-  const planPath = resolve(workspaceDir, "tasks.md");
+  const assignmentPath = resolve(workspaceDir, "assignment.md");
 
   const tasks =
     isResume && resume
@@ -250,7 +250,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
   const injectedVars: Record<string, unknown> = {
     ...runtimeVars,
-    plan_path: planPath,
+    assignment_path: assignmentPath,
     run_id: runId,
     cwd,
   };
@@ -262,7 +262,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     initialPrompt = message ? `${basePrompt}\n\n${message}` : basePrompt;
   }
 
-  writeFileSync(planPath, renderPlan(Array.from(tasks.values())), "utf8");
+  writeFileSync(assignmentPath, renderAssignment(Array.from(tasks.values())), "utf8");
 
   const now = new Date().toISOString();
   const priorAttemptCount = isResume && resume ? resume.manifest.attemptRecords.length : 0;
@@ -278,7 +278,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
           effort: effort ?? null,
           unrestricted,
           cwd,
-          planPath,
+          assignmentPath,
           workspaceDir,
           endedAt: null,
           status: "running",
@@ -302,7 +302,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
           message,
           unrestricted,
           cwd,
-          planPath,
+          assignmentPath,
           workspaceDir,
           startedAt: now,
           endedAt: null,
@@ -339,7 +339,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   stderr(
     `task-runner: agent=${config.name} run=${runId}${isResume ? ` (session ${sessionIndex})` : ""}\n`,
   );
-  stderr(`             plan=${planPath}\n`);
+  stderr(`             assignment=${assignmentPath}\n`);
   stderr(`             cwd=${cwd}\n`);
   stderr("\n");
 
@@ -384,19 +384,19 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       manifest.backendSessionId = invokeResult.sessionId;
     }
 
-    let rawPlan: string;
+    let rawAssignment: string;
     try {
-      rawPlan = readFileSync(planPath, "utf8");
+      rawAssignment = readFileSync(assignmentPath, "utf8");
     } catch {
-      rawPlan = "";
+      rawAssignment = "";
     }
 
-    if (rawPlan.trim().length === 0) {
-      rawPlan = renderPlan(Array.from(tasks.values()));
-      writeFileSync(planPath, rawPlan, "utf8");
+    if (rawAssignment.trim().length === 0) {
+      rawAssignment = renderAssignment(Array.from(tasks.values()));
+      writeFileSync(assignmentPath, rawAssignment, "utf8");
     }
 
-    const updates = parsePlan(rawPlan);
+    const updates = parseAssignment(rawAssignment);
     const mergeInfo = mergeUpdates(tasks, updates);
 
     const logPath = writeAttemptLog(workspaceDir, {
@@ -461,9 +461,9 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       break;
     }
 
-    const merged = mergeIntoFile(rawPlan, tasks);
-    if (merged !== rawPlan) {
-      writeFileSync(planPath, merged, "utf8");
+    const merged = mergeIntoFile(rawAssignment, tasks);
+    if (merged !== rawAssignment) {
+      writeFileSync(assignmentPath, merged, "utf8");
     }
 
     const incompleteCount = countBy(tasks, (t) => t.status !== "completed");
@@ -471,7 +471,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       `\ntask-runner: retrying — ${incompleteCount} incomplete, ${mergeInfo.invalidStatuses.length} invalid status${mergeInfo.invalidStatuses.length === 1 ? "" : "es"}\n\n`,
     );
 
-    currentPrompt = buildNudgeMessage(tasks, mergeInfo.invalidStatuses, planPath);
+    currentPrompt = buildNudgeMessage(tasks, mergeInfo.invalidStatuses, assignmentPath);
   }
 
   if (!terminal) {
@@ -499,7 +499,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     maxAttempts,
     tasksCompleted,
     tasksTotal: tasks.size,
-    planPath,
+    assignmentPath,
     tasks: Array.from(tasks.values()),
     runId,
   };
@@ -510,7 +510,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     exitCode: terminal.exitCode,
     attemptTranscripts,
     runId,
-    planPath,
+    assignmentPath,
     workspaceDir,
     manifest,
   };
