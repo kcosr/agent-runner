@@ -32,6 +32,7 @@ the work, and writes a single canonical record per run.
   - [`task-runner run`](#task-runner-run)
   - [`task-runner init`](#task-runner-init)
   - [`task-runner status`](#task-runner-status)
+  - [`task-runner task set` / `task add`](#task-runner-task-set--task-runner-task-add)
 - [Backends](#backends)
 - [Resuming, aborting, importing](#resuming-aborting-importing)
 - [Variables and interpolation](#variables-and-interpolation)
@@ -95,6 +96,12 @@ chat output.
   manifest and (for in-flight runs) overlays the live workspace
   `assignment.md` so you can see mid-attempt progress without
   attaching to anything.
+- **Sidecar task mutation**: `task-runner task set` / `task add` let
+  an external agent or script drive a run's task list through the CLI
+  without task-runner ever invoking a backend. The natural pairing is
+  `init` (no backend call) → external agent works through tasks → CLI
+  updates status/notes → `status` reads progress. Useful for agents
+  that can't be invoked as a task-runner subprocess.
 - **Clean Ctrl+C**: SIGINT aborts the in-flight backend invocation
   cleanly (claude gets SIGINT, codex gets `turn/interrupt`), persists
   the manifest as `aborted`, and exits 130. Resume any time with
@@ -466,6 +473,95 @@ output. Both the text checklist and the JSON `finalTasks` /
 `tasksCompleted` reflect the agent's mid-attempt edits — useful for
 watching long-running attempts without attaching to anything. The
 overlay never writes back to disk.
+
+### `task-runner task set` / `task-runner task add`
+
+Mutate a run's task list **without invoking the agent**. The canonical
+use case is a *sidecar* flow: you have an agent that can't (or
+shouldn't) be invoked as a task-runner subprocess, but you still want
+it to work through a structured task list. `init` seeds the list, the
+external agent reads it via `status`, works each task, and reports
+progress back through `task set`.
+
+Both commands:
+
+- Require an existing run (as id or workspace path).
+- Are **rejected while the manifest status is `running`** — a live
+  backend attempt owns the workspace, and a concurrent CLI write would
+  race the attempt's parse/merge cycle. Allowed on `initialized` and
+  all terminal states (`success`, `blocked`, `exhausted`, `aborted`,
+  `error`).
+- Rewrite both the workspace `assignment.md` and `run.json.finalTasks`
+  atomically (`status` consumers stay coherent).
+- Respect any status/notes edits already present in `assignment.md`
+  that aren't yet reflected in the manifest snapshot (they are merged
+  in before the CLI mutation is applied, CLI wins on conflict).
+
+```bash
+# Mark a task in-progress
+task-runner task set <run-id> t1 --status in_progress
+
+# Add a notes block without changing status
+task-runner task set <run-id> t1 --notes "Investigating the parser."
+
+# Complete a task with a note in one call
+task-runner task set <run-id> t1 --status completed --notes "Done."
+
+# Append a new task to an initialized run
+task-runner task add <run-id> --title "Follow-up cleanup"
+
+# JSON output returns the updated task snapshot (handy for scripts)
+task-runner task set <run-id> t1 --status completed --output-format json
+```
+
+`task set` options:
+
+| Flag | Purpose |
+|---|---|
+| `--status <s>` | Target status (`pending`, `in_progress`, `completed`, `blocked`). |
+| `--notes <text>` | Replacement notes body (replaces, does not append). |
+| `--output-format <text\|json>` | Default `text`. `json` prints the updated task snapshot. |
+
+At least one of `--status` / `--notes` must be supplied.
+
+`task add` options:
+
+| Flag | Purpose |
+|---|---|
+| `--title <text>` (required) | Title for the new task. Non-empty, ≤ 200 chars. |
+| `--output-format <text\|json>` | Default `text`. `json` prints the new task snapshot. |
+
+`task add` honors the `tasks` locked field the same way `--add-task`
+does on a fresh run: if either the agent or the assignment locks
+`tasks`, the command is rejected. Generated ids follow the same
+`cli-<short-id>` scheme as `--add-task`.
+
+**Sidecar example.** Drive an initialized run from an external
+agent/script without ever invoking a backend through task-runner:
+
+```bash
+# 1. Seed the workspace (no backend call)
+task-runner init --agent code-reviewer --assignment code-review \
+  --var repo_path=. --var range=main..HEAD
+# -> prints: task-runner: initialized agent=code-reviewer run=abc123
+
+# 2. External agent asks: "what's left to do?"
+task-runner status abc123 --output-format json --field finalTasks
+
+# 3. External agent works task t1 and reports progress
+task-runner task set abc123 t1 --status in_progress
+# ...agent does the work...
+task-runner task set abc123 t1 --status completed --notes "LGTM"
+
+# 4. Optionally add a task the script discovered along the way
+task-runner task add abc123 --title "Follow-up: address flakey test"
+
+# 5. Loop until status JSON shows all tasks terminal.
+```
+
+The run stays in `initialized` state the whole time. If you later want
+to hand it to a subprocess agent (e.g. to finish up), `task-runner run
+--resume-run abc123` still works — the init state is fully resumable.
 
 ---
 

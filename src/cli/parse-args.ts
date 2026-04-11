@@ -3,6 +3,9 @@ export type BackendId = "claude" | "codex";
 
 export interface ParsedArgs {
   command: string;
+  // Populated when `command` is a grouped command (e.g. "task"). Taken
+  // from the token immediately after `command`.
+  subcommand?: string;
   agent?: string;
   assignment?: string;
   resumeRun?: string;
@@ -18,8 +21,12 @@ export interface ParsedArgs {
   sessionName?: string;
   outputFormat: OutputFormat;
   message?: string;
+  positionals: string[];
   addedTasks: string[];
   fields: string[];
+  taskStatus?: string;
+  taskNotes?: string;
+  taskTitle?: string;
   showHelp: boolean;
 }
 
@@ -33,6 +40,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     command: "",
     vars: {},
     outputFormat: "text",
+    positionals: [],
     addedTasks: [],
     fields: [],
     showHelp: false,
@@ -48,6 +56,17 @@ export function parseArgs(argv: string[]): ParsedArgs {
   }
 
   result.command = args.shift() ?? "";
+
+  // Grouped commands shift one more token as their subcommand so that
+  // `task set <run> <task>` parses cleanly without colliding with the
+  // positional collector below.
+  if (result.command === "task") {
+    const next = args[0];
+    if (next !== undefined && !next.startsWith("-")) {
+      result.subcommand = args.shift();
+    }
+  }
+
   const positional: string[] = [];
 
   while (args.length > 0) {
@@ -131,6 +150,18 @@ export function parseArgs(argv: string[]): ParsedArgs {
       if (next === undefined) throw new Error("--field requires a value");
       if (next.trim().length === 0) throw new Error("--field cannot be empty");
       result.fields.push(next);
+    } else if (arg === "--status") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--status requires a value");
+      result.taskStatus = next;
+    } else if (arg === "--notes") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--notes requires a value");
+      result.taskNotes = next;
+    } else if (arg === "--title") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--title requires a value");
+      result.taskTitle = next;
     } else if (arg === "--output-format") {
       const next = args.shift();
       if (next === undefined) throw new Error("--output-format requires a value");
@@ -148,6 +179,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     }
   }
 
+  result.positionals = positional;
   if (positional.length > 0) {
     result.message = positional.join(" ");
   }
