@@ -275,15 +275,23 @@ function rebuildTasksFromAssignmentAndSnapshot(
   assignment: LoadedAssignment | undefined,
   snapshot: Record<string, TaskSnapshot>,
   normalize: boolean,
+  injectedVars?: Record<string, unknown>,
 ): Map<string, TaskState> {
   const tasks = new Map<string, TaskState>();
   const source = assignment?.config.tasks ?? [];
   for (const t of source) {
     const prior = snapshot[t.id];
+    // Interpolate `{{var}}` references inside the fresh-run task
+    // title and body against the same injectedVars used elsewhere.
+    // On resume paths we skip this: the assignment isn't loaded and
+    // the snapshot already carries interpolated text from its
+    // original fresh-run build.
+    const title = injectedVars ? interpolate(t.title, injectedVars) : t.title;
+    const body = injectedVars ? interpolate(t.body ?? "", injectedVars) : (t.body ?? "");
     tasks.set(t.id, {
       id: t.id,
-      title: t.title,
-      body: t.body ?? "",
+      title,
+      body,
       status: prior ? (normalize ? normalizeResumeStatus(prior.status) : prior.status) : "pending",
       notes: prior?.notes ?? "",
     });
@@ -416,6 +424,17 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   mkdirSync(workspaceDir, { recursive: true });
   const assignmentPath = resolve(workspaceDir, "assignment.md");
 
+  // `injectedVars` has to be built *before* the task-map rebuild so
+  // that fresh-run task titles and bodies get `{{var}}` references
+  // substituted. Every field it needs (runtimeVars, assignmentPath,
+  // runId, cwd) is known at this point.
+  const injectedVars: Record<string, unknown> = {
+    ...runtimeVars,
+    assignment_path: assignmentPath,
+    run_id: runId,
+    cwd,
+  };
+
   const priorHadTasks = Boolean(
     isResume && resume && Object.keys(resume.manifest.finalTasks).length > 0,
   );
@@ -426,7 +445,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   } else if (priorInitialized && resume) {
     tasks = rebuildTasksFromAssignmentAndSnapshot(undefined, resume.manifest.finalTasks, false);
   } else {
-    tasks = rebuildTasksFromAssignmentAndSnapshot(loadedAssignment, {}, false);
+    tasks = rebuildTasksFromAssignmentAndSnapshot(loadedAssignment, {}, false, injectedVars);
   }
 
   for (let i = 0; i < addedTitles.length; i++) {
@@ -450,13 +469,6 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const hasTasks = tasks.size > 0;
   const firstTimeTasksAppear = isResume && !priorHadTasks && hasTasks;
   const resumeAddedNewTasks = isResume && priorHadTasks && addedTitles.length > 0;
-
-  const injectedVars: Record<string, unknown> = {
-    ...runtimeVars,
-    assignment_path: assignmentPath,
-    run_id: runId,
-    cwd,
-  };
 
   const trimmedMessage = message?.trim() ?? "";
 

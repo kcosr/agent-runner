@@ -595,8 +595,22 @@ input.replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g, (full, key) => {
 });
 ```
 
-Applied to: the instructions body, `cwd`, and any string field the runner
-renders into user-visible text.
+Applied to:
+
+- The agent's instructions body.
+- The assignment's instructions body.
+- Every **task `title` and `body`** from the assignment frontmatter
+  (interpolated once at fresh-run build time, before tasks are
+  rendered to the workspace `assignment.md` and before the first
+  snapshot lands in the manifest). On resume and execute-after-init
+  the assignment isn't reloaded — tasks come from the manifest's
+  `finalTasks` snapshot, which already carries the interpolated text
+  from the original fresh-run build.
+- `sessionName`, `cwd`, and any other string field the runner renders
+  into user-visible text.
+
+`--add-task` titles are **not** interpolated — they come from the
+CLI directly, so `{{}}` sequences are preserved as-is.
 
 ### Runner-injected vars
 
