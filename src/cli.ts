@@ -19,6 +19,7 @@ import {
   EmptyPromptError,
   InvalidAddedTaskError,
   LockedFieldError,
+  RecursionDepthError,
   VarResolutionError,
   runAgent,
 } from "./runner/run-loop.js";
@@ -289,7 +290,8 @@ async function main(): Promise<void> {
       err instanceof LockedFieldError ||
       err instanceof ResumeError ||
       err instanceof InvalidAddedTaskError ||
-      err instanceof EmptyPromptError
+      err instanceof EmptyPromptError ||
+      err instanceof RecursionDepthError
     ) {
       process.stderr.write(`task-runner: ${err.message}\n`);
       process.exit(3);

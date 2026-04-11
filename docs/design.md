@@ -1498,6 +1498,36 @@ stdout.
 | 4 | Backend invocation error (binary not found, spawn failed, etc.) |
 | 130 | Run interrupted by the user (Ctrl+C / SIGINT) |
 
+## Recursion depth guard
+
+When an orchestrator agent itself shells out to `task-runner run` to
+spawn a child agent, the child can in turn spawn another, and so on.
+Without a guard a misbehaving agent can recurse indefinitely. Two
+env vars travel through every backend child invocation to enforce a
+hard cap:
+
+```
+TASK_RUNNER_CALL_DEPTH       — current depth (0 at the outermost call)
+TASK_RUNNER_MAX_CALL_DEPTH   — hard cap, default 4
+```
+
+On entry, `runAgent` reads the current depth from its own env. If
+`currentDepth >= maxDepth` it throws `RecursionDepthError` *before*
+creating the workspace or invoking any backend, and the CLI exits
+with code 3. When constructing the env for the backend child
+process, the runner overlays an incremented depth so a nested
+`task-runner run` spawned by that backend inherits it.
+
+- Default cap is 4. A legitimate orchestrator → task-runner →
+  task-runner chain is at depth 1 → 2, well under the limit.
+- Override with `TASK_RUNNER_MAX_CALL_DEPTH=N task-runner run ...`
+  if you genuinely need more headroom.
+- Invalid / non-numeric env values fall back to defaults silently.
+  A malformed env var must never disable the cap.
+- The check is depth-first: it fires at the top of `runAgent`, so a
+  runaway recursive chain dies cheaply with no workspace, no
+  manifest, no attempt log written.
+
 ## User interrupts (Ctrl+C)
 
 The CLI installs a `SIGINT` handler that:

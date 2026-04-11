@@ -22,6 +22,13 @@ import {
 } from "./manifest.js";
 import { buildNudgeMessage } from "./nudge.js";
 import { type RunStatus, type RunSummary, renderSummary } from "./output.js";
+import {
+  buildChildRecursionEnv,
+  checkRecursionDepth,
+  readRecursionState,
+} from "./recursion-guard.js";
+
+export { RecursionDepthError } from "./recursion-guard.js";
 import { TASK_WORKFLOW_TEMPLATE, buildAddedTasksReminder } from "./task-workflow.js";
 
 export interface RunOverrides {
@@ -280,6 +287,14 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const agentConfig = loaded.config;
   const assignmentConfig = loadedAssignment?.config;
   const resumeFailureDetector = opts.resumeFailureDetector ?? defaultResumeFailureDetector;
+
+  // Refuse to start if this invocation is nested too deep inside other
+  // task-runner runs. Read the depth from our own env (set by a parent
+  // task-runner via `buildChildRecursionEnv` below); the check fires
+  // before any workspace creation or backend invocation so a runaway
+  // recursive chain dies cheaply.
+  const recursionState = readRecursionState();
+  checkRecursionDepth(recursionState);
 
   const isInitialize = opts.initialize === true;
   const priorInitialized = resume?.manifest.status === "initialized";
@@ -636,7 +651,13 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     const invokeResult = await backend.invoke({
       prompt: currentPrompt,
       cwd,
-      env: { ...process.env } as Record<string, string>,
+      env: {
+        ...(process.env as Record<string, string>),
+        // Increment recursion depth so a nested `task-runner run` spawned
+        // by this backend can detect it. Always last so it overrides any
+        // stale value the parent inherited.
+        ...buildChildRecursionEnv(recursionState),
+      },
       model,
       effort,
       unrestricted,
