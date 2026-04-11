@@ -449,21 +449,30 @@ Common options:
 
 | Flag | Purpose |
 |---|---|
-| `--agent <name|path>` | Agent name or direct path. Required for fresh runs; optional on resume (taken from the prior manifest). |
-| `--assignment <name|path>` | Assignment name or direct path. Optional on fresh runs. Forbidden on resume. |
-| `--resume-run <id|path>` | Continue an existing run by short id or workspace path. See [Resuming, aborting, importing](#resuming-aborting-importing). |
-| `--var key=value` (repeatable) | Set an input variable. Validated against the assignment's `vars` schema. |
+| `--agent <name\|path>` | Agent name or direct path. **Optional on fresh runs** — when omitted, task-runner synthesizes an ad-hoc agent from CLI overrides (in that case `--backend` is required). **Forbidden with `--resume-run`** — the agent is reconstructed from the frozen manifest, not re-read from disk. |
+| `--assignment <name\|path>` | Assignment name or direct path. Optional on fresh runs. Forbidden on resume. |
+| `--resume-run <id\|path>` | Continue an existing run by short id or workspace path. See [Resuming, aborting, importing](#resuming-aborting-importing) for the full resume-override policy. |
+| `--var key=value` (repeatable) | Set an input variable. Validated against the assignment's `vars` schema. **Forbidden with `--resume-run`** — vars are resolved once at first write and frozen into the manifest; they aren't re-resolved on resume. |
 | `--add-task "<title>"` (repeatable) | Append an ad-hoc task with auto-generated id `cli-<short>`. |
-| `--cwd <path>` | Override the agent's `cwd`. |
-| `--backend <claude|codex>` | Override the agent's backend. Drops the agent's `model` unless `--model` is also passed. Forbidden with `--resume-run` (the backend is locked to the session that created the run). |
+| `--cwd <path>` | Override the agent's `cwd`. **Forbidden with `--resume-run`** — backend sessions are bound to their creation cwd, so a new cwd would invalidate the captured session id. Create a fresh run if you need a different cwd. |
+| `--backend <claude\|codex\|passive>` | Override the agent's backend. Drops the agent's `model` unless `--model` is also passed. Forbidden with `--resume-run` (the backend is locked to the session that created the run). Required when `--agent` is omitted (ad-hoc synthesis). |
 | `--model <id>` | Override the model. Backend-specific (`claude-sonnet-4-6`, `gpt-5.4`, etc.). |
-| `--effort <off|minimal|low|medium|high|xhigh|max>` | Reasoning effort. Mapped per backend. |
+| `--effort <off\|minimal\|low\|medium\|high\|xhigh\|max>` | Reasoning effort. Mapped per backend. |
 | `--max-retries <n>` | Override the per-run retry budget (default 3). |
 | `--timeout-sec <n>` | Override the per-attempt timeout (default 3600). |
 | `--unrestricted` | Bypass the backend's approval prompts. |
 | `--session-name <name>` | Override the assignment's `sessionName` (the backend display label). Vars are interpolated. |
 | `--backend-session-id <id>` | Adopt an existing backend session id (claude UUID, codex thread id). Validated before workspace creation. Forbidden with `--resume-run` (the resume target already carries one). |
-| `--output-format <text|json>` | Default `text`. `json` writes the full manifest to stdout once at end of run. |
+| `--output-format <text\|json>` | Default `text`. `json` writes the full manifest to stdout once at end of run. |
+
+On `--resume-run`, the four "legitimate mid-run" overrides — `--model`,
+`--effort`, `--timeout-sec`, `--max-retries`, `--unrestricted`,
+`--session-name` — are still accepted (and still vetted against the
+frozen `manifest.lockedFields`). **Execute-after-init** (resuming a
+run whose prior status was `initialized`) rejects **every** override —
+init deliberately froze every resolvable field and the only valid
+invocation is `task-runner run --resume-run <id>`. See
+[Resuming, aborting, importing](#resume) for the full matrix.
 
 ### `task-runner init`
 

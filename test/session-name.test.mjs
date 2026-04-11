@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { parseArgs } from "../dist/cli/parse-args.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
-import { resolveResumeTarget } from "../dist/runner/manifest.js";
+import { ResumeError, resolveResumeTarget } from "../dist/runner/manifest.js";
 import { LockedFieldError, runAgent } from "../dist/runner/run-loop.js";
 
 const NAMED_AGENT = `---
@@ -348,6 +348,160 @@ Work.
       (err) => {
         assert.ok(err instanceof LockedFieldError);
         assert.equal(err.field, "sessionName");
+        return true;
+      },
+    );
+  } finally {
+    process.chdir(originalCwd);
+  }
+});
+
+test("sessionName: execute-after-init rejects --session-name override even if NOT locked", async () => {
+  // Regression guard for finding #2 of the manifest-canonical review:
+  // init deliberately freezes every resolvable field, so split flow
+  // `init` → `run --resume-run <id> --session-name ...` must be
+  // rejected. Previously this was silently accepted and allowed
+  // bypassing a locked `sessionName` via the split.
+  //
+  // This variant tests an UNLOCKED sessionName — the "no overrides
+  // on execute-after-init" rule is stricter than the lock rule and
+  // should fire regardless of whether any field is locked.
+  const dir = tempDir();
+  writeAgent(dir, "named", NAMED_AGENT);
+  writeAssignment(dir, "named-work", NAMED_ASSIGNMENT);
+
+  const loaded = loadAgentConfig("named", dir);
+  const loadedAssignment = loadAssignmentConfig("named-work", dir);
+  const originalCwd = process.cwd();
+  process.chdir(dir);
+  let init;
+  try {
+    init = await runAgent({
+      loaded,
+      loadedAssignment,
+      cliVars: { repo_name: "task-runner" },
+      backend: {
+        id: "mock",
+        invoke: async () => {
+          throw new Error("backend should not be invoked during init");
+        },
+      },
+      initialize: true,
+      stderr: () => {},
+      stdout: () => {},
+    });
+  } finally {
+    process.chdir(originalCwd);
+  }
+
+  // Resume-after-init with --session-name must throw — the rule is
+  // "no overrides at all" regardless of lock state.
+  const target = resolveResumeTarget(init.runId, dir);
+  process.chdir(dir);
+  try {
+    await assert.rejects(
+      async () =>
+        runAgent({
+          loaded,
+          cliVars: {},
+          backend: {
+            id: "mock",
+            invoke: async () => {
+              throw new Error("backend should not be invoked");
+            },
+          },
+          overrides: { sessionName: "override-via-resume" },
+          resume: target,
+          stderr: () => {},
+          stdout: () => {},
+        }),
+      (err) => {
+        assert.ok(err instanceof ResumeError);
+        assert.match(err.message, /resuming an initialized run does not accept/);
+        assert.match(err.message, /--session-name/);
+        return true;
+      },
+    );
+  } finally {
+    process.chdir(originalCwd);
+  }
+});
+
+test("sessionName: execute-after-init rejects --session-name override when LOCKED (belt + suspenders)", async () => {
+  // Paired with the test above — this one asserts the lock path is
+  // still enforced even after the stricter "no overrides at all"
+  // rule. Defense in depth: checkLockedFieldsFromManifest re-checks
+  // manifest.lockedFields on priorInitialized so a future addition
+  // to RunOverrides can't sneak past the explicit no-overrides list.
+  const dir = tempDir();
+  writeAgent(dir, "named", NAMED_AGENT);
+  writeAssignment(
+    dir,
+    "locked-name-work",
+    `---
+schemaVersion: 1
+name: locked-name-work
+maxRetries: 1
+sessionName: fixed-name
+lockedFields: [sessionName]
+tasks:
+  - id: t1
+    title: First
+---
+Work.
+`,
+  );
+
+  const loaded = loadAgentConfig("named", dir);
+  const loadedAssignment = loadAssignmentConfig("locked-name-work", dir);
+  const originalCwd = process.cwd();
+  process.chdir(dir);
+  let init;
+  try {
+    init = await runAgent({
+      loaded,
+      loadedAssignment,
+      cliVars: {},
+      backend: {
+        id: "mock",
+        invoke: async () => {
+          throw new Error("backend should not be invoked during init");
+        },
+      },
+      initialize: true,
+      stderr: () => {},
+      stdout: () => {},
+    });
+  } finally {
+    process.chdir(originalCwd);
+  }
+  assert.deepEqual(init.manifest.lockedFields, ["sessionName"]);
+
+  const target = resolveResumeTarget(init.runId, dir);
+  process.chdir(dir);
+  try {
+    await assert.rejects(
+      async () =>
+        runAgent({
+          loaded,
+          cliVars: {},
+          backend: {
+            id: "mock",
+            invoke: async () => {
+              throw new Error("backend should not be invoked");
+            },
+          },
+          overrides: { sessionName: "try-to-override" },
+          resume: target,
+          stderr: () => {},
+          stdout: () => {},
+        }),
+      (err) => {
+        // Either rejection is acceptable — the no-overrides rule
+        // fires first, so we should see ResumeError. If that rule
+        // were ever removed, the lock check would still catch it
+        // (that's the defense-in-depth layer).
+        assert.ok(err instanceof ResumeError || err instanceof LockedFieldError);
         return true;
       },
     );
