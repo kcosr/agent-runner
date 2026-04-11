@@ -14,7 +14,7 @@
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
     "lint-staged": "lint-staged",
-    "check": "npm run lint",
+    "check": "npm run build && npm run lint && node --test \"test/**/*.test.mjs\"",
     "test": "npm run build && node --test \"test/**/*.test.mjs\"",
     "prepare": "husky install",
     "clean": "rimraf dist *.tsbuildinfo",
