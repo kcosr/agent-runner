@@ -733,14 +733,39 @@ task-runner run --resume-run <id> "follow-up message"
 
 Picks up the prior run from its workspace, normalizes any
 non-completed tasks back to `pending` (preserving their notes),
-and starts a new session. The first attempt of the new session
-sends *only* the follow-up message — the role instructions and task
-workflow are not re-rendered, because the backend already has them
-cached in the session it's resuming.
+and starts a new session. Under the manifest-canonical design,
+**the agent config is reconstructed from the frozen manifest** —
+the source `agent.md` is not re-read. The first attempt of the new
+session sends *only* the follow-up message (the role instructions
+and task workflow aren't re-rendered, since the backend already
+has them cached in the session it's resuming).
 
 `--add-task "<title>"` works alongside (or instead of) a follow-up
 message; the runner prepends a short reminder telling the agent
 to re-read the workspace `assignment.md`.
+
+**What's overridable on resume.** The manifest carries the frozen
+agent state, so most CLI overrides either don't apply or would
+actively break the captured backend session. The rules:
+
+- **Rejected on any resume** (regular *or* execute-after-init):
+  `--agent`, `--assignment`, `--backend`, `--backend-session-id`,
+  `--cwd` (sessions are cwd-bound), `--var` (vars are frozen into
+  the manifest at first write).
+- **Allowed on regular resume** (still vetted against the run's
+  frozen `lockedFields`): `--model`, `--effort`, `--timeout-sec`,
+  `--max-retries`, `--unrestricted`, `--session-name`, `--add-task`,
+  positional `[message]`.
+- **Execute-after-init** (resuming a run whose prior status was
+  `initialized`): **no overrides at all**. Init deliberately froze
+  every resolvable field; the only valid call is
+  `task-runner run --resume-run <id>`. If you need different values,
+  create a fresh run.
+
+The frozen values live under `manifest.agent.instructions`,
+`manifest.lockedFields`, `manifest.timeoutSec`, and the usual
+top-level fields — you can read the full state with
+`task-runner status <id> --output-format json`.
 
 ### Abort (Ctrl+C)
 

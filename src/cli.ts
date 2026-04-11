@@ -81,9 +81,13 @@ Task command options:
 Options:
   --agent <name|path>     Agent name (resolved against ./agents/<name>/agent.md
                           or $TASK_RUNNER_HOME/agents/<name>/agent.md) or a
-                          direct path to an agent.md file. Required for fresh
-                          runs and init; optional for --resume-run (taken from
-                          the prior manifest if omitted).
+                          direct path to an agent.md file. Optional on fresh
+                          runs and init — when omitted, task-runner synthesizes
+                          an ad-hoc agent from CLI overrides (in that case
+                          --backend is required; every other field gets a
+                          default). Forbidden with --resume-run: the agent
+                          config is reconstructed from the frozen manifest
+                          (no agent.md re-read).
   --assignment <n|path>   Assignment name (resolved against
                           ./assignments/<n>/assignment.md or
                           $TASK_RUNNER_HOME/assignments/<n>/assignment.md) or
@@ -98,20 +102,37 @@ Options:
                           session was originally created under.
   --resume-run <id|path>  Continue an existing run by its short id or path
                           to its workspace / run.json. Reads the prior
-                          manifest, reloads the agent, normalizes
-                          non-completed tasks to pending, and starts a new
+                          manifest and reconstructs the agent from its
+                          frozen fields (no re-read of the source agent.md
+                          under the manifest-canonical design). Normalizes
+                          non-completed tasks to pending and starts a new
                           session. Requires a follow-up message OR
                           --add-task, unless the prior manifest has
                           status=initialized (in which case the stored
-                          pendingPrompt is executed as session 0). Cannot
-                          be combined with --assignment.
+                          pendingPrompt is executed as session 0 with NO
+                          overrides — init deliberately froze them).
+
+                          Regular resume accepts these overrides (all still
+                          vetted against manifest.lockedFields): --model,
+                          --effort, --timeout-sec, --max-retries,
+                          --unrestricted, --session-name. The following
+                          are REJECTED on any resume: --agent, --assignment,
+                          --backend, --backend-session-id, --cwd (sessions
+                          are cwd-bound), --var (vars are frozen into the
+                          manifest at first write, not re-resolved).
   --var <key>=<value>     Set an input variable (repeatable). Validated
-                          against the assignment's var schema.
+                          against the assignment's var schema. Forbidden
+                          with --resume-run — vars are resolved once at
+                          first write and frozen into the manifest.
   --add-task <title>      Append a task to the run's task list with the
                           given title (repeatable). IDs are auto-generated
                           as \`cli-<short-id>\`. Rejected if \`tasks\` is
                           listed in the run's locked fields.
-  --cwd <path>            Override the agent's cwd.
+  --cwd <path>            Override the agent's cwd. Forbidden with
+                          --resume-run (backend sessions are cwd-bound;
+                          a new cwd would invalidate the captured session
+                          id). Create a fresh run if you need a different
+                          cwd.
   --backend <id>          Override the agent's backend (claude, codex, or passive).
                           Forbidden with --resume-run. The agent's model is
                           dropped on backend override unless --model is also
@@ -175,22 +196,6 @@ async function main(): Promise<void> {
     process.stderr.write("task-runner: init cannot be combined with --resume-run\n");
     process.exit(3);
   }
-  if (parsed.resumeRun !== undefined && parsed.assignment !== undefined) {
-    process.stderr.write("task-runner: --assignment cannot be combined with --resume-run\n");
-    process.exit(3);
-  }
-  if (parsed.resumeRun !== undefined && parsed.backend !== undefined) {
-    process.stderr.write(
-      "task-runner: --backend cannot be combined with --resume-run (backend is locked to the run that created the session)\n",
-    );
-    process.exit(3);
-  }
-  if (parsed.resumeRun !== undefined && parsed.backendSessionId !== undefined) {
-    process.stderr.write(
-      "task-runner: --backend-session-id cannot be combined with --resume-run (the resume target already carries a backend session id)\n",
-    );
-    process.exit(3);
-  }
 
   let resumeTarget: ReturnType<typeof resolveResumeTarget> | undefined;
   if (parsed.resumeRun !== undefined) {
@@ -205,33 +210,13 @@ async function main(): Promise<void> {
       process.exit(3);
     }
 
-    const priorInitialized = resumeTarget.manifest.status === "initialized";
-    if (priorInitialized) {
-      const forbidden: string[] = [];
-      if (parsed.message && parsed.message.trim().length > 0) forbidden.push("message");
-      if (parsed.addedTasks.length > 0) forbidden.push("--add-task");
-      if (Object.keys(parsed.vars).length > 0) forbidden.push("--var");
-      if (parsed.cwd !== undefined) forbidden.push("--cwd");
-      if (parsed.model !== undefined) forbidden.push("--model");
-      if (parsed.effort !== undefined) forbidden.push("--effort");
-      if (parsed.timeoutSec !== undefined) forbidden.push("--timeout-sec");
-      if (parsed.maxRetries !== undefined) forbidden.push("--max-retries");
-      if (parsed.unrestricted !== undefined) forbidden.push("--unrestricted");
-      if (forbidden.length > 0) {
-        process.stderr.write(
-          `task-runner: resuming an initialized run does not accept ${forbidden.join(", ")}\n`,
-        );
-        process.exit(3);
-      }
-    } else {
-      const hasMessage = Boolean(parsed.message && parsed.message.trim().length > 0);
-      const hasAddedTasks = parsed.addedTasks.length > 0;
-      if (!hasMessage && !hasAddedTasks) {
-        process.stderr.write(
-          "task-runner: --resume-run requires a follow-up message or at least one --add-task\n",
-        );
-        process.exit(3);
-      }
+    // All override-validation for resume lives in one place so the
+    // rules stay consistent and new fields get a single place to be
+    // classified. See the override matrix in docs/design.md.
+    const violation = validateResumeOverrides(resumeTarget.manifest, parsed);
+    if (violation !== null) {
+      process.stderr.write(`task-runner: ${violation}\n`);
+      process.exit(3);
     }
   }
 
@@ -386,6 +371,93 @@ async function main(): Promise<void> {
     process.stderr.write(`task-runner: ${(err as Error).message}\n`);
     process.exit(4);
   }
+}
+
+// Resume-time override policy. The manifest is the source of truth
+// post-creation, so the rules here reflect what can legitimately
+// change between sessions without corrupting the backend session or
+// bypassing a frozen lock.
+//
+//   Regular resume (prior terminal state):
+//     ALWAYS rejected:
+//       --agent               — the manifest is the source of truth;
+//                               passing it silently ignored would
+//                               mislead users about whether their
+//                               agent.md edits are taking effect
+//       --assignment          — assignment is baked into the workspace
+//       --backend             — backend is bound to the captured
+//                               session id; can't change underneath
+//       --backend-session-id  — the run already has one
+//       --cwd                 — backend sessions are cwd-bound; a
+//                               new cwd would invalidate the session
+//                               id stored in the manifest. Create a
+//                               fresh run if you need a different cwd
+//       --var                 — prompts aren't re-composed from
+//                               assignment vars on resume, so --var
+//                               is silently a no-op today. Reject
+//                               loudly instead.
+//     Allowed (but still lock-checked via checkLockedFields):
+//       --model, --effort, --timeout-sec, --max-retries,
+//       --unrestricted, --session-name, --add-task, [message]
+//     Required:
+//       [message] OR at least one --add-task
+//
+//   Execute-after-init (prior status=initialized):
+//     No overrides allowed, full stop. Init deliberately froze
+//     everything; any subsequent change should be a fresh init.
+//     The only valid call is `task-runner run --resume-run <id>`.
+function validateResumeOverrides(manifest: RunManifest, parsed: ParsedArgs): string | null {
+  const priorInitialized = manifest.status === "initialized";
+
+  // Fields that are never valid with --resume-run regardless of
+  // whether the prior state was initialized or terminal.
+  if (parsed.agent !== undefined) {
+    return "--agent cannot be combined with --resume-run (the agent is fixed on the run; under the manifest-canonical design, resume reads it from run.json instead of reloading agent.md)";
+  }
+  if (parsed.assignment !== undefined) {
+    return "--assignment cannot be combined with --resume-run (the assignment is baked into the workspace; use --add-task to extend the task list)";
+  }
+  if (parsed.backend !== undefined) {
+    return "--backend cannot be combined with --resume-run (backend is locked to the run that created the session)";
+  }
+  if (parsed.backendSessionId !== undefined) {
+    return "--backend-session-id cannot be combined with --resume-run (the resume target already carries a backend session id)";
+  }
+  if (parsed.cwd !== undefined) {
+    return "--cwd cannot be combined with --resume-run — backend sessions are bound to the cwd they were created in, so a different cwd would invalidate the captured session id. If you need a different cwd, create a fresh run instead.";
+  }
+  if (Object.keys(parsed.vars).length > 0) {
+    return "--var cannot be combined with --resume-run — runtime vars are resolved from the assignment at first write and frozen into the manifest; they are not re-resolved on resume, so passing --var would silently no-op. Edit the assignment and create a fresh run if vars need to change.";
+  }
+
+  if (priorInitialized) {
+    // Execute-after-init: no overrides allowed. Init deliberately
+    // froze every resolvable field.
+    const forbidden: string[] = [];
+    if (parsed.message && parsed.message.trim().length > 0) forbidden.push("message");
+    if (parsed.addedTasks.length > 0) forbidden.push("--add-task");
+    if (parsed.model !== undefined) forbidden.push("--model");
+    if (parsed.effort !== undefined) forbidden.push("--effort");
+    if (parsed.timeoutSec !== undefined) forbidden.push("--timeout-sec");
+    if (parsed.maxRetries !== undefined) forbidden.push("--max-retries");
+    if (parsed.unrestricted !== undefined) forbidden.push("--unrestricted");
+    if (parsed.sessionName !== undefined) forbidden.push("--session-name");
+    if (forbidden.length > 0) {
+      return `resuming an initialized run does not accept ${forbidden.join(", ")} — init froze these at creation. If you need different values, create a fresh run.`;
+    }
+    return null;
+  }
+
+  // Regular resume (non-initialized terminal state): at least one of
+  // a follow-up message or an --add-task is required; the other
+  // allowed overrides (model, effort, etc.) are vetted by
+  // checkLockedFields downstream against manifest.lockedFields.
+  const hasMessage = Boolean(parsed.message && parsed.message.trim().length > 0);
+  const hasAddedTasks = parsed.addedTasks.length > 0;
+  if (!hasMessage && !hasAddedTasks) {
+    return "--resume-run requires a follow-up message or at least one --add-task";
+  }
+  return null;
 }
 
 function runStatus(parsed: ParsedArgs): never {

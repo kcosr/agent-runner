@@ -237,21 +237,56 @@ export function resolveResumeTarget(
   );
 }
 
+// Structural validation for a run.json candidate. Shallow checks
+// deliberately — we confirm that every field `resolveResumeTarget`
+// consumers immediately dereference is present with the expected
+// type, so a truncated / partially-written manifest surfaces a
+// clear error at resume time instead of an unrelated TypeError
+// later in the run-loop or the status renderer.
+//
+// `typeof null === "object"` is the classic trap; every object-valued
+// field below also checks `!== null` explicitly. `finalTasks` is the
+// most dangerous — both run-loop and the status output iterate its
+// keys immediately and would throw if it were `null`.
 function isRunManifest(value: unknown): value is RunManifest {
   if (!value || typeof value !== "object") return false;
   const obj = value as Record<string, unknown>;
   if (obj.schemaVersion !== 2) return false;
   if (typeof obj.runId !== "string") return false;
+
+  // Top-level scalars required by downstream consumers.
+  if (typeof obj.backend !== "string") return false;
+  if (typeof obj.cwd !== "string") return false;
+  if (typeof obj.assignmentPath !== "string") return false;
+  if (typeof obj.workspaceDir !== "string") return false;
+  if (typeof obj.startedAt !== "string") return false;
+  if (typeof obj.status !== "string") return false;
+  if (typeof obj.timeoutSec !== "number") return false;
+  if (typeof obj.unrestricted !== "boolean") return false;
+  if (typeof obj.attempts !== "number") return false;
+  if (typeof obj.maxAttempts !== "number") return false;
+  if (typeof obj.tasksCompleted !== "number") return false;
+  if (typeof obj.tasksTotal !== "number") return false;
+  if (typeof obj.sessionCount !== "number") return false;
+
+  // Arrays.
   if (!Array.isArray(obj.attemptRecords)) return false;
   if (!Array.isArray(obj.sessions)) return false;
-  if (typeof obj.finalTasks !== "object") return false;
-  if (typeof obj.timeoutSec !== "number") return false;
   if (!Array.isArray(obj.lockedFields)) return false;
+
+  // Object-valued fields that are dereferenced by key immediately
+  // after resolveResumeTarget returns. `typeof null === "object"`
+  // so these need explicit null rejection.
+  if (!obj.finalTasks || typeof obj.finalTasks !== "object") return false;
+  if (!obj.runtimeVars || typeof obj.runtimeVars !== "object") return false;
+
+  // Nested agent record.
   if (!obj.agent || typeof obj.agent !== "object") return false;
   const agent = obj.agent as Record<string, unknown>;
   if (typeof agent.name !== "string") return false;
   if (typeof agent.instructions !== "string") return false;
-  // sourcePath is string | null
+  // sourcePath is string | null (null for ad-hoc agents)
   if (agent.sourcePath !== null && typeof agent.sourcePath !== "string") return false;
+
   return true;
 }
