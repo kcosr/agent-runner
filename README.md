@@ -584,30 +584,69 @@ printed to stdout.
 
 ## Bundled examples
 
+### Agents
+
 - **`agents/example/`** — repo orientation assistant (Claude).
 - **`agents/basic/`** — minimal Claude agent with no special setup.
 - **`agents/chat/`** — 0-task Claude "chat mode" agent.
 - **`agents/codex-example/`** — Codex equivalent of `example`.
 - **`agents/codex-chat/`** — 0-task Codex chat mode agent.
-- **`agents/code-reviewer/`** — senior-engineer code reviewer
-  (Codex `gpt-5.3-codex`, high effort, unrestricted) for use with
-  the `deep-review` assignment.
+- **`agents/code-reviewer/`** — senior staff engineer tuned for
+  deep code review (Codex `gpt-5.3-codex`, high effort,
+  unrestricted, severity-tagged findings with file:line citations).
+- **`agents/doc-reviewer/`** — senior technical writer tuned for
+  documentation review. Same model/effort as code-reviewer but a
+  different mindset: drift detection, example runnability,
+  completeness, and proposing mermaid diagrams where they'd help.
+
+### Assignments
+
 - **`assignments/repo-orientation/`** — three-task tour for getting
   oriented in any repo. Takes a `repo_path` var.
 - **`assignments/repo-diagnostics/`** — two simple shell tasks
   (`pwd`, `date`) used as a smoke test.
-- **`assignments/deep-review/`** — eleven-task deep code review:
-  orientation, architecture, concurrency, error handling, state
-  machine correctness, resource management, security, type safety,
-  test coverage, doc drift, and a synthesis pass.
+- **`assignments/code-review/`** — twelve-task deep code review
+  (orientation, architecture, concurrency, error handling, state
+  machine, resources, security, types/schema, simplification &
+  duplication, test coverage, doc drift, synthesis). Takes a
+  `range` var defaulting to `full`; pass any git-style spec
+  (`unstaged`, `staged`, `last commit`, `HEAD~3..HEAD`,
+  `main..branch`) to scope the review to that range.
+- **`assignments/doc-review/`** — twelve-task documentation review
+  (inventory, elevator pitch, quickstart, concepts, commands/API
+  accuracy, examples, completeness gaps, structure & navigation,
+  mermaid diagram proposals, voice consistency, accessibility,
+  synthesis). Takes a `repo_path` var, works on any project
+  (language-agnostic).
 
-Run the deep review against this repo:
+### Running them
 
 ```bash
+# Full code review of this repo
 task-runner run \
   --agent code-reviewer \
-  --assignment deep-review \
+  --assignment code-review \
   --var repo_path=/home/you/path/to/task-runner
+
+# Review just the unstaged changes
+task-runner run \
+  --agent code-reviewer \
+  --assignment code-review \
+  --var repo_path=/home/you/path/to/task-runner \
+  --var range=unstaged
+
+# Review the last commit
+task-runner run \
+  --agent code-reviewer \
+  --assignment code-review \
+  --var repo_path=/home/you/path/to/task-runner \
+  --var "range=last commit"
+
+# Full documentation review
+task-runner run \
+  --agent doc-reviewer \
+  --assignment doc-review \
+  --var repo_path=/home/you/path/to/some/project
 ```
 
 ## Development
