@@ -1508,7 +1508,7 @@ hard cap:
 
 ```
 TASK_RUNNER_CALL_DEPTH       — current depth (0 at the outermost call)
-TASK_RUNNER_MAX_CALL_DEPTH   — hard cap, default 4
+TASK_RUNNER_MAX_CALL_DEPTH   — hard cap, default 1
 ```
 
 On entry, `runAgent` reads the current depth from its own env. If
@@ -1518,10 +1518,14 @@ with code 3. When constructing the env for the backend child
 process, the runner overlays an incremented depth so a nested
 `task-runner run` spawned by that backend inherits it.
 
-- Default cap is 4. A legitimate orchestrator → task-runner →
-  task-runner chain is at depth 1 → 2, well under the limit.
+- **Default cap is 1.** Only one level of nesting is allowed: a
+  user invocation (depth 0) can spawn one agent that itself runs
+  `task-runner run` (depth 1), but that nested invocation refuses
+  to spawn another. Two-level recursion has not yet shown up as a
+  real use case and almost every "agent calls agent calls agent"
+  scenario is a confused agent looping on itself.
 - Override with `TASK_RUNNER_MAX_CALL_DEPTH=N task-runner run ...`
-  if you genuinely need more headroom.
+  if you genuinely need deeper chains.
 - Invalid / non-numeric env values fall back to defaults silently.
   A malformed env var must never disable the cap.
 - The check is depth-first: it fires at the top of `runAgent`, so a

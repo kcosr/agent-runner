@@ -9,7 +9,7 @@
  * Mechanism: two env vars travel through every child invocation.
  *
  *   TASK_RUNNER_CALL_DEPTH       — current depth (0 at the outermost call)
- *   TASK_RUNNER_MAX_CALL_DEPTH   — hard cap, default 4
+ *   TASK_RUNNER_MAX_CALL_DEPTH   — hard cap, default 1
  *
  * On entry, `runAgent` reads the current depth from its own env. If
  * `currentDepth >= maxDepth` it throws `RecursionDepthError` before
@@ -17,16 +17,19 @@
  * the env for the backend child process, the runner overlays an
  * incremented depth so a nested `task-runner run` inherits it.
  *
- * The cap is intentionally low (4) — a legitimate orchestrator agent
- * spawning task-runner that spawns another task-runner is at depth 1
- * → 2, well under the limit. Anything deeper is almost always a
- * mistake. Override with `TASK_RUNNER_MAX_CALL_DEPTH=N` if you
- * genuinely need more headroom.
+ * The default cap is 1 — i.e. only one level of nesting is allowed.
+ * A user invocation (depth 0) can spawn one agent that itself runs
+ * `task-runner run` (depth 1), but that nested invocation refuses to
+ * spawn another. Two-level recursion has not yet shown up as a real
+ * use case and almost every "agent calls agent calls agent" scenario
+ * is a confused agent looping on itself, so the default is set tight
+ * and explicit. Override with `TASK_RUNNER_MAX_CALL_DEPTH=N` if you
+ * have a real reason for deeper chains.
  */
 
 export const TASK_RUNNER_CALL_DEPTH_ENV = "TASK_RUNNER_CALL_DEPTH";
 export const TASK_RUNNER_MAX_CALL_DEPTH_ENV = "TASK_RUNNER_MAX_CALL_DEPTH";
-export const DEFAULT_MAX_CALL_DEPTH = 4;
+export const DEFAULT_MAX_CALL_DEPTH = 1;
 
 export class RecursionDepthError extends Error {
   constructor(

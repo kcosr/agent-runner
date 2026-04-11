@@ -188,6 +188,45 @@ function withEnv(overrides, fn) {
   }
 }
 
+test("runAgent: default cap is 1 — top-level allowed, nested refused", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "depth-agent", DEPTH_AGENT);
+  writeAssignment(dir, "depth-work", DEPTH_ASSIGNMENT);
+
+  // Top-level (depth=0) with default cap (1) is allowed.
+  const captured = {};
+  await withEnv(
+    {
+      [TASK_RUNNER_CALL_DEPTH_ENV]: undefined,
+      [TASK_RUNNER_MAX_CALL_DEPTH_ENV]: undefined,
+    },
+    async () => {
+      await runIn(dir, { backend: captureBackend(captured) });
+    },
+  );
+  assert.equal(captured.env[TASK_RUNNER_CALL_DEPTH_ENV], "1");
+  assert.equal(captured.env[TASK_RUNNER_MAX_CALL_DEPTH_ENV], "1");
+
+  // The would-be grandchild (depth=1, default cap 1) is refused.
+  await withEnv(
+    {
+      [TASK_RUNNER_CALL_DEPTH_ENV]: "1",
+      [TASK_RUNNER_MAX_CALL_DEPTH_ENV]: undefined,
+    },
+    async () => {
+      await assert.rejects(
+        () => runIn(dir, { backend: captureBackend({}) }),
+        (err) => {
+          assert.ok(err instanceof RecursionDepthError);
+          assert.equal(err.currentDepth, 1);
+          assert.equal(err.maxDepth, 1);
+          return true;
+        },
+      );
+    },
+  );
+});
+
 test("runAgent: clean env → child env has depth=1", async () => {
   const dir = tempDir();
   writeAgent(dir, "depth-agent", DEPTH_AGENT);
