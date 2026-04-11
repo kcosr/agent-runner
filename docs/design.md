@@ -271,16 +271,21 @@ interface AttemptRecord {
   exitCode: number | null;
   signal: string | null;
   timedOut: boolean;
-  assistantMessage: string | null;
+  transcript: string | null;      // full assistant output for this attempt
   logPath: string;                // relative path to attempts/NN.json
   tasksAfter: Record<string, TaskSnapshot>;
   invalidStatuses: { taskId: string; rawValue: string }[];
 }
 ```
 
-**Parsed, not raw**: `AttemptRecord.assistantMessage` carries the parsed
-final message (the same thing the user sees in text mode). The raw,
-unfiltered backend output lives in a sidecar file at `logPath` — see
+**Transcript, not summary**: `AttemptRecord.transcript` carries the full
+assistant-side text across every turn in the attempt, in order — the same
+thing the user sees streamed in text mode. It is **not** Claude's one-line
+`result.result` summary. If the assistant says useful things in
+intermediate turns and then drops them from the summary, the transcript
+preserves them; the summary does not. Raw, unfiltered backend output
+(including tool-use events, rate-limit events, and everything else claude
+emits) lives in a sidecar file at `logPath` — see
 [Attempt logs](#attempt-logs).
 
 **Task snapshots**: `finalTasks` is the authoritative state of every task
@@ -490,7 +495,7 @@ interface BackendInvokeResult {
   signal: NodeJS.Signals | null;
   timedOut: boolean;
   sessionId: string | null;        // extracted from output events
-  assistantMessage: string | null; // parsed final message
+  transcript: string | null;       // full assistant text across all turns
   rawStdout: string;               // full unfiltered backend stdout
   rawStderr: string;
 }
@@ -527,9 +532,11 @@ claude --print --output-format stream-json --verbose \
      `assistant` event's `message.content[].text` blocks otherwise. The
      adapter calls the `onStdoutText` callback for whichever source appears,
      guarded so it never double-prints if both are present.
-  3. **Final assistant message** — the `result` event's `result` field,
-     with fallback to the accumulated streamed text or the assistant event
-     text. This becomes the parsed `assistantMessage` in the return value.
+  3. **Transcript** — accumulated across the whole attempt: streamed text
+     deltas if present, otherwise every `assistant` event's text content
+     concatenated in order. Captures every turn, not just the final one.
+     The `result` event's `result` field is only used as a last-resort
+     fallback if no assistant events were seen at all.
 - **Prompt** is passed as the final positional argument, not stdin.
 - **Env**: `process.env` by default. Future hook point if we add an env
   policy.

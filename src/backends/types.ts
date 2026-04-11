@@ -18,7 +18,7 @@ export interface BackendInvokeResult {
   signal: NodeJS.Signals | null;
   timedOut: boolean;
   sessionId: string | null;
-  assistantMessage: string | null;
+  transcript: string | null;
   rawStdout: string;
   rawStderr: string;
 }

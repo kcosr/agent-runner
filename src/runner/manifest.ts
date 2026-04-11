@@ -47,7 +47,7 @@ export interface AttemptRecord {
   exitCode: number | null;
   signal: string | null;
   timedOut: boolean;
-  assistantMessage: string | null;
+  transcript: string | null;
   logPath: string; // relative to workspaceDir, e.g. "attempts/01.json"
   tasksAfter: Record<string, TaskSnapshot>;
   invalidStatuses: InvalidStatusReport[];

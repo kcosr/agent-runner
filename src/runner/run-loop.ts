@@ -42,7 +42,7 @@ export interface RunOptions {
 export interface RunOutcome {
   summary: RunSummary;
   exitCode: number;
-  attemptMessages: string[];
+  attemptTranscripts: string[];
   runId: string;
   planPath: string;
   workspaceDir: string;
@@ -219,7 +219,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   let attempts = 0;
   let sessionId: string | null = null;
   let currentPrompt = initialPrompt;
-  const attemptMessages: string[] = [];
+  const attemptTranscripts: string[] = [];
   let terminal: { status: RunStatus; exitCode: number } | null = null;
 
   while (attempts < maxAttempts && !terminal) {
@@ -246,8 +246,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     stdout("\n");
     const attemptEndedAt = new Date().toISOString();
 
-    if (invokeResult.assistantMessage) {
-      attemptMessages.push(invokeResult.assistantMessage);
+    if (invokeResult.transcript) {
+      attemptTranscripts.push(invokeResult.transcript);
     }
 
     if (attempts === 1 && invokeResult.sessionId) {
@@ -293,7 +293,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       exitCode: invokeResult.exitCode,
       signal: invokeResult.signal,
       timedOut: invokeResult.timedOut,
-      assistantMessage: invokeResult.assistantMessage,
+      transcript: invokeResult.transcript,
       logPath,
       tasksAfter: snapshotTasks(tasks),
       invalidStatuses: mergeInfo.invalidStatuses,
@@ -366,7 +366,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   return {
     summary,
     exitCode: terminal.exitCode,
-    attemptMessages,
+    attemptTranscripts,
     runId,
     planPath,
     workspaceDir,

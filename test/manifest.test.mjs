@@ -100,7 +100,7 @@ test("manifest: run.json is written and matches outcome.manifest", async () => {
       signal: null,
       timedOut: false,
       sessionId: "sess-abc-123",
-      assistantMessage: "all three done",
+      transcript: "all three done",
       rawStdout: "raw stdout text",
       rawStderr: "raw stderr text",
     };
@@ -122,7 +122,7 @@ test("manifest: run.json is written and matches outcome.manifest", async () => {
   assert.equal(onDisk.model, "claude-sonnet-4-6");
   assert.equal(onDisk.effort, "medium");
   assert.equal(onDisk.attemptRecords.length, 1);
-  assert.equal(onDisk.attemptRecords[0].assistantMessage, "all three done");
+  assert.equal(onDisk.attemptRecords[0].transcript, "all three done");
   assert.equal(onDisk.attemptRecords[0].logPath, "attempts/01.json");
   assert.equal(onDisk.attemptRecords[0].rawStdout, undefined, "no raw output in manifest");
   assert.equal(onDisk.finalTasks.t1.status, "completed");
@@ -163,7 +163,7 @@ test("manifest: attempt records snapshot state after each attempt", async () => 
       signal: null,
       timedOut: false,
       sessionId: "sess-multi",
-      assistantMessage: `attempt ${call}`,
+      transcript: `attempt ${call}`,
       rawStdout: `raw ${call}`,
       rawStderr: "",
     };
@@ -212,7 +212,7 @@ test("manifest: blocked run records status and captures final state", async () =
       signal: null,
       timedOut: false,
       sessionId: null,
-      assistantMessage: "hit a wall",
+      transcript: "hit a wall",
       rawStdout: "",
       rawStderr: "",
     };
@@ -236,7 +236,7 @@ test("manifest: exhausted run records all attempts", async () => {
       signal: null,
       timedOut: false,
       sessionId: null,
-      assistantMessage: `attempt ${call}`,
+      transcript: `attempt ${call}`,
       rawStdout: "",
       rawStderr: "",
     };
@@ -268,7 +268,7 @@ test("manifest: captures effort override on the run metadata", async () => {
         signal: null,
         timedOut: false,
         sessionId: null,
-        assistantMessage: "done",
+        transcript: "done",
         rawStdout: "",
         rawStderr: "",
       };
@@ -306,7 +306,7 @@ test("manifest: invalid statuses are recorded on the attempt record", async () =
       signal: null,
       timedOut: false,
       sessionId: null,
-      assistantMessage: `attempt ${call}`,
+      transcript: `attempt ${call}`,
       rawStdout: "",
       rawStderr: "",
     };

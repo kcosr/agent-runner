@@ -98,7 +98,7 @@ test("effort level from frontmatter is forwarded to backend", async () => {
       signal: null,
       timedOut: false,
       sessionId: null,
-      assistantMessage: "done",
+      transcript: "done",
       rawStdout: "",
       rawStderr: "",
     };
@@ -129,7 +129,7 @@ test("effort override beats the frontmatter value", async () => {
         signal: null,
         timedOut: false,
         sessionId: null,
-        assistantMessage: "done",
+        transcript: "done",
         rawStdout: "",
         rawStderr: "",
       };
@@ -159,7 +159,7 @@ test("happy path: mock marks all tasks completed in one attempt → exit 0", asy
       signal: null,
       timedOut: false,
       sessionId: "sess-abc",
-      assistantMessage: "All done.",
+      transcript: "All done.",
       rawStdout: "",
       rawStderr: "",
     };
@@ -202,7 +202,7 @@ test("retry path: first attempt leaves one incomplete, second completes → exit
       signal: null,
       timedOut: false,
       sessionId: "sess-xyz",
-      assistantMessage: `attempt ${invocations} message`,
+      transcript: `attempt ${invocations} message`,
       rawStdout: "",
       rawStderr: "",
     };
@@ -211,7 +211,7 @@ test("retry path: first attempt leaves one incomplete, second completes → exit
   assert.equal(invocations, 2);
   assert.equal(outcome.exitCode, 0);
   assert.equal(outcome.summary.attempts, 2);
-  assert.equal(outcome.attemptMessages.length, 2);
+  assert.equal(outcome.attemptTranscripts.length, 2);
   assert.ok(lastPrompt.includes("Remaining tasks:"), "retry prompt should be the nudge");
   assert.ok(lastPrompt.includes("t3 (status: pending)"));
 });
@@ -235,7 +235,7 @@ test("blocked path: marking one task blocked → exit 2, no further retries", as
       signal: null,
       timedOut: false,
       sessionId: null,
-      assistantMessage: "hit a wall",
+      transcript: "hit a wall",
       rawStdout: "",
       rawStderr: "",
     };
@@ -260,7 +260,7 @@ test("exhausted path: never completes → exit 1 after maxRetries+1 attempts", a
       signal: null,
       timedOut: false,
       sessionId: null,
-      assistantMessage: `msg ${invocations}`,
+      transcript: `msg ${invocations}`,
       rawStdout: "",
       rawStderr: "",
     };
@@ -297,7 +297,7 @@ test("session resume: first attempt session ID passed on retry", async () => {
       signal: null,
       timedOut: false,
       sessionId: "sess-12345",
-      assistantMessage: `msg ${invocations}`,
+      transcript: `msg ${invocations}`,
       rawStdout: "",
       rawStderr: "",
     };
@@ -333,7 +333,7 @@ test("resume failure falls back to fresh invocation", async () => {
         signal: null,
         timedOut: false,
         sessionId: "sess-12345",
-        assistantMessage: `msg ${invocations}`,
+        transcript: `msg ${invocations}`,
         rawStdout: "",
         rawStderr: invocations === 2 ? "session not found" : "",
       };

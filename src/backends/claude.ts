@@ -167,10 +167,10 @@ export const claudeBackend: Backend = {
     });
     flush(state);
 
-    const finalMessage =
-      state.resultText.trim() ||
+    const transcript =
       state.streamedText.trim() ||
       state.assistantEventText.trim() ||
+      state.resultText.trim() ||
       null;
 
     return {
@@ -178,7 +178,7 @@ export const claudeBackend: Backend = {
       signal: result.signal,
       timedOut: result.timedOut,
       sessionId: state.sessionId,
-      assistantMessage: finalMessage,
+      transcript,
       rawStdout: result.stdoutText,
       rawStderr: result.stderrText,
     };
