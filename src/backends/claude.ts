@@ -17,6 +17,7 @@ interface StreamState {
   resultText: string;
   assistantEventText: string;
   streamedText: string;
+  sawDelta: boolean;
   buffer: string;
   onText: (text: string) => void;
 }
@@ -72,7 +73,12 @@ function processLine(state: StreamState, line: string): void {
 
   if (event.type === "assistant" && isRecord(event.message)) {
     const text = extractAssistantText(event.message.content);
-    if (text) state.assistantEventText += text;
+    if (text) {
+      state.assistantEventText += text;
+      if (!state.sawDelta) {
+        state.onText(`${text}\n`);
+      }
+    }
     return;
   }
 
@@ -82,6 +88,7 @@ function processLine(state: StreamState, line: string): void {
       const delta = inner.delta;
       if (delta.type === "text_delta" && typeof delta.text === "string") {
         state.streamedText += delta.text;
+        state.sawDelta = true;
         state.onText(delta.text);
       }
     }
@@ -124,6 +131,9 @@ export const claudeBackend: Backend = {
     if (ctx.model) {
       args.push("--model", normalizeClaudeModel(ctx.model));
     }
+    if (ctx.effort) {
+      args.push("--effort", ctx.effort);
+    }
     if (ctx.unrestricted) {
       args.push("--dangerously-skip-permissions");
     }
@@ -139,6 +149,7 @@ export const claudeBackend: Backend = {
       resultText: "",
       assistantEventText: "",
       streamedText: "",
+      sawDelta: false,
       buffer: "",
       onText: (text) => ctx.onStdoutText?.(text),
     };

@@ -102,6 +102,7 @@ schemaVersion: 1                  # required, must be 1
 name: example                     # required, string
 backend: claude                   # required; "claude" only for now
 model: claude-sonnet-4-6          # optional, plain string (no enum wrapper)
+effort: medium                    # optional; low | medium | high | max
 timeoutSec: 3600                  # optional, default 3600
 unrestricted: false               # optional, default false; maps to --dangerously-skip-permissions
 cwd: .                            # optional, interpolatable with {{var}}
@@ -135,7 +136,8 @@ the Status field for each task as you go.
 | `schemaVersion` | Future migrations | — |
 | `name` | Identity in errors/logs | — |
 | `backend` | Adapter dispatch, extension point | — |
-| `model` | Simple string; agent-runner's `{type, values, default}` enum wrapper is overkill here | `reasoningEffort` |
+| `model` | Simple string; agent-runner's `{type, values, default}` enum wrapper is overkill here | — |
+| `effort` | Maps to Claude CLI `--effort <low|medium|high|max>` | — |
 | `timeoutSec` | Per-run wall clock | — |
 | `unrestricted` | Claude permission bypass | — |
 | `cwd` | Subprocess working directory | — |

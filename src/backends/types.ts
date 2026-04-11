@@ -1,8 +1,11 @@
+export type EffortLevel = "low" | "medium" | "high" | "max";
+
 export interface BackendInvokeContext {
   prompt: string;
   cwd: string;
   env: Record<string, string>;
   model?: string;
+  effort?: EffortLevel;
   unrestricted?: boolean;
   timeoutSec: number;
   resumeSessionId?: string;

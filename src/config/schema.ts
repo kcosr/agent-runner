@@ -30,6 +30,7 @@ export const agentConfigSchema = z
     name: z.string().min(1),
     backend: z.string().min(1),
     model: z.string().optional(),
+    effort: z.enum(["low", "medium", "high", "max"]).optional(),
     timeoutSec: z.number().int().positive().default(3600),
     unrestricted: z.boolean().default(false),
     cwd: z.string().default("."),

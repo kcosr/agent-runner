@@ -15,6 +15,7 @@ import { type RunStatus, type RunSummary, renderSummary } from "./output.js";
 export interface RunOverrides {
   cwd?: string;
   model?: string;
+  effort?: "low" | "medium" | "high" | "max";
   timeoutSec?: number;
   unrestricted?: boolean;
   maxRetries?: number;
@@ -130,6 +131,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const baseDir = process.cwd();
   const cwd = resolveCwd(overrides?.cwd ?? config.cwd, baseDir);
   const model = overrides?.model ?? config.model;
+  const effort = overrides?.effort ?? config.effort;
   const timeoutSec = overrides?.timeoutSec ?? config.timeoutSec;
   const unrestricted = overrides?.unrestricted ?? config.unrestricted;
   const maxRetries = overrides?.maxRetries ?? config.maxRetries;
@@ -186,6 +188,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       cwd,
       env: { ...process.env } as Record<string, string>,
       model,
+      effort,
       unrestricted,
       timeoutSec,
       resumeSessionId: sessionId ?? undefined,

@@ -3,8 +3,9 @@ schemaVersion: 1
 name: example
 backend: claude
 model: claude-sonnet-4-6
+effort: medium
 timeoutSec: 1800
-unrestricted: false
+unrestricted: true
 maxRetries: 3
 vars:
   repo_path:

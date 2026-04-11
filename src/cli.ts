@@ -14,12 +14,15 @@ interface ParsedArgs {
   vars: Record<string, string>;
   cwd?: string;
   model?: string;
+  effort?: "low" | "medium" | "high" | "max";
   timeoutSec?: number;
   unrestricted?: boolean;
   maxRetries?: number;
   extraPrompt?: string;
   showHelp: boolean;
 }
+
+const EFFORT_VALUES = ["low", "medium", "high", "max"] as const;
 
 const HELP = `Usage: task-runner run --agent <name-or-path> [options] [extra prompt]
 
@@ -30,6 +33,7 @@ Options:
   --var <key>=<value>     Set an input variable (repeatable).
   --cwd <path>            Override the agent's cwd.
   --model <id>            Override the agent's model.
+  --effort <level>        Override effort level (low, medium, high, max).
   --timeout-sec <n>       Override the per-attempt timeout.
   --max-retries <n>       Override the max number of retries (default 3).
   --unrestricted          Pass --dangerously-skip-permissions to Claude.
@@ -83,6 +87,13 @@ function parseArgs(argv: string[]): ParsedArgs {
       const next = args.shift();
       if (next === undefined) throw new Error("--model requires a value");
       result.model = next;
+    } else if (arg === "--effort") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--effort requires a value");
+      if (!(EFFORT_VALUES as readonly string[]).includes(next)) {
+        throw new Error(`--effort must be one of: ${EFFORT_VALUES.join(", ")}`);
+      }
+      result.effort = next as (typeof EFFORT_VALUES)[number];
     } else if (arg === "--timeout-sec") {
       const next = args.shift();
       if (next === undefined) throw new Error("--timeout-sec requires a number");
@@ -163,6 +174,7 @@ async function main(): Promise<void> {
       overrides: {
         cwd: parsed.cwd,
         model: parsed.model,
+        effort: parsed.effort,
         timeoutSec: parsed.timeoutSec,
         unrestricted: parsed.unrestricted,
         maxRetries: parsed.maxRetries,

@@ -11,6 +11,7 @@ schemaVersion: 1
 name: three
 backend: claude
 model: claude-sonnet-4-6
+effort: high
 maxRetries: 2
 tasks:
   - id: t1
@@ -77,6 +78,68 @@ async function runWithMock(baseDir, mockInvoke, overrides = {}) {
     process.chdir(originalCwd);
   }
 }
+
+test("effort level from frontmatter is forwarded to backend", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_TASKS);
+
+  let seenEffort;
+  const { outcome } = await runWithMock(dir, async (ctx) => {
+    seenEffort = ctx.effort;
+    const match = ctx.prompt.match(/\.task-runner\/\S+?\/tasks\.md/);
+    const absPlan = `./${match[0]}`;
+    let plan = readFileSync(absPlan, "utf8");
+    plan = editStatus(plan, "t1", "completed");
+    plan = editStatus(plan, "t2", "completed");
+    plan = editStatus(plan, "t3", "completed");
+    writeFileSync(absPlan, plan, "utf8");
+    return {
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      sessionId: null,
+      assistantMessage: "done",
+      rawStdout: "",
+      rawStderr: "",
+    };
+  });
+
+  assert.equal(outcome.exitCode, 0);
+  assert.equal(seenEffort, "high");
+});
+
+test("effort override beats the frontmatter value", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_TASKS);
+
+  let seenEffort;
+  const { outcome } = await runWithMock(
+    dir,
+    async (ctx) => {
+      seenEffort = ctx.effort;
+      const match = ctx.prompt.match(/\.task-runner\/\S+?\/tasks\.md/);
+      const absPlan = `./${match[0]}`;
+      let plan = readFileSync(absPlan, "utf8");
+      plan = editStatus(plan, "t1", "completed");
+      plan = editStatus(plan, "t2", "completed");
+      plan = editStatus(plan, "t3", "completed");
+      writeFileSync(absPlan, plan, "utf8");
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: null,
+        assistantMessage: "done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    },
+    { effort: "low" },
+  );
+
+  assert.equal(outcome.exitCode, 0);
+  assert.equal(seenEffort, "low");
+});
 
 test("happy path: mock marks all tasks completed in one attempt → exit 0", async () => {
   const dir = tempDir();
