@@ -9,6 +9,7 @@ export interface BackendInvokeContext {
   unrestricted?: boolean;
   timeoutSec: number;
   resumeSessionId?: string;
+  sessionName?: string;
   abortSignal?: AbortSignal;
   onStdoutText?: (text: string) => void;
   onStderrText?: (text: string) => void;

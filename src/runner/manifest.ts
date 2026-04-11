@@ -95,6 +95,7 @@ export interface RunManifest {
   model: string | null;
   effort: string | null;
   message: string | null;
+  sessionName: string | null;
   unrestricted: boolean;
   cwd: string;
   assignmentPath: string;

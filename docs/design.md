@@ -186,6 +186,7 @@ those are assignment-level concepts.
 ---
 schemaVersion: 1
 name: repo-orientation
+sessionName: orient {{repo_path}}      # optional display name on the backend
 vars:
   repo_path:
     type: string                  # string | number | boolean | enum
@@ -216,6 +217,7 @@ block; no code changes.
 |---|---|
 | `schemaVersion` | Future migrations |
 | `name` | Identity in errors/logs |
+| `sessionName` | Display name for the backend session (claude `--name`, codex `thread/name/set`). Vars are interpolated. Optional |
 | `vars` | CLI/env input schema (validated at run time) |
 | `message` | Default follow-up message for the run |
 | `tasks` | Task checklist, stable IDs, max 100 per assignment |
@@ -224,6 +226,30 @@ block; no code changes.
 
 Assignments **do not contain** `backend`, `model`, `effort`, `cwd`,
 `timeoutSec`, `unrestricted`, or `maxRetries` — those are agent-level.
+
+#### Session naming
+
+`sessionName` is a backend-side display label for the underlying
+session/thread. It is *not* the runner's `runId` (which stays the
+short slug for filesystem use) — it's what shows up in `claude
+/resume` listings, terminal titles, and codex thread listings.
+
+- **claude**: passed as `--name <value>` on every attempt. Claude
+  persists it to `~/.claude/projects/.../<session>.jsonl` as
+  `customTitle` and uses it in `/resume` and the terminal title.
+- **codex**: after `thread/start` (or `thread/resume`) returns the
+  `threadId`, the runner sends `thread/name/set` with `{threadId,
+  name}`. Codex broadcasts a `thread/name/updated` notification to
+  all clients. Failures are logged to stderr but don't fail the
+  attempt — naming is best-effort.
+- **Var interpolation**: the value is run through `interpolate()`
+  with the same injected vars used elsewhere, so
+  `sessionName: "build {{repo_name}}"` works.
+- **Resume**: the resolved name is persisted into `manifest.sessionName`
+  on the first session. On resume the manifest is canonical (the
+  assignment isn't loaded), so the name carries forward unchanged.
+- **init**: the resolved name is stored in the manifest at init
+  time and replayed on execute-after-init.
 
 ### Invocation shape
 
@@ -667,6 +693,7 @@ interface RunManifest {
   model: string | null;
   effort: string | null;
   message: string | null;          // session 0's initial message
+  sessionName: string | null;      // backend-side display name (resolved + interpolated)
   unrestricted: boolean;
   cwd: string;
   assignmentPath: string;          // workspace assignment.md (the I/O buffer)

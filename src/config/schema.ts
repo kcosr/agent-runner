@@ -69,6 +69,7 @@ export const assignmentConfigSchema = z
   .object({
     schemaVersion: z.literal(1),
     name: z.string().min(1),
+    sessionName: z.string().min(1).optional(),
     message: z.string().optional(),
     vars: z.record(z.string(), varDefSchema).default({}),
     tasks: z.array(taskDefSchema).max(100).default([]),

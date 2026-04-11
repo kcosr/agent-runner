@@ -400,6 +400,18 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
   const trimmedMessage = message?.trim() ?? "";
 
+  // Session name resolution: on resume / execute-after-init, the prior
+  // manifest is canonical (the assignment isn't loaded). On a fresh run
+  // or init, the assignment provides it and we interpolate vars into it.
+  let sessionName: string | null;
+  if ((isResume || priorInitialized) && resume) {
+    sessionName = resume.manifest.sessionName ?? null;
+  } else if (assignmentConfig?.sessionName) {
+    sessionName = interpolate(assignmentConfig.sessionName, injectedVars);
+  } else {
+    sessionName = null;
+  }
+
   // Prompt composition (Option B: broad → specific → mechanics → ask).
   //
   // Fresh run parts (non-empty only, joined with `\n\n`):
@@ -513,6 +525,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       model: model ?? null,
       effort: effort ?? null,
       message,
+      sessionName,
       unrestricted,
       cwd,
       assignmentPath,
@@ -545,6 +558,9 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       stderr(`             source=${loadedAssignment.sourcePath}\n`);
     }
     stderr(`             assignment=${assignmentPath}\n`);
+    if (sessionName) {
+      stderr(`             session=${sessionName}\n`);
+    }
     stderr(`             cwd=${cwd}\n`);
     stderr(`             resume with: task-runner run --resume-run ${runId}\n`);
     return {
@@ -590,6 +606,9 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     stderr(`             source=${loadedAssignment.sourcePath}\n`);
   }
   stderr(`             assignment=${assignmentPath}\n`);
+  if (sessionName) {
+    stderr(`             session=${sessionName}\n`);
+  }
   stderr(`             cwd=${cwd}\n`);
   stderr("\n");
 
@@ -616,6 +635,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       unrestricted,
       timeoutSec,
       resumeSessionId: sessionId ?? undefined,
+      sessionName: sessionName ?? undefined,
       abortSignal: opts.abortSignal,
       onStdoutText: (text) => stdout(text),
       onStderrText: (text) => stderr(text),

@@ -579,6 +579,21 @@ export const codexBackend: Backend = {
         throw new Error("codex: thread/start did not return a thread id");
       }
 
+      // 2a. thread/name/set — set the thread's display name when the
+      // assignment provided one. Always send (idempotent on the codex
+      // side); skipped silently if a prior session already set the same
+      // value. Errors are non-fatal — naming is best-effort.
+      if (ctx.sessionName) {
+        try {
+          await client.call("thread/name/set", {
+            threadId: state.threadId,
+            name: ctx.sessionName,
+          });
+        } catch (err) {
+          ctx.onStderrText?.(`codex: thread/name/set failed: ${(err as Error).message}\n`);
+        }
+      }
+
       // 3. turn/start — send prompt and wait for turn/completed notification.
       const turnCompletedPromise = new Promise<void>((resolve) => {
         state.resolveCompleted = resolve;

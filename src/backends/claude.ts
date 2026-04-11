@@ -159,6 +159,9 @@ export const claudeBackend: Backend = {
     if (ctx.unrestricted) {
       args.push("--dangerously-skip-permissions");
     }
+    if (ctx.sessionName) {
+      args.push("--name", ctx.sessionName);
+    }
     if (ctx.resumeSessionId) {
       args.push("--resume", ctx.resumeSessionId);
     }
