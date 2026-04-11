@@ -15,9 +15,15 @@ export interface MergeResult {
   unknownInFile: string[];
 }
 
+export interface MergeOptions {
+  applyStatus?: boolean;
+  applyNotes?: boolean;
+}
+
 export function mergeUpdates(
   tasks: Map<string, TaskState>,
   updates: ParsedSectionUpdate[],
+  opts: MergeOptions = {},
 ): MergeResult {
   const result: MergeResult = {
     invalidStatuses: [],
@@ -38,7 +44,7 @@ export function mergeUpdates(
     }
     seen.add(update.taskId);
 
-    if (update.status !== undefined) {
+    if (opts.applyStatus !== false && update.status !== undefined) {
       if (isValidStatus(update.status)) {
         task.status = update.status as TaskStatus;
       } else {
@@ -48,7 +54,7 @@ export function mergeUpdates(
         });
       }
     }
-    if (update.notes !== undefined) {
+    if (opts.applyNotes !== false && update.notes !== undefined) {
       task.notes = update.notes;
     }
   }

@@ -16,6 +16,7 @@ export function writeTextFileAtomic(path: string, contents: string): void {
 
   const tmpPath = join(dir, `.${basename(path)}.${process.pid}.${shortId()}.tmp`);
   let fd: number | null = null;
+  let dirFd: number | null = null;
 
   try {
     fd = openSync(tmpPath, "w", 0o600);
@@ -24,10 +25,21 @@ export function writeTextFileAtomic(path: string, contents: string): void {
     closeSync(fd);
     fd = null;
     renameSync(tmpPath, path);
+    dirFd = openSync(dir, "r");
+    fsyncSync(dirFd);
+    closeSync(dirFd);
+    dirFd = null;
   } catch (err) {
     if (fd !== null) {
       try {
         closeSync(fd);
+      } catch {
+        // ignore close failures during cleanup
+      }
+    }
+    if (dirFd !== null) {
+      try {
+        closeSync(dirFd);
       } catch {
         // ignore close failures during cleanup
       }

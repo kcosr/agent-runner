@@ -40,6 +40,7 @@ function normalizeCodexModel(model: string): string {
 }
 
 const TURN_INTERRUPT_GRACE_MS = 1_000;
+const TURN_INTERRUPT_RETRY_MS = 5_000;
 
 /**
  * Decide whether the turn was interrupted by something *outside* this
@@ -475,6 +476,19 @@ export async function interruptTurnWithGrace(
   }
 }
 
+export async function interruptTurnWithRetry(
+  client: Pick<CodexClient, "call">,
+  state: AccumulatorState,
+  retryWindowsMs = [TURN_INTERRUPT_GRACE_MS, TURN_INTERRUPT_RETRY_MS],
+): Promise<boolean> {
+  for (const timeoutMs of retryWindowsMs) {
+    if (await interruptTurnWithGrace(client, state, timeoutMs)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function extractTextFromContent(content: unknown): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
@@ -838,7 +852,7 @@ export const codexBackend: Backend = {
       if (race === "timeout" || race === "abort") {
         if (race === "timeout") timedOut = true;
         if (race === "abort") aborted = true;
-        await interruptTurnWithGrace(client, state);
+        await interruptTurnWithRetry(client, state);
       }
 
       // Detect a turn that codex marked `interrupted` without any

@@ -556,8 +556,9 @@ Both commands:
 - Are **rejected while the manifest status is `running`** — a live
   backend attempt owns the workspace, and a concurrent CLI write would
   race the attempt's parse/merge cycle. Allowed on `initialized` and
-  all terminal states (`success`, `blocked`, `exhausted`, `aborted`,
-  `error`).
+  passive terminal states. On terminal non-passive runs, only
+  notes-only `task set` is allowed; `task add` and status-changing
+  `task set` are rejected.
 - Rewrite both the workspace `assignment.md` and `run.json.finalTasks`
   via separate atomic file replacements (`status` consumers never see
   a half-written canonical file, but there is no single cross-file
@@ -597,7 +598,7 @@ At least one of `--status` / `--notes` must be supplied.
 
 | Flag | Purpose |
 |---|---|
-| `--title <text>` (required) | Title for the new task. Non-empty, ≤ 200 chars. |
+| `--title <text>` (required) | Title for the new task. Non-empty, single-line, ≤ 200 chars. |
 | `--output-format <text\|json>` | Default `text`. `json` prints the new task snapshot. |
 
 `task add` honors the `tasks` locked field the same way `--add-task`

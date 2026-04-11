@@ -373,6 +373,33 @@ test("task set: works on a terminal-status run after it has been resolved", asyn
   assert.equal(after.finalTasks.t1.notes, "Post-hoc annotation");
 });
 
+test("task set: notes-only update on terminal non-passive run ignores workspace status drift", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+
+  const manifestPath = join(outcome.workspaceDir, "run.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  manifest.status = "success";
+  manifest.endedAt = new Date().toISOString();
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+  let plan = readFileSync(outcome.assignmentPath, "utf8");
+  plan = plan.replace(/(<!-- task-id: t2 -->[\s\S]*?\*\*Status:\*\*) pending/, "$1 completed");
+  writeFileSync(outcome.assignmentPath, plan, "utf8");
+
+  runCli(["task", "set", outcome.runId, "t1", "--notes", "Post-hoc annotation"], { cwd: dir });
+
+  const after = readManifest(outcome.workspaceDir);
+  assert.equal(after.status, "success");
+  assert.equal(after.finalTasks.t1.notes, "Post-hoc annotation");
+  assert.equal(after.finalTasks.t1.status, "pending");
+  assert.equal(after.finalTasks.t2.status, "pending");
+
+  const persistedPlan = readFileSync(outcome.assignmentPath, "utf8");
+  assert.match(persistedPlan, /<!-- task-id: t2 -->[\s\S]*?\*\*Status:\*\* pending/);
+});
+
 test("task set: rejects status changes on a terminal non-passive run", async () => {
   const dir = tempDir();
   writeBundle(dir);

@@ -694,7 +694,12 @@ function runTaskSet(parsed: ParsedArgs): never {
   const resolved = resolveRunOrExit(runArg);
   requireMutableStatus(resolved.manifest);
 
-  const tasks = loadWorkspaceTaskMap(resolved.manifest);
+  const tasks = loadWorkspaceTaskMap(resolved.manifest, {
+    // Terminal non-passive runs allow notes-only task edits; keep
+    // preserving workspace note changes, but never import workspace
+    // status drift back into the canonical manifest on those runs.
+    applyStatus: !isTerminalNonPassiveRun(resolved.manifest),
+  });
   const target = tasks.get(taskId);
   if (!target) {
     process.stderr.write(

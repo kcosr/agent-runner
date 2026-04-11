@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import {
   interruptTurnWithGrace,
+  interruptTurnWithRetry,
   isExternalInterrupt,
   waitForTurnId,
 } from "../dist/backends/codex.js";
@@ -93,4 +94,33 @@ test("interruptTurnWithGrace: gives up cleanly when no turn id arrives", async (
   assert.equal(await interruptTurnWithGrace(client, state, 10), false);
   assert.deepEqual(calls, []);
   assert.equal(state.turnIdWaiters.length, 0);
+});
+
+test("interruptTurnWithRetry: retries after the initial grace window and interrupts on late turn id", async () => {
+  const calls = [];
+  const state = {
+    threadId: "thread-1",
+    turnId: null,
+    turnIdWaiters: [],
+  };
+  const client = {
+    async call(method, params) {
+      calls.push({ method, params });
+      return null;
+    },
+  };
+
+  const interrupt = interruptTurnWithRetry(client, state, [5, 50]);
+  setTimeout(() => {
+    state.turnId = "turn-late";
+    state.turnIdWaiters.shift()?.("turn-late");
+  }, 15);
+
+  assert.equal(await interrupt, true);
+  assert.deepEqual(calls, [
+    {
+      method: "turn/interrupt",
+      params: { threadId: "thread-1", turnId: "turn-late" },
+    },
+  ]);
 });

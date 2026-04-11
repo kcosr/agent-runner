@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { type MergeResult, mergeUpdates } from "../assignment/merge.js";
+import { type MergeOptions, type MergeResult, mergeUpdates } from "../assignment/merge.js";
 import type { TaskState } from "../assignment/model.js";
 import { parseAssignment } from "../assignment/parser.js";
 import { renderAssignment } from "../assignment/writer.js";
@@ -69,18 +69,22 @@ export interface WorkspaceMergeResult {
 export function mergeWorkspaceAssignmentIntoTaskMap(
   manifest: RunManifest,
   tasks: Map<string, TaskState>,
+  mergeOptions: MergeOptions = {},
 ): WorkspaceMergeResult {
   const rawAssignment = ensureWorkspaceAssignmentText(manifest.workspaceDir, tasks);
   const updates = parseAssignment(rawAssignment);
   return {
     rawAssignment,
-    mergeInfo: mergeUpdates(tasks, updates),
+    mergeInfo: mergeUpdates(tasks, updates, mergeOptions),
   };
 }
 
-export function loadWorkspaceTaskMap(manifest: RunManifest): Map<string, TaskState> {
+export function loadWorkspaceTaskMap(
+  manifest: RunManifest,
+  mergeOptions: MergeOptions = {},
+): Map<string, TaskState> {
   const tasks = taskMapFromManifestSnapshot(manifest);
-  mergeWorkspaceAssignmentIntoTaskMap(manifest, tasks);
+  mergeWorkspaceAssignmentIntoTaskMap(manifest, tasks, mergeOptions);
   return tasks;
 }
 
