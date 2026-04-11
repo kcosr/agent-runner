@@ -38,6 +38,27 @@ test("runProcess: pre-aborted signal kills child immediately", async () => {
   const elapsed = Date.now() - startedAt;
   assert.ok(elapsed < 10_000, `pre-aborted child should die fast, took ${elapsed}ms`);
   assert.equal(result.aborted, true);
+  assert.equal(result.exitCode, null);
+  assert.equal(result.signal, null);
+});
+
+test("runProcess: pre-aborted signal does not attempt to spawn the command", async () => {
+  const controller = new AbortController();
+  controller.abort();
+
+  const result = await runProcess({
+    command: "definitely-not-a-real-command",
+    args: [],
+    cwd: process.cwd(),
+    env: { ...process.env },
+    timeoutMs: 60_000,
+    abortSignal: controller.signal,
+  });
+
+  assert.equal(result.aborted, true);
+  assert.equal(result.exitCode, null);
+  assert.equal(result.signal, null);
+  assert.equal(result.stderrText, "");
 });
 
 test("runProcess: normal exit reports aborted: false", async () => {
