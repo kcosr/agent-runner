@@ -110,7 +110,7 @@ Options:
                           as \`cli-<short-id>\`. Rejected if \`tasks\` is
                           listed in the run's locked fields.
   --cwd <path>            Override the agent's cwd.
-  --backend <id>          Override the agent's backend (claude or codex).
+  --backend <id>          Override the agent's backend (claude, codex, or passive).
                           Forbidden with --resume-run. The agent's model is
                           dropped on backend override unless --model is also
                           passed (model strings are backend-specific).
