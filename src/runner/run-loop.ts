@@ -27,7 +27,7 @@ import { TASK_WORKFLOW_TEMPLATE, buildAddedTasksReminder } from "./task-workflow
 export interface RunOverrides {
   cwd?: string;
   model?: string;
-  effort?: "low" | "medium" | "high" | "max";
+  effort?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   message?: string;
   timeoutSec?: number;
   unrestricted?: boolean;

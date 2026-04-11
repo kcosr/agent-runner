@@ -113,7 +113,7 @@ schema so the two never drift.
 ---
 schemaVersion: 1                  # required, must be 1
 name: example                     # required, string
-backend: claude                   # required; "claude" only for now
+backend: claude                   # required; one of "claude" | "codex"
 model: claude-sonnet-4-6          # optional, plain string (no enum wrapper)
 effort: medium                    # optional; low | medium | high | max
 message: "focus on auth"          # optional default message (see `message` below)
@@ -762,11 +762,19 @@ stop and report it instead of retrying.
 
 ## Backend interface
 
-One small interface. Claude is the first (and only) implementation for now;
-new backends are drop-in additions under `src/backends/`.
+One small interface. Backends live under `src/backends/` and are registered
+in `src/backends/registry.ts`. Current backends: **claude** (subprocess),
+**codex** (JSON-RPC over stdio or WebSocket).
 
 ```ts
-type EffortLevel = "low" | "medium" | "high" | "max";
+type EffortLevel =
+  | "off"
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh"
+  | "max";
 
 interface BackendInvokeContext {
   prompt: string;
@@ -835,6 +843,97 @@ claude --print --output-format stream-json --verbose \
   to SIGKILL after 5 seconds.
 - **Completion detection**: process exit. Non-zero exit code counts as a
   failed attempt (and a failed attempt still produces a manifest entry).
+
+### Codex implementation
+
+Speaks codex's JSON-RPC 2.0 app-server protocol with a pluggable transport:
+
+- **Stdio transport (default)** — spawns `codex app-server` with the binary
+  from `process.env.TASK_RUNNER_CODEX_BIN` (fallback `"codex"`), wires
+  stdin/stdout as the JSON-RPC channel. One subprocess per `invoke()`.
+- **WebSocket transport** — activated by setting
+  `process.env.TASK_RUNNER_CODEX_WS_URL` to a `ws://` or `wss://` URL.
+  The adapter connects as a client to an externally-started
+  `codex app-server --listen ws://...`, sending/receiving JSON-RPC frames
+  over the WebSocket. Nothing is spawned locally.
+
+The protocol client is transport-agnostic; selecting stdio vs ws is a
+runtime decision based on the env var. Agent.md frontmatter is unchanged
+— it just says `backend: codex`.
+
+#### Protocol flow per invoke
+
+Every `invoke()` call opens a fresh transport and runs one full lifecycle:
+
+1. **`initialize`** — handshake request with `clientInfo` and `capabilities`.
+2. **`thread/start`** (fresh) or **`thread/resume`** (with
+   `ctx.resumeSessionId` as `threadId`). Params include `cwd`, normalized
+   `model`, mapped `effort`, and when `unrestricted` is true,
+   `approvalPolicy: "never"` plus `sandbox: "danger-full-access"`.
+3. **`turn/start`** — sends the prompt as `{input: [{type: "text", text: prompt}]}`
+   along with per-turn `model`/`effort`/`approvalPolicy`/`sandboxPolicy`
+   overrides. Awaits both the response and a `turn/completed` notification
+   before returning.
+4. **Notification stream** — while the turn runs, the client receives
+   notifications:
+   - `thread/started` → capture `thread.id` as session ID
+   - `item/agentMessage/delta` → stream `params.delta` to `onStdoutText`
+   - `item/completed` with `item.type === "agentMessage"` → capture
+     `item.text` as the definitive transcript for the turn
+   - `turn/completed` → capture `turn.status` (`completed` / `failed` /
+     `interrupted`) and any `turn.error.message`; resolves the waiting
+     promise
+   - Everything else (reasoning deltas, command execution, file change
+     deltas, etc.) is silent
+5. **Transport close** — after the turn completes (or times out), the
+   transport is closed. For stdio, this sends `SIGINT` to the subprocess
+   and escalates to `SIGKILL` after 5s. For ws, this closes the socket.
+
+#### Timeout and cancel
+
+On timeout (`ctx.timeoutSec` elapsed before `turn/completed`), the adapter
+sends a `turn/interrupt` request, then closes the transport. The invoke
+returns with `timedOut: true`.
+
+#### Session ID
+
+The session ID exposed to the runner is the codex **`threadId`**. On
+cross-invocation resume (`--resume-run`), the runner passes the stored
+`threadId` back as `ctx.resumeSessionId`, and the adapter uses
+`thread/resume` instead of `thread/start`.
+
+#### What the adapter does NOT do
+
+- **`turn/steer`**: not used. Every retry attempt is a new `turn/start`
+  on the same thread. The adapter doesn't keep a long-lived connection
+  across attempts — connection is opened and closed per `invoke()`. If
+  future work wants in-session steering for efficiency, that's an
+  `openSession()` interface extension, not a codex-specific change.
+- **Multi-turn batching**: one invoke = one turn. No history caching.
+- **Interactive mode**: codex supports a TTY mode; task-runner doesn't
+  use it.
+
+#### Effort and model mapping
+
+Task-runner's canonical `EffortLevel` enum is a superset. Per-backend
+mapping tables:
+
+| canonical | claude (`--effort`) | codex (`effort` param) |
+|---|---|---|
+| `off` | *(omit)* | *(omit)* |
+| `minimal` | `low` | `minimal` |
+| `low` | `low` | `low` |
+| `medium` | `medium` | `medium` |
+| `high` | `high` | `high` |
+| `xhigh` | `max` | `xhigh` |
+| `max` | `max` | `xhigh` |
+
+Each adapter has a small local `mapEffortTo<Backend>()` function with
+this table. The canonical enum is validated at schema load time.
+
+Model names are normalized by stripping any provider-namespace prefix
+(e.g., `openai-codex/gpt-5.4` → `gpt-5.4`, `anthropic/claude-sonnet-4-6`
+→ `claude-sonnet-4-6`). Each adapter does its own normalization.
 
 ## Session resume
 

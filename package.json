@@ -32,7 +32,9 @@
     "typescript": "^5.5.4"
   },
   "dependencies": {
+    "@types/ws": "^8.18.1",
     "gray-matter": "^4.0.3",
+    "ws": "^8.20.0",
     "zod": "^3.23.8"
   }
 }

@@ -7,7 +7,7 @@ export interface ParsedArgs {
   vars: Record<string, string>;
   cwd?: string;
   model?: string;
-  effort?: "low" | "medium" | "high" | "max";
+  effort?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   timeoutSec?: number;
   unrestricted?: boolean;
   maxRetries?: number;
@@ -17,7 +17,7 @@ export interface ParsedArgs {
   showHelp: boolean;
 }
 
-const EFFORT_VALUES = ["low", "medium", "high", "max"] as const;
+const EFFORT_VALUES = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const OUTPUT_FORMATS = ["text", "json"] as const;
 
 export function parseArgs(argv: string[]): ParsedArgs {

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { claudeBackend } from "./backends/claude.js";
+import { UnknownBackendError, resolveBackend } from "./backends/registry.js";
 import { type ParsedArgs, overridesFromParsedArgs, parseArgs } from "./cli/parse-args.js";
 import {
   AgentConfigError,
@@ -120,13 +120,24 @@ async function main(): Promise<void> {
     process.exit(3);
   }
 
+  let backend: ReturnType<typeof resolveBackend>;
+  try {
+    backend = resolveBackend(loaded.config.backend);
+  } catch (err) {
+    if (err instanceof UnknownBackendError) {
+      process.stderr.write(`task-runner: ${err.message}\n`);
+      process.exit(3);
+    }
+    throw err;
+  }
+
   const isJson = parsed.outputFormat === "json";
   const noop = (_text: string): void => {};
   try {
     const outcome = await runAgent({
       loaded,
       cliVars: parsed.vars,
-      backend: claudeBackend,
+      backend,
       resume: resumeTarget,
       overrides: overridesFromParsedArgs(parsed),
       stderr: isJson ? noop : (text) => process.stderr.write(text),

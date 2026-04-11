@@ -1,4 +1,4 @@
-export type EffortLevel = "low" | "medium" | "high" | "max";
+export type EffortLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 export interface BackendInvokeContext {
   prompt: string;

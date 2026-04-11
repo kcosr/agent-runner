@@ -41,9 +41,9 @@ export const agentConfigSchema = z
   .object({
     schemaVersion: z.literal(1),
     name: z.string().min(1),
-    backend: z.string().min(1),
+    backend: z.enum(["claude", "codex"]),
     model: z.string().optional(),
-    effort: z.enum(["low", "medium", "high", "max"]).optional(),
+    effort: z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]).optional(),
     message: z.string().optional(),
     timeoutSec: z.number().int().positive().default(3600),
     unrestricted: z.boolean().default(false),

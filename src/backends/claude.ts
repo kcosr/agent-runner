@@ -1,5 +1,24 @@
 import { runProcess } from "../util/spawn.js";
-import type { Backend, BackendInvokeContext, BackendInvokeResult } from "./types.js";
+import type { Backend, BackendInvokeContext, BackendInvokeResult, EffortLevel } from "./types.js";
+
+function mapEffortToClaude(effort: EffortLevel): string | null {
+  switch (effort) {
+    case "off":
+      return null;
+    case "minimal":
+      return "low";
+    case "low":
+      return "low";
+    case "medium":
+      return "medium";
+    case "high":
+      return "high";
+    case "xhigh":
+      return "max";
+    case "max":
+      return "max";
+  }
+}
 
 function normalizeClaudeModel(model: string): string {
   const idx = model.indexOf("/");
@@ -132,7 +151,10 @@ export const claudeBackend: Backend = {
       args.push("--model", normalizeClaudeModel(ctx.model));
     }
     if (ctx.effort) {
-      args.push("--effort", ctx.effort);
+      const mapped = mapEffortToClaude(ctx.effort);
+      if (mapped !== null) {
+        args.push("--effort", mapped);
+      }
     }
     if (ctx.unrestricted) {
       args.push("--dangerously-skip-permissions");
