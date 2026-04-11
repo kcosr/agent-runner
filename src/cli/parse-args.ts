@@ -14,6 +14,7 @@ export interface ParsedArgs {
   timeoutSec?: number;
   unrestricted?: boolean;
   maxRetries?: number;
+  sessionName?: string;
   outputFormat: OutputFormat;
   message?: string;
   addedTasks: string[];
@@ -112,6 +113,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
       result.maxRetries = n;
     } else if (arg === "--unrestricted") {
       result.unrestricted = true;
+    } else if (arg === "--session-name") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--session-name requires a value");
+      if (next.trim().length === 0) throw new Error("--session-name cannot be empty");
+      result.sessionName = next;
     } else if (arg === "--output-format") {
       const next = args.shift();
       if (next === undefined) throw new Error("--output-format requires a value");
@@ -143,6 +149,7 @@ export function overridesFromParsedArgs(parsed: ParsedArgs) {
     model: parsed.model,
     effort: parsed.effort,
     message: parsed.message,
+    sessionName: parsed.sessionName,
     timeoutSec: parsed.timeoutSec,
     unrestricted: parsed.unrestricted,
     maxRetries: parsed.maxRetries,

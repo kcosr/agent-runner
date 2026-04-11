@@ -77,6 +77,9 @@ Options:
   --timeout-sec <n>       Override the per-attempt timeout.
   --max-retries <n>       Override the max number of retries (default 3).
   --unrestricted          Bypass the backend's approval prompts.
+  --session-name <name>   Override the assignment's sessionName (the
+                          backend display label — claude --name / codex
+                          thread/name/set). Vars are interpolated.
   --output-format <fmt>   Output format: "text" (default) or "json".
   --help, -h              Print this message.
 

@@ -244,12 +244,21 @@ short slug for filesystem use) — it's what shows up in `claude
   attempt — naming is best-effort.
 - **Var interpolation**: the value is run through `interpolate()`
   with the same injected vars used elsewhere, so
-  `sessionName: "build {{repo_name}}"` works.
+  `sessionName: "build {{repo_name}}"` works. Static names like
+  `sessionName: nightly-cleanup` pass through unchanged.
+- **CLI override**: `--session-name <value>` overrides the
+  assignment's value (and is itself interpolated against the run's
+  vars). Listing `sessionName` in `lockedFields` makes the
+  override fail with `LockedFieldError`.
 - **Resume**: the resolved name is persisted into `manifest.sessionName`
   on the first session. On resume the manifest is canonical (the
-  assignment isn't loaded), so the name carries forward unchanged.
+  assignment isn't loaded), so the name carries forward unchanged
+  unless `--session-name` is passed, which updates it for the new
+  session and beyond.
 - **init**: the resolved name is stored in the manifest at init
-  time and replayed on execute-after-init.
+  time and replayed on execute-after-init. `--session-name` may
+  also be passed at execute-after-init time to override the
+  init-time value.
 
 ### Invocation shape
 
@@ -337,7 +346,8 @@ two lists are unioned; a field locked on either side rejects overrides.
 Valid entries:
 
 ```
-cwd  backend  model  effort  instructions  message  timeoutSec  unrestricted  maxRetries  tasks
+cwd  backend  model  effort  instructions  message  sessionName
+timeoutSec  unrestricted  maxRetries  tasks
 ```
 
 The zod schemas reject any entry outside this set at load time, so typos
@@ -1236,6 +1246,7 @@ task-runner <run|init>
                [--max-retries <n>]
                [--timeout-sec <n>]
                [--unrestricted]
+               [--session-name <name>]
                [--output-format <text|json>]
                [message]
 ```
@@ -1336,10 +1347,10 @@ from a prior session):
 
 CLI flags (and the positional `message`) override agent/assignment
 values for: `cwd`, `backend`, `model`, `effort`, `message`,
-`timeoutSec`, `unrestricted`, `maxRetries`. `--add-task` extends the
-assignment's `tasks:` array. Any field listed in the combined
-`lockedFields` (agent ∪ assignment) rejects override attempts with
-`LockedFieldError` and exit code 3 — see [Locked fields](#locked-fields).
+`sessionName`, `timeoutSec`, `unrestricted`, `maxRetries`. `--add-task`
+extends the assignment's `tasks:` array. Any field listed in the
+combined `lockedFields` (agent ∪ assignment) rejects override attempts
+with `LockedFieldError` and exit code 3 — see [Locked fields](#locked-fields).
 
 `--backend <claude|codex>` is special:
 

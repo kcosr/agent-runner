@@ -30,6 +30,7 @@ export interface RunOverrides {
   model?: string;
   effort?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   message?: string;
+  sessionName?: string;
   timeoutSec?: number;
   unrestricted?: boolean;
   maxRetries?: number;
@@ -122,6 +123,7 @@ function checkLockedFields(
     ["model", overrides?.model, agentConfig.model],
     ["effort", overrides?.effort, agentConfig.effort],
     ["message", overrides?.message, assignmentConfig?.message],
+    ["sessionName", overrides?.sessionName, assignmentConfig?.sessionName],
     ["timeoutSec", overrides?.timeoutSec, agentConfig.timeoutSec],
     ["unrestricted", overrides?.unrestricted, agentConfig.unrestricted],
     ["maxRetries", overrides?.maxRetries, agentConfig.maxRetries],
@@ -400,11 +402,14 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
   const trimmedMessage = message?.trim() ?? "";
 
-  // Session name resolution: on resume / execute-after-init, the prior
-  // manifest is canonical (the assignment isn't loaded). On a fresh run
-  // or init, the assignment provides it and we interpolate vars into it.
+  // Session name resolution: CLI override wins, then on resume /
+  // execute-after-init the prior manifest is canonical (the assignment
+  // isn't loaded). On a fresh run or init the assignment provides it
+  // and we interpolate vars into it.
   let sessionName: string | null;
-  if ((isResume || priorInitialized) && resume) {
+  if (overrides?.sessionName) {
+    sessionName = interpolate(overrides.sessionName, injectedVars);
+  } else if ((isResume || priorInitialized) && resume) {
     sessionName = resume.manifest.sessionName ?? null;
   } else if (assignmentConfig?.sessionName) {
     sessionName = interpolate(assignmentConfig.sessionName, injectedVars);
@@ -481,6 +486,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       ...resume.manifest,
       model: model ?? null,
       effort: effort ?? null,
+      sessionName,
       unrestricted,
       cwd,
       assignmentPath,
@@ -500,6 +506,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     // (it has now been consumed by this first real session).
     manifest = {
       ...resume.manifest,
+      sessionName,
       endedAt: null,
       status: "running",
       exitCode: null,

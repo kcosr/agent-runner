@@ -31,6 +31,7 @@ export const LOCKABLE_FIELDS = [
   "effort",
   "instructions",
   "message",
+  "sessionName",
   "timeoutSec",
   "unrestricted",
   "maxRetries",

@@ -3,9 +3,10 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { parseArgs } from "../dist/cli/parse-args.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
 import { resolveResumeTarget } from "../dist/runner/manifest.js";
-import { runAgent } from "../dist/runner/run-loop.js";
+import { LockedFieldError, runAgent } from "../dist/runner/run-loop.js";
 
 const NAMED_AGENT = `---
 schemaVersion: 1
@@ -220,6 +221,133 @@ test("sessionName: persists across resume from manifest, not the assignment", as
     });
     assert.equal(captured.sessionName, "nightly-cleanup");
     assert.equal(second.manifest.sessionName, "nightly-cleanup");
+  } finally {
+    process.chdir(originalCwd);
+  }
+});
+
+test("sessionName: parseArgs accepts --session-name", () => {
+  const a = parseArgs([
+    "node",
+    "task-runner",
+    "run",
+    "--agent",
+    "x",
+    "--session-name",
+    "my-session",
+  ]);
+  assert.equal(a.sessionName, "my-session");
+});
+
+test("sessionName: parseArgs rejects empty --session-name", () => {
+  assert.throws(
+    () => parseArgs(["node", "task-runner", "run", "--agent", "x", "--session-name", ""]),
+    /--session-name cannot be empty/,
+  );
+});
+
+test("sessionName: --session-name override beats assignment value", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "named", NAMED_AGENT);
+  writeAssignment(dir, "static-name-work", STATIC_NAME_ASSIGNMENT);
+
+  const captured = {};
+  const outcome = await runIn(dir, "named", "static-name-work", {
+    backend: captureBackend(captured),
+  });
+  // Re-run with override
+  const captured2 = {};
+  const loaded = loadAgentConfig("named", dir);
+  const loadedAssignment = loadAssignmentConfig("static-name-work", dir);
+  const originalCwd = process.cwd();
+  process.chdir(dir);
+  try {
+    const overridden = await runAgent({
+      loaded,
+      loadedAssignment,
+      cliVars: {},
+      backend: captureBackend(captured2),
+      overrides: { sessionName: "override-name" },
+      stderr: () => {},
+      stdout: () => {},
+    });
+    assert.equal(captured2.sessionName, "override-name");
+    assert.equal(overridden.manifest.sessionName, "override-name");
+  } finally {
+    process.chdir(originalCwd);
+  }
+  // Original (no override) still works
+  assert.equal(outcome.manifest.sessionName, "nightly-cleanup");
+});
+
+test("sessionName: --session-name override interpolates vars", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "named", NAMED_AGENT);
+  writeAssignment(dir, "named-work", NAMED_ASSIGNMENT);
+
+  const captured = {};
+  const loaded = loadAgentConfig("named", dir);
+  const loadedAssignment = loadAssignmentConfig("named-work", dir);
+  const originalCwd = process.cwd();
+  process.chdir(dir);
+  try {
+    const outcome = await runAgent({
+      loaded,
+      loadedAssignment,
+      cliVars: { repo_name: "task-runner" },
+      backend: captureBackend(captured),
+      overrides: { sessionName: "deploy {{repo_name}} prod" },
+      stderr: () => {},
+      stdout: () => {},
+    });
+    assert.equal(captured.sessionName, "deploy task-runner prod");
+    assert.equal(outcome.manifest.sessionName, "deploy task-runner prod");
+  } finally {
+    process.chdir(originalCwd);
+  }
+});
+
+test("sessionName: lockedFields: [sessionName] rejects --session-name override", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "named", NAMED_AGENT);
+  writeAssignment(
+    dir,
+    "locked-name-work",
+    `---
+schemaVersion: 1
+name: locked-name-work
+sessionName: fixed-name
+lockedFields: [sessionName]
+tasks:
+  - id: t1
+    title: First
+---
+Work.
+`,
+  );
+
+  const loaded = loadAgentConfig("named", dir);
+  const loadedAssignment = loadAssignmentConfig("locked-name-work", dir);
+  const originalCwd = process.cwd();
+  process.chdir(dir);
+  try {
+    await assert.rejects(
+      () =>
+        runAgent({
+          loaded,
+          loadedAssignment,
+          cliVars: {},
+          backend: captureBackend({}),
+          overrides: { sessionName: "try-to-override" },
+          stderr: () => {},
+          stdout: () => {},
+        }),
+      (err) => {
+        assert.ok(err instanceof LockedFieldError);
+        assert.equal(err.field, "sessionName");
+        return true;
+      },
+    );
   } finally {
     process.chdir(originalCwd);
   }
