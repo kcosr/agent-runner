@@ -3,15 +3,24 @@
 ## Purpose
 
 `task-runner` is a minimal CLI that invokes an AI agent (starting with Claude)
-with a pre-seeded task list and enforces completion. If the agent does not
-finish every task, the runner re-invokes it up to a configurable number of
-retries. If the agent reports a task as blocked, the runner stops and surfaces
-the blocker instead of spinning.
+with a pre-seeded task list and loops until the agent has accounted for every
+task. If the agent leaves any task marked `pending` at the end of a turn, the
+runner re-invokes it up to a configurable number of retries. If the agent
+reports a task as `blocked`, the runner stops and surfaces the blocker instead
+of spinning.
+
+Task status is self-reported by the agent via the `**Status:**` field in the
+workspace `assignment.md`; the runner parses that field but does not
+independently verify that the work was actually performed. The value of the
+structure is that the agent cannot silently skip an item — every task must be
+explicitly accounted for, and the per-task Notes block captures evidence for
+after-the-fact audit. For stronger guarantees, encode verification into the
+task body (e.g., "run `npm test` and paste the exit code into Notes").
 
 It is a deliberate strip-down of concepts from `agent-runner`. The goal is a
 small, focused tool — no daemon, no web console, no storage layer, no fully
-customizable hook framework. Just: "invoke an agent with this config, make
-sure it completes this list, return the output."
+customizable hook framework. Just: "invoke an agent with this config, drive it
+through this task list with retries, return the output."
 
 The canonical record of every run is a machine-readable manifest
 (`run.json`) written to the per-run workspace directory. Each run also
@@ -28,8 +37,12 @@ manifest is the source of truth.
 - Multi-agent orchestration / handles / lineage
 - Persistent run history or a daemon/server component
 - Fully customizable hooks (pre-invoke, post-invoke, event masks, mutation
-  policies). `task-runner` has exactly one baked-in behavior: enforce task
-  completion and retry.
+  policies). `task-runner` has exactly one baked-in behavior: parse the
+  agent's self-reported task statuses after each turn and retry when any are
+  still `pending`.
+- Verification that an agent *actually* performed the work for a task. The
+  runner reads the `**Status:**` string the agent wrote; it never checks the
+  agent's claims against reality. See Purpose above.
 - Tool/MCP management
 - Web UI
 

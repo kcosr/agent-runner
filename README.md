@@ -1,15 +1,16 @@
 # task-runner
 
-A small, focused CLI for invoking an AI coding agent against a structured
-task list and making sure it actually finishes.
+A small, focused CLI that drives an AI coding agent through a structured
+task list, tracks per-task status, and retries until every task is
+marked done or blocked.
 
 You write a checklist. `task-runner` hands it to a backend (Claude or
-Codex), the agent works through it and updates each task as it goes,
-and the runner enforces completion: if any task is still `pending` when
-the agent ends its turn, the agent gets re-invoked with a nudge — up
-to a configurable retry budget. Blocked tasks halt the run cleanly.
-Aborted runs (Ctrl+C, external interrupt, timeout) persist their state
-and can be resumed later.
+Codex), the agent works through it and updates each task's status in
+place, and the runner loops until the agent has accounted for every
+task: if any are still `pending` when the agent ends its turn, it gets
+re-invoked with a nudge — up to a configurable retry budget. Blocked
+tasks halt the run cleanly. Aborted runs (Ctrl+C, external interrupt,
+timeout) persist their state and can be resumed later.
 
 It is intentionally not a daemon, not a web console, and not an
 orchestration framework. It is one binary that runs an agent, watches
@@ -72,10 +73,14 @@ chat output.
 
 - **Two backends**: Claude (subprocess wrapping `claude --print`) and
   Codex (JSON-RPC managed mode over stdio or websocket).
-- **Structured task enforcement**: tasks have stable ids and statuses
-  (`pending`, `in_progress`, `completed`, `blocked`); the runner
-  parses the workspace `assignment.md` after every turn and re-invokes
-  the agent with a precise list of what's still incomplete.
+- **Structured task tracking**: tasks have stable ids and statuses
+  (`pending`, `in_progress`, `completed`, `blocked`) that the agent
+  updates in place; the runner parses the workspace `assignment.md`
+  after every turn and re-invokes with a precise list of what the
+  agent hasn't yet marked done. The runner does not independently
+  verify work — it trusts the status the agent wrote — so the checklist
+  acts as a structured reminder and audit trail, not a proof of
+  completion. See [What the checklist does and doesn't do](#what-the-checklist-does-and-doesnt-do).
 - **Retries with budget**: configurable per-attempt timeout and per-run
   retry count. Blocked tasks short-circuit the loop.
 - **Resumable runs**: every run persists a canonical `run.json`
@@ -299,6 +304,18 @@ After every backend invocation, the runner re-reads the workspace
 
 Task ids are stable across invocations so retries can address
 incomplete work precisely.
+
+#### What the checklist does and doesn't do
+
+The runner trusts the `**Status:**` string the agent writes — it does
+not independently verify that a task's work was actually done. What
+the structure *does* buy you is that the agent cannot silently skip
+an item: every task must be explicitly accounted for (`completed`,
+`blocked`, or left `pending` and retried), and the per-task Notes
+block captures evidence you can audit after the fact. If you need
+harder guarantees, encode them into the task body itself — e.g.,
+"run `npm test` and paste the exit code into Notes," or "open the
+file at `src/foo.ts` and paste the top-level exports."
 
 One run attempt, from CLI to backend and back:
 

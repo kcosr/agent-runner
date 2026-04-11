@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Minimal CLI that invokes an AI agent with a seeded task list and enforces completion via retries.",
+  "description": "Minimal CLI that drives an AI agent through a seeded task list, tracking per-task status and retrying until the agent has accounted for every task.",
   "bin": {
     "task-runner": "./dist/cli.js"
   },
