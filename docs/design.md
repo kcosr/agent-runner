@@ -255,7 +255,6 @@ vars:
     envName: REPO_PATH            # only when source includes env
     default: null                 # optional fallback
     description: Path to target repo
-    sensitive: false              # default false
     values: [a, b, c]             # only for type: enum
 message: "focus on the auth layer first"   # optional default
 lockedFields: [message]           # optional
@@ -504,7 +503,7 @@ task-runner: cannot override locked field: model
 - `lockedFields: [message]` on an **assignment** means a CLI positional
   message is rejected (and the assignment's default message is used).
 - Locks do not cover `vars`: those have their own schema (`required`,
-  `source`, `sensitive`) and are outside the lock mechanism.
+  `source`) and are outside the lock mechanism.
 
 **What this replaces** — agent-runner had a richer `overridePolicy` with
 `{default: allow|deny, allow: [...], deny: [...]}`. We took the simplest
@@ -2038,8 +2037,6 @@ the plug; nothing went wrong." A subsequent `task-runner run
 
 ## Open questions / deferred
 
-- **Sensitive var redaction**: `sensitive: true` fields should be redacted
-  from manifest `prompt` fields and from logs. Not yet implemented.
 - **Tool permissions / allowlists**: Claude CLI supports `--allowedTools`,
   `--permission-mode`, etc. Not in scope until an agent actually needs it.
   A middle-ground permission mode (e.g., `acceptEdits` only) would be a

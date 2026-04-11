@@ -852,7 +852,6 @@ vars:
     envName: REPO_PATH          # only when source includes env
     default: null               # optional fallback
     description: Path to target repo
-    sensitive: false            # default false
     values: [a, b, c]           # only for type: enum
 ```
 

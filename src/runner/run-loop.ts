@@ -728,11 +728,14 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     // with {{var}} refs interpolated. This is documentation for the
     // CALLER of task-runner, not content sent to the backend — see
     // the field comment on RunManifest.callerInstructions.
-    const rawCallerInstructions = assignmentConfig?.callerInstructions ?? null;
+    //
+    // Trim before the length check: a whitespace-only value (like
+    // `callerInstructions: "   "`) would otherwise freeze into the
+    // manifest as whitespace and later render as an empty banner at
+    // print time. Treat it as absent.
+    const rawCallerInstructions = assignmentConfig?.callerInstructions?.trim() ?? "";
     const frozenCallerInstructions =
-      rawCallerInstructions && rawCallerInstructions.length > 0
-        ? interpolate(rawCallerInstructions, injectedVars)
-        : null;
+      rawCallerInstructions.length > 0 ? interpolate(rawCallerInstructions, injectedVars) : null;
     manifest = {
       schemaVersion: 2,
       runId,

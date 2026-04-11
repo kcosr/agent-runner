@@ -454,3 +454,38 @@ Body.
   assert.equal(outcome.manifest.callerInstructions, null);
   assert.doesNotMatch(stderr, /── caller instructions ──/);
 });
+
+test("whitespace-only callerInstructions is treated as absent (no empty banner)", async () => {
+  // Regression guard for the LOW review finding: a whitespace-only
+  // value used to freeze into the manifest and later render an empty
+  // banner block at print time. Normalized with .trim() before the
+  // length check now.
+  const dir = tempDir();
+  writeAgent(dir, "caller-test", AGENT);
+  writeAssignment(
+    dir,
+    "whitespace-caller",
+    `---
+schemaVersion: 1
+name: whitespace-caller
+callerInstructions: "   \\n\\t  "
+vars:
+  repo_path:
+    type: string
+    required: true
+    source: cli
+tasks:
+  - id: t1
+    title: Only
+---
+Body.
+`,
+  );
+  const { stderr, outcome } = await runFreshRun(dir, "whitespace-caller", { initialize: true });
+  assert.equal(
+    outcome.manifest.callerInstructions,
+    null,
+    "whitespace-only callerInstructions normalizes to null",
+  );
+  assert.doesNotMatch(stderr, /── caller instructions ──/, "no empty banner printed");
+});

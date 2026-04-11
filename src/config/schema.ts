@@ -17,7 +17,6 @@ export const varDefSchema = z
     envName: z.string().optional(),
     default: z.unknown().optional(),
     description: z.string().optional(),
-    sensitive: z.boolean().default(false),
     values: z.array(z.string()).optional(),
   })
   .refine((v) => v.type !== "enum" || (v.values !== undefined && v.values.length > 0), {
