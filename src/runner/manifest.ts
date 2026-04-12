@@ -384,8 +384,13 @@ export function listRunManifests(env: NodeJS.ProcessEnv = process.env): ListedRu
           continue;
         }
         runs.push({ repo: bucket.name, workspaceDir, manifest });
-      } catch {
-        // Unsupported or corrupt manifests are skipped for discovery.
+      } catch (err) {
+        // Unsupported or corrupt manifests are skipped for discovery,
+        // but unexpected failures should still surface.
+        if (err instanceof ResumeError) {
+          continue;
+        }
+        throw err;
       }
     }
   }
