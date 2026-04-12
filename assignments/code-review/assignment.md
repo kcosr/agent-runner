@@ -428,6 +428,15 @@ tasks:
       Your job is to verify that what shipped matches what was
       planned, with no silent deferrals.
 
+      Also check the plan for explicit design constraints.
+      When the plan or repo conventions say to avoid fallback
+      logic, heuristics, alias fields, compatibility shims,
+      or dual-shape readers unless compatibility was explicitly
+      requested, enforce that rule here. A change that quietly
+      adds transitional compatibility machinery despite a
+      hot-cut plan is a plan-coverage/design finding, not an
+      implementation detail to wave through.
+
       Walk **every task** in the plan. Do not hardcode specific
       task ids — the plan's task list is whatever shape its
       planner produced.
@@ -456,7 +465,7 @@ tasks:
         one against the diff; if the Notes say "no changes
         needed" or equivalent, accept it like a process task.
 
-      **Fallback for untagged plans.** If the Category tag is
+      **Inference for untagged plans.** If the Category tag is
       missing (legacy plans, manually-authored assignments,
       or a planner that failed to tag), flag it as a [LOW]
       finding (`untagged task requires inference`) and fall
@@ -566,6 +575,24 @@ tasks:
       one still holds for the final implementation. A silently
       broken assumption is [HIGH] — cite the assumption and
       the place where the code contradicts it.
+
+      **Step 5: verify design-discipline constraints.** If the
+      plan, repo guidance, or task notes say the change should
+      be a hot cut with no compatibility layer, check for:
+        - fallback readers/writers for old shapes
+        - heuristic format detection instead of an explicit
+          contract
+        - alias fields kept in sync with the new field
+        - bridge routes or dual command/code paths
+        - compatibility-only migrations the plan did not call for
+
+      Findings here are usually:
+        - [HIGH] unplanned compatibility layer or fallback
+          logic that materially widens the maintenance surface
+        - [MEDIUM] heuristic detection where the plan called
+          for an explicit contract
+        - [LOW] leftover transitional comments/TODOs pointing
+          at a migration that the implemented change no longer needs
 
       If every plan task is `completed` with concrete evidence
       and the diff matches the code-bearing tasks and no

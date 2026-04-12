@@ -1114,8 +1114,9 @@ printed to stdout.
   risks; copies a template from the configured task-runner
   config root into the repo-name drafts area under
   `${TASK_RUNNER_STATE_DIR}/drafts/`; fills in every placeholder
-  with concrete file-level detail; then runs `task-runner init`
-  to freeze the draft into a new run workspace. The resulting
+  with concrete file-level detail; then hands the caller the
+  exact `task-runner init ...` command to run. After the caller
+  initializes the draft into a new run workspace, the resulting
   run can be executed by any agent via
   `task-runner run --resume-run <new-id>`. Execution requires
   `TASK_RUNNER_MAX_CALL_DEPTH=2` because the generated plan

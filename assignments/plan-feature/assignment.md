@@ -27,8 +27,8 @@ callerInstructions: |
   Any general-purpose agent works (for example `example`). The
   planner doesn't need special role instructions — the detail
   lives in this assignment's task bodies. It does need shell
-  access (`unrestricted: true`) so it can run
-  `{{task_runner_cmd}} init` in `t08_init_run`.
+  access (`unrestricted: true`) so it can inspect the repo and
+  validate the generated draft assignment.
 
   ## What the planner does
 
@@ -44,20 +44,22 @@ callerInstructions: |
        template's task list is a starting shape; the planner
        may add, remove, or rename tasks so long as the
        `lockedFields: [tasks]` line stays in the frontmatter.
-    3. Runs `{{task_runner_cmd}} init --assignment <draft-path>` to
-       freeze the draft into a new run workspace. This creates
-       a new run id — the implementer's run id — which the
-       planner records in its handoff task's notes.
+    3. Produces the exact `{{task_runner_cmd}} init ...` command the
+       caller should run to freeze the draft into a new run
+       workspace. The planner does **not** init the implementer
+       run itself.
 
   ## After planning
 
-  Pull the new run id from the `t09_handoff` task's notes block:
+  Pull the draft path and exact init command from the
+  `t09_handoff` task's notes block:
 
       {{task_runner_cmd}} status {{run_id}}
       {{task_runner_cmd}} status {{run_id}} --output-format json \
         --field finalTasks
 
-  To execute the plan:
+  First initialize the implementer run by executing the handoff's
+  init command. Then execute the resulting run:
 
       TASK_RUNNER_MAX_CALL_DEPTH=2 {{task_runner_cmd}} run \
         --resume-run <new-run-id>
@@ -76,19 +78,11 @@ callerInstructions: |
   ## What happens to the draft file
 
   The draft under `${TASK_RUNNER_STATE_DIR}/drafts/<repo-name>/`
-  is **superseded** the moment `{{task_runner_cmd}} init` succeeds.
-  From that point on, the canonical artifact is the workspace
+  is the planner's output artifact. It remains the source to init
+  from until the caller runs the handoff command. Once init
+  succeeds, the canonical artifact becomes the workspace
   `assignment.md` inside the new run directory. Edits to the
-  draft file after init have no effect on the run. To change
-  an initialized plan before execution, use `task set` /
-  `task add` against the new run id, or resume the run with a
-  follow-up message.
-
-  The planner is instructed to delete the draft (or rename it
-  to `*.init-source` for audit) at the end of `t08_init_run`
-  so it cannot be confused with the live plan. If you see a
-  leftover draft, the planning run did not finish cleanly —
-  ignore it and work from the new run id.
+  draft file after init have no effect on the run.
 tasks:
   - id: t01_orient
     title: Target repo orientation and conventions
@@ -135,6 +129,13 @@ tasks:
       each one down. Do not guess; do not fill gaps with
       assumptions. An unanswered contract question at this
       stage becomes silently-wrong code later.
+
+      When the feature changes a config/schema/API contract,
+      plan for the end-state shape directly unless the caller
+      explicitly asks for compatibility or migration support.
+      Do not quietly introduce fallback parsing, heuristics,
+      alias fields, bridge routes, or dual-shape readers just
+      to smooth over a redesign.
 
       Identify the feature type first:
         - **CLI feature** — adds or changes a command,
@@ -278,6 +279,12 @@ tasks:
       the feature, note them — the plan may need a
       pre-refactor task.
 
+      Also flag any proposed approach that relies on fallback
+      logic, heuristic detection, or compatibility shims where
+      a direct hot-cut design would be cleaner. The generated
+      plan should prefer explicit contracts over transitional
+      glue unless the caller asked for migration support.
+
       This task is the primary defense against the plan
       producing accidental duplication. Take it seriously.
   - id: t05_risk_and_testing
@@ -298,6 +305,11 @@ tasks:
       uses to gate commits (e.g. `npm run check`,
       `cargo test`, `pytest`). These will be cited verbatim
       by the generated plan's check-gate task.
+
+      If the feature changes a persisted or user-facing
+      contract, state explicitly whether the intended landing
+      is a hot cut or a compatibility-preserving migration.
+      Default to hot cut unless the caller said otherwise.
   - id: t06_contract_artifact
     title: Produce the feature contract artifact
     body: |
@@ -370,8 +382,9 @@ tasks:
 
           **Auth**: required permissions / tokens, if any.
 
-          **Backwards-compat**: additive-only, deprecation
-          path, or breaking with migration notes.
+          **Migration / compatibility**: hot cut unless the
+          brief explicitly requires compatibility or an
+          additive/deprecation path.
 
       **Data / schema features** — a schema diff plus
       migration:
@@ -380,7 +393,8 @@ tasks:
 
           **Before**: existing shape.
           **After**: new shape.
-          **Migration**: forward and rollback commands.
+          **Migration**: hot cut / additive / rollback plan,
+          whichever the brief explicitly requires.
           **Pre-existing data**: how it is handled.
 
       **UI features** — a state-transition sketch:
@@ -514,6 +528,11 @@ tasks:
           t01.
         - Keep a dedicated docs-drift task unless the
           feature genuinely touches no documentation.
+        - Make contract changes explicit. The generated plan
+          should not tell the implementer to add fallback
+          readers, heuristic detection, alias fields, or
+          compatibility shims unless the caller explicitly
+          requested that migration behavior.
 
       Fill in every `<<PLACEHOLDER>>` marker with concrete,
       file-level detail from tasks t01–t06. Placeholders
@@ -553,10 +572,11 @@ tasks:
       correct YAML indentation, balanced quoting, no TAB
       characters. Report the final draft path in this
       task's Notes.
-  - id: t08_init_run
-    title: Initialize the plan run
+  - id: t08_prepare_init_command
+    title: Prepare the exact init command for the caller
     body: |
-      Run `{{task_runner_cmd}} init` against the draft from t07:
+      Prepare the exact `{{task_runner_cmd}} init` command the
+      caller should run against the draft from t07:
 
           {{task_runner_cmd}} init \
             --agent implementer \
@@ -589,51 +609,40 @@ tasks:
           genuinely need to, but init's default must be
           stable and unambiguous.
 
-      Capture the new run id from the init output in this
-      task's Notes. From the moment init succeeds, the
-      draft file under `${TASK_RUNNER_STATE_DIR}/drafts/<repo-name>/`
-      is **no longer the working artifact** — the workspace
-      `assignment.md` inside the new run directory is the
-      canonical source of truth.
+      Capture the full command in this task's Notes exactly as
+      the caller should paste it. Do **not** run it yourself.
+      The planner stops at the draft-plus-command stage so the
+      caller decides when to create the implementer run.
 
-      **Delete the draft file after init succeeds.** Leaving
-      it around is a UX footgun: a future reader might edit
-      the draft and assume they changed the executable
-      plan. Once `{{task_runner_cmd}} status <new-run-id>` confirms
-      the workspace is healthy, `rm` the draft and note the
-      deletion in this task's Notes. If you need the draft
-      preserved for audit, rename it to
-      `plan-<slug>-<shortid>.md.init-source` so it is
-      obviously non-live.
-
-      If init rejects the draft (missing required vars,
-      invalid schema, unparseable frontmatter, locked-field
-      conflict), do NOT silently retry with a different
-      path. Fix the draft in place, re-run init, and record
-      both the failure and the fix in Notes. A rejected
-      draft is usually a frontmatter bug.
+      Also note:
+      - the draft path from t07
+      - that init's stdout/stderr will produce the new run id
+      - that after init succeeds, the canonical artifact becomes
+        the new run workspace `assignment.md`
   - id: t09_handoff
     title: Handoff summary
     body: |
       Write a short Notes block capturing everything the
-      caller needs to execute the plan. The new run id is
-      the only artifact they need — do **not** surface the
-      draft path here; the draft was deleted (or archived)
-      at the end of t07, and treating it as a
-      first-class output confuses the caller into editing
-      the wrong file.
+      caller needs to execute the plan. The caller should be
+      able to copy the init command, create the implementer run,
+      and then resume it.
 
       Include:
-        - **New run id** from t08 (this is the primary
-          handoff — the caller resumes this id to execute).
+        - **Draft path** from t07.
+        - **Exact init command** from t08 (this is the
+          primary handoff command the caller should run
+          first).
         - **Feature summary** (one or two sentences from
           t02).
-        - **Exact command** the caller should run to
-          execute the plan, including the
+        - **Exact command shape** the caller should run
+          *after init succeeds* to execute the plan, including the
           `TASK_RUNNER_MAX_CALL_DEPTH=2` export:
 
               TASK_RUNNER_MAX_CALL_DEPTH=2 {{task_runner_cmd}} run \
                 --resume-run <new-run-id>
+
+        - A note that `<new-run-id>` comes from the init
+          command's output, not from the planning run itself.
 
         - **Open assumptions** from t02 that the caller
           should confirm before kicking off execution.
@@ -673,10 +682,16 @@ calling `{{task_runner_cmd}} run --resume-run`. Surface this
 requirement in the t09 handoff summary so the caller does not
 get bitten by it.
 
+Prefer end-state designs in the generated plan. Avoid fallback
+logic, heuristic detection, compatibility shims, alias fields,
+and dual-shape readers unless the caller explicitly asked for
+migration or backward-compatibility support. Default to hot-cut
+contract changes.
+
 You may delegate repo exploration (t03) or duplication
 scanning (t04) to native subagents if that would parallelize
 your work. Do not delegate t02 (feature capture — the
 ambiguity gate must live in your own context), t06 (contract
 artifact — the contract is your deliverable), t07 (draft
-writing), t08 (init run), or t09 (handoff) — those need to
+writing), t08 (init-command prep), or t09 (handoff) — those need to
 live in your own context.

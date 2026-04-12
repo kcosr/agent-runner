@@ -85,6 +85,13 @@ callerInstructions: |
   `blocked` with an explanation rather than dropping it.
   A blocked plan halts cleanly and you can re-plan, adjust,
   and resume.
+
+  Design defaults for this repo:
+  - Prefer end-state implementations over transitional ones.
+  - Avoid fallback logic, heuristics, alias fields, bridge
+    routes, and dual-shape readers unless the caller
+    explicitly asked for migration or compatibility support.
+  - Treat contract changes as hot cuts by default.
 tasks:
   - id: t01_orient
     title: Re-orient to repo conventions (fresh session)
@@ -122,6 +129,15 @@ tasks:
       than silently adapting. The reviewer's plan-coverage
       pass verifies these assumptions against the final
       implementation.
+
+      **Design rules for this run**:
+      - Prefer the final contract shape directly.
+      - Do not add fallback logic, heuristic detection,
+        compatibility shims, or dual-shape parsing unless
+        this plan explicitly calls for migration support.
+      - If the plan changes a schema/config/API/CLI surface
+        and says nothing about compatibility, treat it as a
+        hot cut.
 
       ## Preflight: recursion depth
 
@@ -232,6 +248,9 @@ tasks:
           a table or a loop.
         - Over-engineered configuration for cases that do
           not exist yet.
+        - Fallback logic, compatibility shims, heuristics,
+          alias fields, or dual-shape readers that the plan
+          did not explicitly require.
 
       Apply any simplifications you find before moving on.
       The goal is to shorten the diff the reviewer has to
