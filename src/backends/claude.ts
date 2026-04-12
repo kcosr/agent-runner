@@ -248,7 +248,7 @@ export const claudeBackend: Backend = {
       buffer: "",
       lastMessageId: null,
       pendingMessageBoundary: false,
-      onText: (text) => ctx.onStdoutText?.(text),
+      onText: (text) => ctx.emit?.({ type: "agent_message_delta", text }),
     };
 
     const command = process.env.TASK_RUNNER_CLAUDE_BIN ?? "claude";
@@ -261,7 +261,7 @@ export const claudeBackend: Backend = {
       timeoutMs: ctx.timeoutSec * 1000,
       abortSignal: ctx.abortSignal,
       onStdout: (chunk) => feed(state, chunk.toString("utf8")),
-      onStderr: (chunk) => ctx.onStderrText?.(chunk.toString("utf8")),
+      onStderr: (chunk) => ctx.emit?.({ type: "backend_notice", text: chunk.toString("utf8") }),
     });
     flush(state);
 

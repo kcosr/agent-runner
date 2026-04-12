@@ -1,5 +1,15 @@
 export type EffortLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
+export type BackendEvent =
+  | {
+      type: "agent_message_delta";
+      text: string;
+    }
+  | {
+      type: "backend_notice";
+      text: string;
+    };
+
 export interface BackendInvokeContext {
   prompt: string;
   cwd: string;
@@ -11,8 +21,7 @@ export interface BackendInvokeContext {
   resumeSessionId?: string;
   sessionName?: string;
   abortSignal?: AbortSignal;
-  onStdoutText?: (text: string) => void;
-  onStderrText?: (text: string) => void;
+  emit?: (event: BackendEvent) => void;
 }
 
 export interface BackendInvokeResult {

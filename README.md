@@ -1051,11 +1051,13 @@ For the full ownership table and edge cases see
 
 ### `--output-format text` (default)
 
-- **stdout**: the agent's text, streamed live during each attempt.
-  Between attempts, a divider is printed: `── attempt 2 ──`.
-- **stderr**: runner chrome — startup banner, attempt dividers,
-  retry notifications, final summary block with per-task results
-  and notes.
+- **stdout**: the agent's text, streamed live during each attempt. For
+  passive `init`, the composed bootstrap prompt is also written here
+  so it can be piped elsewhere.
+- **stderr**: runner chrome rendered from typed events at the CLI edge
+  — startup banner, caller-instructions banner, attempt dividers,
+  retry notifications, and the final summary block with per-task
+  results and notes.
 
 ### `--output-format json`
 
@@ -1227,7 +1229,7 @@ npm run lint        # biome check
 npm run format      # biome format --write
 ```
 
-Pre-commit runs `lint-staged` + `biome check` via husky.
+Pre-commit runs `lint-staged` and `npm run check` via husky.
 
 Tests are vanilla `node:test`. Backend integration tests use mock
 Backend objects to keep them hermetic; the only tests that touch
@@ -1236,14 +1238,22 @@ real subprocesses are a couple of `runProcess` smoke tests against
 
 ## Project layout
 
-Subsystem boundaries: the run loop is the center of gravity; backends
-are swappable, persistence is a flat workspace directory.
+Subsystem boundaries: `src/cli.ts` is the transport edge over two core
+seams: `src/commands/` for typed non-run command results and
+`src/runner/run-loop.ts` for typed run events plus final outcomes.
+Backends are swappable, and persistence remains a flat workspace
+directory.
 
 ```mermaid
 flowchart TD
     subgraph CLI["CLI layer"]
         cli["cli.ts"]
         parse["cli/parse-args.ts"]
+        render["cli/render-run.ts"]
+    end
+    subgraph Commands["Command services"]
+        commands["commands/service.ts"]
+        commandRender["commands/render.ts"]
     end
     subgraph Config["Config"]
         loader["config/loader.ts"]
@@ -1274,9 +1284,13 @@ flowchart TD
         attempts["attempts/NN.json"]
     end
     cli --> parse
+    cli --> render
+    cli --> commandRender
+    cli --> commands
     cli --> loop
     cli --> manifest
     cli --> output
+    commands --> manifest
     loop --> loader
     loop --> registry
     loop --> writer
@@ -1294,16 +1308,21 @@ flowchart TD
 ```
 src/
 ├── cli.ts                  # CLI entry point and dispatcher
-├── cli/parse-args.ts       # argv parser
+├── cli/
+│   ├── parse-args.ts       # argv parser
+│   └── render-run.ts       # RunEvent -> stdout/stderr rendering
+├── commands/
+│   ├── service.ts          # typed non-run command/query/mutation services
+│   └── render.ts           # text renderers for command results
 ├── config/                 # frontmatter loaders + zod schemas
 ├── assignment/             # task model, parser, writer, merge logic
 ├── backends/
-│   ├── types.ts            # Backend interface
+│   ├── types.ts            # Backend interface + BackendEvent stream
 │   ├── claude.ts           # Claude subprocess backend
 │   ├── codex.ts            # Codex JSON-RPC backend (stdio + ws)
 │   └── registry.ts
 ├── runner/
-│   ├── run-loop.ts         # the core runAgent function
+│   ├── run-loop.ts         # runAgent: emits RunEvent + final outcome
 │   ├── manifest.ts         # RunManifest types + persistence
 │   ├── output.ts           # text rendering helpers
 │   ├── recursion-guard.ts  # TASK_RUNNER_CALL_DEPTH safety

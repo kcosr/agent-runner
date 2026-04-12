@@ -1,13 +1,14 @@
 import { strict as assert } from "node:assert";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
 import { parseAssignment } from "../dist/assignment/parser.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
 import { applyLiveOverlay, renderManifestStatus } from "../dist/runner/output.js";
 import { runAgent } from "../dist/runner/run-loop.js";
-import { assignmentPathFromPrompt, withEnv } from "./helpers/runtime-paths.mjs";
+import { assignmentPathFromPrompt, sharedRuntimeEnv, withEnv } from "./helpers/runtime-paths.mjs";
 
 function patchManifest(workspaceDir, mutator) {
   const manifestPath = join(workspaceDir, "run.json");
@@ -38,6 +39,8 @@ tasks:
 ---
 Work.
 `;
+
+const CLI_PATH = resolvePath(new URL("../dist/cli.js", import.meta.url).pathname);
 
 function tempDir() {
   return mkdtempSync(join(tmpdir(), "task-runner-status-"));
@@ -82,6 +85,25 @@ function withSharedRuntimeEnv(baseDir, fn) {
     },
     fn,
   );
+}
+
+function runCliExpectFail(args, opts = {}) {
+  try {
+    execFileSync("node", [CLI_PATH, ...args], {
+      cwd: opts.cwd ?? process.cwd(),
+      env: { ...process.env, ...sharedRuntimeEnv(opts.cwd ?? process.cwd()) },
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    throw new Error("expected CLI to fail");
+  } catch (err) {
+    if (err.status === undefined) throw err;
+    return {
+      status: err.status,
+      stdout: err.stdout?.toString() ?? "",
+      stderr: err.stderr?.toString() ?? "",
+    };
+  }
 }
 
 const okBackend = () => ({
@@ -209,4 +231,22 @@ test("renderManifestStatus shows the live-overlay note for running runs", async 
 
   const text = renderManifestStatus(runningManifest, { isLive: true });
   assert.match(text, /read live from the workspace assignment\.md/);
+});
+
+test("status CLI reports unreadable manifest snapshots as clean unexpected failures", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "status-agent", STATUS_AGENT);
+  writeAssignment(dir, "status-work", STATUS_ASSIGNMENT);
+  const outcome = await runFresh(dir);
+
+  const runJsonPath = join(outcome.workspaceDir, "run.json");
+  chmodSync(runJsonPath, 0o000);
+
+  try {
+    const result = runCliExpectFail(["status", outcome.runId], { cwd: dir });
+    assert.equal(result.status, 4);
+    assert.match(result.stderr, /task-runner:/);
+  } finally {
+    chmodSync(runJsonPath, 0o600);
+  }
 });
