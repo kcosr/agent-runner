@@ -1,6 +1,4 @@
-function resolvedTaskMode(manifest) {
-    return manifest.taskMode ?? "file";
-}
+import { normalizeTaskMode } from "../config/schema.js";
 function toRunTaskSummary(task) {
     return {
         id: task.id,
@@ -31,7 +29,7 @@ export function toRunSummary(entry) {
 export function deriveRunCapabilities(manifest) {
     const isRunning = manifest.status === "running";
     const isArchived = manifest.archivedAt !== null;
-    const isCliModeRun = resolvedTaskMode(manifest) === "cli";
+    const isCliModeRun = normalizeTaskMode(manifest.taskMode) === "cli";
     return {
         canArchive: !isRunning && !isArchived,
         canUnarchive: !isRunning && isArchived,
@@ -64,7 +62,7 @@ export function toRunDetail(result) {
         sessionName: manifest.sessionName,
         backendSessionId: manifest.backendSessionId,
         cwd: manifest.cwd,
-        taskMode: resolvedTaskMode(manifest),
+        taskMode: normalizeTaskMode(manifest.taskMode),
         unrestricted: manifest.unrestricted,
         timeoutSec: manifest.timeoutSec,
         startedAt: manifest.startedAt,

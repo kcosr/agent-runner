@@ -1,4 +1,4 @@
-import type { StatusCommandResult } from "../commands/service.js";
+import { normalizeTaskMode } from "../config/schema.js";
 import type { LockableField, TaskMode } from "../config/schema.js";
 import type { TaskSnapshot } from "../runner/manifest.js";
 import type { ListedRunManifest, ManifestStatus, RunManifest } from "../runner/manifest.js";
@@ -35,7 +35,14 @@ export interface RunCapabilities {
   canUnarchive: boolean;
   canResume: boolean;
   canAbort: boolean;
+  // Reflects the existing `task set` / `task append-notes` surface only.
+  // It does not imply `task add` is currently legal for the run.
   canMutateTasks: boolean;
+}
+
+export interface RunDetailInput {
+  manifest: RunManifest;
+  isLive: boolean;
 }
 
 export interface RunDetail {
@@ -88,10 +95,6 @@ export interface RunActionTarget {
   target: string;
 }
 
-function resolvedTaskMode(manifest: Pick<RunManifest, "taskMode">): TaskMode {
-  return manifest.taskMode ?? "file";
-}
-
 function toRunTaskSummary(task: TaskSnapshot): RunTaskSummary {
   return {
     id: task.id,
@@ -124,7 +127,7 @@ export function toRunSummary(entry: ListedRunManifest): RunSummary {
 export function deriveRunCapabilities(manifest: RunManifest): RunCapabilities {
   const isRunning = manifest.status === "running";
   const isArchived = manifest.archivedAt !== null;
-  const isCliModeRun = resolvedTaskMode(manifest) === "cli";
+  const isCliModeRun = normalizeTaskMode(manifest.taskMode) === "cli";
 
   return {
     canArchive: !isRunning && !isArchived,
@@ -135,7 +138,7 @@ export function deriveRunCapabilities(manifest: RunManifest): RunCapabilities {
   };
 }
 
-export function toRunDetail(result: StatusCommandResult): RunDetail {
+export function toRunDetail(result: RunDetailInput): RunDetail {
   const { manifest } = result;
   return {
     runId: manifest.runId,
@@ -159,7 +162,7 @@ export function toRunDetail(result: StatusCommandResult): RunDetail {
     sessionName: manifest.sessionName,
     backendSessionId: manifest.backendSessionId,
     cwd: manifest.cwd,
-    taskMode: resolvedTaskMode(manifest),
+    taskMode: normalizeTaskMode(manifest.taskMode),
     unrestricted: manifest.unrestricted,
     timeoutSec: manifest.timeoutSec,
     startedAt: manifest.startedAt,

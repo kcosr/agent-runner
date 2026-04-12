@@ -125,24 +125,65 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
     isLive: true,
   });
 
-  assert.equal(detail.runId, "run123");
-  assert.equal(detail.status, "success");
-  assert.equal(detail.isLive, true);
-  assert.equal(detail.taskMode, "file");
-  assert.equal(detail.assignment.workspacePath, "/state/runs/demo/run123/assignment.md");
-  assert.deepEqual(
-    detail.tasks.map((task) => task.id),
-    ["t1", "t2"],
-  );
-  assert.equal(detail.tasks[0].notes, "Done.");
-  assert.deepEqual(detail.lockedFields, ["backend"]);
-  assert.deepEqual(detail.runtimeVars, { repo_path: "." });
   assert.deepEqual(detail.capabilities, {
     canArchive: true,
     canUnarchive: false,
     canResume: true,
     canAbort: false,
     canMutateTasks: true,
+  });
+  assert.deepEqual(detail, {
+    runId: "run123",
+    status: "success",
+    archivedAt: null,
+    isLive: true,
+    agent: {
+      name: "demo-agent",
+      sourcePath: "/repo/agents/demo/agent.md",
+    },
+    assignment: {
+      name: "demo-work",
+      sourcePath: "/repo/assignments/demo/assignment.md",
+      workspacePath: "/state/runs/demo/run123/assignment.md",
+    },
+    backend: "claude",
+    model: "claude-sonnet-4-6",
+    effort: "medium",
+    sessionName: "demo session",
+    backendSessionId: "sess-123",
+    cwd: "/repo",
+    taskMode: "file",
+    unrestricted: false,
+    timeoutSec: 3600,
+    startedAt: "2026-04-12T10:00:00.000Z",
+    endedAt: "2026-04-12T10:05:00.000Z",
+    exitCode: 0,
+    attempts: 1,
+    maxAttempts: 2,
+    tasksCompleted: 1,
+    tasksTotal: 2,
+    tasks: [
+      {
+        id: "t1",
+        title: "First",
+        body: "Do the first thing.",
+        status: "completed",
+        notes: "Done.",
+      },
+      {
+        id: "t2",
+        title: "Second",
+        body: "Do the second thing.",
+        status: "pending",
+        notes: "",
+      },
+    ],
+    message: "Finish the task list.",
+    callerInstructions: "Caller docs",
+    pendingPrompt: "Prompt body",
+    lockedFields: ["backend"],
+    runtimeVars: { repo_path: "." },
+    capabilities: detail.capabilities,
   });
 });
 

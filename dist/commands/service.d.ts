@@ -1,10 +1,7 @@
 import { type DefinitionEntry, type DefinitionKind, type LoadedAgent, type LoadedAssignment } from "../config/loader.js";
-import { type RunArchiveResult, type RunSummary } from "../contracts/runs.js";
+import { type RunArchiveResult, type RunDetailInput, type RunSummary } from "../contracts/runs.js";
 import { ResumeError, type RunManifest, type TaskSnapshot } from "../runner/manifest.js";
-export interface StatusCommandResult {
-    manifest: RunManifest;
-    isLive: boolean;
-}
+export type StatusCommandResult = RunDetailInput;
 export interface DefinitionListResult {
     kind: DefinitionKind;
     entries: DefinitionEntry[];

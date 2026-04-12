@@ -13,6 +13,7 @@ import {
 } from "../config/loader.js";
 import {
   type RunArchiveResult,
+  type RunDetailInput,
   type RunSummary,
   toRunArchiveResult,
   toRunSummary,
@@ -38,10 +39,7 @@ import {
 import { resolveTaskRunnerCommand } from "../task-runner-command.js";
 import { shortId } from "../util/short-id.js";
 
-export interface StatusCommandResult {
-  manifest: RunManifest;
-  isLive: boolean;
-}
+export type StatusCommandResult = RunDetailInput;
 
 export interface DefinitionListResult {
   kind: DefinitionKind;

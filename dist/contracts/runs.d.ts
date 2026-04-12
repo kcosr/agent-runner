@@ -1,4 +1,3 @@
-import type { StatusCommandResult } from "../commands/service.js";
 import type { LockableField, TaskMode } from "../config/schema.js";
 import type { TaskSnapshot } from "../runner/manifest.js";
 import type { ListedRunManifest, ManifestStatus, RunManifest } from "../runner/manifest.js";
@@ -32,6 +31,10 @@ export interface RunCapabilities {
     canResume: boolean;
     canAbort: boolean;
     canMutateTasks: boolean;
+}
+export interface RunDetailInput {
+    manifest: RunManifest;
+    isLive: boolean;
 }
 export interface RunDetail {
     runId: string;
@@ -82,7 +85,7 @@ export interface RunActionTarget {
 }
 export declare function toRunSummary(entry: ListedRunManifest): RunSummary;
 export declare function deriveRunCapabilities(manifest: RunManifest): RunCapabilities;
-export declare function toRunDetail(result: StatusCommandResult): RunDetail;
+export declare function toRunDetail(result: RunDetailInput): RunDetail;
 export declare function toRunArchiveResult(result: {
     manifest: RunManifest;
     changed: boolean;
