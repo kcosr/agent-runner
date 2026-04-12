@@ -28,6 +28,7 @@
 
 ### Changed
 
+- Build and packaging no longer rely on git-tracked `dist/` output. `dist/` is generated locally and during `prepack`, and the build step explicitly marks `dist/cli.js` executable on Unix-like systems.
 - Refactored command execution around transport-agnostic core contracts: non-run commands now execute through typed `src/commands/` services, `runAgent` emits typed events instead of writing terminal text directly, and the CLI renders text/json output at the transport edge. ([#13](https://github.com/kcosr/task-runner/pull/13))
 - `assignments/plan-feature/` handoff init commands now freeze generated plans with `--backend passive` and `--var repo_path=<worktree-dir>` instead of hard-coding `--agent implementer` and a machine-specific repo path. `assignments/plan-review/` now enforces that passive-backend handoff shape during draft review. ([#15](https://github.com/kcosr/task-runner/pull/15))
 - Run manifests now carry `archivedAt`, existing schema-version-3 manifests normalize a missing archive marker to `null`, `task-runner status` surfaces archive metadata, and archived runs are rejected by `task-runner run --resume-run` until unarchived. ([#15](https://github.com/kcosr/task-runner/pull/15))
