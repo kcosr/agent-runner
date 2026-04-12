@@ -180,8 +180,7 @@ tasks:
       <<PLACEHOLDER_SCAFFOLD_STEPS>>
 
       Typical content: create a feature branch, ensure a
-      clean working tree, verify the baseline check gate
-      passes before you touch code, set up any
+      clean working tree, and set up any
       feature-specific config. If none of that applies,
       keep this task but note "No scaffolding needed;
       working on <branch>." and move on.
@@ -259,13 +258,39 @@ tasks:
 
           <<PLACEHOLDER_CHECK_COMMANDS>>
 
-      Every command must pass before moving to `internal_review`. Paste
+      Every command must pass before moving to `commit`. Paste
       each command's exit code and any relevant output into
       Notes. If a command fails, fix the underlying issue
       here — do not defer failing checks to the reviewer.
 
       If the project has no check gate at all, note that
       explicitly and move on.
+  - id: commit
+    title: Commit review candidate before internal review
+    body: |
+      **Category**: process
+
+      Create a clean reviewable commit before launching the nested
+      review.
+
+        1. Run `git status` and paste the output into Notes.
+        2. Stage only the files changed so far for this plan,
+           including rebuilt `dist/` output if any `src/` file
+           changed.
+        3. Commit with a clear focused message describing the
+           work from this plan. Follow the repo's commit-message
+           convention from `orient`.
+        4. If the repo uses pre-commit hooks, let them run. If
+           a hook fails, fix the underlying issue and create a
+           new commit — do not amend past a hook failure, and
+           do not use `--no-verify`.
+        5. Run `git status` again and confirm the tree is clean.
+        6. Run `git log --oneline <base>..HEAD` and paste the
+           commits into Notes.
+
+      `internal_review` should use the same `<base>..HEAD` range
+      when launching the nested code review. If hooks fail or the
+      tree is not clean, fix that here before moving on.
   - id: internal_review
     title: Internal code review via task-runner
     body: |
@@ -465,8 +490,8 @@ tasks:
       `blocked`. If anything is blocked, this task is
       blocked too — escalate to the caller rather than
       silently marking the plan successful.
-  - id: commit
-    title: Commit all work and confirm clean tree
+  - id: final_commit
+    title: Finalize post-review commits and confirm clean tree
     body: |
       **Category**: process
 
@@ -474,28 +499,30 @@ tasks:
       be committed before the run can end successfully.
 
         1. Run `git status` and paste the output into Notes.
-        2. If there are uncommitted changes (staged,
-           unstaged, or untracked files the plan created),
-           stage them explicitly by file path (not `git add
-           -A` — that can pick up files you didn't intend,
-           including runtime-state artifacts under the
-           configured task-runner state dir) and
-           commit them with a clear, focused message that
-           describes the work from the plan. Follow the
-           repo's commit-message convention from `orient`.
-        3. If the repo uses pre-commit hooks, let them run.
-           If a hook fails, fix the underlying issue and
-           create a **new** commit — do not amend past a
-           hook failure, and do not use `--no-verify`.
-        4. If the `apply_review_fixes` delta passes produced
+        2. If review fixes, docs updates, or final verification
+           work changed files after `commit`, stage them
+           explicitly by file path (not `git add -A` — that can
+           pick up files you didn't intend, including
+           runtime-state artifacts under the configured
+           task-runner state dir) and create a final focused
+           follow-up commit. Follow the repo's commit-message
+           convention from `orient`.
+        3. If the repo uses pre-commit hooks, let them run. If
+           a hook fails, fix the underlying issue and create a
+           **new** commit — do not amend past a hook failure,
+           and do not use `--no-verify`.
+        4. If no post-review changes were needed and the tree is
+           already clean, say that plainly in Notes instead of
+           creating an empty commit.
+        5. If the `apply_review_fixes` delta passes produced
            multiple commits, that's fine — leave them as
            separate commits; do not squash without the
            caller's instruction.
-        5. Run `git status` again. The working tree must
+        6. Run `git status` again. The working tree must
            be clean (nothing staged, nothing unstaged,
            nothing untracked that should have been added).
            If it isn't, go back to step 2.
-        6. Run `git log --oneline <base>..HEAD` (where
+        7. Run `git log --oneline <base>..HEAD` (where
            `<base>` is the commit this plan was planned
            against — capture it from `scaffold` notes or ask the
            caller in a blocked state if you don't know it)

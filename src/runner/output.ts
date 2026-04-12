@@ -206,6 +206,7 @@ export function renderManifestStatus(
       lines.push(
         `  ${taskRunnerCmd} task set ${manifest.runId} <task-id> --status completed --notes "..."`,
       );
+      lines.push('  For multi-line notes, prefer a quoted heredoc and pass --notes "$notes".');
     } else {
       lines.push("To execute this run:");
       lines.push(`  ${taskRunnerCmd} run --resume-run ${manifest.runId}`);

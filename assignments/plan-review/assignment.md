@@ -91,8 +91,8 @@ tasks:
           numeric prefixes or opaque labels
         - task ordering that matches the dependency chain
         - required workflow tasks still present when applicable:
-          orient, check gate, fresh-eyes pass, internal review,
-          docs drift, self-check, commit
+          orient, check gate, fresh-eyes pass, commit,
+          internal review, docs drift, self-check, final_commit
         - every code-bearing task has a concrete `**Done when:**`
           block with test-backed completion criteria
         - every task body has concrete file paths, commands, or
