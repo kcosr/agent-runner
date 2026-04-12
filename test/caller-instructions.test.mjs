@@ -7,6 +7,7 @@ import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
 import { resolveResumeTarget } from "../dist/runner/manifest.js";
 import { runAgent } from "../dist/runner/run-loop.js";
+import { createRunEventCapture } from "./helpers/run-events.mjs";
 import {
   assignmentPathFromPrompt,
   sharedRuntimeEnv,
@@ -123,8 +124,7 @@ async function runFreshRun(baseDir, assignmentName, opts = {}) {
   return withSharedRuntimeEnv(baseDir, async () => {
     const loaded = loadAgentConfig(opts.agentName ?? "caller-test", baseDir);
     const loadedAssignment = loadAssignmentConfig(assignmentName, baseDir);
-    const stderrChunks = [];
-    const stdoutChunks = [];
+    const capture = createRunEventCapture();
     const originalCwd = process.cwd();
     process.chdir(baseDir);
     try {
@@ -134,13 +134,12 @@ async function runFreshRun(baseDir, assignmentName, opts = {}) {
         cliVars: opts.vars ?? { repo_path: "/tmp/caller" },
         backend: opts.backend ?? mockBackend(),
         initialize: opts.initialize ?? false,
-        stderr: (t) => stderrChunks.push(t),
-        stdout: (t) => stdoutChunks.push(t),
+        emitEvent: capture.emitEvent,
       });
       return {
         outcome,
-        stderr: stderrChunks.join(""),
-        stdout: stdoutChunks.join(""),
+        stderr: capture.stderr(),
+        stdout: capture.stdout(),
       };
     } finally {
       process.chdir(originalCwd);
@@ -223,8 +222,6 @@ test("manifest: callerInstructions is null when no assignment at all (chat mode)
         cliVars: {},
         backend: mockBackend(),
         overrides: { message: "chat" },
-        stderr: () => {},
-        stdout: () => {},
       });
     } finally {
       process.chdir(originalCwd);
@@ -303,7 +300,7 @@ test("resume does NOT print callerInstructions (caller already saw it on fresh r
     // Resume — must NOT reprint
     const target = resolveResumeTarget(first.outcome.runId, dir);
     const loaded = loadAgentConfig("caller-test", dir);
-    const stderrChunks = [];
+    const capture = createRunEventCapture();
     const originalCwd = process.cwd();
     process.chdir(dir);
     try {
@@ -313,13 +310,12 @@ test("resume does NOT print callerInstructions (caller already saw it on fresh r
         backend: mockBackend(),
         overrides: { message: "continue" },
         resume: target,
-        stderr: (t) => stderrChunks.push(t),
-        stdout: () => {},
+        emitEvent: capture.emitEvent,
       });
     } finally {
       process.chdir(originalCwd);
     }
-    const stderr = stderrChunks.join("");
+    const stderr = capture.stderr();
     assert.doesNotMatch(stderr, /── caller instructions ──/);
   });
 });
@@ -337,7 +333,7 @@ test("execute-after-init does NOT print callerInstructions (init already did)", 
     // Execute-after-init — must NOT reprint
     const target = resolveResumeTarget(init.outcome.runId, dir);
     const loaded = loadAgentConfig("caller-test", dir);
-    const stderrChunks = [];
+    const capture = createRunEventCapture();
     const originalCwd = process.cwd();
     process.chdir(dir);
     try {
@@ -346,13 +342,12 @@ test("execute-after-init does NOT print callerInstructions (init already did)", 
         cliVars: {},
         backend: mockBackend(),
         resume: target,
-        stderr: (t) => stderrChunks.push(t),
-        stdout: () => {},
+        emitEvent: capture.emitEvent,
       });
     } finally {
       process.chdir(originalCwd);
     }
-    const stderr = stderrChunks.join("");
+    const stderr = capture.stderr();
     assert.doesNotMatch(stderr, /── caller instructions ──/);
   });
 });

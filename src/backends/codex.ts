@@ -755,7 +755,7 @@ export const codexBackend: Backend = {
       turnStatus: "in_progress",
       turnError: null,
       turnCompleted: false,
-      onText: (text) => ctx.onStdoutText?.(text),
+      onText: (text) => ctx.emit?.({ type: "agent_message_delta", text }),
       resolveCompleted: null,
     };
 
@@ -766,7 +766,7 @@ export const codexBackend: Backend = {
       // capture is wired into the client itself so both incoming and
       // outgoing frames land in the attempt log.
       transport.onStderr((text) => {
-        ctx.onStderrText?.(text);
+        ctx.emit?.({ type: "backend_notice", text });
       });
 
       client = createClient(transport, {
@@ -824,7 +824,10 @@ export const codexBackend: Backend = {
             name: ctx.sessionName,
           });
         } catch (err) {
-          ctx.onStderrText?.(`codex: thread/name/set failed: ${(err as Error).message}\n`);
+          ctx.emit?.({
+            type: "backend_notice",
+            text: `codex: thread/name/set failed: ${(err as Error).message}\n`,
+          });
         }
       }
 
@@ -897,13 +900,14 @@ export const codexBackend: Backend = {
       if (isExternalInterrupt(state.turnStatus, timedOut, aborted)) {
         aborted = true;
         const taskRunnerCmd = resolveTaskRunnerCommand();
-        ctx.onStderrText?.(
-          `\ncodex: turn was interrupted externally (e.g. cancelled from another client connected to the same thread); marking the run aborted instead of retrying. Resume with \`${taskRunnerCmd} run --resume-run <id>\` when ready.\n`,
-        );
+        ctx.emit?.({
+          type: "backend_notice",
+          text: `\ncodex: turn was interrupted externally (e.g. cancelled from another client connected to the same thread); marking the run aborted instead of retrying. Resume with \`${taskRunnerCmd} run --resume-run <id>\` when ready.\n`,
+        });
       }
     } catch (err) {
       const message = (err as Error).message;
-      ctx.onStderrText?.(`${message}\n`);
+      ctx.emit?.({ type: "backend_notice", text: `${message}\n` });
       return {
         exitCode: 1,
         signal: null,

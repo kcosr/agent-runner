@@ -3,7 +3,7 @@ import { isAbsolute, resolve } from "node:path";
 import { type MergeResult, mergeIntoFile } from "../assignment/merge.js";
 import type { TaskState, TaskStatus } from "../assignment/model.js";
 import { renderAssignment } from "../assignment/writer.js";
-import type { Backend, BackendInvokeResult } from "../backends/types.js";
+import type { Backend, BackendEvent, BackendInvokeResult } from "../backends/types.js";
 import { interpolate } from "../config/interpolate.js";
 import type { LoadedAgent, LoadedAssignment } from "../config/loader.js";
 import { resolveRunWorkspaceDir } from "../config/runtime-paths.js";
@@ -30,7 +30,7 @@ import {
   writeManifest,
 } from "./manifest.js";
 import { buildNudgeMessage } from "./nudge.js";
-import { type RunStatus, type RunSummary, renderSummary } from "./output.js";
+import type { RunStatus, RunSummary } from "./output.js";
 import {
   buildChildRecursionEnv,
   checkRecursionDepth,
@@ -88,8 +88,7 @@ export interface RunOptions {
    */
   bootstrapBackendSessionId?: string;
   abortSignal?: AbortSignal;
-  stderr: (text: string) => void;
-  stdout: (text: string) => void;
+  emitEvent?: (event: RunEvent) => void;
   resumeFailureDetector?: (result: BackendInvokeResult) => boolean;
 }
 
@@ -102,6 +101,53 @@ export interface RunOutcome {
   workspaceDir: string;
   manifest: RunManifest;
 }
+
+export type RunEvent =
+  | {
+      type: "run_initialized";
+      runId: string;
+      agentName: string;
+      assignmentSourcePath: string | null;
+      assignmentPath: string;
+      sessionName: string | null;
+      cwd: string;
+      passive: boolean;
+      pendingPrompt: string;
+    }
+  | {
+      type: "caller_instructions";
+      text: string;
+    }
+  | {
+      type: "run_started";
+      runId: string;
+      agentName: string;
+      assignmentSourcePath: string | null;
+      assignmentPath: string;
+      sessionName: string | null;
+      cwd: string;
+      sessionIndex: number | null;
+    }
+  | {
+      type: "attempt_started";
+      attempt: number;
+    }
+  | BackendEvent
+  | {
+      type: "retrying";
+      incompleteCount: number;
+      invalidStatusCount: number;
+    }
+  | {
+      type: "run_aborted";
+    }
+  | {
+      type: "resume_rejected";
+    }
+  | {
+      type: "run_finished";
+      summary: RunSummary;
+    };
 
 export class VarResolutionError extends Error {
   constructor(message: string) {
@@ -252,19 +298,15 @@ function resolveCwd(input: string | undefined, fallback: string): string {
   return isAbsolute(input) ? input : resolve(fallback, input);
 }
 
-// Print the assignment's `callerInstructions` block to stderr with a
-// visible separator. Called exactly once per run: on `init` and on
-// fresh `run` (rule: resume and execute-after-init skip so the
-// caller only sees it at the moment they first meet the assignment).
-// No-op when the manifest has no callerInstructions.
-function writeCallerInstructions(
+function emitCallerInstructions(
   callerInstructions: string | null,
-  stderr: (text: string) => void,
+  emitEvent: (event: RunEvent) => void,
 ): void {
   if (!callerInstructions || callerInstructions.length === 0) return;
-  stderr("\n── caller instructions ──\n");
-  stderr(`${callerInstructions.trim()}\n`);
-  stderr("── end caller instructions ──\n");
+  emitEvent({
+    type: "caller_instructions",
+    text: callerInstructions,
+  });
 }
 
 function coerceVar(key: string, value: unknown, def: VarDef): unknown {
@@ -447,7 +489,8 @@ function rebuildTasksFromAssignmentAndSnapshot(
 }
 
 export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
-  const { loaded, loadedAssignment, cliVars, backend, overrides, resume, stderr, stdout } = opts;
+  const { loaded, loadedAssignment, cliVars, backend, overrides, resume } = opts;
+  const emitEvent = opts.emitEvent ?? (() => {});
   const agentConfig = loaded.config;
   const assignmentConfig = loadedAssignment?.config;
   const resumeFailureDetector = opts.resumeFailureDetector ?? defaultResumeFailureDetector;
@@ -906,34 +949,18 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   if (isInitialize) {
     writeManifest(workspaceDir, manifest);
     const isPassive = agentConfig.backend === "passive";
-    stderr(
-      `task-runner: initialized ${isPassive ? "passive " : ""}agent=${agentConfig.name} run=${runId}\n`,
-    );
-    if (loadedAssignment) {
-      stderr(`             source=${loadedAssignment.sourcePath}\n`);
-    }
-    stderr(`             assignment=${assignmentPath}\n`);
-    if (sessionName) {
-      stderr(`             session=${sessionName}\n`);
-    }
-    stderr(`             cwd=${cwd}\n`);
-    if (isPassive) {
-      stderr(
-        `             drive with: ${resolveTaskRunnerCommand()} task set ${runId} <task-id> ...\n`,
-      );
-      // The full bootstrap (composed pendingPrompt) goes to stdout so
-      // callers can pipe or capture it cleanly — e.g.
-      // `task-runner init --agent passive-example ... > /tmp/brief.txt`.
-      if (initialPrompt.length > 0) {
-        stdout(`${initialPrompt}\n`);
-      }
-    } else {
-      stderr(`             resume with: ${resolveTaskRunnerCommand()} run --resume-run ${runId}\n`);
-    }
-    // Caller-instructions banner. Init is always a "first exposure"
-    // moment, so we always print here if the assignment supplied the
-    // field. Interpolation already happened at manifest construction.
-    writeCallerInstructions(manifest.callerInstructions, stderr);
+    emitEvent({
+      type: "run_initialized",
+      runId,
+      agentName: agentConfig.name,
+      assignmentSourcePath: loadedAssignment?.sourcePath ?? null,
+      assignmentPath,
+      sessionName,
+      cwd,
+      passive: isPassive,
+      pendingPrompt: initialPrompt,
+    });
+    emitCallerInstructions(manifest.callerInstructions, emitEvent);
     return {
       summary: {
         status: "initialized",
@@ -971,25 +998,24 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
   writeManifest(workspaceDir, manifest);
 
-  const sessionSuffix = isResume ? ` (session ${sessionIndex})` : "";
-  stderr(`task-runner: agent=${agentConfig.name} run=${runId}${sessionSuffix}\n`);
-  if (loadedAssignment) {
-    stderr(`             source=${loadedAssignment.sourcePath}\n`);
-  }
-  stderr(`             assignment=${assignmentPath}\n`);
-  if (sessionName) {
-    stderr(`             session=${sessionName}\n`);
-  }
-  stderr(`             cwd=${cwd}\n`);
+  emitEvent({
+    type: "run_started",
+    runId,
+    agentName: agentConfig.name,
+    assignmentSourcePath: loadedAssignment?.sourcePath ?? null,
+    assignmentPath,
+    sessionName,
+    cwd,
+    sessionIndex: isResume ? sessionIndex : null,
+  });
 
   // Caller-instructions banner on fresh runs only. Resume and
   // execute-after-init skip the banner (the caller already saw it
   // on init or on the fresh run that created the workspace). See
   // the `callerInstructions` field doc on RunManifest for the rule.
   if (!isResume && !priorInitialized) {
-    writeCallerInstructions(manifest.callerInstructions, stderr);
+    emitCallerInstructions(manifest.callerInstructions, emitEvent);
   }
-  stderr("\n");
 
   let sessionAttempts = 0;
   // Seed the per-attempt session id from one of three sources:
@@ -1010,7 +1036,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   while (sessionAttempts < maxAttempts && !terminal) {
     sessionAttempts++;
     const globalAttemptNumber = priorAttemptCount + sessionAttempts;
-    stderr(`── attempt ${globalAttemptNumber} ──\n`);
+    emitEvent({ type: "attempt_started", attempt: globalAttemptNumber });
 
     const sessionIdAtStart = sessionId;
     const attemptStartedAt = new Date().toISOString();
@@ -1032,10 +1058,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       resumeSessionId: sessionId ?? undefined,
       sessionName: sessionName ?? undefined,
       abortSignal: opts.abortSignal,
-      onStdoutText: (text) => stdout(text),
-      onStderrText: (text) => stderr(text),
+      emit: emitEvent,
     });
-    stdout("\n");
     const attemptEndedAt = new Date().toISOString();
 
     if (invokeResult.transcript) {
@@ -1111,13 +1135,13 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
     if (invokeResult.aborted) {
       terminal = { status: "aborted", exitCode: 130 };
-      stderr("\ntask-runner: interrupted by user; stopping.\n");
+      emitEvent({ type: "run_aborted" });
       break;
     }
 
     if (resumeRejected) {
       terminal = { status: "error", exitCode: 4 };
-      stderr("task-runner: backend rejected the resume session; stopping.\n");
+      emitEvent({ type: "resume_rejected" });
       break;
     }
 
@@ -1158,9 +1182,11 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     }
 
     const incompleteCount = countBy(tasks, (t) => t.status !== "completed");
-    stderr(
-      `\ntask-runner: retrying — ${incompleteCount} incomplete, ${mergeInfo.invalidStatuses.length} invalid status${mergeInfo.invalidStatuses.length === 1 ? "" : "es"}\n\n`,
-    );
+    emitEvent({
+      type: "retrying",
+      incompleteCount,
+      invalidStatusCount: mergeInfo.invalidStatuses.length,
+    });
 
     currentPrompt = buildNudgeMessage(tasks, mergeInfo.invalidStatuses, assignmentPath, {
       runId,
@@ -1204,7 +1230,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     tasks: Array.from(tasks.values()),
     runId,
   };
-  stderr(renderSummary(summary));
+  emitEvent({ type: "run_finished", summary });
 
   return {
     summary,

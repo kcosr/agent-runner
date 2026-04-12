@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
 import { ResumeError, resolveResumeTarget } from "../dist/runner/manifest.js";
 import { runAgent } from "../dist/runner/run-loop.js";
+import { createRunEventCapture } from "./helpers/run-events.mjs";
 import { assignmentPathFromPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 const THREE_AGENT = `---
@@ -644,7 +645,7 @@ test("resume: text summary includes the resume-run hint with the run id", async 
   const dir = tempDir();
   writeAgentAndAssignment(dir);
 
-  const stderrChunks = [];
+  const capture = createRunEventCapture();
   await withSharedRuntimeEnv(dir, async () => {
     const loaded = loadAgentConfig("three", dir);
     const loadedAssignment = loadAssignmentConfig("three-work", dir);
@@ -670,10 +671,9 @@ test("resume: text summary includes the resume-run hint with the run id", async 
             rawStderr: "",
           };
         }),
-        stderr: (t) => stderrChunks.push(t),
-        stdout: () => {},
+        emitEvent: capture.emitEvent,
       });
-      const stderr = stderrChunks.join("");
+      const stderr = capture.stderr();
       assert.ok(stderr.includes("To continue this run with a follow-up message:"));
       assert.ok(stderr.includes(`task-runner run --resume-run ${outcome.runId}`));
     } finally {

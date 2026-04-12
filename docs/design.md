@@ -71,8 +71,8 @@ task-runner run --agent <name> [--assignment <name>] [--var k=v]...
      e. If retry: merge missing sections, build nudge, re-invoke with
         backend session resume
 10. Rewrite run.json with terminal state
-11. Emit final output (text summary on stderr, or full manifest on stdout
-    when --output-format json)
+11. Emit typed run events plus the final outcome; the CLI transport renders
+    those events to stderr/stdout (or suppresses them in JSON mode)
 12. Exit with status code
 ```
 
@@ -89,9 +89,13 @@ task-runner/
 ├── docs/
 │   └── design.md          # this file
 ├── src/
-│   ├── cli.ts             # argv parsing, entry point
+│   ├── cli.ts             # argv parsing, entry point, transport adapter
 │   ├── cli/
-│   │   └── parse-args.ts  # argv → ParsedArgs + overridesFromParsedArgs
+│   │   ├── parse-args.ts  # argv → ParsedArgs + overridesFromParsedArgs
+│   │   └── render-run.ts  # RunEvent -> stdout/stderr rendering
+│   ├── commands/
+│   │   ├── service.ts     # typed non-run command/query/mutation services
+│   │   └── render.ts      # text renderers for command results
 │   ├── config/
 │   │   ├── schema.ts      # zod AgentConfig + AssignmentConfig schemas
 │   │   ├── loader.ts      # locate + parse agent.md AND assignment.md
@@ -102,12 +106,12 @@ task-runner/
 │   │   ├── parser.ts      # parse assignment.md -> status/notes updates
 │   │   └── merge.ts       # merge: missing sections only, preserve edits
 │   ├── backends/
-│   │   ├── types.ts       # Backend interface
+│   │   ├── types.ts       # Backend interface + BackendEvent stream
 │   │   ├── registry.ts    # name → adapter lookup
 │   │   ├── claude.ts      # Claude CLI subprocess adapter
 │   │   └── codex.ts       # Codex JSON-RPC adapter (stdio + ws transports)
 │   ├── runner/
-│   │   ├── run-loop.ts    # seed → invoke → parse → retry
+│   │   ├── run-loop.ts    # seed → invoke → parse → retry, emit RunEvent
 │   │   ├── manifest.ts    # RunManifest types + writer for run.json
 │   │   ├── task-workflow.ts # injected task workflow template + reminder
 │   │   ├── nudge.ts       # retry prompt builder
@@ -140,6 +144,12 @@ task-runner/
     ├── backend-registry.test.mjs
     └── cli-parse-args.test.mjs
 ```
+
+The CLI owns parsing, signal handling, rendering, and exit codes only.
+Read-only commands (`status`, `list`, `show`, `task list/show`) and task
+mutations (`task set`, `task append-notes`, `task add`, `run reset`)
+execute through typed service functions in `src/commands/service.ts`,
+with text formatting isolated in `src/commands/render.ts`.
 
 ## Agent and assignment definitions
 
@@ -1219,6 +1229,10 @@ type EffortLevel =
   | "xhigh"
   | "max";
 
+type BackendEvent =
+  | { type: "agent_message_delta"; text: string }
+  | { type: "backend_notice"; text: string };
+
 interface BackendInvokeContext {
   prompt: string;
   cwd: string;
@@ -1228,14 +1242,16 @@ interface BackendInvokeContext {
   unrestricted?: boolean;
   timeoutSec: number;
   resumeSessionId?: string;
-  onStdoutText?: (text: string) => void;
-  onStderrText?: (text: string) => void;
+  sessionName?: string;
+  abortSignal?: AbortSignal;
+  emit?: (event: BackendEvent) => void;
 }
 
 interface BackendInvokeResult {
   exitCode: number | null;
   signal: NodeJS.Signals | null;
   timedOut: boolean;
+  aborted: boolean;
   sessionId: string | null;        // extracted from output events
   transcript: string | null;       // full assistant text across all turns
   rawStdout: string;               // full unfiltered backend stdout
@@ -1272,7 +1288,7 @@ claude --print --output-format stream-json --verbose \
      stream (`stream_event.content_block_delta` with `delta.type ===
      "text_delta"`) when partial messages are enabled, and the terminating
      `assistant` event's `message.content[].text` blocks otherwise. The
-     adapter calls the `onStdoutText` callback for whichever source appears,
+     adapter emits `agent_message_delta` for whichever source appears,
      guarded so it never double-prints if both are present.
   3. **Transcript** — accumulated across the whole attempt: streamed text
      deltas if present, otherwise every `assistant` event's text content
@@ -1333,7 +1349,7 @@ Every `invoke()` call opens a fresh transport and runs one full lifecycle:
    notifications:
    - `thread/started` → capture `thread.id` as session ID
    - `turn/started` → capture `turn.id` (needed for interrupt)
-   - `item/agentMessage/delta` → stream `params.delta` to `onStdoutText`
+   - `item/agentMessage/delta` → emit `agent_message_delta` with `params.delta`
    - `item/completed` with `item.type === "agentMessage"` → capture
      `item.text` as the definitive transcript for the turn
    - `turn/completed` → capture `turn.status` (`completed` / `failed` /
@@ -1885,23 +1901,20 @@ run. On resume, `--var` is rejected (vars are frozen into
 
 ## Output modes
 
-`--output-format` controls what goes to stdout:
+`runAgent` no longer writes terminal text directly. It emits typed
+`RunEvent` records (`run_initialized`, `caller_instructions`,
+`run_started`, `attempt_started`, backend events, retry notices, and
+`run_finished`), and the CLI transport renders those to terminal
+streams. `--output-format` controls how the CLI renders them:
 
 ### text (default)
 
 - **Stdout**: the agent's text output, verbatim, piped live during each
-  attempt. Between attempts, a divider is printed so concatenation is
-  still readable:
-  ```
-  ── attempt 1 ──
-  <agent stdout>
-
-  ── attempt 2 ──
-  <agent stdout>
-  ```
-- **Stderr**: runner chrome — startup banner (agent name, run ID,
-  assignment path, cwd), attempt dividers, retry notifications, final
-  summary.
+  attempt. Passive `init` also writes the composed bootstrap prompt to
+  stdout so it can be piped elsewhere.
+- **Stderr**: runner chrome rendered from `RunEvent` records — startup
+  banner (agent name, run ID, assignment path, cwd), caller-instructions
+  banner, attempt dividers, retry notifications, final summary.
 
 Final summary on stderr, including per-task results with notes:
 

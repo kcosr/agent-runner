@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
 import { runAgent } from "../dist/runner/run-loop.js";
+import { createRunEventCapture } from "./helpers/run-events.mjs";
 import { assignmentPathFromPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 const THREE_AGENT = `---
@@ -76,8 +77,7 @@ async function runWithMock(baseDir, mockInvoke, overrides = {}) {
     id: "mock",
     invoke: mockInvoke,
   };
-  const stdoutChunks = [];
-  const stderrChunks = [];
+  const capture = createRunEventCapture();
   return withSharedRuntimeEnv(baseDir, async () => {
     const loaded = loadAgentConfig("three", baseDir);
     const loadedAssignment = loadAssignmentConfig("three-work", baseDir);
@@ -90,13 +90,12 @@ async function runWithMock(baseDir, mockInvoke, overrides = {}) {
         cliVars: {},
         backend,
         overrides,
-        stderr: (t) => stderrChunks.push(t),
-        stdout: (t) => stdoutChunks.push(t),
+        emitEvent: capture.emitEvent,
       });
       return {
         outcome,
-        stdout: stdoutChunks.join(""),
-        stderr: stderrChunks.join(""),
+        stdout: capture.stdout(),
+        stderr: capture.stderr(),
       };
     } finally {
       process.chdir(originalCwd);
