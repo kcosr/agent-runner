@@ -123,56 +123,43 @@ function isRunning(manifest: RunManifest): boolean {
   return manifest.status === "running";
 }
 
-function isTerminalNonPassiveRun(manifest: RunManifest): boolean {
-  return (
-    manifest.backend !== "passive" &&
-    manifest.status !== "initialized" &&
-    manifest.status !== "running"
-  );
-}
-
 export function deriveTaskMutationCapabilities(manifest: RunManifest): RunTaskMutationCapabilities {
   const tasksLocked = manifest.lockedFields.includes("tasks");
-  const running = isRunning(manifest);
 
   if (manifest.backend === "passive") {
     return {
-      canSetStatus: !running,
-      canEditNotes: !running,
-      canAdd: !running && !tasksLocked,
+      canSetStatus: !isRunning(manifest),
+      canEditNotes: !isRunning(manifest),
+      canAdd: !isRunning(manifest) && !tasksLocked,
     };
   }
 
-  if (manifest.status === "initialized") {
-    return {
-      canSetStatus: true,
-      canEditNotes: true,
-      canAdd: !tasksLocked,
-    };
+  switch (manifest.status) {
+    case "initialized":
+      return {
+        canSetStatus: true,
+        canEditNotes: true,
+        canAdd: !tasksLocked,
+      };
+    case "running": {
+      const canMutateRunningTasks = normalizeTaskMode(manifest.taskMode) === "cli";
+      return {
+        canSetStatus: canMutateRunningTasks,
+        canEditNotes: canMutateRunningTasks,
+        canAdd: false,
+      };
+    }
+    case "success":
+    case "blocked":
+    case "exhausted":
+    case "aborted":
+    case "error":
+      return {
+        canSetStatus: false,
+        canEditNotes: true,
+        canAdd: false,
+      };
   }
-
-  if (running) {
-    const canMutateRunningTasks = normalizeTaskMode(manifest.taskMode) === "cli";
-    return {
-      canSetStatus: canMutateRunningTasks,
-      canEditNotes: canMutateRunningTasks,
-      canAdd: false,
-    };
-  }
-
-  if (isTerminalNonPassiveRun(manifest)) {
-    return {
-      canSetStatus: false,
-      canEditNotes: true,
-      canAdd: false,
-    };
-  }
-
-  return {
-    canSetStatus: false,
-    canEditNotes: false,
-    canAdd: false,
-  };
 }
 
 export function toRunSummary(entry: ListedRunManifest): RunSummary {

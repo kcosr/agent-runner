@@ -1947,6 +1947,7 @@ daemon adoption:
 - `RunSummary`
 - `RunDetail`
 - `RunArchiveResult`
+- `RunTaskMutationCapabilities`
 - `RunCapabilities`
 
 Rules for this seam:
@@ -1960,6 +1961,16 @@ Rules for this seam:
   through the neutral contracts. `status` emits `RunDetail`, and bundled
   planner/reviewer workflows read `tasks[]` from that DTO instead of projecting
   raw `finalTasks`.
+- `RunCapabilities` exposes the current CLI-backed action surface:
+  `canArchive`, `canUnarchive`, `canResume`, plus nested task mutation
+  booleans in `RunTaskMutationCapabilities`
+  (`canSetStatus`, `canEditNotes`, `canAdd`).
+- `RunSummary` and `RunDetail` both carry `capabilities`, so list/board
+  consumers do not need N+1 detail reads just to determine which actions
+  are available.
+- Pause / stop control is intentionally excluded from this seam in the
+  current slice. Live-control flags belong to the later daemon/API work,
+  not the current CLI-derived capability contract.
 
 ## Output modes
 

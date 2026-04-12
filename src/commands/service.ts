@@ -15,6 +15,7 @@ import {
   type RunArchiveResult,
   type RunDetail,
   type RunSummary,
+  type RunTaskMutationCapabilities,
   deriveTaskMutationCapabilities,
   toRunArchiveResult,
   toRunDetail,
@@ -123,32 +124,37 @@ function taskSnapshot(manifest: RunManifest, taskId: string): TaskSnapshot {
   return task;
 }
 
-function requireTaskMutationAllowed(manifest: RunManifest, kind: TaskMutationKind): void {
+function requireTaskMutationAllowed(
+  manifest: RunManifest,
+  kind: TaskMutationKind,
+): RunTaskMutationCapabilities {
   const capabilities = deriveTaskMutationCapabilities(manifest);
 
   if (kind === "set") {
     if (capabilities.canSetStatus || capabilities.canEditNotes) {
-      return;
+      return capabilities;
     }
   }
 
   if (kind === "append-notes") {
     if (capabilities.canEditNotes) {
-      return;
+      return capabilities;
     }
   }
 
   if (kind === "add") {
-    if (capabilities.canAdd) {
-      return;
-    }
     if (manifest.lockedFields.includes("tasks")) {
       throw new CommandError(
         "task add: the `tasks` field is locked for this run — cannot add tasks",
       );
     }
+    if (capabilities.canAdd) {
+      return capabilities;
+    }
     if (capabilities.canEditNotes && !capabilities.canSetStatus) {
-      return;
+      throw new CommandError(
+        `cannot add tasks to a terminal non-passive run; use ${resolveTaskRunnerCommand()} run --resume-run <id> --add-task "..." instead`,
+      );
     }
   }
 
@@ -387,8 +393,7 @@ export function setTask(
   }
 
   const resolved = resolveRun(target);
-  requireTaskMutationAllowed(resolved.manifest, "set");
-  const capabilities = deriveTaskMutationCapabilities(resolved.manifest);
+  const capabilities = requireTaskMutationAllowed(resolved.manifest, "set");
 
   updateTaskMap(
     resolved,
@@ -431,8 +436,7 @@ export function appendTaskNotes(target: string, taskId: string, text: string): T
   }
 
   const resolved = resolveRun(target);
-  requireTaskMutationAllowed(resolved.manifest, "append-notes");
-  const capabilities = deriveTaskMutationCapabilities(resolved.manifest);
+  const capabilities = requireTaskMutationAllowed(resolved.manifest, "append-notes");
 
   updateTaskMap(
     resolved,
@@ -461,11 +465,6 @@ export function addTask(
   const title = validateTaskTitle(input.title);
   const resolved = resolveRun(target);
   requireTaskMutationAllowed(resolved.manifest, "add");
-  if (!deriveTaskMutationCapabilities(resolved.manifest).canAdd) {
-    throw new CommandError(
-      `cannot add tasks to a terminal non-passive run; use ${resolveTaskRunnerCommand()} run --resume-run <id> --add-task "..." instead`,
-    );
-  }
 
   let taskId = "";
   updateTaskMap(resolved, {}, (tasks) => {
