@@ -9,7 +9,7 @@ vars:
     source: cli
     description: Absolute path to the repository you're going to work in.
 tasks:
-  - id: t01_read_primary_entry_points
+  - id: read_primary_entry_points
     title: Read the high-signal entry points
     body: |
       Before doing anything else, read the primary orientation
@@ -33,7 +33,7 @@ tasks:
       Notes: a short summary (10-20 lines) capturing what the
       project is, who it's for, what the build/test/lint commands
       are, and any non-obvious conventions you noticed.
-  - id: t02_codemap
+  - id: run_codemap
     title: Run codemap for a compact code map
     body: |
       Run the following shell command at the repo root:
@@ -55,7 +55,7 @@ tasks:
       exist, which symbols look load-bearing, what the rough
       call graph feels like). You don't need to paste the full
       codemap output; you need to internalize it.
-  - id: t03_structure_inventory
+  - id: inventory_structure
     title: Inventory the directory structure
     body: |
       Walk the top-level directory layout of the repo:
@@ -72,7 +72,7 @@ tasks:
 
       Notes: a short directory tour (15-30 lines). Describe each
       top-level dir in a sentence.
-  - id: t04_entry_points
+  - id: identify_entry_points
     title: Identify the entry points
     body: |
       Find where the project actually *starts* at runtime.
@@ -91,7 +91,7 @@ tasks:
 
       Notes: list each entry point with its file path and a
       one-sentence description of what it does.
-  - id: t05_subsystem_map
+  - id: map_subsystems
     title: Map the major subsystems and how they talk
     body: |
       Now that you have the directory layout and the entry
@@ -108,7 +108,7 @@ tasks:
 
       Notes: a subsystem list with dependencies. Aim for 5-12
       subsystems for a typical project.
-  - id: t06_conventions
+  - id: capture_conventions
     title: Project conventions — style, testing, tooling
     body: |
       Capture the operational conventions the project follows,
@@ -132,7 +132,7 @@ tasks:
       Notes: a concise conventions reference. This is the
       thing you'll need when you eventually modify code so you
       don't fight the project's style.
-  - id: t07_unknowns
+  - id: list_unknowns
     title: Unknowns — what you'd have to dig into later
     body: |
       Now flip the frame: given what you've read, what are the
@@ -156,7 +156,7 @@ tasks:
       how you avoid confidently answering a future question
       incorrectly. Aim for 5-10 honest unknowns. An assignment
       that claims zero unknowns is suspicious.
-  - id: t08_self_check_summary
+  - id: self_check_summary
     title: Self-check summary
     body: |
       Before declaring this task complete, run a quick self-
@@ -203,10 +203,11 @@ afterward.
 
 **Delegating via subagents.** For a large or unfamiliar
 codebase, you may delegate independent tasks to subagents to
-parallelize — e.g. run t03 (directory inventory), t04 (entry
-points), and t06 (conventions) concurrently while you continue
-reading the primary docs. Do not delegate t01 (primary docs)
-or t08 (self-check summary); both need to live in the main
+parallelize — e.g. run `inventory_structure`,
+`identify_entry_points`, and `capture_conventions`
+concurrently while you continue reading the primary docs. Do
+not delegate `read_primary_entry_points` (primary docs) or
+`self_check_summary`; both need to live in the main
 agent's context so follow-up tasks inherit them. When a
 subagent returns, fold its findings into the task's Notes
 block so the main session has a single consolidated view.

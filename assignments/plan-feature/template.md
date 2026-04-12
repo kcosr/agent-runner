@@ -24,14 +24,12 @@ callerInstructions: |
 
   ## Executing the plan
 
-      TASK_RUNNER_MAX_CALL_DEPTH=2 {{task_runner_cmd}} run \
-        --resume-run {{run_id}}
+      {{task_runner_cmd}} run --resume-run {{run_id}}
 
-  The depth override is required. The internal-review task in
-  this plan launches a nested `{{task_runner_cmd}} run` against the
-  code-reviewer agent (implementer runs at depth 1, reviewer at
-  depth 2). Default depth is 1, so without the override the
-  review invocation is rejected.
+  The `internal_review` task in this plan launches a nested
+  `{{task_runner_cmd}} run` against the `code-reviewer` agent.
+  The caller environment must allow one nested review run, or
+  that step will be rejected.
 
   Any agent with shell access can execute this run. The plan
   is deliberately agent-agnostic — task-runner reconstructs
@@ -85,8 +83,15 @@ callerInstructions: |
   `blocked` with an explanation rather than dropping it.
   A blocked plan halts cleanly and you can re-plan, adjust,
   and resume.
+
+  Design defaults for this repo:
+  - Prefer end-state implementations over transitional ones.
+  - Avoid fallback logic, heuristics, alias fields, bridge
+    routes, and dual-shape readers unless the caller
+    explicitly asked for migration or compatibility support.
+  - Treat contract changes as hot cuts by default.
 tasks:
-  - id: t01_orient
+  - id: orient
     title: Re-orient to repo conventions (fresh session)
     body: |
       **Category**: process
@@ -123,21 +128,25 @@ tasks:
       pass verifies these assumptions against the final
       implementation.
 
-      ## Preflight: recursion depth
+      **Design rules for this run**:
+      - Prefer the final contract shape directly.
+      - Do not add fallback logic, heuristic detection,
+        compatibility shims, or dual-shape parsing unless
+        this plan explicitly calls for migration support.
+      - If the plan changes a schema/config/API/CLI surface
+        and says nothing about compatibility, treat it as a
+        hot cut.
 
-      This plan launches a nested `{{task_runner_cmd}} run` against
-      the `code-reviewer` agent in `t07_internal_review`.
-      That requires the max call depth to be strictly
-      greater than the current depth. Run:
+      ## Preflight: nested review allowed
 
-          echo "max=${TASK_RUNNER_MAX_CALL_DEPTH:-1} current=${TASK_RUNNER_CALL_DEPTH:-0}"
-
-      If `max` is less than or equal to `current`, mark THIS
-      task `blocked` with the note "TASK_RUNNER_MAX_CALL_DEPTH
-      must be > TASK_RUNNER_CALL_DEPTH; re-invoke with
-      TASK_RUNNER_MAX_CALL_DEPTH=<higher> exported." Do not
-      proceed — the review at t07 will be rejected and you
-      will waste the rest of the run.
+      This plan launches a nested `{{task_runner_cmd}} run`
+      against the `code-reviewer` agent in `internal_review`.
+      If your surrounding environment disallows nested
+      task-runner reviews, mark THIS task `blocked` with a
+      note telling the caller that nested review must be
+      enabled before execution can continue. Do not proceed
+      into the implementation tasks if the review step cannot
+      run.
 
       ## Re-orient to repo conventions
 
@@ -163,7 +172,7 @@ tasks:
 
       Paste the planning run id into this task's Notes for
       the record.
-  - id: t02_scaffold
+  - id: scaffold
     title: Branch, scaffold, and workspace setup
     body: |
       **Category**: hybrid
@@ -176,7 +185,7 @@ tasks:
       feature-specific config. If none of that applies,
       keep this task but note "No scaffolding needed;
       working on <branch>." and move on.
-  - id: t03_implement_core
+  - id: implement_core
     title: Implement core feature logic
     body: |
       **Category**: code-bearing
@@ -195,7 +204,7 @@ tasks:
       implementation splits cleanly into independent
       chunks, spawn subagents to parallelize. Fold their
       diffs back in before marking this task complete.
-  - id: t04_implement_tests
+  - id: implement_tests
     title: Add and update tests
     body: |
       **Category**: code-bearing
@@ -205,14 +214,14 @@ tasks:
       <<PLACEHOLDER_TEST_PLAN>>
 
       Add tests that cover every non-trivial branch
-      introduced in t03 — happy paths, error paths, edge
+      introduced in `implement_core` — happy paths, error paths, edge
       cases, and any concurrency or lifecycle interactions
       the planner flagged. Update existing tests whose
       assumptions changed.
 
       Paste the test command and its exit code into Notes
       when done.
-  - id: t05_fresh_eyes_simplify
+  - id: fresh_eyes_simplify
     title: Fresh-eyes simplification pass
     body: |
       **Category**: hybrid
@@ -232,12 +241,15 @@ tasks:
           a table or a loop.
         - Over-engineered configuration for cases that do
           not exist yet.
+        - Fallback logic, compatibility shims, heuristics,
+          alias fields, or dual-shape readers that the plan
+          did not explicitly require.
 
       Apply any simplifications you find before moving on.
       The goal is to shorten the diff the reviewer has to
       read; shorter diffs produce sharper reviews. Paste a
       one-line summary of what you simplified into Notes.
-  - id: t06_check_gate
+  - id: check_gate
     title: Run the lint / build / test gate
     body: |
       **Category**: process
@@ -247,14 +259,14 @@ tasks:
 
           <<PLACEHOLDER_CHECK_COMMANDS>>
 
-      Every command must pass before moving to t07. Paste
+      Every command must pass before moving to `internal_review`. Paste
       each command's exit code and any relevant output into
       Notes. If a command fails, fix the underlying issue
       here — do not defer failing checks to the reviewer.
 
       If the project has no check gate at all, note that
       explicitly and move on.
-  - id: t07_internal_review
+  - id: internal_review
     title: Internal code review via task-runner
     body: |
       **Category**: process
@@ -312,7 +324,7 @@ tasks:
           {{task_runner_cmd}} status <review-run-id> --output-format json \
             --field status
 
-      The code-review assignment has a final `t14_approval`
+      The code-review assignment has a final `approval`
       task that gates ship/no-ship, and the run's exit code
       reflects it:
         - `status: "success"` → reviewer approved. Proceed.
@@ -331,26 +343,24 @@ tasks:
             --field finalTasks
 
       Paste the reviewer's top-findings synthesis and the
-      `t14_approval` decision record into this task's Notes
+      `approval` decision record into this task's Notes
       — raw, not summarized. If the reviewer flagged plan-
       coverage findings, call them out explicitly: they are
       the ones that say "the plan promised X but the diff
-      does not contain X." If t14 is BLOCKED, copy its
-      "Path to approval" list here so t08 knows exactly
+      does not contain X." If `approval` is BLOCKED, copy its
+      "Path to approval" list here so `apply_review_fixes` knows exactly
       what must be fixed.
 
-      Note on recursion depth: this nested task-runner
-      invocation consumes one level of depth (implementer →
-      reviewer). That is why the caller-instructions at the
-      top of this run require `TASK_RUNNER_MAX_CALL_DEPTH=2`.
-      If the review launch is rejected with a depth error,
-      that is almost certainly the missing export.
-  - id: t08_apply_review_fixes
+      This nested task-runner invocation consumes one level
+      of nested review (implementer → reviewer). If the
+      review launch is rejected by recursion policy, block
+      and surface that to the caller instead of continuing.
+  - id: apply_review_fixes
     title: Apply agreed review fixes and request delta re-review
     body: |
       **Category**: hybrid
 
-      Work through the findings from t07:
+      Work through the findings from `internal_review`:
         - For each finding you agree with, implement the
           fix here. Cite the file:line you edited in Notes.
         - For each finding you disagree with, write a
@@ -379,13 +389,13 @@ tasks:
             --field status
 
       If it still returns `blocked`, read the updated
-      `t14_approval` decision record for the new "Path to
+      `approval` decision record for the new "Path to
       approval" list, apply the remaining fixes, and
       resume again. Do not mark this task `completed`
       until the review run hits `success`.
 
       Paste the final delta synthesis and the final
-      (APPROVED) `t14_approval` decision record into this
+      (APPROVED) `approval` decision record into this
       task's Notes, replacing the earlier (BLOCKED)
       versions. The audit trail of earlier passes lives
       in the review run itself; this task's Notes should
@@ -399,9 +409,9 @@ tasks:
       several passes the reviewer still refuses to approve
       and you disagree with the remaining blockers, mark
       **this** task `blocked` with an explanation — do not
-      fake an approval by editing the review's t14 block
+      fake an approval by editing the review's `approval` block
       directly. The caller escalates from there.
-  - id: t09_docs_drift
+  - id: docs_drift
     title: Documentation drift
     body: |
       **Category**: code-bearing
@@ -425,7 +435,7 @@ tasks:
       say so explicitly and move on. Documentation drift
       is a first-class release blocker, not an
       afterthought.
-  - id: t10_self_check
+  - id: self_check
     title: Final self-check and synthesis
     body: |
       **Category**: process
@@ -445,8 +455,8 @@ tasks:
         - **Files touched** (repo-relative paths, grouped
           by subsystem)
         - **Test results** (pass/fail counts, any skipped)
-        - **Review run id** from t07 for audit
-        - **Planning run id** from t01 for audit
+        - **Review run id** from `internal_review` for audit
+        - **Planning run id** from `orient` for audit
         - **Deferred work** or open questions, if any
         - **Caller notes** — anything the human kicking
           the tires should know on first read
@@ -455,7 +465,7 @@ tasks:
       `blocked`. If anything is blocked, this task is
       blocked too — escalate to the caller rather than
       silently marking the plan successful.
-  - id: t11_commit
+  - id: commit
     title: Commit all work and confirm clean tree
     body: |
       **Category**: process
@@ -472,12 +482,12 @@ tasks:
            configured task-runner state dir) and
            commit them with a clear, focused message that
            describes the work from the plan. Follow the
-           repo's commit-message convention from t01.
+           repo's commit-message convention from `orient`.
         3. If the repo uses pre-commit hooks, let them run.
            If a hook fails, fix the underlying issue and
            create a **new** commit — do not amend past a
            hook failure, and do not use `--no-verify`.
-        4. If the t08 review-fix delta passes produced
+        4. If the `apply_review_fixes` delta passes produced
            multiple commits, that's fine — leave them as
            separate commits; do not squash without the
            caller's instruction.
@@ -487,7 +497,7 @@ tasks:
            If it isn't, go back to step 2.
         6. Run `git log --oneline <base>..HEAD` (where
            `<base>` is the commit this plan was planned
-           against — capture it from t02 notes or ask the
+           against — capture it from `scaffold` notes or ask the
            caller in a blocked state if you don't know it)
            and paste the list of commits this plan produced
            into Notes.
@@ -524,8 +534,8 @@ implementation (Claude's Agent tool, Codex subagents,
 whatever your backend supports). Native subagents do not
 count against task-runner's recursion depth. The one
 depth-consuming invocation in this plan is the nested
-`{{task_runner_cmd}} run` in `t07_internal_review`; that is why
-this run must be launched with `TASK_RUNNER_MAX_CALL_DEPTH=2`.
+`{{task_runner_cmd}} run` in `internal_review`; make sure the
+caller environment allows that nested review before execution.
 
 The task list is locked (`lockedFields: [tasks]`). You
 cannot add, remove, or reorder tasks at runtime. If a task

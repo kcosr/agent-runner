@@ -41,25 +41,25 @@ callerInstructions: |
   gated by an explicit ship / no-ship decision at the end. Read
   the findings, implement the fixes you agree with, then resume
   this same run for a delta re-review. The reviewer's synthesis
-  in `t13_synthesis.notes` is the ranked top-findings list; each
-  individual task (t02 architecture, t03 concurrency, …, t11 docs
-  drift, t12 plan coverage) carries the raw findings for its
+  in `synthesis.notes` is the ranked top-findings list; each
+  individual task (`architecture`, `concurrency`, …,
+  `docs_drift`, `plan_coverage`) carries the raw findings for its
   dimension with severity tags. The final decision lives in
-  `t14_approval.notes`.
+  `approval.notes`.
 
   **Exit code carries the decision.** The run exits `success`
-  (code 0) only if the reviewer approved the change in t14;
+  (code 0) only if the reviewer approved the change in `approval`;
   `blocked` (code 2) means the reviewer could not approve and
   a delta pass is needed after fixes. The first call will
   almost always exit blocked — that is the expected contract,
   not a failure. Scripts should gate on the terminal status,
   not on the existence of a synthesis block. The approval
-  decision record in `t14_approval.notes` follows a fixed
+  decision record in `approval.notes` follows a fixed
   format (`APPROVED for ship` or `BLOCKED — cannot approve`)
   so you can grep it directly:
 
       {{task_runner_cmd}} status {{run_id}} --output-format json \
-        --field finalTasks | jq -r '.[] | select(.id=="t14_approval") | .notes'
+        --field finalTasks | jq -r '.[] | select(.id=="approval") | .notes'
 
   If this review was launched with `--var implementation_plan=<path>`
   — typically from a `plan-feature`-generated implementer run —
@@ -67,7 +67,7 @@ callerInstructions: |
   actually landed in the diff under review. Silent deferrals and
   dropped review fixes are flagged at HIGH/CRITICAL severity,
   and any unresolved HIGH/CRITICAL from the plan-coverage pass
-  blocks t14 approval. Runs launched without the var skip the
+  blocks `approval`. Runs launched without the var skip the
   plan-coverage pass cleanly.
 
   ## Reviewing findings
@@ -121,11 +121,12 @@ callerInstructions: |
   The reviewer has been instructed to do a **focused delta pass**
   on resume, not a full 14-task re-walk. It will verify each prior
   finding's resolution status, scan for any new issues the fixes
-  may have introduced, rewrite the t13 synthesis with a "Delta
-  review" structure, and re-evaluate t14 approval from scratch
-  against the post-fix state. Tasks t02–t12 retain their original
+  may have introduced, rewrite the `synthesis` task with a "Delta
+  review" structure, and re-evaluate `approval` from scratch
+  against the post-fix state. Tasks `architecture` through
+  `plan_coverage` retain their original
   findings as the audit trail from the first pass, so you can
-  always see how findings evolved across rounds. The t14 approval
+  always see how findings evolved across rounds. The `approval`
   block preserves the prior decision in its Notes history, so you
   can see what blocked the previous pass.
 
@@ -142,7 +143,7 @@ callerInstructions: |
   synthesis records that you declined it. A finding you push back
   on is not a failed review; it's a calibration datapoint.
 tasks:
-  - id: t01_orient
+  - id: orient
     title: Repo orientation and scope resolution
     body: |
       First, understand the project. Read the high-signal entry
@@ -178,7 +179,7 @@ tasks:
       major modules, and — if scoped — the concrete set of files
       and hunks under review. This is context for the rest of the
       review, not a finding section.
-  - id: t02_architecture
+  - id: architecture
     title: Architecture & module boundaries
     body: |
       Review the module layout and component boundaries for
@@ -192,7 +193,8 @@ tasks:
           on high-level)
         - Abstractions that exist but aren't pulling weight
         - Abstractions that should exist but don't (duplicated
-          logic across sibling modules — also see t09)
+          logic across sibling modules — also see
+          `simplification_and_duplication`)
         - Layer violations (e.g. a backend module reaching into
           runner state, a UI module calling a DB layer directly)
         - Asymmetries between sibling modules that suggest one is
@@ -202,7 +204,7 @@ tasks:
       If the scope is too small for this dimension to produce
       real findings, say so and move on. Format per role
       instructions.
-  - id: t03_concurrency
+  - id: concurrency
     title: Concurrency & async safety
     body: |
       This is usually the highest-leverage dimension. Look for:
@@ -230,7 +232,7 @@ tasks:
 
       Read every backend adapter, every subprocess wrapper, and
       the main loop(s) for the code. Format per role instructions.
-  - id: t04_error_handling
+  - id: error_handling
     title: Error handling & edge cases
     body: |
       For each user-visible operation in scope, ask: what happens
@@ -251,7 +253,7 @@ tasks:
       fix)? Are partial states left on disk if a write fails
       halfway? Look especially at any code that writes to disk
       and any code that parses external input.
-  - id: t05_state_machine
+  - id: state_machine
     title: State machine & lifecycle correctness
     body: |
       Identify the explicit and implicit state machines in the
@@ -268,7 +270,7 @@ tasks:
           states?
         - Are status fields ever stale relative to the truth
           (e.g. `running` after the process died)?
-  - id: t06_resources
+  - id: resources
     title: Resource management & cleanup
     body: |
       Any code that allocates a non-memory resource is suspect.
@@ -286,7 +288,7 @@ tasks:
 
       Also flag anything that grows unboundedly (arrays, maps,
       log buffers, caches) without a cap.
-  - id: t07_security
+  - id: security
     title: Security & untrusted-input handling
     body: |
       Identify the trust boundaries — where untrusted input
@@ -307,7 +309,7 @@ tasks:
           messages?
         - Is there any `eval`, `Function`, dynamic `require`,
           or user-supplied regex with potential ReDoS?
-  - id: t08_types_schema
+  - id: types_schema
     title: Type safety & schema rigor
     body: |
       Is the type system load-bearing or decorative?
@@ -325,7 +327,7 @@ tasks:
           payload when only v1 is understood? Loud failure or
           silent misinterpret?
         - Optional fields where code assumes presence
-  - id: t09_simplification_and_duplication
+  - id: simplification_and_duplication
     title: Simplification & duplication
     body: |
       Two related dimensions that often pay for themselves
@@ -372,7 +374,7 @@ tasks:
       "`src/a.ts:12-28` and `src/b.ts:40-56` both implement
       retry with exponential backoff; if the backoff constant
       changes in one, the other silently diverges" is.
-  - id: t10_test_coverage
+  - id: test_coverage
     title: Test coverage gaps
     body: |
       Skim the test directory. For each fragile area you flagged
@@ -390,7 +392,7 @@ tasks:
       whether everything currently passes. If the scope is
       ranged, check whether the change added tests for its own
       new code paths.
-  - id: t11_docs_drift
+  - id: docs_drift
     title: Documentation accuracy
     body: |
       Compare the code in scope against the documentation that
@@ -408,7 +410,7 @@ tasks:
       (This is a code review, not a doc review — keep it to
       inaccuracies and contradictions. For a full doc pass use
       the `doc-review` assignment.)
-  - id: t12_plan_coverage
+  - id: plan_coverage
     title: Plan coverage verification
     body: |
       This task is conditional on the `implementation_plan` var.
@@ -427,6 +429,15 @@ tasks:
       that claims to have finished the work you are now reviewing.
       Your job is to verify that what shipped matches what was
       planned, with no silent deferrals.
+
+      Also check the plan for explicit design constraints.
+      When the plan or repo conventions say to avoid fallback
+      logic, heuristics, alias fields, compatibility shims,
+      or dual-shape readers unless compatibility was explicitly
+      requested, enforce that rule here. A change that quietly
+      adds transitional compatibility machinery despite a
+      hot-cut plan is a plan-coverage/design finding, not an
+      implementation detail to wave through.
 
       Walk **every task** in the plan. Do not hardcode specific
       task ids — the plan's task list is whatever shape its
@@ -456,7 +467,7 @@ tasks:
         one against the diff; if the Notes say "no changes
         needed" or equivalent, accept it like a process task.
 
-      **Fallback for untagged plans.** If the Category tag is
+      **Inference for untagged plans.** If the Category tag is
       missing (legacy plans, manually-authored assignments,
       or a planner that failed to tag), flag it as a [LOW]
       finding (`untagged task requires inference`) and fall
@@ -561,11 +572,29 @@ tasks:
           informational; the plan's audit trail is now stale.
 
       **Step 4: verify planning assumptions.** If the plan's
-      orient task (typically t01) or feature-context section
+      orient task (typically `orient`) or feature-context section
       lists explicit assumptions the planner made, verify each
       one still holds for the final implementation. A silently
       broken assumption is [HIGH] — cite the assumption and
       the place where the code contradicts it.
+
+      **Step 5: verify design-discipline constraints.** If the
+      plan, repo guidance, or task notes say the change should
+      be a hot cut with no compatibility layer, check for:
+        - fallback readers/writers for old shapes
+        - heuristic format detection instead of an explicit
+          contract
+        - alias fields kept in sync with the new field
+        - bridge routes or dual command/code paths
+        - compatibility-only migrations the plan did not call for
+
+      Findings here are usually:
+        - [HIGH] unplanned compatibility layer or fallback
+          logic that materially widens the maintenance surface
+        - [MEDIUM] heuristic detection where the plan called
+          for an explicit contract
+        - [LOW] leftover transitional comments/TODOs pointing
+          at a migration that the implemented change no longer needs
 
       If every plan task is `completed` with concrete evidence
       and the diff matches the code-bearing tasks and no
@@ -575,10 +604,11 @@ tasks:
       Notes and mark `completed`. A clean result is the
       correct outcome when the work is clean — do not pad
       with fabricated findings.
-  - id: t13_synthesis
+  - id: synthesis
     title: Top findings synthesis
     body: |
-      Now read back through the notes you wrote on tasks t02-t12
+      Now read back through the notes you wrote on
+      `architecture` through `plan_coverage`
       and build a single ranked list of the **top 10
       highest-leverage findings** from the entire review. Order
       by severity (CRITICAL first, then HIGH, MEDIUM, LOW) and
@@ -595,7 +625,7 @@ tasks:
           would make several findings disappear at once
         - A one-sentence ship / ship-with-changes / block
           recommendation. **Required for every review, not
-          just ranged ones**, because t14_approval gates on
+          just ranged ones**, because approval gates on
           it. For **ranged** reviews, this answers "should
           this change land?" For **full-codebase** reviews,
           this answers "would you ship this codebase as-is if
@@ -604,12 +634,12 @@ tasks:
           changes = real issues to address but no immediate
           crisis; block = critical issues that demand
           immediate attention). Do not omit this field.
-        - If t12 plan-coverage ran (i.e. a plan was provided),
+        - If `plan_coverage` ran (i.e. a plan was provided),
           fold its findings into the ranked list above and
           state explicitly in the recommendation whether plan
           scope was fully met, partially met, or materially
           deferred
-  - id: t14_approval
+  - id: approval
     title: Final ship / no-ship decision
     body: |
       This task is the gate. It is not a synthesis, a summary,
@@ -629,11 +659,12 @@ tasks:
       stop — the runner will halt the session cleanly and the
       caller will resume for a delta pass after fixes.
 
-        - Any finding at HIGH or CRITICAL severity from t02–t12
+        - Any finding at HIGH or CRITICAL severity from
+          `architecture` through `plan_coverage`
           is unresolved in the current diff.
-        - t12 plan-coverage (if it ran) surfaced any HIGH or
+        - `plan_coverage` (if it ran) surfaced any HIGH or
           CRITICAL finding that is not resolved.
-        - The t13 synthesis recommendation is "block" or "ship
+        - The `synthesis` recommendation is "block" or "ship
           with changes" — both mean more work is required.
         - You were unable to trace a finding deeply enough to
           judge whether it is real. Uncertainty blocks.
@@ -652,10 +683,10 @@ tasks:
           the caller upstream with a written justification —
           typically in the resume follow-up message that
           triggered this delta pass.
-        - The t12 plan-coverage pass either did not run (no
+        - The `plan_coverage` pass either did not run (no
           plan provided) or ran cleanly with no HIGH /
           CRITICAL findings open.
-        - The t13 synthesis recommendation is "ship."
+        - The `synthesis` recommendation is "ship."
         - You personally would stand behind this change
           landing on the main branch as-is. If you would not,
           block.
@@ -708,10 +739,10 @@ review.
 delegate independent task dimensions to subagents to
 parallelize — e.g. run the concurrency review and the security
 review as separate subagents while you prepare the synthesis.
-Do not delegate the orient task (t01), the plan-coverage task
-(t12), the synthesis task (t13), or the approval task (t14);
-all four depend on your own accumulated context and, in the
-case of t14, on a judgment call that cannot be outsourced.
+Do not delegate the `orient`, `plan_coverage`, `synthesis`, or
+`approval` tasks; all four depend on your own accumulated
+context and, in the case of `approval`, on a judgment call
+that cannot be outsourced.
 When a subagent returns, fold its findings into the task's
 Notes block in the same severity/format used by the rest of
 the review so the synthesis pass sees a consistent shape.
@@ -722,9 +753,10 @@ working the tasks yourself is usually faster.
 with a follow-up message asking you to re-check your prior
 findings, do **not** re-walk all 14 tasks from scratch. Instead:
 
-1. Re-read your prior notes on tasks t02–t13 — those are your
-   original findings and synthesis. Also re-read the prior
-   t14 approval decision record if it exists (the runner
+1. Re-read your prior notes on `architecture` through
+   `synthesis` — those are your original findings and
+   synthesis. Also re-read the prior `approval` decision
+   record if it exists (the runner
    preserves Notes on resume); it tells you exactly what
    blocked approval last time.
 2. Inspect what has changed in the repository since your prior
@@ -749,7 +781,7 @@ findings, do **not** re-walk all 14 tasks from scratch. Instead:
 4. Scan the new changes (the delta since the prior review) for
    any **new issues** introduced by the fixes themselves. Hold
    these to the same severity bar as the original review.
-5. Write the delta as a fresh synthesis into `t13_synthesis`'s
+5. Write the delta as a fresh synthesis into `synthesis`'s
    Notes block, replacing the prior synthesis. Structure:
    ```
    ## Delta review (re-run)
@@ -768,22 +800,24 @@ findings, do **not** re-walk all 14 tasks from scratch. Instead:
    ### Overall recommendation
    One sentence: ship, ship with changes, or block.
    ```
-6. You do not need to rewrite the Notes on t02–t12 — leave the
+6. You do not need to rewrite the Notes on `architecture`
+   through `plan_coverage` — leave the
    original findings (including any plan-coverage findings)
-   intact there as an audit trail and put the delta in t13 only.
+   intact there as an audit trail and put the delta in
+   `synthesis` only.
    If an implementation plan was provided for the original run,
    re-verify plan coverage against the post-fix diff as part of
    step 3 — a plan-coverage finding that was originally HIGH
    because scope was deferred becomes "resolved" once the
    scope lands, or remains open if it did not.
-7. Re-evaluate `t14_approval` against the post-fix state. The
+7. Re-evaluate `approval` against the post-fix state. The
    runner reset it to `pending` on resume and preserved the
    prior Notes block, so you have the previous decision record
-   as context. Apply the t14 criteria from scratch against the
-   delta synthesis in t13 and the current diff. If every
+   as context. Apply the approval criteria from scratch against
+   the delta synthesis in `synthesis` and the current diff. If every
    HIGH/CRITICAL finding is now resolved or was explicitly
    declined with justification and the synthesis recommendation
-   is "ship", mark t14 `completed` with a fresh approval
+   is "ship", mark `approval` `completed` with a fresh approval
    decision record. Otherwise, mark it `blocked` again with an
    updated reason — and expect another delta pass. Exit code
    semantics are unchanged: `completed` → success (exit 0),
@@ -794,5 +828,5 @@ Re-review mode is strictly additive over prior context: your
 goal is speed and targeted verification, not thoroughness for
 its own sake. A re-review that concludes "all findings
 resolved, no new issues, ship" in 2 minutes is the correct
-outcome if that's what the code shows — approve it in t14 and
-finish.
+outcome if that's what the code shows — approve it in
+`approval` and finish.
