@@ -304,3 +304,36 @@ test("status --field projects RunDetail fields and rejects removed manifest-only
   assert.equal(failed.status, 3);
   assert.match(failed.stderr, /unknown status field\(s\): finalTasks/);
 });
+
+test("status --field capabilities exposes the current run capability contract", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "status-agent", STATUS_AGENT);
+  writeAssignment(dir, "status-work", STATUS_ASSIGNMENT);
+  const outcome = await runFresh(dir);
+
+  const projected = JSON.parse(
+    execFileSync(
+      "node",
+      [CLI_PATH, "status", outcome.runId, "--output-format", "json", "--field", "capabilities"],
+      {
+        cwd: dir,
+        env: { ...process.env, ...sharedRuntimeEnv(dir) },
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    ),
+  );
+
+  assert.deepEqual(projected.capabilities, {
+    canArchive: true,
+    canUnarchive: false,
+    canResume: true,
+    taskMutation: {
+      canSetStatus: false,
+      canEditNotes: true,
+      canAdd: false,
+    },
+  });
+  assert.equal("canAbort" in projected.capabilities, false);
+  assert.equal("canMutateTasks" in projected.capabilities, false);
+});

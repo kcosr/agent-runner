@@ -139,6 +139,12 @@ function readManifest(workspaceDir) {
   return JSON.parse(readFileSync(join(workspaceDir, "run.json"), "utf8"));
 }
 
+function readCapabilities(runId, cwd) {
+  return JSON.parse(
+    runCli(["status", runId, "--output-format", "json", "--field", "capabilities"], { cwd }),
+  ).capabilities;
+}
+
 function patchManifest(workspaceDir, mutator) {
   const manifestPath = join(workspaceDir, "run.json");
   const manifest = readManifest(workspaceDir);
@@ -270,6 +276,16 @@ test("task set: rejected while manifest status=running in taskMode=file", async 
   });
   assert.equal(result.status, 3);
   assert.match(result.stderr, /running file-mode run/);
+  assert.deepEqual(readCapabilities(outcome.runId, dir), {
+    canArchive: false,
+    canUnarchive: false,
+    canResume: false,
+    taskMutation: {
+      canSetStatus: false,
+      canEditNotes: false,
+      canAdd: false,
+    },
+  });
 });
 
 test("task set: live assignment.md edits are preserved when CLI touches a different task", async () => {
@@ -313,6 +329,16 @@ test("task set: allowed while manifest status=running in taskMode=cli", async ()
   const manifest = readManifest(outcome.workspaceDir);
   assert.equal(manifest.status, "running");
   assert.equal(manifest.finalTasks.t1.status, "in_progress");
+  assert.deepEqual(readCapabilities(outcome.runId, dir), {
+    canArchive: false,
+    canUnarchive: false,
+    canResume: false,
+    taskMutation: {
+      canSetStatus: true,
+      canEditNotes: true,
+      canAdd: false,
+    },
+  });
 });
 
 test("task append-notes: allowed while manifest status=running in taskMode=cli", async () => {
@@ -737,6 +763,16 @@ test("task set: rejects status changes on a terminal non-passive run", async () 
   });
   assert.equal(result.status, 3);
   assert.match(result.stderr, /cannot change task status on a terminal non-passive run/);
+  assert.deepEqual(readCapabilities(outcome.runId, dir), {
+    canArchive: true,
+    canUnarchive: false,
+    canResume: true,
+    taskMutation: {
+      canSetStatus: false,
+      canEditNotes: true,
+      canAdd: false,
+    },
+  });
 });
 
 test("task add: rejects terminal non-passive runs", async () => {
