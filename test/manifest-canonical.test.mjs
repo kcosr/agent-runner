@@ -137,6 +137,22 @@ test("manifest schemaVersion is 3", async () => {
   writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
   const outcome = await freshRun(dir, { initialize: true });
   assert.equal(outcome.manifest.schemaVersion, 3);
+  assert.equal(outcome.manifest.archivedAt, null);
+});
+
+test("resolveResumeTarget treats missing archivedAt on schemaVersion 3 manifests as unarchived", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "canonical-claude", CLAUDE_AGENT);
+  writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
+  const outcome = await freshRun(dir, { initialize: true });
+
+  const manifestPath = join(outcome.workspaceDir, "run.json");
+  const manifest = readManifest(outcome.workspaceDir);
+  manifest.archivedAt = undefined;
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+  const resolved = withSharedRuntimeEnv(dir, () => resolveResumeTarget(outcome.runId, dir));
+  assert.equal(resolved.manifest.archivedAt, null);
 });
 
 test("first write freezes agent.instructions, lockedFields, and timeoutSec", async () => {

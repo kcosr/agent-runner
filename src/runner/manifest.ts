@@ -1,10 +1,12 @@
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { type Dirent, existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { InvalidStatusReport, TaskState, TaskStatus } from "../assignment/model.js";
 import {
   isPathArg,
   resolveInputPath,
   resolveRepoRunsDir,
+  resolveRunsBucketDir,
+  resolveRunsRoot,
   resolveUnknownRunsDir,
 } from "../config/runtime-paths.js";
 import type { LockableField, TaskMode } from "../config/schema.js";
@@ -149,6 +151,7 @@ export interface RunManifest {
   taskMode?: TaskMode;
   startedAt: string;
   endedAt: string | null;
+  archivedAt: string | null;
   status: ManifestStatus;
   exitCode: number | null;
   attempts: number;
@@ -258,6 +261,49 @@ export interface ResolvedResumeTarget {
   manifest: RunManifest;
 }
 
+export interface ListedRunManifest {
+  repo: string;
+  workspaceDir: string;
+  manifest: RunManifest;
+}
+
+function normalizeRunManifest(parsed: RunManifest & { archivedAt?: string | null }): RunManifest {
+  return {
+    ...parsed,
+    archivedAt: parsed.archivedAt ?? null,
+  };
+}
+
+function readManifestCandidate(candidate: string): RunManifest {
+  const raw = readFileSync(candidate, "utf8");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new ResumeError(`manifest at ${candidate} is not valid JSON: ${(err as Error).message}`);
+  }
+  // Surface a schemaVersion mismatch (e.g. v1 manifest from before
+  // the manifest-canonical refactor) with a clear message instead
+  // of the generic "does not look like a run.json" fallback. Hot
+  // cut — old manifests are not resumable; users re-init.
+  if (
+    parsed &&
+    typeof parsed === "object" &&
+    "schemaVersion" in parsed &&
+    typeof (parsed as { schemaVersion: unknown }).schemaVersion === "number" &&
+    (parsed as { schemaVersion: number }).schemaVersion !== 3
+  ) {
+    const version = (parsed as { schemaVersion: number }).schemaVersion;
+    throw new ResumeError(
+      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 3. Manifests from earlier versions cannot be resumed — create a fresh run (task-runner init / run).`,
+    );
+  }
+  if (!isRunManifest(parsed)) {
+    throw new ResumeError(`manifest at ${candidate} does not look like a task-runner run.json`);
+  }
+  return normalizeRunManifest(parsed);
+}
+
 export function resolveResumeTarget(
   arg: string,
   cwd: string = process.cwd(),
@@ -280,34 +326,7 @@ export function resolveResumeTarget(
 
   for (const candidate of candidates) {
     if (!existsSync(candidate)) continue;
-    const raw = readFileSync(candidate, "utf8");
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch (err) {
-      throw new ResumeError(
-        `manifest at ${candidate} is not valid JSON: ${(err as Error).message}`,
-      );
-    }
-    // Surface a schemaVersion mismatch (e.g. v1 manifest from before
-    // the manifest-canonical refactor) with a clear message instead
-    // of the generic "does not look like a run.json" fallback. Hot
-    // cut — old manifests are not resumable; users re-init.
-    if (
-      parsed &&
-      typeof parsed === "object" &&
-      "schemaVersion" in parsed &&
-      typeof (parsed as { schemaVersion: unknown }).schemaVersion === "number" &&
-      (parsed as { schemaVersion: number }).schemaVersion !== 3
-    ) {
-      const version = (parsed as { schemaVersion: number }).schemaVersion;
-      throw new ResumeError(
-        `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 3. Manifests from earlier versions cannot be resumed — create a fresh run (task-runner init / run).`,
-      );
-    }
-    if (!isRunManifest(parsed)) {
-      throw new ResumeError(`manifest at ${candidate} does not look like a task-runner run.json`);
-    }
+    const parsed = readManifestCandidate(candidate);
     const resolvedWorkspaceDir = dirname(candidate);
     const expectedAssignmentPath = workspaceAssignmentPath(resolvedWorkspaceDir);
     if (parsed.workspaceDir !== resolvedWorkspaceDir) {
@@ -335,6 +354,45 @@ export function resolveResumeTarget(
   );
 }
 
+export function listRunManifests(env: NodeJS.ProcessEnv = process.env): ListedRunManifest[] {
+  const root = resolveRunsRoot(env);
+  if (!existsSync(root)) {
+    return [];
+  }
+
+  const runs: ListedRunManifest[] = [];
+  for (const bucket of readdirSync(root, { withFileTypes: true })) {
+    if (!bucket.isDirectory()) continue;
+    const bucketDir = resolveRunsBucketDir(bucket.name, env);
+    let runEntries: Dirent[];
+    try {
+      runEntries = readdirSync(bucketDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const runDir of runEntries) {
+      if (!runDir.isDirectory()) continue;
+      const workspaceDir = join(bucketDir, runDir.name);
+      const candidate = manifestPath(workspaceDir);
+      if (!existsSync(candidate)) continue;
+      try {
+        const manifest = readManifestCandidate(candidate);
+        if (
+          manifest.workspaceDir !== workspaceDir ||
+          manifest.assignmentPath !== workspaceAssignmentPath(workspaceDir)
+        ) {
+          continue;
+        }
+        runs.push({ repo: bucket.name, workspaceDir, manifest });
+      } catch {
+        // Unsupported or corrupt manifests are skipped for discovery.
+      }
+    }
+  }
+
+  return runs;
+}
+
 // Structural validation for a run.json candidate. Shallow checks
 // deliberately — we confirm that every field `resolveResumeTarget`
 // consumers immediately dereference is present with the expected
@@ -359,6 +417,13 @@ function isRunManifest(value: unknown): value is RunManifest {
   if (typeof obj.workspaceDir !== "string") return false;
   if (typeof obj.startedAt !== "string") return false;
   if (typeof obj.status !== "string") return false;
+  if (
+    obj.archivedAt !== undefined &&
+    obj.archivedAt !== null &&
+    typeof obj.archivedAt !== "string"
+  ) {
+    return false;
+  }
   if (typeof obj.timeoutSec !== "number") return false;
   if (typeof obj.unrestricted !== "boolean") return false;
   if (typeof obj.attempts !== "number") return false;

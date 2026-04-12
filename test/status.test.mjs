@@ -233,6 +233,22 @@ test("renderManifestStatus shows the live-overlay note for running runs", async 
   assert.match(text, /read live from the workspace assignment\.md/);
 });
 
+test("renderManifestStatus shows archive metadata and the unarchive hint", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "status-agent", STATUS_AGENT);
+  writeAssignment(dir, "status-work", STATUS_ASSIGNMENT);
+  const outcome = await runFresh(dir);
+
+  const archivedManifest = {
+    ...outcome.manifest,
+    archivedAt: "2026-04-12T18:00:00.000Z",
+  };
+
+  const text = renderManifestStatus(archivedManifest);
+  assert.match(text, /Archived: 2026-04-12T18:00:00.000Z/);
+  assert.match(text, /task-runner run unarchive/);
+});
+
 test("status CLI reports unreadable manifest snapshots as clean unexpected failures", async () => {
   const dir = tempDir();
   writeAgent(dir, "status-agent", STATUS_AGENT);

@@ -8,6 +8,7 @@ import {
   UNKNOWN_REPO_KEY,
   deriveRepoKey,
   isPathArg,
+  resolveRunsBucketDir,
   resolveTaskRunnerStateDir,
   slugifyRepoKey,
 } from "../dist/config/runtime-paths.js";
@@ -82,5 +83,14 @@ test("resolveTaskRunnerStateDir uses explicit, xdg, then HOME fallback order", (
       HOME: "/home/user",
     }),
     "/home/user/.local/state/task-runner",
+  );
+});
+
+test("resolveRunsBucketDir joins the runs root with an arbitrary bucket name", () => {
+  assert.equal(
+    resolveRunsBucketDir("task-runner", {
+      TASK_RUNNER_STATE_DIR: "/tmp/state",
+    }),
+    "/tmp/state/runs/task-runner",
   );
 });

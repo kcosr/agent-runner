@@ -157,6 +157,9 @@ export function renderManifestStatus(
   if (manifest.endedAt) {
     lines.push(`Ended: ${manifest.endedAt}`);
   }
+  if (manifest.archivedAt) {
+    lines.push(`Archived: ${manifest.archivedAt}`);
+  }
   // Passive runs never run backend attempts or create sessions, so
   // the Attempts / Sessions fields are always `0/0` / `0` and add
   // noise. Hide them for passive.
@@ -184,6 +187,7 @@ export function renderManifestStatus(
   }
 
   const isPassive = manifest.backend === "passive";
+  const isArchived = manifest.archivedAt !== null;
 
   if (manifest.status === "running") {
     lines.push("");
@@ -198,6 +202,10 @@ export function renderManifestStatus(
     } else {
       lines.push("(run is still in progress; status reflects the most recent persisted attempt)");
     }
+  } else if (isArchived) {
+    lines.push("");
+    lines.push("Run is archived. Unarchive it before resuming:");
+    lines.push(`  ${taskRunnerCmd} run unarchive ${manifest.runId}`);
   } else if (manifest.status === "initialized") {
     lines.push("");
     if (isPassive) {
