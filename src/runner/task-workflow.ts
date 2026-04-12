@@ -32,6 +32,17 @@ For each task:
 4. Mark completion:
    \`{{task_runner_cmd}} task set {{run_id}} <task-id> --status completed\`
 
+For multi-line notes, prefer a quoted heredoc over inline shell
+quotes. Example:
+  \`notes=$(cat <<'EOF'\`
+  \`first line\`
+  \`second line\`
+  \`EOF\`
+  \`)\`
+  \`{{task_runner_cmd}} task set {{run_id}} <task-id> --status completed --notes "$notes"\`
+The same pattern works for \`task append-notes --text "$notes"\`
+and blocked updates with \`--notes "$notes"\`.
+
 If a task cannot be completed, mark it \`blocked\` and explain why in
 notes:
    \`{{task_runner_cmd}} task set {{run_id}} <task-id> --status blocked --notes "..."\`
@@ -57,6 +68,17 @@ For each task in the list:
 2. Do the work described in the task body.
 3. Report completion with your findings:
    \`{{task_runner_cmd}} task set {{run_id}} <task-id> --status completed --notes "..."\`
+
+For multi-line notes, prefer a quoted heredoc over inline shell
+quotes. Example:
+  \`notes=$(cat <<'EOF'\`
+  \`first line\`
+  \`second line\`
+  \`EOF\`
+  \`)\`
+  \`{{task_runner_cmd}} task set {{run_id}} <task-id> --status completed --notes "$notes"\`
+The same pattern works for blocked updates with
+\`--notes "$notes"\`.
 
 If a task cannot be completed, mark it \`blocked\` instead and explain
 why in the notes — the run auto-finalizes to \`blocked\` status and

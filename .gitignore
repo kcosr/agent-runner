@@ -38,3 +38,6 @@ Thumbs.db
 
 # codex
 .codex
+
+# local review scratch
+.sem/
