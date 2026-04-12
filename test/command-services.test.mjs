@@ -296,19 +296,20 @@ test("command services: archiveRun and unarchiveRun are idempotent and reject ru
   await withSharedRuntimeEnv(dir, async () => {
     const archived = archiveRun(outcome.runId);
     assert.equal(archived.changed, true);
-    assert.ok(archived.manifest.archivedAt);
+    assert.ok(archived.archivedAt);
+    assert.equal(archived.runId, outcome.runId);
 
     const archivedAgain = archiveRun(outcome.runId);
     assert.equal(archivedAgain.changed, false);
-    assert.equal(archivedAgain.manifest.archivedAt, archived.manifest.archivedAt);
+    assert.equal(archivedAgain.archivedAt, archived.archivedAt);
 
     const unarchived = unarchiveRun(outcome.runId);
     assert.equal(unarchived.changed, true);
-    assert.equal(unarchived.manifest.archivedAt, null);
+    assert.equal(unarchived.archivedAt, null);
 
     const unarchivedAgain = unarchiveRun(outcome.runId);
     assert.equal(unarchivedAgain.changed, false);
-    assert.equal(unarchivedAgain.manifest.archivedAt, null);
+    assert.equal(unarchivedAgain.archivedAt, null);
   });
 
   patchManifest(outcome.workspaceDir, (manifest) => {

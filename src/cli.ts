@@ -862,12 +862,7 @@ function runArchiveToggleCommand(
   try {
     const result = opts.action(runArg);
     if (parsed.outputFormat === "json") {
-      writeJson({
-        runId: result.manifest.runId,
-        status: result.manifest.status,
-        archivedAt: result.manifest.archivedAt,
-        changed: result.changed,
-      });
+      writeJson(result);
     } else {
       process.stdout.write(opts.renderText(result));
     }
