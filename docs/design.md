@@ -414,7 +414,7 @@ task-runner run --agent chat "hello"
 ### Resolution
 
 `--agent <arg>`:
-1. If `<arg>` contains `/`, `\`, or starts with `.` → direct path
+1. If `<arg>` contains `/` or starts with `./` → direct path
 2. Else look for `${TASK_RUNNER_CONFIG_DIR}/agents/<arg>/agent.md`
 3. Else → `AgentNotFoundError`
 
@@ -687,13 +687,13 @@ This avoids stray `\n\n` sequences when any part is missing.
 
 Given `--agent <name>`:
 
-1. If `<name>` contains `/`, `\`, or starts with `.` → treat as a direct path
+1. If `<name>` contains `/` or starts with `./` → treat as a direct path
 2. Else look for `${TASK_RUNNER_CONFIG_DIR}/agents/<name>/agent.md`
 3. Else → `AGENT_NOT_FOUND`
 
 Given `--assignment <name>` (optional):
 
-1. If `<name>` contains `/`, `\`, or starts with `.` → treat as a direct path
+1. If `<name>` contains `/` or starts with `./` → treat as a direct path
 2. Else look for `${TASK_RUNNER_CONFIG_DIR}/assignments/<name>/assignment.md`
 3. Else → `ASSIGNMENT_NOT_FOUND`
 

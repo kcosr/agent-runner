@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
 import { ResumeError, resolveResumeTarget } from "../dist/runner/manifest.js";
 import { runAgent } from "../dist/runner/run-loop.js";
-import { assignmentPathFromPrompt, withEnv } from "./helpers/runtime-paths.mjs";
+import { assignmentPathFromPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 const THREE_AGENT = `---
 schemaVersion: 1
@@ -86,16 +86,6 @@ function editNotes(content, taskId, notesText) {
 
 function mockBackend(handler) {
   return { id: "mock", invoke: handler };
-}
-
-function withSharedRuntimeEnv(baseDir, fn) {
-  return withEnv(
-    {
-      TASK_RUNNER_CONFIG_DIR: baseDir,
-      TASK_RUNNER_STATE_DIR: baseDir,
-    },
-    fn,
-  );
 }
 
 async function runIn(baseDir, opts) {

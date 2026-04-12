@@ -90,11 +90,11 @@ function resolveDefinitionPath(
     return { path: abs, searched: [abs] };
   }
 
-  const candidates = [resolve(resolveDefinitionRoot(kind), arg, fileName)];
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) return { path: candidate, searched: candidates };
-  }
-  return { path: "", searched: candidates };
+  const candidate = resolve(resolveDefinitionRoot(kind), arg, fileName);
+  return {
+    path: existsSync(candidate) ? candidate : "",
+    searched: [candidate],
+  };
 }
 
 export function resolveAgentPath(arg: string, cwd: string = process.cwd()): string {
@@ -238,7 +238,7 @@ export class DefinitionListError extends Error {
   }
 }
 
-function discoverDefinitions(kind: DefinitionKind, cwd: string = process.cwd()): DefinitionEntry[] {
+function discoverDefinitions(kind: DefinitionKind): DefinitionEntry[] {
   const { fileName } = definitionLayout(kind);
   const entries: DefinitionEntry[] = [];
   const dir = resolveDefinitionRoot(kind);
@@ -263,10 +263,10 @@ function discoverDefinitions(kind: DefinitionKind, cwd: string = process.cwd()):
   return entries;
 }
 
-export function listAgents(cwd?: string): DefinitionEntry[] {
-  return discoverDefinitions("agent", cwd);
+export function listAgents(): DefinitionEntry[] {
+  return discoverDefinitions("agent");
 }
 
-export function listAssignments(cwd?: string): DefinitionEntry[] {
-  return discoverDefinitions("assignment", cwd);
+export function listAssignments(): DefinitionEntry[] {
+  return discoverDefinitions("assignment");
 }

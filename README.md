@@ -306,13 +306,15 @@ instructions body, and require `--backend` to be passed explicitly
 ```bash
 # Passive ad-hoc run — no agent file, no model calls, just a
 # structured checklist driven by task set / task add.
-task-runner init --backend passive --assignment repo-diagnostics \
+task-runner init --backend passive \
+  --assignment ./assignments/repo-diagnostics/assignment.md \
   --var repo_path=.
 
 # Codex ad-hoc run — backend + model from the CLI, assignment for
 # the task list, no agent.md required.
 task-runner run --backend codex --model gpt-5.4 --effort high \
-  --assignment code-review --var repo_path=. --var range=HEAD~3..HEAD
+  --assignment ./assignments/code-review/assignment.md \
+  --var repo_path=. --var range=HEAD~3..HEAD
 ```
 
 Ad-hoc agents have `lockedFields: []` (nothing is locked by default)
@@ -506,7 +508,9 @@ but stops after writing the workspace, manifest (`status:
 later with `task-runner run --resume-run <id>`.
 
 ```bash
-task-runner init --agent example --assignment repo-orientation \
+task-runner init \
+  --agent ./agents/example/agent.md \
+  --assignment ./assignments/repo-orientation/assignment.md \
   --var repo_path=/some/repo
 # task-runner: initialized agent=example run=abc123
 #              ...
@@ -620,7 +624,9 @@ agent/script without ever invoking a backend through task-runner:
 
 ```bash
 # 1. Seed the workspace (no backend call)
-task-runner init --agent code-reviewer --assignment code-review \
+task-runner init \
+  --agent ./agents/code-reviewer/agent.md \
+  --assignment ./assignments/code-review/assignment.md \
   --var repo_path=. --var range=main..HEAD
 # -> prints: task-runner: initialized agent=code-reviewer run=abc123
 
@@ -680,7 +686,7 @@ Read-only.
 
 ```bash
 # Show an agent by name
-task-runner show agent example
+task-runner show agent ./agents/example/agent.md
 
 # Show an assignment by path (JSON output)
 task-runner show assignment ./assignments/repo-orientation/assignment.md \
@@ -785,11 +791,15 @@ Sidecar driver loop:
 
 ```bash
 # 1. Prepare the run (prints the full bootstrap to stdout)
-task-runner init --agent passive-example --assignment <work> \
+task-runner init \
+  --agent ./agents/passive-example/agent.md \
+  --assignment ./assignments/repo-orientation/assignment.md \
   --var repo_path=. 2>/dev/null > /tmp/brief.txt
 
 # 2. Parse out the run id from the earlier stderr, or from JSON mode:
-RUN=$(task-runner init --agent passive-example --assignment <work> \
+RUN=$(task-runner init \
+  --agent ./agents/passive-example/agent.md \
+  --assignment ./assignments/repo-orientation/assignment.md \
   --var repo_path=. --output-format json | jq -r .runId)
 
 # 3. Walk the task list (agent-specific logic omitted)
@@ -1076,36 +1086,36 @@ printed to stdout.
 # Load a repo into an agent's context first, then drive it
 # conversationally after familiarization finishes.
 task-runner run \
-  --agent code-reviewer \
-  --assignment familiarize \
+  --agent ./agents/code-reviewer/agent.md \
+  --assignment ./assignments/familiarize/assignment.md \
   --var repo_path=/home/you/path/to/some/project
 # ... familiarization tasks complete ...
 task-runner run --resume-run <id> "now review the auth layer for security issues"
 
 # Full code review of this repo
 task-runner run \
-  --agent code-reviewer \
-  --assignment code-review \
+  --agent ./agents/code-reviewer/agent.md \
+  --assignment ./assignments/code-review/assignment.md \
   --var repo_path=/home/you/path/to/task-runner
 
 # Review just the unstaged changes
 task-runner run \
-  --agent code-reviewer \
-  --assignment code-review \
+  --agent ./agents/code-reviewer/agent.md \
+  --assignment ./assignments/code-review/assignment.md \
   --var repo_path=/home/you/path/to/task-runner \
   --var range=unstaged
 
 # Review the last commit
 task-runner run \
-  --agent code-reviewer \
-  --assignment code-review \
+  --agent ./agents/code-reviewer/agent.md \
+  --assignment ./assignments/code-review/assignment.md \
   --var repo_path=/home/you/path/to/task-runner \
   --var "range=last commit"
 
 # Full documentation review
 task-runner run \
-  --agent doc-reviewer \
-  --assignment doc-review \
+  --agent ./agents/doc-reviewer/agent.md \
+  --assignment ./assignments/doc-review/assignment.md \
   --var repo_path=/home/you/path/to/some/project
 ```
 

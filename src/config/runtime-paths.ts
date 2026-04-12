@@ -105,13 +105,6 @@ export function resolveRunWorkspaceDir(
   return join(resolveRepoRunsDir(cwd, env), runId);
 }
 
-export function resolveDraftsDir(
-  cwd: string = process.cwd(),
-  env: NodeJS.ProcessEnv = process.env,
-): string {
-  return join(resolveTaskRunnerStateDir(env), "drafts", deriveRepoKey(cwd));
-}
-
 export function resolveInputPath(arg: string, cwd: string): string {
   return isAbsolute(arg) ? arg : resolve(cwd, arg);
 }
