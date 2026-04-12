@@ -134,7 +134,7 @@ Options:
                           session was originally created under.
   --resume-run <id|path>  Continue an existing run by short id or by direct
                           path to its workspace / run.json. Short ids are
-                          resolved from \${TASK_RUNNER_STATE_DIR}/runs/<repo-key>/
+                          resolved from \${TASK_RUNNER_STATE_DIR}/runs/<repo-name>/
                           first, then runs/unknown/ (with XDG fallback).
                           Reads the prior manifest and reconstructs the
                           agent from its frozen fields (no re-read of the
@@ -172,6 +172,10 @@ Options:
                           Forbidden with --resume-run. The agent's model is
                           dropped on backend override unless --model is also
                           passed (model strings are backend-specific).
+  --task-mode <m>         Override the assignment task workflow mode
+                          ("file" or "cli"). Forbidden with --resume-run;
+                          the chosen mode is frozen into the manifest at
+                          first write.
   --model <id>            Override the agent's model.
   --effort <level>        Override effort level (off, minimal, low, medium,
                           high, xhigh, max).
@@ -463,6 +467,9 @@ function validateResumeOverrides(manifest: RunManifest, parsed: ParsedArgs): str
   }
   if (parsed.backend !== undefined) {
     return "--backend cannot be combined with --resume-run (backend is locked to the run that created the session)";
+  }
+  if (parsed.taskMode !== undefined) {
+    return "--task-mode cannot be combined with --resume-run — task interaction mode is frozen into the manifest at first write. If you need a different mode, create a fresh run instead.";
   }
   if (parsed.backendSessionId !== undefined) {
     return "--backend-session-id cannot be combined with --resume-run (the resume target already carries a backend session id)";

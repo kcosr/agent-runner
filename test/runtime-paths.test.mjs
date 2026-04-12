@@ -18,6 +18,10 @@ test("slugifyRepoKey normalizes separators, leading slashes, and case", () => {
   assert.equal(slugifyRepoKey(""), UNKNOWN_REPO_KEY);
 });
 
+test("deriveRepoKey uses the repo basename instead of the full parent path", () => {
+  assert.equal(deriveRepoKey(process.cwd()), "task-runner");
+});
+
 test("isPathArg recognizes slash-bearing args and dot-slash relative paths only", () => {
   assert.equal(isPathArg("code-review"), false);
   assert.equal(isPathArg("./assignments/code-review/assignment.md"), true);

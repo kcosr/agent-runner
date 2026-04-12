@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 export const TASK_RUNNER_CONFIG_DIR_ENV = "TASK_RUNNER_CONFIG_DIR";
 export const TASK_RUNNER_STATE_DIR_ENV = "TASK_RUNNER_STATE_DIR";
@@ -89,7 +89,10 @@ export function deriveRepoKey(cwd: string = process.cwd()): string {
       return UNKNOWN_REPO_KEY;
     }
 
-    return slugifyRepoKey(dirname(gitCommonDir));
+    // Keep workspace paths short and human-readable by using the repo root
+    // basename instead of a slugified absolute path. Same-named repo
+    // collisions are an accepted product tradeoff for simpler paths.
+    return slugifyRepoKey(basename(dirname(gitCommonDir)));
   } catch {
     return UNKNOWN_REPO_KEY;
   }

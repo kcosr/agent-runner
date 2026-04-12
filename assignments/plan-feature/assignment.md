@@ -38,7 +38,7 @@ callerInstructions: |
     2. Copies the reference template from
        `${TASK_RUNNER_CONFIG_DIR}/assignments/plan-feature/template.md`
        into
-       `${TASK_RUNNER_STATE_DIR}/drafts/<repo-key>/plan-<slug>-<shortid>.md`,
+       `${TASK_RUNNER_STATE_DIR}/drafts/<repo-name>/plan-<slug>-<shortid>.md`,
        adjusts the task list to fit the feature, and fills in
        every `<<PLACEHOLDER>>` with concrete steps. The
        template's task list is a starting shape; the planner
@@ -75,7 +75,7 @@ callerInstructions: |
 
   ## What happens to the draft file
 
-  The draft under `${TASK_RUNNER_STATE_DIR}/drafts/<repo-key>/`
+  The draft under `${TASK_RUNNER_STATE_DIR}/drafts/<repo-name>/`
   is **superseded** the moment `{{task_runner_cmd}} init` succeeds.
   From that point on, the canonical artifact is the workspace
   `assignment.md` inside the new run directory. Edits to the
@@ -433,11 +433,11 @@ tasks:
 
       Copy it to a new draft file at:
 
-          ${TASK_RUNNER_STATE_DIR}/drafts/<repo-key>/plan-<slug>-<shortid>.md
+          ${TASK_RUNNER_STATE_DIR}/drafts/<repo-name>/plan-<slug>-<shortid>.md
 
-      Create the repo-keyed drafts directory if it does not
-      exist. `<repo-key>` is task-runner's repo slug for the
-      current checkout, `<slug>` is the feature's kebab-cased
+      Create the repo-name drafts directory if it does not
+      exist. `<repo-name>` is the basename of task-runner's
+      resolved repo root for the current checkout, `<slug>` is the feature's kebab-cased
       short title (5 words or fewer), and `<shortid>` is any
       4-character base32 string, just to disambiguate multiple
       drafts for the same feature.
@@ -591,7 +591,7 @@ tasks:
 
       Capture the new run id from the init output in this
       task's Notes. From the moment init succeeds, the
-      draft file under `${TASK_RUNNER_STATE_DIR}/drafts/<repo-key>/`
+      draft file under `${TASK_RUNNER_STATE_DIR}/drafts/<repo-name>/`
       is **no longer the working artifact** — the workspace
       `assignment.md` inside the new run directory is the
       canonical source of truth.
@@ -658,7 +658,7 @@ file under that repo freely. Do not modify any file under
 `{{repo_path}}` — the only files you should write are:
   - Your own workspace plan at `{{assignment_path}}`.
   - The draft plan file you create in t07 under
-    `${TASK_RUNNER_STATE_DIR}/drafts/<repo-key>/`.
+    `${TASK_RUNNER_STATE_DIR}/drafts/<repo-name>/`.
 
 Work the tasks in order. Earlier tasks build context the
 later ones depend on. The draft plan in t07 should cite

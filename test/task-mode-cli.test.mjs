@@ -59,7 +59,7 @@ function writeAssignment(baseDir, name, body) {
   writeFileSync(join(dir, "assignment.md"), body);
 }
 
-async function initRun(baseDir, assignmentName) {
+async function initRun(baseDir, assignmentName, options = {}) {
   return withSharedRuntimeEnv(baseDir, async () => {
     const loaded = loadAgentConfig("task-mode-agent", baseDir);
     const loadedAssignment = loadAssignmentConfig(assignmentName, baseDir);
@@ -71,6 +71,7 @@ async function initRun(baseDir, assignmentName) {
         loadedAssignment,
         cliVars: {},
         backend: { id: "mock", invoke: async () => ({}) },
+        overrides: options.overrides,
         initialize: true,
         stderr: () => {},
         stdout: () => {},
@@ -165,6 +166,33 @@ test("taskMode omitted defaults to file behavior", async () => {
   assert.equal(outcome.manifest.taskMode, "file");
   assert.match(prompt, /Your assignment is at/);
   assert.match(prompt, new RegExp(outcome.assignmentPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
+test("taskMode CLI override beats the assignment default on init", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "task-mode-agent", AGENT);
+  writeAssignment(dir, "file-work", FILE_ASSIGNMENT);
+
+  const outcome = await initRun(dir, "file-work", {
+    overrides: { taskMode: "cli" },
+  });
+  const prompt = outcome.manifest.pendingPrompt ?? "";
+
+  assert.equal(outcome.manifest.taskMode, "cli");
+  assert.match(prompt, new RegExp(`task list ${outcome.runId}`));
+  assert.doesNotMatch(prompt, /Your assignment is at/);
+});
+
+test("taskMode override is rejected on resume-run", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "task-mode-agent", AGENT);
+  writeAssignment(dir, "file-work", FILE_ASSIGNMENT);
+  const outcome = await initRun(dir, "file-work");
+
+  const result = runCli(["run", "--resume-run", outcome.runId, "--task-mode", "cli"], { cwd: dir });
+
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /--task-mode cannot be combined with --resume-run/);
 });
 
 test("status on a running cli-mode run reads canonical task state and explains the mode", async () => {

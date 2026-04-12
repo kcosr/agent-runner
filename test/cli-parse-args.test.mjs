@@ -73,6 +73,20 @@ test("overridesFromParsedArgs: addedTasks is undefined when empty (so locked-fie
   assert.equal(overrides.addedTasks, undefined);
 });
 
+test("parseArgs: --task-mode accepts file and cli", () => {
+  const cliParsed = parseArgs(argv("run", "--agent", "x", "--task-mode", "cli"));
+  const fileParsed = parseArgs(argv("run", "--agent", "x", "--task-mode", "file"));
+  assert.equal(cliParsed.taskMode, "cli");
+  assert.equal(fileParsed.taskMode, "file");
+});
+
+test("parseArgs: --task-mode rejects unknown values", () => {
+  assert.throws(
+    () => parseArgs(argv("run", "--agent", "x", "--task-mode", "live")),
+    /--task-mode must be one of: file, cli/,
+  );
+});
+
 // ── list/show command parsing ────────────────────────────────────────
 
 test("parseArgs: list agents is parsed as command=list subcommand=agents", () => {
@@ -178,6 +192,8 @@ test("overridesFromParsedArgs: all other overrides plumbed through", () => {
       "claude-opus-4-6",
       "--effort",
       "max",
+      "--task-mode",
+      "cli",
       "--timeout-sec",
       "60",
       "--max-retries",
@@ -189,6 +205,7 @@ test("overridesFromParsedArgs: all other overrides plumbed through", () => {
   const overrides = overridesFromParsedArgs(parsed);
   assert.equal(overrides.model, "claude-opus-4-6");
   assert.equal(overrides.effort, "max");
+  assert.equal(overrides.taskMode, "cli");
   assert.equal(overrides.timeoutSec, 60);
   assert.equal(overrides.maxRetries, 5);
   assert.equal(overrides.unrestricted, true);

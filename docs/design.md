@@ -57,7 +57,7 @@ task-runner run --agent <name> [--assignment <name>] [--var k=v]...
 2. If --assignment: load + validate assignment.md (vars, tasks, message)
 3. Resolve vars (CLI → env → defaults) against the assignment's schema
 4. Check locks (union of agent.lockedFields + assignment.lockedFields)
-5. Create workspace: ${TASK_RUNNER_STATE_DIR}/runs/<repo-key>/<short-id>/
+5. Create workspace: ${TASK_RUNNER_STATE_DIR}/runs/<repo-name>/<short-id>/
 6. Build in-memory task map from the assignment's `tasks:` (+ CLI --add-task)
 7. Re-render a fresh assignment.md into the workspace; source file is never
    touched
@@ -427,7 +427,7 @@ task-runner run --agent chat "hello"
 
 The runner **copies**, never mutates, the caller's assignment file:
 
-1. Generate short ID, create `${TASK_RUNNER_STATE_DIR}/runs/<repo-key>/<short-id>/`
+1. Generate short ID, create `${TASK_RUNNER_STATE_DIR}/runs/<repo-name>/<short-id>/`
 2. Re-render a fresh `assignment.md` into the workspace from the parsed
    task list. This is the runner's ephemeral scratch copy — the agent
    edits it in place during the run.
@@ -438,7 +438,7 @@ The runner **copies**, never mutates, the caller's assignment file:
    "assignment": {
      "name": "repo-orientation",
      "sourcePath": "/tmp/work-abc/assignment.md",
-     "workspacePath": "/abs/.local/state/task-runner/runs/<repo-key>/k7m2xq/assignment.md"
+     "workspacePath": "/abs/.local/state/task-runner/runs/<repo-name>/k7m2xq/assignment.md"
    }
    ```
 
@@ -746,7 +746,7 @@ invocation and **reused** across any subsequent `--resume-run`
 invocations:
 
 ```
-${TASK_RUNNER_STATE_DIR}/runs/<repo-key>/<short-id>/
+${TASK_RUNNER_STATE_DIR}/runs/<repo-name>/<short-id>/
 ├── run.json              # canonical manifest (accumulates across sessions)
 ├── assignment.md         # ephemeral scratch file the agent edits in place
 └── attempts/
@@ -1635,7 +1635,7 @@ and/or a follow-up `[message]` to extend the run.
 
 `task-runner status <id|path>` is a read-only inspector for an
 existing run. It resolves the manifest the same way `--resume-run`
-does (slug under `${TASK_RUNNER_STATE_DIR}/runs/<repo-key>/` and then
+does (current repo-name bucket under `${TASK_RUNNER_STATE_DIR}/runs/<repo-name>/` and then
 `runs/unknown/`, workspace dir, or direct
 `run.json` path) and prints either a human-readable summary or the
 manifest as JSON. It never invokes a backend, never writes to disk,
@@ -1700,7 +1700,7 @@ attempt. `status` therefore follows the run's task mode:
 1. Resolves agent + assignment and runs the same locked-field checks,
    var resolution, and prompt composition as a fresh run.
 2. Creates the workspace directory
-   (`${TASK_RUNNER_STATE_DIR}/runs/<repo-key>/<short-id>/`),
+   (`${TASK_RUNNER_STATE_DIR}/runs/<repo-name>/<short-id>/`),
    writes the task-fenced `assignment.md`, and writes `run.json` with
    `status: "initialized"`, `sessionCount: 0`, empty `sessions` and
    `attemptRecords`, and the composed prompt frozen in
@@ -1791,7 +1791,7 @@ a completed task on a terminal passive run transitions back to
 **Resume of an already-executed run** (`status` is a terminal state
 from a prior session):
 
-- `<id>` is the short slug resolved against the current repo-key bucket
+- `<id>` is the short slug resolved against the current repo-name bucket
   under `${TASK_RUNNER_STATE_DIR}/runs/`, then `runs/unknown/`.
 - `<path>` can be a workspace directory or a direct path to a `run.json`
   file.
@@ -1874,7 +1874,7 @@ Final summary on stderr, including per-task results with notes:
 Status: success
 Tasks completed: 3/3
 Attempts: 2/4
-Assignment file: /abs/path/.local/state/task-runner/runs/<repo-key>/k7m2xq/assignment.md
+Assignment file: /abs/path/.local/state/task-runner/runs/<repo-name>/k7m2xq/assignment.md
 
 Task results:
   - t1_read_conventions — Check repo conventions [completed]
@@ -1884,7 +1884,7 @@ Task results:
   - t3_summary — Summary [completed]
       Small monorepo for agent tooling; three packages under src/.
 
-Review /abs/path/.local/state/task-runner/runs/<repo-key>/k7m2xq/assignment.md for additional agent output.
+Review /abs/path/.local/state/task-runner/runs/<repo-name>/k7m2xq/assignment.md for additional agent output.
 ```
 
 The `Task results` section is built from the in-memory task map, so it

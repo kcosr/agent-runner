@@ -21,22 +21,22 @@ function withStateRoot(stateDir, fn) {
   );
 }
 
-function writeManifest(stateDir, repoKey, runId, manifest) {
-  const workspaceDir = join(stateDir, "runs", repoKey, runId);
+function writeManifest(stateDir, repoName, runId, manifest) {
+  const workspaceDir = join(stateDir, "runs", repoName, runId);
   mkdirSync(workspaceDir, { recursive: true });
   writeFileSync(join(workspaceDir, "run.json"), `${JSON.stringify(manifest, null, 2)}\n`);
   return workspaceDir;
 }
 
-test("resolveResumeTarget prefers the current repo-key bucket over unknown for short ids", () => {
+test("resolveResumeTarget prefers the current repo-name bucket over unknown for short ids", () => {
   const stateDir = tempDir();
-  const repoKey = deriveRepoKey(process.cwd());
+  const repoName = deriveRepoKey(process.cwd());
 
   const repoWorkspace = writeManifest(
     stateDir,
-    repoKey,
+    repoName,
     "shared1",
-    baseManifest("shared1", join(stateDir, "runs", repoKey, "shared1")),
+    baseManifest("shared1", join(stateDir, "runs", repoName, "shared1")),
   );
   writeManifest(
     stateDir,
@@ -49,7 +49,7 @@ test("resolveResumeTarget prefers the current repo-key bucket over unknown for s
   assert.equal(resolved.workspaceDir, repoWorkspace);
 });
 
-test("resolveResumeTarget falls back to the unknown bucket when the repo-key bucket is missing", () => {
+test("resolveResumeTarget falls back to the unknown bucket when the repo-name bucket is missing", () => {
   const stateDir = tempDir();
   const unknownWorkspace = writeManifest(
     stateDir,
@@ -64,13 +64,13 @@ test("resolveResumeTarget falls back to the unknown bucket when the repo-key buc
 
 test("resolveResumeTarget missing short ids list both checked directories", () => {
   const stateDir = tempDir();
-  const repoKey = deriveRepoKey(process.cwd());
+  const repoName = deriveRepoKey(process.cwd());
 
   assert.throws(
     () => withStateRoot(stateDir, () => resolveResumeTarget("missing1", process.cwd())),
     (error) => {
       assert.ok(error instanceof ResumeError);
-      assert.match(error.message, new RegExp(`runs/${repoKey}/missing1/`));
+      assert.match(error.message, new RegExp(`runs/${repoName}/missing1/`));
       assert.match(error.message, /runs\/unknown\/missing1\//);
       return true;
     },

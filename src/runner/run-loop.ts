@@ -7,7 +7,12 @@ import type { Backend, BackendInvokeResult } from "../backends/types.js";
 import { interpolate } from "../config/interpolate.js";
 import type { LoadedAgent, LoadedAssignment } from "../config/loader.js";
 import { resolveRunWorkspaceDir } from "../config/runtime-paths.js";
-import { type LockableField, type VarDef, normalizeTaskMode } from "../config/schema.js";
+import {
+  type LockableField,
+  type TaskMode,
+  type VarDef,
+  normalizeTaskMode,
+} from "../config/schema.js";
 import { resolveTaskRunnerCommand } from "../task-runner-command.js";
 import { shortId } from "../util/short-id.js";
 import { writeTextFileAtomic } from "../util/write-file-atomic.js";
@@ -52,6 +57,7 @@ export interface RunOverrides {
   backend?: "claude" | "codex" | "passive";
   model?: string;
   effort?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+  taskMode?: TaskMode;
   message?: string;
   sessionName?: string;
   timeoutSec?: number;
@@ -166,6 +172,7 @@ function checkLockedFields(
     ["backend", overrides?.backend, agentConfig.backend],
     ["model", overrides?.model, agentConfig.model],
     ["effort", overrides?.effort, agentConfig.effort],
+    ["taskMode", overrides?.taskMode, assignmentConfig?.taskMode ?? "file"],
     ["message", overrides?.message, assignmentConfig?.message],
     ["sessionName", overrides?.sessionName, assignmentConfig?.sessionName],
     ["timeoutSec", overrides?.timeoutSec, agentConfig.timeoutSec],
@@ -206,6 +213,7 @@ function checkLockedFieldsFromManifest(
     ["backend", overrides?.backend, manifest.backend],
     ["model", overrides?.model, manifest.model],
     ["effort", overrides?.effort, manifest.effort],
+    ["taskMode", overrides?.taskMode, manifest.taskMode ?? "file"],
     ["message", overrides?.message, manifest.message],
     ["sessionName", overrides?.sessionName, manifest.sessionName],
     ["timeoutSec", overrides?.timeoutSec, manifest.timeoutSec],
@@ -550,7 +558,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const effort = overrides?.effort ?? agentConfig.effort;
   const message = overrides?.message ?? assignmentConfig?.message ?? null;
   const taskMode = normalizeTaskMode(
-    assignmentConfig?.taskMode ?? resume?.manifest.taskMode ?? null,
+    overrides?.taskMode ?? assignmentConfig?.taskMode ?? resume?.manifest.taskMode ?? null,
   );
   const timeoutSec = overrides?.timeoutSec ?? agentConfig.timeoutSec;
   const unrestricted = overrides?.unrestricted ?? agentConfig.unrestricted;

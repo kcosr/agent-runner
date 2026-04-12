@@ -1,3 +1,5 @@
+import type { TaskMode } from "../config/schema.js";
+
 export const TASK_WORKFLOW_TEMPLATE = `Your assignment is at \`{{assignment_path}}\`. Read it first. Work
 through each task in order. For each task:
 
@@ -74,7 +76,7 @@ the run automatically transitions to \`success\` (if all completed) or
 export function buildAddedTasksReminder(
   addedCount: number,
   assignmentPath: string,
-  opts: { runId?: string; taskMode?: "file" | "cli" } = {},
+  opts: { runId?: string; taskMode?: TaskMode } = {},
 ): string {
   const noun = addedCount === 1 ? "task has" : "tasks have";
   if (opts.taskMode === "cli" && opts.runId) {

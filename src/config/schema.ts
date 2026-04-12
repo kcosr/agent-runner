@@ -76,6 +76,7 @@ export const LOCKABLE_FIELDS = [
   "backend",
   "model",
   "effort",
+  "taskMode",
   "instructions",
   "message",
   "sessionName",

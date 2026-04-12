@@ -1,10 +1,11 @@
 import { type InvalidStatusReport, type TaskState, VALID_STATUSES } from "../assignment/model.js";
+import type { TaskMode } from "../config/schema.js";
 
 export function buildNudgeMessage(
   tasks: Map<string, TaskState>,
   invalid: InvalidStatusReport[],
   assignmentPath: string,
-  opts: { runId?: string; taskMode?: "file" | "cli" } = {},
+  opts: { runId?: string; taskMode?: TaskMode } = {},
 ): string {
   const incomplete: TaskState[] = [];
   for (const task of tasks.values()) {

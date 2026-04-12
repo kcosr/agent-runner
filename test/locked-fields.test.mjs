@@ -75,6 +75,19 @@ tasks:
 Work on the repo. Plan at {{assignment_path}}.
 `;
 
+const LOCKED_TASK_MODE_ASSIGNMENT = `---
+schemaVersion: 1
+name: locked-taskmode-work
+taskMode: file
+lockedFields: [taskMode]
+maxRetries: 1
+tasks:
+  - id: t1
+    title: First
+---
+Work on the repo. Plan at {{assignment_path}}.
+`;
+
 function tempDir() {
   return mkdtempSync(join(tmpdir(), "task-runner-locked-"));
 }
@@ -162,6 +175,11 @@ function setupWithMsg(dir) {
 function setupLockedMsg(dir) {
   writeAgent(dir, "locked-msg", LOCKED_MSG_AGENT);
   writeAssignment(dir, "locked-msg-work", LOCKED_MSG_ASSIGNMENT);
+}
+
+function setupLockedTaskMode(dir) {
+  writeAgent(dir, "with-msg", WITH_MSG_AGENT);
+  writeAssignment(dir, "locked-taskmode-work", LOCKED_TASK_MODE_ASSIGNMENT);
 }
 
 test("locked: overriding a locked field throws LockedFieldError", async () => {
@@ -283,4 +301,19 @@ test("message: locked message still uses the assignment default when caller stay
   setupLockedMsg(dir);
   const outcome = await runIn(dir, "locked-msg", undefined, "locked-msg-work");
   assert.equal(outcome.manifest.message, "fixed message");
+});
+
+test("taskMode: locked taskMode rejects CLI override", async () => {
+  const dir = tempDir();
+  setupLockedTaskMode(dir);
+  await assert.rejects(
+    () => runIn(dir, "with-msg", { taskMode: "cli" }, "locked-taskmode-work"),
+    (err) => {
+      assert.ok(err instanceof LockedFieldError);
+      assert.equal(err.field, "taskMode");
+      assert.ok(err.message.includes("taskMode"));
+      assert.ok(err.message.includes('"file"'));
+      return true;
+    },
+  );
 });
