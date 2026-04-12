@@ -179,11 +179,17 @@ tasks:
 
       <<PLACEHOLDER_SCAFFOLD_STEPS>>
 
-      Typical content: create a feature branch, ensure a
-      clean working tree, and set up any
-      feature-specific config. If none of that applies,
-      keep this task but note "No scaffolding needed;
-      working on <branch>." and move on.
+      Typical content: confirm you are in a non-`main`
+      git worktree, confirm local `main` is already in
+      sync with `origin/main` (without updating it
+      yourself), sync the current worktree to local
+      `main`, ensure a clean working tree, and set up any
+      feature-specific config. If local `main` is not in
+      sync with `origin/main`, if you are not in a
+      worktree, or if the current worktree cannot be
+      synced cleanly to local `main`, mark the task
+      `blocked` and stop rather than starting
+      implementation.
   - id: implement_core
     title: Implement core feature logic
     body: |

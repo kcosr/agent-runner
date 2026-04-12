@@ -27,6 +27,7 @@
 ### Changed
 
 - Refactored command execution around transport-agnostic core contracts: non-run commands now execute through typed `src/commands/` services, `runAgent` emits typed events instead of writing terminal text directly, and the CLI renders text/json output at the transport edge. ([#13](https://github.com/kcosr/task-runner/pull/13))
+- `assignments/plan-feature/` handoff init commands now freeze generated plans with `--backend passive` and `--var repo_path=<worktree-dir>` instead of hard-coding `--agent implementer` and a machine-specific repo path. `assignments/plan-review/` now enforces that passive-backend handoff shape during draft review.
 - Run manifests now carry `archivedAt`, existing schema-version-3 manifests normalize a missing archive marker to `null`, `task-runner status` surfaces archive metadata, and archived runs are rejected by `task-runner run --resume-run` until unarchived.
 - Assignment config now supports `taskMode: file | cli` with default `file`. `taskMode=cli` switches prompts to a run-id-and-command workflow, treats `run.json.finalTasks` as canonical live task state, and renders `assignment.md` as an audit projection instead of a live input surface.
 - Running non-passive CLI-mode runs now allow `task set` and `task append-notes` during execution through a shared per-run persistence lock. `task add` remains rejected while a run is in flight.
@@ -42,7 +43,7 @@
 
 ### Fixed
 
-- Fixed `assignments/plan-feature/` implementer-init guidance to make `--agent implementer` mandatory in the handoff command instead of leaving agent choice to planner judgment. The previous wording was too vague for ad-hoc planner invocations and could steer callers toward initializing a plan with the wrong agent.
+- Fixed `assignments/plan-feature/` scaffold guidance to require implementers to verify they are in a non-`main` worktree, confirm local `main` is already in sync with `origin/main`, and sync the current worktree to local `main` before starting. Generated plans now block instead of proceeding when that preflight fails, and `assignments/plan-review/` flags drafts that omit it.
 - Fixed workspace persistence to use atomic writes for manifests, attempt logs, and assignment files, and reject resume targets whose manifest paths do not match the workspace they were loaded from. ([#6](https://github.com/kcosr/task-runner/pull/6))
 - Fixed Codex timeout/abort cleanup to wait for late-arriving turn ids and retry interruption, reducing the risk of orphaned remote turns. ([#6](https://github.com/kcosr/task-runner/pull/6))
 - Fixed assignment/task mutation hardening around structural marker escaping, single-line task titles, terminal non-passive notes-only edits, and undeclared or mistyped runtime vars. ([#6](https://github.com/kcosr/task-runner/pull/6))
