@@ -100,6 +100,38 @@ function patchManifest(workspaceDir, mutator) {
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
+function spawnLockedManifestWriter(dir, workspaceDir, mutateSource) {
+  return spawn(
+    "node",
+    [
+      "--input-type=module",
+      "-e",
+      `
+        import { readFileSync, writeFileSync } from "node:fs";
+        import { join } from "node:path";
+        import { withTaskStateLock } from ${JSON.stringify(
+          resolvePath(new URL("../dist/runner/workspace-state.js", import.meta.url).pathname),
+        )};
+
+        const buf = new Int32Array(new SharedArrayBuffer(4));
+        withTaskStateLock(${JSON.stringify(workspaceDir)}, () => {
+          const manifestPath = join(${JSON.stringify(workspaceDir)}, "run.json");
+          const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+          ${mutateSource}
+          writeFileSync(manifestPath, \`\${JSON.stringify(manifest, null, 2)}\\n\`);
+          console.log("written");
+          Atomics.wait(buf, 0, 0, 250);
+        });
+      `,
+    ],
+    {
+      cwd: dir,
+      env: { ...process.env, ...sharedRuntimeEnv(dir) },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+}
+
 test("taskMode=cli init prompt uses task CLI workflow instead of assignment-path workflow", async () => {
   const dir = tempDir();
   writeAgent(dir, "task-mode-agent", AGENT);
@@ -237,4 +269,77 @@ test("task-state persistence serializes concurrent cli-mode writes and keeps run
   const planText = readFileSync(outcome.assignmentPath, "utf8");
   assert.equal(manifest.finalTasks.t1.notes, "Serialized write");
   assert.match(planText, /Serialized write/);
+});
+
+test("status waits for the task-state lock and reads the fresh manifest snapshot", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "task-mode-agent", AGENT);
+  writeAssignment(dir, "cli-work", CLI_ASSIGNMENT);
+  const outcome = await initRun(dir, "cli-work");
+
+  const locker = spawnLockedManifestWriter(
+    dir,
+    outcome.workspaceDir,
+    `
+      manifest.tasksCompleted = 1;
+      manifest.finalTasks.t1.status = "completed";
+      manifest.finalTasks.t1.notes = "Fresh from locked write";
+    `,
+  );
+  await once(locker.stdout, "data");
+
+  const started = Date.now();
+  const result = runCli(["status", outcome.runId], { cwd: dir });
+  const elapsed = Date.now() - started;
+  await once(locker, "exit");
+
+  assert.equal(result.status, 0);
+  assert.ok(elapsed >= 150, `expected status to wait for the lock, saw ${elapsed}ms`);
+  assert.match(result.stdout, /Tasks completed: 1\/1/);
+  assert.match(result.stdout, /First \[completed\]/);
+  assert.match(result.stdout, /Fresh from locked write/);
+});
+
+test("task list/show wait for the task-state lock and read fresh task snapshots", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "task-mode-agent", AGENT);
+  writeAssignment(dir, "cli-work", CLI_ASSIGNMENT);
+  const outcome = await initRun(dir, "cli-work");
+
+  const listLocker = spawnLockedManifestWriter(
+    dir,
+    outcome.workspaceDir,
+    `
+      manifest.tasksCompleted = 1;
+      manifest.finalTasks.t1.status = "completed";
+      manifest.finalTasks.t1.notes = "Visible after list wait";
+    `,
+  );
+  await once(listLocker.stdout, "data");
+  const listStarted = Date.now();
+  const listResult = runCli(["task", "list", outcome.runId], { cwd: dir });
+  const listElapsed = Date.now() - listStarted;
+  await once(listLocker, "exit");
+
+  assert.equal(listResult.status, 0);
+  assert.ok(listElapsed >= 150, `expected task list to wait for the lock, saw ${listElapsed}ms`);
+  assert.match(listResult.stdout, /\[completed\] t1 - First/);
+
+  const showLocker = spawnLockedManifestWriter(
+    dir,
+    outcome.workspaceDir,
+    `
+      manifest.finalTasks.t1.notes = "Visible after show wait";
+    `,
+  );
+  await once(showLocker.stdout, "data");
+  const showStarted = Date.now();
+  const showResult = runCli(["task", "show", outcome.runId, "t1"], { cwd: dir });
+  const showElapsed = Date.now() - showStarted;
+  await once(showLocker, "exit");
+
+  assert.equal(showResult.status, 0);
+  assert.ok(showElapsed >= 150, `expected task show to wait for the lock, saw ${showElapsed}ms`);
+  assert.match(showResult.stdout, /^status: completed$/m);
+  assert.match(showResult.stdout, /notes:\nVisible after show wait\n$/);
 });

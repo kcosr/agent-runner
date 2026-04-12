@@ -529,6 +529,8 @@ function runStatus(parsed: ParsedArgs): never {
     process.exit(3);
   }
 
+  refreshRunSnapshotAfterTaskStateSettles(resolved);
+
   // For a `running` manifest, parse the workspace assignment.md so the
   // checklist reflects the agent's mid-attempt edits instead of the
   // last-persisted snapshot. Read-only — never written back. Failures
@@ -802,6 +804,23 @@ function resolveRunOrExit(target: string): ReturnType<typeof resolveResumeTarget
   }
 }
 
+function refreshRunSnapshotAfterTaskStateSettles(
+  resolved: ReturnType<typeof resolveResumeTarget>,
+): void {
+  try {
+    withTaskStateLock(resolved.workspaceDir, () => {
+      resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
+    });
+  } catch (err) {
+    if (err instanceof ResumeError) {
+      process.stderr.write(`task-runner: ${err.message}\n`);
+    } else {
+      process.stderr.write(`task-runner: ${(err as Error).message}\n`);
+    }
+    process.exit(3);
+  }
+}
+
 function requireMutableStatus(manifest: RunManifest): void {
   if (!MUTATION_ALLOWED_STATUSES.has(manifest.status)) {
     process.stderr.write(
@@ -959,6 +978,7 @@ function runTaskList(parsed: ParsedArgs): never {
   }
 
   const resolved = resolveRunOrExit(runArg);
+  refreshRunSnapshotAfterTaskStateSettles(resolved);
   const tasks = taskSnapshots(resolved.manifest);
   if (parsed.outputFormat === "json") {
     process.stdout.write(`${JSON.stringify(tasks, null, 2)}\n`);
@@ -987,6 +1007,7 @@ function runTaskShow(parsed: ParsedArgs): never {
   }
 
   const resolved = resolveRunOrExit(runArg);
+  refreshRunSnapshotAfterTaskStateSettles(resolved);
   writeTaskSnapshot(taskSnapshotOrExit(resolved.manifest, taskId), parsed.outputFormat);
   process.exit(0);
 }
