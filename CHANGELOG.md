@@ -25,7 +25,7 @@
 
 ### Changed
 
-- Refactored command execution around transport-agnostic core contracts: non-run commands now execute through typed `src/commands/` services, `runAgent` emits typed events instead of writing terminal text directly, and the CLI renders text/json output at the transport edge.
+- Refactored command execution around transport-agnostic core contracts: non-run commands now execute through typed `src/commands/` services, `runAgent` emits typed events instead of writing terminal text directly, and the CLI renders text/json output at the transport edge. ([#13](https://github.com/kcosr/task-runner/pull/13))
 - Assignment config now supports `taskMode: file | cli` with default `file`. `taskMode=cli` switches prompts to a run-id-and-command workflow, treats `run.json.finalTasks` as canonical live task state, and renders `assignment.md` as an audit projection instead of a live input surface.
 - Running non-passive CLI-mode runs now allow `task set` and `task append-notes` during execution through a shared per-run persistence lock. `task add` remains rejected while a run is in flight.
 - `agents/code-reviewer/` flipped from `codex` / `gpt-5.3-codex` to `claude` / `claude-opus-4-6`. The role body and severity format are unchanged; only the backend and model. Plan-feature-driven reviews now run on opus without needing template-level `--backend` / `--model` overrides. Callers that want the old configuration can still override via `--backend codex --model gpt-5.3-codex` at run time.
