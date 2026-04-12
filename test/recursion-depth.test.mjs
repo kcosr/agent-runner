@@ -14,6 +14,11 @@ import {
   readRecursionState,
 } from "../dist/runner/recursion-guard.js";
 import { runAgent } from "../dist/runner/run-loop.js";
+import {
+  assignmentPathFromPrompt,
+  withEnv,
+  withSharedRuntimeEnv,
+} from "./helpers/runtime-paths.mjs";
 
 // ─── Pure helper tests ──────────────────────────────────────────────────────
 
@@ -132,9 +137,8 @@ function captureBackend(captured) {
     id: "mock",
     async invoke(ctx) {
       captured.env = ctx.env;
-      const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
-      if (match) {
-        const absPlan = `./${match[0]}`;
+      const absPlan = assignmentPathFromPrompt(ctx.prompt);
+      if (absPlan) {
         const plan = readFileSync(absPlan, "utf8");
         writeFileSync(absPlan, editStatus(plan, "t1", "completed"), "utf8");
       }
@@ -153,39 +157,24 @@ function captureBackend(captured) {
 }
 
 async function runIn(baseDir, opts) {
-  const loaded = loadAgentConfig("depth-agent", baseDir);
-  const loadedAssignment = loadAssignmentConfig("depth-work", baseDir);
-  const originalCwd = process.cwd();
-  process.chdir(baseDir);
-  try {
-    return await runAgent({
-      loaded,
-      loadedAssignment,
-      cliVars: {},
-      backend: opts.backend,
-      stderr: () => {},
-      stdout: () => {},
-    });
-  } finally {
-    process.chdir(originalCwd);
-  }
-}
-
-function withEnv(overrides, fn) {
-  const prior = {};
-  for (const key of Object.keys(overrides)) {
-    prior[key] = process.env[key];
-    if (overrides[key] === undefined) delete process.env[key];
-    else process.env[key] = overrides[key];
-  }
-  try {
-    return fn();
-  } finally {
-    for (const [key, value] of Object.entries(prior)) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
+  return withSharedRuntimeEnv(baseDir, async () => {
+    const loaded = loadAgentConfig("depth-agent", baseDir);
+    const loadedAssignment = loadAssignmentConfig("depth-work", baseDir);
+    const originalCwd = process.cwd();
+    process.chdir(baseDir);
+    try {
+      return await runAgent({
+        loaded,
+        loadedAssignment,
+        cliVars: {},
+        backend: opts.backend,
+        stderr: () => {},
+        stdout: () => {},
+      });
+    } finally {
+      process.chdir(originalCwd);
     }
-  }
+  });
 }
 
 test("runAgent: default cap is 1 — top-level allowed, nested refused", async () => {

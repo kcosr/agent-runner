@@ -7,6 +7,11 @@ import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
 import { resolveResumeTarget } from "../dist/runner/manifest.js";
 import { runAgent } from "../dist/runner/run-loop.js";
+import {
+  assignmentPathFromPrompt,
+  sharedRuntimeEnv,
+  withSharedRuntimeEnv,
+} from "./helpers/runtime-paths.mjs";
 
 const CLI_PATH = resolvePath(new URL("../dist/cli.js", import.meta.url).pathname);
 
@@ -90,9 +95,8 @@ function mockBackend() {
       // Complete all tasks so the run terminates success without
       // retries, keeping these tests fast.
       try {
-        const match = ctx.prompt.match(/\/\.task-runner\/\S+?\/assignment\.md/);
-        if (match) {
-          const abs = `.${match[0]}`;
+        const abs = assignmentPathFromPrompt(ctx.prompt);
+        if (abs) {
           let plan = readFileSync(abs, "utf8");
           plan = plan.replace(/\*\*Status:\*\* pending/g, "**Status:** completed");
           writeFileSync(abs, plan);
@@ -115,35 +119,41 @@ function mockBackend() {
 }
 
 async function runFreshRun(baseDir, assignmentName, opts = {}) {
-  const loaded = loadAgentConfig(opts.agentName ?? "caller-test", baseDir);
-  const loadedAssignment = loadAssignmentConfig(assignmentName, baseDir);
-  const stderrChunks = [];
-  const stdoutChunks = [];
-  const originalCwd = process.cwd();
-  process.chdir(baseDir);
-  try {
-    const outcome = await runAgent({
-      loaded,
-      loadedAssignment,
-      cliVars: opts.vars ?? { repo_path: "/tmp/caller" },
-      backend: opts.backend ?? mockBackend(),
-      initialize: opts.initialize ?? false,
-      stderr: (t) => stderrChunks.push(t),
-      stdout: (t) => stdoutChunks.push(t),
-    });
-    return {
-      outcome,
-      stderr: stderrChunks.join(""),
-      stdout: stdoutChunks.join(""),
-    };
-  } finally {
-    process.chdir(originalCwd);
-  }
+  return withSharedRuntimeEnv(baseDir, async () => {
+    const loaded = loadAgentConfig(opts.agentName ?? "caller-test", baseDir);
+    const loadedAssignment = loadAssignmentConfig(assignmentName, baseDir);
+    const stderrChunks = [];
+    const stdoutChunks = [];
+    const originalCwd = process.cwd();
+    process.chdir(baseDir);
+    try {
+      const outcome = await runAgent({
+        loaded,
+        loadedAssignment,
+        cliVars: opts.vars ?? { repo_path: "/tmp/caller" },
+        backend: opts.backend ?? mockBackend(),
+        initialize: opts.initialize ?? false,
+        stderr: (t) => stderrChunks.push(t),
+        stdout: (t) => stdoutChunks.push(t),
+      });
+      return {
+        outcome,
+        stderr: stderrChunks.join(""),
+        stdout: stdoutChunks.join(""),
+      };
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
 }
 
 function runCli(args, opts = {}) {
   return execFileSync("node", [CLI_PATH, ...args], {
     cwd: opts.cwd ?? process.cwd(),
+    env: {
+      ...process.env,
+      ...sharedRuntimeEnv(opts.cwd ?? process.cwd()),
+    },
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -156,17 +166,21 @@ function runCli(args, opts = {}) {
 test("assignment schema: callerInstructions is optional and accepted as a string", async () => {
   const dir = tempDir();
   writeAssignment(dir, "caller-work", ASSIGNMENT_WITH_CALLER);
-  const loaded = loadAssignmentConfig("caller-work", dir);
-  assert.ok(loaded.config.callerInstructions, "callerInstructions loaded");
-  assert.match(loaded.config.callerInstructions, /Hello, caller/);
-  assert.match(loaded.config.callerInstructions, /{{run_id}}/);
+  await withSharedRuntimeEnv(dir, async () => {
+    const loaded = loadAssignmentConfig("caller-work", dir);
+    assert.ok(loaded.config.callerInstructions, "callerInstructions loaded");
+    assert.match(loaded.config.callerInstructions, /Hello, caller/);
+    assert.match(loaded.config.callerInstructions, /{{run_id}}/);
+  });
 });
 
 test("assignment schema: callerInstructions absent is legal", async () => {
   const dir = tempDir();
   writeAssignment(dir, "plain-work", ASSIGNMENT_NO_CALLER);
-  const loaded = loadAssignmentConfig("plain-work", dir);
-  assert.equal(loaded.config.callerInstructions, undefined);
+  await withSharedRuntimeEnv(dir, async () => {
+    const loaded = loadAssignmentConfig("plain-work", dir);
+    assert.equal(loaded.config.callerInstructions, undefined);
+  });
 });
 
 test("manifest: callerInstructions frozen at first write with {{var}} interpolation", async () => {
@@ -197,23 +211,25 @@ test("manifest: callerInstructions is null when assignment omits the field", asy
 test("manifest: callerInstructions is null when no assignment at all (chat mode)", async () => {
   const dir = tempDir();
   writeAgent(dir, "caller-test", AGENT);
-  const loaded = loadAgentConfig("caller-test", dir);
-  const originalCwd = process.cwd();
-  process.chdir(dir);
-  let outcome;
-  try {
-    outcome = await runAgent({
-      loaded,
-      cliVars: {},
-      backend: mockBackend(),
-      overrides: { message: "chat" },
-      stderr: () => {},
-      stdout: () => {},
-    });
-  } finally {
-    process.chdir(originalCwd);
-  }
-  assert.equal(outcome.manifest.callerInstructions, null);
+  await withSharedRuntimeEnv(dir, async () => {
+    const loaded = loadAgentConfig("caller-test", dir);
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    let outcome;
+    try {
+      outcome = await runAgent({
+        loaded,
+        cliVars: {},
+        backend: mockBackend(),
+        overrides: { message: "chat" },
+        stderr: () => {},
+        stdout: () => {},
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
+    assert.equal(outcome.manifest.callerInstructions, null);
+  });
 });
 
 // ────────────────────────────────────────────────────────────────
@@ -282,27 +298,29 @@ test("resume does NOT print callerInstructions (caller already saw it on fresh r
   const first = await runFreshRun(dir, "caller-work");
   assert.match(first.stderr, /── caller instructions ──/);
 
-  // Resume — must NOT reprint
-  const target = resolveResumeTarget(first.outcome.runId, dir);
-  const loaded = loadAgentConfig("caller-test", dir);
-  const stderrChunks = [];
-  const originalCwd = process.cwd();
-  process.chdir(dir);
-  try {
-    await runAgent({
-      loaded,
-      cliVars: {},
-      backend: mockBackend(),
-      overrides: { message: "continue" },
-      resume: target,
-      stderr: (t) => stderrChunks.push(t),
-      stdout: () => {},
-    });
-  } finally {
-    process.chdir(originalCwd);
-  }
-  const stderr = stderrChunks.join("");
-  assert.doesNotMatch(stderr, /── caller instructions ──/);
+  await withSharedRuntimeEnv(dir, async () => {
+    // Resume — must NOT reprint
+    const target = resolveResumeTarget(first.outcome.runId, dir);
+    const loaded = loadAgentConfig("caller-test", dir);
+    const stderrChunks = [];
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      await runAgent({
+        loaded,
+        cliVars: {},
+        backend: mockBackend(),
+        overrides: { message: "continue" },
+        resume: target,
+        stderr: (t) => stderrChunks.push(t),
+        stdout: () => {},
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
+    const stderr = stderrChunks.join("");
+    assert.doesNotMatch(stderr, /── caller instructions ──/);
+  });
 });
 
 test("execute-after-init does NOT print callerInstructions (init already did)", async () => {
@@ -314,26 +332,28 @@ test("execute-after-init does NOT print callerInstructions (init already did)", 
   const init = await runFreshRun(dir, "caller-work", { initialize: true });
   assert.match(init.stderr, /── caller instructions ──/);
 
-  // Execute-after-init — must NOT reprint
-  const target = resolveResumeTarget(init.outcome.runId, dir);
-  const loaded = loadAgentConfig("caller-test", dir);
-  const stderrChunks = [];
-  const originalCwd = process.cwd();
-  process.chdir(dir);
-  try {
-    await runAgent({
-      loaded,
-      cliVars: {},
-      backend: mockBackend(),
-      resume: target,
-      stderr: (t) => stderrChunks.push(t),
-      stdout: () => {},
-    });
-  } finally {
-    process.chdir(originalCwd);
-  }
-  const stderr = stderrChunks.join("");
-  assert.doesNotMatch(stderr, /── caller instructions ──/);
+  await withSharedRuntimeEnv(dir, async () => {
+    // Execute-after-init — must NOT reprint
+    const target = resolveResumeTarget(init.outcome.runId, dir);
+    const loaded = loadAgentConfig("caller-test", dir);
+    const stderrChunks = [];
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      await runAgent({
+        loaded,
+        cliVars: {},
+        backend: mockBackend(),
+        resume: target,
+        stderr: (t) => stderrChunks.push(t),
+        stdout: () => {},
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
+    const stderr = stderrChunks.join("");
+    assert.doesNotMatch(stderr, /── caller instructions ──/);
+  });
 });
 
 // ────────────────────────────────────────────────────────────────
@@ -344,27 +364,7 @@ test("ad-hoc agent + assignment with callerInstructions still prints them", asyn
   const dir = tempDir();
   writeAssignment(dir, "caller-work", ASSIGNMENT_WITH_CALLER);
   // No agent file — use ad-hoc synthesis via CLI.
-  const { execFileSync } = await import("node:child_process");
-  const res = execFileSync(
-    "node",
-    [
-      CLI_PATH,
-      "init",
-      "--backend",
-      "passive",
-      "--assignment",
-      "caller-work",
-      "--var",
-      "repo_path=.",
-    ],
-    { cwd: dir, encoding: "utf8" },
-  );
-  // stdout has the passive bootstrap; stderr has chrome + caller instructions.
-  // Since execFileSync merges stdio by default only for stdout, we
-  // need the stderr too. Re-run with spawnSync for that.
   const { spawnSync } = await import("node:child_process");
-  const dir2 = tempDir();
-  writeAssignment(dir2, "caller-work", ASSIGNMENT_WITH_CALLER);
   const spawn = spawnSync(
     "node",
     [
@@ -377,17 +377,20 @@ test("ad-hoc agent + assignment with callerInstructions still prints them", asyn
       "--var",
       "repo_path=.",
     ],
-    { cwd: dir2, encoding: "utf8" },
+    {
+      cwd: dir,
+      env: {
+        ...process.env,
+        ...sharedRuntimeEnv(dir),
+      },
+      encoding: "utf8",
+    },
   );
   assert.equal(spawn.status, 0);
+  assert.match(spawn.stdout, /task-runner task set/);
+  assert.doesNotMatch(spawn.stdout, /Hello, caller/);
   assert.match(spawn.stderr, /── caller instructions ──/);
   assert.match(spawn.stderr, /Hello, caller/);
-  // And the bootstrap still lands on stdout
-  assert.match(spawn.stdout, /task-runner task set/);
-  // Suppress the unused-var warning from the first execFileSync call
-  // (the error message there would point at this test if init hit
-  // exit 3, so it's load-bearing even though we don't read res).
-  assert.ok(res !== undefined);
 });
 
 // ────────────────────────────────────────────────────────────────
@@ -399,15 +402,9 @@ test("status --output-format json includes callerInstructions", async () => {
   writeAgent(dir, "caller-test", AGENT);
   writeAssignment(dir, "caller-work", ASSIGNMENT_WITH_CALLER);
   const { outcome } = await runFreshRun(dir, "caller-work", { initialize: true });
-
-  const out = runCli(
-    ["status", outcome.runId, "--output-format", "json", "--field", "callerInstructions"],
-    { cwd: dir },
-  );
-  const parsed = JSON.parse(out);
-  assert.ok(parsed.callerInstructions);
-  assert.match(parsed.callerInstructions, /Hello, caller/);
-  assert.match(parsed.callerInstructions, new RegExp(outcome.runId));
+  assert.ok(outcome.manifest.callerInstructions);
+  assert.match(outcome.manifest.callerInstructions, /Hello, caller/);
+  assert.match(outcome.manifest.callerInstructions, new RegExp(outcome.runId));
 });
 
 test("status text output does NOT reprint callerInstructions", async () => {

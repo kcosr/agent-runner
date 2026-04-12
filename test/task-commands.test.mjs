@@ -6,6 +6,7 @@ import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
 import { runAgent } from "../dist/runner/run-loop.js";
+import { sharedRuntimeEnv, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 const CLI_PATH = resolvePath(new URL("../dist/cli.js", import.meta.url).pathname);
 
@@ -68,28 +69,31 @@ function writeBundle(baseDir, assignmentBody = ASSIGNMENT, assignmentName = "tas
 }
 
 async function initRun(baseDir, assignmentName = "task-cmd-work") {
-  const loaded = loadAgentConfig("task-cmd-agent", baseDir);
-  const loadedAssignment = loadAssignmentConfig(assignmentName, baseDir);
-  const originalCwd = process.cwd();
-  process.chdir(baseDir);
-  try {
-    return await runAgent({
-      loaded,
-      loadedAssignment,
-      cliVars: {},
-      backend: { id: "mock", invoke: async () => ({}) },
-      initialize: true,
-      stderr: () => {},
-      stdout: () => {},
-    });
-  } finally {
-    process.chdir(originalCwd);
-  }
+  return withSharedRuntimeEnv(baseDir, async () => {
+    const loaded = loadAgentConfig("task-cmd-agent", baseDir);
+    const loadedAssignment = loadAssignmentConfig(assignmentName, baseDir);
+    const originalCwd = process.cwd();
+    process.chdir(baseDir);
+    try {
+      return await runAgent({
+        loaded,
+        loadedAssignment,
+        cliVars: {},
+        backend: { id: "mock", invoke: async () => ({}) },
+        initialize: true,
+        stderr: () => {},
+        stdout: () => {},
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
 }
 
 function runCli(args, opts = {}) {
   const stdout = execFileSync("node", [CLI_PATH, ...args], {
     cwd: opts.cwd ?? process.cwd(),
+    env: { ...process.env, ...sharedRuntimeEnv(opts.cwd ?? process.cwd()) },
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -100,6 +104,7 @@ function runCliExpectFail(args, opts = {}) {
   try {
     execFileSync("node", [CLI_PATH, ...args], {
       cwd: opts.cwd ?? process.cwd(),
+      env: { ...process.env, ...sharedRuntimeEnv(opts.cwd ?? process.cwd()) },
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
     });

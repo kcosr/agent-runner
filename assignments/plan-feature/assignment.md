@@ -36,12 +36,13 @@ callerInstructions: |
        impact surface, checks for reusable existing code, and
        maps out risks and tests.
     2. Copies the reference template from
-       `assignments/plan-feature/template.md` into
-       `.task-runner/drafts/plan-<slug>-<shortid>.md`, adjusts
-       the task list to fit the feature, and fills in every
-       `<<PLACEHOLDER>>` with concrete steps. The template's
-       task list is a starting shape; the planner may add,
-       remove, or rename tasks so long as the
+       `${TASK_RUNNER_CONFIG_DIR}/assignments/plan-feature/template.md`
+       into
+       `${TASK_RUNNER_STATE_DIR}/drafts/<repo-key>/plan-<slug>-<shortid>.md`,
+       adjusts the task list to fit the feature, and fills in
+       every `<<PLACEHOLDER>>` with concrete steps. The
+       template's task list is a starting shape; the planner
+       may add, remove, or rename tasks so long as the
        `lockedFields: [tasks]` line stays in the frontmatter.
     3. Runs `task-runner init --assignment <draft-path>` to
        freeze the draft into a new run workspace. This creates
@@ -74,13 +75,14 @@ callerInstructions: |
 
   ## What happens to the draft file
 
-  The draft under `.task-runner/drafts/` is **superseded** the
-  moment `task-runner init` succeeds. From that point on, the
-  canonical artifact is the workspace `assignment.md` inside
-  the new run directory. Edits to the draft file after init
-  have no effect on the run. To change an initialized plan
-  before execution, use `task set` / `task add` against the
-  new run id, or resume the run with a follow-up message.
+  The draft under `${TASK_RUNNER_STATE_DIR}/drafts/<repo-key>/`
+  is **superseded** the moment `task-runner init` succeeds.
+  From that point on, the canonical artifact is the workspace
+  `assignment.md` inside the new run directory. Edits to the
+  draft file after init have no effect on the run. To change
+  an initialized plan before execution, use `task set` /
+  `task add` against the new run id, or resume the run with a
+  follow-up message.
 
   The planner is instructed to delete the draft (or rename it
   to `*.init-source` for audit) at the end of `t08_init_run`
@@ -426,18 +428,19 @@ tasks:
       Locate the reference template. It lives alongside this
       assignment's source file in one of:
         - `{{cwd}}/assignments/plan-feature/template.md`
-        - `$TASK_RUNNER_HOME/assignments/plan-feature/template.md`
+        - `${TASK_RUNNER_CONFIG_DIR}/assignments/plan-feature/template.md`
         - under the task-runner install root
 
       Copy it to a new draft file at:
 
-          {{cwd}}/.task-runner/drafts/plan-<slug>-<shortid>.md
+          ${TASK_RUNNER_STATE_DIR}/drafts/<repo-key>/plan-<slug>-<shortid>.md
 
-      Create the `drafts` directory if it does not exist.
-      `<slug>` is the feature's kebab-cased short title
-      (5 words or fewer); `<shortid>` is any 4-character
-      base32 string, just to disambiguate multiple drafts
-      for the same feature.
+      Create the repo-keyed drafts directory if it does not
+      exist. `<repo-key>` is task-runner's repo slug for the
+      current checkout, `<slug>` is the feature's kebab-cased
+      short title (5 words or fewer), and `<shortid>` is any
+      4-character base32 string, just to disambiguate multiple
+      drafts for the same feature.
 
       The template's task list is a starting shape — not a
       fixed skeleton. Adjust it as the feature warrants:
@@ -588,8 +591,8 @@ tasks:
 
       Capture the new run id from the init output in this
       task's Notes. From the moment init succeeds, the
-      draft file under `.task-runner/drafts/` is **no
-      longer the working artifact** — the workspace
+      draft file under `${TASK_RUNNER_STATE_DIR}/drafts/<repo-key>/`
+      is **no longer the working artifact** — the workspace
       `assignment.md` inside the new run directory is the
       canonical source of truth.
 
@@ -655,7 +658,7 @@ file under that repo freely. Do not modify any file under
 `{{repo_path}}` — the only files you should write are:
   - Your own workspace plan at `{{assignment_path}}`.
   - The draft plan file you create in t07 under
-    `{{cwd}}/.task-runner/drafts/`.
+    `${TASK_RUNNER_STATE_DIR}/drafts/<repo-key>/`.
 
 Work the tasks in order. Earlier tasks build context the
 later ones depend on. The draft plan in t07 should cite

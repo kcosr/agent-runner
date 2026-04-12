@@ -468,7 +468,8 @@ tasks:
            unstaged, or untracked files the plan created),
            stage them explicitly by file path (not `git add
            -A` — that can pick up files you didn't intend,
-           including anything under `.task-runner/`) and
+           including runtime-state artifacts under the
+           configured task-runner state dir) and
            commit them with a clear, focused message that
            describes the work from the plan. Follow the
            repo's commit-message convention from t01.

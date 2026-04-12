@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
 import { VarResolutionError, runAgent } from "../dist/runner/run-loop.js";
+import { assignmentPathFromPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 const INTERP_AGENT = `---
 schemaVersion: 1
@@ -69,17 +70,15 @@ function editStatus(content, taskId, newStatus) {
   return content.slice(0, start) + updated + content.slice(end);
 }
 
-function ackBackend() {
+function ackBackend(onAssignmentPath) {
   return {
     id: "mock",
     async invoke(ctx) {
-      const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
-      if (match) {
-        const absPlan = `./${match[0]}`;
-        let plan = readFileSync(absPlan, "utf8");
-        for (const id of ["t1", "t2"]) plan = editStatus(plan, id, "completed");
-        writeFileSync(absPlan, plan, "utf8");
-      }
+      const absPlan = assignmentPathFromPrompt(ctx.prompt);
+      onAssignmentPath(absPlan);
+      let plan = readFileSync(absPlan, "utf8");
+      for (const id of ["t1", "t2"]) plan = editStatus(plan, id, "completed");
+      writeFileSync(absPlan, plan, "utf8");
       return {
         exitCode: 0,
         signal: null,
@@ -95,22 +94,28 @@ function ackBackend() {
 }
 
 async function runIn(baseDir, cliVars) {
-  const loaded = loadAgentConfig("interp", baseDir);
-  const loadedAssignment = loadAssignmentConfig("interp-work", baseDir);
-  const originalCwd = process.cwd();
-  process.chdir(baseDir);
-  try {
-    return await runAgent({
-      loaded,
-      loadedAssignment,
-      cliVars,
-      backend: ackBackend(),
-      stderr: () => {},
-      stdout: () => {},
-    });
-  } finally {
-    process.chdir(originalCwd);
-  }
+  return withSharedRuntimeEnv(baseDir, async () => {
+    let assignmentPath = null;
+    const loaded = loadAgentConfig("interp", baseDir);
+    const loadedAssignment = loadAssignmentConfig("interp-work", baseDir);
+    const originalCwd = process.cwd();
+    process.chdir(baseDir);
+    try {
+      const outcome = await runAgent({
+        loaded,
+        loadedAssignment,
+        cliVars,
+        backend: ackBackend((path) => {
+          assignmentPath = path;
+        }),
+        stderr: () => {},
+        stdout: () => {},
+      });
+      return { ...outcome, assignmentPath };
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
 }
 
 test("task title and body interpolate {{var}} refs from assignment vars", async () => {
@@ -131,7 +136,7 @@ test("task title and body interpolate {{var}} refs from assignment vars", async 
   // Runner-injected vars (run_id, assignment_path) also interpolate.
   const t2 = outcome.manifest.finalTasks.t2;
   assert.match(t2.body, new RegExp(`run id ${outcome.runId}`));
-  assert.match(t2.body, /assignment path\s+\/\S*\.task-runner\/\S*\/assignment\.md/);
+  assert.ok(t2.body.includes(outcome.assignmentPath));
   assert.doesNotMatch(t2.body, /\{\{/);
 });
 

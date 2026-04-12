@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
 import { ResumeError, resolveResumeTarget } from "../dist/runner/manifest.js";
 import { runAgent } from "../dist/runner/run-loop.js";
+import { assignmentPathFromPrompt, withEnv } from "./helpers/runtime-paths.mjs";
 
 const THREE_AGENT = `---
 schemaVersion: 1
@@ -87,27 +88,37 @@ function mockBackend(handler) {
   return { id: "mock", invoke: handler };
 }
 
+function withSharedRuntimeEnv(baseDir, fn) {
+  return withEnv(
+    {
+      TASK_RUNNER_CONFIG_DIR: baseDir,
+      TASK_RUNNER_STATE_DIR: baseDir,
+    },
+    fn,
+  );
+}
+
 async function runIn(baseDir, opts) {
-  const loaded = loadAgentConfig("three", baseDir);
-  // On resume, `--assignment` is forbidden; only pass loadedAssignment for
-  // fresh runs.
-  const loadedAssignment = opts.resume ? undefined : loadAssignmentConfig("three-work", baseDir);
-  const originalCwd = process.cwd();
-  process.chdir(baseDir);
-  try {
-    return await runAgent({
-      loaded,
-      loadedAssignment,
-      cliVars: {},
-      backend: opts.backend,
-      overrides: opts.overrides,
-      resume: opts.resume,
-      stderr: () => {},
-      stdout: () => {},
-    });
-  } finally {
-    process.chdir(originalCwd);
-  }
+  return withSharedRuntimeEnv(baseDir, async () => {
+    const loaded = loadAgentConfig("three", baseDir);
+    const loadedAssignment = opts.resume ? undefined : loadAssignmentConfig("three-work", baseDir);
+    const originalCwd = process.cwd();
+    process.chdir(baseDir);
+    try {
+      return await runAgent({
+        loaded,
+        loadedAssignment,
+        cliVars: {},
+        backend: opts.backend,
+        overrides: opts.overrides,
+        resume: opts.resume,
+        stderr: () => {},
+        stdout: () => {},
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
 }
 
 test("resume: happy path — original blocks, resume completes, same workspace", async () => {
@@ -117,8 +128,7 @@ test("resume: happy path — original blocks, resume completes, same workspace",
   // Session 0 — blocks on t2
   const first = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
-      const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
-      const absPlan = `./${match[0]}`;
+      const absPlan = assignmentPathFromPrompt(ctx.prompt);
       let plan = readFileSync(absPlan, "utf8");
       plan = editStatus(plan, "t1", "completed");
       plan = editStatus(plan, "t2", "blocked");
@@ -145,7 +155,7 @@ test("resume: happy path — original blocks, resume completes, same workspace",
 
   // Resume — fix everything. Plan path is known from the first run.
   const firstPlanPath = join(first.workspaceDir, "assignment.md");
-  const target = resolveResumeTarget(first.runId, dir);
+  const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.runId, dir));
   const second = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
       // Should receive the inherited session id and only the follow-up message
@@ -207,7 +217,7 @@ test("resume: attempt numbers are monotonic across sessions", async () => {
 
   // Resume — succeed on first attempt
   const firstPlanPath = join(first.workspaceDir, "assignment.md");
-  const target = resolveResumeTarget(first.runId, dir);
+  const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.runId, dir));
   const second = await runIn(dir, {
     backend: mockBackend(async (_ctx) => {
       let plan = readFileSync(firstPlanPath, "utf8");
@@ -247,8 +257,7 @@ test("resume: non-completed tasks normalized to pending, notes preserved", async
 
   const first = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
-      const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
-      const absPlan = `./${match[0]}`;
+      const absPlan = assignmentPathFromPrompt(ctx.prompt);
       let plan = readFileSync(absPlan, "utf8");
       plan = editStatus(plan, "t1", "completed");
       plan = editNotes(plan, "t1", "first done");
@@ -270,7 +279,7 @@ test("resume: non-completed tasks normalized to pending, notes preserved", async
 
   // Resume — inspect the in-memory state after normalization by reading tasks.md
   const firstPlanPath = join(first.workspaceDir, "assignment.md");
-  const target = resolveResumeTarget(first.runId, dir);
+  const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.runId, dir));
   const second = await runIn(dir, {
     backend: mockBackend(async (_ctx) => {
       const plan = readFileSync(firstPlanPath, "utf8");
@@ -320,8 +329,7 @@ test("resume: --add-task alone (no message) is allowed on resume", async () => {
 
   const first = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
-      const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
-      const absPlan = `./${match[0]}`;
+      const absPlan = assignmentPathFromPrompt(ctx.prompt);
       let plan = readFileSync(absPlan, "utf8");
       for (const id of ["t1", "t2", "t3"]) {
         plan = editStatus(plan, id, "completed");
@@ -340,7 +348,7 @@ test("resume: --add-task alone (no message) is allowed on resume", async () => {
   });
   assert.equal(first.exitCode, 0);
 
-  const target = resolveResumeTarget(first.runId, dir);
+  const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.runId, dir));
   const firstPlanPath = join(first.workspaceDir, "assignment.md");
   let seenPrompt;
   const second = await runIn(dir, {
@@ -379,8 +387,7 @@ test("resume: missing both message and --add-task is a hard error", async () => 
 
   const first = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
-      const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
-      const absPlan = `./${match[0]}`;
+      const absPlan = assignmentPathFromPrompt(ctx.prompt);
       let plan = readFileSync(absPlan, "utf8");
       plan = editStatus(plan, "t1", "blocked");
       writeFileSync(absPlan, plan, "utf8");
@@ -396,7 +403,7 @@ test("resume: missing both message and --add-task is a hard error", async () => 
     }),
   });
 
-  const target = resolveResumeTarget(first.runId, dir);
+  const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.runId, dir));
   await assert.rejects(
     () =>
       runIn(dir, {
@@ -422,8 +429,7 @@ test("resume: missing backend session id is a hard error", async () => {
 
   const first = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
-      const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
-      const absPlan = `./${match[0]}`;
+      const absPlan = assignmentPathFromPrompt(ctx.prompt);
       let plan = readFileSync(absPlan, "utf8");
       plan = editStatus(plan, "t1", "blocked");
       writeFileSync(absPlan, plan, "utf8");
@@ -440,7 +446,7 @@ test("resume: missing backend session id is a hard error", async () => {
   });
   assert.equal(first.manifest.backendSessionId, null);
 
-  const target = resolveResumeTarget(first.runId, dir);
+  const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.runId, dir));
   await assert.rejects(
     () =>
       runIn(dir, {
@@ -466,8 +472,7 @@ test("resume: claude rejecting the resume on first attempt fails hard", async ()
 
   const first = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
-      const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
-      const absPlan = `./${match[0]}`;
+      const absPlan = assignmentPathFromPrompt(ctx.prompt);
       let plan = readFileSync(absPlan, "utf8");
       plan = editStatus(plan, "t1", "blocked");
       writeFileSync(absPlan, plan, "utf8");
@@ -483,7 +488,7 @@ test("resume: claude rejecting the resume on first attempt fails hard", async ()
     }),
   });
 
-  const target = resolveResumeTarget(first.runId, dir);
+  const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.runId, dir));
   const second = await runIn(dir, {
     backend: mockBackend(async () => ({
       exitCode: 1,
@@ -510,8 +515,7 @@ test("resume: resolveResumeTarget finds the workspace by slug in cwd", async () 
 
   const first = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
-      const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
-      const absPlan = `./${match[0]}`;
+      const absPlan = assignmentPathFromPrompt(ctx.prompt);
       let plan = readFileSync(absPlan, "utf8");
       for (const id of ["t1", "t2", "t3"]) plan = editStatus(plan, id, "completed");
       writeFileSync(absPlan, plan, "utf8");
@@ -527,14 +531,17 @@ test("resume: resolveResumeTarget finds the workspace by slug in cwd", async () 
     }),
   });
 
-  const target = resolveResumeTarget(first.runId, dir);
+  const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.runId, dir));
   assert.equal(target.workspaceDir, first.workspaceDir);
   assert.equal(target.manifest.runId, first.runId);
 });
 
 test("resume: resolveResumeTarget throws for unknown slug", () => {
   const dir = tempDir();
-  assert.throws(() => resolveResumeTarget("notarealid", dir), ResumeError);
+  assert.throws(
+    () => withSharedRuntimeEnv(dir, () => resolveResumeTarget("notarealid", dir)),
+    ResumeError,
+  );
 });
 
 // Resume override policy — runAgent-layer enforcement. The CLI layer
@@ -550,8 +557,7 @@ test("resume: runAgent rejects overrides.cwd (backend sessions are cwd-bound)", 
   // Session 0 — complete happy path so we have a resumable terminal run.
   const first = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
-      const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
-      const absPlan = `./${match[0]}`;
+      const absPlan = assignmentPathFromPrompt(ctx.prompt);
       let plan = readFileSync(absPlan, "utf8");
       for (const id of ["t1", "t2", "t3"]) plan = editStatus(plan, id, "completed");
       writeFileSync(absPlan, plan, "utf8");
@@ -569,7 +575,7 @@ test("resume: runAgent rejects overrides.cwd (backend sessions are cwd-bound)", 
   assert.equal(first.manifest.status, "success");
 
   // Attempt a resume with --cwd — must throw ResumeError.
-  const target = resolveResumeTarget(first.runId, dir);
+  const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.runId, dir));
   await assert.rejects(
     async () =>
       runIn(dir, {
@@ -594,8 +600,7 @@ test("resume: runAgent rejects cliVars non-empty on resume", async () => {
 
   const first = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
-      const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
-      const absPlan = `./${match[0]}`;
+      const absPlan = assignmentPathFromPrompt(ctx.prompt);
       let plan = readFileSync(absPlan, "utf8");
       for (const id of ["t1", "t2", "t3"]) plan = editStatus(plan, id, "completed");
       writeFileSync(absPlan, plan, "utf8");
@@ -614,33 +619,35 @@ test("resume: runAgent rejects cliVars non-empty on resume", async () => {
   // Programmatic caller passes cliVars with content on resume —
   // currently a silent no-op because resume doesn't re-resolve vars.
   // runAgent must reject loudly.
-  const target = resolveResumeTarget(first.runId, dir);
-  const loaded = loadAgentConfig("three", dir);
-  const originalCwd = process.cwd();
-  process.chdir(dir);
-  try {
-    await assert.rejects(
-      async () =>
-        runAgent({
-          loaded,
-          cliVars: { forced: "value" },
-          backend: mockBackend(async () => {
-            throw new Error("backend should not be invoked");
+  await withSharedRuntimeEnv(dir, async () => {
+    const target = resolveResumeTarget(first.runId, dir);
+    const loaded = loadAgentConfig("three", dir);
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      await assert.rejects(
+        async () =>
+          runAgent({
+            loaded,
+            cliVars: { forced: "value" },
+            backend: mockBackend(async () => {
+              throw new Error("backend should not be invoked");
+            }),
+            overrides: { message: "continue" },
+            resume: target,
+            stderr: () => {},
+            stdout: () => {},
           }),
-          overrides: { message: "continue" },
-          resume: target,
-          stderr: () => {},
-          stdout: () => {},
-        }),
-      (err) => {
-        assert.ok(err instanceof ResumeError);
-        assert.match(err.message, /--var cannot be combined with --resume-run/);
-        return true;
-      },
-    );
-  } finally {
-    process.chdir(originalCwd);
-  }
+        (err) => {
+          assert.ok(err instanceof ResumeError);
+          assert.match(err.message, /--var cannot be combined with --resume-run/);
+          return true;
+        },
+      );
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
 });
 
 test("resume: text summary includes the resume-run hint with the run id", async () => {
@@ -648,38 +655,39 @@ test("resume: text summary includes the resume-run hint with the run id", async 
   writeAgentAndAssignment(dir);
 
   const stderrChunks = [];
-  const loaded = loadAgentConfig("three", dir);
-  const loadedAssignment = loadAssignmentConfig("three-work", dir);
-  const originalCwd = process.cwd();
-  process.chdir(dir);
-  try {
-    const outcome = await runAgent({
-      loaded,
-      loadedAssignment,
-      cliVars: {},
-      backend: mockBackend(async (ctx) => {
-        const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
-        const absPlan = `./${match[0]}`;
-        let plan = readFileSync(absPlan, "utf8");
-        for (const id of ["t1", "t2", "t3"]) plan = editStatus(plan, id, "completed");
-        writeFileSync(absPlan, plan, "utf8");
-        return {
-          exitCode: 0,
-          signal: null,
-          timedOut: false,
-          sessionId: "sess-hint",
-          transcript: "done",
-          rawStdout: "",
-          rawStderr: "",
-        };
-      }),
-      stderr: (t) => stderrChunks.push(t),
-      stdout: () => {},
-    });
-    const stderr = stderrChunks.join("");
-    assert.ok(stderr.includes("To continue this run with a follow-up message:"));
-    assert.ok(stderr.includes(`task-runner run --resume-run ${outcome.runId}`));
-  } finally {
-    process.chdir(originalCwd);
-  }
+  await withSharedRuntimeEnv(dir, async () => {
+    const loaded = loadAgentConfig("three", dir);
+    const loadedAssignment = loadAssignmentConfig("three-work", dir);
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      const outcome = await runAgent({
+        loaded,
+        loadedAssignment,
+        cliVars: {},
+        backend: mockBackend(async (ctx) => {
+          const absPlan = assignmentPathFromPrompt(ctx.prompt);
+          let plan = readFileSync(absPlan, "utf8");
+          for (const id of ["t1", "t2", "t3"]) plan = editStatus(plan, id, "completed");
+          writeFileSync(absPlan, plan, "utf8");
+          return {
+            exitCode: 0,
+            signal: null,
+            timedOut: false,
+            sessionId: "sess-hint",
+            transcript: "done",
+            rawStdout: "",
+            rawStderr: "",
+          };
+        }),
+        stderr: (t) => stderrChunks.push(t),
+        stdout: () => {},
+      });
+      const stderr = stderrChunks.join("");
+      assert.ok(stderr.includes("To continue this run with a follow-up message:"));
+      assert.ok(stderr.includes(`task-runner run --resume-run ${outcome.runId}`));
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
 });

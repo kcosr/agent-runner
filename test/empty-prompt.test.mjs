@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
 import { EmptyPromptError, runAgent } from "../dist/runner/run-loop.js";
+import { assignmentPathFromPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 function tempDir() {
   return mkdtempSync(join(tmpdir(), "task-runner-emptyprompt-"));
@@ -42,27 +43,29 @@ function mockBackend(handler) {
 }
 
 async function runIn(baseDir, agentName, opts = {}) {
-  const loaded = loadAgentConfig(agentName, baseDir);
-  const loadedAssignment =
-    !opts.resume && opts.assignmentName
-      ? loadAssignmentConfig(opts.assignmentName, baseDir)
-      : undefined;
-  const originalCwd = process.cwd();
-  process.chdir(baseDir);
-  try {
-    return await runAgent({
-      loaded,
-      loadedAssignment,
-      cliVars: {},
-      backend: opts.backend,
-      overrides: opts.overrides,
-      resume: opts.resume,
-      stderr: () => {},
-      stdout: () => {},
-    });
-  } finally {
-    process.chdir(originalCwd);
-  }
+  return withSharedRuntimeEnv(baseDir, async () => {
+    const loaded = loadAgentConfig(agentName, baseDir);
+    const loadedAssignment =
+      !opts.resume && opts.assignmentName
+        ? loadAssignmentConfig(opts.assignmentName, baseDir)
+        : undefined;
+    const originalCwd = process.cwd();
+    process.chdir(baseDir);
+    try {
+      return await runAgent({
+        loaded,
+        loadedAssignment,
+        cliVars: {},
+        backend: opts.backend,
+        overrides: opts.overrides,
+        resume: opts.resume,
+        stderr: () => {},
+        stdout: () => {},
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
 }
 
 // Agent with empty body and nothing else — no assignment either. Used to
@@ -161,8 +164,7 @@ test("empty-prompt: tasks only (no body, no message) runs with just the workflow
     assignmentName: "body-less-tasks-work",
     backend: mockBackend(async (ctx) => {
       seenPrompt = ctx.prompt;
-      const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
-      const absPlan = `./${match[0]}`;
+      const absPlan = assignmentPathFromPrompt(ctx.prompt);
       const plan = readFileSync(absPlan, "utf8");
       writeFileSync(absPlan, editStatus(plan, "t1", "completed"), "utf8");
       return {
@@ -195,8 +197,7 @@ test("empty-prompt: message + tasks (no body) composes workflow above message wi
     overrides: { message: "focus on it" },
     backend: mockBackend(async (ctx) => {
       seenPrompt = ctx.prompt;
-      const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
-      const absPlan = `./${match[0]}`;
+      const absPlan = assignmentPathFromPrompt(ctx.prompt);
       const plan = readFileSync(absPlan, "utf8");
       writeFileSync(absPlan, editStatus(plan, "t1", "completed"), "utf8");
       return {

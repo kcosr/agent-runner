@@ -7,6 +7,7 @@ import { claudeSessionFilePath, encodeClaudeProjectDir } from "../dist/backends/
 import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
 import { resolveResumeTarget } from "../dist/runner/manifest.js";
 import { InvalidBackendSessionError, runAgent } from "../dist/runner/run-loop.js";
+import { assignmentPathFromPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 // ─── claude cwd-encoding helper ─────────────────────────────────────────────
 
@@ -80,12 +81,9 @@ function importableBackend({ validate, captured }) {
     validateSessionId: validate,
     async invoke(ctx) {
       captured.resumeSessionId = ctx.resumeSessionId;
-      const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
-      if (match) {
-        const absPlan = `./${match[0]}`;
-        const plan = readFileSync(absPlan, "utf8");
-        writeFileSync(absPlan, editStatus(plan, "t1", "completed"), "utf8");
-      }
+      const absPlan = assignmentPathFromPrompt(ctx.prompt);
+      const plan = readFileSync(absPlan, "utf8");
+      writeFileSync(absPlan, editStatus(plan, "t1", "completed"), "utf8");
       return {
         exitCode: 0,
         signal: null,
@@ -101,24 +99,26 @@ function importableBackend({ validate, captured }) {
 }
 
 async function runImportIn(baseDir, opts) {
-  const loaded = loadAgentConfig("import-agent", baseDir);
-  const loadedAssignment = loadAssignmentConfig("import-work", baseDir);
-  const originalCwd = process.cwd();
-  process.chdir(baseDir);
-  try {
-    return await runAgent({
-      loaded,
-      loadedAssignment,
-      cliVars: {},
-      backend: opts.backend,
-      bootstrapBackendSessionId: opts.bootstrapBackendSessionId,
-      initialize: opts.initialize ?? false,
-      stderr: () => {},
-      stdout: () => {},
-    });
-  } finally {
-    process.chdir(originalCwd);
-  }
+  return withSharedRuntimeEnv(baseDir, async () => {
+    const loaded = loadAgentConfig("import-agent", baseDir);
+    const loadedAssignment = loadAssignmentConfig("import-work", baseDir);
+    const originalCwd = process.cwd();
+    process.chdir(baseDir);
+    try {
+      return await runAgent({
+        loaded,
+        loadedAssignment,
+        cliVars: {},
+        backend: opts.backend,
+        bootstrapBackendSessionId: opts.bootstrapBackendSessionId,
+        initialize: opts.initialize ?? false,
+        stderr: () => {},
+        stdout: () => {},
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
 }
 
 test("import (run): valid session id is persisted to manifest and forwarded to first invoke", async () => {
@@ -215,7 +215,7 @@ test("import (init+resume): execute-after-init forwards the imported id on first
   });
   assert.equal(initCaptured.resumeSessionId, undefined, "init must not invoke");
 
-  const target = resolveResumeTarget(init.runId, dir);
+  const target = await withSharedRuntimeEnv(dir, async () => resolveResumeTarget(init.runId, dir));
   const execCaptured = {};
   const execBackend = importableBackend({
     captured: execCaptured,
@@ -223,23 +223,25 @@ test("import (init+resume): execute-after-init forwards the imported id on first
       throw new Error("validateSessionId must not be called on resume");
     },
   });
-  const loaded = loadAgentConfig("import-agent", dir);
-  const originalCwd = process.cwd();
-  process.chdir(dir);
-  try {
-    const exec = await runAgent({
-      loaded,
-      cliVars: {},
-      backend: execBackend,
-      resume: target,
-      stderr: () => {},
-      stdout: () => {},
-    });
-    assert.equal(execCaptured.resumeSessionId, "imported-sess-3");
-    assert.equal(exec.manifest.backendSessionId, "imported-sess-3");
-  } finally {
-    process.chdir(originalCwd);
-  }
+  await withSharedRuntimeEnv(dir, async () => {
+    const loaded = loadAgentConfig("import-agent", dir);
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      const exec = await runAgent({
+        loaded,
+        cliVars: {},
+        backend: execBackend,
+        resume: target,
+        stderr: () => {},
+        stdout: () => {},
+      });
+      assert.equal(execCaptured.resumeSessionId, "imported-sess-3");
+      assert.equal(exec.manifest.backendSessionId, "imported-sess-3");
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
 });
 
 test("import: combining bootstrapBackendSessionId with resume target throws", async () => {
@@ -253,28 +255,30 @@ test("import: combining bootstrapBackendSessionId with resume target throws", as
     bootstrapBackendSessionId: undefined,
   });
 
-  const target = resolveResumeTarget(fresh.runId, dir);
-  const loaded = loadAgentConfig("import-agent", dir);
-  const originalCwd = process.cwd();
-  process.chdir(dir);
-  try {
-    await assert.rejects(
-      () =>
-        runAgent({
-          loaded,
-          cliVars: {},
-          backend: importableBackend({ captured: {}, validate: async () => ({ valid: true }) }),
-          resume: target,
-          bootstrapBackendSessionId: "should-be-rejected",
-          overrides: { message: "follow up" },
-          stderr: () => {},
-          stdout: () => {},
-        }),
-      /backend-session-id cannot be combined with --resume-run/,
-    );
-  } finally {
-    process.chdir(originalCwd);
-  }
+  const target = await withSharedRuntimeEnv(dir, async () => resolveResumeTarget(fresh.runId, dir));
+  await withSharedRuntimeEnv(dir, async () => {
+    const loaded = loadAgentConfig("import-agent", dir);
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      await assert.rejects(
+        () =>
+          runAgent({
+            loaded,
+            cliVars: {},
+            backend: importableBackend({ captured: {}, validate: async () => ({ valid: true }) }),
+            resume: target,
+            bootstrapBackendSessionId: "should-be-rejected",
+            overrides: { message: "follow up" },
+            stderr: () => {},
+            stdout: () => {},
+          }),
+        /backend-session-id cannot be combined with --resume-run/,
+      );
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
 });
 
 test("import: backends without validateSessionId are treated as 'always valid'", async () => {
@@ -288,12 +292,9 @@ test("import: backends without validateSessionId are treated as 'always valid'",
     // No validateSessionId at all.
     async invoke(ctx) {
       captured.resumeSessionId = ctx.resumeSessionId;
-      const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
-      if (match) {
-        const absPlan = `./${match[0]}`;
-        const plan = readFileSync(absPlan, "utf8");
-        writeFileSync(absPlan, editStatus(plan, "t1", "completed"), "utf8");
-      }
+      const absPlan = assignmentPathFromPrompt(ctx.prompt);
+      const plan = readFileSync(absPlan, "utf8");
+      writeFileSync(absPlan, editStatus(plan, "t1", "completed"), "utf8");
       return {
         exitCode: 0,
         signal: null,

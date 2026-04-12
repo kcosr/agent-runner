@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
 import { runAgent } from "../dist/runner/run-loop.js";
+import { assignmentPathFromPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 const THREE_AGENT = `---
 schemaVersion: 1
@@ -71,34 +72,36 @@ function editStatus(content, taskId, newStatus) {
 }
 
 async function runWithMock(baseDir, mockInvoke, overrides = {}) {
-  const loaded = loadAgentConfig("three", baseDir);
-  const loadedAssignment = loadAssignmentConfig("three-work", baseDir);
   const backend = {
     id: "mock",
     invoke: mockInvoke,
   };
   const stdoutChunks = [];
   const stderrChunks = [];
-  const originalCwd = process.cwd();
-  process.chdir(baseDir);
-  try {
-    const outcome = await runAgent({
-      loaded,
-      loadedAssignment,
-      cliVars: {},
-      backend,
-      overrides,
-      stderr: (t) => stderrChunks.push(t),
-      stdout: (t) => stdoutChunks.push(t),
-    });
-    return {
-      outcome,
-      stdout: stdoutChunks.join(""),
-      stderr: stderrChunks.join(""),
-    };
-  } finally {
-    process.chdir(originalCwd);
-  }
+  return withSharedRuntimeEnv(baseDir, async () => {
+    const loaded = loadAgentConfig("three", baseDir);
+    const loadedAssignment = loadAssignmentConfig("three-work", baseDir);
+    const originalCwd = process.cwd();
+    process.chdir(baseDir);
+    try {
+      const outcome = await runAgent({
+        loaded,
+        loadedAssignment,
+        cliVars: {},
+        backend,
+        overrides,
+        stderr: (t) => stderrChunks.push(t),
+        stdout: (t) => stdoutChunks.push(t),
+      });
+      return {
+        outcome,
+        stdout: stdoutChunks.join(""),
+        stderr: stderrChunks.join(""),
+      };
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
 }
 
 test("effort level from frontmatter is forwarded to backend", async () => {
@@ -108,8 +111,7 @@ test("effort level from frontmatter is forwarded to backend", async () => {
   let seenEffort;
   const { outcome } = await runWithMock(dir, async (ctx) => {
     seenEffort = ctx.effort;
-    const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
-    const absPlan = `./${match[0]}`;
+    const absPlan = assignmentPathFromPrompt(ctx.prompt);
     let plan = readFileSync(absPlan, "utf8");
     plan = editStatus(plan, "t1", "completed");
     plan = editStatus(plan, "t2", "completed");
@@ -139,8 +141,7 @@ test("effort override beats the frontmatter value", async () => {
     dir,
     async (ctx) => {
       seenEffort = ctx.effort;
-      const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
-      const absPlan = `./${match[0]}`;
+      const absPlan = assignmentPathFromPrompt(ctx.prompt);
       let plan = readFileSync(absPlan, "utf8");
       plan = editStatus(plan, "t1", "completed");
       plan = editStatus(plan, "t2", "completed");
@@ -170,19 +171,12 @@ test("happy path: mock marks all tasks completed in one attempt → exit 0", asy
   let invocations = 0;
   const { outcome, stdout, stderr } = await runWithMock(dir, async (ctx) => {
     invocations++;
-    const plan = readFileSync(
-      `./${ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/)[0]}`,
-      "utf8",
-    );
+    const plan = readFileSync(assignmentPathFromPrompt(ctx.prompt), "utf8");
     let updated = plan;
     for (const id of ["t1", "t2", "t3"]) {
       updated = editStatus(updated, id, "completed");
     }
-    writeFileSync(
-      `./${ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/)[0]}`,
-      updated,
-      "utf8",
-    );
+    writeFileSync(assignmentPathFromPrompt(ctx.prompt), updated, "utf8");
     return {
       exitCode: 0,
       signal: null,
@@ -214,10 +208,7 @@ test("retry path: first attempt leaves one incomplete, second completes → exit
   const { outcome } = await runWithMock(dir, async (ctx) => {
     invocations++;
     lastPrompt = ctx.prompt;
-    const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
-    const planPath = match ? match[0] : null;
-    const absPlan = planPath ? `./${planPath}` : null;
-    if (!absPlan) throw new Error(`no plan path in prompt: ${ctx.prompt}`);
+    const absPlan = assignmentPathFromPrompt(ctx.prompt);
 
     const plan = readFileSync(absPlan, "utf8");
     let updated = plan;
@@ -255,8 +246,7 @@ test("blocked path: marking one task blocked → exit 2, no further retries", as
   let invocations = 0;
   const { outcome } = await runWithMock(dir, async (ctx) => {
     invocations++;
-    const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
-    const absPlan = `./${match[0]}`;
+    const absPlan = assignmentPathFromPrompt(ctx.prompt);
     let plan = readFileSync(absPlan, "utf8");
     plan = editStatus(plan, "t1", "completed");
     plan = editStatus(plan, "t2", "blocked");
@@ -314,8 +304,7 @@ test("session resume: first attempt session ID passed on retry", async () => {
   const { outcome } = await runWithMock(dir, async (ctx) => {
     invocations++;
     seenResumeIds.push(ctx.resumeSessionId ?? null);
-    const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
-    const absPlan = `./${match[0]}`;
+    const absPlan = assignmentPathFromPrompt(ctx.prompt);
     let plan = readFileSync(absPlan, "utf8");
     if (invocations === 1) {
       plan = editStatus(plan, "t1", "completed");
@@ -353,8 +342,7 @@ test("in-run resume rejection stops the run with an error", async () => {
       // attempt 1 succeeds but leaves tasks incomplete; attempt 2 is the retry
       // that carries --resume; the mock pretends claude rejects that session
       if (invocations === 1) {
-        const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
-        const absPlan = `./${match[0]}`;
+        const absPlan = assignmentPathFromPrompt(ctx.prompt);
         const plan = readFileSync(absPlan, "utf8");
         writeFileSync(absPlan, editStatus(plan, "t1", "completed"), "utf8");
         return {

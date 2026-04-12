@@ -6,6 +6,7 @@ import { renderAssignment } from "../assignment/writer.js";
 import type { Backend, BackendInvokeResult } from "../backends/types.js";
 import { interpolate } from "../config/interpolate.js";
 import type { LoadedAgent, LoadedAssignment } from "../config/loader.js";
+import { resolveRunWorkspaceDir } from "../config/runtime-paths.js";
 import type { LockableField, VarDef } from "../config/schema.js";
 import { shortId } from "../util/short-id.js";
 import { writeTextFileAtomic } from "../util/write-file-atomic.js";
@@ -597,7 +598,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const reusingWorkspace = (isResume && resume) || (priorInitialized && resume);
   const runId = reusingWorkspace && resume ? resume.manifest.runId : shortId();
   const workspaceDir =
-    reusingWorkspace && resume ? resume.workspaceDir : resolve(cwd, ".task-runner", runId);
+    reusingWorkspace && resume ? resume.workspaceDir : resolveRunWorkspaceDir(cwd, runId);
   mkdirSync(workspaceDir, { recursive: true });
   const assignmentPath = workspaceAssignmentPath(workspaceDir);
 

@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
 import { resolveResumeTarget } from "../dist/runner/manifest.js";
 import { InvalidAddedTaskError, LockedFieldError, runAgent } from "../dist/runner/run-loop.js";
+import { assignmentPathFromPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 // ─── two-task assignment with an agent ──────────────────────────────────────
 const TWO_AGENT = `---
@@ -118,25 +119,27 @@ function mockBackend(handler) {
 }
 
 async function runIn(baseDir, agentName, overrides, backend, assignmentName) {
-  const loaded = loadAgentConfig(agentName, baseDir);
-  const loadedAssignment = assignmentName
-    ? loadAssignmentConfig(assignmentName, baseDir)
-    : undefined;
-  const originalCwd = process.cwd();
-  process.chdir(baseDir);
-  try {
-    return await runAgent({
-      loaded,
-      loadedAssignment,
-      cliVars: {},
-      backend,
-      overrides,
-      stderr: () => {},
-      stdout: () => {},
-    });
-  } finally {
-    process.chdir(originalCwd);
-  }
+  return withSharedRuntimeEnv(baseDir, async () => {
+    const loaded = loadAgentConfig(agentName, baseDir);
+    const loadedAssignment = assignmentName
+      ? loadAssignmentConfig(assignmentName, baseDir)
+      : undefined;
+    const originalCwd = process.cwd();
+    process.chdir(baseDir);
+    try {
+      return await runAgent({
+        loaded,
+        loadedAssignment,
+        cliVars: {},
+        backend,
+        overrides,
+        stderr: () => {},
+        stdout: () => {},
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
 }
 
 test("add-task: CLI-added task is appended to the frontmatter list on fresh run", async () => {
@@ -149,8 +152,7 @@ test("add-task: CLI-added task is appended to the frontmatter list on fresh run"
     "two",
     { addedTasks: ["Check the logs"] },
     mockBackend(async (ctx) => {
-      const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
-      const absPlan = `./${match[0]}`;
+      const absPlan = assignmentPathFromPrompt(ctx.prompt);
       seenIds = completeEverything(absPlan);
       return {
         exitCode: 0,
@@ -185,8 +187,7 @@ test("add-task: multiple added tasks preserve order", async () => {
     "two",
     { addedTasks: ["First added", "Second added", "Third added"] },
     mockBackend(async (ctx) => {
-      const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
-      const absPlan = `./${match[0]}`;
+      const absPlan = assignmentPathFromPrompt(ctx.prompt);
       completeEverything(absPlan);
       return {
         exitCode: 0,
@@ -219,8 +220,7 @@ test("add-task: works on resume — appends after task normalization", async () 
     "two",
     undefined,
     mockBackend(async (ctx) => {
-      const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
-      const absPlan = `./${match[0]}`;
+      const absPlan = assignmentPathFromPrompt(ctx.prompt);
       let plan = readFileSync(absPlan, "utf8");
       plan = editStatus(plan, "t1", "completed");
       plan = editStatus(plan, "t2", "blocked");
@@ -238,46 +238,50 @@ test("add-task: works on resume — appends after task normalization", async () 
     "two-work",
   );
 
-  const target = resolveResumeTarget(first.runId, dir);
-  const loaded = loadAgentConfig("two", dir);
-  const firstAssignmentPath = join(first.workspaceDir, "assignment.md");
-  const originalCwd = process.cwd();
-  process.chdir(dir);
-  try {
-    const second = await runAgent({
-      loaded,
-      cliVars: {},
-      backend: mockBackend(async () => {
-        completeEverything(firstAssignmentPath);
-        return {
-          exitCode: 0,
-          signal: null,
-          timedOut: false,
-          sessionId: "sess-resume-2",
-          transcript: "done",
-          rawStdout: "",
-          rawStderr: "",
-        };
-      }),
-      resume: target,
-      overrides: {
-        message: "try alternate approach",
-        addedTasks: ["Try alternate path"],
-      },
-      stderr: () => {},
-      stdout: () => {},
-    });
+  await withSharedRuntimeEnv(dir, async () => {
+    const target = resolveResumeTarget(first.runId, dir);
+    const loaded = loadAgentConfig("two", dir);
+    const firstAssignmentPath = join(first.workspaceDir, "assignment.md");
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      const second = await runAgent({
+        loaded,
+        cliVars: {},
+        backend: mockBackend(async () => {
+          completeEverything(firstAssignmentPath);
+          return {
+            exitCode: 0,
+            signal: null,
+            timedOut: false,
+            sessionId: "sess-resume-2",
+            transcript: "done",
+            rawStdout: "",
+            rawStderr: "",
+          };
+        }),
+        resume: target,
+        overrides: {
+          message: "try alternate approach",
+          addedTasks: ["Try alternate path"],
+        },
+        stderr: () => {},
+        stdout: () => {},
+      });
 
-    assert.equal(second.exitCode, 0);
-    assert.equal(second.manifest.tasksTotal, 3);
-    const cliTask = Object.values(second.manifest.finalTasks).find((t) => t.id.startsWith("cli-"));
-    assert.ok(cliTask, "cli task exists in resume manifest");
-    assert.equal(cliTask.title, "Try alternate path");
-    assert.equal(second.manifest.finalTasks.t1.status, "completed");
-    assert.equal(second.manifest.finalTasks.t2.status, "completed");
-  } finally {
-    process.chdir(originalCwd);
-  }
+      assert.equal(second.exitCode, 0);
+      assert.equal(second.manifest.tasksTotal, 3);
+      const cliTask = Object.values(second.manifest.finalTasks).find((t) =>
+        t.id.startsWith("cli-"),
+      );
+      assert.ok(cliTask, "cli task exists in resume manifest");
+      assert.equal(cliTask.title, "Try alternate path");
+      assert.equal(second.manifest.finalTasks.t1.status, "completed");
+      assert.equal(second.manifest.finalTasks.t2.status, "completed");
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
 });
 
 test("add-task: frontmatter with no tasks and one --add-task runs successfully", async () => {
@@ -289,8 +293,7 @@ test("add-task: frontmatter with no tasks and one --add-task runs successfully",
     "notasks",
     { addedTasks: ["Do the thing"] },
     mockBackend(async (ctx) => {
-      const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
-      const absPlan = `./${match[0]}`;
+      const absPlan = assignmentPathFromPrompt(ctx.prompt);
       completeEverything(absPlan);
       return {
         exitCode: 0,
@@ -425,8 +428,7 @@ test("add-task: locked `tasks` still allows runs without --add-task", async () =
     "locked-tasks",
     undefined,
     mockBackend(async (ctx) => {
-      const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
-      const absPlan = `./${match[0]}`;
+      const absPlan = assignmentPathFromPrompt(ctx.prompt);
       completeEverything(absPlan);
       return {
         exitCode: 0,

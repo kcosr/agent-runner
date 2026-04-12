@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
 import { ResumeError, resolveResumeTarget } from "../dist/runner/manifest.js";
 import { runAgent } from "../dist/runner/run-loop.js";
+import { withEnv } from "./helpers/runtime-paths.mjs";
 
 const TWO_AGENT = `---
 schemaVersion: 1
@@ -77,46 +78,60 @@ function mockBackend(handler) {
   return { id: "mock", invoke: handler };
 }
 
+function withSharedRuntimeEnv(baseDir, fn) {
+  return withEnv(
+    {
+      TASK_RUNNER_CONFIG_DIR: baseDir,
+      TASK_RUNNER_STATE_DIR: baseDir,
+    },
+    fn,
+  );
+}
+
 async function initIn(baseDir, { cliVars, overrides } = {}) {
-  const loaded = loadAgentConfig("two", baseDir);
-  const loadedAssignment = loadAssignmentConfig("two-work", baseDir);
-  const originalCwd = process.cwd();
-  process.chdir(baseDir);
-  try {
-    return await runAgent({
-      loaded,
-      loadedAssignment,
-      cliVars: cliVars ?? { repo_path: "/tmp/fake-repo" },
-      backend: mockBackend(async () => {
-        throw new Error("backend should not be invoked during init");
-      }),
-      initialize: true,
-      overrides,
-      stderr: () => {},
-      stdout: () => {},
-    });
-  } finally {
-    process.chdir(originalCwd);
-  }
+  return withSharedRuntimeEnv(baseDir, async () => {
+    const loaded = loadAgentConfig("two", baseDir);
+    const loadedAssignment = loadAssignmentConfig("two-work", baseDir);
+    const originalCwd = process.cwd();
+    process.chdir(baseDir);
+    try {
+      return await runAgent({
+        loaded,
+        loadedAssignment,
+        cliVars: cliVars ?? { repo_path: "/tmp/fake-repo" },
+        backend: mockBackend(async () => {
+          throw new Error("backend should not be invoked during init");
+        }),
+        initialize: true,
+        overrides,
+        stderr: () => {},
+        stdout: () => {},
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
 }
 
 async function executeAfterInit(baseDir, runId, backend) {
-  const loaded = loadAgentConfig("two", baseDir);
-  const originalCwd = process.cwd();
-  process.chdir(baseDir);
-  try {
-    const target = resolveResumeTarget(runId, baseDir);
-    return await runAgent({
-      loaded,
-      cliVars: {},
-      backend,
-      resume: target,
-      stderr: () => {},
-      stdout: () => {},
-    });
-  } finally {
-    process.chdir(originalCwd);
-  }
+  return withSharedRuntimeEnv(baseDir, async () => {
+    const loaded = loadAgentConfig("two", baseDir);
+    const originalCwd = process.cwd();
+    process.chdir(baseDir);
+    try {
+      const target = resolveResumeTarget(runId, baseDir);
+      return await runAgent({
+        loaded,
+        cliVars: {},
+        backend,
+        resume: target,
+        stderr: () => {},
+        stdout: () => {},
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
 }
 
 test("init: persists workspace, assignment.md, and manifest without invoking the backend", async () => {
@@ -153,35 +168,37 @@ test("init: rejects --resume-run", async () => {
   writeAgentAndAssignment(dir);
 
   const first = await initIn(dir);
-  const target = resolveResumeTarget(first.runId, dir);
+  const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.runId, dir));
 
   await assert.rejects(async () => {
-    const loaded = loadAgentConfig("two", dir);
-    const loadedAssignment = loadAssignmentConfig("two-work", dir);
-    const originalCwd = process.cwd();
-    process.chdir(dir);
-    try {
-      await runAgent({
-        loaded,
-        loadedAssignment,
-        cliVars: { repo_path: "/tmp/other" },
-        backend: mockBackend(async () => ({
-          exitCode: 0,
-          signal: null,
-          timedOut: false,
-          sessionId: null,
-          transcript: null,
-          rawStdout: "",
-          rawStderr: "",
-        })),
-        initialize: true,
-        resume: target,
-        stderr: () => {},
-        stdout: () => {},
-      });
-    } finally {
-      process.chdir(originalCwd);
-    }
+    await withSharedRuntimeEnv(dir, async () => {
+      const loaded = loadAgentConfig("two", dir);
+      const loadedAssignment = loadAssignmentConfig("two-work", dir);
+      const originalCwd = process.cwd();
+      process.chdir(dir);
+      try {
+        await runAgent({
+          loaded,
+          loadedAssignment,
+          cliVars: { repo_path: "/tmp/other" },
+          backend: mockBackend(async () => ({
+            exitCode: 0,
+            signal: null,
+            timedOut: false,
+            sessionId: null,
+            transcript: null,
+            rawStdout: "",
+            rawStderr: "",
+          })),
+          initialize: true,
+          resume: target,
+          stderr: () => {},
+          stdout: () => {},
+        });
+      } finally {
+        process.chdir(originalCwd);
+      }
+    });
   }, ResumeError);
 });
 
@@ -267,34 +284,36 @@ test("execute-after-init: --assignment is forbidden", async () => {
   writeAgentAndAssignment(dir);
 
   const init = await initIn(dir);
-  const target = resolveResumeTarget(init.runId, dir);
+  const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(init.runId, dir));
 
   await assert.rejects(async () => {
-    const loaded = loadAgentConfig("two", dir);
-    const loadedAssignment = loadAssignmentConfig("two-work", dir);
-    const originalCwd = process.cwd();
-    process.chdir(dir);
-    try {
-      await runAgent({
-        loaded,
-        loadedAssignment,
-        cliVars: {},
-        backend: mockBackend(async () => ({
-          exitCode: 0,
-          signal: null,
-          timedOut: false,
-          sessionId: "x",
-          transcript: null,
-          rawStdout: "",
-          rawStderr: "",
-        })),
-        resume: target,
-        stderr: () => {},
-        stdout: () => {},
-      });
-    } finally {
-      process.chdir(originalCwd);
-    }
+    await withSharedRuntimeEnv(dir, async () => {
+      const loaded = loadAgentConfig("two", dir);
+      const loadedAssignment = loadAssignmentConfig("two-work", dir);
+      const originalCwd = process.cwd();
+      process.chdir(dir);
+      try {
+        await runAgent({
+          loaded,
+          loadedAssignment,
+          cliVars: {},
+          backend: mockBackend(async () => ({
+            exitCode: 0,
+            signal: null,
+            timedOut: false,
+            sessionId: "x",
+            transcript: null,
+            rawStdout: "",
+            rawStderr: "",
+          })),
+          resume: target,
+          stderr: () => {},
+          stdout: () => {},
+        });
+      } finally {
+        process.chdir(originalCwd);
+      }
+    });
   }, ResumeError);
 });
 
@@ -303,32 +322,34 @@ test("execute-after-init: --add-task is forbidden", async () => {
   writeAgentAndAssignment(dir);
 
   const init = await initIn(dir);
-  const target = resolveResumeTarget(init.runId, dir);
+  const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(init.runId, dir));
 
   await assert.rejects(async () => {
-    const loaded = loadAgentConfig("two", dir);
-    const originalCwd = process.cwd();
-    process.chdir(dir);
-    try {
-      await runAgent({
-        loaded,
-        cliVars: {},
-        backend: mockBackend(async () => ({
-          exitCode: 0,
-          signal: null,
-          timedOut: false,
-          sessionId: "x",
-          transcript: null,
-          rawStdout: "",
-          rawStderr: "",
-        })),
-        resume: target,
-        overrides: { addedTasks: ["extra"] },
-        stderr: () => {},
-        stdout: () => {},
-      });
-    } finally {
-      process.chdir(originalCwd);
-    }
+    await withSharedRuntimeEnv(dir, async () => {
+      const loaded = loadAgentConfig("two", dir);
+      const originalCwd = process.cwd();
+      process.chdir(dir);
+      try {
+        await runAgent({
+          loaded,
+          cliVars: {},
+          backend: mockBackend(async () => ({
+            exitCode: 0,
+            signal: null,
+            timedOut: false,
+            sessionId: "x",
+            transcript: null,
+            rawStdout: "",
+            rawStderr: "",
+          })),
+          resume: target,
+          overrides: { addedTasks: ["extra"] },
+          stderr: () => {},
+          stdout: () => {},
+        });
+      } finally {
+        process.chdir(originalCwd);
+      }
+    });
   }, ResumeError);
 });
