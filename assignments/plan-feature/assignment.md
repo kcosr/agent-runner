@@ -556,15 +556,35 @@ tasks:
       Run `task-runner init` against the draft from t07:
 
           task-runner init \
-            --agent <planner-or-caller-choice> \
-            --assignment <draft-path-from-t06> \
+            --agent implementer \
+            --assignment <draft-path-from-t07> \
             --var repo_path={{repo_path}}
 
-      Pick the agent the caller is most likely to use for
-      execution. If you are uncertain, use the same agent
-      that is executing this planning run — the handoff
-      summary in t09 will make it clear the caller can pick
-      a different agent if they prefer.
+      **Always use `--agent implementer`.** This is the
+      bundled agent dedicated to plan execution — it is
+      tuned to follow existing conventions, cite file paths,
+      and capture concrete evidence in task Notes for the
+      reviewer to consume. Do not substitute your own
+      judgment on agent selection:
+
+        - Do **not** use `code-reviewer`. It is explicitly
+          instructed to read-only review work and will
+          refuse to edit files. Using it as the implementer
+          is the most common bad outcome of a free-form
+          "pick an agent" instruction.
+        - Do **not** reuse an ad-hoc agent configuration
+          from your own planning invocation. The planner
+          and the implementer have different jobs; the
+          planner should not be leaking its own backend,
+          model, or role into the frozen implementer
+          manifest.
+        - Do **not** accept an agent override from the
+          feature brief. The caller should not specify an
+          agent in the brief, and even if they do,
+          `implementer` still wins at init time. The caller
+          can override the agent on a later resume if they
+          genuinely need to, but init's default must be
+          stable and unambiguous.
 
       Capture the new run id from the init output in this
       task's Notes. From the moment init succeeds, the
