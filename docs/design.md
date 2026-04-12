@@ -1934,6 +1934,34 @@ The CLI validates each var against the schema before starting the
 run. On resume, `--var` is rejected (vars are frozen into
 `manifest.runtimeVars` at first write).
 
+## Machine-facing run contracts
+
+`RunManifest` remains the internal canonical record for persisted run state,
+resume semantics, and on-disk inspection. It is **not** the intended long-term
+transport boundary for every machine consumer.
+
+The shared machine-facing run seam lives in `src/contracts/runs.ts`. That module
+defines transport-neutral DTOs and pure mappers for later CLI JSON, web, and
+daemon adoption:
+
+- `RunSummary`
+- `RunDetail`
+- `RunArchiveResult`
+- `RunCapabilities`
+
+Rules for this seam:
+
+- The contract module maps **from** `RunManifest`; it does not replace it.
+- The mappers are pure and deterministic. No filesystem reads, env reads, or
+  writes.
+- New machine-facing surfaces should prefer these DTOs over binding directly to
+  raw manifest JSON unless a command explicitly documents manifest-shaped output.
+- In this slice, `list runs` and archive/unarchive service projections are wired
+  through the neutral contracts, while `status --output-format json` still
+  returns raw manifest JSON because bundled plan/review workflows consume
+  `finalTasks` directly. A later slice can move status JSON onto `RunDetail`
+  once those call sites are updated.
+
 ## Output modes
 
 `runAgent` no longer writes terminal text directly. It emits typed

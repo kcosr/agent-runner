@@ -3,6 +3,9 @@ import type { LockableField, TaskMode } from "../config/schema.js";
 import type { TaskSnapshot } from "../runner/manifest.js";
 import type { ListedRunManifest, ManifestStatus, RunManifest } from "../runner/manifest.js";
 
+// Transport-neutral run DTOs for later CLI/web/daemon surfaces.
+// RunManifest remains the internal canonical record; these helpers project
+// from it without doing filesystem, env, or process work.
 export type RunStatus = ManifestStatus;
 
 export interface RunSummary {
