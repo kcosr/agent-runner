@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
 import { ResumeError, resolveResumeTarget } from "../dist/runner/manifest.js";
 import { runAgent } from "../dist/runner/run-loop.js";
+import { resetWorkspaceRun } from "../dist/runner/workspace-state.js";
 import { withEnv } from "./helpers/runtime-paths.mjs";
 
 const TWO_AGENT = `---
@@ -247,6 +248,51 @@ test("execute-after-init: uses stored pendingPrompt verbatim", async () => {
   assert.equal(seenPrompt, init.manifest.pendingPrompt);
   // No backend session id to resume from — session 0 starts fresh.
   assert.equal(seenResumeSessionId, undefined);
+});
+
+test("execute-after-init: reset seed survives execution and restores initialized state", async () => {
+  const dir = tempDir();
+  writeAgentAndAssignment(dir);
+
+  const init = await initIn(dir);
+  await executeAfterInit(
+    dir,
+    init.runId,
+    mockBackend(async () => {
+      let plan = readFileSync(init.assignmentPath, "utf8");
+      plan = editStatus(plan, "t1", "completed");
+      plan = editStatus(plan, "t2", "completed");
+      writeFileSync(init.assignmentPath, plan, "utf8");
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "sess-after-init",
+        transcript: "ok",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    }),
+  );
+
+  const afterExec = JSON.parse(readFileSync(join(init.workspaceDir, "run.json"), "utf8"));
+  assert.equal(afterExec.pendingPrompt, null);
+  assert.equal(afterExec.finalTasks.t1.status, "completed");
+  assert.equal(afterExec.resetSeed.pendingPrompt, init.manifest.pendingPrompt);
+  assert.equal(afterExec.resetSeed.finalTasks.t1.status, "pending");
+  assert.equal(afterExec.resetSeed.finalTasks.t2.status, "pending");
+  assert.ok(existsSync(join(init.workspaceDir, "attempts", "01.json")));
+
+  const reset = resetWorkspaceRun(init.workspaceDir);
+  assert.equal(reset.status, "initialized");
+  assert.equal(reset.pendingPrompt, init.manifest.pendingPrompt);
+  assert.equal(reset.finalTasks.t1.status, "pending");
+  assert.equal(reset.finalTasks.t2.status, "pending");
+  assert.equal(reset.sessionCount, 0);
+  assert.deepEqual(reset.sessions, []);
+  assert.deepEqual(reset.attemptRecords, []);
+  assert.equal(reset.backendSessionId, null);
+  assert.equal(existsSync(join(init.workspaceDir, "attempts")), false);
 });
 
 test("execute-after-init: missing pendingPrompt is a hard error", async () => {

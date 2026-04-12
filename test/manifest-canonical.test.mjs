@@ -131,12 +131,12 @@ function readManifest(workspaceDir) {
   return JSON.parse(readFileSync(join(workspaceDir, "run.json"), "utf8"));
 }
 
-test("manifest schemaVersion is 2", async () => {
+test("manifest schemaVersion is 3", async () => {
   const dir = tempDir();
   writeAgent(dir, "canonical-claude", CLAUDE_AGENT);
   writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
   const outcome = await freshRun(dir, { initialize: true });
-  assert.equal(outcome.manifest.schemaVersion, 2);
+  assert.equal(outcome.manifest.schemaVersion, 3);
 });
 
 test("first write freezes agent.instructions, lockedFields, and timeoutSec", async () => {
@@ -344,7 +344,58 @@ test("schemaVersion mismatch: resume rejects a v1 manifest with a clear error", 
       () => resolveResumeTarget("stale01", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 1/);
-        assert.match(err.message, /requires schemaVersion 2/);
+        assert.match(err.message, /requires schemaVersion 3/);
+        return true;
+      },
+    );
+  });
+});
+
+test("schemaVersion mismatch: resume rejects a v2 manifest with a clear error", async () => {
+  const dir = tempDir();
+  const workspaceDir = join(dir, "runs", "unknown", "stale02");
+  mkdirSync(workspaceDir, { recursive: true });
+  const v2Manifest = {
+    schemaVersion: 2,
+    runId: "stale02",
+    agent: { name: "old", sourcePath: "/tmp/agent.md", instructions: "" },
+    assignment: null,
+    backend: "claude",
+    model: null,
+    effort: null,
+    message: null,
+    sessionName: null,
+    unrestricted: false,
+    cwd: dir,
+    lockedFields: [],
+    timeoutSec: 3600,
+    assignmentPath: join(workspaceDir, "assignment.md"),
+    workspaceDir,
+    startedAt: "2024-01-01T00:00:00Z",
+    endedAt: null,
+    status: "success",
+    exitCode: 0,
+    attempts: 1,
+    maxAttempts: 4,
+    tasksCompleted: 0,
+    tasksTotal: 0,
+    backendSessionId: "sess-old",
+    runtimeVars: {},
+    pendingPrompt: null,
+    callerInstructions: null,
+    finalTasks: {},
+    sessionCount: 1,
+    sessions: [],
+    attemptRecords: [],
+  };
+  writeFileSync(join(workspaceDir, "run.json"), `${JSON.stringify(v2Manifest, null, 2)}\n`);
+
+  await withSharedRuntimeEnv(dir, async () => {
+    assert.throws(
+      () => resolveResumeTarget("stale02", dir),
+      (err) => {
+        assert.match(err.message, /schemaVersion 2/);
+        assert.match(err.message, /requires schemaVersion 3/);
         return true;
       },
     );

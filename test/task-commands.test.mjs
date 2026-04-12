@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
@@ -437,6 +437,124 @@ test("task add: --output-format json returns new task snapshot", async () => {
   assert.match(parsed.id, /^cli-[a-z0-9]+$/);
   assert.equal(parsed.title, "New one");
   assert.equal(parsed.status, "pending");
+});
+
+test("run reset: restores the original initialized task snapshot after task mutations", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+  const originalPrompt = outcome.manifest.pendingPrompt;
+
+  runCli(
+    ["task", "set", outcome.runId, "t1", "--status", "in_progress", "--notes", "Working on it"],
+    { cwd: dir },
+  );
+  const added = JSON.parse(
+    runCli(["task", "add", outcome.runId, "--title", "Temporary", "--output-format", "json"], {
+      cwd: dir,
+    }),
+  );
+
+  const out = runCli(["run", "reset", outcome.runId], { cwd: dir });
+  assert.match(out, new RegExp(`reset run ${outcome.runId} to initialized state`));
+
+  const manifest = readManifest(outcome.workspaceDir);
+  assert.equal(manifest.status, "initialized");
+  assert.equal(manifest.pendingPrompt, originalPrompt);
+  assert.deepEqual(Object.keys(manifest.finalTasks), ["t1", "t2"]);
+  assert.equal(manifest.finalTasks.t1.status, "pending");
+  assert.equal(manifest.finalTasks.t1.notes, "");
+  assert.equal(manifest.tasksCompleted, 0);
+  assert.equal(manifest.tasksTotal, 2);
+  assert.equal(manifest.sessionCount, 0);
+  assert.deepEqual(manifest.sessions, []);
+  assert.deepEqual(manifest.attemptRecords, []);
+
+  const planText = readFileSync(outcome.assignmentPath, "utf8");
+  assert.doesNotMatch(planText, new RegExp(`<!-- task-id: ${added.id} -->`));
+  assert.match(planText, /<!-- task-id: t1 -->[\s\S]*?\*\*Status:\*\* pending/);
+});
+
+test("run reset: json output restores initialized state and removes attempt artifacts", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.status = "success";
+    manifest.endedAt = "2026-04-12T15:00:00.000Z";
+    manifest.exitCode = 0;
+    manifest.attempts = 2;
+    manifest.maxAttempts = 9;
+    manifest.model = "override-model";
+    manifest.effort = "max";
+    manifest.sessionName = "override session";
+    manifest.unrestricted = true;
+    manifest.timeoutSec = 42;
+    manifest.backendSessionId = "sess-after-run";
+    manifest.pendingPrompt = null;
+    manifest.finalTasks.t1.status = "completed";
+    manifest.finalTasks.t1.notes = "Done.";
+    manifest.tasksCompleted = 1;
+    manifest.sessionCount = 2;
+    manifest.sessions = [{ sessionIndex: 0 }, { sessionIndex: 1 }];
+    manifest.attemptRecords = [{ attempt: 1 }, { attempt: 2 }];
+  });
+  mkdirSync(join(outcome.workspaceDir, "attempts"), { recursive: true });
+  writeFileSync(join(outcome.workspaceDir, "attempts", "01.json"), "{}\n");
+
+  const out = runCli(["run", "reset", outcome.runId, "--output-format", "json"], { cwd: dir });
+  assert.deepEqual(JSON.parse(out), { runId: outcome.runId, status: "initialized" });
+
+  const manifest = readManifest(outcome.workspaceDir);
+  assert.equal(manifest.status, "initialized");
+  assert.equal(manifest.endedAt, null);
+  assert.equal(manifest.exitCode, null);
+  assert.equal(manifest.attempts, 0);
+  assert.equal(manifest.maxAttempts, 2);
+  assert.equal(manifest.model, "claude-sonnet-4-6");
+  assert.equal(manifest.effort, null);
+  assert.equal(manifest.sessionName, null);
+  assert.equal(manifest.unrestricted, false);
+  assert.equal(manifest.timeoutSec, 3600);
+  assert.equal(manifest.backendSessionId, null);
+  assert.ok(manifest.pendingPrompt);
+  assert.equal(manifest.finalTasks.t1.status, "pending");
+  assert.equal(manifest.finalTasks.t1.notes, "");
+  assert.equal(manifest.sessionCount, 0);
+  assert.deepEqual(manifest.sessions, []);
+  assert.deepEqual(manifest.attemptRecords, []);
+  assert.equal(existsSync(join(outcome.workspaceDir, "attempts")), false);
+});
+
+test("run reset: rejects a running file-mode run", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.status = "running";
+    manifest.taskMode = "file";
+  });
+
+  const result = runCliExpectFail(["run", "reset", outcome.runId], { cwd: dir });
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /cannot reset a running run/);
+});
+
+test("run reset: rejects a running cli-mode run", async () => {
+  const dir = tempDir();
+  writeBundle(dir, ASSIGNMENT_CLI_MODE, "task-cmd-cli-work");
+  const outcome = await initRun(dir, "task-cmd-cli-work");
+
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.status = "running";
+    manifest.taskMode = "cli";
+  });
+
+  const result = runCliExpectFail(["run", "reset", outcome.runId], { cwd: dir });
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /cannot reset a running run/);
 });
 
 test("task list: text output follows manifest task order", async () => {

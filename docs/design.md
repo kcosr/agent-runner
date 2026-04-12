@@ -378,9 +378,9 @@ short slug for filesystem use) — it's what shows up in `claude
   unless `--session-name` is passed, which updates it for the new
   session and beyond.
 - **init**: the resolved name is stored in the manifest at init
-  time and replayed on execute-after-init. `--session-name` may
-  also be passed at execute-after-init time to override the
-  init-time value.
+  time and replayed on execute-after-init. Execute-after-init
+  rejects all overrides, so changing `sessionName` after init
+  requires creating a fresh run instead.
 
 ### Invocation shape
 
@@ -855,9 +855,10 @@ every subsequent operation. Resume never re-reads the source
   instructions are written into the manifest at first write and
   carried forward like any other agent.
 
-**Schema versioning.** `schemaVersion: 2` is the manifest-canonical
+**Schema versioning.** `schemaVersion: 3` is the manifest-canonical
 generation. Manifests written by earlier task-runner versions have
-`schemaVersion: 1` and are **not resumable** by this version —
+`schemaVersion: 1` (pre-canonical) or `schemaVersion: 2`
+(pre-reset-seed) and are **not resumable** by this version —
 `resolveResumeTarget` rejects them with a clear error and tells the
 caller to start a fresh run. No automatic migration.
 
@@ -872,7 +873,7 @@ type ManifestStatus =
   | "error";
 
 interface RunManifest {
-  schemaVersion: 2;
+  schemaVersion: 3;
   runId: string;
   agent: {
     name: string;
@@ -907,6 +908,7 @@ interface RunManifest {
   backendSessionId: string | null; // most recently captured claude session id
   pendingPrompt: string | null;    // frozen by `init`; cleared once session 0 runs
   callerInstructions: string | null; // assignment documentation for the CALLER (not sent to the backend); see "Caller instructions" under Assignment schema
+  resetSeed: RunResetSeed;         // frozen initialized snapshot for `run reset`
   finalTasks: Record<string, TaskSnapshot>;
   sessionCount: number;            // 0 for initialized-only runs, 1 for initial
                                    // executed run, 2 after first resume, etc.
@@ -934,6 +936,18 @@ interface TaskSnapshot {
   body: string;
   status: TaskStatus;
   notes: string;
+}
+
+interface RunResetSeed {
+  model: string | null;
+  effort: string | null;
+  sessionName: string | null;
+  unrestricted: boolean;
+  timeoutSec: number;
+  maxAttempts: number;
+  taskMode?: "file" | "cli";
+  pendingPrompt: string;
+  finalTasks: Record<string, TaskSnapshot>;
 }
 
 interface AttemptRecord {
@@ -970,6 +984,16 @@ snapshot after that attempt's parse/merge step. Because `tasksAfter` contains
 the full `TaskSnapshot` (including `title`, `body`, and `notes`), you can
 reconstruct a complete history of the run from the manifest alone — no need
 to look at `assignment.md`.
+
+**Reset-to-init seed**: `resetSeed` freezes the initialized-state data that
+`task-runner run reset <id>` needs to restore a run without re-reading the
+current agent or assignment source files. The seed captures the original
+`pendingPrompt`, initialized task snapshot, and reset-relevant top-level
+settings that can drift later (`model`, `effort`, `sessionName`,
+`unrestricted`, `timeoutSec`, `maxAttempts`, `taskMode`). Reset reapplies
+that seed, clears `endedAt`, `exitCode`, `backendSessionId`, `sessions`,
+`attemptRecords`, and `attempts/`, then rewrites `assignment.md` from the
+restored task map.
 
 **Session ID**: `backendSessionId` is the claude session ID captured from
 attempt 1 and used for `--resume` on subsequent attempts. The per-attempt
@@ -1536,6 +1560,10 @@ task-runner <run|init>
                [--output-format <text|json>]
                [message]
 
+# run reset — restore a run to initialized state
+task-runner run reset <id|path>
+               [--output-format <text|json>]
+
 # status — read-only inspector
 task-runner status <id|path>
                [--output-format <text|json>]
@@ -1566,6 +1594,14 @@ Subcommands:
   already-executed run, or an execute-after-init (when `--resume-run`
   points at a manifest with `status: "initialized"`). **Rejected on
   passive agents** — use `init` + `task set` / `task add` instead.
+- **`run reset`** — restore a non-running run to its initialized
+  state. The command resolves the existing workspace, rejects
+  `status: "running"`, reapplies the manifest's frozen `resetSeed`,
+  clears prior attempt/session history, deletes `attempts/`, rewrites
+  `assignment.md`, and leaves the run at `status: "initialized"`.
+  Works for passive and non-passive runs. Text output is
+  `task-runner: reset run <id> to initialized state`; JSON output is
+  `{ "runId": "<id>", "status": "initialized" }`.
 - **`init`** — prepare a run without invoking the backend. Resolves
   agent + assignment, composes the full fresh-run prompt, writes the
   workspace (`assignment.md` with task fences, `run.json` with

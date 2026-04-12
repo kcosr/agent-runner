@@ -23,6 +23,8 @@ import {
   type RunManifest,
   type SessionRecord,
   type TaskSnapshot,
+  buildRunResetSeed,
+  snapshotTasks,
   workspaceAssignmentPath,
   writeAttemptLog,
   writeManifest,
@@ -830,7 +832,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     const frozenCallerInstructions =
       rawCallerInstructions.length > 0 ? interpolate(rawCallerInstructions, injectedVars) : null;
     manifest = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       runId,
       agent: {
         name: agentConfig.name,
@@ -877,6 +879,17 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       runtimeVars: persistedRuntimeVars,
       pendingPrompt: isInitialize ? initialPrompt : null,
       callerInstructions: frozenCallerInstructions,
+      resetSeed: buildRunResetSeed({
+        model: model ?? null,
+        effort: effort ?? null,
+        sessionName,
+        unrestricted,
+        timeoutSec,
+        maxAttempts,
+        taskMode,
+        pendingPrompt: initialPrompt,
+        finalTasks: snapshotTasks(tasks),
+      }),
       finalTasks: {},
       sessionCount: isInitialize ? 0 : 1,
       sessions: [],
