@@ -12,7 +12,13 @@ import {
   loadAssignmentConfig,
 } from "../config/loader.js";
 import {
-  type ListedRunManifest,
+  type RunArchiveResult,
+  type RunDetailInput,
+  type RunSummary,
+  toRunArchiveResult,
+  toRunSummary,
+} from "../contracts/runs.js";
+import {
   type ManifestStatus,
   ResumeError,
   type RunManifest,
@@ -33,10 +39,7 @@ import {
 import { resolveTaskRunnerCommand } from "../task-runner-command.js";
 import { shortId } from "../util/short-id.js";
 
-export interface StatusCommandResult {
-  manifest: RunManifest;
-  isLive: boolean;
-}
+export type StatusCommandResult = RunDetailInput;
 
 export interface DefinitionListResult {
   kind: DefinitionKind;
@@ -57,22 +60,8 @@ export interface RunResetResult {
   manifest: RunManifest;
 }
 
-export interface RunListEntry {
-  runId: string;
-  repo: string;
-  status: ManifestStatus;
-  archivedAt: string | null;
-  agentName: string;
-  assignmentName: string | null;
-  backend: string;
-  model: string | null;
-  sessionName: string | null;
-  cwd: string;
-  startedAt: string;
-  endedAt: string | null;
-  tasksCompleted: number;
-  tasksTotal: number;
-}
+export type RunListEntry = RunSummary;
+export type { RunArchiveResult } from "../contracts/runs.js";
 
 export interface RunListResult {
   runs: RunListEntry[];
@@ -91,11 +80,6 @@ export interface TaskDetailsResult {
 export interface TaskMutationResult {
   manifest: RunManifest;
   task: TaskSnapshot;
-}
-
-export interface RunArchiveResult {
-  manifest: RunManifest;
-  changed: boolean;
 }
 
 export class CommandError extends Error {
@@ -300,29 +284,10 @@ export function listDefinitions(kind: DefinitionKind): DefinitionListResult {
   };
 }
 
-function runListEntryFromManifest(entry: ListedRunManifest): RunListEntry {
-  return {
-    runId: entry.manifest.runId,
-    repo: entry.repo,
-    status: entry.manifest.status,
-    archivedAt: entry.manifest.archivedAt,
-    agentName: entry.manifest.agent.name,
-    assignmentName: entry.manifest.assignment?.name ?? null,
-    backend: entry.manifest.backend,
-    model: entry.manifest.model,
-    sessionName: entry.manifest.sessionName,
-    cwd: entry.manifest.cwd,
-    startedAt: entry.manifest.startedAt,
-    endedAt: entry.manifest.endedAt,
-    tasksCompleted: entry.manifest.tasksCompleted,
-    tasksTotal: entry.manifest.tasksTotal,
-  };
-}
-
 export function listRuns(opts: { includeArchived?: boolean } = {}): RunListResult {
   const includeArchived = opts.includeArchived === true;
   const runs = listRunManifests()
-    .map(runListEntryFromManifest)
+    .map(toRunSummary)
     .filter((entry) => includeArchived || entry.archivedAt === null)
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
   return { runs };
@@ -379,10 +344,10 @@ function setRunArchived(target: string, archived: boolean): RunArchiveResult {
     writeManifest(resolved.workspaceDir, resolved.manifest);
   });
 
-  return {
+  return toRunArchiveResult({
     manifest: resolved.manifest,
     changed,
-  };
+  });
 }
 
 export function archiveRun(target: string): RunArchiveResult {

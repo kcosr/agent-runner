@@ -86,16 +86,16 @@ export function renderRunList(result: RunListResult): string {
 
 export function renderRunArchive(result: RunArchiveResult): string {
   if (!result.changed) {
-    return `task-runner: run ${result.manifest.runId} is already archived\n`;
+    return `task-runner: run ${result.runId} is already archived\n`;
   }
-  return `task-runner: archived run ${result.manifest.runId}\n`;
+  return `task-runner: archived run ${result.runId}\n`;
 }
 
 export function renderRunUnarchive(result: RunArchiveResult): string {
   if (!result.changed) {
-    return `task-runner: run ${result.manifest.runId} is not archived\n`;
+    return `task-runner: run ${result.runId} is not archived\n`;
   }
-  return `task-runner: unarchived run ${result.manifest.runId}\n`;
+  return `task-runner: unarchived run ${result.runId}\n`;
 }
 
 export function renderStatus(result: StatusCommandResult): string {

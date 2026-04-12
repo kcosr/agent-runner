@@ -11,6 +11,7 @@
 
 ### Added
 
+- Added a transport-neutral `src/contracts/runs.ts` seam for shared run DTOs and pure mappers (`RunSummary`, `RunDetail`, `RunArchiveResult`, `RunCapabilities`) so later CLI/web/daemon surfaces can project from `RunManifest` without binding directly to raw manifest internals. ([#16](https://github.com/kcosr/task-runner/pull/16))
 - Added `task-runner task list`, `task show`, and `task append-notes`, plus `task add --body`, for a fuller CLI task workflow surface. The new read commands return stable task snapshots in text or JSON, and append-notes uses deterministic single-newline joining.
 - Added `task-runner run reset <run-id>` to restore a non-running run to its original initialized state, rewrite `run.json` and `assignment.md` from a persisted reset seed, clear prior attempt/session history, and remove stale `attempts/` artifacts.
 - Added run-management commands: `task-runner list runs`, `task-runner run archive <id|path>`, and `task-runner run unarchive <id|path>`. Run discovery now scans current-generation manifests under `${TASK_RUNNER_STATE_DIR}/runs/`, `list runs` hides archived runs unless `--include-archived` is passed, and archive toggles are idempotent in text and JSON output. ([#15](https://github.com/kcosr/task-runner/pull/15))
