@@ -6,7 +6,8 @@ import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
 import { parseAssignment } from "../dist/assignment/parser.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
-import { applyLiveOverlay, renderManifestStatus } from "../dist/runner/output.js";
+import { toRunDetail } from "../dist/contracts/runs.js";
+import { applyLiveOverlay, renderRunStatus } from "../dist/runner/output.js";
 import { runAgent } from "../dist/runner/run-loop.js";
 import { assignmentPathFromPrompt, sharedRuntimeEnv, withEnv } from "./helpers/runtime-paths.mjs";
 
@@ -148,13 +149,13 @@ async function runFresh(baseDir) {
   });
 }
 
-test("renderManifestStatus prints the persisted run summary", async () => {
+test("renderRunStatus prints the persisted run summary", async () => {
   const dir = tempDir();
   writeAgent(dir, "status-agent", STATUS_AGENT);
   writeAssignment(dir, "status-work", STATUS_ASSIGNMENT);
   const outcome = await runFresh(dir);
 
-  const text = renderManifestStatus(outcome.manifest);
+  const text = renderRunStatus(toRunDetail({ manifest: outcome.manifest, isLive: false }));
   assert.match(text, new RegExp(`── run ${outcome.runId} ──`));
   assert.match(text, /Status: success/);
   assert.match(text, /Agent: status-agent/);
@@ -216,35 +217,41 @@ test("applyLiveOverlay falls back to the manifest snapshot for invalid live stat
   assert.equal(overlaid.finalTasks.t1.status, "completed");
 });
 
-test("renderManifestStatus shows the live-overlay note for running runs", async () => {
+test("renderRunStatus shows the live-overlay note for running runs", async () => {
   const dir = tempDir();
   writeAgent(dir, "status-agent", STATUS_AGENT);
   writeAssignment(dir, "status-work", STATUS_ASSIGNMENT);
   const outcome = await runFresh(dir);
 
-  const runningManifest = {
-    ...outcome.manifest,
-    status: "running",
-    exitCode: null,
-    endedAt: null,
-  };
+  const runningDetail = toRunDetail({
+    manifest: {
+      ...outcome.manifest,
+      status: "running",
+      exitCode: null,
+      endedAt: null,
+    },
+    isLive: true,
+  });
 
-  const text = renderManifestStatus(runningManifest, { isLive: true });
+  const text = renderRunStatus(runningDetail);
   assert.match(text, /read live from the workspace assignment\.md/);
 });
 
-test("renderManifestStatus shows archive metadata and the unarchive hint", async () => {
+test("renderRunStatus shows archive metadata and the unarchive hint", async () => {
   const dir = tempDir();
   writeAgent(dir, "status-agent", STATUS_AGENT);
   writeAssignment(dir, "status-work", STATUS_ASSIGNMENT);
   const outcome = await runFresh(dir);
 
-  const archivedManifest = {
-    ...outcome.manifest,
-    archivedAt: "2026-04-12T18:00:00.000Z",
-  };
+  const archivedDetail = toRunDetail({
+    manifest: {
+      ...outcome.manifest,
+      archivedAt: "2026-04-12T18:00:00.000Z",
+    },
+    isLive: false,
+  });
 
-  const text = renderManifestStatus(archivedManifest);
+  const text = renderRunStatus(archivedDetail);
   assert.match(text, /Archived: 2026-04-12T18:00:00.000Z/);
   assert.match(text, /task-runner run unarchive/);
 });
@@ -265,4 +272,32 @@ test("status CLI reports unreadable manifest snapshots as clean unexpected failu
   } finally {
     chmodSync(runJsonPath, 0o600);
   }
+});
+
+test("status --field projects RunDetail fields and rejects removed manifest-only keys", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "status-agent", STATUS_AGENT);
+  writeAssignment(dir, "status-work", STATUS_ASSIGNMENT);
+  const outcome = await runFresh(dir);
+
+  const projected = JSON.parse(
+    execFileSync(
+      "node",
+      [CLI_PATH, "status", outcome.runId, "--output-format", "json", "--field", "tasks"],
+      {
+        cwd: dir,
+        env: { ...process.env, ...sharedRuntimeEnv(dir) },
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    ),
+  );
+  assert.equal(projected.tasks[0].id, "t1");
+
+  const failed = runCliExpectFail(
+    ["status", outcome.runId, "--output-format", "json", "--field", "finalTasks"],
+    { cwd: dir },
+  );
+  assert.equal(failed.status, 3);
+  assert.match(failed.stderr, /unknown status field\(s\): finalTasks/);
 });

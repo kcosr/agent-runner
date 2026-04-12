@@ -1,4 +1,4 @@
-import { renderManifestStatus } from "../runner/output.js";
+import { renderRunStatus } from "../runner/output.js";
 export function renderDefinitionList(result) {
     if (result.entries.length === 0) {
         return `No ${result.kind} definitions found.\n`;
@@ -59,10 +59,10 @@ export function renderRunReset(result) {
     return `task-runner: reset run ${result.manifest.runId} to initialized state\n`;
 }
 export function renderRunList(result) {
-    if (result.runs.length === 0) {
+    if (result.length === 0) {
         return "No runs found.\n";
     }
-    return `${result.runs
+    return `${result
         .map((run) => {
         const archived = run.archivedAt !== null ? ` archived=${run.archivedAt}` : "";
         return `${run.runId} [${run.status}] ${run.tasksCompleted}/${run.tasksTotal} repo=${run.repo} agent=${run.agentName} assignment=${run.assignmentName ?? "none"}${archived}`;
@@ -82,7 +82,7 @@ export function renderRunUnarchive(result) {
     return `task-runner: unarchived run ${result.runId}\n`;
 }
 export function renderStatus(result) {
-    return renderManifestStatus(result.manifest, { isLive: result.isLive });
+    return renderRunStatus(result);
 }
 export function renderTaskList(result) {
     return `${result.tasks.map((task) => `[${task.status}] ${task.id} - ${task.title}`).join("\n")}\n`;

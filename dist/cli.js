@@ -520,9 +520,9 @@ function exitCommandFailure(err) {
     process.stderr.write(`task-runner: ${errorMessage(err)}\n`);
     process.exit(4);
 }
-function projectManifest(manifest, fields) {
+function projectStatus(detail, fields) {
     const projection = {};
-    const source = manifest;
+    const source = detail;
     const missing = [];
     for (const field of fields) {
         if (field in source) {
@@ -533,7 +533,7 @@ function projectManifest(manifest, fields) {
         }
     }
     if (missing.length > 0) {
-        throw new CommandError(`unknown manifest field(s): ${missing.join(", ")}`);
+        throw new CommandError(`unknown status field(s): ${missing.join(", ")}`);
     }
     return projection;
 }
@@ -547,9 +547,7 @@ function runStatus(parsed) {
     try {
         const result = readStatus(target);
         if (parsed.outputFormat === "json") {
-            writeJson(parsed.fields.length > 0
-                ? projectManifest(result.manifest, parsed.fields)
-                : result.manifest);
+            writeJson(parsed.fields.length > 0 ? projectStatus(result, parsed.fields) : result);
         }
         else {
             if (parsed.fields.length > 0) {
@@ -585,7 +583,7 @@ function runListCommand(parsed) {
             }
             const result = listRuns({ includeArchived: parsed.includeArchived });
             if (parsed.outputFormat === "json") {
-                writeJson(result.runs);
+                writeJson(result);
             }
             else {
                 process.stdout.write(renderRunList(result));

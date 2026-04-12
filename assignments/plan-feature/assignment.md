@@ -64,7 +64,7 @@ callerInstructions: |
 
       {{task_runner_cmd}} status {{run_id}}
       {{task_runner_cmd}} status {{run_id}} --output-format json \
-        --field finalTasks
+        --field tasks
 
   First initialize the implementer run by executing the handoff's
   init command. Then execute the resulting run:
@@ -638,7 +638,10 @@ tasks:
       Pull the reviewer's synthesis and approval decision:
 
           {{task_runner_cmd}} status <review-run-id> --output-format json \
-            --field finalTasks
+            --field tasks | jq -r '.tasks[] | select(.id=="synthesis") | .notes'
+
+          {{task_runner_cmd}} status <review-run-id> --output-format json \
+            --field tasks | jq -r '.tasks[] | select(.id=="approval") | .notes'
 
       Paste the reviewer's synthesis and `approval` decision
       record into this task's Notes — raw, not summarized. If

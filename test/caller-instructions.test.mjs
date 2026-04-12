@@ -398,10 +398,15 @@ test("status --output-format json includes callerInstructions", async () => {
   writeAgent(dir, "caller-test", AGENT);
   writeAssignment(dir, "caller-work", ASSIGNMENT_WITH_CALLER);
   const { outcome } = await runFreshRun(dir, "caller-work", { initialize: true });
-  assert.ok(outcome.manifest.callerInstructions);
-  assert.match(outcome.manifest.callerInstructions, /Hello, caller/);
-  assert.match(outcome.manifest.callerInstructions, new RegExp(outcome.runId));
-  assert.match(outcome.manifest.callerInstructions, /task-runner status/);
+  const out = runCli(
+    ["status", outcome.runId, "--output-format", "json", "--field", "callerInstructions"],
+    { cwd: dir },
+  );
+  const parsed = JSON.parse(out);
+  assert.ok(parsed.callerInstructions);
+  assert.match(parsed.callerInstructions, /Hello, caller/);
+  assert.match(parsed.callerInstructions, new RegExp(outcome.runId));
+  assert.match(parsed.callerInstructions, /task-runner status/);
 });
 
 test("status text output does NOT reprint callerInstructions", async () => {

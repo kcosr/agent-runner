@@ -588,9 +588,12 @@ function exitCommandFailure(err: unknown): never {
   process.exit(4);
 }
 
-function projectManifest(manifest: RunManifest, fields: string[]): Record<string, unknown> {
+function projectStatus(
+  detail: ReturnType<typeof readStatus>,
+  fields: string[],
+): Record<string, unknown> {
   const projection: Record<string, unknown> = {};
-  const source = manifest as unknown as Record<string, unknown>;
+  const source = detail as unknown as Record<string, unknown>;
   const missing: string[] = [];
   for (const field of fields) {
     if (field in source) {
@@ -600,7 +603,7 @@ function projectManifest(manifest: RunManifest, fields: string[]): Record<string
     }
   }
   if (missing.length > 0) {
-    throw new CommandError(`unknown manifest field(s): ${missing.join(", ")}`);
+    throw new CommandError(`unknown status field(s): ${missing.join(", ")}`);
   }
   return projection;
 }
@@ -618,11 +621,7 @@ function runStatus(parsed: ParsedArgs): never {
   try {
     const result = readStatus(target);
     if (parsed.outputFormat === "json") {
-      writeJson(
-        parsed.fields.length > 0
-          ? projectManifest(result.manifest, parsed.fields)
-          : result.manifest,
-      );
+      writeJson(parsed.fields.length > 0 ? projectStatus(result, parsed.fields) : result);
     } else {
       if (parsed.fields.length > 0) {
         throw new CommandError("--field requires --output-format json");
@@ -666,7 +665,7 @@ function runListCommand(parsed: ParsedArgs): never {
       }
       const result = listRuns({ includeArchived: parsed.includeArchived });
       if (parsed.outputFormat === "json") {
-        writeJson(result.runs);
+        writeJson(result);
       } else {
         process.stdout.write(renderRunList(result));
       }

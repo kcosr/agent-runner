@@ -41,6 +41,8 @@ export interface RunDetail {
     status: RunStatus;
     archivedAt: string | null;
     isLive: boolean;
+    workspaceDir: string;
+    assignmentPath: string;
     agent: {
         name: string;
         sourcePath: string | null;
@@ -64,6 +66,7 @@ export interface RunDetail {
     exitCode: number | null;
     attempts: number;
     maxAttempts: number;
+    sessionCount: number;
     tasksCompleted: number;
     tasksTotal: number;
     tasks: RunTaskSummary[];

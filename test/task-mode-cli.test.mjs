@@ -236,13 +236,12 @@ test("status on an older manifest with no taskMode still behaves like file mode"
   plan = plan.replace(/\*\*Status:\*\* pending/, "**Status:** completed");
   writeFileSync(outcome.assignmentPath, plan, "utf8");
 
-  const res = runCli(
-    ["status", outcome.runId, "--output-format", "json", "--field", "finalTasks"],
-    { cwd: dir },
-  );
+  const res = runCli(["status", outcome.runId, "--output-format", "json", "--field", "tasks"], {
+    cwd: dir,
+  });
   assert.equal(res.status, 0);
   const parsed = JSON.parse(res.stdout);
-  assert.equal(parsed.finalTasks.t1.status, "completed");
+  assert.equal(parsed.tasks[0].status, "completed");
 });
 
 test("task-state persistence serializes concurrent cli-mode writes and keeps run.json and assignment.md coherent", async () => {

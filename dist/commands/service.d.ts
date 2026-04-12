@@ -1,7 +1,7 @@
 import { type DefinitionEntry, type DefinitionKind, type LoadedAgent, type LoadedAssignment } from "../config/loader.js";
-import { type RunArchiveResult, type RunDetailInput, type RunSummary } from "../contracts/runs.js";
+import { type RunArchiveResult, type RunDetail, type RunSummary } from "../contracts/runs.js";
 import { ResumeError, type RunManifest, type TaskSnapshot } from "../runner/manifest.js";
-export type StatusCommandResult = RunDetailInput;
+export type StatusCommandResult = RunDetail;
 export interface DefinitionListResult {
     kind: DefinitionKind;
     entries: DefinitionEntry[];
@@ -18,9 +18,7 @@ export interface RunResetResult {
 }
 export type RunListEntry = RunSummary;
 export type { RunArchiveResult } from "../contracts/runs.js";
-export interface RunListResult {
-    runs: RunListEntry[];
-}
+export type RunListResult = RunListEntry[];
 export interface TaskListResult {
     manifest: RunManifest;
     tasks: TaskSnapshot[];

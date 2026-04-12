@@ -34,7 +34,7 @@ callerInstructions: |
   pass.
 
       {{task_runner_cmd}} status {{run_id}} --output-format json \
-        --field finalTasks | jq -r '.[] | select(.id=="approval") | .notes'
+        --field tasks | jq -r '.tasks[] | select(.id=="approval") | .notes'
 
   The planner should read both `synthesis` and `approval`, apply
   the fixes it agrees with, then resume this same run with a
