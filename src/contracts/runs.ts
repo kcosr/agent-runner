@@ -23,6 +23,7 @@ export interface RunSummary {
   endedAt: string | null;
   tasksCompleted: number;
   tasksTotal: number;
+  capabilities: RunCapabilities;
 }
 
 export interface RunTaskSummary {
@@ -33,14 +34,17 @@ export interface RunTaskSummary {
   notes: string;
 }
 
+export interface RunTaskMutationCapabilities {
+  canSetStatus: boolean;
+  canEditNotes: boolean;
+  canAdd: boolean;
+}
+
 export interface RunCapabilities {
   canArchive: boolean;
   canUnarchive: boolean;
   canResume: boolean;
-  canAbort: boolean;
-  // Reflects the existing `task set` / `task append-notes` surface only.
-  // It does not imply `task add` is currently legal for the run.
-  canMutateTasks: boolean;
+  taskMutation: RunTaskMutationCapabilities;
 }
 
 export interface RunDetailInput {
@@ -111,6 +115,53 @@ function toRunTaskSummary(task: TaskSnapshot): RunTaskSummary {
   };
 }
 
+function isArchived(manifest: RunManifest): boolean {
+  return manifest.archivedAt !== null;
+}
+
+function isRunning(manifest: RunManifest): boolean {
+  return manifest.status === "running";
+}
+
+export function deriveTaskMutationCapabilities(manifest: RunManifest): RunTaskMutationCapabilities {
+  const tasksLocked = manifest.lockedFields.includes("tasks");
+
+  if (manifest.backend === "passive") {
+    return {
+      canSetStatus: !isRunning(manifest),
+      canEditNotes: !isRunning(manifest),
+      canAdd: !isRunning(manifest) && !tasksLocked,
+    };
+  }
+
+  switch (manifest.status) {
+    case "initialized":
+      return {
+        canSetStatus: true,
+        canEditNotes: true,
+        canAdd: !tasksLocked,
+      };
+    case "running": {
+      const canMutateRunningTasks = normalizeTaskMode(manifest.taskMode) === "cli";
+      return {
+        canSetStatus: canMutateRunningTasks,
+        canEditNotes: canMutateRunningTasks,
+        canAdd: false,
+      };
+    }
+    case "success":
+    case "blocked":
+    case "exhausted":
+    case "aborted":
+    case "error":
+      return {
+        canSetStatus: false,
+        canEditNotes: true,
+        canAdd: false,
+      };
+  }
+}
+
 export function toRunSummary(entry: ListedRunManifest): RunSummary {
   return {
     runId: entry.manifest.runId,
@@ -127,20 +178,16 @@ export function toRunSummary(entry: ListedRunManifest): RunSummary {
     endedAt: entry.manifest.endedAt,
     tasksCompleted: entry.manifest.tasksCompleted,
     tasksTotal: entry.manifest.tasksTotal,
+    capabilities: deriveRunCapabilities(entry.manifest),
   };
 }
 
 export function deriveRunCapabilities(manifest: RunManifest): RunCapabilities {
-  const isRunning = manifest.status === "running";
-  const isArchived = manifest.archivedAt !== null;
-  const isCliModeRun = normalizeTaskMode(manifest.taskMode) === "cli";
-
   return {
-    canArchive: !isRunning && !isArchived,
-    canUnarchive: !isRunning && isArchived,
-    canResume: !isRunning && !isArchived && manifest.backend !== "passive",
-    canAbort: false,
-    canMutateTasks: !isRunning || isCliModeRun,
+    canArchive: !isRunning(manifest) && !isArchived(manifest),
+    canUnarchive: !isRunning(manifest) && isArchived(manifest),
+    canResume: !isRunning(manifest) && !isArchived(manifest) && manifest.backend !== "passive",
+    taskMutation: deriveTaskMutationCapabilities(manifest),
   };
 }
 

@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { readStatus } from "../dist/commands/service.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
 import { ResumeError, resolveResumeTarget } from "../dist/runner/manifest.js";
 import { runAgent } from "../dist/runner/run-loop.js";
@@ -258,10 +259,18 @@ test("resume: archived runs are rejected until unarchived", async () => {
     })),
   });
 
+  await withSharedRuntimeEnv(dir, async () => {
+    assert.equal(readStatus(first.runId).capabilities.canResume, true);
+  });
+
   const manifestPath = join(first.workspaceDir, "run.json");
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
   manifest.archivedAt = "2026-04-12T18:00:00.000Z";
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+  await withSharedRuntimeEnv(dir, async () => {
+    assert.equal(readStatus(first.runId).capabilities.canResume, false);
+  });
 
   const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.runId, dir));
   await assert.rejects(

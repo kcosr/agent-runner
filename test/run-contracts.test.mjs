@@ -108,6 +108,16 @@ test("run contracts: toRunSummary maps listed manifest rows to the neutral summa
     endedAt: "2026-04-12T10:05:00.000Z",
     tasksCompleted: 1,
     tasksTotal: 2,
+    capabilities: {
+      canArchive: true,
+      canUnarchive: false,
+      canResume: true,
+      taskMutation: {
+        canSetStatus: false,
+        canEditNotes: true,
+        canAdd: false,
+      },
+    },
   });
 });
 
@@ -129,9 +139,14 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
     canArchive: true,
     canUnarchive: false,
     canResume: true,
-    canAbort: false,
-    canMutateTasks: true,
+    taskMutation: {
+      canSetStatus: false,
+      canEditNotes: true,
+      canAdd: false,
+    },
   });
+  assert.equal("canAbort" in detail.capabilities, false);
+  assert.equal("canMutateTasks" in detail.capabilities, false);
   assert.deepEqual(detail, {
     runId: "run123",
     status: "success",
@@ -196,8 +211,11 @@ test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mu
     canArchive: true,
     canUnarchive: false,
     canResume: true,
-    canAbort: false,
-    canMutateTasks: true,
+    taskMutation: {
+      canSetStatus: true,
+      canEditNotes: true,
+      canAdd: true,
+    },
   });
 
   const archived = deriveRunCapabilities(
@@ -213,8 +231,11 @@ test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mu
     canArchive: false,
     canUnarchive: true,
     canResume: false,
-    canAbort: false,
-    canMutateTasks: true,
+    taskMutation: {
+      canSetStatus: false,
+      canEditNotes: true,
+      canAdd: false,
+    },
   });
 
   const runningFileMode = deriveRunCapabilities(
@@ -226,8 +247,11 @@ test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mu
     canArchive: false,
     canUnarchive: false,
     canResume: false,
-    canAbort: false,
-    canMutateTasks: false,
+    taskMutation: {
+      canSetStatus: false,
+      canEditNotes: false,
+      canAdd: false,
+    },
   });
 
   const runningCliMode = deriveRunCapabilities(
@@ -236,7 +260,11 @@ test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mu
       taskMode: "cli",
     }),
   );
-  assert.equal(runningCliMode.canMutateTasks, true);
+  assert.deepEqual(runningCliMode.taskMutation, {
+    canSetStatus: true,
+    canEditNotes: true,
+    canAdd: false,
+  });
 
   const passive = deriveRunCapabilities(
     buildManifest({
@@ -244,6 +272,22 @@ test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mu
     }),
   );
   assert.equal(passive.canResume, false);
+  assert.deepEqual(passive.taskMutation, {
+    canSetStatus: true,
+    canEditNotes: true,
+    canAdd: true,
+  });
+
+  const initializedLocked = deriveRunCapabilities(
+    buildManifest({
+      lockedFields: ["tasks"],
+    }),
+  );
+  assert.deepEqual(initializedLocked.taskMutation, {
+    canSetStatus: true,
+    canEditNotes: true,
+    canAdd: false,
+  });
 });
 
 test("run contracts: toRunArchiveResult maps manifest-plus-change to the neutral archive DTO", () => {

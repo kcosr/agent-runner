@@ -164,6 +164,26 @@ test("list runs enumerates current-generation runs across buckets and filters ar
     [second.runId, first.runId, "oth123"],
   );
   assert.equal(parsed[1].archivedAt, "2026-04-12T12:00:00.000Z");
+  assert.deepEqual(parsed[0].capabilities, {
+    canArchive: true,
+    canUnarchive: false,
+    canResume: true,
+    taskMutation: {
+      canSetStatus: true,
+      canEditNotes: true,
+      canAdd: true,
+    },
+  });
+  assert.deepEqual(parsed[1].capabilities, {
+    canArchive: false,
+    canUnarchive: true,
+    canResume: false,
+    taskMutation: {
+      canSetStatus: true,
+      canEditNotes: true,
+      canAdd: true,
+    },
+  });
 });
 
 test("run archive and run unarchive expose idempotent text and json results", async () => {

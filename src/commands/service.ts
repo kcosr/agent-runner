@@ -15,6 +15,8 @@ import {
   type RunArchiveResult,
   type RunDetail,
   type RunSummary,
+  type RunTaskMutationCapabilities,
+  deriveTaskMutationCapabilities,
   toRunArchiveResult,
   toRunDetail,
   toRunSummary,
@@ -90,23 +92,6 @@ export class CommandError extends Error {
 
 type TaskMutationKind = "set" | "append-notes" | "add";
 
-const MUTATION_ALLOWED_STATUSES = new Set<ManifestStatus>([
-  "initialized",
-  "success",
-  "blocked",
-  "exhausted",
-  "aborted",
-  "error",
-]);
-
-const TERMINAL_MUTATION_STATUSES = new Set<ManifestStatus>([
-  "success",
-  "blocked",
-  "exhausted",
-  "aborted",
-  "error",
-]);
-
 const MAX_TITLE_LENGTH = 200;
 
 function resolveRun(target: string): ReturnType<typeof resolveResumeTarget> {
@@ -139,31 +124,50 @@ function taskSnapshot(manifest: RunManifest, taskId: string): TaskSnapshot {
   return task;
 }
 
-function requireMutableStatus(manifest: RunManifest): void {
-  if (!MUTATION_ALLOWED_STATUSES.has(manifest.status)) {
-    throw new CommandError(
-      `cannot mutate tasks on a ${manifest.status} run (task-runner task set/add is rejected while a run is in-flight)`,
-    );
-  }
-}
+function requireTaskMutationAllowed(
+  manifest: RunManifest,
+  kind: TaskMutationKind,
+): RunTaskMutationCapabilities {
+  const capabilities = deriveTaskMutationCapabilities(manifest);
 
-function requireTaskMutationAllowed(manifest: RunManifest, kind: TaskMutationKind): void {
-  if (manifest.status === "running") {
-    if (taskModeFromManifest(manifest) === "cli" && (kind === "set" || kind === "append-notes")) {
-      return;
+  if (kind === "set") {
+    if (capabilities.canSetStatus || capabilities.canEditNotes) {
+      return capabilities;
     }
+  }
 
+  if (kind === "append-notes") {
+    if (capabilities.canEditNotes) {
+      return capabilities;
+    }
+  }
+
+  if (kind === "add") {
+    if (manifest.lockedFields.includes("tasks")) {
+      throw new CommandError(
+        "task add: the `tasks` field is locked for this run — cannot add tasks",
+      );
+    }
+    if (capabilities.canAdd) {
+      return capabilities;
+    }
+    if (capabilities.canEditNotes && !capabilities.canSetStatus) {
+      throw new CommandError(
+        `cannot add tasks to a terminal non-passive run; use ${resolveTaskRunnerCommand()} run --resume-run <id> --add-task "..." instead`,
+      );
+    }
+  }
+
+  if (manifest.status === "running") {
     const verb = kind === "add" ? "add tasks" : "mutate tasks";
     throw new CommandError(
       `cannot ${verb} on a running ${taskModeFromManifest(manifest)}-mode run${kind === "add" ? " (task add remains rejected while a run is in-flight)" : " (task CLI mutation during a run is only allowed in taskMode=cli for task set/append-notes)"}`,
     );
   }
 
-  requireMutableStatus(manifest);
-}
-
-function isTerminalNonPassiveRun(manifest: RunManifest): boolean {
-  return manifest.backend !== "passive" && TERMINAL_MUTATION_STATUSES.has(manifest.status);
+  throw new CommandError(
+    `cannot mutate tasks on a ${manifest.status} run (task-runner task set/add is rejected while a run is in-flight)`,
+  );
 }
 
 function applyPassiveFinalization(manifest: RunManifest, ordered: TaskState[]): void {
@@ -389,12 +393,12 @@ export function setTask(
   }
 
   const resolved = resolveRun(target);
-  requireTaskMutationAllowed(resolved.manifest, "set");
+  const capabilities = requireTaskMutationAllowed(resolved.manifest, "set");
 
   updateTaskMap(
     resolved,
     {
-      applyStatus: !isTerminalNonPassiveRun(resolved.manifest),
+      applyStatus: capabilities.canSetStatus,
     },
     (tasks) => {
       const task = tasks.get(taskId);
@@ -404,7 +408,7 @@ export function setTask(
       if (
         update.status !== undefined &&
         update.status !== task.status &&
-        isTerminalNonPassiveRun(resolved.manifest)
+        !capabilities.canSetStatus
       ) {
         throw new CommandError(
           `cannot change task status on a terminal non-passive run; use ${resolveTaskRunnerCommand()} run --resume-run <id> with a follow-up message instead`,
@@ -432,12 +436,12 @@ export function appendTaskNotes(target: string, taskId: string, text: string): T
   }
 
   const resolved = resolveRun(target);
-  requireTaskMutationAllowed(resolved.manifest, "append-notes");
+  const capabilities = requireTaskMutationAllowed(resolved.manifest, "append-notes");
 
   updateTaskMap(
     resolved,
     {
-      applyStatus: !isTerminalNonPassiveRun(resolved.manifest),
+      applyStatus: capabilities.canSetStatus,
     },
     (tasks) => {
       const task = tasks.get(taskId);
@@ -461,14 +465,6 @@ export function addTask(
   const title = validateTaskTitle(input.title);
   const resolved = resolveRun(target);
   requireTaskMutationAllowed(resolved.manifest, "add");
-  if (isTerminalNonPassiveRun(resolved.manifest)) {
-    throw new CommandError(
-      `cannot add tasks to a terminal non-passive run; use ${resolveTaskRunnerCommand()} run --resume-run <id> --add-task "..." instead`,
-    );
-  }
-  if (resolved.manifest.lockedFields.includes("tasks")) {
-    throw new CommandError("task add: the `tasks` field is locked for this run — cannot add tasks");
-  }
 
   let taskId = "";
   updateTaskMap(resolved, {}, (tasks) => {

@@ -172,6 +172,16 @@ test("command services: readStatus applies the live workspace overlay for runnin
     assert.equal(result.tasks[0].status, "completed");
     assert.equal(result.tasks[1].status, "in_progress");
     assert.equal(result.tasksCompleted, 1);
+    assert.deepEqual(result.capabilities, {
+      canArchive: false,
+      canUnarchive: false,
+      canResume: false,
+      taskMutation: {
+        canSetStatus: false,
+        canEditNotes: false,
+        canAdd: false,
+      },
+    });
   });
 });
 
@@ -285,6 +295,26 @@ test("command services: listRuns returns newest-first rows and filters archived 
       [second.runId, first.runId, "oth123"],
     );
     assert.equal(allRuns[1].archivedAt, "2026-04-12T12:00:00.000Z");
+    assert.deepEqual(allRuns[0].capabilities, {
+      canArchive: true,
+      canUnarchive: false,
+      canResume: true,
+      taskMutation: {
+        canSetStatus: true,
+        canEditNotes: true,
+        canAdd: true,
+      },
+    });
+    assert.deepEqual(allRuns[1].capabilities, {
+      canArchive: false,
+      canUnarchive: true,
+      canResume: false,
+      taskMutation: {
+        canSetStatus: true,
+        canEditNotes: true,
+        canAdd: true,
+      },
+    });
   });
 });
 

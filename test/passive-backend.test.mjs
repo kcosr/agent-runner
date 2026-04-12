@@ -415,6 +415,30 @@ test("passive status: initialized footer points at task set, not run", async () 
   assert.doesNotMatch(text, /task-runner run --resume-run/);
 });
 
+test("passive status json exposes passive task-mutation capabilities and no resume", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "passive-agent", PASSIVE_AGENT);
+  writeAssignment(dir, "two-task", TWO_TASK_ASSIGNMENT);
+  const outcome = await initPassive(dir);
+
+  const projected = JSON.parse(
+    runCli(["status", outcome.runId, "--output-format", "json", "--field", "capabilities"], {
+      cwd: dir,
+    }),
+  );
+
+  assert.deepEqual(projected.capabilities, {
+    canArchive: true,
+    canUnarchive: false,
+    canResume: false,
+    taskMutation: {
+      canSetStatus: true,
+      canEditNotes: true,
+      canAdd: true,
+    },
+  });
+});
+
 test("passive backend: invoke() throws PassiveBackendNotInvokableError", async () => {
   await assert.rejects(async () => {
     await passiveBackend.invoke({

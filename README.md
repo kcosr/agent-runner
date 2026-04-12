@@ -645,6 +645,24 @@ When `manifest.archivedAt` is non-null, text output includes the
 archive timestamp plus an unarchive hint, and JSON output exposes the
 same top-level `archivedAt` field.
 
+The JSON `RunDetail` contract also carries a machine-facing
+`capabilities` block:
+
+- `canArchive`, `canUnarchive`, `canResume`
+- `taskMutation.canSetStatus`
+- `taskMutation.canEditNotes`
+- `taskMutation.canAdd`
+
+These booleans reflect the current CLI-backed lifecycle rules. In
+particular, passive runs are never resumable through `run`, running
+`taskMode=cli` runs allow `task set` / `task append-notes` but not
+`task add`, and terminal non-passive runs remain notes-editable but do
+not allow task status changes or task creation.
+
+Pause / stop control is intentionally not part of this contract in this
+slice. Later daemon/API work owns any live-control surface beyond the
+current archive / unarchive / resume / task-mutation semantics.
+
 ### `taskMode: file` vs `taskMode: cli`
 
 Assignments default to `taskMode: file` when the field is omitted. A
@@ -817,7 +835,7 @@ Options:
 
 | Flag | Purpose |
 |---|---|
-| `--output-format <text\|json>` | Default `text`. Definition JSON returns `{ name, path, root }[]`; run JSON returns `RunListEntry[]` including `runId`, `status`, `archivedAt`, repo/agent/assignment names, cwd, timestamps, and task counts. |
+| `--output-format <text\|json>` | Default `text`. Definition JSON returns `{ name, path, root }[]`; run JSON returns `RunListEntry[]` including `runId`, `status`, `archivedAt`, repo/agent/assignment names, cwd, timestamps, task counts, and `capabilities` so list/board consumers can render available actions without extra `status` reads. |
 | `--include-archived` | `list runs` only. Include runs whose `archivedAt` is non-null. |
 
 ### `task-runner show`
