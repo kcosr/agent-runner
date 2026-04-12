@@ -1,16 +1,5 @@
-import type { TaskState, TaskStatus } from "../../assignment/model.js";
+import { type TaskState, isValidStatus } from "../../assignment/model.js";
 import type { RunManifest, TaskSnapshot } from "./manifest.js";
-
-const VALID_TASK_STATUSES: ReadonlySet<TaskStatus> = new Set([
-  "pending",
-  "in_progress",
-  "completed",
-  "blocked",
-]);
-
-function isTaskStatus(s: string): s is TaskStatus {
-  return VALID_TASK_STATUSES.has(s as TaskStatus);
-}
 
 export type RunCompletionStatus =
   | "initialized"
@@ -55,7 +44,7 @@ export function applyLiveOverlay(manifest: RunManifest, overlay: LiveTaskOverlay
   for (const [id, snap] of Object.entries(manifest.finalTasks)) {
     const live = overlay.get(id);
     const liveStatus =
-      live?.status !== undefined && isTaskStatus(live.status) ? live.status : snap.status;
+      live?.status !== undefined && isValidStatus(live.status) ? live.status : snap.status;
     overlaidTasks[id] = {
       ...snap,
       status: liveStatus,

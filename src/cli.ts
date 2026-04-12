@@ -37,7 +37,6 @@ import {
   showTask,
   unarchiveRun,
 } from "./core/commands/service.js";
-import { ResumeError, UnknownBackendError, executeRunCommand } from "./core/run/execute-command.js";
 import {
   EmptyPromptError,
   InvalidAddedTaskError,
@@ -46,6 +45,12 @@ import {
   RecursionDepthError,
   VarResolutionError,
 } from "./core/run/run-loop.js";
+import {
+  ResumeError,
+  RunCommandError,
+  UnknownBackendError,
+  executeRunCommand,
+} from "./run-command.js";
 
 const HELP = `Usage: task-runner <run|init|status|task|list|show> [options] [args]
 
@@ -271,18 +276,6 @@ async function main(): Promise<void> {
 
   const isInitCommand = parsed.command === "init";
 
-  if (
-    parsed.resumeRun === undefined &&
-    parsed.agent === undefined &&
-    parsed.backend === undefined
-  ) {
-    process.stderr.write(
-      "task-runner: --agent was omitted — --backend is required to synthesize an ad-hoc agent\n",
-    );
-    process.stderr.write(HELP);
-    process.exit(3);
-  }
-
   const isJson = parsed.outputFormat === "json";
 
   // Install a SIGINT handler that aborts the in-flight backend invocation
@@ -338,6 +331,7 @@ async function main(): Promise<void> {
       err instanceof AgentConfigError ||
       err instanceof AssignmentNotFoundError ||
       err instanceof AssignmentConfigError ||
+      err instanceof RunCommandError ||
       err instanceof VarResolutionError ||
       err instanceof LockedFieldError ||
       err instanceof ResumeError ||
@@ -347,6 +341,9 @@ async function main(): Promise<void> {
       err instanceof InvalidBackendSessionError
     ) {
       process.stderr.write(`task-runner: ${err.message}\n`);
+      if (err instanceof RunCommandError && err.showHelp) {
+        process.stderr.write(HELP);
+      }
       process.exit(3);
     }
     process.stderr.write(`task-runner: ${(err as Error).message}\n`);

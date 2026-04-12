@@ -1329,19 +1329,21 @@ flowchart TD
         cli["cli.ts"]
         parse["cli/parse-args.ts"]
         render["cli/render-run.ts"]
+        commandRender["commands/render.ts"]
     end
     subgraph CoreCommands["Core command services"]
         commands["core/commands/service.ts"]
-        commandRender["commands/render.ts"]
     end
-    subgraph Config["Config + bootstrap"]
+    subgraph HostBootstrap["Host bootstrap"]
+        execute["run-command.ts"]
         loader["config/loader.ts"]
+    end
+    subgraph CoreConfig["Core config"]
         coreSchema["core/config/schema.ts"]
         coreInterp["core/config/interpolate.ts"]
         coreLoaded["core/config/loaded.ts"]
     end
     subgraph CoreRun["Core run lifecycle"]
-        execute["core/run/execute-command.ts"]
         loop["core/run/run-loop.ts"]
         manifest["core/run/manifest.ts"]
         status["core/run/status.ts"]
@@ -1370,8 +1372,6 @@ flowchart TD
     cli --> commandRender
     cli --> commands
     cli --> execute
-    cli --> loop
-    cli --> manifest
     commands --> manifest
     execute --> loader
     execute --> registry
@@ -1397,6 +1397,7 @@ flowchart TD
 ```
 src/
 ├── cli.ts                  # CLI entry point and dispatcher
+├── run-command.ts          # run/init bootstrap bridge from host services into core
 ├── cli/
 │   ├── parse-args.ts       # argv parser
 │   └── render-run.ts       # RunEvent -> stdout/stderr rendering
@@ -1412,7 +1413,6 @@ src/
 │   │   ├── interpolate.ts  # {{var}} substitution
 │   │   └── loaded.ts       # LoadedAgent/LoadedAssignment + manifest/ad-hoc helpers
 │   └── run/
-│       ├── execute-command.ts # run/init bootstrap service behind the CLI
 │       ├── run-loop.ts        # runAgent: emits RunEvent + final outcome
 │       ├── manifest.ts        # RunManifest types + persistence
 │       ├── status.ts          # transport-neutral run summaries + live overlays

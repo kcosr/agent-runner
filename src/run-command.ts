@@ -1,4 +1,4 @@
-import { UnknownBackendError, resolveBackend } from "../../backends/registry.js";
+import { UnknownBackendError, resolveBackend } from "./backends/registry.js";
 import {
   AgentConfigError,
   AgentNotFoundError,
@@ -6,11 +6,21 @@ import {
   AssignmentNotFoundError,
   loadAgentConfig,
   loadAssignmentConfig,
-} from "../../config/loader.js";
-import { resolveTaskRunnerCommand } from "../../task-runner-command.js";
-import { loadedAgentFromManifest, synthesizeAdHocAgent } from "../config/loaded.js";
-import { ResumeError, type RunManifest, resolveResumeTarget } from "./manifest.js";
-import { type RunEvent, type RunOptions, type RunOutcome, runAgent } from "./run-loop.js";
+} from "./config/loader.js";
+import { loadedAgentFromManifest, synthesizeAdHocAgent } from "./core/config/loaded.js";
+import { ResumeError, type RunManifest, resolveResumeTarget } from "./core/run/manifest.js";
+import { type RunEvent, type RunOptions, type RunOutcome, runAgent } from "./core/run/run-loop.js";
+import { resolveTaskRunnerCommand } from "./task-runner-command.js";
+
+export class RunCommandError extends Error {
+  constructor(
+    message: string,
+    public readonly showHelp: boolean = false,
+  ) {
+    super(message);
+    this.name = "RunCommandError";
+  }
+}
 
 export interface ExecuteRunCommandOptions {
   initialize: boolean;
@@ -102,8 +112,9 @@ export async function executeRunCommand(opts: ExecuteRunCommandOptions): Promise
         ? loadAgentConfig(opts.agent)
         : (() => {
             if (opts.overrides.backend === undefined) {
-              throw new ResumeError(
+              throw new RunCommandError(
                 "--agent was omitted — --backend is required to synthesize an ad-hoc agent",
+                true,
               );
             }
             return synthesizeAdHocAgent({
@@ -129,7 +140,7 @@ export async function executeRunCommand(opts: ExecuteRunCommandOptions): Promise
     const hint = runId
       ? `${taskRunnerCmd} task set ${runId} <task-id> --status in_progress\n  ${taskRunnerCmd} status ${runId}`
       : `${taskRunnerCmd} init --agent <passive-agent> --assignment <...>\n  ${taskRunnerCmd} task set <run-id> <task-id> --status in_progress`;
-    throw new ResumeError(
+    throw new RunCommandError(
       `cannot run passive agent "${loaded.config.name}" — passive agents are driven externally via task commands. Use:\n  ${hint}`,
     );
   }

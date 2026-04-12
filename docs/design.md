@@ -90,6 +90,7 @@ task-runner/
 │   └── design.md          # this file
 ├── src/
 │   ├── cli.ts             # argv parsing, entry point, transport adapter
+│   ├── run-command.ts     # run/init bootstrap bridge from host services into core
 │   ├── cli/
 │   │   ├── parse-args.ts  # argv → ParsedArgs + overridesFromParsedArgs
 │   │   └── render-run.ts  # RunEvent -> stdout/stderr rendering
@@ -105,7 +106,6 @@ task-runner/
 │   │   │   ├── interpolate.ts # {{var}} substitution
 │   │   │   └── loaded.ts  # LoadedAgent/LoadedAssignment + manifest/ad-hoc helpers
 │   │   └── run/
-│   │       ├── execute-command.ts # run/init bootstrap behind the CLI edge
 │   │       ├── run-loop.ts    # seed → invoke → parse → retry, emit RunEvent
 │   │       ├── manifest.ts    # RunManifest types + writer for run.json
 │   │       ├── status.ts      # transport-neutral run summaries + live overlays
