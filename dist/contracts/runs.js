@@ -45,6 +45,8 @@ export function toRunDetail(result) {
         status: manifest.status,
         archivedAt: manifest.archivedAt,
         isLive: result.isLive,
+        workspaceDir: manifest.workspaceDir,
+        assignmentPath: manifest.assignmentPath,
         agent: {
             name: manifest.agent.name,
             sourcePath: manifest.agent.sourcePath,
@@ -70,6 +72,7 @@ export function toRunDetail(result) {
         exitCode: manifest.exitCode,
         attempts: manifest.attempts,
         maxAttempts: manifest.maxAttempts,
+        sessionCount: manifest.sessionCount,
         tasksCompleted: manifest.tasksCompleted,
         tasksTotal: manifest.tasksTotal,
         tasks: Object.values(manifest.finalTasks).map(toRunTaskSummary),

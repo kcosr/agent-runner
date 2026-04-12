@@ -481,8 +481,13 @@ test("passive re-orient: status --field pendingPrompt returns the bootstrap text
   writeAssignment(dir, "two-task", TWO_TASK_ASSIGNMENT);
   const outcome = await initPassive(dir);
 
-  assert.ok(outcome.manifest.pendingPrompt);
-  assert.match(outcome.manifest.pendingPrompt, /task-runner task set/);
+  const out = runCli(
+    ["status", outcome.runId, "--output-format", "json", "--field", "pendingPrompt"],
+    { cwd: dir },
+  );
+  const parsed = JSON.parse(out);
+  assert.ok(parsed.pendingPrompt);
+  assert.match(parsed.pendingPrompt, /task-runner task set/);
 });
 
 test("bundled passive-example agent is loadable and passes schema", async () => {

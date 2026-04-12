@@ -53,6 +53,8 @@ export interface RunDetail {
   status: RunStatus;
   archivedAt: string | null;
   isLive: boolean;
+  workspaceDir: string;
+  assignmentPath: string;
   agent: {
     name: string;
     sourcePath: string | null;
@@ -76,6 +78,7 @@ export interface RunDetail {
   exitCode: number | null;
   attempts: number;
   maxAttempts: number;
+  sessionCount: number;
   tasksCompleted: number;
   tasksTotal: number;
   tasks: RunTaskSummary[];
@@ -148,6 +151,8 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
     status: manifest.status,
     archivedAt: manifest.archivedAt,
     isLive: result.isLive,
+    workspaceDir: manifest.workspaceDir,
+    assignmentPath: manifest.assignmentPath,
     agent: {
       name: manifest.agent.name,
       sourcePath: manifest.agent.sourcePath,
@@ -173,6 +178,7 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
     exitCode: manifest.exitCode,
     attempts: manifest.attempts,
     maxAttempts: manifest.maxAttempts,
+    sessionCount: manifest.sessionCount,
     tasksCompleted: manifest.tasksCompleted,
     tasksTotal: manifest.tasksTotal,
     tasks: Object.values(manifest.finalTasks).map(toRunTaskSummary),

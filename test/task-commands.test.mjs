@@ -826,18 +826,17 @@ test("task command: missing subcommand prints usage and exits 3", async () => {
   assert.match(result.stderr, /task command requires a subcommand/);
 });
 
-test("task set: status-only call can then be read back via status --output-format json --field finalTasks", async () => {
+test("task set: status-only call can then be read back via status --output-format json --field tasks", async () => {
   const dir = tempDir();
   writeBundle(dir);
   const outcome = await initRun(dir);
 
   runCli(["task", "set", outcome.runId, "t1", "--status", "completed"], { cwd: dir });
 
-  const out = runCli(
-    ["status", outcome.runId, "--output-format", "json", "--field", "finalTasks"],
-    { cwd: dir },
-  );
+  const out = runCli(["status", outcome.runId, "--output-format", "json", "--field", "tasks"], {
+    cwd: dir,
+  });
   const parsed = JSON.parse(out);
-  assert.equal(parsed.finalTasks.t1.status, "completed");
-  assert.equal(parsed.finalTasks.t2.status, "pending");
+  assert.equal(parsed.tasks[0].status, "completed");
+  assert.equal(parsed.tasks[1].status, "pending");
 });

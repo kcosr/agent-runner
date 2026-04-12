@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { VALID_STATUSES, isValidStatus } from "../assignment/model.js";
 import { parseAssignment } from "../assignment/parser.js";
 import { listAgents, listAssignments, loadAgentConfig, loadAssignmentConfig, } from "../config/loader.js";
-import { toRunArchiveResult, toRunSummary, } from "../contracts/runs.js";
+import { toRunArchiveResult, toRunDetail, toRunSummary, } from "../contracts/runs.js";
 import { ResumeError, listRunManifests, resolveResumeTarget, workspaceAssignmentPath, writeManifest, } from "../runner/manifest.js";
 import { applyLiveOverlay } from "../runner/output.js";
 import { loadWorkspaceTaskMap, persistWorkspaceTaskState, resetWorkspaceRun, taskModeFromManifest, withTaskStateLock, } from "../runner/workspace-state.js";
@@ -164,7 +164,7 @@ export function readStatus(target) {
             // Fall back to the persisted manifest snapshot.
         }
     }
-    return { manifest: manifestView, isLive };
+    return toRunDetail({ manifest: manifestView, isLive });
 }
 export function listDefinitions(kind) {
     return {
@@ -174,11 +174,10 @@ export function listDefinitions(kind) {
 }
 export function listRuns(opts = {}) {
     const includeArchived = opts.includeArchived === true;
-    const runs = listRunManifests()
+    return listRunManifests()
         .map(toRunSummary)
         .filter((entry) => includeArchived || entry.archivedAt === null)
         .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
-    return { runs };
 }
 export function showDefinition(kind, target) {
     if (kind === "agent") {

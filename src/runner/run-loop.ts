@@ -30,7 +30,7 @@ import {
   writeManifest,
 } from "./manifest.js";
 import { buildNudgeMessage } from "./nudge.js";
-import type { RunStatus, RunSummary } from "./output.js";
+import type { RunCompletionStatus, RunCompletionSummary } from "./output.js";
 import {
   buildChildRecursionEnv,
   checkRecursionDepth,
@@ -93,7 +93,7 @@ export interface RunOptions {
 }
 
 export interface RunOutcome {
-  summary: RunSummary;
+  summary: RunCompletionSummary;
   exitCode: number;
   attemptTranscripts: string[];
   runId: string;
@@ -146,7 +146,7 @@ export type RunEvent =
     }
   | {
       type: "run_finished";
-      summary: RunSummary;
+      summary: RunCompletionSummary;
     };
 
 export class VarResolutionError extends Error {
@@ -1037,7 +1037,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     null;
   let currentPrompt = initialPrompt;
   const attemptTranscripts: string[] = [];
-  let terminal: { status: RunStatus; exitCode: number } | null = null;
+  let terminal: { status: RunCompletionStatus; exitCode: number } | null = null;
 
   while (sessionAttempts < maxAttempts && !terminal) {
     sessionAttempts++;
@@ -1226,7 +1226,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     writeManifest(workspaceDir, manifest);
   });
 
-  const summary: RunSummary = {
+  const summary: RunCompletionSummary = {
     status: terminal.status,
     attempts: sessionAttempts,
     maxAttempts,

@@ -59,7 +59,7 @@ callerInstructions: |
   so you can grep it directly:
 
       {{task_runner_cmd}} status {{run_id}} --output-format json \
-        --field finalTasks | jq -r '.[] | select(.id=="approval") | .notes'
+        --field tasks | jq -r '.tasks[] | select(.id=="approval") | .notes'
 
   If this review was launched with `--var implementation_plan=<path>`
   — typically from a `plan-feature`-generated implementer run —

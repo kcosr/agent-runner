@@ -168,7 +168,7 @@ tasks:
       duplication check, risk analysis), pull it via:
 
           {{task_runner_cmd}} status <<PLACEHOLDER_PLANNING_RUN_ID>> \
-            --output-format json --field finalTasks
+            --output-format json --field tasks
 
       Paste the planning run id into this task's Notes for
       the record.
@@ -371,7 +371,10 @@ tasks:
       Pull the synthesis and the approval decision record:
 
           {{task_runner_cmd}} status <review-run-id> --output-format json \
-            --field finalTasks
+            --field tasks | jq -r '.tasks[] | select(.id=="synthesis") | .notes'
+
+          {{task_runner_cmd}} status <review-run-id> --output-format json \
+            --field tasks | jq -r '.tasks[] | select(.id=="approval") | .notes'
 
       Paste the reviewer's top-findings synthesis and the
       `approval` decision record into this task's Notes

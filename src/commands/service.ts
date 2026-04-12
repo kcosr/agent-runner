@@ -13,9 +13,10 @@ import {
 } from "../config/loader.js";
 import {
   type RunArchiveResult,
-  type RunDetailInput,
+  type RunDetail,
   type RunSummary,
   toRunArchiveResult,
+  toRunDetail,
   toRunSummary,
 } from "../contracts/runs.js";
 import {
@@ -39,7 +40,7 @@ import {
 import { resolveTaskRunnerCommand } from "../task-runner-command.js";
 import { shortId } from "../util/short-id.js";
 
-export type StatusCommandResult = RunDetailInput;
+export type StatusCommandResult = RunDetail;
 
 export interface DefinitionListResult {
   kind: DefinitionKind;
@@ -63,9 +64,7 @@ export interface RunResetResult {
 export type RunListEntry = RunSummary;
 export type { RunArchiveResult } from "../contracts/runs.js";
 
-export interface RunListResult {
-  runs: RunListEntry[];
-}
+export type RunListResult = RunListEntry[];
 
 export interface TaskListResult {
   manifest: RunManifest;
@@ -274,7 +273,7 @@ export function readStatus(target: string): StatusCommandResult {
     }
   }
 
-  return { manifest: manifestView, isLive };
+  return toRunDetail({ manifest: manifestView, isLive });
 }
 
 export function listDefinitions(kind: DefinitionKind): DefinitionListResult {
@@ -286,11 +285,10 @@ export function listDefinitions(kind: DefinitionKind): DefinitionListResult {
 
 export function listRuns(opts: { includeArchived?: boolean } = {}): RunListResult {
   const includeArchived = opts.includeArchived === true;
-  const runs = listRunManifests()
+  return listRunManifests()
     .map(toRunSummary)
     .filter((entry) => includeArchived || entry.archivedAt === null)
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
-  return { runs };
 }
 
 export function showDefinition(kind: DefinitionKind, target: string): DefinitionDetailsResult {

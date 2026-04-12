@@ -169,9 +169,9 @@ test("command services: readStatus applies the live workspace overlay for runnin
   await withSharedRuntimeEnv(dir, async () => {
     const result = readStatus(outcome.runId);
     assert.equal(result.isLive, true);
-    assert.equal(result.manifest.finalTasks.t1.status, "completed");
-    assert.equal(result.manifest.finalTasks.t2.status, "in_progress");
-    assert.equal(result.manifest.tasksCompleted, 1);
+    assert.equal(result.tasks[0].status, "completed");
+    assert.equal(result.tasks[1].status, "in_progress");
+    assert.equal(result.tasksCompleted, 1);
   });
 });
 
@@ -273,18 +273,18 @@ test("command services: listRuns returns newest-first rows and filters archived 
   await withSharedRuntimeEnv(dir, async () => {
     const visible = listRuns();
     assert.deepEqual(
-      visible.runs.map((run) => run.runId),
+      visible.map((run) => run.runId),
       [second.runId, "oth123"],
     );
-    assert.equal(visible.runs[0].repo, "unknown");
-    assert.equal(visible.runs[1].repo, "other-repo");
+    assert.equal(visible[0].repo, "unknown");
+    assert.equal(visible[1].repo, "other-repo");
 
     const allRuns = listRuns({ includeArchived: true });
     assert.deepEqual(
-      allRuns.runs.map((run) => run.runId),
+      allRuns.map((run) => run.runId),
       [second.runId, first.runId, "oth123"],
     );
-    assert.equal(allRuns.runs[1].archivedAt, "2026-04-12T12:00:00.000Z");
+    assert.equal(allRuns[1].archivedAt, "2026-04-12T12:00:00.000Z");
   });
 });
 
