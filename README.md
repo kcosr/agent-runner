@@ -445,9 +445,10 @@ once the manifest is written, the agent had no source file to begin
 with and the run doesn't care.
 
 Manifest schema is versioned — the current generation is
-`schemaVersion: 2`. Older runs (v1, pre-canonical) are not resumable
-under this version of task-runner; attempting to do so surfaces a
-clear error and you're expected to start a fresh run.
+`schemaVersion: 3`. Older runs (v1 pre-canonical and v2
+pre-reset-seed) are not resumable under this version of task-runner;
+attempting to do so surfaces a clear error and you're expected to
+start a fresh run.
 
 For the full schema and the rationale, see
 [`docs/design.md`](docs/design.md).
@@ -521,6 +522,43 @@ task-runner init \
 Useful when an outer process wants a resumable handle before
 committing to execution, or wants to inspect the prepared workspace
 before kicking off the actual work.
+
+### `task-runner run reset`
+
+Restore an existing non-running run to the same initialized state it
+had immediately after `task-runner init` or first-write on a fresh
+run.
+
+```bash
+task-runner run reset <run-id>
+task-runner run reset <run-id> --output-format json
+```
+
+Reset semantics:
+
+- Allowed for `initialized`, `success`, `blocked`, `exhausted`,
+  `aborted`, and `error` runs.
+- Rejected while `status=running`, regardless of `taskMode`.
+- Works for both passive and non-passive runs.
+- Rewrites `run.json` and the workspace `assignment.md` from the
+  manifest's frozen initialized-state seed; it does **not** re-read
+  the current agent or assignment source files from disk.
+- Restores the initialized prompt/task snapshot, clears
+  `backendSessionId`, zeroes session/attempt history, and removes
+  stale `attempts/` artifacts so the next execution starts clean.
+
+Success output:
+
+```text
+task-runner: reset run abc123 to initialized state
+```
+
+```json
+{
+  "runId": "abc123",
+  "status": "initialized"
+}
+```
 
 ### `task-runner status`
 
@@ -805,6 +843,10 @@ Passive-specific behavior:
 - **`task-runner run` is rejected** on passive agents with a clear
   pointer to `init` and `task set`. Applies to fresh runs and
   `--resume-run` alike.
+- **`task-runner run reset` is allowed** on passive runs. It restores
+  the original initialized task set, rewrites `assignment.md`, keeps
+  the run externally driven, and clears prior task-history-derived
+  terminal state back to `initialized`.
 - **`task-runner init` prints the full bootstrap** — the composed
   agent instructions + assignment context + CLI workflow reminder —
   to **stdout**, so you can pipe it: `task-runner init ... >

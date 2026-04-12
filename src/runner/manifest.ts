@@ -54,6 +54,18 @@ export interface TaskSnapshot {
   notes: string;
 }
 
+export interface RunResetSeed {
+  model: string | null;
+  effort: string | null;
+  sessionName: string | null;
+  unrestricted: boolean;
+  timeoutSec: number;
+  maxAttempts: number;
+  taskMode?: TaskMode;
+  pendingPrompt: string;
+  finalTasks: Record<string, TaskSnapshot>;
+}
+
 export interface AttemptRecord {
   attempt: number;
   sessionIndex: number;
@@ -98,13 +110,13 @@ export interface AssignmentInfo {
 // `timeoutSec` are all captured at init / fresh-run time and preserved
 // across all subsequent sessions.
 //
-// schemaVersion: 2 is the manifest-canonical generation. Manifests written
-// by earlier task-runner versions have schemaVersion: 1 and are not
+// schemaVersion: 3 is the current manifest-canonical generation. Manifests written
+// by earlier task-runner versions (v1 pre-canonical, v2 pre-reset-seed) are not
 // resumable by this version — `isRunManifest` rejects them and
 // `resolveResumeTarget` surfaces a clear error telling the caller to
 // create a fresh run.
 export interface RunManifest {
-  schemaVersion: 2;
+  schemaVersion: 3;
   runId: string;
   agent: {
     name: string;
@@ -158,6 +170,9 @@ export interface RunManifest {
   // fresh `run` and `init` and always included in
   // `status --output-format json` for later retrieval.
   callerInstructions: string | null;
+  // Reset-to-init seed frozen at first write. Reset uses this instead
+  // of re-reading the current agent/assignment source files.
+  resetSeed: RunResetSeed;
   finalTasks: Record<string, TaskSnapshot>;
   sessionCount: number;
   sessions: SessionRecord[];
@@ -176,6 +191,46 @@ export function snapshotTasks(tasks: Map<string, TaskState>): Record<string, Tas
     };
   }
   return out;
+}
+
+function cloneTaskSnapshots(tasks: Record<string, TaskSnapshot>): Record<string, TaskSnapshot> {
+  const out: Record<string, TaskSnapshot> = {};
+  for (const [id, task] of Object.entries(tasks)) {
+    out[id] = { ...task };
+  }
+  return out;
+}
+
+export function buildRunResetSeed(seed: RunResetSeed): RunResetSeed {
+  return {
+    ...seed,
+    finalTasks: cloneTaskSnapshots(seed.finalTasks),
+  };
+}
+
+export function applyRunResetSeed(manifest: RunManifest): void {
+  const seed = manifest.resetSeed;
+  manifest.model = seed.model;
+  manifest.effort = seed.effort;
+  manifest.sessionName = seed.sessionName;
+  manifest.unrestricted = seed.unrestricted;
+  manifest.timeoutSec = seed.timeoutSec;
+  manifest.maxAttempts = seed.maxAttempts;
+  manifest.taskMode = seed.taskMode;
+  manifest.endedAt = null;
+  manifest.status = "initialized";
+  manifest.exitCode = null;
+  manifest.attempts = 0;
+  manifest.backendSessionId = null;
+  manifest.pendingPrompt = seed.pendingPrompt;
+  manifest.finalTasks = cloneTaskSnapshots(seed.finalTasks);
+  manifest.tasksCompleted = Object.values(manifest.finalTasks).filter(
+    (task) => task.status === "completed",
+  ).length;
+  manifest.tasksTotal = Object.keys(manifest.finalTasks).length;
+  manifest.sessionCount = 0;
+  manifest.sessions = [];
+  manifest.attemptRecords = [];
 }
 
 export function writeManifest(workspaceDir: string, manifest: RunManifest): void {
@@ -243,11 +298,11 @@ export function resolveResumeTarget(
       typeof parsed === "object" &&
       "schemaVersion" in parsed &&
       typeof (parsed as { schemaVersion: unknown }).schemaVersion === "number" &&
-      (parsed as { schemaVersion: number }).schemaVersion !== 2
+      (parsed as { schemaVersion: number }).schemaVersion !== 3
     ) {
       const version = (parsed as { schemaVersion: number }).schemaVersion;
       throw new ResumeError(
-        `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 2. Manifests from earlier versions cannot be resumed — create a fresh run (task-runner init / run).`,
+        `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 3. Manifests from earlier versions cannot be resumed — create a fresh run (task-runner init / run).`,
       );
     }
     if (!isRunManifest(parsed)) {
@@ -294,7 +349,7 @@ export function resolveResumeTarget(
 function isRunManifest(value: unknown): value is RunManifest {
   if (!value || typeof value !== "object") return false;
   const obj = value as Record<string, unknown>;
-  if (obj.schemaVersion !== 2) return false;
+  if (obj.schemaVersion !== 3) return false;
   if (typeof obj.runId !== "string") return false;
 
   // Top-level scalars required by downstream consumers.
@@ -323,11 +378,29 @@ function isRunManifest(value: unknown): value is RunManifest {
   // so these need explicit null rejection.
   if (!obj.finalTasks || typeof obj.finalTasks !== "object") return false;
   if (!obj.runtimeVars || typeof obj.runtimeVars !== "object") return false;
+  if (!obj.resetSeed || typeof obj.resetSeed !== "object") return false;
 
   // callerInstructions is string | null.
   if (obj.callerInstructions !== null && typeof obj.callerInstructions !== "string") {
     return false;
   }
+
+  const resetSeed = obj.resetSeed as Record<string, unknown>;
+  if (resetSeed.model !== null && typeof resetSeed.model !== "string") return false;
+  if (resetSeed.effort !== null && typeof resetSeed.effort !== "string") return false;
+  if (resetSeed.sessionName !== null && typeof resetSeed.sessionName !== "string") return false;
+  if (typeof resetSeed.unrestricted !== "boolean") return false;
+  if (typeof resetSeed.timeoutSec !== "number") return false;
+  if (typeof resetSeed.maxAttempts !== "number") return false;
+  if (typeof resetSeed.pendingPrompt !== "string") return false;
+  if (
+    resetSeed.taskMode !== undefined &&
+    resetSeed.taskMode !== "file" &&
+    resetSeed.taskMode !== "cli"
+  ) {
+    return false;
+  }
+  if (!resetSeed.finalTasks || typeof resetSeed.finalTasks !== "object") return false;
 
   // Nested agent record.
   if (!obj.agent || typeof obj.agent !== "object") return false;

@@ -250,6 +250,48 @@ test("passive auto-finalize: status flips to blocked when any task is blocked (r
   assert.ok(m.endedAt);
 });
 
+test("passive reset: success run returns to initialized with original tasks", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "passive-agent", PASSIVE_AGENT);
+  writeAssignment(dir, "two-task", TWO_TASK_ASSIGNMENT);
+  const outcome = await initPassive(dir);
+
+  runCli(["task", "set", outcome.runId, "t1", "--status", "completed"], { cwd: dir });
+  runCli(["task", "set", outcome.runId, "t2", "--status", "completed"], { cwd: dir });
+  assert.equal(readManifest(outcome.workspaceDir).status, "success");
+
+  runCli(["run", "reset", outcome.runId], { cwd: dir });
+
+  const manifest = readManifest(outcome.workspaceDir);
+  assert.equal(manifest.status, "initialized");
+  assert.equal(manifest.exitCode, null);
+  assert.equal(manifest.endedAt, null);
+  assert.equal(manifest.finalTasks.t1.status, "pending");
+  assert.equal(manifest.finalTasks.t2.status, "pending");
+  assert.equal(manifest.pendingPrompt, manifest.resetSeed.pendingPrompt);
+});
+
+test("passive reset: blocked run returns to initialized with notes cleared", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "passive-agent", PASSIVE_AGENT);
+  writeAssignment(dir, "two-task", TWO_TASK_ASSIGNMENT);
+  const outcome = await initPassive(dir);
+
+  runCli(["task", "set", outcome.runId, "t1", "--status", "completed"], { cwd: dir });
+  runCli(["task", "set", outcome.runId, "t2", "--status", "blocked", "--notes", "needs decision"], {
+    cwd: dir,
+  });
+  assert.equal(readManifest(outcome.workspaceDir).status, "blocked");
+
+  runCli(["run", "reset", outcome.runId], { cwd: dir });
+
+  const manifest = readManifest(outcome.workspaceDir);
+  assert.equal(manifest.status, "initialized");
+  assert.equal(manifest.finalTasks.t1.status, "pending");
+  assert.equal(manifest.finalTasks.t2.status, "pending");
+  assert.equal(manifest.finalTasks.t2.notes, "");
+});
+
 test("passive auto-finalize: in_progress blocks finalization", async () => {
   const dir = tempDir();
   writeAgent(dir, "passive-agent", PASSIVE_AGENT);

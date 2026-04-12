@@ -182,6 +182,14 @@ test("parseArgs: task add captures optional --body", () => {
   assert.equal(parsed.taskBody, "Update the tables.");
 });
 
+test("parseArgs: run reset parses as a grouped run subcommand", () => {
+  const parsed = parseArgs(argv("run", "reset", "abc123", "--output-format", "json"));
+  assert.equal(parsed.command, "run");
+  assert.equal(parsed.subcommand, "reset");
+  assert.deepEqual(parsed.positionals, ["abc123"]);
+  assert.equal(parsed.outputFormat, "json");
+});
+
 test("overridesFromParsedArgs: all other overrides plumbed through", () => {
   const parsed = parseArgs(
     argv(

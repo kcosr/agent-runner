@@ -1,4 +1,5 @@
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { type MergeOptions, type MergeResult, mergeUpdates } from "../assignment/merge.js";
 import type { TaskState } from "../assignment/model.js";
 import { parseAssignment } from "../assignment/parser.js";
@@ -7,6 +8,7 @@ import { normalizeTaskMode } from "../config/schema.js";
 import { writeTextFileAtomic } from "../util/write-file-atomic.js";
 import {
   type RunManifest,
+  applyRunResetSeed,
   manifestPath,
   snapshotTasks,
   workspaceAssignmentPath,
@@ -181,4 +183,22 @@ export function persistWorkspaceTaskState(
   }
 
   return withTaskStateLock(manifest.workspaceDir, persist);
+}
+
+export function resetWorkspaceRun(workspaceDir: string): RunManifest {
+  return withTaskStateLock(workspaceDir, () => {
+    const manifest = readManifestSnapshot(workspaceDir);
+    if (manifest.status === "running") {
+      throw new Error(
+        "cannot reset a running run (run reset is rejected while a run is in-flight)",
+      );
+    }
+
+    applyRunResetSeed(manifest);
+    rmSync(join(workspaceDir, "attempts"), { recursive: true, force: true });
+    persistWorkspaceTaskState(manifest, taskMapFromManifestSnapshot(manifest), {
+      alreadyLocked: true,
+    });
+    return manifest;
+  });
 }

@@ -131,19 +131,19 @@ test("resolveResumeTarget rejects a manifest with runtimeVars: null", () => {
   );
 });
 
-test("resolveResumeTarget accepts a well-formed v2 manifest from the unknown bucket", () => {
+test("resolveResumeTarget accepts a well-formed v3 manifest from the unknown bucket", () => {
   const dir = tempDir();
   const workspaceDir = join(dir, "runs", "unknown", "wellformed");
   writeManifest(dir, "unknown", "wellformed", baseManifest("wellformed", workspaceDir));
 
   const resolved = withStateRoot(dir, () => resolveResumeTarget("wellformed", dir));
   assert.equal(resolved.manifest.runId, "wellformed");
-  assert.equal(resolved.manifest.schemaVersion, 2);
+  assert.equal(resolved.manifest.schemaVersion, 3);
 });
 
 function baseManifest(runId, workspaceDir) {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     runId,
     agent: {
       name: "override-test",
@@ -174,6 +174,24 @@ function baseManifest(runId, workspaceDir) {
     runtimeVars: {},
     pendingPrompt: null,
     callerInstructions: null,
+    resetSeed: {
+      model: "claude-sonnet-4-6",
+      effort: null,
+      sessionName: null,
+      unrestricted: false,
+      timeoutSec: 3600,
+      maxAttempts: 4,
+      pendingPrompt: "seed prompt",
+      finalTasks: {
+        t1: {
+          id: "t1",
+          title: "First",
+          body: "",
+          status: "pending",
+          notes: "",
+        },
+      },
+    },
     finalTasks: {
       t1: {
         id: "t1",

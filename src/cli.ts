@@ -40,6 +40,7 @@ import {
 import {
   loadWorkspaceTaskMap,
   persistWorkspaceTaskState,
+  resetWorkspaceRun,
   taskModeFromManifest,
   withTaskStateLock,
 } from "./runner/workspace-state.js";
@@ -52,6 +53,9 @@ Commands:
   run                     Execute an agent. Either a fresh run, a resume,
                           or execute-after-init (when --resume-run points
                           at an initialized run).
+  run reset <id|path>     Restore a non-running run to initialized state.
+                          Rewrites run.json and assignment.md, clears old
+                          execution history, and rejects in-flight runs.
   init                    Prepare a run without invoking the backend. Writes
                           the workspace, seeds assignment.md from tasks, and
                           stores a manifest with status=initialized and a
@@ -217,6 +221,10 @@ async function main(): Promise<void> {
 
   if (parsed.command === "status") {
     runStatus(parsed);
+  }
+
+  if (parsed.command === "run" && parsed.subcommand === "reset") {
+    runResetCommand(parsed);
   }
 
   if (parsed.command === "task") {
@@ -776,6 +784,68 @@ function runTaskCommand(parsed: ParsedArgs): never {
     '       task-runner task add <run-id> --title "..." [--body "..."] [--output-format text|json]\n',
   );
   process.exit(3);
+}
+
+function runResetCommand(parsed: ParsedArgs): never {
+  const [runArg, extra] = parsed.positionals;
+  if (!runArg) {
+    process.stderr.write("task-runner: run reset requires <run-id>\n");
+    process.stderr.write("Usage: task-runner run reset <run-id> [--output-format text|json]\n");
+    process.exit(3);
+  }
+  if (extra !== undefined) {
+    process.stderr.write(
+      `task-runner: run reset takes exactly one positional (<run-id>); got extra "${extra}"\n`,
+    );
+    process.exit(3);
+  }
+
+  const unsupported: string[] = [];
+  if (parsed.agent !== undefined) unsupported.push("--agent");
+  if (parsed.assignment !== undefined) unsupported.push("--assignment");
+  if (parsed.resumeRun !== undefined) unsupported.push("--resume-run");
+  if (parsed.backendSessionId !== undefined) unsupported.push("--backend-session-id");
+  if (Object.keys(parsed.vars).length > 0) unsupported.push("--var");
+  if (parsed.cwd !== undefined) unsupported.push("--cwd");
+  if (parsed.backend !== undefined) unsupported.push("--backend");
+  if (parsed.model !== undefined) unsupported.push("--model");
+  if (parsed.effort !== undefined) unsupported.push("--effort");
+  if (parsed.taskMode !== undefined) unsupported.push("--task-mode");
+  if (parsed.timeoutSec !== undefined) unsupported.push("--timeout-sec");
+  if (parsed.unrestricted !== undefined) unsupported.push("--unrestricted");
+  if (parsed.maxRetries !== undefined) unsupported.push("--max-retries");
+  if (parsed.sessionName !== undefined) unsupported.push("--session-name");
+  if (parsed.fields.length > 0) unsupported.push("--field");
+  if (parsed.taskStatus !== undefined) unsupported.push("--status");
+  if (parsed.taskNotes !== undefined) unsupported.push("--notes");
+  if (parsed.taskAppendText !== undefined) unsupported.push("--text");
+  if (parsed.taskTitle !== undefined) unsupported.push("--title");
+  if (parsed.taskBody !== undefined) unsupported.push("--body");
+  if (parsed.addedTasks.length > 0) unsupported.push("--add-task");
+  if (unsupported.length > 0) {
+    process.stderr.write(
+      `task-runner: run reset only supports <run-id> and --output-format (got ${unsupported.join(", ")})\n`,
+    );
+    process.exit(3);
+  }
+
+  const resolved = resolveRunOrExit(runArg);
+  let manifest: RunManifest;
+  try {
+    manifest = resetWorkspaceRun(resolved.workspaceDir);
+  } catch (err) {
+    process.stderr.write(`task-runner: ${(err as Error).message}\n`);
+    process.exit(3);
+  }
+
+  if (parsed.outputFormat === "json") {
+    process.stdout.write(
+      `${JSON.stringify({ runId: manifest.runId, status: manifest.status }, null, 2)}\n`,
+    );
+  } else {
+    process.stdout.write(`task-runner: reset run ${manifest.runId} to initialized state\n`);
+  }
+  process.exit(0);
 }
 
 type TaskMutationKind = "set" | "append-notes" | "add";
