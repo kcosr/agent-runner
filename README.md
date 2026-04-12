@@ -143,8 +143,10 @@ chat output.
   orchestrator agent can't accidentally fork-bomb itself. If the cap
   is hit, the runner exits with a clear error telling you to raise
   `TASK_RUNNER_MAX_CALL_DEPTH` if the nesting is intentional.
-- **JSON output mode** for scripting: the full manifest as
-  pretty-printed JSON, byte-identical to `run.json` on disk.
+- **JSON output mode** for scripting: `task-runner status
+  --output-format json` returns the shared `RunDetail` DTO, and
+  `task-runner run --output-format json` writes the final
+  manifest-shaped run record.
 
 ## Install
 
@@ -184,7 +186,7 @@ task-runner run \
 # Inspect the run after the fact (or during, with live overlay):
 task-runner status <run-id>
 
-# Get the full manifest as JSON:
+# Get the full run detail as JSON:
 task-runner status <run-id> --output-format json
 ```
 
@@ -497,7 +499,7 @@ Common options:
 | `--unrestricted` | Bypass the backend's approval prompts. |
 | `--session-name <name>` | Override the assignment's `sessionName` (the backend display label). Vars are interpolated. |
 | `--backend-session-id <id>` | Adopt an existing backend session id (claude UUID, codex thread id). Validated before workspace creation. Forbidden with `--resume-run` (the resume target already carries one). |
-| `--output-format <text\|json>` | Default `text`. `json` writes the full manifest to stdout once at end of run. |
+| `--output-format <text\|json>` | Default `text`. `json` writes the final manifest-shaped run record to stdout once at end of run. |
 
 On `--resume-run`, the "legitimate mid-run" overrides — `--model`,
 `--effort`, `--timeout-sec`, `--max-retries`, `--unrestricted`,
@@ -614,7 +616,7 @@ current repo-name bucket under `${TASK_RUNNER_STATE_DIR}/runs/`, then
 # Human-readable status block + per-task checklist
 task-runner status <id>
 
-# Full manifest as JSON
+# Full run detail as JSON
 task-runner status <id> --output-format json
 
 # Just the fields you care about
@@ -626,8 +628,8 @@ Options:
 
 | Flag | Purpose |
 |---|---|
-| `--output-format <text|json>` | Default `text`. `json` prints the full manifest as JSON. |
-| `--field <name>` (repeatable) | When `--output-format json`, restrict output to these top-level manifest fields. |
+| `--output-format <text|json>` | Default `text`. `json` prints the full `RunDetail` JSON contract. |
+| `--field <name>` (repeatable) | When `--output-format json`, restrict output to these top-level `RunDetail` fields. |
 
 When the resolved manifest's status is `running`, `status` behaves by
 task mode:
@@ -763,7 +765,7 @@ task-runner init \
 # -> prints: task-runner: initialized agent=code-reviewer run=abc123
 
 # 2. External agent asks: "what's left to do?"
-task-runner status abc123 --output-format json --field finalTasks
+task-runner status abc123 --output-format json --field tasks
 
 # 3. External agent works a task and reports progress
 task-runner task set abc123 review_accessibility --status in_progress

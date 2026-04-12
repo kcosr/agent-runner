@@ -14,10 +14,16 @@ function isTaskStatus(s: string): s is TaskStatus {
   return VALID_TASK_STATUSES.has(s as TaskStatus);
 }
 
-export type RunStatus = "initialized" | "success" | "blocked" | "exhausted" | "aborted" | "error";
+export type RunCompletionStatus =
+  | "initialized"
+  | "success"
+  | "blocked"
+  | "exhausted"
+  | "aborted"
+  | "error";
 
-export interface RunSummary {
-  status: RunStatus;
+export interface RunCompletionSummary {
+  status: RunCompletionStatus;
   attempts: number;
   maxAttempts: number;
   tasksCompleted: number;
@@ -27,7 +33,7 @@ export interface RunSummary {
   runId: string;
 }
 
-export function renderSummary(summary: RunSummary): string {
+export function renderSummary(summary: RunCompletionSummary): string {
   const taskRunnerCmd = resolveTaskRunnerCommand();
   const lines: string[] = [];
   lines.push("");

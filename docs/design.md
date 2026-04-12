@@ -1651,7 +1651,7 @@ Subcommands:
 - **`status`** — read-only inspector. Resolves a run by short id or
   workspace path, parses the manifest, and prints either a
   human-readable status block (with task checklist and notes) or the
-  full manifest JSON. When the run's manifest status is `running`,
+  full `RunDetail` JSON contract. When the run's manifest status is `running`,
   status reads live task state according to `taskMode`: `file` mode
   overlays the workspace `assignment.md`, while `cli` mode reads
   canonical task state directly from `run.json.finalTasks`. If
@@ -1719,7 +1719,7 @@ existing run. It resolves the manifest the same way `--resume-run`
 does (current repo-name bucket under `${TASK_RUNNER_STATE_DIR}/runs/<repo-name>/` and then
 `runs/unknown/`, workspace dir, or direct
 `run.json` path) and prints either a human-readable summary or the
-manifest as JSON. It never invokes a backend, never writes to disk,
+shared `RunDetail` JSON contract. It never invokes a backend, never writes to disk,
 never touches state.
 
 - **Default (text)**: a status block with the run id, agent,
@@ -1729,12 +1729,12 @@ never touches state.
   shows `Archived: <timestamp>` and an unarchive hint. Trailing hint
   matches the run's status (resume command for terminal states,
   execute command for initialized runs).
-- **`--output-format json`**: prints the manifest verbatim as
-  pretty-printed JSON. Byte-identical to `cat run.json`.
+- **`--output-format json`**: prints the overlaid `RunDetail` DTO as
+  pretty-printed JSON.
 - **`--field <name>` (repeatable, json mode only)**: projects to
-  the named top-level manifest fields and prints just those as a
+  the named top-level `RunDetail` fields and prints just those as a
   JSON object. Unknown field names exit with code 3. Use this for
-  scripts that only care about, say, `status` and `tasksCompleted`.
+  scripts that only care about, say, `status`, `tasksCompleted`, and `tasks`.
 
 #### Live overlay during a `running` attempt
 
@@ -1956,11 +1956,10 @@ Rules for this seam:
   writes.
 - New machine-facing surfaces should prefer these DTOs over binding directly to
   raw manifest JSON unless a command explicitly documents manifest-shaped output.
-- In this slice, `list runs` and archive/unarchive service projections are wired
-  through the neutral contracts, while `status --output-format json` still
-  returns raw manifest JSON because bundled plan/review workflows consume
-  `finalTasks` directly. A later slice can move status JSON onto `RunDetail`
-  once those call sites are updated.
+- `list runs`, archive/unarchive, and `status --output-format json` are wired
+  through the neutral contracts. `status` emits `RunDetail`, and bundled
+  planner/reviewer workflows read `tasks[]` from that DTO instead of projecting
+  raw `finalTasks`.
 
 ## Output modes
 

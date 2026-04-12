@@ -161,6 +161,9 @@ test("renderRunStatus prints the persisted run summary", async () => {
   assert.match(text, /Agent: status-agent/);
   assert.match(text, /Backend: claude \(claude-sonnet-4-6\)/);
   assert.match(text, /Session name: status test/);
+  assert.match(text, new RegExp(`Workspace: ${outcome.workspaceDir}`));
+  assert.match(text, new RegExp(`Assignment file: ${outcome.assignmentPath}`));
+  assert.match(text, /Sessions: 1/);
   assert.match(text, /Tasks completed: 2\/2/);
   assert.match(text, /- t1 — First \[completed\]/);
   assert.match(text, /- t2 — Second \[completed\]/);
