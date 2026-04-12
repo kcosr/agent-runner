@@ -47,6 +47,7 @@ export function makeRuntimeRoots(prefix, options = {}) {
     env: {
       TASK_RUNNER_CONFIG_DIR: configDir,
       TASK_RUNNER_STATE_DIR: stateDir,
+      TASK_RUNNER_CMD: "task-runner",
     },
     cleanup,
   };
@@ -72,6 +73,7 @@ export function sharedRuntimeEnv(baseDir) {
   return {
     TASK_RUNNER_CONFIG_DIR: baseDir,
     TASK_RUNNER_STATE_DIR: baseDir,
+    TASK_RUNNER_CMD: "task-runner",
   };
 }
 

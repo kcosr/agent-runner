@@ -38,6 +38,7 @@ import {
   runAgent,
 } from "./runner/run-loop.js";
 import { loadWorkspaceTaskMap, persistWorkspaceTaskState } from "./runner/workspace-state.js";
+import { resolveTaskRunnerCommand } from "./task-runner-command.js";
 import { shortId } from "./util/short-id.js";
 
 const HELP = `Usage: task-runner <run|init|status|task|list|show> [options] [args]
@@ -327,10 +328,11 @@ async function main(): Promise<void> {
   // workspace and prints the bootstrap). `run` — fresh or resume — is
   // rejected with a clear pointer to the right commands.
   if (parsed.command === "run" && backendId === "passive") {
+    const taskRunnerCmd = resolveTaskRunnerCommand();
     const runId = resumeTarget?.manifest.runId;
     const hint = runId
-      ? `task-runner task set ${runId} <task-id> --status in_progress\n  task-runner status ${runId}`
-      : "task-runner init --agent <passive-agent> --assignment <...>\n  task-runner task set <run-id> <task-id> --status in_progress";
+      ? `${taskRunnerCmd} task set ${runId} <task-id> --status in_progress\n  ${taskRunnerCmd} status ${runId}`
+      : `${taskRunnerCmd} init --agent <passive-agent> --assignment <...>\n  ${taskRunnerCmd} task set <run-id> <task-id> --status in_progress`;
     process.stderr.write(
       `task-runner: cannot run passive agent "${loaded.config.name}" — passive agents are driven externally via task commands. Use:\n  ${hint}\n`,
     );
@@ -882,7 +884,7 @@ function runTaskSet(parsed: ParsedArgs): never {
     isTerminalNonPassiveRun(resolved.manifest)
   ) {
     process.stderr.write(
-      "task-runner: cannot change task status on a terminal non-passive run; use task-runner run --resume-run <id> with a follow-up message instead\n",
+      `task-runner: cannot change task status on a terminal non-passive run; use ${resolveTaskRunnerCommand()} run --resume-run <id> with a follow-up message instead\n`,
     );
     process.exit(3);
   }
@@ -944,7 +946,7 @@ function runTaskAdd(parsed: ParsedArgs): never {
 
   if (isTerminalNonPassiveRun(resolved.manifest)) {
     process.stderr.write(
-      'task-runner: cannot add tasks to a terminal non-passive run; use task-runner run --resume-run <id> --add-task "..." instead\n',
+      `task-runner: cannot add tasks to a terminal non-passive run; use ${resolveTaskRunnerCommand()} run --resume-run <id> --add-task "..." instead\n`,
     );
     process.exit(3);
   }

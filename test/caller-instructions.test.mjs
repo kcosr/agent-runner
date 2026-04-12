@@ -39,8 +39,9 @@ schemaVersion: 1
 name: caller-work
 callerInstructions: |
   Hello, caller. Your run id is {{run_id}} and you're working on
-  {{repo_path}}. Pass --output-format json to any status call to
-  get structured data back.
+  {{repo_path}}. Use {{task_runner_cmd}} status {{run_id}} to
+  inspect the run, and pass --output-format json for structured
+  data.
 vars:
   repo_path:
     type: string
@@ -405,6 +406,7 @@ test("status --output-format json includes callerInstructions", async () => {
   assert.ok(outcome.manifest.callerInstructions);
   assert.match(outcome.manifest.callerInstructions, /Hello, caller/);
   assert.match(outcome.manifest.callerInstructions, new RegExp(outcome.runId));
+  assert.match(outcome.manifest.callerInstructions, /task-runner status/);
 });
 
 test("status text output does NOT reprint callerInstructions", async () => {

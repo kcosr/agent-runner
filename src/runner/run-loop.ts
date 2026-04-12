@@ -8,6 +8,7 @@ import { interpolate } from "../config/interpolate.js";
 import type { LoadedAgent, LoadedAssignment } from "../config/loader.js";
 import { resolveRunWorkspaceDir } from "../config/runtime-paths.js";
 import type { LockableField, VarDef } from "../config/schema.js";
+import { resolveTaskRunnerCommand } from "../task-runner-command.js";
 import { shortId } from "../util/short-id.js";
 import { writeTextFileAtomic } from "../util/write-file-atomic.js";
 import {
@@ -611,6 +612,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     assignment_path: assignmentPath,
     run_id: runId,
     cwd,
+    task_runner_cmd: resolveTaskRunnerCommand(),
   };
 
   const priorHadTasks = Boolean(
@@ -876,7 +878,9 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     }
     stderr(`             cwd=${cwd}\n`);
     if (isPassive) {
-      stderr(`             drive with: task-runner task set ${runId} <task-id> ...\n`);
+      stderr(
+        `             drive with: ${resolveTaskRunnerCommand()} task set ${runId} <task-id> ...\n`,
+      );
       // The full bootstrap (composed pendingPrompt) goes to stdout so
       // callers can pipe or capture it cleanly — e.g.
       // `task-runner init --agent passive-example ... > /tmp/brief.txt`.
@@ -884,7 +888,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         stdout(`${initialPrompt}\n`);
       }
     } else {
-      stderr(`             resume with: task-runner run --resume-run ${runId}\n`);
+      stderr(`             resume with: ${resolveTaskRunnerCommand()} run --resume-run ${runId}\n`);
     }
     // Caller-instructions banner. Init is always a "first exposure"
     // moment, so we always print here if the assignment supplied the

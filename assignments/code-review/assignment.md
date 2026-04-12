@@ -58,7 +58,7 @@ callerInstructions: |
   format (`APPROVED for ship` or `BLOCKED — cannot approve`)
   so you can grep it directly:
 
-      task-runner status {{run_id}} --output-format json \
+      {{task_runner_cmd}} status {{run_id}} --output-format json \
         --field finalTasks | jq -r '.[] | select(.id=="t14_approval") | .notes'
 
   If this review was launched with `--var implementation_plan=<path>`
@@ -74,8 +74,8 @@ callerInstructions: |
 
   Pull the full review:
 
-      task-runner status {{run_id}}                         # human-readable
-      task-runner status {{run_id}} --output-format json    # machine-readable
+      {{task_runner_cmd}} status {{run_id}}                         # human-readable
+      {{task_runner_cmd}} status {{run_id}} --output-format json    # machine-readable
 
   Each finding in a task's notes block follows this format:
 
@@ -104,7 +104,7 @@ callerInstructions: |
   After implementing fixes, resume this same run with a follow-up
   message that tells the reviewer what you did:
 
-      task-runner run --resume-run {{run_id}} "<your follow-up>"
+      {{task_runner_cmd}} run --resume-run {{run_id}} "<your follow-up>"
 
   The follow-up message should cover, for each prior finding:
     - **resolved** — cite the file:line or commit of the fix so

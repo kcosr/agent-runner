@@ -18,7 +18,7 @@ callerInstructions: |
 
   ## Invoking the planner
 
-      task-runner run \
+      {{task_runner_cmd}} run \
         --agent <your-planner-agent> \
         --assignment plan-feature \
         --var repo_path=/abs/path/to/target/repo \
@@ -28,7 +28,7 @@ callerInstructions: |
   planner doesn't need special role instructions — the detail
   lives in this assignment's task bodies. It does need shell
   access (`unrestricted: true`) so it can run
-  `task-runner init` in `t08_init_run`.
+  `{{task_runner_cmd}} init` in `t08_init_run`.
 
   ## What the planner does
 
@@ -44,7 +44,7 @@ callerInstructions: |
        template's task list is a starting shape; the planner
        may add, remove, or rename tasks so long as the
        `lockedFields: [tasks]` line stays in the frontmatter.
-    3. Runs `task-runner init --assignment <draft-path>` to
+    3. Runs `{{task_runner_cmd}} init --assignment <draft-path>` to
        freeze the draft into a new run workspace. This creates
        a new run id — the implementer's run id — which the
        planner records in its handoff task's notes.
@@ -53,17 +53,17 @@ callerInstructions: |
 
   Pull the new run id from the `t09_handoff` task's notes block:
 
-      task-runner status {{run_id}}
-      task-runner status {{run_id}} --output-format json \
+      {{task_runner_cmd}} status {{run_id}}
+      {{task_runner_cmd}} status {{run_id}} --output-format json \
         --field finalTasks
 
   To execute the plan:
 
-      TASK_RUNNER_MAX_CALL_DEPTH=2 task-runner run \
+      TASK_RUNNER_MAX_CALL_DEPTH=2 {{task_runner_cmd}} run \
         --resume-run <new-run-id>
 
   The depth override is required because the generated plan
-  nests a `task-runner run` against the code-reviewer agent
+  nests a `{{task_runner_cmd}} run` against the code-reviewer agent
   inside its review task. Default depth is 1; the implementer
   runs at depth 1 and the reviewer at depth 2, so without the
   override the review invocation is rejected.
@@ -76,7 +76,7 @@ callerInstructions: |
   ## What happens to the draft file
 
   The draft under `${TASK_RUNNER_STATE_DIR}/drafts/<repo-key>/`
-  is **superseded** the moment `task-runner init` succeeds.
+  is **superseded** the moment `{{task_runner_cmd}} init` succeeds.
   From that point on, the canonical artifact is the workspace
   `assignment.md` inside the new run directory. Edits to the
   draft file after init have no effect on the run. To change
@@ -207,7 +207,7 @@ tasks:
       caller resumes with a follow-up message answering
       your questions:
 
-          task-runner run --resume-run {{run_id}} \
+          {{task_runner_cmd}} run --resume-run {{run_id}} \
             "answers: <your answers here>"
 
       On resume, the runner normalizes `blocked` back to
@@ -501,7 +501,7 @@ tasks:
           lines — their deliverable is the Notes block
           itself.
         - Keep a dedicated internal-review task that
-          launches `task-runner run --agent code-reviewer
+          launches `{{task_runner_cmd}} run --agent code-reviewer
           --assignment code-review --var
           implementation_plan={{assignment_path}} ...` so
           the reviewer sees the full plan context.
@@ -546,7 +546,7 @@ tasks:
 
       Also fill `<<PLACEHOLDER_PLANNING_RUN_ID>>` with this
       run's id ({{run_id}}) so the implementer can pull
-      additional planning context via `task-runner status`
+      additional planning context via `{{task_runner_cmd}} status`
       if needed.
 
       Validate frontmatter parses by eye before moving on:
@@ -556,9 +556,9 @@ tasks:
   - id: t08_init_run
     title: Initialize the plan run
     body: |
-      Run `task-runner init` against the draft from t07:
+      Run `{{task_runner_cmd}} init` against the draft from t07:
 
-          task-runner init \
+          {{task_runner_cmd}} init \
             --agent implementer \
             --assignment <draft-path-from-t07> \
             --var repo_path={{repo_path}}
@@ -599,7 +599,7 @@ tasks:
       **Delete the draft file after init succeeds.** Leaving
       it around is a UX footgun: a future reader might edit
       the draft and assume they changed the executable
-      plan. Once `task-runner status <new-run-id>` confirms
+      plan. Once `{{task_runner_cmd}} status <new-run-id>` confirms
       the workspace is healthy, `rm` the draft and note the
       deletion in this task's Notes. If you need the draft
       preserved for audit, rename it to
@@ -632,7 +632,7 @@ tasks:
           execute the plan, including the
           `TASK_RUNNER_MAX_CALL_DEPTH=2` export:
 
-              TASK_RUNNER_MAX_CALL_DEPTH=2 task-runner run \
+              TASK_RUNNER_MAX_CALL_DEPTH=2 {{task_runner_cmd}} run \
                 --resume-run <new-run-id>
 
         - **Open assumptions** from t02 that the caller
@@ -641,7 +641,7 @@ tasks:
           that deserve a pre-execution sanity check.
 
       Keep this block tight. The caller will read it via
-      `task-runner status {{run_id}}` and decide to
+      `{{task_runner_cmd}} status {{run_id}}` and decide to
       proceed, adjust the plan, or hand off to a different
       agent. If there is nothing to flag, say so plainly.
 ---
@@ -667,9 +667,9 @@ notes — vague plans produce vague execution.
 
 The generated plan will use task-runner's existing
 code-review assignment for its internal review step, invoked
-as a nested `task-runner run`. This means whoever executes
+as a nested `{{task_runner_cmd}} run`. This means whoever executes
 the plan must export `TASK_RUNNER_MAX_CALL_DEPTH=2` before
-calling `task-runner run --resume-run`. Surface this
+calling `{{task_runner_cmd}} run --resume-run`. Surface this
 requirement in the t09 handoff summary so the caller does not
 get bitten by it.
 

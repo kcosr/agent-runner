@@ -24,21 +24,21 @@ and is the source of truth for what's left to do.
 For each task in the list:
 
 1. Claim it:
-   \`task-runner task set {{run_id}} <task-id> --status in_progress\`
+   \`{{task_runner_cmd}} task set {{run_id}} <task-id> --status in_progress\`
 2. Do the work described in the task body.
 3. Report completion with your findings:
-   \`task-runner task set {{run_id}} <task-id> --status completed --notes "..."\`
+   \`{{task_runner_cmd}} task set {{run_id}} <task-id> --status completed --notes "..."\`
 
 If a task cannot be completed, mark it \`blocked\` instead and explain
 why in the notes — the run auto-finalizes to \`blocked\` status and
 exit code 2:
-   \`task-runner task set {{run_id}} <task-id> --status blocked --notes "..."\`
+   \`{{task_runner_cmd}} task set {{run_id}} <task-id> --status blocked --notes "..."\`
 
 Check remaining work at any time:
-   \`task-runner status {{run_id}}\`
+   \`{{task_runner_cmd}} status {{run_id}}\`
 
 To re-fetch these instructions later:
-   \`task-runner status {{run_id}} --output-format json --field pendingPrompt\`
+   \`{{task_runner_cmd}} status {{run_id}} --output-format json --field pendingPrompt\`
 
 When every task reaches a terminal status (\`completed\` / \`blocked\`),
 the run automatically transitions to \`success\` (if all completed) or

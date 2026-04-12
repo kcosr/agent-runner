@@ -313,7 +313,7 @@ model / sidecar driver never sees it.
 **Freeze and interpolation.** `callerInstructions` is read from
 `assignmentConfig.callerInstructions` at first write, interpolated
 against the same `injectedVars` as other body fields
-(`{{run_id}}`, `{{repo_path}}`, `{{assignment_path}}`, etc.), and
+(`{{run_id}}`, `{{repo_path}}`, `{{assignment_path}}`, `{{task_runner_cmd}}`, etc.), and
 frozen into `manifest.callerInstructions` as a top-level `string |
 null` field. Resume never re-reads the source assignment, so the
 frozen manifest value is the authoritative copy.
@@ -735,6 +735,7 @@ In addition to user-declared vars from the CLI/env, the runner provides:
 - `{{assignment_path}}` — absolute path to `assignment.md` for this run
 - `{{run_id}}` — the short ID for this run
 - `{{cwd}}` — resolved absolute working directory
+- `{{task_runner_cmd}}` — resolved CLI command name for user-facing workflow instructions
 
 ## Workspace layout
 
