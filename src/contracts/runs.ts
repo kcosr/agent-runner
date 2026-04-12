@@ -1,7 +1,7 @@
-import { normalizeTaskMode } from "../config/schema.js";
-import type { LockableField, TaskMode } from "../config/schema.js";
-import type { TaskSnapshot } from "../runner/manifest.js";
-import type { ListedRunManifest, ManifestStatus, RunManifest } from "../runner/manifest.js";
+import { normalizeTaskMode } from "../core/config/schema.js";
+import type { LockableField, TaskMode } from "../core/config/schema.js";
+import type { TaskSnapshot } from "../core/run/manifest.js";
+import type { ListedRunManifest, ManifestStatus, RunManifest } from "../core/run/manifest.js";
 
 // Transport-neutral run DTOs for later CLI/web/daemon surfaces.
 // RunManifest remains the internal canonical record; these helpers project

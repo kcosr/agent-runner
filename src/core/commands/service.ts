@@ -1,16 +1,14 @@
 import { readFileSync } from "node:fs";
-import { type TaskState, VALID_STATUSES, isValidStatus } from "../assignment/model.js";
-import { parseAssignment } from "../assignment/parser.js";
+import { type TaskState, VALID_STATUSES, isValidStatus } from "../../assignment/model.js";
+import { parseAssignment } from "../../assignment/parser.js";
 import {
   type DefinitionEntry,
   type DefinitionKind,
-  type LoadedAgent,
-  type LoadedAssignment,
   listAgents,
   listAssignments,
   loadAgentConfig,
   loadAssignmentConfig,
-} from "../config/loader.js";
+} from "../../config/loader.js";
 import {
   type RunArchiveResult,
   type RunDetail,
@@ -20,7 +18,10 @@ import {
   toRunArchiveResult,
   toRunDetail,
   toRunSummary,
-} from "../contracts/runs.js";
+} from "../../contracts/runs.js";
+import { resolveTaskRunnerCommand } from "../../task-runner-command.js";
+import { shortId } from "../../util/short-id.js";
+import type { LoadedAgent, LoadedAssignment } from "../config/loaded.js";
 import {
   type ManifestStatus,
   ResumeError,
@@ -30,17 +31,15 @@ import {
   resolveResumeTarget,
   workspaceAssignmentPath,
   writeManifest,
-} from "../runner/manifest.js";
-import { type LiveTaskOverlay, applyLiveOverlay } from "../runner/output.js";
+} from "../run/manifest.js";
+import { type LiveTaskOverlay, applyLiveOverlay } from "../run/status.js";
 import {
   loadWorkspaceTaskMap,
   persistWorkspaceTaskState,
   resetWorkspaceRun,
   taskModeFromManifest,
   withTaskStateLock,
-} from "../runner/workspace-state.js";
-import { resolveTaskRunnerCommand } from "../task-runner-command.js";
-import { shortId } from "../util/short-id.js";
+} from "../run/workspace-state.js";
 
 export type StatusCommandResult = RunDetail;
 
@@ -64,7 +63,7 @@ export interface RunResetResult {
 }
 
 export type RunListEntry = RunSummary;
-export type { RunArchiveResult } from "../contracts/runs.js";
+export type { RunArchiveResult } from "../../contracts/runs.js";
 
 export type RunListResult = RunListEntry[];
 

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { parseArgs } from "../dist/cli/parse-args.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
-import { LockedFieldError, runAgent } from "../dist/runner/run-loop.js";
+import { LockedFieldError, runAgent } from "../dist/core/run/run-loop.js";
 import { assignmentPathFromPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 const CLAUDE_AGENT = `---

@@ -3,10 +3,10 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { readStatus } from "../dist/commands/service.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
-import { ResumeError, resolveResumeTarget } from "../dist/runner/manifest.js";
-import { runAgent } from "../dist/runner/run-loop.js";
+import { readStatus } from "../dist/core/commands/service.js";
+import { ResumeError, resolveResumeTarget } from "../dist/core/run/manifest.js";
+import { runAgent } from "../dist/core/run/run-loop.js";
 import { createRunEventCapture } from "./helpers/run-events.mjs";
 import { assignmentPathFromPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 

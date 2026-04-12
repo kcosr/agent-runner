@@ -12,8 +12,8 @@ import {
   buildChildRecursionEnv,
   checkRecursionDepth,
   readRecursionState,
-} from "../dist/runner/recursion-guard.js";
-import { runAgent } from "../dist/runner/run-loop.js";
+} from "../dist/core/run/recursion-guard.js";
+import { runAgent } from "../dist/core/run/run-loop.js";
 import {
   assignmentPathFromPrompt,
   withEnv,

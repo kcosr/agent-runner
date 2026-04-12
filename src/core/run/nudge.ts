@@ -1,4 +1,8 @@
-import { type InvalidStatusReport, type TaskState, VALID_STATUSES } from "../assignment/model.js";
+import {
+  type InvalidStatusReport,
+  type TaskState,
+  VALID_STATUSES,
+} from "../../assignment/model.js";
 import type { TaskMode } from "../config/schema.js";
 
 export function buildNudgeMessage(

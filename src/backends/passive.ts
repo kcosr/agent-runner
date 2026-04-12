@@ -1,5 +1,5 @@
+import type { Backend, BackendInvokeResult } from "../core/backends/types.js";
 import { resolveTaskRunnerCommand } from "../task-runner-command.js";
-import type { Backend, BackendInvokeResult } from "./types.js";
 
 export class PassiveBackendNotInvokableError extends Error {
   constructor() {

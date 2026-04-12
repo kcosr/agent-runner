@@ -1,8 +1,6 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { runProcess } from "../util/spawn.js";
-import { streamBoundarySeparator } from "./codex.js";
 import type {
   Backend,
   BackendInvokeContext,
@@ -10,7 +8,9 @@ import type {
   EffortLevel,
   ValidateSessionContext,
   ValidateSessionResult,
-} from "./types.js";
+} from "../core/backends/types.js";
+import { runProcess } from "../util/spawn.js";
+import { streamBoundarySeparator } from "./codex.js";
 
 /**
  * Claude encodes the working directory of a session into the

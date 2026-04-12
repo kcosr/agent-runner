@@ -1,7 +1,7 @@
+import type { Backend } from "../core/backends/types.js";
 import { claudeBackend } from "./claude.js";
 import { codexBackend } from "./codex.js";
 import { passiveBackend } from "./passive.js";
-import type { Backend } from "./types.js";
 
 const BACKENDS: Record<string, Backend> = {
   claude: claudeBackend,

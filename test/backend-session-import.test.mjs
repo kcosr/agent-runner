@@ -5,8 +5,8 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { claudeSessionFilePath, encodeClaudeProjectDir } from "../dist/backends/claude.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
-import { resolveResumeTarget } from "../dist/runner/manifest.js";
-import { InvalidBackendSessionError, runAgent } from "../dist/runner/run-loop.js";
+import { resolveResumeTarget } from "../dist/core/run/manifest.js";
+import { InvalidBackendSessionError, runAgent } from "../dist/core/run/run-loop.js";
 import { assignmentPathFromPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 // ─── claude cwd-encoding helper ─────────────────────────────────────────────

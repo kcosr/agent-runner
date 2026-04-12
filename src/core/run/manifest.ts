@@ -1,6 +1,6 @@
 import { type Dirent, existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { InvalidStatusReport, TaskState, TaskStatus } from "../assignment/model.js";
+import type { InvalidStatusReport, TaskState, TaskStatus } from "../../assignment/model.js";
 import {
   isPathArg,
   resolveInputPath,
@@ -8,9 +8,9 @@ import {
   resolveRunsBucketDir,
   resolveRunsRoot,
   resolveUnknownRunsDir,
-} from "../config/runtime-paths.js";
+} from "../../config/runtime-paths.js";
+import { writeTextFileAtomic } from "../../util/write-file-atomic.js";
 import type { LockableField, TaskMode } from "../config/schema.js";
-import { writeTextFileAtomic } from "../util/write-file-atomic.js";
 
 export type ManifestStatus =
   | "initialized"

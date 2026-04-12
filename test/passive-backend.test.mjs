@@ -6,7 +6,7 @@ import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
 import { passiveBackend } from "../dist/backends/passive.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
-import { runAgent } from "../dist/runner/run-loop.js";
+import { runAgent } from "../dist/core/run/run-loop.js";
 import { sharedRuntimeEnv, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 const CLI_PATH = resolvePath(new URL("../dist/cli.js", import.meta.url).pathname);
