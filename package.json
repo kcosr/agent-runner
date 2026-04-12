@@ -21,7 +21,9 @@
     "task-runner": "node dist/cli.js"
   },
   "lint-staged": {
-    "!dist/**/*.{ts,tsx,js,jsx,mjs,cjs,json}": ["biome format --write --files-ignore-unknown=true"]
+    "!dist/**/*.{ts,tsx,js,jsx,mjs,cjs,json}": [
+      "biome format --write --files-ignore-unknown=true --no-errors-on-unmatched"
+    ]
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.0",
