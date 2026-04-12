@@ -34,6 +34,7 @@ export interface ParsedArgs {
   taskAppendText?: string;
   taskTitle?: string;
   taskBody?: string;
+  includeArchived?: boolean;
   showHelp: boolean;
 }
 
@@ -72,7 +73,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (next !== undefined && !next.startsWith("-")) {
       result.subcommand = args.shift();
     }
-  } else if (result.command === "run" && args[0] === "reset") {
+  } else if (
+    result.command === "run" &&
+    (args[0] === "reset" || args[0] === "archive" || args[0] === "unarchive")
+  ) {
     result.subcommand = args.shift();
   }
 
@@ -193,6 +197,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
         throw new Error(`--output-format must be one of: ${OUTPUT_FORMATS.join(", ")}`);
       }
       result.outputFormat = next as OutputFormat;
+    } else if (arg === "--include-archived") {
+      result.includeArchived = true;
     } else if (arg === "--") {
       positional.push(...args);
       break;

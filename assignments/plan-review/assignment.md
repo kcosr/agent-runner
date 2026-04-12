@@ -93,6 +93,12 @@ tasks:
         - required workflow tasks still present when applicable:
           orient, check gate, fresh-eyes pass, commit,
           internal review, docs drift, self-check, final_commit
+        - the scaffold/setup task explicitly requires the
+          implementer to confirm it is in a non-`main`
+          git worktree, confirm local `main` is already in
+          sync with `origin/main` without updating `main`
+          itself, and sync the current worktree to local
+          `main` before starting implementation
         - every code-bearing task has a concrete `**Done when:**`
           block with test-backed completion criteria
         - every task body has concrete file paths, commands, or
@@ -100,8 +106,9 @@ tasks:
         - no `<<PLACEHOLDER>>` markers remain anywhere in the draft
 
       A placeholder left in the draft, a code-bearing task with no
-      meaningful `Done when:`, or an id scheme that encodes array
-      position instead of meaning are all findings.
+      meaningful `Done when:`, a missing worktree/main-sync
+      preflight, or an id scheme that encodes array position
+      instead of meaning are all findings.
   - id: review_workflow_and_handoff
     title: Review workflow wiring and caller handoff
     body: |
@@ -118,7 +125,11 @@ tasks:
       In the planning workspace, verify:
         - the planner instructs the caller to run init manually
           instead of initializing the implementer run itself
-        - the init command hard-codes `--agent implementer`
+        - the init command hard-codes `--backend passive`
+        - the init command uses a placeholder worktree path
+          such as `--var repo_path=<worktree-dir>` rather than
+          a machine-specific absolute path from the planner's
+          environment
         - the handoff tells the caller how to run the resulting
           implementer run and where the new run id comes from
         - the draft-review loop itself is reflected accurately in

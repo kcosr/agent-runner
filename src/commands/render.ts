@@ -2,6 +2,8 @@ import { renderManifestStatus } from "../runner/output.js";
 import type {
   DefinitionDetailsResult,
   DefinitionListResult,
+  RunArchiveResult,
+  RunListResult,
   RunResetResult,
   StatusCommandResult,
   TaskDetailsResult,
@@ -68,6 +70,32 @@ export function renderDefinitionDetails(result: DefinitionDetailsResult): string
 
 export function renderRunReset(result: RunResetResult): string {
   return `task-runner: reset run ${result.manifest.runId} to initialized state\n`;
+}
+
+export function renderRunList(result: RunListResult): string {
+  if (result.runs.length === 0) {
+    return "No runs found.\n";
+  }
+  return `${result.runs
+    .map((run) => {
+      const archived = run.archivedAt !== null ? ` archived=${run.archivedAt}` : "";
+      return `${run.runId} [${run.status}] ${run.tasksCompleted}/${run.tasksTotal} repo=${run.repo} agent=${run.agentName} assignment=${run.assignmentName ?? "none"}${archived}`;
+    })
+    .join("\n")}\n`;
+}
+
+export function renderRunArchive(result: RunArchiveResult): string {
+  if (!result.changed) {
+    return `task-runner: run ${result.manifest.runId} is already archived\n`;
+  }
+  return `task-runner: archived run ${result.manifest.runId}\n`;
+}
+
+export function renderRunUnarchive(result: RunArchiveResult): string {
+  if (!result.changed) {
+    return `task-runner: run ${result.manifest.runId} is not archived\n`;
+  }
+  return `task-runner: unarchived run ${result.manifest.runId}\n`;
 }
 
 export function renderStatus(result: StatusCommandResult): string {

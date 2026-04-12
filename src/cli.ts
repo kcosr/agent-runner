@@ -5,7 +5,10 @@ import { renderRunEvent } from "./cli/render-run.js";
 import {
   renderDefinitionDetails,
   renderDefinitionList,
+  renderRunArchive,
+  renderRunList,
   renderRunReset,
+  renderRunUnarchive,
   renderStatus,
   renderTaskAdded,
   renderTaskDetails,
@@ -16,14 +19,17 @@ import {
   CommandError,
   addTask,
   appendTaskNotes,
+  archiveRun,
   isCommandError,
   listDefinitions,
+  listRuns,
   listTasks,
   readStatus,
   resetRun,
   setTask,
   showDefinition,
   showTask,
+  unarchiveRun,
 } from "./commands/service.js";
 import {
   AgentConfigError,
@@ -59,6 +65,11 @@ Commands:
   run reset <id|path>     Restore a non-running run to initialized state.
                           Rewrites run.json and assignment.md, clears old
                           execution history, and rejects in-flight runs.
+  run archive <id|path>   Mark a non-running run as archived. Archived
+                          runs stay visible via list/status but are
+                          rejected by --resume-run until unarchived.
+  run unarchive <id|path> Clear a run's archive marker so it can be
+                          resumed again.
   init                    Prepare a run without invoking the backend. Writes
                           the workspace, seeds assignment.md from tasks, and
                           stores a manifest with status=initialized and a
@@ -96,6 +107,10 @@ Commands:
                           config root (\${TASK_RUNNER_CONFIG_DIR},
                           XDG fallback, or ~/.config/task-runner).
                           Read-only.
+                          Supports --output-format json.
+  list runs               Enumerate known current-generation runs across
+                          all state-dir repo buckets. Archived runs are
+                          hidden unless --include-archived is supplied.
                           Supports --output-format json.
   show <agent|assignment> <name|path>
                           Print details of a specific definition.
@@ -196,6 +211,8 @@ Options:
   --field <name>          (status only, repeatable) When --output-format
                           is json, restrict output to these top-level
                           manifest fields.
+  --include-archived      (list runs only) Include archived runs in the
+                          listing. Archived rows include their timestamp.
   --help, -h              Print this message.
 
 Exit codes:
@@ -222,12 +239,25 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
+  if (parsed.includeArchived && !(parsed.command === "list" && parsed.subcommand === "runs")) {
+    process.stderr.write("task-runner: --include-archived is only valid with `list runs`\n");
+    process.exit(3);
+  }
+
   if (parsed.command === "status") {
     runStatus(parsed);
   }
 
-  if (parsed.command === "run" && parsed.subcommand === "reset") {
-    runResetCommand(parsed);
+  if (parsed.command === "run") {
+    if (parsed.subcommand === "reset") {
+      runResetCommand(parsed);
+    }
+    if (parsed.subcommand === "archive") {
+      runArchiveCommand(parsed);
+    }
+    if (parsed.subcommand === "unarchive") {
+      runUnarchiveCommand(parsed);
+    }
   }
 
   if (parsed.command === "task") {
@@ -474,6 +504,10 @@ async function main(): Promise<void> {
 //     everything; any subsequent change should be a fresh init.
 //     The only valid call is `task-runner run --resume-run <id>`.
 function validateResumeOverrides(manifest: RunManifest, parsed: ParsedArgs): string | null {
+  if (manifest.archivedAt !== null) {
+    return `cannot resume archived run ${manifest.runId} — unarchive it first with ${resolveTaskRunnerCommand()} run unarchive ${manifest.runId}`;
+  }
+
   const priorInitialized = manifest.status === "initialized";
 
   // Fields that are never valid with --resume-run regardless of
@@ -603,15 +637,49 @@ function runStatus(parsed: ParsedArgs): never {
 
 function runListCommand(parsed: ParsedArgs): never {
   const kindArg = parsed.subcommand;
-  if (kindArg !== "agents" && kindArg !== "assignments") {
+  if (kindArg !== "agents" && kindArg !== "assignments" && kindArg !== "runs") {
     process.stderr.write(
-      `task-runner: list requires a kind: agents or assignments${kindArg ? ` (got "${kindArg}")` : ""}\n`,
+      `task-runner: list requires a kind: agents, assignments, or runs${kindArg ? ` (got "${kindArg}")` : ""}\n`,
     );
-    process.stderr.write("Usage: task-runner list <agents|assignments> [--output-format json]\n");
+    process.stderr.write(
+      "Usage: task-runner list <agents|assignments|runs> [--include-archived] [--output-format json]\n",
+    );
     process.exit(3);
   }
 
   try {
+    if (kindArg === "runs") {
+      if (parsed.positionals.length > 0) {
+        process.stderr.write(
+          `task-runner: list runs takes no positional args; got "${parsed.positionals[0]}"\n`,
+        );
+        process.exit(3);
+      }
+      const unsupported = unsupportedFlagsForGroupedCommand(parsed, {
+        allowIncludeArchived: true,
+      });
+      if (unsupported.length > 0) {
+        process.stderr.write(
+          `task-runner: list runs only supports --include-archived and --output-format (got ${unsupported.join(", ")})\n`,
+        );
+        process.exit(3);
+      }
+      const result = listRuns({ includeArchived: parsed.includeArchived });
+      if (parsed.outputFormat === "json") {
+        writeJson(result.runs);
+      } else {
+        process.stdout.write(renderRunList(result));
+      }
+      process.exit(0);
+    }
+
+    const unsupported = unsupportedFlagsForGroupedCommand(parsed);
+    if (unsupported.length > 0) {
+      process.stderr.write(
+        `task-runner: list ${kindArg} only supports --output-format (got ${unsupported.join(", ")})\n`,
+      );
+      process.exit(3);
+    }
     const result = listDefinitions(kindArg === "agents" ? "agent" : "assignment");
     if (parsed.outputFormat === "json") {
       writeJson(result.entries);
@@ -662,6 +730,36 @@ function runShowCommand(parsed: ParsedArgs): never {
   }
 }
 
+function unsupportedFlagsForGroupedCommand(
+  parsed: ParsedArgs,
+  opts: { allowFields?: boolean; allowIncludeArchived?: boolean } = {},
+): string[] {
+  const unsupported: string[] = [];
+  if (parsed.agent !== undefined) unsupported.push("--agent");
+  if (parsed.assignment !== undefined) unsupported.push("--assignment");
+  if (parsed.resumeRun !== undefined) unsupported.push("--resume-run");
+  if (parsed.backendSessionId !== undefined) unsupported.push("--backend-session-id");
+  if (Object.keys(parsed.vars).length > 0) unsupported.push("--var");
+  if (parsed.cwd !== undefined) unsupported.push("--cwd");
+  if (parsed.backend !== undefined) unsupported.push("--backend");
+  if (parsed.model !== undefined) unsupported.push("--model");
+  if (parsed.effort !== undefined) unsupported.push("--effort");
+  if (parsed.taskMode !== undefined) unsupported.push("--task-mode");
+  if (parsed.timeoutSec !== undefined) unsupported.push("--timeout-sec");
+  if (parsed.unrestricted !== undefined) unsupported.push("--unrestricted");
+  if (parsed.maxRetries !== undefined) unsupported.push("--max-retries");
+  if (parsed.sessionName !== undefined) unsupported.push("--session-name");
+  if (!opts.allowFields && parsed.fields.length > 0) unsupported.push("--field");
+  if (parsed.taskStatus !== undefined) unsupported.push("--status");
+  if (parsed.taskNotes !== undefined) unsupported.push("--notes");
+  if (parsed.taskAppendText !== undefined) unsupported.push("--text");
+  if (parsed.taskTitle !== undefined) unsupported.push("--title");
+  if (parsed.taskBody !== undefined) unsupported.push("--body");
+  if (parsed.addedTasks.length > 0) unsupported.push("--add-task");
+  if (!opts.allowIncludeArchived && parsed.includeArchived) unsupported.push("--include-archived");
+  return unsupported;
+}
+
 function runTaskCommand(parsed: ParsedArgs): never {
   switch (parsed.subcommand) {
     case "list":
@@ -698,42 +796,21 @@ function runTaskCommand(parsed: ParsedArgs): never {
 function runResetCommand(parsed: ParsedArgs): never {
   const [runArg, extra] = parsed.positionals;
   if (!runArg) {
-    process.stderr.write("task-runner: run reset requires <run-id>\n");
-    process.stderr.write("Usage: task-runner run reset <run-id> [--output-format text|json]\n");
+    process.stderr.write("task-runner: run reset requires <id-or-path>\n");
+    process.stderr.write("Usage: task-runner run reset <id-or-path> [--output-format text|json]\n");
     process.exit(3);
   }
   if (extra !== undefined) {
     process.stderr.write(
-      `task-runner: run reset takes exactly one positional (<run-id>); got extra "${extra}"\n`,
+      `task-runner: run reset takes exactly one positional (<id-or-path>); got extra "${extra}"\n`,
     );
     process.exit(3);
   }
 
-  const unsupported: string[] = [];
-  if (parsed.agent !== undefined) unsupported.push("--agent");
-  if (parsed.assignment !== undefined) unsupported.push("--assignment");
-  if (parsed.resumeRun !== undefined) unsupported.push("--resume-run");
-  if (parsed.backendSessionId !== undefined) unsupported.push("--backend-session-id");
-  if (Object.keys(parsed.vars).length > 0) unsupported.push("--var");
-  if (parsed.cwd !== undefined) unsupported.push("--cwd");
-  if (parsed.backend !== undefined) unsupported.push("--backend");
-  if (parsed.model !== undefined) unsupported.push("--model");
-  if (parsed.effort !== undefined) unsupported.push("--effort");
-  if (parsed.taskMode !== undefined) unsupported.push("--task-mode");
-  if (parsed.timeoutSec !== undefined) unsupported.push("--timeout-sec");
-  if (parsed.unrestricted !== undefined) unsupported.push("--unrestricted");
-  if (parsed.maxRetries !== undefined) unsupported.push("--max-retries");
-  if (parsed.sessionName !== undefined) unsupported.push("--session-name");
-  if (parsed.fields.length > 0) unsupported.push("--field");
-  if (parsed.taskStatus !== undefined) unsupported.push("--status");
-  if (parsed.taskNotes !== undefined) unsupported.push("--notes");
-  if (parsed.taskAppendText !== undefined) unsupported.push("--text");
-  if (parsed.taskTitle !== undefined) unsupported.push("--title");
-  if (parsed.taskBody !== undefined) unsupported.push("--body");
-  if (parsed.addedTasks.length > 0) unsupported.push("--add-task");
+  const unsupported = unsupportedFlagsForGroupedCommand(parsed);
   if (unsupported.length > 0) {
     process.stderr.write(
-      `task-runner: run reset only supports <run-id> and --output-format (got ${unsupported.join(", ")})\n`,
+      `task-runner: run reset only supports <id-or-path> and --output-format (got ${unsupported.join(", ")})\n`,
     );
     process.exit(3);
   }
@@ -749,6 +826,71 @@ function runResetCommand(parsed: ParsedArgs): never {
   } catch (err) {
     exitCommandFailure(err);
   }
+}
+
+function runArchiveToggleCommand(
+  parsed: ParsedArgs,
+  opts: {
+    verb: "archive" | "unarchive";
+    action: (target: string) => ReturnType<typeof archiveRun>;
+    renderText: typeof renderRunArchive | typeof renderRunUnarchive;
+  },
+): never {
+  const [runArg, extra] = parsed.positionals;
+  if (!runArg) {
+    process.stderr.write(`task-runner: run ${opts.verb} requires <id-or-path>\n`);
+    process.stderr.write(
+      `Usage: task-runner run ${opts.verb} <id-or-path> [--output-format text|json]\n`,
+    );
+    process.exit(3);
+  }
+  if (extra !== undefined) {
+    process.stderr.write(
+      `task-runner: run ${opts.verb} takes exactly one positional (<id-or-path>); got extra "${extra}"\n`,
+    );
+    process.exit(3);
+  }
+
+  const unsupported = unsupportedFlagsForGroupedCommand(parsed);
+  if (unsupported.length > 0) {
+    process.stderr.write(
+      `task-runner: run ${opts.verb} only supports <id-or-path> and --output-format (got ${unsupported.join(", ")})\n`,
+    );
+    process.exit(3);
+  }
+
+  try {
+    const result = opts.action(runArg);
+    if (parsed.outputFormat === "json") {
+      writeJson({
+        runId: result.manifest.runId,
+        status: result.manifest.status,
+        archivedAt: result.manifest.archivedAt,
+        changed: result.changed,
+      });
+    } else {
+      process.stdout.write(opts.renderText(result));
+    }
+    process.exit(0);
+  } catch (err) {
+    exitCommandFailure(err);
+  }
+}
+
+function runArchiveCommand(parsed: ParsedArgs): never {
+  return runArchiveToggleCommand(parsed, {
+    verb: "archive",
+    action: archiveRun,
+    renderText: renderRunArchive,
+  });
+}
+
+function runUnarchiveCommand(parsed: ParsedArgs): never {
+  return runArchiveToggleCommand(parsed, {
+    verb: "unarchive",
+    action: unarchiveRun,
+    renderText: renderRunUnarchive,
+  });
 }
 
 function runTaskList(parsed: ParsedArgs): never {

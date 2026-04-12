@@ -909,6 +909,7 @@ interface RunManifest {
   runtimeVars: Record<string, unknown>;  // resolved vars used for this run
   startedAt: string;               // ISO-8601; session 0 start
   endedAt: string | null;          // latest session's end, null while running
+  archivedAt: string | null;       // orthogonal archive marker for run discovery / resume gating
   status: ManifestStatus;          // latest session's terminal state
   exitCode: number | null;         // latest session's exit code
   attempts: number;                // total across all sessions
@@ -977,6 +978,12 @@ interface AttemptRecord {
   invalidStatuses: { taskId: string; rawValue: string }[];
 }
 ```
+
+`archivedAt` is orthogonal to lifecycle `status`: it does not change a
+run from `success` to some new archive state. Instead it is a
+discovery/resume gate used by `task-runner list runs`, `run archive`,
+and `run unarchive`. Archived runs are hidden from default run
+listings and rejected by `--resume-run` until unarchived.
 
 **Transcript, not summary**: `AttemptRecord.transcript` carries the full
 assistant-side text across every turn in the attempt, in order — the same
@@ -1580,6 +1587,13 @@ task-runner <run|init>
 task-runner run reset <id|path>
                [--output-format <text|json>]
 
+# run archive / unarchive — toggle the archive marker on a non-running run
+task-runner run archive <id|path>
+               [--output-format <text|json>]
+
+task-runner run unarchive <id|path>
+               [--output-format <text|json>]
+
 # status — read-only inspector
 task-runner status <id|path>
                [--output-format <text|json>]
@@ -1595,9 +1609,10 @@ task-runner task add <id>
                --title <text>
                [--output-format <text|json>]
 
-# list — enumerate available definitions (read-only)
-task-runner list <agents|assignments>
+# list — enumerate available definitions or runs (read-only)
+task-runner list <agents|assignments|runs>
                [--output-format <text|json>]
+               [--include-archived]          (runs only)
 
 # show — print details of a specific definition (read-only)
 task-runner show <agent|assignment> <name|path>
@@ -1618,6 +1633,13 @@ Subcommands:
   Works for passive and non-passive runs. Text output is
   `task-runner: reset run <id> to initialized state`; JSON output is
   `{ "runId": "<id>", "status": "initialized" }`.
+- **`run archive` / `run unarchive`** — toggle `manifest.archivedAt`
+  on an existing non-running run. The archive flag is orthogonal to
+  lifecycle `status`: task state, `endedAt`, and attempt/session
+  history remain untouched. `run archive` stamps the current
+  ISO-8601 time when first archiving; `run unarchive` clears the
+  field. Both commands are idempotent and expose a `changed` boolean
+  in JSON mode.
 - **`init`** — prepare a run without invoking the backend. Resolves
   agent + assignment, composes the full fresh-run prompt, writes the
   workspace (`assignment.md` with task fences, `run.json` with
@@ -1632,7 +1654,9 @@ Subcommands:
   full manifest JSON. When the run's manifest status is `running`,
   status reads live task state according to `taskMode`: `file` mode
   overlays the workspace `assignment.md`, while `cli` mode reads
-  canonical task state directly from `run.json.finalTasks`.
+  canonical task state directly from `run.json.finalTasks`. If
+  `manifest.archivedAt` is non-null, text output also prints the
+  archive timestamp and an unarchive hint.
 - **`task list`** / **`task show`** — read-only task inspectors for an
   existing run. Both read canonical task state from
   `run.json.finalTasks` and never invoke a backend.
@@ -1646,10 +1670,15 @@ Subcommands:
   allows `task set` and `task append-notes`, but `task add` remains
   rejected in v1. `task add` respects the `tasks` locked field via the
   same `checkLockedFields` path used by `--add-task` on fresh runs.
-- **`list`** — enumerate available definitions from local
+- **`list`** — enumerate either available definitions from local
   config-root locations (`${TASK_RUNNER_CONFIG_DIR}/agents/` and
-  `${TASK_RUNNER_CONFIG_DIR}/assignments/`). Strictly read-only —
-  creates no workspace or manifest artifacts.
+  `${TASK_RUNNER_CONFIG_DIR}/assignments/`) or known runs from
+  `${TASK_RUNNER_STATE_DIR}/runs/*/*/run.json`. `list runs` only
+  returns current-generation manifests whose `workspaceDir` and
+  `assignmentPath` still match the containing workspace, hides
+  archived runs by default, and accepts `--include-archived` to show
+  them. Strictly read-only — creates no workspace or manifest
+  artifacts.
 - **`show`** — print details of a named or path-specified definition.
   Loads and validates the frontmatter (same code path as `--agent` /
   `--assignment` on a fresh run) and prints config fields plus the
@@ -1696,9 +1725,10 @@ never touches state.
 - **Default (text)**: a status block with the run id, agent,
   assignment, backend/model, sessionName, cwd, workspace path,
   start/end timestamps, attempt counts, and the per-task checklist
-  with statuses and notes. Trailing hint matches the run's status
-  (resume command for terminal states, execute command for
-  initialized runs).
+  with statuses and notes. If the run is archived, the block also
+  shows `Archived: <timestamp>` and an unarchive hint. Trailing hint
+  matches the run's status (resume command for terminal states,
+  execute command for initialized runs).
 - **`--output-format json`**: prints the manifest verbatim as
   pretty-printed JSON. Byte-identical to `cat run.json`.
 - **`--field <name>` (repeatable, json mode only)**: projects to
@@ -1825,6 +1855,11 @@ backend is `passive`. Execute-after-init does not apply. The stored
 `pendingPrompt` persists for the lifetime of the run as a
 re-orientation payload for the external driver, accessible via
 `task-runner status <id> --output-format json --field pendingPrompt`.
+
+**Archived-run gate**: if `manifest.archivedAt !== null`,
+`task-runner run --resume-run <id|path>` is rejected with exit code 3
+before any backend work starts. The caller must clear the archive
+marker first with `task-runner run unarchive <id|path>`.
 
 **Passive auto-finalization**: for a passive run, every successful
 `task set` / `task add` re-derives `manifest.status` from the task

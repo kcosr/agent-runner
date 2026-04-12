@@ -510,6 +510,11 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   if (isInitialize && resume) {
     throw new ResumeError("--init cannot be combined with --resume-run");
   }
+  if (resume && resume.manifest.archivedAt !== null) {
+    throw new ResumeError(
+      `cannot resume archived run ${resume.manifest.runId} — unarchive it first with ${resolveTaskRunnerCommand()} run unarchive ${resume.manifest.runId}`,
+    );
+  }
 
   // Resume override policy. The CLI also enforces most of these
   // earlier (with flag-level error messages), but these checks are
@@ -908,6 +913,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       taskMode,
       startedAt: now,
       endedAt: null,
+      archivedAt: null,
       status: isInitialize ? "initialized" : "running",
       exitCode: null,
       attempts: 0,

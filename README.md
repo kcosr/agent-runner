@@ -31,6 +31,7 @@ the work, and writes a single canonical record per run.
 - [Commands](#commands)
   - [`task-runner run`](#task-runner-run)
   - [`task-runner init`](#task-runner-init)
+  - [`task-runner run reset / archive / unarchive`](#task-runner-run-reset--archive--unarchive)
   - [`task-runner status`](#task-runner-status)
   - [`task-runner task` commands](#task-runner-task-commands)
   - [`task-runner list`](#task-runner-list)
@@ -103,6 +104,11 @@ chat output.
   manifest and (for in-flight runs) overlays the live workspace
   `assignment.md` so you can see mid-attempt progress without
   attaching to anything.
+- **Run discovery and archiving**: `task-runner list runs` enumerates
+  current-generation run manifests across the state root, `run
+  archive` / `run unarchive` toggle a run-level archive marker, and
+  archived runs are hidden from default listings and rejected by
+  `--resume-run` until unarchived.
 - **Sidecar task mutation**: `task-runner task set` / `task add` let
   an external agent or script drive a run's task list through the CLI
   without task-runner ever invoking a backend. Pair with the
@@ -478,7 +484,7 @@ Common options:
 |---|---|
 | `--agent <name\|path>` | Agent name or direct path. **Optional on fresh runs** — when omitted, task-runner synthesizes an ad-hoc agent from CLI overrides (in that case `--backend` is required). **Forbidden with `--resume-run`** — the agent is reconstructed from the frozen manifest, not re-read from disk. |
 | `--assignment <name\|path>` | Assignment name or direct path. Optional on fresh runs. Forbidden on resume. |
-| `--resume-run <id\|path>` | Continue an existing run by short id, workspace path, or direct `run.json` path. See [Resuming, aborting, importing](#resuming-aborting-importing) for the full resume-override policy. |
+| `--resume-run <id\|path>` | Continue an existing run by short id, workspace path, or direct `run.json` path. Archived runs must be unarchived first. See [Resuming, aborting, importing](#resuming-aborting-importing) for the full resume-override policy. |
 | `--var key=value` (repeatable) | Set an input variable. Validated against the assignment's `vars` schema. **Forbidden with `--resume-run`** — vars are resolved once at first write and frozen into the manifest; they aren't re-resolved on resume. |
 | `--add-task "<title>"` (repeatable) | Append an ad-hoc task with auto-generated id `cli-<short>`. |
 | `--cwd <path>` | Override the agent's `cwd`. **Forbidden with `--resume-run`** — backend sessions are bound to their creation cwd, so a new cwd would invalidate the captured session id. Create a fresh run if you need a different cwd. |
@@ -523,7 +529,7 @@ Useful when an outer process wants a resumable handle before
 committing to execution, or wants to inspect the prepared workspace
 before kicking off the actual work.
 
-### `task-runner run reset`
+### `task-runner run reset / archive / unarchive`
 
 Restore an existing non-running run to the same initialized state it
 had immediately after `task-runner init` or first-write on a fresh
@@ -560,6 +566,44 @@ task-runner: reset run abc123 to initialized state
 }
 ```
 
+Archive toggles are orthogonal to `status`: they keep the run's
+current lifecycle state but add or clear `manifest.archivedAt`. By
+default `task-runner list runs` hides archived runs, and
+`task-runner run --resume-run <id>` rejects them until unarchived.
+
+```bash
+task-runner run archive <run-id>
+task-runner run archive <run-id> --output-format json
+
+task-runner run unarchive <run-id>
+task-runner run unarchive <run-id> --output-format json
+```
+
+Archive semantics:
+
+- Allowed for any non-running run.
+- Rejected while `status=running`.
+- Idempotent: archiving an already archived run and unarchiving an
+  unarchived run both succeed with `changed: false` in JSON mode.
+- `status`, `endedAt`, task state, and attempt/session history are
+  preserved; only `archivedAt` changes.
+
+Success output:
+
+```text
+task-runner: archived run abc123
+task-runner: unarchived run abc123
+```
+
+```json
+{
+  "runId": "abc123",
+  "status": "success",
+  "archivedAt": "2026-04-12T18:41:00.000Z",
+  "changed": true
+}
+```
+
 ### `task-runner status`
 
 Read-only inspector. Resolves a run by short id (looked up in the
@@ -593,6 +637,10 @@ task mode:
 - `taskMode=cli`: read canonical task state directly from
   `run.json.finalTasks`. `assignment.md` is render-only in this mode,
   so there is no live file overlay.
+
+When `manifest.archivedAt` is non-null, text output includes the
+archive timestamp plus an unarchive hint, and JSON output exposes the
+same top-level `archivedAt` field.
 
 ### `taskMode: file` vs `taskMode: cli`
 
@@ -742,11 +790,11 @@ below for the full lifecycle.
 
 ### `task-runner list`
 
-Enumerate available agent or assignment definitions. Discovers named
-definitions from `${TASK_RUNNER_CONFIG_DIR}/agents/` or
-`${TASK_RUNNER_CONFIG_DIR}/assignments/` only. Direct path arguments
-remain available for `show`, but `list` itself is config-root only.
-Read-only — touches no state.
+Enumerate available agent or assignment definitions, or known runs.
+Definition discovery is config-root only; run discovery scans
+`${TASK_RUNNER_STATE_DIR}/runs/*/*/run.json` and returns
+current-generation manifests whose recorded workspace paths still
+match the containing directory. `list` is read-only in all modes.
 
 ```bash
 # List all agents
@@ -754,13 +802,20 @@ task-runner list agents
 
 # List all assignments (JSON output)
 task-runner list assignments --output-format json
+
+# List non-archived runs
+task-runner list runs
+
+# Include archived runs in the inventory
+task-runner list runs --include-archived --output-format json
 ```
 
 Options:
 
 | Flag | Purpose |
 |---|---|
-| `--output-format <text\|json>` | Default `text`. `json` returns an array of `{ name, path, root }` objects. |
+| `--output-format <text\|json>` | Default `text`. Definition JSON returns `{ name, path, root }[]`; run JSON returns `RunListEntry[]` including `runId`, `status`, `archivedAt`, repo/agent/assignment names, cwd, timestamps, and task counts. |
+| `--include-archived` | `list runs` only. Include runs whose `archivedAt` is non-null. |
 
 ### `task-runner show`
 

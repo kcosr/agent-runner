@@ -7,12 +7,15 @@ import {
   CommandError,
   addTask,
   appendTaskNotes,
+  archiveRun,
   listDefinitions,
+  listRuns,
   listTasks,
   readStatus,
   setTask,
   showDefinition,
   showTask,
+  unarchiveRun,
 } from "../dist/commands/service.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
 import { runAgent } from "../dist/runner/run-loop.js";
@@ -235,6 +238,93 @@ test("command services: locked task lists reject addTask with CommandError", asy
       () => addTask(outcome.runId, { title: "Blocked by lock" }),
       (err) =>
         err instanceof CommandError && /the `tasks` field is locked for this run/.test(err.message),
+    );
+  });
+});
+
+test("command services: listRuns returns newest-first rows and filters archived unless requested", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const first = await initRun(dir);
+  const second = await initRun(dir);
+
+  patchManifest(first.workspaceDir, (manifest) => {
+    manifest.startedAt = "2026-04-12T10:00:00.000Z";
+    manifest.archivedAt = "2026-04-12T12:00:00.000Z";
+  });
+  patchManifest(second.workspaceDir, (manifest) => {
+    manifest.startedAt = "2026-04-12T11:00:00.000Z";
+  });
+
+  const otherWorkspaceDir = join(dir, "runs", "other-repo", "oth123");
+  mkdirSync(otherWorkspaceDir, { recursive: true });
+  const otherManifest = readManifest(second.workspaceDir);
+  otherManifest.runId = "oth123";
+  otherManifest.workspaceDir = otherWorkspaceDir;
+  otherManifest.assignmentPath = join(otherWorkspaceDir, "assignment.md");
+  otherManifest.startedAt = "2026-04-12T09:00:00.000Z";
+  otherManifest.archivedAt = null;
+  writeFileSync(join(otherWorkspaceDir, "run.json"), `${JSON.stringify(otherManifest, null, 2)}\n`);
+  writeFileSync(otherManifest.assignmentPath, "# Assignment\n");
+
+  mkdirSync(join(dir, "runs", "broken-repo", "bad999"), { recursive: true });
+  writeFileSync(join(dir, "runs", "broken-repo", "bad999", "run.json"), "{not json\n");
+
+  await withSharedRuntimeEnv(dir, async () => {
+    const visible = listRuns();
+    assert.deepEqual(
+      visible.runs.map((run) => run.runId),
+      [second.runId, "oth123"],
+    );
+    assert.equal(visible.runs[0].repo, "unknown");
+    assert.equal(visible.runs[1].repo, "other-repo");
+
+    const allRuns = listRuns({ includeArchived: true });
+    assert.deepEqual(
+      allRuns.runs.map((run) => run.runId),
+      [second.runId, first.runId, "oth123"],
+    );
+    assert.equal(allRuns.runs[1].archivedAt, "2026-04-12T12:00:00.000Z");
+  });
+});
+
+test("command services: archiveRun and unarchiveRun are idempotent and reject running runs", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+
+  await withSharedRuntimeEnv(dir, async () => {
+    const archived = archiveRun(outcome.runId);
+    assert.equal(archived.changed, true);
+    assert.ok(archived.manifest.archivedAt);
+
+    const archivedAgain = archiveRun(outcome.runId);
+    assert.equal(archivedAgain.changed, false);
+    assert.equal(archivedAgain.manifest.archivedAt, archived.manifest.archivedAt);
+
+    const unarchived = unarchiveRun(outcome.runId);
+    assert.equal(unarchived.changed, true);
+    assert.equal(unarchived.manifest.archivedAt, null);
+
+    const unarchivedAgain = unarchiveRun(outcome.runId);
+    assert.equal(unarchivedAgain.changed, false);
+    assert.equal(unarchivedAgain.manifest.archivedAt, null);
+  });
+
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.status = "running";
+    manifest.exitCode = null;
+    manifest.endedAt = null;
+  });
+
+  await withSharedRuntimeEnv(dir, async () => {
+    assert.throws(
+      () => archiveRun(outcome.runId),
+      (err) => err instanceof CommandError && /cannot archive a running run/.test(err.message),
+    );
+    assert.throws(
+      () => unarchiveRun(outcome.runId),
+      (err) => err instanceof CommandError && /cannot unarchive a running run/.test(err.message),
     );
   });
 });

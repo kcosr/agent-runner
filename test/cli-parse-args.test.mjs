@@ -108,6 +108,14 @@ test("parseArgs: list with --output-format json", () => {
   assert.equal(parsed.outputFormat, "json");
 });
 
+test("parseArgs: list runs captures --include-archived", () => {
+  const parsed = parseArgs(argv("list", "runs", "--include-archived", "--output-format", "json"));
+  assert.equal(parsed.command, "list");
+  assert.equal(parsed.subcommand, "runs");
+  assert.equal(parsed.includeArchived, true);
+  assert.equal(parsed.outputFormat, "json");
+});
+
 test("parseArgs: list with no kind still parses (validation in handler)", () => {
   const parsed = parseArgs(argv("list"));
   assert.equal(parsed.command, "list");
@@ -188,6 +196,21 @@ test("parseArgs: run reset parses as a grouped run subcommand", () => {
   assert.equal(parsed.subcommand, "reset");
   assert.deepEqual(parsed.positionals, ["abc123"]);
   assert.equal(parsed.outputFormat, "json");
+});
+
+test("parseArgs: run archive parses as a grouped run subcommand", () => {
+  const parsed = parseArgs(argv("run", "archive", "abc123", "--output-format", "json"));
+  assert.equal(parsed.command, "run");
+  assert.equal(parsed.subcommand, "archive");
+  assert.deepEqual(parsed.positionals, ["abc123"]);
+  assert.equal(parsed.outputFormat, "json");
+});
+
+test("parseArgs: run unarchive parses as a grouped run subcommand", () => {
+  const parsed = parseArgs(argv("run", "unarchive", "abc123"));
+  assert.equal(parsed.command, "run");
+  assert.equal(parsed.subcommand, "unarchive");
+  assert.deepEqual(parsed.positionals, ["abc123"]);
 });
 
 test("overridesFromParsedArgs: all other overrides plumbed through", () => {

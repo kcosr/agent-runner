@@ -242,6 +242,41 @@ test("resume: attempt numbers are monotonic across sessions", async () => {
   assert.equal(log4.stdout, "done raw");
 });
 
+test("resume: archived runs are rejected until unarchived", async () => {
+  const dir = tempDir();
+  writeAgentAndAssignment(dir);
+
+  const first = await runIn(dir, {
+    backend: mockBackend(async () => ({
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      sessionId: "sess-archived",
+      transcript: "done",
+      rawStdout: "",
+      rawStderr: "",
+    })),
+  });
+
+  const manifestPath = join(first.workspaceDir, "run.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  manifest.archivedAt = "2026-04-12T18:00:00.000Z";
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+  const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.runId, dir));
+  await assert.rejects(
+    () =>
+      runIn(dir, {
+        backend: mockBackend(async () => {
+          throw new Error("backend should not be invoked for archived resumes");
+        }),
+        overrides: { message: "continue" },
+        resume: target,
+      }),
+    (err) => err instanceof ResumeError && /cannot resume archived run/.test(err.message),
+  );
+});
+
 test("resume: non-completed tasks normalized to pending, notes preserved", async () => {
   const dir = tempDir();
   writeAgentAndAssignment(dir);

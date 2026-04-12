@@ -102,15 +102,19 @@ export function resolveRunsRoot(env: NodeJS.ProcessEnv = process.env): string {
   return join(resolveTaskRunnerStateDir(env), "runs");
 }
 
+export function resolveRunsBucketDir(bucket: string, env: NodeJS.ProcessEnv = process.env): string {
+  return join(resolveRunsRoot(env), bucket);
+}
+
 export function resolveRepoRunsDir(
   cwd: string = process.cwd(),
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  return join(resolveRunsRoot(env), deriveRepoKey(cwd));
+  return resolveRunsBucketDir(deriveRepoKey(cwd), env);
 }
 
 export function resolveUnknownRunsDir(env: NodeJS.ProcessEnv = process.env): string {
-  return join(resolveRunsRoot(env), UNKNOWN_REPO_KEY);
+  return resolveRunsBucketDir(UNKNOWN_REPO_KEY, env);
 }
 
 export function resolveRunWorkspaceDir(

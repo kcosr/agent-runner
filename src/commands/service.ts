@@ -12,12 +12,15 @@ import {
   loadAssignmentConfig,
 } from "../config/loader.js";
 import {
+  type ListedRunManifest,
   type ManifestStatus,
   ResumeError,
   type RunManifest,
   type TaskSnapshot,
+  listRunManifests,
   resolveResumeTarget,
   workspaceAssignmentPath,
+  writeManifest,
 } from "../runner/manifest.js";
 import { type LiveTaskOverlay, applyLiveOverlay } from "../runner/output.js";
 import {
@@ -54,6 +57,27 @@ export interface RunResetResult {
   manifest: RunManifest;
 }
 
+export interface RunListEntry {
+  runId: string;
+  repo: string;
+  status: ManifestStatus;
+  archivedAt: string | null;
+  agentName: string;
+  assignmentName: string | null;
+  backend: string;
+  model: string | null;
+  sessionName: string | null;
+  cwd: string;
+  startedAt: string;
+  endedAt: string | null;
+  tasksCompleted: number;
+  tasksTotal: number;
+}
+
+export interface RunListResult {
+  runs: RunListEntry[];
+}
+
 export interface TaskListResult {
   manifest: RunManifest;
   tasks: TaskSnapshot[];
@@ -67,6 +91,11 @@ export interface TaskDetailsResult {
 export interface TaskMutationResult {
   manifest: RunManifest;
   task: TaskSnapshot;
+}
+
+export interface RunArchiveResult {
+  manifest: RunManifest;
+  changed: boolean;
 }
 
 export class CommandError extends Error {
@@ -99,6 +128,12 @@ const MAX_TITLE_LENGTH = 200;
 
 function resolveRun(target: string): ReturnType<typeof resolveResumeTarget> {
   return resolveResumeTarget(target);
+}
+
+function requireArchivableRun(manifest: RunManifest, verb: "archive" | "unarchive"): void {
+  if (manifest.status === "running") {
+    throw new CommandError(`cannot ${verb} a running run`);
+  }
 }
 
 function refreshRunSnapshotAfterTaskStateSettles(
@@ -265,6 +300,34 @@ export function listDefinitions(kind: DefinitionKind): DefinitionListResult {
   };
 }
 
+function runListEntryFromManifest(entry: ListedRunManifest): RunListEntry {
+  return {
+    runId: entry.manifest.runId,
+    repo: entry.repo,
+    status: entry.manifest.status,
+    archivedAt: entry.manifest.archivedAt,
+    agentName: entry.manifest.agent.name,
+    assignmentName: entry.manifest.assignment?.name ?? null,
+    backend: entry.manifest.backend,
+    model: entry.manifest.model,
+    sessionName: entry.manifest.sessionName,
+    cwd: entry.manifest.cwd,
+    startedAt: entry.manifest.startedAt,
+    endedAt: entry.manifest.endedAt,
+    tasksCompleted: entry.manifest.tasksCompleted,
+    tasksTotal: entry.manifest.tasksTotal,
+  };
+}
+
+export function listRuns(opts: { includeArchived?: boolean } = {}): RunListResult {
+  const includeArchived = opts.includeArchived === true;
+  const runs = listRunManifests()
+    .map(runListEntryFromManifest)
+    .filter((entry) => includeArchived || entry.archivedAt === null)
+    .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  return { runs };
+}
+
 export function showDefinition(kind: DefinitionKind, target: string): DefinitionDetailsResult {
   if (kind === "agent") {
     return {
@@ -288,6 +351,46 @@ export function resetRun(target: string): RunResetResult {
   return {
     manifest: resetWorkspaceRun(resolved.workspaceDir),
   };
+}
+
+function setRunArchived(target: string, archived: boolean): RunArchiveResult {
+  const resolved = resolveRun(target);
+  let changed = false;
+
+  withTaskStateLock(resolved.workspaceDir, () => {
+    resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
+    requireArchivableRun(resolved.manifest, archived ? "archive" : "unarchive");
+
+    const alreadyArchived = resolved.manifest.archivedAt !== null;
+    if (archived) {
+      if (alreadyArchived) {
+        return;
+      }
+      resolved.manifest.archivedAt = new Date().toISOString();
+      changed = true;
+    } else {
+      if (!alreadyArchived) {
+        return;
+      }
+      resolved.manifest.archivedAt = null;
+      changed = true;
+    }
+
+    writeManifest(resolved.workspaceDir, resolved.manifest);
+  });
+
+  return {
+    manifest: resolved.manifest,
+    changed,
+  };
+}
+
+export function archiveRun(target: string): RunArchiveResult {
+  return setRunArchived(target, true);
+}
+
+export function unarchiveRun(target: string): RunArchiveResult {
+  return setRunArchived(target, false);
 }
 
 export function listTasks(target: string): TaskListResult {

@@ -700,35 +700,21 @@ tasks:
       `draft_plan`:
 
           {{task_runner_cmd}} init \
-            --agent implementer \
+            --backend passive \
             --assignment <draft-path-from-draft_plan> \
-            --var repo_path={{repo_path}}
+            --var repo_path=<worktree-dir>
 
-      **Always use `--agent implementer`.** This is the
-      bundled agent dedicated to plan execution — it is
-      tuned to follow existing conventions, cite file paths,
-      and capture concrete evidence in task Notes for the
-      reviewer to consume. Do not substitute your own
-      judgment on agent selection:
+      **Always use `--backend passive`.** The planner's job is
+      to hand back an approved draft and create the run
+      workspace without freezing a specific implementer
+      agent into the manifest. The caller will resume the
+      run with whatever execution agent they want later.
 
-        - Do **not** use `code-reviewer`. It is explicitly
-          instructed to read-only review work and will
-          refuse to edit files. Using it as the implementer
-          is the most common bad outcome of a free-form
-          "pick an agent" instruction.
-        - Do **not** reuse an ad-hoc agent configuration
-          from your own planning invocation. The planner
-          and the implementer have different jobs; the
-          planner should not be leaking its own backend,
-          model, or role into the frozen implementer
-          manifest.
-        - Do **not** accept an agent override from the
-          feature brief. The caller should not specify an
-          agent in the brief, and even if they do,
-          `implementer` still wins at init time. The caller
-          can override the agent on a later resume if they
-          genuinely need to, but init's default must be
-          stable and unambiguous.
+      **Always use `--var repo_path=<worktree-dir>`.** Do not
+      paste a machine-specific absolute path from your own
+      environment into the handoff command. The caller
+      should substitute the actual feature worktree path
+      when they run init.
 
       Capture the full command in this task's Notes exactly as
       the caller should paste it. Do **not** run it yourself.
