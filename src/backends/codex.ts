@@ -143,9 +143,22 @@ interface Transport {
 // Stdio transport — spawns `codex app-server --listen stdio://`
 // ─────────────────────────────────────────────────────────────────────────────
 
-function openStdioTransport(cwd: string, env: Record<string, string>): Transport {
+export function buildCodexAppServerArgs(unrestricted: boolean): string[] {
+  const args: string[] = [];
+  if (unrestricted) {
+    args.push("--dangerously-bypass-approvals-and-sandbox");
+  }
+  args.push("app-server");
+  return args;
+}
+
+function openStdioTransport(
+  cwd: string,
+  env: Record<string, string>,
+  unrestricted: boolean,
+): Transport {
   const binary = process.env.TASK_RUNNER_CODEX_BIN ?? "codex";
-  const child: ChildProcess = spawn(binary, ["app-server"], {
+  const child: ChildProcess = spawn(binary, buildCodexAppServerArgs(unrestricted), {
     cwd,
     env,
     stdio: ["pipe", "pipe", "pipe"],
@@ -611,10 +624,10 @@ async function openTransport(ctx: BackendInvokeContext): Promise<Transport> {
   if (wsUrl && wsUrl.length > 0) {
     return openWsTransport(wsUrl);
   }
-  return openStdioTransport(ctx.cwd, ctx.env);
+  return openStdioTransport(ctx.cwd, ctx.env, ctx.unrestricted ?? false);
 }
 
-function buildThreadParams(
+export function buildCodexThreadParams(
   ctx: BackendInvokeContext,
   extra: Record<string, unknown> = {},
 ): Record<string, unknown> {
@@ -633,8 +646,25 @@ function buildThreadParams(
   }
   if (ctx.unrestricted) {
     params.approvalPolicy = "never";
+    params.sandbox = "danger-full-access";
   }
   return params;
+}
+
+export function buildCodexTurnStartPayload(
+  threadId: string,
+  prompt: string,
+  unrestricted: boolean,
+): Record<string, unknown> {
+  const payload: Record<string, unknown> = {
+    threadId,
+    input: [{ type: "text", text: prompt }],
+  };
+  if (unrestricted) {
+    payload.approvalPolicy = "never";
+    payload.sandboxPolicy = { type: "dangerFullAccess" };
+  }
+  return payload;
 }
 
 /**
@@ -764,13 +794,13 @@ export const codexBackend: Backend = {
       if (ctx.resumeSessionId) {
         const result = await client.call<unknown>(
           "thread/resume",
-          buildThreadParams(ctx, { threadId: ctx.resumeSessionId }),
+          buildCodexThreadParams(ctx, { threadId: ctx.resumeSessionId }),
         );
         if (isRecord(result) && isRecord(result.thread) && typeof result.thread.id === "string") {
           threadIdFromStart = result.thread.id;
         }
       } else {
-        const result = await client.call<unknown>("thread/start", buildThreadParams(ctx));
+        const result = await client.call<unknown>("thread/start", buildCodexThreadParams(ctx));
         if (isRecord(result) && isRecord(result.thread) && typeof result.thread.id === "string") {
           threadIdFromStart = result.thread.id;
         }
@@ -803,13 +833,15 @@ export const codexBackend: Backend = {
         state.resolveCompleted = resolve;
       });
 
-      // turn/start params are minimal — model/effort/approvalPolicy are
-      // set once at thread/start (or thread/resume) time and apply for the
-      // lifetime of the thread. Matches agent-runner's managed.ts.
-      const turnStartPayload: Record<string, unknown> = {
-        threadId: state.threadId,
-        input: [{ type: "text", text: ctx.prompt }],
-      };
+      // turn/start is usually minimal because thread/start persists the
+      // model/runtime overrides, but unrestricted runs must restate their
+      // policy explicitly because app-server resolves sandboxing from RPC
+      // params, not from the outer `codex app-server` process argv.
+      const turnStartPayload = buildCodexTurnStartPayload(
+        state.threadId,
+        ctx.prompt,
+        ctx.unrestricted ?? false,
+      );
 
       const turnTimeoutMs = ctx.timeoutSec * 1000;
       let timeoutHandle: NodeJS.Timeout | undefined;

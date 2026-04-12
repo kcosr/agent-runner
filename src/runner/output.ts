@@ -1,4 +1,5 @@
 import type { TaskState, TaskStatus } from "../assignment/model.js";
+import { normalizeTaskMode } from "../config/schema.js";
 import { resolveTaskRunnerCommand } from "../task-runner-command.js";
 import type { RunManifest, TaskSnapshot } from "./manifest.js";
 
@@ -186,7 +187,11 @@ export function renderManifestStatus(
 
   if (manifest.status === "running") {
     lines.push("");
-    if (opts.isLive) {
+    if (normalizeTaskMode(manifest.taskMode) === "cli") {
+      lines.push(
+        "(task statuses above come from canonical run.json task state; assignment.md is rendered for audit only)",
+      );
+    } else if (opts.isLive) {
       lines.push(
         "(task statuses above are read live from the workspace assignment.md; the current attempt may still be in progress)",
       );

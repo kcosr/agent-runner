@@ -57,7 +57,7 @@ task-runner run --agent <name> [--assignment <name>] [--var k=v]...
 2. If --assignment: load + validate assignment.md (vars, tasks, message)
 3. Resolve vars (CLI → env → defaults) against the assignment's schema
 4. Check locks (union of agent.lockedFields + assignment.lockedFields)
-5. Create workspace: ${TASK_RUNNER_STATE_DIR}/runs/<repo-key>/<short-id>/
+5. Create workspace: ${TASK_RUNNER_STATE_DIR}/runs/<repo-name>/<short-id>/
 6. Build in-memory task map from the assignment's `tasks:` (+ CLI --add-task)
 7. Re-render a fresh assignment.md into the workspace; source file is never
    touched
@@ -245,6 +245,7 @@ past the first-write synthesis.
 ---
 schemaVersion: 1
 name: repo-orientation
+taskMode: file                       # optional, default file; file | cli
 sessionName: orient {{repo_path}}      # optional display name on the backend
 maxRetries: 3                          # optional, default 3; retry budget per session
 vars:
@@ -278,6 +279,7 @@ block; no code changes.
 
 | Field | Purpose |
 |---|---|
+| `taskMode` | Task interaction mode: `file` keeps the assignment-file workflow, `cli` makes task CLI commands the agent-facing surface while `run.json.finalTasks` remains canonical live task state |
 | `schemaVersion` | Future migrations |
 | `name` | Identity in errors/logs |
 | `sessionName` | Display name for the backend session (claude `--name`, codex `thread/name/set`). Vars are interpolated. Optional |
@@ -425,7 +427,7 @@ task-runner run --agent chat "hello"
 
 The runner **copies**, never mutates, the caller's assignment file:
 
-1. Generate short ID, create `${TASK_RUNNER_STATE_DIR}/runs/<repo-key>/<short-id>/`
+1. Generate short ID, create `${TASK_RUNNER_STATE_DIR}/runs/<repo-name>/<short-id>/`
 2. Re-render a fresh `assignment.md` into the workspace from the parsed
    task list. This is the runner's ephemeral scratch copy — the agent
    edits it in place during the run.
@@ -436,7 +438,7 @@ The runner **copies**, never mutates, the caller's assignment file:
    "assignment": {
      "name": "repo-orientation",
      "sourcePath": "/tmp/work-abc/assignment.md",
-     "workspacePath": "/abs/.local/state/task-runner/runs/<repo-key>/k7m2xq/assignment.md"
+     "workspacePath": "/abs/.local/state/task-runner/runs/<repo-name>/k7m2xq/assignment.md"
    }
    ```
 
@@ -744,7 +746,7 @@ invocation and **reused** across any subsequent `--resume-run`
 invocations:
 
 ```
-${TASK_RUNNER_STATE_DIR}/runs/<repo-key>/<short-id>/
+${TASK_RUNNER_STATE_DIR}/runs/<repo-name>/<short-id>/
 ├── run.json              # canonical manifest (accumulates across sessions)
 ├── assignment.md         # ephemeral scratch file the agent edits in place
 └── attempts/
@@ -1292,10 +1294,12 @@ Every `invoke()` call opens a fresh transport and runs one full lifecycle:
 3. **`thread/start`** (fresh) or **`thread/resume`** (with
    `ctx.resumeSessionId` as `threadId`). Params include `cwd`, normalized
    `model`, mapped `effort`, and when `unrestricted` is true,
-   `approvalPolicy: "never"`. The `sandbox` field is never set —
-   `approvalPolicy: "never"` is sufficient to bypass approvals, and
-   codex's SandboxPolicy enum has inconsistent wire formats across
-   versions. Matches agent-runner's managed.ts.
+   `approvalPolicy: "never"`. In stdio mode the spawned CLI process is
+   also launched with
+   `--dangerously-bypass-approvals-and-sandbox` so Codex itself is not
+   sandboxing tool execution. The JSON-RPC `sandbox` field is still never
+   set — the CLI launch flag owns sandbox disablement, and codex's
+   SandboxPolicy enum has inconsistent wire formats across versions.
 4. **`turn/start`** — sends the prompt as
    `{threadId, input: [{type: "text", text: prompt}]}`. Nothing else —
    `model`, `effort`, and `approvalPolicy` are set once at the thread
@@ -1574,21 +1578,22 @@ Subcommands:
   workspace path, parses the manifest, and prints either a
   human-readable status block (with task checklist and notes) or the
   full manifest JSON. When the run's manifest status is `running`,
-  status also parses the workspace `assignment.md` and overlays the
-  live task states onto the output — useful for watching an in-flight
-  attempt without attaching to the process.
-- **`task set`** / **`task add`** — mutate a run's task list without
-  invoking a backend. Both go through the same manifest-resolve
-  pipeline as `resume`, apply the mutation (merging any live
-  assignment.md edits first), rewrite both `assignment.md` and
-  `manifest.finalTasks` atomically, and for passive runs re-derive
-  the manifest status via `applyPassiveFinalization`. Both commands
-  are rejected while manifest `status == "running"` — a live backend
-  attempt owns the workspace and a concurrent CLI write would race
-  the attempt's parse/merge cycle. Allowed on `initialized` and every
-  terminal state. `task add` respects the `tasks` locked field via
-  the same `checkLockedFields` path used by `--add-task` on fresh
-  runs.
+  status reads live task state according to `taskMode`: `file` mode
+  overlays the workspace `assignment.md`, while `cli` mode reads
+  canonical task state directly from `run.json.finalTasks`.
+- **`task list`** / **`task show`** — read-only task inspectors for an
+  existing run. Both read canonical task state from
+  `run.json.finalTasks` and never invoke a backend.
+- **`task set`** / **`task append-notes`** / **`task add`** — mutate a
+  run's task list without invoking a backend. All three go through the
+  same manifest-resolve and per-run persistence lock, rewrite
+  `assignment.md` from canonical task state, and keep
+  `manifest.finalTasks` in sync. For passive runs they also re-derive
+  status via `applyPassiveFinalization`. While a non-passive run is
+  `running`, `taskMode=file` still rejects CLI mutation; `taskMode=cli`
+  allows `task set` and `task append-notes`, but `task add` remains
+  rejected in v1. `task add` respects the `tasks` locked field via the
+  same `checkLockedFields` path used by `--add-task` on fresh runs.
 - **`list`** — enumerate available definitions from local
   config-root locations (`${TASK_RUNNER_CONFIG_DIR}/agents/` and
   `${TASK_RUNNER_CONFIG_DIR}/assignments/`). Strictly read-only —
@@ -1630,7 +1635,7 @@ and/or a follow-up `[message]` to extend the run.
 
 `task-runner status <id|path>` is a read-only inspector for an
 existing run. It resolves the manifest the same way `--resume-run`
-does (slug under `${TASK_RUNNER_STATE_DIR}/runs/<repo-key>/` and then
+does (current repo-name bucket under `${TASK_RUNNER_STATE_DIR}/runs/<repo-name>/` and then
 `runs/unknown/`, workspace dir, or direct
 `run.json` path) and prints either a human-readable summary or the
 manifest as JSON. It never invokes a backend, never writes to disk,
@@ -1652,35 +1657,41 @@ never touches state.
 #### Live overlay during a `running` attempt
 
 `run.json` is only persisted *between* attempts (see "When the
-manifest is written") so it's stale during a long-running attempt.
-To avoid that, when `status` resolves a manifest with
-`status: "running"` it also reads the workspace `assignment.md`,
-parses it with the same parser the run loop uses, and overlays
-the live task statuses + notes onto the rendered output.
+manifest is written") so it can be stale during a long-running
+attempt. `status` therefore follows the run's task mode:
 
-- The overlay is **read-only**. The status command never writes
-  to `run.json` or `assignment.md`.
-- The overlay only fires when `manifest.status === "running"`.
+- **`taskMode=file`**: read the workspace `assignment.md`, parse it
+  with the same parser the run loop uses, and overlay the live task
+  statuses + notes onto the rendered output.
+- **`taskMode=cli`**: read canonical live task state directly from
+  `run.json.finalTasks`. In this mode `assignment.md` is a rendered
+  audit artifact, not the read path.
+
+- Both paths are **read-only**. The status command never writes to
+  `run.json` or `assignment.md`.
+- Live reads only matter when `manifest.status === "running"`.
   Terminal manifests (success / blocked / exhausted / aborted /
-  error / initialized) use the snapshot — there's nothing live to
-  read.
-- Both text and JSON output are overlaid: `finalTasks` and
-  `tasksCompleted` reflect the live values, so a script reading
-  `--field tasksCompleted` mid-attempt sees the agent's progress.
+  error / initialized) use the persisted snapshot.
+- Both text and JSON output reflect the selected live-read path, so a
+  script reading `--field tasksCompleted` mid-attempt sees current
+  task progress for the active mode.
 - The top-level `manifest.status` is **not** changed by the
-  overlay. A run with all tasks marked complete on disk is still
+  live read. A run with all tasks marked complete on disk is still
   `running` until the run loop sees that and writes the terminal
   state itself. Status flipping is the run loop's job, not the
   inspector's.
-- Invalid status strings in the workspace file (anything not in
-  the `TaskStatus` enum) fall back to the manifest's snapshot
-  value for that task. Better to under-report progress than to
-  surface a corrupt status.
-- Missing or unparseable workspace files fall through silently to
-  the manifest snapshot — the overlay is best-effort.
-- Text output adds a marker line:
+- Invalid status strings in the workspace file (anything not in the
+  `TaskStatus` enum) fall back to the manifest snapshot value for that
+  task. Better to under-report progress than to surface a corrupt
+  status.
+- Missing or unparseable workspace files fall through silently to the
+  manifest snapshot in `taskMode=file`; the live overlay is best-effort.
+- Text output adds a marker line. In file mode:
   `(task statuses above are read live from the workspace
   assignment.md; the current attempt may still be in progress)`
+  In CLI mode:
+  `(task statuses above come from canonical run.json task state;
+  assignment.md is rendered for audit only)`
 
 ### `task-runner init`
 
@@ -1689,7 +1700,7 @@ the live task statuses + notes onto the rendered output.
 1. Resolves agent + assignment and runs the same locked-field checks,
    var resolution, and prompt composition as a fresh run.
 2. Creates the workspace directory
-   (`${TASK_RUNNER_STATE_DIR}/runs/<repo-key>/<short-id>/`),
+   (`${TASK_RUNNER_STATE_DIR}/runs/<repo-name>/<short-id>/`),
    writes the task-fenced `assignment.md`, and writes `run.json` with
    `status: "initialized"`, `sessionCount: 0`, empty `sessions` and
    `attemptRecords`, and the composed prompt frozen in
@@ -1703,6 +1714,15 @@ can't also do on the first session — its purpose is to separate the
 *seeding* step from the *execution* step, so an orchestrator can
 prepare work for an agent and hand off a resumable run id without
 committing to running it immediately.
+
+**`taskMode=cli`.** For non-passive agents, prompt composition switches
+from `TASK_WORKFLOW_TEMPLATE` to `CLI_TASK_WORKFLOW_TEMPLATE`. The
+prompt is oriented around the run id, repo path, and task commands
+(`task list`, `task show`, `task set`, `task append-notes`, `status`);
+it does not tell the agent to open `assignment.md` as its work surface.
+While the run is active, `run.json.finalTasks` is the canonical live
+task state and `assignment.md` is rendered from that state for human
+inspection only.
 
 **Passive backend exception.** When the agent declares
 `backend: passive`, `init` still writes the workspace and the
@@ -1771,7 +1791,7 @@ a completed task on a terminal passive run transitions back to
 **Resume of an already-executed run** (`status` is a terminal state
 from a prior session):
 
-- `<id>` is the short slug resolved against the current repo-key bucket
+- `<id>` is the short slug resolved against the current repo-name bucket
   under `${TASK_RUNNER_STATE_DIR}/runs/`, then `runs/unknown/`.
 - `<path>` can be a workspace directory or a direct path to a `run.json`
   file.
@@ -1854,7 +1874,7 @@ Final summary on stderr, including per-task results with notes:
 Status: success
 Tasks completed: 3/3
 Attempts: 2/4
-Assignment file: /abs/path/.local/state/task-runner/runs/<repo-key>/k7m2xq/assignment.md
+Assignment file: /abs/path/.local/state/task-runner/runs/<repo-name>/k7m2xq/assignment.md
 
 Task results:
   - t1_read_conventions — Check repo conventions [completed]
@@ -1864,7 +1884,7 @@ Task results:
   - t3_summary — Summary [completed]
       Small monorepo for agent tooling; three packages under src/.
 
-Review /abs/path/.local/state/task-runner/runs/<repo-key>/k7m2xq/assignment.md for additional agent output.
+Review /abs/path/.local/state/task-runner/runs/<repo-name>/k7m2xq/assignment.md for additional agent output.
 ```
 
 The `Task results` section is built from the in-memory task map, so it

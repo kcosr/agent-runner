@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 export const TASK_RUNNER_CONFIG_DIR_ENV = "TASK_RUNNER_CONFIG_DIR";
 export const TASK_RUNNER_STATE_DIR_ENV = "TASK_RUNNER_STATE_DIR";
@@ -10,6 +10,18 @@ type DefinitionKind = "agent" | "assignment";
 
 function nonEmpty(value: string | undefined): string | undefined {
   return value && value.length > 0 ? value : undefined;
+}
+
+function gitProbeEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const nextEnv = { ...env };
+  for (const key of Object.keys(nextEnv)) {
+    // Git hooks export repo-bound GIT_* variables that can make an arbitrary
+    // target cwd resolve as the hook's repository instead of the probed path.
+    if (key.startsWith("GIT_")) {
+      delete nextEnv[key];
+    }
+  }
+  return nextEnv;
 }
 
 function resolvedHome(env: NodeJS.ProcessEnv): string {
@@ -67,6 +79,7 @@ export function deriveRepoKey(cwd: string = process.cwd()): string {
       ["rev-parse", "--path-format=absolute", "--git-common-dir"],
       {
         cwd,
+        env: gitProbeEnv(),
         encoding: "utf8",
         stdio: ["ignore", "pipe", "ignore"],
       },
@@ -76,7 +89,10 @@ export function deriveRepoKey(cwd: string = process.cwd()): string {
       return UNKNOWN_REPO_KEY;
     }
 
-    return slugifyRepoKey(dirname(gitCommonDir));
+    // Keep workspace paths short and human-readable by using the repo root
+    // basename instead of a slugified absolute path. Same-named repo
+    // collisions are an accepted product tradeoff for simpler paths.
+    return slugifyRepoKey(basename(dirname(gitCommonDir)));
   } catch {
     return UNKNOWN_REPO_KEY;
   }

@@ -1,9 +1,11 @@
 import { type InvalidStatusReport, type TaskState, VALID_STATUSES } from "../assignment/model.js";
+import type { TaskMode } from "../config/schema.js";
 
 export function buildNudgeMessage(
   tasks: Map<string, TaskState>,
   invalid: InvalidStatusReport[],
   assignmentPath: string,
+  opts: { runId?: string; taskMode?: TaskMode } = {},
 ): string {
   const incomplete: TaskState[] = [];
   for (const task of tasks.values()) {
@@ -11,7 +13,12 @@ export function buildNudgeMessage(
   }
 
   const lines: string[] = [];
-  lines.push(`Some tasks in ${assignmentPath} are not yet completed. Please continue.`);
+  if (opts.taskMode === "cli" && opts.runId) {
+    lines.push(`Some tasks in run ${opts.runId} are not yet completed. Please continue.`);
+    lines.push(`Inspect them with: task-runner task list ${opts.runId}`);
+  } else {
+    lines.push(`Some tasks in ${assignmentPath} are not yet completed. Please continue.`);
+  }
   lines.push("");
   lines.push("Remaining tasks:");
   for (const task of incomplete) {

@@ -32,7 +32,7 @@ the work, and writes a single canonical record per run.
   - [`task-runner run`](#task-runner-run)
   - [`task-runner init`](#task-runner-init)
   - [`task-runner status`](#task-runner-status)
-  - [`task-runner task set` / `task add`](#task-runner-task-set--task-runner-task-add)
+  - [`task-runner task` commands](#task-runner-task-commands)
   - [`task-runner list`](#task-runner-list)
   - [`task-runner show`](#task-runner-show)
 - [Backends](#backends)
@@ -183,7 +183,7 @@ task-runner status <run-id> --output-format json
 ```
 
 A run produces a workspace under
-`${TASK_RUNNER_STATE_DIR:-$HOME/.local/state/task-runner}/runs/<repo-key>/<run-id>/`
+`${TASK_RUNNER_STATE_DIR:-$HOME/.local/state/task-runner}/runs/<repo-name>/<run-id>/`
 with:
 
 - `run.json` — canonical manifest, written after every attempt
@@ -195,7 +195,7 @@ The text output looks roughly like:
 ```
 task-runner: agent=example run=abc123
              source=/.../assignments/repo-orientation/assignment.md
-             assignment=/.../.local/state/task-runner/runs/<repo-key>/abc123/assignment.md
+             assignment=/.../.local/state/task-runner/runs/<repo-name>/abc123/assignment.md
              cwd=/path/to/some/repo
 
 ── attempt 1 ──
@@ -205,7 +205,7 @@ task-runner: agent=example run=abc123
 Status: success
 Tasks completed: 3/3
 Attempts: 1/4
-Assignment file: /.../.local/state/task-runner/runs/<repo-key>/abc123/assignment.md
+Assignment file: /.../.local/state/task-runner/runs/<repo-name>/abc123/assignment.md
 
 Task results:
   - t1_read_conventions — Check repo conventions [completed]
@@ -416,7 +416,7 @@ sequenceDiagram
 ### Workspaces and the run manifest
 
 Each run gets a workspace directory at
-`${TASK_RUNNER_STATE_DIR}/runs/<repo-key>/<run-id>/` with three things
+`${TASK_RUNNER_STATE_DIR}/runs/<repo-name>/<run-id>/` with three things
 in it:
 
 - **`run.json`** — the canonical record, written at run start,
@@ -482,6 +482,7 @@ Common options:
 | `--add-task "<title>"` (repeatable) | Append an ad-hoc task with auto-generated id `cli-<short>`. |
 | `--cwd <path>` | Override the agent's `cwd`. **Forbidden with `--resume-run`** — backend sessions are bound to their creation cwd, so a new cwd would invalidate the captured session id. Create a fresh run if you need a different cwd. |
 | `--backend <claude\|codex\|passive>` | Override the agent's backend. Drops the agent's `model` unless `--model` is also passed. Forbidden with `--resume-run` (the backend is locked to the session that created the run). Required when `--agent` is omitted (ad-hoc synthesis). |
+| `--task-mode <file\|cli>` | Override the assignment's task workflow mode for a fresh `run` or `init`. Forbidden with `--resume-run` because the chosen mode is frozen into the manifest at first write. |
 | `--model <id>` | Override the model. Backend-specific (`claude-sonnet-4-6`, `gpt-5.4`, etc.). |
 | `--effort <off\|minimal\|low\|medium\|high\|xhigh\|max>` | Reasoning effort. Mapped per backend. |
 | `--max-retries <n>` | Override the per-run retry budget (default 3). |
@@ -524,7 +525,7 @@ before kicking off the actual work.
 ### `task-runner status`
 
 Read-only inspector. Resolves a run by short id (looked up in the
-current repo-key bucket under `${TASK_RUNNER_STATE_DIR}/runs/`, then
+current repo-name bucket under `${TASK_RUNNER_STATE_DIR}/runs/`, then
 `runs/unknown/`), workspace path, or direct `run.json` path.
 
 ```bash
@@ -546,52 +547,89 @@ Options:
 | `--output-format <text|json>` | Default `text`. `json` prints the full manifest as JSON. |
 | `--field <name>` (repeatable) | When `--output-format json`, restrict output to these top-level manifest fields. |
 
-When the resolved manifest's status is `running` (i.e. an attempt is
-currently in flight), `status` *also* parses the workspace
-`assignment.md` and overlays the live task statuses + notes onto the
-output. Both the text checklist and the JSON `finalTasks` /
-`tasksCompleted` reflect the agent's mid-attempt edits — useful for
-watching long-running attempts without attaching to anything. The
-overlay never writes back to disk.
+When the resolved manifest's status is `running`, `status` behaves by
+task mode:
 
-### `task-runner task set` / `task-runner task add`
+- `taskMode=file`: parse the workspace `assignment.md` and overlay the
+  live task statuses + notes onto the output.
+- `taskMode=cli`: read canonical task state directly from
+  `run.json.finalTasks`. `assignment.md` is render-only in this mode,
+  so there is no live file overlay.
+
+### `taskMode: file` vs `taskMode: cli`
+
+Assignments default to `taskMode: file` when the field is omitted. A
+fresh `run` or `init` may override the assignment with
+`--task-mode <file|cli>`; resume reads the frozen manifest value.
+
+- `taskMode=file`: the agent is oriented around the workspace
+  `assignment.md` path and updates task status/notes by editing the
+  file. While a non-passive run is `running`, task CLI mutation stays
+  rejected.
+- `taskMode=cli`: the agent is oriented around the run id plus task
+  commands (`task list`, `task show`, `task set`, `task append-notes`,
+  `status`). `run.json.finalTasks` is the live source of truth,
+  `assignment.md` is rendered from that state for human audit, and
+  `task set` / `task append-notes` are allowed while a non-passive run
+  is `running`.
+- `task add` remains rejected while a non-passive run is `running`,
+  even in `taskMode=cli`. Live mutation in v1 is limited to status and
+  notes on existing tasks.
+
+### `task-runner task` commands
 
 Mutate a run's task list **without invoking the agent**. The canonical
 use case is a *sidecar* flow: you have an agent that can't (or
 shouldn't) be invoked as a task-runner subprocess, but you still want
 it to work through a structured task list. `init` seeds the list, the
 external agent reads it via `status`, works each task, and reports
-progress back through `task set`.
+progress back through the task CLI.
 
-Both commands:
+The task subcommands are:
+
+- `task list <run-id>` — list tasks in stable order.
+- `task show <run-id> <task-id>` — show one task snapshot.
+- `task set <run-id> <task-id>` — replace status and/or notes.
+- `task append-notes <run-id> <task-id>` — append notes with a single
+  newline join rule.
+- `task add <run-id>` — add a new pending task, with optional `--body`.
+
+Read commands (`task list`, `task show`) always read canonical task
+state from `run.json.finalTasks`; they never invoke a backend.
+
+Mutation commands:
 
 - Require an existing run (as id or workspace path).
-- Are **rejected while the manifest status is `running`** — a live
-  backend attempt owns the workspace, and a concurrent CLI write would
-  race the attempt's parse/merge cycle. Allowed on `initialized` and
-  passive terminal states. On terminal non-passive runs, only
-  notes-only `task set` is allowed; `task add` and status-changing
+- Use a shared per-run persistence lock so `run.json` and rendered
+  `assignment.md` stay in sync.
+- `taskMode=file`: reject mutation while a non-passive run is
+  `running`.
+- `taskMode=cli`: allow `task set` and `task append-notes` while a
+  non-passive run is `running`; canonical task state lives in
+  `run.json.finalTasks` and `assignment.md` is rendered from it.
+- On terminal non-passive runs, only notes-only `task set` /
+  `task append-notes` are allowed; `task add` and status-changing
   `task set` are rejected.
-- Rewrite both the workspace `assignment.md` and `run.json.finalTasks`
-  via separate atomic file replacements (`status` consumers never see
-  a half-written canonical file, but there is no single cross-file
-  transaction).
-- Respect any status/notes edits already present in `assignment.md`
-  that aren't yet reflected in the manifest snapshot (they are merged
-  in before the CLI mutation is applied, CLI wins on conflict).
 
 ```bash
+# Inspect tasks
+task-runner task list <run-id>
+task-runner task show <run-id> t1
+
 # Mark a task in-progress
 task-runner task set <run-id> t1 --status in_progress
 
 # Add a notes block without changing status
 task-runner task set <run-id> t1 --notes "Investigating the parser."
 
+# Append to the existing notes body
+task-runner task append-notes <run-id> t1 --text "Captured CLI-mode details."
+
 # Complete a task with a note in one call
 task-runner task set <run-id> t1 --status completed --notes "Done."
 
 # Append a new task to an initialized run
-task-runner task add <run-id> --title "Follow-up cleanup"
+task-runner task add <run-id> --title "Follow-up cleanup" --body "Update docs."
 
 # JSON output returns the updated task snapshot (handy for scripts)
 task-runner task set <run-id> t1 --status completed --output-format json
@@ -607,11 +645,19 @@ task-runner task set <run-id> t1 --status completed --output-format json
 
 At least one of `--status` / `--notes` must be supplied.
 
+`task append-notes` options:
+
+| Flag | Purpose |
+|---|---|
+| `--text <text>` (required) | Appended note text. Trimmed before joining. |
+| `--output-format <text\|json>` | Default `text`. `json` prints the updated task snapshot. |
+
 `task add` options:
 
 | Flag | Purpose |
 |---|---|
 | `--title <text>` (required) | Title for the new task. Non-empty, single-line, ≤ 200 chars. |
+| `--body <text>` | Optional task body. Defaults to empty string. |
 | `--output-format <text\|json>` | Default `text`. `json` prints the new task snapshot. |
 
 `task add` honors the `tasks` locked field the same way `--add-task`
@@ -998,7 +1044,7 @@ printed to stdout.
 | Var | Purpose |
 |---|---|
 | `TASK_RUNNER_CONFIG_DIR` | Root for named definitions. Agents live under `agents/<name>/agent.md`; assignments live under `assignments/<name>/assignment.md`. Defaults to `${XDG_CONFIG_HOME}/task-runner` or `~/.config/task-runner`. |
-| `TASK_RUNNER_STATE_DIR` | Root for runtime state. Runs live under `runs/<repo-key>/<run-id>/`; drafts live under `drafts/<repo-key>/`. Defaults to `${XDG_STATE_HOME}/task-runner` or `~/.local/state/task-runner`. |
+| `TASK_RUNNER_STATE_DIR` | Root for runtime state. Runs live under `runs/<repo-name>/<run-id>/`; drafts live under `drafts/<repo-name>/`. Defaults to `${XDG_STATE_HOME}/task-runner` or `~/.local/state/task-runner`. |
 | `TASK_RUNNER_CMD` | Override the CLI command name used in user-facing messages, prompts, and assignment templates. Defaults to the `task-runner` binary found on `PATH`, then bare `task-runner`. |
 | `TASK_RUNNER_CLAUDE_BIN` | Path to the `claude` binary. Defaults to `claude` on `PATH`. |
 | `TASK_RUNNER_CODEX_BIN` | Path to the `codex` binary for stdio mode. Defaults to `codex` on `PATH`. |
@@ -1066,7 +1112,7 @@ printed to stdout.
   the positional message body so it is not length-limited. The
   planner surveys conventions, impact, reuse opportunities, and
   risks; copies a template from the configured task-runner
-  config root into the repo-keyed drafts area under
+  config root into the repo-name drafts area under
   `${TASK_RUNNER_STATE_DIR}/drafts/`; fills in every placeholder
   with concrete file-level detail; then runs `task-runner init`
   to freeze the draft into a new run workspace. The resulting
@@ -1172,7 +1218,7 @@ flowchart TD
         claude["backends/claude.ts"]
         codex["backends/codex.ts"]
     end
-    subgraph Workspace["${TASK_RUNNER_STATE_DIR}/runs/&lt;repo-key&gt;/&lt;run-id&gt;/"]
+    subgraph Workspace["${TASK_RUNNER_STATE_DIR}/runs/&lt;repo-name&gt;/&lt;run-id&gt;/"]
         runjson["run.json"]
         assignmd["assignment.md"]
         attempts["attempts/NN.json"]

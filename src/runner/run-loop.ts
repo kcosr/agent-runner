@@ -1,13 +1,18 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
-import { mergeIntoFile } from "../assignment/merge.js";
+import { type MergeResult, mergeIntoFile } from "../assignment/merge.js";
 import type { TaskState, TaskStatus } from "../assignment/model.js";
 import { renderAssignment } from "../assignment/writer.js";
 import type { Backend, BackendInvokeResult } from "../backends/types.js";
 import { interpolate } from "../config/interpolate.js";
 import type { LoadedAgent, LoadedAssignment } from "../config/loader.js";
 import { resolveRunWorkspaceDir } from "../config/runtime-paths.js";
-import type { LockableField, VarDef } from "../config/schema.js";
+import {
+  type LockableField,
+  type TaskMode,
+  type VarDef,
+  normalizeTaskMode,
+} from "../config/schema.js";
 import { resolveTaskRunnerCommand } from "../task-runner-command.js";
 import { shortId } from "../util/short-id.js";
 import { writeTextFileAtomic } from "../util/write-file-atomic.js";
@@ -32,11 +37,18 @@ import {
 
 export { RecursionDepthError } from "./recursion-guard.js";
 import {
+  CLI_TASK_WORKFLOW_TEMPLATE,
   PASSIVE_TASK_WORKFLOW_TEMPLATE,
   TASK_WORKFLOW_TEMPLATE,
   buildAddedTasksReminder,
 } from "./task-workflow.js";
-import { mergeWorkspaceAssignmentIntoTaskMap, syncManifestTaskState } from "./workspace-state.js";
+import {
+  mergeWorkspaceAssignmentIntoTaskMap,
+  refreshManifestTaskState,
+  syncManifestTaskState,
+  taskModeFromManifest,
+  withTaskStateLock,
+} from "./workspace-state.js";
 
 export interface RunOverrides {
   cwd?: string;
@@ -45,6 +57,7 @@ export interface RunOverrides {
   backend?: "claude" | "codex" | "passive";
   model?: string;
   effort?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+  taskMode?: TaskMode;
   message?: string;
   sessionName?: string;
   timeoutSec?: number;
@@ -159,6 +172,7 @@ function checkLockedFields(
     ["backend", overrides?.backend, agentConfig.backend],
     ["model", overrides?.model, agentConfig.model],
     ["effort", overrides?.effort, agentConfig.effort],
+    ["taskMode", overrides?.taskMode, assignmentConfig?.taskMode ?? "file"],
     ["message", overrides?.message, assignmentConfig?.message],
     ["sessionName", overrides?.sessionName, assignmentConfig?.sessionName],
     ["timeoutSec", overrides?.timeoutSec, agentConfig.timeoutSec],
@@ -199,6 +213,7 @@ function checkLockedFieldsFromManifest(
     ["backend", overrides?.backend, manifest.backend],
     ["model", overrides?.model, manifest.model],
     ["effort", overrides?.effort, manifest.effort],
+    ["taskMode", overrides?.taskMode, manifest.taskMode ?? "file"],
     ["message", overrides?.message, manifest.message],
     ["sessionName", overrides?.sessionName, manifest.sessionName],
     ["timeoutSec", overrides?.timeoutSec, manifest.timeoutSec],
@@ -542,6 +557,9 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const model = overrides?.model ?? (backendOverridden ? undefined : agentConfig.model);
   const effort = overrides?.effort ?? agentConfig.effort;
   const message = overrides?.message ?? assignmentConfig?.message ?? null;
+  const taskMode = normalizeTaskMode(
+    overrides?.taskMode ?? assignmentConfig?.taskMode ?? resume?.manifest.taskMode ?? null,
+  );
   const timeoutSec = overrides?.timeoutSec ?? agentConfig.timeoutSec;
   const unrestricted = overrides?.unrestricted ?? agentConfig.unrestricted;
   // maxRetries lives on the assignment. In chat mode (no assignment
@@ -694,9 +712,11 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   } else if (isResume) {
     const parts: string[] = [];
     if (firstTimeTasksAppear) {
-      parts.push(interpolate(TASK_WORKFLOW_TEMPLATE, injectedVars));
+      const workflowTemplate =
+        taskMode === "cli" ? CLI_TASK_WORKFLOW_TEMPLATE : TASK_WORKFLOW_TEMPLATE;
+      parts.push(interpolate(workflowTemplate, injectedVars));
     } else if (resumeAddedNewTasks) {
-      parts.push(buildAddedTasksReminder(addedTitles.length, assignmentPath));
+      parts.push(buildAddedTasksReminder(addedTitles.length, assignmentPath, { runId, taskMode }));
     }
     if (trimmedMessage.length > 0) {
       parts.push(trimmedMessage);
@@ -711,7 +731,11 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     // `status --field pendingPrompt`; it is never sent to a backend
     // because `task-runner run` is rejected on passive agents.
     const workflowTemplate =
-      agentConfig.backend === "passive" ? PASSIVE_TASK_WORKFLOW_TEMPLATE : TASK_WORKFLOW_TEMPLATE;
+      agentConfig.backend === "passive"
+        ? PASSIVE_TASK_WORKFLOW_TEMPLATE
+        : taskMode === "cli"
+          ? CLI_TASK_WORKFLOW_TEMPLATE
+          : TASK_WORKFLOW_TEMPLATE;
     const parts: string[] = [];
     if (agentInstructions.length > 0) {
       parts.push(interpolate(agentInstructions, injectedVars));
@@ -752,6 +776,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       ...resume.manifest,
       model: model ?? null,
       effort: effort ?? null,
+      taskMode,
       sessionName,
       unrestricted,
       cwd,
@@ -773,6 +798,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     // (it has now been consumed by this first real session).
     manifest = {
       ...resume.manifest,
+      taskMode,
       sessionName,
       endedAt: null,
       status: "running",
@@ -834,6 +860,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       timeoutSec,
       assignmentPath,
       workspaceDir,
+      taskMode,
       startedAt: now,
       endedAt: null,
       status: isInitialize ? "initialized" : "running",
@@ -1010,8 +1037,6 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       manifest.backendSessionId = invokeResult.sessionId;
     }
 
-    const { rawAssignment, mergeInfo } = mergeWorkspaceAssignmentIntoTaskMap(manifest, tasks);
-
     const logPath = writeAttemptLog(workspaceDir, {
       schemaVersion: 1,
       runId,
@@ -1022,33 +1047,54 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       stdout: invokeResult.rawStdout,
       stderr: invokeResult.rawStderr,
     });
-
-    syncManifestTaskState(manifest, tasks);
-    const attemptRecord: AttemptRecord = {
-      attempt: globalAttemptNumber,
-      sessionIndex,
-      startedAt: attemptStartedAt,
-      endedAt: attemptEndedAt,
-      prompt: currentPrompt,
-      sessionIdAtStart,
-      sessionIdCaptured: invokeResult.sessionId,
-      exitCode: invokeResult.exitCode,
-      signal: invokeResult.signal,
-      timedOut: invokeResult.timedOut,
-      transcript: invokeResult.transcript,
-      logPath,
-      tasksAfter: manifest.finalTasks,
-      invalidStatuses: mergeInfo.invalidStatuses,
+    let rawAssignment = "";
+    let mergeInfo: MergeResult = {
+      invalidStatuses: [],
+      missingFromFile: [],
+      unknownInFile: [],
     };
-    manifest.attemptRecords.push(attemptRecord);
-    manifest.attempts = manifest.attemptRecords.length;
+    withTaskStateLock(workspaceDir, () => {
+      if (taskModeFromManifest(manifest) === "cli") {
+        tasks = refreshManifestTaskState(manifest);
+        rawAssignment = renderAssignment(Array.from(tasks.values()));
+        mergeInfo = {
+          invalidStatuses: [],
+          missingFromFile: [],
+          unknownInFile: [],
+        };
+      } else {
+        const merged = mergeWorkspaceAssignmentIntoTaskMap(manifest, tasks);
+        rawAssignment = merged.rawAssignment;
+        mergeInfo = merged.mergeInfo;
+      }
 
-    if (sessionRecord.firstAttempt === null) {
-      sessionRecord.firstAttempt = globalAttemptNumber;
-    }
-    sessionRecord.lastAttempt = globalAttemptNumber;
+      syncManifestTaskState(manifest, tasks);
+      const attemptRecord: AttemptRecord = {
+        attempt: globalAttemptNumber,
+        sessionIndex,
+        startedAt: attemptStartedAt,
+        endedAt: attemptEndedAt,
+        prompt: currentPrompt,
+        sessionIdAtStart,
+        sessionIdCaptured: invokeResult.sessionId,
+        exitCode: invokeResult.exitCode,
+        signal: invokeResult.signal,
+        timedOut: invokeResult.timedOut,
+        transcript: invokeResult.transcript,
+        logPath,
+        tasksAfter: manifest.finalTasks,
+        invalidStatuses: mergeInfo.invalidStatuses,
+      };
+      manifest.attemptRecords.push(attemptRecord);
+      manifest.attempts = manifest.attemptRecords.length;
 
-    writeManifest(workspaceDir, manifest);
+      if (sessionRecord.firstAttempt === null) {
+        sessionRecord.firstAttempt = globalAttemptNumber;
+      }
+      sessionRecord.lastAttempt = globalAttemptNumber;
+
+      writeManifest(workspaceDir, manifest);
+    });
 
     if (invokeResult.aborted) {
       terminal = { status: "aborted", exitCode: 130 };
@@ -1091,9 +1137,11 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       break;
     }
 
-    const merged = mergeIntoFile(rawAssignment, tasks);
-    if (merged !== rawAssignment) {
-      writeTextFileAtomic(assignmentPath, merged);
+    if (taskModeFromManifest(manifest) === "file") {
+      const merged = mergeIntoFile(rawAssignment, tasks);
+      if (merged !== rawAssignment) {
+        writeTextFileAtomic(assignmentPath, merged);
+      }
     }
 
     const incompleteCount = countBy(tasks, (t) => t.status !== "completed");
@@ -1101,26 +1149,37 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       `\ntask-runner: retrying — ${incompleteCount} incomplete, ${mergeInfo.invalidStatuses.length} invalid status${mergeInfo.invalidStatuses.length === 1 ? "" : "es"}\n\n`,
     );
 
-    currentPrompt = buildNudgeMessage(tasks, mergeInfo.invalidStatuses, assignmentPath);
+    currentPrompt = buildNudgeMessage(tasks, mergeInfo.invalidStatuses, assignmentPath, {
+      runId,
+      taskMode: taskModeFromManifest(manifest),
+    });
   }
 
   if (!terminal) {
     terminal = { status: "error", exitCode: 4 };
   }
 
-  const orderedTasks = syncManifestTaskState(manifest, tasks);
-  const tasksCompleted = manifest.tasksCompleted;
+  let orderedTasks: TaskState[] = [];
+  let tasksCompleted = 0;
   const endedAt = new Date().toISOString();
+  withTaskStateLock(workspaceDir, () => {
+    if (taskModeFromManifest(manifest) === "cli") {
+      tasks = refreshManifestTaskState(manifest);
+    }
 
-  sessionRecord.status = terminal.status;
-  sessionRecord.exitCode = terminal.exitCode;
-  sessionRecord.endedAt = endedAt;
-  sessionRecord.backendSessionIdAtEnd = manifest.backendSessionId;
+    orderedTasks = syncManifestTaskState(manifest, tasks);
+    tasksCompleted = manifest.tasksCompleted;
 
-  manifest.status = terminal.status;
-  manifest.exitCode = terminal.exitCode;
-  manifest.endedAt = endedAt;
-  writeManifest(workspaceDir, manifest);
+    sessionRecord.status = terminal.status;
+    sessionRecord.exitCode = terminal.exitCode;
+    sessionRecord.endedAt = endedAt;
+    sessionRecord.backendSessionIdAtEnd = manifest.backendSessionId;
+
+    manifest.status = terminal.status;
+    manifest.exitCode = terminal.exitCode;
+    manifest.endedAt = endedAt;
+    writeManifest(workspaceDir, manifest);
+  });
 
   const summary: RunSummary = {
     status: terminal.status,

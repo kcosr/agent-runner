@@ -7,7 +7,7 @@ import {
   resolveRepoRunsDir,
   resolveUnknownRunsDir,
 } from "../config/runtime-paths.js";
-import type { LockableField } from "../config/schema.js";
+import type { LockableField, TaskMode } from "../config/schema.js";
 import { writeTextFileAtomic } from "../util/write-file-atomic.js";
 
 export type ManifestStatus =
@@ -134,6 +134,7 @@ export interface RunManifest {
   timeoutSec: number;
   assignmentPath: string;
   workspaceDir: string;
+  taskMode?: TaskMode;
   startedAt: string;
   endedAt: string | null;
   status: ManifestStatus;
@@ -310,6 +311,7 @@ function isRunManifest(value: unknown): value is RunManifest {
   if (typeof obj.tasksCompleted !== "number") return false;
   if (typeof obj.tasksTotal !== "number") return false;
   if (typeof obj.sessionCount !== "number") return false;
+  if (obj.taskMode !== undefined && obj.taskMode !== "file" && obj.taskMode !== "cli") return false;
 
   // Arrays.
   if (!Array.isArray(obj.attemptRecords)) return false;

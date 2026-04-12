@@ -73,6 +73,20 @@ test("overridesFromParsedArgs: addedTasks is undefined when empty (so locked-fie
   assert.equal(overrides.addedTasks, undefined);
 });
 
+test("parseArgs: --task-mode accepts file and cli", () => {
+  const cliParsed = parseArgs(argv("run", "--agent", "x", "--task-mode", "cli"));
+  const fileParsed = parseArgs(argv("run", "--agent", "x", "--task-mode", "file"));
+  assert.equal(cliParsed.taskMode, "cli");
+  assert.equal(fileParsed.taskMode, "file");
+});
+
+test("parseArgs: --task-mode rejects unknown values", () => {
+  assert.throws(
+    () => parseArgs(argv("run", "--agent", "x", "--task-mode", "live")),
+    /--task-mode must be one of: file, cli/,
+  );
+});
+
 // ── list/show command parsing ────────────────────────────────────────
 
 test("parseArgs: list agents is parsed as command=list subcommand=agents", () => {
@@ -134,6 +148,40 @@ test("parseArgs: show agent with path positional", () => {
   assert.deepEqual(parsed.positionals, ["./agents/example/agent.md"]);
 });
 
+test("parseArgs: task list parses grouped subcommand and output format", () => {
+  const parsed = parseArgs(argv("task", "list", "abc123", "--output-format", "json"));
+  assert.equal(parsed.command, "task");
+  assert.equal(parsed.subcommand, "list");
+  assert.deepEqual(parsed.positionals, ["abc123"]);
+  assert.equal(parsed.outputFormat, "json");
+});
+
+test("parseArgs: task show parses run and task ids", () => {
+  const parsed = parseArgs(argv("task", "show", "abc123", "t1"));
+  assert.equal(parsed.command, "task");
+  assert.equal(parsed.subcommand, "show");
+  assert.deepEqual(parsed.positionals, ["abc123", "t1"]);
+});
+
+test("parseArgs: task append-notes captures --text", () => {
+  const parsed = parseArgs(argv("task", "append-notes", "abc123", "t1", "--text", "hello"));
+  assert.equal(parsed.command, "task");
+  assert.equal(parsed.subcommand, "append-notes");
+  assert.deepEqual(parsed.positionals, ["abc123", "t1"]);
+  assert.equal(parsed.taskAppendText, "hello");
+});
+
+test("parseArgs: task add captures optional --body", () => {
+  const parsed = parseArgs(
+    argv("task", "add", "abc123", "--title", "Docs", "--body", "Update the tables."),
+  );
+  assert.equal(parsed.command, "task");
+  assert.equal(parsed.subcommand, "add");
+  assert.deepEqual(parsed.positionals, ["abc123"]);
+  assert.equal(parsed.taskTitle, "Docs");
+  assert.equal(parsed.taskBody, "Update the tables.");
+});
+
 test("overridesFromParsedArgs: all other overrides plumbed through", () => {
   const parsed = parseArgs(
     argv(
@@ -144,6 +192,8 @@ test("overridesFromParsedArgs: all other overrides plumbed through", () => {
       "claude-opus-4-6",
       "--effort",
       "max",
+      "--task-mode",
+      "cli",
       "--timeout-sec",
       "60",
       "--max-retries",
@@ -155,6 +205,7 @@ test("overridesFromParsedArgs: all other overrides plumbed through", () => {
   const overrides = overridesFromParsedArgs(parsed);
   assert.equal(overrides.model, "claude-opus-4-6");
   assert.equal(overrides.effort, "max");
+  assert.equal(overrides.taskMode, "cli");
   assert.equal(overrides.timeoutSec, 60);
   assert.equal(overrides.maxRetries, 5);
   assert.equal(overrides.unrestricted, true);

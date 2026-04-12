@@ -1,3 +1,5 @@
+import { TASK_MODES, type TaskMode } from "../config/schema.js";
+
 export type OutputFormat = "text" | "json";
 // Kept in sync with `agentConfigSchema.backend` in src/config/schema.ts
 // and the backend registry in src/backends/registry.ts.
@@ -17,6 +19,7 @@ export interface ParsedArgs {
   backend?: BackendId;
   model?: string;
   effort?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+  taskMode?: TaskMode;
   timeoutSec?: number;
   unrestricted?: boolean;
   maxRetries?: number;
@@ -28,14 +31,15 @@ export interface ParsedArgs {
   fields: string[];
   taskStatus?: string;
   taskNotes?: string;
+  taskAppendText?: string;
   taskTitle?: string;
+  taskBody?: string;
   showHelp: boolean;
 }
 
 const EFFORT_VALUES = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const OUTPUT_FORMATS = ["text", "json"] as const;
 const BACKEND_VALUES = ["claude", "codex", "passive"] as const;
-
 export function parseArgs(argv: string[]): ParsedArgs {
   const args = argv.slice(2);
   const result: ParsedArgs = {
@@ -126,6 +130,13 @@ export function parseArgs(argv: string[]): ParsedArgs {
         throw new Error(`--effort must be one of: ${EFFORT_VALUES.join(", ")}`);
       }
       result.effort = next as (typeof EFFORT_VALUES)[number];
+    } else if (arg === "--task-mode") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--task-mode requires a value");
+      if (!(TASK_MODES as readonly string[]).includes(next)) {
+        throw new Error(`--task-mode must be one of: ${TASK_MODES.join(", ")}`);
+      }
+      result.taskMode = next as TaskMode;
     } else if (arg === "--timeout-sec") {
       const next = args.shift();
       if (next === undefined) throw new Error("--timeout-sec requires a number");
@@ -160,10 +171,18 @@ export function parseArgs(argv: string[]): ParsedArgs {
       const next = args.shift();
       if (next === undefined) throw new Error("--notes requires a value");
       result.taskNotes = next;
+    } else if (arg === "--text") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--text requires a value");
+      result.taskAppendText = next;
     } else if (arg === "--title") {
       const next = args.shift();
       if (next === undefined) throw new Error("--title requires a value");
       result.taskTitle = next;
+    } else if (arg === "--body") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--body requires a value");
+      result.taskBody = next;
     } else if (arg === "--output-format") {
       const next = args.shift();
       if (next === undefined) throw new Error("--output-format requires a value");
@@ -195,6 +214,7 @@ export function overridesFromParsedArgs(parsed: ParsedArgs) {
     backend: parsed.backend,
     model: parsed.model,
     effort: parsed.effort,
+    taskMode: parsed.taskMode,
     message: parsed.message,
     sessionName: parsed.sessionName,
     timeoutSec: parsed.timeoutSec,

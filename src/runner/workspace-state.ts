@@ -1,15 +1,65 @@
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { type MergeOptions, type MergeResult, mergeUpdates } from "../assignment/merge.js";
 import type { TaskState } from "../assignment/model.js";
 import { parseAssignment } from "../assignment/parser.js";
 import { renderAssignment } from "../assignment/writer.js";
+import { normalizeTaskMode } from "../config/schema.js";
 import { writeTextFileAtomic } from "../util/write-file-atomic.js";
 import {
   type RunManifest,
+  manifestPath,
   snapshotTasks,
   workspaceAssignmentPath,
   writeManifest,
 } from "./manifest.js";
+
+const LOCK_DIR_NAME = ".task-state.lock";
+const LOCK_WAIT_MS = 10;
+const LOCK_TIMEOUT_MS = 5_000;
+const LOCK_WAIT_BUFFER = new Int32Array(new SharedArrayBuffer(4));
+
+function sleep(ms: number): void {
+  Atomics.wait(LOCK_WAIT_BUFFER, 0, 0, ms);
+}
+
+export function taskModeFromManifest(manifest: Pick<RunManifest, "taskMode">): "file" | "cli" {
+  return normalizeTaskMode(manifest.taskMode);
+}
+
+function taskLockPath(workspaceDir: string): string {
+  return `${workspaceDir}/${LOCK_DIR_NAME}`;
+}
+
+export function withTaskStateLock<T>(workspaceDir: string, fn: () => T): T {
+  const lockPath = taskLockPath(workspaceDir);
+  const deadline = Date.now() + LOCK_TIMEOUT_MS;
+
+  while (true) {
+    try {
+      mkdirSync(lockPath);
+      break;
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code !== "EEXIST") {
+        throw error;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(`timed out waiting for task-state lock at ${lockPath}`);
+      }
+      sleep(LOCK_WAIT_MS);
+    }
+  }
+
+  try {
+    return fn();
+  } finally {
+    rmSync(lockPath, { recursive: true, force: true });
+  }
+}
+
+function readManifestSnapshot(workspaceDir: string): RunManifest {
+  return JSON.parse(readFileSync(manifestPath(workspaceDir), "utf8")) as RunManifest;
+}
 
 function orderedTasks(tasks: Map<string, TaskState>): TaskState[] {
   return Array.from(tasks.values());
@@ -27,6 +77,15 @@ export function taskMapFromManifestSnapshot(manifest: RunManifest): Map<string, 
     });
   }
   return tasks;
+}
+
+export function refreshManifestTaskState(manifest: RunManifest): Map<string, TaskState> {
+  const latest = readManifestSnapshot(manifest.workspaceDir);
+  manifest.taskMode = latest.taskMode;
+  manifest.finalTasks = latest.finalTasks;
+  manifest.tasksCompleted = latest.tasksCompleted;
+  manifest.tasksTotal = latest.tasksTotal;
+  return taskMapFromManifestSnapshot(latest);
 }
 
 export function syncManifestTaskState(
@@ -71,6 +130,17 @@ export function mergeWorkspaceAssignmentIntoTaskMap(
   tasks: Map<string, TaskState>,
   mergeOptions: MergeOptions = {},
 ): WorkspaceMergeResult {
+  if (taskModeFromManifest(manifest) === "cli") {
+    return {
+      rawAssignment: renderAssignment(orderedTasks(tasks)),
+      mergeInfo: {
+        invalidStatuses: [],
+        missingFromFile: [],
+        unknownInFile: [],
+      },
+    };
+  }
+
   const rawAssignment = ensureWorkspaceAssignmentText(manifest.workspaceDir, tasks);
   const updates = parseAssignment(rawAssignment);
   return {
@@ -84,7 +154,9 @@ export function loadWorkspaceTaskMap(
   mergeOptions: MergeOptions = {},
 ): Map<string, TaskState> {
   const tasks = taskMapFromManifestSnapshot(manifest);
-  mergeWorkspaceAssignmentIntoTaskMap(manifest, tasks, mergeOptions);
+  if (taskModeFromManifest(manifest) === "file") {
+    mergeWorkspaceAssignmentIntoTaskMap(manifest, tasks, mergeOptions);
+  }
   return tasks;
 }
 
@@ -93,11 +165,20 @@ export function persistWorkspaceTaskState(
   tasks: Map<string, TaskState>,
   opts: {
     beforeManifestWrite?: (ordered: TaskState[], manifest: RunManifest) => void;
+    alreadyLocked?: boolean;
   } = {},
 ): TaskState[] {
-  const ordered = syncManifestTaskState(manifest, tasks);
-  writeTextFileAtomic(workspaceAssignmentPath(manifest.workspaceDir), renderAssignment(ordered));
-  opts.beforeManifestWrite?.(ordered, manifest);
-  writeManifest(manifest.workspaceDir, manifest);
-  return ordered;
+  const persist = (): TaskState[] => {
+    const ordered = syncManifestTaskState(manifest, tasks);
+    writeTextFileAtomic(workspaceAssignmentPath(manifest.workspaceDir), renderAssignment(ordered));
+    opts.beforeManifestWrite?.(ordered, manifest);
+    writeManifest(manifest.workspaceDir, manifest);
+    return ordered;
+  };
+
+  if (opts.alreadyLocked) {
+    return persist();
+  }
+
+  return withTaskStateLock(manifest.workspaceDir, persist);
 }
