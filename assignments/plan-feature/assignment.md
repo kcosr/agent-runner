@@ -28,7 +28,9 @@ callerInstructions: |
   planner doesn't need special role instructions — the detail
   lives in this assignment's task bodies. It does need shell
   access (`unrestricted: true`) so it can inspect the repo and
-  validate the generated draft assignment.
+  validate the generated draft assignment. The caller
+  environment must allow one nested `task-runner run`, because
+  the planner runs `plan-review` before handing the draft back.
 
   ## What the planner does
 
@@ -44,15 +46,21 @@ callerInstructions: |
        template's task list is a starting shape; the planner
        may add, remove, or rename tasks so long as the
        `lockedFields: [tasks]` line stays in the frontmatter.
-    3. Produces the exact `{{task_runner_cmd}} init ...` command the
-       caller should run to freeze the draft into a new run
-       workspace. The planner does **not** init the implementer
-       run itself.
+    3. Runs the bundled `plan-review` assignment against the
+       draft, passing both the draft path and the planner's own
+       workspace `assignment.md` so the reviewer can validate
+       the draft against the planning evidence. The planner
+       applies fixes and reruns the draft review until it is
+       approved.
+    4. Produces the exact `{{task_runner_cmd}} init ...` command the
+       caller should run to freeze the approved draft into a
+       new run workspace. The planner does **not** init the
+       implementer run itself.
 
   ## After planning
 
   Pull the draft path and exact init command from the
-  `t09_handoff` task's notes block:
+  `handoff` task's notes block:
 
       {{task_runner_cmd}} status {{run_id}}
       {{task_runner_cmd}} status {{run_id}} --output-format json \
@@ -61,14 +69,14 @@ callerInstructions: |
   First initialize the implementer run by executing the handoff's
   init command. Then execute the resulting run:
 
-      TASK_RUNNER_MAX_CALL_DEPTH=2 {{task_runner_cmd}} run \
-        --resume-run <new-run-id>
+      {{task_runner_cmd}} run --resume-run <new-run-id>
 
-  The depth override is required because the generated plan
-  nests a `{{task_runner_cmd}} run` against the code-reviewer agent
-  inside its review task. Default depth is 1; the implementer
-  runs at depth 1 and the reviewer at depth 2, so without the
-  override the review invocation is rejected.
+  Nested review must be allowed at both stages:
+  - the planner run nests `plan-review`
+  - the generated implementation plan nests `code-review`
+
+  If nested `task-runner run` invocations are disallowed in the
+  surrounding environment, the review step will be rejected.
 
   The executor may be the same agent that did the planning, or
   a different agent entirely — anchor the handoff on the run
@@ -84,7 +92,7 @@ callerInstructions: |
   `assignment.md` inside the new run directory. Edits to the
   draft file after init have no effect on the run.
 tasks:
-  - id: t01_orient
+  - id: orient
     title: Target repo orientation and conventions
     body: |
       Read the high-signal entry points for the repository at
@@ -104,7 +112,7 @@ tasks:
       rules the generated plan must respect. These command
       strings will be cited verbatim by the implementer's
       check-gate task, so copy them accurately.
-  - id: t02_capture_feature
+  - id: capture_feature
     title: Capture the feature and implementation brief
     body: |
       The feature you are planning for was handed to you as
@@ -217,7 +225,7 @@ tasks:
       block with the resolved dimensions and mark the
       task `completed`.
 
-      **Do not assume**. Do not proceed to t03 with
+      **Do not assume**. Do not proceed to `survey_impact` with
       unresolved ambiguity — your whole plan will be
       built on a guess, and the ambiguity compounds
       through impact survey, implementation tasks, and
@@ -236,7 +244,7 @@ tasks:
       plan-coverage pass later, but they do not block —
       the contract gate only fires on the enumerated
       dimensions above.
-  - id: t03_impact_survey
+  - id: survey_impact
     title: Survey the impact surface
     body: |
       Find every part of the repository the feature will
@@ -256,7 +264,7 @@ tasks:
       whatever your backend supports) if that would
       parallelize the survey. Native subagents do not count
       against task-runner's recursion depth.
-  - id: t04_duplication_check
+  - id: check_existing_code
     title: Existing-code and duplication check
     body: |
       Before planning new code, check what already exists.
@@ -287,10 +295,10 @@ tasks:
 
       This task is the primary defense against the plan
       producing accidental duplication. Take it seriously.
-  - id: t05_risk_and_testing
+  - id: assess_risks_and_tests
     title: Risks, edge cases, and test strategy
     body: |
-      For each impact area from t03, identify in Notes:
+      For each impact area from `survey_impact`, identify in Notes:
         - Concurrency, state-machine, or lifecycle risks
         - Error paths and edge cases the feature must
           handle (malformed inputs, missing files,
@@ -299,7 +307,7 @@ tasks:
           absence of it
         - New tests the feature will need — unit,
           integration, or end-to-end — and where they will
-          live (file paths from t01 conventions)
+          live (file paths from `orient` conventions)
 
       Also capture the exact check command(s) the project
       uses to gate commits (e.g. `npm run check`,
@@ -310,12 +318,12 @@ tasks:
       contract, state explicitly whether the intended landing
       is a hot cut or a compatibility-preserving migration.
       Default to hot cut unless the caller said otherwise.
-  - id: t06_contract_artifact
+  - id: produce_contract_artifact
     title: Produce the feature contract artifact
     body: |
       Before you draft the plan, pin down the exact shape
       of what the implementer is going to build. The
-      contract dimensions you walked in t02 were the
+      contract dimensions you walked in `capture_feature` were the
       *requirements check*; this task is the *deliverable*
       — a concrete, greppable artifact the implementer and
       reviewer both work from.
@@ -425,18 +433,18 @@ tasks:
       Once the contract artifact is written, paste the
       entire block into this task's Notes. It will be
       copied verbatim into the generated plan's
-      `<<PLACEHOLDER_FEATURE_CONTRACT>>` marker in t07,
+      `<<PLACEHOLDER_FEATURE_CONTRACT>>` marker in `draft_plan`,
       so the implementer reads it on every fresh task
       attempt and the reviewer cross-checks the final
       code against it in plan-coverage.
 
       If you are mid-task and realize the contract is
-      still ambiguous on a dimension you missed in t02,
+      still ambiguous on a dimension you missed in `capture_feature`,
       mark **this** task `blocked` with the missing
       dimension and targeted questions — same gate as
-      t02. It is better to catch a contract gap here
+      `capture_feature`. It is better to catch a contract gap here
       than to let the implementer discover it.
-  - id: t07_draft_plan
+  - id: draft_plan
     title: Draft the plan assignment file
     body: |
       Locate the reference template. It lives alongside this
@@ -472,6 +480,10 @@ tasks:
           [tasks]` line in the frontmatter — once the draft
           is init'd, the executor must not be able to
           silently drop tasks at runtime.
+        - Use semantic task ids that describe the work
+          (`implement_core`, not `step_three`).
+          Array order defines execution order; do not encode
+          ordinals into ids.
         - Every task in the plan must begin its body with a
           `**Category**: <code-bearing|process|hybrid>` line.
           The reviewer's plan-coverage pass reads this tag
@@ -525,7 +537,7 @@ tasks:
           read.
         - Keep a dedicated check-gate task citing the
           project's exact lint/build/test commands from
-          t01.
+          `orient`.
         - Keep a dedicated docs-drift task unless the
           feature genuinely touches no documentation.
         - Make contract changes explicit. The generated plan
@@ -535,7 +547,8 @@ tasks:
           requested that migration behavior.
 
       Fill in every `<<PLACEHOLDER>>` marker with concrete,
-      file-level detail from tasks t01–t06. Placeholders
+      file-level detail from tasks `orient` through
+      `produce_contract_artifact`. Placeholders
       that remain are a draft-quality failure — they leak
       into the implementer's workspace and produce vague
       execution.
@@ -544,13 +557,13 @@ tasks:
       plan-coverage pass:
         - `<<PLACEHOLDER_FEATURE_BRIEF>>` in the generated
           plan's first task — paste a 3-5 sentence summary
-          of the feature from your t02 notes (what it is,
+          of the feature from your `capture_feature` notes (what it is,
           why, in-scope, out-of-scope). The reviewer reads
           this via `implementation_plan` to know what it is
           verifying.
         - `<<PLACEHOLDER_FEATURE_CONTRACT>>` in the same
           task — paste the entire contract artifact from
-          your t06 notes, verbatim, inside a fenced block.
+          your `produce_contract_artifact` notes, verbatim, inside a fenced block.
           The reviewer cross-checks the final implementation
           against this contract: every listed flag,
           every listed exit code, every listed sample
@@ -558,7 +571,7 @@ tasks:
           plan-coverage weaker than it should be.
         - `<<PLACEHOLDER_FEATURE_ASSUMPTIONS>>` in the same
           task — paste the explicit assumptions list you
-          captured in t02 as a bulleted list. The reviewer
+          captured in `capture_feature` as a bulleted list. The reviewer
           cross-checks each assumption against the final
           implementation; silent assumption breakage is
           graded HIGH.
@@ -572,15 +585,123 @@ tasks:
       correct YAML indentation, balanced quoting, no TAB
       characters. Report the final draft path in this
       task's Notes.
-  - id: t08_prepare_init_command
+  - id: review_draft
+    title: Review the draft plan via task-runner
+    body: |
+      Before launching the draft review, finalize the planning
+      evidence the reviewer depends on:
+
+        1. Open this run's workspace `assignment.md` and scan
+           every task above this one.
+        2. Every prior task must have status `completed`.
+           If a prior task is still `in_progress`, `pending`,
+           or `blocked`, fix that first.
+        3. Every prior task must have a non-empty Notes block
+           with concrete evidence: repo file paths, commands,
+           contract details, reusable code references, and
+           risks. The draft reviewer uses this workspace as
+           ground truth for the feature brief, contract, and
+           assumptions.
+        4. Do not launch the draft reviewer against a half-
+           finished planning workspace. A wasted review cycle
+           is worse than a delayed one.
+
+      Once the draft and planning evidence are finalized,
+      launch the bundled `plan-review` assignment as a nested
+      `{{task_runner_cmd}} run`:
+
+          {{task_runner_cmd}} run \
+            --agent code-reviewer \
+            --assignment plan-review \
+            --var repo_path={{repo_path}} \
+            --var plan_draft=<draft-path-from-draft_plan> \
+            --var planning_workspace={{assignment_path}}
+
+      The reviewer reads both artifacts:
+        - `plan_draft` is the exact draft the caller will init.
+        - `planning_workspace` is this planner run's own
+          workspace assignment, which contains the captured
+          brief, contract, risks, and assumptions.
+
+      The review produces its own run id. Capture that run id
+      in this task's Notes immediately after launch. Once the
+      review finishes, check its terminal status first:
+
+          {{task_runner_cmd}} status <review-run-id> --output-format json \
+            --field status
+
+      The `plan-review` assignment ends with an `approval`
+      task that gates whether the draft is ready to hand back:
+        - `status: "success"` → the draft is approved.
+        - `status: "blocked"` → the draft still needs fixes.
+
+      Pull the reviewer's synthesis and approval decision:
+
+          {{task_runner_cmd}} status <review-run-id> --output-format json \
+            --field finalTasks
+
+      Paste the reviewer's synthesis and `approval` decision
+      record into this task's Notes — raw, not summarized. If
+      approval is BLOCKED, copy its "Path to approval" list
+      here so `apply_review_fixes` knows exactly what to fix.
+
+      This nested review consumes one level of `task-runner`
+      recursion (planner → plan-review). If your environment
+      disallows nested `task-runner run` calls, block here and
+      surface that to the caller instead of continuing.
+  - id: apply_review_fixes
+    title: Apply draft-review fixes and request delta re-review
+    body: |
+      Work through the findings from `review_draft`:
+        - For each finding you agree with, update the draft
+          file and cite the changed section or line context in
+          Notes.
+        - For each finding you disagree with, write a short
+          justification in Notes explaining why.
+        - If the reviewer flags placeholders, vague task ids,
+          missing `Done when:` criteria, weak handoff wording,
+          or fallback/compatibility instructions that violate
+          the plan, fix them here in the draft — do not defer
+          them to the implementer.
+
+      After applying fixes, resume the draft review run for a
+      delta pass:
+
+          {{task_runner_cmd}} run --resume-run <review-run-id> \
+            "Draft updated. <one-line summary per prior finding>."
+
+      The reviewer does a focused delta pass, not a full
+      re-walk. Iterate until the review run's terminal status
+      is `success`:
+
+          {{task_runner_cmd}} status <review-run-id> --output-format json \
+            --field status
+
+      If it still returns `blocked`, read the updated
+      `approval` decision record for the new "Path to
+      approval" list, apply the remaining fixes, and resume
+      again. Do not mark this task `completed` until the draft
+      review run hits `success`.
+
+      Paste the final delta synthesis and the final approved
+      `approval` decision record into this task's Notes,
+      replacing the earlier blocked versions. The audit trail
+      of earlier passes lives in the review run itself.
+
+      If the reviewer still refuses to approve after several
+      passes and you disagree with the remaining blockers, mark
+      **this** task `blocked` with an explanation — do not fake
+      an approval by editing the review run directly.
+  - id: prepare_init_command
     title: Prepare the exact init command for the caller
     body: |
       Prepare the exact `{{task_runner_cmd}} init` command the
-      caller should run against the draft from t07:
+      caller should run against the approved draft from
+      `draft_plan`:
 
           {{task_runner_cmd}} init \
             --agent implementer \
-            --assignment <draft-path-from-t07> \
+            --assignment <draft-path-from-draft_plan> \
             --var repo_path={{repo_path}}
 
       **Always use `--agent implementer`.** This is the
@@ -615,11 +736,12 @@ tasks:
       caller decides when to create the implementer run.
 
       Also note:
-      - the draft path from t07
+      - the approved draft path from `draft_plan`
+      - the draft-review run id from `review_draft`
       - that init's stdout/stderr will produce the new run id
       - that after init succeeds, the canonical artifact becomes
         the new run workspace `assignment.md`
-  - id: t09_handoff
+  - id: handoff
     title: Handoff summary
     body: |
       Write a short Notes block capturing everything the
@@ -628,25 +750,30 @@ tasks:
       and then resume it.
 
       Include:
-        - **Draft path** from t07.
-        - **Exact init command** from t08 (this is the
+        - **Draft path** from `draft_plan`.
+        - **Draft-review run id** from `review_draft`, so the
+          caller can inspect the final draft-approval audit
+          trail if desired.
+        - **Exact init command** from `prepare_init_command` (this is the
           primary handoff command the caller should run
           first).
         - **Feature summary** (one or two sentences from
-          t02).
+          `capture_feature`).
         - **Exact command shape** the caller should run
-          *after init succeeds* to execute the plan, including the
-          `TASK_RUNNER_MAX_CALL_DEPTH=2` export:
+          *after init succeeds* to execute the plan:
 
-              TASK_RUNNER_MAX_CALL_DEPTH=2 {{task_runner_cmd}} run \
-                --resume-run <new-run-id>
+              {{task_runner_cmd}} run --resume-run <new-run-id>
 
         - A note that `<new-run-id>` comes from the init
           command's output, not from the planning run itself.
+        - A note that the caller environment must allow one
+          nested `task-runner run`, because the generated plan
+          runs a bundled `code-review` step.
 
-        - **Open assumptions** from t02 that the caller
+        - **Open assumptions** from `capture_feature` that the caller
           should confirm before kicking off execution.
-        - **Known risks or scope concerns** from t03–t05
+        - **Known risks or scope concerns** from `survey_impact`,
+          `check_existing_code`, and `assess_risks_and_tests`
           that deserve a pre-execution sanity check.
 
       Keep this block tight. The caller will read it via
@@ -659,27 +786,33 @@ executable `task-runner` assignment file — not the feature
 itself.
 
 The feature you are planning for was handed to you as the user
-message that started this run. Read it before you start t01.
+message that started this run. Read it before you start `orient`.
 Do not fabricate scope.
 
 Work on the repository at `{{repo_path}}`. You may read any
 file under that repo freely. Do not modify any file under
 `{{repo_path}}` — the only files you should write are:
   - Your own workspace plan at `{{assignment_path}}`.
-  - The draft plan file you create in t07 under
+  - The draft plan file you create in `draft_plan` under
     `${TASK_RUNNER_STATE_DIR}/drafts/<repo-name>/`.
 
 Work the tasks in order. Earlier tasks build context the
-later ones depend on. The draft plan in t07 should cite
+later ones depend on. The draft plan in `draft_plan` should cite
 specific files, functions, and commands from your earlier
 notes — vague plans produce vague execution.
+
+This run itself launches a nested `plan-review` task-runner
+review against the draft. The caller environment must allow
+that nested review. Surface the same requirement for the
+implementer run in the final handoff, because the generated
+plan also launches a nested `code-review` run.
 
 The generated plan will use task-runner's existing
 code-review assignment for its internal review step, invoked
 as a nested `{{task_runner_cmd}} run`. This means whoever executes
-the plan must export `TASK_RUNNER_MAX_CALL_DEPTH=2` before
-calling `{{task_runner_cmd}} run --resume-run`. Surface this
-requirement in the t09 handoff summary so the caller does not
+the plan must run it in an environment that permits one nested
+`task-runner run`. Surface this
+requirement in the `handoff` summary so the caller does not
 get bitten by it.
 
 Prefer end-state designs in the generated plan. Avoid fallback
@@ -688,10 +821,11 @@ and dual-shape readers unless the caller explicitly asked for
 migration or backward-compatibility support. Default to hot-cut
 contract changes.
 
-You may delegate repo exploration (t03) or duplication
-scanning (t04) to native subagents if that would parallelize
-your work. Do not delegate t02 (feature capture — the
-ambiguity gate must live in your own context), t06 (contract
-artifact — the contract is your deliverable), t07 (draft
-writing), t08 (init-command prep), or t09 (handoff) — those need to
-live in your own context.
+You may delegate repo exploration (`survey_impact`) or
+duplication scanning (`check_existing_code`) to native
+subagents if that would parallelize your work. Do not
+delegate `capture_feature` (the ambiguity gate must live in
+your own context), `produce_contract_artifact` (the contract
+is your deliverable), `draft_plan`, `review_draft`,
+`apply_review_fixes`, `prepare_init_command`, or `handoff`
+— those need to live in your own context.

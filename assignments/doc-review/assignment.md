@@ -9,7 +9,7 @@ vars:
     source: cli
     description: Absolute path to the repository whose docs you want reviewed.
 tasks:
-  - id: t01_inventory
+  - id: inventory
     title: Inventory the documentation surface
     body: |
       First, find every documentation file in the repository at
@@ -38,7 +38,7 @@ tasks:
       you found and the code surface you'll check them against.
       This is context for the rest of the review, not a finding
       section.
-  - id: t02_elevator_pitch
+  - id: review_elevator_pitch
     title: README elevator pitch & framing
     body: |
       Read the README's opening. A reader who has never heard of
@@ -62,7 +62,7 @@ tasks:
           not why you'd use it instead of the obvious alternative
 
       Format per role instructions.
-  - id: t03_quickstart
+  - id: review_quickstart
     title: Quickstart runnability & completeness
     body: |
       Find the quickstart or getting-started section. A good
@@ -87,7 +87,7 @@ tasks:
 
       Broken quickstart commands are CRITICAL. Grep/read the
       code to confirm before flagging.
-  - id: t04_concepts
+  - id: review_concepts
     title: Conceptual clarity & terminology
     body: |
       Walk through the README's concept section (or equivalent)
@@ -108,7 +108,7 @@ tasks:
       This task often catches the biggest readability wins —
       name a thing clearly once and the rest of the doc
       improves.
-  - id: t05_commands_flags_api
+  - id: review_commands_flags_api
     title: Commands, flags, and API reference accuracy
     body: |
       For every CLI subcommand, flag, function signature, or
@@ -132,7 +132,7 @@ tasks:
       the wrong path. For each inaccuracy, quote both sides
       (doc line + code line) and propose the replacement
       wording.
-  - id: t06_examples
+  - id: review_examples
     title: Examples, tutorials, and recipes
     body: |
       Walk every example in the docs — shell commands, code
@@ -156,10 +156,10 @@ tasks:
           they the same minimal example with an extra flag?
 
       Broken examples are CRITICAL.
-  - id: t07_completeness_gaps
+  - id: review_completeness
     title: Completeness — undocumented features
     body: |
-      Walk the code surface you inventoried in t01 and list
+      Walk the code surface you inventoried in `inventory` and list
       features that aren't mentioned in the docs at all, or are
       mentioned only in passing. Candidates:
         - CLI subcommands the docs don't describe
@@ -175,7 +175,7 @@ tasks:
       A missing feature in docs is **HIGH** (users can still
       find it by reading the code or --help). A stale claim is
       **CRITICAL** because it actively misleads.
-  - id: t08_structure_navigation
+  - id: review_structure
     title: Structure & navigation
     body: |
       Zoom out to the README's structure. Does the table of
@@ -194,7 +194,7 @@ tasks:
       For projects with multiple top-level docs (README,
       CONTRIBUTING, etc.), is the split sensible or is content
       in the wrong file?
-  - id: t09_diagrams
+  - id: propose_diagrams
     title: Diagrams — propose mermaid blocks where they help
     body: |
       Identify the parts of the docs where a diagram would
@@ -243,7 +243,7 @@ tasks:
       noise. If the project is small or the existing prose is
       already clear, it's fine to propose zero diagrams and
       say so.
-  - id: t10_voice_consistency
+  - id: review_voice_consistency
     title: Voice, tone, and consistency
     body: |
       Read the docs end-to-end and listen for:
@@ -263,7 +263,7 @@ tasks:
       This is the lowest-severity dimension; only flag things
       that a reader would actually notice. Skip pure
       preference.
-  - id: t11_accessibility
+  - id: review_accessibility
     title: Accessibility & assumed knowledge
     body: |
       Who is the reader the docs are written for, and does the
@@ -281,10 +281,11 @@ tasks:
           equivalent
         - "Obvious" steps that are only obvious to someone who
           already knows the project
-  - id: t12_synthesis
+  - id: synthesis
     title: Top findings synthesis
     body: |
-      Now read back through the notes you wrote on tasks t02-t11
+      Now read back through the notes you wrote on
+      `review_elevator_pitch` through `review_accessibility`
       and build a single ranked list of the **top 10
       highest-leverage findings** from the entire review. Order
       by severity (CRITICAL first, then HIGH, MEDIUM, LOW) and
@@ -301,7 +302,8 @@ tasks:
           time?)
         - The single highest-leverage fix (if any) that would
           unblock or improve many readers at once
-        - A short list of the diagrams you proposed in t09
+        - A short list of the diagrams you proposed in
+          `propose_diagrams`
           with their target sections, so the human has a
           single place to find them
 ---
@@ -340,10 +342,12 @@ honest review.
 
 **Delegating via subagents.** For a large doc set, you may
 delegate independent dimensions to subagents to parallelize —
-e.g. run the commands/flags/API accuracy pass (t05) and the
-examples runnability pass (t06) as separate subagents while
+e.g. run the commands/flags/API accuracy pass
+(`review_commands_flags_api`) and the examples runnability
+pass (`review_examples`) as separate subagents while
 you continue with the structure pass. Do not delegate the
-inventory task (t01) or the synthesis task (t12); both depend
+inventory task (`inventory`) or the synthesis task
+(`synthesis`); both depend
 on your own accumulated context. When a subagent returns,
 fold its findings into the task's Notes block in the same
 severity/format used by the rest of the review so the

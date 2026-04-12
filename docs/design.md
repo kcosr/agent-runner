@@ -264,11 +264,11 @@ callerInstructions: |             # optional; printed to the CALLER,
   json to get a structured        # "Caller instructions" section below.
   report for run {{run_id}}.
 tasks:
-  - id: t1_conventions            # stable ID, [A-Za-z0-9._:-]+, max 128 chars
+  - id: read_conventions          # stable semantic ID, [A-Za-z0-9._:-]+, max 128 chars
     title: Check repo conventions # required, short label
     body: |                       # optional, multi-line description
       Read AGENTS.md and CLAUDE.md.
-  - id: t2_inventory
+  - id: inventory_packages
     title: Inventory packages
 ---
 This is a repository orientation. Capture findings in each task's notes
@@ -1092,7 +1092,7 @@ retrying.
 
 ---
 
-<!-- task-id: t1_read_conventions -->
+<!-- task-id: read_conventions -->
 ## Task 1: Check repo conventions
 
 Read AGENTS.md and CLAUDE.md.
@@ -1165,11 +1165,11 @@ Built from the in-memory map + any invalid-status errors captured during parse:
 Some tasks in /abs/path/assignment.md are not yet completed. Please continue.
 
 Remaining tasks:
-- t1_read_conventions (status: pending) — Check repo conventions
-- t3_run_tests (status: in_progress) — Run the test suite
+- read_conventions (status: pending) — Check repo conventions
+- run_tests (status: in_progress) — Run the test suite
 
 Invalid status values:
-- t2_audit_auth had status "done"; use one of the valid statuses instead.
+- audit_auth had status "done"; use one of the valid statuses instead.
 
 Valid statuses: pending, in_progress, completed, blocked.
 Update each task's Status to `completed` when done. If you cannot complete
@@ -1877,11 +1877,11 @@ Attempts: 2/4
 Assignment file: /abs/path/.local/state/task-runner/runs/<repo-name>/k7m2xq/assignment.md
 
 Task results:
-  - t1_read_conventions — Check repo conventions [completed]
+  - read_conventions — Check repo conventions [completed]
       2-space indent; prefer node:test; PRs squash-merge to main.
-  - t2_audit_auth — Audit authentication flow [completed]
+  - audit_auth — Audit authentication flow [completed]
       OAuth2 via middleware/auth.ts; no session tokens stored at rest.
-  - t3_summary — Summary [completed]
+  - summary — Summary [completed]
       Small monorepo for agent tooling; three packages under src/.
 
 Review /abs/path/.local/state/task-runner/runs/<repo-name>/k7m2xq/assignment.md for additional agent output.

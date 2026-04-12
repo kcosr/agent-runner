@@ -8,11 +8,11 @@ vars:
     source: cli
     description: Absolute path to the repository to inspect.
 tasks:
-  - id: t1_run_date
+  - id: run_date
     title: Run Date
     body: |
       Run `date` and record the output in the Notes field of this task.
-  - id: t2_run_pwd
+  - id: run_pwd
     title: Run pwd
     body: |
       Run `pwd` and record the output in the Notes field of this task.

@@ -208,11 +208,11 @@ Attempts: 1/4
 Assignment file: /.../.local/state/task-runner/runs/<repo-name>/abc123/assignment.md
 
 Task results:
-  - t1_read_conventions — Check repo conventions [completed]
+  - read_conventions — Check repo conventions [completed]
       2-space indent; biome for lint/format; tests via node:test.
-  - t2_inventory_packages — Inventory top-level packages [completed]
+  - inventory_packages — Inventory top-level packages [completed]
       ...
-  - t3_summary — Summary [completed]
+  - summary — Summary [completed]
       Small TS monorepo for an AI agent runner with two backends.
 
 To continue this run with a follow-up message:
@@ -272,13 +272,13 @@ callerInstructions: |
   Your run id is {{run_id}}. The structured report lands in
   {{assignment_path}} — parse per-task notes blocks for findings.
 tasks:
-  - id: t1_read_conventions
+  - id: read_conventions
     title: Check repo conventions
     body: |
       Read AGENTS.md and CLAUDE.md (if present). Capture the coding
       style, test requirements, and PR conventions in this task's
       Notes block.
-  - id: t2_inventory_packages
+  - id: inventory_packages
     title: Inventory packages
     body: List the top-level packages and what each one does.
 ---
@@ -614,25 +614,25 @@ Mutation commands:
 ```bash
 # Inspect tasks
 task-runner task list <run-id>
-task-runner task show <run-id> t1
+task-runner task show <run-id> <task-id>
 
 # Mark a task in-progress
-task-runner task set <run-id> t1 --status in_progress
+task-runner task set <run-id> <task-id> --status in_progress
 
 # Add a notes block without changing status
-task-runner task set <run-id> t1 --notes "Investigating the parser."
+task-runner task set <run-id> <task-id> --notes "Investigating the parser."
 
 # Append to the existing notes body
-task-runner task append-notes <run-id> t1 --text "Captured CLI-mode details."
+task-runner task append-notes <run-id> <task-id> --text "Captured CLI-mode details."
 
 # Complete a task with a note in one call
-task-runner task set <run-id> t1 --status completed --notes "Done."
+task-runner task set <run-id> <task-id> --status completed --notes "Done."
 
 # Append a new task to an initialized run
 task-runner task add <run-id> --title "Follow-up cleanup" --body "Update docs."
 
 # JSON output returns the updated task snapshot (handy for scripts)
-task-runner task set <run-id> t1 --status completed --output-format json
+task-runner task set <run-id> <task-id> --status completed --output-format json
 ```
 
 `task set` options:
@@ -679,10 +679,10 @@ task-runner init \
 # 2. External agent asks: "what's left to do?"
 task-runner status abc123 --output-format json --field finalTasks
 
-# 3. External agent works task t1 and reports progress
-task-runner task set abc123 t1 --status in_progress
+# 3. External agent works a task and reports progress
+task-runner task set abc123 review_accessibility --status in_progress
 # ...agent does the work...
-task-runner task set abc123 t1 --status completed --notes "LGTM"
+task-runner task set abc123 review_accessibility --status completed --notes "LGTM"
 
 # 4. Optionally add a task the script discovered along the way
 task-runner task add abc123 --title "Follow-up: address flakey test"
@@ -849,9 +849,9 @@ RUN=$(task-runner init \
   --var repo_path=. --output-format json | jq -r .runId)
 
 # 3. Walk the task list (agent-specific logic omitted)
-task-runner task set $RUN t1 --status in_progress
+task-runner task set $RUN read_conventions --status in_progress
 # ...do the work...
-task-runner task set $RUN t1 --status completed --notes "..."
+task-runner task set $RUN read_conventions --status completed --notes "..."
 
 # 4. When every task is terminal, the run auto-finalizes.
 task-runner status $RUN | grep "Status: success"
@@ -1101,7 +1101,7 @@ printed to stdout.
   pointing at a task-runner workspace `assignment.md`; when set
   (typically from a `plan-feature`-driven implementer run) the
   reviewer verifies every planned task actually shipped and
-  flags silent deferrals. The final `t14_approval` task is an
+  flags silent deferrals. The final `approval` task is an
   explicit ship / no-ship decision: runs that approve exit
   `success` (code 0); runs where the reviewer cannot approve
   exit `blocked` (code 2), so scripts can gate on the terminal
@@ -1114,14 +1114,21 @@ printed to stdout.
   risks; copies a template from the configured task-runner
   config root into the repo-name drafts area under
   `${TASK_RUNNER_STATE_DIR}/drafts/`; fills in every placeholder
-  with concrete file-level detail; then hands the caller the
-  exact `task-runner init ...` command to run. After the caller
-  initializes the draft into a new run workspace, the resulting
-  run can be executed by any agent via
-  `task-runner run --resume-run <new-id>`. Execution requires
-  `TASK_RUNNER_MAX_CALL_DEPTH=2` because the generated plan
-  nests a `task-runner run` against the `code-reviewer` agent
-  for its internal review step.
+  with concrete file-level detail; runs a nested `plan-review`
+  pass against the draft and planning workspace; then hands the
+  caller the exact `task-runner init ...` command to run. Both
+  the planner run and the generated implementation run require
+  `TASK_RUNNER_MAX_CALL_DEPTH=2`: the planner nests
+  `plan-review`, and the generated implementation plan nests
+  `code-review`.
+- **`assignments/plan-review/`** — six-task draft-plan review for
+  `plan-feature`. It reads the generated draft assignment plus
+  the planner's own workspace `assignment.md`, checks contract
+  fidelity, task quality, workflow wiring, and handoff clarity,
+  then ends with an explicit `approval` gate. Runs exit
+  `success` only when the draft is ready to hand back to the
+  caller; otherwise they exit `blocked` so the planner can
+  revise and request a delta re-review.
 - **`assignments/doc-review/`** — twelve-task documentation review
   (inventory, elevator pitch, quickstart, concepts, commands/API
   accuracy, examples, completeness gaps, structure & navigation,
