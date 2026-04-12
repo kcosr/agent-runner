@@ -17,18 +17,18 @@ callerInstructions: |
   and risk analysis live in the **planning** run's task notes —
   pull them via:
 
-      task-runner status <planning-run-id>
+      {{task_runner_cmd}} status <planning-run-id>
 
   If you don't know the planning run id, it's captured in this
   run's first task notes as part of orient.
 
   ## Executing the plan
 
-      TASK_RUNNER_MAX_CALL_DEPTH=2 task-runner run \
+      TASK_RUNNER_MAX_CALL_DEPTH=2 {{task_runner_cmd}} run \
         --resume-run {{run_id}}
 
   The depth override is required. The internal-review task in
-  this plan launches a nested `task-runner run` against the
+  this plan launches a nested `{{task_runner_cmd}} run` against the
   code-reviewer agent (implementer runs at depth 1, reviewer at
   depth 2). Default depth is 1, so without the override the
   review invocation is rejected.
@@ -42,7 +42,7 @@ callerInstructions: |
 
   ## How the reviewer sees your work
 
-  The internal-review task launches a nested `task-runner run`
+  The internal-review task launches a nested `{{task_runner_cmd}} run`
   against the `code-reviewer` agent with
   `--var implementation_plan={{assignment_path}}` — which is
   the absolute path to **this run's own** workspace
@@ -71,7 +71,7 @@ callerInstructions: |
   test results, and a pointer to the review run id. Start
   there:
 
-      task-runner status {{run_id}}
+      {{task_runner_cmd}} status {{run_id}}
 
   The review run is a separate task-runner run; its findings
   live in that run's own workspace and are referenced by id
@@ -125,7 +125,7 @@ tasks:
 
       ## Preflight: recursion depth
 
-      This plan launches a nested `task-runner run` against
+      This plan launches a nested `{{task_runner_cmd}} run` against
       the `code-reviewer` agent in `t07_internal_review`.
       That requires the max call depth to be strictly
       greater than the current depth. Run:
@@ -158,7 +158,7 @@ tasks:
       If you want the full planning context (impact survey,
       duplication check, risk analysis), pull it via:
 
-          task-runner status <<PLACEHOLDER_PLANNING_RUN_ID>> \
+          {{task_runner_cmd}} status <<PLACEHOLDER_PLANNING_RUN_ID>> \
             --output-format json --field finalTasks
 
       Paste the planning run id into this task's Notes for
@@ -284,11 +284,11 @@ tasks:
            delayed one.
 
       Once every prior task is finalized, launch the bundled
-      `code-review` assignment as a nested `task-runner run`,
+      `code-review` assignment as a nested `{{task_runner_cmd}} run`,
       passing this plan's workspace assignment as the
       implementation context:
 
-          task-runner run \
+          {{task_runner_cmd}} run \
             --agent code-reviewer \
             --assignment code-review \
             --var repo_path={{repo_path}} \
@@ -309,7 +309,7 @@ tasks:
       finishes, check its **terminal status** first — not
       just its synthesis:
 
-          task-runner status <review-run-id> --output-format json \
+          {{task_runner_cmd}} status <review-run-id> --output-format json \
             --field status
 
       The code-review assignment has a final `t14_approval`
@@ -327,7 +327,7 @@ tasks:
 
       Pull the synthesis and the approval decision record:
 
-          task-runner status <review-run-id> --output-format json \
+          {{task_runner_cmd}} status <review-run-id> --output-format json \
             --field finalTasks
 
       Paste the reviewer's top-findings synthesis and the
@@ -366,7 +366,7 @@ tasks:
       After applying fixes, resume the review run for a
       delta pass:
 
-          task-runner run --resume-run <review-run-id> \
+          {{task_runner_cmd}} run --resume-run <review-run-id> \
             "Fixes applied. <one-line summary per prior finding>."
 
       The reviewer does a focused delta pass, not a full
@@ -375,7 +375,7 @@ tasks:
       approval gate, and the only signal that the change
       is cleared to ship. Check after each delta pass:
 
-          task-runner status <review-run-id> --output-format json \
+          {{task_runner_cmd}} status <review-run-id> --output-format json \
             --field status
 
       If it still returns `blocked`, read the updated
@@ -524,7 +524,7 @@ implementation (Claude's Agent tool, Codex subagents,
 whatever your backend supports). Native subagents do not
 count against task-runner's recursion depth. The one
 depth-consuming invocation in this plan is the nested
-`task-runner run` in `t07_internal_review`; that is why
+`{{task_runner_cmd}} run` in `t07_internal_review`; that is why
 this run must be launched with `TASK_RUNNER_MAX_CALL_DEPTH=2`.
 
 The task list is locked (`lockedFields: [tasks]`). You

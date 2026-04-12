@@ -1,5 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { WebSocket } from "ws";
+import { resolveTaskRunnerCommand } from "../task-runner-command.js";
 import type {
   Backend,
   BackendInvokeContext,
@@ -863,10 +864,9 @@ export const codexBackend: Backend = {
       // failure that triggers another retry.
       if (isExternalInterrupt(state.turnStatus, timedOut, aborted)) {
         aborted = true;
+        const taskRunnerCmd = resolveTaskRunnerCommand();
         ctx.onStderrText?.(
-          "\ncodex: turn was interrupted externally (e.g. cancelled from another " +
-            "client connected to the same thread); marking the run aborted instead " +
-            "of retrying. Resume with `task-runner run --resume-run <id>` when ready.\n",
+          `\ncodex: turn was interrupted externally (e.g. cancelled from another client connected to the same thread); marking the run aborted instead of retrying. Resume with \`${taskRunnerCmd} run --resume-run <id>\` when ready.\n`,
         );
       }
     } catch (err) {

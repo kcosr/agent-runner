@@ -934,6 +934,7 @@ injects:
 - `{{assignment_path}}` — absolute path to the workspace `assignment.md`
 - `{{run_id}}` — short run id
 - `{{cwd}}` — resolved absolute working directory
+- `{{task_runner_cmd}}` — resolved CLI command name for user-facing workflow instructions
 
 ## Locked fields
 
@@ -998,6 +999,7 @@ printed to stdout.
 |---|---|
 | `TASK_RUNNER_CONFIG_DIR` | Root for named definitions. Agents live under `agents/<name>/agent.md`; assignments live under `assignments/<name>/assignment.md`. Defaults to `${XDG_CONFIG_HOME}/task-runner` or `~/.config/task-runner`. |
 | `TASK_RUNNER_STATE_DIR` | Root for runtime state. Runs live under `runs/<repo-key>/<run-id>/`; drafts live under `drafts/<repo-key>/`. Defaults to `${XDG_STATE_HOME}/task-runner` or `~/.local/state/task-runner`. |
+| `TASK_RUNNER_CMD` | Override the CLI command name used in user-facing messages, prompts, and assignment templates. Defaults to the `task-runner` binary found on `PATH`, then bare `task-runner`. |
 | `TASK_RUNNER_CLAUDE_BIN` | Path to the `claude` binary. Defaults to `claude` on `PATH`. |
 | `TASK_RUNNER_CODEX_BIN` | Path to the `codex` binary for stdio mode. Defaults to `codex` on `PATH`. |
 | `TASK_RUNNER_CODEX_WS_URL` | If set, the codex backend connects to this WebSocket URL instead of spawning a stdio subprocess. |

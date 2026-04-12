@@ -116,7 +116,8 @@ export const assignmentConfigSchema = z
     // task-runner, NOT part of the prompt sent to the backend.
     // Printed to stderr on fresh `run` and `init` (never on
     // --resume-run). Interpolated against runtime vars and the
-    // runner-injected vars ({{run_id}}, {{assignment_path}}, etc.).
+    // runner-injected vars ({{run_id}}, {{assignment_path}},
+    // {{task_runner_cmd}}, etc.).
     // Frozen into `manifest.callerInstructions` at first write so
     // `status --output-format json --field callerInstructions` can
     // always re-fetch it.

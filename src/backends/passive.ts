@@ -1,11 +1,11 @@
+import { resolveTaskRunnerCommand } from "../task-runner-command.js";
 import type { Backend, BackendInvokeResult } from "./types.js";
 
 export class PassiveBackendNotInvokableError extends Error {
   constructor() {
+    const taskRunnerCmd = resolveTaskRunnerCommand();
     super(
-      "the passive backend cannot be invoked. Passive agents are driven " +
-        "externally via `task-runner task set` / `task add`. Use those commands " +
-        "to work the task list and `task-runner status` to read progress.",
+      `the passive backend cannot be invoked. Passive agents are driven externally via \`${taskRunnerCmd} task set\` / \`${taskRunnerCmd} task add\`. Use those commands to work the task list and \`${taskRunnerCmd} status\` to read progress.`,
     );
     this.name = "PassiveBackendNotInvokableError";
   }

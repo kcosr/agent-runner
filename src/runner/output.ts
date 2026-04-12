@@ -1,4 +1,5 @@
 import type { TaskState, TaskStatus } from "../assignment/model.js";
+import { resolveTaskRunnerCommand } from "../task-runner-command.js";
 import type { RunManifest, TaskSnapshot } from "./manifest.js";
 
 const VALID_TASK_STATUSES: ReadonlySet<TaskStatus> = new Set([
@@ -26,6 +27,7 @@ export interface RunSummary {
 }
 
 export function renderSummary(summary: RunSummary): string {
+  const taskRunnerCmd = resolveTaskRunnerCommand();
   const lines: string[] = [];
   lines.push("");
   lines.push("── summary ──");
@@ -43,7 +45,7 @@ export function renderSummary(summary: RunSummary): string {
     }
     lines.push("");
     lines.push("To execute this run:");
-    lines.push(`  task-runner run --resume-run ${summary.runId}`);
+    lines.push(`  ${taskRunnerCmd} run --resume-run ${summary.runId}`);
     return `${lines.join("\n")}\n`;
   }
 
@@ -53,7 +55,7 @@ export function renderSummary(summary: RunSummary): string {
     lines.push(`Assignment file: ${summary.assignmentPath}`);
     lines.push("");
     lines.push("Run was interrupted by the user. To resume:");
-    lines.push(`  task-runner run --resume-run ${summary.runId} "..."`);
+    lines.push(`  ${taskRunnerCmd} run --resume-run ${summary.runId} "..."`);
     return `${lines.join("\n")}\n`;
   }
 
@@ -79,7 +81,7 @@ export function renderSummary(summary: RunSummary): string {
 
   lines.push("");
   lines.push("To continue this run with a follow-up message:");
-  lines.push(`  task-runner run --resume-run ${summary.runId} "..."`);
+  lines.push(`  ${taskRunnerCmd} run --resume-run ${summary.runId} "..."`);
 
   return `${lines.join("\n")}\n`;
 }
@@ -129,6 +131,7 @@ export function renderManifestStatus(
   manifest: RunManifest,
   opts: { isLive?: boolean } = {},
 ): string {
+  const taskRunnerCmd = resolveTaskRunnerCommand();
   const lines: string[] = [];
   lines.push("");
   lines.push(`── run ${manifest.runId} ──`);
@@ -194,13 +197,13 @@ export function renderManifestStatus(
     lines.push("");
     if (isPassive) {
       lines.push("Drive this run externally:");
-      lines.push(`  task-runner task set ${manifest.runId} <task-id> --status in_progress`);
+      lines.push(`  ${taskRunnerCmd} task set ${manifest.runId} <task-id> --status in_progress`);
       lines.push(
-        `  task-runner task set ${manifest.runId} <task-id> --status completed --notes "..."`,
+        `  ${taskRunnerCmd} task set ${manifest.runId} <task-id> --status completed --notes "..."`,
       );
     } else {
       lines.push("To execute this run:");
-      lines.push(`  task-runner run --resume-run ${manifest.runId}`);
+      lines.push(`  ${taskRunnerCmd} run --resume-run ${manifest.runId}`);
     }
   } else if (
     manifest.status === "blocked" ||
@@ -211,10 +214,10 @@ export function renderManifestStatus(
     lines.push("");
     if (isPassive) {
       lines.push("Reopen tasks to continue:");
-      lines.push(`  task-runner task set ${manifest.runId} <task-id> --status in_progress`);
+      lines.push(`  ${taskRunnerCmd} task set ${manifest.runId} <task-id> --status in_progress`);
     } else {
       lines.push("To resume this run:");
-      lines.push(`  task-runner run --resume-run ${manifest.runId} "..."`);
+      lines.push(`  ${taskRunnerCmd} run --resume-run ${manifest.runId} "..."`);
     }
   }
 
