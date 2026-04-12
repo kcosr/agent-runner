@@ -168,6 +168,7 @@ npm run build
 
 The CLI is now at `node dist/cli.js`. Either alias it, add the bin
 via `npm link`, or invoke it through `npm run task-runner -- ...`.
+Builds also mark `dist/cli.js` executable on Unix-like systems.
 
 ## Quickstart
 
@@ -1287,6 +1288,8 @@ npm run format      # biome format --write
 ```
 
 Pre-commit runs `lint-staged` and `npm run check` via husky.
+`dist/` is generated output and is not committed to git. Packaging
+rebuilds it via `npm run prepack`.
 
 Tests are vanilla `node:test`. Backend integration tests use mock
 Backend objects to keep them hermetic; the only tests that touch

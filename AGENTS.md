@@ -28,7 +28,7 @@ This file is a lightweight, internal onboarding note for agents working in this 
 - Run `npm test` for functional changes.
 - Run `npm run lint` to check formatting and lint rules.
 - Run `npm run check` to run the standard verification pipeline (`build`, `lint`, `test`).
-- If you change `src/`, commit the corresponding `dist/` output.
+- Do not commit `dist/`; build artifacts are generated locally and during packaging.
 - If you cannot run the relevant checks, call that out explicitly.
 
 ## Changelog

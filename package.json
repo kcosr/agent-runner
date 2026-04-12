@@ -4,18 +4,20 @@
   "private": true,
   "type": "module",
   "description": "Minimal CLI that drives an AI agent through a seeded task list, tracking per-task status and retrying until the agent has accounted for every task.",
+  "files": ["dist/", "README.md", "CHANGELOG.md"],
   "bin": {
     "task-runner": "./dist/cli.js"
   },
   "scripts": {
     "setup": "npm install",
-    "build": "tsc -b",
+    "build": "tsc -b && node -e \"require('node:fs').chmodSync('dist/cli.js', 0o755)\"",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
     "lint-staged": "lint-staged",
     "check": "npm run build && npm run lint && node --test \"test/**/*.test.mjs\"",
     "test": "npm run build && node --test \"test/**/*.test.mjs\"",
+    "prepack": "npm run build",
     "prepare": "husky install",
     "clean": "rimraf dist *.tsbuildinfo",
     "task-runner": "node dist/cli.js"
