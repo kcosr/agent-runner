@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { deriveRepoKey } from "../dist/config/runtime-paths.js";
-import { ResumeError, resolveResumeTarget } from "../dist/runner/manifest.js";
+import { ResumeError, resolveResumeTarget } from "../dist/core/run/manifest.js";
 import { withEnv } from "./helpers/runtime-paths.mjs";
 
 function tempDir() {

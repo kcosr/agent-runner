@@ -5,15 +5,10 @@ import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
 import { passiveBackend } from "../dist/backends/passive.js";
-import {
-  AgentConfigError,
-  loadAgentConfig,
-  loadAssignmentConfig,
-  loadedAgentFromManifest,
-  synthesizeAdHocAgent,
-} from "../dist/config/loader.js";
-import { resolveResumeTarget } from "../dist/runner/manifest.js";
-import { runAgent } from "../dist/runner/run-loop.js";
+import { AgentConfigError, loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
+import { loadedAgentFromManifest, synthesizeAdHocAgent } from "../dist/core/config/loaded.js";
+import { resolveResumeTarget } from "../dist/core/run/manifest.js";
+import { runAgent } from "../dist/core/run/run-loop.js";
 import { withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 const CLI_PATH = resolvePath(new URL("../dist/cli.js", import.meta.url).pathname);

@@ -1,11 +1,11 @@
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { type MergeOptions, type MergeResult, mergeUpdates } from "../assignment/merge.js";
-import type { TaskState } from "../assignment/model.js";
-import { parseAssignment } from "../assignment/parser.js";
-import { renderAssignment } from "../assignment/writer.js";
+import { type MergeOptions, type MergeResult, mergeUpdates } from "../../assignment/merge.js";
+import type { TaskState } from "../../assignment/model.js";
+import { parseAssignment } from "../../assignment/parser.js";
+import { renderAssignment } from "../../assignment/writer.js";
+import { writeTextFileAtomic } from "../../util/write-file-atomic.js";
 import { normalizeTaskMode } from "../config/schema.js";
-import { writeTextFileAtomic } from "../util/write-file-atomic.js";
 import {
   type RunManifest,
   applyRunResetSeed,

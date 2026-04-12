@@ -94,19 +94,34 @@ task-runner/
 │   │   ├── parse-args.ts  # argv → ParsedArgs + overridesFromParsedArgs
 │   │   └── render-run.ts  # RunEvent -> stdout/stderr rendering
 │   ├── commands/
-│   │   ├── service.ts     # typed non-run command/query/mutation services
 │   │   └── render.ts      # text renderers for command results
+│   ├── core/
+│   │   ├── backends/
+│   │   │   └── types.ts   # abstract Backend interface + BackendEvent stream
+│   │   ├── commands/
+│   │   │   └── service.ts # typed non-run command/query/mutation services
+│   │   ├── config/
+│   │   │   ├── schema.ts  # zod AgentConfig + AssignmentConfig schemas
+│   │   │   ├── interpolate.ts # {{var}} substitution
+│   │   │   └── loaded.ts  # LoadedAgent/LoadedAssignment + manifest/ad-hoc helpers
+│   │   └── run/
+│   │       ├── execute-command.ts # run/init bootstrap behind the CLI edge
+│   │       ├── run-loop.ts    # seed → invoke → parse → retry, emit RunEvent
+│   │       ├── manifest.ts    # RunManifest types + writer for run.json
+│   │       ├── status.ts      # transport-neutral run summaries + live overlays
+│   │       ├── task-workflow.ts # injected task workflow template + reminder
+│   │       ├── nudge.ts       # retry prompt builder
+│   │       ├── recursion-guard.ts # nested task-runner safety
+│   │       └── workspace-state.ts # task-state persistence + locking
 │   ├── config/
-│   │   ├── schema.ts      # zod AgentConfig + AssignmentConfig schemas
-│   │   ├── loader.ts      # locate + parse agent.md AND assignment.md
-│   │   └── interpolate.ts # {{var}} substitution
+│   │   ├── loader.ts      # filesystem-backed definition lookup + parsing
+│   │   └── runtime-paths.ts # config/state root helpers
 │   ├── assignment/
 │   │   ├── model.ts       # TaskState types
 │   │   ├── writer.ts      # serialize in-memory map -> assignment.md
 │   │   ├── parser.ts      # parse assignment.md -> status/notes updates
 │   │   └── merge.ts       # merge: missing sections only, preserve edits
 │   ├── backends/
-│   │   ├── types.ts       # Backend interface + BackendEvent stream
 │   │   ├── registry.ts    # name → adapter lookup
 │   │   ├── claude.ts      # Claude CLI subprocess adapter
 │   │   └── codex.ts       # Codex JSON-RPC adapter (stdio + ws transports)
@@ -148,7 +163,7 @@ task-runner/
 The CLI owns parsing, signal handling, rendering, and exit codes only.
 Read-only commands (`status`, `list`, `show`, `task list/show`) and task
 mutations (`task set`, `task append-notes`, `task add`, `run reset`)
-execute through typed service functions in `src/commands/service.ts`,
+execute through typed service functions in `src/core/commands/service.ts`,
 with text formatting isolated in `src/commands/render.ts`.
 
 ## Agent and assignment definitions

@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
-import { ResumeError, resolveResumeTarget } from "../dist/runner/manifest.js";
-import { runAgent } from "../dist/runner/run-loop.js";
-import { resetWorkspaceRun } from "../dist/runner/workspace-state.js";
+import { ResumeError, resolveResumeTarget } from "../dist/core/run/manifest.js";
+import { runAgent } from "../dist/core/run/run-loop.js";
+import { resetWorkspaceRun } from "../dist/core/run/workspace-state.js";
 import { withEnv } from "./helpers/runtime-paths.mjs";
 
 const TWO_AGENT = `---

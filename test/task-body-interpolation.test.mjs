@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
-import { VarResolutionError, runAgent } from "../dist/runner/run-loop.js";
+import { VarResolutionError, runAgent } from "../dist/core/run/run-loop.js";
 import { assignmentPathFromPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 const INTERP_AGENT = `---

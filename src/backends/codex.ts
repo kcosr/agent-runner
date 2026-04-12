@@ -1,6 +1,5 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { WebSocket } from "ws";
-import { resolveTaskRunnerCommand } from "../task-runner-command.js";
 import type {
   Backend,
   BackendInvokeContext,
@@ -8,7 +7,8 @@ import type {
   EffortLevel,
   ValidateSessionContext,
   ValidateSessionResult,
-} from "./types.js";
+} from "../core/backends/types.js";
+import { resolveTaskRunnerCommand } from "../task-runner-command.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Effort and model helpers

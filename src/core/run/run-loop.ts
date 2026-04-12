@@ -1,21 +1,21 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
-import { type MergeResult, mergeIntoFile } from "../assignment/merge.js";
-import type { TaskState, TaskStatus } from "../assignment/model.js";
-import { renderAssignment } from "../assignment/writer.js";
+import { type MergeResult, mergeIntoFile } from "../../assignment/merge.js";
+import type { TaskState, TaskStatus } from "../../assignment/model.js";
+import { renderAssignment } from "../../assignment/writer.js";
+import { resolveRunWorkspaceDir } from "../../config/runtime-paths.js";
+import { resolveTaskRunnerCommand } from "../../task-runner-command.js";
+import { shortId } from "../../util/short-id.js";
+import { writeTextFileAtomic } from "../../util/write-file-atomic.js";
 import type { Backend, BackendEvent, BackendInvokeResult } from "../backends/types.js";
 import { interpolate } from "../config/interpolate.js";
-import type { LoadedAgent, LoadedAssignment } from "../config/loader.js";
-import { resolveRunWorkspaceDir } from "../config/runtime-paths.js";
+import type { LoadedAgent, LoadedAssignment } from "../config/loaded.js";
 import {
   type LockableField,
   type TaskMode,
   type VarDef,
   normalizeTaskMode,
 } from "../config/schema.js";
-import { resolveTaskRunnerCommand } from "../task-runner-command.js";
-import { shortId } from "../util/short-id.js";
-import { writeTextFileAtomic } from "../util/write-file-atomic.js";
 import {
   type AttemptRecord,
   type ResolvedResumeTarget,
@@ -30,12 +30,12 @@ import {
   writeManifest,
 } from "./manifest.js";
 import { buildNudgeMessage } from "./nudge.js";
-import type { RunCompletionStatus, RunCompletionSummary } from "./output.js";
 import {
   buildChildRecursionEnv,
   checkRecursionDepth,
   readRecursionState,
 } from "./recursion-guard.js";
+import type { RunCompletionStatus, RunCompletionSummary } from "./status.js";
 
 export { RecursionDepthError } from "./recursion-guard.js";
 import {
@@ -55,7 +55,7 @@ import {
 export interface RunOverrides {
   cwd?: string;
   // Must stay in sync with `agentConfigSchema.backend` in
-  // src/config/schema.ts and the backend registry.
+  // src/core/config/schema.ts and the backend registry.
   backend?: "claude" | "codex" | "passive";
   model?: string;
   effort?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";

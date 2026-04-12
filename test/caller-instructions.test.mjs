@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
-import { resolveResumeTarget } from "../dist/runner/manifest.js";
-import { runAgent } from "../dist/runner/run-loop.js";
+import { resolveResumeTarget } from "../dist/core/run/manifest.js";
+import { runAgent } from "../dist/core/run/run-loop.js";
 import { createRunEventCapture } from "./helpers/run-events.mjs";
 import {
   assignmentPathFromPrompt,

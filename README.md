@@ -1316,11 +1316,12 @@ real subprocesses are a couple of `runProcess` smoke tests against
 
 ## Project layout
 
-Subsystem boundaries: `src/cli.ts` is the transport edge over two core
-seams: `src/commands/` for typed non-run command results and
-`src/runner/run-loop.ts` for typed run events plus final outcomes.
-Backends are swappable, and persistence remains a flat workspace
-directory.
+Subsystem boundaries: `src/cli.ts` is the transport edge over an
+explicit internal `src/core/` seam. Transport-neutral run orchestration,
+persisted state, command services, schema/interpolation helpers, and the
+abstract backend contract live under `src/core/`; CLI parsing and text
+rendering stay outside that seam. Backends are swappable, and
+persistence remains a flat workspace directory.
 
 ```mermaid
 flowchart TD
@@ -1329,22 +1330,24 @@ flowchart TD
         parse["cli/parse-args.ts"]
         render["cli/render-run.ts"]
     end
-    subgraph Commands["Command services"]
-        commands["commands/service.ts"]
+    subgraph CoreCommands["Core command services"]
+        commands["core/commands/service.ts"]
         commandRender["commands/render.ts"]
     end
-    subgraph Config["Config"]
+    subgraph Config["Config + bootstrap"]
         loader["config/loader.ts"]
-        schema["config/schema.ts"]
-        interp["config/interpolate.ts"]
+        coreSchema["core/config/schema.ts"]
+        coreInterp["core/config/interpolate.ts"]
+        coreLoaded["core/config/loaded.ts"]
     end
-    subgraph Runner["Runner"]
-        loop["runner/run-loop.ts"]
-        manifest["runner/manifest.ts"]
-        nudge["runner/nudge.ts"]
-        workflow["runner/task-workflow.ts"]
-        guard["runner/recursion-guard.ts"]
-        output["runner/output.ts"]
+    subgraph CoreRun["Core run lifecycle"]
+        execute["core/run/execute-command.ts"]
+        loop["core/run/run-loop.ts"]
+        manifest["core/run/manifest.ts"]
+        status["core/run/status.ts"]
+        nudge["core/run/nudge.ts"]
+        workflow["core/run/task-workflow.ts"]
+        guard["core/run/recursion-guard.ts"]
     end
     subgraph Assignment["Assignment I/O"]
         parser["assignment/parser.ts"]
@@ -1352,6 +1355,7 @@ flowchart TD
         merge["assignment/merge.ts"]
     end
     subgraph Backends["Backends"]
+        backendTypes["core/backends/types.ts"]
         registry["backends/registry.ts"]
         claude["backends/claude.ts"]
         codex["backends/codex.ts"]
@@ -1365,11 +1369,15 @@ flowchart TD
     cli --> render
     cli --> commandRender
     cli --> commands
+    cli --> execute
     cli --> loop
     cli --> manifest
-    cli --> output
     commands --> manifest
-    loop --> loader
+    execute --> loader
+    execute --> registry
+    execute --> loop
+    loop --> coreSchema
+    loop --> coreInterp
     loop --> registry
     loop --> writer
     loop --> parser
@@ -1377,7 +1385,10 @@ flowchart TD
     loop --> nudge
     loop --> workflow
     loop --> guard
+    commands --> status
     loop --> manifest
+    status --> manifest
+    registry --> backendTypes
     loop --> Workspace
     registry --> claude
     registry --> codex
@@ -1390,22 +1401,33 @@ src/
 │   ├── parse-args.ts       # argv parser
 │   └── render-run.ts       # RunEvent -> stdout/stderr rendering
 ├── commands/
-│   ├── service.ts          # typed non-run command/query/mutation services
 │   └── render.ts           # text renderers for command results
-├── config/                 # frontmatter loaders + zod schemas
+├── core/
+│   ├── backends/
+│   │   └── types.ts        # abstract Backend interface + BackendEvent stream
+│   ├── commands/
+│   │   └── service.ts      # typed non-run command/query/mutation services
+│   ├── config/
+│   │   ├── schema.ts       # zod AgentConfig + AssignmentConfig schemas
+│   │   ├── interpolate.ts  # {{var}} substitution
+│   │   └── loaded.ts       # LoadedAgent/LoadedAssignment + manifest/ad-hoc helpers
+│   └── run/
+│       ├── execute-command.ts # run/init bootstrap service behind the CLI
+│       ├── run-loop.ts        # runAgent: emits RunEvent + final outcome
+│       ├── manifest.ts        # RunManifest types + persistence
+│       ├── status.ts          # transport-neutral run summaries + live overlays
+│       ├── recursion-guard.ts # TASK_RUNNER_CALL_DEPTH safety
+│       ├── nudge.ts           # retry-prompt builder
+│       ├── task-workflow.ts   # injected workflow preamble
+│       └── workspace-state.ts # task-state persistence + locking
+├── config/
+│   ├── loader.ts           # filesystem-backed definition loading/discovery
+│   └── runtime-paths.ts    # config/state root and workspace path helpers
 ├── assignment/             # task model, parser, writer, merge logic
 ├── backends/
-│   ├── types.ts            # Backend interface + BackendEvent stream
 │   ├── claude.ts           # Claude subprocess backend
 │   ├── codex.ts            # Codex JSON-RPC backend (stdio + ws)
 │   └── registry.ts
-├── runner/
-│   ├── run-loop.ts         # runAgent: emits RunEvent + final outcome
-│   ├── manifest.ts         # RunManifest types + persistence
-│   ├── output.ts           # text rendering helpers
-│   ├── recursion-guard.ts  # TASK_RUNNER_CALL_DEPTH safety
-│   ├── nudge.ts            # retry-prompt builder
-│   └── task-workflow.ts    # injected workflow preamble
 └── util/
     ├── spawn.ts            # subprocess wrapper with abort/timeout
     └── short-id.ts         # 6-char base32 run id generator

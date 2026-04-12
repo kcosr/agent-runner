@@ -1,7 +1,7 @@
-import { TASK_MODES, type TaskMode } from "../config/schema.js";
+import { TASK_MODES, type TaskMode } from "../core/config/schema.js";
 
 export type OutputFormat = "text" | "json";
-// Kept in sync with `agentConfigSchema.backend` in src/config/schema.ts
+// Kept in sync with `agentConfigSchema.backend` in src/core/config/schema.ts
 // and the backend registry in src/backends/registry.ts.
 export type BackendId = "claude" | "codex" | "passive";
 

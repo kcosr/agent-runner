@@ -5,10 +5,11 @@ import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
 import { parseAssignment } from "../dist/assignment/parser.js";
+import { renderRunStatus } from "../dist/commands/render.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
 import { toRunDetail } from "../dist/contracts/runs.js";
-import { applyLiveOverlay, renderRunStatus } from "../dist/runner/output.js";
-import { runAgent } from "../dist/runner/run-loop.js";
+import { runAgent } from "../dist/core/run/run-loop.js";
+import { applyLiveOverlay } from "../dist/core/run/status.js";
 import { assignmentPathFromPrompt, sharedRuntimeEnv, withEnv } from "./helpers/runtime-paths.mjs";
 
 function patchManifest(workspaceDir, mutator) {
