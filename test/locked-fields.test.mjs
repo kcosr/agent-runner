@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
 import { LockedFieldError, runAgent } from "../dist/runner/run-loop.js";
+import { assignmentPathFromPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 // ─── locked model agent + its one-task assignment ───────────────────────────
 const LOCKED_MODEL_AGENT = `---
@@ -107,9 +108,8 @@ function editStatus(content, taskId, newStatus) {
 const okBackend = () => ({
   id: "mock",
   async invoke(ctx) {
-    const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
-    if (match) {
-      const absPlan = `./${match[0]}`;
+    const absPlan = assignmentPathFromPrompt(ctx.prompt);
+    if (absPlan) {
       const plan = readFileSync(absPlan, "utf8");
       writeFileSync(absPlan, editStatus(plan, "t1", "completed"), "utf8");
     }
@@ -126,25 +126,27 @@ const okBackend = () => ({
 });
 
 async function runIn(baseDir, agentName, overrides, assignmentName) {
-  const loaded = loadAgentConfig(agentName, baseDir);
-  const loadedAssignment = assignmentName
-    ? loadAssignmentConfig(assignmentName, baseDir)
-    : undefined;
-  const originalCwd = process.cwd();
-  process.chdir(baseDir);
-  try {
-    return await runAgent({
-      loaded,
-      loadedAssignment,
-      cliVars: {},
-      backend: okBackend(),
-      overrides,
-      stderr: () => {},
-      stdout: () => {},
-    });
-  } finally {
-    process.chdir(originalCwd);
-  }
+  return withSharedRuntimeEnv(baseDir, async () => {
+    const loaded = loadAgentConfig(agentName, baseDir);
+    const loadedAssignment = assignmentName
+      ? loadAssignmentConfig(assignmentName, baseDir)
+      : undefined;
+    const originalCwd = process.cwd();
+    process.chdir(baseDir);
+    try {
+      return await runAgent({
+        loaded,
+        loadedAssignment,
+        cliVars: {},
+        backend: okBackend(),
+        overrides,
+        stderr: () => {},
+        stdout: () => {},
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
 }
 
 function setupLockedModel(dir) {
@@ -208,7 +210,9 @@ lockedFields: [modle]
 body
 `,
   );
-  assert.throws(() => loadAgentConfig("bad", dir));
+  withSharedRuntimeEnv(dir, () => {
+    assert.throws(() => loadAgentConfig("bad", dir));
+  });
 });
 
 test("message: default from assignment is used when no override", async () => {

@@ -57,7 +57,7 @@ task-runner run --agent <name> [--assignment <name>] [--var k=v]...
 2. If --assignment: load + validate assignment.md (vars, tasks, message)
 3. Resolve vars (CLI → env → defaults) against the assignment's schema
 4. Check locks (union of agent.lockedFields + assignment.lockedFields)
-5. Create workspace: <cwd>/.task-runner/<short-id>/
+5. Create workspace: ${TASK_RUNNER_STATE_DIR}/runs/<repo-key>/<short-id>/
 6. Build in-memory task map from the assignment's `tasks:` (+ CLI --add-task)
 7. Re-render a fresh assignment.md into the workspace; source file is never
    touched
@@ -414,10 +414,9 @@ task-runner run --agent chat "hello"
 ### Resolution
 
 `--agent <arg>`:
-1. If `<arg>` contains `/`, `\`, or starts with `.` → direct path
-2. Else look for `<cwd>/agents/<arg>/agent.md`
-3. Else look for `<TASK_RUNNER_HOME>/agents/<arg>/agent.md`
-4. Else → `AgentNotFoundError`
+1. If `<arg>` contains `/` or starts with `./` → direct path
+2. Else look for `${TASK_RUNNER_CONFIG_DIR}/agents/<arg>/agent.md`
+3. Else → `AgentNotFoundError`
 
 `--assignment <arg>`: same pattern, `assignments/` directory and
 `assignment.md` filename.
@@ -426,7 +425,7 @@ task-runner run --agent chat "hello"
 
 The runner **copies**, never mutates, the caller's assignment file:
 
-1. Generate short ID, create `<cwd>/.task-runner/<short-id>/`
+1. Generate short ID, create `${TASK_RUNNER_STATE_DIR}/runs/<repo-key>/<short-id>/`
 2. Re-render a fresh `assignment.md` into the workspace from the parsed
    task list. This is the runner's ephemeral scratch copy — the agent
    edits it in place during the run.
@@ -437,7 +436,7 @@ The runner **copies**, never mutates, the caller's assignment file:
    "assignment": {
      "name": "repo-orientation",
      "sourcePath": "/tmp/work-abc/assignment.md",
-     "workspacePath": "/abs/.task-runner/k7m2xq/assignment.md"
+     "workspacePath": "/abs/.local/state/task-runner/runs/<repo-key>/k7m2xq/assignment.md"
    }
    ```
 
@@ -688,18 +687,15 @@ This avoids stray `\n\n` sequences when any part is missing.
 
 Given `--agent <name>`:
 
-1. If `<name>` contains `/`, `\`, or starts with `.` → treat as a direct path
-2. Else look for `<cwd>/agents/<name>/agent.md`
-3. Else look for `<TASK_RUNNER_HOME>/agents/<name>/agent.md`
-   (`TASK_RUNNER_HOME` defaults to `~/.task-runner`)
-4. Else → `AGENT_NOT_FOUND`
+1. If `<name>` contains `/` or starts with `./` → treat as a direct path
+2. Else look for `${TASK_RUNNER_CONFIG_DIR}/agents/<name>/agent.md`
+3. Else → `AGENT_NOT_FOUND`
 
 Given `--assignment <name>` (optional):
 
-1. If `<name>` contains `/`, `\`, or starts with `.` → treat as a direct path
-2. Else look for `<cwd>/assignments/<name>/assignment.md`
-3. Else look for `<TASK_RUNNER_HOME>/assignments/<name>/assignment.md`
-4. Else → `ASSIGNMENT_NOT_FOUND`
+1. If `<name>` contains `/` or starts with `./` → treat as a direct path
+2. Else look for `${TASK_RUNNER_CONFIG_DIR}/assignments/<name>/assignment.md`
+3. Else → `ASSIGNMENT_NOT_FOUND`
 
 The source assignment file is never mutated. On a fresh run the runner
 copies it into the workspace as `assignment.md`; that copy is the
@@ -747,9 +743,9 @@ invocation and **reused** across any subsequent `--resume-run`
 invocations:
 
 ```
-<cwd>/.task-runner/<short-id>/
+${TASK_RUNNER_STATE_DIR}/runs/<repo-key>/<short-id>/
 ├── run.json              # canonical manifest (accumulates across sessions)
-├── assignment.md              # ephemeral scratch file the agent edits in place
+├── assignment.md         # ephemeral scratch file the agent edits in place
 └── attempts/
     ├── 01.json           # session 0, attempt 1
     ├── 02.json           # session 0, attempt 2
@@ -775,8 +771,9 @@ for inspection and for future resume invocations. `run.json` is the
 thing you archive, share, or grep; `assignment.md` is a diagnostic artifact
 that shows what the markdown looked like at the end of the latest
 session; `attempts/NN.json` holds the raw, unfiltered backend output for
-each attempt (see [Attempt logs](#attempt-logs) below). Users should add
-`.task-runner/` to `.gitignore`.
+each attempt (see [Attempt logs](#attempt-logs) below). The default state
+root lives outside the repo, but if callers point `TASK_RUNNER_STATE_DIR`
+inside a checkout they should ignore that directory in git.
 
 ## One run, many sessions
 
@@ -1592,10 +1589,9 @@ Subcommands:
   the same `checkLockedFields` path used by `--add-task` on fresh
   runs.
 - **`list`** — enumerate available definitions from local
-  (`./agents/` or `./assignments/`) and global
-  (`$TASK_RUNNER_HOME/...`) roots. Local definitions shadow global
-  ones with the same name. Strictly read-only — creates no workspace
-  or manifest artifacts.
+  config-root locations (`${TASK_RUNNER_CONFIG_DIR}/agents/` and
+  `${TASK_RUNNER_CONFIG_DIR}/assignments/`). Strictly read-only —
+  creates no workspace or manifest artifacts.
 - **`show`** — print details of a named or path-specified definition.
   Loads and validates the frontmatter (same code path as `--agent` /
   `--assignment` on a fresh run) and prints config fields plus the
@@ -1633,7 +1629,8 @@ and/or a follow-up `[message]` to extend the run.
 
 `task-runner status <id|path>` is a read-only inspector for an
 existing run. It resolves the manifest the same way `--resume-run`
-does (slug under `.task-runner/`, workspace dir, or direct
+does (slug under `${TASK_RUNNER_STATE_DIR}/runs/<repo-key>/` and then
+`runs/unknown/`, workspace dir, or direct
 `run.json` path) and prints either a human-readable summary or the
 manifest as JSON. It never invokes a backend, never writes to disk,
 never touches state.
@@ -1690,7 +1687,8 @@ the live task statuses + notes onto the rendered output.
 
 1. Resolves agent + assignment and runs the same locked-field checks,
    var resolution, and prompt composition as a fresh run.
-2. Creates the workspace directory (`.task-runner/<short-id>/`),
+2. Creates the workspace directory
+   (`${TASK_RUNNER_STATE_DIR}/runs/<repo-key>/<short-id>/`),
    writes the task-fenced `assignment.md`, and writes `run.json` with
    `status: "initialized"`, `sessionCount: 0`, empty `sessions` and
    `attemptRecords`, and the composed prompt frozen in
@@ -1772,8 +1770,8 @@ a completed task on a terminal passive run transitions back to
 **Resume of an already-executed run** (`status` is a terminal state
 from a prior session):
 
-- `<id>` is the short slug from `.task-runner/<id>/`, resolved against
-  the current cwd.
+- `<id>` is the short slug resolved against the current repo-key bucket
+  under `${TASK_RUNNER_STATE_DIR}/runs/`, then `runs/unknown/`.
 - `<path>` can be a workspace directory or a direct path to a `run.json`
   file.
 - At least one of a positional `[message]` **or** one or more
@@ -1855,7 +1853,7 @@ Final summary on stderr, including per-task results with notes:
 Status: success
 Tasks completed: 3/3
 Attempts: 2/4
-Assignment file: /abs/path/.task-runner/k7m2xq/assignment.md
+Assignment file: /abs/path/.local/state/task-runner/runs/<repo-key>/k7m2xq/assignment.md
 
 Task results:
   - t1_read_conventions — Check repo conventions [completed]
@@ -1865,7 +1863,7 @@ Task results:
   - t3_summary — Summary [completed]
       Small monorepo for agent tooling; three packages under src/.
 
-Review /abs/path/.task-runner/k7m2xq/assignment.md for additional agent output.
+Review /abs/path/.local/state/task-runner/runs/<repo-key>/k7m2xq/assignment.md for additional agent output.
 ```
 
 The `Task results` section is built from the in-memory task map, so it

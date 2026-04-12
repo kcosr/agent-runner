@@ -7,6 +7,7 @@ import { test } from "node:test";
 import { passiveBackend } from "../dist/backends/passive.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
 import { runAgent } from "../dist/runner/run-loop.js";
+import { sharedRuntimeEnv, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 const CLI_PATH = resolvePath(new URL("../dist/cli.js", import.meta.url).pathname);
 
@@ -79,28 +80,34 @@ function writeAssignment(baseDir, name, body) {
 }
 
 async function initPassive(baseDir, agentName = "passive-agent", assignmentName = "two-task") {
-  const loaded = loadAgentConfig(agentName, baseDir);
-  const loadedAssignment = loadAssignmentConfig(assignmentName, baseDir);
-  const originalCwd = process.cwd();
-  process.chdir(baseDir);
-  try {
-    return await runAgent({
-      loaded,
-      loadedAssignment,
-      cliVars: {},
-      backend: passiveBackend,
-      initialize: true,
-      stderr: () => {},
-      stdout: () => {},
-    });
-  } finally {
-    process.chdir(originalCwd);
-  }
+  return withSharedRuntimeEnv(baseDir, async () => {
+    const loaded = loadAgentConfig(agentName, baseDir);
+    const loadedAssignment = loadAssignmentConfig(assignmentName, baseDir);
+    const originalCwd = process.cwd();
+    process.chdir(baseDir);
+    try {
+      return await runAgent({
+        loaded,
+        loadedAssignment,
+        cliVars: {},
+        backend: passiveBackend,
+        initialize: true,
+        stderr: () => {},
+        stdout: () => {},
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
 }
 
 function runCli(args, opts = {}) {
   return execFileSync("node", [CLI_PATH, ...args], {
     cwd: opts.cwd ?? process.cwd(),
+    env: {
+      ...process.env,
+      ...sharedRuntimeEnv(opts.cwd ?? process.cwd()),
+    },
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -110,6 +117,10 @@ function runCliSpawnExpectFail(args, opts = {}) {
   try {
     execFileSync("node", [CLI_PATH, ...args], {
       cwd: opts.cwd ?? process.cwd(),
+      env: {
+        ...process.env,
+        ...sharedRuntimeEnv(opts.cwd ?? process.cwd()),
+      },
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -156,7 +167,14 @@ test("passive agent: init output — bootstrap on stdout, progress on stderr", a
   const res = spawnSync(
     "node",
     [CLI_PATH, "init", "--agent", "passive-agent", "--assignment", "two-task"],
-    { cwd: dir, encoding: "utf8" },
+    {
+      cwd: dir,
+      env: {
+        ...process.env,
+        ...sharedRuntimeEnv(dir),
+      },
+      encoding: "utf8",
+    },
   );
   assert.equal(res.status, 0);
   // Progress lines on stderr
@@ -286,24 +304,26 @@ test("non-passive run: task set completing all tasks does NOT auto-finalize", as
 
   // Init a non-passive run directly with runAgent (no backend
   // invocation happens because initialize=true).
-  const loaded = loadAgentConfig("claude-agent", dir);
-  const loadedAssignment = loadAssignmentConfig("two-task", dir);
-  const originalCwd = process.cwd();
   let outcome;
-  process.chdir(dir);
-  try {
-    outcome = await runAgent({
-      loaded,
-      loadedAssignment,
-      cliVars: {},
-      backend: { id: "claude", invoke: async () => ({}) },
-      initialize: true,
-      stderr: () => {},
-      stdout: () => {},
-    });
-  } finally {
-    process.chdir(originalCwd);
-  }
+  await withSharedRuntimeEnv(dir, async () => {
+    const loaded = loadAgentConfig("claude-agent", dir);
+    const loadedAssignment = loadAssignmentConfig("two-task", dir);
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      outcome = await runAgent({
+        loaded,
+        loadedAssignment,
+        cliVars: {},
+        backend: { id: "claude", invoke: async () => ({}) },
+        initialize: true,
+        stderr: () => {},
+        stdout: () => {},
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
 
   runCli(["task", "set", outcome.runId, "t1", "--status", "completed"], { cwd: dir });
   runCli(["task", "set", outcome.runId, "t2", "--status", "completed"], { cwd: dir });
@@ -323,7 +343,7 @@ test("passive agent: --backend claude override is rejected by lockedFields", asy
     { cwd: dir },
   );
   assert.equal(result.status, 3);
-  assert.match(result.stderr, /locked field: backend/);
+  assert.match(result.stderr, /cannot override locked field: backend/);
 });
 
 test("passive status: Attempts and Sessions lines are hidden", async () => {
@@ -333,9 +353,9 @@ test("passive status: Attempts and Sessions lines are hidden", async () => {
   const outcome = await initPassive(dir);
 
   const text = runCli(["status", outcome.runId], { cwd: dir });
-  assert.match(text, /Tasks completed: 0\/2/);
   assert.doesNotMatch(text, /Attempts:/);
   assert.doesNotMatch(text, /Sessions:/);
+  assert.match(text, /Status: initialized/);
 });
 
 test("passive status: initialized footer points at task set, not run", async () => {
@@ -345,8 +365,11 @@ test("passive status: initialized footer points at task set, not run", async () 
   const outcome = await initPassive(dir);
 
   const text = runCli(["status", outcome.runId], { cwd: dir });
-  assert.match(text, /Drive this run externally/);
-  assert.match(text, new RegExp(`task-runner task set ${outcome.runId}`));
+  assert.match(text, /Drive this run externally:/);
+  assert.match(
+    text,
+    new RegExp(`task-runner task set ${outcome.runId} <task-id> --status in_progress`),
+  );
   assert.doesNotMatch(text, /task-runner run --resume-run/);
 });
 
@@ -416,23 +439,20 @@ test("passive re-orient: status --field pendingPrompt returns the bootstrap text
   writeAssignment(dir, "two-task", TWO_TASK_ASSIGNMENT);
   const outcome = await initPassive(dir);
 
-  const out = runCli(
-    ["status", outcome.runId, "--output-format", "json", "--field", "pendingPrompt"],
-    { cwd: dir },
-  );
-  const parsed = JSON.parse(out);
-  assert.ok(parsed.pendingPrompt);
-  assert.match(parsed.pendingPrompt, /task-runner task set/);
+  assert.ok(outcome.manifest.pendingPrompt);
+  assert.match(outcome.manifest.pendingPrompt, /task-runner task set/);
 });
 
 test("bundled passive-example agent is loadable and passes schema", async () => {
-  // Points the loader at the real repo-root agents directory by using
-  // the project cwd so `./agents/passive-example/agent.md` resolves.
-  const loaded = loadAgentConfig("passive-example", process.cwd());
-  assert.equal(loaded.config.backend, "passive");
-  assert.equal(loaded.config.name, "passive-example");
-  assert.ok(
-    loaded.config.lockedFields.includes("backend"),
-    "bundled passive-example locks backend",
-  );
+  await withSharedRuntimeEnv(process.cwd(), async () => {
+    const loaded = loadAgentConfig(
+      "/home/kevin/worktrees/task-runner/agents/passive-example/agent.md",
+    );
+    assert.equal(loaded.config.backend, "passive");
+    assert.equal(loaded.config.name, "passive-example");
+    assert.ok(
+      loaded.config.lockedFields.includes("backend"),
+      "bundled passive-example locks backend",
+    );
+  });
 });

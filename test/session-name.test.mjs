@@ -7,6 +7,7 @@ import { parseArgs } from "../dist/cli/parse-args.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
 import { ResumeError, resolveResumeTarget } from "../dist/runner/manifest.js";
 import { LockedFieldError, runAgent } from "../dist/runner/run-loop.js";
+import { assignmentPathFromPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 const NAMED_AGENT = `---
 schemaVersion: 1
@@ -91,11 +92,12 @@ function captureBackend(captured) {
     id: "mock",
     async invoke(ctx) {
       captured.sessionName = ctx.sessionName;
-      const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
-      if (match) {
-        const absPlan = `./${match[0]}`;
+      try {
+        const absPlan = assignmentPathFromPrompt(ctx.prompt);
         const plan = readFileSync(absPlan, "utf8");
         writeFileSync(absPlan, editStatus(plan, "t1", "completed"), "utf8");
+      } catch {
+        // Resume/chat prompts do not include an assignment path.
       }
       return {
         exitCode: 0,
@@ -112,24 +114,26 @@ function captureBackend(captured) {
 }
 
 async function runIn(baseDir, agentName, assignmentName, opts = {}) {
-  const loaded = loadAgentConfig(agentName, baseDir);
-  const loadedAssignment = assignmentName
-    ? loadAssignmentConfig(assignmentName, baseDir)
-    : undefined;
-  const originalCwd = process.cwd();
-  process.chdir(baseDir);
-  try {
-    return await runAgent({
-      loaded,
-      loadedAssignment,
-      cliVars: opts.cliVars ?? {},
-      backend: opts.backend,
-      stderr: () => {},
-      stdout: () => {},
-    });
-  } finally {
-    process.chdir(originalCwd);
-  }
+  return withSharedRuntimeEnv(baseDir, async () => {
+    const loaded = loadAgentConfig(agentName, baseDir);
+    const loadedAssignment = assignmentName
+      ? loadAssignmentConfig(assignmentName, baseDir)
+      : undefined;
+    const originalCwd = process.cwd();
+    process.chdir(baseDir);
+    try {
+      return await runAgent({
+        loaded,
+        loadedAssignment,
+        cliVars: opts.cliVars ?? {},
+        backend: opts.backend,
+        stderr: () => {},
+        stdout: () => {},
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
 }
 
 test("sessionName: assignment provides a static name; backend receives it", async () => {
@@ -191,7 +195,9 @@ tasks:
 Work.
 `,
   );
-  assert.throws(() => loadAssignmentConfig("empty-name-work", dir));
+  withSharedRuntimeEnv(dir, () => {
+    assert.throws(() => loadAssignmentConfig("empty-name-work", dir));
+  });
 });
 
 test("sessionName: persists across resume from manifest, not the assignment", async () => {
@@ -204,28 +210,30 @@ test("sessionName: persists across resume from manifest, not the assignment", as
   });
   assert.equal(first.manifest.sessionName, "nightly-cleanup");
 
-  // On resume the assignment is forbidden — the name must come from
-  // the prior manifest.
-  const target = resolveResumeTarget(first.runId, dir);
   const captured = {};
-  const loaded = loadAgentConfig("named", dir);
-  const originalCwd = process.cwd();
-  process.chdir(dir);
-  try {
-    const second = await runAgent({
-      loaded,
-      cliVars: {},
-      backend: captureBackend(captured),
-      resume: target,
-      overrides: { message: "follow up" },
-      stderr: () => {},
-      stdout: () => {},
-    });
-    assert.equal(captured.sessionName, "nightly-cleanup");
-    assert.equal(second.manifest.sessionName, "nightly-cleanup");
-  } finally {
-    process.chdir(originalCwd);
-  }
+  await withSharedRuntimeEnv(dir, async () => {
+    // On resume the assignment is forbidden — the name must come from
+    // the prior manifest.
+    const target = resolveResumeTarget(first.runId, dir);
+    const loaded = loadAgentConfig("named", dir);
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      const second = await runAgent({
+        loaded,
+        cliVars: {},
+        backend: captureBackend(captured),
+        resume: target,
+        overrides: { message: "follow up" },
+        stderr: () => {},
+        stdout: () => {},
+      });
+      assert.equal(captured.sessionName, "nightly-cleanup");
+      assert.equal(second.manifest.sessionName, "nightly-cleanup");
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
 });
 
 test("sessionName: parseArgs accepts --session-name", () => {
@@ -259,25 +267,27 @@ test("sessionName: --session-name override beats assignment value", async () => 
   });
   // Re-run with override
   const captured2 = {};
-  const loaded = loadAgentConfig("named", dir);
-  const loadedAssignment = loadAssignmentConfig("static-name-work", dir);
-  const originalCwd = process.cwd();
-  process.chdir(dir);
-  try {
-    const overridden = await runAgent({
-      loaded,
-      loadedAssignment,
-      cliVars: {},
-      backend: captureBackend(captured2),
-      overrides: { sessionName: "override-name" },
-      stderr: () => {},
-      stdout: () => {},
-    });
-    assert.equal(captured2.sessionName, "override-name");
-    assert.equal(overridden.manifest.sessionName, "override-name");
-  } finally {
-    process.chdir(originalCwd);
-  }
+  await withSharedRuntimeEnv(dir, async () => {
+    const loaded = loadAgentConfig("named", dir);
+    const loadedAssignment = loadAssignmentConfig("static-name-work", dir);
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      const overridden = await runAgent({
+        loaded,
+        loadedAssignment,
+        cliVars: {},
+        backend: captureBackend(captured2),
+        overrides: { sessionName: "override-name" },
+        stderr: () => {},
+        stdout: () => {},
+      });
+      assert.equal(captured2.sessionName, "override-name");
+      assert.equal(overridden.manifest.sessionName, "override-name");
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
   // Original (no override) still works
   assert.equal(outcome.manifest.sessionName, "nightly-cleanup");
 });
@@ -288,25 +298,27 @@ test("sessionName: --session-name override interpolates vars", async () => {
   writeAssignment(dir, "named-work", NAMED_ASSIGNMENT);
 
   const captured = {};
-  const loaded = loadAgentConfig("named", dir);
-  const loadedAssignment = loadAssignmentConfig("named-work", dir);
-  const originalCwd = process.cwd();
-  process.chdir(dir);
-  try {
-    const outcome = await runAgent({
-      loaded,
-      loadedAssignment,
-      cliVars: { repo_name: "task-runner" },
-      backend: captureBackend(captured),
-      overrides: { sessionName: "deploy {{repo_name}} prod" },
-      stderr: () => {},
-      stdout: () => {},
-    });
-    assert.equal(captured.sessionName, "deploy task-runner prod");
-    assert.equal(outcome.manifest.sessionName, "deploy task-runner prod");
-  } finally {
-    process.chdir(originalCwd);
-  }
+  await withSharedRuntimeEnv(dir, async () => {
+    const loaded = loadAgentConfig("named", dir);
+    const loadedAssignment = loadAssignmentConfig("named-work", dir);
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      const outcome = await runAgent({
+        loaded,
+        loadedAssignment,
+        cliVars: { repo_name: "task-runner" },
+        backend: captureBackend(captured),
+        overrides: { sessionName: "deploy {{repo_name}} prod" },
+        stderr: () => {},
+        stdout: () => {},
+      });
+      assert.equal(captured.sessionName, "deploy task-runner prod");
+      assert.equal(outcome.manifest.sessionName, "deploy task-runner prod");
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
 });
 
 test("sessionName: lockedFields: [sessionName] rejects --session-name override", async () => {
@@ -329,31 +341,33 @@ Work.
 `,
   );
 
-  const loaded = loadAgentConfig("named", dir);
-  const loadedAssignment = loadAssignmentConfig("locked-name-work", dir);
-  const originalCwd = process.cwd();
-  process.chdir(dir);
-  try {
-    await assert.rejects(
-      () =>
-        runAgent({
-          loaded,
-          loadedAssignment,
-          cliVars: {},
-          backend: captureBackend({}),
-          overrides: { sessionName: "try-to-override" },
-          stderr: () => {},
-          stdout: () => {},
-        }),
-      (err) => {
-        assert.ok(err instanceof LockedFieldError);
-        assert.equal(err.field, "sessionName");
-        return true;
-      },
-    );
-  } finally {
-    process.chdir(originalCwd);
-  }
+  await withSharedRuntimeEnv(dir, async () => {
+    const loaded = loadAgentConfig("named", dir);
+    const loadedAssignment = loadAssignmentConfig("locked-name-work", dir);
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      await assert.rejects(
+        () =>
+          runAgent({
+            loaded,
+            loadedAssignment,
+            cliVars: {},
+            backend: captureBackend({}),
+            overrides: { sessionName: "try-to-override" },
+            stderr: () => {},
+            stdout: () => {},
+          }),
+        (err) => {
+          assert.ok(err instanceof LockedFieldError);
+          assert.equal(err.field, "sessionName");
+          return true;
+        },
+      );
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
 });
 
 test("sessionName: execute-after-init rejects --session-name override even if NOT locked", async () => {
@@ -370,61 +384,67 @@ test("sessionName: execute-after-init rejects --session-name override even if NO
   writeAgent(dir, "named", NAMED_AGENT);
   writeAssignment(dir, "named-work", NAMED_ASSIGNMENT);
 
-  const loaded = loadAgentConfig("named", dir);
-  const loadedAssignment = loadAssignmentConfig("named-work", dir);
-  const originalCwd = process.cwd();
-  process.chdir(dir);
   let init;
-  try {
-    init = await runAgent({
-      loaded,
-      loadedAssignment,
-      cliVars: { repo_name: "task-runner" },
-      backend: {
-        id: "mock",
-        invoke: async () => {
-          throw new Error("backend should not be invoked during init");
-        },
-      },
-      initialize: true,
-      stderr: () => {},
-      stdout: () => {},
-    });
-  } finally {
-    process.chdir(originalCwd);
-  }
-
-  // Resume-after-init with --session-name must throw — the rule is
-  // "no overrides at all" regardless of lock state.
-  const target = resolveResumeTarget(init.runId, dir);
-  process.chdir(dir);
-  try {
-    await assert.rejects(
-      async () =>
-        runAgent({
-          loaded,
-          cliVars: {},
-          backend: {
-            id: "mock",
-            invoke: async () => {
-              throw new Error("backend should not be invoked");
-            },
+  await withSharedRuntimeEnv(dir, async () => {
+    const loaded = loadAgentConfig("named", dir);
+    const loadedAssignment = loadAssignmentConfig("named-work", dir);
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      init = await runAgent({
+        loaded,
+        loadedAssignment,
+        cliVars: { repo_name: "task-runner" },
+        backend: {
+          id: "mock",
+          invoke: async () => {
+            throw new Error("backend should not be invoked during init");
           },
-          overrides: { sessionName: "override-via-resume" },
-          resume: target,
-          stderr: () => {},
-          stdout: () => {},
-        }),
-      (err) => {
-        assert.ok(err instanceof ResumeError);
-        assert.match(err.message, /resuming an initialized run does not accept/);
-        assert.match(err.message, /--session-name/);
-        return true;
-      },
-    );
-  } finally {
-    process.chdir(originalCwd);
-  }
+        },
+        initialize: true,
+        stderr: () => {},
+        stdout: () => {},
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+
+  await withSharedRuntimeEnv(dir, async () => {
+    // Resume-after-init with --session-name must throw — the rule is
+    // "no overrides at all" regardless of lock state.
+    const target = resolveResumeTarget(init.runId, dir);
+    const loaded = loadAgentConfig("named", dir);
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      await assert.rejects(
+        async () =>
+          runAgent({
+            loaded,
+            cliVars: {},
+            backend: {
+              id: "mock",
+              invoke: async () => {
+                throw new Error("backend should not be invoked");
+              },
+            },
+            overrides: { sessionName: "override-via-resume" },
+            resume: target,
+            stderr: () => {},
+            stdout: () => {},
+          }),
+        (err) => {
+          assert.ok(err instanceof ResumeError);
+          assert.match(err.message, /resuming an initialized run does not accept/);
+          assert.match(err.message, /--session-name/);
+          return true;
+        },
+      );
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
 });
 
 test("sessionName: execute-after-init rejects --session-name override when LOCKED (belt + suspenders)", async () => {
@@ -452,62 +472,68 @@ Work.
 `,
   );
 
-  const loaded = loadAgentConfig("named", dir);
-  const loadedAssignment = loadAssignmentConfig("locked-name-work", dir);
-  const originalCwd = process.cwd();
-  process.chdir(dir);
   let init;
-  try {
-    init = await runAgent({
-      loaded,
-      loadedAssignment,
-      cliVars: {},
-      backend: {
-        id: "mock",
-        invoke: async () => {
-          throw new Error("backend should not be invoked during init");
+  await withSharedRuntimeEnv(dir, async () => {
+    const loaded = loadAgentConfig("named", dir);
+    const loadedAssignment = loadAssignmentConfig("locked-name-work", dir);
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      init = await runAgent({
+        loaded,
+        loadedAssignment,
+        cliVars: {},
+        backend: {
+          id: "mock",
+          invoke: async () => {
+            throw new Error("backend should not be invoked during init");
+          },
         },
-      },
-      initialize: true,
-      stderr: () => {},
-      stdout: () => {},
-    });
-  } finally {
-    process.chdir(originalCwd);
-  }
+        initialize: true,
+        stderr: () => {},
+        stdout: () => {},
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
   assert.deepEqual(init.manifest.lockedFields, ["sessionName"]);
 
-  const target = resolveResumeTarget(init.runId, dir);
-  process.chdir(dir);
-  try {
-    await assert.rejects(
-      async () =>
-        runAgent({
-          loaded,
-          cliVars: {},
-          backend: {
-            id: "mock",
-            invoke: async () => {
-              throw new Error("backend should not be invoked");
+  await withSharedRuntimeEnv(dir, async () => {
+    const target = resolveResumeTarget(init.runId, dir);
+    const loaded = loadAgentConfig("named", dir);
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      await assert.rejects(
+        async () =>
+          runAgent({
+            loaded,
+            cliVars: {},
+            backend: {
+              id: "mock",
+              invoke: async () => {
+                throw new Error("backend should not be invoked");
+              },
             },
-          },
-          overrides: { sessionName: "try-to-override" },
-          resume: target,
-          stderr: () => {},
-          stdout: () => {},
-        }),
-      (err) => {
-        // Either rejection is acceptable — the no-overrides rule
-        // fires first, so we should see ResumeError. If that rule
-        // were ever removed, the lock check would still catch it
-        // (that's the defense-in-depth layer).
-        assert.ok(err instanceof ResumeError || err instanceof LockedFieldError);
-        return true;
-      },
-    );
-  } finally {
-    process.chdir(originalCwd);
-  }
+            overrides: { sessionName: "try-to-override" },
+            resume: target,
+            stderr: () => {},
+            stdout: () => {},
+          }),
+        (err) => {
+          // Either rejection is acceptable — the no-overrides rule
+          // fires first, so we should see ResumeError. If that rule
+          // were ever removed, the lock check would still catch it
+          // (that's the defense-in-depth layer).
+          assert.ok(err instanceof ResumeError || err instanceof LockedFieldError);
+          return true;
+        },
+      );
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
 });
 
 test("sessionName: init persists the resolved name; execute-after-init replays it", async () => {
@@ -515,45 +541,51 @@ test("sessionName: init persists the resolved name; execute-after-init replays i
   writeAgent(dir, "named", NAMED_AGENT);
   writeAssignment(dir, "named-work", NAMED_ASSIGNMENT);
 
-  const loaded = loadAgentConfig("named", dir);
-  const loadedAssignment = loadAssignmentConfig("named-work", dir);
-  const originalCwd = process.cwd();
-  process.chdir(dir);
   let init;
-  try {
-    init = await runAgent({
-      loaded,
-      loadedAssignment,
-      cliVars: { repo_name: "task-runner" },
-      backend: {
-        id: "mock",
-        invoke: async () => {
-          throw new Error("backend should not be invoked during init");
+  await withSharedRuntimeEnv(dir, async () => {
+    const loaded = loadAgentConfig("named", dir);
+    const loadedAssignment = loadAssignmentConfig("named-work", dir);
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      init = await runAgent({
+        loaded,
+        loadedAssignment,
+        cliVars: { repo_name: "task-runner" },
+        backend: {
+          id: "mock",
+          invoke: async () => {
+            throw new Error("backend should not be invoked during init");
+          },
         },
-      },
-      initialize: true,
-      stderr: () => {},
-      stdout: () => {},
-    });
-  } finally {
-    process.chdir(originalCwd);
-  }
+        initialize: true,
+        stderr: () => {},
+        stdout: () => {},
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
   assert.equal(init.manifest.sessionName, "build task-runner integration");
 
   const captured = {};
-  const target = resolveResumeTarget(init.runId, dir);
-  process.chdir(dir);
-  try {
-    await runAgent({
-      loaded,
-      cliVars: {},
-      backend: captureBackend(captured),
-      resume: target,
-      stderr: () => {},
-      stdout: () => {},
-    });
-  } finally {
-    process.chdir(originalCwd);
-  }
-  assert.equal(captured.sessionName, "build task-runner integration");
+  await withSharedRuntimeEnv(dir, async () => {
+    const target = resolveResumeTarget(init.runId, dir);
+    const loaded = loadAgentConfig("named", dir);
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      await runAgent({
+        loaded,
+        cliVars: {},
+        backend: captureBackend(captured),
+        resume: target,
+        stderr: () => {},
+        stdout: () => {},
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
+    assert.equal(captured.sessionName, "build task-runner integration");
+  });
 });

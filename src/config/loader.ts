@@ -1,8 +1,13 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { homedir } from "node:os";
-import { isAbsolute, resolve } from "node:path";
+import { resolve } from "node:path";
 import matter from "gray-matter";
 import type { RunManifest } from "../runner/manifest.js";
+import {
+  definitionLayout,
+  isPathArg,
+  resolveDefinitionRoot,
+  resolveInputPath,
+} from "./runtime-paths.js";
 import {
   type AgentConfig,
   type AssignmentConfig,
@@ -73,40 +78,23 @@ export class AssignmentConfigError extends Error {
   }
 }
 
-function taskRunnerHome(): string {
-  return process.env.TASK_RUNNER_HOME ?? resolve(homedir(), ".task-runner");
-}
-
-function looksLikePath(arg: string): boolean {
-  return arg.includes("/") || arg.includes("\\") || arg.startsWith(".");
-}
-
-function definitionLayout(kind: "agent" | "assignment"): { dirName: string; fileName: string } {
-  return kind === "agent"
-    ? { dirName: "agents", fileName: "agent.md" }
-    : { dirName: "assignments", fileName: "assignment.md" };
-}
-
 function resolveDefinitionPath(
   kind: "agent" | "assignment",
   arg: string,
   cwd: string,
 ): { path: string; searched: string[] } {
-  const { dirName, fileName } = definitionLayout(kind);
+  const { fileName } = definitionLayout(kind);
 
-  if (looksLikePath(arg)) {
-    const abs = isAbsolute(arg) ? arg : resolve(cwd, arg);
+  if (isPathArg(arg)) {
+    const abs = resolveInputPath(arg, cwd);
     return { path: abs, searched: [abs] };
   }
 
-  const candidates = [
-    resolve(cwd, dirName, arg, fileName),
-    resolve(taskRunnerHome(), dirName, arg, fileName),
-  ];
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) return { path: candidate, searched: candidates };
-  }
-  return { path: "", searched: candidates };
+  const candidate = resolve(resolveDefinitionRoot(kind), arg, fileName);
+  return {
+    path: existsSync(candidate) ? candidate : "",
+    searched: [candidate],
+  };
 }
 
 export function resolveAgentPath(arg: string, cwd: string = process.cwd()): string {
@@ -227,8 +215,8 @@ export function loadAssignmentConfig(arg: string, cwd: string = process.cwd()): 
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Definition catalog — enumerate available definitions from local and
-// $TASK_RUNNER_HOME roots. Used by the `list` and `show` commands.
+// Definition catalog — enumerate available definitions from the
+// TASK_RUNNER_CONFIG_DIR / XDG config root. Used by `list` and `show`.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type DefinitionKind = "agent" | "assignment";
@@ -236,7 +224,7 @@ export type DefinitionKind = "agent" | "assignment";
 export interface DefinitionEntry {
   name: string;
   path: string;
-  root: "local" | "global";
+  root: "config";
 }
 
 export class DefinitionListError extends Error {
@@ -250,43 +238,35 @@ export class DefinitionListError extends Error {
   }
 }
 
-function discoverDefinitions(kind: DefinitionKind, cwd: string = process.cwd()): DefinitionEntry[] {
-  const { dirName, fileName } = definitionLayout(kind);
-  const seen = new Set<string>();
+function discoverDefinitions(kind: DefinitionKind): DefinitionEntry[] {
+  const { fileName } = definitionLayout(kind);
   const entries: DefinitionEntry[] = [];
+  const dir = resolveDefinitionRoot(kind);
 
-  const roots: Array<{ dir: string; root: "local" | "global" }> = [
-    { dir: resolve(cwd, dirName), root: "local" },
-    { dir: resolve(taskRunnerHome(), dirName), root: "global" },
-  ];
+  if (!existsSync(dir)) return entries;
 
-  for (const { dir, root } of roots) {
-    if (!existsSync(dir)) continue;
-    let children: string[];
-    try {
-      children = readdirSync(dir, { withFileTypes: true })
-        .filter((d) => d.isDirectory())
-        .map((d) => d.name);
-    } catch (err) {
-      throw new DefinitionListError(dir, err);
-    }
-    for (const name of children.sort()) {
-      if (seen.has(name)) continue;
-      const defPath = resolve(dir, name, fileName);
-      if (existsSync(defPath)) {
-        seen.add(name);
-        entries.push({ name, path: defPath, root });
-      }
+  let children: string[];
+  try {
+    children = readdirSync(dir, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name);
+  } catch (err) {
+    throw new DefinitionListError(dir, err);
+  }
+  for (const name of children.sort()) {
+    const defPath = resolve(dir, name, fileName);
+    if (existsSync(defPath)) {
+      entries.push({ name, path: defPath, root: "config" });
     }
   }
 
   return entries;
 }
 
-export function listAgents(cwd?: string): DefinitionEntry[] {
-  return discoverDefinitions("agent", cwd);
+export function listAgents(): DefinitionEntry[] {
+  return discoverDefinitions("agent");
 }
 
-export function listAssignments(cwd?: string): DefinitionEntry[] {
-  return discoverDefinitions("assignment", cwd);
+export function listAssignments(): DefinitionEntry[] {
+  return discoverDefinitions("assignment");
 }

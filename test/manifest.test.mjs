@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
 import { runAgent } from "../dist/runner/run-loop.js";
+import { assignmentPathFromPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 const THREE_AGENT = `---
 schemaVersion: 1
@@ -83,25 +84,27 @@ function editNotes(content, taskId, notesText) {
 }
 
 async function runWithMock(baseDir, mockInvoke, overrides = {}) {
-  const loaded = loadAgentConfig("three", baseDir);
-  const loadedAssignment = loadAssignmentConfig("three-work", baseDir);
   const backend = { id: "mock", invoke: mockInvoke };
-  const originalCwd = process.cwd();
-  process.chdir(baseDir);
-  try {
-    const outcome = await runAgent({
-      loaded,
-      loadedAssignment,
-      cliVars: {},
-      backend,
-      overrides,
-      stderr: () => {},
-      stdout: () => {},
-    });
-    return outcome;
-  } finally {
-    process.chdir(originalCwd);
-  }
+  return withSharedRuntimeEnv(baseDir, async () => {
+    const loaded = loadAgentConfig("three", baseDir);
+    const loadedAssignment = loadAssignmentConfig("three-work", baseDir);
+    const originalCwd = process.cwd();
+    process.chdir(baseDir);
+    try {
+      const outcome = await runAgent({
+        loaded,
+        loadedAssignment,
+        cliVars: {},
+        backend,
+        overrides,
+        stderr: () => {},
+        stdout: () => {},
+      });
+      return outcome;
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
 }
 
 test("manifest: run.json is written and matches outcome.manifest", async () => {
@@ -109,8 +112,7 @@ test("manifest: run.json is written and matches outcome.manifest", async () => {
   writeAgentAndAssignment(dir);
 
   const outcome = await runWithMock(dir, async (ctx) => {
-    const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
-    const absPlan = `./${match[0]}`;
+    const absPlan = assignmentPathFromPrompt(ctx.prompt);
     let plan = readFileSync(absPlan, "utf8");
     for (const id of ["t1", "t2", "t3"]) {
       plan = editStatus(plan, id, "completed");
@@ -170,8 +172,7 @@ test("manifest: attempt records snapshot state after each attempt", async () => 
   let call = 0;
   const outcome = await runWithMock(dir, async (ctx) => {
     call++;
-    const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
-    const absPlan = `./${match[0]}`;
+    const absPlan = assignmentPathFromPrompt(ctx.prompt);
     let plan = readFileSync(absPlan, "utf8");
     if (call === 1) {
       plan = editStatus(plan, "t1", "completed");
@@ -222,8 +223,7 @@ test("manifest: blocked run records status and captures final state", async () =
   writeAgentAndAssignment(dir);
 
   const outcome = await runWithMock(dir, async (ctx) => {
-    const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
-    const absPlan = `./${match[0]}`;
+    const absPlan = assignmentPathFromPrompt(ctx.prompt);
     let plan = readFileSync(absPlan, "utf8");
     plan = editStatus(plan, "t1", "completed");
     plan = editStatus(plan, "t2", "blocked");
@@ -278,8 +278,7 @@ test("manifest: captures effort override on the run metadata", async () => {
   const outcome = await runWithMock(
     dir,
     async (ctx) => {
-      const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
-      const absPlan = `./${match[0]}`;
+      const absPlan = assignmentPathFromPrompt(ctx.prompt);
       let plan = readFileSync(absPlan, "utf8");
       for (const id of ["t1", "t2", "t3"]) {
         plan = editStatus(plan, id, "completed");
@@ -308,8 +307,7 @@ test("manifest: invalid statuses are recorded on the attempt record", async () =
   let call = 0;
   const outcome = await runWithMock(dir, async (ctx) => {
     call++;
-    const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
-    const absPlan = `./${match[0]}`;
+    const absPlan = assignmentPathFromPrompt(ctx.prompt);
     let plan = readFileSync(absPlan, "utf8");
     if (call === 1) {
       // write an invalid status on t1, real completed on t2/t3

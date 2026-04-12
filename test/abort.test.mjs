@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
 import { runAgent } from "../dist/runner/run-loop.js";
+import { withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 const ABORT_AGENT = `---
 schemaVersion: 1
@@ -59,23 +60,25 @@ function mockBackend(handler) {
 }
 
 async function runIn(baseDir, opts) {
-  const loaded = loadAgentConfig("aborter", baseDir);
-  const loadedAssignment = loadAssignmentConfig("aborter-work", baseDir);
-  const originalCwd = process.cwd();
-  process.chdir(baseDir);
-  try {
-    return await runAgent({
-      loaded,
-      loadedAssignment,
-      cliVars: {},
-      backend: opts.backend,
-      abortSignal: opts.abortSignal,
-      stderr: () => {},
-      stdout: () => {},
-    });
-  } finally {
-    process.chdir(originalCwd);
-  }
+  return withSharedRuntimeEnv(baseDir, async () => {
+    const loaded = loadAgentConfig("aborter", baseDir);
+    const loadedAssignment = loadAssignmentConfig("aborter-work", baseDir);
+    const originalCwd = process.cwd();
+    process.chdir(baseDir);
+    try {
+      return await runAgent({
+        loaded,
+        loadedAssignment,
+        cliVars: {},
+        backend: opts.backend,
+        abortSignal: opts.abortSignal,
+        stderr: () => {},
+        stdout: () => {},
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
 }
 
 test("abort: backend signals aborted; run terminates with status=aborted, exit 130", async () => {

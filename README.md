@@ -171,8 +171,8 @@ dist/cli.js` for `task-runner` in every command.
 # Run the bundled "example" agent against the bundled "repo-orientation"
 # assignment, pointed at any repo:
 task-runner run \
-  --agent example \
-  --assignment repo-orientation \
+  --agent ./agents/example/agent.md \
+  --assignment ./assignments/repo-orientation/assignment.md \
   --var repo_path=/path/to/some/repo
 
 # Inspect the run after the fact (or during, with live overlay):
@@ -182,7 +182,9 @@ task-runner status <run-id>
 task-runner status <run-id> --output-format json
 ```
 
-A run produces a workspace at `./.task-runner/<run-id>/` with:
+A run produces a workspace under
+`${TASK_RUNNER_STATE_DIR:-$HOME/.local/state/task-runner}/runs/<repo-key>/<run-id>/`
+with:
 
 - `run.json` — canonical manifest, written after every attempt
 - `assignment.md` — the per-task checklist the agent edits in place
@@ -193,7 +195,7 @@ The text output looks roughly like:
 ```
 task-runner: agent=example run=abc123
              source=/.../assignments/repo-orientation/assignment.md
-             assignment=/.../.task-runner/abc123/assignment.md
+             assignment=/.../.local/state/task-runner/runs/<repo-key>/abc123/assignment.md
              cwd=/path/to/some/repo
 
 ── attempt 1 ──
@@ -203,7 +205,7 @@ task-runner: agent=example run=abc123
 Status: success
 Tasks completed: 3/3
 Attempts: 1/4
-Assignment file: /.../.task-runner/abc123/assignment.md
+Assignment file: /.../.local/state/task-runner/runs/<repo-key>/abc123/assignment.md
 
 Task results:
   - t1_read_conventions — Check repo conventions [completed]
@@ -284,11 +286,14 @@ You are working on the repository at `{{repo_path}}`. Plan at
 {{assignment_path}}.
 ```
 
-Both can be passed by name (resolved against `./agents/<name>/`,
-`./assignments/<name>/`, or `$TASK_RUNNER_HOME/...`) or by direct
-path. `--assignment` is optional — running an agent with no
-assignment is "chat mode" (no enforced task list, just a single
-backend invocation).
+Both can be passed by direct path, or by bare name if the definition
+is installed under `TASK_RUNNER_CONFIG_DIR` (default:
+`$XDG_CONFIG_HOME/task-runner` or `~/.config/task-runner`). Bare names
+do not fall back to `./agents/` or `./assignments/`; definitions in
+the repo checkout should be referenced by path unless you export
+`TASK_RUNNER_CONFIG_DIR=$PWD`. `--assignment` is optional — running an
+agent with no assignment is "chat mode" (no enforced task list, just a
+single backend invocation).
 
 **`--agent` is also optional.** When omitted, task-runner synthesizes
 an **ad-hoc agent** from CLI overrides — useful for quick one-off
@@ -301,13 +306,15 @@ instructions body, and require `--backend` to be passed explicitly
 ```bash
 # Passive ad-hoc run — no agent file, no model calls, just a
 # structured checklist driven by task set / task add.
-task-runner init --backend passive --assignment repo-diagnostics \
+task-runner init --backend passive \
+  --assignment ./assignments/repo-diagnostics/assignment.md \
   --var repo_path=.
 
 # Codex ad-hoc run — backend + model from the CLI, assignment for
 # the task list, no agent.md required.
 task-runner run --backend codex --model gpt-5.4 --effort high \
-  --assignment code-review --var repo_path=. --var range=HEAD~3..HEAD
+  --assignment ./assignments/code-review/assignment.md \
+  --var repo_path=. --var range=HEAD~3..HEAD
 ```
 
 Ad-hoc agents have `lockedFields: []` (nothing is locked by default)
@@ -408,8 +415,9 @@ sequenceDiagram
 
 ### Workspaces and the run manifest
 
-Each run gets a workspace directory at `<cwd>/.task-runner/<run-id>/`
-with three things in it:
+Each run gets a workspace directory at
+`${TASK_RUNNER_STATE_DIR}/runs/<repo-key>/<run-id>/` with three things
+in it:
 
 - **`run.json`** — the canonical record, written at run start,
   rewritten after every attempt, and one final time on terminal
@@ -500,7 +508,9 @@ but stops after writing the workspace, manifest (`status:
 later with `task-runner run --resume-run <id>`.
 
 ```bash
-task-runner init --agent example --assignment repo-orientation \
+task-runner init \
+  --agent ./agents/example/agent.md \
+  --assignment ./assignments/repo-orientation/assignment.md \
   --var repo_path=/some/repo
 # task-runner: initialized agent=example run=abc123
 #              ...
@@ -513,8 +523,9 @@ before kicking off the actual work.
 
 ### `task-runner status`
 
-Read-only inspector. Resolves a run by short id (looked up in
-`./.task-runner/`), workspace path, or direct `run.json` path.
+Read-only inspector. Resolves a run by short id (looked up in the
+current repo-key bucket under `${TASK_RUNNER_STATE_DIR}/runs/`, then
+`runs/unknown/`), workspace path, or direct `run.json` path.
 
 ```bash
 # Human-readable status block + per-task checklist
@@ -613,7 +624,9 @@ agent/script without ever invoking a backend through task-runner:
 
 ```bash
 # 1. Seed the workspace (no backend call)
-task-runner init --agent code-reviewer --assignment code-review \
+task-runner init \
+  --agent ./agents/code-reviewer/agent.md \
+  --assignment ./assignments/code-review/assignment.md \
   --var repo_path=. --var range=main..HEAD
 # -> prints: task-runner: initialized agent=code-reviewer run=abc123
 
@@ -645,10 +658,10 @@ below for the full lifecycle.
 
 ### `task-runner list`
 
-Enumerate available agent or assignment definitions. Discovers from
-local (`./agents/` or `./assignments/`) and global
-(`$TASK_RUNNER_HOME/agents/` or `$TASK_RUNNER_HOME/assignments/`)
-roots, with local taking precedence when both define the same name.
+Enumerate available agent or assignment definitions. Discovers named
+definitions from `${TASK_RUNNER_CONFIG_DIR}/agents/` or
+`${TASK_RUNNER_CONFIG_DIR}/assignments/` only. Direct path arguments
+remain available for `show`, but `list` itself is config-root only.
 Read-only — touches no state.
 
 ```bash
@@ -667,13 +680,13 @@ Options:
 
 ### `task-runner show`
 
-Print details of a specific agent or assignment definition. Accepts
-a name (resolved via the same local-then-global precedence as
-`--agent` / `--assignment`) or a direct file path. Read-only.
+Print details of a specific agent or assignment definition. Accepts a
+bare name resolved from the config root or a direct file path.
+Read-only.
 
 ```bash
 # Show an agent by name
-task-runner show agent example
+task-runner show agent ./agents/example/agent.md
 
 # Show an assignment by path (JSON output)
 task-runner show assignment ./assignments/repo-orientation/assignment.md \
@@ -778,11 +791,15 @@ Sidecar driver loop:
 
 ```bash
 # 1. Prepare the run (prints the full bootstrap to stdout)
-task-runner init --agent passive-example --assignment <work> \
+task-runner init \
+  --agent ./agents/passive-example/agent.md \
+  --assignment ./assignments/repo-orientation/assignment.md \
   --var repo_path=. 2>/dev/null > /tmp/brief.txt
 
 # 2. Parse out the run id from the earlier stderr, or from JSON mode:
-RUN=$(task-runner init --agent passive-example --assignment <work> \
+RUN=$(task-runner init \
+  --agent ./agents/passive-example/agent.md \
+  --assignment ./assignments/repo-orientation/assignment.md \
   --var repo_path=. --output-format json | jq -r .runId)
 
 # 3. Walk the task list (agent-specific logic omitted)
@@ -979,7 +996,8 @@ printed to stdout.
 
 | Var | Purpose |
 |---|---|
-| `TASK_RUNNER_HOME` | Where named agents/assignments are looked up if not found under `./agents/` / `./assignments/`. Defaults to `~/.task-runner`. |
+| `TASK_RUNNER_CONFIG_DIR` | Root for named definitions. Agents live under `agents/<name>/agent.md`; assignments live under `assignments/<name>/assignment.md`. Defaults to `${XDG_CONFIG_HOME}/task-runner` or `~/.config/task-runner`. |
+| `TASK_RUNNER_STATE_DIR` | Root for runtime state. Runs live under `runs/<repo-key>/<run-id>/`; drafts live under `drafts/<repo-key>/`. Defaults to `${XDG_STATE_HOME}/task-runner` or `~/.local/state/task-runner`. |
 | `TASK_RUNNER_CLAUDE_BIN` | Path to the `claude` binary. Defaults to `claude` on `PATH`. |
 | `TASK_RUNNER_CODEX_BIN` | Path to the `codex` binary for stdio mode. Defaults to `codex` on `PATH`. |
 | `TASK_RUNNER_CODEX_WS_URL` | If set, the codex backend connects to this WebSocket URL instead of spawning a stdio subprocess. |
@@ -1045,10 +1063,12 @@ printed to stdout.
   plan. Takes a `repo_path` var; the feature brief comes in as
   the positional message body so it is not length-limited. The
   planner surveys conventions, impact, reuse opportunities, and
-  risks; copies a template into `.task-runner/drafts/`; fills in
-  every placeholder with concrete file-level detail; then runs
-  `task-runner init` to freeze the draft into a new run
-  workspace. The resulting run can be executed by any agent via
+  risks; copies a template from the configured task-runner
+  config root into the repo-keyed drafts area under
+  `${TASK_RUNNER_STATE_DIR}/drafts/`; fills in every placeholder
+  with concrete file-level detail; then runs `task-runner init`
+  to freeze the draft into a new run workspace. The resulting
+  run can be executed by any agent via
   `task-runner run --resume-run <new-id>`. Execution requires
   `TASK_RUNNER_MAX_CALL_DEPTH=2` because the generated plan
   nests a `task-runner run` against the `code-reviewer` agent
@@ -1066,36 +1086,36 @@ printed to stdout.
 # Load a repo into an agent's context first, then drive it
 # conversationally after familiarization finishes.
 task-runner run \
-  --agent code-reviewer \
-  --assignment familiarize \
+  --agent ./agents/code-reviewer/agent.md \
+  --assignment ./assignments/familiarize/assignment.md \
   --var repo_path=/home/you/path/to/some/project
 # ... familiarization tasks complete ...
 task-runner run --resume-run <id> "now review the auth layer for security issues"
 
 # Full code review of this repo
 task-runner run \
-  --agent code-reviewer \
-  --assignment code-review \
+  --agent ./agents/code-reviewer/agent.md \
+  --assignment ./assignments/code-review/assignment.md \
   --var repo_path=/home/you/path/to/task-runner
 
 # Review just the unstaged changes
 task-runner run \
-  --agent code-reviewer \
-  --assignment code-review \
+  --agent ./agents/code-reviewer/agent.md \
+  --assignment ./assignments/code-review/assignment.md \
   --var repo_path=/home/you/path/to/task-runner \
   --var range=unstaged
 
 # Review the last commit
 task-runner run \
-  --agent code-reviewer \
-  --assignment code-review \
+  --agent ./agents/code-reviewer/agent.md \
+  --assignment ./assignments/code-review/assignment.md \
   --var repo_path=/home/you/path/to/task-runner \
   --var "range=last commit"
 
 # Full documentation review
 task-runner run \
-  --agent doc-reviewer \
-  --assignment doc-review \
+  --agent ./agents/doc-reviewer/agent.md \
+  --assignment ./assignments/doc-review/assignment.md \
   --var repo_path=/home/you/path/to/some/project
 ```
 
@@ -1150,7 +1170,7 @@ flowchart TD
         claude["backends/claude.ts"]
         codex["backends/codex.ts"]
     end
-    subgraph Workspace[".task-runner/&lt;run-id&gt;/"]
+    subgraph Workspace["${TASK_RUNNER_STATE_DIR}/runs/&lt;repo-key&gt;/&lt;run-id&gt;/"]
         runjson["run.json"]
         assignmd["assignment.md"]
         attempts["attempts/NN.json"]

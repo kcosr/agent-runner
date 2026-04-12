@@ -1,6 +1,12 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import type { InvalidStatusReport, TaskState, TaskStatus } from "../assignment/model.js";
+import {
+  isPathArg,
+  resolveInputPath,
+  resolveRepoRunsDir,
+  resolveUnknownRunsDir,
+} from "../config/runtime-paths.js";
 import type { LockableField } from "../config/schema.js";
 import { writeTextFileAtomic } from "../util/write-file-atomic.js";
 
@@ -201,10 +207,9 @@ export function resolveResumeTarget(
   cwd: string = process.cwd(),
 ): ResolvedResumeTarget {
   const candidates: string[] = [];
-  const looksLikePath = arg.includes("/") || arg.includes("\\") || arg.startsWith(".");
 
-  if (looksLikePath) {
-    const abs = isAbsolute(arg) ? arg : resolve(cwd, arg);
+  if (isPathArg(arg)) {
+    const abs = resolveInputPath(arg, cwd);
     if (abs.endsWith(MANIFEST_FILENAME) && existsSync(abs)) {
       candidates.push(abs);
     } else if (existsSync(abs)) {
@@ -213,7 +218,8 @@ export function resolveResumeTarget(
       candidates.push(abs);
     }
   } else {
-    candidates.push(resolve(cwd, ".task-runner", arg, MANIFEST_FILENAME));
+    candidates.push(join(resolveRepoRunsDir(cwd), arg, MANIFEST_FILENAME));
+    candidates.push(join(resolveUnknownRunsDir(), arg, MANIFEST_FILENAME));
   }
 
   for (const candidate of candidates) {
@@ -261,8 +267,15 @@ export function resolveResumeTarget(
     return { workspaceDir: resolvedWorkspaceDir, manifest: parsed };
   }
 
+  if (isPathArg(arg)) {
+    throw new ResumeError(
+      `could not find run manifest for "${arg}"\n  tried:\n${candidates.map((c) => `    - ${c}`).join("\n")}`,
+    );
+  }
+
+  const checkedDirs = [join(resolveRepoRunsDir(cwd), arg), join(resolveUnknownRunsDir(), arg)];
   throw new ResumeError(
-    `could not find run manifest for "${arg}"\n  tried:\n${candidates.map((c) => `    - ${c}`).join("\n")}`,
+    `could not find run manifest for "${arg}"\n  tried:\n${checkedDirs.map((c) => `    - ${c}/`).join("\n")}`,
   );
 }
 

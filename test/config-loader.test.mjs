@@ -16,6 +16,7 @@ import {
   resolveAgentPath,
   resolveAssignmentPath,
 } from "../dist/config/loader.js";
+import { withEnv, withRuntimeRoots } from "./helpers/runtime-paths.mjs";
 
 const MINIMAL_AGENT = `---
 schemaVersion: 1
@@ -36,6 +37,10 @@ tasks:
 Work on the repo. Plan at {{assignment_path}}.
 `;
 
+function tempDir() {
+  return mkdtempSync(join(tmpdir(), "task-runner-loader-extra-"));
+}
+
 function writeAgent(baseDir, name, body) {
   const agentDir = join(baseDir, "agents", name);
   mkdirSync(agentDir, { recursive: true });
@@ -52,46 +57,41 @@ function writeAssignment(baseDir, name, body) {
   return path;
 }
 
-function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-test-"));
-}
+test("loadAgentConfig parses a minimal agent.md from TASK_RUNNER_CONFIG_DIR", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    writeAgent(configDir, "demo", MINIMAL_AGENT);
 
-test("loadAgentConfig parses a minimal agent.md", () => {
-  const dir = tempDir();
-  writeAgent(dir, "demo", MINIMAL_AGENT);
+    const loaded = loadAgentConfig("demo", rootDir);
+    assert.equal(loaded.config.name, "demo");
+    assert.equal(loaded.config.backend, "claude");
+    assert.equal(loaded.config.timeoutSec, 3600);
+    assert.equal(loaded.config.unrestricted, false);
+    assert.ok(!("maxRetries" in loaded.config), "maxRetries moved to assignment schema");
+    assert.ok(loaded.instructions.includes("You are an assistant."));
+  }));
 
-  const loaded = loadAgentConfig("demo", dir);
-  assert.equal(loaded.config.name, "demo");
-  assert.equal(loaded.config.backend, "claude");
-  assert.equal(loaded.config.timeoutSec, 3600);
-  assert.equal(loaded.config.unrestricted, false);
-  assert.ok(!("maxRetries" in loaded.config), "maxRetries moved to assignment schema");
-  assert.ok(loaded.instructions.includes("You are an assistant."));
-});
-
-test("loadAgentConfig throws AgentConfigError on bad frontmatter", () => {
-  const dir = tempDir();
-  writeAgent(
-    dir,
-    "bad",
-    `---
+test("loadAgentConfig throws AgentConfigError on bad frontmatter", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    writeAgent(
+      configDir,
+      "bad",
+      `---
 schemaVersion: 1
 backend: claude
 ---
 body
 `,
-  );
+    );
 
-  // missing required `name` field
-  assert.throws(() => loadAgentConfig("bad", dir), AgentConfigError);
-});
+    assert.throws(() => loadAgentConfig("bad", rootDir), AgentConfigError);
+  }));
 
-test("loadAgentConfig silently drops `tasks` (which belongs on assignments)", () => {
-  const dir = tempDir();
-  writeAgent(
-    dir,
-    "with-tasks",
-    `---
+test("loadAgentConfig silently drops `tasks` (which belongs on assignments)", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    writeAgent(
+      configDir,
+      "with-tasks",
+      `---
 schemaVersion: 1
 name: with-tasks
 backend: claude
@@ -101,37 +101,42 @@ tasks:
 ---
 body
 `,
-  );
+    );
 
-  // `tasks` moved to the assignment schema. The agent schema uses zod's default
-  // strip behavior, so unknown keys are quietly dropped on load.
-  const loaded = loadAgentConfig("with-tasks", dir);
-  assert.equal(loaded.config.name, "with-tasks");
-  assert.ok(!("tasks" in loaded.config), "tasks stripped from agent config");
-});
+    const loaded = loadAgentConfig("with-tasks", rootDir);
+    assert.equal(loaded.config.name, "with-tasks");
+    assert.ok(!("tasks" in loaded.config), "tasks stripped from agent config");
+  }));
 
-test("loadAgentConfig accepts agent with no tasks/vars/message fields", () => {
-  const dir = tempDir();
-  writeAgent(
-    dir,
-    "notasks",
-    `---
+test("loadAgentConfig accepts agent with no tasks/vars/message fields", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    writeAgent(
+      configDir,
+      "notasks",
+      `---
 schemaVersion: 1
 name: notasks
 backend: claude
 ---
 body
 `,
-  );
+    );
 
-  const loaded = loadAgentConfig("notasks", dir);
-  assert.equal(loaded.config.name, "notasks");
-});
+    const loaded = loadAgentConfig("notasks", rootDir);
+    assert.equal(loaded.config.name, "notasks");
+  }));
 
-test("loadAgentConfig throws AgentNotFoundError for missing agent", () => {
-  const dir = tempDir();
-  assert.throws(() => loadAgentConfig("nope", dir), AgentNotFoundError);
-});
+test("loadAgentConfig throws AgentNotFoundError for missing agent and lists config-root path", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    assert.throws(
+      () => loadAgentConfig("nope", rootDir),
+      (err) => {
+        assert.ok(err instanceof AgentNotFoundError);
+        assert.deepEqual(err.searched, [join(configDir, "agents", "nope", "agent.md")]);
+        return true;
+      },
+    );
+  }));
 
 test("resolveAgentPath accepts a direct path", () => {
   const dir = tempDir();
@@ -141,22 +146,31 @@ test("resolveAgentPath accepts a direct path", () => {
   assert.equal(resolved, agentPath);
 });
 
-test("loadAssignmentConfig parses a minimal assignment.md", () => {
-  const dir = tempDir();
-  writeAssignment(dir, "demo-work", MINIMAL_ASSIGNMENT);
+test("loadAssignmentConfig parses a minimal assignment.md from TASK_RUNNER_CONFIG_DIR", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    writeAssignment(configDir, "demo-work", MINIMAL_ASSIGNMENT);
 
-  const loaded = loadAssignmentConfig("demo-work", dir);
-  assert.equal(loaded.config.name, "demo-work");
-  assert.equal(loaded.config.tasks.length, 1);
-  assert.equal(loaded.config.tasks[0].id, "t1");
-  assert.equal(loaded.config.maxRetries, 3, "maxRetries defaults to 3 on assignment");
-  assert.ok(loaded.instructions.includes("{{assignment_path}}"));
-});
+    const loaded = loadAssignmentConfig("demo-work", rootDir);
+    assert.equal(loaded.config.name, "demo-work");
+    assert.equal(loaded.config.tasks.length, 1);
+    assert.equal(loaded.config.tasks[0].id, "t1");
+    assert.equal(loaded.config.maxRetries, 3, "maxRetries defaults to 3 on assignment");
+    assert.ok(loaded.instructions.includes("{{assignment_path}}"));
+  }));
 
-test("loadAssignmentConfig throws AssignmentNotFoundError for missing assignment", () => {
-  const dir = tempDir();
-  assert.throws(() => loadAssignmentConfig("nope-work", dir), AssignmentNotFoundError);
-});
+test("loadAssignmentConfig throws AssignmentNotFoundError for missing assignment and lists config-root path", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    assert.throws(
+      () => loadAssignmentConfig("nope-work", rootDir),
+      (err) => {
+        assert.ok(err instanceof AssignmentNotFoundError);
+        assert.deepEqual(err.searched, [
+          join(configDir, "assignments", "nope-work", "assignment.md"),
+        ]);
+        return true;
+      },
+    );
+  }));
 
 test("resolveAssignmentPath accepts a direct path", () => {
   const dir = tempDir();
@@ -166,12 +180,12 @@ test("resolveAssignmentPath accepts a direct path", () => {
   assert.equal(resolved, assignmentPath);
 });
 
-test("assignment schema rejects duplicate task ids", () => {
-  const dir = tempDir();
-  writeAssignment(
-    dir,
-    "dup",
-    `---
+test("assignment schema rejects duplicate task ids", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    writeAssignment(
+      configDir,
+      "dup",
+      `---
 schemaVersion: 1
 name: dup
 tasks:
@@ -182,17 +196,17 @@ tasks:
 ---
 body
 `,
-  );
+    );
 
-  assert.throws(() => loadAssignmentConfig("dup", dir), AssignmentConfigError);
-});
+    assert.throws(() => loadAssignmentConfig("dup", rootDir), AssignmentConfigError);
+  }));
 
-test("assignment schema rejects multiline task titles", () => {
-  const dir = tempDir();
-  writeAssignment(
-    dir,
-    "multiline-title",
-    `---
+test("assignment schema rejects multiline task titles", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    writeAssignment(
+      configDir,
+      "multiline-title",
+      `---
 schemaVersion: 1
 name: multiline-title
 tasks:
@@ -203,17 +217,17 @@ tasks:
 ---
 body
 `,
-  );
+    );
 
-  assert.throws(() => loadAssignmentConfig("multiline-title", dir), AssignmentConfigError);
-});
+    assert.throws(() => loadAssignmentConfig("multiline-title", rootDir), AssignmentConfigError);
+  }));
 
-test("assignment schema rejects incompatible var defaults", () => {
-  const dir = tempDir();
-  writeAssignment(
-    dir,
-    "bad-default",
-    `---
+test("assignment schema rejects incompatible var defaults", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    writeAssignment(
+      configDir,
+      "bad-default",
+      `---
 schemaVersion: 1
 name: bad-default
 vars:
@@ -223,105 +237,155 @@ vars:
 ---
 body
 `,
-  );
+    );
 
-  assert.throws(() => loadAssignmentConfig("bad-default", dir), AssignmentConfigError);
-});
+    assert.throws(() => loadAssignmentConfig("bad-default", rootDir), AssignmentConfigError);
+  }));
 
-// ── catalog / list tests ────────────────────────────────────────────
+test("loadAgentConfig does not fall back to cwd-local bare names", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    writeAgent(rootDir, "demo", MINIMAL_AGENT);
 
-test("listAgents discovers local agents", () => {
-  const dir = tempDir();
-  writeAgent(dir, "alpha", MINIMAL_AGENT);
-  writeAgent(dir, "beta", MINIMAL_AGENT);
+    assert.throws(
+      () => loadAgentConfig("demo", rootDir),
+      (err) => {
+        assert.ok(err instanceof AgentNotFoundError);
+        assert.deepEqual(err.searched, [join(configDir, "agents", "demo", "agent.md")]);
+        return true;
+      },
+    );
+  }));
 
-  const entries = listAgents(dir);
-  const names = entries.map((e) => e.name);
-  assert.ok(names.includes("alpha"));
-  assert.ok(names.includes("beta"));
-  assert.equal(entries[0].root, "local");
-});
+test("listAgents discovers config-root agents", () =>
+  withRuntimeRoots("task-runner-loader-", ({ configDir }) => {
+    writeAgent(configDir, "alpha", MINIMAL_AGENT);
+    writeAgent(configDir, "beta", MINIMAL_AGENT);
 
-test("listAssignments discovers local assignments", () => {
-  const dir = tempDir();
-  writeAssignment(dir, "work-a", MINIMAL_ASSIGNMENT);
-  writeAssignment(dir, "work-b", MINIMAL_ASSIGNMENT);
-
-  const entries = listAssignments(dir);
-  const names = entries.map((e) => e.name);
-  assert.ok(names.includes("work-a"));
-  assert.ok(names.includes("work-b"));
-});
-
-test("listAgents returns sorted names", () => {
-  const dir = tempDir();
-  writeAgent(dir, "zeta", MINIMAL_AGENT);
-  writeAgent(dir, "alpha", MINIMAL_AGENT);
-  writeAgent(dir, "mid", MINIMAL_AGENT);
-
-  const entries = listAgents(dir);
-  const names = entries.map((e) => e.name);
-  assert.deepEqual(names, ["alpha", "mid", "zeta"]);
-});
-
-test("listAgents returns empty array when no agents exist", () => {
-  const dir = tempDir();
-  const entries = listAgents(dir);
-  assert.deepEqual(entries, []);
-});
-
-test("listAssignments returns empty array when no assignments exist", () => {
-  const dir = tempDir();
-  const entries = listAssignments(dir);
-  assert.deepEqual(entries, []);
-});
-
-test("listAgents skips directories without agent.md", () => {
-  const dir = tempDir();
-  writeAgent(dir, "real", MINIMAL_AGENT);
-  mkdirSync(join(dir, "agents", "empty"), { recursive: true });
-
-  const entries = listAgents(dir);
-  assert.equal(entries.length, 1);
-  assert.equal(entries[0].name, "real");
-});
-
-test("listAgents local root shadows global root for same name", () => {
-  const dir = tempDir();
-  const globalDir = tempDir();
-  writeAgent(dir, "shared", MINIMAL_AGENT);
-  writeAgent(globalDir, "shared", MINIMAL_AGENT);
-  writeAgent(globalDir, "global-only", MINIMAL_AGENT);
-
-  const origEnv = process.env.TASK_RUNNER_HOME;
-  try {
-    process.env.TASK_RUNNER_HOME = globalDir;
-    const entries = listAgents(dir);
+    const entries = listAgents();
     const names = entries.map((e) => e.name);
-    assert.ok(names.includes("shared"));
-    assert.ok(names.includes("global-only"));
-    const shared = entries.find((e) => e.name === "shared");
-    assert.equal(shared.root, "local");
-    const globalOnly = entries.find((e) => e.name === "global-only");
-    assert.equal(globalOnly.root, "global");
-  } finally {
-    if (origEnv === undefined) {
-      process.env.TASK_RUNNER_HOME = undefined;
-    } else {
-      process.env.TASK_RUNNER_HOME = origEnv;
-    }
-  }
+    assert.ok(names.includes("alpha"));
+    assert.ok(names.includes("beta"));
+    assert.equal(entries[0].root, "config");
+  }));
+
+test("listAssignments discovers config-root assignments", () =>
+  withRuntimeRoots("task-runner-loader-", ({ configDir }) => {
+    writeAssignment(configDir, "work-a", MINIMAL_ASSIGNMENT);
+    writeAssignment(configDir, "work-b", MINIMAL_ASSIGNMENT);
+
+    const entries = listAssignments();
+    const names = entries.map((e) => e.name);
+    assert.ok(names.includes("work-a"));
+    assert.ok(names.includes("work-b"));
+  }));
+
+test("listAgents returns sorted names", () =>
+  withRuntimeRoots("task-runner-loader-", ({ configDir }) => {
+    writeAgent(configDir, "zeta", MINIMAL_AGENT);
+    writeAgent(configDir, "alpha", MINIMAL_AGENT);
+    writeAgent(configDir, "mid", MINIMAL_AGENT);
+
+    const entries = listAgents();
+    const names = entries.map((e) => e.name);
+    assert.deepEqual(names, ["alpha", "mid", "zeta"]);
+  }));
+
+test("listAgents returns empty array when no agents exist", () =>
+  withRuntimeRoots("task-runner-loader-", () => {
+    const entries = listAgents();
+    assert.deepEqual(entries, []);
+  }));
+
+test("listAssignments returns empty array when no assignments exist", () =>
+  withRuntimeRoots("task-runner-loader-", () => {
+    const entries = listAssignments();
+    assert.deepEqual(entries, []);
+  }));
+
+test("listAgents skips directories without agent.md", () =>
+  withRuntimeRoots("task-runner-loader-", ({ configDir }) => {
+    writeAgent(configDir, "real", MINIMAL_AGENT);
+    mkdirSync(join(configDir, "agents", "empty"), { recursive: true });
+
+    const entries = listAgents();
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].name, "real");
+  }));
+
+test("TASK_RUNNER_CONFIG_DIR overrides XDG_CONFIG_HOME and HOME fallbacks", () => {
+  const explicitRoot = tempDir();
+  const xdgRoot = tempDir();
+  const homeRoot = tempDir();
+  writeAgent(explicitRoot, "explicit", MINIMAL_AGENT);
+  writeAgent(join(xdgRoot, "task-runner"), "xdg", MINIMAL_AGENT);
+  writeAgent(join(homeRoot, ".config", "task-runner"), "home", MINIMAL_AGENT);
+
+  withEnv(
+    {
+      TASK_RUNNER_CONFIG_DIR: explicitRoot,
+      XDG_CONFIG_HOME: xdgRoot,
+      HOME: homeRoot,
+    },
+    () => {
+      const entries = listAgents();
+      assert.deepEqual(
+        entries.map((entry) => entry.name),
+        ["explicit"],
+      );
+    },
+  );
 });
 
-test("listAgents throws DefinitionListError when agents directory is unreadable", () => {
-  const dir = tempDir();
-  const agentsDir = join(dir, "agents");
-  mkdirSync(agentsDir, { recursive: true });
-  writeAgent(dir, "visible", MINIMAL_AGENT);
-  chmodSync(agentsDir, 0o000);
-  try {
-    assert.throws(() => listAgents(dir), DefinitionListError);
-  } finally {
-    chmodSync(agentsDir, 0o755);
-  }
+test("XDG_CONFIG_HOME fallback is used when TASK_RUNNER_CONFIG_DIR is unset", () => {
+  const xdgRoot = tempDir();
+  const homeRoot = tempDir();
+  writeAssignment(join(xdgRoot, "task-runner"), "demo-work", MINIMAL_ASSIGNMENT);
+
+  withEnv(
+    {
+      TASK_RUNNER_CONFIG_DIR: undefined,
+      XDG_CONFIG_HOME: xdgRoot,
+      HOME: homeRoot,
+    },
+    () => {
+      const loaded = loadAssignmentConfig("demo-work");
+      assert.equal(
+        loaded.sourcePath,
+        join(xdgRoot, "task-runner", "assignments", "demo-work", "assignment.md"),
+      );
+    },
+  );
 });
+
+test("HOME fallback uses ~/.config/task-runner when explicit and XDG vars are unset", () => {
+  const homeRoot = tempDir();
+  writeAgent(join(homeRoot, ".config", "task-runner"), "demo", MINIMAL_AGENT);
+
+  withEnv(
+    {
+      TASK_RUNNER_CONFIG_DIR: undefined,
+      XDG_CONFIG_HOME: undefined,
+      HOME: homeRoot,
+    },
+    () => {
+      const loaded = loadAgentConfig("demo");
+      assert.equal(
+        loaded.sourcePath,
+        join(homeRoot, ".config", "task-runner", "agents", "demo", "agent.md"),
+      );
+    },
+  );
+});
+
+test("listAgents throws DefinitionListError when config agents directory is unreadable", () =>
+  withRuntimeRoots("task-runner-loader-", ({ configDir }) => {
+    const agentsDir = join(configDir, "agents");
+    mkdirSync(agentsDir, { recursive: true });
+    writeAgent(configDir, "visible", MINIMAL_AGENT);
+    chmodSync(agentsDir, 0o000);
+    try {
+      assert.throws(() => listAgents(), DefinitionListError);
+    } finally {
+      chmodSync(agentsDir, 0o755);
+    }
+  }));

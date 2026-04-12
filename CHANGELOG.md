@@ -4,16 +4,21 @@
 
 ### Breaking Changes
 
+- Replaced the previous single-root runtime env var and cwd-local bare-name definition lookup with split XDG-style roots: `TASK_RUNNER_CONFIG_DIR` for named agent/assignment definitions and `TASK_RUNNER_STATE_DIR` for runtime state. Bare names now resolve only from the config root, and run workspaces now live under repo-scoped state buckets instead of `<cwd>/.task-runner/`. ([#8](https://github.com/kcosr/task-runner/pull/8))
+- Direct file-path args are now recognized only when the argument contains `/` or starts with `./`; bare names no longer implicitly resolve from the repo checkout. ([#8](https://github.com/kcosr/task-runner/pull/8))
+
 ### Added
 
-- Added `task-runner list <agents|assignments>` and `task-runner show <agent|assignment> <name|path>` commands for read-only definition inspection. Both discover definitions from local (`./agents/`, `./assignments/`) and `$TASK_RUNNER_HOME` roots with local-first precedence, support `--output-format json`, and create no run artifacts.
+- Added `agents/implementer/` — a bundled plan-feature execution agent (backend `codex`, model `gpt-5.4`, effort `high`, unrestricted). Tuned to read task bodies and `Done when:` criteria end-to-end, cite file paths in task Notes, and capture concrete evidence (file paths, exit codes, commit shas) for the reviewer's plan-coverage pass to consume. The `plan-feature` meta-assignment now hard-codes `--agent implementer` at `task-runner init` time, so every generated plan inherits a dedicated implementer agent instead of whatever the planner happened to pick.
+- Added `task-runner list <agents|assignments>` and `task-runner show <agent|assignment> <name|path>` commands for read-only definition inspection. Both discover named definitions from the configured task-runner config root, support `--output-format json`, and create no run artifacts. ([#8](https://github.com/kcosr/task-runner/pull/8))
 - Added agent onboarding guidance in `AGENTS.md` and a `CLAUDE.md` symlink to the same content. ([#6](https://github.com/kcosr/task-runner/pull/6))
 - Added a root `CHANGELOG.md` with unreleased and release-section structure for future updates. ([#6](https://github.com/kcosr/task-runner/pull/6))
 - Added stricter assignment/task regression coverage for structural markdown escaping, task-command terminal-state handling, runtime var validation, Codex interruption, and subprocess abort paths. ([#6](https://github.com/kcosr/task-runner/pull/6))
-- Added `assignments/plan-feature/` — a meta-assignment that turns a free-form feature description (passed as the positional message body) into an executable task-runner plan. The planner surveys repo conventions, impact surface, reuse opportunities, and risks, then copies a reference template into `.task-runner/drafts/`, fills in every placeholder with concrete file-level detail, and runs `task-runner init` to freeze the draft into a new run workspace that any agent can resume.
+- Added `assignments/plan-feature/` — a meta-assignment that turns a free-form feature description (passed as the positional message body) into an executable task-runner plan. The planner surveys repo conventions, impact surface, reuse opportunities, and risks, then copies a reference template into the repo-keyed task-runner drafts area under `${TASK_RUNNER_STATE_DIR}/drafts/`, fills in every placeholder with concrete file-level detail, and runs `task-runner init` to freeze the draft into a new run workspace that any agent can resume. ([#8](https://github.com/kcosr/task-runner/pull/8))
 
 ### Changed
 
+- `agents/code-reviewer/` flipped from `codex` / `gpt-5.3-codex` to `claude` / `claude-opus-4-6`. The role body and severity format are unchanged; only the backend and model. Plan-feature-driven reviews now run on opus without needing template-level `--backend` / `--model` overrides. Callers that want the old configuration can still override via `--backend codex --model gpt-5.3-codex` at run time.
 - Shared workspace task-state loading and persistence between the run loop and CLI task commands so assignment overlays, manifest snapshots, and canonical writes follow one code path. ([#6](https://github.com/kcosr/task-runner/pull/6))
 - Updated the standard verification workflow so `npm run check` runs build, lint, and test coverage together. ([#6](https://github.com/kcosr/task-runner/pull/6))
 - `assignments/code-review/` now accepts an optional `implementation_plan` var pointing at a task-runner workspace `assignment.md`. When set, a new `t12_plan_coverage` task verifies that every task in the referenced plan actually shipped in the diff — flagging silent deferrals and dropped review fixes at HIGH/CRITICAL severity. The synthesis task is renumbered to `t13_synthesis` and folds plan-coverage findings into its ranked list. Reviews launched without the var skip the plan-coverage pass cleanly.
@@ -22,6 +27,7 @@
 
 ### Fixed
 
+- Fixed `assignments/plan-feature/` `t08_init_run` to hard-code `--agent implementer` at init time instead of letting the planner pick an arbitrary agent. The previous "pick the agent the caller is most likely to use" guidance was too vague for ad-hoc planner invocations, which in the first live plan-feature run produced an implementer workspace frozen to `code-reviewer` — a read-only agent that would have refused to edit files. The new wording lists explicit anti-patterns (don't use `code-reviewer`, don't reuse the planner's ad-hoc config, don't accept overrides from the feature brief) to make the correct choice unambiguous.
 - Fixed workspace persistence to use atomic writes for manifests, attempt logs, and assignment files, and reject resume targets whose manifest paths do not match the workspace they were loaded from. ([#6](https://github.com/kcosr/task-runner/pull/6))
 - Fixed Codex timeout/abort cleanup to wait for late-arriving turn ids and retry interruption, reducing the risk of orphaned remote turns. ([#6](https://github.com/kcosr/task-runner/pull/6))
 - Fixed assignment/task mutation hardening around structural marker escaping, single-line task titles, terminal non-passive notes-only edits, and undeclared or mistyped runtime vars. ([#6](https://github.com/kcosr/task-runner/pull/6))

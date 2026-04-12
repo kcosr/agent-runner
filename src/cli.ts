@@ -67,9 +67,10 @@ Commands:
                           Respects the \`tasks\` locked field. Rejected
                           while status=running.
   list <agents|assignments>
-                          Enumerate available definitions from local
-                          (./agents/ or ./assignments/) and global
-                          ($TASK_RUNNER_HOME) roots. Read-only.
+                          Enumerate available definitions from the
+                          config root (\${TASK_RUNNER_CONFIG_DIR},
+                          XDG fallback, or ~/.config/task-runner).
+                          Read-only.
                           Supports --output-format json.
   show <agent|assignment> <name|path>
                           Print details of a specific definition.
@@ -89,38 +90,42 @@ Task command options:
   --title <text>          (task add) Title for the new task.
 
 Options:
-  --agent <name|path>     Agent name (resolved against ./agents/<name>/agent.md
-                          or $TASK_RUNNER_HOME/agents/<name>/agent.md) or a
-                          direct path to an agent.md file. Optional on fresh
-                          runs and init — when omitted, task-runner synthesizes
-                          an ad-hoc agent from CLI overrides (in that case
+  --agent <name|path>     Agent bare name (resolved only from
+                          \${TASK_RUNNER_CONFIG_DIR}/agents/<name>/agent.md,
+                          with XDG fallback) or a direct path to an
+                          agent.md file. Optional on fresh runs and init
+                          — when omitted, task-runner synthesizes an
+                          ad-hoc agent from CLI overrides (in that case
                           --backend is required; every other field gets a
                           default). Forbidden with --resume-run: the agent
                           config is reconstructed from the frozen manifest
                           (no agent.md re-read).
-  --assignment <n|path>   Assignment name (resolved against
-                          ./assignments/<n>/assignment.md or
-                          $TASK_RUNNER_HOME/assignments/<n>/assignment.md) or
-                          a direct path to an assignment.md file. Assignments
-                          supply tasks, vars, and optional work instructions.
-                          Forbidden on --resume-run.
+  --assignment <n|path>   Assignment bare name (resolved only from
+                          \${TASK_RUNNER_CONFIG_DIR}/assignments/<n>/assignment.md,
+                          with XDG fallback) or a direct path to an
+                          assignment.md file. Assignments supply tasks,
+                          vars, and optional work instructions. Forbidden
+                          on --resume-run.
   --backend-session-id    Adopt an existing backend session id (claude session
                           UUID, codex thread id) instead of starting a fresh
                           one. Cannot be combined with --resume-run. Validated
                           via the backend's read-only check before any
                           workspace creation; the cwd must match the cwd the
                           session was originally created under.
-  --resume-run <id|path>  Continue an existing run by its short id or path
-                          to its workspace / run.json. Reads the prior
-                          manifest and reconstructs the agent from its
-                          frozen fields (no re-read of the source agent.md
-                          under the manifest-canonical design). Normalizes
-                          non-completed tasks to pending and starts a new
-                          session. Requires a follow-up message OR
-                          --add-task, unless the prior manifest has
-                          status=initialized (in which case the stored
-                          pendingPrompt is executed as session 0 with NO
-                          overrides — init deliberately froze them).
+  --resume-run <id|path>  Continue an existing run by short id or by direct
+                          path to its workspace / run.json. Short ids are
+                          resolved from \${TASK_RUNNER_STATE_DIR}/runs/<repo-key>/
+                          first, then runs/unknown/ (with XDG fallback).
+                          Reads the prior manifest and reconstructs the
+                          agent from its frozen fields (no re-read of the
+                          source agent.md under the manifest-canonical
+                          design). Normalizes non-completed tasks to
+                          pending and starts a new session. Requires a
+                          follow-up message OR --add-task, unless the
+                          prior manifest has status=initialized (in which
+                          case the stored pendingPrompt is executed as
+                          session 0 with NO overrides — init deliberately
+                          froze them).
 
                           Regular resume accepts these overrides (all still
                           vetted against manifest.lockedFields): --model,
@@ -600,8 +605,7 @@ function runListCommand(parsed: ParsedArgs): never {
       process.stdout.write(`No ${kind} definitions found.\n`);
     } else {
       for (const entry of entries) {
-        const tag = entry.root === "global" ? " (global)" : "";
-        process.stdout.write(`  ${entry.name}${tag}\n`);
+        process.stdout.write(`  ${entry.name}\n`);
       }
     }
   }

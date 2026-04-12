@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { parseArgs } from "../dist/cli/parse-args.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
 import { LockedFieldError, runAgent } from "../dist/runner/run-loop.js";
+import { assignmentPathFromPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 const CLAUDE_AGENT = `---
 schemaVersion: 1
@@ -71,11 +72,12 @@ function editStatus(content, taskId, newStatus) {
 const okBackend = (id) => ({
   id,
   async invoke(ctx) {
-    const match = ctx.prompt.match(/\.task-runner\/\S+?\/assignment\.md/);
-    if (match) {
-      const absPlan = `./${match[0]}`;
+    try {
+      const absPlan = assignmentPathFromPrompt(ctx.prompt);
       const plan = readFileSync(absPlan, "utf8");
       writeFileSync(absPlan, editStatus(plan, "t1", "completed"), "utf8");
+    } catch {
+      // Chat-mode prompts do not embed an assignment path.
     }
     return {
       exitCode: 0,
@@ -91,23 +93,25 @@ const okBackend = (id) => ({
 });
 
 async function runIn(baseDir, agentName, overrides) {
-  const loaded = loadAgentConfig(agentName, baseDir);
-  const loadedAssignment = loadAssignmentConfig("one-work", baseDir);
-  const originalCwd = process.cwd();
-  process.chdir(baseDir);
-  try {
-    return await runAgent({
-      loaded,
-      loadedAssignment,
-      cliVars: {},
-      backend: okBackend("mock-codex"),
-      overrides,
-      stderr: () => {},
-      stdout: () => {},
-    });
-  } finally {
-    process.chdir(originalCwd);
-  }
+  return withSharedRuntimeEnv(baseDir, async () => {
+    const loaded = loadAgentConfig(agentName, baseDir);
+    const loadedAssignment = loadAssignmentConfig("one-work", baseDir);
+    const originalCwd = process.cwd();
+    process.chdir(baseDir);
+    try {
+      return await runAgent({
+        loaded,
+        loadedAssignment,
+        cliVars: {},
+        backend: okBackend("mock-codex"),
+        overrides,
+        stderr: () => {},
+        stdout: () => {},
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
 }
 
 test("parseArgs: --backend accepts claude and codex", () => {

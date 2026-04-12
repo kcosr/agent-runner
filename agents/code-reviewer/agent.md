@@ -1,8 +1,8 @@
 ---
 schemaVersion: 1
 name: code-reviewer
-backend: codex
-model: gpt-5.3-codex
+backend: claude
+model: claude-opus-4-6
 effort: high
 timeoutSec: 3600
 unrestricted: true

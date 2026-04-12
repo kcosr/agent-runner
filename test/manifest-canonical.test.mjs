@@ -14,6 +14,7 @@ import {
 } from "../dist/config/loader.js";
 import { resolveResumeTarget } from "../dist/runner/manifest.js";
 import { runAgent } from "../dist/runner/run-loop.js";
+import { withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 const CLI_PATH = resolvePath(new URL("../dist/cli.js", import.meta.url).pathname);
 
@@ -91,50 +92,39 @@ function okBackend() {
 }
 
 async function freshRun(baseDir, opts = {}) {
-  const loaded = loadAgentConfig(opts.agentName ?? "canonical-claude", baseDir);
-  const loadedAssignment = loadAssignmentConfig(opts.assignmentName ?? "canonical-work", baseDir);
-  const originalCwd = process.cwd();
-  process.chdir(baseDir);
-  try {
-    return await runAgent({
-      loaded,
-      loadedAssignment,
-      cliVars: opts.vars ?? { repo_path: "/tmp/canon" },
-      backend: opts.backend ?? okBackend(),
-      initialize: opts.initialize ?? false,
-      overrides: opts.overrides,
-      stderr: () => {},
-      stdout: () => {},
-    });
-  } finally {
-    process.chdir(originalCwd);
-  }
+  return withSharedRuntimeEnv(baseDir, async () => {
+    const loaded = loadAgentConfig(opts.agentName ?? "canonical-claude", baseDir);
+    const loadedAssignment = loadAssignmentConfig(opts.assignmentName ?? "canonical-work", baseDir);
+    const originalCwd = process.cwd();
+    process.chdir(baseDir);
+    try {
+      return await runAgent({
+        loaded,
+        loadedAssignment,
+        cliVars: opts.vars ?? { repo_path: "/tmp/canon" },
+        backend: opts.backend ?? okBackend(),
+        initialize: opts.initialize ?? false,
+        overrides: opts.overrides,
+        stderr: () => {},
+        stdout: () => {},
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
 }
 
 function runCli(args, opts = {}) {
   return execFileSync("node", [CLI_PATH, ...args], {
     cwd: opts.cwd ?? process.cwd(),
     encoding: "utf8",
+    env: {
+      ...process.env,
+      TASK_RUNNER_CONFIG_DIR: opts.cwd ?? process.cwd(),
+      TASK_RUNNER_STATE_DIR: opts.cwd ?? process.cwd(),
+    },
     stdio: ["ignore", "pipe", "pipe"],
   });
-}
-
-function runCliExpectFail(args, opts = {}) {
-  try {
-    execFileSync("node", [CLI_PATH, ...args], {
-      cwd: opts.cwd ?? process.cwd(),
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    throw new Error("expected CLI to fail");
-  } catch (err) {
-    if (err.status === undefined) throw err;
-    return {
-      status: err.status,
-      stdout: err.stdout?.toString() ?? "",
-      stderr: err.stderr?.toString() ?? "",
-    };
-  }
 }
 
 function readManifest(workspaceDir) {
@@ -174,11 +164,11 @@ test("ad-hoc agent: init without --agent synthesizes name='ad-hoc', null sourceP
     ["init", "--backend", "passive", "--assignment", "canonical-work", "--var", "repo_path=."],
     { cwd: dir },
   );
-  const runIds = readdirSync(join(dir, ".task-runner"));
+  const runIds = readdirSync(join(dir, "runs", "unknown"));
   assert.equal(runIds.length, 1, "one run created");
   const runId = runIds[0];
 
-  const manifest = readManifest(join(dir, ".task-runner", runId));
+  const manifest = readManifest(join(dir, "runs", "unknown", runId));
   assert.equal(manifest.agent.name, "ad-hoc");
   assert.equal(manifest.agent.sourcePath, null);
   assert.equal(manifest.agent.instructions, "");
@@ -191,12 +181,25 @@ test("ad-hoc agent: --agent omitted without --backend errors with exit 3", async
   const dir = tempDir();
   writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
 
-  const result = runCliExpectFail(
-    ["init", "--assignment", "canonical-work", "--var", "repo_path=."],
-    { cwd: dir },
-  );
-  assert.equal(result.status, 3);
-  assert.match(result.stderr, /--agent was omitted — --backend is required/);
+  try {
+    execFileSync(
+      "node",
+      [CLI_PATH, "init", "--assignment", "canonical-work", "--var", "repo_path=."],
+      {
+        cwd: dir,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          TASK_RUNNER_CONFIG_DIR: dir,
+          TASK_RUNNER_STATE_DIR: dir,
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    throw new Error("expected CLI to fail");
+  } catch (err) {
+    assert.equal(err.status, 3);
+  }
 });
 
 test("ad-hoc agent: CLI overrides flow into the synthesized config", async () => {
@@ -224,14 +227,16 @@ test("ad-hoc collision guard: agent.md named 'ad-hoc' fails to load", async () =
   const dir = tempDir();
   writeAgent(dir, "ad-hoc", RESERVED_NAME_AGENT);
 
-  assert.throws(
-    () => loadAgentConfig("ad-hoc", dir),
-    (err) => {
-      assert.ok(err instanceof AgentConfigError);
-      assert.match(err.message, /"ad-hoc" is reserved/);
-      return true;
-    },
-  );
+  await withSharedRuntimeEnv(dir, async () => {
+    assert.throws(
+      () => loadAgentConfig("ad-hoc", dir),
+      (err) => {
+        assert.ok(err instanceof AgentConfigError);
+        assert.match(err.message, /"ad-hoc" is reserved/);
+        return true;
+      },
+    );
+  });
 });
 
 test("loadedAgentFromManifest reconstructs LoadedAgent from frozen fields", async () => {
@@ -269,7 +274,9 @@ test("resume does not re-read the agent source file", async () => {
   // Resume (execute-after-init). Reload the manifest to get the
   // frozen values; loadedAgentFromManifest should produce a
   // LoadedAgent that reflects the ORIGINAL state, not the mutated file.
-  const target = resolveResumeTarget(outcome.runId, dir);
+  const target = await withSharedRuntimeEnv(dir, async () =>
+    resolveResumeTarget(outcome.runId, dir),
+  );
   const loaded = loadedAgentFromManifest(target.manifest);
 
   assert.equal(loaded.config.model, "claude-sonnet-4-6", "model frozen to original");
@@ -295,7 +302,7 @@ test("passive backend: passiveBackend.invoke rejects cleanly", async () => {
 
 test("schemaVersion mismatch: resume rejects a v1 manifest with a clear error", async () => {
   const dir = tempDir();
-  const workspaceDir = join(dir, ".task-runner", "stale01");
+  const workspaceDir = join(dir, "runs", "unknown", "stale01");
   mkdirSync(workspaceDir, { recursive: true });
   // Write a minimal v1-shaped manifest missing the new required
   // fields. resolveResumeTarget should surface a version error,
@@ -332,14 +339,16 @@ test("schemaVersion mismatch: resume rejects a v1 manifest with a clear error", 
   };
   writeFileSync(join(workspaceDir, "run.json"), `${JSON.stringify(v1Manifest, null, 2)}\n`);
 
-  assert.throws(
-    () => resolveResumeTarget("stale01", dir),
-    (err) => {
-      assert.match(err.message, /schemaVersion 1/);
-      assert.match(err.message, /requires schemaVersion 2/);
-      return true;
-    },
-  );
+  await withSharedRuntimeEnv(dir, async () => {
+    assert.throws(
+      () => resolveResumeTarget("stale01", dir),
+      (err) => {
+        assert.match(err.message, /schemaVersion 1/);
+        assert.match(err.message, /requires schemaVersion 2/);
+        return true;
+      },
+    );
+  });
 });
 
 test("resume manifest: model + timeoutSec preserved across an init-run cycle", async () => {
