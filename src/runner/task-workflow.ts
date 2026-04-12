@@ -13,6 +13,33 @@ rather than retrying.
 
 Do not delete or reorder tasks in \`{{assignment_path}}\`.`;
 
+export const CLI_TASK_WORKFLOW_TEMPLATE = `You are working through a task list maintained by task-runner. Your
+run id is \`{{run_id}}\`. Work in the repo at \`{{cwd}}\`.
+
+Inspect the task list through the CLI:
+  - \`{{task_runner_cmd}} task list {{run_id}}\`
+  - \`{{task_runner_cmd}} task show {{run_id}} <task-id>\`
+
+For each task:
+
+1. Claim it:
+   \`{{task_runner_cmd}} task set {{run_id}} <task-id> --status in_progress\`
+2. Do the work described in the task body.
+3. Record concrete evidence as you go:
+   \`{{task_runner_cmd}} task append-notes {{run_id}} <task-id> --text "..."\`
+4. Mark completion:
+   \`{{task_runner_cmd}} task set {{run_id}} <task-id> --status completed\`
+
+If a task cannot be completed, mark it \`blocked\` and explain why in
+notes:
+   \`{{task_runner_cmd}} task set {{run_id}} <task-id> --status blocked --notes "..."\`
+
+Check overall run status at any time:
+   \`{{task_runner_cmd}} status {{run_id}}\`
+
+Use the task CLI as the task interface for this run. \`assignment.md\`
+may exist on disk for human audit, but it is not your work surface.`;
+
 // Passive variant: the agent works the checklist through task-runner
 // CLI calls instead of editing {{assignment_path}} directly. Used when
 // the agent's backend is `passive` and task-runner is acting as a
@@ -44,7 +71,14 @@ When every task reaches a terminal status (\`completed\` / \`blocked\`),
 the run automatically transitions to \`success\` (if all completed) or
 \`blocked\` (if any blocked).`;
 
-export function buildAddedTasksReminder(addedCount: number, assignmentPath: string): string {
+export function buildAddedTasksReminder(
+  addedCount: number,
+  assignmentPath: string,
+  opts: { runId?: string; taskMode?: "file" | "cli" } = {},
+): string {
   const noun = addedCount === 1 ? "task has" : "tasks have";
+  if (opts.taskMode === "cli" && opts.runId) {
+    return `(task-runner: ${addedCount} new ${noun} been added to run ${opts.runId} since the last session — inspect them with task-runner task list ${opts.runId} before continuing.)`;
+  }
   return `(task-runner: ${addedCount} new ${noun} been added to your assignment since the last session — please re-read ${assignmentPath} before continuing.)`;
 }

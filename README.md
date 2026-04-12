@@ -32,7 +32,7 @@ the work, and writes a single canonical record per run.
   - [`task-runner run`](#task-runner-run)
   - [`task-runner init`](#task-runner-init)
   - [`task-runner status`](#task-runner-status)
-  - [`task-runner task set` / `task add`](#task-runner-task-set--task-runner-task-add)
+  - [`task-runner task` commands](#task-runner-task-commands)
   - [`task-runner list`](#task-runner-list)
   - [`task-runner show`](#task-runner-show)
 - [Backends](#backends)
@@ -546,52 +546,87 @@ Options:
 | `--output-format <text|json>` | Default `text`. `json` prints the full manifest as JSON. |
 | `--field <name>` (repeatable) | When `--output-format json`, restrict output to these top-level manifest fields. |
 
-When the resolved manifest's status is `running` (i.e. an attempt is
-currently in flight), `status` *also* parses the workspace
-`assignment.md` and overlays the live task statuses + notes onto the
-output. Both the text checklist and the JSON `finalTasks` /
-`tasksCompleted` reflect the agent's mid-attempt edits — useful for
-watching long-running attempts without attaching to anything. The
-overlay never writes back to disk.
+When the resolved manifest's status is `running`, `status` behaves by
+task mode:
 
-### `task-runner task set` / `task-runner task add`
+- `taskMode=file`: parse the workspace `assignment.md` and overlay the
+  live task statuses + notes onto the output.
+- `taskMode=cli`: read canonical task state directly from
+  `run.json.finalTasks`. `assignment.md` is render-only in this mode,
+  so there is no live file overlay.
+
+### `taskMode: file` vs `taskMode: cli`
+
+Assignments default to `taskMode: file` when the field is omitted.
+
+- `taskMode=file`: the agent is oriented around the workspace
+  `assignment.md` path and updates task status/notes by editing the
+  file. While a non-passive run is `running`, task CLI mutation stays
+  rejected.
+- `taskMode=cli`: the agent is oriented around the run id plus task
+  commands (`task list`, `task show`, `task set`, `task append-notes`,
+  `status`). `run.json.finalTasks` is the live source of truth,
+  `assignment.md` is rendered from that state for human audit, and
+  `task set` / `task append-notes` are allowed while a non-passive run
+  is `running`.
+- `task add` remains rejected while a non-passive run is `running`,
+  even in `taskMode=cli`. Live mutation in v1 is limited to status and
+  notes on existing tasks.
+
+### `task-runner task` commands
 
 Mutate a run's task list **without invoking the agent**. The canonical
 use case is a *sidecar* flow: you have an agent that can't (or
 shouldn't) be invoked as a task-runner subprocess, but you still want
 it to work through a structured task list. `init` seeds the list, the
 external agent reads it via `status`, works each task, and reports
-progress back through `task set`.
+progress back through the task CLI.
 
-Both commands:
+The task subcommands are:
+
+- `task list <run-id>` — list tasks in stable order.
+- `task show <run-id> <task-id>` — show one task snapshot.
+- `task set <run-id> <task-id>` — replace status and/or notes.
+- `task append-notes <run-id> <task-id>` — append notes with a single
+  newline join rule.
+- `task add <run-id>` — add a new pending task, with optional `--body`.
+
+Read commands (`task list`, `task show`) always read canonical task
+state from `run.json.finalTasks`; they never invoke a backend.
+
+Mutation commands:
 
 - Require an existing run (as id or workspace path).
-- Are **rejected while the manifest status is `running`** — a live
-  backend attempt owns the workspace, and a concurrent CLI write would
-  race the attempt's parse/merge cycle. Allowed on `initialized` and
-  passive terminal states. On terminal non-passive runs, only
-  notes-only `task set` is allowed; `task add` and status-changing
+- Use a shared per-run persistence lock so `run.json` and rendered
+  `assignment.md` stay in sync.
+- `taskMode=file`: reject mutation while a non-passive run is
+  `running`.
+- `taskMode=cli`: allow `task set` and `task append-notes` while a
+  non-passive run is `running`; canonical task state lives in
+  `run.json.finalTasks` and `assignment.md` is rendered from it.
+- On terminal non-passive runs, only notes-only `task set` /
+  `task append-notes` are allowed; `task add` and status-changing
   `task set` are rejected.
-- Rewrite both the workspace `assignment.md` and `run.json.finalTasks`
-  via separate atomic file replacements (`status` consumers never see
-  a half-written canonical file, but there is no single cross-file
-  transaction).
-- Respect any status/notes edits already present in `assignment.md`
-  that aren't yet reflected in the manifest snapshot (they are merged
-  in before the CLI mutation is applied, CLI wins on conflict).
 
 ```bash
+# Inspect tasks
+task-runner task list <run-id>
+task-runner task show <run-id> t1
+
 # Mark a task in-progress
 task-runner task set <run-id> t1 --status in_progress
 
 # Add a notes block without changing status
 task-runner task set <run-id> t1 --notes "Investigating the parser."
 
+# Append to the existing notes body
+task-runner task append-notes <run-id> t1 --text "Captured CLI-mode details."
+
 # Complete a task with a note in one call
 task-runner task set <run-id> t1 --status completed --notes "Done."
 
 # Append a new task to an initialized run
-task-runner task add <run-id> --title "Follow-up cleanup"
+task-runner task add <run-id> --title "Follow-up cleanup" --body "Update docs."
 
 # JSON output returns the updated task snapshot (handy for scripts)
 task-runner task set <run-id> t1 --status completed --output-format json
@@ -607,11 +642,19 @@ task-runner task set <run-id> t1 --status completed --output-format json
 
 At least one of `--status` / `--notes` must be supplied.
 
+`task append-notes` options:
+
+| Flag | Purpose |
+|---|---|
+| `--text <text>` (required) | Appended note text. Trimmed before joining. |
+| `--output-format <text\|json>` | Default `text`. `json` prints the updated task snapshot. |
+
 `task add` options:
 
 | Flag | Purpose |
 |---|---|
 | `--title <text>` (required) | Title for the new task. Non-empty, single-line, ≤ 200 chars. |
+| `--body <text>` | Optional task body. Defaults to empty string. |
 | `--output-format <text\|json>` | Default `text`. `json` prints the new task snapshot. |
 
 `task add` honors the `tasks` locked field the same way `--add-task`

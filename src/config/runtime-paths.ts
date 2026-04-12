@@ -12,6 +12,18 @@ function nonEmpty(value: string | undefined): string | undefined {
   return value && value.length > 0 ? value : undefined;
 }
 
+function gitProbeEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const nextEnv = { ...env };
+  for (const key of Object.keys(nextEnv)) {
+    // Git hooks export repo-bound GIT_* variables that can make an arbitrary
+    // target cwd resolve as the hook's repository instead of the probed path.
+    if (key.startsWith("GIT_")) {
+      delete nextEnv[key];
+    }
+  }
+  return nextEnv;
+}
+
 function resolvedHome(env: NodeJS.ProcessEnv): string {
   return nonEmpty(env.HOME) ?? homedir();
 }
@@ -67,6 +79,7 @@ export function deriveRepoKey(cwd: string = process.cwd()): string {
       ["rev-parse", "--path-format=absolute", "--git-common-dir"],
       {
         cwd,
+        env: gitProbeEnv(),
         encoding: "utf8",
         stdio: ["ignore", "pipe", "ignore"],
       },

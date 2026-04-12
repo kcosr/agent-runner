@@ -28,7 +28,9 @@ export interface ParsedArgs {
   fields: string[];
   taskStatus?: string;
   taskNotes?: string;
+  taskAppendText?: string;
   taskTitle?: string;
+  taskBody?: string;
   showHelp: boolean;
 }
 
@@ -160,10 +162,18 @@ export function parseArgs(argv: string[]): ParsedArgs {
       const next = args.shift();
       if (next === undefined) throw new Error("--notes requires a value");
       result.taskNotes = next;
+    } else if (arg === "--text") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--text requires a value");
+      result.taskAppendText = next;
     } else if (arg === "--title") {
       const next = args.shift();
       if (next === undefined) throw new Error("--title requires a value");
       result.taskTitle = next;
+    } else if (arg === "--body") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--body requires a value");
+      result.taskBody = next;
     } else if (arg === "--output-format") {
       const next = args.shift();
       if (next === undefined) throw new Error("--output-format requires a value");

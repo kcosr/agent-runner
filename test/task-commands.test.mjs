@@ -34,6 +34,22 @@ tasks:
 Work.
 `;
 
+const ASSIGNMENT_CLI_MODE = `---
+schemaVersion: 1
+name: task-cmd-cli-work
+taskMode: cli
+maxRetries: 1
+tasks:
+  - id: t1
+    title: First
+    body: Do thing one.
+  - id: t2
+    title: Second
+    body: Do thing two.
+---
+Work through the CLI.
+`;
+
 const ASSIGNMENT_LOCKED = `---
 schemaVersion: 1
 name: task-cmd-locked-work
@@ -121,6 +137,13 @@ function runCliExpectFail(args, opts = {}) {
 
 function readManifest(workspaceDir) {
   return JSON.parse(readFileSync(join(workspaceDir, "run.json"), "utf8"));
+}
+
+function patchManifest(workspaceDir, mutator) {
+  const manifestPath = join(workspaceDir, "run.json");
+  const manifest = readManifest(workspaceDir);
+  mutator(manifest);
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 test("task set: updates status only on initialized run", async () => {
@@ -231,22 +254,22 @@ test("task set: rejects missing positionals", async () => {
   assert.match(result.stderr, /requires <run-id> <task-id>/);
 });
 
-test("task set: rejected while manifest status=running", async () => {
+test("task set: rejected while manifest status=running in taskMode=file", async () => {
   const dir = tempDir();
   writeBundle(dir);
   const outcome = await initRun(dir);
 
   // Patch manifest to running to simulate an in-flight run
-  const manifestPath = join(outcome.workspaceDir, "run.json");
-  const m = JSON.parse(readFileSync(manifestPath, "utf8"));
-  m.status = "running";
-  writeFileSync(manifestPath, `${JSON.stringify(m, null, 2)}\n`);
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.status = "running";
+    manifest.taskMode = "file";
+  });
 
   const result = runCliExpectFail(["task", "set", outcome.runId, "t1", "--status", "completed"], {
     cwd: dir,
   });
   assert.equal(result.status, 3);
-  assert.match(result.stderr, /cannot mutate tasks on a running run/);
+  assert.match(result.stderr, /running file-mode run/);
 });
 
 test("task set: live assignment.md edits are preserved when CLI touches a different task", async () => {
@@ -272,6 +295,64 @@ test("task set: live assignment.md edits are preserved when CLI touches a differ
   assert.equal(manifest.finalTasks.t1.notes, "Working on it.");
   assert.equal(manifest.finalTasks.t2.status, "completed");
   assert.equal(manifest.tasksCompleted, 1);
+});
+
+test("task set: allowed while manifest status=running in taskMode=cli", async () => {
+  const dir = tempDir();
+  writeBundle(dir, ASSIGNMENT_CLI_MODE, "task-cmd-cli-work");
+  const outcome = await initRun(dir, "task-cmd-cli-work");
+
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.status = "running";
+    manifest.taskMode = "cli";
+  });
+
+  const out = runCli(["task", "set", outcome.runId, "t1", "--status", "in_progress"], { cwd: dir });
+  assert.match(out, /updated t1 \(status=in_progress\)/);
+
+  const manifest = readManifest(outcome.workspaceDir);
+  assert.equal(manifest.status, "running");
+  assert.equal(manifest.finalTasks.t1.status, "in_progress");
+});
+
+test("task append-notes: allowed while manifest status=running in taskMode=cli", async () => {
+  const dir = tempDir();
+  writeBundle(dir, ASSIGNMENT_CLI_MODE, "task-cmd-cli-work");
+  const outcome = await initRun(dir, "task-cmd-cli-work");
+
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.status = "running";
+    manifest.taskMode = "cli";
+  });
+
+  const out = runCli(["task", "append-notes", outcome.runId, "t2", "--text", "Captured detail"], {
+    cwd: dir,
+  });
+  assert.match(out, /updated t2 \(status=pending\)/);
+
+  const manifest = readManifest(outcome.workspaceDir);
+  assert.equal(manifest.status, "running");
+  assert.equal(manifest.finalTasks.t2.notes, "Captured detail");
+  const planText = readFileSync(outcome.assignmentPath, "utf8");
+  assert.match(planText, /Captured detail/);
+});
+
+test("task append-notes: rejected while manifest status=running in taskMode=file", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.status = "running";
+    manifest.taskMode = "file";
+  });
+
+  const result = runCliExpectFail(
+    ["task", "append-notes", outcome.runId, "t1", "--text", "blocked"],
+    { cwd: dir },
+  );
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /running file-mode run/);
 });
 
 test("task add: appends new task with cli-* id to initialized run", async () => {
@@ -358,6 +439,123 @@ test("task add: --output-format json returns new task snapshot", async () => {
   assert.equal(parsed.status, "pending");
 });
 
+test("task list: text output follows manifest task order", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+
+  const out = runCli(["task", "list", outcome.runId], { cwd: dir });
+  assert.equal(out, "[pending] t1 - First\n[pending] t2 - Second\n");
+});
+
+test("task list: json output returns task snapshots in order", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+
+  const out = runCli(["task", "list", outcome.runId, "--output-format", "json"], { cwd: dir });
+  const parsed = JSON.parse(out);
+  assert.deepEqual(
+    parsed.map((task) => task.id),
+    ["t1", "t2"],
+  );
+  assert.equal(parsed[0].body, "Do thing one.");
+  assert.equal(parsed[1].notes, "");
+});
+
+test("task show: text and json outputs match the task snapshot", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+  runCli(["task", "set", outcome.runId, "t2", "--status", "in_progress", "--notes", "Working"], {
+    cwd: dir,
+  });
+
+  const textOut = runCli(["task", "show", outcome.runId, "t2"], { cwd: dir });
+  assert.match(textOut, /^id: t2$/m);
+  assert.match(textOut, /^title: Second$/m);
+  assert.match(textOut, /^status: in_progress$/m);
+  assert.match(textOut, /body:\nDo thing two\.\nnotes:\nWorking\n$/);
+
+  const jsonOut = runCli(["task", "show", outcome.runId, "t2", "--output-format", "json"], {
+    cwd: dir,
+  });
+  const parsed = JSON.parse(jsonOut);
+  assert.equal(parsed.id, "t2");
+  assert.equal(parsed.status, "in_progress");
+  assert.equal(parsed.notes, "Working");
+});
+
+test("task show: rejects unknown task ids", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+
+  const result = runCliExpectFail(["task", "show", outcome.runId, "missing"], { cwd: dir });
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /task "missing" not found/);
+});
+
+test("task append-notes: appends with deterministic newline joining", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+
+  runCli(["task", "append-notes", outcome.runId, "t1", "--text", "First line"], { cwd: dir });
+  runCli(["task", "append-notes", outcome.runId, "t1", "--text", "  Second line  "], {
+    cwd: dir,
+  });
+
+  const manifest = readManifest(outcome.workspaceDir);
+  assert.equal(manifest.finalTasks.t1.notes, "First line\nSecond line");
+});
+
+test("task append-notes: rejects missing or empty --text", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+
+  const missing = runCliExpectFail(["task", "append-notes", outcome.runId, "t1"], { cwd: dir });
+  assert.equal(missing.status, 3);
+  assert.match(missing.stderr, /requires --text/);
+
+  const empty = runCliExpectFail(["task", "append-notes", outcome.runId, "t1", "--text", "   "], {
+    cwd: dir,
+  });
+  assert.equal(empty.status, 3);
+  assert.match(empty.stderr, /--text cannot be empty/);
+});
+
+test("task add: accepts --body and persists it", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+
+  const out = runCli(
+    [
+      "task",
+      "add",
+      outcome.runId,
+      "--title",
+      "Docs alignment",
+      "--body",
+      "Update README and docs/design command tables.",
+      "--output-format",
+      "json",
+    ],
+    { cwd: dir },
+  );
+  const parsed = JSON.parse(out);
+  assert.equal(parsed.title, "Docs alignment");
+  assert.equal(parsed.body, "Update README and docs/design command tables.");
+
+  const manifest = readManifest(outcome.workspaceDir);
+  assert.equal(
+    manifest.finalTasks[parsed.id].body,
+    "Update README and docs/design command tables.",
+  );
+});
+
 test("task set: works on a terminal-status run after it has been resolved", async () => {
   const dir = tempDir();
   writeBundle(dir);
@@ -439,6 +637,52 @@ test("task add: rejects terminal non-passive runs", async () => {
   });
   assert.equal(result.status, 3);
   assert.match(result.stderr, /cannot add tasks to a terminal non-passive run/);
+});
+
+test("task add: remains rejected while a cli-mode run is running", async () => {
+  const dir = tempDir();
+  writeBundle(dir, ASSIGNMENT_CLI_MODE, "task-cmd-cli-work");
+  const outcome = await initRun(dir, "task-cmd-cli-work");
+
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.status = "running";
+    manifest.taskMode = "cli";
+  });
+
+  const result = runCliExpectFail(["task", "add", outcome.runId, "--title", "Follow-up"], {
+    cwd: dir,
+  });
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /task add remains rejected while a run is in-flight/);
+});
+
+test("task list/show: running cli-mode reads ignore assignment.md drift", async () => {
+  const dir = tempDir();
+  writeBundle(dir, ASSIGNMENT_CLI_MODE, "task-cmd-cli-work");
+  const outcome = await initRun(dir, "task-cmd-cli-work");
+
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.status = "running";
+    manifest.taskMode = "cli";
+    manifest.finalTasks.t1.status = "in_progress";
+    manifest.finalTasks.t1.notes = "Canonical note";
+  });
+
+  let plan = readFileSync(outcome.assignmentPath, "utf8");
+  plan = plan.replace(/(<!-- task-id: t1 -->[\s\S]*?\*\*Status:\*\*) pending/, "$1 completed");
+  plan = plan.replace(
+    /(<!-- task-id: t1 -->[\s\S]*?<!-- notes:start -->\n)(<!-- notes:end -->)/,
+    "$1Drifted note\n$2",
+  );
+  writeFileSync(outcome.assignmentPath, plan, "utf8");
+
+  const listOut = runCli(["task", "list", outcome.runId], { cwd: dir });
+  assert.match(listOut, /\[in_progress\] t1 - First/);
+  assert.doesNotMatch(listOut, /\[completed\] t1 - First/);
+
+  const showOut = runCli(["task", "show", outcome.runId, "t1"], { cwd: dir });
+  assert.match(showOut, /^status: in_progress$/m);
+  assert.match(showOut, /notes:\nCanonical note\n$/);
 });
 
 test("task set: rejects manifests whose assignmentPath does not match the workspace", async () => {

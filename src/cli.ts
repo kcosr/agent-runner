@@ -37,7 +37,12 @@ import {
   VarResolutionError,
   runAgent,
 } from "./runner/run-loop.js";
-import { loadWorkspaceTaskMap, persistWorkspaceTaskState } from "./runner/workspace-state.js";
+import {
+  loadWorkspaceTaskMap,
+  persistWorkspaceTaskState,
+  taskModeFromManifest,
+  withTaskStateLock,
+} from "./runner/workspace-state.js";
 import { resolveTaskRunnerCommand } from "./task-runner-command.js";
 import { shortId } from "./util/short-id.js";
 
@@ -58,13 +63,25 @@ Commands:
                           for resuming. Read-only — touches no state.
                           Supports --output-format json and --field for
                           selective JSON output.
+  task list <id>          List tasks for a run in stable task order.
+                          Read-only. Supports --output-format json.
+  task show <id> <task>   Show one task snapshot for a run.
+                          Read-only. Supports --output-format json.
   task set <id> <task>    Update a task's status and/or notes on a run
                           without invoking the backend. Requires at least
                           one of --status / --notes. Rewrites the
                           workspace assignment.md and persists the
-                          manifest. Rejected while status=running.
+                          manifest. Running non-passive runs only allow
+                          this in \`taskMode=cli\`.
+  task append-notes <id> <task>
+                          Append text to a task's notes with a single
+                          newline separator. Requires --text. Rewrites the
+                          workspace assignment.md and persists the
+                          manifest. Running non-passive runs only allow
+                          this in \`taskMode=cli\`.
   task add <id>           Append a new task to a run's task list. Requires
-                          --title. Generates a \`cli-<short-id>\` task id.
+                          --title. Accepts optional --body. Generates a
+                          \`cli-<short-id>\` task id.
                           Respects the \`tasks\` locked field. Rejected
                           while status=running.
   list <agents|assignments>
@@ -88,7 +105,9 @@ Task command options:
   --status <s>            (task set) Target status: pending, in_progress,
                           completed, or blocked.
   --notes <text>          (task set) Replacement notes body.
+  --text <text>           (task append-notes) Text to append.
   --title <text>          (task add) Title for the new task.
+  --body <text>           (task add) Optional task body.
 
 Options:
   --agent <name|path>     Agent bare name (resolved only from
@@ -516,7 +535,10 @@ function runStatus(parsed: ParsedArgs): never {
   // (file missing, parse errors) silently fall through to the manifest
   // snapshot.
   let liveOverlay: LiveTaskOverlay | undefined;
-  if (resolved.manifest.status === "running") {
+  if (
+    resolved.manifest.status === "running" &&
+    taskModeFromManifest(resolved.manifest) === "file"
+  ) {
     try {
       const raw = readFileSync(workspaceAssignmentPath(resolved.workspaceDir), "utf8");
       const updates = parseAssignment(raw);
@@ -715,22 +737,41 @@ function runShowCommand(parsed: ParsedArgs): never {
 }
 
 function runTaskCommand(parsed: ParsedArgs): never {
+  if (parsed.subcommand === "list") {
+    runTaskList(parsed);
+  }
+  if (parsed.subcommand === "show") {
+    runTaskShow(parsed);
+  }
   if (parsed.subcommand === "set") {
     runTaskSet(parsed);
+  }
+  if (parsed.subcommand === "append-notes") {
+    runTaskAppendNotes(parsed);
   }
   if (parsed.subcommand === "add") {
     runTaskAdd(parsed);
   }
   process.stderr.write(
-    `task-runner: task command requires a subcommand: set | add (got "${parsed.subcommand ?? ""}")\n`,
+    `task-runner: task command requires a subcommand: list | show | set | append-notes | add (got "${parsed.subcommand ?? ""}")\n`,
   );
-  process.stderr.write("Usage: task-runner task set <run-id> <task-id> [--status s] [--notes n]\n");
-  process.stderr.write('       task-runner task add <run-id> --title "..."\n');
+  process.stderr.write("Usage: task-runner task list <run-id> [--output-format text|json]\n");
+  process.stderr.write(
+    "       task-runner task show <run-id> <task-id> [--output-format text|json]\n",
+  );
+  process.stderr.write("       task-runner task set <run-id> <task-id> [--status s] [--notes n]\n");
+  process.stderr.write(
+    '       task-runner task append-notes <run-id> <task-id> --text "..." [--output-format text|json]\n',
+  );
+  process.stderr.write(
+    '       task-runner task add <run-id> --title "..." [--body "..."] [--output-format text|json]\n',
+  );
   process.exit(3);
 }
 
-// States in which `task set` / `task add` are allowed. Everything else is
-// either `running` (live agent would race us) or an unreachable value.
+type TaskMutationKind = "set" | "append-notes" | "add";
+
+// States in which task mutation is allowed without consulting taskMode.
 const MUTATION_ALLOWED_STATUSES = new Set([
   "initialized",
   "success",
@@ -770,6 +811,22 @@ function requireMutableStatus(manifest: RunManifest): void {
   }
 }
 
+function requireTaskMutationAllowed(manifest: RunManifest, kind: TaskMutationKind): void {
+  if (manifest.status === "running") {
+    if (taskModeFromManifest(manifest) === "cli" && (kind === "set" || kind === "append-notes")) {
+      return;
+    }
+
+    const verb = kind === "add" ? "add tasks" : "mutate tasks";
+    process.stderr.write(
+      `task-runner: cannot ${verb} on a running ${taskModeFromManifest(manifest)}-mode run${kind === "add" ? " (task add remains rejected while a run is in-flight)" : " (task CLI mutation during a run is only allowed in taskMode=cli for task set/append-notes)"}\n`,
+    );
+    process.exit(3);
+  }
+
+  requireMutableStatus(manifest);
+}
+
 function isTerminalNonPassiveRun(manifest: RunManifest): boolean {
   return manifest.backend !== "passive" && TERMINAL_MUTATION_STATUSES.has(manifest.status);
 }
@@ -789,7 +846,55 @@ function persistTaskMap(
         applyPassiveFinalization(manifest, ordered);
       }
     },
+    alreadyLocked: true,
   });
+}
+
+function updateTaskMap(
+  resolved: ReturnType<typeof resolveResumeTarget>,
+  mergeOptions: Parameters<typeof loadWorkspaceTaskMap>[1],
+  updater: (tasks: Map<string, TaskState>) => void,
+): void {
+  withTaskStateLock(resolved.workspaceDir, () => {
+    resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
+    const tasks = loadWorkspaceTaskMap(resolved.manifest, mergeOptions);
+    updater(tasks);
+    persistTaskMap(resolved, tasks);
+  });
+}
+
+function taskSnapshots(manifest: RunManifest): RunManifest["finalTasks"][string][] {
+  return Object.values(manifest.finalTasks);
+}
+
+function taskSnapshotOrExit(
+  manifest: RunManifest,
+  taskId: string,
+): RunManifest["finalTasks"][string] {
+  const task = manifest.finalTasks[taskId];
+  if (!task) {
+    process.stderr.write(`task-runner: task "${taskId}" not found in run ${manifest.runId}\n`);
+    process.exit(3);
+  }
+  return task;
+}
+
+function writeTaskSnapshot(
+  task: RunManifest["finalTasks"][string],
+  outputFormat: ParsedArgs["outputFormat"],
+): void {
+  if (outputFormat === "json") {
+    process.stdout.write(`${JSON.stringify(task, null, 2)}\n`);
+    return;
+  }
+
+  process.stdout.write(`id: ${task.id}\n`);
+  process.stdout.write(`title: ${task.title}\n`);
+  process.stdout.write(`status: ${task.status}\n`);
+  process.stdout.write("body:\n");
+  process.stdout.write(`${task.body}\n`);
+  process.stdout.write("notes:\n");
+  process.stdout.write(`${task.notes}\n`);
 }
 
 // For a passive run, derive the next state from the task map:
@@ -839,6 +944,53 @@ function applyPassiveFinalization(manifest: RunManifest, ordered: TaskState[]): 
   }
 }
 
+function runTaskList(parsed: ParsedArgs): never {
+  const [runArg, extra] = parsed.positionals;
+  if (!runArg) {
+    process.stderr.write("task-runner: task list requires <run-id>\n");
+    process.stderr.write("Usage: task-runner task list <run-id> [--output-format text|json]\n");
+    process.exit(3);
+  }
+  if (extra !== undefined) {
+    process.stderr.write(
+      `task-runner: task list takes exactly one positional (<run-id>); got extra "${extra}"\n`,
+    );
+    process.exit(3);
+  }
+
+  const resolved = resolveRunOrExit(runArg);
+  const tasks = taskSnapshots(resolved.manifest);
+  if (parsed.outputFormat === "json") {
+    process.stdout.write(`${JSON.stringify(tasks, null, 2)}\n`);
+  } else {
+    for (const task of tasks) {
+      process.stdout.write(`[${task.status}] ${task.id} - ${task.title}\n`);
+    }
+  }
+  process.exit(0);
+}
+
+function runTaskShow(parsed: ParsedArgs): never {
+  const [runArg, taskId, extra] = parsed.positionals;
+  if (!runArg || !taskId) {
+    process.stderr.write("task-runner: task show requires <run-id> <task-id>\n");
+    process.stderr.write(
+      "Usage: task-runner task show <run-id> <task-id> [--output-format text|json]\n",
+    );
+    process.exit(3);
+  }
+  if (extra !== undefined) {
+    process.stderr.write(
+      `task-runner: task show takes exactly two positionals (<run-id> <task-id>); got extra "${extra}"\n`,
+    );
+    process.exit(3);
+  }
+
+  const resolved = resolveRunOrExit(runArg);
+  writeTaskSnapshot(taskSnapshotOrExit(resolved.manifest, taskId), parsed.outputFormat);
+  process.exit(0);
+}
+
 function runTaskSet(parsed: ParsedArgs): never {
   const [runArg, taskId] = parsed.positionals;
   if (!runArg || !taskId) {
@@ -862,47 +1014,102 @@ function runTaskSet(parsed: ParsedArgs): never {
   }
 
   const resolved = resolveRunOrExit(runArg);
-  requireMutableStatus(resolved.manifest);
+  requireTaskMutationAllowed(resolved.manifest, "set");
 
-  const tasks = loadWorkspaceTaskMap(resolved.manifest, {
-    // Terminal non-passive runs allow notes-only task edits; keep
-    // preserving workspace note changes, but never import workspace
-    // status drift back into the canonical manifest on those runs.
-    applyStatus: !isTerminalNonPassiveRun(resolved.manifest),
-  });
-  const target = tasks.get(taskId);
-  if (!target) {
-    process.stderr.write(
-      `task-runner: task "${taskId}" not found in run ${resolved.manifest.runId}\n`,
-    );
-    process.exit(3);
-  }
+  updateTaskMap(
+    resolved,
+    {
+      // Terminal non-passive runs allow notes-only task edits; keep
+      // preserving workspace note changes, but never import workspace
+      // status drift back into the canonical manifest on those runs.
+      applyStatus: !isTerminalNonPassiveRun(resolved.manifest),
+    },
+    (tasks) => {
+      const target = tasks.get(taskId);
+      if (!target) {
+        process.stderr.write(
+          `task-runner: task "${taskId}" not found in run ${resolved.manifest.runId}\n`,
+        );
+        process.exit(3);
+      }
 
-  if (
-    parsed.taskStatus !== undefined &&
-    parsed.taskStatus !== target.status &&
-    isTerminalNonPassiveRun(resolved.manifest)
-  ) {
-    process.stderr.write(
-      `task-runner: cannot change task status on a terminal non-passive run; use ${resolveTaskRunnerCommand()} run --resume-run <id> with a follow-up message instead\n`,
-    );
-    process.exit(3);
-  }
+      if (
+        parsed.taskStatus !== undefined &&
+        parsed.taskStatus !== target.status &&
+        isTerminalNonPassiveRun(resolved.manifest)
+      ) {
+        process.stderr.write(
+          `task-runner: cannot change task status on a terminal non-passive run; use ${resolveTaskRunnerCommand()} run --resume-run <id> with a follow-up message instead\n`,
+        );
+        process.exit(3);
+      }
 
-  if (parsed.taskStatus !== undefined) {
-    target.status = parsed.taskStatus as TaskState["status"];
-  }
-  if (parsed.taskNotes !== undefined) {
-    target.notes = parsed.taskNotes;
-  }
-
-  persistTaskMap(resolved, tasks);
+      if (parsed.taskStatus !== undefined) {
+        target.status = parsed.taskStatus as TaskState["status"];
+      }
+      if (parsed.taskNotes !== undefined) {
+        target.notes = parsed.taskNotes;
+      }
+    },
+  );
 
   if (parsed.outputFormat === "json") {
     process.stdout.write(`${JSON.stringify(resolved.manifest.finalTasks[taskId], null, 2)}\n`);
   } else {
     process.stdout.write(
-      `task-runner: updated ${taskId} (status=${target.status}) in run ${resolved.manifest.runId}\n`,
+      `task-runner: updated ${taskId} (status=${resolved.manifest.finalTasks[taskId]?.status ?? "pending"}) in run ${resolved.manifest.runId}\n`,
+    );
+  }
+  process.exit(0);
+}
+
+function runTaskAppendNotes(parsed: ParsedArgs): never {
+  const [runArg, taskId] = parsed.positionals;
+  if (!runArg || !taskId) {
+    process.stderr.write("task-runner: task append-notes requires <run-id> <task-id>\n");
+    process.stderr.write(
+      'Usage: task-runner task append-notes <run-id> <task-id> --text "..." [--output-format text|json]\n',
+    );
+    process.exit(3);
+  }
+
+  if (parsed.taskAppendText === undefined) {
+    process.stderr.write("task-runner: task append-notes requires --text\n");
+    process.exit(3);
+  }
+
+  const appendText = parsed.taskAppendText.trim();
+  if (appendText.length === 0) {
+    process.stderr.write("task-runner: task append-notes: --text cannot be empty\n");
+    process.exit(3);
+  }
+
+  const resolved = resolveRunOrExit(runArg);
+  requireTaskMutationAllowed(resolved.manifest, "append-notes");
+
+  updateTaskMap(
+    resolved,
+    {
+      applyStatus: !isTerminalNonPassiveRun(resolved.manifest),
+    },
+    (tasks) => {
+      const target = tasks.get(taskId);
+      if (!target) {
+        process.stderr.write(
+          `task-runner: task "${taskId}" not found in run ${resolved.manifest.runId}\n`,
+        );
+        process.exit(3);
+      }
+
+      target.notes = target.notes.length === 0 ? appendText : `${target.notes}\n${appendText}`;
+    },
+  );
+
+  if (parsed.outputFormat === "json") {
+    process.stdout.write(`${JSON.stringify(resolved.manifest.finalTasks[taskId], null, 2)}\n`);
+  } else {
+    process.stdout.write(
+      `task-runner: updated ${taskId} (status=${resolved.manifest.finalTasks[taskId]?.status ?? "pending"}) in run ${resolved.manifest.runId}\n`,
     );
   }
   process.exit(0);
@@ -942,7 +1149,7 @@ function runTaskAdd(parsed: ParsedArgs): never {
   }
 
   const resolved = resolveRunOrExit(runArg);
-  requireMutableStatus(resolved.manifest);
+  requireTaskMutationAllowed(resolved.manifest, "add");
 
   if (isTerminalNonPassiveRun(resolved.manifest)) {
     process.stderr.write(
@@ -963,21 +1170,20 @@ function runTaskAdd(parsed: ParsedArgs): never {
     process.exit(3);
   }
 
-  const tasks = loadWorkspaceTaskMap(resolved.manifest);
-  let newId: string;
-  do {
-    newId = `cli-${shortId()}`;
-  } while (tasks.has(newId));
+  let newId = "";
+  updateTaskMap(resolved, {}, (tasks) => {
+    do {
+      newId = `cli-${shortId()}`;
+    } while (tasks.has(newId));
 
-  tasks.set(newId, {
-    id: newId,
-    title,
-    body: "",
-    status: "pending",
-    notes: "",
+    tasks.set(newId, {
+      id: newId,
+      title,
+      body: parsed.taskBody ?? "",
+      status: "pending",
+      notes: "",
+    });
   });
-
-  persistTaskMap(resolved, tasks);
 
   if (parsed.outputFormat === "json") {
     process.stdout.write(`${JSON.stringify(resolved.manifest.finalTasks[newId], null, 2)}\n`);

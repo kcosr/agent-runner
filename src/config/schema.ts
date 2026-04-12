@@ -1,5 +1,12 @@
 import { z } from "zod";
 
+export const TASK_MODES = ["file", "cli"] as const;
+export type TaskMode = (typeof TASK_MODES)[number];
+
+export function normalizeTaskMode(taskMode: TaskMode | undefined | null): TaskMode {
+  return taskMode === "cli" ? "cli" : "file";
+}
+
 export const taskDefSchema = z.object({
   id: z
     .string()
@@ -109,6 +116,7 @@ export const assignmentConfigSchema = z
   .object({
     schemaVersion: z.literal(1),
     name: z.string().min(1),
+    taskMode: z.enum(TASK_MODES).default("file"),
     sessionName: z.string().min(1).optional(),
     message: z.string().optional(),
     maxRetries: z.number().int().min(0).max(20).default(3),

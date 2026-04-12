@@ -134,6 +134,40 @@ test("parseArgs: show agent with path positional", () => {
   assert.deepEqual(parsed.positionals, ["./agents/example/agent.md"]);
 });
 
+test("parseArgs: task list parses grouped subcommand and output format", () => {
+  const parsed = parseArgs(argv("task", "list", "abc123", "--output-format", "json"));
+  assert.equal(parsed.command, "task");
+  assert.equal(parsed.subcommand, "list");
+  assert.deepEqual(parsed.positionals, ["abc123"]);
+  assert.equal(parsed.outputFormat, "json");
+});
+
+test("parseArgs: task show parses run and task ids", () => {
+  const parsed = parseArgs(argv("task", "show", "abc123", "t1"));
+  assert.equal(parsed.command, "task");
+  assert.equal(parsed.subcommand, "show");
+  assert.deepEqual(parsed.positionals, ["abc123", "t1"]);
+});
+
+test("parseArgs: task append-notes captures --text", () => {
+  const parsed = parseArgs(argv("task", "append-notes", "abc123", "t1", "--text", "hello"));
+  assert.equal(parsed.command, "task");
+  assert.equal(parsed.subcommand, "append-notes");
+  assert.deepEqual(parsed.positionals, ["abc123", "t1"]);
+  assert.equal(parsed.taskAppendText, "hello");
+});
+
+test("parseArgs: task add captures optional --body", () => {
+  const parsed = parseArgs(
+    argv("task", "add", "abc123", "--title", "Docs", "--body", "Update the tables."),
+  );
+  assert.equal(parsed.command, "task");
+  assert.equal(parsed.subcommand, "add");
+  assert.deepEqual(parsed.positionals, ["abc123"]);
+  assert.equal(parsed.taskTitle, "Docs");
+  assert.equal(parsed.taskBody, "Update the tables.");
+});
+
 test("overridesFromParsedArgs: all other overrides plumbed through", () => {
   const parsed = parseArgs(
     argv(
