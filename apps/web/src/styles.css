@@ -278,9 +278,6 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  max-height: min(26rem, 48vh);
-  overflow-y: auto;
-  overscroll-behavior: contain;
 }
 
 .drawer-panel--timing {
@@ -444,6 +441,14 @@ body {
   font-size: 12.5px;
   max-height: 320px;
   overflow-y: auto;
+}
+
+.task-empty {
+  margin: 0;
+  padding: 8px 0;
+  color: var(--muted-foreground);
+  font-size: 12.5px;
+  font-style: italic;
 }
 
 .markdown {

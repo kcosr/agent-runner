@@ -58,11 +58,8 @@ export function RunTaskList({ tasks }: { tasks: RunTaskSummary[] }) {
 
   function activeTabFor(task: RunTaskSummary): TaskTab {
     const choice = activeTabs.get(task.id);
-    if (choice === "body" && task.body) {
-      return "body";
-    }
-    if (choice === "notes" && task.notes) {
-      return "notes";
+    if (choice) {
+      return choice;
     }
     return task.body ? "body" : "notes";
   }
@@ -104,30 +101,35 @@ export function RunTaskList({ tasks }: { tasks: RunTaskSummary[] }) {
             </button>
             {isExpanded && hasDetails ? (
               <div className="task-details" id={detailsId}>
-                {task.body && task.notes ? (
-                  <nav aria-label="Task content sections" className="task-tabs">
-                    <button
-                      aria-selected={activeTab === "body"}
-                      className={activeTab === "body" ? "task-tab active" : "task-tab"}
-                      onClick={() => selectTab(task.id, "body")}
-                      type="button"
-                    >
-                      Description
-                    </button>
-                    <button
-                      aria-selected={activeTab === "notes"}
-                      className={activeTab === "notes" ? "task-tab active" : "task-tab"}
-                      onClick={() => selectTab(task.id, "notes")}
-                      type="button"
-                    >
-                      Notes
-                    </button>
-                  </nav>
-                ) : null}
-                <MarkdownContent
-                  className="task-markdown"
-                  text={activeTab === "body" ? task.body : task.notes}
-                />
+                <nav aria-label="Task content sections" className="task-tabs">
+                  <button
+                    aria-selected={activeTab === "body"}
+                    className={activeTab === "body" ? "task-tab active" : "task-tab"}
+                    onClick={() => selectTab(task.id, "body")}
+                    type="button"
+                  >
+                    Description
+                  </button>
+                  <button
+                    aria-selected={activeTab === "notes"}
+                    className={activeTab === "notes" ? "task-tab active" : "task-tab"}
+                    onClick={() => selectTab(task.id, "notes")}
+                    type="button"
+                  >
+                    Notes
+                  </button>
+                </nav>
+                {activeTab === "body" ? (
+                  task.body ? (
+                    <MarkdownContent className="task-markdown" text={task.body} />
+                  ) : (
+                    <p className="task-empty">No description recorded.</p>
+                  )
+                ) : task.notes ? (
+                  <MarkdownContent className="task-markdown" text={task.notes} />
+                ) : (
+                  <p className="task-empty">No notes recorded yet.</p>
+                )}
               </div>
             ) : null}
           </article>
