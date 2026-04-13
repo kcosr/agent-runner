@@ -60,6 +60,7 @@ export function RunDetailDrawer({
   const width = dragWidth ?? settings.drawerWidth;
   const drawerStyle = { "--drawer-width": `${width}px` } as CSSProperties;
   const backendSessionId = run.backendSessionId;
+  const actionsLocked = actionPending !== undefined;
 
   function handleResizeStart(event: PointerEvent<HTMLDivElement>) {
     event.preventDefault();
@@ -146,41 +147,26 @@ export function RunDetailDrawer({
           </div>
           <div className="drawer-actions">
             {run.capabilities.canArchive ? (
-              <button
-                className="btn"
-                disabled={actionPending === "archive"}
-                onClick={onArchive}
-                type="button"
-              >
+              <button className="btn" disabled={actionsLocked} onClick={onArchive} type="button">
                 <ArchiveIcon aria-hidden="true" />
                 {actionPending === "archive" ? "Archiving..." : "Archive"}
               </button>
             ) : null}
             {run.capabilities.canUnarchive ? (
-              <button
-                className="btn"
-                disabled={actionPending === "unarchive"}
-                onClick={onUnarchive}
-                type="button"
-              >
+              <button className="btn" disabled={actionsLocked} onClick={onUnarchive} type="button">
                 <ArchiveIcon aria-hidden="true" />
                 {actionPending === "unarchive" ? "Restoring..." : "Unarchive"}
               </button>
             ) : null}
             {run.capabilities.canResume ? (
-              <button
-                className="btn"
-                disabled={actionPending === "resume"}
-                onClick={onResume}
-                type="button"
-              >
+              <button className="btn" disabled={actionsLocked} onClick={onResume} type="button">
                 {actionPending === "resume" ? "Resuming..." : "Resume"}
               </button>
             ) : null}
             {run.isLive && run.status === "running" ? (
               <button
                 className="btn btn-destructive-outline"
-                disabled={actionPending === "abort"}
+                disabled={actionsLocked}
                 onClick={onAbort}
                 type="button"
               >

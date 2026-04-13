@@ -3,6 +3,7 @@ import type { RunEventEnvelope } from "@task-runner/core/contracts/events.js";
 
 export interface RunEventsSubscriptionOptions {
   onEvent: (payload: RunEventEnvelope) => void;
+  onOpen?: () => void;
   onStaleChange?: (stale: boolean) => void;
 }
 
@@ -13,7 +14,7 @@ export function subscribeToRunEvents(
   const source = new EventSource(config.runEventsPath);
 
   source.onopen = () => {
-    options.onStaleChange?.(false);
+    options.onOpen?.();
   };
 
   source.onerror = () => {
@@ -23,7 +24,6 @@ export function subscribeToRunEvents(
   source.onmessage = (message) => {
     try {
       const payload = JSON.parse(message.data) as RunEventEnvelope;
-      options.onStaleChange?.(false);
       options.onEvent(payload);
     } catch {
       options.onStaleChange?.(true);

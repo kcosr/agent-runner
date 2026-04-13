@@ -376,6 +376,7 @@ export function RunsDashboardRoute() {
       <RunDetailDrawer
         actionError={actionError}
         actionPending={activeMutation}
+        key={selectedRun.runId}
         onAbort={() => abortMutation.mutate(selectedRun.runId)}
         onArchive={() => archiveMutation.mutate(selectedRun.runId)}
         onClose={() => void navigate({ to: "/" })}

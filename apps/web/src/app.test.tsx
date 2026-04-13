@@ -143,12 +143,24 @@ function makeDetail(overrides: Partial<RunDetail> = {}): RunDetail {
   };
 }
 
-function installFetchMock(state: {
-  runs: RunSummary[];
-  details: Record<string, RunDetail>;
-}) {
+function installFetchMock(
+  state: {
+    runs: RunSummary[];
+    details: Record<string, RunDetail>;
+  },
+  options?: {
+    handleRequest?: (
+      url: string,
+      init?: RequestInit,
+    ) => Promise<Response | undefined> | Response | undefined;
+  },
+) {
   const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
+    const override = await options?.handleRequest?.(url, init);
+    if (override) {
+      return override;
+    }
     if (url.endsWith("/app-config.json")) {
       return new Response(JSON.stringify(APP_CONFIG), { status: 200 });
     }
@@ -469,6 +481,65 @@ describe("web app", () => {
     expect(screen.queryByRole("button", { name: "Abort" })).not.toBeInTheDocument();
   });
 
+  it("locks all run-level actions while one mutation is pending", async () => {
+    let resolveArchive: (() => void) | undefined;
+    installFetchMock(
+      {
+        runs: [makeRun({ runId: "resumable", assignmentName: "Resumable run", status: "success" })],
+        details: {
+          resumable: makeDetail({
+            runId: "resumable",
+            status: "success",
+            assignment: {
+              name: "Resumable run",
+              sourcePath: "/tmp/a.md",
+              workspacePath: "/tmp/b.md",
+            },
+            capabilities: {
+              canArchive: true,
+              canUnarchive: false,
+              canResume: true,
+              taskMutation: {
+                canAdd: false,
+                canEditNotes: false,
+                canSetStatus: false,
+              },
+            },
+          }),
+        },
+      },
+      {
+        handleRequest: (url) => {
+          if (url.endsWith("/api/runs/resumable/archive")) {
+            return new Promise<Response>((resolve) => {
+              resolveArchive = () => {
+                resolve(
+                  new Response(JSON.stringify({ result: { runId: "resumable" } }), { status: 200 }),
+                );
+              };
+            });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+    await screen.findByText("Resumable run");
+    await user.click(screen.getByRole("button", { name: /resumable run/i }));
+
+    await user.click(await screen.findByRole("button", { name: "Archive" }));
+
+    expect(await screen.findByRole("button", { name: "Archiving..." })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Resume" })).toBeDisabled();
+
+    resolveArchive?.();
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Archive" })).not.toBeDisabled());
+    expect(screen.getByRole("button", { name: "Resume" })).not.toBeDisabled();
+  });
+
   it("shows Abort only for live running runs", async () => {
     installFetchMock({
       runs: [makeRun()],
@@ -527,6 +598,55 @@ describe("web app", () => {
     await waitFor(() => expect(screen.getByText("Recovered after stale")).toBeInTheDocument());
   });
 
+  it("revalidates after SSE reconnect before clearing the stale banner", async () => {
+    let failNextRunsFetch = false;
+    const state = {
+      runs: [makeRun({ assignmentName: "Original title" })],
+      details: {
+        "run-1": makeDetail({
+          assignment: {
+            name: "Original title",
+            sourcePath: "/tmp/a.md",
+            workspacePath: "/tmp/b.md",
+          },
+        }),
+      },
+    };
+    installFetchMock(state, {
+      handleRequest: (url) => {
+        if (url.includes("/api/runs?includeArchived=true") && failNextRunsFetch) {
+          failNextRunsFetch = false;
+          return new Response(
+            JSON.stringify({ error: { message: "temporary failure", code: "server_error" } }),
+            { status: 500 },
+          );
+        }
+        return undefined;
+      },
+    });
+
+    await renderApp();
+    expect(await screen.findByText("Original title")).toBeInTheDocument();
+
+    const source = MockEventSource.instances[0];
+    if (!source) {
+      throw new Error("expected an EventSource subscription");
+    }
+    source.emitOpen();
+
+    state.runs = [makeRun({ assignmentName: "Recovered after reconnect" })];
+    failNextRunsFetch = true;
+    source.emitError();
+
+    expect(await screen.findByText(/live updates are temporarily stale/i)).toBeInTheDocument();
+    source.emitOpen();
+
+    await waitFor(() => expect(screen.getByText("Recovered after reconnect")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.queryByText(/live updates are temporarily stale/i)).not.toBeInTheDocument(),
+    );
+  });
+
   it("marks the stream stale when an SSE payload is malformed", async () => {
     installFetchMock({
       runs: [makeRun({ assignmentName: "Original title" })],
@@ -552,6 +672,98 @@ describe("web app", () => {
     source.emitRawMessage("{");
 
     expect(await screen.findByText(/live updates are temporarily stale/i)).toBeInTheDocument();
+  });
+
+  it("ignores non-stateful SSE events for HTTP refresh", async () => {
+    const fetchMock = installFetchMock({
+      runs: [makeRun({ assignmentName: "Original title" })],
+      details: {
+        "run-1": makeDetail({
+          assignment: {
+            name: "Original title",
+            sourcePath: "/tmp/a.md",
+            workspacePath: "/tmp/b.md",
+          },
+        }),
+      },
+    });
+
+    await renderApp();
+    expect(await screen.findByText("Original title")).toBeInTheDocument();
+
+    const source = MockEventSource.instances[0];
+    if (!source) {
+      throw new Error("expected an EventSource subscription");
+    }
+    source.emitOpen();
+
+    const callsBefore = fetchMock.mock.calls.length;
+    source.emitMessage({
+      runId: "run-1",
+      event: { type: "backend_notice", text: "noise" },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 250));
+
+    expect(fetchMock).toHaveBeenCalledTimes(callsBefore);
+  });
+
+  it("resets drawer and task state when switching runs", async () => {
+    installFetchMock({
+      runs: [makeRun(), makeRun({ runId: "run-2", assignmentName: "Second run" })],
+      details: {
+        "run-1": makeDetail({
+          tasks: [
+            {
+              id: "shared-task",
+              title: "Shared task",
+              body: "First run description",
+              status: "in_progress",
+              notes: "First run notes",
+            },
+          ],
+        }),
+        "run-2": makeDetail({
+          runId: "run-2",
+          assignment: {
+            name: "Second run",
+            sourcePath: "/tmp/a.md",
+            workspacePath: "/tmp/b.md",
+          },
+          tasks: [
+            {
+              id: "shared-task",
+              title: "Shared task",
+              body: "Second run description",
+              status: "in_progress",
+              notes: "Second run notes",
+            },
+          ],
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await screen.findByText("Second run");
+
+    await user.click(screen.getByRole("button", { name: /second run/i }));
+    expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
+    await router.navigate({ to: "/" });
+
+    await user.click(screen.getByRole("button", { name: /build dashboard/i }));
+    await screen.findByLabelText("Run detail");
+    await user.click(screen.getByRole("button", { name: /shared task/i, expanded: false }));
+    await user.click(screen.getByRole("button", { name: "Notes" }));
+    expect(await screen.findByText("First run notes")).toBeInTheDocument();
+
+    await router.navigate({ to: "/runs/$runId", params: { runId: "run-2" } });
+
+    expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /shared task/i, expanded: false }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Second run notes")).not.toBeInTheDocument();
   });
 
   it("keeps one SSE subscription while switching selected runs", async () => {
