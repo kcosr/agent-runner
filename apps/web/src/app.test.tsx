@@ -357,6 +357,7 @@ describe("web app", () => {
     await user.click(screen.getByRole("button", { name: /resumable run/i }));
     expect(await screen.findByRole("button", { name: "Resume" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Archive" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Abort" })).not.toBeInTheDocument();
 
     const closeButtons = screen.getAllByRole("button", { name: /close detail/i });
     const closeButton = closeButtons[0];
@@ -368,6 +369,22 @@ describe("web app", () => {
     expect(await screen.findByRole("button", { name: "Archive" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Abort" })).not.toBeInTheDocument();
+  });
+
+  it("shows Abort only for live running runs", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: {
+        "run-1": makeDetail(),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await screen.findByText("Build dashboard");
+    await user.click(screen.getByRole("button", { name: /build dashboard/i }));
+
+    expect(await screen.findByRole("button", { name: "Abort" })).toBeInTheDocument();
   });
 
   it("applies SSE updates and falls back to HTTP refetch when the stream goes stale", async () => {
@@ -410,5 +427,43 @@ describe("web app", () => {
 
     expect(await screen.findByText(/live updates are temporarily stale/i)).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText("Recovered after stale")).toBeInTheDocument());
+  });
+
+  it("keeps one SSE subscription while switching selected runs", async () => {
+    installFetchMock({
+      runs: [makeRun(), makeRun({ runId: "run-2", assignmentName: "Second run" })],
+      details: {
+        "run-1": makeDetail(),
+        "run-2": makeDetail({
+          runId: "run-2",
+          assignment: {
+            name: "Second run",
+            sourcePath: "/tmp/a.md",
+            workspacePath: "/tmp/b.md",
+          },
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await screen.findByText("Second run");
+
+    expect(MockEventSource.instances).toHaveLength(1);
+
+    await user.click(screen.getByRole("button", { name: /build dashboard/i }));
+    expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
+    expect(MockEventSource.instances).toHaveLength(1);
+
+    const closeButtons = screen.getAllByRole("button", { name: /close detail/i });
+    const closeButton = closeButtons[0];
+    if (!closeButton) {
+      throw new Error("expected a close-detail button");
+    }
+    await user.click(closeButton);
+    await user.click(screen.getByRole("button", { name: /second run/i }));
+
+    expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
+    expect(MockEventSource.instances).toHaveLength(1);
   });
 });

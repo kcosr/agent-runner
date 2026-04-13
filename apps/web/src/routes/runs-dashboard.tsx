@@ -9,9 +9,9 @@ import { RunDetailDrawer } from "../components/run-detail-drawer.js";
 import { RunFilters } from "../components/run-filters.js";
 import { createApiClient, isNotFoundError } from "../lib/api-client.js";
 import { queryClient, runQueryKeys } from "../lib/query.js";
+import { useRunEvents } from "../lib/run-events.js";
 import { useRuntimeConfig } from "../lib/runtime-config.js";
 import { useBoardSettings } from "../lib/settings.js";
-import { subscribeToRunEvents } from "../lib/sse.js";
 
 interface NoticeState {
   id: string;
@@ -76,12 +76,12 @@ export function RunsDashboardRoute() {
   const config = useRuntimeConfig();
   const api = useMemo(() => createApiClient(config), [config]);
   const { settings, updateSettings } = useBoardSettings();
+  const { streamStale } = useRunEvents();
   const deferredSearch = useDeferredValue(settings.search);
   const navigate = useNavigate();
   const runRouteParams = useParams({ strict: false });
   const selectedRunId = "runId" in runRouteParams ? runRouteParams.runId : undefined;
   const [showOptions, setShowOptions] = useState(false);
-  const [streamStale, setStreamStale] = useState(false);
   const [notices, setNotices] = useState<NoticeState[]>([]);
   const [actionError, setActionError] = useState<string>();
 
@@ -100,24 +100,6 @@ export function RunsDashboardRoute() {
     },
     enabled: Boolean(selectedRunId),
   });
-
-  useEffect(() => {
-    return subscribeToRunEvents(config, {
-      onEvent: (payload) => {
-        void queryClient.invalidateQueries({ queryKey: runQueryKeys.list() });
-        void queryClient.invalidateQueries({ queryKey: runQueryKeys.detail(payload.runId) });
-      },
-      onStaleChange: (stale) => {
-        setStreamStale(stale);
-        if (stale) {
-          void queryClient.invalidateQueries({ queryKey: runQueryKeys.list() });
-          if (selectedRunId) {
-            void queryClient.invalidateQueries({ queryKey: runQueryKeys.detail(selectedRunId) });
-          }
-        }
-      },
-    });
-  }, [config, selectedRunId]);
 
   const runs = runsQuery.data ?? [];
   const repoOptions = useMemo(

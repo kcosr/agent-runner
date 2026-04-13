@@ -3,6 +3,7 @@ import { RouterProvider } from "@tanstack/react-router";
 import type { AppRuntimeConfig } from "@task-runner/core/contracts/app-config.js";
 import { useEffect, useState } from "react";
 import { queryClient } from "./lib/query.js";
+import { RunEventsProvider } from "./lib/run-events.js";
 import {
   RuntimeConfigContext,
   RuntimeConfigError,
@@ -71,9 +72,11 @@ export function App() {
   return (
     <RuntimeConfigContext.Provider value={bootState.config}>
       <QueryClientProvider client={queryClient}>
-        <BoardSettingsProvider>
-          <RouterProvider router={router} />
-        </BoardSettingsProvider>
+        <RunEventsProvider config={bootState.config}>
+          <BoardSettingsProvider>
+            <RouterProvider router={router} />
+          </BoardSettingsProvider>
+        </RunEventsProvider>
       </QueryClientProvider>
     </RuntimeConfigContext.Provider>
   );
