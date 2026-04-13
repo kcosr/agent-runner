@@ -37,6 +37,12 @@
 - Added stricter assignment/task regression coverage for structural markdown escaping, task-command terminal-state handling, runtime var validation, Codex interruption, and subprocess abort paths. ([#6](https://github.com/kcosr/task-runner/pull/6))
 - Added `assignments/plan-feature/` — a meta-assignment that turns a free-form feature description (passed as the positional message body) into an executable task-runner plan. The planner surveys repo conventions, impact surface, reuse opportunities, and risks, then copies a reference template into the repo-name task-runner drafts area under `${TASK_RUNNER_STATE_DIR}/drafts/`, fills in every placeholder with concrete file-level detail, and hands back the exact `task-runner init --agent implementer ...` command the caller should run once the draft is approved. ([#8](https://github.com/kcosr/task-runner/pull/8))
 - Added `TASK_RUNNER_CMD` and the runner-injected `{{task_runner_cmd}}` template variable so user-facing workflow instructions can point at the installed `task-runner` command path instead of hardcoding the bare command name. ([#9](https://github.com/kcosr/task-runner/pull/9))
+- Added `apps/web`, a phase-1 same-origin run dashboard built with
+  React/Vite. `task-runner serve` now serves the packaged SPA,
+  `/app-config.json`, and the existing `/api/*` + `/api/events/*`
+  control-plane routes from one loopback origin, and the repo now ships
+  the canonical visual-contract mockup under
+  `apps/web/mockups/run-dashboard.{html,css}`.
 
 ### Changed
 
@@ -45,6 +51,10 @@
   the existing in-process CLI behavior, while daemon mode moves live run
   ownership and external abort control into the local daemon without
   silently falling back to embedded execution. ([#21](https://github.com/kcosr/task-runner/pull/21))
+- Root build/test/check wiring now includes the new `apps/web` workspace,
+  and the CLI package build/prepack flow copies built web assets into
+  `apps/cli/dist/web` so installed `task-runner serve` can host the
+  dashboard without depending on a sibling workspace checkout.
 - Fresh run cwd resolution now preserves whether an agent file explicitly
   authored `cwd`. `--cwd` still wins, explicit agent `cwd` still wins
   next, daemon runs otherwise use the client caller's cwd, and embedded

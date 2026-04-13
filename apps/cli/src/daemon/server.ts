@@ -22,7 +22,8 @@ import { ConflictError } from "@task-runner/core/core/commands/service.js";
 import type { RunEvent } from "@task-runner/core/core/run/run-loop.js";
 import { shortId } from "@task-runner/core/util/short-id.js";
 import { WebSocket, WebSocketServer } from "ws";
-import { deriveHttpBaseUrl, listenSocketConfig } from "./config.js";
+import { deriveAppRuntimeConfig, deriveHttpBaseUrl, listenSocketConfig } from "./config.js";
+import { serveFrontendRequest } from "./frontend.js";
 import { isKnownControlPlaneError } from "./http-errors.js";
 import { handleHttpRequest } from "./http-routes.js";
 import {
@@ -292,36 +293,51 @@ export async function serveDaemon(
   };
 
   const httpServer = createServer((req, res) => {
-    void handleHttpRequest(req, res, {
-      ...app,
-      daemonInfo: {
-        pid: process.pid,
-        listenUrl,
-        version,
-        startedAt,
-      },
-      httpBaseUrl,
-      startManagedRun: (request) =>
-        executeManagedRun((emitEvent, abortSignal) =>
-          app.startRun({
-            ...request,
-            abortSignal,
-            emitEvent,
-          }),
-        ),
-      resumeManagedRun: (request) =>
-        executeManagedRun((emitEvent, abortSignal) =>
-          app.resumeRun({
-            ...request,
-            abortSignal,
-            emitEvent,
-          }),
-        ),
-      abortRun,
-      subscribeRunEvents: (runId, publish) =>
-        subscribeRunEvents(res, runId, (eventRunId, event) => publish({ runId: eventRunId, event }))
-          .unsubscribe,
-    });
+    const pathname = new URL(req.url ?? "/", httpBaseUrl).pathname;
+
+    if (pathname === "/app-config.json") {
+      res.setHeader("cache-control", "no-cache");
+      res.setHeader("content-type", "application/json; charset=utf-8");
+      res.end(JSON.stringify(deriveAppRuntimeConfig()));
+      return;
+    }
+
+    if (pathname === "/api" || pathname.startsWith("/api/")) {
+      void handleHttpRequest(req, res, {
+        ...app,
+        daemonInfo: {
+          pid: process.pid,
+          listenUrl,
+          version,
+          startedAt,
+        },
+        httpBaseUrl,
+        startManagedRun: (request) =>
+          executeManagedRun((emitEvent, abortSignal) =>
+            app.startRun({
+              ...request,
+              abortSignal,
+              emitEvent,
+            }),
+          ),
+        resumeManagedRun: (request) =>
+          executeManagedRun((emitEvent, abortSignal) =>
+            app.resumeRun({
+              ...request,
+              abortSignal,
+              emitEvent,
+            }),
+          ),
+        abortRun,
+        subscribeRunEvents: (runId, publish) =>
+          subscribeRunEvents(res, runId, (eventRunId, event) =>
+            publish({ runId: eventRunId, event }),
+          ).unsubscribe,
+      });
+      return;
+    }
+
+    serveFrontendRequest(req, res, pathname);
   });
   const wsServer = new WebSocketServer({ server: httpServer, path });
 

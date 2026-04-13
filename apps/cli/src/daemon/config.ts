@@ -1,3 +1,4 @@
+import type { AppRuntimeConfig } from "@task-runner/core/contracts/app-config.js";
 import { DEFAULT_DAEMON_URL, TASK_RUNNER_CONNECT_ENV, TASK_RUNNER_LISTEN_ENV } from "./protocol.js";
 
 export type HostMode = "embedded" | "daemon";
@@ -74,4 +75,11 @@ export function deriveHttpBaseUrl(listenUrl: string): string {
   parsed.search = "";
   parsed.hash = "";
   return parsed.toString();
+}
+
+export function deriveAppRuntimeConfig(): AppRuntimeConfig {
+  return {
+    apiBasePath: "/api",
+    runEventsPath: "/api/events/runs",
+  };
 }

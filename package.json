@@ -7,13 +7,15 @@
   "workspaces": ["packages/*", "apps/*"],
   "scripts": {
     "setup": "npm install",
-    "build": "npm run build -w @task-runner/core && npm run build -w task-runner && node -e \"require('node:fs').chmodSync('apps/cli/dist/cli.js', 0o755)\"",
+    "build": "npm run build -w @task-runner/core && npm run build -w @task-runner/web && npm run build -w task-runner && node -e \"require('node:fs').chmodSync('apps/cli/dist/cli.js', 0o755)\"",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
     "lint-staged": "lint-staged",
-    "check": "npm run build && npm run lint && node --test \"test/**/*.test.mjs\"",
-    "test": "npm run build && node --test \"test/**/*.test.mjs\"",
+    "test:node": "node --test \"test/**/*.test.mjs\"",
+    "test:web": "npm run test -w @task-runner/web",
+    "check": "npm run build && npm run lint && npm run test:node && npm run test:web",
+    "test": "npm run build && npm run test:node && npm run test:web",
     "prepack": "npm run build",
     "prepare": "husky install",
     "clean": "rimraf apps/*/dist packages/*/dist apps/*/tsconfig.tsbuildinfo packages/*/tsconfig.tsbuildinfo",
@@ -26,11 +28,22 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.0",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
     "@types/node": "^20.11.30",
     "@types/ws": "^8.18.1",
+    "@vitejs/plugin-react": "^5.0.4",
     "husky": "^9.1.7",
+    "jsdom": "^26.1.0",
     "lint-staged": "^15.2.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
     "rimraf": "^6.0.1",
-    "typescript": "^5.5.4"
+    "typescript": "^5.5.4",
+    "vite": "^7.1.12",
+    "vitest": "^3.2.4"
   }
 }

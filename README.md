@@ -115,6 +115,12 @@ chat output.
   long-lived local `task-runner serve` process reached over
   `ws://127.0.0.1:4773/` by default for CLI WebSocket JSON-RPC, with a
   browser-facing HTTP API and SSE stream on the same loopback listener.
+- **Run dashboard web app**: `apps/web` ships a same-origin browser UI
+  for run status, filtering, archive toggles, and deep-linkable run
+  detail routes. The app loads runtime config from `/app-config.json`,
+  reads/actions over HTTP, stays fresh over SSE, and follows the
+  canonical phase-1 visual contract in
+  `apps/web/mockups/run-dashboard.{html,css}`.
 - **Live status inspection**: `task-runner status <id>` reads the
   manifest and (for in-flight runs) overlays the live workspace
   `assignment.md` so you can see mid-attempt progress without
@@ -590,6 +596,26 @@ Transport split:
   SSE for live run events.
 - A default listener such as `ws://127.0.0.1:4773/` therefore also exposes
   HTTP at `http://127.0.0.1:4773/api/`.
+- The same host also serves the built web app and runtime config:
+  `http://127.0.0.1:4773/` for the SPA and
+  `http://127.0.0.1:4773/app-config.json` for the phase-1 frontend
+  config payload.
+
+Web dashboard notes:
+
+- `apps/web` is a real workspace package built with Vite + React.
+- Normal local use is same-origin: `task-runner serve` hosts the built
+  frontend plus `/api/*` and `/api/events/*`.
+- Client routing is deep-linkable: `/` shows the board and
+  `/runs/:runId` opens the selected-run drawer/sheet.
+- The canonical visual contract lives in
+  `apps/web/mockups/run-dashboard.html` and
+  `apps/web/mockups/run-dashboard.css`. The React UI should match that
+  layout and visual language unless a later change explicitly justifies
+  divergence.
+- Development uses the Vite dev server in `apps/web` with a proxy for
+  `/api/*`, `/api/events/*`, and `/app-config.json` back to the local
+  daemon host.
 
 ### `task-runner run reset / archive / unarchive`
 
@@ -1385,10 +1411,12 @@ real subprocesses are a couple of `runProcess` smoke tests against
 
 Subsystem boundaries are now explicit npm workspaces:
 `apps/cli` owns the executable transport edge and local daemon host,
-while `packages/core` owns the transport-neutral run lifecycle,
-manifest/task state, shared contracts, config/assignment loading,
-backend adapters, and shared helpers. The daemon remains part of the
-CLI app rather than becoming a separate package.
+`apps/web` owns the browser UI, and `packages/core` owns the
+transport-neutral run lifecycle, manifest/task state, shared contracts,
+config/assignment loading, backend adapters, and shared helpers. The
+daemon remains part of the CLI app rather than becoming a separate
+package, and the web app is served from the CLI package's built `dist/`
+layout for same-origin local use.
 
 ```mermaid
 flowchart TD
@@ -1398,6 +1426,10 @@ flowchart TD
         render["src/cli/render-run.ts"]
         commandRender["src/commands/render.ts"]
         daemon["src/daemon/*"]
+    end
+    subgraph Web["apps/web"]
+        webApp["src/*"]
+        webMock["mockups/run-dashboard.{html,css}"]
     end
     subgraph Core["packages/core"]
         service["src/app/service.ts"]
@@ -1420,8 +1452,10 @@ flowchart TD
     cli --> render
     cli --> commandRender
     cli --> daemon
+    cli --> webApp
     cli --> service
     daemon --> service
+    daemon --> webApp
     service --> commands
     service --> execute
     execute --> loader
@@ -1433,6 +1467,8 @@ flowchart TD
     runloop --> paths
     runloop --> util
     runloop --> Workspace
+    webApp --> contracts
+    webApp --> daemon
 ```
 
 ```

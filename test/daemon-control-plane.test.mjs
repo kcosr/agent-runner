@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
@@ -361,6 +361,73 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
       await server.close();
     }
   });
+});
+
+test("daemon serve exposes app config, keeps /api precedence, and falls back to SPA routes", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const init = await initRun(dir);
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl);
+    try {
+      const appConfig = await httpJson(httpBaseUrl, "/app-config.json");
+      assert.equal(appConfig.status, 200);
+      assert.deepEqual(appConfig.body, {
+        apiBasePath: "/api",
+        runEventsPath: "/api/events/runs",
+      });
+
+      const apiDetail = await httpJson(httpBaseUrl, `/api/runs/${init.runId}`);
+      assert.equal(apiDetail.status, 200);
+      assert.equal(apiDetail.body.run.runId, init.runId);
+
+      const spaRoot = await fetch(new URL("/", httpBaseUrl));
+      const spaRootBody = await spaRoot.text();
+      assert.equal(spaRoot.status, 200);
+      assert.match(spaRoot.headers.get("content-type") ?? "", /text\/html/);
+      assert.match(spaRootBody, /<div id="root"><\/div>/);
+
+      const deepLink = await fetch(new URL(`/runs/${init.runId}`, httpBaseUrl));
+      const deepLinkBody = await deepLink.text();
+      assert.equal(deepLink.status, 200);
+      assert.match(deepLinkBody, /<div id="root"><\/div>/);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+test("daemon serve reads packaged web assets from the CLI dist layout", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  const packagedIndex = readFileSync(
+    new URL("../apps/cli/dist/web/index.html", import.meta.url),
+    "utf8",
+  );
+
+  const server = await serveDaemon(listenUrl);
+  try {
+    const response = await fetch(new URL("/", httpBaseUrl));
+    const body = await response.text();
+    assert.equal(response.status, 200);
+    assert.equal(body, packagedIndex);
+
+    const assetPath = body.match(/\/assets\/[^"]+\.(?:js|css)/)?.[0];
+    assert.ok(assetPath, "expected built asset path in served index.html");
+
+    const assetResponse = await fetch(new URL(assetPath, httpBaseUrl));
+    const assetBody = await assetResponse.text();
+    assert.equal(assetResponse.status, 200);
+    assert.ok(assetBody.length > 0);
+  } finally {
+    await server.close();
+  }
 });
 
 test("daemon HTTP rejects oversized JSON request bodies", async () => {

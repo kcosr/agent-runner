@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { RunCommandOverrides } from "@task-runner/core/app/service.js";
 import { VALID_STATUSES } from "@task-runner/core/assignment/model.js";
+import type { RunEventEnvelope } from "@task-runner/core/contracts/events.js";
 import { HttpError } from "./http-errors.js";
 import { readJsonBody, sendError, sendJson } from "./http-serializers.js";
 import type { DaemonInfo, RunsStartParams } from "./protocol.js";
@@ -14,7 +15,7 @@ import {
   requiredString,
 } from "./request-parsing.js";
 import type { DaemonHandlers } from "./server.js";
-import { type SseRunEventEnvelope, streamRunEvents } from "./sse.js";
+import { streamRunEvents } from "./sse.js";
 
 interface ResumeRunBody {
   overrides: RunCommandOverrides;
@@ -31,7 +32,7 @@ interface RouteContext extends DaemonHandlers {
   abortRun(target: string): { runId: string; accepted: true };
   subscribeRunEvents(
     runId: string | undefined,
-    publish: (payload: SseRunEventEnvelope) => boolean,
+    publish: (payload: RunEventEnvelope) => boolean,
   ): () => void;
 }
 

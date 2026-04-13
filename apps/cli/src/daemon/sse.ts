@@ -1,15 +1,10 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { RunEvent } from "@task-runner/core/core/run/run-loop.js";
-
-export interface SseRunEventEnvelope {
-  runId: string;
-  event: RunEvent;
-}
+import type { RunEventEnvelope } from "@task-runner/core/contracts/events.js";
 
 export function streamRunEvents(
   req: IncomingMessage,
   res: ServerResponse,
-  subscribe: (publish: (payload: SseRunEventEnvelope) => boolean) => () => void,
+  subscribe: (publish: (payload: RunEventEnvelope) => boolean) => () => void,
 ): void {
   res.statusCode = 200;
   res.setHeader("content-type", "text/event-stream; charset=utf-8");
@@ -38,7 +33,7 @@ export function streamRunEvents(
   res.on("error", cleanup);
 }
 
-function writeEvent(res: ServerResponse, payload: SseRunEventEnvelope): boolean {
+function writeEvent(res: ServerResponse, payload: RunEventEnvelope): boolean {
   if (res.destroyed || res.writableEnded) {
     return false;
   }

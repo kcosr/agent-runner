@@ -149,6 +149,7 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
   assert.equal("canMutateTasks" in detail.capabilities, false);
   assert.deepEqual(detail, {
     runId: "run123",
+    repo: "unknown",
     status: "success",
     archivedAt: null,
     isLive: true,
