@@ -1,6 +1,7 @@
 ---
 schemaVersion: 1
 name: plan-feature
+taskMode: cli
 sessionName: plan feature · {{repo_path}}
 maxRetries: 4
 vars:

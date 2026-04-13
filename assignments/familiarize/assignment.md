@@ -1,6 +1,7 @@
 ---
 schemaVersion: 1
 name: familiarize
+taskMode: cli
 sessionName: familiarize · {{repo_path}}
 vars:
   repo_path:
