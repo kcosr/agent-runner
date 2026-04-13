@@ -534,6 +534,19 @@ function rebuildTasksFromAssignmentAndSnapshot(
   return tasks;
 }
 
+function collectNewTasks(
+  tasks: Map<string, TaskState>,
+  snapshot: Record<string, TaskSnapshot>,
+): TaskState[] {
+  const added: TaskState[] = [];
+  for (const task of tasks.values()) {
+    if (!snapshot[task.id]) {
+      added.push({ ...task });
+    }
+  }
+  return added;
+}
+
 export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const { loaded, loadedAssignment, cliVars, backend, overrides, resume } = opts;
   const emitEvent = opts.emitEvent ?? (() => {});
@@ -560,6 +573,9 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     throw new ResumeError(
       `cannot resume archived run ${resume.manifest.runId} — unarchive it first with ${resolveTaskRunnerCommand()} run unarchive ${resume.manifest.runId}`,
     );
+  }
+  if (resume && !priorInitialized && resume.manifest.status === "running") {
+    throw new ResumeError(`cannot resume run ${resume.manifest.runId} — it is already running`);
   }
 
   // Resume override policy. The CLI also enforces most of these
@@ -845,13 +861,11 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     initialPrompt = parts.join("\n\n");
   }
 
-  writeTextFileAtomic(assignmentPath, renderAssignment(Array.from(tasks.values())));
-
   const now = new Date().toISOString();
-  const priorAttemptCount = isResume && resume ? resume.manifest.attemptRecords.length : 0;
-  const priorSessionCount = isResume && resume ? resume.manifest.sessions.length : 0;
+  let priorAttemptCount = isResume && resume ? resume.manifest.attemptRecords.length : 0;
+  let priorSessionCount = isResume && resume ? resume.manifest.sessions.length : 0;
   // `priorInitialized` runs start at session 0 — init never created a session.
-  const sessionIndex = priorInitialized ? 0 : priorSessionCount;
+  let sessionIndex = priorInitialized ? 0 : priorSessionCount;
 
   let manifest: RunManifest;
   if (isResume && resume) {
@@ -986,13 +1000,13 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     };
   }
 
-  syncManifestTaskState(manifest, tasks);
-
   // `init` stops here: persist the prepared workspace + manifest and
   // return a terminal "initialized" outcome. No session is created; the
   // caller will follow up with `task-runner run --resume-run <id>` —
   // or, for passive agents, with `task-runner task set` / `task add`.
   if (isInitialize) {
+    writeTextFileAtomic(assignmentPath, renderAssignment(Array.from(tasks.values())));
+    syncManifestTaskState(manifest, tasks);
     writeManifest(workspaceDir, manifest);
     const isPassive = agentConfig.backend === "passive";
     emitEvent({
@@ -1027,22 +1041,100 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     };
   }
 
-  const sessionRecord: SessionRecord = {
-    sessionIndex,
-    startedAt: now,
-    endedAt: null,
-    status: "running",
-    exitCode: null,
-    message: priorInitialized && resume ? resume.manifest.message : message,
-    firstAttempt: null,
-    lastAttempt: null,
-    maxAttempts,
-    backendSessionIdAtStart: isResume && resume ? resume.manifest.backendSessionId : null,
-    backendSessionIdAtEnd: null,
-  };
-  manifest.sessions.push(sessionRecord);
+  const addedTasks =
+    reusingWorkspace && resume ? collectNewTasks(tasks, resume.manifest.finalTasks) : [];
+  let sessionRecord: SessionRecord;
+  if (reusingWorkspace) {
+    withTaskStateLock(workspaceDir, () => {
+      const latest = resolveResumeTarget(workspaceDir).manifest;
+      if (latest.archivedAt !== null) {
+        throw new ResumeError(
+          `cannot resume archived run ${latest.runId} — unarchive it first with ${resolveTaskRunnerCommand()} run unarchive ${latest.runId}`,
+        );
+      }
+      if (latest.status === "running") {
+        throw new ResumeError(`cannot resume run ${latest.runId} — it is already running`);
+      }
 
-  writeManifest(workspaceDir, manifest);
+      priorAttemptCount = latest.attemptRecords.length;
+      priorSessionCount = latest.sessions.length;
+      sessionIndex = priorInitialized ? 0 : priorSessionCount;
+      tasks = rebuildTasksFromAssignmentAndSnapshot(undefined, latest.finalTasks, isResume);
+      for (const task of addedTasks) {
+        tasks.set(task.id, { ...task });
+      }
+
+      if (isResume) {
+        manifest = {
+          ...latest,
+          model: model ?? null,
+          effort: effort ?? null,
+          taskMode,
+          name,
+          unrestricted,
+          cwd,
+          timeoutSec,
+          assignmentPath,
+          workspaceDir,
+          endedAt: null,
+          status: "running",
+          exitCode: null,
+          maxAttempts,
+          finalTasks: {},
+          tasksCompleted: 0,
+          tasksTotal: 0,
+          sessionCount: priorSessionCount + 1,
+        };
+      } else {
+        manifest = {
+          ...latest,
+          taskMode,
+          name,
+          endedAt: null,
+          status: "running",
+          exitCode: null,
+          sessionCount: 1,
+          pendingPrompt: null,
+        };
+      }
+
+      syncManifestTaskState(manifest, tasks);
+      writeTextFileAtomic(assignmentPath, renderAssignment(Array.from(tasks.values())));
+      sessionRecord = {
+        sessionIndex,
+        startedAt: now,
+        endedAt: null,
+        status: "running",
+        exitCode: null,
+        message: priorInitialized ? latest.message : message,
+        firstAttempt: null,
+        lastAttempt: null,
+        maxAttempts,
+        backendSessionIdAtStart: isResume ? latest.backendSessionId : null,
+        backendSessionIdAtEnd: null,
+      };
+      manifest.sessions.push(sessionRecord);
+      writeManifest(workspaceDir, manifest);
+    });
+  } else {
+    writeTextFileAtomic(assignmentPath, renderAssignment(Array.from(tasks.values())));
+    syncManifestTaskState(manifest, tasks);
+    sessionRecord = {
+      sessionIndex,
+      startedAt: now,
+      endedAt: null,
+      status: "running",
+      exitCode: null,
+      message: message,
+      firstAttempt: null,
+      lastAttempt: null,
+      maxAttempts,
+      backendSessionIdAtStart: null,
+      backendSessionIdAtEnd: null,
+    };
+    manifest.sessions.push(sessionRecord);
+    writeManifest(workspaceDir, manifest);
+  }
 
   emitEvent({
     type: "run_started",

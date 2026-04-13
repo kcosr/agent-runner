@@ -98,6 +98,14 @@
 
 ### Fixed
 
+- Fixed resume/run startup to reject already-running manifests, claim
+  the `running` transition for reused workspaces under the shared
+  task-state lock, and refresh the latest initialized task snapshot
+  before execution so stale resume snapshots cannot clobber task state.
+- Fixed Codex WebSocket transport handling so post-open protocol/socket
+  errors now propagate through the transport close path and reject
+  pending JSON-RPC requests instead of hanging callers like run-name
+  propagation.
 - Fixed daemon-hosted web asset resolution to use real filesystem paths,
   preventing packaged dashboard failures on Windows and URL-encoded
   install paths, and hardened frontend serving so directory requests
