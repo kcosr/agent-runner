@@ -335,6 +335,17 @@ interface CreateClientOptions {
   onRawOutgoing?: (line: string) => void;
 }
 
+async function closeCodexConnection(
+  client?: Pick<CodexClient, "close">,
+  transport?: Pick<Transport, "close">,
+): Promise<void> {
+  if (client) {
+    await client.close().catch(() => {});
+    return;
+  }
+  await transport?.close().catch(() => {});
+}
+
 function createClient(transport: Transport, opts: CreateClientOptions = {}): CodexClient {
   let nextId = 1;
   const pending = new Map<
@@ -730,7 +741,7 @@ async function validateCodexSession(ctx: ValidateSessionContext): Promise<Valida
       reason: `codex thread "${ctx.sessionId}" not found: ${(err as Error).message}`,
     };
   } finally {
-    await client?.close().catch(() => {});
+    await closeCodexConnection(client, transport);
   }
 }
 
@@ -766,7 +777,7 @@ export async function setCodexThreadName(ctx: {
       name: ctx.name,
     });
   } finally {
-    await client?.close().catch(() => {});
+    await closeCodexConnection(client, transport);
   }
 }
 

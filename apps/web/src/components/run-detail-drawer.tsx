@@ -203,7 +203,6 @@ export function RunDetailDrawer({
         <div className="drawer-body">
           <div className="drawer-title-block">
             <h3 className="drawer-section-title">{run.name ?? "Unnamed"}</h3>
-            <p className="drawer-subtitle">Assignment: {run.assignment?.name ?? "Ad hoc run"}</p>
           </div>
           <section aria-label="Run summary" className="meta-grid">
             {summaryRows(run).map(([label, value]) => (

@@ -1,4 +1,5 @@
 import { TASK_MODES, type TaskMode } from "@task-runner/core/core/config/schema.js";
+import { trimRunName } from "@task-runner/core/util/run-name.js";
 
 export type OutputFormat = "text" | "json";
 // Kept in sync with `agentConfigSchema.backend` in src/core/config/schema.ts
@@ -169,8 +170,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
     } else if (arg === "--name") {
       const next = args.shift();
       if (next === undefined) throw new Error("--name requires a value");
-      if (next.trim().length === 0) throw new Error("--name cannot be empty");
-      result.name = next;
+      try {
+        result.name = trimRunName(next);
+      } catch {
+        throw new Error("--name cannot be empty");
+      }
     } else if (arg === "--clear") {
       result.clear = true;
     } else if (arg === "--field") {

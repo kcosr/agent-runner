@@ -576,7 +576,6 @@ describe("web app", () => {
     await user.click(unnamedCard);
     expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Unnamed" })).toBeInTheDocument();
-    expect(screen.getByText("Assignment: Assignment metadata")).toBeInTheDocument();
 
     await user.click(getCloseDetailButton());
     await user.clear(screen.getByPlaceholderText("Search runs"));
@@ -584,6 +583,39 @@ describe("web app", () => {
 
     expect(await screen.findByRole("button", { name: /search-only name/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /unnamed/i })).not.toBeInTheDocument();
+  });
+
+  it("truncates long run names on cards while preserving the full hover title", async () => {
+    const longName = "plan feature · /home/kevin/worktrees/task-runner-run-names";
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "run-long-name",
+          assignmentName: "plan-feature",
+          name: longName,
+        }),
+      ],
+      details: {
+        "run-long-name": makeDetail({
+          runId: "run-long-name",
+          name: longName,
+          assignment: {
+            name: "plan-feature",
+            sourcePath: "/tmp/assignment.md",
+            workspacePath: "/tmp/task-runner/assignment.md",
+          },
+        }),
+      },
+    });
+
+    await renderApp();
+
+    const card = await screen.findByRole("button", { name: /plan feature/i });
+    const title = card.querySelector(".card-title");
+    expect(title).not.toBeNull();
+    expect(card).toHaveAttribute("title", longName);
+    expect(title).toHaveTextContent("plan feature · /home/kevin/worktrees/task...");
+    expect(card).not.toHaveTextContent(longName);
   });
 
   it("persists board settings in localStorage", async () => {

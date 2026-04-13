@@ -128,7 +128,7 @@ const routes: RouteDefinition[] = [
         res,
         200,
         await ctx.operations.setRunName(body.target, {
-          name: body.clear ? null : (body.name ?? null),
+          name: body.name,
         }),
       );
     },

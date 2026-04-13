@@ -677,6 +677,8 @@ body {
 .card-title,
 .card-subtitle {
   display: block;
+  width: 100%;
+  max-width: 100%;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -694,18 +696,21 @@ body {
   font-size: 12px;
 }
 
+.card-row--title,
+.card-row--subtitle {
+  display: block;
+}
+
+.card-row > .active-task {
+  flex: 1 1 auto;
+}
+
 .drawer-title-block {
   padding: 16px 18px 6px;
 }
 
 .drawer-title-block .drawer-section-title {
   padding: 0;
-}
-
-.drawer-subtitle {
-  margin: 4px 0 0;
-  color: var(--muted-foreground);
-  font-size: 12px;
 }
 
 .backend-badge {

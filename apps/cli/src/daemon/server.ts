@@ -486,7 +486,7 @@ export async function serveDaemon(
             resultResponse(
               request.id,
               await operations.setRunName(parsed.target, {
-                name: parsed.clear ? null : (parsed.name ?? null),
+                name: parsed.name,
               }),
             ),
           );

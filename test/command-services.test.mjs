@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { WebSocketServer } from "ws";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import {
   CommandError,
@@ -13,13 +14,14 @@ import {
   listRuns,
   listTasks,
   readStatus,
+  setRunName,
   setTask,
   showDefinition,
   showTask,
   unarchiveRun,
 } from "../packages/core/dist/core/commands/service.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
-import { withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
+import { withEnv, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 const AGENT = `---
 schemaVersion: 1
@@ -126,6 +128,57 @@ async function initRun(baseDir, assignmentName = "svc-work") {
       process.chdir(originalCwd);
     }
   });
+}
+
+async function startCodexRenameServer(options = {}) {
+  const renameCalls = [];
+  const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+  await new Promise((resolve) => server.once("listening", resolve));
+
+  server.on("connection", (socket) => {
+    socket.on("message", (data) => {
+      const message = JSON.parse(data.toString("utf8"));
+      if (message.method === "initialize" && message.id !== undefined) {
+        socket.send(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: {} }));
+        return;
+      }
+      if (message.method === "initialized") {
+        return;
+      }
+      if (message.method === "thread/name/set" && message.id !== undefined) {
+        renameCalls.push(message.params);
+        if (options.failRename === true) {
+          socket.send(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: message.id,
+              error: { code: -32001, message: "rename failed" },
+            }),
+          );
+          return;
+        }
+        socket.send(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: {} }));
+      }
+    });
+  });
+
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("failed to bind codex rename test server");
+  }
+
+  return {
+    renameCalls,
+    url: `ws://127.0.0.1:${address.port}/`,
+    async close() {
+      await new Promise((resolve, reject) => {
+        server.close((err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+    },
+  };
 }
 
 test("command services: listDefinitions and showDefinition return typed config results", async () => {
@@ -316,6 +369,81 @@ test("command services: listRuns returns newest-first rows and filters archived 
       },
     });
   });
+});
+
+test("command services: setRunName propagates codex thread rename and clear values", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+  const codexServer = await startCodexRenameServer();
+
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.backend = "codex";
+    manifest.backendSessionId = "thr_rename";
+    manifest.cwd = dir;
+  });
+
+  try {
+    await withSharedRuntimeEnv(dir, async () => {
+      await withEnv({ TASK_RUNNER_CODEX_WS_URL: codexServer.url }, async () => {
+        const renamed = await setRunName(outcome.runId, { name: "  Codex rename  " });
+        assert.deepEqual(renamed, {
+          runId: outcome.runId,
+          name: "Codex rename",
+          changed: true,
+        });
+
+        const cleared = await setRunName(outcome.runId, { name: null });
+        assert.deepEqual(cleared, {
+          runId: outcome.runId,
+          name: null,
+          changed: true,
+        });
+      });
+    });
+
+    assert.deepEqual(codexServer.renameCalls, [
+      { threadId: "thr_rename", name: "Codex rename" },
+      { threadId: "thr_rename", name: null },
+    ]);
+  } finally {
+    await codexServer.close();
+  }
+});
+
+test("command services: setRunName keeps manifest update when codex propagation fails", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+  const codexServer = await startCodexRenameServer({ failRename: true });
+
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.backend = "codex";
+    manifest.backendSessionId = "thr_rename";
+    manifest.cwd = dir;
+  });
+
+  try {
+    await withSharedRuntimeEnv(dir, async () => {
+      await withEnv({ TASK_RUNNER_CODEX_WS_URL: codexServer.url }, async () => {
+        const renamed = await setRunName(outcome.runId, { name: "Still persisted" });
+        assert.deepEqual(renamed, {
+          runId: outcome.runId,
+          name: "Still persisted",
+          changed: true,
+        });
+      });
+    });
+
+    const manifest = readManifest(outcome.workspaceDir);
+    assert.equal(manifest.name, "Still persisted");
+    assert.equal(manifest.resetSeed.name, "Still persisted");
+    assert.deepEqual(codexServer.renameCalls, [
+      { threadId: "thr_rename", name: "Still persisted" },
+    ]);
+  } finally {
+    await codexServer.close();
+  }
 });
 
 test("command services: archiveRun and unarchiveRun are idempotent and reject running runs", async () => {

@@ -1,4 +1,5 @@
 import type { RunCommandOverrides } from "@task-runner/core/app/service.js";
+import { normalizeRunNameMutation } from "@task-runner/core/util/run-name.js";
 import type { RunSetNameParams, RunsStartParams } from "./protocol.js";
 
 export class RequestValidationError extends Error {
@@ -204,7 +205,6 @@ export function parseRunSetNameParams(value: unknown, label: string): RunSetName
   }
   return {
     target: requiredString(record.target, `${label}.target`),
-    name,
-    clear,
+    name: normalizeRunNameMutation({ name, clear }),
   };
 }

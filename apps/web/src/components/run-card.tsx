@@ -1,4 +1,5 @@
 import type { RunSummary } from "@task-runner/core/contracts/runs.js";
+import { truncateEnd } from "../lib/format.js";
 import { RunningIcon } from "./icons.js";
 import { StatusBadge } from "./status-badge.js";
 
@@ -15,6 +16,7 @@ export function RunCard({
 }) {
   const progress =
     run.tasksTotal === 0 ? 0 : Math.round((run.tasksCompleted / run.tasksTotal) * 100);
+  const visibleName = truncateEnd(run.name ?? "Unnamed");
 
   return (
     <button
@@ -29,10 +31,10 @@ export function RunCard({
         <span className="card-row-spacer" />
         <StatusBadge status={run.status} />
       </div>
-      <div className="card-row">
-        <span className="card-title">{run.name ?? "Unnamed"}</span>
+      <div className="card-row card-row--title">
+        <span className="card-title">{visibleName}</span>
       </div>
-      <div className="card-row">
+      <div className="card-row card-row--subtitle">
         <span className="card-subtitle">{run.assignmentName ?? "Ad hoc run"}</span>
       </div>
       <div className="card-row card-meta">

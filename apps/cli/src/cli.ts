@@ -41,6 +41,7 @@ import {
   RunCommandError,
   UnknownBackendError,
 } from "@task-runner/core/run-command.js";
+import { normalizeRunNameMutation } from "@task-runner/core/util/run-name.js";
 import { type ParsedArgs, overridesFromParsedArgs, parseArgs } from "./cli/parse-args.js";
 import { renderRunEvent } from "./cli/render-run.js";
 import {
@@ -642,7 +643,13 @@ async function runSetNameCommand(parsed: ParsedArgs, connectUrl?: string): Promi
     process.stderr.write("task-runner: run set-name requires <name> or --clear\n");
     process.exit(3);
   }
-  if (nameArg !== undefined && nameArg.trim().length === 0) {
+  let nextName: string | null;
+  try {
+    nextName = normalizeRunNameMutation({
+      name: nameArg,
+      clear: parsed.clear === true,
+    });
+  } catch {
     process.stderr.write("task-runner: run set-name: <name> cannot be empty\n");
     process.exit(3);
   }
@@ -658,7 +665,7 @@ async function runSetNameCommand(parsed: ParsedArgs, connectUrl?: string): Promi
   try {
     const result =
       connectUrl === undefined
-        ? await renameRun(target, { name: parsed.clear ? null : (nameArg ?? null) })
+        ? await renameRun(target, { name: nextName })
         : await withDaemonClient(connectUrl, (client) =>
             client
               .call<{ result: Awaited<ReturnType<typeof renameRun>> }>("runs.setName", {

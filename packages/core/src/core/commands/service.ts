@@ -23,6 +23,7 @@ import {
   toRunSummary,
 } from "../../contracts/runs.js";
 import { resolveTaskRunnerCommand } from "../../task-runner-command.js";
+import { trimRunName } from "../../util/run-name.js";
 import { shortId } from "../../util/short-id.js";
 import type { LoadedAgent, LoadedAssignment } from "../config/loaded.js";
 import {
@@ -272,11 +273,11 @@ function validateTaskTitle(title: string): string {
 }
 
 function validateRunName(name: string): string {
-  const trimmed = name.trim();
-  if (trimmed.length === 0) {
+  try {
+    return trimRunName(name);
+  } catch {
     throw new CommandError("run set-name: <name> cannot be empty");
   }
-  return trimmed;
 }
 
 async function propagateRunNameChange(manifest: RunManifest): Promise<void> {

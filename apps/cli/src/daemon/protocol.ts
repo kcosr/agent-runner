@@ -55,8 +55,7 @@ export interface RunTargetParams {
 }
 
 export interface RunSetNameParams extends RunTargetParams {
-  name?: string;
-  clear?: boolean;
+  name: string | null;
 }
 
 export interface TaskTargetParams extends RunTargetParams {

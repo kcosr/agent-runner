@@ -37,3 +37,10 @@ export function truncateMiddle(value: string, start = 20, end = 18): string {
   }
   return `${value.slice(0, start)}...${value.slice(-end)}`;
 }
+
+export function truncateEnd(value: string, max = 44): string {
+  if (value.length <= max) {
+    return value;
+  }
+  return `${value.slice(0, Math.max(0, max - 3))}...`;
+}

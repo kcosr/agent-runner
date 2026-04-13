@@ -5,6 +5,7 @@ import type { TaskState, TaskStatus } from "../../assignment/model.js";
 import { renderAssignment } from "../../assignment/writer.js";
 import { resolveRunWorkspaceDir } from "../../config/runtime-paths.js";
 import { resolveTaskRunnerCommand } from "../../task-runner-command.js";
+import { normalizeOptionalRunName } from "../../util/run-name.js";
 import { shortId } from "../../util/short-id.js";
 import { writeTextFileAtomic } from "../../util/write-file-atomic.js";
 import type { Backend, BackendEvent, BackendInvokeResult } from "../backends/types.js";
@@ -301,20 +302,26 @@ function validateAddedTaskTitle(title: string, index: number): void {
 }
 
 function normalizeRunName(value: string | undefined): string | null {
-  if (value === undefined) {
-    return null;
-  }
-  const trimmed = value.trim();
-  if (trimmed.length === 0) {
+  try {
+    return normalizeOptionalRunName(value);
+  } catch {
     throw new InvalidRunNameError("--name cannot be empty");
   }
-  return trimmed;
 }
 
 function refreshMutableManifestName(manifest: RunManifest): void {
   const latest = resolveResumeTarget(manifest.workspaceDir).manifest;
   manifest.name = latest.name;
   manifest.resetSeed.name = latest.resetSeed.name;
+}
+
+function tryRefreshMutableManifestName(manifest: RunManifest): void {
+  try {
+    refreshMutableManifestName(manifest);
+  } catch {
+    // Mutable name refresh is best-effort; keep the in-memory name if
+    // the manifest cannot be re-read transiently.
+  }
 }
 
 function resolveConfiguredCwd(input: string | undefined, fallback: string): string {
@@ -1073,7 +1080,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   let terminal: { status: RunCompletionStatus; exitCode: number } | null = null;
 
   while (sessionAttempts < maxAttempts && !terminal) {
-    refreshMutableManifestName(manifest);
+    tryRefreshMutableManifestName(manifest);
     name = manifest.name;
     sessionAttempts++;
     const globalAttemptNumber = priorAttemptCount + sessionAttempts;
@@ -1171,7 +1178,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       }
       sessionRecord.lastAttempt = globalAttemptNumber;
 
-      refreshMutableManifestName(manifest);
+      tryRefreshMutableManifestName(manifest);
       writeManifest(workspaceDir, manifest);
     });
 
@@ -1259,7 +1266,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     manifest.status = terminal.status;
     manifest.exitCode = terminal.exitCode;
     manifest.endedAt = endedAt;
-    refreshMutableManifestName(manifest);
+    tryRefreshMutableManifestName(manifest);
     writeManifest(workspaceDir, manifest);
   });
 
