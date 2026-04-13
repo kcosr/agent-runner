@@ -297,7 +297,7 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
 
       const cleared = await client.call("runs.setName", {
         target: init.runId,
-        clear: true,
+        name: null,
       });
       assert.deepEqual(cleared.result, {
         runId: init.runId,
@@ -374,7 +374,7 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
       const cleared = await httpJson(httpBaseUrl, `/api/runs/${init.runId}/name`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ clear: true }),
+        body: JSON.stringify({ name: null }),
       });
       assert.equal(cleared.status, 200);
       assert.deepEqual(cleared.body.result, {

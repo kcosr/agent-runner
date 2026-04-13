@@ -1,5 +1,5 @@
 import type { RunCommandOverrides } from "@task-runner/core/app/service.js";
-import { normalizeRunNameMutation } from "@task-runner/core/util/run-name.js";
+import { trimRunName } from "@task-runner/core/util/run-name.js";
 import type { RunSetNameParams, RunsStartParams } from "./protocol.js";
 
 export class RequestValidationError extends Error {
@@ -43,6 +43,21 @@ export function requiredString(value: unknown, label: string): string {
     throw new RequestValidationError(`${label} is required`);
   }
   return stringValue;
+}
+
+export function requiredNullableRunName(value: unknown, label: string): string | null {
+  if (value === null) {
+    return null;
+  }
+  const stringValue = optionalString(value, label);
+  if (stringValue === undefined) {
+    throw new RequestValidationError(`${label} is required`);
+  }
+  try {
+    return trimRunName(stringValue);
+  } catch {
+    throw new RequestValidationError(`${label} cannot be empty`);
+  }
 }
 
 export function stringRecord(value: unknown, label: string): Record<string, string> {
@@ -195,16 +210,8 @@ export function parseStartRunParams(value: unknown, label: string): RunsStartPar
 
 export function parseRunSetNameParams(value: unknown, label: string): RunSetNameParams {
   const record = asRecord(value, label);
-  const clear = optionalBoolean(record.clear, `${label}.clear`) === true;
-  const name = optionalNonEmptyString(record.name, `${label}.name`);
-  if (!clear && name === undefined) {
-    throw new RequestValidationError(`${label} requires name or clear=true`);
-  }
-  if (clear && name !== undefined) {
-    throw new RequestValidationError(`${label} does not accept both name and clear=true`);
-  }
   return {
     target: requiredString(record.target, `${label}.target`),
-    name: normalizeRunNameMutation({ name, clear }),
+    name: requiredNullableRunName(record.name, `${label}.name`),
   };
 }

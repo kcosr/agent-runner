@@ -670,8 +670,7 @@ async function runSetNameCommand(parsed: ParsedArgs, connectUrl?: string): Promi
             client
               .call<{ result: Awaited<ReturnType<typeof renameRun>> }>("runs.setName", {
                 target,
-                name: parsed.clear ? undefined : nameArg,
-                clear: parsed.clear === true,
+                name: nextName,
               })
               .then((response) => response.result),
           );
