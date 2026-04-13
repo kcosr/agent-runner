@@ -2,7 +2,6 @@
 schemaVersion: 1
 name: plan-feature
 taskMode: cli
-sessionName: plan feature · {{repo_path}}
 maxRetries: 4
 vars:
   repo_path:
@@ -733,8 +732,8 @@ tasks:
       your existing Notes:
 
         - `<<PLACEHOLDER_FEATURE_SHORT_TITLE>>` — the feature's
-          short title (same one used in the draft's
-          `sessionName`).
+          short title (same one used in the draft filename and
+          title).
         - `<<PLACEHOLDER_OVERVIEW>>` — one paragraph, plain
           language. Source: `capture_feature` (what is it).
         - `<<PLACEHOLDER_MOTIVATION>>` — one or two sentences.

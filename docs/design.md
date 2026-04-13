@@ -306,7 +306,6 @@ past the first-write synthesis.
 schemaVersion: 1
 name: repo-orientation
 taskMode: file                       # optional, default file; file | cli
-sessionName: orient {{repo_path}}      # optional display name on the backend
 maxRetries: 3                          # optional, default 3; retry budget per session
 vars:
   repo_path:
@@ -342,7 +341,6 @@ block; no code changes.
 | `taskMode` | Task interaction mode: `file` keeps the assignment-file workflow, `cli` makes task CLI commands the agent-facing surface while `run.json.finalTasks` remains canonical live task state |
 | `schemaVersion` | Future migrations |
 | `name` | Identity in errors/logs |
-| `sessionName` | Display name for the backend session (claude `--name`, codex `thread/name/set`). Vars are interpolated. Optional |
 | `maxRetries` | Retry budget per session (int, 0–20, default 3). Caps the number of attempts the run loop makes against this assignment before giving up. |
 | `vars` | CLI/env input schema (validated at run time) |
 | `message` | Default follow-up message for the run |
@@ -409,38 +407,33 @@ it's a read-only inspector, not a UX surface.
 with `manifest.callerInstructions: null`, and nothing is printed.
 The field is purely opt-in.
 
-#### Session naming
+#### Run naming
 
-`sessionName` is a backend-side display label for the underlying
-session/thread. It is *not* the runner's `runId` (which stays the
-short slug for filesystem use) — it's what shows up in `claude
-/resume` listings, terminal titles, and codex thread listings.
+`run.name` is the persisted display label for the run. It is *not*
+the runner's `runId` (which stays the short slug for filesystem
+use) — it is what CLI detail surfaces, the web dashboard, Claude
+session titles, and Codex thread listings render when a run has a
+name.
 
-- **claude**: passed as `--name <value>` on every attempt. Claude
-  persists it to `~/.claude/projects/.../<session>.jsonl` as
-  `customTitle` and uses it in `/resume` and the terminal title.
+- **Fresh run / init**: `task-runner run` and `task-runner init`
+  accept `--name <value>`. The trimmed value must be non-empty.
+  Omitting the flag stores `manifest.name = null`.
+- **Manifest ownership**: the name is persisted as `manifest.name`
+  and mirrored into `manifest.resetSeed.name`. Assignment config no
+  longer owns run naming.
+- **Later rename**: `task-runner run set-name <id|path> <name>` (or
+  `--clear`) updates the manifest immediately. Clearing sets the
+  value back to `null`.
+- **claude**: the persisted run name is passed as `--name <value>`
+  on each invocation. Changing the run name takes effect on the
+  next Claude attempt or resume.
 - **codex**: after `thread/start` (or `thread/resume`) returns the
   `threadId`, the runner sends `thread/name/set` with `{threadId,
-  name}`. Codex broadcasts a `thread/name/updated` notification to
-  all clients. Failures are logged to stderr but don't fail the
-  attempt — naming is best-effort.
-- **Var interpolation**: the value is run through `interpolate()`
-  with the same injected vars used elsewhere, so
-  `sessionName: "build {{repo_name}}"` works. Static names like
-  `sessionName: nightly-cleanup` pass through unchanged.
-- **CLI override**: `--session-name <value>` overrides the
-  assignment's value (and is itself interpolated against the run's
-  vars). Listing `sessionName` in `lockedFields` makes the
-  override fail with `LockedFieldError`.
-- **Resume**: the resolved name is persisted into `manifest.sessionName`
-  on the first session. On resume the manifest is canonical (the
-  assignment isn't loaded), so the name carries forward unchanged
-  unless `--session-name` is passed, which updates it for the new
-  session and beyond.
-- **init**: the resolved name is stored in the manifest at init
-  time and replayed on execute-after-init. Execute-after-init
-  rejects all overrides, so changing `sessionName` after init
-  requires creating a fresh run instead.
+  name}` when `run.name` is non-null. `run set-name` also attempts a
+  live `thread/name/set` for existing Codex runs. Failures are
+  swallowed after the manifest update; naming is best-effort.
+- **Resume**: `--resume-run` rejects `--name`. If you need to rename
+  an existing run, use `task-runner run set-name`.
 
 ### Invocation shape
 
@@ -527,8 +520,8 @@ two lists are unioned; a field locked on either side rejects overrides.
 Valid entries:
 
 ```
-cwd  backend  model  effort  instructions  message  sessionName
-timeoutSec  unrestricted  maxRetries  tasks
+cwd  backend  model  effort  instructions  message
+timeoutSec  unrestricted  maxRetries  tasks  taskMode
 ```
 
 The zod schemas reject any entry outside this set at load time, so typos
@@ -540,7 +533,7 @@ fail fast.
 |---|---|
 | `cwd`, `backend`, `model`, `effort`, `timeoutSec`, `unrestricted` | agent — agent-owned config, agent decides CLI override rules |
 | `instructions` | agent — refuses assignments with non-empty body |
-| `message`, `tasks`, `sessionName`, `maxRetries` | either — agent-wide prohibition OR per-assignment canonical value |
+| `message`, `tasks`, `maxRetries`, `taskMode` | either — agent-wide prohibition OR per-assignment canonical value |
 
 **Runtime check** — early in `runAgent()`, before any work starts, the
 runner builds the union of `agentConfig.lockedFields` and
@@ -784,7 +777,7 @@ Applied to:
   the assignment isn't reloaded — tasks come from the manifest's
   `finalTasks` snapshot, which already carries the interpolated text
   from the original fresh-run build.
-- `sessionName`, `cwd`, and any other string field the runner renders
+- `cwd` and any other string field the runner renders
   into user-visible text.
 
 `--add-task` titles are **not** interpolated — they come from the
@@ -880,7 +873,7 @@ evolves between sessions is what's explicitly writable: the workspace
 `assignment.md` (task status + notes), manifest fields managed by
 the run loop (attempts, sessions, finalTasks, status/exitCode/endedAt),
 and whatever CLI overrides each resume legally applies (model,
-effort, timeoutSec, maxRetries, unrestricted, sessionName — see
+effort, timeoutSec, maxRetries, unrestricted — see
 [CLI shape → resume overrides](#--resume-run-idpath) for the full
 matrix).
 
@@ -949,7 +942,7 @@ interface RunManifest {
   model: string | null;
   effort: string | null;
   message: string | null;          // session 0's initial message
-  sessionName: string | null;      // backend-side display name (resolved + interpolated)
+  name: string | null;             // persisted run display name
   unrestricted: boolean;
   cwd: string;
   lockedFields: LockableField[];   // union of agent + assignment locks, frozen
@@ -1002,7 +995,7 @@ interface TaskSnapshot {
 interface RunResetSeed {
   model: string | null;
   effort: string | null;
-  sessionName: string | null;
+  name: string | null;
   unrestricted: boolean;
   timeoutSec: number;
   maxAttempts: number;
@@ -1056,7 +1049,7 @@ to look at `assignment.md`.
 `task-runner run reset <id>` needs to restore a run without re-reading the
 current agent or assignment source files. The seed captures the original
 `pendingPrompt`, initialized task snapshot, and reset-relevant top-level
-settings that can drift later (`model`, `effort`, `sessionName`,
+settings that can drift later (`model`, `effort`, `name`,
 `unrestricted`, `timeoutSec`, `maxAttempts`, `taskMode`). Reset reapplies
 that seed, clears `endedAt`, `exitCode`, `backendSessionId`, `sessions`,
 `attemptRecords`, and `attempts/`, then rewrites `assignment.md` from the
@@ -1300,7 +1293,7 @@ interface BackendInvokeContext {
   unrestricted?: boolean;
   timeoutSec: number;
   resumeSessionId?: string;
-  sessionName?: string;
+  name?: string;
   abortSignal?: AbortSignal;
   emit?: (event: BackendEvent) => void;
 }
@@ -1632,7 +1625,7 @@ task-runner <run|init>
                [--max-retries <n>]
                [--timeout-sec <n>]
                [--unrestricted]
-               [--session-name <name>]
+               [--name <name>]
                [--connect <ws-url>]
                [--output-format <text|json>]
                [message]
@@ -1640,6 +1633,11 @@ task-runner <run|init>
 # serve — start the local daemon host
 task-runner serve
                [--listen <ws-url>]
+
+# run set-name — update the persisted run display name
+task-runner run set-name <id|path> (<name> | --clear)
+               [--connect <ws-url>]
+               [--output-format <text|json>]
 
 # run reset — restore a run to initialized state
 task-runner run reset <id|path>
@@ -1809,7 +1807,7 @@ shared `RunDetail` JSON contract. It never invokes a backend, never writes to di
 never touches state.
 
 - **Default (text)**: a status block with the run id, agent,
-  assignment, backend/model, sessionName, cwd, workspace path,
+  assignment, backend/model, name, cwd, workspace path,
   start/end timestamps, attempt counts, and the per-task checklist
   with statuses and notes. If the run is archived, the block also
   shows `Archived: <timestamp>` and an unarchive hint. Trailing hint
@@ -1928,7 +1926,7 @@ read progress through `status`. Specifically:
   `--add-task`, `--var`, `--agent`, `--assignment`, `--backend`,
   `--backend-session-id`, `--cwd`, `--model`, `--effort`,
   `--timeout-sec`, `--max-retries`, `--unrestricted`, or
-  `--session-name` will exit 3 with a clear error. If you need
+  `--name` will exit 3 with a clear error. If you need
   different values, create a fresh run.
 - `backendSessionId` is *not* required to be non-null (init leaves it
   `null` by definition).
@@ -2005,7 +2003,7 @@ lives in a single `validateResumeOverrides` function in
 | `--timeout-sec` | allowed | rejected | Per-attempt wall clock. Init freezes it |
 | `--max-retries` | allowed | rejected | Per-session retry budget. Init freezes it |
 | `--unrestricted` | allowed | rejected | Per-attempt spawn flag. Init freezes it |
-| `--session-name` | allowed | rejected | Display-only label. Init freezes it (and an assignment-locked `sessionName` could otherwise be bypassed via init-then-resume) |
+| `--name` | rejected | rejected | Fresh-run-only persisted run name. Rename existing runs with `task-runner run set-name` |
 | `--add-task` | allowed | rejected | Legitimate mid-run task list extension. Init froze the task list |
 | `[message]` | required | rejected | Required on regular resume; init pre-composed the prompt |
 | `--output-format`, `--field` | allowed | allowed | Read-only; no state effect |

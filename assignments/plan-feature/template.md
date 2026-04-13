@@ -1,7 +1,6 @@
 ---
 schemaVersion: 1
 name: plan-<<KEBAB_FEATURE_SLUG>>
-sessionName: implement <<FEATURE_SHORT_TITLE>> · {{repo_path}}
 maxRetries: 4
 lockedFields:
   - tasks

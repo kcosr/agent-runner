@@ -2,7 +2,6 @@
 schemaVersion: 1
 name: doc-review
 taskMode: cli
-sessionName: doc review · {{repo_path}}
 vars:
   repo_path:
     type: string
