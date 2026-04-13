@@ -158,6 +158,19 @@ async function openSse(baseUrl, path) {
       controller.abort();
       await reader.cancel().catch(() => undefined);
     },
+    async waitForClose() {
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            return;
+          }
+          buffer += decoder.decode(value, { stream: true });
+        }
+      } catch {
+        // Connection teardown may surface as a stream read error instead of EOF.
+      }
+    },
   };
 }
 
@@ -348,6 +361,53 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
       await server.close();
     }
   });
+});
+
+test("daemon HTTP rejects oversized JSON request bodies", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl);
+    try {
+      const oversizedPayload = JSON.stringify({
+        cliVars: {
+          blob: "x".repeat(1024 * 1024),
+        },
+        overrides: {},
+      });
+      const response = await fetch(new URL("/api/runs", httpBaseUrl), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: oversizedPayload,
+      });
+      const body = await response.json();
+      assert.equal(response.status, 400);
+      assert.equal(body.error.code, "INVALID_REQUEST");
+      assert.match(body.error.message, /request body exceeds/i);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+test("daemon HTTP rejects encoded traversal route params without leaking paths", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  const server = await serveDaemon(listenUrl);
+  try {
+    const response = await httpJson(httpBaseUrl, "/api/runs/..%2F..%2Fetc/tasks");
+    assert.equal(response.status, 404);
+    assert.equal(response.body.error.code, "NOT_FOUND");
+    assert.equal(response.body.error.message, "resource not found");
+  } finally {
+    await server.close();
+  }
 });
 
 test("daemon subscriptions fan out run events and abort active runs", async () => {
@@ -554,6 +614,27 @@ test("daemon close aborts active runs and releases connected clients", async () 
     assert.equal(aborted, true);
   } finally {
     await client.close().catch(() => undefined);
+  }
+});
+
+test("daemon close terminates active SSE streams promptly", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  const server = await serveDaemon(listenUrl);
+  const events = await openSse(httpBaseUrl, "/api/events/runs");
+  try {
+    await Promise.race([
+      (async () => {
+        await server.close();
+        await events.waitForClose();
+      })(),
+      new Promise((_, reject) => {
+        setTimeout(() => reject(new Error("timed out waiting for SSE shutdown")), 1000);
+      }),
+    ]);
+  } finally {
+    await events.close().catch(() => undefined);
   }
 });
 
