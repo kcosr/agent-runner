@@ -18,6 +18,7 @@ import {
   unarchive,
   updateTask,
 } from "@task-runner/core/app/service.js";
+import { VALID_STATUSES } from "@task-runner/core/assignment/model.js";
 import { ConflictError } from "@task-runner/core/core/commands/service.js";
 import type { RunEvent } from "@task-runner/core/core/run/run-loop.js";
 import { shortId } from "@task-runner/core/util/short-id.js";
@@ -26,8 +27,8 @@ import { deriveAppRuntimeConfig, deriveHttpBaseUrl, listenSocketConfig } from ".
 import { serveFrontendRequest } from "./frontend.js";
 import { isKnownControlPlaneError } from "./http-errors.js";
 import { handleHttpRequest } from "./http-routes.js";
+import { type DaemonHandlers, createDaemonOperations } from "./operations.js";
 import {
-  type EventsSubscribeParams,
   type JsonRpcRequest,
   type JsonRpcResponse,
   RPC_ERROR_COMMAND,
@@ -35,6 +36,7 @@ import {
 } from "./protocol.js";
 import {
   asRecord,
+  optionalEnum,
   optionalOverrides,
   optionalString,
   parseStartRunParams,
@@ -106,24 +108,6 @@ export interface DaemonServerHandle {
   httpBaseUrl: string;
   startedAt: string;
   close(): Promise<void>;
-}
-
-export interface DaemonHandlers {
-  getRun: typeof getRun;
-  getRunList: typeof getRunList;
-  getTask: typeof getTask;
-  getTaskList: typeof getTaskList;
-  getDefinition: typeof getDefinition;
-  getDefinitionList: typeof getDefinitionList;
-  archive: typeof archive;
-  unarchive: typeof unarchive;
-  reset: typeof reset;
-  updateTask: typeof updateTask;
-  appendNotes: typeof appendNotes;
-  createTask: typeof createTask;
-  initRun: typeof initRun;
-  startRun: typeof startRun;
-  resumeRun: typeof resumeRun;
 }
 
 export async function serveDaemon(
@@ -292,6 +276,33 @@ export async function serveDaemon(
     return { runId: target, accepted: true };
   };
 
+  const operations = createDaemonOperations({
+    ...app,
+    daemonInfo: {
+      pid: process.pid,
+      listenUrl,
+      version,
+      startedAt,
+    },
+    startManagedRun: (request) =>
+      executeManagedRun((emitEvent, abortSignal) =>
+        app.startRun({
+          ...request,
+          abortSignal,
+          emitEvent,
+        }),
+      ),
+    resumeManagedRun: (request) =>
+      executeManagedRun((emitEvent, abortSignal) =>
+        app.resumeRun({
+          ...request,
+          abortSignal,
+          emitEvent,
+        }),
+      ),
+    abortRun,
+  });
+
   const httpServer = createServer((req, res) => {
     const pathname = new URL(req.url ?? "/", httpBaseUrl).pathname;
 
@@ -304,31 +315,8 @@ export async function serveDaemon(
 
     if (pathname === "/api" || pathname.startsWith("/api/")) {
       void handleHttpRequest(req, res, {
-        ...app,
-        daemonInfo: {
-          pid: process.pid,
-          listenUrl,
-          version,
-          startedAt,
-        },
+        operations,
         httpBaseUrl,
-        startManagedRun: (request) =>
-          executeManagedRun((emitEvent, abortSignal) =>
-            app.startRun({
-              ...request,
-              abortSignal,
-              emitEvent,
-            }),
-          ),
-        resumeManagedRun: (request) =>
-          executeManagedRun((emitEvent, abortSignal) =>
-            app.resumeRun({
-              ...request,
-              abortSignal,
-              emitEvent,
-            }),
-          ),
-        abortRun,
         subscribeRunEvents: (runId, publish) =>
           subscribeRunEvents(res, runId, (eventRunId, event) =>
             publish({ runId: eventRunId, event }),
@@ -372,140 +360,137 @@ export async function serveDaemon(
       const params = request.params;
       switch (request.method) {
         case "daemon.info":
-          sendJson(
-            ws,
-            resultResponse(request.id, {
-              pid: process.pid,
-              listenUrl,
-              version,
-              startedAt,
-            }),
-          );
+          sendJson(ws, resultResponse(request.id, operations.readDaemonInfo().daemon));
           return;
         case "runs.list": {
           const parsed = params ? asRecord(params, "runs.list params") : {};
           sendJson(
             ws,
-            resultResponse(request.id, {
-              runs: app.getRunList({
-                includeArchived: parsed.includeArchived === true,
-              }),
-            }),
+            resultResponse(
+              request.id,
+              operations.listRuns({ includeArchived: parsed.includeArchived === true }),
+            ),
           );
           return;
         }
         case "runs.get":
           sendJson(
             ws,
-            resultResponse(request.id, {
-              run: app.getRun(requiredString(asRecord(params, "runs.get params").target, "target")),
-            }),
+            resultResponse(
+              request.id,
+              operations.getRun(
+                requiredString(asRecord(params, "runs.get params").target, "target"),
+              ),
+            ),
           );
           return;
         case "tasks.list":
           sendJson(
             ws,
-            resultResponse(request.id, {
-              tasks: app.getTaskList(
+            resultResponse(
+              request.id,
+              operations.listTasks(
                 requiredString(asRecord(params, "tasks.list params").target, "target"),
               ),
-            }),
+            ),
           );
           return;
         case "tasks.get": {
           const parsed = asRecord(params, "tasks.get params");
           sendJson(
             ws,
-            resultResponse(request.id, {
-              task: app.getTask(
+            resultResponse(
+              request.id,
+              operations.getTask(
                 requiredString(parsed.target, "target"),
                 requiredString(parsed.taskId, "taskId"),
               ),
-            }),
+            ),
           );
           return;
         }
         case "agents.list":
-          sendJson(ws, resultResponse(request.id, { agents: app.getDefinitionList("agent") }));
+          sendJson(ws, resultResponse(request.id, operations.listAgents()));
           return;
         case "agents.get": {
           const parsed = asRecord(params, "agents.get params");
           sendJson(
             ws,
-            resultResponse(request.id, {
-              agent: app.getDefinition(
-                "agent",
-                requiredString(parsed.target, "target"),
-                optionalString(parsed.cwd, "cwd"),
-              ),
-            }),
+            resultResponse(
+              request.id,
+              operations.getAgent({
+                target: requiredString(parsed.target, "target"),
+                cwd: optionalString(parsed.cwd, "cwd"),
+              }),
+            ),
           );
           return;
         }
         case "assignments.list":
-          sendJson(
-            ws,
-            resultResponse(request.id, { assignments: app.getDefinitionList("assignment") }),
-          );
+          sendJson(ws, resultResponse(request.id, operations.listAssignments()));
           return;
         case "assignments.get": {
           const parsed = asRecord(params, "assignments.get params");
           sendJson(
             ws,
-            resultResponse(request.id, {
-              assignment: app.getDefinition(
-                "assignment",
-                requiredString(parsed.target, "target"),
-                optionalString(parsed.cwd, "cwd"),
-              ),
-            }),
+            resultResponse(
+              request.id,
+              operations.getAssignment({
+                target: requiredString(parsed.target, "target"),
+                cwd: optionalString(parsed.cwd, "cwd"),
+              }),
+            ),
           );
           return;
         }
         case "runs.archive":
           sendJson(
             ws,
-            resultResponse(request.id, {
-              result: app.archive(
+            resultResponse(
+              request.id,
+              operations.archiveRun(
                 requiredString(asRecord(params, "runs.archive params").target, "target"),
               ),
-            }),
+            ),
           );
           return;
         case "runs.unarchive":
           sendJson(
             ws,
-            resultResponse(request.id, {
-              result: app.unarchive(
+            resultResponse(
+              request.id,
+              operations.unarchiveRun(
                 requiredString(asRecord(params, "runs.unarchive params").target, "target"),
               ),
-            }),
+            ),
           );
           return;
         case "runs.reset":
           sendJson(
             ws,
-            resultResponse(request.id, {
-              run: app.reset(
+            resultResponse(
+              request.id,
+              operations.resetRun(
                 requiredString(asRecord(params, "runs.reset params").target, "target"),
               ),
-            }),
+            ),
           );
           return;
         case "tasks.set": {
           const parsed = asRecord(params, "tasks.set params");
           sendJson(
             ws,
-            resultResponse(request.id, {
-              task: app.updateTask(
+            resultResponse(
+              request.id,
+              operations.updateTask(
                 requiredString(parsed.target, "target"),
                 requiredString(parsed.taskId, "taskId"),
                 {
-                  status: optionalString(parsed.status, "status"),
+                  status: optionalEnum(parsed.status, "status", VALID_STATUSES),
                   notes: optionalString(parsed.notes, "notes"),
                 },
               ),
-            }),
+            ),
           );
           return;
         }
@@ -513,13 +498,14 @@ export async function serveDaemon(
           const parsed = asRecord(params, "tasks.appendNotes params");
           sendJson(
             ws,
-            resultResponse(request.id, {
-              task: app.appendNotes(
+            resultResponse(
+              request.id,
+              operations.appendTaskNotes(
                 requiredString(parsed.target, "target"),
                 requiredString(parsed.taskId, "taskId"),
                 requiredString(parsed.text, "text"),
               ),
-            }),
+            ),
           );
           return;
         }
@@ -527,42 +513,24 @@ export async function serveDaemon(
           const parsed = asRecord(params, "tasks.add params");
           sendJson(
             ws,
-            resultResponse(request.id, {
-              task: app.createTask(requiredString(parsed.target, "target"), {
+            resultResponse(
+              request.id,
+              operations.createTask(requiredString(parsed.target, "target"), {
                 title: requiredString(parsed.title, "title"),
                 body: optionalString(parsed.body, "body"),
               }),
-            }),
+            ),
           );
           return;
         }
         case "runs.init": {
           const parsed = parseStartRunParams(params, "runs.init params");
-          sendJson(
-            ws,
-            resultResponse(request.id, {
-              run: await app.initRun({
-                ...parsed,
-              }),
-            }),
-          );
+          sendJson(ws, resultResponse(request.id, await operations.initRun(parsed)));
           return;
         }
         case "runs.start": {
           const parsed = parseStartRunParams(params, "runs.start params");
-          sendJson(
-            ws,
-            resultResponse(
-              request.id,
-              await executeManagedRun((emitEvent, abortSignal) =>
-                app.startRun({
-                  ...parsed,
-                  abortSignal,
-                  emitEvent,
-                }),
-              ),
-            ),
-          );
+          sendJson(ws, resultResponse(request.id, await operations.startRun(parsed)));
           return;
         }
         case "runs.resume": {
@@ -571,21 +539,17 @@ export async function serveDaemon(
             ws,
             resultResponse(
               request.id,
-              await executeManagedRun((emitEvent, abortSignal) =>
-                app.resumeRun({
-                  target: requiredString(parsed.target, "target"),
-                  overrides: optionalOverrides(parsed.overrides),
-                  abortSignal,
-                  emitEvent,
-                }),
-              ),
+              await operations.resumeRun({
+                target: requiredString(parsed.target, "target"),
+                overrides: optionalOverrides(parsed.overrides),
+              }),
             ),
           );
           return;
         }
         case "runs.abort": {
           const target = requiredString(asRecord(params, "runs.abort params").target, "target");
-          sendJson(ws, resultResponse(request.id, abortRun(target)));
+          sendJson(ws, resultResponse(request.id, operations.abortRun(target)));
           return;
         }
         case "events.subscribe": {

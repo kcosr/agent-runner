@@ -47,6 +47,9 @@
 ### Changed
 
 - `task-runner serve` no longer restricts `--listen` / `TASK_RUNNER_LISTEN` to loopback hosts, and the web dashboard now keeps long kanban/task lists scrollable while the detail drawer sections start collapsed and can be expanded on demand.
+- Refactored the daemon control plane so HTTP and WebSocket commands
+  now flow through one shared operations layer, keeping transport
+  parsing thin while preserving shared run/definition DTO behavior.
 - Split the repo into npm workspaces: the root package is now a private orchestration workspace, `apps/cli` owns the `task-runner` executable plus `serve` transport host, and `packages/core` owns shared run lifecycle, config/assignment loading, backend adapters, contracts, and helpers. Root `npm run build`, `test`, `lint`, and `check` still work unchanged, but generated build output now lives under the workspace packages instead of a single root `dist/`. ([#23](https://github.com/kcosr/task-runner/pull/23))
 - `task-runner` now has an explicit dual-host model. Embedded mode keeps
   the existing in-process CLI behavior, while daemon mode moves live run
@@ -85,6 +88,9 @@
   preventing packaged dashboard failures on Windows and URL-encoded
   install paths, and hardened frontend serving so directory requests
   like `/assets` no longer crash `task-runner serve`.
+- Fixed the web dashboard to validate runtime config and daemon API
+  payloads before using them, so malformed responses now fail cleanly
+  instead of being trusted as typed contracts.
 - Fixed the web dashboard SSE client to treat malformed daemon event
   payloads as a stale-stream condition instead of crashing the live
   updates subscription.

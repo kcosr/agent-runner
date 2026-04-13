@@ -1,4 +1,7 @@
-import type { AppRuntimeConfig } from "@task-runner/core/contracts/app-config.js";
+import {
+  type AppRuntimeConfig,
+  appRuntimeConfigSchema,
+} from "@task-runner/core/contracts/app-config.js";
 import { createContext, useContext } from "react";
 
 export type { AppRuntimeConfig as RuntimeConfig };
@@ -29,17 +32,19 @@ export async function loadRuntimeConfig(
     );
   }
 
-  const payload = (await response.json()) as unknown;
-  if (
-    typeof payload !== "object" ||
-    payload === null ||
-    typeof (payload as { apiBasePath?: unknown }).apiBasePath !== "string" ||
-    typeof (payload as { runEventsPath?: unknown }).runEventsPath !== "string"
-  ) {
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
     throw new RuntimeConfigError("Runtime config payload is invalid");
   }
 
-  return payload as AppRuntimeConfig;
+  const parsed = appRuntimeConfigSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new RuntimeConfigError("Runtime config payload is invalid");
+  }
+
+  return parsed.data;
 }
 
 export const RuntimeConfigContext = createContext<AppRuntimeConfig | null>(null);
