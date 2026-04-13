@@ -1,6 +1,11 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import type { RunDetail, RunStatus, RunSummary } from "@task-runner/core/contracts/runs.js";
+import type {
+  RunDetail,
+  RunNameResult,
+  RunStatus,
+  RunSummary,
+} from "@task-runner/core/contracts/runs.js";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { BoardColumn } from "../components/run-column.js";
 import { createApiClient, isNotFoundError } from "../lib/api-client.js";
@@ -16,7 +21,7 @@ export interface NoticeState {
   autoDismissMs?: number;
 }
 
-export type RunActionPending = "archive" | "unarchive" | "resume" | "abort";
+export type RunActionPending = "archive" | "unarchive" | "resume" | "abort" | "rename";
 
 const FAILURE_STATUSES: RunStatus[] = ["blocked", "exhausted", "error"];
 
@@ -129,6 +134,15 @@ function useRunActionMutation(
       options.onSuccess?.();
     },
   });
+}
+
+function updateRunNameCaches(result: RunNameResult) {
+  queryClient.setQueryData<RunDetail | undefined>(runQueryKeys.detail(result.runId), (current) =>
+    current ? { ...current, name: result.name } : current,
+  );
+  queryClient.setQueryData<RunSummary[] | undefined>(runQueryKeys.list(), (current) =>
+    current?.map((run) => (run.runId === result.runId ? { ...run, name: result.name } : run)),
+  );
 }
 
 export function useRunsDashboardState() {
@@ -280,6 +294,21 @@ export function useRunsDashboardState() {
   const unarchiveMutation = useRunActionMutation(api.unarchiveRun, setActionError);
   const resumeMutation = useRunActionMutation(api.resumeRun, setActionError);
   const abortMutation = useRunActionMutation(api.abortRun, setActionError);
+  const renameMutation = useMutation({
+    mutationFn: ({ name, runId }: { runId: string; name: string | null }) =>
+      api.setRunName(runId, name),
+    onError: (error: Error) => {
+      setActionError(error.message);
+    },
+    onSuccess: async (result, { runId }) => {
+      setActionError(undefined);
+      updateRunNameCaches(result);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: runQueryKeys.list() }),
+        queryClient.invalidateQueries({ queryKey: runQueryKeys.detail(runId) }),
+      ]);
+    },
+  });
 
   const actionPending: RunActionPending | undefined = archiveMutation.isPending
     ? "archive"
@@ -289,7 +318,9 @@ export function useRunsDashboardState() {
         ? "resume"
         : abortMutation.isPending
           ? "abort"
-          : undefined;
+          : renameMutation.isPending
+            ? "rename"
+            : undefined;
 
   return {
     actionError,
@@ -327,6 +358,9 @@ export function useRunsDashboardState() {
     runActions: {
       abort: (runId: string) => abortMutation.mutate(runId),
       archive: (runId: string) => archiveMutation.mutate(runId),
+      rename: async (runId: string, name: string | null) => {
+        await renameMutation.mutateAsync({ runId, name });
+      },
       resume: (runId: string) => resumeMutation.mutate(runId),
       unarchive: (runId: string) => unarchiveMutation.mutate(runId),
     },

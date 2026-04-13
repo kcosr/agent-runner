@@ -103,6 +103,15 @@ export function CopyIcon(props: IconProps) {
   );
 }
 
+export function PencilIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M12 20h9" />
+      <path d="m16.5 3.5 4 4L8 20l-5 1 1-5Z" />
+    </IconBase>
+  );
+}
+
 export function StopIcon(props: IconProps) {
   return (
     <IconBase {...props}>

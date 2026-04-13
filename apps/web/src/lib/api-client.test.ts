@@ -40,4 +40,35 @@ describe("api client", () => {
       status: 200,
     });
   });
+
+  it("sends rename requests and parses the result payload", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            result: {
+              runId: "run-1",
+              name: "Dashboard polish",
+              changed: true,
+            },
+          }),
+          { status: 200 },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createApiClient(config);
+    await expect(api.setRunName("run-1", "Dashboard polish")).resolves.toEqual({
+      runId: "run-1",
+      name: "Dashboard polish",
+      changed: true,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs/run-1/name",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ name: "Dashboard polish" }),
+      }),
+    );
+  });
 });

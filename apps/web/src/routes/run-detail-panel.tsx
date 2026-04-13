@@ -14,6 +14,7 @@ export function RunDetailPanel({
   onArchive,
   onClose,
   onCopy,
+  onRename,
   onResume,
   onUnarchive,
   selectedRunId,
@@ -26,6 +27,7 @@ export function RunDetailPanel({
   onArchive: (runId: string) => void;
   onClose: () => void;
   onCopy: (value: string, label: string) => Promise<void>;
+  onRename: (runId: string, name: string | null) => Promise<void>;
   onResume: (runId: string) => void;
   onUnarchive: (runId: string) => void;
   selectedRunId?: string;
@@ -77,6 +79,7 @@ export function RunDetailPanel({
       onArchive={() => onArchive(selectedRun.runId)}
       onClose={onClose}
       onCopy={(value, label) => void onCopy(value, label)}
+      onRename={(name) => onRename(selectedRun.runId, name)}
       onResume={() => onResume(selectedRun.runId)}
       onUnarchive={() => onUnarchive(selectedRun.runId)}
       run={selectedRun}

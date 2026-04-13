@@ -709,8 +709,45 @@ body {
   padding: 16px 18px 6px;
 }
 
+.drawer-title-inline,
+.drawer-title-edit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .drawer-title-block .drawer-section-title {
+  margin: 0;
   padding: 0;
+}
+
+.drawer-title-inline {
+  width: fit-content;
+  max-width: 100%;
+}
+
+.drawer-title-inline .drawer-section-title {
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+.drawer-title-edit {
+  width: 100%;
+}
+
+.drawer-title-field {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.drawer-title-edit .btn,
+.drawer-title-edit-trigger {
+  flex-shrink: 0;
+}
+
+.drawer-title-edit-trigger svg {
+  width: 13px;
+  height: 13px;
 }
 
 .backend-badge {

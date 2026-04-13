@@ -224,6 +224,26 @@ function installFetchMock(
       return new Response(JSON.stringify({ accepted: true, runId }), { status: 200 });
     }
 
+    const renameMatch = /\/api\/runs\/([^/]+)\/name$/.exec(url);
+    if (renameMatch && init?.method === "POST") {
+      const runId = decodeURIComponent(renameMatch[1] ?? "");
+      const body =
+        typeof init.body === "string" && init.body.length > 0
+          ? (JSON.parse(init.body) as { name?: string | null })
+          : {};
+      const name = body.name ?? null;
+      const detail = state.details[runId];
+      if (!detail) {
+        return new Response(JSON.stringify({ error: { message: "missing", code: "not_found" } }), {
+          status: 404,
+        });
+      }
+      const changed = detail.name !== name;
+      state.details[runId] = { ...detail, name };
+      state.runs = state.runs.map((run) => (run.runId === runId ? { ...run, name } : run));
+      return new Response(JSON.stringify({ result: { runId, name, changed } }), { status: 200 });
+    }
+
     throw new Error(`Unhandled fetch: ${url}`);
   });
 
@@ -616,6 +636,38 @@ describe("web app", () => {
     expect(card).toHaveAttribute("title", longName);
     expect(title).toHaveTextContent("plan feature · /home/kevin/worktrees/task...");
     expect(card).not.toHaveTextContent(longName);
+  });
+
+  it("renames a run from the detail drawer title editor", async () => {
+    const state = {
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    };
+    const fetchMock = installFetchMock(state);
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await user.click(await findRunCard("Build dashboard"));
+    expect(await screen.findByRole("heading", { name: "Build dashboard" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /edit run name/i }));
+    const input = screen.getByRole("textbox", { name: /run name/i });
+    await user.clear(input);
+    await user.type(input, "Dashboard polish");
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Dashboard polish" })).toBeInTheDocument(),
+    );
+    expect(await findRunCard("Dashboard polish")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs/run-1/name",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ name: "Dashboard polish" }),
+      }),
+    );
   });
 
   it("persists board settings in localStorage", async () => {
