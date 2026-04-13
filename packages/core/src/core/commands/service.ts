@@ -245,6 +245,29 @@ function liveOverlay(rawAssignment: string): LiveTaskOverlay {
   return overlay;
 }
 
+function readManifestView(
+  manifest: RunManifest,
+  workspaceDir: string,
+): { manifest: RunManifest; isLive: boolean } {
+  if (manifest.status !== "running" || taskModeFromManifest(manifest) !== "file") {
+    return { manifest, isLive: false };
+  }
+
+  try {
+    const raw = readFileSync(workspaceAssignmentPath(workspaceDir), "utf8");
+    const overlay = liveOverlay(raw);
+    if (overlay.size === 0) {
+      return { manifest, isLive: false };
+    }
+    return {
+      manifest: applyLiveOverlay(manifest, overlay),
+      isLive: true,
+    };
+  } catch {
+    return { manifest, isLive: false };
+  }
+}
+
 function validateTaskTitle(title: string): string {
   const trimmed = title.trim();
   if (trimmed.length === 0) {
@@ -285,23 +308,10 @@ export function readStatus(target: string): StatusCommandResult {
   const resolved = resolveRun(target);
   refreshRunSnapshotAfterTaskStateSettles(resolved);
 
-  let isLive = false;
-  let manifestView = resolved.manifest;
-  if (
-    resolved.manifest.status === "running" &&
-    taskModeFromManifest(resolved.manifest) === "file"
-  ) {
-    try {
-      const raw = readFileSync(workspaceAssignmentPath(resolved.workspaceDir), "utf8");
-      const overlay = liveOverlay(raw);
-      if (overlay.size > 0) {
-        manifestView = applyLiveOverlay(resolved.manifest, overlay);
-        isLive = true;
-      }
-    } catch {
-      // Fall back to the persisted manifest snapshot.
-    }
-  }
+  const { manifest: manifestView, isLive } = readManifestView(
+    resolved.manifest,
+    resolved.workspaceDir,
+  );
 
   return toRunDetail({ manifest: manifestView, isLive });
 }
@@ -316,7 +326,12 @@ export function listDefinitions(kind: DefinitionKind): DefinitionListResult {
 export function listRuns(opts: { includeArchived?: boolean } = {}): RunListResult {
   const includeArchived = opts.includeArchived === true;
   return listRunManifests()
-    .map(toRunSummary)
+    .map((entry) =>
+      toRunSummary({
+        ...entry,
+        manifest: readManifestView(entry.manifest, entry.workspaceDir).manifest,
+      }),
+    )
     .filter((entry) => includeArchived || entry.archivedAt === null)
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
 }
