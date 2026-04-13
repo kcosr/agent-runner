@@ -57,7 +57,8 @@ task-runner serve [--listen <ws-url>]
 1. Resolve host mode:
      a. embedded: CLI calls shared app services directly
      b. daemon: CLI connects to local JSON-RPC over WebSocket; browser-style
-        clients use HTTP + SSE on the same loopback host
+        clients use HTTP + SSE on the same host, and the same
+        host serves the built web app plus `/app-config.json`
 2. Load + validate agent.md (identity, config, role instructions)
 3. If --assignment: load + validate assignment.md (vars, tasks, message)
 4. Resolve vars (CLI → env → defaults) against the assignment's schema
@@ -114,8 +115,18 @@ task-runner/
 │               ├── http-serializers.ts # JSON body/response helpers
 │               ├── protocol.ts    # daemon RPC and event contract
 │               ├── request-parsing.ts # shared transport request validation helpers
-│               ├── server.ts      # local loopback WS RPC + HTTP/SSE daemon host
+│               ├── server.ts      # local WS RPC + HTTP/SSE daemon host
 │               └── sse.ts         # browser-facing event-stream adapter
+│   └── web/
+│       ├── package.json   # same-origin run dashboard SPA
+│       ├── tsconfig.json
+│       ├── mockups/       # canonical phase-1 visual contract
+│       ├── dist/          # generated web build copied into apps/cli/dist/web for packaging
+│       └── src/
+│           ├── components/ # board, cards, filters, drawer, task list
+│           ├── lib/        # runtime config, HTTP/SSE clients, settings, query keys
+│           ├── routes/     # / and /runs/:runId dashboard routes
+│           └── main.tsx
 ├── packages/
 │   └── core/
 │       ├── package.json   # shared internal package
@@ -183,7 +194,7 @@ task-runner/
 ```
 
 The root package owns workspace orchestration only. `apps/cli` owns CLI
-parsing, signal handling, rendering, exit codes, and the loopback daemon
+parsing, signal handling, rendering, exit codes, and the daemon
 transport. Read-only commands (`status`, `list`, `show`, `task list/show`)
 and task mutations (`task set`, `task append-notes`, `task add`, `run reset`)
 execute through typed service functions in
@@ -1672,12 +1683,34 @@ Subcommands:
   already-executed run, or an execute-after-init (when `--resume-run`
   points at a manifest with `status: "initialized"`). **Rejected on
   passive agents** — use `init` + `task set` / `task add` instead.
-- **`serve`** — start the local daemon host on loopback. The daemon owns
+- **`serve`** — start the local daemon host. The daemon owns
   live run execution, subscriptions, and daemon-mode aborts. CLI clients
   opt in per-command with `--connect` / `TASK_RUNNER_CONNECT` and keep
   using the WebSocket JSON-RPC transport; browser-style clients use the
-  daemon's HTTP endpoints plus SSE on the same loopback listener. There
-  is no silent fallback to embedded mode when the daemon is unavailable.
+  daemon's HTTP endpoints plus SSE on the same listener. The
+  same host also serves the built `apps/web` bundle, returns
+  `/app-config.json` for runtime config, and falls back to `index.html`
+  for non-`/api` client routes such as `/runs/:runId`. There is no
+  silent fallback to embedded mode when the daemon is unavailable.
+
+### Browser app hosting
+
+- `apps/web` is the phase-1 run dashboard package. It is built with
+  Vite/React and consumed as static assets, not as a second server.
+- Normal local use is same-origin: `task-runner serve` owns the host,
+  serves `/api/*`, `/api/events/*`, `/app-config.json`, and the
+  built SPA from one origin.
+- The browser app uses shared machine contracts from
+  `@task-runner/core/contracts/*`; there is no web-local DTO layer or
+  CLI bridge.
+- Development uses the Vite dev server in `apps/web` with a proxy for
+  `/api/*`, `/api/events/*`, and `/app-config.json` back to the local
+  daemon host.
+- `apps/web/mockups/run-dashboard.{html,css}` is the canonical visual
+  contract for the phase-1 dashboard. The files are copied from the
+  planning draft artifacts and kept verbatim; React/UI changes should
+  stay aligned with that layout and visual language unless a later task
+  explicitly justifies divergence.
 - **`run reset`** — restore a non-running run to its initialized
   state. The command resolves the existing workspace, rejects
   `status: "running"`, reapplies the manifest's frozen `resetSeed`,

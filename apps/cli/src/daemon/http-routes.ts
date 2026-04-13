@@ -1,9 +1,11 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { RunCommandOverrides } from "@task-runner/core/app/service.js";
 import { VALID_STATUSES } from "@task-runner/core/assignment/model.js";
+import type { RunEventEnvelope } from "@task-runner/core/contracts/events.js";
 import { HttpError } from "./http-errors.js";
 import { readJsonBody, sendError, sendJson } from "./http-serializers.js";
-import type { DaemonInfo, RunsStartParams } from "./protocol.js";
+import type { DaemonOperations } from "./operations.js";
+import type { RunsStartParams } from "./protocol.js";
 import {
   asRecord,
   optionalEnum,
@@ -13,25 +15,18 @@ import {
   parseStartRunParams,
   requiredString,
 } from "./request-parsing.js";
-import type { DaemonHandlers } from "./server.js";
-import { type SseRunEventEnvelope, streamRunEvents } from "./sse.js";
+import { streamRunEvents } from "./sse.js";
 
 interface ResumeRunBody {
   overrides: RunCommandOverrides;
 }
 
-interface RouteContext extends DaemonHandlers {
-  daemonInfo: DaemonInfo;
+interface RouteContext {
+  operations: DaemonOperations;
   httpBaseUrl: string;
-  startManagedRun(request: RunsStartParams): Promise<{ runId: string }>;
-  resumeManagedRun(request: {
-    target: string;
-    overrides: RunCommandOverrides;
-  }): Promise<{ runId: string }>;
-  abortRun(target: string): { runId: string; accepted: true };
   subscribeRunEvents(
     runId: string | undefined,
-    publish: (payload: SseRunEventEnvelope) => boolean,
+    publish: (payload: RunEventEnvelope) => boolean,
   ): () => void;
 }
 
@@ -54,49 +49,44 @@ const routes: RouteDefinition[] = [
     method: "GET",
     pattern: ["api", "daemon"],
     handler: (_req, res, ctx) => {
-      sendJson(res, 200, {
-        daemon: ctx.daemonInfo,
-      });
+      sendJson(res, 200, ctx.operations.readDaemonInfo());
     },
   },
   {
     method: "GET",
     pattern: ["api", "runs"],
     handler: (_req, res, ctx, _params, url) => {
-      sendJson(res, 200, {
-        runs: ctx.getRunList({
+      sendJson(
+        res,
+        200,
+        ctx.operations.listRuns({
           includeArchived: parseBooleanQueryValue(
             url.searchParams.get("includeArchived"),
             "includeArchived",
           ),
         }),
-      });
+      );
     },
   },
   {
     method: "GET",
     pattern: ["api", "runs", ":runId"],
     handler: (_req, res, ctx, params) => {
-      sendJson(res, 200, {
-        run: ctx.getRun(routeParam(params, "runId")),
-      });
+      sendJson(res, 200, ctx.operations.getRun(routeParam(params, "runId")));
     },
   },
   {
     method: "POST",
     pattern: ["api", "runs", "init"],
     handler: async (req, res, ctx) => {
-      sendJson(res, 200, {
-        run: await ctx.initRun(await parseStartRunBody(req)),
-      });
+      sendJson(res, 200, await ctx.operations.initRun(await parseStartRunBody(req)));
     },
   },
   {
     method: "POST",
     pattern: ["api", "runs"],
     handler: async (req, res, ctx) => {
-      const outcome = await ctx.startManagedRun(await parseStartRunBody(req));
-      sendJson(res, 200, { runId: outcome.runId });
+      sendJson(res, 200, await ctx.operations.startRun(await parseStartRunBody(req)));
     },
   },
   {
@@ -104,48 +94,53 @@ const routes: RouteDefinition[] = [
     pattern: ["api", "runs", ":runId", "resume"],
     handler: async (req, res, ctx, params) => {
       const body = await parseResumeRunBody(req);
-      const outcome = await ctx.resumeManagedRun({
-        target: routeParam(params, "runId"),
-        overrides: body.overrides,
-      });
-      sendJson(res, 200, { runId: outcome.runId });
+      sendJson(
+        res,
+        200,
+        await ctx.operations.resumeRun({
+          target: routeParam(params, "runId"),
+          overrides: body.overrides,
+        }),
+      );
     },
   },
   {
     method: "POST",
     pattern: ["api", "runs", ":runId", "archive"],
     handler: (_req, res, ctx, params) => {
-      sendJson(res, 200, { result: ctx.archive(routeParam(params, "runId")) });
+      sendJson(res, 200, ctx.operations.archiveRun(routeParam(params, "runId")));
     },
   },
   {
     method: "POST",
     pattern: ["api", "runs", ":runId", "unarchive"],
     handler: (_req, res, ctx, params) => {
-      sendJson(res, 200, { result: ctx.unarchive(routeParam(params, "runId")) });
+      sendJson(res, 200, ctx.operations.unarchiveRun(routeParam(params, "runId")));
     },
   },
   {
     method: "POST",
     pattern: ["api", "runs", ":runId", "abort"],
     handler: (_req, res, ctx, params) => {
-      sendJson(res, 200, ctx.abortRun(routeParam(params, "runId")));
+      sendJson(res, 200, ctx.operations.abortRun(routeParam(params, "runId")));
     },
   },
   {
     method: "GET",
     pattern: ["api", "runs", ":runId", "tasks"],
     handler: (_req, res, ctx, params) => {
-      sendJson(res, 200, { tasks: ctx.getTaskList(routeParam(params, "runId")) });
+      sendJson(res, 200, ctx.operations.listTasks(routeParam(params, "runId")));
     },
   },
   {
     method: "GET",
     pattern: ["api", "runs", ":runId", "tasks", ":taskId"],
     handler: (_req, res, ctx, params) => {
-      sendJson(res, 200, {
-        task: ctx.getTask(routeParam(params, "runId"), routeParam(params, "taskId")),
-      });
+      sendJson(
+        res,
+        200,
+        ctx.operations.getTask(routeParam(params, "runId"), routeParam(params, "taskId")),
+      );
     },
   },
   {
@@ -153,12 +148,14 @@ const routes: RouteDefinition[] = [
     pattern: ["api", "runs", ":runId", "tasks", ":taskId"],
     handler: async (req, res, ctx, params) => {
       const body = asRecord(await readJsonBody(req), "request body");
-      sendJson(res, 200, {
-        task: ctx.updateTask(routeParam(params, "runId"), routeParam(params, "taskId"), {
+      sendJson(
+        res,
+        200,
+        ctx.operations.updateTask(routeParam(params, "runId"), routeParam(params, "taskId"), {
           status: optionalEnum(body.status, "status", VALID_STATUSES),
           notes: optionalString(body.notes, "notes"),
         }),
-      });
+      );
     },
   },
   {
@@ -166,13 +163,15 @@ const routes: RouteDefinition[] = [
     pattern: ["api", "runs", ":runId", "tasks", ":taskId", "append-notes"],
     handler: async (req, res, ctx, params) => {
       const body = asRecord(await readJsonBody(req), "request body");
-      sendJson(res, 200, {
-        task: ctx.appendNotes(
+      sendJson(
+        res,
+        200,
+        ctx.operations.appendTaskNotes(
           routeParam(params, "runId"),
           routeParam(params, "taskId"),
           requiredString(body.text, "text"),
         ),
-      });
+      );
     },
   },
   {
@@ -180,12 +179,14 @@ const routes: RouteDefinition[] = [
     pattern: ["api", "runs", ":runId", "tasks"],
     handler: async (req, res, ctx, params) => {
       const body = asRecord(await readJsonBody(req), "request body");
-      sendJson(res, 200, {
-        task: ctx.createTask(routeParam(params, "runId"), {
+      sendJson(
+        res,
+        200,
+        ctx.operations.createTask(routeParam(params, "runId"), {
           title: requiredString(body.title, "title"),
           body: optionalString(body.body, "body"),
         }),
-      });
+      );
     },
   },
   {

@@ -1,0 +1,21 @@
+{
+  "name": "@task-runner/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Run dashboard web app for task-runner.",
+  "scripts": {
+    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "dev": "vite",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.90.5",
+    "@tanstack/react-router": "^1.133.48",
+    "@task-runner/core": "*",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
+  }
+}

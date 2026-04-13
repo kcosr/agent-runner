@@ -1,4 +1,4 @@
 {
   "files": [],
-  "references": [{ "path": "./packages/core" }, { "path": "./apps/cli" }]
+  "references": [{ "path": "./packages/core" }, { "path": "./apps/web" }, { "path": "./apps/cli" }]
 }

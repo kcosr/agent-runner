@@ -1,3 +1,4 @@
+import { deriveRepoKey } from "../config/runtime-paths.js";
 import { normalizeTaskMode } from "../core/config/schema.js";
 import type { LockableField, TaskMode } from "../core/config/schema.js";
 import type { TaskSnapshot } from "../core/run/manifest.js";
@@ -54,6 +55,7 @@ export interface RunDetailInput {
 
 export interface RunDetail {
   runId: string;
+  repo: string;
   status: RunStatus;
   archivedAt: string | null;
   isLive: boolean;
@@ -195,6 +197,7 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
   const { manifest } = result;
   return {
     runId: manifest.runId,
+    repo: deriveRepoKey(manifest.cwd),
     status: manifest.status,
     archivedAt: manifest.archivedAt,
     isLive: result.isLive,

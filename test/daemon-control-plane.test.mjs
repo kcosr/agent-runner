@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { EventEmitter } from "node:events";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
@@ -9,6 +10,7 @@ import WebSocket from "ws";
 import { DaemonClient } from "../apps/cli/dist/daemon/client.js";
 import { deriveHttpBaseUrl } from "../apps/cli/dist/daemon/config.js";
 import { serveDaemon } from "../apps/cli/dist/daemon/server.js";
+import { streamRunEvents } from "../apps/cli/dist/daemon/sse.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import { sharedRuntimeEnv, withEnv } from "./helpers/runtime-paths.mjs";
@@ -172,6 +174,34 @@ async function openSse(baseUrl, path) {
       }
     },
   };
+}
+
+class FakeSseResponse extends EventEmitter {
+  constructor(writeResults = []) {
+    super();
+    this.destroyed = false;
+    this.headers = new Map();
+    this.writeResults = writeResults;
+    this.writableEnded = false;
+  }
+
+  flushHeaders() {}
+
+  setHeader(name, value) {
+    this.headers.set(name.toLowerCase(), value);
+  }
+
+  write(chunk) {
+    this.lastChunk = chunk;
+    if (this.writeResults.length > 0) {
+      return this.writeResults.shift();
+    }
+    return true;
+  }
+
+  end() {
+    this.writableEnded = true;
+  }
 }
 
 function runCli(args, opts = {}) {
@@ -361,6 +391,82 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
       await server.close();
     }
   });
+});
+
+test("daemon serve exposes app config, keeps /api precedence, and falls back to SPA routes", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const init = await initRun(dir);
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl);
+    try {
+      const appConfig = await httpJson(httpBaseUrl, "/app-config.json");
+      assert.equal(appConfig.status, 200);
+      assert.deepEqual(appConfig.body, {
+        apiBasePath: "/api",
+        runEventsPath: "/api/events/runs",
+      });
+
+      const apiDetail = await httpJson(httpBaseUrl, `/api/runs/${init.runId}`);
+      assert.equal(apiDetail.status, 200);
+      assert.equal(apiDetail.body.run.runId, init.runId);
+
+      const spaRoot = await fetch(new URL("/", httpBaseUrl));
+      const spaRootBody = await spaRoot.text();
+      assert.equal(spaRoot.status, 200);
+      assert.match(spaRoot.headers.get("content-type") ?? "", /text\/html/);
+      assert.match(spaRootBody, /<div id="root"><\/div>/);
+
+      const deepLink = await fetch(new URL(`/runs/${init.runId}`, httpBaseUrl));
+      const deepLinkBody = await deepLink.text();
+      assert.equal(deepLink.status, 200);
+      assert.match(deepLinkBody, /<div id="root"><\/div>/);
+
+      const assetsDirectory = await fetch(new URL("/assets", httpBaseUrl));
+      const assetsDirectoryBody = await assetsDirectory.text();
+      assert.equal(assetsDirectory.status, 200);
+      assert.match(assetsDirectoryBody, /<div id="root"><\/div>/);
+
+      const daemonAfterAssets = await httpJson(httpBaseUrl, "/api/daemon");
+      assert.equal(daemonAfterAssets.status, 200);
+      assert.equal(daemonAfterAssets.body.daemon.listenUrl, listenUrl);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+test("daemon serve reads packaged web assets from the CLI dist layout", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  const packagedIndex = readFileSync(
+    new URL("../apps/cli/dist/web/index.html", import.meta.url),
+    "utf8",
+  );
+
+  const server = await serveDaemon(listenUrl);
+  try {
+    const response = await fetch(new URL("/", httpBaseUrl));
+    const body = await response.text();
+    assert.equal(response.status, 200);
+    assert.equal(body, packagedIndex);
+
+    const assetPath = body.match(/\/assets\/[^"]+\.(?:js|css)/)?.[0];
+    assert.ok(assetPath, "expected built asset path in served index.html");
+
+    const assetResponse = await fetch(new URL(assetPath, httpBaseUrl));
+    const assetBody = await assetResponse.text();
+    assert.equal(assetResponse.status, 200);
+    assert.ok(assetBody.length > 0);
+  } finally {
+    await server.close();
+  }
 });
 
 test("daemon HTTP rejects oversized JSON request bodies", async () => {
@@ -559,6 +665,34 @@ test("daemon SSE streams reuse run event fan-out for all-runs and per-run subscr
     await oneRun.close();
     await server.close();
   }
+});
+
+test("streamRunEvents keeps SSE subscribers active when writes report backpressure", () => {
+  const req = new EventEmitter();
+  const res = new FakeSseResponse([true, false]);
+  let unsubscribeCount = 0;
+  let publish = null;
+
+  streamRunEvents(req, res, (next) => {
+    publish = next;
+    return () => {
+      unsubscribeCount += 1;
+    };
+  });
+
+  assert.equal(typeof publish, "function");
+  assert.equal(
+    publish({
+      runId: "backpressure-run",
+      event: { type: "attempt_started", attempt: 1 },
+    }),
+    true,
+  );
+  assert.match(res.lastChunk, /backpressure-run/);
+  assert.equal(unsubscribeCount, 0);
+
+  req.emit("close");
+  assert.equal(unsubscribeCount, 1);
 });
 
 test("daemon close aborts active runs and releases connected clients", async () => {

@@ -1,3 +1,4 @@
+import type { AppRuntimeConfig } from "@task-runner/core/contracts/app-config.js";
 import { DEFAULT_DAEMON_URL, TASK_RUNNER_CONNECT_ENV, TASK_RUNNER_LISTEN_ENV } from "./protocol.js";
 
 export type HostMode = "embedded" | "daemon";
@@ -17,17 +18,10 @@ function parseDaemonUrl(raw: string, label: string): URL {
   if (parsed.protocol !== "ws:") {
     throw new Error(`${label} must use ws://`);
   }
-  if (!isLoopbackHost(parsed.hostname)) {
-    throw new Error(`${label} must bind/connect on loopback (127.0.0.1, localhost, or ::1)`);
-  }
   if (!parsed.port) {
     throw new Error(`${label} must include an explicit port`);
   }
   return parsed;
-}
-
-function isLoopbackHost(hostname: string): boolean {
-  return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
 }
 
 export function resolveListenUrl(
@@ -74,4 +68,11 @@ export function deriveHttpBaseUrl(listenUrl: string): string {
   parsed.search = "";
   parsed.hash = "";
   return parsed.toString();
+}
+
+export function deriveAppRuntimeConfig(): AppRuntimeConfig {
+  return {
+    apiBasePath: "/api",
+    runEventsPath: "/api/events/runs",
+  };
 }

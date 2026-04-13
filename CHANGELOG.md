@@ -23,7 +23,7 @@
   now exposes run/task HTTP endpoints under `/api/...`, streams live
   run events over `/api/events/...`, and keeps the shared
   `src/app/service.ts` seam as the transport-independent business
-  layer. ([#22](https://github.com/kcosr/task-runner/pull/22))
+  layer. ([#24](https://github.com/kcosr/task-runner/pull/24))
 - Added a transport-neutral `src/contracts/runs.ts` seam for shared run DTOs and pure mappers (`RunSummary`, `RunDetail`, `RunArchiveResult`, `RunCapabilities`) so later CLI/web/daemon surfaces can project from `RunManifest` without binding directly to raw manifest internals. ([#16](https://github.com/kcosr/task-runner/pull/16))
 - Added `task-runner task list`, `task show`, and `task append-notes`, plus `task add --body`, for a fuller CLI task workflow surface. The new read commands return stable task snapshots in text or JSON, and append-notes uses deterministic single-newline joining.
 - Added `task-runner run reset <run-id>` to restore a non-running run to its original initialized state, rewrite `run.json` and `assignment.md` from a persisted reset seed, clear prior attempt/session history, and remove stale `attempts/` artifacts.
@@ -37,14 +37,31 @@
 - Added stricter assignment/task regression coverage for structural markdown escaping, task-command terminal-state handling, runtime var validation, Codex interruption, and subprocess abort paths. ([#6](https://github.com/kcosr/task-runner/pull/6))
 - Added `assignments/plan-feature/` — a meta-assignment that turns a free-form feature description (passed as the positional message body) into an executable task-runner plan. The planner surveys repo conventions, impact surface, reuse opportunities, and risks, then copies a reference template into the repo-name task-runner drafts area under `${TASK_RUNNER_STATE_DIR}/drafts/`, fills in every placeholder with concrete file-level detail, and hands back the exact `task-runner init --agent implementer ...` command the caller should run once the draft is approved. ([#8](https://github.com/kcosr/task-runner/pull/8))
 - Added `TASK_RUNNER_CMD` and the runner-injected `{{task_runner_cmd}}` template variable so user-facing workflow instructions can point at the installed `task-runner` command path instead of hardcoding the bare command name. ([#9](https://github.com/kcosr/task-runner/pull/9))
+- Added `apps/web`, a phase-1 same-origin run dashboard built with
+  React/Vite. `task-runner serve` now serves the packaged SPA,
+  `/app-config.json`, and the existing `/api/*` + `/api/events/*`
+  control-plane routes from one origin, and the repo now ships
+  the canonical visual-contract mockup under
+  `apps/web/mockups/run-dashboard.{html,css}`. ([#24](https://github.com/kcosr/task-runner/pull/24))
 
 ### Changed
 
+- `task-runner serve` no longer restricts `--listen` / `TASK_RUNNER_LISTEN` to loopback hosts, and the web dashboard now keeps long kanban/task lists scrollable while the detail drawer sections start collapsed and can be expanded on demand. ([#24](https://github.com/kcosr/task-runner/pull/24))
+- Refined the web dashboard interaction model: the detail drawer now closes on `Escape`, the board toolbar exposes archived / empty-column / failure-grouping toggles directly in the header, and mobile kanban scrolling snaps more reliably between columns. ([#24](https://github.com/kcosr/task-runner/pull/24))
+- Added a board jump strip above the kanban that exposes only the currently rendered non-empty columns and scrolls them into view when the board overflows. ([#24](https://github.com/kcosr/task-runner/pull/24))
+- Renamed task-body tabs in the detail drawer from `Description` to `Instructions` for consistency with assignment/task wording. ([#24](https://github.com/kcosr/task-runner/pull/24))
+- Refactored the daemon control plane so HTTP and WebSocket commands
+  now flow through one shared operations layer, keeping transport
+  parsing thin while preserving shared run/definition DTO behavior. ([#24](https://github.com/kcosr/task-runner/pull/24))
 - Split the repo into npm workspaces: the root package is now a private orchestration workspace, `apps/cli` owns the `task-runner` executable plus `serve` transport host, and `packages/core` owns shared run lifecycle, config/assignment loading, backend adapters, contracts, and helpers. Root `npm run build`, `test`, `lint`, and `check` still work unchanged, but generated build output now lives under the workspace packages instead of a single root `dist/`. ([#23](https://github.com/kcosr/task-runner/pull/23))
 - `task-runner` now has an explicit dual-host model. Embedded mode keeps
   the existing in-process CLI behavior, while daemon mode moves live run
   ownership and external abort control into the local daemon without
   silently falling back to embedded execution. ([#21](https://github.com/kcosr/task-runner/pull/21))
+- Root build/test/check wiring now includes the new `apps/web` workspace,
+  and the CLI package build/prepack flow copies built web assets into
+  `apps/cli/dist/web` so installed `task-runner serve` can host the
+  dashboard without depending on a sibling workspace checkout. ([#24](https://github.com/kcosr/task-runner/pull/24))
 - Fresh run cwd resolution now preserves whether an agent file explicitly
   authored `cwd`. `--cwd` still wins, explicit agent `cwd` still wins
   next, daemon runs otherwise use the client caller's cwd, and embedded
@@ -70,6 +87,35 @@
 
 ### Fixed
 
+- Fixed daemon-hosted web asset resolution to use real filesystem paths,
+  preventing packaged dashboard failures on Windows and URL-encoded
+  install paths, and hardened frontend serving so directory requests
+  like `/assets` no longer crash `task-runner serve`. ([#24](https://github.com/kcosr/task-runner/pull/24))
+- Fixed the web dashboard to validate runtime config and daemon API
+  payloads before using them, so malformed responses now fail cleanly
+  instead of being trusted as typed contracts. ([#24](https://github.com/kcosr/task-runner/pull/24))
+- Fixed the board jump strip to stay stable while switching selected
+  runs, validated daemon SSE envelopes and stored board settings before
+  trusting them, and stopped drawer resize cancels from committing
+  stray widths. ([#24](https://github.com/kcosr/task-runner/pull/24))
+- Fixed daemon-hosted frontend routes to return `405 Method Not Allowed`
+  with an `Allow: GET, HEAD` header for unsupported methods. ([#24](https://github.com/kcosr/task-runner/pull/24))
+- Fixed the web dashboard SSE client to treat malformed daemon event
+  payloads as a stale-stream condition instead of crashing the live
+  updates subscription. ([#24](https://github.com/kcosr/task-runner/pull/24))
+- Fixed dashboard copy actions to fall back when the async Clipboard API
+  is unavailable, and removed the duplicate header-level backend session
+  copy control in the detail drawer. Copy confirmations now render as
+  bottom toasts that auto-dismiss after a short delay. ([#24](https://github.com/kcosr/task-runner/pull/24))
+- Fixed the web dashboard live-update loop to ignore noisy daemon
+  transport events, revalidate state before clearing stale-stream
+  warnings after reconnect, lock conflicting run actions while a
+  mutation is in flight, and reset detail-drawer UI state when
+  switching between runs. ([#24](https://github.com/kcosr/task-runner/pull/24))
+- Fixed daemon-hosted SSE subscriptions to stay attached under normal
+  HTTP backpressure, and hardened frontend asset serving so filesystem
+  read/stat failures return controlled 500 responses instead of
+  crashing the daemon. ([#24](https://github.com/kcosr/task-runner/pull/24))
 - Fixed `assignments/plan-feature/` scaffold guidance to require implementers to verify they are in a non-`main` worktree, confirm local `main` is already in sync with `origin/main`, and sync the current worktree to local `main` before starting. Generated plans now block instead of proceeding when that preflight fails, and `assignments/plan-review/` flags drafts that omit it. ([#15](https://github.com/kcosr/task-runner/pull/15))
 - Fixed workspace persistence to use atomic writes for manifests, attempt logs, and assignment files, and reject resume targets whose manifest paths do not match the workspace they were loaded from. ([#6](https://github.com/kcosr/task-runner/pull/6))
 - Fixed Codex timeout/abort cleanup to wait for late-arriving turn ids and retry interruption, reducing the risk of orphaned remote turns. ([#6](https://github.com/kcosr/task-runner/pull/6))

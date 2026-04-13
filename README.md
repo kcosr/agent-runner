@@ -16,7 +16,7 @@ It now supports two local host modes:
 
 - **Embedded mode**: the foreground CLI process owns execution.
 - **Daemon mode**: `task-runner serve` owns live runs over a local
-  loopback control plane. CLI commands still route through WebSocket
+  control plane. CLI commands still route through WebSocket
   JSON-RPC with `--connect` / `TASK_RUNNER_CONNECT`, while browser-style
   clients can use HTTP for request/response plus SSE for live run events.
 
@@ -114,7 +114,13 @@ chat output.
   run ownership, event streaming, and external abort control into a
   long-lived local `task-runner serve` process reached over
   `ws://127.0.0.1:4773/` by default for CLI WebSocket JSON-RPC, with a
-  browser-facing HTTP API and SSE stream on the same loopback listener.
+  browser-facing HTTP API and SSE stream on the same listener.
+- **Run dashboard web app**: `apps/web` ships a same-origin browser UI
+  for run status, filtering, archive toggles, and deep-linkable run
+  detail routes. The app loads runtime config from `/app-config.json`,
+  reads/actions over HTTP, stays fresh over SSE, and follows the
+  canonical phase-1 visual contract in
+  `apps/web/mockups/run-dashboard.{html,css}`.
 - **Live status inspection**: `task-runner status <id>` reads the
   manifest and (for in-flight runs) overlays the live workspace
   `assignment.md` so you can see mid-attempt progress without
@@ -562,7 +568,7 @@ before kicking off the actual work.
 
 ### `task-runner serve`
 
-Start the local daemon host on loopback:
+Start the local daemon host:
 
 ```bash
 task-runner serve
@@ -573,12 +579,10 @@ Rules:
 
 - The daemon keeps the existing JSON-RPC 2.0 WebSocket control plane for
   CLI clients.
-- The same loopback listener also serves browser-facing HTTP endpoints
+- The same listener also serves browser-facing HTTP endpoints
   under `/api/...` and live run events via SSE under `/api/events/...`.
 - `--listen` overrides `TASK_RUNNER_LISTEN`; both fall back to
   `ws://127.0.0.1:4773/`.
-- The listener must stay on loopback (`127.0.0.1`, `localhost`, or
-  `::1`).
 - Run-scoped commands, `list runs`, and definition read commands opt
   into daemon mode with `--connect <ws-url>` or `TASK_RUNNER_CONNECT`.
 - External live abort control exists only in daemon mode.
@@ -590,6 +594,26 @@ Transport split:
   SSE for live run events.
 - A default listener such as `ws://127.0.0.1:4773/` therefore also exposes
   HTTP at `http://127.0.0.1:4773/api/`.
+- The same host also serves the built web app and runtime config:
+  `http://127.0.0.1:4773/` for the SPA and
+  `http://127.0.0.1:4773/app-config.json` for the phase-1 frontend
+  config payload.
+
+Web dashboard notes:
+
+- `apps/web` is a real workspace package built with Vite + React.
+- Normal local use is same-origin: `task-runner serve` hosts the built
+  frontend plus `/api/*` and `/api/events/*`.
+- Client routing is deep-linkable: `/` shows the board and
+  `/runs/:runId` opens the selected-run drawer/sheet.
+- The canonical visual contract lives in
+  `apps/web/mockups/run-dashboard.html` and
+  `apps/web/mockups/run-dashboard.css`. The React UI should match that
+  layout and visual language unless a later change explicitly justifies
+  divergence.
+- Development uses the Vite dev server in `apps/web` with a proxy for
+  `/api/*`, `/api/events/*`, and `/app-config.json` back to the local
+  daemon host.
 
 ### `task-runner run reset / archive / unarchive`
 
@@ -1226,7 +1250,7 @@ printed to stdout.
 | `TASK_RUNNER_STATE_DIR` | Root for runtime state. Runs live under `runs/<repo-name>/<run-id>/`; drafts live under `drafts/<repo-name>/`. Defaults to `${XDG_STATE_HOME}/task-runner` or `~/.local/state/task-runner`. |
 | `TASK_RUNNER_CMD` | Override the CLI command name used in user-facing messages, prompts, and assignment templates. Defaults to the `task-runner` binary found on `PATH`, then bare `task-runner`. |
 | `TASK_RUNNER_CONNECT` | Opt commands into daemon mode by pointing them at a local daemon WebSocket URL. Default: unset (embedded mode). |
-| `TASK_RUNNER_LISTEN` | Default WebSocket listen URL for `task-runner serve`. Falls back to `ws://127.0.0.1:4773/`. The same loopback listener also serves HTTP/SSE on the derived `http://` origin. |
+| `TASK_RUNNER_LISTEN` | Default WebSocket listen URL for `task-runner serve`. Falls back to `ws://127.0.0.1:4773/`. The same listener also serves HTTP/SSE on the derived `http://` origin. |
 | `TASK_RUNNER_CLAUDE_BIN` | Path to the `claude` binary. Defaults to `claude` on `PATH`. |
 | `TASK_RUNNER_CODEX_BIN` | Path to the `codex` binary for stdio mode. Defaults to `codex` on `PATH`. |
 | `TASK_RUNNER_CODEX_WS_URL` | If set, the codex backend connects to this WebSocket URL instead of spawning a stdio subprocess. |
@@ -1385,10 +1409,12 @@ real subprocesses are a couple of `runProcess` smoke tests against
 
 Subsystem boundaries are now explicit npm workspaces:
 `apps/cli` owns the executable transport edge and local daemon host,
-while `packages/core` owns the transport-neutral run lifecycle,
-manifest/task state, shared contracts, config/assignment loading,
-backend adapters, and shared helpers. The daemon remains part of the
-CLI app rather than becoming a separate package.
+`apps/web` owns the browser UI, and `packages/core` owns the
+transport-neutral run lifecycle, manifest/task state, shared contracts,
+config/assignment loading, backend adapters, and shared helpers. The
+daemon remains part of the CLI app rather than becoming a separate
+package, and the web app is served from the CLI package's built `dist/`
+layout for same-origin local use.
 
 ```mermaid
 flowchart TD
@@ -1398,6 +1424,10 @@ flowchart TD
         render["src/cli/render-run.ts"]
         commandRender["src/commands/render.ts"]
         daemon["src/daemon/*"]
+    end
+    subgraph Web["apps/web"]
+        webApp["src/*"]
+        webMock["mockups/run-dashboard.{html,css}"]
     end
     subgraph Core["packages/core"]
         service["src/app/service.ts"]
@@ -1420,8 +1450,10 @@ flowchart TD
     cli --> render
     cli --> commandRender
     cli --> daemon
+    cli --> webApp
     cli --> service
     daemon --> service
+    daemon --> webApp
     service --> commands
     service --> execute
     execute --> loader
@@ -1433,6 +1465,8 @@ flowchart TD
     runloop --> paths
     runloop --> util
     runloop --> Workspace
+    webApp --> contracts
+    webApp --> daemon
 ```
 
 ```

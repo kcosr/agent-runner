@@ -8,7 +8,9 @@
     "task-runner": "./dist/cli.js"
   },
   "scripts": {
-    "build": "tsc -b"
+    "build": "npm run build:dist && node ../../scripts/copy-web-assets.mjs",
+    "build:dist": "tsc -b",
+    "prepack": "npm run build -w @task-runner/core && npm run build -w @task-runner/web && npm run build:dist && node ../../scripts/copy-web-assets.mjs"
   },
   "dependencies": {
     "@task-runner/core": "*",
