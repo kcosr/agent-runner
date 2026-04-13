@@ -278,7 +278,7 @@ async function runServe(parsed: ParsedArgs): Promise<never> {
     process.exit(exitCode);
   };
   process.on("SIGINT", () => {
-    void shutdown(0);
+    void shutdown(130);
   });
   process.on("SIGTERM", () => {
     void shutdown(0);

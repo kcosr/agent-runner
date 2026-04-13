@@ -490,6 +490,20 @@ test("serve exits cleanly on SIGTERM", async () => {
   }
 });
 
+test("serve exits 130 on SIGINT", async () => {
+  const dir = tempDir();
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const daemon = await startCliDaemon(dir, listenUrl);
+  try {
+    const result = await daemon.stop("SIGINT");
+    assert.equal(result.code, 130);
+    assert.equal(result.signal, null);
+  } finally {
+    // no-op if already stopped
+  }
+});
+
 test("daemon init uses the remote caller cwd when the agent omits cwd", async () => {
   const daemonDir = tempDir();
   writeAgent(daemonDir, "daemon-agent", AGENT);
