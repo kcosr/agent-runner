@@ -1,8 +1,9 @@
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { extname, join, normalize } from "node:path";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const WEB_ROOT_URL = new URL("../web/", import.meta.url);
+const WEB_ROOT_PATH = fileURLToPath(new URL("../web/", import.meta.url));
 
 const CONTENT_TYPES: Record<string, string> = {
   ".css": "text/css; charset=utf-8",
@@ -13,19 +14,41 @@ const CONTENT_TYPES: Record<string, string> = {
 };
 
 function webRootPath(): string {
-  return WEB_ROOT_URL.pathname;
+  return WEB_ROOT_PATH;
+}
+
+export function resolveFrontendPath(
+  rootPath: string,
+  pathname: string,
+  pathApi: Pick<typeof path, "isAbsolute" | "normalize" | "relative" | "resolve" | "sep"> = path,
+): string | null {
+  const strippedPath = pathname.replace(/^[/\\]+/, "");
+  const relativePath = pathname === "/" ? "index.html" : pathApi.normalize(strippedPath);
+  const resolvedPath = pathApi.resolve(rootPath, relativePath);
+  const relativeToRoot = pathApi.relative(rootPath, resolvedPath);
+  if (
+    relativeToRoot === "" ||
+    relativeToRoot === ".." ||
+    relativeToRoot.startsWith(`..${pathApi.sep}`) ||
+    pathApi.isAbsolute(relativeToRoot)
+  ) {
+    return null;
+  }
+  return resolvedPath;
 }
 
 function readFrontendFile(pathname: string): { body: Buffer; contentType: string } | null {
-  const relativePath = pathname === "/" ? "index.html" : normalize(pathname).replace(/^\/+/, "");
-  const resolvedPath = join(webRootPath(), relativePath);
-  if (!resolvedPath.startsWith(webRootPath()) || !existsSync(resolvedPath)) {
+  const resolvedPath = resolveFrontendPath(webRootPath(), pathname);
+  if (!resolvedPath) {
     return null;
   }
-
+  const stats = statSync(resolvedPath, { throwIfNoEntry: false });
+  if (!stats?.isFile()) {
+    return null;
+  }
   return {
     body: readFileSync(resolvedPath),
-    contentType: CONTENT_TYPES[extname(resolvedPath)] ?? "application/octet-stream",
+    contentType: CONTENT_TYPES[path.extname(resolvedPath)] ?? "application/octet-stream",
   };
 }
 
@@ -67,7 +90,7 @@ export function serveFrontendRequest(
     return;
   }
 
-  if (extname(pathname)) {
+  if (path.extname(pathname)) {
     res.statusCode = 404;
     res.end("Not Found");
     return;

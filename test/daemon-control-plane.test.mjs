@@ -396,6 +396,15 @@ test("daemon serve exposes app config, keeps /api precedence, and falls back to 
       const deepLinkBody = await deepLink.text();
       assert.equal(deepLink.status, 200);
       assert.match(deepLinkBody, /<div id="root"><\/div>/);
+
+      const assetsDirectory = await fetch(new URL("/assets", httpBaseUrl));
+      const assetsDirectoryBody = await assetsDirectory.text();
+      assert.equal(assetsDirectory.status, 200);
+      assert.match(assetsDirectoryBody, /<div id="root"><\/div>/);
+
+      const daemonAfterAssets = await httpJson(httpBaseUrl, "/api/daemon");
+      assert.equal(daemonAfterAssets.status, 200);
+      assert.equal(daemonAfterAssets.body.daemon.listenUrl, listenUrl);
     } finally {
       await server.close();
     }
