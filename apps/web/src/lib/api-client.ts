@@ -2,9 +2,15 @@ import type { AppRuntimeConfig } from "@task-runner/core/contracts/app-config.js
 import {
   runArchiveResultSchema,
   runDetailSchema,
+  runNameResultSchema,
   runSummarySchema,
 } from "@task-runner/core/contracts/run-schemas.js";
-import type { RunArchiveResult, RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
+import type {
+  RunArchiveResult,
+  RunDetail,
+  RunNameResult,
+  RunSummary,
+} from "@task-runner/core/contracts/runs.js";
 import { z } from "zod";
 
 export class ApiError extends Error {
@@ -126,6 +132,19 @@ async function readArchiveResult(response: Response, label: string): Promise<Run
   );
 }
 
+async function readNameResult(response: Response, label: string): Promise<RunNameResult> {
+  if (!response.ok) {
+    return await readError(response);
+  }
+  return parseField(
+    await parseResponseJson(response, label),
+    response.status,
+    "result",
+    runNameResultSchema,
+    label,
+  );
+}
+
 async function readRunIdResult(response: Response, label: string): Promise<string> {
   if (!response.ok) {
     return await readError(response);
@@ -211,6 +230,20 @@ export function createApiClient(config: AppRuntimeConfig) {
         },
       );
       await readAbortResult(response);
+    },
+    async setRunName(runId: string, name: string | null): Promise<RunNameResult> {
+      const response = await fetch(
+        joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/name`),
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json",
+          },
+          body: JSON.stringify({ name }),
+        },
+      );
+      return await readNameResult(response, "Rename run");
     },
   };
 }

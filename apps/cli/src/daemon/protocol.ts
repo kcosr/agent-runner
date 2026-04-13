@@ -3,6 +3,7 @@ import type { DefinitionEntry } from "@task-runner/core/config/loader.js";
 import type {
   RunArchiveResult,
   RunDetail,
+  RunNameResult,
   RunSummary,
   RunTaskSummary,
 } from "@task-runner/core/contracts/runs.js";
@@ -51,6 +52,10 @@ export interface RunsListParams {
 
 export interface RunTargetParams {
   target: string;
+}
+
+export interface RunSetNameParams extends RunTargetParams {
+  name: string | null;
 }
 
 export interface TaskTargetParams extends RunTargetParams {
@@ -147,6 +152,10 @@ export interface AssignmentResult {
 
 export interface RunArchiveRpcResult {
   result: RunArchiveResult;
+}
+
+export interface RunSetNameRpcResult {
+  result: RunNameResult;
 }
 
 export interface RunsStartResult {

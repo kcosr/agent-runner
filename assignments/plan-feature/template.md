@@ -1,7 +1,6 @@
 ---
 schemaVersion: 1
 name: plan-<<KEBAB_FEATURE_SLUG>>
-sessionName: implement <<FEATURE_SHORT_TITLE>> · {{repo_path}}
 maxRetries: 4
 lockedFields:
   - tasks
@@ -334,6 +333,7 @@ tasks:
           {{task_runner_cmd}} run \
             --agent code-reviewer \
             --assignment code-review \
+            --name "<same-short-topic-name>" \
             --var repo_path={{repo_path}} \
             --var "range=<<PLACEHOLDER_REVIEW_RANGE>>" \
             --var implementation_plan={{assignment_path}}
@@ -345,6 +345,14 @@ tasks:
       reviewer at this plan so it can cross-check that
       every planned task actually shipped — that is what
       the reviewer's plan-coverage task consumes.
+
+      Use the same short topic label the caller used when they
+      initialized this run:
+        - first word capitalized
+        - target 2-4 words and about 32 characters or less
+        - omit redundant words already covered by the assignment
+          such as `Review` or `Implementation`
+        - never include cwd paths, repo names, or git ranges
 
       The review produces its own task-runner run with its
       own run id. Capture that review run id in this task's

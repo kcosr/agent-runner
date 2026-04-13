@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { type TaskState, VALID_STATUSES, isValidStatus } from "../../assignment/model.js";
 import { parseAssignment } from "../../assignment/parser.js";
+import { setCodexThreadName } from "../../backends/codex.js";
 import {
   type DefinitionEntry,
   type DefinitionKind,
@@ -12,14 +13,17 @@ import {
 import {
   type RunArchiveResult,
   type RunDetail,
+  type RunNameResult,
   type RunSummary,
   type RunTaskMutationCapabilities,
   deriveTaskMutationCapabilities,
   toRunArchiveResult,
   toRunDetail,
+  toRunNameResult,
   toRunSummary,
 } from "../../contracts/runs.js";
 import { resolveTaskRunnerCommand } from "../../task-runner-command.js";
+import { trimRunName } from "../../util/run-name.js";
 import { shortId } from "../../util/short-id.js";
 import type { LoadedAgent, LoadedAssignment } from "../config/loaded.js";
 import {
@@ -63,7 +67,7 @@ export interface RunResetResult {
 }
 
 export type RunListEntry = RunSummary;
-export type { RunArchiveResult } from "../../contracts/runs.js";
+export type { RunArchiveResult, RunNameResult } from "../../contracts/runs.js";
 
 export type RunListResult = RunListEntry[];
 
@@ -268,6 +272,26 @@ function validateTaskTitle(title: string): string {
   return trimmed;
 }
 
+function validateRunName(name: string): string {
+  try {
+    return trimRunName(name);
+  } catch {
+    throw new CommandError("run set-name: <name> cannot be empty");
+  }
+}
+
+async function propagateRunNameChange(manifest: RunManifest): Promise<void> {
+  if (manifest.backend !== "codex" || manifest.backendSessionId === null) {
+    return;
+  }
+  await setCodexThreadName({
+    threadId: manifest.backendSessionId,
+    cwd: manifest.cwd,
+    env: process.env as Record<string, string>,
+    name: manifest.name,
+  });
+}
+
 export function readStatus(target: string): StatusCommandResult {
   const resolved = resolveRun(target);
   refreshRunSnapshotAfterTaskStateSettles(resolved);
@@ -375,6 +399,39 @@ export function archiveRun(target: string): RunArchiveResult {
 
 export function unarchiveRun(target: string): RunArchiveResult {
   return setRunArchived(target, false);
+}
+
+export async function setRunName(
+  target: string,
+  input: { name: string | null },
+): Promise<RunNameResult> {
+  const resolved = resolveRun(target);
+  let changed = false;
+
+  withTaskStateLock(resolved.workspaceDir, () => {
+    resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
+    const nextName = input.name === null ? null : validateRunName(input.name);
+    if (resolved.manifest.name === nextName) {
+      return;
+    }
+    resolved.manifest.name = nextName;
+    resolved.manifest.resetSeed.name = nextName;
+    writeManifest(resolved.workspaceDir, resolved.manifest);
+    changed = true;
+  });
+
+  if (changed) {
+    try {
+      await propagateRunNameChange(resolved.manifest);
+    } catch {
+      // Best-effort backend propagation. The manifest update is canonical.
+    }
+  }
+
+  return toRunNameResult({
+    manifest: resolved.manifest,
+    changed,
+  });
 }
 
 export function listTasks(target: string): TaskListResult {

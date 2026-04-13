@@ -5,6 +5,7 @@ import type { TaskState, TaskStatus } from "../../assignment/model.js";
 import { renderAssignment } from "../../assignment/writer.js";
 import { resolveRunWorkspaceDir } from "../../config/runtime-paths.js";
 import { resolveTaskRunnerCommand } from "../../task-runner-command.js";
+import { normalizeOptionalRunName } from "../../util/run-name.js";
 import { shortId } from "../../util/short-id.js";
 import { writeTextFileAtomic } from "../../util/write-file-atomic.js";
 import type { Backend, BackendEvent, BackendInvokeResult } from "../backends/types.js";
@@ -24,6 +25,7 @@ import {
   type SessionRecord,
   type TaskSnapshot,
   buildRunResetSeed,
+  resolveResumeTarget,
   snapshotTasks,
   workspaceAssignmentPath,
   writeAttemptLog,
@@ -61,7 +63,7 @@ export interface RunOverrides {
   effort?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   taskMode?: TaskMode;
   message?: string;
-  sessionName?: string;
+  name?: string;
   timeoutSec?: number;
   unrestricted?: boolean;
   maxRetries?: number;
@@ -110,7 +112,7 @@ export type RunEvent =
       agentName: string;
       assignmentSourcePath: string | null;
       assignmentPath: string;
-      sessionName: string | null;
+      name: string | null;
       cwd: string;
       passive: boolean;
       pendingPrompt: string;
@@ -125,7 +127,7 @@ export type RunEvent =
       agentName: string;
       assignmentSourcePath: string | null;
       assignmentPath: string;
-      sessionName: string | null;
+      name: string | null;
       cwd: string;
       sessionIndex: number | null;
     }
@@ -176,6 +178,13 @@ export class InvalidAddedTaskError extends Error {
   }
 }
 
+export class InvalidRunNameError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidRunNameError";
+  }
+}
+
 export class InvalidBackendSessionError extends Error {
   constructor(
     public readonly sessionId: string,
@@ -223,7 +232,6 @@ function checkLockedFields(
     ["effort", overrides?.effort, agentConfig.effort],
     ["taskMode", overrides?.taskMode, assignmentConfig?.taskMode ?? "file"],
     ["message", overrides?.message, assignmentConfig?.message],
-    ["sessionName", overrides?.sessionName, assignmentConfig?.sessionName],
     ["timeoutSec", overrides?.timeoutSec, agentConfig.timeoutSec],
     ["unrestricted", overrides?.unrestricted, agentConfig.unrestricted],
     ["maxRetries", overrides?.maxRetries, assignmentConfig?.maxRetries],
@@ -264,7 +272,6 @@ function checkLockedFieldsFromManifest(
     ["effort", overrides?.effort, manifest.effort],
     ["taskMode", overrides?.taskMode, manifest.taskMode ?? "file"],
     ["message", overrides?.message, manifest.message],
-    ["sessionName", overrides?.sessionName, manifest.sessionName],
     ["timeoutSec", overrides?.timeoutSec, manifest.timeoutSec],
     ["unrestricted", overrides?.unrestricted, manifest.unrestricted],
     // maxRetries is stored on the manifest as maxAttempts (= retries + 1)
@@ -291,6 +298,29 @@ function validateAddedTaskTitle(title: string, index: number): void {
     throw new InvalidAddedTaskError(
       `--add-task #${index + 1}: title exceeds ${MAX_TITLE_LENGTH} characters (${trimmed.length})`,
     );
+  }
+}
+
+function normalizeRunName(value: string | undefined): string | null {
+  try {
+    return normalizeOptionalRunName(value);
+  } catch {
+    throw new InvalidRunNameError("--name cannot be empty");
+  }
+}
+
+function refreshMutableManifestName(manifest: RunManifest): void {
+  const latest = resolveResumeTarget(manifest.workspaceDir).manifest;
+  manifest.name = latest.name;
+  manifest.resetSeed.name = latest.resetSeed.name;
+}
+
+function tryRefreshMutableManifestName(manifest: RunManifest): void {
+  try {
+    refreshMutableManifestName(manifest);
+  } catch {
+    // Mutable name refresh is best-effort; keep the in-memory name if
+    // the manifest cannot be re-read transiently.
   }
 }
 
@@ -567,6 +597,9 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         "--var cannot be combined with --resume-run — runtime vars are resolved from the assignment once at first write and frozen into the manifest; they are not re-resolved on resume.",
       );
     }
+    if (overrides?.name !== undefined) {
+      throw new ResumeError("--name cannot be combined with --resume-run");
+    }
 
     // Execute-after-init is stricter: no overrides at all. Init
     // deliberately froze every resolvable field at creation time,
@@ -580,7 +613,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       if (overrides?.timeoutSec !== undefined) forbidden.push("--timeout-sec");
       if (overrides?.maxRetries !== undefined) forbidden.push("--max-retries");
       if (overrides?.unrestricted !== undefined) forbidden.push("--unrestricted");
-      if (overrides?.sessionName !== undefined) forbidden.push("--session-name");
+      if (overrides?.name !== undefined) forbidden.push("--name");
       if (forbidden.length > 0) {
         throw new ResumeError(
           `resuming an initialized run does not accept ${forbidden.join(", ")} — init froze these at creation. If you need different values, create a fresh run.`,
@@ -735,20 +768,12 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
   const trimmedMessage = message?.trim() ?? "";
 
-  // Session name resolution: CLI override wins, then on resume /
-  // execute-after-init the prior manifest is canonical (the assignment
-  // isn't loaded). On a fresh run or init the assignment provides it
-  // and we interpolate vars into it.
-  let sessionName: string | null;
-  if (overrides?.sessionName) {
-    sessionName = interpolate(overrides.sessionName, injectedVars);
-  } else if ((isResume || priorInitialized) && resume) {
-    sessionName = resume.manifest.sessionName ?? null;
-  } else if (assignmentConfig?.sessionName) {
-    sessionName = interpolate(assignmentConfig.sessionName, injectedVars);
-  } else {
-    sessionName = null;
-  }
+  // Run name resolution: fresh `run` / `init` may set it via the
+  // CLI override, while resume and execute-after-init always reuse
+  // the persisted manifest value.
+  const overrideName = normalizeRunName(overrides?.name);
+  let name =
+    overrideName ?? ((isResume || priorInitialized) && resume ? resume.manifest.name : null);
 
   // Prompt composition (Option B: broad → specific → mechanics → ask).
   //
@@ -842,7 +867,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       model: model ?? null,
       effort: effort ?? null,
       taskMode,
-      sessionName,
+      name,
       unrestricted,
       cwd,
       timeoutSec,
@@ -864,7 +889,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     manifest = {
       ...resume.manifest,
       taskMode,
-      sessionName,
+      name,
       endedAt: null,
       status: "running",
       exitCode: null,
@@ -918,7 +943,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       model: model ?? null,
       effort: effort ?? null,
       message,
-      sessionName,
+      name,
       unrestricted,
       cwd,
       lockedFields: frozenLockedFields,
@@ -946,7 +971,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       resetSeed: buildRunResetSeed({
         model: model ?? null,
         effort: effort ?? null,
-        sessionName,
+        name,
         unrestricted,
         timeoutSec,
         maxAttempts,
@@ -976,7 +1001,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       agentName: agentConfig.name,
       assignmentSourcePath: loadedAssignment?.sourcePath ?? null,
       assignmentPath,
-      sessionName,
+      name,
       cwd,
       passive: isPassive,
       pendingPrompt: initialPrompt,
@@ -1025,7 +1050,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     agentName: agentConfig.name,
     assignmentSourcePath: loadedAssignment?.sourcePath ?? null,
     assignmentPath,
-    sessionName,
+    name,
     cwd,
     sessionIndex: isResume ? sessionIndex : null,
   });
@@ -1055,6 +1080,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   let terminal: { status: RunCompletionStatus; exitCode: number } | null = null;
 
   while (sessionAttempts < maxAttempts && !terminal) {
+    tryRefreshMutableManifestName(manifest);
+    name = manifest.name;
     sessionAttempts++;
     const globalAttemptNumber = priorAttemptCount + sessionAttempts;
     emitEvent({ type: "attempt_started", attempt: globalAttemptNumber });
@@ -1077,7 +1104,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       unrestricted,
       timeoutSec,
       resumeSessionId: sessionId ?? undefined,
-      sessionName: sessionName ?? undefined,
+      name: name ?? undefined,
       abortSignal: opts.abortSignal,
       emit: emitEvent,
     });
@@ -1151,6 +1178,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       }
       sessionRecord.lastAttempt = globalAttemptNumber;
 
+      tryRefreshMutableManifestName(manifest);
       writeManifest(workspaceDir, manifest);
     });
 
@@ -1238,6 +1266,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     manifest.status = terminal.status;
     manifest.exitCode = terminal.exitCode;
     manifest.endedAt = endedAt;
+    tryRefreshMutableManifestName(manifest);
     writeManifest(workspaceDir, manifest);
   });
 

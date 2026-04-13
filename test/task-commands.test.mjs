@@ -514,7 +514,7 @@ test("run reset: json output restores initialized state and removes attempt arti
     manifest.maxAttempts = 9;
     manifest.model = "override-model";
     manifest.effort = "max";
-    manifest.sessionName = "override session";
+    manifest.name = "override session";
     manifest.unrestricted = true;
     manifest.timeoutSec = 42;
     manifest.backendSessionId = "sess-after-run";
@@ -540,7 +540,7 @@ test("run reset: json output restores initialized state and removes attempt arti
   assert.equal(manifest.maxAttempts, 2);
   assert.equal(manifest.model, "claude-sonnet-4-6");
   assert.equal(manifest.effort, null);
-  assert.equal(manifest.sessionName, null);
+  assert.equal(manifest.name, null);
   assert.equal(manifest.unrestricted, false);
   assert.equal(manifest.timeoutSec, 3600);
   assert.equal(manifest.backendSessionId, null);

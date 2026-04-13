@@ -1,5 +1,11 @@
 import type { DefinitionEntry } from "../config/loader.js";
-import type { RunArchiveResult, RunDetail, RunSummary, RunTaskSummary } from "../contracts/runs.js";
+import type {
+  RunArchiveResult,
+  RunDetail,
+  RunNameResult,
+  RunSummary,
+  RunTaskSummary,
+} from "../contracts/runs.js";
 import { toRunDetail } from "../contracts/runs.js";
 import {
   addTask,
@@ -10,6 +16,7 @@ import {
   listTasks,
   readStatus,
   resetRun,
+  setRunName,
   setTask,
   showDefinition,
   showTask,
@@ -33,7 +40,7 @@ export interface RunCommandOverrides {
   effort?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   taskMode?: TaskMode;
   message?: string;
-  sessionName?: string;
+  name?: string;
   timeoutSec?: number;
   unrestricted?: boolean;
   maxRetries?: number;
@@ -119,6 +126,10 @@ export function unarchive(target: string): RunArchiveResult {
 
 export function reset(target: string): RunDetail {
   return toRunDetail({ manifest: resetRun(target).manifest, isLive: false });
+}
+
+export function renameRun(target: string, input: { name: string | null }): Promise<RunNameResult> {
+  return setRunName(target, input);
 }
 
 export function updateTask(

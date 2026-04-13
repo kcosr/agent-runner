@@ -2,7 +2,6 @@
 schemaVersion: 1
 name: plan-review
 taskMode: cli
-sessionName: plan review · {{repo_path}}
 vars:
   repo_path:
     type: string
@@ -120,6 +119,10 @@ tasks:
         - the internal review step passes
           `implementation_plan={{assignment_path}}` so the code
           reviewer sees the implementer workspace
+        - the internal review step passes a short descriptive
+          `--name` (same topic, capitalized first word, no cwd /
+          repo / range noise, no redundant `Review` /
+          `Implementation` wording)
         - the draft explains the recursion-depth requirement for
           the nested code-review run
 
@@ -127,6 +130,11 @@ tasks:
         - the planner instructs the caller to run init manually
           instead of initializing the implementer run itself
         - the init command hard-codes `--backend passive`
+        - the init command includes a short descriptive `--name`
+          with the same format rule: capitalized first word,
+          about 2-4 words / 32 chars, and no cwd / repo / range
+          clutter or redundant `Plan` / `Review` /
+          `Implementation` wording
         - the init command uses a placeholder worktree path
           such as `--var repo_path=<worktree-dir>` rather than
           a machine-specific absolute path from the planner's

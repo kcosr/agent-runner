@@ -42,7 +42,7 @@ class MockEventSource {
 }
 
 function makeRun(overrides: Partial<RunSummary> = {}): RunSummary {
-  return {
+  const run: RunSummary = {
     runId: "run-1",
     repo: "task-runner",
     status: "running",
@@ -51,7 +51,7 @@ function makeRun(overrides: Partial<RunSummary> = {}): RunSummary {
     assignmentName: "Build dashboard",
     backend: "codex",
     model: "gpt-5.4",
-    sessionName: "dashboard",
+    name: "Build dashboard",
     cwd: "/tmp/task-runner",
     startedAt: "2026-04-13T05:00:00.000Z",
     endedAt: null,
@@ -69,10 +69,14 @@ function makeRun(overrides: Partial<RunSummary> = {}): RunSummary {
     },
     ...overrides,
   };
+  if (overrides.name === undefined && overrides.assignmentName !== undefined) {
+    run.name = overrides.assignmentName;
+  }
+  return run;
 }
 
 function makeDetail(overrides: Partial<RunDetail> = {}): RunDetail {
-  return {
+  const detail: RunDetail = {
     runId: "run-1",
     repo: "task-runner",
     status: "running",
@@ -92,7 +96,7 @@ function makeDetail(overrides: Partial<RunDetail> = {}): RunDetail {
     backend: "codex",
     model: "gpt-5.4",
     effort: "high",
-    sessionName: "dashboard",
+    name: "Build dashboard",
     backendSessionId: "thread-1",
     cwd: "/tmp/task-runner",
     taskMode: "file",
@@ -141,6 +145,10 @@ function makeDetail(overrides: Partial<RunDetail> = {}): RunDetail {
     },
     ...overrides,
   };
+  if (overrides.name === undefined && overrides.assignment?.name !== undefined) {
+    detail.name = overrides.assignment.name;
+  }
+  return detail;
 }
 
 function installFetchMock(
@@ -216,6 +224,26 @@ function installFetchMock(
       return new Response(JSON.stringify({ accepted: true, runId }), { status: 200 });
     }
 
+    const renameMatch = /\/api\/runs\/([^/]+)\/name$/.exec(url);
+    if (renameMatch && init?.method === "POST") {
+      const runId = decodeURIComponent(renameMatch[1] ?? "");
+      const body =
+        typeof init.body === "string" && init.body.length > 0
+          ? (JSON.parse(init.body) as { name?: string | null })
+          : {};
+      const name = body.name ?? null;
+      const detail = state.details[runId];
+      if (!detail) {
+        return new Response(JSON.stringify({ error: { message: "missing", code: "not_found" } }), {
+          status: 404,
+        });
+      }
+      const changed = detail.name !== name;
+      state.details[runId] = { ...detail, name };
+      state.runs = state.runs.map((run) => (run.runId === runId ? { ...run, name } : run));
+      return new Response(JSON.stringify({ result: { runId, name, changed } }), { status: 200 });
+    }
+
     throw new Error(`Unhandled fetch: ${url}`);
   });
 
@@ -226,6 +254,21 @@ function installFetchMock(
 async function renderApp() {
   await router.navigate({ to: "/" });
   return render(<App />);
+}
+
+async function findRunCard(name: string | RegExp) {
+  return await screen.findByRole("button", {
+    name: typeof name === "string" ? new RegExp(name, "i") : name,
+  });
+}
+
+function getCloseDetailButton() {
+  const closeButtons = screen.getAllByRole("button", { name: /close detail/i });
+  const closeButton = closeButtons[0];
+  if (!closeButton) {
+    throw new Error("expected a close-detail button");
+  }
+  return closeButton;
 }
 
 function defineElementMetric(element: Element, key: string, value: number | (() => void)) {
@@ -292,8 +335,7 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
 
-    await screen.findByText("Build dashboard");
-    await user.click(screen.getByRole("button", { name: /build dashboard/i }));
+    await user.click(await findRunCard("Build dashboard"));
 
     expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
     expect(screen.getByText("Build UI")).toBeInTheDocument();
@@ -319,8 +361,7 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
 
-    await screen.findByText("Build dashboard");
-    await user.click(screen.getByRole("button", { name: /build dashboard/i }));
+    await user.click(await findRunCard("Build dashboard"));
     await screen.findByLabelText("Run detail");
     await user.click(screen.getByRole("button", { name: /copy backend session id/i }));
 
@@ -345,8 +386,7 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
 
-    await screen.findByText("Build dashboard");
-    await user.click(screen.getByRole("button", { name: /build dashboard/i }));
+    await user.click(await findRunCard("Build dashboard"));
     await screen.findByLabelText("Run detail");
 
     expect(screen.queryByText("Ship the web UI")).not.toBeInTheDocument();
@@ -397,8 +437,7 @@ describe("web app", () => {
 
     const user = userEvent.setup();
     await renderApp();
-    await screen.findByText("Build dashboard");
-    await user.click(screen.getByRole("button", { name: /build dashboard/i }));
+    await user.click(await findRunCard("Build dashboard"));
 
     const drawer = await screen.findByLabelText("Run detail");
     expect(drawer.style.getPropertyValue("--drawer-width")).toBe("540px");
@@ -441,8 +480,7 @@ describe("web app", () => {
 
     const user = userEvent.setup();
     await renderApp();
-    await screen.findByText("Build dashboard");
-    await user.click(screen.getByRole("button", { name: /build dashboard/i }));
+    await user.click(await findRunCard("Build dashboard"));
 
     const skeletonDrawer = await screen.findByLabelText("Run detail");
     expect(skeletonDrawer.style.getPropertyValue("--drawer-width")).toBe("700px");
@@ -474,8 +512,7 @@ describe("web app", () => {
 
     const user = userEvent.setup();
     await renderApp();
-    await screen.findByText("Build dashboard");
-    await user.click(screen.getByRole("button", { name: /build dashboard/i }));
+    await user.click(await findRunCard("Build dashboard"));
     await screen.findByLabelText("Run detail");
     await user.click(screen.getByRole("button", { name: /render markdown/i, expanded: false }));
 
@@ -508,9 +545,129 @@ describe("web app", () => {
 
     const user = userEvent.setup();
     await renderApp();
-    await screen.findByText("Build dashboard");
+    await findRunCard("Build dashboard");
     await user.type(screen.getByPlaceholderText("Search runs"), "does-not-match");
     expect(await screen.findByText("Filters hide every run")).toBeInTheDocument();
+  });
+
+  it("renders unnamed runs separately from assignment metadata and searches by run name", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "run-unnamed",
+          assignmentName: "Assignment metadata",
+          name: null,
+        }),
+        makeRun({
+          runId: "run-search",
+          assignmentName: "Different assignment",
+          name: "Search-only name",
+        }),
+      ],
+      details: {
+        "run-unnamed": makeDetail({
+          runId: "run-unnamed",
+          name: null,
+          assignment: {
+            name: "Assignment metadata",
+            sourcePath: "/tmp/assignment.md",
+            workspacePath: "/tmp/task-runner/assignment.md",
+          },
+        }),
+        "run-search": makeDetail({
+          runId: "run-search",
+          name: "Search-only name",
+          assignment: {
+            name: "Different assignment",
+            sourcePath: "/tmp/assignment.md",
+            workspacePath: "/tmp/task-runner/assignment.md",
+          },
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    const unnamedCard = await findRunCard("Unnamed");
+    expect(unnamedCard).toHaveAttribute("title", "Unnamed");
+    expect(screen.getByText("Assignment metadata")).toBeInTheDocument();
+
+    await user.click(unnamedCard);
+    expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Unnamed" })).toBeInTheDocument();
+
+    await user.click(getCloseDetailButton());
+    await user.clear(screen.getByPlaceholderText("Search runs"));
+    await user.type(screen.getByPlaceholderText("Search runs"), "search-only");
+
+    expect(await screen.findByRole("button", { name: /search-only name/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /unnamed/i })).not.toBeInTheDocument();
+  });
+
+  it("truncates long run names on cards while preserving the full hover title", async () => {
+    const longName = "plan feature · /home/kevin/worktrees/task-runner-run-names";
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "run-long-name",
+          assignmentName: "plan-feature",
+          name: longName,
+        }),
+      ],
+      details: {
+        "run-long-name": makeDetail({
+          runId: "run-long-name",
+          name: longName,
+          assignment: {
+            name: "plan-feature",
+            sourcePath: "/tmp/assignment.md",
+            workspacePath: "/tmp/task-runner/assignment.md",
+          },
+        }),
+      },
+    });
+
+    await renderApp();
+
+    const card = await screen.findByRole("button", { name: /plan feature/i });
+    const title = card.querySelector(".card-title");
+    expect(title).not.toBeNull();
+    expect(card).toHaveAttribute("title", longName);
+    expect(title).toHaveTextContent("plan feature · /home/kevin/worktrees/task...");
+    expect(card).not.toHaveTextContent(longName);
+  });
+
+  it("renames a run from the detail drawer title editor", async () => {
+    const state = {
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    };
+    const fetchMock = installFetchMock(state);
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await user.click(await findRunCard("Build dashboard"));
+    expect(await screen.findByRole("heading", { name: "Build dashboard" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /edit run name/i }));
+    const input = screen.getByRole("textbox", { name: /run name/i });
+    await user.clear(input);
+    await user.type(input, "Dashboard polish");
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Dashboard polish" })).toBeInTheDocument(),
+    );
+    expect(await findRunCard("Dashboard polish")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs/run-1/name",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ name: "Dashboard polish" }),
+      }),
+    );
   });
 
   it("persists board settings in localStorage", async () => {
@@ -568,8 +725,8 @@ describe("web app", () => {
 
     const user = userEvent.setup();
     const view = await renderApp();
-    await screen.findByText("Build dashboard");
-    expect(screen.queryByText("Archived dashboard")).not.toBeInTheDocument();
+    await findRunCard("Build dashboard");
+    expect(screen.queryByRole("button", { name: /archived dashboard/i })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Failures" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Blocked" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Aborted" })).not.toBeInTheDocument();
@@ -577,7 +734,7 @@ describe("web app", () => {
     await user.click(screen.getByRole("button", { name: /show archived runs/i }));
     await user.click(screen.getByRole("button", { name: /hide empty columns/i }));
     await user.click(screen.getByRole("button", { name: /collapse failure states/i }));
-    expect(await screen.findByText("Archived dashboard")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /archived dashboard/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Blocked" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Error" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Aborted" })).toBeInTheDocument();
@@ -585,7 +742,7 @@ describe("web app", () => {
     view.unmount();
     queryClient.clear();
     await renderApp();
-    expect(await screen.findByText("Archived dashboard")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /archived dashboard/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Blocked" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Error" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Aborted" })).toBeInTheDocument();
@@ -634,13 +791,13 @@ describe("web app", () => {
 
     const user = userEvent.setup();
     await renderApp();
-    await screen.findByText("Build dashboard");
+    await findRunCard("Build dashboard");
 
-    expect(screen.queryByText("Archived dashboard")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /archived dashboard/i })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Failures" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Blocked" })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /build dashboard/i }));
+    await user.click(await findRunCard("Build dashboard"));
     const drawer = await screen.findByLabelText("Run detail");
     expect(drawer.style.getPropertyValue("--drawer-width")).toBe("540px");
   });
@@ -675,7 +832,7 @@ describe("web app", () => {
 
     const user = userEvent.setup();
     await renderApp();
-    await screen.findByText("Build dashboard");
+    await findRunCard("Build dashboard");
 
     const scrollTo = vi.fn();
     setBoardGeometry({
@@ -732,7 +889,7 @@ describe("web app", () => {
     });
 
     await renderApp();
-    await screen.findByText("Build dashboard");
+    await findRunCard("Build dashboard");
 
     setBoardGeometry({
       clientWidth: 800,
@@ -811,20 +968,15 @@ describe("web app", () => {
 
     const user = userEvent.setup();
     await renderApp();
-    await screen.findByText("Resumable run");
+    await findRunCard("Resumable run");
 
-    await user.click(screen.getByRole("button", { name: /resumable run/i }));
+    await user.click(await findRunCard("Resumable run"));
     expect(await screen.findByRole("button", { name: "Resume" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Archive" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Abort" })).not.toBeInTheDocument();
 
-    const closeButtons = screen.getAllByRole("button", { name: /close detail/i });
-    const closeButton = closeButtons[0];
-    if (!closeButton) {
-      throw new Error("expected a close-detail button");
-    }
-    await user.click(closeButton);
-    await user.click(screen.getByRole("button", { name: /passive run/i }));
+    await user.click(getCloseDetailButton());
+    await user.click(await findRunCard("Passive run"));
     expect(await screen.findByRole("button", { name: "Archive" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Abort" })).not.toBeInTheDocument();
@@ -885,8 +1037,8 @@ describe("web app", () => {
 
     const user = userEvent.setup();
     await renderApp();
-    await screen.findByText("Resumable run");
-    await user.click(screen.getByRole("button", { name: /resumable run/i }));
+    await findRunCard("Resumable run");
+    await user.click(await findRunCard("Resumable run"));
 
     await user.click(await screen.findByRole("button", { name: "Archive" }));
 
@@ -910,8 +1062,7 @@ describe("web app", () => {
 
     const user = userEvent.setup();
     await renderApp();
-    await screen.findByText("Build dashboard");
-    await user.click(screen.getByRole("button", { name: /build dashboard/i }));
+    await user.click(await findRunCard("Build dashboard"));
 
     expect(await screen.findByRole("button", { name: "Abort" })).toBeInTheDocument();
   });
@@ -932,7 +1083,7 @@ describe("web app", () => {
     installFetchMock(state);
 
     await renderApp();
-    expect(await screen.findByText("Original title")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /original title/i })).toBeInTheDocument();
 
     const source = MockEventSource.instances[0];
     if (!source) {
@@ -949,13 +1100,15 @@ describe("web app", () => {
       event: { type: "run_finished", summary: { runId: "run-1" } },
     });
 
-    expect(await screen.findByText("Updated from SSE")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /updated from sse/i })).toBeInTheDocument();
 
     state.runs = [makeRun({ assignmentName: "Recovered after stale" })];
     source.emitError();
 
     expect(await screen.findByText(/live updates are temporarily stale/i)).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByText("Recovered after stale")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /recovered after stale/i })).toBeInTheDocument(),
+    );
   });
 
   it("revalidates after SSE reconnect before clearing the stale banner", async () => {
@@ -986,7 +1139,7 @@ describe("web app", () => {
     });
 
     await renderApp();
-    expect(await screen.findByText("Original title")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /original title/i })).toBeInTheDocument();
 
     const source = MockEventSource.instances[0];
     if (!source) {
@@ -1001,7 +1154,11 @@ describe("web app", () => {
     expect(await screen.findByText(/live updates are temporarily stale/i)).toBeInTheDocument();
     source.emitOpen();
 
-    await waitFor(() => expect(screen.getByText("Recovered after reconnect")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /recovered after reconnect/i }),
+      ).toBeInTheDocument(),
+    );
     await waitFor(() =>
       expect(screen.queryByText(/live updates are temporarily stale/i)).not.toBeInTheDocument(),
     );
@@ -1022,7 +1179,7 @@ describe("web app", () => {
     });
 
     await renderApp();
-    expect(await screen.findByText("Original title")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /original title/i })).toBeInTheDocument();
 
     const source = MockEventSource.instances[0];
     if (!source) {
@@ -1049,7 +1206,7 @@ describe("web app", () => {
     });
 
     await renderApp();
-    expect(await screen.findByText("Original title")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /original title/i })).toBeInTheDocument();
 
     const source = MockEventSource.instances[0];
     if (!source) {
@@ -1076,7 +1233,7 @@ describe("web app", () => {
     });
 
     await renderApp();
-    expect(await screen.findByText("Original title")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /original title/i })).toBeInTheDocument();
 
     const source = MockEventSource.instances[0];
     if (!source) {
@@ -1132,13 +1289,13 @@ describe("web app", () => {
 
     const user = userEvent.setup();
     await renderApp();
-    await screen.findByText("Second run");
+    await findRunCard("Second run");
 
-    await user.click(screen.getByRole("button", { name: /second run/i }));
+    await user.click(await findRunCard("Second run"));
     expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
     await router.navigate({ to: "/" });
 
-    await user.click(screen.getByRole("button", { name: /build dashboard/i }));
+    await user.click(await findRunCard("Build dashboard"));
     await screen.findByLabelText("Run detail");
     await user.click(screen.getByRole("button", { name: /shared task/i, expanded: false }));
     await user.click(screen.getByRole("button", { name: "Notes" }));
@@ -1171,21 +1328,16 @@ describe("web app", () => {
 
     const user = userEvent.setup();
     await renderApp();
-    await screen.findByText("Second run");
+    await findRunCard("Second run");
 
     expect(MockEventSource.instances).toHaveLength(1);
 
-    await user.click(screen.getByRole("button", { name: /build dashboard/i }));
+    await user.click(await findRunCard("Build dashboard"));
     expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
     expect(MockEventSource.instances).toHaveLength(1);
 
-    const closeButtons = screen.getAllByRole("button", { name: /close detail/i });
-    const closeButton = closeButtons[0];
-    if (!closeButton) {
-      throw new Error("expected a close-detail button");
-    }
-    await user.click(closeButton);
-    await user.click(screen.getByRole("button", { name: /second run/i }));
+    await user.click(getCloseDetailButton());
+    await user.click(await findRunCard("Second run"));
 
     expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
     expect(MockEventSource.instances).toHaveLength(1);

@@ -15,10 +15,10 @@ export interface RunSummary {
   status: RunStatus;
   archivedAt: string | null;
   agentName: string;
+  name: string | null;
   assignmentName: string | null;
   backend: string;
   model: string | null;
-  sessionName: string | null;
   cwd: string;
   startedAt: string;
   endedAt: string | null;
@@ -73,7 +73,7 @@ export interface RunDetail {
   backend: string;
   model: string | null;
   effort: string | null;
-  sessionName: string | null;
+  name: string | null;
   backendSessionId: string | null;
   cwd: string;
   taskMode: TaskMode;
@@ -100,6 +100,12 @@ export interface RunArchiveResult {
   runId: string;
   status: RunStatus;
   archivedAt: string | null;
+  changed: boolean;
+}
+
+export interface RunNameResult {
+  runId: string;
+  name: string | null;
   changed: boolean;
 }
 
@@ -171,10 +177,10 @@ export function toRunSummary(entry: ListedRunManifest): RunSummary {
     status: entry.manifest.status,
     archivedAt: entry.manifest.archivedAt,
     agentName: entry.manifest.agent.name,
+    name: entry.manifest.name,
     assignmentName: entry.manifest.assignment?.name ?? null,
     backend: entry.manifest.backend,
     model: entry.manifest.model,
-    sessionName: entry.manifest.sessionName,
     cwd: entry.manifest.cwd,
     startedAt: entry.manifest.startedAt,
     endedAt: entry.manifest.endedAt,
@@ -217,7 +223,7 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
     backend: manifest.backend,
     model: manifest.model,
     effort: manifest.effort,
-    sessionName: manifest.sessionName,
+    name: manifest.name,
     backendSessionId: manifest.backendSessionId,
     cwd: manifest.cwd,
     taskMode: normalizeTaskMode(manifest.taskMode),
@@ -249,6 +255,17 @@ export function toRunArchiveResult(result: {
     runId: result.manifest.runId,
     status: result.manifest.status,
     archivedAt: result.manifest.archivedAt,
+    changed: result.changed,
+  };
+}
+
+export function toRunNameResult(result: {
+  manifest: RunManifest;
+  changed: boolean;
+}): RunNameResult {
+  return {
+    runId: result.manifest.runId,
+    name: result.manifest.name,
     changed: result.changed,
   };
 }

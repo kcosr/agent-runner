@@ -335,6 +335,17 @@ interface CreateClientOptions {
   onRawOutgoing?: (line: string) => void;
 }
 
+async function closeCodexConnection(
+  client?: Pick<CodexClient, "close">,
+  transport?: Pick<Transport, "close">,
+): Promise<void> {
+  if (client) {
+    await client.close().catch(() => {});
+    return;
+  }
+  await transport?.close().catch(() => {});
+}
+
 function createClient(transport: Transport, opts: CreateClientOptions = {}): CodexClient {
   let nextId = 1;
   const pending = new Map<
@@ -730,7 +741,43 @@ async function validateCodexSession(ctx: ValidateSessionContext): Promise<Valida
       reason: `codex thread "${ctx.sessionId}" not found: ${(err as Error).message}`,
     };
   } finally {
-    await client?.close().catch(() => {});
+    await closeCodexConnection(client, transport);
+  }
+}
+
+export async function setCodexThreadName(ctx: {
+  threadId: string;
+  cwd: string;
+  env?: Record<string, string>;
+  name: string | null;
+}): Promise<void> {
+  let transport: Transport | undefined;
+  let client: CodexClient | undefined;
+  try {
+    transport = await openTransport({
+      prompt: "",
+      cwd: ctx.cwd,
+      env: ctx.env ?? (process.env as Record<string, string>),
+      timeoutSec: 60,
+    });
+    client = createClient(transport);
+
+    await client.call("initialize", {
+      clientInfo: {
+        name: "task-runner",
+        title: "task-runner",
+        version: "0.1.0",
+      },
+      capabilities: { experimentalApi: true },
+    });
+    client.sendNotification("initialized");
+
+    await client.call("thread/name/set", {
+      threadId: ctx.threadId,
+      name: ctx.name,
+    });
+  } finally {
+    await closeCodexConnection(client, transport);
   }
 }
 
@@ -817,11 +864,11 @@ export const codexBackend: Backend = {
       // assignment provided one. Always send (idempotent on the codex
       // side); skipped silently if a prior session already set the same
       // value. Errors are non-fatal — naming is best-effort.
-      if (ctx.sessionName) {
+      if (ctx.name) {
         try {
           await client.call("thread/name/set", {
             threadId: state.threadId,
-            name: ctx.sessionName,
+            name: ctx.name,
           });
         } catch (err) {
           ctx.emit?.({

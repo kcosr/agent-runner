@@ -280,6 +280,30 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
       const detail = await client.call("runs.get", { target: init.runId });
       assert.equal(detail.run.runId, init.runId);
       assert.equal(detail.run.assignment.name, "daemon-work");
+      assert.equal(detail.run.name, null);
+
+      const renamed = await client.call("runs.setName", {
+        target: init.runId,
+        name: "RPC renamed run",
+      });
+      assert.deepEqual(renamed.result, {
+        runId: init.runId,
+        name: "RPC renamed run",
+        changed: true,
+      });
+
+      const renamedDetail = await client.call("runs.get", { target: init.runId });
+      assert.equal(renamedDetail.run.name, "RPC renamed run");
+
+      const cleared = await client.call("runs.setName", {
+        target: init.runId,
+        name: null,
+      });
+      assert.deepEqual(cleared.result, {
+        runId: init.runId,
+        name: null,
+        changed: true,
+      });
 
       const tasks = await client.call("tasks.list", { target: init.runId });
       assert.equal(tasks.tasks.length, 1);
@@ -329,6 +353,35 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
       const detail = await httpJson(httpBaseUrl, `/api/runs/${init.runId}`);
       assert.equal(detail.status, 200);
       assert.equal(detail.body.run.assignment.name, "daemon-work");
+      assert.equal(detail.body.run.name, null);
+
+      const renamed = await httpJson(httpBaseUrl, `/api/runs/${init.runId}/name`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "HTTP renamed run" }),
+      });
+      assert.equal(renamed.status, 200);
+      assert.deepEqual(renamed.body.result, {
+        runId: init.runId,
+        name: "HTTP renamed run",
+        changed: true,
+      });
+
+      const renamedDetail = await httpJson(httpBaseUrl, `/api/runs/${init.runId}`);
+      assert.equal(renamedDetail.status, 200);
+      assert.equal(renamedDetail.body.run.name, "HTTP renamed run");
+
+      const cleared = await httpJson(httpBaseUrl, `/api/runs/${init.runId}/name`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: null }),
+      });
+      assert.equal(cleared.status, 200);
+      assert.deepEqual(cleared.body.result, {
+        runId: init.runId,
+        name: null,
+        changed: true,
+      });
 
       const tasks = await httpJson(httpBaseUrl, `/api/runs/${init.runId}/tasks`);
       assert.equal(tasks.status, 200);
@@ -538,7 +591,7 @@ test("daemon subscriptions fan out run events and abort active runs", async () =
         agentName: "daemon-agent",
         assignmentSourcePath: null,
         assignmentPath: summary.assignmentPath,
-        sessionName: "daemon test",
+        name: "daemon test",
         cwd: process.cwd(),
         sessionIndex: null,
       });
@@ -595,7 +648,7 @@ test("daemon SSE streams reuse run event fan-out for all-runs and per-run subscr
         agentName: "daemon-agent",
         assignmentSourcePath: null,
         assignmentPath: "/tmp/fake/assignment.md",
-        sessionName: "daemon sse",
+        name: "daemon sse",
         cwd: process.cwd(),
         sessionIndex: null,
       });
@@ -708,7 +761,7 @@ test("daemon close aborts active runs and releases connected clients", async () 
         agentName: "daemon-agent",
         assignmentSourcePath: null,
         assignmentPath: "/tmp/fake/assignment.md",
-        sessionName: "daemon close",
+        name: "daemon close",
         cwd: process.cwd(),
         sessionIndex: null,
       });
@@ -930,11 +983,20 @@ test("serve and --connect route CLI commands remotely and fail clearly when no d
     const agentsText = runCli(["list", "agents", "--connect", listenUrl], { cwd: dir });
     assert.match(agentsText, /daemon-agent/);
 
+    const renameText = runCli(
+      ["run", "set-name", init.runId, "Remote CLI name", "--connect", listenUrl],
+      {
+        cwd: dir,
+      },
+    );
+    assert.match(renameText, new RegExp(`set name for run ${init.runId} to "Remote CLI name"`));
+
     const statusViaEnv = runCli(["status", init.runId], {
       cwd: dir,
       env: { TASK_RUNNER_CONNECT: listenUrl },
     });
     assert.match(statusViaEnv, new RegExp(`── run ${init.runId} ──`));
+    assert.match(statusViaEnv, /Name:\s+Remote CLI name/);
 
     const client = await DaemonClient.connect(listenUrl);
     try {

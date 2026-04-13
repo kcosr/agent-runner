@@ -40,7 +40,7 @@ and future local clients, not to become a remote multi-user service.
   - [`task-runner run`](#task-runner-run)
   - [`task-runner init`](#task-runner-init)
   - [`task-runner serve`](#task-runner-serve)
-  - [`task-runner run reset / archive / unarchive`](#task-runner-run-reset--archive--unarchive)
+  - [`task-runner run set-name / reset / archive / unarchive`](#task-runner-run-set-name--reset--archive--unarchive)
   - [`task-runner status`](#task-runner-status)
   - [`task-runner task` commands](#task-runner-task-commands)
   - [`task-runner list`](#task-runner-list)
@@ -289,7 +289,6 @@ A minimal assignment:
 ---
 schemaVersion: 1
 name: repo-orientation
-sessionName: orient {{repo_path}}      # optional display label
 maxRetries: 3                          # retry budget per session, default 3
 vars:
   repo_path:
@@ -531,15 +530,15 @@ Common options:
 | `--max-retries <n>` | Override the per-run retry budget (default 3). |
 | `--timeout-sec <n>` | Override the per-attempt timeout (default 3600). |
 | `--unrestricted` | Bypass the backend's approval prompts. |
-| `--session-name <name>` | Override the assignment's `sessionName` (the backend display label). Vars are interpolated. |
+| `--name <name>` | Set the fresh run's persisted display name (`run.name`). Omitted means unnamed. Forbidden with `--resume-run`. |
 | `--backend-session-id <id>` | Adopt an existing backend session id (claude UUID, codex thread id). Validated before workspace creation. Forbidden with `--resume-run` (the resume target already carries one). |
 | `--connect <ws-url>` | Route the command through the local daemon instead of embedded mode. Also honored from `TASK_RUNNER_CONNECT`. |
 | `--output-format <text\|json>` | Default `text`. `json` writes the final manifest-shaped run record to stdout once at end of run. |
 
 On `--resume-run`, the "legitimate mid-run" overrides — `--model`,
-`--effort`, `--timeout-sec`, `--max-retries`, `--unrestricted`,
-`--session-name` — are still accepted (and still vetted against the
-frozen `manifest.lockedFields`). **Execute-after-init** (resuming a
+`--effort`, `--timeout-sec`, `--max-retries`, `--unrestricted` —
+are still accepted (and still vetted against the frozen
+`manifest.lockedFields`). **Execute-after-init** (resuming a
 run whose prior status was `initialized`) rejects **every** override —
 init deliberately froze every resolvable field and the only valid
 invocation is `task-runner run --resume-run <id>`. See
@@ -615,7 +614,47 @@ Web dashboard notes:
   `/api/*`, `/api/events/*`, and `/app-config.json` back to the local
   daemon host.
 
-### `task-runner run reset / archive / unarchive`
+### `task-runner run set-name / reset / archive / unarchive`
+
+Update the persisted display name for an existing run without
+otherwise changing run state.
+
+```bash
+task-runner run set-name <run-id> "Review auth hot cut"
+task-runner run set-name <run-id> --clear
+task-runner run set-name <run-id> --output-format json --clear
+```
+
+Set-name semantics:
+
+- Allowed for existing runs in embedded mode or daemon mode via
+  `--connect`.
+- `<name>` is required unless `--clear` is present. Trimmed names
+  must be non-empty.
+- Updates `manifest.name` immediately and mirrors the value into the
+  persisted reset seed so later `run reset` keeps the renamed value.
+- Codex best-effort attempts a live thread-title rename when the run
+  already has a backend session id. Claude picks up the changed name
+  on the next invocation.
+- Idempotent: setting the same name again or clearing an already
+  unnamed run succeeds with `changed: false` in JSON mode.
+
+Success output:
+
+```text
+task-runner: set name for run abc123 to "Review auth hot cut"
+task-runner: cleared name for run abc123
+```
+
+```json
+{
+  "runId": "abc123",
+  "name": "Review auth hot cut",
+  "changed": true
+}
+```
+
+Reset/archive commands mutate other run metadata:
 
 Restore an existing non-running run to the same initialized state it
 had immediately after `task-runner init` or first-write on a fresh
@@ -970,8 +1009,8 @@ notices the external interrupt and stops cleanly with status
 importing](#resuming-aborting-importing).
 
 The runner sends `thread/start` (or `thread/resume`) at session
-start, optionally `thread/name/set` if the assignment provided a
-`sessionName`, then `turn/start` for each attempt and `turn/interrupt`
+start, optionally `thread/name/set` if the run has a persisted
+`name`, then `turn/start` for each attempt and `turn/interrupt`
 on timeout, abort, or external Ctrl+C.
 
 ### Passive
@@ -1091,8 +1130,8 @@ actively break the captured backend session. The rules:
   the manifest at first write).
 - **Allowed on regular resume** (still vetted against the run's
   frozen `lockedFields`): `--model`, `--effort`, `--timeout-sec`,
-  `--max-retries`, `--unrestricted`, `--session-name`, `--add-task`,
-  positional `[message]`.
+  `--max-retries`, `--unrestricted`, `--add-task`, positional
+  `[message]`.
 - **Execute-after-init** (resuming a run whose prior status was
   `initialized`): **no overrides at all**. Init deliberately froze
   every resolvable field; the only valid call is
@@ -1173,9 +1212,9 @@ at run start; missing required vars or type mismatches exit with
 code 3 before any backend is invoked.
 
 Interpolation uses `{{key}}` syntax and is applied to the
-assignment instructions body, the agent instructions body, the
-session name, and any other string field rendered into a
-user-visible prompt. In addition to user-declared vars, the runner
+assignment instructions body, the agent instructions body, and any
+other string field rendered into a user-visible prompt. In addition
+to user-declared vars, the runner
 injects:
 
 - `{{assignment_path}}` — absolute path to the workspace `assignment.md`
@@ -1193,8 +1232,8 @@ exit code 3.
 Lockable fields:
 
 ```
-cwd  backend  model  effort  instructions  message  sessionName
-timeoutSec  unrestricted  maxRetries  tasks
+cwd  backend  model  effort  instructions  message
+timeoutSec  unrestricted  maxRetries  tasks  taskMode
 ```
 
 Use this to distribute an agent that pins its own model

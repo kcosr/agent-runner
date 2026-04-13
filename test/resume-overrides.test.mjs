@@ -155,7 +155,7 @@ function baseManifest(runId, workspaceDir) {
     model: "claude-sonnet-4-6",
     effort: null,
     message: null,
-    sessionName: null,
+    name: null,
     unrestricted: false,
     cwd: process.cwd(),
     lockedFields: [],
@@ -177,7 +177,7 @@ function baseManifest(runId, workspaceDir) {
     resetSeed: {
       model: "claude-sonnet-4-6",
       effort: null,
-      sessionName: null,
+      name: null,
       unrestricted: false,
       timeoutSec: 3600,
       maxAttempts: 4,

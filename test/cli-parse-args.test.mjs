@@ -225,6 +225,20 @@ test("parseArgs: run unarchive parses as a grouped run subcommand", () => {
   assert.deepEqual(parsed.positionals, ["abc123"]);
 });
 
+test("parseArgs: run set-name parses grouped subcommand positionals and --clear", () => {
+  const parsed = parseArgs(argv("run", "set-name", "abc123", "--clear", "--output-format", "json"));
+  assert.equal(parsed.command, "run");
+  assert.equal(parsed.subcommand, "set-name");
+  assert.deepEqual(parsed.positionals, ["abc123"]);
+  assert.equal(parsed.clear, true);
+  assert.equal(parsed.outputFormat, "json");
+});
+
+test("parseArgs: --name is captured for fresh run overrides", () => {
+  const parsed = parseArgs(argv("run", "--agent", "x", "--name", "release prep"));
+  assert.equal(parsed.name, "release prep");
+});
+
 test("overridesFromParsedArgs: all other overrides plumbed through", () => {
   const parsed = parseArgs(
     argv(
@@ -253,4 +267,10 @@ test("overridesFromParsedArgs: all other overrides plumbed through", () => {
   assert.equal(overrides.maxRetries, 5);
   assert.equal(overrides.unrestricted, true);
   assert.equal(overrides.message, "hello there");
+});
+
+test("overridesFromParsedArgs: name override is plumbed through", () => {
+  const parsed = parseArgs(argv("init", "--agent", "x", "--name", "repo orientation"));
+  const overrides = overridesFromParsedArgs(parsed);
+  assert.equal(overrides.name, "repo orientation");
 });

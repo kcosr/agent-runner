@@ -25,9 +25,7 @@ export function renderRunStatus(detail: RunDetail): string {
     lines.push(`Assignment: ${detail.assignment.name}`);
   }
   lines.push(`Backend: ${detail.backend}${detail.model ? ` (${detail.model})` : ""}`);
-  if (detail.sessionName) {
-    lines.push(`Session name: ${detail.sessionName}`);
-  }
+  lines.push(`Name: ${detail.name ?? "Unnamed"}`);
   if (detail.backendSessionId) {
     lines.push(`Backend session: ${detail.backendSessionId}`);
   }
@@ -147,9 +145,6 @@ export function renderDefinitionDetails(result: DefinitionDetailsResult): string
   const { loaded } = result;
   const lines: string[] = [];
   lines.push(`Assignment: ${loaded.config.name}`);
-  if (loaded.config.sessionName) {
-    lines.push(`  sessionName:  ${loaded.config.sessionName}`);
-  }
   lines.push(`  maxRetries:   ${loaded.config.maxRetries}`);
   if (loaded.config.tasks.length > 0) {
     lines.push(`  tasks:        ${loaded.config.tasks.length}`);
@@ -183,7 +178,7 @@ export function renderRunList(result: RunListResult): string {
   return `${result
     .map((run) => {
       const archived = run.archivedAt !== null ? ` archived=${run.archivedAt}` : "";
-      return `${run.runId} [${run.status}] ${run.tasksCompleted}/${run.tasksTotal} repo=${run.repo} agent=${run.agentName} assignment=${run.assignmentName ?? "none"}${archived}`;
+      return `${run.runId} [${run.status}] name=${run.name ?? "<unnamed>"} ${run.tasksCompleted}/${run.tasksTotal} repo=${run.repo} agent=${run.agentName} assignment=${run.assignmentName ?? "none"}${archived}`;
     })
     .join("\n")}\n`;
 }
@@ -200,6 +195,21 @@ export function renderRunUnarchive(result: RunArchiveResult): string {
     return `task-runner: run ${result.runId} is not archived\n`;
   }
   return `task-runner: unarchived run ${result.runId}\n`;
+}
+
+export function renderRunSetName(result: {
+  runId: string;
+  name: string | null;
+  changed: boolean;
+}): string {
+  if (result.name === null) {
+    return result.changed
+      ? `task-runner: cleared name for run ${result.runId}\n`
+      : `task-runner: run ${result.runId} already has no name\n`;
+  }
+  return result.changed
+    ? `task-runner: set name for run ${result.runId} to "${result.name}"\n`
+    : `task-runner: run ${result.runId} already has name "${result.name}"\n`;
 }
 
 export function renderStatus(result: StatusCommandResult): string {

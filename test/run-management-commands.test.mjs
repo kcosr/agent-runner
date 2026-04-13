@@ -146,13 +146,18 @@ test("list runs enumerates current-generation runs across buckets and filters ar
 
   const text = runCli(["list", "runs"], { cwd: dir });
   assert.doesNotMatch(text, new RegExp(first.runId));
-  assert.match(text, new RegExp(`^${second.runId} \\[initialized\\] 0/2 repo=unknown`, "m"));
-  assert.match(text, /^oth123 \[initialized\] 0\/2 repo=other-repo/m);
+  assert.match(
+    text,
+    new RegExp(`^${second.runId} \\[initialized\\] name=<unnamed> 0/2 repo=unknown`, "m"),
+  );
+  assert.match(text, /^oth123 \[initialized\] name=<unnamed> 0\/2 repo=other-repo/m);
 
   const includeArchived = runCli(["list", "runs", "--include-archived"], { cwd: dir });
   assert.match(
     includeArchived,
-    new RegExp(`${first.runId} \\[initialized\\] 0/2 .* archived=2026-04-12T12:00:00.000Z`),
+    new RegExp(
+      `${first.runId} \\[initialized\\] name=<unnamed> 0/2 .* archived=2026-04-12T12:00:00.000Z`,
+    ),
   );
 
   const jsonOut = runCli(["list", "runs", "--include-archived", "--output-format", "json"], {
@@ -214,6 +219,91 @@ test("run archive and run unarchive expose idempotent text and json results", as
   const unarchivedAgain = JSON.parse(unarchivedAgainJson);
   assert.equal(unarchivedAgain.changed, false);
   assert.equal(unarchivedAgain.archivedAt, null);
+});
+
+test("run set-name updates, clears, and preserves reset seed", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "run-mgmt-agent", AGENT);
+  writeAssignment(dir, "run-mgmt-work", ASSIGNMENT);
+  const outcome = await initRun(dir);
+
+  const setText = runCli(["run", "set-name", outcome.runId, "Run naming redesign"], { cwd: dir });
+  assert.match(setText, /set name for run .*"Run naming redesign"/);
+
+  let manifest = readManifest(outcome.workspaceDir);
+  assert.equal(manifest.name, "Run naming redesign");
+  assert.equal(manifest.resetSeed.name, "Run naming redesign");
+
+  const setAgainJson = runCli(
+    ["run", "set-name", outcome.runId, "Run naming redesign", "--output-format", "json"],
+    { cwd: dir },
+  );
+  assert.deepEqual(JSON.parse(setAgainJson), {
+    runId: outcome.runId,
+    name: "Run naming redesign",
+    changed: false,
+  });
+
+  const clearText = runCli(["run", "set-name", outcome.runId, "--clear"], { cwd: dir });
+  assert.match(clearText, /cleared name for run/);
+
+  manifest = readManifest(outcome.workspaceDir);
+  assert.equal(manifest.name, null);
+  assert.equal(manifest.resetSeed.name, null);
+
+  const clearAgainJson = runCli(
+    ["run", "set-name", outcome.runId, "--clear", "--output-format", "json"],
+    { cwd: dir },
+  );
+  assert.deepEqual(JSON.parse(clearAgainJson), {
+    runId: outcome.runId,
+    name: null,
+    changed: false,
+  });
+});
+
+test("run set-name validates required args and empty names", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "run-mgmt-agent", AGENT);
+  writeAssignment(dir, "run-mgmt-work", ASSIGNMENT);
+  const outcome = await initRun(dir);
+
+  let result = runCliExpectFail(["run", "set-name"], { cwd: dir });
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /run set-name requires <id-or-path>/);
+
+  result = runCliExpectFail(["run", "set-name", outcome.runId], { cwd: dir });
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /run set-name requires <name> or --clear/);
+
+  result = runCliExpectFail(["run", "set-name", outcome.runId, " ", "--output-format", "json"], {
+    cwd: dir,
+  });
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /run set-name: <name> cannot be empty/);
+});
+
+test("run archive and run reset reject unrelated --clear flag leakage", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "run-mgmt-agent", AGENT);
+  writeAssignment(dir, "run-mgmt-work", ASSIGNMENT);
+  const outcome = await initRun(dir);
+
+  let result = runCliExpectFail(["run", "archive", outcome.runId, "--clear"], { cwd: dir });
+  assert.equal(result.status, 3);
+  assert.match(
+    result.stderr,
+    /run archive only supports <id-or-path>, --connect, and --output-format/,
+  );
+  assert.match(result.stderr, /--clear/);
+
+  result = runCliExpectFail(["run", "reset", outcome.runId, "--clear"], { cwd: dir });
+  assert.equal(result.status, 3);
+  assert.match(
+    result.stderr,
+    /run reset only supports <id-or-path>, --connect, and --output-format/,
+  );
+  assert.match(result.stderr, /--clear/);
 });
 
 test("run archive rejects running runs", async () => {

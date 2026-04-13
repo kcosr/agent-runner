@@ -2,7 +2,6 @@
 schemaVersion: 1
 name: plan-feature
 taskMode: cli
-sessionName: plan feature · {{repo_path}}
 maxRetries: 4
 vars:
   repo_path:
@@ -621,6 +620,7 @@ tasks:
           {{task_runner_cmd}} run \
             --agent code-reviewer \
             --assignment plan-review \
+            --name <short-descriptive-name> \
             --var repo_path={{repo_path}} \
             --var plan_draft=<draft-path-from-draft_plan> \
             --var planning_workspace={{assignment_path}}
@@ -630,6 +630,15 @@ tasks:
         - `planning_workspace` is this planner run's own
           workspace assignment, which contains the captured
           brief, contract, risks, and assumptions.
+
+      Set `--name` to the same short topic label you expect the
+      caller to use for the eventual implementer run:
+        - first word capitalized
+        - target 2-4 words and about 32 characters or less
+        - omit redundant words already covered by the assignment
+          such as `Plan`, `Review`, or `Implementation`
+        - never include cwd paths, repo names, or git ranges
+      Examples: `Run naming`, `Web dashboard`, `Daemon control plane`.
 
       The review produces its own run id. Capture that run id
       in this task's Notes immediately after launch. Once the
@@ -733,8 +742,8 @@ tasks:
       your existing Notes:
 
         - `<<PLACEHOLDER_FEATURE_SHORT_TITLE>>` — the feature's
-          short title (same one used in the draft's
-          `sessionName`).
+          short title (same one used in the draft filename and
+          title).
         - `<<PLACEHOLDER_OVERVIEW>>` — one paragraph, plain
           language. Source: `capture_feature` (what is it).
         - `<<PLACEHOLDER_MOTIVATION>>` — one or two sentences.
@@ -809,6 +818,7 @@ tasks:
           {{task_runner_cmd}} init \
             --backend passive \
             --assignment <draft-path-from-draft_plan> \
+            --name <short-descriptive-name> \
             --var repo_path=<worktree-dir>
 
       **Always use `--backend passive`.** The planner's job is
@@ -822,6 +832,14 @@ tasks:
       environment into the handoff command. The caller
       should substitute the actual feature worktree path
       when they run init.
+
+      **Always use a short descriptive `--name`.** It should:
+      - start with a capitalized first word
+      - target 2-4 words and about 32 characters or less
+      - omit redundant words already covered by the assignment
+        such as `Plan`, `Review`, or `Implementation`
+      - never include cwd paths, repo names, or git ranges
+      Examples: `Run naming`, `Web dashboard`, `Daemon control plane`.
 
       Capture the full command in this task's Notes exactly as
       the caller should paste it. Do **not** run it yourself.

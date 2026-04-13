@@ -1,5 +1,12 @@
 import type { RunDetail } from "@task-runner/core/contracts/runs.js";
-import { type CSSProperties, type KeyboardEvent, type PointerEvent, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  type KeyboardEvent,
+  type PointerEvent,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { formatRelativeTimestamp, formatTimestamp, truncateMiddle } from "../lib/format.js";
 import {
   DRAWER_WIDTH_MAX,
@@ -7,7 +14,7 @@ import {
   clampDrawerWidth,
   useBoardSettings,
 } from "../lib/settings.js";
-import { ArchiveIcon, CloseIcon, CopyIcon, StopIcon } from "./icons.js";
+import { ArchiveIcon, CloseIcon, CopyIcon, PencilIcon, StopIcon } from "./icons.js";
 import { RunTaskList } from "./run-task-list.js";
 import { StatusBadge } from "./status-badge.js";
 
@@ -25,7 +32,6 @@ function summaryRows(run: RunDetail) {
     ["Assignment", run.assignment?.name ?? "Ad hoc"],
     ["Agent", run.agent.name],
     ["Backend", [run.backend, run.model, run.effort].filter(Boolean).join(" · ") || run.backend],
-    ["Session", run.sessionName ?? "Not available"],
     ["Started", `${formatTimestamp(run.startedAt)} ${formatRelativeTimestamp(run.startedAt)}`],
     ["Attempts", `${run.attempts} / ${run.maxAttempts}`],
     ["Sessions", String(run.sessionCount)],
@@ -39,6 +45,7 @@ export function RunDetailDrawer({
   onArchive,
   onClose,
   onCopy,
+  onRename,
   onResume,
   onUnarchive,
   run,
@@ -49,18 +56,24 @@ export function RunDetailDrawer({
   onArchive: () => void;
   onClose: () => void;
   onCopy: (value: string, label: string) => void;
+  onRename: (name: string | null) => Promise<void>;
   onResume: () => void;
   onUnarchive: () => void;
   run: RunDetail;
 }) {
   const [section, setSection] = useState<SectionKey>("tasks");
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState(run.name ?? "");
   const { settings, updateSettings } = useBoardSettings();
   const dragRef = useRef<DragState | null>(null);
+  const nameInputRef = useRef<HTMLInputElement | null>(null);
   const [dragWidth, setDragWidth] = useState<number | null>(null);
   const width = dragWidth ?? settings.drawerWidth;
   const drawerStyle = { "--drawer-width": `${width}px` } as CSSProperties;
   const backendSessionId = run.backendSessionId;
   const actionsLocked = actionPending !== undefined;
+  const renamePending = actionPending === "rename";
+  const visibleName = run.name ?? "Unnamed";
 
   function handleResizeStart(event: PointerEvent<HTMLDivElement>) {
     event.preventDefault();
@@ -127,6 +140,58 @@ export function RunDetailDrawer({
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
   }
+
+  function startNameEdit() {
+    if (actionsLocked) {
+      return;
+    }
+    setNameDraft(run.name ?? "");
+    setEditingName(true);
+  }
+
+  function cancelNameEdit() {
+    if (renamePending) {
+      return;
+    }
+    setNameDraft(run.name ?? "");
+    setEditingName(false);
+  }
+
+  async function submitNameEdit() {
+    if (renamePending) {
+      return;
+    }
+    const trimmed = nameDraft.trim();
+    const nextName = trimmed.length === 0 ? null : trimmed;
+    if (nextName === run.name) {
+      setEditingName(false);
+      return;
+    }
+    try {
+      await onRename(nextName);
+      setEditingName(false);
+    } catch {
+      // actionError is surfaced by the shared mutation handler.
+    }
+  }
+
+  function handleNameInputKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      void submitNameEdit();
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cancelNameEdit();
+    }
+  }
+
+  useEffect(() => {
+    if (editingName) {
+      nameInputRef.current?.focus();
+    }
+  }, [editingName]);
 
   return (
     <>
@@ -202,7 +267,53 @@ export function RunDetailDrawer({
         </header>
 
         <div className="drawer-body">
-          <h3 className="drawer-section-title">{run.assignment?.name ?? "Ad hoc run"}</h3>
+          <div className="drawer-title-block">
+            {editingName ? (
+              <div className="drawer-title-edit">
+                <label className="field drawer-title-field">
+                  <input
+                    aria-label="Run name"
+                    disabled={renamePending}
+                    onChange={(event) => setNameDraft(event.target.value)}
+                    onKeyDown={handleNameInputKeyDown}
+                    placeholder="Unnamed"
+                    ref={nameInputRef}
+                    value={nameDraft}
+                  />
+                </label>
+                <button
+                  className="btn"
+                  disabled={renamePending}
+                  onClick={() => void submitNameEdit()}
+                  type="button"
+                >
+                  {renamePending ? "Saving..." : "Save"}
+                </button>
+                <button
+                  className="btn"
+                  disabled={renamePending}
+                  onClick={cancelNameEdit}
+                  type="button"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <div className="drawer-title-inline">
+                <h3 className="drawer-section-title">{visibleName}</h3>
+                <button
+                  aria-label="Edit run name"
+                  className="icon-btn icon-btn--small drawer-title-edit-trigger"
+                  disabled={actionsLocked}
+                  onClick={startNameEdit}
+                  title="Edit run name"
+                  type="button"
+                >
+                  <PencilIcon aria-hidden="true" />
+                </button>
+              </div>
+            )}
+          </div>
           <section aria-label="Run summary" className="meta-grid">
             {summaryRows(run).map(([label, value]) => (
               <div className="meta-cell" key={label}>

@@ -9,6 +9,7 @@ import type {
   getTask,
   getTaskList,
   initRun,
+  renameRun,
   reset,
   resumeRun,
   startRun,
@@ -32,6 +33,7 @@ export interface DaemonHandlers {
   getDefinitionList: typeof getDefinitionList;
   archive: typeof archive;
   unarchive: typeof unarchive;
+  renameRun: typeof renameRun;
   reset: typeof reset;
   updateTask: typeof updateTask;
   appendNotes: typeof appendNotes;
@@ -77,6 +79,9 @@ export function createDaemonOperations(ctx: DaemonOperationContext) {
     },
     unarchiveRun(target: string) {
       return { result: ctx.unarchive(target) };
+    },
+    async setRunName(target: string, input: Parameters<typeof renameRun>[1]) {
+      return { result: await ctx.renameRun(target, input) };
     },
     abortRun(target: string) {
       return ctx.abortRun(target);

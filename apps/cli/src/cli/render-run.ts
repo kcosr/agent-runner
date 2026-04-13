@@ -20,7 +20,7 @@ function renderBannerLines(event: {
   runId: string;
   assignmentSourcePath: string | null;
   assignmentPath: string;
-  sessionName: string | null;
+  name: string | null;
   cwd: string;
   header: string;
 }): string[] {
@@ -29,9 +29,7 @@ function renderBannerLines(event: {
     lines.push(`             source=${event.assignmentSourcePath}`);
   }
   lines.push(`             assignment=${event.assignmentPath}`);
-  if (event.sessionName) {
-    lines.push(`             session=${event.sessionName}`);
-  }
+  lines.push(`             name=${event.name ?? "Unnamed"}`);
   lines.push(`             cwd=${event.cwd}`);
   return lines;
 }

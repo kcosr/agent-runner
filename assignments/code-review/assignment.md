@@ -2,7 +2,6 @@
 schemaVersion: 1
 name: code-review
 taskMode: cli
-sessionName: code review {{range}} · {{repo_path}}
 vars:
   repo_path:
     type: string

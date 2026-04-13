@@ -64,6 +64,7 @@ export function RunsDashboardRoute() {
           onArchive={state.runActions.archive}
           onClose={state.closeRun}
           onCopy={state.copyText}
+          onRename={state.runActions.rename}
           onResume={state.runActions.resume}
           onUnarchive={state.runActions.unarchive}
           selectedRunId={state.selectedRunId}

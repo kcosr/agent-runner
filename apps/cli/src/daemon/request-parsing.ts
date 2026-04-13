@@ -1,5 +1,6 @@
 import type { RunCommandOverrides } from "@task-runner/core/app/service.js";
-import type { RunsStartParams } from "./protocol.js";
+import { trimRunName } from "@task-runner/core/util/run-name.js";
+import type { RunSetNameParams, RunsStartParams } from "./protocol.js";
 
 export class RequestValidationError extends Error {
   constructor(message: string) {
@@ -25,12 +26,38 @@ export function optionalString(value: unknown, label: string): string | undefine
   return value;
 }
 
+export function optionalNonEmptyString(value: unknown, label: string): string | undefined {
+  const stringValue = optionalString(value, label);
+  if (stringValue === undefined) {
+    return undefined;
+  }
+  if (stringValue.trim().length === 0) {
+    throw new RequestValidationError(`${label} cannot be empty`);
+  }
+  return stringValue;
+}
+
 export function requiredString(value: unknown, label: string): string {
   const stringValue = optionalString(value, label);
   if (stringValue === undefined) {
     throw new RequestValidationError(`${label} is required`);
   }
   return stringValue;
+}
+
+export function requiredNullableRunName(value: unknown, label: string): string | null {
+  if (value === null) {
+    return null;
+  }
+  const stringValue = optionalString(value, label);
+  if (stringValue === undefined) {
+    throw new RequestValidationError(`${label} is required`);
+  }
+  try {
+    return trimRunName(stringValue);
+  } catch {
+    throw new RequestValidationError(`${label} cannot be empty`);
+  }
 }
 
 export function stringRecord(value: unknown, label: string): Record<string, string> {
@@ -134,7 +161,7 @@ export function optionalOverrides(value: unknown): RunCommandOverrides {
     "effort",
     "taskMode",
     "message",
-    "sessionName",
+    "name",
     "timeoutSec",
     "unrestricted",
     "maxRetries",
@@ -160,7 +187,7 @@ export function optionalOverrides(value: unknown): RunCommandOverrides {
     ]),
     taskMode: optionalEnum(record.taskMode, "overrides.taskMode", ["file", "cli"]),
     message: optionalString(record.message, "overrides.message"),
-    sessionName: optionalString(record.sessionName, "overrides.sessionName"),
+    name: optionalNonEmptyString(record.name, "overrides.name"),
     timeoutSec: optionalPositiveInteger(record.timeoutSec, "overrides.timeoutSec"),
     unrestricted: optionalBoolean(record.unrestricted, "overrides.unrestricted"),
     maxRetries: optionalNonNegativeInteger(record.maxRetries, "overrides.maxRetries"),
@@ -178,5 +205,13 @@ export function parseStartRunParams(value: unknown, label: string): RunsStartPar
     backendSessionId: optionalString(record.backendSessionId, "backendSessionId"),
     cliVars: stringRecord(record.cliVars, "cliVars"),
     overrides: optionalOverrides(record.overrides),
+  };
+}
+
+export function parseRunSetNameParams(value: unknown, label: string): RunSetNameParams {
+  const record = asRecord(value, label);
+  return {
+    target: requiredString(record.target, `${label}.target`),
+    name: requiredNullableRunName(record.name, `${label}.name`),
   };
 }

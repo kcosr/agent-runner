@@ -4,6 +4,7 @@
 
 ### Breaking Changes
 
+- Replaced the old assignment-owned/backend display-name contract with first-class nullable `run.name`. Fresh `task-runner run` / `init` now use `--name`, resume rejects name overrides, and bundled assignments/docs/examples no longer describe the removed contract.
 - Replaced the previous single-root runtime env var and cwd-local bare-name definition lookup with split XDG-style roots: `TASK_RUNNER_CONFIG_DIR` for named agent/assignment definitions and `TASK_RUNNER_STATE_DIR` for runtime state. Bare names now resolve only from the config root, and run workspaces now live under repo-scoped state buckets instead of `<cwd>/.task-runner/`. ([#8](https://github.com/kcosr/task-runner/pull/8))
 - Direct file-path args are now recognized only when the argument contains `/` or starts with `./`; bare names no longer implicitly resolve from the repo checkout. ([#8](https://github.com/kcosr/task-runner/pull/8))
 - Run workspace and draft buckets under `${TASK_RUNNER_STATE_DIR}/runs/` and `${TASK_RUNNER_STATE_DIR}/drafts/` now use the repo basename (for example `task-runner`) instead of a slugified absolute repo path. Existing runs remain on disk at their old locations, but short-id lookup now resolves against the new basename bucket unless you resume by explicit workspace path. ([#10](https://github.com/kcosr/task-runner/pull/10))
@@ -13,6 +14,7 @@
 
 ### Added
 
+- Added `task-runner run set-name <id|path> (<name> | --clear)` plus daemon/HTTP parity so existing runs can update persisted `run.name` without rewriting the run. Run list/status/web surfaces now render the stored run name, the web detail drawer can rename runs inline, Codex best-effort propagates live renames to the backend thread title, and Claude picks up the changed name on the next invocation. ([#25](https://github.com/kcosr/task-runner/pull/25))
 - Added a local daemon control plane: `task-runner serve` now starts a
   loopback WebSocket JSON-RPC server, run/definition commands can opt
   into daemon mode with `--connect` / `TASK_RUNNER_CONNECT`, and daemon

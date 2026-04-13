@@ -5,13 +5,14 @@ import type { RunEventEnvelope } from "@task-runner/core/contracts/events.js";
 import { HttpError } from "./http-errors.js";
 import { readJsonBody, sendError, sendJson } from "./http-serializers.js";
 import type { DaemonOperations } from "./operations.js";
-import type { RunsStartParams } from "./protocol.js";
+import type { RunSetNameParams, RunsStartParams } from "./protocol.js";
 import {
   asRecord,
   optionalEnum,
   optionalOverrides,
   optionalString,
   parseBooleanQueryValue,
+  parseRunSetNameParams,
   parseStartRunParams,
   requiredString,
 } from "./request-parsing.js";
@@ -116,6 +117,20 @@ const routes: RouteDefinition[] = [
     pattern: ["api", "runs", ":runId", "unarchive"],
     handler: (_req, res, ctx, params) => {
       sendJson(res, 200, ctx.operations.unarchiveRun(routeParam(params, "runId")));
+    },
+  },
+  {
+    method: "POST",
+    pattern: ["api", "runs", ":runId", "name"],
+    handler: async (req, res, ctx, params) => {
+      const body = await parseRunSetNameBody(req, routeParam(params, "runId"));
+      sendJson(
+        res,
+        200,
+        await ctx.operations.setRunName(body.target, {
+          name: body.name,
+        }),
+      );
     },
   },
   {
@@ -250,6 +265,11 @@ async function parseResumeRunBody(req: IncomingMessage): Promise<ResumeRunBody> 
   return {
     overrides: optionalOverrides(body.overrides),
   };
+}
+
+async function parseRunSetNameBody(req: IncomingMessage, runId: string): Promise<RunSetNameParams> {
+  const body = asRecord(await readJsonBody(req), "request body");
+  return parseRunSetNameParams({ ...body, target: runId }, "request body");
 }
 
 function splitPath(pathname: string): string[] {
