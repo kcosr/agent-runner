@@ -155,9 +155,11 @@ async function startCliDaemon(baseDir, listenUrl) {
 
   return {
     child,
-    async stop() {
-      child.kill("SIGINT");
-      await new Promise((resolve) => child.once("exit", resolve));
+    async stop(signal = "SIGINT") {
+      child.kill(signal);
+      return await new Promise((resolve) =>
+        child.once("exit", (code, exitSignal) => resolve({ code, signal: exitSignal })),
+      );
     },
   };
 }
@@ -331,6 +333,17 @@ test("daemon close aborts active runs and releases connected clients", async () 
   }
 });
 
+test("serveDaemon waits for bind errors before returning", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const server = await serveDaemon(listenUrl);
+  try {
+    await assert.rejects(() => serveDaemon(listenUrl), /EADDRINUSE|address already in use/i);
+  } finally {
+    await server.close();
+  }
+});
+
 test("daemon returns JSON-RPC errors for malformed requests", async () => {
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
@@ -371,6 +384,22 @@ test("daemon validates override payloads before calling shared services", async 
           overrides: { taskMode: "bogus" },
         }),
       /overrides\.taskMode must be one of: file, cli/,
+    );
+    await assert.rejects(
+      () =>
+        client.call("runs.start", {
+          cliVars: {},
+          overrides: { timeoutSec: 1.5 },
+        }),
+      /overrides\.timeoutSec must be a positive integer/,
+    );
+    await assert.rejects(
+      () =>
+        client.call("runs.start", {
+          cliVars: {},
+          overrides: { maxRetries: 1.5 },
+        }),
+      /overrides\.maxRetries must be a non-negative integer/,
     );
     assert.equal(invoked, false);
   } finally {
@@ -444,6 +473,20 @@ test("serve and --connect route CLI commands remotely and fail clearly when no d
     }
   } finally {
     await daemon.stop();
+  }
+});
+
+test("serve exits cleanly on SIGTERM", async () => {
+  const dir = tempDir();
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const daemon = await startCliDaemon(dir, listenUrl);
+  try {
+    const result = await daemon.stop("SIGTERM");
+    assert.equal(result.code, 0);
+    assert.equal(result.signal, null);
+  } finally {
+    // no-op if already stopped
   }
 });
 

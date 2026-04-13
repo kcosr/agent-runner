@@ -176,6 +176,26 @@ function optionalFiniteNumber(value: unknown, label: string): number | undefined
   return value;
 }
 
+function optionalPositiveInteger(value: unknown, label: string): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+    throw new CommandError(`${label} must be a positive integer`);
+  }
+  return value;
+}
+
+function optionalNonNegativeInteger(value: unknown, label: string): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    throw new CommandError(`${label} must be a non-negative integer`);
+  }
+  return value;
+}
+
 function optionalStringArray(value: unknown, label: string): string[] | undefined {
   if (value === undefined) {
     return undefined;
@@ -239,9 +259,9 @@ function optionalOverrides(value: unknown): RunCommandOverrides {
     taskMode: optionalEnum(record.taskMode, "overrides.taskMode", ["file", "cli"]),
     message: optionalString(record.message, "overrides.message"),
     sessionName: optionalString(record.sessionName, "overrides.sessionName"),
-    timeoutSec: optionalFiniteNumber(record.timeoutSec, "overrides.timeoutSec"),
+    timeoutSec: optionalPositiveInteger(record.timeoutSec, "overrides.timeoutSec"),
     unrestricted: optionalBoolean(record.unrestricted, "overrides.unrestricted"),
-    maxRetries: optionalFiniteNumber(record.maxRetries, "overrides.maxRetries"),
+    maxRetries: optionalNonNegativeInteger(record.maxRetries, "overrides.maxRetries"),
     addedTasks: optionalStringArray(record.addedTasks, "overrides.addedTasks"),
   };
 }
@@ -288,6 +308,22 @@ export async function serveDaemon(
   const sockets = new Set<WebSocket>();
   const version = packageVersion();
   const server = new WebSocketServer({ host, port, path });
+  await new Promise<void>((resolve, reject) => {
+    const onListening = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+    const cleanup = () => {
+      server.off("listening", onListening);
+      server.off("error", onError);
+    };
+    server.once("listening", onListening);
+    server.once("error", onError);
+  });
   const app: DaemonHandlers = {
     getRun,
     getRunList,

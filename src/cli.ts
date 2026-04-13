@@ -268,10 +268,22 @@ async function runServe(parsed: ParsedArgs): Promise<never> {
   }
   const listenUrl = resolveListenUrl(parsed.listen);
   const server = await serveDaemon(listenUrl);
-  process.stderr.write(`task-runner: serving on ${server.listenUrl}\n`);
+  let closing = false;
+  const shutdown = async (exitCode: number): Promise<void> => {
+    if (closing) {
+      return;
+    }
+    closing = true;
+    await server.close();
+    process.exit(exitCode);
+  };
   process.on("SIGINT", () => {
-    void server.close().finally(() => process.exit(130));
+    void shutdown(0);
   });
+  process.on("SIGTERM", () => {
+    void shutdown(0);
+  });
+  process.stderr.write(`task-runner: serving on ${server.listenUrl}\n`);
   // Keep the process alive until SIGINT closes the daemon.
   // eslint-disable-next-line @typescript-eslint/no-empty-function
   return await new Promise<never>(() => {});
