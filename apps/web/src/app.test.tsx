@@ -228,6 +228,46 @@ async function renderApp() {
   return render(<App />);
 }
 
+function defineElementMetric(element: Element, key: string, value: number | (() => void)) {
+  Object.defineProperty(element, key, {
+    configurable: true,
+    value,
+  });
+}
+
+function setBoardGeometry(options: {
+  clientWidth: number;
+  scrollLeft?: number;
+  scrollTo?: ReturnType<typeof vi.fn>;
+  scrollWidth: number;
+  columns: Array<{ key: string; left: number; width: number }>;
+}) {
+  const board = screen.getByLabelText("Run board");
+  defineElementMetric(board, "clientWidth", options.clientWidth);
+  defineElementMetric(board, "scrollLeft", options.scrollLeft ?? 0);
+  defineElementMetric(board, "scrollWidth", options.scrollWidth);
+  defineElementMetric(
+    board,
+    "scrollTo",
+    options.scrollTo ??
+      vi.fn(({ left }: { left: number }) => {
+        defineElementMetric(board, "scrollLeft", left);
+      }),
+  );
+
+  for (const column of options.columns) {
+    const element = board.querySelector(`[data-status="${column.key}"]`);
+    if (!element) {
+      continue;
+    }
+    defineElementMetric(element, "offsetLeft", column.left);
+    defineElementMetric(element, "offsetWidth", column.width);
+  }
+
+  window.dispatchEvent(new Event("resize"));
+  return board as HTMLElement;
+}
+
 describe("web app", () => {
   beforeEach(() => {
     queryClient.clear();
@@ -510,6 +550,110 @@ describe("web app", () => {
     expect(screen.getByRole("heading", { name: "Blocked" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Error" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Aborted" })).toBeInTheDocument();
+  });
+
+  it("shows jump buttons for overflowed non-empty columns and scrolls them into view", async () => {
+    installFetchMock({
+      runs: [
+        makeRun(),
+        makeRun({
+          runId: "run-success",
+          assignmentName: "Done dashboard",
+          status: "success",
+        }),
+        makeRun({
+          runId: "run-blocked",
+          assignmentName: "Blocked dashboard",
+          status: "blocked",
+        }),
+      ],
+      details: {
+        "run-1": makeDetail(),
+        "run-success": makeDetail({
+          runId: "run-success",
+          status: "success",
+        }),
+        "run-blocked": makeDetail({
+          runId: "run-blocked",
+          status: "blocked",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await screen.findByText("Build dashboard");
+
+    const scrollTo = vi.fn();
+    setBoardGeometry({
+      clientWidth: 260,
+      columns: [
+        { key: "running", left: 0, width: 180 },
+        { key: "completed", left: 200, width: 180 },
+        { key: "failures", left: 400, width: 180 },
+      ],
+      scrollTo,
+      scrollWidth: 620,
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Running (1)" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Completed (1)" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Failures (1)" })).toBeInTheDocument();
+    });
+
+    expect(screen.queryByRole("button", { name: "Pending (0)" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Aborted (0)" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Failures (1)" }));
+
+    expect(scrollTo).toHaveBeenCalledWith({ behavior: "smooth", left: 360 });
+  });
+
+  it("hides jump buttons when all non-empty columns already fit", async () => {
+    installFetchMock({
+      runs: [
+        makeRun(),
+        makeRun({
+          runId: "run-success",
+          assignmentName: "Done dashboard",
+          status: "success",
+        }),
+        makeRun({
+          runId: "run-blocked",
+          assignmentName: "Blocked dashboard",
+          status: "blocked",
+        }),
+      ],
+      details: {
+        "run-1": makeDetail(),
+        "run-success": makeDetail({
+          runId: "run-success",
+          status: "success",
+        }),
+        "run-blocked": makeDetail({
+          runId: "run-blocked",
+          status: "blocked",
+        }),
+      },
+    });
+
+    await renderApp();
+    await screen.findByText("Build dashboard");
+
+    setBoardGeometry({
+      clientWidth: 800,
+      columns: [
+        { key: "running", left: 0, width: 180 },
+        { key: "completed", left: 200, width: 180 },
+        { key: "failures", left: 400, width: 180 },
+      ],
+      scrollWidth: 800,
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Running (1)" })).not.toBeInTheDocument();
+    });
   });
 
   it("shows capability-driven actions and hides passive-only controls", async () => {

@@ -260,6 +260,40 @@ body {
   align-items: stretch;
 }
 
+.board-region {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+.board-jumpbar {
+  display: flex;
+  gap: 8px;
+  padding: 12px 20px 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.board-jumpbar__button {
+  flex: 0 0 auto;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.board-jumpbar__button:hover {
+  border-color: var(--border-strong);
+  background: var(--accent);
+  color: var(--foreground);
+}
+
 .board {
   overflow-y: hidden;
   overscroll-behavior-x: contain;
@@ -751,5 +785,9 @@ body {
     bottom: 16px;
     width: calc(100vw - 32px);
     padding: 0;
+  }
+
+  .board-jumpbar {
+    padding: 12px 16px 0;
   }
 }

@@ -12,17 +12,24 @@ export interface BoardColumn {
 
 export function RunColumn({
   column,
+  columnRef,
   selectedRunId,
   selectedRunActiveTask,
   onSelectRun,
 }: {
   column: BoardColumn;
+  columnRef?: (node: HTMLElement | null) => void;
   selectedRunId?: string;
   selectedRunActiveTask?: string;
   onSelectRun: (runId: string) => void;
 }) {
   return (
-    <article className="column" data-status={column.key} aria-labelledby={`col-${column.key}`}>
+    <article
+      aria-labelledby={`col-${column.key}`}
+      className="column"
+      data-status={column.key}
+      ref={columnRef}
+    >
       <header className="col-head">
         <h2 id={`col-${column.key}`}>{column.title}</h2>
         <span className="count">{column.runs.length}</span>

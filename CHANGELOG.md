@@ -48,6 +48,7 @@
 
 - `task-runner serve` no longer restricts `--listen` / `TASK_RUNNER_LISTEN` to loopback hosts, and the web dashboard now keeps long kanban/task lists scrollable while the detail drawer sections start collapsed and can be expanded on demand. ([#24](https://github.com/kcosr/task-runner/pull/24))
 - Refined the web dashboard interaction model: the detail drawer now closes on `Escape`, the board toolbar exposes archived / empty-column / failure-grouping toggles directly in the header, and mobile kanban scrolling snaps more reliably between columns. ([#24](https://github.com/kcosr/task-runner/pull/24))
+- Added a board jump strip above the kanban that exposes only the currently rendered non-empty columns and scrolls them into view when the board overflows. ([#24](https://github.com/kcosr/task-runner/pull/24))
 - Refactored the daemon control plane so HTTP and WebSocket commands
   now flow through one shared operations layer, keeping transport
   parsing thin while preserving shared run/definition DTO behavior. ([#24](https://github.com/kcosr/task-runner/pull/24))
