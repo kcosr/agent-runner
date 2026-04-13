@@ -1,6 +1,10 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { ResumeError, RunCommandError, executeRunCommand } from "../dist/run-command.js";
+import {
+  ResumeError,
+  RunCommandError,
+  executeRunCommand,
+} from "../packages/core/dist/run-command.js";
 import { withRuntimeRoots } from "./helpers/runtime-paths.mjs";
 
 test("executeRunCommand can initialize an ad-hoc passive run without an agent file", async () =>

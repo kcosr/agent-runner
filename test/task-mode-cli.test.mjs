@@ -5,11 +5,11 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
-import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
-import { runAgent } from "../dist/core/run/run-loop.js";
+import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
+import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import { sharedRuntimeEnv, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
-const CLI_PATH = resolvePath(new URL("../dist/cli.js", import.meta.url).pathname);
+const CLI_PATH = resolvePath(new URL("../apps/cli/dist/cli.js", import.meta.url).pathname);
 
 const AGENT = `---
 schemaVersion: 1
@@ -111,7 +111,9 @@ function spawnLockedManifestWriter(dir, workspaceDir, mutateSource) {
         import { readFileSync, writeFileSync } from "node:fs";
         import { join } from "node:path";
         import { withTaskStateLock } from ${JSON.stringify(
-          resolvePath(new URL("../dist/core/run/workspace-state.js", import.meta.url).pathname),
+          resolvePath(
+            new URL("../packages/core/dist/core/run/workspace-state.js", import.meta.url).pathname,
+          ),
         )};
 
         const buf = new Int32Array(new SharedArrayBuffer(4));
@@ -262,7 +264,9 @@ test("task-state persistence serializes concurrent cli-mode writes and keeps run
       "-e",
       `
         import { withTaskStateLock } from ${JSON.stringify(
-          resolvePath(new URL("../dist/core/run/workspace-state.js", import.meta.url).pathname),
+          resolvePath(
+            new URL("../packages/core/dist/core/run/workspace-state.js", import.meta.url).pathname,
+          ),
         )};
         const buf = new Int32Array(new SharedArrayBuffer(4));
         withTaskStateLock(${JSON.stringify(outcome.workspaceDir)}, () => {

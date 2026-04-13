@@ -3,10 +3,10 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
-import { ResumeError, resolveResumeTarget } from "../dist/core/run/manifest.js";
-import { runAgent } from "../dist/core/run/run-loop.js";
-import { resetWorkspaceRun } from "../dist/core/run/workspace-state.js";
+import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
+import { ResumeError, resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js";
+import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
+import { resetWorkspaceRun } from "../packages/core/dist/core/run/workspace-state.js";
 import { withEnv } from "./helpers/runtime-paths.mjs";
 
 const TWO_AGENT = `---

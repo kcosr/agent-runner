@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { RunEvent } from "../core/run/run-loop.js";
+import type { RunEvent } from "@task-runner/core/core/run/run-loop.js";
 
 export interface SseRunEventEnvelope {
   runId: string;

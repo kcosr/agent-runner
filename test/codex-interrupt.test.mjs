@@ -5,7 +5,7 @@ import {
   interruptTurnWithRetry,
   isExternalInterrupt,
   waitForTurnId,
-} from "../dist/backends/codex.js";
+} from "../packages/core/dist/backends/codex.js";
 
 test("isExternalInterrupt: turn=interrupted with no internal cause → external", () => {
   assert.equal(isExternalInterrupt("interrupted", false, false), true);

@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { runProcess } from "../dist/util/spawn.js";
+import { runProcess } from "../packages/core/dist/util/spawn.js";
 
 test("runProcess: aborting before spawn marks aborted and kills the child", async () => {
   const controller = new AbortController();

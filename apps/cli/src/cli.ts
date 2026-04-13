@@ -15,7 +15,30 @@ import {
   startRun,
   unarchive,
   updateTask,
-} from "./app/service.js";
+} from "@task-runner/core/app/service.js";
+import {
+  AgentConfigError,
+  AgentNotFoundError,
+  AssignmentConfigError,
+  AssignmentNotFoundError,
+  DefinitionListError,
+} from "@task-runner/core/config/loader.js";
+import { isPathArg, resolveInputPath } from "@task-runner/core/config/runtime-paths.js";
+import { CommandError, isCommandError } from "@task-runner/core/core/commands/service.js";
+import {
+  EmptyPromptError,
+  InvalidAddedTaskError,
+  InvalidBackendSessionError,
+  LockedFieldError,
+  RecursionDepthError,
+  type RunEvent,
+  VarResolutionError,
+} from "@task-runner/core/core/run/run-loop.js";
+import {
+  ResumeError,
+  RunCommandError,
+  UnknownBackendError,
+} from "@task-runner/core/run-command.js";
 import { type ParsedArgs, overridesFromParsedArgs, parseArgs } from "./cli/parse-args.js";
 import { renderRunEvent } from "./cli/render-run.js";
 import {
@@ -28,29 +51,10 @@ import {
   renderTaskDetails,
   renderTaskList,
 } from "./commands/render.js";
-import {
-  AgentConfigError,
-  AgentNotFoundError,
-  AssignmentConfigError,
-  AssignmentNotFoundError,
-  DefinitionListError,
-} from "./config/loader.js";
-import { isPathArg, resolveInputPath } from "./config/runtime-paths.js";
-import { CommandError, isCommandError } from "./core/commands/service.js";
-import {
-  EmptyPromptError,
-  InvalidAddedTaskError,
-  InvalidBackendSessionError,
-  LockedFieldError,
-  RecursionDepthError,
-  type RunEvent,
-  VarResolutionError,
-} from "./core/run/run-loop.js";
 import { DaemonClient, DaemonConnectionError, DaemonRpcError } from "./daemon/client.js";
 import { resolveHostMode, resolveListenUrl } from "./daemon/config.js";
 import { RPC_ERROR_COMMAND } from "./daemon/protocol.js";
 import { serveDaemon } from "./daemon/server.js";
-import { ResumeError, RunCommandError, UnknownBackendError } from "./run-command.js";
 
 const HELP = `Usage: task-runner <run|init|serve|status|task|list|show> [options] [args]
 

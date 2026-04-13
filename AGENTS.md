@@ -6,14 +6,14 @@ This file is a lightweight, internal onboarding note for agents working in this 
 
 - Read `README.md` for the CLI surface, workflow model, and run/assignment semantics.
 - Read `docs/design.md` for the manifest-canonical design, lifecycle rules, and resume policy.
-- Primary entry points are `src/cli.ts`, `src/runner/run-loop.ts`, and `src/runner/manifest.ts`.
-- Task parsing/rendering lives in `src/assignment/*`; config loading and schemas live in `src/config/*`; backend adapters live in `src/backends/*`.
+- Primary entry points are `apps/cli/src/cli.ts`, `packages/core/src/core/run/run-loop.ts`, and `packages/core/src/core/run/manifest.ts`.
+- Task parsing/rendering lives in `packages/core/src/assignment/*`; config loading lives in `packages/core/src/config/*`; backend adapters live in `packages/core/src/backends/*`; daemon transports live in `apps/cli/src/daemon/*`.
 - Built-in agents and assignments live in `agents/` and `assignments/`.
 
 ## Conventions
 
 - TypeScript, ESM modules, Node CLI.
-- Source of truth lives in `src/`; distributable CLI output is generated into `dist/` via `npm run build`.
+- Source of truth lives in `apps/cli/src/` and `packages/core/src/`; distributable output is generated into workspace `dist/` directories via `npm run build`.
 - Formatting and linting are handled by Biome (`biome.json`); pre-commit runs `lint-staged`.
 - Keep edits ASCII-only unless a file already uses Unicode.
 - Prefer small, focused changes that preserve the existing CLI and manifest invariants.
@@ -24,7 +24,7 @@ This file is a lightweight, internal onboarding note for agents working in this 
 ## Testing Requirements
 
 - Run `npm install` to install dependencies.
-- Run `npm run build` when you change anything under `src/` or otherwise affect generated `dist/`.
+- Run `npm run build` when you change anything under `apps/cli/src/`, `packages/core/src/`, or otherwise affect generated workspace `dist/` output.
 - Run `npm test` for functional changes.
 - Run `npm run lint` to check formatting and lint rules.
 - Run `npm run check` to run the standard verification pipeline (`build`, `lint`, `test`).

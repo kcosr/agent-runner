@@ -1,4 +1,4 @@
-import type { RunCommandOverrides } from "../app/service.js";
+import type { RunCommandOverrides } from "@task-runner/core/app/service.js";
 import type { RunsStartParams } from "./protocol.js";
 
 export class RequestValidationError extends Error {

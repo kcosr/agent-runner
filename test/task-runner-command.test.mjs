@@ -3,7 +3,7 @@ import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { test } from "node:test";
-import { resolveTaskRunnerCommand } from "../dist/task-runner-command.js";
+import { resolveTaskRunnerCommand } from "../packages/core/dist/task-runner-command.js";
 
 function makeExecutableDir() {
   const dir = mkdtempSync(join(tmpdir(), "task-runner-cmd-"));

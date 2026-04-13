@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { RunCommandOverrides } from "../app/service.js";
-import { VALID_STATUSES } from "../assignment/model.js";
+import type { RunCommandOverrides } from "@task-runner/core/app/service.js";
+import { VALID_STATUSES } from "@task-runner/core/assignment/model.js";
 import { HttpError } from "./http-errors.js";
 import { readJsonBody, sendError, sendJson } from "./http-serializers.js";
 import type { DaemonInfo, RunsStartParams } from "./protocol.js";

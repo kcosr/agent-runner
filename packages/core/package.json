@@ -1,0 +1,27 @@
+{
+  "name": "@task-runner/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared task-runner business logic and helpers.",
+  "files": ["dist/"],
+  "exports": {
+    "./app/*": "./dist/app/*",
+    "./assignment/*": "./dist/assignment/*",
+    "./backends/*": "./dist/backends/*",
+    "./config/*": "./dist/config/*",
+    "./contracts/*": "./dist/contracts/*",
+    "./core/*": "./dist/core/*",
+    "./run-command.js": "./dist/run-command.js",
+    "./task-runner-command.js": "./dist/task-runner-command.js",
+    "./util/*": "./dist/util/*"
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "gray-matter": "^4.0.3",
+    "ws": "^8.20.0",
+    "zod": "^3.23.8"
+  }
+}

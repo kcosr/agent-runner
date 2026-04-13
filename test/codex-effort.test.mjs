@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { mapEffortToCodex, normalizeCodexModel } from "../dist/backends/codex.js";
+import { mapEffortToCodex, normalizeCodexModel } from "../packages/core/dist/backends/codex.js";
 
 test("codex effort: off → null (omit flag)", () => {
   assert.equal(mapEffortToCodex("off"), null);

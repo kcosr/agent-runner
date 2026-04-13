@@ -6,14 +6,14 @@ import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
 import WebSocket from "ws";
-import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
-import { runAgent } from "../dist/core/run/run-loop.js";
-import { DaemonClient } from "../dist/daemon/client.js";
-import { deriveHttpBaseUrl } from "../dist/daemon/config.js";
-import { serveDaemon } from "../dist/daemon/server.js";
+import { DaemonClient } from "../apps/cli/dist/daemon/client.js";
+import { deriveHttpBaseUrl } from "../apps/cli/dist/daemon/config.js";
+import { serveDaemon } from "../apps/cli/dist/daemon/server.js";
+import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
+import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import { sharedRuntimeEnv, withEnv } from "./helpers/runtime-paths.mjs";
 
-const CLI_PATH = resolvePath(new URL("../dist/cli.js", import.meta.url).pathname);
+const CLI_PATH = resolvePath(new URL("../apps/cli/dist/cli.js", import.meta.url).pathname);
 
 const AGENT = `---
 schemaVersion: 1

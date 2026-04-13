@@ -1,4 +1,4 @@
-import { renderRunEvent } from "../../dist/cli/render-run.js";
+import { renderRunEvent } from "../../apps/cli/dist/cli/render-run.js";
 
 export function createRunEventCapture() {
   const stdoutChunks = [];

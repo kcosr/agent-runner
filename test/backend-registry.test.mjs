@@ -1,6 +1,10 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { UnknownBackendError, knownBackends, resolveBackend } from "../dist/backends/registry.js";
+import {
+  UnknownBackendError,
+  knownBackends,
+  resolveBackend,
+} from "../packages/core/dist/backends/registry.js";
 
 test("registry: claude and codex are known", () => {
   const known = knownBackends();

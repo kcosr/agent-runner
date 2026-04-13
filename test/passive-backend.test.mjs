@@ -4,12 +4,12 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
-import { passiveBackend } from "../dist/backends/passive.js";
-import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
-import { runAgent } from "../dist/core/run/run-loop.js";
+import { passiveBackend } from "../packages/core/dist/backends/passive.js";
+import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
+import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import { sharedRuntimeEnv, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
-const CLI_PATH = resolvePath(new URL("../dist/cli.js", import.meta.url).pathname);
+const CLI_PATH = resolvePath(new URL("../apps/cli/dist/cli.js", import.meta.url).pathname);
 
 const PASSIVE_AGENT = `---
 schemaVersion: 1

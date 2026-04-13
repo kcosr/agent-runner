@@ -5,7 +5,7 @@ import {
   toRunArchiveResult,
   toRunDetail,
   toRunSummary,
-} from "../dist/contracts/runs.js";
+} from "../packages/core/dist/contracts/runs.js";
 
 function buildManifest(overrides = {}) {
   const finalTasks = overrides.finalTasks ?? {

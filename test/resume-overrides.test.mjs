@@ -3,8 +3,8 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { deriveRepoKey } from "../dist/config/runtime-paths.js";
-import { ResumeError, resolveResumeTarget } from "../dist/core/run/manifest.js";
+import { deriveRepoKey } from "../packages/core/dist/config/runtime-paths.js";
+import { ResumeError, resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js";
 import { withEnv } from "./helpers/runtime-paths.mjs";
 
 function tempDir() {

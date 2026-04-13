@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { type Socket, createServer as createNetServer } from "node:net";
-import { WebSocket, WebSocketServer } from "ws";
 import {
   appendNotes,
   archive,
@@ -18,10 +17,11 @@ import {
   startRun,
   unarchive,
   updateTask,
-} from "../app/service.js";
-import { ConflictError } from "../core/commands/service.js";
-import type { RunEvent } from "../core/run/run-loop.js";
-import { shortId } from "../util/short-id.js";
+} from "@task-runner/core/app/service.js";
+import { ConflictError } from "@task-runner/core/core/commands/service.js";
+import type { RunEvent } from "@task-runner/core/core/run/run-loop.js";
+import { shortId } from "@task-runner/core/util/short-id.js";
+import { WebSocket, WebSocketServer } from "ws";
 import { deriveHttpBaseUrl, listenSocketConfig } from "./config.js";
 import { isKnownControlPlaneError } from "./http-errors.js";
 import { handleHttpRequest } from "./http-routes.js";

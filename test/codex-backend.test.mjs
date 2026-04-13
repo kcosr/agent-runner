@@ -4,7 +4,7 @@ import {
   buildCodexAppServerArgs,
   buildCodexThreadParams,
   buildCodexTurnStartPayload,
-} from "../dist/backends/codex.js";
+} from "../packages/core/dist/backends/codex.js";
 
 const baseCtx = {
   cwd: "/repo",

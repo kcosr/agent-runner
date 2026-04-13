@@ -15,7 +15,7 @@ import {
   loadAssignmentConfig,
   resolveAgentPath,
   resolveAssignmentPath,
-} from "../dist/config/loader.js";
+} from "../packages/core/dist/config/loader.js";
 import { withEnv, withRuntimeRoots } from "./helpers/runtime-paths.mjs";
 
 const MINIMAL_AGENT = `---

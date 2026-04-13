@@ -3,10 +3,13 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { claudeSessionFilePath, encodeClaudeProjectDir } from "../dist/backends/claude.js";
-import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
-import { resolveResumeTarget } from "../dist/core/run/manifest.js";
-import { InvalidBackendSessionError, runAgent } from "../dist/core/run/run-loop.js";
+import {
+  claudeSessionFilePath,
+  encodeClaudeProjectDir,
+} from "../packages/core/dist/backends/claude.js";
+import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
+import { resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js";
+import { InvalidBackendSessionError, runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import { assignmentPathFromPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 // ─── claude cwd-encoding helper ─────────────────────────────────────────────
