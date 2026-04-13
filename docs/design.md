@@ -56,7 +56,8 @@ task-runner serve [--listen <ws-url>]
    ▼
 1. Resolve host mode:
      a. embedded: CLI calls shared app services directly
-     b. daemon: CLI connects to local JSON-RPC over WebSocket
+     b. daemon: CLI connects to local JSON-RPC over WebSocket; browser-style
+        clients use HTTP + SSE on the same loopback host
 2. Load + validate agent.md (identity, config, role instructions)
 3. If --assignment: load + validate assignment.md (vars, tasks, message)
 4. Resolve vars (CLI → env → defaults) against the assignment's schema
@@ -76,7 +77,7 @@ task-runner serve [--listen <ws-url>]
         backend session resume
 11. Rewrite run.json with terminal state
 12. Emit typed run events; embedded CLI renders them directly, daemon mode
-    fans them out to subscribed clients over JSON-RPC notifications
+    fans them out to subscribed clients over JSON-RPC notifications or SSE
 13. Exit with status code
 ```
 
@@ -105,8 +106,13 @@ task-runner/
 │   ├── daemon/
 │   │   ├── client.ts      # daemon JSON-RPC WebSocket client
 │   │   ├── config.ts      # --connect / --listen host-selection helpers
+│   │   ├── http-errors.ts # HTTP status/error-envelope mapping
+│   │   ├── http-routes.ts # explicit HTTP route map over app services
+│   │   ├── http-serializers.ts # JSON body/response helpers
 │   │   ├── protocol.ts    # daemon RPC and event contract
-│   │   └── server.ts      # local loopback WebSocket daemon host
+│   │   ├── request-parsing.ts # shared transport request validation helpers
+│   │   ├── server.ts      # local loopback WS RPC + HTTP/SSE daemon host
+│   │   └── sse.ts         # browser-facing event-stream adapter
 │   ├── core/
 │   │   ├── backends/
 │   │   │   └── types.ts   # abstract Backend interface + BackendEvent stream
@@ -1658,9 +1664,11 @@ Subcommands:
   points at a manifest with `status: "initialized"`). **Rejected on
   passive agents** — use `init` + `task set` / `task add` instead.
 - **`serve`** — start the local daemon host on loopback. The daemon owns
-  live run execution, subscriptions, and daemon-mode aborts. Clients opt
-  in per-command with `--connect` / `TASK_RUNNER_CONNECT`; there is no
-  silent fallback to embedded mode when the daemon is unavailable.
+  live run execution, subscriptions, and daemon-mode aborts. CLI clients
+  opt in per-command with `--connect` / `TASK_RUNNER_CONNECT` and keep
+  using the WebSocket JSON-RPC transport; browser-style clients use the
+  daemon's HTTP endpoints plus SSE on the same loopback listener. There
+  is no silent fallback to embedded mode when the daemon is unavailable.
 - **`run reset`** — restore a non-running run to its initialized
   state. The command resolves the existing workspace, rejects
   `status: "running"`, reapplies the manifest's frozen `resetSeed`,

@@ -9,6 +9,7 @@ import WebSocket from "ws";
 import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
 import { runAgent } from "../dist/core/run/run-loop.js";
 import { DaemonClient } from "../dist/daemon/client.js";
+import { deriveHttpBaseUrl } from "../dist/daemon/config.js";
 import { serveDaemon } from "../dist/daemon/server.js";
 import { sharedRuntimeEnv, withEnv } from "./helpers/runtime-paths.mjs";
 
@@ -107,6 +108,57 @@ async function nextRawMessage(ws) {
     ws.once("message", (data) => resolve(JSON.parse(data.toString())));
     ws.once("error", reject);
   });
+}
+
+async function httpJson(baseUrl, path, opts = {}) {
+  const response = await fetch(new URL(path, baseUrl), opts);
+  const text = await response.text();
+  return {
+    status: response.status,
+    headers: response.headers,
+    body: text.length > 0 ? JSON.parse(text) : null,
+  };
+}
+
+async function openSse(baseUrl, path) {
+  const controller = new AbortController();
+  const response = await fetch(new URL(path, baseUrl), {
+    headers: { accept: "text/event-stream" },
+    signal: controller.signal,
+  });
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type") ?? "", /text\/event-stream/);
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  return {
+    async next() {
+      while (true) {
+        const boundary = buffer.indexOf("\n\n");
+        if (boundary !== -1) {
+          const frame = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          const dataLine = frame.split("\n").find((line) => line.startsWith("data: "));
+          if (!dataLine) {
+            continue;
+          }
+          return JSON.parse(dataLine.slice(6));
+        }
+
+        const { done, value } = await reader.read();
+        if (done) {
+          throw new Error("SSE stream ended before next event");
+        }
+        buffer += decoder.decode(value, { stream: true });
+      }
+    },
+    async close() {
+      controller.abort();
+      await reader.cancel().catch(() => undefined);
+    },
+  };
 }
 
 function runCli(args, opts = {}) {
@@ -211,6 +263,93 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
   });
 });
 
+test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const init = await initRun(dir);
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl);
+    try {
+      const daemon = await httpJson(httpBaseUrl, "/api/daemon");
+      assert.equal(daemon.status, 200);
+      assert.equal(daemon.body.daemon.listenUrl, listenUrl);
+
+      const runs = await httpJson(httpBaseUrl, "/api/runs");
+      assert.equal(runs.status, 200);
+      assert.equal(runs.body.runs[0].runId, init.runId);
+
+      const detail = await httpJson(httpBaseUrl, `/api/runs/${init.runId}`);
+      assert.equal(detail.status, 200);
+      assert.equal(detail.body.run.assignment.name, "daemon-work");
+
+      const tasks = await httpJson(httpBaseUrl, `/api/runs/${init.runId}/tasks`);
+      assert.equal(tasks.status, 200);
+      assert.equal(tasks.body.tasks[0].id, "t1");
+
+      const updated = await httpJson(httpBaseUrl, `/api/runs/${init.runId}/tasks/t1`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ status: "completed", notes: "Handled over HTTP." }),
+      });
+      assert.equal(updated.status, 200);
+      assert.equal(updated.body.task.status, "completed");
+      assert.equal(updated.body.task.notes, "Handled over HTTP.");
+
+      const appended = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${init.runId}/tasks/t1/append-notes`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ text: "Second line." }),
+        },
+      );
+      assert.equal(appended.status, 200);
+      assert.match(appended.body.task.notes, /Handled over HTTP\.\nSecond line\./);
+
+      const added = await httpJson(httpBaseUrl, `/api/runs/${init.runId}/tasks`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "Follow-up task", body: "via HTTP" }),
+      });
+      assert.equal(added.status, 200);
+      assert.equal(added.body.task.title, "Follow-up task");
+
+      const notFound = await httpJson(httpBaseUrl, "/api/runs/missing-run");
+      assert.equal(notFound.status, 404);
+      assert.equal(notFound.body.error.code, "NOT_FOUND");
+
+      const badQuery = await httpJson(httpBaseUrl, "/api/runs?includeArchived=maybe");
+      assert.equal(badQuery.status, 400);
+      assert.equal(badQuery.body.error.code, "INVALID_REQUEST");
+
+      const invalidStatus = await httpJson(httpBaseUrl, `/api/runs/${init.runId}/tasks/t1`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ status: "bogus" }),
+      });
+      assert.equal(invalidStatus.status, 400);
+      assert.equal(invalidStatus.body.error.code, "INVALID_REQUEST");
+
+      const malformed = await fetch(new URL(`/api/runs/${init.runId}/tasks/t1`, httpBaseUrl), {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: "{",
+      });
+      const malformedBody = await malformed.json();
+      assert.equal(malformed.status, 400);
+      assert.equal(malformedBody.error.code, "INVALID_REQUEST");
+    } finally {
+      await server.close();
+    }
+  });
+});
+
 test("daemon subscriptions fan out run events and abort active runs", async () => {
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
@@ -273,6 +412,91 @@ test("daemon subscriptions fan out run events and abort active runs", async () =
   } finally {
     await clientA.close();
     await clientB.close();
+    await server.close();
+  }
+});
+
+test("daemon SSE streams reuse run event fan-out for all-runs and per-run subscriptions", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  const server = await serveDaemon(listenUrl, {
+    async startRun({ emitEvent, abortSignal }) {
+      const runId = "daemon-sse-run";
+      emitEvent({
+        type: "run_started",
+        runId,
+        agentName: "daemon-agent",
+        assignmentSourcePath: null,
+        assignmentPath: "/tmp/fake/assignment.md",
+        sessionName: "daemon sse",
+        cwd: process.cwd(),
+        sessionIndex: null,
+      });
+      emitEvent({ type: "attempt_started", attempt: 1 });
+      await new Promise((resolve) => {
+        abortSignal.addEventListener(
+          "abort",
+          () => {
+            emitEvent({ type: "run_aborted" });
+            emitEvent({
+              type: "run_finished",
+              summary: {
+                status: "aborted",
+                attempts: 1,
+                maxAttempts: 1,
+                tasksCompleted: 0,
+                tasksTotal: 0,
+                assignmentPath: "/tmp/fake/assignment.md",
+                tasks: [],
+                runId,
+              },
+            });
+            resolve();
+          },
+          { once: true },
+        );
+      });
+      return { runId };
+    },
+  });
+
+  const allRuns = await openSse(httpBaseUrl, "/api/events/runs");
+  const oneRun = await openSse(httpBaseUrl, "/api/events/runs/daemon-sse-run");
+  try {
+    const started = await httpJson(httpBaseUrl, "/api/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ cliVars: {}, overrides: {} }),
+    });
+    assert.equal(started.status, 200);
+    assert.equal(started.body.runId, "daemon-sse-run");
+
+    const allStarted = await allRuns.next();
+    const oneStarted = await oneRun.next();
+    assert.equal(allStarted.runId, "daemon-sse-run");
+    assert.equal(allStarted.event.type, "run_started");
+    assert.equal(oneStarted.runId, "daemon-sse-run");
+    assert.equal(oneStarted.event.type, "run_started");
+
+    const allAttempt = await allRuns.next();
+    const oneAttempt = await oneRun.next();
+    assert.equal(allAttempt.event.type, "attempt_started");
+    assert.equal(oneAttempt.event.type, "attempt_started");
+
+    const aborted = await httpJson(httpBaseUrl, "/api/runs/daemon-sse-run/abort", {
+      method: "POST",
+    });
+    assert.equal(aborted.status, 200);
+    assert.equal(aborted.body.accepted, true);
+
+    assert.equal((await allRuns.next()).event.type, "run_aborted");
+    assert.equal((await oneRun.next()).event.type, "run_aborted");
+    assert.equal((await allRuns.next()).event.type, "run_finished");
+    assert.equal((await oneRun.next()).event.type, "run_finished");
+  } finally {
+    await allRuns.close();
+    await oneRun.close();
     await server.close();
   }
 });
@@ -437,6 +661,39 @@ test("daemon runs.start keeps callerCwd separate from overrides.cwd", async () =
   }
 });
 
+test("daemon HTTP run start keeps callerCwd separate from overrides.cwd", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  const callerCwd = "/tmp/http-start-caller";
+  let seenCallerCwd;
+  let seenOverrideCwd;
+  const server = await serveDaemon(listenUrl, {
+    async startRun(request) {
+      seenCallerCwd = request.callerCwd;
+      seenOverrideCwd = request.overrides.cwd;
+      return { runId: "http-start-cwd" };
+    },
+  });
+  try {
+    const started = await httpJson(httpBaseUrl, "/api/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        callerCwd,
+        cliVars: {},
+        overrides: {},
+      }),
+    });
+    assert.equal(started.status, 200);
+    assert.equal(started.body.runId, "http-start-cwd");
+    assert.equal(seenCallerCwd, callerCwd);
+    assert.equal(seenOverrideCwd, undefined);
+  } finally {
+    await server.close();
+  }
+});
+
 test("serve and --connect route CLI commands remotely and fail clearly when no daemon is available", async () => {
   const dir = tempDir();
   writeAgent(dir, "daemon-agent", AGENT);
@@ -476,6 +733,36 @@ test("serve and --connect route CLI commands remotely and fail clearly when no d
   }
 });
 
+test("serve exposes HTTP/SSE alongside the existing WebSocket RPC transport", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const init = await initRun(dir);
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  const daemon = await startCliDaemon(dir, listenUrl);
+  try {
+    const client = await DaemonClient.connect(listenUrl);
+    try {
+      const info = await client.call("daemon.info");
+      assert.equal(info.listenUrl, listenUrl);
+    } finally {
+      await client.close();
+    }
+
+    const status = await httpJson(httpBaseUrl, `/api/runs/${init.runId}`);
+    assert.equal(status.status, 200);
+    assert.equal(status.body.run.runId, init.runId);
+
+    const events = await openSse(httpBaseUrl, `/api/events/runs/${init.runId}`);
+    await events.close();
+  } finally {
+    await daemon.stop();
+  }
+});
+
 test("serve exits cleanly on SIGTERM", async () => {
   const dir = tempDir();
   const port = await freePort();
@@ -501,6 +788,35 @@ test("serve exits 130 on SIGINT", async () => {
     assert.equal(result.signal, null);
   } finally {
     // no-op if already stopped
+  }
+});
+
+test("daemon HTTP init uses the remote caller cwd when the agent omits cwd", async () => {
+  const daemonDir = tempDir();
+  writeAgent(daemonDir, "daemon-agent", AGENT);
+  writeAssignment(daemonDir, "daemon-work", ASSIGNMENT);
+  const clientDir = tempDir();
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  const daemon = await startCliDaemon(daemonDir, listenUrl);
+  try {
+    const run = await httpJson(httpBaseUrl, "/api/runs/init", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        agent: join(daemonDir, "agents", "daemon-agent", "agent.md"),
+        assignment: join(daemonDir, "assignments", "daemon-work", "assignment.md"),
+        callerCwd: clientDir,
+        cliVars: {},
+        overrides: {},
+      }),
+    });
+    assert.equal(run.status, 200);
+    assert.equal(run.body.run.cwd, clientDir);
+  } finally {
+    await daemon.stop();
   }
 });
 
