@@ -3,28 +3,18 @@ import type { RunCommandOverrides } from "../app/service.js";
 import { VALID_STATUSES } from "../assignment/model.js";
 import { HttpError } from "./http-errors.js";
 import { readJsonBody, sendError, sendJson } from "./http-serializers.js";
-import type { DaemonInfo } from "./protocol.js";
+import type { DaemonInfo, RunsStartParams } from "./protocol.js";
 import {
   asRecord,
   optionalEnum,
   optionalOverrides,
   optionalString,
   parseBooleanQueryValue,
+  parseStartRunParams,
   requiredString,
-  stringRecord,
 } from "./request-parsing.js";
 import type { DaemonHandlers } from "./server.js";
 import { type SseRunEventEnvelope, streamRunEvents } from "./sse.js";
-
-interface StartRunBody {
-  agent?: string;
-  assignment?: string;
-  definitionCwd?: string;
-  callerCwd?: string;
-  backendSessionId?: string;
-  cliVars: Record<string, string>;
-  overrides: RunCommandOverrides;
-}
 
 interface ResumeRunBody {
   overrides: RunCommandOverrides;
@@ -33,7 +23,7 @@ interface ResumeRunBody {
 interface RouteContext extends DaemonHandlers {
   daemonInfo: DaemonInfo;
   httpBaseUrl: string;
-  startManagedRun(request: StartRunBody): Promise<{ runId: string }>;
+  startManagedRun(request: RunsStartParams): Promise<{ runId: string }>;
   resumeManagedRun(request: {
     target: string;
     overrides: RunCommandOverrides;
@@ -250,17 +240,8 @@ export async function handleHttpRequest(
   }
 }
 
-async function parseStartRunBody(req: IncomingMessage): Promise<StartRunBody> {
-  const body = asRecord(await readJsonBody(req), "request body");
-  return {
-    agent: optionalString(body.agent, "agent"),
-    assignment: optionalString(body.assignment, "assignment"),
-    definitionCwd: optionalString(body.definitionCwd, "definitionCwd"),
-    callerCwd: optionalString(body.callerCwd, "callerCwd"),
-    backendSessionId: optionalString(body.backendSessionId, "backendSessionId"),
-    cliVars: stringRecord(body.cliVars, "cliVars"),
-    overrides: optionalOverrides(body.overrides),
-  };
+async function parseStartRunBody(req: IncomingMessage): Promise<RunsStartParams> {
+  return parseStartRunParams(await readJsonBody(req), "request body");
 }
 
 async function parseResumeRunBody(req: IncomingMessage): Promise<ResumeRunBody> {

@@ -1,4 +1,5 @@
 import type { RunCommandOverrides } from "../app/service.js";
+import type { RunsStartParams } from "./protocol.js";
 
 export class RequestValidationError extends Error {
   constructor(message: string) {
@@ -164,5 +165,18 @@ export function optionalOverrides(value: unknown): RunCommandOverrides {
     unrestricted: optionalBoolean(record.unrestricted, "overrides.unrestricted"),
     maxRetries: optionalNonNegativeInteger(record.maxRetries, "overrides.maxRetries"),
     addedTasks: optionalStringArray(record.addedTasks, "overrides.addedTasks"),
+  };
+}
+
+export function parseStartRunParams(value: unknown, label: string): RunsStartParams {
+  const record = asRecord(value, label);
+  return {
+    agent: optionalString(record.agent, "agent"),
+    assignment: optionalString(record.assignment, "assignment"),
+    definitionCwd: optionalString(record.definitionCwd, "definitionCwd"),
+    callerCwd: optionalString(record.callerCwd, "callerCwd"),
+    backendSessionId: optionalString(record.backendSessionId, "backendSessionId"),
+    cliVars: stringRecord(record.cliVars, "cliVars"),
+    overrides: optionalOverrides(record.overrides),
   };
 }

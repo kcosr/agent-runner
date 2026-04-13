@@ -36,8 +36,8 @@ import {
   asRecord,
   optionalOverrides,
   optionalString,
+  parseStartRunParams,
   requiredString,
-  stringRecord,
 } from "./request-parsing.js";
 
 interface SubscriptionRecord {
@@ -521,38 +521,26 @@ export async function serveDaemon(
           return;
         }
         case "runs.init": {
-          const parsed = asRecord(params, "runs.init params");
+          const parsed = parseStartRunParams(params, "runs.init params");
           sendJson(
             ws,
             resultResponse(request.id, {
               run: await app.initRun({
-                agent: optionalString(parsed.agent, "agent"),
-                assignment: optionalString(parsed.assignment, "assignment"),
-                definitionCwd: optionalString(parsed.definitionCwd, "definitionCwd"),
-                callerCwd: optionalString(parsed.callerCwd, "callerCwd"),
-                backendSessionId: optionalString(parsed.backendSessionId, "backendSessionId"),
-                cliVars: stringRecord(parsed.cliVars, "cliVars"),
-                overrides: optionalOverrides(parsed.overrides),
+                ...parsed,
               }),
             }),
           );
           return;
         }
         case "runs.start": {
-          const parsed = asRecord(params, "runs.start params");
+          const parsed = parseStartRunParams(params, "runs.start params");
           sendJson(
             ws,
             resultResponse(
               request.id,
               await executeManagedRun((emitEvent, abortSignal) =>
                 app.startRun({
-                  agent: optionalString(parsed.agent, "agent"),
-                  assignment: optionalString(parsed.assignment, "assignment"),
-                  definitionCwd: optionalString(parsed.definitionCwd, "definitionCwd"),
-                  callerCwd: optionalString(parsed.callerCwd, "callerCwd"),
-                  backendSessionId: optionalString(parsed.backendSessionId, "backendSessionId"),
-                  cliVars: stringRecord(parsed.cliVars, "cliVars"),
-                  overrides: optionalOverrides(parsed.overrides),
+                  ...parsed,
                   abortSignal,
                   emitEvent,
                 }),
@@ -674,6 +662,16 @@ export async function serveDaemon(
     httpBaseUrl,
     startedAt,
     close: async () => {
+      const wsClosePromise = new Promise<void>((resolve) => wsServer.close(() => resolve()));
+      const httpClosePromise = new Promise<void>((resolve, reject) => {
+        httpServer.close((err) => {
+          if (err && !(err instanceof Error && err.message === "Server is not running.")) {
+            reject(err);
+            return;
+          }
+          resolve();
+        });
+      });
       const active = [...activeRuns.values()];
       for (const record of active) {
         record.abortController.abort();
@@ -686,18 +684,7 @@ export async function serveDaemon(
       for (const socket of sockets) {
         socket.destroy();
       }
-      await Promise.all([
-        new Promise<void>((resolve) => wsServer.close(() => resolve())),
-        new Promise<void>((resolve, reject) => {
-          httpServer.close((err) => {
-            if (err && !(err instanceof Error && err.message === "Server is not running.")) {
-              reject(err);
-              return;
-            }
-            resolve();
-          });
-        }),
-      ]);
+      await Promise.all([wsClosePromise, httpClosePromise]);
     },
   };
 }
