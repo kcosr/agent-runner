@@ -14,7 +14,7 @@
 
 ### Added
 
-- Added `task-runner run set-name <id|path> (<name> | --clear)` plus daemon/HTTP parity so existing runs can update persisted `run.name` without rewriting the run. Run list/status/web surfaces now render the stored run name, Codex best-effort propagates live renames to the backend thread title, and Claude picks up the changed name on the next invocation.
+- Added `task-runner run set-name <id|path> (<name> | --clear)` plus daemon/HTTP parity so existing runs can update persisted `run.name` without rewriting the run. Run list/status/web surfaces now render the stored run name, the web detail drawer can rename runs inline, Codex best-effort propagates live renames to the backend thread title, and Claude picks up the changed name on the next invocation. ([#25](https://github.com/kcosr/task-runner/pull/25))
 - Added a local daemon control plane: `task-runner serve` now starts a
   loopback WebSocket JSON-RPC server, run/definition commands can opt
   into daemon mode with `--connect` / `TASK_RUNNER_CONNECT`, and daemon
