@@ -237,13 +237,17 @@ describe("web app", () => {
     await user.click(taskHeader);
 
     expect(await screen.findByText("Ship the web UI")).toBeInTheDocument();
-    expect(screen.getByText("working")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /build ui/i, expanded: true })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Description" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Notes" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Description" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Notes" })).toBeInTheDocument();
+
+    expect(screen.queryByText("working")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Notes" }));
+    expect(await screen.findByText("working")).toBeInTheDocument();
+    expect(screen.queryByText("Ship the web UI")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /build ui/i, expanded: true }));
-    expect(screen.queryByText("Ship the web UI")).not.toBeInTheDocument();
+    expect(screen.queryByText("working")).not.toBeInTheDocument();
   });
 
   it("renders markdown in task body and notes", async () => {
@@ -275,6 +279,9 @@ describe("web app", () => {
     const bulletOne = screen.getByText("bullet one");
     expect(bulletOne).toBeInTheDocument();
     expect(bulletOne.tagName).toBe("LI");
+
+    await user.click(screen.getByRole("button", { name: "Notes" }));
+    expect(await screen.findByText("npm run check")).toBeInTheDocument();
     expect(screen.getByText("npm run check").tagName).toBe("CODE");
   });
 

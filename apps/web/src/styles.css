@@ -357,34 +357,50 @@ body {
 .task-details {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   padding: 0 12px 12px 50px;
 }
 
-.task-section {
+.task-tabs {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
 }
 
-.task-section--notes {
-  padding: 8px 10px;
-  border-left: 2px solid var(--border);
-  background: var(--accent);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-}
-
-.task-section-label {
-  margin: 0;
+.task-tab {
+  position: relative;
+  padding: 6px 10px;
+  border: 0;
+  background: transparent;
   color: var(--muted-foreground);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
+  cursor: pointer;
+  transition: color 120ms;
 }
 
-.task-meta,
-.task-notes {
+.task-tab:hover {
+  color: var(--foreground);
+}
+
+.task-tab.active {
+  color: var(--foreground);
+}
+
+.task-tab.active::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: -1px;
+  height: 1.5px;
+  background: var(--foreground);
+  border-radius: 2px 2px 0 0;
+}
+
+.task-markdown {
   color: var(--muted-foreground);
   font-size: 12.5px;
   max-height: 320px;
