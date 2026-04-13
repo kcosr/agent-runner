@@ -259,8 +259,9 @@ body {
 }
 
 .col-body {
+  overflow-x: clip;
   overflow-y: auto;
-  overscroll-behavior: contain;
+  overscroll-behavior-y: contain;
 }
 
 .drawer-body {
