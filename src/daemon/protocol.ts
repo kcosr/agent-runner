@@ -18,7 +18,7 @@ export interface JsonRpcRequest {
 
 export interface JsonRpcResponse {
   jsonrpc: "2.0";
-  id: string | number;
+  id: string | number | null;
   result?: unknown;
   error?: {
     code: number;
@@ -75,6 +75,7 @@ export interface RunsStartParams {
   agent?: string;
   assignment?: string;
   definitionCwd?: string;
+  baseDir?: string;
   cliVars: Record<string, string>;
   backendSessionId?: string;
   overrides: RunCommandOverrides;

@@ -17,6 +17,7 @@ import {
   unarchive,
   updateTask,
 } from "../app/service.js";
+import type { RunCommandOverrides } from "../app/service.js";
 import { CommandError, isCommandError } from "../core/commands/service.js";
 import {
   EmptyPromptError,
@@ -95,6 +96,21 @@ function errorResponse(id: string | number, err: unknown): JsonRpcResponse {
   };
 }
 
+function rpcErrorResponse(
+  id: string | number | null,
+  code: number,
+  message: string,
+): JsonRpcResponse {
+  return {
+    jsonrpc: "2.0",
+    id,
+    error: {
+      code,
+      message,
+    },
+  };
+}
+
 function resultResponse(id: string | number, result: unknown): JsonRpcResponse {
   return {
     jsonrpc: "2.0",
@@ -140,11 +156,101 @@ function stringRecord(value: unknown, label: string): Record<string, string> {
   return result;
 }
 
-function optionalOverrides(value: unknown): Record<string, unknown> {
+function optionalBoolean(value: unknown, label: string): boolean | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "boolean") {
+    throw new CommandError(`${label} must be a boolean`);
+  }
+  return value;
+}
+
+function optionalFiniteNumber(value: unknown, label: string): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new CommandError(`${label} must be a finite number`);
+  }
+  return value;
+}
+
+function optionalStringArray(value: unknown, label: string): string[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
+    throw new CommandError(`${label} must be an array of strings`);
+  }
+  return [...value];
+}
+
+function optionalEnum<T extends string>(
+  value: unknown,
+  label: string,
+  allowed: readonly T[],
+): T | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "string" || !allowed.includes(value as T)) {
+    throw new CommandError(`${label} must be one of: ${allowed.join(", ")}`);
+  }
+  return value as T;
+}
+
+function optionalOverrides(value: unknown): RunCommandOverrides {
   if (value === undefined) {
     return {};
   }
-  return asRecord(value, "overrides");
+  const record = asRecord(value, "overrides");
+  const allowedKeys = new Set([
+    "cwd",
+    "backend",
+    "model",
+    "effort",
+    "taskMode",
+    "message",
+    "sessionName",
+    "timeoutSec",
+    "unrestricted",
+    "maxRetries",
+    "addedTasks",
+  ]);
+  for (const key of Object.keys(record)) {
+    if (!allowedKeys.has(key)) {
+      throw new CommandError(`overrides.${key} is not supported`);
+    }
+  }
+  return {
+    cwd: optionalString(record.cwd, "overrides.cwd"),
+    backend: optionalEnum(record.backend, "overrides.backend", ["claude", "codex", "passive"]),
+    model: optionalString(record.model, "overrides.model"),
+    effort: optionalEnum(record.effort, "overrides.effort", [
+      "off",
+      "minimal",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ]),
+    taskMode: optionalEnum(record.taskMode, "overrides.taskMode", ["file", "cli"]),
+    message: optionalString(record.message, "overrides.message"),
+    sessionName: optionalString(record.sessionName, "overrides.sessionName"),
+    timeoutSec: optionalFiniteNumber(record.timeoutSec, "overrides.timeoutSec"),
+    unrestricted: optionalBoolean(record.unrestricted, "overrides.unrestricted"),
+    maxRetries: optionalFiniteNumber(record.maxRetries, "overrides.maxRetries"),
+    addedTasks: optionalStringArray(record.addedTasks, "overrides.addedTasks"),
+  };
+}
+
+function sendJson(ws: WebSocket, payload: JsonRpcResponse): void {
+  if (ws.readyState !== WebSocket.OPEN) {
+    return;
+  }
+  ws.send(JSON.stringify(payload));
 }
 
 export interface DaemonServerHandle {
@@ -489,7 +595,7 @@ export async function serveDaemon(
                   agent: optionalString(parsed.agent, "agent"),
                   assignment: optionalString(parsed.assignment, "assignment"),
                   definitionCwd: optionalString(parsed.definitionCwd, "definitionCwd"),
-                  baseDir: optionalString(parsed.definitionCwd, "definitionCwd"),
+                  baseDir: optionalString(parsed.baseDir, "baseDir"),
                   backendSessionId: optionalString(parsed.backendSessionId, "backendSessionId"),
                   cliVars: stringRecord(parsed.cliVars, "cliVars"),
                   overrides: optionalOverrides(parsed.overrides),
@@ -510,7 +616,7 @@ export async function serveDaemon(
                     agent: optionalString(parsed.agent, "agent"),
                     assignment: optionalString(parsed.assignment, "assignment"),
                     definitionCwd: optionalString(parsed.definitionCwd, "definitionCwd"),
-                    baseDir: optionalString(parsed.definitionCwd, "definitionCwd"),
+                    baseDir: optionalString(parsed.baseDir, "baseDir"),
                     backendSessionId: optionalString(parsed.backendSessionId, "backendSessionId"),
                     cliVars: stringRecord(parsed.cliVars, "cliVars"),
                     overrides: optionalOverrides(parsed.overrides),
@@ -550,7 +656,7 @@ export async function serveDaemon(
             throw new CommandError(`run ${target} is not active in this daemon process`);
           }
           active.abortController.abort();
-          ws.send(JSON.stringify(resultResponse(request.id, { runId: target, accepted: true })));
+          sendJson(ws, resultResponse(request.id, { runId: target, accepted: true }));
           return;
         }
         case "events.subscribe": {
@@ -563,49 +669,54 @@ export async function serveDaemon(
             ws,
             runId: optionalString(parsed.runId, "runId"),
           });
-          ws.send(JSON.stringify(resultResponse(request.id, { subscriptionId })));
+          sendJson(ws, resultResponse(request.id, { subscriptionId }));
           return;
         }
         case "events.unsubscribe": {
           const parsed = asRecord(params, "events.unsubscribe params");
           subscriptions.delete(requiredString(parsed.subscriptionId, "subscriptionId"));
-          ws.send(JSON.stringify(resultResponse(request.id, { unsubscribed: true })));
+          sendJson(ws, resultResponse(request.id, { unsubscribed: true }));
           return;
         }
         default:
-          ws.send(
-            JSON.stringify({
-              jsonrpc: "2.0",
-              id: request.id,
-              error: {
-                code: -32601,
-                message: `unknown daemon method: ${request.method}`,
-              },
-            }),
+          sendJson(
+            ws,
+            rpcErrorResponse(request.id, -32601, `unknown daemon method: ${request.method}`),
           );
       }
     } catch (err) {
-      ws.send(JSON.stringify(errorResponse(request.id, err)));
+      try {
+        sendJson(ws, errorResponse(request.id, err));
+      } catch {
+        // Ignore disconnect races while attempting to report an error.
+      }
     }
   };
 
   server.on("connection", (ws) => {
     sockets.add(ws);
     ws.on("message", (payload) => {
-      let request: JsonRpcRequest;
+      let parsed: unknown;
       try {
-        request = JSON.parse(payload.toString()) as JsonRpcRequest;
+        parsed = JSON.parse(payload.toString()) as unknown;
       } catch {
+        sendJson(ws, rpcErrorResponse(null, -32700, "parse error"));
         return;
       }
-      if (
-        request.jsonrpc !== "2.0" ||
-        request.id === undefined ||
-        typeof request.method !== "string"
-      ) {
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        sendJson(ws, rpcErrorResponse(null, -32600, "invalid request"));
         return;
       }
-      void handleRequest(ws, request);
+      const request = parsed as Partial<JsonRpcRequest>;
+      if (request.jsonrpc !== "2.0") {
+        sendJson(ws, rpcErrorResponse(request.id ?? null, -32600, "invalid request"));
+        return;
+      }
+      if (request.id === undefined || typeof request.method !== "string") {
+        sendJson(ws, rpcErrorResponse(request.id ?? null, -32600, "invalid request"));
+        return;
+      }
+      void handleRequest(ws, request as JsonRpcRequest);
     });
 
     ws.on("close", () => {

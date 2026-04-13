@@ -5,6 +5,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
+import WebSocket from "ws";
 import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
 import { runAgent } from "../dist/core/run/run-loop.js";
 import { DaemonClient } from "../dist/daemon/client.js";
@@ -89,6 +90,22 @@ async function freePort() {
         else resolve(port);
       });
     });
+  });
+}
+
+async function openRawWebSocket(listenUrl) {
+  const ws = new WebSocket(listenUrl);
+  await new Promise((resolve, reject) => {
+    ws.once("open", resolve);
+    ws.once("error", reject);
+  });
+  return ws;
+}
+
+async function nextRawMessage(ws) {
+  return await new Promise((resolve, reject) => {
+    ws.once("message", (data) => resolve(JSON.parse(data.toString())));
+    ws.once("error", reject);
   });
 }
 
@@ -311,6 +328,54 @@ test("daemon close aborts active runs and releases connected clients", async () 
     assert.equal(aborted, true);
   } finally {
     await client.close().catch(() => undefined);
+  }
+});
+
+test("daemon returns JSON-RPC errors for malformed requests", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const server = await serveDaemon(listenUrl);
+  const ws = await openRawWebSocket(listenUrl);
+  try {
+    ws.send("{");
+    const parseError = await nextRawMessage(ws);
+    assert.equal(parseError.id, null);
+    assert.equal(parseError.error.code, -32700);
+
+    ws.send(JSON.stringify({ jsonrpc: "2.0", id: "bad-request" }));
+    const invalidRequest = await nextRawMessage(ws);
+    assert.equal(invalidRequest.id, "bad-request");
+    assert.equal(invalidRequest.error.code, -32600);
+  } finally {
+    ws.close();
+    await server.close();
+  }
+});
+
+test("daemon validates override payloads before calling shared services", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  let invoked = false;
+  const server = await serveDaemon(listenUrl, {
+    async startRun() {
+      invoked = true;
+      return { runId: "unexpected" };
+    },
+  });
+  const client = await DaemonClient.connect(listenUrl);
+  try {
+    await assert.rejects(
+      () =>
+        client.call("runs.start", {
+          cliVars: {},
+          overrides: { taskMode: "bogus" },
+        }),
+      /overrides\.taskMode must be one of: file, cli/,
+    );
+    assert.equal(invoked, false);
+  } finally {
+    await client.close();
+    await server.close();
   }
 });
 
