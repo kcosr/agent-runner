@@ -183,17 +183,6 @@ export function RunDetailDrawer({
             >
               <CopyIcon aria-hidden="true" />
             </button>
-            {backendSessionId ? (
-              <button
-                aria-label="Copy backend session id"
-                className="icon-btn"
-                onClick={() => onCopy(backendSessionId, "backend session id")}
-                title="Copy backend session id"
-                type="button"
-              >
-                <CopyIcon aria-hidden="true" />
-              </button>
-            ) : null}
             <button aria-label="Close detail" className="icon-btn" onClick={onClose} type="button">
               <CloseIcon aria-hidden="true" />
             </button>

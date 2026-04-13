@@ -47,6 +47,7 @@
 ### Changed
 
 - `task-runner serve` no longer restricts `--listen` / `TASK_RUNNER_LISTEN` to loopback hosts, and the web dashboard now keeps long kanban/task lists scrollable while the detail drawer sections start collapsed and can be expanded on demand.
+- Refined the web dashboard interaction model: the detail drawer now closes on `Escape`, the board toolbar exposes archived / empty-column / failure-grouping toggles directly in the header, and mobile kanban scrolling snaps more reliably between columns.
 - Refactored the daemon control plane so HTTP and WebSocket commands
   now flow through one shared operations layer, keeping transport
   parsing thin while preserving shared run/definition DTO behavior.
@@ -94,6 +95,9 @@
 - Fixed the web dashboard SSE client to treat malformed daemon event
   payloads as a stale-stream condition instead of crashing the live
   updates subscription.
+- Fixed dashboard copy actions to fall back when the async Clipboard API
+  is unavailable, and removed the duplicate header-level backend session
+  copy control in the detail drawer.
 - Fixed the web dashboard live-update loop to ignore noisy daemon
   transport events, revalidate state before clearing stale-stream
   warnings after reconnect, lock conflicting run actions while a

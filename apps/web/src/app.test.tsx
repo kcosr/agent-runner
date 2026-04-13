@@ -261,6 +261,32 @@ describe("web app", () => {
     expect(screen.getByRole("button", { name: /copy run id/i })).toBeInTheDocument();
   });
 
+  it("falls back to document copy when clipboard access is unavailable", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    Object.defineProperty(window.navigator, "clipboard", {
+      configurable: true,
+      value: undefined,
+    });
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: vi.fn(() => true),
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await screen.findByText("Build dashboard");
+    await user.click(screen.getByRole("button", { name: /build dashboard/i }));
+    await screen.findByLabelText("Run detail");
+    await user.click(screen.getByRole("button", { name: /copy backend session id/i }));
+
+    expect(await screen.findByText("Copied backend session id.")).toBeInTheDocument();
+  });
+
   it("collapses task details by default and expands them on click", async () => {
     installFetchMock({
       runs: [makeRun()],
@@ -404,6 +430,16 @@ describe("web app", () => {
       runs: [
         makeRun(),
         makeRun({
+          runId: "run-blocked",
+          assignmentName: "Blocked dashboard",
+          status: "blocked",
+        }),
+        makeRun({
+          runId: "run-error",
+          assignmentName: "Broken dashboard",
+          status: "error",
+        }),
+        makeRun({
           runId: "run-archived",
           assignmentName: "Archived dashboard",
           archivedAt: "2026-04-13T06:00:00.000Z",
@@ -412,6 +448,14 @@ describe("web app", () => {
       ],
       details: {
         "run-1": makeDetail(),
+        "run-blocked": makeDetail({
+          runId: "run-blocked",
+          status: "blocked",
+        }),
+        "run-error": makeDetail({
+          runId: "run-error",
+          status: "error",
+        }),
         "run-archived": makeDetail({
           runId: "run-archived",
           status: "success",
@@ -438,14 +482,25 @@ describe("web app", () => {
     const view = await renderApp();
     await screen.findByText("Build dashboard");
     expect(screen.queryByText("Archived dashboard")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Failures" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Blocked" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Aborted" })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /show archived runs/i }));
+    await user.click(screen.getByRole("button", { name: /hide empty columns/i }));
+    await user.click(screen.getByRole("button", { name: /collapse failure states/i }));
     expect(await screen.findByText("Archived dashboard")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Blocked" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Error" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Aborted" })).toBeInTheDocument();
 
     view.unmount();
     queryClient.clear();
     await renderApp();
     expect(await screen.findByText("Archived dashboard")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Blocked" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Error" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Aborted" })).toBeInTheDocument();
   });
 
   it("shows capability-driven actions and hides passive-only controls", async () => {

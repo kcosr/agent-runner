@@ -614,49 +614,6 @@ body {
   gap: 8px;
 }
 
-.options-menu {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--muted-foreground);
-  font-size: 12px;
-}
-
-.options-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 30px;
-  padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: transparent;
-}
-
-.options-toggle:hover {
-  border-color: var(--border-strong);
-  background: var(--accent);
-}
-
-.options-panel {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 0 20px 12px;
-  color: var(--muted-foreground);
-  font-size: 12px;
-}
-
-.options-checkbox {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.options-checkbox input {
-  margin: 0;
-}
-
 .repo-badge {
   display: inline-flex;
   align-items: center;
@@ -774,12 +731,6 @@ body {
   .field.search,
   .field.select {
     width: 100%;
-  }
-
-  .options-panel {
-    flex-wrap: wrap;
-    gap: 10px 14px;
-    padding: 0 16px 12px;
   }
 
   .notice-stack {

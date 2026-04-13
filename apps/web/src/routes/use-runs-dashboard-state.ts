@@ -77,6 +77,37 @@ function appendNotice(current: NoticeState[], notice: NoticeState): NoticeState[
   return [...current, notice];
 }
 
+async function writeToClipboard(value: string): Promise<boolean> {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(value);
+      return true;
+    } catch {
+      // Fall back to document-based copy for insecure origins and older browsers.
+    }
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.top = "0";
+  textarea.style.left = "-9999px";
+  textarea.style.opacity = "0";
+  document.body.append(textarea);
+  textarea.focus();
+  textarea.select();
+  textarea.setSelectionRange(0, value.length);
+
+  try {
+    return document.execCommand("copy");
+  } catch {
+    return false;
+  } finally {
+    textarea.remove();
+  }
+}
+
 function useRunActionMutation(
   action: (runId: string) => Promise<unknown>,
   setActionError: (message: string | undefined) => void,
@@ -109,7 +140,6 @@ export function useRunsDashboardState() {
   const navigate = useNavigate();
   const runRouteParams = useParams({ strict: false });
   const selectedRunId = "runId" in runRouteParams ? runRouteParams.runId : undefined;
-  const [showOptions, setShowOptions] = useState(false);
   const [notices, setNotices] = useState<NoticeState[]>([]);
   const [actionError, setActionError] = useState<string>();
 
@@ -234,8 +264,7 @@ export function useRunsDashboardState() {
     boardColumns,
     closeRun,
     copyText: async (value: string, label: string) => {
-      try {
-        await navigator.clipboard.writeText(value);
+      if (await writeToClipboard(value)) {
         setNotices((current) =>
           appendNotice(current, {
             id: `copied-${label}-${Date.now()}`,
@@ -243,7 +272,7 @@ export function useRunsDashboardState() {
             tone: "warning",
           }),
         );
-      } catch {
+      } else {
         setActionError(`Failed to copy ${label}.`);
       }
     },
@@ -268,11 +297,7 @@ export function useRunsDashboardState() {
     selectedRunId,
     selectedRunQuery,
     settings,
-    showOptions,
     streamStale,
-    toggleOptions: () => {
-      setShowOptions((current) => !current);
-    },
     updateSettings,
     visibleRuns,
   };

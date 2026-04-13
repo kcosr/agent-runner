@@ -72,8 +72,6 @@ export function RunsDashboardRoute() {
         <RunFilters
           repoOptions={state.repoOptions}
           settings={state.settings}
-          showOptions={state.showOptions}
-          toggleOptions={state.toggleOptions}
           updateSettings={state.updateSettings}
         />
       }
