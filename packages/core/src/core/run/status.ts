@@ -28,19 +28,11 @@ export interface RunCompletionSummary {
  */
 export type LiveTaskOverlay = Map<string, { status?: string; notes?: string }>;
 
-export function deriveEffectiveStatus(
-  manifest: Pick<RunManifest, "backend" | "status" | "finalTasks">,
-): ManifestStatus {
-  if (manifest.backend !== "passive") {
-    return manifest.status;
-  }
-
-  const tasks = Object.values(manifest.finalTasks);
+export function derivePassiveTerminalStatus(
+  tasks: Pick<TaskState, "status">[],
+): "initialized" | "success" | "blocked" {
   if (tasks.length === 0) {
     return "initialized";
-  }
-  if (tasks.some((task) => task.status === "in_progress")) {
-    return "running";
   }
   if (tasks.every((task) => task.status === "completed")) {
     return "success";
@@ -51,7 +43,29 @@ export function deriveEffectiveStatus(
   ) {
     return "blocked";
   }
+  // Passive runs stay lifecycle-initialized until task state reaches a terminal mix.
   return "initialized";
+}
+
+export function deriveEffectiveStatus(
+  manifest: Pick<RunManifest, "backend" | "status" | "finalTasks">,
+): ManifestStatus {
+  if (manifest.backend !== "passive") {
+    return manifest.status;
+  }
+  if (
+    manifest.status === "aborted" ||
+    manifest.status === "error" ||
+    manifest.status === "exhausted"
+  ) {
+    return manifest.status;
+  }
+
+  const tasks = Object.values(manifest.finalTasks);
+  if (tasks.some((task) => task.status === "in_progress")) {
+    return "running";
+  }
+  return derivePassiveTerminalStatus(tasks);
 }
 
 /**

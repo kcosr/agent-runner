@@ -192,6 +192,56 @@ test("deriveEffectiveStatus marks passive runs with in-progress tasks as running
   assert.equal(effectiveStatus, "running");
 });
 
+test("deriveEffectiveStatus marks fully completed passive runs as success", () => {
+  const effectiveStatus = deriveEffectiveStatus({
+    backend: "passive",
+    status: "initialized",
+    finalTasks: {
+      t1: { status: "completed" },
+      t2: { status: "completed" },
+    },
+  });
+
+  assert.equal(effectiveStatus, "success");
+});
+
+test("deriveEffectiveStatus marks completed-and-blocked passive runs as blocked", () => {
+  const effectiveStatus = deriveEffectiveStatus({
+    backend: "passive",
+    status: "initialized",
+    finalTasks: {
+      t1: { status: "completed" },
+      t2: { status: "blocked" },
+    },
+  });
+
+  assert.equal(effectiveStatus, "blocked");
+});
+
+test("deriveEffectiveStatus keeps passive runs with no tasks as initialized", () => {
+  const effectiveStatus = deriveEffectiveStatus({
+    backend: "passive",
+    status: "initialized",
+    finalTasks: {},
+  });
+
+  assert.equal(effectiveStatus, "initialized");
+});
+
+test("deriveEffectiveStatus preserves passive terminal error statuses", () => {
+  for (const status of ["aborted", "error", "exhausted"]) {
+    const effectiveStatus = deriveEffectiveStatus({
+      backend: "passive",
+      status,
+      finalTasks: {
+        t1: { status: "completed" },
+      },
+    });
+
+    assert.equal(effectiveStatus, status);
+  }
+});
+
 test("applyLiveOverlay updates tasksCompleted and finalTasks while manifest.status is running", async () => {
   const dir = tempDir();
   writeAgent(dir, "status-agent", STATUS_AGENT);

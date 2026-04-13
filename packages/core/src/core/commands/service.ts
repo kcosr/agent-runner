@@ -27,7 +27,6 @@ import { trimRunName } from "../../util/run-name.js";
 import { shortId } from "../../util/short-id.js";
 import type { LoadedAgent, LoadedAssignment } from "../config/loaded.js";
 import {
-  type ManifestStatus,
   ResumeError,
   type RunManifest,
   type TaskSnapshot,
@@ -36,7 +35,11 @@ import {
   workspaceAssignmentPath,
   writeManifest,
 } from "../run/manifest.js";
-import { type LiveTaskOverlay, applyLiveOverlay } from "../run/status.js";
+import {
+  type LiveTaskOverlay,
+  applyLiveOverlay,
+  derivePassiveTerminalStatus,
+} from "../run/status.js";
 import {
   loadWorkspaceTaskMap,
   persistWorkspaceTaskState,
@@ -188,21 +191,7 @@ function requireTaskMutationAllowed(
 }
 
 function applyPassiveFinalization(manifest: RunManifest, ordered: TaskState[]): void {
-  let hasOpen = false;
-  let hasBlocked = false;
-  for (const task of ordered) {
-    if (task.status === "pending" || task.status === "in_progress") hasOpen = true;
-    if (task.status === "blocked") hasBlocked = true;
-  }
-
-  let derived: ManifestStatus;
-  if (ordered.length === 0 || hasOpen) {
-    derived = "initialized";
-  } else if (hasBlocked) {
-    derived = "blocked";
-  } else {
-    derived = "success";
-  }
+  const derived = derivePassiveTerminalStatus(ordered);
 
   if (manifest.status === derived) {
     return;
