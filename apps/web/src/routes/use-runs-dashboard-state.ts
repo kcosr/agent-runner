@@ -44,7 +44,6 @@ function buildColumns(runs: RunSummary[], collapseFailureStates: boolean): Board
       key: "failures",
       title: "Failures",
       statuses: FAILURE_STATUSES,
-      subLabel: "grouped: blocked · exhausted · error",
       runs: [],
     });
   } else {
