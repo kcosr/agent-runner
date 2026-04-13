@@ -145,3 +145,11 @@ export function AlertIcon(props: IconProps) {
     </IconBase>
   );
 }
+
+export function ChevronIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="m6 9 6 6 6-6" />
+    </IconBase>
+  );
+}

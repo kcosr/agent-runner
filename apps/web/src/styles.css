@@ -261,21 +261,46 @@ body {
 }
 
 .task {
-  display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) auto;
-  gap: 10px;
-  padding: 12px;
+  display: flex;
+  flex-direction: column;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--card);
 }
 
+.task-header {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 16px auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.task-header:disabled {
+  cursor: default;
+}
+
+.task-header:hover:not(:disabled) {
+  background: var(--accent);
+}
+
+.task-header:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
 .task-status {
   display: inline-flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
   color: var(--muted-foreground);
-  padding-top: 2px;
 }
 
 .task-status svg {
@@ -295,16 +320,12 @@ body {
   color: var(--destructive-foreground);
 }
 
-.task-body {
-  min-width: 0;
-}
-
 .task-title {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   align-items: baseline;
-  margin: 0 0 2px;
+  min-width: 0;
   font-size: 13px;
   font-weight: 600;
 }
@@ -316,20 +337,183 @@ body {
   font-weight: 400;
 }
 
+.task-chevron {
+  width: 14px;
+  height: 14px;
+  color: var(--muted-foreground);
+  transition: transform 0.15s ease;
+}
+
+.task-chevron.expanded {
+  transform: rotate(180deg);
+}
+
+.task-chevron-spacer {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+}
+
+.task-details {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 12px 12px 50px;
+}
+
+.task-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.task-section--notes {
+  padding: 8px 10px;
+  border-left: 2px solid var(--border);
+  background: var(--accent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.task-section-label {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 .task-meta,
 .task-notes {
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: 12.5px;
+  max-height: 320px;
+  overflow-y: auto;
 }
 
-.task-notes {
-  margin-top: 8px;
-  white-space: pre-wrap;
+.markdown {
   word-break: break-word;
 }
 
-.task-side {
-  align-self: start;
+.markdown > :first-child {
+  margin-top: 0;
+}
+
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown p {
+  margin: 0 0 0.6em;
+  line-height: 1.5;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  margin: 0.8em 0 0.4em;
+  color: var(--foreground);
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.markdown h1 {
+  font-size: 14px;
+}
+
+.markdown h2 {
+  font-size: 13px;
+}
+
+.markdown h3,
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  font-size: 12.5px;
+}
+
+.markdown ul,
+.markdown ol {
+  margin: 0 0 0.6em;
+  padding-left: 1.4em;
+}
+
+.markdown li {
+  margin: 0.15em 0;
+  line-height: 1.5;
+}
+
+.markdown li > p {
+  margin: 0 0 0.3em;
+}
+
+.markdown a {
+  color: var(--info-foreground, var(--foreground));
+  text-decoration: underline;
+}
+
+.markdown code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--secondary);
+  color: var(--foreground);
+  font-family: var(--mono);
+  font-size: 0.92em;
+}
+
+.markdown pre {
+  margin: 0 0 0.6em;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--secondary);
+  overflow-x: auto;
+}
+
+.markdown pre code {
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.markdown blockquote {
+  margin: 0 0 0.6em;
+  padding: 4px 10px;
+  border-left: 2px solid var(--border);
+  color: var(--muted-foreground);
+}
+
+.markdown table {
+  margin: 0 0 0.6em;
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.markdown th,
+.markdown td {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  text-align: left;
+}
+
+.markdown th {
+  background: var(--secondary);
+  font-weight: 600;
+}
+
+.markdown hr {
+  margin: 0.8em 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+.markdown img {
+  max-width: 100%;
+  height: auto;
 }
 
 .timing-grid {

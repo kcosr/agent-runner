@@ -217,6 +217,67 @@ describe("web app", () => {
     expect(screen.getByRole("button", { name: /copy run id/i })).toBeInTheDocument();
   });
 
+  it("collapses task details by default and expands them on click", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await screen.findByText("Build dashboard");
+    await user.click(screen.getByRole("button", { name: /build dashboard/i }));
+    await screen.findByLabelText("Run detail");
+
+    expect(screen.queryByText("Ship the web UI")).not.toBeInTheDocument();
+    expect(screen.queryByText("working")).not.toBeInTheDocument();
+
+    const taskHeader = screen.getByRole("button", { name: /build ui/i, expanded: false });
+    await user.click(taskHeader);
+
+    expect(await screen.findByText("Ship the web UI")).toBeInTheDocument();
+    expect(screen.getByText("working")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /build ui/i, expanded: true })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Description" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Notes" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /build ui/i, expanded: true }));
+    expect(screen.queryByText("Ship the web UI")).not.toBeInTheDocument();
+  });
+
+  it("renders markdown in task body and notes", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: {
+        "run-1": makeDetail({
+          tasks: [
+            {
+              id: "render",
+              title: "Render markdown",
+              body: "**Done when:** the markdown renders\n\n- bullet one\n- bullet two",
+              status: "in_progress",
+              notes: "Captured `npm run check` exit code 0.",
+            },
+          ],
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await screen.findByText("Build dashboard");
+    await user.click(screen.getByRole("button", { name: /build dashboard/i }));
+    await screen.findByLabelText("Run detail");
+    await user.click(screen.getByRole("button", { name: /render markdown/i, expanded: false }));
+
+    expect(await screen.findByText("Done when:")).toBeInTheDocument();
+    const bulletOne = screen.getByText("bullet one");
+    expect(bulletOne).toBeInTheDocument();
+    expect(bulletOne.tagName).toBe("LI");
+    expect(screen.getByText("npm run check").tagName).toBe("CODE");
+  });
+
   it("distinguishes empty runs from filter-hidden runs", async () => {
     installFetchMock({
       runs: [],
