@@ -65,7 +65,14 @@ export function deriveEffectiveStatus(
   if (tasks.some((task) => task.status === "in_progress")) {
     return "running";
   }
-  return derivePassiveTerminalStatus(tasks);
+  const terminalStatus = derivePassiveTerminalStatus(tasks);
+  if (terminalStatus !== "initialized") {
+    return terminalStatus;
+  }
+  if (tasks.some((task) => task.status === "completed")) {
+    return "running";
+  }
+  return terminalStatus;
 }
 
 /**

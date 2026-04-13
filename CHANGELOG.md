@@ -98,6 +98,12 @@
 
 ### Fixed
 
+- Fixed the web dashboard so running file-mode kanban cards now show the
+  same live task progress as the detail drawer instead of stale persisted
+  manifest counts.
+- Fixed passive `effectiveStatus` so runs with completed work but no
+  currently `in_progress` task still surface as running in CLI, daemon,
+  and web status badges instead of falling back to pending.
 - Fixed resume/run startup to reject already-running manifests, claim
   the `running` transition for reused workspaces under the shared
   task-state lock, and refresh the latest initialized task snapshot
