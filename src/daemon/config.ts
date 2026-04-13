@@ -66,3 +66,12 @@ export function listenSocketConfig(listenUrl: string): {
     path: parsed.pathname.length > 0 ? parsed.pathname : "/",
   };
 }
+
+export function deriveHttpBaseUrl(listenUrl: string): string {
+  const parsed = parseDaemonUrl(listenUrl, "--listen");
+  parsed.protocol = "http:";
+  parsed.pathname = "/";
+  parsed.search = "";
+  parsed.hash = "";
+  return parsed.toString();
+}

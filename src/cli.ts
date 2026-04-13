@@ -89,7 +89,8 @@ Host selection:
   --connect <ws-url>      Route the command through the daemon host.
                           Also honored from TASK_RUNNER_CONNECT.
   --listen <ws-url>       (serve only) Listen URL for the daemon host.
-                          Also honored from TASK_RUNNER_LISTEN.
+                          Also honored from TASK_RUNNER_LISTEN. The same
+                          loopback listener serves HTTP/SSE under /api/.
 
 Execution options:
   --agent <name|path>     Agent bare name or direct path to agent.md.
@@ -284,6 +285,7 @@ async function runServe(parsed: ParsedArgs): Promise<never> {
     void shutdown(0);
   });
   process.stderr.write(`task-runner: serving on ${server.listenUrl}\n`);
+  process.stderr.write(`task-runner: http api on ${new URL("/api/", server.httpBaseUrl)}\n`);
   // Keep the process alive until SIGINT closes the daemon.
   // eslint-disable-next-line @typescript-eslint/no-empty-function
   return await new Promise<never>(() => {});

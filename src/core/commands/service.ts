@@ -89,6 +89,20 @@ export class CommandError extends Error {
   }
 }
 
+export class ConflictError extends CommandError {
+  constructor(message: string) {
+    super(message);
+    this.name = "ConflictError";
+  }
+}
+
+export class TaskNotFoundError extends CommandError {
+  constructor(runId: string, taskId: string) {
+    super(`task "${taskId}" not found in run ${runId}`);
+    this.name = "TaskNotFoundError";
+  }
+}
+
 type TaskMutationKind = "set" | "append-notes" | "add";
 
 const MAX_TITLE_LENGTH = 200;
@@ -99,7 +113,7 @@ function resolveRun(target: string): ReturnType<typeof resolveResumeTarget> {
 
 function requireArchivableRun(manifest: RunManifest, verb: "archive" | "unarchive"): void {
   if (manifest.status === "running") {
-    throw new CommandError(`cannot ${verb} a running run`);
+    throw new ConflictError(`cannot ${verb} a running run`);
   }
 }
 
@@ -118,7 +132,7 @@ function taskSnapshots(manifest: RunManifest): TaskSnapshot[] {
 function taskSnapshot(manifest: RunManifest, taskId: string): TaskSnapshot {
   const task = manifest.finalTasks[taskId];
   if (!task) {
-    throw new CommandError(`task "${taskId}" not found in run ${manifest.runId}`);
+    throw new TaskNotFoundError(manifest.runId, taskId);
   }
   return task;
 }
@@ -159,7 +173,7 @@ function requireTaskMutationAllowed(
 
   if (manifest.status === "running") {
     const verb = kind === "add" ? "add tasks" : "mutate tasks";
-    throw new CommandError(
+    throw new ConflictError(
       `cannot ${verb} on a running ${taskModeFromManifest(manifest)}-mode run${kind === "add" ? " (task add remains rejected while a run is in-flight)" : " (task CLI mutation during a run is only allowed in taskMode=cli for task set/append-notes)"}`,
     );
   }
@@ -314,7 +328,7 @@ export function showDefinition(
 export function resetRun(target: string): RunResetResult {
   const resolved = resolveRun(target);
   if (resolved.manifest.status === "running") {
-    throw new CommandError(
+    throw new ConflictError(
       "cannot reset a running run (run reset is rejected while a run is in-flight)",
     );
   }
@@ -406,7 +420,7 @@ export function setTask(
     (tasks) => {
       const task = tasks.get(taskId);
       if (!task) {
-        throw new CommandError(`task "${taskId}" not found in run ${resolved.manifest.runId}`);
+        throw new TaskNotFoundError(resolved.manifest.runId, taskId);
       }
       if (
         update.status !== undefined &&
@@ -449,7 +463,7 @@ export function appendTaskNotes(target: string, taskId: string, text: string): T
     (tasks) => {
       const task = tasks.get(taskId);
       if (!task) {
-        throw new CommandError(`task "${taskId}" not found in run ${resolved.manifest.runId}`);
+        throw new TaskNotFoundError(resolved.manifest.runId, taskId);
       }
       task.notes = task.notes.length === 0 ? appendText : `${task.notes}\n${appendText}`;
     },

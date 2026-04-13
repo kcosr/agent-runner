@@ -256,6 +256,15 @@ export class ResumeError extends Error {
   }
 }
 
+export class RunNotFoundError extends ResumeError {
+  constructor(arg: string, candidates: string[]) {
+    super(
+      `could not find run manifest for "${arg}"\n  tried:\n${candidates.map((c) => `    - ${c}`).join("\n")}`,
+    );
+    this.name = "RunNotFoundError";
+  }
+}
+
 export interface ResolvedResumeTarget {
   workspaceDir: string;
   manifest: RunManifest;
@@ -343,14 +352,13 @@ export function resolveResumeTarget(
   }
 
   if (isPathArg(arg)) {
-    throw new ResumeError(
-      `could not find run manifest for "${arg}"\n  tried:\n${candidates.map((c) => `    - ${c}`).join("\n")}`,
-    );
+    throw new RunNotFoundError(arg, candidates);
   }
 
   const checkedDirs = [join(resolveRepoRunsDir(cwd), arg), join(resolveUnknownRunsDir(), arg)];
-  throw new ResumeError(
-    `could not find run manifest for "${arg}"\n  tried:\n${checkedDirs.map((c) => `    - ${c}/`).join("\n")}`,
+  throw new RunNotFoundError(
+    arg,
+    checkedDirs.map((candidate) => `${candidate}/`),
   );
 }
 
