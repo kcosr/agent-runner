@@ -1,5 +1,5 @@
 import type { RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./app.js";
@@ -42,10 +42,11 @@ class MockEventSource {
 }
 
 function makeRun(overrides: Partial<RunSummary> = {}): RunSummary {
-  const run: RunSummary = {
+  const run = {
     runId: "run-1",
     repo: "task-runner",
     status: "running",
+    effectiveStatus: "running",
     archivedAt: null,
     agentName: "implementer",
     assignmentName: "Build dashboard",
@@ -68,7 +69,10 @@ function makeRun(overrides: Partial<RunSummary> = {}): RunSummary {
       },
     },
     ...overrides,
-  };
+  } as RunSummary;
+  if (overrides.status !== undefined && !("effectiveStatus" in overrides)) {
+    run.effectiveStatus = overrides.status;
+  }
   if (overrides.name === undefined && overrides.assignmentName !== undefined) {
     run.name = overrides.assignmentName;
   }
@@ -76,10 +80,11 @@ function makeRun(overrides: Partial<RunSummary> = {}): RunSummary {
 }
 
 function makeDetail(overrides: Partial<RunDetail> = {}): RunDetail {
-  const detail: RunDetail = {
+  const detail = {
     runId: "run-1",
     repo: "task-runner",
     status: "running",
+    effectiveStatus: "running",
     archivedAt: null,
     isLive: true,
     workspaceDir: "/tmp/task-runner/.state/run-1",
@@ -144,7 +149,10 @@ function makeDetail(overrides: Partial<RunDetail> = {}): RunDetail {
       },
     },
     ...overrides,
-  };
+  } as RunDetail;
+  if (overrides.status !== undefined && !("effectiveStatus" in overrides)) {
+    detail.effectiveStatus = overrides.status;
+  }
   if (overrides.name === undefined && overrides.assignment?.name !== undefined) {
     detail.name = overrides.assignment.name;
   }
@@ -341,6 +349,129 @@ describe("web app", () => {
     expect(screen.getByText("Build UI")).toBeInTheDocument();
     expect(screen.getAllByText("Repo").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByRole("button", { name: /copy run id/i })).toBeInTheDocument();
+  });
+
+  it("groups the board by effective status instead of canonical lifecycle status", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "passive-active",
+          assignmentName: "Passive active run",
+          backend: "passive",
+          status: "initialized",
+          effectiveStatus: "running",
+          capabilities: {
+            canArchive: true,
+            canUnarchive: false,
+            canResume: false,
+            taskMutation: {
+              canAdd: true,
+              canEditNotes: true,
+              canSetStatus: true,
+            },
+          },
+        }),
+      ],
+      details: {
+        "passive-active": makeDetail({
+          runId: "passive-active",
+          assignment: {
+            name: "Passive active run",
+            sourcePath: "/tmp/a.md",
+            workspacePath: "/tmp/b.md",
+          },
+          backend: "passive",
+          status: "initialized",
+          effectiveStatus: "running",
+          capabilities: {
+            canArchive: true,
+            canUnarchive: false,
+            canResume: false,
+            taskMutation: {
+              canAdd: true,
+              canEditNotes: true,
+              canSetStatus: true,
+            },
+          },
+        }),
+      },
+    });
+
+    await renderApp();
+    await findRunCard("Passive active run");
+
+    const runningColumn = screen.getByRole("heading", { name: "Running" }).closest("article");
+    if (!runningColumn) {
+      throw new Error("expected running column");
+    }
+
+    expect(
+      within(runningColumn).getByRole("button", { name: /passive active run/i }),
+    ).toBeInTheDocument();
+    expect(within(runningColumn).getByText("running", { selector: ".badge" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Pending" })).not.toBeInTheDocument();
+  });
+
+  it("shows effective status as primary detail status and canonical lifecycle as secondary metadata", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "passive-active",
+          assignmentName: "Passive active run",
+          backend: "passive",
+          status: "initialized",
+          effectiveStatus: "running",
+          capabilities: {
+            canArchive: true,
+            canUnarchive: false,
+            canResume: false,
+            taskMutation: {
+              canAdd: true,
+              canEditNotes: true,
+              canSetStatus: true,
+            },
+          },
+        }),
+      ],
+      details: {
+        "passive-active": makeDetail({
+          runId: "passive-active",
+          assignment: {
+            name: "Passive active run",
+            sourcePath: "/tmp/a.md",
+            workspacePath: "/tmp/b.md",
+          },
+          backend: "passive",
+          status: "initialized",
+          effectiveStatus: "running",
+          isLive: true,
+          capabilities: {
+            canArchive: true,
+            canUnarchive: false,
+            canResume: false,
+            taskMutation: {
+              canAdd: true,
+              canEditNotes: true,
+              canSetStatus: true,
+            },
+          },
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await user.click(await findRunCard("Passive active run"));
+
+    const detail = await screen.findByLabelText("Run detail");
+    expect(within(detail).getAllByText("running", { selector: ".badge" }).length).toBeGreaterThan(
+      0,
+    );
+    expect(within(detail).getByText("Lifecycle status")).toBeInTheDocument();
+    expect(within(detail).getByText("initialized")).toBeInTheDocument();
+    expect(within(detail).getByRole("button", { name: "Archive" })).toBeInTheDocument();
+    expect(within(detail).queryByRole("button", { name: "Abort" })).not.toBeInTheDocument();
   });
 
   it("falls back to document copy when clipboard access is unavailable", async () => {
@@ -728,7 +859,7 @@ describe("web app", () => {
     await findRunCard("Build dashboard");
     expect(screen.queryByRole("button", { name: /archived dashboard/i })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Failures" })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Blocked" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Blocked" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Aborted" })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /show archived runs/i }));
@@ -775,6 +906,11 @@ describe("web app", () => {
           archivedAt: "2026-04-13T06:00:00.000Z",
           status: "success",
         }),
+        makeRun({
+          runId: "run-error",
+          assignmentName: "Broken dashboard",
+          status: "error",
+        }),
       ],
       details: {
         "run-1": makeDetail(),
@@ -786,6 +922,10 @@ describe("web app", () => {
           runId: "run-archived",
           status: "success",
         }),
+        "run-error": makeDetail({
+          runId: "run-error",
+          status: "error",
+        }),
       },
     });
 
@@ -795,7 +935,7 @@ describe("web app", () => {
 
     expect(screen.queryByRole("button", { name: /archived dashboard/i })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Failures" })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Blocked" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Blocked" })).toBeInTheDocument();
 
     await user.click(await findRunCard("Build dashboard"));
     const drawer = await screen.findByLabelText("Run detail");
@@ -840,7 +980,7 @@ describe("web app", () => {
       columns: [
         { key: "running", left: 0, width: 180 },
         { key: "completed", left: 200, width: 180 },
-        { key: "failures", left: 400, width: 180 },
+        { key: "blocked", left: 400, width: 180 },
       ],
       scrollTo,
       scrollWidth: 620,
@@ -849,13 +989,13 @@ describe("web app", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Running (1)" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Completed (1)" })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Failures (1)" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Blocked (1)" })).toBeInTheDocument();
     });
 
     expect(screen.queryByRole("button", { name: "Pending (0)" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Aborted (0)" })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Failures (1)" }));
+    await user.click(screen.getByRole("button", { name: "Blocked (1)" }));
 
     expect(scrollTo).toHaveBeenCalledWith({ behavior: "smooth", left: 360 });
   });
@@ -896,7 +1036,7 @@ describe("web app", () => {
       columns: [
         { key: "running", left: 0, width: 180 },
         { key: "completed", left: 200, width: 180 },
-        { key: "failures", left: 400, width: 180 },
+        { key: "blocked", left: 400, width: 180 },
       ],
       scrollWidth: 800,
     });

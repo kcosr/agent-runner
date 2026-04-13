@@ -11,10 +11,45 @@ describe("api client", () => {
     vi.unstubAllGlobals();
   });
 
-  it("rejects invalid run list payloads", async () => {
+  it("rejects run list payloads that omit effectiveStatus", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => new Response(JSON.stringify({ runs: [{ runId: 42 }] }), { status: 200 })),
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              runs: [
+                {
+                  runId: "run-1",
+                  repo: "task-runner",
+                  status: "running",
+                  archivedAt: null,
+                  agentName: "implementer",
+                  name: "Build dashboard",
+                  assignmentName: "Build dashboard",
+                  backend: "codex",
+                  model: "gpt-5.4",
+                  cwd: "/tmp/task-runner",
+                  startedAt: "2026-04-13T05:00:00.000Z",
+                  endedAt: null,
+                  tasksCompleted: 1,
+                  tasksTotal: 4,
+                  capabilities: {
+                    canArchive: false,
+                    canUnarchive: false,
+                    canResume: true,
+                    taskMutation: {
+                      canAdd: false,
+                      canEditNotes: false,
+                      canSetStatus: false,
+                    },
+                  },
+                },
+              ],
+            }),
+            { status: 200 },
+          ),
+      ),
     );
 
     const api = createApiClient(config);
@@ -24,6 +59,59 @@ describe("api client", () => {
       name: "ApiError",
       status: 200,
     });
+  });
+
+  it("parses effectiveStatus from run list payloads", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              runs: [
+                {
+                  runId: "run-1",
+                  repo: "task-runner",
+                  status: "initialized",
+                  effectiveStatus: "running",
+                  archivedAt: null,
+                  agentName: "implementer",
+                  name: "Build dashboard",
+                  assignmentName: "Build dashboard",
+                  backend: "passive",
+                  model: null,
+                  cwd: "/tmp/task-runner",
+                  startedAt: "2026-04-13T05:00:00.000Z",
+                  endedAt: null,
+                  tasksCompleted: 1,
+                  tasksTotal: 4,
+                  capabilities: {
+                    canArchive: true,
+                    canUnarchive: false,
+                    canResume: false,
+                    taskMutation: {
+                      canAdd: true,
+                      canEditNotes: true,
+                      canSetStatus: true,
+                    },
+                  },
+                },
+              ],
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+
+    const api = createApiClient(config);
+
+    await expect(api.listRuns()).resolves.toEqual([
+      expect.objectContaining({
+        runId: "run-1",
+        status: "initialized",
+        effectiveStatus: "running",
+      }),
+    ]);
   });
 
   it("rejects invalid resume responses", async () => {

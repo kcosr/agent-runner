@@ -286,6 +286,114 @@ test("resume: archived runs are rejected until unarchived", async () => {
   );
 });
 
+test("resume: rejects a target already marked running", async () => {
+  const dir = tempDir();
+  writeAgentAndAssignment(dir);
+
+  const first = await runIn(dir, {
+    backend: mockBackend(async (ctx) => {
+      const absPlan = assignmentPathFromPrompt(ctx.prompt);
+      let plan = readFileSync(absPlan, "utf8");
+      plan = editStatus(plan, "t1", "completed");
+      writeFileSync(absPlan, plan, "utf8");
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "sess-running-guard",
+        transcript: "partial",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    }),
+  });
+
+  const manifestPath = join(first.workspaceDir, "run.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  manifest.status = "running";
+  manifest.exitCode = null;
+  manifest.endedAt = null;
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+  const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.runId, dir));
+  await assert.rejects(
+    () =>
+      runIn(dir, {
+        backend: mockBackend(async () => {
+          throw new Error("backend should not be invoked for already-running resumes");
+        }),
+        overrides: { message: "continue" },
+        resume: target,
+      }),
+    (err) => err instanceof ResumeError && /already running/.test(err.message),
+  );
+});
+
+test("resume: start refreshes the latest initialized task state before claiming running", async () => {
+  const dir = tempDir();
+  writeAgentAndAssignment(dir);
+
+  const initialized = await withSharedRuntimeEnv(dir, async () => {
+    const loaded = loadAgentConfig("three", dir);
+    const loadedAssignment = loadAssignmentConfig("three-work", dir);
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      return await runAgent({
+        loaded,
+        loadedAssignment,
+        cliVars: {},
+        backend: {
+          id: "mock",
+          async invoke() {
+            throw new Error("backend should not be invoked during init");
+          },
+        },
+        initialize: true,
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+
+  const staleTarget = withSharedRuntimeEnv(dir, () => resolveResumeTarget(initialized.runId, dir));
+
+  const initializedManifestPath = join(initialized.workspaceDir, "run.json");
+  const initializedManifest = JSON.parse(readFileSync(initializedManifestPath, "utf8"));
+  initializedManifest.finalTasks.t1.status = "completed";
+  initializedManifest.tasksCompleted = 1;
+  writeFileSync(initializedManifestPath, `${JSON.stringify(initializedManifest, null, 2)}\n`);
+
+  let initializedPlan = readFileSync(initialized.assignmentPath, "utf8");
+  initializedPlan = editStatus(initializedPlan, "t1", "completed");
+  writeFileSync(initialized.assignmentPath, initializedPlan, "utf8");
+
+  const resumed = await runIn(dir, {
+    backend: mockBackend(async () => {
+      let plan = readFileSync(initialized.assignmentPath, "utf8");
+      plan = editStatus(plan, "t2", "completed");
+      plan = editStatus(plan, "t3", "completed");
+      writeFileSync(initialized.assignmentPath, plan, "utf8");
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "sess-init-refresh",
+        transcript: "done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    }),
+    resume: staleTarget,
+  });
+
+  assert.equal(resumed.exitCode, 0);
+  assert.equal(resumed.manifest.status, "success");
+  assert.equal(resumed.manifest.finalTasks.t1.status, "completed");
+  assert.equal(resumed.manifest.finalTasks.t2.status, "completed");
+  assert.equal(resumed.manifest.finalTasks.t3.status, "completed");
+});
+
 test("resume: non-completed tasks normalized to pending, notes preserved", async () => {
   const dir = tempDir();
   writeAgentAndAssignment(dir);

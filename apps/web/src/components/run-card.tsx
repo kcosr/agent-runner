@@ -29,7 +29,7 @@ export function RunCard({
       <div className="card-row">
         <span className="run-id">{run.runId}</span>
         <span className="card-row-spacer" />
-        <StatusBadge status={run.status} />
+        <StatusBadge status={run.effectiveStatus} />
       </div>
       <div className="card-row card-row--title">
         <span className="card-title">{visibleName}</span>

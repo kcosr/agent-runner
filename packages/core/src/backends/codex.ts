@@ -265,8 +265,22 @@ function openWsTransport(url: string): Promise<Transport> {
     let stderrHandler: ((text: string) => void) | null = null;
     let closeHandler: ((code: number | null, reason: string) => void) | null = null;
     let closed = false;
+    let opened = false;
+
+    const finishOpenFailure = (reason: string, err?: Error): void => {
+      if (closed) return;
+      closed = true;
+      reject(err ?? new Error(reason));
+    };
+
+    const finishTransportClose = (code: number | null, reason: string): void => {
+      if (closed) return;
+      closed = true;
+      closeHandler?.(code, reason);
+    };
 
     ws.on("open", () => {
+      opened = true;
       resolve({
         descriptor: `ws:${url}`,
         send(line: string) {
@@ -302,15 +316,24 @@ function openWsTransport(url: string): Promise<Transport> {
     });
     ws.on("error", (err) => {
       stderrHandler?.(`ws error: ${err.message}\n`);
-      if (!closed) {
-        closed = true;
-        reject(err);
+      if (!opened) {
+        finishOpenFailure(`ws error: ${err.message}`, err);
+        return;
+      }
+      finishTransportClose(null, `ws error: ${err.message}`);
+      try {
+        ws.close();
+      } catch {
+        // ignore
       }
     });
     ws.on("close", (code, reason) => {
-      if (closed) return;
-      closed = true;
-      closeHandler?.(code, reason.toString("utf8") || "close");
+      const closeReason = reason.toString("utf8") || "close";
+      if (!opened) {
+        finishOpenFailure(`websocket closed before open (${closeReason})`);
+        return;
+      }
+      finishTransportClose(code, closeReason);
     });
   });
 }

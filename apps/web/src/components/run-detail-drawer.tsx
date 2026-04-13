@@ -27,7 +27,7 @@ interface DragState {
 }
 
 function summaryRows(run: RunDetail) {
-  return [
+  const rows = [
     ["Repo", run.repo],
     ["Assignment", run.assignment?.name ?? "Ad hoc"],
     ["Agent", run.agent.name],
@@ -36,6 +36,12 @@ function summaryRows(run: RunDetail) {
     ["Attempts", `${run.attempts} / ${run.maxAttempts}`],
     ["Sessions", String(run.sessionCount)],
   ] as const;
+
+  if (run.effectiveStatus !== run.status) {
+    return [...rows.slice(0, 4), ["Lifecycle status", run.status], ...rows.slice(4)] as const;
+  }
+
+  return rows;
 }
 
 export function RunDetailDrawer({
@@ -220,7 +226,7 @@ export function RunDetailDrawer({
         <header className="drawer-head">
           <div className="drawer-title">
             <span className="run-id-large">{run.runId}</span>
-            <StatusBadge status={run.status} />
+            <StatusBadge status={run.effectiveStatus} />
           </div>
           <div className="drawer-actions">
             {run.capabilities.canArchive ? (

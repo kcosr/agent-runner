@@ -169,6 +169,8 @@ test("list runs enumerates current-generation runs across buckets and filters ar
     [second.runId, first.runId, "oth123"],
   );
   assert.equal(parsed[1].archivedAt, "2026-04-12T12:00:00.000Z");
+  assert.equal(parsed[0].status, "initialized");
+  assert.equal(parsed[0].effectiveStatus, "initialized");
   assert.deepEqual(parsed[0].capabilities, {
     canArchive: true,
     canUnarchive: false,

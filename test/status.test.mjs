@@ -9,7 +9,7 @@ import { parseAssignment } from "../packages/core/dist/assignment/parser.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { toRunDetail } from "../packages/core/dist/contracts/runs.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
-import { applyLiveOverlay } from "../packages/core/dist/core/run/status.js";
+import { applyLiveOverlay, deriveEffectiveStatus } from "../packages/core/dist/core/run/status.js";
 import { assignmentPathFromPrompt, sharedRuntimeEnv, withEnv } from "./helpers/runtime-paths.mjs";
 
 function patchManifest(workspaceDir, mutator) {
@@ -170,6 +170,78 @@ test("renderRunStatus prints the persisted run summary", async () => {
   assert.match(text, /- t2 — Second \[completed\]/);
 });
 
+test("deriveEffectiveStatus marks passive runs with in-progress tasks as running", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "status-agent", STATUS_AGENT);
+  writeAssignment(dir, "status-work", STATUS_ASSIGNMENT);
+  const outcome = await runFresh(dir);
+
+  const effectiveStatus = deriveEffectiveStatus({
+    ...outcome.manifest,
+    backend: "passive",
+    status: "initialized",
+    finalTasks: {
+      ...outcome.manifest.finalTasks,
+      t1: {
+        ...outcome.manifest.finalTasks.t1,
+        status: "in_progress",
+      },
+    },
+  });
+
+  assert.equal(effectiveStatus, "running");
+});
+
+test("deriveEffectiveStatus marks fully completed passive runs as success", () => {
+  const effectiveStatus = deriveEffectiveStatus({
+    backend: "passive",
+    status: "initialized",
+    finalTasks: {
+      t1: { status: "completed" },
+      t2: { status: "completed" },
+    },
+  });
+
+  assert.equal(effectiveStatus, "success");
+});
+
+test("deriveEffectiveStatus marks completed-and-blocked passive runs as blocked", () => {
+  const effectiveStatus = deriveEffectiveStatus({
+    backend: "passive",
+    status: "initialized",
+    finalTasks: {
+      t1: { status: "completed" },
+      t2: { status: "blocked" },
+    },
+  });
+
+  assert.equal(effectiveStatus, "blocked");
+});
+
+test("deriveEffectiveStatus keeps passive runs with no tasks as initialized", () => {
+  const effectiveStatus = deriveEffectiveStatus({
+    backend: "passive",
+    status: "initialized",
+    finalTasks: {},
+  });
+
+  assert.equal(effectiveStatus, "initialized");
+});
+
+test("deriveEffectiveStatus preserves passive terminal error statuses", () => {
+  for (const status of ["aborted", "error", "exhausted"]) {
+    const effectiveStatus = deriveEffectiveStatus({
+      backend: "passive",
+      status,
+      finalTasks: {
+        t1: { status: "completed" },
+      },
+    });
+
+    assert.equal(effectiveStatus, status);
+  }
+});
+
 test("applyLiveOverlay updates tasksCompleted and finalTasks while manifest.status is running", async () => {
   const dir = tempDir();
   writeAgent(dir, "status-agent", STATUS_AGENT);
@@ -241,6 +313,39 @@ test("renderRunStatus shows the live-overlay note for running runs", async () =>
   assert.match(text, /read live from the workspace assignment\.md/);
 });
 
+test("renderRunStatus shows effective status separately from lifecycle status", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "status-agent", STATUS_AGENT);
+  writeAssignment(dir, "status-work", STATUS_ASSIGNMENT);
+  const outcome = await runFresh(dir);
+
+  const detail = toRunDetail({
+    manifest: {
+      ...outcome.manifest,
+      backend: "passive",
+      status: "initialized",
+      finalTasks: {
+        ...outcome.manifest.finalTasks,
+        t1: {
+          ...outcome.manifest.finalTasks.t1,
+          status: "in_progress",
+        },
+        t2: {
+          ...outcome.manifest.finalTasks.t2,
+          status: "pending",
+        },
+      },
+      tasksCompleted: 0,
+    },
+    isLive: false,
+  });
+
+  const text = renderRunStatus(detail);
+  assert.match(text, /Status: running/);
+  assert.match(text, /Lifecycle status: initialized/);
+  assert.match(text, /Drive this run externally:/);
+});
+
 test("renderRunStatus shows archive metadata and the unarchive hint", async () => {
   const dir = tempDir();
   writeAgent(dir, "status-agent", STATUS_AGENT);
@@ -297,6 +402,20 @@ test("status --field projects RunDetail fields and rejects removed manifest-only
     ),
   );
   assert.equal(projected.tasks[0].id, "t1");
+
+  const effectiveStatus = JSON.parse(
+    execFileSync(
+      "node",
+      [CLI_PATH, "status", outcome.runId, "--output-format", "json", "--field", "effectiveStatus"],
+      {
+        cwd: dir,
+        env: { ...process.env, ...sharedRuntimeEnv(dir) },
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    ),
+  );
+  assert.equal(effectiveStatus.effectiveStatus, "success");
 
   const failed = runCliExpectFail(
     ["status", outcome.runId, "--output-format", "json", "--field", "finalTasks"],

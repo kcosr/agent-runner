@@ -147,6 +147,10 @@ async function startCodexRenameServer(options = {}) {
       }
       if (message.method === "thread/name/set" && message.id !== undefined) {
         renameCalls.push(message.params);
+        if (options.invalidFrameOnRename === true) {
+          socket._socket.write(Buffer.from([0x88, 0x7e, 0xff, 0xff]));
+          return;
+        }
         if (options.failRename === true) {
           socket.send(
             JSON.stringify({
@@ -440,6 +444,49 @@ test("command services: setRunName keeps manifest update when codex propagation 
     assert.equal(manifest.resetSeed.name, "Still persisted");
     assert.deepEqual(codexServer.renameCalls, [
       { threadId: "thr_rename", name: "Still persisted" },
+    ]);
+  } finally {
+    await codexServer.close();
+  }
+});
+
+test("command services: setRunName does not hang on codex post-open transport errors", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+  const codexServer = await startCodexRenameServer({ invalidFrameOnRename: true });
+
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.backend = "codex";
+    manifest.backendSessionId = "thr_rename";
+    manifest.cwd = dir;
+  });
+
+  try {
+    await withSharedRuntimeEnv(dir, async () => {
+      await withEnv({ TASK_RUNNER_CODEX_WS_URL: codexServer.url }, async () => {
+        const renamed = await Promise.race([
+          setRunName(outcome.runId, { name: "Post-open failure" }),
+          new Promise((_, reject) =>
+            setTimeout(
+              () => reject(new Error("setRunName timed out after codex transport error")),
+              2_000,
+            ),
+          ),
+        ]);
+        assert.deepEqual(renamed, {
+          runId: outcome.runId,
+          name: "Post-open failure",
+          changed: true,
+        });
+      });
+    });
+
+    const manifest = readManifest(outcome.workspaceDir);
+    assert.equal(manifest.name, "Post-open failure");
+    assert.equal(manifest.resetSeed.name, "Post-open failure");
+    assert.deepEqual(codexServer.renameCalls, [
+      { threadId: "thr_rename", name: "Post-open failure" },
     ]);
   } finally {
     await codexServer.close();

@@ -415,6 +415,45 @@ test("passive status: initialized footer points at task set, not run", async () 
   assert.doesNotMatch(text, /task-runner run --resume-run/);
 });
 
+test("passive status and list surfaces use effectiveStatus while capabilities stay canonical", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "passive-agent", PASSIVE_AGENT);
+  writeAssignment(dir, "two-task", TWO_TASK_ASSIGNMENT);
+  const outcome = await initPassive(dir);
+
+  runCli(["task", "set", outcome.runId, "t1", "--status", "in_progress"], { cwd: dir });
+
+  const statusText = runCli(["status", outcome.runId], { cwd: dir });
+  assert.match(statusText, /Status: running/);
+  assert.match(statusText, /Lifecycle status: initialized/);
+  assert.match(statusText, /Drive this run externally:/);
+
+  const listText = runCli(["list", "runs"], { cwd: dir });
+  assert.match(listText, new RegExp(`${outcome.runId} \\[running\\]`));
+
+  const projected = JSON.parse(
+    runCli(
+      [
+        "status",
+        outcome.runId,
+        "--output-format",
+        "json",
+        "--field",
+        "status",
+        "--field",
+        "effectiveStatus",
+      ],
+      {
+        cwd: dir,
+      },
+    ),
+  );
+  assert.deepEqual(projected, {
+    status: "initialized",
+    effectiveStatus: "running",
+  });
+});
+
 test("passive status json exposes passive task-mutation capabilities and no resume", async () => {
   const dir = tempDir();
   writeAgent(dir, "passive-agent", PASSIVE_AGENT);

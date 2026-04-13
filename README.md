@@ -121,6 +121,9 @@ chat output.
   reads/actions over HTTP, stays fresh over SSE, and follows the
   canonical phase-1 visual contract in
   `apps/web/mockups/run-dashboard.{html,css}`.
+  Primary badges and board grouping use the shared derived
+  `effectiveStatus`, while control actions still follow the canonical
+  lifecycle `status`.
 - **Live status inspection**: `task-runner status <id>` reads the
   manifest and (for in-flight runs) overlays the live workspace
   `assignment.md` so you can see mid-attempt progress without
@@ -767,6 +770,13 @@ When `manifest.archivedAt` is non-null, text output includes the
 archive timestamp plus an unarchive hint, and JSON output exposes the
 same top-level `archivedAt` field.
 
+`RunDetail` carries both the canonical lifecycle `status` and a
+derived `effectiveStatus`. Text output uses `effectiveStatus` for the
+primary `Status:` line and shows `Lifecycle status:` when the two
+diverge. For passive runs, `effectiveStatus` becomes `running` when
+any task is `in_progress`, while the canonical manifest status stays
+`initialized` until the task set reaches a terminal state.
+
 The JSON `RunDetail` contract also carries a machine-facing
 `capabilities` block:
 
@@ -930,6 +940,12 @@ For a **passive backend** the contract is different: task mutations
 re-derived from the task map on every call), and `task-runner run`
 is rejected outright. See the [Passive backend](#passive) section
 below for the full lifecycle.
+
+Read surfaces still distinguish between canonical and effective
+status: passive work with any `in_progress` task is presented as
+effectively `running` in `status`, `list runs`, daemon JSON, and the
+web dashboard, even though the canonical manifest lifecycle remains
+`initialized` until the work is terminal.
 
 ### `task-runner list`
 

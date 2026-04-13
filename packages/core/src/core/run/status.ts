@@ -1,5 +1,5 @@
 import { type TaskState, isValidStatus } from "../../assignment/model.js";
-import type { RunManifest, TaskSnapshot } from "./manifest.js";
+import type { ManifestStatus, RunManifest, TaskSnapshot } from "./manifest.js";
 
 export type RunCompletionStatus =
   | "initialized"
@@ -27,6 +27,46 @@ export interface RunCompletionSummary {
  * the validation when constructing the overlaid manifest.
  */
 export type LiveTaskOverlay = Map<string, { status?: string; notes?: string }>;
+
+export function derivePassiveTerminalStatus(
+  tasks: Pick<TaskState, "status">[],
+): "initialized" | "success" | "blocked" {
+  if (tasks.length === 0) {
+    return "initialized";
+  }
+  if (tasks.every((task) => task.status === "completed")) {
+    return "success";
+  }
+  if (
+    tasks.every((task) => task.status === "completed" || task.status === "blocked") &&
+    tasks.some((task) => task.status === "blocked")
+  ) {
+    return "blocked";
+  }
+  // Passive runs stay lifecycle-initialized until task state reaches a terminal mix.
+  return "initialized";
+}
+
+export function deriveEffectiveStatus(
+  manifest: Pick<RunManifest, "backend" | "status" | "finalTasks">,
+): ManifestStatus {
+  if (manifest.backend !== "passive") {
+    return manifest.status;
+  }
+  if (
+    manifest.status === "aborted" ||
+    manifest.status === "error" ||
+    manifest.status === "exhausted"
+  ) {
+    return manifest.status;
+  }
+
+  const tasks = Object.values(manifest.finalTasks);
+  if (tasks.some((task) => task.status === "in_progress")) {
+    return "running";
+  }
+  return derivePassiveTerminalStatus(tasks);
+}
 
 /**
  * Build a non-mutating clone of `manifest` with `finalTasks` and
