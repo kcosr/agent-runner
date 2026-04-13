@@ -21,9 +21,13 @@ export function subscribeToRunEvents(
   };
 
   source.onmessage = (message) => {
-    options.onStaleChange?.(false);
-    const payload = JSON.parse(message.data) as RunEventEnvelope;
-    options.onEvent(payload);
+    try {
+      const payload = JSON.parse(message.data) as RunEventEnvelope;
+      options.onStaleChange?.(false);
+      options.onEvent(payload);
+    } catch {
+      options.onStaleChange?.(true);
+    }
   };
 
   return () => {

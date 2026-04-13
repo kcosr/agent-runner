@@ -28,6 +28,10 @@ class MockEventSource {
     this.onmessage?.(new MessageEvent("message", { data: JSON.stringify(payload) }));
   }
 
+  emitRawMessage(data: string) {
+    this.onmessage?.(new MessageEvent("message", { data }));
+  }
+
   emitError() {
     this.onerror?.(new Event("error"));
   }
@@ -521,6 +525,33 @@ describe("web app", () => {
 
     expect(await screen.findByText(/live updates are temporarily stale/i)).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText("Recovered after stale")).toBeInTheDocument());
+  });
+
+  it("marks the stream stale when an SSE payload is malformed", async () => {
+    installFetchMock({
+      runs: [makeRun({ assignmentName: "Original title" })],
+      details: {
+        "run-1": makeDetail({
+          assignment: {
+            name: "Original title",
+            sourcePath: "/tmp/a.md",
+            workspacePath: "/tmp/b.md",
+          },
+        }),
+      },
+    });
+
+    await renderApp();
+    expect(await screen.findByText("Original title")).toBeInTheDocument();
+
+    const source = MockEventSource.instances[0];
+    if (!source) {
+      throw new Error("expected an EventSource subscription");
+    }
+    source.emitOpen();
+    source.emitRawMessage("{");
+
+    expect(await screen.findByText(/live updates are temporarily stale/i)).toBeInTheDocument();
   });
 
   it("keeps one SSE subscription while switching selected runs", async () => {

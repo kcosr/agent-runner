@@ -85,6 +85,9 @@
   preventing packaged dashboard failures on Windows and URL-encoded
   install paths, and hardened frontend serving so directory requests
   like `/assets` no longer crash `task-runner serve`.
+- Fixed the web dashboard SSE client to treat malformed daemon event
+  payloads as a stale-stream condition instead of crashing the live
+  updates subscription.
 - Fixed `assignments/plan-feature/` scaffold guidance to require implementers to verify they are in a non-`main` worktree, confirm local `main` is already in sync with `origin/main`, and sync the current worktree to local `main` before starting. Generated plans now block instead of proceeding when that preflight fails, and `assignments/plan-review/` flags drafts that omit it. ([#15](https://github.com/kcosr/task-runner/pull/15))
 - Fixed workspace persistence to use atomic writes for manifests, attempt logs, and assignment files, and reject resume targets whose manifest paths do not match the workspace they were loaded from. ([#6](https://github.com/kcosr/task-runner/pull/6))
 - Fixed Codex timeout/abort cleanup to wait for late-arriving turn ids and retry interruption, reducing the risk of orphaned remote turns. ([#6](https://github.com/kcosr/task-runner/pull/6))
