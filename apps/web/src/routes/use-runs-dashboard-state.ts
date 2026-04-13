@@ -25,7 +25,7 @@ function matchesSearch(run: RunSummary, search: string): boolean {
     return true;
   }
 
-  const haystack = [run.runId, run.assignmentName, run.agentName, run.repo, run.backend]
+  const haystack = [run.runId, run.name, run.assignmentName, run.agentName, run.repo, run.backend]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();

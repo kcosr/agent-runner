@@ -23,7 +23,8 @@ export interface ParsedArgs {
   timeoutSec?: number;
   unrestricted?: boolean;
   maxRetries?: number;
-  sessionName?: string;
+  name?: string;
+  clear?: boolean;
   outputFormat: OutputFormat;
   message?: string;
   positionals: string[];
@@ -77,7 +78,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
     }
   } else if (
     result.command === "run" &&
-    (args[0] === "reset" || args[0] === "archive" || args[0] === "unarchive")
+    (args[0] === "reset" ||
+      args[0] === "archive" ||
+      args[0] === "unarchive" ||
+      args[0] === "set-name")
   ) {
     result.subcommand = args.shift();
   }
@@ -162,11 +166,13 @@ export function parseArgs(argv: string[]): ParsedArgs {
       result.maxRetries = n;
     } else if (arg === "--unrestricted") {
       result.unrestricted = true;
-    } else if (arg === "--session-name") {
+    } else if (arg === "--name") {
       const next = args.shift();
-      if (next === undefined) throw new Error("--session-name requires a value");
-      if (next.trim().length === 0) throw new Error("--session-name cannot be empty");
-      result.sessionName = next;
+      if (next === undefined) throw new Error("--name requires a value");
+      if (next.trim().length === 0) throw new Error("--name cannot be empty");
+      result.name = next;
+    } else if (arg === "--clear") {
+      result.clear = true;
     } else if (arg === "--field") {
       const next = args.shift();
       if (next === undefined) throw new Error("--field requires a value");
@@ -235,7 +241,7 @@ export function overridesFromParsedArgs(parsed: ParsedArgs) {
     effort: parsed.effort,
     taskMode: parsed.taskMode,
     message: parsed.message,
-    sessionName: parsed.sessionName,
+    name: parsed.name,
     timeoutSec: parsed.timeoutSec,
     unrestricted: parsed.unrestricted,
     maxRetries: parsed.maxRetries,

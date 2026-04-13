@@ -734,6 +734,42 @@ async function validateCodexSession(ctx: ValidateSessionContext): Promise<Valida
   }
 }
 
+export async function setCodexThreadName(ctx: {
+  threadId: string;
+  cwd: string;
+  env?: Record<string, string>;
+  name: string | null;
+}): Promise<void> {
+  let transport: Transport | undefined;
+  let client: CodexClient | undefined;
+  try {
+    transport = await openTransport({
+      prompt: "",
+      cwd: ctx.cwd,
+      env: ctx.env ?? (process.env as Record<string, string>),
+      timeoutSec: 60,
+    });
+    client = createClient(transport);
+
+    await client.call("initialize", {
+      clientInfo: {
+        name: "task-runner",
+        title: "task-runner",
+        version: "0.1.0",
+      },
+      capabilities: { experimentalApi: true },
+    });
+    client.sendNotification("initialized");
+
+    await client.call("thread/name/set", {
+      threadId: ctx.threadId,
+      name: ctx.name,
+    });
+  } finally {
+    await client?.close().catch(() => {});
+  }
+}
+
 export const codexBackend: Backend = {
   id: "codex",
   validateSessionId: validateCodexSession,
@@ -817,11 +853,11 @@ export const codexBackend: Backend = {
       // assignment provided one. Always send (idempotent on the codex
       // side); skipped silently if a prior session already set the same
       // value. Errors are non-fatal — naming is best-effort.
-      if (ctx.sessionName) {
+      if (ctx.name) {
         try {
           await client.call("thread/name/set", {
             threadId: state.threadId,
-            name: ctx.sessionName,
+            name: ctx.name,
           });
         } catch (err) {
           ctx.emit?.({

@@ -59,7 +59,7 @@ export interface TaskSnapshot {
 export interface RunResetSeed {
   model: string | null;
   effort: string | null;
-  sessionName: string | null;
+  name: string | null;
   unrestricted: boolean;
   timeoutSec: number;
   maxAttempts: number;
@@ -136,7 +136,7 @@ export interface RunManifest {
   model: string | null;
   effort: string | null;
   message: string | null;
-  sessionName: string | null;
+  name: string | null;
   unrestricted: boolean;
   cwd: string;
   // Union of the agent's and assignment's lockedFields at first write.
@@ -215,7 +215,7 @@ export function applyRunResetSeed(manifest: RunManifest): void {
   const seed = manifest.resetSeed;
   manifest.model = seed.model;
   manifest.effort = seed.effort;
-  manifest.sessionName = seed.sessionName;
+  manifest.name = seed.name;
   manifest.unrestricted = seed.unrestricted;
   manifest.timeoutSec = seed.timeoutSec;
   manifest.maxAttempts = seed.maxAttempts;
@@ -425,6 +425,7 @@ function isRunManifest(value: unknown): value is RunManifest {
 
   // Top-level scalars required by downstream consumers.
   if (typeof obj.backend !== "string") return false;
+  if (obj.name !== null && typeof obj.name !== "string") return false;
   if (typeof obj.cwd !== "string") return false;
   if (typeof obj.assignmentPath !== "string") return false;
   if (typeof obj.workspaceDir !== "string") return false;
@@ -466,7 +467,7 @@ function isRunManifest(value: unknown): value is RunManifest {
   const resetSeed = obj.resetSeed as Record<string, unknown>;
   if (resetSeed.model !== null && typeof resetSeed.model !== "string") return false;
   if (resetSeed.effort !== null && typeof resetSeed.effort !== "string") return false;
-  if (resetSeed.sessionName !== null && typeof resetSeed.sessionName !== "string") return false;
+  if (resetSeed.name !== null && typeof resetSeed.name !== "string") return false;
   if (typeof resetSeed.unrestricted !== "boolean") return false;
   if (typeof resetSeed.timeoutSec !== "number") return false;
   if (typeof resetSeed.maxAttempts !== "number") return false;

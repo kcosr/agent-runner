@@ -64,6 +64,9 @@ function validateResumeOverrides(
   if (opts.overrides.cwd !== undefined) {
     return "--cwd cannot be combined with --resume-run — backend sessions are bound to the cwd they were created in, so a different cwd would invalidate the captured session id. If you need a different cwd, create a fresh run instead.";
   }
+  if (opts.overrides.name !== undefined) {
+    return "--name cannot be combined with --resume-run";
+  }
   if (Object.keys(opts.cliVars).length > 0) {
     return "--var cannot be combined with --resume-run — runtime vars are resolved from the assignment at first write and frozen into the manifest; they are not re-resolved on resume, so passing --var would silently no-op. Edit the assignment and create a fresh run if vars need to change.";
   }
@@ -78,7 +81,7 @@ function validateResumeOverrides(
     if (opts.overrides.timeoutSec !== undefined) forbidden.push("--timeout-sec");
     if (opts.overrides.maxRetries !== undefined) forbidden.push("--max-retries");
     if (opts.overrides.unrestricted !== undefined) forbidden.push("--unrestricted");
-    if (opts.overrides.sessionName !== undefined) forbidden.push("--session-name");
+    if (opts.overrides.name !== undefined) forbidden.push("--name");
     if (forbidden.length > 0) {
       return `resuming an initialized run does not accept ${forbidden.join(", ")} — init froze these at creation. If you need different values, create a fresh run.`;
     }

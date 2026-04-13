@@ -32,7 +32,6 @@ const STATUS_ASSIGNMENT = `---
 schemaVersion: 1
 name: status-work
 maxRetries: 1
-sessionName: status test
 tasks:
   - id: t1
     title: First
@@ -141,6 +140,7 @@ async function runFresh(baseDir) {
         loadedAssignment,
         cliVars: {},
         backend: okBackend(),
+        overrides: { name: "status test" },
         stderr: () => {},
         stdout: () => {},
       });
@@ -161,7 +161,7 @@ test("renderRunStatus prints the persisted run summary", async () => {
   assert.match(text, /Status: success/);
   assert.match(text, /Agent: status-agent/);
   assert.match(text, /Backend: claude \(claude-sonnet-4-6\)/);
-  assert.match(text, /Session name: status test/);
+  assert.match(text, /Name: status test/);
   assert.match(text, new RegExp(`Workspace: ${outcome.workspaceDir}`));
   assert.match(text, new RegExp(`Assignment file: ${outcome.assignmentPath}`));
   assert.match(text, /Sessions: 1/);

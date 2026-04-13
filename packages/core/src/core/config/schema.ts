@@ -79,7 +79,6 @@ export const LOCKABLE_FIELDS = [
   "taskMode",
   "instructions",
   "message",
-  "sessionName",
   "timeoutSec",
   "unrestricted",
   "maxRetries",
@@ -118,7 +117,6 @@ export const assignmentConfigSchema = z
     schemaVersion: z.literal(1),
     name: z.string().min(1),
     taskMode: z.enum(TASK_MODES).default("file"),
-    sessionName: z.string().min(1).optional(),
     message: z.string().optional(),
     maxRetries: z.number().int().min(0).max(20).default(3),
     // Documentation surface for the human / script invoking

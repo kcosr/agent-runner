@@ -12,6 +12,7 @@ import {
   getTask,
   getTaskList,
   initRun,
+  renameRun,
   reset,
   resumeRun,
   startRun,
@@ -39,6 +40,7 @@ import {
   optionalEnum,
   optionalOverrides,
   optionalString,
+  parseRunSetNameParams,
   parseStartRunParams,
   requiredString,
 } from "./request-parsing.js";
@@ -132,6 +134,7 @@ export async function serveDaemon(
     getDefinitionList,
     archive,
     unarchive,
+    renameRun,
     reset,
     updateTask,
     appendNotes,
@@ -476,6 +479,19 @@ export async function serveDaemon(
             ),
           );
           return;
+        case "runs.setName": {
+          const parsed = parseRunSetNameParams(params, "runs.setName params");
+          sendJson(
+            ws,
+            resultResponse(
+              request.id,
+              await operations.setRunName(parsed.target, {
+                name: parsed.clear ? null : (parsed.name ?? null),
+              }),
+            ),
+          );
+          return;
+        }
         case "tasks.set": {
           const parsed = asRecord(params, "tasks.set params");
           sendJson(

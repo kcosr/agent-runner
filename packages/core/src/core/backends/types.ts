@@ -19,7 +19,7 @@ export interface BackendInvokeContext {
   unrestricted?: boolean;
   timeoutSec: number;
   resumeSessionId?: string;
-  sessionName?: string;
+  name?: string;
   abortSignal?: AbortSignal;
   emit?: (event: BackendEvent) => void;
 }

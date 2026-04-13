@@ -25,7 +25,6 @@ function summaryRows(run: RunDetail) {
     ["Assignment", run.assignment?.name ?? "Ad hoc"],
     ["Agent", run.agent.name],
     ["Backend", [run.backend, run.model, run.effort].filter(Boolean).join(" · ") || run.backend],
-    ["Session", run.sessionName ?? "Not available"],
     ["Started", `${formatTimestamp(run.startedAt)} ${formatRelativeTimestamp(run.startedAt)}`],
     ["Attempts", `${run.attempts} / ${run.maxAttempts}`],
     ["Sessions", String(run.sessionCount)],
@@ -202,7 +201,10 @@ export function RunDetailDrawer({
         </header>
 
         <div className="drawer-body">
-          <h3 className="drawer-section-title">{run.assignment?.name ?? "Ad hoc run"}</h3>
+          <div className="drawer-title-block">
+            <h3 className="drawer-section-title">{run.name ?? "Unnamed"}</h3>
+            <p className="drawer-subtitle">Assignment: {run.assignment?.name ?? "Ad hoc run"}</p>
+          </div>
           <section aria-label="Run summary" className="meta-grid">
             {summaryRows(run).map(([label, value]) => (
               <div className="meta-cell" key={label}>

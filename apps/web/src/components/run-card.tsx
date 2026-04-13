@@ -21,6 +21,7 @@ export function RunCard({
       aria-pressed={selected}
       className={selected ? "card selected" : "card"}
       onClick={onSelect}
+      title={run.name ?? "Unnamed"}
       type="button"
     >
       <div className="card-row">
@@ -29,7 +30,10 @@ export function RunCard({
         <StatusBadge status={run.status} />
       </div>
       <div className="card-row">
-        <span className="card-title">{run.assignmentName ?? "Ad hoc run"}</span>
+        <span className="card-title">{run.name ?? "Unnamed"}</span>
+      </div>
+      <div className="card-row">
+        <span className="card-subtitle">{run.assignmentName ?? "Ad hoc run"}</span>
       </div>
       <div className="card-row card-meta">
         <span className="repo-badge">{run.repo}</span>

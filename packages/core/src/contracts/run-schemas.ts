@@ -4,6 +4,7 @@ import type {
   RunArchiveResult,
   RunCapabilities,
   RunDetail,
+  RunNameResult,
   RunStatus,
   RunSummary,
   RunTaskMutationCapabilities,
@@ -51,10 +52,10 @@ export const runSummarySchema: z.ZodType<RunSummary> = z.object({
   status: runStatusSchema,
   archivedAt: z.string().nullable(),
   agentName: z.string(),
+  name: z.string().nullable(),
   assignmentName: z.string().nullable(),
   backend: z.string(),
   model: z.string().nullable(),
-  sessionName: z.string().nullable(),
   cwd: z.string(),
   startedAt: z.string(),
   endedAt: z.string().nullable(),
@@ -85,7 +86,7 @@ export const runDetailSchema: z.ZodType<RunDetail> = z.object({
   backend: z.string(),
   model: z.string().nullable(),
   effort: z.string().nullable(),
-  sessionName: z.string().nullable(),
+  name: z.string().nullable(),
   backendSessionId: z.string().nullable(),
   cwd: z.string(),
   taskMode: z.enum(TASK_MODES),
@@ -112,5 +113,11 @@ export const runArchiveResultSchema: z.ZodType<RunArchiveResult> = z.object({
   runId: z.string(),
   status: runStatusSchema,
   archivedAt: z.string().nullable(),
+  changed: z.boolean(),
+});
+
+export const runNameResultSchema: z.ZodType<RunNameResult> = z.object({
+  runId: z.string(),
+  name: z.string().nullable(),
   changed: z.boolean(),
 });

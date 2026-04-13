@@ -674,6 +674,40 @@ body {
   max-width: 7rem;
 }
 
+.card-title,
+.card-subtitle {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-title {
+  display: block;
+  -webkit-line-clamp: unset;
+  -webkit-box-orient: initial;
+}
+
+.card-subtitle {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.drawer-title-block {
+  padding: 16px 18px 6px;
+}
+
+.drawer-title-block .drawer-section-title {
+  padding: 0;
+}
+
+.drawer-subtitle {
+  margin: 4px 0 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
 .backend-badge {
   display: inline-flex;
   align-items: center;

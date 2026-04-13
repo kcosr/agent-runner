@@ -10,6 +10,7 @@ import {
   getTask,
   getTaskList,
   initRun,
+  renameRun,
   reset,
   resumeRun,
   startRun,
@@ -29,6 +30,7 @@ import {
   EmptyPromptError,
   InvalidAddedTaskError,
   InvalidBackendSessionError,
+  InvalidRunNameError,
   LockedFieldError,
   RecursionDepthError,
   type RunEvent,
@@ -46,6 +48,7 @@ import {
   renderDefinitionList,
   renderRunArchive,
   renderRunList,
+  renderRunSetName,
   renderRunUnarchive,
   renderStatus,
   renderTaskDetails,
@@ -65,6 +68,7 @@ Commands:
   run reset <id|path>     Restore a non-running run to initialized state.
   run archive <id|path>   Mark a non-running run as archived.
   run unarchive <id|path> Clear a run's archive marker.
+  run set-name <id|path>  Update or clear a run's persisted display name.
   init                    Prepare a run without invoking the backend.
   serve                   Start the local daemon server.
   status <id|path>        Read a run and print its current status.
@@ -111,7 +115,8 @@ Execution options:
   --timeout-sec <n>       Override the per-attempt timeout.
   --max-retries <n>       Override the max number of retries.
   --unrestricted          Bypass the backend's approval prompts.
-  --session-name <name>   Override the assignment's session name.
+  --name <name>           Set the persisted run display name.
+  --clear                 (run set-name) Clear the persisted run name.
   --output-format <fmt>   Output format: "text" (default) or "json".
   --field <name>          (status only, repeatable) Restrict JSON output.
   --include-archived      (list runs only) Include archived runs.
@@ -221,7 +226,7 @@ function renderInitializedRun(detail: ReturnType<typeof getRun>): void {
     agentName: detail.agent.name,
     assignmentSourcePath: detail.assignment?.sourcePath ?? null,
     assignmentPath: detail.assignmentPath,
-    sessionName: detail.sessionName,
+    name: detail.name,
     cwd: detail.cwd,
     passive: detail.backend === "passive",
     pendingPrompt: detail.pendingPrompt ?? "",
@@ -473,7 +478,7 @@ async function runShowCommand(parsed: ParsedArgs, connectUrl?: string): Promise<
 
 function unsupportedFlagsForGroupedCommand(
   parsed: ParsedArgs,
-  opts: { allowFields?: boolean; allowIncludeArchived?: boolean } = {},
+  opts: { allowFields?: boolean; allowIncludeArchived?: boolean; allowClear?: boolean } = {},
 ): string[] {
   const unsupported: string[] = [];
   if (parsed.agent !== undefined) unsupported.push("--agent");
@@ -489,7 +494,8 @@ function unsupportedFlagsForGroupedCommand(
   if (parsed.timeoutSec !== undefined) unsupported.push("--timeout-sec");
   if (parsed.unrestricted !== undefined) unsupported.push("--unrestricted");
   if (parsed.maxRetries !== undefined) unsupported.push("--max-retries");
-  if (parsed.sessionName !== undefined) unsupported.push("--session-name");
+  if (parsed.name !== undefined) unsupported.push("--name");
+  if (!opts.allowClear && parsed.clear) unsupported.push("--clear");
   if (!opts.allowFields && parsed.fields.length > 0) unsupported.push("--field");
   if (parsed.taskStatus !== undefined) unsupported.push("--status");
   if (parsed.taskNotes !== undefined) unsupported.push("--notes");
@@ -608,6 +614,64 @@ async function runArchiveToggleCommand(
       process.stdout.write(
         verb === "archive" ? renderRunArchive(result) : renderRunUnarchive(result),
       );
+    }
+    process.exit(0);
+  } catch (err) {
+    exitCommandFailure(err, connectUrl);
+  }
+}
+
+async function runSetNameCommand(parsed: ParsedArgs, connectUrl?: string): Promise<never> {
+  const [runArg, nameArg, extra] = parsed.positionals;
+  const target = normalizeTarget(runArg);
+  if (!target) {
+    process.stderr.write("task-runner: run set-name requires <id-or-path>\n");
+    process.exit(3);
+  }
+  if (extra !== undefined) {
+    process.stderr.write(
+      `task-runner: run set-name takes exactly two positionals (<id-or-path> <name>) unless --clear is used; got extra "${extra}"\n`,
+    );
+    process.exit(3);
+  }
+  if (parsed.clear && nameArg !== undefined) {
+    process.stderr.write("task-runner: run set-name does not accept both <name> and --clear\n");
+    process.exit(3);
+  }
+  if (!parsed.clear && nameArg === undefined) {
+    process.stderr.write("task-runner: run set-name requires <name> or --clear\n");
+    process.exit(3);
+  }
+  if (nameArg !== undefined && nameArg.trim().length === 0) {
+    process.stderr.write("task-runner: run set-name: <name> cannot be empty\n");
+    process.exit(3);
+  }
+
+  const unsupported = unsupportedFlagsForGroupedCommand(parsed, { allowClear: true });
+  if (unsupported.length > 0) {
+    process.stderr.write(
+      `task-runner: run set-name only supports <id-or-path>, <name> or --clear, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+    );
+    process.exit(3);
+  }
+
+  try {
+    const result =
+      connectUrl === undefined
+        ? await renameRun(target, { name: parsed.clear ? null : (nameArg ?? null) })
+        : await withDaemonClient(connectUrl, (client) =>
+            client
+              .call<{ result: Awaited<ReturnType<typeof renameRun>> }>("runs.setName", {
+                target,
+                name: parsed.clear ? undefined : nameArg,
+                clear: parsed.clear === true,
+              })
+              .then((response) => response.result),
+          );
+    if (parsed.outputFormat === "json") {
+      writeJson(result);
+    } else {
+      process.stdout.write(renderRunSetName(result));
     }
     process.exit(0);
   } catch (err) {
@@ -871,6 +935,7 @@ async function runExecuteCommandEmbedded(parsed: ParsedArgs): Promise<never> {
       err instanceof LockedFieldError ||
       err instanceof ResumeError ||
       err instanceof InvalidAddedTaskError ||
+      err instanceof InvalidRunNameError ||
       err instanceof EmptyPromptError ||
       err instanceof RecursionDepthError ||
       err instanceof InvalidBackendSessionError
@@ -1038,6 +1103,9 @@ async function main(): Promise<void> {
     }
     if (parsed.subcommand === "unarchive") {
       await runArchiveToggleCommand(parsed, connectUrl, "unarchive");
+    }
+    if (parsed.subcommand === "set-name") {
+      await runSetNameCommand(parsed, connectUrl);
     }
   }
 
