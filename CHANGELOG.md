@@ -14,6 +14,10 @@
 
 ### Added
 
+- Added derived `effectiveStatus` to shared `RunSummary` / `RunDetail`
+  read models so passive runs with `in_progress` tasks surface as
+  running in CLI/daemon/web consumers without changing the canonical
+  persisted lifecycle `status`.
 - Added `task-runner run set-name <id|path> (<name> | --clear)` plus daemon/HTTP parity so existing runs can update persisted `run.name` without rewriting the run. Run list/status/web surfaces now render the stored run name, the web detail drawer can rename runs inline, Codex best-effort propagates live renames to the backend thread title, and Claude picks up the changed name on the next invocation. ([#25](https://github.com/kcosr/task-runner/pull/25))
 - Added a local daemon control plane: `task-runner serve` now starts a
   loopback WebSocket JSON-RPC server, run/definition commands can opt
@@ -48,6 +52,11 @@
 
 ### Changed
 
+- `task-runner status` and `task-runner list runs` now render the
+  shared derived `effectiveStatus` as their primary status surface, and
+  the web dashboard groups/badges by `effectiveStatus` while keeping
+  archive/resume/task-mutation affordances keyed to canonical
+  lifecycle `status`.
 - `task-runner serve` no longer restricts `--listen` / `TASK_RUNNER_LISTEN` to loopback hosts, and the web dashboard now keeps long kanban/task lists scrollable while the detail drawer sections start collapsed and can be expanded on demand. ([#24](https://github.com/kcosr/task-runner/pull/24))
 - Refined the web dashboard interaction model: the detail drawer now closes on `Escape`, the board toolbar exposes archived / empty-column / failure-grouping toggles directly in the header, and mobile kanban scrolling snaps more reliably between columns. ([#24](https://github.com/kcosr/task-runner/pull/24))
 - Added a board jump strip above the kanban that exposes only the currently rendered non-empty columns and scrolls them into view when the board overflows. ([#24](https://github.com/kcosr/task-runner/pull/24))

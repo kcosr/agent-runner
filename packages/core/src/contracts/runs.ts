@@ -3,6 +3,7 @@ import { normalizeTaskMode } from "../core/config/schema.js";
 import type { LockableField, TaskMode } from "../core/config/schema.js";
 import type { TaskSnapshot } from "../core/run/manifest.js";
 import type { ListedRunManifest, ManifestStatus, RunManifest } from "../core/run/manifest.js";
+import { deriveEffectiveStatus } from "../core/run/status.js";
 
 // Transport-neutral run DTOs for later CLI/web/daemon surfaces.
 // RunManifest remains the internal canonical record; these helpers project
@@ -13,6 +14,7 @@ export interface RunSummary {
   runId: string;
   repo: string;
   status: RunStatus;
+  effectiveStatus: RunStatus;
   archivedAt: string | null;
   agentName: string;
   name: string | null;
@@ -57,6 +59,7 @@ export interface RunDetail {
   runId: string;
   repo: string;
   status: RunStatus;
+  effectiveStatus: RunStatus;
   archivedAt: string | null;
   isLive: boolean;
   workspaceDir: string;
@@ -175,6 +178,7 @@ export function toRunSummary(entry: ListedRunManifest): RunSummary {
     runId: entry.manifest.runId,
     repo: entry.repo,
     status: entry.manifest.status,
+    effectiveStatus: deriveEffectiveStatus(entry.manifest),
     archivedAt: entry.manifest.archivedAt,
     agentName: entry.manifest.agent.name,
     name: entry.manifest.name,
@@ -205,6 +209,7 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
     runId: manifest.runId,
     repo: deriveRepoKey(manifest.cwd),
     status: manifest.status,
+    effectiveStatus: deriveEffectiveStatus(manifest),
     archivedAt: manifest.archivedAt,
     isLive: result.isLive,
     workspaceDir: manifest.workspaceDir,

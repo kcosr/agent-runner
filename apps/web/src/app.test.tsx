@@ -1,5 +1,5 @@
 import type { RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./app.js";
@@ -42,10 +42,11 @@ class MockEventSource {
 }
 
 function makeRun(overrides: Partial<RunSummary> = {}): RunSummary {
-  const run: RunSummary = {
+  const run = {
     runId: "run-1",
     repo: "task-runner",
     status: "running",
+    effectiveStatus: "running",
     archivedAt: null,
     agentName: "implementer",
     assignmentName: "Build dashboard",
@@ -68,7 +69,10 @@ function makeRun(overrides: Partial<RunSummary> = {}): RunSummary {
       },
     },
     ...overrides,
-  };
+  } as RunSummary;
+  if (overrides.status !== undefined && !("effectiveStatus" in overrides)) {
+    run.effectiveStatus = overrides.status;
+  }
   if (overrides.name === undefined && overrides.assignmentName !== undefined) {
     run.name = overrides.assignmentName;
   }
@@ -76,10 +80,11 @@ function makeRun(overrides: Partial<RunSummary> = {}): RunSummary {
 }
 
 function makeDetail(overrides: Partial<RunDetail> = {}): RunDetail {
-  const detail: RunDetail = {
+  const detail = {
     runId: "run-1",
     repo: "task-runner",
     status: "running",
+    effectiveStatus: "running",
     archivedAt: null,
     isLive: true,
     workspaceDir: "/tmp/task-runner/.state/run-1",
@@ -144,7 +149,10 @@ function makeDetail(overrides: Partial<RunDetail> = {}): RunDetail {
       },
     },
     ...overrides,
-  };
+  } as RunDetail;
+  if (overrides.status !== undefined && !("effectiveStatus" in overrides)) {
+    detail.effectiveStatus = overrides.status;
+  }
   if (overrides.name === undefined && overrides.assignment?.name !== undefined) {
     detail.name = overrides.assignment.name;
   }
@@ -341,6 +349,129 @@ describe("web app", () => {
     expect(screen.getByText("Build UI")).toBeInTheDocument();
     expect(screen.getAllByText("Repo").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByRole("button", { name: /copy run id/i })).toBeInTheDocument();
+  });
+
+  it("groups the board by effective status instead of canonical lifecycle status", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "passive-active",
+          assignmentName: "Passive active run",
+          backend: "passive",
+          status: "initialized",
+          effectiveStatus: "running",
+          capabilities: {
+            canArchive: true,
+            canUnarchive: false,
+            canResume: false,
+            taskMutation: {
+              canAdd: true,
+              canEditNotes: true,
+              canSetStatus: true,
+            },
+          },
+        }),
+      ],
+      details: {
+        "passive-active": makeDetail({
+          runId: "passive-active",
+          assignment: {
+            name: "Passive active run",
+            sourcePath: "/tmp/a.md",
+            workspacePath: "/tmp/b.md",
+          },
+          backend: "passive",
+          status: "initialized",
+          effectiveStatus: "running",
+          capabilities: {
+            canArchive: true,
+            canUnarchive: false,
+            canResume: false,
+            taskMutation: {
+              canAdd: true,
+              canEditNotes: true,
+              canSetStatus: true,
+            },
+          },
+        }),
+      },
+    });
+
+    await renderApp();
+    await findRunCard("Passive active run");
+
+    const runningColumn = screen.getByRole("heading", { name: "Running" }).closest("article");
+    if (!runningColumn) {
+      throw new Error("expected running column");
+    }
+
+    expect(
+      within(runningColumn).getByRole("button", { name: /passive active run/i }),
+    ).toBeInTheDocument();
+    expect(within(runningColumn).getByText("running", { selector: ".badge" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Pending" })).not.toBeInTheDocument();
+  });
+
+  it("shows effective status as primary detail status and canonical lifecycle as secondary metadata", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "passive-active",
+          assignmentName: "Passive active run",
+          backend: "passive",
+          status: "initialized",
+          effectiveStatus: "running",
+          capabilities: {
+            canArchive: true,
+            canUnarchive: false,
+            canResume: false,
+            taskMutation: {
+              canAdd: true,
+              canEditNotes: true,
+              canSetStatus: true,
+            },
+          },
+        }),
+      ],
+      details: {
+        "passive-active": makeDetail({
+          runId: "passive-active",
+          assignment: {
+            name: "Passive active run",
+            sourcePath: "/tmp/a.md",
+            workspacePath: "/tmp/b.md",
+          },
+          backend: "passive",
+          status: "initialized",
+          effectiveStatus: "running",
+          isLive: true,
+          capabilities: {
+            canArchive: true,
+            canUnarchive: false,
+            canResume: false,
+            taskMutation: {
+              canAdd: true,
+              canEditNotes: true,
+              canSetStatus: true,
+            },
+          },
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await user.click(await findRunCard("Passive active run"));
+
+    const detail = await screen.findByLabelText("Run detail");
+    expect(within(detail).getAllByText("running", { selector: ".badge" }).length).toBeGreaterThan(
+      0,
+    );
+    expect(within(detail).getByText("Lifecycle status")).toBeInTheDocument();
+    expect(within(detail).getByText("initialized")).toBeInTheDocument();
+    expect(within(detail).getByRole("button", { name: "Archive" })).toBeInTheDocument();
+    expect(within(detail).queryByRole("button", { name: "Abort" })).not.toBeInTheDocument();
   });
 
   it("falls back to document copy when clipboard access is unavailable", async () => {

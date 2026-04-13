@@ -97,6 +97,7 @@ test("run contracts: toRunSummary maps listed manifest rows to the neutral summa
     runId: "run123",
     repo: "demo-repo",
     status: "success",
+    effectiveStatus: "success",
     archivedAt: null,
     agentName: "demo-agent",
     assignmentName: "demo-work",
@@ -151,6 +152,7 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
     runId: "run123",
     repo: "unknown",
     status: "success",
+    effectiveStatus: "success",
     archivedAt: null,
     isLive: true,
     workspaceDir: "/state/runs/demo/run123",
@@ -288,6 +290,52 @@ test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mu
     canSetStatus: true,
     canEditNotes: true,
     canAdd: false,
+  });
+});
+
+test("run contracts: passive summaries and details derive effectiveStatus from task snapshots", () => {
+  const manifest = buildManifest({
+    backend: "passive",
+    status: "initialized",
+    finalTasks: {
+      t1: {
+        id: "t1",
+        title: "First",
+        body: "Do the first thing.",
+        status: "completed",
+        notes: "Done.",
+      },
+      t2: {
+        id: "t2",
+        title: "Second",
+        body: "Do the second thing.",
+        status: "in_progress",
+        notes: "Working.",
+      },
+    },
+    tasksCompleted: 1,
+  });
+
+  const summary = toRunSummary({
+    repo: "demo-repo",
+    workspaceDir: manifest.workspaceDir,
+    manifest,
+  });
+  const detail = toRunDetail({ manifest, isLive: false });
+
+  assert.equal(summary.status, "initialized");
+  assert.equal(summary.effectiveStatus, "running");
+  assert.equal(detail.status, "initialized");
+  assert.equal(detail.effectiveStatus, "running");
+  assert.deepEqual(detail.capabilities, {
+    canArchive: true,
+    canUnarchive: false,
+    canResume: false,
+    taskMutation: {
+      canSetStatus: true,
+      canEditNotes: true,
+      canAdd: true,
+    },
   });
 });
 

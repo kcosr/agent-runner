@@ -349,11 +349,15 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
       const runs = await httpJson(httpBaseUrl, "/api/runs");
       assert.equal(runs.status, 200);
       assert.equal(runs.body.runs[0].runId, init.runId);
+      assert.equal(runs.body.runs[0].status, "initialized");
+      assert.equal(runs.body.runs[0].effectiveStatus, "initialized");
 
       const detail = await httpJson(httpBaseUrl, `/api/runs/${init.runId}`);
       assert.equal(detail.status, 200);
       assert.equal(detail.body.run.assignment.name, "daemon-work");
       assert.equal(detail.body.run.name, null);
+      assert.equal(detail.body.run.status, "initialized");
+      assert.equal(detail.body.run.effectiveStatus, "initialized");
 
       const renamed = await httpJson(httpBaseUrl, `/api/runs/${init.runId}/name`, {
         method: "POST",
@@ -468,6 +472,7 @@ test("daemon serve exposes app config, keeps /api precedence, and falls back to 
       const apiDetail = await httpJson(httpBaseUrl, `/api/runs/${init.runId}`);
       assert.equal(apiDetail.status, 200);
       assert.equal(apiDetail.body.run.runId, init.runId);
+      assert.equal(apiDetail.body.run.effectiveStatus, "initialized");
 
       const spaRoot = await fetch(new URL("/", httpBaseUrl));
       const spaRootBody = await spaRoot.text();

@@ -2040,6 +2040,15 @@ Rules for this seam:
 - The contract module maps **from** `RunManifest`; it does not replace it.
 - The mappers are pure and deterministic. No filesystem reads, env reads, or
   writes.
+- `RunSummary` and `RunDetail` carry both canonical lifecycle `status`
+  and derived `effectiveStatus`.
+- Canonical `status` remains the persisted engine lifecycle used for
+  resume/reset/archive/task-mutation semantics.
+- `effectiveStatus` is a read-model field: non-passive runs mirror
+  `status`; passive runs derive `running` when any task is
+  `in_progress`, `blocked` when every task is terminal and any task is
+  blocked, `success` when every task is completed, and `initialized`
+  otherwise.
 - New machine-facing surfaces should prefer these DTOs over binding directly to
   raw manifest JSON unless a command explicitly documents manifest-shaped output.
 - `list runs`, archive/unarchive, daemon RPC reads, and
@@ -2050,6 +2059,8 @@ Rules for this seam:
   `canArchive`, `canUnarchive`, `canResume`, plus nested task mutation
   booleans in `RunTaskMutationCapabilities`
   (`canSetStatus`, `canEditNotes`, `canAdd`).
+- Capabilities continue to key off canonical `status`, not
+  `effectiveStatus`.
 - `RunSummary` and `RunDetail` both carry `capabilities`, so list/board
   consumers do not need N+1 detail reads just to determine which actions
   are available.

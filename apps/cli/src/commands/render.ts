@@ -18,8 +18,11 @@ export function renderRunStatus(detail: RunDetail): string {
   lines.push("");
   lines.push(`── run ${detail.runId} ──`);
   lines.push(
-    `Status: ${detail.status}${detail.exitCode !== null ? ` (exit ${detail.exitCode})` : ""}`,
+    `Status: ${detail.effectiveStatus}${detail.exitCode !== null ? ` (exit ${detail.exitCode})` : ""}`,
   );
+  if (detail.effectiveStatus !== detail.status) {
+    lines.push(`Lifecycle status: ${detail.status}`);
+  }
   lines.push(`Agent: ${detail.agent.name}`);
   if (detail.assignment) {
     lines.push(`Assignment: ${detail.assignment.name}`);
@@ -178,7 +181,7 @@ export function renderRunList(result: RunListResult): string {
   return `${result
     .map((run) => {
       const archived = run.archivedAt !== null ? ` archived=${run.archivedAt}` : "";
-      return `${run.runId} [${run.status}] name=${run.name ?? "<unnamed>"} ${run.tasksCompleted}/${run.tasksTotal} repo=${run.repo} agent=${run.agentName} assignment=${run.assignmentName ?? "none"}${archived}`;
+      return `${run.runId} [${run.effectiveStatus}] name=${run.name ?? "<unnamed>"} ${run.tasksCompleted}/${run.tasksTotal} repo=${run.repo} agent=${run.agentName} assignment=${run.assignmentName ?? "none"}${archived}`;
     })
     .join("\n")}\n`;
 }

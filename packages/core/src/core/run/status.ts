@@ -1,5 +1,5 @@
 import { type TaskState, isValidStatus } from "../../assignment/model.js";
-import type { RunManifest, TaskSnapshot } from "./manifest.js";
+import type { ManifestStatus, RunManifest, TaskSnapshot } from "./manifest.js";
 
 export type RunCompletionStatus =
   | "initialized"
@@ -27,6 +27,32 @@ export interface RunCompletionSummary {
  * the validation when constructing the overlaid manifest.
  */
 export type LiveTaskOverlay = Map<string, { status?: string; notes?: string }>;
+
+export function deriveEffectiveStatus(
+  manifest: Pick<RunManifest, "backend" | "status" | "finalTasks">,
+): ManifestStatus {
+  if (manifest.backend !== "passive") {
+    return manifest.status;
+  }
+
+  const tasks = Object.values(manifest.finalTasks);
+  if (tasks.length === 0) {
+    return "initialized";
+  }
+  if (tasks.some((task) => task.status === "in_progress")) {
+    return "running";
+  }
+  if (tasks.every((task) => task.status === "completed")) {
+    return "success";
+  }
+  if (
+    tasks.every((task) => task.status === "completed" || task.status === "blocked") &&
+    tasks.some((task) => task.status === "blocked")
+  ) {
+    return "blocked";
+  }
+  return "initialized";
+}
 
 /**
  * Build a non-mutating clone of `manifest` with `finalTasks` and

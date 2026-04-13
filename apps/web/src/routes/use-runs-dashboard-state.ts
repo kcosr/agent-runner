@@ -63,7 +63,7 @@ function buildColumns(runs: RunSummary[], collapseFailureStates: boolean): Board
 
   return base.map((column) => ({
     ...column,
-    runs: runs.filter((run) => column.statuses.includes(run.status)),
+    runs: runs.filter((run) => column.statuses.includes(run.effectiveStatus)),
   }));
 }
 
