@@ -89,10 +89,13 @@ function sendBuffer(
 ): void {
   res.statusCode = status;
   res.setHeader("content-type", contentType);
-  res.setHeader(
-    "cache-control",
-    contentType.startsWith("text/html") ? "no-cache" : "public, max-age=31536000, immutable",
-  );
+  const cacheControl =
+    status >= 400
+      ? "no-store"
+      : contentType.startsWith("text/html")
+        ? "no-cache"
+        : "public, max-age=31536000, immutable";
+  res.setHeader("cache-control", cacheControl);
   res.setHeader("content-length", String(body.length));
   if (req.method === "HEAD") {
     res.end();

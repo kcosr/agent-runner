@@ -58,5 +58,41 @@ test("serveFrontendRequest converts filesystem errors into 500 responses", () =>
 
   assert.equal(res.statusCode, 500);
   assert.equal(res.body, "Failed to read task-runner web assets.");
+  assert.equal(res.headers.get("cache-control"), "no-store");
   assert.equal(failures.length, 1);
+});
+
+test("serveFrontendRequest does not cache missing build responses", () => {
+  const req = new EventEmitter();
+  req.method = "GET";
+
+  const res = {
+    destroyed: false,
+    headers: new Map(),
+    statusCode: 200,
+    writableEnded: false,
+    setHeader(name, value) {
+      this.headers.set(name.toLowerCase(), value);
+    },
+    end(chunk = "") {
+      this.body = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
+      this.writableEnded = true;
+    },
+  };
+
+  serveFrontendRequest(req, res, "/", {
+    fsApi: {
+      statSync() {
+        return undefined;
+      },
+      readFileSync() {
+        throw new Error("should not be called");
+      },
+    },
+    rootPath: "/tmp/task-runner/apps/cli/dist/web",
+  });
+
+  assert.equal(res.statusCode, 503);
+  assert.equal(res.body, "task-runner web assets are not available; run npm run build");
+  assert.equal(res.headers.get("cache-control"), "no-store");
 });
