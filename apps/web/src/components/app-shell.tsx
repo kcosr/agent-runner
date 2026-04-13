@@ -2,12 +2,14 @@ import type { ReactNode } from "react";
 import { FileIcon, GridIcon, SettingsIcon } from "./icons.js";
 
 export function AppShell({
-  notices,
+  topNotices,
+  bottomNotices,
   toolbar,
   board,
   detail,
 }: {
-  notices?: ReactNode;
+  topNotices?: ReactNode;
+  bottomNotices?: ReactNode;
   toolbar: ReactNode;
   board: ReactNode;
   detail?: ReactNode;
@@ -38,11 +40,14 @@ export function AppShell({
         </aside>
         <div className="main">
           {toolbar}
-          {notices ? <div className="notice-stack">{notices}</div> : null}
+          {topNotices ? <div className="notice-stack">{topNotices}</div> : null}
           <main className="layout">
             {board}
             {detail}
           </main>
+          {bottomNotices ? (
+            <div className="notice-stack notice-stack--bottom">{bottomNotices}</div>
+          ) : null}
         </div>
       </div>
     </div>

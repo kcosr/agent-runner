@@ -1,7 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import type { RunDetail, RunStatus, RunSummary } from "@task-runner/core/contracts/runs.js";
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { BoardColumn } from "../components/run-column.js";
 import { createApiClient, isNotFoundError } from "../lib/api-client.js";
 import { queryClient, runQueryKeys } from "../lib/query.js";
@@ -13,6 +13,7 @@ export interface NoticeState {
   id: string;
   message: string;
   tone: "warning" | "error";
+  autoDismissMs?: number;
 }
 
 export type RunActionPending = "archive" | "unarchive" | "resume" | "abort";
@@ -142,6 +143,7 @@ export function useRunsDashboardState() {
   const selectedRunId = "runId" in runRouteParams ? runRouteParams.runId : undefined;
   const [notices, setNotices] = useState<NoticeState[]>([]);
   const [actionError, setActionError] = useState<string>();
+  const noticeTimersRef = useRef(new Map<string, number>());
 
   const runsQuery = useQuery({
     queryKey: runQueryKeys.list(),
@@ -188,6 +190,38 @@ export function useRunsDashboardState() {
     ? columns.filter((column) => column.runs.length > 0)
     : columns;
   const activeTask = selectedRunActiveTask(selectedRunQuery.data);
+
+  useEffect(() => {
+    for (const notice of notices) {
+      if (!notice.autoDismissMs || noticeTimersRef.current.has(notice.id)) {
+        continue;
+      }
+
+      const timeoutId = window.setTimeout(() => {
+        noticeTimersRef.current.delete(notice.id);
+        setNotices((current) => current.filter((entry) => entry.id !== notice.id));
+      }, notice.autoDismissMs);
+      noticeTimersRef.current.set(notice.id, timeoutId);
+    }
+
+    for (const [id, timeoutId] of noticeTimersRef.current) {
+      if (notices.some((notice) => notice.id === id)) {
+        continue;
+      }
+      window.clearTimeout(timeoutId);
+      noticeTimersRef.current.delete(id);
+    }
+  }, [notices]);
+
+  useEffect(
+    () => () => {
+      for (const timeoutId of noticeTimersRef.current.values()) {
+        window.clearTimeout(timeoutId);
+      }
+      noticeTimersRef.current.clear();
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!selectedRunId) {
@@ -269,6 +303,7 @@ export function useRunsDashboardState() {
           appendNotice(current, {
             id: `copied-${label}-${Date.now()}`,
             message: `Copied ${label}.`,
+            autoDismissMs: 4000,
             tone: "warning",
           }),
         );
@@ -277,6 +312,11 @@ export function useRunsDashboardState() {
       }
     },
     dismissNotice: (id: string) => {
+      const timeoutId = noticeTimersRef.current.get(id);
+      if (timeoutId !== undefined) {
+        window.clearTimeout(timeoutId);
+        noticeTimersRef.current.delete(id);
+      }
       setNotices((current) => current.filter((notice) => notice.id !== id));
     },
     notices,

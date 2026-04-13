@@ -7,7 +7,7 @@ import { useRunsDashboardState } from "./use-runs-dashboard-state.js";
 export function RunsDashboardRoute() {
   const state = useRunsDashboardState();
 
-  const notices = [
+  const topNotices = [
     state.streamStale ? (
       <div className="notice" data-tone="warning" key="stream-stale">
         <span className="notice__message">
@@ -20,22 +20,23 @@ export function RunsDashboardRoute() {
         </div>
       </div>
     ) : null,
-    ...state.notices.map((notice) => (
-      <div className="notice" data-tone={notice.tone} key={notice.id}>
-        <span className="notice__message">{notice.message}</span>
-        <div className="notice__actions">
-          <button
-            aria-label="Dismiss notice"
-            className="icon-btn icon-btn--small"
-            onClick={() => state.dismissNotice(notice.id)}
-            type="button"
-          >
-            ×
-          </button>
-        </div>
-      </div>
-    )),
   ].filter(Boolean);
+
+  const bottomNotices = state.notices.map((notice) => (
+    <div className="notice" data-tone={notice.tone} key={notice.id}>
+      <span className="notice__message">{notice.message}</span>
+      <div className="notice__actions">
+        <button
+          aria-label="Dismiss notice"
+          className="icon-btn icon-btn--small"
+          onClick={() => state.dismissNotice(notice.id)}
+          type="button"
+        >
+          ×
+        </button>
+      </div>
+    </div>
+  ));
 
   return (
     <AppShell
@@ -53,6 +54,7 @@ export function RunsDashboardRoute() {
           visibleRuns={state.visibleRuns}
         />
       }
+      bottomNotices={bottomNotices.length > 0 ? bottomNotices : undefined}
       detail={
         <RunDetailPanel
           actionError={state.actionError}
@@ -67,7 +69,7 @@ export function RunsDashboardRoute() {
           selectedRunQuery={state.selectedRunQuery}
         />
       }
-      notices={notices.length > 0 ? notices : undefined}
+      topNotices={topNotices.length > 0 ? topNotices : undefined}
       toolbar={
         <RunFilters
           repoOptions={state.repoOptions}

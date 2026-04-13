@@ -60,6 +60,15 @@ body {
   padding: 12px 20px 0;
 }
 
+.notice-stack--bottom {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 30;
+  width: min(26rem, calc(100vw - 32px));
+  padding: 0;
+}
+
 .notice {
   display: flex;
   align-items: center;
@@ -735,5 +744,12 @@ body {
 
   .notice-stack {
     padding: 12px 16px 0;
+  }
+
+  .notice-stack--bottom {
+    right: 16px;
+    bottom: 16px;
+    width: calc(100vw - 32px);
+    padding: 0;
   }
 }

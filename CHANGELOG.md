@@ -97,7 +97,8 @@
   updates subscription. ([#24](https://github.com/kcosr/task-runner/pull/24))
 - Fixed dashboard copy actions to fall back when the async Clipboard API
   is unavailable, and removed the duplicate header-level backend session
-  copy control in the detail drawer. ([#24](https://github.com/kcosr/task-runner/pull/24))
+  copy control in the detail drawer. Copy confirmations now render as
+  bottom toasts that auto-dismiss after a short delay. ([#24](https://github.com/kcosr/task-runner/pull/24))
 - Fixed the web dashboard live-update loop to ignore noisy daemon
   transport events, revalidate state before clearing stale-stream
   warnings after reconnect, lock conflicting run actions while a

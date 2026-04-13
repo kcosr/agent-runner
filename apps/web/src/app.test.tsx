@@ -285,6 +285,15 @@ describe("web app", () => {
     await user.click(screen.getByRole("button", { name: /copy backend session id/i }));
 
     expect(await screen.findByText("Copied backend session id.")).toBeInTheDocument();
+    expect(document.querySelector(".notice-stack--bottom")).not.toBeNull();
+
+    await waitFor(
+      () => {
+        expect(screen.queryByText("Copied backend session id.")).not.toBeInTheDocument();
+        expect(document.querySelector(".notice-stack--bottom")).toBeNull();
+      },
+      { timeout: 5000 },
+    );
   });
 
   it("collapses task details by default and expands them on click", async () => {
