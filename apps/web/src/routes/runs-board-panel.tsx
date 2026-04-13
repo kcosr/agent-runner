@@ -1,6 +1,6 @@
 import type { UseQueryResult } from "@tanstack/react-query";
 import type { RunSummary } from "@task-runner/core/contracts/runs.js";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { EmptyPanel } from "../components/empty-states.js";
 import { type BoardColumn, RunColumn } from "../components/run-column.js";
 
@@ -25,60 +25,71 @@ export function RunsBoardPanel({
 }) {
   const boardRef = useRef<HTMLElement | null>(null);
   const columnRefs = useRef(new Map<string, HTMLElement>());
+  const columnRefCallbacks = useRef(new Map<string, (node: HTMLElement | null) => void>());
   const [showColumnJumpBar, setShowColumnJumpBar] = useState(false);
   const jumpColumns = useMemo(
     () => boardColumns.filter((column) => column.runs.length > 0),
     [boardColumns],
   );
 
-  useEffect(() => {
+  const recomputeJumpBarVisibility = useCallback(() => {
     const board = boardRef.current;
-    if (!board) {
+    if (!board || jumpColumns.length === 0) {
       setShowColumnJumpBar(false);
       return;
     }
-    const boardElement = board;
 
-    function recomputeJumpBarVisibility() {
-      if (jumpColumns.length === 0) {
-        setShowColumnJumpBar(false);
-        return;
+    const viewportLeft = board.scrollLeft;
+    const viewportRight = viewportLeft + board.clientWidth;
+    const allVisible = jumpColumns.every((column) => {
+      const element = columnRefs.current.get(column.key);
+      if (!element) {
+        return false;
       }
+      const left = element.offsetLeft;
+      const right = left + element.offsetWidth;
+      return left >= viewportLeft && right <= viewportRight;
+    });
 
-      const viewportLeft = boardElement.scrollLeft;
-      const viewportRight = viewportLeft + boardElement.clientWidth;
-      const allVisible = jumpColumns.every((column) => {
-        const element = columnRefs.current.get(column.key);
-        if (!element) {
-          return true;
-        }
-        const left = element.offsetLeft;
-        const right = left + element.offsetWidth;
-        return left >= viewportLeft && right <= viewportRight;
-      });
+    setShowColumnJumpBar(!allVisible);
+  }, [jumpColumns]);
 
-      setShowColumnJumpBar(!allVisible);
+  useLayoutEffect(() => {
+    recomputeJumpBarVisibility();
+  });
+
+  useEffect(() => {
+    const board = boardRef.current;
+    if (!board) {
+      return;
     }
 
     const frameId = window.requestAnimationFrame(recomputeJumpBarVisibility);
-    boardElement.addEventListener("scroll", recomputeJumpBarVisibility, { passive: true });
+    board.addEventListener("scroll", recomputeJumpBarVisibility, { passive: true });
     window.addEventListener("resize", recomputeJumpBarVisibility);
 
     return () => {
       window.cancelAnimationFrame(frameId);
-      boardElement.removeEventListener("scroll", recomputeJumpBarVisibility);
+      board.removeEventListener("scroll", recomputeJumpBarVisibility);
       window.removeEventListener("resize", recomputeJumpBarVisibility);
     };
-  }, [jumpColumns]);
+  }, [recomputeJumpBarVisibility]);
 
-  function setColumnRef(columnKey: string) {
-    return (node: HTMLElement | null) => {
+  function columnRefFor(columnKey: string) {
+    const existing = columnRefCallbacks.current.get(columnKey);
+    if (existing) {
+      return existing;
+    }
+
+    const callback = (node: HTMLElement | null) => {
       if (node) {
         columnRefs.current.set(columnKey, node);
       } else {
         columnRefs.current.delete(columnKey);
       }
     };
+    columnRefCallbacks.current.set(columnKey, callback);
+    return callback;
   }
 
   function scrollColumnIntoView(columnKey: string) {
@@ -187,7 +198,7 @@ export function RunsBoardPanel({
         {boardColumns.map((column) => (
           <RunColumn
             column={column}
-            columnRef={setColumnRef(column.key)}
+            columnRef={columnRefFor(column.key)}
             key={column.key}
             onSelectRun={onSelectRun}
             selectedRunActiveTask={selectedRunActiveTask}

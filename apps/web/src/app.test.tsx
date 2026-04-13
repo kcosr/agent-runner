@@ -357,7 +357,7 @@ describe("web app", () => {
 
     expect(await screen.findByText("Ship the web UI")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /build ui/i, expanded: true })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Description" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Instructions" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Notes" })).toBeInTheDocument();
 
     expect(screen.queryByText("working")).not.toBeInTheDocument();
@@ -413,6 +413,45 @@ describe("web app", () => {
     const stored = window.localStorage.getItem("task-runner:web:board-settings");
     const parsed = stored ? (JSON.parse(stored) as { drawerWidth?: number }) : null;
     expect(parsed?.drawerWidth).toBe(570);
+  });
+
+  it("keeps the pending detail skeleton at the persisted drawer width", async () => {
+    let resolveDetail: ((response: Response) => void) | undefined;
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest: (url, init) => {
+          if (/\/api\/runs\/run-1$/.test(url) && (!init?.method || init.method === "GET")) {
+            return new Promise<Response>((resolve) => {
+              resolveDetail = resolve;
+            });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    window.localStorage.setItem(
+      "task-runner:web:board-settings",
+      JSON.stringify({ drawerWidth: 700 }),
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+    await screen.findByText("Build dashboard");
+    await user.click(screen.getByRole("button", { name: /build dashboard/i }));
+
+    const skeletonDrawer = await screen.findByLabelText("Run detail");
+    expect(skeletonDrawer.style.getPropertyValue("--drawer-width")).toBe("700px");
+
+    resolveDetail?.(new Response(JSON.stringify({ run: makeDetail() }), { status: 200 }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /copy run id/i })).toBeInTheDocument();
+    });
   });
 
   it("renders markdown in task body and notes", async () => {
@@ -550,6 +589,60 @@ describe("web app", () => {
     expect(screen.getByRole("heading", { name: "Blocked" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Error" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Aborted" })).toBeInTheDocument();
+  });
+
+  it("ignores malformed stored board settings values", async () => {
+    window.localStorage.setItem(
+      "task-runner:web:board-settings",
+      JSON.stringify({
+        collapseFailureStates: "yes",
+        drawerWidth: "wide",
+        hideEmptyColumns: "no",
+        repo: 42,
+        search: ["dashboard"],
+        showArchived: "sure",
+      }),
+    );
+
+    installFetchMock({
+      runs: [
+        makeRun(),
+        makeRun({
+          runId: "run-blocked",
+          assignmentName: "Blocked dashboard",
+          status: "blocked",
+        }),
+        makeRun({
+          runId: "run-archived",
+          assignmentName: "Archived dashboard",
+          archivedAt: "2026-04-13T06:00:00.000Z",
+          status: "success",
+        }),
+      ],
+      details: {
+        "run-1": makeDetail(),
+        "run-blocked": makeDetail({
+          runId: "run-blocked",
+          status: "blocked",
+        }),
+        "run-archived": makeDetail({
+          runId: "run-archived",
+          status: "success",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await screen.findByText("Build dashboard");
+
+    expect(screen.queryByText("Archived dashboard")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Failures" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Blocked" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /build dashboard/i }));
+    const drawer = await screen.findByLabelText("Run detail");
+    expect(drawer.style.getPropertyValue("--drawer-width")).toBe("540px");
   });
 
   it("shows jump buttons for overflowed non-empty columns and scrolls them into view", async () => {
@@ -937,6 +1030,33 @@ describe("web app", () => {
     }
     source.emitOpen();
     source.emitRawMessage("{");
+
+    expect(await screen.findByText(/live updates are temporarily stale/i)).toBeInTheDocument();
+  });
+
+  it("marks the stream stale when an SSE payload shape is invalid", async () => {
+    installFetchMock({
+      runs: [makeRun({ assignmentName: "Original title" })],
+      details: {
+        "run-1": makeDetail({
+          assignment: {
+            name: "Original title",
+            sourcePath: "/tmp/a.md",
+            workspacePath: "/tmp/b.md",
+          },
+        }),
+      },
+    });
+
+    await renderApp();
+    expect(await screen.findByText("Original title")).toBeInTheDocument();
+
+    const source = MockEventSource.instances[0];
+    if (!source) {
+      throw new Error("expected an EventSource subscription");
+    }
+    source.emitOpen();
+    source.emitMessage({ runId: "run-1", event: {} });
 
     expect(await screen.findByText(/live updates are temporarily stale/i)).toBeInTheDocument();
   });

@@ -116,6 +116,18 @@ export function RunDetailDrawer({
     }
   }
 
+  function handleResizeCancel(event: PointerEvent<HTMLDivElement>) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+    dragRef.current = null;
+    setDragWidth(null);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
   return (
     <>
       <button
@@ -133,7 +145,7 @@ export function RunDetailDrawer({
           aria-valuenow={width}
           className={dragWidth !== null ? "drawer-resize active" : "drawer-resize"}
           onKeyDown={handleResizeKey}
-          onPointerCancel={handleResizeEnd}
+          onPointerCancel={handleResizeCancel}
           onPointerDown={handleResizeStart}
           onPointerMove={handleResizeMove}
           onPointerUp={handleResizeEnd}

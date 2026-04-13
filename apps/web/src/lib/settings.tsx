@@ -49,12 +49,38 @@ function loadSettings(): BoardSettings {
     if (!raw) {
       return DEFAULT_SETTINGS;
     }
-    const parsed = JSON.parse(raw) as Partial<BoardSettings>;
-    const merged = { ...DEFAULT_SETTINGS, ...parsed };
-    return { ...merged, drawerWidth: clampDrawerWidth(merged.drawerWidth) };
+    const parsed = JSON.parse(raw);
+    return parseStoredSettings(parsed);
   } catch {
     return DEFAULT_SETTINGS;
   }
+}
+
+function parseStoredSettings(value: unknown): BoardSettings {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return DEFAULT_SETTINGS;
+  }
+
+  const record = value as Record<string, unknown>;
+  return {
+    repo: typeof record.repo === "string" ? record.repo : DEFAULT_SETTINGS.repo,
+    showArchived:
+      typeof record.showArchived === "boolean"
+        ? record.showArchived
+        : DEFAULT_SETTINGS.showArchived,
+    hideEmptyColumns:
+      typeof record.hideEmptyColumns === "boolean"
+        ? record.hideEmptyColumns
+        : DEFAULT_SETTINGS.hideEmptyColumns,
+    collapseFailureStates:
+      typeof record.collapseFailureStates === "boolean"
+        ? record.collapseFailureStates
+        : DEFAULT_SETTINGS.collapseFailureStates,
+    search: typeof record.search === "string" ? record.search : DEFAULT_SETTINGS.search,
+    drawerWidth: clampDrawerWidth(
+      typeof record.drawerWidth === "number" ? record.drawerWidth : DEFAULT_SETTINGS.drawerWidth,
+    ),
+  };
 }
 
 export function BoardSettingsProvider({ children }: { children: ReactNode }) {

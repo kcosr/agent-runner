@@ -1,5 +1,6 @@
 import type { UseQueryResult } from "@tanstack/react-query";
 import type { RunDetail } from "@task-runner/core/contracts/runs.js";
+import type { CSSProperties } from "react";
 import type { RunActionPending } from "./use-runs-dashboard-state.js";
 
 import { RunDetailDrawer } from "../components/run-detail-drawer.js";
@@ -8,6 +9,7 @@ import { isNotFoundError } from "../lib/api-client.js";
 export function RunDetailPanel({
   actionError,
   actionPending,
+  drawerWidth,
   onAbort,
   onArchive,
   onClose,
@@ -19,6 +21,7 @@ export function RunDetailPanel({
 }: {
   actionError?: string;
   actionPending?: RunActionPending;
+  drawerWidth: number;
   onAbort: (runId: string) => void;
   onArchive: (runId: string) => void;
   onClose: () => void;
@@ -32,9 +35,11 @@ export function RunDetailPanel({
     return undefined;
   }
 
+  const drawerStyle = { "--drawer-width": `${drawerWidth}px` } as CSSProperties;
+
   if (selectedRunQuery.isPending) {
     return (
-      <aside aria-label="Run detail" className="drawer drawer-skeleton">
+      <aside aria-label="Run detail" className="drawer drawer-skeleton" style={drawerStyle}>
         <div className="drawer-state">
           <div className="skeleton-line skeleton-line--short" />
           <div className="skeleton-line skeleton-line--medium" style={{ marginTop: "12px" }} />
@@ -46,7 +51,7 @@ export function RunDetailPanel({
 
   if (selectedRunQuery.isError && !isNotFoundError(selectedRunQuery.error)) {
     return (
-      <aside aria-label="Run detail" className="drawer">
+      <aside aria-label="Run detail" className="drawer" style={drawerStyle}>
         <div className="drawer-state">
           <h3>Run detail failed to load</h3>
           <p>{selectedRunQuery.error.message}</p>

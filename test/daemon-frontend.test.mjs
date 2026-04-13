@@ -96,3 +96,30 @@ test("serveFrontendRequest does not cache missing build responses", () => {
   assert.equal(res.body, "task-runner web assets are not available; run npm run build");
   assert.equal(res.headers.get("cache-control"), "no-store");
 });
+
+test("serveFrontendRequest rejects unsupported methods with 405", () => {
+  const req = new EventEmitter();
+  req.method = "POST";
+
+  const res = {
+    destroyed: false,
+    headers: new Map(),
+    statusCode: 200,
+    writableEnded: false,
+    setHeader(name, value) {
+      this.headers.set(name.toLowerCase(), value);
+    },
+    end(chunk = "") {
+      this.body = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
+      this.writableEnded = true;
+    },
+  };
+
+  serveFrontendRequest(req, res, "/", {
+    rootPath: "/tmp/task-runner/apps/cli/dist/web",
+  });
+
+  assert.equal(res.statusCode, 405);
+  assert.equal(res.body, "Method Not Allowed");
+  assert.equal(res.headers.get("allow"), "GET, HEAD");
+});

@@ -59,6 +59,7 @@ export function RunsDashboardRoute() {
         <RunDetailPanel
           actionError={state.actionError}
           actionPending={state.actionPending}
+          drawerWidth={state.settings.drawerWidth}
           onAbort={state.runActions.abort}
           onArchive={state.runActions.archive}
           onClose={state.closeRun}

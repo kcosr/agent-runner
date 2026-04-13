@@ -129,8 +129,9 @@ export function serveFrontendRequest(
   const logError = options.logError ?? ((error: unknown) => console.error(error));
 
   if (req.method !== "GET" && req.method !== "HEAD") {
-    res.statusCode = 404;
-    res.end("Not Found");
+    res.statusCode = 405;
+    res.setHeader("allow", "GET, HEAD");
+    res.end("Method Not Allowed");
     return;
   }
 

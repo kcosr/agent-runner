@@ -97,7 +97,9 @@ export function RunEventsProvider({
             streamStaleRef.current = false;
             setStreamStale(false);
           })
-          .catch(() => {});
+          .catch(() => {
+            // Keep the stale banner visible until a reconnect can revalidate successfully.
+          });
       },
       onEvent: (payload) => {
         if (streamStaleRef.current) {

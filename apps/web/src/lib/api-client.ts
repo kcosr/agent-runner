@@ -5,6 +5,7 @@ import {
   runSummarySchema,
 } from "@task-runner/core/contracts/run-schemas.js";
 import type { RunArchiveResult, RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
+import { z } from "zod";
 
 export class ApiError extends Error {
   constructor(
@@ -94,25 +95,7 @@ async function readRuns(response: Response): Promise<RunSummary[]> {
     await parseResponseJson(response, "Runs list"),
     response.status,
     "runs",
-    {
-      safeParse(value) {
-        if (!Array.isArray(value)) {
-          return {
-            success: false,
-            error: { flatten: () => ({ fieldErrors: { runs: ["Expected an array"] } }) },
-          };
-        }
-        const runs: RunSummary[] = [];
-        for (const entry of value) {
-          const parsed = runSummarySchema.safeParse(entry);
-          if (!parsed.success) {
-            return parsed;
-          }
-          runs.push(parsed.data);
-        }
-        return { success: true, data: runs };
-      },
-    },
+    z.array(runSummarySchema),
     "Runs list",
   );
 }

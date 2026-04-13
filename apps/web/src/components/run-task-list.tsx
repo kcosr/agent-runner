@@ -108,7 +108,7 @@ export function RunTaskList({ tasks }: { tasks: RunTaskSummary[] }) {
                     onClick={() => selectTab(task.id, "body")}
                     type="button"
                   >
-                    Description
+                    Instructions
                   </button>
                   <button
                     aria-selected={activeTab === "notes"}
@@ -123,7 +123,7 @@ export function RunTaskList({ tasks }: { tasks: RunTaskSummary[] }) {
                   task.body ? (
                     <MarkdownContent className="task-markdown" text={task.body} />
                   ) : (
-                    <p className="task-empty">No description recorded.</p>
+                    <p className="task-empty">No instructions recorded.</p>
                   )
                 ) : task.notes ? (
                   <MarkdownContent className="task-markdown" text={task.notes} />

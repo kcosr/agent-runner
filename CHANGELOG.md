@@ -40,7 +40,7 @@
 - Added `apps/web`, a phase-1 same-origin run dashboard built with
   React/Vite. `task-runner serve` now serves the packaged SPA,
   `/app-config.json`, and the existing `/api/*` + `/api/events/*`
-  control-plane routes from one loopback origin, and the repo now ships
+  control-plane routes from one origin, and the repo now ships
   the canonical visual-contract mockup under
   `apps/web/mockups/run-dashboard.{html,css}`. ([#24](https://github.com/kcosr/task-runner/pull/24))
 
@@ -49,6 +49,7 @@
 - `task-runner serve` no longer restricts `--listen` / `TASK_RUNNER_LISTEN` to loopback hosts, and the web dashboard now keeps long kanban/task lists scrollable while the detail drawer sections start collapsed and can be expanded on demand. ([#24](https://github.com/kcosr/task-runner/pull/24))
 - Refined the web dashboard interaction model: the detail drawer now closes on `Escape`, the board toolbar exposes archived / empty-column / failure-grouping toggles directly in the header, and mobile kanban scrolling snaps more reliably between columns. ([#24](https://github.com/kcosr/task-runner/pull/24))
 - Added a board jump strip above the kanban that exposes only the currently rendered non-empty columns and scrolls them into view when the board overflows. ([#24](https://github.com/kcosr/task-runner/pull/24))
+- Renamed task-body tabs in the detail drawer from `Description` to `Instructions` for consistency with assignment/task wording. ([#24](https://github.com/kcosr/task-runner/pull/24))
 - Refactored the daemon control plane so HTTP and WebSocket commands
   now flow through one shared operations layer, keeping transport
   parsing thin while preserving shared run/definition DTO behavior. ([#24](https://github.com/kcosr/task-runner/pull/24))
@@ -93,6 +94,12 @@
 - Fixed the web dashboard to validate runtime config and daemon API
   payloads before using them, so malformed responses now fail cleanly
   instead of being trusted as typed contracts. ([#24](https://github.com/kcosr/task-runner/pull/24))
+- Fixed the board jump strip to stay stable while switching selected
+  runs, validated daemon SSE envelopes and stored board settings before
+  trusting them, and stopped drawer resize cancels from committing
+  stray widths. ([#24](https://github.com/kcosr/task-runner/pull/24))
+- Fixed daemon-hosted frontend routes to return `405 Method Not Allowed`
+  with an `Allow: GET, HEAD` header for unsupported methods. ([#24](https://github.com/kcosr/task-runner/pull/24))
 - Fixed the web dashboard SSE client to treat malformed daemon event
   payloads as a stale-stream condition instead of crashing the live
   updates subscription. ([#24](https://github.com/kcosr/task-runner/pull/24))
