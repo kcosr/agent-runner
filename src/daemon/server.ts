@@ -171,7 +171,9 @@ export async function serveDaemon(
     };
     const onError = (error: Error) => {
       cleanup();
-      reject(error);
+      probe.close(() => {
+        reject(error);
+      });
     };
     const cleanup = () => {
       probe.off("listening", onListening);
@@ -583,8 +585,8 @@ export async function serveDaemon(
           return;
         }
         case "events.subscribe": {
-          const parsed = params
-            ? (asRecord(params, "events.subscribe params") as EventsSubscribeParams)
+          const parsed: Record<string, unknown> = params
+            ? asRecord(params, "events.subscribe params")
             : {};
           const subscription = subscribeRunEvents(
             ws,

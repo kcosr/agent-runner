@@ -240,7 +240,13 @@ export async function handleHttpRequest(
 
     throw new HttpError(404, "NOT_FOUND", `route not found: ${method} ${url.pathname}`);
   } catch (err) {
-    sendError(res, err);
+    try {
+      sendError(res, err);
+    } catch {
+      if (!res.writableEnded) {
+        res.end();
+      }
+    }
   }
 }
 
@@ -293,6 +299,9 @@ function routeParam(params: Record<string, string>, key: string): string {
   const value = params[key];
   if (value === undefined) {
     throw new HttpError(500, "INTERNAL_ERROR", `missing route param: ${key}`);
+  }
+  if (value.includes("/") || value.includes("\\") || value.includes("..")) {
+    throw new HttpError(404, "NOT_FOUND", "resource not found");
   }
   return value;
 }

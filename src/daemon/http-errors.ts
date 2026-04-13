@@ -67,7 +67,7 @@ export function toHttpError(err: unknown): HttpError {
     return new HttpError(400, "INVALID_REQUEST", err.message, err);
   }
   if (err instanceof RunNotFoundError || err instanceof TaskNotFoundError) {
-    return new HttpError(404, "NOT_FOUND", err.message, err);
+    return new HttpError(404, "NOT_FOUND", "resource not found", err);
   }
   if (err instanceof ConflictError) {
     return new HttpError(409, "CONFLICT", err.message, err);
