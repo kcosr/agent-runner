@@ -212,9 +212,7 @@ describe("web app", () => {
     await user.click(screen.getByRole("button", { name: /build dashboard/i }));
 
     expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
-    expect(screen.queryByText("Build UI")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /tasks\s+1\/4/i }));
-    expect(await screen.findByText("Build UI")).toBeInTheDocument();
+    expect(screen.getByText("Build UI")).toBeInTheDocument();
     expect(screen.getAllByText("Repo").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByRole("button", { name: /copy run id/i })).toBeInTheDocument();
   });

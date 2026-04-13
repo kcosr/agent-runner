@@ -239,6 +239,9 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  max-height: min(26rem, 48vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .drawer-panel--timing {
@@ -255,55 +258,6 @@ body {
   border-radius: var(--radius-md);
   padding: 12px;
   background: var(--card);
-}
-
-.drawer-group {
-  border-top: 1px solid var(--border);
-}
-
-.drawer-group-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  width: 100%;
-  padding: 12px 18px;
-  background: transparent;
-  border: 0;
-  color: var(--foreground);
-  font-size: 13px;
-  font-weight: 600;
-  text-align: left;
-}
-
-.drawer-group-toggle:hover {
-  background: var(--accent);
-}
-
-.drawer-group-icon {
-  width: 16px;
-  height: 16px;
-  color: var(--muted-foreground);
-  flex-shrink: 0;
-  transition: transform 120ms ease;
-}
-
-.drawer-group-icon.open {
-  transform: rotate(180deg);
-}
-
-.drawer-group-content {
-  padding: 0 18px 16px;
-}
-
-.drawer-group-scroll {
-  min-height: 0;
-}
-
-.drawer-group-scroll--tasks {
-  max-height: min(26rem, 48vh);
-  overflow-y: auto;
-  overscroll-behavior: contain;
 }
 
 .task {
