@@ -13,6 +13,11 @@
 
 ### Added
 
+- Added a local daemon control plane: `task-runner serve` now starts a
+  loopback WebSocket JSON-RPC server, run/definition commands can opt
+  into daemon mode with `--connect` / `TASK_RUNNER_CONNECT`, and daemon
+  clients can subscribe to typed `RunEvent` notifications for live
+  progress. ([#21](https://github.com/kcosr/task-runner/pull/21))
 - Added a transport-neutral `src/contracts/runs.ts` seam for shared run DTOs and pure mappers (`RunSummary`, `RunDetail`, `RunArchiveResult`, `RunCapabilities`) so later CLI/web/daemon surfaces can project from `RunManifest` without binding directly to raw manifest internals. ([#16](https://github.com/kcosr/task-runner/pull/16))
 - Added `task-runner task list`, `task show`, and `task append-notes`, plus `task add --body`, for a fuller CLI task workflow surface. The new read commands return stable task snapshots in text or JSON, and append-notes uses deterministic single-newline joining.
 - Added `task-runner run reset <run-id>` to restore a non-running run to its original initialized state, rewrite `run.json` and `assignment.md` from a persisted reset seed, clear prior attempt/session history, and remove stale `attempts/` artifacts.
@@ -29,6 +34,14 @@
 
 ### Changed
 
+- `task-runner` now has an explicit dual-host model. Embedded mode keeps
+  the existing in-process CLI behavior, while daemon mode moves live run
+  ownership and external abort control into the local daemon without
+  silently falling back to embedded execution. ([#21](https://github.com/kcosr/task-runner/pull/21))
+- Fresh run cwd resolution now preserves whether an agent file explicitly
+  authored `cwd`. `--cwd` still wins, explicit agent `cwd` still wins
+  next, daemon runs otherwise use the client caller's cwd, and embedded
+  runs otherwise fall back to the host process cwd. ([#21](https://github.com/kcosr/task-runner/pull/21))
 - Build and packaging no longer rely on git-tracked `dist/` output. `dist/` is generated locally and during `prepack`, and the build step explicitly marks `dist/cli.js` executable on Unix-like systems.
 - Extracted an explicit internal `src/core/` seam: transport-neutral run lifecycle, command services, schema/interpolation helpers, and the abstract backend contract now live under `src/core/`, while CLI parsing and text rendering remain at the transport edge. `config/loader.ts` is now filesystem-only, and the old mixed `runner/output.ts` responsibilities were split into core live-status shaping plus CLI renderers. ([#20](https://github.com/kcosr/task-runner/pull/20))
 - Refactored command execution around transport-agnostic core contracts: non-run commands now execute through typed `src/commands/` services, `runAgent` emits typed events instead of writing terminal text directly, and the CLI renders text/json output at the transport edge. ([#13](https://github.com/kcosr/task-runner/pull/13))
@@ -45,6 +58,8 @@
 - Built-in assignments now use semantic task ids (`orient`, `internal_review`, `approval`) instead of numeric prefixes. Array order remains the execution order, while ids stay stable when tasks are inserted or reordered. ([#11](https://github.com/kcosr/task-runner/pull/11))
 - `assignments/plan-feature/` now runs a nested `plan-review` pass before handoff, passing both the generated draft and the planner workspace as review artifacts. The planner applies draft-review fixes until approval, then hands the caller the exact `task-runner init --agent implementer --assignment <draft> --var repo_path=...` command to run. Planner, template, reviewer, and onboarding guidance now also default to hot-cut designs: avoid fallback logic, heuristics, and backward-compatibility shims unless the caller explicitly asks for migration support. ([#11](https://github.com/kcosr/task-runner/pull/11))
 - `assignments/plan-feature/` templates now create a review-candidate `commit` before `internal_review`, rename the final git-wrap-up step to `final_commit`, drop the scaffold guidance that implied a pre-edit baseline check gate, and teach task-workflow prompts to use quoted heredocs for multi-line CLI notes. ([#14](https://github.com/kcosr/task-runner/pull/14))
+- `assignments/plan-feature/` now produces a human-facing markdown summary artifact alongside the approved draft. A new `produce_summary` task (inserted after `apply_review_fixes`) renders the planner's existing notes through a new `summary-template.md` into `${TASK_RUNNER_STATE_DIR}/drafts/<repo-name>/plan-<slug>-<shortid>.summary.md`, covering overview, motivation, scope, contract, schema, impact surface, higher-level steps, Mermaid diagrams where applicable, risks, test strategy, and open assumptions. The summary's Contract and Open Assumptions blocks must match the draft verbatim, and `handoff` now surfaces the summary path alongside the draft path so the caller can skim the plan before running init. ([#21](https://github.com/kcosr/task-runner/pull/21))
+- Built-in planner/reviewer/orientation assignments now opt into `taskMode: cli` by default for `plan-feature`, `plan-review`, `code-review`, `doc-review`, and `familiarize`. ([#21](https://github.com/kcosr/task-runner/pull/21))
 
 ### Fixed
 

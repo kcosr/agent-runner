@@ -18,6 +18,28 @@ effort: high
 Agent prompt.
 `;
 
+const EXPLICIT_DOT_AGENT = `---
+schemaVersion: 1
+name: three-dot
+backend: claude
+model: claude-sonnet-4-6
+effort: high
+cwd: .
+---
+Agent prompt.
+`;
+
+const EXPLICIT_RELATIVE_AGENT = `---
+schemaVersion: 1
+name: three-relative
+backend: claude
+model: claude-sonnet-4-6
+effort: high
+cwd: nested/worktree
+---
+Agent prompt.
+`;
+
 const THREE_ASSIGNMENT = `---
 schemaVersion: 1
 name: three-work
@@ -72,15 +94,15 @@ function editStatus(content, taskId, newStatus) {
   return content.slice(0, start) + updated + content.slice(end);
 }
 
-async function runWithMock(baseDir, mockInvoke, overrides = {}) {
+async function runWithMock(baseDir, mockInvoke, overrides = {}, options = {}) {
   const backend = {
     id: "mock",
     invoke: mockInvoke,
   };
   const capture = createRunEventCapture();
   return withSharedRuntimeEnv(baseDir, async () => {
-    const loaded = loadAgentConfig("three", baseDir);
-    const loadedAssignment = loadAssignmentConfig("three-work", baseDir);
+    const loaded = loadAgentConfig(options.agentName ?? "three", baseDir);
+    const loadedAssignment = loadAssignmentConfig(options.assignmentName ?? "three-work", baseDir);
     const originalCwd = process.cwd();
     process.chdir(baseDir);
     try {
@@ -90,6 +112,7 @@ async function runWithMock(baseDir, mockInvoke, overrides = {}) {
         cliVars: {},
         backend,
         overrides,
+        callerCwd: options.callerCwd,
         emitEvent: capture.emitEvent,
       });
       return {
@@ -102,6 +125,110 @@ async function runWithMock(baseDir, mockInvoke, overrides = {}) {
     }
   });
 }
+
+test("fresh runs use callerCwd when the agent omits cwd", async () => {
+  const dir = tempDir();
+  writeAgentAndAssignment(dir);
+  const callerDir = join(dir, "client-root");
+  mkdirSync(callerDir, { recursive: true });
+
+  let seenCwd;
+  await runWithMock(
+    dir,
+    async (ctx) => {
+      seenCwd = ctx.cwd;
+      const absPlan = assignmentPathFromPrompt(ctx.prompt);
+      let plan = readFileSync(absPlan, "utf8");
+      for (const id of ["t1", "t2", "t3"]) {
+        plan = editStatus(plan, id, "completed");
+      }
+      writeFileSync(absPlan, plan, "utf8");
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: null,
+        transcript: "done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    },
+    {},
+    { callerCwd: callerDir },
+  );
+
+  assert.equal(seenCwd, callerDir);
+});
+
+test("explicit agent cwd resolves relative to callerCwd", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three-relative", EXPLICIT_RELATIVE_AGENT);
+  writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
+  const callerDir = join(dir, "client-root");
+  mkdirSync(join(callerDir, "nested", "worktree"), { recursive: true });
+
+  let seenCwd;
+  await runWithMock(
+    dir,
+    async (ctx) => {
+      seenCwd = ctx.cwd;
+      const absPlan = assignmentPathFromPrompt(ctx.prompt);
+      let plan = readFileSync(absPlan, "utf8");
+      for (const id of ["t1", "t2", "t3"]) {
+        plan = editStatus(plan, id, "completed");
+      }
+      writeFileSync(absPlan, plan, "utf8");
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: null,
+        transcript: "done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    },
+    {},
+    { agentName: "three-relative", callerCwd: callerDir },
+  );
+
+  assert.equal(seenCwd, join(callerDir, "nested", "worktree"));
+});
+
+test("explicit --cwd override beats agent cwd and callerCwd", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three-dot", EXPLICIT_DOT_AGENT);
+  writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
+  const callerDir = join(dir, "client-root");
+  mkdirSync(join(callerDir, "override-root"), { recursive: true });
+
+  let seenCwd;
+  await runWithMock(
+    dir,
+    async (ctx) => {
+      seenCwd = ctx.cwd;
+      const absPlan = assignmentPathFromPrompt(ctx.prompt);
+      let plan = readFileSync(absPlan, "utf8");
+      for (const id of ["t1", "t2", "t3"]) {
+        plan = editStatus(plan, id, "completed");
+      }
+      writeFileSync(absPlan, plan, "utf8");
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: null,
+        transcript: "done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    },
+    { cwd: "override-root" },
+    { agentName: "three-dot", callerCwd: callerDir },
+  );
+
+  assert.equal(seenCwd, join(callerDir, "override-root"));
+});
 
 test("effort level from frontmatter is forwarded to backend", async () => {
   const dir = tempDir();

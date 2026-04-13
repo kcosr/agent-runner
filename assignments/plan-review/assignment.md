@@ -1,6 +1,7 @@
 ---
 schemaVersion: 1
 name: plan-review
+taskMode: cli
 sessionName: plan review · {{repo_path}}
 vars:
   repo_path:

@@ -294,16 +294,20 @@ export function listRuns(opts: { includeArchived?: boolean } = {}): RunListResul
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
 }
 
-export function showDefinition(kind: DefinitionKind, target: string): DefinitionDetailsResult {
+export function showDefinition(
+  kind: DefinitionKind,
+  target: string,
+  cwd?: string,
+): DefinitionDetailsResult {
   if (kind === "agent") {
     return {
       kind,
-      loaded: loadAgentConfig(target),
+      loaded: loadAgentConfig(target, cwd),
     };
   }
   return {
     kind,
-    loaded: loadAssignmentConfig(target),
+    loaded: loadAssignmentConfig(target, cwd),
   };
 }
 

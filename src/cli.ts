@@ -1,4 +1,21 @@
 #!/usr/bin/env node
+import {
+  appendNotes,
+  archive,
+  createTask,
+  getDefinition,
+  getDefinitionList,
+  getRun,
+  getRunList,
+  getTask,
+  getTaskList,
+  initRun,
+  reset,
+  resumeRun,
+  startRun,
+  unarchive,
+  updateTask,
+} from "./app/service.js";
 import { type ParsedArgs, overridesFromParsedArgs, parseArgs } from "./cli/parse-args.js";
 import { renderRunEvent } from "./cli/render-run.js";
 import {
@@ -6,13 +23,10 @@ import {
   renderDefinitionList,
   renderRunArchive,
   renderRunList,
-  renderRunReset,
   renderRunUnarchive,
   renderStatus,
-  renderTaskAdded,
   renderTaskDetails,
   renderTaskList,
-  renderTaskMutation,
 } from "./commands/render.js";
 import {
   AgentConfigError,
@@ -21,335 +35,91 @@ import {
   AssignmentNotFoundError,
   DefinitionListError,
 } from "./config/loader.js";
-import {
-  CommandError,
-  addTask,
-  appendTaskNotes,
-  archiveRun,
-  isCommandError,
-  listDefinitions,
-  listRuns,
-  listTasks,
-  readStatus,
-  resetRun,
-  setTask,
-  showDefinition,
-  showTask,
-  unarchiveRun,
-} from "./core/commands/service.js";
+import { isPathArg, resolveInputPath } from "./config/runtime-paths.js";
+import { CommandError, isCommandError } from "./core/commands/service.js";
 import {
   EmptyPromptError,
   InvalidAddedTaskError,
   InvalidBackendSessionError,
   LockedFieldError,
   RecursionDepthError,
+  type RunEvent,
   VarResolutionError,
 } from "./core/run/run-loop.js";
-import {
-  ResumeError,
-  RunCommandError,
-  UnknownBackendError,
-  executeRunCommand,
-} from "./run-command.js";
+import { DaemonClient, DaemonConnectionError, DaemonRpcError } from "./daemon/client.js";
+import { resolveHostMode, resolveListenUrl } from "./daemon/config.js";
+import { RPC_ERROR_COMMAND } from "./daemon/protocol.js";
+import { serveDaemon } from "./daemon/server.js";
+import { ResumeError, RunCommandError, UnknownBackendError } from "./run-command.js";
 
-const HELP = `Usage: task-runner <run|init|status|task|list|show> [options] [args]
+const HELP = `Usage: task-runner <run|init|serve|status|task|list|show> [options] [args]
 
 Commands:
   run                     Execute an agent. Either a fresh run, a resume,
                           or execute-after-init (when --resume-run points
                           at an initialized run).
   run reset <id|path>     Restore a non-running run to initialized state.
-                          Rewrites run.json and assignment.md, clears old
-                          execution history, and rejects in-flight runs.
-  run archive <id|path>   Mark a non-running run as archived. Archived
-                          runs stay visible via list/status but are
-                          rejected by --resume-run until unarchived.
-  run unarchive <id|path> Clear a run's archive marker so it can be
-                          resumed again.
-  init                    Prepare a run without invoking the backend. Writes
-                          the workspace, seeds assignment.md from tasks, and
-                          stores a manifest with status=initialized and a
-                          frozen pendingPrompt. Resume later with
-                          \`task-runner run --resume-run <id>\`.
-  status <id|path>        Read a run's persisted manifest and print its
-                          current status, agent/assignment/backend, task
-                          checklist with statuses and notes, and a hint
-                          for resuming. Read-only — touches no state.
-                          Supports --output-format json and --field for
-                          selective JSON output.
+  run archive <id|path>   Mark a non-running run as archived.
+  run unarchive <id|path> Clear a run's archive marker.
+  init                    Prepare a run without invoking the backend.
+  serve                   Start the local daemon server on loopback.
+  status <id|path>        Read a run and print its current status.
   task list <id>          List tasks for a run in stable task order.
-                          Read-only. Supports --output-format json.
   task show <id> <task>   Show one task snapshot for a run.
-                          Read-only. Supports --output-format json.
-  task set <id> <task>    Update a task's status and/or notes on a run
-                          without invoking the backend. Requires at least
-                          one of --status / --notes. Rewrites the
-                          workspace assignment.md and persists the
-                          manifest. Running non-passive runs only allow
-                          this in \`taskMode=cli\`.
+  task set <id> <task>    Update a task's status and/or notes.
   task append-notes <id> <task>
-                          Append text to a task's notes with a single
-                          newline separator. Requires --text. Rewrites the
-                          workspace assignment.md and persists the
-                          manifest. Running non-passive runs only allow
-                          this in \`taskMode=cli\`.
-  task add <id>           Append a new task to a run's task list. Requires
-                          --title. Accepts optional --body. Generates a
-                          \`cli-<short-id>\` task id.
-                          Respects the \`tasks\` locked field. Rejected
-                          while status=running.
-  list <agents|assignments>
-                          Enumerate available definitions from the
-                          config root (\${TASK_RUNNER_CONFIG_DIR},
-                          XDG fallback, or ~/.config/task-runner).
-                          Read-only.
-                          Supports --output-format json.
-  list runs               Enumerate known current-generation runs across
-                          all state-dir repo buckets. Archived runs are
-                          hidden unless --include-archived is supplied.
-                          Supports --output-format json.
+                          Append text to a task's notes.
+  task add <id>           Append a new task to a run's task list.
+  list <agents|assignments|runs>
+                          Enumerate definitions or runs.
   show <agent|assignment> <name|path>
                           Print details of a specific definition.
-                          Read-only. Supports --output-format json.
 
 Arguments:
-  [message]               Positional text. For a fresh run or init,
-                          appended as the "specific ask" at the end of the
-                          prompt. For a resume run, sent as (part of) the
-                          sole follow-up prompt for the new session.
-                          Forbidden when resuming an initialized run.
+  [message]               Positional text for fresh runs or resumes.
 
 Task command options:
-  --status <s>            (task set) Target status: pending, in_progress,
-                          completed, or blocked.
+  --status <s>            (task set) Target status.
   --notes <text>          (task set) Replacement notes body.
   --text <text>           (task append-notes) Text to append.
   --title <text>          (task add) Title for the new task.
   --body <text>           (task add) Optional task body.
 
-Options:
-  --agent <name|path>     Agent bare name (resolved only from
-                          \${TASK_RUNNER_CONFIG_DIR}/agents/<name>/agent.md,
-                          with XDG fallback) or a direct path to an
-                          agent.md file. Optional on fresh runs and init
-                          — when omitted, task-runner synthesizes an
-                          ad-hoc agent from CLI overrides (in that case
-                          --backend is required; every other field gets a
-                          default). Forbidden with --resume-run: the agent
-                          config is reconstructed from the frozen manifest
-                          (no agent.md re-read).
-  --assignment <n|path>   Assignment bare name (resolved only from
-                          \${TASK_RUNNER_CONFIG_DIR}/assignments/<n>/assignment.md,
-                          with XDG fallback) or a direct path to an
-                          assignment.md file. Assignments supply tasks,
-                          vars, and optional work instructions. Forbidden
-                          on --resume-run.
-  --backend-session-id    Adopt an existing backend session id (claude session
-                          UUID, codex thread id) instead of starting a fresh
-                          one. Cannot be combined with --resume-run. Validated
-                          via the backend's read-only check before any
-                          workspace creation; the cwd must match the cwd the
-                          session was originally created under.
-  --resume-run <id|path>  Continue an existing run by short id or by direct
-                          path to its workspace / run.json. Short ids are
-                          resolved from \${TASK_RUNNER_STATE_DIR}/runs/<repo-name>/
-                          first, then runs/unknown/ (with XDG fallback).
-                          Reads the prior manifest and reconstructs the
-                          agent from its frozen fields (no re-read of the
-                          source agent.md under the manifest-canonical
-                          design). Normalizes non-completed tasks to
-                          pending and starts a new session. Requires a
-                          follow-up message OR --add-task, unless the
-                          prior manifest has status=initialized (in which
-                          case the stored pendingPrompt is executed as
-                          session 0 with NO overrides — init deliberately
-                          froze them).
+Host selection:
+  --connect <ws-url>      Route the command through the daemon host.
+                          Also honored from TASK_RUNNER_CONNECT.
+  --listen <ws-url>       (serve only) Listen URL for the daemon host.
+                          Also honored from TASK_RUNNER_LISTEN.
 
-                          Regular resume accepts these overrides (all still
-                          vetted against manifest.lockedFields): --model,
-                          --effort, --timeout-sec, --max-retries,
-                          --unrestricted, --session-name. The following
-                          are REJECTED on any resume: --agent, --assignment,
-                          --backend, --backend-session-id, --cwd (sessions
-                          are cwd-bound), --var (vars are frozen into the
-                          manifest at first write, not re-resolved).
-  --var <key>=<value>     Set an input variable (repeatable). Validated
-                          against the assignment's var schema. Forbidden
-                          with --resume-run — vars are resolved once at
-                          first write and frozen into the manifest.
-  --add-task <title>      Append a task to the run's task list with the
-                          given title (repeatable). IDs are auto-generated
-                          as \`cli-<short-id>\`. Rejected if \`tasks\` is
-                          listed in the run's locked fields.
-  --cwd <path>            Override the agent's cwd. Forbidden with
-                          --resume-run (backend sessions are cwd-bound;
-                          a new cwd would invalidate the captured session
-                          id). Create a fresh run if you need a different
-                          cwd.
-  --backend <id>          Override the agent's backend (claude, codex, or passive).
-                          Forbidden with --resume-run. The agent's model is
-                          dropped on backend override unless --model is also
-                          passed (model strings are backend-specific).
-  --task-mode <m>         Override the assignment task workflow mode
-                          ("file" or "cli"). Forbidden with --resume-run;
-                          the chosen mode is frozen into the manifest at
-                          first write.
+Execution options:
+  --agent <name|path>     Agent bare name or direct path to agent.md.
+  --assignment <n|path>   Assignment bare name or direct path to assignment.md.
+  --backend-session-id    Adopt an existing backend session id.
+  --resume-run <id|path>  Continue an existing run by short id or path.
+  --var <key>=<value>     Set an input variable (repeatable).
+  --add-task <title>      Append a task to the run's task list.
+  --cwd <path>            Override the agent's cwd.
+  --backend <id>          Override the agent's backend.
+  --task-mode <m>         Override the assignment task workflow mode.
   --model <id>            Override the agent's model.
-  --effort <level>        Override effort level (off, minimal, low, medium,
-                          high, xhigh, max).
+  --effort <level>        Override effort level.
   --timeout-sec <n>       Override the per-attempt timeout.
-  --max-retries <n>       Override the max number of retries (default 3).
+  --max-retries <n>       Override the max number of retries.
   --unrestricted          Bypass the backend's approval prompts.
-  --session-name <name>   Override the assignment's sessionName (the
-                          backend display label — claude --name / codex
-                          thread/name/set). Vars are interpolated.
+  --session-name <name>   Override the assignment's session name.
   --output-format <fmt>   Output format: "text" (default) or "json".
-  --field <name>          (status only, repeatable) When --output-format
-                          is json, restrict output to these top-level
-                          manifest fields.
-  --include-archived      (list runs only) Include archived runs in the
-                          listing. Archived rows include their timestamp.
+  --field <name>          (status only, repeatable) Restrict JSON output.
+  --include-archived      (list runs only) Include archived runs.
   --help, -h              Print this message.
 
 Exit codes:
   0    All tasks completed successfully (or 0-task run succeeded)
   1    Retries exhausted with incomplete tasks
   2    One or more tasks reported as blocked
-  3    Config / validation / resume error before any run started
-  4    Backend invocation error
+  3    Config / validation / daemon connectivity error
+  4    Backend / runtime error
   130  Run interrupted by user (Ctrl+C) or external cancellation
 `;
-
-async function main(): Promise<void> {
-  let parsed: ParsedArgs;
-  try {
-    parsed = parseArgs(process.argv);
-  } catch (err) {
-    process.stderr.write(`task-runner: ${(err as Error).message}\n`);
-    process.stderr.write(HELP);
-    process.exit(3);
-  }
-
-  if (parsed.showHelp) {
-    process.stdout.write(HELP);
-    process.exit(0);
-  }
-
-  if (parsed.includeArchived && !(parsed.command === "list" && parsed.subcommand === "runs")) {
-    process.stderr.write("task-runner: --include-archived is only valid with `list runs`\n");
-    process.exit(3);
-  }
-
-  if (parsed.command === "status") {
-    runStatus(parsed);
-  }
-
-  if (parsed.command === "run") {
-    if (parsed.subcommand === "reset") {
-      runResetCommand(parsed);
-    }
-    if (parsed.subcommand === "archive") {
-      runArchiveCommand(parsed);
-    }
-    if (parsed.subcommand === "unarchive") {
-      runUnarchiveCommand(parsed);
-    }
-  }
-
-  if (parsed.command === "task") {
-    runTaskCommand(parsed);
-  }
-
-  if (parsed.command === "list") {
-    runListCommand(parsed);
-  }
-
-  if (parsed.command === "show") {
-    runShowCommand(parsed);
-  }
-
-  if (parsed.command !== "run" && parsed.command !== "init") {
-    process.stderr.write(`task-runner: unknown command "${parsed.command}"\n`);
-    process.stderr.write(HELP);
-    process.exit(3);
-  }
-
-  const isInitCommand = parsed.command === "init";
-
-  const isJson = parsed.outputFormat === "json";
-
-  // Install a SIGINT handler that aborts the in-flight backend invocation
-  // on the first Ctrl+C and force-exits on the second. The first Ctrl+C
-  // gives the run loop a chance to send `turn/interrupt` to codex (or
-  // SIGINT to the claude child) and persist the manifest as `aborted`.
-  const abortController = new AbortController();
-  let sigintCount = 0;
-  const onSigint = (): void => {
-    sigintCount++;
-    if (sigintCount === 1) {
-      process.stderr.write(
-        "\ntask-runner: caught Ctrl+C — interrupting backend (Ctrl+C again to force-exit)\n",
-      );
-      abortController.abort();
-      return;
-    }
-    process.stderr.write("\ntask-runner: forced exit\n");
-    process.exit(130);
-  };
-  process.on("SIGINT", onSigint);
-
-  try {
-    const outcome = await executeRunCommand({
-      initialize: isInitCommand,
-      agent: parsed.agent,
-      assignment: parsed.assignment,
-      resumeRun: parsed.resumeRun,
-      backendSessionId: parsed.backendSessionId,
-      cliVars: parsed.vars,
-      overrides: overridesFromParsedArgs(parsed),
-      abortSignal: abortController.signal,
-      emitEvent: isJson
-        ? undefined
-        : (event) => {
-            for (const chunk of renderRunEvent(event)) {
-              if (chunk.stream === "stdout") {
-                process.stdout.write(chunk.text);
-              } else {
-                process.stderr.write(chunk.text);
-              }
-            }
-          },
-    });
-    if (isJson) {
-      process.stdout.write(`${JSON.stringify(outcome.manifest, null, 2)}\n`);
-    }
-    process.exit(outcome.exitCode);
-  } catch (err) {
-    if (
-      err instanceof UnknownBackendError ||
-      err instanceof AgentNotFoundError ||
-      err instanceof AgentConfigError ||
-      err instanceof AssignmentNotFoundError ||
-      err instanceof AssignmentConfigError ||
-      err instanceof RunCommandError ||
-      err instanceof VarResolutionError ||
-      err instanceof LockedFieldError ||
-      err instanceof ResumeError ||
-      err instanceof InvalidAddedTaskError ||
-      err instanceof EmptyPromptError ||
-      err instanceof RecursionDepthError ||
-      err instanceof InvalidBackendSessionError
-    ) {
-      process.stderr.write(`task-runner: ${err.message}\n`);
-      if (err instanceof RunCommandError && err.showHelp) {
-        process.stderr.write(HELP);
-      }
-      process.exit(3);
-    }
-    process.stderr.write(`task-runner: ${(err as Error).message}\n`);
-    process.exit(4);
-  }
-}
 
 function writeJson(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
@@ -359,7 +129,21 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-function exitCommandFailure(err: unknown): never {
+function daemonUnavailableHint(connectUrl: string): string {
+  return `task-runner: cannot connect to daemon at ${connectUrl}\nHint: task-runner serve --listen ${connectUrl}\n`;
+}
+
+function exitCommandFailure(err: unknown, connectUrl?: string): never {
+  if (err instanceof DaemonConnectionError) {
+    process.stderr.write(daemonUnavailableHint(err.url));
+    process.exit(3);
+  }
+
+  if (err instanceof DaemonRpcError && err.code === RPC_ERROR_COMMAND) {
+    process.stderr.write(`task-runner: ${err.message}\n`);
+    process.exit(3);
+  }
+
   if (
     isCommandError(err) ||
     err instanceof AgentNotFoundError ||
@@ -371,12 +155,28 @@ function exitCommandFailure(err: unknown): never {
     process.stderr.write(`task-runner: ${errorMessage(err)}\n`);
     process.exit(3);
   }
+
+  if (connectUrl && err instanceof Error && /ECONNREFUSED|socket hang up/i.test(err.message)) {
+    process.stderr.write(daemonUnavailableHint(connectUrl));
+    process.exit(3);
+  }
+
   process.stderr.write(`task-runner: ${errorMessage(err)}\n`);
   process.exit(4);
 }
 
+function emitRenderedEvent(event: RunEvent): void {
+  for (const chunk of renderRunEvent(event)) {
+    if (chunk.stream === "stdout") {
+      process.stdout.write(chunk.text);
+    } else {
+      process.stderr.write(chunk.text);
+    }
+  }
+}
+
 function projectStatus(
-  detail: ReturnType<typeof readStatus>,
+  detail: ReturnType<typeof getRun>,
   fields: string[],
 ): Record<string, unknown> {
   const projection: Record<string, unknown> = {};
@@ -395,9 +195,103 @@ function projectStatus(
   return projection;
 }
 
-function runStatus(parsed: ParsedArgs): never {
-  const target = parsed.message?.trim();
-  if (!target || target.length === 0) {
+function normalizeTarget(target: string | undefined): string | undefined {
+  if (!target) {
+    return target;
+  }
+  return isPathArg(target) ? resolveInputPath(target, process.cwd()) : target;
+}
+
+function resolvedOverrides(parsed: ParsedArgs) {
+  return {
+    ...overridesFromParsedArgs(parsed),
+    cwd: parsed.cwd ? resolveInputPath(parsed.cwd, process.cwd()) : undefined,
+  };
+}
+
+function renderInitializedRun(detail: ReturnType<typeof getRun>): void {
+  emitRenderedEvent({
+    type: "run_initialized",
+    runId: detail.runId,
+    agentName: detail.agent.name,
+    assignmentSourcePath: detail.assignment?.sourcePath ?? null,
+    assignmentPath: detail.assignmentPath,
+    sessionName: detail.sessionName,
+    cwd: detail.cwd,
+    passive: detail.backend === "passive",
+    pendingPrompt: detail.pendingPrompt ?? "",
+  });
+  if (detail.callerInstructions) {
+    emitRenderedEvent({
+      type: "caller_instructions",
+      text: detail.callerInstructions,
+    });
+  }
+}
+
+function terminalExitCode(status: string): number {
+  switch (status) {
+    case "success":
+    case "initialized":
+      return 0;
+    case "blocked":
+      return 2;
+    case "exhausted":
+      return 1;
+    case "aborted":
+      return 130;
+    default:
+      return 4;
+  }
+}
+
+async function withDaemonClient<T>(
+  connectUrl: string,
+  fn: (client: DaemonClient) => Promise<T>,
+): Promise<T> {
+  const client = await DaemonClient.connect(connectUrl);
+  try {
+    return await fn(client);
+  } finally {
+    await client.close();
+  }
+}
+
+async function runServe(parsed: ParsedArgs): Promise<never> {
+  if (parsed.connect !== undefined) {
+    process.stderr.write("task-runner: serve does not accept --connect\n");
+    process.exit(3);
+  }
+  if (parsed.positionals.length > 0) {
+    process.stderr.write("task-runner: serve takes no positional arguments\n");
+    process.exit(3);
+  }
+  const listenUrl = resolveListenUrl(parsed.listen);
+  const server = await serveDaemon(listenUrl);
+  let closing = false;
+  const shutdown = async (exitCode: number): Promise<void> => {
+    if (closing) {
+      return;
+    }
+    closing = true;
+    await server.close();
+    process.exit(exitCode);
+  };
+  process.on("SIGINT", () => {
+    void shutdown(130);
+  });
+  process.on("SIGTERM", () => {
+    void shutdown(0);
+  });
+  process.stderr.write(`task-runner: serving on ${server.listenUrl}\n`);
+  // Keep the process alive until SIGINT closes the daemon.
+  // eslint-disable-next-line @typescript-eslint/no-empty-function
+  return await new Promise<never>(() => {});
+}
+
+async function runStatus(parsed: ParsedArgs, connectUrl?: string): Promise<never> {
+  const target = normalizeTarget(parsed.message?.trim());
+  if (!target) {
     process.stderr.write("task-runner: status requires a run id or workspace path\n");
     process.stderr.write(
       "Usage: task-runner status <id-or-path> [--output-format json] [--field name]...\n",
@@ -406,7 +300,14 @@ function runStatus(parsed: ParsedArgs): never {
   }
 
   try {
-    const result = readStatus(target);
+    const result =
+      connectUrl === undefined
+        ? getRun(target)
+        : await withDaemonClient(connectUrl, (client) =>
+            client
+              .call<{ run: ReturnType<typeof getRun> }>("runs.get", { target })
+              .then((r) => r.run),
+          );
     if (parsed.outputFormat === "json") {
       writeJson(parsed.fields.length > 0 ? projectStatus(result, parsed.fields) : result);
     } else {
@@ -417,11 +318,11 @@ function runStatus(parsed: ParsedArgs): never {
     }
     process.exit(0);
   } catch (err) {
-    exitCommandFailure(err);
+    exitCommandFailure(err, connectUrl);
   }
 }
 
-function runListCommand(parsed: ParsedArgs): never {
+async function runListCommand(parsed: ParsedArgs, connectUrl?: string): Promise<never> {
   const kindArg = parsed.subcommand;
   if (kindArg !== "agents" && kindArg !== "assignments" && kindArg !== "runs") {
     process.stderr.write(
@@ -446,11 +347,20 @@ function runListCommand(parsed: ParsedArgs): never {
       });
       if (unsupported.length > 0) {
         process.stderr.write(
-          `task-runner: list runs only supports --include-archived and --output-format (got ${unsupported.join(", ")})\n`,
+          `task-runner: list runs only supports --connect, --include-archived, and --output-format (got ${unsupported.join(", ")})\n`,
         );
         process.exit(3);
       }
-      const result = listRuns({ includeArchived: parsed.includeArchived });
+      const result =
+        connectUrl === undefined
+          ? getRunList({ includeArchived: parsed.includeArchived })
+          : await withDaemonClient(connectUrl, (client) =>
+              client
+                .call<{ runs: ReturnType<typeof getRunList> }>("runs.list", {
+                  includeArchived: parsed.includeArchived,
+                })
+                .then((r) => r.runs),
+            );
       if (parsed.outputFormat === "json") {
         writeJson(result);
       } else {
@@ -462,57 +372,96 @@ function runListCommand(parsed: ParsedArgs): never {
     const unsupported = unsupportedFlagsForGroupedCommand(parsed);
     if (unsupported.length > 0) {
       process.stderr.write(
-        `task-runner: list ${kindArg} only supports --output-format (got ${unsupported.join(", ")})\n`,
+        `task-runner: list ${kindArg} only supports --connect and --output-format (got ${unsupported.join(", ")})\n`,
       );
       process.exit(3);
     }
-    const result = listDefinitions(kindArg === "agents" ? "agent" : "assignment");
+    const result =
+      connectUrl === undefined
+        ? getDefinitionList(kindArg === "agents" ? "agent" : "assignment")
+        : await withDaemonClient(connectUrl, (client) =>
+            client
+              .call<{
+                agents?: ReturnType<typeof getDefinitionList>;
+                assignments?: ReturnType<typeof getDefinitionList>;
+              }>(kindArg === "agents" ? "agents.list" : "assignments.list")
+              .then((r) => (kindArg === "agents" ? (r.agents ?? []) : (r.assignments ?? []))),
+          );
     if (parsed.outputFormat === "json") {
-      writeJson(result.entries);
+      writeJson(result);
     } else {
-      process.stdout.write(renderDefinitionList(result));
+      process.stdout.write(
+        renderDefinitionList({
+          kind: kindArg === "agents" ? "agent" : "assignment",
+          entries: result,
+        }),
+      );
     }
     process.exit(0);
   } catch (err) {
-    exitCommandFailure(err);
+    exitCommandFailure(err, connectUrl);
   }
 }
 
-function runShowCommand(parsed: ParsedArgs): never {
+async function runShowCommand(parsed: ParsedArgs, connectUrl?: string): Promise<never> {
   const kindArg = parsed.subcommand;
   if (kindArg !== "agent" && kindArg !== "assignment") {
     process.stderr.write(
       `task-runner: show requires a kind: agent or assignment${kindArg ? ` (got "${kindArg}")` : ""}\n`,
     );
     process.stderr.write(
-      "Usage: task-runner show <agent|assignment> <name|path> [--output-format json]\n",
+      "Usage: task-runner show <agent|assignment> <name|path> [--connect <ws-url>] [--output-format json]\n",
     );
     process.exit(3);
   }
 
-  const target = parsed.positionals[0];
-  if (!target || target.length === 0) {
+  const target = normalizeTarget(parsed.positionals[0]);
+  if (!target) {
     process.stderr.write(`task-runner: show ${kindArg} requires a name or path\n`);
     process.stderr.write(
-      "Usage: task-runner show <agent|assignment> <name|path> [--output-format json]\n",
+      "Usage: task-runner show <agent|assignment> <name|path> [--connect <ws-url>] [--output-format json]\n",
     );
     process.exit(3);
   }
 
   try {
-    const result = showDefinition(kindArg, target);
+    const result =
+      connectUrl === undefined
+        ? getDefinition(kindArg, target, process.cwd())
+        : await withDaemonClient(connectUrl, (client) =>
+            client
+              .call<{
+                agent?: ReturnType<typeof getDefinition>;
+                assignment?: ReturnType<typeof getDefinition>;
+              }>(kindArg === "agent" ? "agents.get" : "assignments.get", {
+                target,
+                cwd: process.cwd(),
+              })
+              .then((r) => (kindArg === "agent" ? r.agent : r.assignment))
+              .then((detail) => {
+                if (!detail) {
+                  throw new Error(`missing ${kindArg} detail`);
+                }
+                return detail;
+              }),
+          );
     if (parsed.outputFormat === "json") {
-      writeJson({
-        config: result.loaded.config,
-        instructions: result.loaded.instructions,
-        sourcePath: result.loaded.sourcePath,
-      });
+      writeJson(result);
     } else {
-      process.stdout.write(renderDefinitionDetails(result));
+      process.stdout.write(
+        renderDefinitionDetails({
+          kind: kindArg,
+          loaded: {
+            config: result.config,
+            instructions: result.instructions,
+            sourcePath: result.sourcePath,
+          },
+        } as never),
+      );
     }
     process.exit(0);
   } catch (err) {
-    exitCommandFailure(err);
+    exitCommandFailure(err, connectUrl);
   }
 }
 
@@ -542,48 +491,36 @@ function unsupportedFlagsForGroupedCommand(
   if (parsed.taskTitle !== undefined) unsupported.push("--title");
   if (parsed.taskBody !== undefined) unsupported.push("--body");
   if (parsed.addedTasks.length > 0) unsupported.push("--add-task");
+  if (parsed.listen !== undefined) unsupported.push("--listen");
   if (!opts.allowIncludeArchived && parsed.includeArchived) unsupported.push("--include-archived");
   return unsupported;
 }
 
-function runTaskCommand(parsed: ParsedArgs): never {
+async function runTaskCommand(parsed: ParsedArgs, connectUrl?: string): Promise<never> {
   switch (parsed.subcommand) {
     case "list":
-      return runTaskList(parsed);
+      return runTaskList(parsed, connectUrl);
     case "show":
-      return runTaskShow(parsed);
+      return runTaskShow(parsed, connectUrl);
     case "set":
-      return runTaskSet(parsed);
+      return runTaskSet(parsed, connectUrl);
     case "append-notes":
-      return runTaskAppendNotes(parsed);
+      return runTaskAppendNotes(parsed, connectUrl);
     case "add":
-      return runTaskAdd(parsed);
+      return runTaskAdd(parsed, connectUrl);
     default:
       process.stderr.write(
         `task-runner: task command requires a subcommand: list | show | set | append-notes | add (got "${parsed.subcommand ?? ""}")\n`,
-      );
-      process.stderr.write("Usage: task-runner task list <run-id> [--output-format text|json]\n");
-      process.stderr.write(
-        "       task-runner task show <run-id> <task-id> [--output-format text|json]\n",
-      );
-      process.stderr.write(
-        "       task-runner task set <run-id> <task-id> [--status s] [--notes n]\n",
-      );
-      process.stderr.write(
-        '       task-runner task append-notes <run-id> <task-id> --text "..." [--output-format text|json]\n',
-      );
-      process.stderr.write(
-        '       task-runner task add <run-id> --title "..." [--body "..."] [--output-format text|json]\n',
       );
       process.exit(3);
   }
 }
 
-function runResetCommand(parsed: ParsedArgs): never {
+async function runResetCommand(parsed: ParsedArgs, connectUrl?: string): Promise<never> {
   const [runArg, extra] = parsed.positionals;
-  if (!runArg) {
+  const target = normalizeTarget(runArg);
+  if (!target) {
     process.stderr.write("task-runner: run reset requires <id-or-path>\n");
-    process.stderr.write("Usage: task-runner run reset <id-or-path> [--output-format text|json]\n");
     process.exit(3);
   }
   if (extra !== undefined) {
@@ -592,93 +529,91 @@ function runResetCommand(parsed: ParsedArgs): never {
     );
     process.exit(3);
   }
-
   const unsupported = unsupportedFlagsForGroupedCommand(parsed);
   if (unsupported.length > 0) {
     process.stderr.write(
-      `task-runner: run reset only supports <id-or-path> and --output-format (got ${unsupported.join(", ")})\n`,
+      `task-runner: run reset only supports <id-or-path>, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
     );
     process.exit(3);
   }
 
   try {
-    const result = resetRun(runArg);
+    const result =
+      connectUrl === undefined
+        ? reset(target)
+        : await withDaemonClient(connectUrl, (client) =>
+            client
+              .call<{ run: ReturnType<typeof reset> }>("runs.reset", { target })
+              .then((r) => r.run),
+          );
     if (parsed.outputFormat === "json") {
-      writeJson({ runId: result.manifest.runId, status: result.manifest.status });
+      writeJson({ runId: result.runId, status: result.status });
     } else {
-      process.stdout.write(renderRunReset(result));
+      process.stdout.write(`task-runner: reset run ${result.runId} to initialized state\n`);
     }
     process.exit(0);
   } catch (err) {
-    exitCommandFailure(err);
+    exitCommandFailure(err, connectUrl);
   }
 }
 
-function runArchiveToggleCommand(
+async function runArchiveToggleCommand(
   parsed: ParsedArgs,
-  opts: {
-    verb: "archive" | "unarchive";
-    action: (target: string) => ReturnType<typeof archiveRun>;
-    renderText: typeof renderRunArchive | typeof renderRunUnarchive;
-  },
-): never {
+  connectUrl: string | undefined,
+  verb: "archive" | "unarchive",
+): Promise<never> {
   const [runArg, extra] = parsed.positionals;
-  if (!runArg) {
-    process.stderr.write(`task-runner: run ${opts.verb} requires <id-or-path>\n`);
-    process.stderr.write(
-      `Usage: task-runner run ${opts.verb} <id-or-path> [--output-format text|json]\n`,
-    );
+  const target = normalizeTarget(runArg);
+  if (!target) {
+    process.stderr.write(`task-runner: run ${verb} requires <id-or-path>\n`);
     process.exit(3);
   }
   if (extra !== undefined) {
     process.stderr.write(
-      `task-runner: run ${opts.verb} takes exactly one positional (<id-or-path>); got extra "${extra}"\n`,
+      `task-runner: run ${verb} takes exactly one positional (<id-or-path>); got extra "${extra}"\n`,
     );
     process.exit(3);
   }
-
   const unsupported = unsupportedFlagsForGroupedCommand(parsed);
   if (unsupported.length > 0) {
     process.stderr.write(
-      `task-runner: run ${opts.verb} only supports <id-or-path> and --output-format (got ${unsupported.join(", ")})\n`,
+      `task-runner: run ${verb} only supports <id-or-path>, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
     );
     process.exit(3);
   }
 
   try {
-    const result = opts.action(runArg);
+    const result =
+      connectUrl === undefined
+        ? verb === "archive"
+          ? archive(target)
+          : unarchive(target)
+        : await withDaemonClient(connectUrl, (client) =>
+            client
+              .call<{ result: ReturnType<typeof archive> }>(
+                verb === "archive" ? "runs.archive" : "runs.unarchive",
+                { target },
+              )
+              .then((r) => r.result),
+          );
     if (parsed.outputFormat === "json") {
       writeJson(result);
     } else {
-      process.stdout.write(opts.renderText(result));
+      process.stdout.write(
+        verb === "archive" ? renderRunArchive(result) : renderRunUnarchive(result),
+      );
     }
     process.exit(0);
   } catch (err) {
-    exitCommandFailure(err);
+    exitCommandFailure(err, connectUrl);
   }
 }
 
-function runArchiveCommand(parsed: ParsedArgs): never {
-  return runArchiveToggleCommand(parsed, {
-    verb: "archive",
-    action: archiveRun,
-    renderText: renderRunArchive,
-  });
-}
-
-function runUnarchiveCommand(parsed: ParsedArgs): never {
-  return runArchiveToggleCommand(parsed, {
-    verb: "unarchive",
-    action: unarchiveRun,
-    renderText: renderRunUnarchive,
-  });
-}
-
-function runTaskList(parsed: ParsedArgs): never {
+async function runTaskList(parsed: ParsedArgs, connectUrl?: string): Promise<never> {
   const [runArg, extra] = parsed.positionals;
-  if (!runArg) {
+  const target = normalizeTarget(runArg);
+  if (!target) {
     process.stderr.write("task-runner: task list requires <run-id>\n");
-    process.stderr.write("Usage: task-runner task list <run-id> [--output-format text|json]\n");
     process.exit(3);
   }
   if (extra !== undefined) {
@@ -689,25 +624,30 @@ function runTaskList(parsed: ParsedArgs): never {
   }
 
   try {
-    const result = listTasks(runArg);
+    const tasks =
+      connectUrl === undefined
+        ? getTaskList(target)
+        : await withDaemonClient(connectUrl, (client) =>
+            client
+              .call<{ tasks: ReturnType<typeof getTaskList> }>("tasks.list", { target })
+              .then((r) => r.tasks),
+          );
     if (parsed.outputFormat === "json") {
-      writeJson(result.tasks);
+      writeJson(tasks);
     } else {
-      process.stdout.write(renderTaskList(result));
+      process.stdout.write(renderTaskList({ manifest: {} as never, tasks }));
     }
     process.exit(0);
   } catch (err) {
-    exitCommandFailure(err);
+    exitCommandFailure(err, connectUrl);
   }
 }
 
-function runTaskShow(parsed: ParsedArgs): never {
+async function runTaskShow(parsed: ParsedArgs, connectUrl?: string): Promise<never> {
   const [runArg, taskId, extra] = parsed.positionals;
-  if (!runArg || !taskId) {
+  const target = normalizeTarget(runArg);
+  if (!target || !taskId) {
     process.stderr.write("task-runner: task show requires <run-id> <task-id>\n");
-    process.stderr.write(
-      "Usage: task-runner task show <run-id> <task-id> [--output-format text|json]\n",
-    );
     process.exit(3);
   }
   if (extra !== undefined) {
@@ -718,51 +658,68 @@ function runTaskShow(parsed: ParsedArgs): never {
   }
 
   try {
-    const result = showTask(runArg, taskId);
+    const task =
+      connectUrl === undefined
+        ? getTask(target, taskId)
+        : await withDaemonClient(connectUrl, (client) =>
+            client
+              .call<{ task: ReturnType<typeof getTask> }>("tasks.get", { target, taskId })
+              .then((r) => r.task),
+          );
     if (parsed.outputFormat === "json") {
-      writeJson(result.task);
+      writeJson(task);
     } else {
-      process.stdout.write(renderTaskDetails(result));
+      process.stdout.write(renderTaskDetails({ manifest: {} as never, task }));
     }
     process.exit(0);
   } catch (err) {
-    exitCommandFailure(err);
+    exitCommandFailure(err, connectUrl);
   }
 }
 
-function runTaskSet(parsed: ParsedArgs): never {
+async function runTaskSet(parsed: ParsedArgs, connectUrl?: string): Promise<never> {
   const [runArg, taskId] = parsed.positionals;
-  if (!runArg || !taskId) {
+  const target = normalizeTarget(runArg);
+  if (!target || !taskId) {
     process.stderr.write("task-runner: task set requires <run-id> <task-id>\n");
-    process.stderr.write(
-      "Usage: task-runner task set <run-id> <task-id> [--status s] [--notes n]\n",
-    );
     process.exit(3);
   }
 
   try {
-    const result = setTask(runArg, taskId, {
-      status: parsed.taskStatus,
-      notes: parsed.taskNotes,
-    });
+    const task =
+      connectUrl === undefined
+        ? updateTask(target, taskId, {
+            status: parsed.taskStatus,
+            notes: parsed.taskNotes,
+          })
+        : await withDaemonClient(connectUrl, (client) =>
+            client
+              .call<{ task: ReturnType<typeof updateTask> }>("tasks.set", {
+                target,
+                taskId,
+                status: parsed.taskStatus,
+                notes: parsed.taskNotes,
+              })
+              .then((r) => r.task),
+          );
     if (parsed.outputFormat === "json") {
-      writeJson(result.task);
+      writeJson(task);
     } else {
-      process.stdout.write(renderTaskMutation(result));
+      process.stdout.write(
+        `task-runner: updated ${task.id} (status=${task.status}) in run ${target}\n`,
+      );
     }
     process.exit(0);
   } catch (err) {
-    exitCommandFailure(err);
+    exitCommandFailure(err, connectUrl);
   }
 }
 
-function runTaskAppendNotes(parsed: ParsedArgs): never {
+async function runTaskAppendNotes(parsed: ParsedArgs, connectUrl?: string): Promise<never> {
   const [runArg, taskId] = parsed.positionals;
-  if (!runArg || !taskId) {
+  const target = normalizeTarget(runArg);
+  if (!target || !taskId) {
     process.stderr.write("task-runner: task append-notes requires <run-id> <task-id>\n");
-    process.stderr.write(
-      'Usage: task-runner task append-notes <run-id> <task-id> --text "..." [--output-format text|json]\n',
-    );
     process.exit(3);
   }
   if (parsed.taskAppendText === undefined) {
@@ -771,23 +728,36 @@ function runTaskAppendNotes(parsed: ParsedArgs): never {
   }
 
   try {
-    const result = appendTaskNotes(runArg, taskId, parsed.taskAppendText);
+    const task =
+      connectUrl === undefined
+        ? appendNotes(target, taskId, parsed.taskAppendText)
+        : await withDaemonClient(connectUrl, (client) =>
+            client
+              .call<{ task: ReturnType<typeof appendNotes> }>("tasks.appendNotes", {
+                target,
+                taskId,
+                text: parsed.taskAppendText,
+              })
+              .then((r) => r.task),
+          );
     if (parsed.outputFormat === "json") {
-      writeJson(result.task);
+      writeJson(task);
     } else {
-      process.stdout.write(renderTaskMutation(result));
+      process.stdout.write(
+        `task-runner: updated ${task.id} (status=${task.status}) in run ${target}\n`,
+      );
     }
     process.exit(0);
   } catch (err) {
-    exitCommandFailure(err);
+    exitCommandFailure(err, connectUrl);
   }
 }
 
-function runTaskAdd(parsed: ParsedArgs): never {
+async function runTaskAdd(parsed: ParsedArgs, connectUrl?: string): Promise<never> {
   const [runArg, extra] = parsed.positionals;
-  if (!runArg) {
+  const target = normalizeTarget(runArg);
+  if (!target) {
     process.stderr.write("task-runner: task add requires <run-id>\n");
-    process.stderr.write('Usage: task-runner task add <run-id> --title "..."\n');
     process.exit(3);
   }
   if (extra !== undefined) {
@@ -802,15 +772,291 @@ function runTaskAdd(parsed: ParsedArgs): never {
   }
 
   try {
-    const result = addTask(runArg, { title: parsed.taskTitle, body: parsed.taskBody });
+    const task =
+      connectUrl === undefined
+        ? createTask(target, { title: parsed.taskTitle, body: parsed.taskBody })
+        : await withDaemonClient(connectUrl, (client) =>
+            client
+              .call<{ task: ReturnType<typeof createTask> }>("tasks.add", {
+                target,
+                title: parsed.taskTitle,
+                body: parsed.taskBody,
+              })
+              .then((r) => r.task),
+          );
     if (parsed.outputFormat === "json") {
-      writeJson(result.task);
+      writeJson(task);
     } else {
-      process.stdout.write(renderTaskAdded(result));
+      process.stdout.write(`task-runner: added task ${task.id} "${task.title}" to run ${target}\n`);
     }
     process.exit(0);
   } catch (err) {
-    exitCommandFailure(err);
+    exitCommandFailure(err, connectUrl);
+  }
+}
+
+async function runExecuteCommandEmbedded(parsed: ParsedArgs): Promise<never> {
+  const isInitCommand = parsed.command === "init";
+  const isJson = parsed.outputFormat === "json";
+  const abortController = new AbortController();
+  let sigintCount = 0;
+  const onSigint = (): void => {
+    sigintCount++;
+    if (sigintCount === 1) {
+      process.stderr.write(
+        "\ntask-runner: caught Ctrl+C — interrupting backend (Ctrl+C again to force-exit)\n",
+      );
+      abortController.abort();
+      return;
+    }
+    process.stderr.write("\ntask-runner: forced exit\n");
+    process.exit(130);
+  };
+  process.on("SIGINT", onSigint);
+
+  try {
+    if (isInitCommand) {
+      const run = await initRun({
+        agent: normalizeTarget(parsed.agent),
+        assignment: normalizeTarget(parsed.assignment),
+        definitionCwd: process.cwd(),
+        backendSessionId: parsed.backendSessionId,
+        cliVars: parsed.vars,
+        overrides: resolvedOverrides(parsed),
+        abortSignal: abortController.signal,
+        emitEvent: isJson ? undefined : emitRenderedEvent,
+      });
+      if (isJson) {
+        writeJson(run);
+      }
+      process.exit(0);
+    }
+
+    const outcome = parsed.resumeRun
+      ? await resumeRun({
+          target: normalizeTarget(parsed.resumeRun) ?? parsed.resumeRun,
+          overrides: resolvedOverrides(parsed),
+          abortSignal: abortController.signal,
+          emitEvent: isJson ? undefined : emitRenderedEvent,
+        })
+      : await startRun({
+          agent: normalizeTarget(parsed.agent),
+          assignment: normalizeTarget(parsed.assignment),
+          definitionCwd: process.cwd(),
+          backendSessionId: parsed.backendSessionId,
+          cliVars: parsed.vars,
+          overrides: resolvedOverrides(parsed),
+          abortSignal: abortController.signal,
+          emitEvent: isJson ? undefined : emitRenderedEvent,
+        });
+    if (isJson) {
+      writeJson(getRun(outcome.runId));
+    }
+    process.exit(outcome.exitCode);
+  } catch (err) {
+    if (
+      err instanceof UnknownBackendError ||
+      err instanceof AgentNotFoundError ||
+      err instanceof AgentConfigError ||
+      err instanceof AssignmentNotFoundError ||
+      err instanceof AssignmentConfigError ||
+      err instanceof RunCommandError ||
+      err instanceof VarResolutionError ||
+      err instanceof LockedFieldError ||
+      err instanceof ResumeError ||
+      err instanceof InvalidAddedTaskError ||
+      err instanceof EmptyPromptError ||
+      err instanceof RecursionDepthError ||
+      err instanceof InvalidBackendSessionError
+    ) {
+      process.stderr.write(`task-runner: ${err.message}\n`);
+      if (err instanceof RunCommandError && err.showHelp) {
+        process.stderr.write(HELP);
+      }
+      process.exit(3);
+    }
+    process.stderr.write(`task-runner: ${(err as Error).message}\n`);
+    process.exit(4);
+  }
+}
+
+async function runExecuteCommandDaemon(parsed: ParsedArgs, connectUrl: string): Promise<never> {
+  const isInitCommand = parsed.command === "init";
+  const isJson = parsed.outputFormat === "json";
+
+  await withDaemonClient(connectUrl, async (client) => {
+    if (isInitCommand) {
+      const result = await client.call<{ run: ReturnType<typeof getRun> }>("runs.init", {
+        agent: normalizeTarget(parsed.agent),
+        assignment: normalizeTarget(parsed.assignment),
+        definitionCwd: process.cwd(),
+        callerCwd: process.cwd(),
+        backendSessionId: parsed.backendSessionId,
+        cliVars: parsed.vars,
+        overrides: resolvedOverrides(parsed),
+      });
+      if (isJson) {
+        writeJson(result.run);
+      } else {
+        renderInitializedRun(result.run);
+      }
+      process.exit(0);
+    }
+
+    const bufferedEvents: Array<{ runId: string; event: RunEvent }> = [];
+    let activeRunId: string | undefined;
+    let terminalStatus: string | undefined;
+    let abortRequested = false;
+    const onSigint = (): void => {
+      if (activeRunId) {
+        abortRequested = true;
+        void client.call("runs.abort", { target: activeRunId }).catch(() => undefined);
+        return;
+      }
+      abortRequested = true;
+    };
+    process.on("SIGINT", onSigint);
+
+    const subscriptionId = await client.subscribe({}, ({ runId, event }) => {
+      if (!activeRunId) {
+        bufferedEvents.push({ runId, event });
+        return;
+      }
+      if (runId !== activeRunId) {
+        return;
+      }
+      if (!isJson) {
+        emitRenderedEvent(event);
+      }
+      if (event.type === "run_finished") {
+        terminalStatus = event.summary.status;
+      }
+    });
+
+    try {
+      const startResult = parsed.resumeRun
+        ? await client.call<{ runId: string }>("runs.resume", {
+            target: normalizeTarget(parsed.resumeRun) ?? parsed.resumeRun,
+            overrides: resolvedOverrides(parsed),
+          })
+        : await client.call<{ runId: string }>("runs.start", {
+            agent: normalizeTarget(parsed.agent),
+            assignment: normalizeTarget(parsed.assignment),
+            definitionCwd: process.cwd(),
+            callerCwd: process.cwd(),
+            backendSessionId: parsed.backendSessionId,
+            cliVars: parsed.vars,
+            overrides: resolvedOverrides(parsed),
+          });
+      activeRunId = startResult.runId;
+      for (const buffered of bufferedEvents) {
+        if (buffered.runId !== activeRunId) {
+          continue;
+        }
+        if (!isJson) {
+          emitRenderedEvent(buffered.event);
+        }
+        if (buffered.event.type === "run_finished") {
+          terminalStatus = buffered.event.summary.status;
+        }
+      }
+      if (abortRequested) {
+        await client.call("runs.abort", { target: activeRunId });
+      }
+      while (!terminalStatus) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      const finalRun = await client.call<{ run: ReturnType<typeof getRun> }>("runs.get", {
+        target: activeRunId,
+      });
+      if (isJson) {
+        writeJson(finalRun.run);
+      }
+      process.exit(terminalExitCode(terminalStatus));
+    } finally {
+      process.off("SIGINT", onSigint);
+      await client.unsubscribe(subscriptionId);
+    }
+  });
+
+  process.exit(4);
+}
+
+async function main(): Promise<void> {
+  let parsed: ParsedArgs;
+  try {
+    parsed = parseArgs(process.argv);
+  } catch (err) {
+    process.stderr.write(`task-runner: ${(err as Error).message}\n`);
+    process.stderr.write(HELP);
+    process.exit(3);
+  }
+
+  if (parsed.showHelp) {
+    process.stdout.write(HELP);
+    process.exit(0);
+  }
+
+  if (parsed.command === "serve") {
+    await runServe(parsed);
+  }
+
+  if (parsed.listen !== undefined) {
+    process.stderr.write("task-runner: --listen is only valid with `serve`\n");
+    process.exit(3);
+  }
+
+  if (parsed.includeArchived && !(parsed.command === "list" && parsed.subcommand === "runs")) {
+    process.stderr.write("task-runner: --include-archived is only valid with `list runs`\n");
+    process.exit(3);
+  }
+
+  let connectUrl: string | undefined;
+  try {
+    connectUrl = resolveHostMode(parsed.connect).connectUrl;
+  } catch (err) {
+    process.stderr.write(`task-runner: ${errorMessage(err)}\n`);
+    process.exit(3);
+  }
+
+  if (parsed.command === "status") {
+    await runStatus(parsed, connectUrl);
+  }
+
+  if (parsed.command === "run") {
+    if (parsed.subcommand === "reset") {
+      await runResetCommand(parsed, connectUrl);
+    }
+    if (parsed.subcommand === "archive") {
+      await runArchiveToggleCommand(parsed, connectUrl, "archive");
+    }
+    if (parsed.subcommand === "unarchive") {
+      await runArchiveToggleCommand(parsed, connectUrl, "unarchive");
+    }
+  }
+
+  if (parsed.command === "task") {
+    await runTaskCommand(parsed, connectUrl);
+  }
+
+  if (parsed.command === "list") {
+    await runListCommand(parsed, connectUrl);
+  }
+
+  if (parsed.command === "show") {
+    await runShowCommand(parsed, connectUrl);
+  }
+
+  if (parsed.command !== "run" && parsed.command !== "init") {
+    process.stderr.write(`task-runner: unknown command "${parsed.command}"\n`);
+    process.stderr.write(HELP);
+    process.exit(3);
+  }
+
+  if (connectUrl) {
+    await runExecuteCommandDaemon(parsed, connectUrl);
+  } else {
+    await runExecuteCommandEmbedded(parsed);
   }
 }
 

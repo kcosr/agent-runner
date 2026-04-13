@@ -1,6 +1,7 @@
 ---
 schemaVersion: 1
 name: plan-feature
+taskMode: cli
 sessionName: plan feature · {{repo_path}}
 maxRetries: 4
 vars:
@@ -545,6 +546,13 @@ tasks:
           readers, heuristic detection, alias fields, or
           compatibility shims unless the caller explicitly
           requested that migration behavior.
+        - The `<<PLACEHOLDER_FEATURE_CONTRACT>>` and
+          `<<PLACEHOLDER_FEATURE_ASSUMPTIONS>>` blocks in the
+          draft are the canonical copies. The later
+          `produce_summary` task will diff its own Contract and
+          Assumptions sections against these. If you edit the
+          draft after `produce_summary` has run, re-run the
+          summary step so the two stay in sync.
 
       Fill in every `<<PLACEHOLDER>>` marker with concrete,
       file-level detail from tasks `orient` through
@@ -695,6 +703,102 @@ tasks:
       passes and you disagree with the remaining blockers, mark
       **this** task `blocked` with an explanation — do not fake
       an approval by editing the review run directly.
+  - id: produce_summary
+    title: Produce human-facing summary artifact
+    body: |
+      **Category**: process
+
+      Render the approved draft and your planning notes into a
+      human-facing markdown summary the caller can skim before
+      running the init command. This task is pure transformation
+      of evidence you already captured — do **not** perform new
+      analysis here. If something is missing, fix it in the
+      upstream task's Notes and come back.
+
+      Locate the summary reference template. It lives alongside
+      this assignment's source file in one of:
+        - `{{cwd}}/assignments/plan-feature/summary-template.md`
+        - `${TASK_RUNNER_CONFIG_DIR}/assignments/plan-feature/summary-template.md`
+        - under the task-runner install root
+
+      Copy it to a new summary file next to the approved draft:
+
+          ${TASK_RUNNER_STATE_DIR}/drafts/<repo-name>/plan-<slug>-<shortid>.summary.md
+
+      Reuse the **exact** `<repo-name>`, `<slug>`, and `<shortid>`
+      from the draft path captured in `draft_plan` so the two
+      files remain a greppable pair.
+
+      Fill each `<<PLACEHOLDER_*>>` marker in the template from
+      your existing Notes:
+
+        - `<<PLACEHOLDER_FEATURE_SHORT_TITLE>>` — the feature's
+          short title (same one used in the draft's
+          `sessionName`).
+        - `<<PLACEHOLDER_OVERVIEW>>` — one paragraph, plain
+          language. Source: `capture_feature` (what is it).
+        - `<<PLACEHOLDER_MOTIVATION>>` — one or two sentences.
+          Source: `capture_feature` (why / what problem).
+        - `<<PLACEHOLDER_IN_SCOPE>>` — bullet list. Source:
+          `capture_feature`.
+        - `<<PLACEHOLDER_OUT_OF_SCOPE>>` — bullet list. Source:
+          `capture_feature`.
+        - `<<PLACEHOLDER_CONTRACT>>` — paste the contract
+          artifact **verbatim** from `produce_contract_artifact`
+          Notes. Do not re-derive it; it must match the
+          `<<PLACEHOLDER_FEATURE_CONTRACT>>` block you already
+          pasted into the draft, character-for-character.
+        - `<<PLACEHOLDER_SCHEMA>>` — for data/schema features,
+          paste the before/after schema diff from
+          `produce_contract_artifact`. For non-schema features,
+          replace with `_No schema changes._`.
+        - `<<PLACEHOLDER_IMPACT_TABLE>>` — markdown table with
+          columns `File | Responsibility | Existing tests`.
+          Source: `survey_impact`.
+        - `<<PLACEHOLDER_HIGHER_LEVEL_STEPS>>` — 5 to 10 bullets
+          describing the shape of the work, not the task-level
+          detail. Source: synthesize from the draft's task
+          titles and bodies. Aim for the level of detail a
+          reviewer could skim in under a minute.
+        - `<<PLACEHOLDER_DIAGRAMS>>` — Mermaid fenced blocks
+          where they add signal (flowchart, sequence, ER,
+          state). If no diagram would help, replace this marker
+          with the literal line `_No diagrams applicable._` —
+          do not invent diagrams to fill the section.
+        - `<<PLACEHOLDER_RISKS>>` — bullet list. Source:
+          `assess_risks_and_tests`.
+        - `<<PLACEHOLDER_TEST_STRATEGY>>` — short paragraph or
+          bullet list describing new tests and where they live.
+          Source: `assess_risks_and_tests`.
+        - `<<PLACEHOLDER_ASSUMPTIONS>>` — bullet list of the
+          non-contract assumptions captured in `capture_feature`.
+          Must match `<<PLACEHOLDER_FEATURE_ASSUMPTIONS>>` in
+          the draft.
+
+      Two consistency rules the reviewer and caller both rely
+      on:
+
+        1. The Contract block in the summary must match the
+           `<<PLACEHOLDER_FEATURE_CONTRACT>>` block in the draft
+           verbatim. Diff them by eye before you finish.
+        2. The Open Assumptions block must match
+           `<<PLACEHOLDER_FEATURE_ASSUMPTIONS>>` in the draft.
+           Drift here is a silent failure — the summary tells
+           the caller one story and the implementer reads
+           another.
+
+      Do not include resume instructions, redirect instructions,
+      or meta-commentary about how to use the summary. The
+      caller already knows how to resume planning or adjust the
+      draft. The summary is purely a rendering of what the
+      approved plan contains.
+
+      Do not leave any `<<PLACEHOLDER_*>>` markers in the final
+      file. Unfilled placeholders are a draft-quality failure.
+
+      Report the final summary path in this task's Notes, plus
+      a one-line confirmation that you diffed the Contract and
+      Assumptions blocks against the draft and they match.
   - id: prepare_init_command
     title: Prepare the exact init command for the caller
     body: |
@@ -740,6 +844,10 @@ tasks:
 
       Include:
         - **Draft path** from `draft_plan`.
+        - **Summary path** from `produce_summary` — the human-
+          facing markdown rendering of the approved plan. The
+          caller can skim this to sanity-check scope and
+          contract before running init.
         - **Draft-review run id** from `review_draft`, so the
           caller can inspect the final draft-approval audit
           trail if desired.
