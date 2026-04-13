@@ -93,6 +93,10 @@
   warnings after reconnect, lock conflicting run actions while a
   mutation is in flight, and reset detail-drawer UI state when
   switching between runs.
+- Fixed daemon-hosted SSE subscriptions to stay attached under normal
+  HTTP backpressure, and hardened frontend asset serving so filesystem
+  read/stat failures return controlled 500 responses instead of
+  crashing the daemon.
 - Fixed `assignments/plan-feature/` scaffold guidance to require implementers to verify they are in a non-`main` worktree, confirm local `main` is already in sync with `origin/main`, and sync the current worktree to local `main` before starting. Generated plans now block instead of proceeding when that preflight fails, and `assignments/plan-review/` flags drafts that omit it. ([#15](https://github.com/kcosr/task-runner/pull/15))
 - Fixed workspace persistence to use atomic writes for manifests, attempt logs, and assignment files, and reject resume targets whose manifest paths do not match the workspace they were loaded from. ([#6](https://github.com/kcosr/task-runner/pull/6))
 - Fixed Codex timeout/abort cleanup to wait for late-arriving turn ids and retry interruption, reducing the risk of orphaned remote turns. ([#6](https://github.com/kcosr/task-runner/pull/6))

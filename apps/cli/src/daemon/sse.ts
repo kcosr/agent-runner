@@ -38,7 +38,10 @@ function writeEvent(res: ServerResponse, payload: RunEventEnvelope): boolean {
     return false;
   }
   try {
-    return res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    // `ServerResponse.write()` returns false on backpressure, not just failure.
+    // Keep the subscriber alive unless the stream is actually closed or throws.
+    res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    return !res.destroyed && !res.writableEnded;
   } catch {
     return false;
   }

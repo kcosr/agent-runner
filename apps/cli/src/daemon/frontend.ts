@@ -13,6 +13,25 @@ const CONTENT_TYPES: Record<string, string> = {
   ".svg": "image/svg+xml",
 };
 
+interface FrontendFsApi {
+  readFileSync: typeof readFileSync;
+  statSync: typeof statSync;
+}
+
+type FrontendReadResult =
+  | {
+      kind: "asset";
+      body: Buffer;
+      contentType: string;
+    }
+  | {
+      kind: "missing";
+    }
+  | {
+      kind: "error";
+      error: unknown;
+    };
+
 function webRootPath(): string {
   return WEB_ROOT_PATH;
 }
@@ -37,19 +56,28 @@ export function resolveFrontendPath(
   return resolvedPath;
 }
 
-function readFrontendFile(pathname: string): { body: Buffer; contentType: string } | null {
-  const resolvedPath = resolveFrontendPath(webRootPath(), pathname);
+function readFrontendFile(
+  pathname: string,
+  rootPath: string,
+  fsApi: FrontendFsApi,
+): FrontendReadResult {
+  const resolvedPath = resolveFrontendPath(rootPath, pathname);
   if (!resolvedPath) {
-    return null;
+    return { kind: "missing" };
   }
-  const stats = statSync(resolvedPath, { throwIfNoEntry: false });
-  if (!stats?.isFile()) {
-    return null;
+  try {
+    const stats = fsApi.statSync(resolvedPath, { throwIfNoEntry: false });
+    if (!stats?.isFile()) {
+      return { kind: "missing" };
+    }
+    return {
+      kind: "asset",
+      body: fsApi.readFileSync(resolvedPath),
+      contentType: CONTENT_TYPES[path.extname(resolvedPath)] ?? "application/octet-stream",
+    };
+  } catch (error) {
+    return { kind: "error", error };
   }
-  return {
-    body: readFileSync(resolvedPath),
-    contentType: CONTENT_TYPES[path.extname(resolvedPath)] ?? "application/octet-stream",
-  };
 }
 
 function sendBuffer(
@@ -73,20 +101,44 @@ function sendBuffer(
   res.end(body);
 }
 
+function sendText(
+  req: IncomingMessage,
+  res: ServerResponse,
+  status: number,
+  body: string,
+  contentType = "text/plain; charset=utf-8",
+): void {
+  sendBuffer(req, res, status, Buffer.from(body, "utf8"), contentType);
+}
+
 export function serveFrontendRequest(
   req: IncomingMessage,
   res: ServerResponse,
   pathname: string,
+  options: {
+    rootPath?: string;
+    fsApi?: FrontendFsApi;
+    logError?: (error: unknown) => void;
+  } = {},
 ): void {
+  const rootPath = options.rootPath ?? webRootPath();
+  const fsApi = options.fsApi ?? { statSync, readFileSync };
+  const logError = options.logError ?? ((error: unknown) => console.error(error));
+
   if (req.method !== "GET" && req.method !== "HEAD") {
     res.statusCode = 404;
     res.end("Not Found");
     return;
   }
 
-  const asset = readFrontendFile(pathname);
-  if (asset) {
+  const asset = readFrontendFile(pathname, rootPath, fsApi);
+  if (asset.kind === "asset") {
     sendBuffer(req, res, 200, asset.body, asset.contentType);
+    return;
+  }
+  if (asset.kind === "error") {
+    logError(asset.error);
+    sendText(req, res, 500, "Failed to read task-runner web assets.");
     return;
   }
 
@@ -96,10 +148,14 @@ export function serveFrontendRequest(
     return;
   }
 
-  const indexFile = readFrontendFile("/");
-  if (!indexFile) {
-    res.statusCode = 503;
-    res.end("task-runner web assets are not available; run npm run build");
+  const indexFile = readFrontendFile("/", rootPath, fsApi);
+  if (indexFile.kind === "error") {
+    logError(indexFile.error);
+    sendText(req, res, 500, "Failed to read task-runner web assets.");
+    return;
+  }
+  if (indexFile.kind === "missing") {
+    sendText(req, res, 503, "task-runner web assets are not available; run npm run build");
     return;
   }
 

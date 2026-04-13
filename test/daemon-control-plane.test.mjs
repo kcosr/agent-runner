@@ -1,5 +1,6 @@
 import { strict as assert } from "node:assert";
 import { execFileSync, spawn } from "node:child_process";
+import { EventEmitter } from "node:events";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -9,6 +10,7 @@ import WebSocket from "ws";
 import { DaemonClient } from "../apps/cli/dist/daemon/client.js";
 import { deriveHttpBaseUrl } from "../apps/cli/dist/daemon/config.js";
 import { serveDaemon } from "../apps/cli/dist/daemon/server.js";
+import { streamRunEvents } from "../apps/cli/dist/daemon/sse.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import { sharedRuntimeEnv, withEnv } from "./helpers/runtime-paths.mjs";
@@ -172,6 +174,34 @@ async function openSse(baseUrl, path) {
       }
     },
   };
+}
+
+class FakeSseResponse extends EventEmitter {
+  constructor(writeResults = []) {
+    super();
+    this.destroyed = false;
+    this.headers = new Map();
+    this.writeResults = writeResults;
+    this.writableEnded = false;
+  }
+
+  flushHeaders() {}
+
+  setHeader(name, value) {
+    this.headers.set(name.toLowerCase(), value);
+  }
+
+  write(chunk) {
+    this.lastChunk = chunk;
+    if (this.writeResults.length > 0) {
+      return this.writeResults.shift();
+    }
+    return true;
+  }
+
+  end() {
+    this.writableEnded = true;
+  }
 }
 
 function runCli(args, opts = {}) {
@@ -635,6 +665,34 @@ test("daemon SSE streams reuse run event fan-out for all-runs and per-run subscr
     await oneRun.close();
     await server.close();
   }
+});
+
+test("streamRunEvents keeps SSE subscribers active when writes report backpressure", () => {
+  const req = new EventEmitter();
+  const res = new FakeSseResponse([true, false]);
+  let unsubscribeCount = 0;
+  let publish = null;
+
+  streamRunEvents(req, res, (next) => {
+    publish = next;
+    return () => {
+      unsubscribeCount += 1;
+    };
+  });
+
+  assert.equal(typeof publish, "function");
+  assert.equal(
+    publish({
+      runId: "backpressure-run",
+      event: { type: "attempt_started", attempt: 1 },
+    }),
+    true,
+  );
+  assert.match(res.lastChunk, /backpressure-run/);
+  assert.equal(unsubscribeCount, 0);
+
+  req.emit("close");
+  assert.equal(unsubscribeCount, 1);
 });
 
 test("daemon close aborts active runs and releases connected clients", async () => {
