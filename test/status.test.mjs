@@ -4,12 +4,12 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
-import { parseAssignment } from "../dist/assignment/parser.js";
-import { renderRunStatus } from "../dist/commands/render.js";
-import { loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
-import { toRunDetail } from "../dist/contracts/runs.js";
-import { runAgent } from "../dist/core/run/run-loop.js";
-import { applyLiveOverlay } from "../dist/core/run/status.js";
+import { renderRunStatus } from "../apps/cli/dist/commands/render.js";
+import { parseAssignment } from "../packages/core/dist/assignment/parser.js";
+import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
+import { toRunDetail } from "../packages/core/dist/contracts/runs.js";
+import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
+import { applyLiveOverlay } from "../packages/core/dist/core/run/status.js";
 import { assignmentPathFromPrompt, sharedRuntimeEnv, withEnv } from "./helpers/runtime-paths.mjs";
 
 function patchManifest(workspaceDir, mutator) {
@@ -42,7 +42,7 @@ tasks:
 Work.
 `;
 
-const CLI_PATH = resolvePath(new URL("../dist/cli.js", import.meta.url).pathname);
+const CLI_PATH = resolvePath(new URL("../apps/cli/dist/cli.js", import.meta.url).pathname);
 
 function tempDir() {
   return mkdtempSync(join(tmpdir(), "task-runner-status-"));

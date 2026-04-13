@@ -11,7 +11,7 @@ import {
   resolveRunsBucketDir,
   resolveTaskRunnerStateDir,
   slugifyRepoKey,
-} from "../dist/config/runtime-paths.js";
+} from "../packages/core/dist/config/runtime-paths.js";
 
 test("slugifyRepoKey normalizes separators, leading slashes, and case", () => {
   assert.equal(slugifyRepoKey("/Users/KeVin/worktrees/Repo"), "users-kevin-worktrees-repo");

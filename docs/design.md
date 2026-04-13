@@ -85,72 +85,77 @@ task-runner serve [--listen <ws-url>]
 
 ```
 task-runner/
-├── package.json           # single-package (no workspaces)
+├── package.json           # private workspace/orchestration root
 ├── tsconfig.json
+├── tsconfig.base.json
 ├── biome.json
 ├── .husky/pre-commit
 ├── .gitignore
 ├── README.md
 ├── docs/
 │   └── design.md          # this file
-├── src/
-│   ├── cli.ts             # argv parsing, host routing, terminal entry point
-│   ├── run-command.ts     # run/init bootstrap bridge from host services into core
-│   ├── app/
-│   │   └── service.ts     # shared app/service seam used by embedded CLI + daemon
-│   ├── cli/
-│   │   ├── parse-args.ts  # argv → ParsedArgs + overridesFromParsedArgs
-│   │   └── render-run.ts  # RunEvent -> stdout/stderr rendering
-│   ├── commands/
-│   │   └── render.ts      # text renderers for command results
-│   ├── daemon/
-│   │   ├── client.ts      # daemon JSON-RPC WebSocket client
-│   │   ├── config.ts      # --connect / --listen host-selection helpers
-│   │   ├── http-errors.ts # HTTP status/error-envelope mapping
-│   │   ├── http-routes.ts # explicit HTTP route map over app services
-│   │   ├── http-serializers.ts # JSON body/response helpers
-│   │   ├── protocol.ts    # daemon RPC and event contract
-│   │   ├── request-parsing.ts # shared transport request validation helpers
-│   │   ├── server.ts      # local loopback WS RPC + HTTP/SSE daemon host
-│   │   └── sse.ts         # browser-facing event-stream adapter
-│   ├── core/
-│   │   ├── backends/
-│   │   │   └── types.ts   # abstract Backend interface + BackendEvent stream
-│   │   ├── commands/
-│   │   │   └── service.ts # typed non-run command/query/mutation services
-│   │   ├── config/
-│   │   │   ├── schema.ts  # zod AgentConfig + AssignmentConfig schemas
-│   │   │   ├── interpolate.ts # {{var}} substitution
-│   │   │   └── loaded.ts  # LoadedAgent/LoadedAssignment + manifest/ad-hoc helpers
-│   │   └── run/
-│   │       ├── run-loop.ts    # seed → invoke → parse → retry, emit RunEvent
-│   │       ├── manifest.ts    # RunManifest types + writer for run.json
-│   │       ├── status.ts      # transport-neutral run summaries + live overlays
-│   │       ├── task-workflow.ts # injected task workflow template + reminder
-│   │       ├── nudge.ts       # retry prompt builder
-│   │       ├── recursion-guard.ts # nested task-runner safety
-│   │       └── workspace-state.ts # task-state persistence + locking
-│   ├── config/
-│   │   ├── loader.ts      # filesystem-backed definition lookup + parsing
-│   │   └── runtime-paths.ts # config/state root helpers
-│   ├── assignment/
-│   │   ├── model.ts       # TaskState types
-│   │   ├── writer.ts      # serialize in-memory map -> assignment.md
-│   │   ├── parser.ts      # parse assignment.md -> status/notes updates
-│   │   └── merge.ts       # merge: missing sections only, preserve edits
-│   ├── backends/
-│   │   ├── registry.ts    # name → adapter lookup
-│   │   ├── claude.ts      # Claude CLI subprocess adapter
-│   │   └── codex.ts       # Codex JSON-RPC adapter (stdio + ws transports)
-│   ├── runner/
-│   │   ├── run-loop.ts    # seed → invoke → parse → retry, emit RunEvent
-│   │   ├── manifest.ts    # RunManifest types + writer for run.json
-│   │   ├── task-workflow.ts # injected task workflow template + reminder
-│   │   ├── nudge.ts       # retry prompt builder
-│   │   └── output.ts      # summary for text mode
-│   └── util/
-│       ├── short-id.ts    # 6-char base32 nonce
-│       └── spawn.ts       # subprocess helper (timeout, SIGINT/SIGKILL)
+├── apps/
+│   └── cli/
+│       ├── package.json   # executable package named task-runner
+│       ├── tsconfig.json
+│       ├── dist/          # generated CLI build output
+│       └── src/
+│           ├── cli.ts     # argv parsing, host routing, terminal entry point
+│           ├── cli/
+│           │   ├── parse-args.ts  # argv → ParsedArgs + overridesFromParsedArgs
+│           │   └── render-run.ts  # RunEvent -> stdout/stderr rendering
+│           ├── commands/
+│           │   └── render.ts      # text renderers for command results
+│           └── daemon/
+│               ├── client.ts      # daemon JSON-RPC WebSocket client
+│               ├── config.ts      # --connect / --listen host-selection helpers
+│               ├── http-errors.ts # HTTP status/error-envelope mapping
+│               ├── http-routes.ts # explicit HTTP route map over app services
+│               ├── http-serializers.ts # JSON body/response helpers
+│               ├── protocol.ts    # daemon RPC and event contract
+│               ├── request-parsing.ts # shared transport request validation helpers
+│               ├── server.ts      # local loopback WS RPC + HTTP/SSE daemon host
+│               └── sse.ts         # browser-facing event-stream adapter
+├── packages/
+│   └── core/
+│       ├── package.json   # shared internal package
+│       ├── tsconfig.json
+│       ├── dist/          # generated shared build output
+│       └── src/
+│           ├── app/
+│           │   └── service.ts     # shared app/service seam used by embedded CLI + daemon
+│           ├── assignment/        # task model, parser, writer, merge logic
+│           ├── backends/
+│           │   ├── registry.ts    # name → adapter lookup
+│           │   ├── claude.ts      # Claude CLI subprocess adapter
+│           │   └── codex.ts       # Codex JSON-RPC adapter (stdio + ws transports)
+│           ├── config/
+│           │   ├── loader.ts      # filesystem-backed definition lookup + parsing
+│           │   └── runtime-paths.ts # config/state root helpers
+│           ├── contracts/
+│           │   └── runs.ts        # shared run DTOs
+│           ├── core/
+│           │   ├── backends/
+│           │   │   └── types.ts   # abstract Backend interface + BackendEvent stream
+│           │   ├── commands/
+│           │   │   └── service.ts # typed non-run command/query/mutation services
+│           │   ├── config/
+│           │   │   ├── schema.ts  # zod AgentConfig + AssignmentConfig schemas
+│           │   │   ├── interpolate.ts # {{var}} substitution
+│           │   │   └── loaded.ts  # LoadedAgent/LoadedAssignment + manifest/ad-hoc helpers
+│           │   └── run/
+│           │       ├── run-loop.ts    # seed → invoke → parse → retry, emit RunEvent
+│           │       ├── manifest.ts    # RunManifest types + writer for run.json
+│           │       ├── status.ts      # transport-neutral run summaries + live overlays
+│           │       ├── task-workflow.ts # injected task workflow template + reminder
+│           │       ├── nudge.ts       # retry prompt builder
+│           │       ├── recursion-guard.ts # nested task-runner safety
+│           │       └── workspace-state.ts # task-state persistence + locking
+│           ├── run-command.ts         # run/init bootstrap bridge into the core run loop
+│           ├── task-runner-command.ts # installed task-runner command discovery
+│           └── util/
+│               ├── short-id.ts        # 6-char base32 nonce
+│               └── spawn.ts           # subprocess helper (timeout, SIGINT/SIGKILL)
 ├── agents/
 │   ├── example/agent.md           # reference agent — identity only
 │   ├── basic/agent.md
@@ -177,11 +182,13 @@ task-runner/
     └── cli-parse-args.test.mjs
 ```
 
-The CLI owns parsing, signal handling, rendering, and exit codes only.
-Read-only commands (`status`, `list`, `show`, `task list/show`) and task
-mutations (`task set`, `task append-notes`, `task add`, `run reset`)
-execute through typed service functions in `src/core/commands/service.ts`,
-with text formatting isolated in `src/commands/render.ts`.
+The root package owns workspace orchestration only. `apps/cli` owns CLI
+parsing, signal handling, rendering, exit codes, and the loopback daemon
+transport. Read-only commands (`status`, `list`, `show`, `task list/show`)
+and task mutations (`task set`, `task append-notes`, `task add`, `run reset`)
+execute through typed service functions in
+`packages/core/src/core/commands/service.ts`, with text formatting isolated in
+`apps/cli/src/commands/render.ts`.
 
 ## Agent and assignment definitions
 
@@ -1252,8 +1259,9 @@ stop and report it instead of retrying.
 
 ## Backend interface
 
-One small interface. Backends live under `src/backends/` and are registered
-in `src/backends/registry.ts`. Current backends: **claude** (subprocess),
+One small interface. Backends live under `packages/core/src/backends/` and are
+registered in `packages/core/src/backends/registry.ts`. Current backends:
+**claude** (subprocess),
 **codex** (JSON-RPC over stdio or WebSocket), and **passive** (null-object
 for sidecar-only runs; see [Passive implementation](#passive-implementation)
 below).
@@ -1462,8 +1470,9 @@ Model names are normalized by stripping any provider-namespace prefix
 
 ### Passive implementation
 
-A **null-object** backend used for sidecar-only runs. `src/backends/
-passive.ts` exports a `Backend` whose `invoke()` throws
+A **null-object** backend used for sidecar-only runs.
+`packages/core/src/backends/passive.ts` exports a `Backend` whose
+`invoke()` throws
 `PassiveBackendNotInvokableError` unconditionally. Defense in depth —
 the CLI rejects `task-runner run` on passive agents before control
 ever reaches `invoke()` (see [`task-runner init`](#task-runner-init)
@@ -1946,8 +1955,9 @@ from a prior session):
   has them in the cached session from the prior run.
 
 **Resume override matrix.** All override validation for `--resume-run`
-lives in a single `validateResumeOverrides` function in `src/cli.ts`
-that runs right after `resolveResumeTarget`. The rules:
+lives in a single `validateResumeOverrides` function in
+`packages/core/src/run-command.ts` that runs right after
+`resolveResumeTarget`. The rules:
 
 | Flag | Regular resume | Execute-after-init | Reason |
 |---|---|---|---|
@@ -2193,8 +2203,8 @@ came from outside.
 When detected, the codex backend writes a hint to stderr telling the
 user that the turn was interrupted externally and how to resume.
 The pure detection helper `isExternalInterrupt(turnStatus,
-timedOut, aborted)` is exported from `src/backends/codex.ts` and
-unit-tested directly.
+timedOut, aborted)` is exported from
+`packages/core/src/backends/codex.ts` and unit-tested directly.
 
 ## User interrupts (Ctrl+C)
 
@@ -2246,8 +2256,8 @@ the plug; nothing went wrong." A subsequent `task-runner run
 - **Additional backends**: Codex shipped in M5 (JSON-RPC over stdio
   and websocket transports). Passive shipped as a null-object backend
   for sidecar-only runs. Future adapters (Gemini, Ollama, etc.) can
-  be added to `src/backends/registry.ts` by implementing the `Backend`
-  interface — no other code should need to know about them.
+  be added to `packages/core/src/backends/registry.ts` by implementing
+  the `Backend` interface — no other code should need to know about them.
 - **Task ID uniqueness**: enforced via zod `refine` at load time.
 - **Max task count**: enforced at 100 in schema.
 - **Concurrent resume**: two `task-runner run --resume-run <id>`

@@ -1,7 +1,12 @@
-import type { DefinitionDetail, RunCommandOverrides } from "../app/service.js";
-import type { DefinitionEntry } from "../config/loader.js";
-import type { RunArchiveResult, RunDetail, RunSummary, RunTaskSummary } from "../contracts/runs.js";
-import type { RunEvent } from "../core/run/run-loop.js";
+import type { DefinitionDetail, RunCommandOverrides } from "@task-runner/core/app/service.js";
+import type { DefinitionEntry } from "@task-runner/core/config/loader.js";
+import type {
+  RunArchiveResult,
+  RunDetail,
+  RunSummary,
+  RunTaskSummary,
+} from "@task-runner/core/contracts/runs.js";
+import type { RunEvent } from "@task-runner/core/core/run/run-loop.js";
 
 export const DEFAULT_DAEMON_URL = "ws://127.0.0.1:4773/";
 export const TASK_RUNNER_LISTEN_ENV = "TASK_RUNNER_LISTEN";

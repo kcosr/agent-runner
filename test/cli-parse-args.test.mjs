@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { overridesFromParsedArgs, parseArgs } from "../dist/cli/parse-args.js";
+import { overridesFromParsedArgs, parseArgs } from "../apps/cli/dist/cli/parse-args.js";
 
 function argv(...rest) {
   return ["node", "task-runner", ...rest];

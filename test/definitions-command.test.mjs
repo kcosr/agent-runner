@@ -9,7 +9,7 @@ import {
   listAssignments,
   loadAgentConfig,
   loadAssignmentConfig,
-} from "../dist/config/loader.js";
+} from "../packages/core/dist/config/loader.js";
 import { withRuntimeRoots } from "./helpers/runtime-paths.mjs";
 
 const AGENT_BODY = `---

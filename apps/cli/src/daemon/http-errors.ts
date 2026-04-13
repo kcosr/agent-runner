@@ -3,9 +3,13 @@ import {
   AgentNotFoundError,
   AssignmentConfigError,
   AssignmentNotFoundError,
-} from "../config/loader.js";
-import { CommandError, ConflictError, TaskNotFoundError } from "../core/commands/service.js";
-import { ResumeError, RunNotFoundError } from "../core/run/manifest.js";
+} from "@task-runner/core/config/loader.js";
+import {
+  CommandError,
+  ConflictError,
+  TaskNotFoundError,
+} from "@task-runner/core/core/commands/service.js";
+import { ResumeError, RunNotFoundError } from "@task-runner/core/core/run/manifest.js";
 import {
   EmptyPromptError,
   InvalidAddedTaskError,
@@ -13,8 +17,8 @@ import {
   LockedFieldError,
   RecursionDepthError,
   VarResolutionError,
-} from "../core/run/run-loop.js";
-import { RunCommandError, UnknownBackendError } from "../run-command.js";
+} from "@task-runner/core/core/run/run-loop.js";
+import { RunCommandError, UnknownBackendError } from "@task-runner/core/run-command.js";
 import { RequestValidationError } from "./request-parsing.js";
 
 export interface HttpErrorEnvelope {

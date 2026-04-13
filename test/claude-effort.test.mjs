@@ -5,7 +5,7 @@ import { test } from "node:test";
 // the args-building path. Here we just verify the canonical enum shape via the
 // schema so the mapping table has something to map against.
 
-import { agentConfigSchema } from "../dist/core/config/schema.js";
+import { agentConfigSchema } from "../packages/core/dist/core/config/schema.js";
 
 test("canonical effort enum accepts all 7 values", () => {
   const base = {

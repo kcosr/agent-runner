@@ -181,15 +181,18 @@ npm install
 npm run build
 ```
 
-The CLI is now at `node dist/cli.js`. Either alias it, add the bin
-via `npm link`, or invoke it through `npm run task-runner -- ...`.
-Builds also mark `dist/cli.js` executable on Unix-like systems.
+The built CLI entrypoint is now `node apps/cli/dist/cli.js`. Either
+link the CLI workspace with `npm link --workspace apps/cli`, add a
+shell alias, or invoke it through `npm run task-runner -- ...`.
+Builds also mark `apps/cli/dist/cli.js` executable on Unix-like
+systems.
 
 ## Quickstart
 
 The examples below assume `task-runner` is on your `PATH` (via
-`npm link` or a shell alias). If it isn't, substitute `node
-dist/cli.js` for `task-runner` in every command.
+`npm link --workspace apps/cli` or a shell alias). If it isn't,
+substitute `node apps/cli/dist/cli.js` for `task-runner` in every
+command.
 
 ```bash
 # Run the bundled "example" agent against the bundled "repo-orientation"
@@ -1357,15 +1360,21 @@ task-runner run \
 
 ```bash
 npm install
-npm run build       # tsc -b
+npm run build       # builds packages/core then apps/cli
 npm run test        # builds and runs all node:test suites
 npm run lint        # biome check
 npm run format      # biome format --write
 ```
 
+The repo root is a private npm workspace orchestrator. The shared
+runtime lives in `packages/core`, the executable and daemon host live
+in `apps/cli`, and the root command surface (`npm run build`, `test`,
+`lint`, `check`) orchestrates both.
+
 Pre-commit runs `lint-staged` and `npm run check` via husky.
-`dist/` is generated output and is not committed to git. Packaging
-rebuilds it via `npm run prepack`.
+Workspace `dist/` directories are generated output and are not
+committed to git. Packaging rebuilds the CLI artifact via
+`npm run prepack`.
 
 Tests are vanilla `node:test`. Backend integration tests use mock
 Backend objects to keep them hermetic; the only tests that touch
@@ -1374,51 +1383,33 @@ real subprocesses are a couple of `runProcess` smoke tests against
 
 ## Project layout
 
-Subsystem boundaries: `src/cli.ts` is the transport edge over an
-explicit internal `src/core/` seam. Transport-neutral run orchestration,
-persisted state, command services, schema/interpolation helpers, and the
-abstract backend contract live under `src/core/`; CLI parsing and text
-rendering stay outside that seam. Backends are swappable, and
-persistence remains a flat workspace directory.
+Subsystem boundaries are now explicit npm workspaces:
+`apps/cli` owns the executable transport edge and local daemon host,
+while `packages/core` owns the transport-neutral run lifecycle,
+manifest/task state, shared contracts, config/assignment loading,
+backend adapters, and shared helpers. The daemon remains part of the
+CLI app rather than becoming a separate package.
 
 ```mermaid
 flowchart TD
-    subgraph CLI["CLI layer"]
-        cli["cli.ts"]
-        parse["cli/parse-args.ts"]
-        render["cli/render-run.ts"]
-        commandRender["commands/render.ts"]
+    subgraph CLI["apps/cli"]
+        cli["src/cli.ts"]
+        parse["src/cli/parse-args.ts"]
+        render["src/cli/render-run.ts"]
+        commandRender["src/commands/render.ts"]
+        daemon["src/daemon/*"]
     end
-    subgraph CoreCommands["Core command services"]
-        commands["core/commands/service.ts"]
-    end
-    subgraph HostBootstrap["Host bootstrap"]
-        execute["run-command.ts"]
-        loader["config/loader.ts"]
-    end
-    subgraph CoreConfig["Core config"]
-        coreSchema["core/config/schema.ts"]
-        coreInterp["core/config/interpolate.ts"]
-        coreLoaded["core/config/loaded.ts"]
-    end
-    subgraph CoreRun["Core run lifecycle"]
-        loop["core/run/run-loop.ts"]
-        manifest["core/run/manifest.ts"]
-        status["core/run/status.ts"]
-        nudge["core/run/nudge.ts"]
-        workflow["core/run/task-workflow.ts"]
-        guard["core/run/recursion-guard.ts"]
-    end
-    subgraph Assignment["Assignment I/O"]
-        parser["assignment/parser.ts"]
-        writer["assignment/writer.ts"]
-        merge["assignment/merge.ts"]
-    end
-    subgraph Backends["Backends"]
-        backendTypes["core/backends/types.ts"]
-        registry["backends/registry.ts"]
-        claude["backends/claude.ts"]
-        codex["backends/codex.ts"]
+    subgraph Core["packages/core"]
+        service["src/app/service.ts"]
+        commands["src/core/commands/service.ts"]
+        execute["src/run-command.ts"]
+        loader["src/config/loader.ts"]
+        paths["src/config/runtime-paths.ts"]
+        runloop["src/core/run/*"]
+        assignment["src/assignment/*"]
+        backends["src/backends/*"]
+        contracts["src/contracts/runs.ts"]
+        util["src/util/*"]
     end
     subgraph Workspace["${TASK_RUNNER_STATE_DIR}/runs/&lt;repo-name&gt;/&lt;run-id&gt;/"]
         runjson["run.json"]
@@ -1428,67 +1419,50 @@ flowchart TD
     cli --> parse
     cli --> render
     cli --> commandRender
-    cli --> commands
-    cli --> execute
-    commands --> manifest
+    cli --> daemon
+    cli --> service
+    daemon --> service
+    service --> commands
+    service --> execute
     execute --> loader
-    execute --> registry
-    execute --> loop
-    loop --> coreSchema
-    loop --> coreInterp
-    loop --> registry
-    loop --> writer
-    loop --> parser
-    loop --> merge
-    loop --> nudge
-    loop --> workflow
-    loop --> guard
-    commands --> status
-    loop --> manifest
-    status --> manifest
-    registry --> backendTypes
-    loop --> Workspace
-    registry --> claude
-    registry --> codex
+    execute --> runloop
+    commands --> runloop
+    commands --> contracts
+    runloop --> assignment
+    runloop --> backends
+    runloop --> paths
+    runloop --> util
+    runloop --> Workspace
 ```
 
 ```
-src/
-├── cli.ts                  # CLI entry point and dispatcher
-├── run-command.ts          # run/init bootstrap bridge from host services into core
-├── cli/
-│   ├── parse-args.ts       # argv parser
-│   └── render-run.ts       # RunEvent -> stdout/stderr rendering
-├── commands/
-│   └── render.ts           # text renderers for command results
-├── core/
-│   ├── backends/
-│   │   └── types.ts        # abstract Backend interface + BackendEvent stream
-│   ├── commands/
-│   │   └── service.ts      # typed non-run command/query/mutation services
-│   ├── config/
-│   │   ├── schema.ts       # zod AgentConfig + AssignmentConfig schemas
-│   │   ├── interpolate.ts  # {{var}} substitution
-│   │   └── loaded.ts       # LoadedAgent/LoadedAssignment + manifest/ad-hoc helpers
-│   └── run/
-│       ├── run-loop.ts        # runAgent: emits RunEvent + final outcome
-│       ├── manifest.ts        # RunManifest types + persistence
-│       ├── status.ts          # transport-neutral run summaries + live overlays
-│       ├── recursion-guard.ts # TASK_RUNNER_CALL_DEPTH safety
-│       ├── nudge.ts           # retry-prompt builder
-│       ├── task-workflow.ts   # injected workflow preamble
-│       └── workspace-state.ts # task-state persistence + locking
-├── config/
-│   ├── loader.ts           # filesystem-backed definition loading/discovery
-│   └── runtime-paths.ts    # config/state root and workspace path helpers
-├── assignment/             # task model, parser, writer, merge logic
-├── backends/
-│   ├── claude.ts           # Claude subprocess backend
-│   ├── codex.ts            # Codex JSON-RPC backend (stdio + ws)
-│   └── registry.ts
-└── util/
-    ├── spawn.ts            # subprocess wrapper with abort/timeout
-    └── short-id.ts         # 6-char base32 run id generator
+package.json                # private workspace/orchestration root
+tsconfig.base.json          # shared TS compiler options and paths
+apps/
+└── cli/
+    ├── package.json        # executable package named task-runner
+    ├── tsconfig.json
+    ├── dist/               # generated CLI build output
+    └── src/
+        ├── cli.ts          # CLI entry point and dispatcher
+        ├── cli/            # argv parsing + RunEvent rendering
+        ├── commands/       # text renderers for command/status output
+        └── daemon/         # local WS RPC + HTTP/SSE transport host/client
+packages/
+└── core/
+    ├── package.json        # shared internal workspace package
+    ├── tsconfig.json
+    ├── dist/               # generated shared build output
+    └── src/
+        ├── app/            # transport-neutral service seam
+        ├── assignment/     # task parser/writer/merge/model
+        ├── backends/       # claude/codex/passive adapters + registry
+        ├── config/         # definition loading + runtime path helpers
+        ├── contracts/      # shared DTOs
+        ├── core/           # run lifecycle, status, schema, commands
+        ├── run-command.ts  # run/init bootstrap bridge
+        ├── task-runner-command.ts
+        └── util/           # subprocess + atomic-write helpers
 
 agents/                     # reference agent definitions
 assignments/                # reference assignments
@@ -1499,7 +1473,7 @@ test/                       # node:test suites
 
 For the full design — schema, run lifecycle, manifest format,
 locked-field semantics, recursion guard, abort handling, and
-everything else — see [`docs/design.md`](docs/design.md).
+the workspace package split — see [`docs/design.md`](docs/design.md).
 
 ## License
 

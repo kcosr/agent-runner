@@ -1,8 +1,8 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { mergeIntoFile, mergeUpdates } from "../dist/assignment/merge.js";
-import { parseAssignment } from "../dist/assignment/parser.js";
-import { renderAssignment } from "../dist/assignment/writer.js";
+import { mergeIntoFile, mergeUpdates } from "../packages/core/dist/assignment/merge.js";
+import { parseAssignment } from "../packages/core/dist/assignment/parser.js";
+import { renderAssignment } from "../packages/core/dist/assignment/writer.js";
 
 function buildTasks(states) {
   const tasks = new Map();

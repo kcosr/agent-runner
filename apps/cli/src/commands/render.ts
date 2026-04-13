@@ -1,4 +1,4 @@
-import type { RunDetail } from "../contracts/runs.js";
+import type { RunDetail } from "@task-runner/core/contracts/runs.js";
 import type {
   DefinitionDetailsResult,
   DefinitionListResult,
@@ -9,8 +9,8 @@ import type {
   TaskDetailsResult,
   TaskListResult,
   TaskMutationResult,
-} from "../core/commands/service.js";
-import { resolveTaskRunnerCommand } from "../task-runner-command.js";
+} from "@task-runner/core/core/commands/service.js";
+import { resolveTaskRunnerCommand } from "@task-runner/core/task-runner-command.js";
 
 export function renderRunStatus(detail: RunDetail): string {
   const taskRunnerCmd = resolveTaskRunnerCommand();

@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { buildNudgeMessage } from "../dist/core/run/nudge.js";
+import { buildNudgeMessage } from "../packages/core/dist/core/run/nudge.js";
 
 function buildTasks(states) {
   const tasks = new Map();

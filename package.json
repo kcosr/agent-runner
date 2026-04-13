@@ -1,16 +1,13 @@
 {
-  "name": "task-runner",
+  "name": "task-runner-workspace",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Minimal CLI that drives an AI agent through a seeded task list, tracking per-task status and retrying until the agent has accounted for every task.",
-  "files": ["dist/", "README.md", "CHANGELOG.md"],
-  "bin": {
-    "task-runner": "./dist/cli.js"
-  },
+  "description": "Workspace root for the task-runner monorepo.",
+  "workspaces": ["packages/*", "apps/*"],
   "scripts": {
     "setup": "npm install",
-    "build": "tsc -b && node -e \"require('node:fs').chmodSync('dist/cli.js', 0o755)\"",
+    "build": "npm run build -w @task-runner/core && npm run build -w task-runner && node -e \"require('node:fs').chmodSync('apps/cli/dist/cli.js', 0o755)\"",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
@@ -19,8 +16,8 @@
     "test": "npm run build && node --test \"test/**/*.test.mjs\"",
     "prepack": "npm run build",
     "prepare": "husky install",
-    "clean": "rimraf dist *.tsbuildinfo",
-    "task-runner": "node dist/cli.js"
+    "clean": "rimraf apps/*/dist packages/*/dist apps/*/tsconfig.tsbuildinfo packages/*/tsconfig.tsbuildinfo",
+    "task-runner": "node apps/cli/dist/cli.js"
   },
   "lint-staged": {
     "!dist/**/*.{ts,tsx,js,jsx,mjs,cjs,json}": [
@@ -30,15 +27,10 @@
   "devDependencies": {
     "@biomejs/biome": "^1.9.0",
     "@types/node": "^20.11.30",
+    "@types/ws": "^8.18.1",
     "husky": "^9.1.7",
     "lint-staged": "^15.2.0",
     "rimraf": "^6.0.1",
     "typescript": "^5.5.4"
-  },
-  "dependencies": {
-    "@types/ws": "^8.18.1",
-    "gray-matter": "^4.0.3",
-    "ws": "^8.20.0",
-    "zod": "^3.23.8"
   }
 }

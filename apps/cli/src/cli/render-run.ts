@@ -1,6 +1,6 @@
-import type { RunEvent } from "../core/run/run-loop.js";
-import type { RunCompletionSummary } from "../core/run/status.js";
-import { resolveTaskRunnerCommand } from "../task-runner-command.js";
+import type { RunEvent } from "@task-runner/core/core/run/run-loop.js";
+import type { RunCompletionSummary } from "@task-runner/core/core/run/status.js";
+import { resolveTaskRunnerCommand } from "@task-runner/core/task-runner-command.js";
 
 export interface RenderedRunChunk {
   stream: "stdout" | "stderr";

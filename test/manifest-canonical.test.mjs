@@ -4,14 +4,21 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
-import { passiveBackend } from "../dist/backends/passive.js";
-import { AgentConfigError, loadAgentConfig, loadAssignmentConfig } from "../dist/config/loader.js";
-import { loadedAgentFromManifest, synthesizeAdHocAgent } from "../dist/core/config/loaded.js";
-import { resolveResumeTarget } from "../dist/core/run/manifest.js";
-import { runAgent } from "../dist/core/run/run-loop.js";
+import { passiveBackend } from "../packages/core/dist/backends/passive.js";
+import {
+  AgentConfigError,
+  loadAgentConfig,
+  loadAssignmentConfig,
+} from "../packages/core/dist/config/loader.js";
+import {
+  loadedAgentFromManifest,
+  synthesizeAdHocAgent,
+} from "../packages/core/dist/core/config/loaded.js";
+import { resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js";
+import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import { withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
-const CLI_PATH = resolvePath(new URL("../dist/cli.js", import.meta.url).pathname);
+const CLI_PATH = resolvePath(new URL("../apps/cli/dist/cli.js", import.meta.url).pathname);
 
 const CLAUDE_AGENT = `---
 schemaVersion: 1

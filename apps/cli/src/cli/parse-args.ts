@@ -1,4 +1,4 @@
-import { TASK_MODES, type TaskMode } from "../core/config/schema.js";
+import { TASK_MODES, type TaskMode } from "@task-runner/core/core/config/schema.js";
 
 export type OutputFormat = "text" | "json";
 // Kept in sync with `agentConfigSchema.backend` in src/core/config/schema.ts
