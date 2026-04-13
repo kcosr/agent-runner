@@ -18,7 +18,9 @@ after-the-fact audit. For stronger guarantees, encode verification into the
 task body (e.g., "run `npm test` and paste the exit code into Notes").
 
 It is a deliberate strip-down of concepts from `agent-runner`. The goal is a
-small, focused tool — no daemon, no web console, no storage layer, no fully
+small, focused tool with a local dual-host control plane: embedded mode for
+single-process CLI use, and a local-only daemon mode for shared run ownership
+and future local clients. No web console, no public remote service, no fully
 customizable hook framework. Just: "invoke an agent with this config, drive it
 through this task list with retries, return the output."
 
@@ -33,9 +35,8 @@ manifest is the source of truth.
 - Interactive sessions (TTY passthrough). We do resume sessions across
   retries, but non-interactively and only within a single run — see
   [Session resume](#session-resume-across-retries) below.
-- Streaming event protocol (JSONL, WebSocket, etc.) exposed to the user
+- Public remote daemon hosting, auth, or multi-user access control
 - Multi-agent orchestration / handles / lineage
-- Persistent run history or a daemon/server component
 - Fully customizable hooks (pre-invoke, post-invoke, event masks, mutation
   policies). `task-runner` has exactly one baked-in behavior: parse the
   agent's self-reported task statuses after each turn and retry when any are
@@ -49,31 +50,34 @@ manifest is the source of truth.
 ## High-level flow
 
 ```
-task-runner run --agent <name> [--assignment <name>] [--var k=v]...
-                               [--output-format text|json] [message]
+task-runner <run|init|status|task|list|show> [--connect <ws-url>] ...
+task-runner serve [--listen <ws-url>]
    │
    ▼
-1. Load + validate agent.md (identity, config, role instructions)
-2. If --assignment: load + validate assignment.md (vars, tasks, message)
-3. Resolve vars (CLI → env → defaults) against the assignment's schema
-4. Check locks (union of agent.lockedFields + assignment.lockedFields)
-5. Create workspace: ${TASK_RUNNER_STATE_DIR}/runs/<repo-name>/<short-id>/
-6. Build in-memory task map from the assignment's `tasks:` (+ CLI --add-task)
-7. Re-render a fresh assignment.md into the workspace; source file is never
+1. Resolve host mode:
+     a. embedded: CLI calls shared app services directly
+     b. daemon: CLI connects to local JSON-RPC over WebSocket
+2. Load + validate agent.md (identity, config, role instructions)
+3. If --assignment: load + validate assignment.md (vars, tasks, message)
+4. Resolve vars (CLI → env → defaults) against the assignment's schema
+5. Check locks (union of agent.lockedFields + assignment.lockedFields)
+6. Create workspace: ${TASK_RUNNER_STATE_DIR}/runs/<repo-name>/<short-id>/
+7. Build in-memory task map from the assignment's `tasks:` (+ CLI --add-task)
+8. Re-render a fresh assignment.md into the workspace; source file is never
    touched
-8. Compose prompt: agent instructions → assignment instructions → workflow
+9. Compose prompt: agent instructions → assignment instructions → workflow
    → message (non-empty parts only, joined with blank lines)
-9. Loop:
+10. Loop:
      a. Invoke backend (Claude subprocess or Codex app-server JSON-RPC)
      b. Parse workspace assignment.md back, merge status/notes into in-memory
      c. Snapshot into manifest + rewrite run.json
      d. Decide: done? blocked? retry? fail?
      e. If retry: merge missing sections, build nudge, re-invoke with
         backend session resume
-10. Rewrite run.json with terminal state
-11. Emit typed run events plus the final outcome; the CLI transport renders
-    those events to stderr/stdout (or suppresses them in JSON mode)
-12. Exit with status code
+11. Rewrite run.json with terminal state
+12. Emit typed run events; embedded CLI renders them directly, daemon mode
+    fans them out to subscribed clients over JSON-RPC notifications
+13. Exit with status code
 ```
 
 ## Repo layout
@@ -89,13 +93,20 @@ task-runner/
 ├── docs/
 │   └── design.md          # this file
 ├── src/
-│   ├── cli.ts             # argv parsing, entry point, transport adapter
+│   ├── cli.ts             # argv parsing, host routing, terminal entry point
 │   ├── run-command.ts     # run/init bootstrap bridge from host services into core
+│   ├── app/
+│   │   └── service.ts     # shared app/service seam used by embedded CLI + daemon
 │   ├── cli/
 │   │   ├── parse-args.ts  # argv → ParsedArgs + overridesFromParsedArgs
 │   │   └── render-run.ts  # RunEvent -> stdout/stderr rendering
 │   ├── commands/
 │   │   └── render.ts      # text renderers for command results
+│   ├── daemon/
+│   │   ├── client.ts      # daemon JSON-RPC WebSocket client
+│   │   ├── config.ts      # --connect / --listen host-selection helpers
+│   │   ├── protocol.ts    # daemon RPC and event contract
+│   │   └── server.ts      # local loopback WebSocket daemon host
 │   ├── core/
 │   │   ├── backends/
 │   │   │   └── types.ts   # abstract Backend interface + BackendEvent stream
@@ -1577,7 +1588,8 @@ The raw JSON events are still captured verbatim into
 ## CLI shape
 
 ```
-task-runner <run|init|status|task|list|show> [options] [args]
+task-runner <run|init|status|task|list|show> [--connect <ws-url>] [options] [args]
+task-runner serve [--listen <ws-url>]
 
 # run / init shared flag set
 task-runner <run|init>
@@ -1595,8 +1607,13 @@ task-runner <run|init>
                [--timeout-sec <n>]
                [--unrestricted]
                [--session-name <name>]
+               [--connect <ws-url>]
                [--output-format <text|json>]
                [message]
+
+# serve — start the local daemon host
+task-runner serve
+               [--listen <ws-url>]
 
 # run reset — restore a run to initialized state
 task-runner run reset <id|path>
@@ -1640,6 +1657,10 @@ Subcommands:
   already-executed run, or an execute-after-init (when `--resume-run`
   points at a manifest with `status: "initialized"`). **Rejected on
   passive agents** — use `init` + `task set` / `task add` instead.
+- **`serve`** — start the local daemon host on loopback. The daemon owns
+  live run execution, subscriptions, and daemon-mode aborts. Clients opt
+  in per-command with `--connect` / `TASK_RUNNER_CONNECT`; there is no
+  silent fallback to embedded mode when the daemon is unavailable.
 - **`run reset`** — restore a non-running run to its initialized
   state. The command resolves the existing workspace, rejects
   `status: "running"`, reapplies the manifest's frozen `resetSeed`,
@@ -1956,8 +1977,8 @@ resume semantics, and on-disk inspection. It is **not** the intended long-term
 transport boundary for every machine consumer.
 
 The shared machine-facing run seam lives in `src/contracts/runs.ts`. That module
-defines transport-neutral DTOs and pure mappers for later CLI JSON, web, and
-daemon adoption:
+defines transport-neutral DTOs and pure mappers for CLI JSON and daemon
+responses, and it remains the seam later web clients should reuse:
 
 - `RunSummary`
 - `RunDetail`
@@ -1972,10 +1993,10 @@ Rules for this seam:
   writes.
 - New machine-facing surfaces should prefer these DTOs over binding directly to
   raw manifest JSON unless a command explicitly documents manifest-shaped output.
-- `list runs`, archive/unarchive, and `status --output-format json` are wired
-  through the neutral contracts. `status` emits `RunDetail`, and bundled
-  planner/reviewer workflows read `tasks[]` from that DTO instead of projecting
-  raw `finalTasks`.
+- `list runs`, archive/unarchive, daemon RPC reads, and
+  `status --output-format json` are wired through the neutral contracts.
+  `status` emits `RunDetail`, and bundled planner/reviewer workflows read
+  `tasks[]` from that DTO instead of projecting raw `finalTasks`.
 - `RunCapabilities` exposes the current CLI-backed action surface:
   `canArchive`, `canUnarchive`, `canResume`, plus nested task mutation
   booleans in `RunTaskMutationCapabilities`
@@ -1983,9 +2004,8 @@ Rules for this seam:
 - `RunSummary` and `RunDetail` both carry `capabilities`, so list/board
   consumers do not need N+1 detail reads just to determine which actions
   are available.
-- Pause / stop control is intentionally excluded from this seam in the
-  current slice. Live-control flags belong to the later daemon/API work,
-  not the current CLI-derived capability contract.
+- Daemon-mode live abort reuses the existing `aborted` lifecycle rather
+  than introducing a second terminal-state family.
 
 ## Output modes
 

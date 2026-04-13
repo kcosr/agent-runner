@@ -108,6 +108,18 @@ test("parseArgs: list with --output-format json", () => {
   assert.equal(parsed.outputFormat, "json");
 });
 
+test("parseArgs: --connect is captured on routed commands", () => {
+  const parsed = parseArgs(argv("status", "abc123", "--connect", "ws://127.0.0.1:4773/"));
+  assert.equal(parsed.command, "status");
+  assert.equal(parsed.connect, "ws://127.0.0.1:4773/");
+});
+
+test("parseArgs: serve captures --listen", () => {
+  const parsed = parseArgs(argv("serve", "--listen", "ws://127.0.0.1:4773/"));
+  assert.equal(parsed.command, "serve");
+  assert.equal(parsed.listen, "ws://127.0.0.1:4773/");
+});
+
 test("parseArgs: list runs captures --include-archived", () => {
   const parsed = parseArgs(argv("list", "runs", "--include-archived", "--output-format", "json"));
   assert.equal(parsed.command, "list");

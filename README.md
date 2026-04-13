@@ -12,9 +12,16 @@ re-invoked with a nudge — up to a configurable retry budget. Blocked
 tasks halt the run cleanly. Aborted runs (Ctrl+C, external interrupt,
 timeout) persist their state and can be resumed later.
 
-It is intentionally not a daemon, not a web console, and not an
-orchestration framework. It is one binary that runs an agent, watches
-the work, and writes a single canonical record per run.
+It now supports two local host modes:
+
+- **Embedded mode**: the foreground CLI process owns execution.
+- **Daemon mode**: `task-runner serve` owns live runs over a local
+  loopback WebSocket JSON-RPC control plane, and clients opt in with
+  `--connect` / `TASK_RUNNER_CONNECT`.
+
+It is still intentionally not a web console or a general orchestration
+framework. The daemon is local-only and exists to stabilize run control
+and future local clients, not to become a remote multi-user service.
 
 ---
 
@@ -31,6 +38,7 @@ the work, and writes a single canonical record per run.
 - [Commands](#commands)
   - [`task-runner run`](#task-runner-run)
   - [`task-runner init`](#task-runner-init)
+  - [`task-runner serve`](#task-runner-serve)
   - [`task-runner run reset / archive / unarchive`](#task-runner-run-reset--archive--unarchive)
   - [`task-runner status`](#task-runner-status)
   - [`task-runner task` commands](#task-runner-task-commands)
@@ -100,6 +108,11 @@ chat output.
   without invoking the backend, returns a run id, and `task-runner
   run --resume-run <id>` later picks it up. Useful when an outer
   process wants to compose a run before committing to it.
+- **Dual-host local control plane**: embedded mode keeps the
+  single-process CLI path for simple use, while daemon mode moves live
+  run ownership, event streaming, and external abort control into a
+  long-lived local `task-runner serve` process reached over
+  `ws://127.0.0.1:4773/` by default.
 - **Live status inspection**: `task-runner status <id>` reads the
   manifest and (for in-flight runs) overlays the live workspace
   `assignment.md` so you can see mid-attempt progress without
@@ -466,6 +479,15 @@ For the full schema and the rationale, see
 
 ## Commands
 
+Host selection:
+
+- Without `--connect` / `TASK_RUNNER_CONNECT`, commands run in
+  **embedded mode** and call the shared app services in-process.
+- With `--connect <ws-url>` or `TASK_RUNNER_CONNECT=<ws-url>`, the CLI
+  runs in **daemon mode** and routes the entire command through the
+  local daemon API. If nothing is listening there, the command fails
+  with exit code `3`; it does not silently fall back to embedded mode.
+
 ### `task-runner run`
 
 Execute an agent. Three modes, distinguished by which flags you pass:
@@ -500,6 +522,7 @@ Common options:
 | `--unrestricted` | Bypass the backend's approval prompts. |
 | `--session-name <name>` | Override the assignment's `sessionName` (the backend display label). Vars are interpolated. |
 | `--backend-session-id <id>` | Adopt an existing backend session id (claude UUID, codex thread id). Validated before workspace creation. Forbidden with `--resume-run` (the resume target already carries one). |
+| `--connect <ws-url>` | Route the command through the local daemon instead of embedded mode. Also honored from `TASK_RUNNER_CONNECT`. |
 | `--output-format <text\|json>` | Default `text`. `json` writes the final manifest-shaped run record to stdout once at end of run. |
 
 On `--resume-run`, the "legitimate mid-run" overrides — `--model`,
@@ -531,6 +554,26 @@ task-runner init \
 Useful when an outer process wants a resumable handle before
 committing to execution, or wants to inspect the prepared workspace
 before kicking off the actual work.
+
+### `task-runner serve`
+
+Start the local daemon host on loopback:
+
+```bash
+task-runner serve
+task-runner serve --listen ws://127.0.0.1:4773/
+```
+
+Rules:
+
+- The daemon speaks JSON-RPC 2.0 over a local WebSocket listener.
+- `--listen` overrides `TASK_RUNNER_LISTEN`; both fall back to
+  `ws://127.0.0.1:4773/`.
+- The listener must stay on loopback (`127.0.0.1`, `localhost`, or
+  `::1`).
+- Run-scoped commands, `list runs`, and definition read commands opt
+  into daemon mode with `--connect <ws-url>` or `TASK_RUNNER_CONNECT`.
+- External live abort control exists only in daemon mode.
 
 ### `task-runner run reset / archive / unarchive`
 
@@ -659,9 +702,9 @@ particular, passive runs are never resumable through `run`, running
 `task add`, and terminal non-passive runs remain notes-editable but do
 not allow task status changes or task creation.
 
-Pause / stop control is intentionally not part of this contract in this
-slice. Later daemon/API work owns any live-control surface beyond the
-current archive / unarchive / resume / task-mutation semantics.
+In daemon mode, external live abort control is available through the
+daemon-owned run lifecycle. Embedded mode remains single-process and
+does not expose external live control.
 
 ### `taskMode: file` vs `taskMode: cli`
 
@@ -1166,6 +1209,8 @@ printed to stdout.
 | `TASK_RUNNER_CONFIG_DIR` | Root for named definitions. Agents live under `agents/<name>/agent.md`; assignments live under `assignments/<name>/assignment.md`. Defaults to `${XDG_CONFIG_HOME}/task-runner` or `~/.config/task-runner`. |
 | `TASK_RUNNER_STATE_DIR` | Root for runtime state. Runs live under `runs/<repo-name>/<run-id>/`; drafts live under `drafts/<repo-name>/`. Defaults to `${XDG_STATE_HOME}/task-runner` or `~/.local/state/task-runner`. |
 | `TASK_RUNNER_CMD` | Override the CLI command name used in user-facing messages, prompts, and assignment templates. Defaults to the `task-runner` binary found on `PATH`, then bare `task-runner`. |
+| `TASK_RUNNER_CONNECT` | Opt commands into daemon mode by pointing them at a local daemon WebSocket URL. Default: unset (embedded mode). |
+| `TASK_RUNNER_LISTEN` | Default listen URL for `task-runner serve`. Falls back to `ws://127.0.0.1:4773/`. |
 | `TASK_RUNNER_CLAUDE_BIN` | Path to the `claude` binary. Defaults to `claude` on `PATH`. |
 | `TASK_RUNNER_CODEX_BIN` | Path to the `codex` binary for stdio mode. Defaults to `codex` on `PATH`. |
 | `TASK_RUNNER_CODEX_WS_URL` | If set, the codex backend connects to this WebSocket URL instead of spawning a stdio subprocess. |

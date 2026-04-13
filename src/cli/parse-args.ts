@@ -34,6 +34,8 @@ export interface ParsedArgs {
   taskAppendText?: string;
   taskTitle?: string;
   taskBody?: string;
+  connect?: string;
+  listen?: string;
   includeArchived?: boolean;
   showHelp: boolean;
 }
@@ -197,6 +199,14 @@ export function parseArgs(argv: string[]): ParsedArgs {
         throw new Error(`--output-format must be one of: ${OUTPUT_FORMATS.join(", ")}`);
       }
       result.outputFormat = next as OutputFormat;
+    } else if (arg === "--connect") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--connect requires a value");
+      result.connect = next;
+    } else if (arg === "--listen") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--listen requires a value");
+      result.listen = next;
     } else if (arg === "--include-archived") {
       result.includeArchived = true;
     } else if (arg === "--") {

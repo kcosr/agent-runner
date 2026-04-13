@@ -13,6 +13,11 @@
 
 ### Added
 
+- Added a local daemon control plane: `task-runner serve` now starts a
+  loopback WebSocket JSON-RPC server, run/definition commands can opt
+  into daemon mode with `--connect` / `TASK_RUNNER_CONNECT`, and daemon
+  clients can subscribe to typed `RunEvent` notifications for live
+  progress.
 - Added a transport-neutral `src/contracts/runs.ts` seam for shared run DTOs and pure mappers (`RunSummary`, `RunDetail`, `RunArchiveResult`, `RunCapabilities`) so later CLI/web/daemon surfaces can project from `RunManifest` without binding directly to raw manifest internals. ([#16](https://github.com/kcosr/task-runner/pull/16))
 - Added `task-runner task list`, `task show`, and `task append-notes`, plus `task add --body`, for a fuller CLI task workflow surface. The new read commands return stable task snapshots in text or JSON, and append-notes uses deterministic single-newline joining.
 - Added `task-runner run reset <run-id>` to restore a non-running run to its original initialized state, rewrite `run.json` and `assignment.md` from a persisted reset seed, clear prior attempt/session history, and remove stale `attempts/` artifacts.
@@ -29,6 +34,10 @@
 
 ### Changed
 
+- `task-runner` now has an explicit dual-host model. Embedded mode keeps
+  the existing in-process CLI behavior, while daemon mode moves live run
+  ownership and external abort control into the local daemon without
+  silently falling back to embedded execution.
 - Build and packaging no longer rely on git-tracked `dist/` output. `dist/` is generated locally and during `prepack`, and the build step explicitly marks `dist/cli.js` executable on Unix-like systems.
 - Extracted an explicit internal `src/core/` seam: transport-neutral run lifecycle, command services, schema/interpolation helpers, and the abstract backend contract now live under `src/core/`, while CLI parsing and text rendering remain at the transport edge. `config/loader.ts` is now filesystem-only, and the old mixed `runner/output.ts` responsibilities were split into core live-status shaping plus CLI renderers. ([#20](https://github.com/kcosr/task-runner/pull/20))
 - Refactored command execution around transport-agnostic core contracts: non-run commands now execute through typed `src/commands/` services, `runAgent` emits typed events instead of writing terminal text directly, and the CLI renders text/json output at the transport edge. ([#13](https://github.com/kcosr/task-runner/pull/13))

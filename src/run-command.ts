@@ -26,6 +26,8 @@ export interface ExecuteRunCommandOptions {
   initialize: boolean;
   agent?: string;
   assignment?: string;
+  definitionCwd?: string;
+  baseDir?: string;
   resumeRun?: string;
   backendSessionId?: string;
   cliVars: Record<string, string>;
@@ -109,7 +111,7 @@ export async function executeRunCommand(opts: ExecuteRunCommandOptions): Promise
     resumeTarget !== undefined
       ? loadedAgentFromManifest(resumeTarget.manifest)
       : opts.agent !== undefined
-        ? loadAgentConfig(opts.agent)
+        ? loadAgentConfig(opts.agent, opts.definitionCwd)
         : (() => {
             if (opts.overrides.backend === undefined) {
               throw new RunCommandError(
@@ -128,7 +130,9 @@ export async function executeRunCommand(opts: ExecuteRunCommandOptions): Promise
           })();
 
   const loadedAssignment =
-    opts.assignment !== undefined ? loadAssignmentConfig(opts.assignment) : undefined;
+    opts.assignment !== undefined
+      ? loadAssignmentConfig(opts.assignment, opts.definitionCwd)
+      : undefined;
 
   const backendId =
     opts.overrides.backend ?? resumeTarget?.manifest.backend ?? loaded.config.backend;
@@ -150,6 +154,7 @@ export async function executeRunCommand(opts: ExecuteRunCommandOptions): Promise
     loadedAssignment,
     cliVars: opts.cliVars,
     backend,
+    baseDir: opts.baseDir,
     resume: resumeTarget,
     initialize: opts.initialize,
     bootstrapBackendSessionId: opts.backendSessionId,

@@ -73,6 +73,7 @@ export interface RunOptions {
   loadedAssignment?: LoadedAssignment;
   cliVars: Record<string, string>;
   backend: Backend;
+  baseDir?: string;
   overrides?: RunOverrides;
   resume?: ResolvedResumeTarget;
   initialize?: boolean;
@@ -598,7 +599,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     checkLockedFieldsFromManifest(resume.manifest, overrides, addedTitles);
   }
 
-  const baseDir = process.cwd();
+  const baseDir = opts.baseDir ?? process.cwd();
   const cwd = resolveCwd(overrides?.cwd ?? agentConfig.cwd, baseDir);
   // When --backend overrides the agent's backend, the agent's `model`
   // is also dropped (since model strings are backend-specific). Pass
