@@ -18,17 +18,10 @@ function parseDaemonUrl(raw: string, label: string): URL {
   if (parsed.protocol !== "ws:") {
     throw new Error(`${label} must use ws://`);
   }
-  if (!isLoopbackHost(parsed.hostname)) {
-    throw new Error(`${label} must bind/connect on loopback (127.0.0.1, localhost, or ::1)`);
-  }
   if (!parsed.port) {
     throw new Error(`${label} must include an explicit port`);
   }
   return parsed;
-}
-
-function isLoopbackHost(hostname: string): boolean {
-  return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
 }
 
 export function resolveListenUrl(

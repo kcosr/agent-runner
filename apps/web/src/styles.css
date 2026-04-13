@@ -10,6 +10,7 @@ body {
 
 .app {
   height: 100%;
+  min-height: 0;
 }
 
 .boot-screen {
@@ -196,10 +197,38 @@ body {
   display: none;
 }
 
+.main,
+.layout,
+.board,
+.column,
+.drawer,
+.drawer-body,
+.col-body {
+  min-height: 0;
+}
+
+.layout {
+  align-items: stretch;
+}
+
+.board {
+  overflow-y: hidden;
+}
+
+.column {
+  max-height: 100%;
+}
+
+.col-body {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 .drawer-body {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  overflow-y: auto;
 }
 
 .drawer-panel {
@@ -226,6 +255,55 @@ body {
   border-radius: var(--radius-md);
   padding: 12px;
   background: var(--card);
+}
+
+.drawer-group {
+  border-top: 1px solid var(--border);
+}
+
+.drawer-group-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 18px;
+  background: transparent;
+  border: 0;
+  color: var(--foreground);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.drawer-group-toggle:hover {
+  background: var(--accent);
+}
+
+.drawer-group-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--muted-foreground);
+  flex-shrink: 0;
+  transition: transform 120ms ease;
+}
+
+.drawer-group-icon.open {
+  transform: rotate(180deg);
+}
+
+.drawer-group-content {
+  padding: 0 18px 16px;
+}
+
+.drawer-group-scroll {
+  min-height: 0;
+}
+
+.drawer-group-scroll--tasks {
+  max-height: min(26rem, 48vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .task {
@@ -325,23 +403,6 @@ body {
 .timing-value {
   font-family: var(--mono);
   text-align: right;
-}
-
-.drawer-state {
-  padding: 16px 18px 24px;
-}
-
-.drawer-state h3 {
-  margin: 0 0 0.5rem;
-}
-
-.drawer-state p {
-  margin: 0;
-  color: var(--muted-foreground);
-}
-
-.drawer-state .btn {
-  margin-top: 1rem;
 }
 
 .toolbar-matrix {

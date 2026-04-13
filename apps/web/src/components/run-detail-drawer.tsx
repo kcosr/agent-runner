@@ -1,7 +1,7 @@
 import type { RunDetail } from "@task-runner/core/contracts/runs.js";
 import { useState } from "react";
 import { formatRelativeTimestamp, formatTimestamp, truncateMiddle } from "../lib/format.js";
-import { ArchiveIcon, CloseIcon, CopyIcon, StopIcon } from "./icons.js";
+import { ArchiveIcon, ChevronDownIcon, CloseIcon, CopyIcon, StopIcon } from "./icons.js";
 import { RunTaskList } from "./run-task-list.js";
 import { StatusBadge } from "./status-badge.js";
 
@@ -41,8 +41,20 @@ export function RunDetailDrawer({
   onUnarchive: () => void;
   run: RunDetail;
 }) {
-  const [section, setSection] = useState<SectionKey>("tasks");
+  const [openSections, setOpenSections] = useState<Record<SectionKey, boolean>>({
+    tasks: false,
+    timing: false,
+    events: false,
+  });
   const backendSessionId = run.backendSessionId;
+  const sectionBaseId = `run-detail-${run.runId}`;
+
+  function toggleSection(section: SectionKey) {
+    setOpenSections((current) => ({
+      ...current,
+      [section]: !current[section],
+    }));
+  }
 
   return (
     <>
@@ -175,87 +187,121 @@ export function RunDetailDrawer({
             </div>
           ) : null}
 
-          <nav aria-label="Run sections" className="tabs">
+          <section className="drawer-group">
             <button
-              aria-selected={section === "tasks"}
-              className={section === "tasks" ? "tab active" : "tab"}
-              onClick={() => setSection("tasks")}
+              aria-controls={`${sectionBaseId}-tasks`}
+              aria-expanded={openSections.tasks}
+              className="drawer-group-toggle"
+              onClick={() => toggleSection("tasks")}
               type="button"
             >
-              Tasks{" "}
-              <span className="tab-count">
-                {run.tasksCompleted}/{run.tasksTotal}
+              <span>
+                Tasks{" "}
+                <span className="tab-count">
+                  {run.tasksCompleted}/{run.tasksTotal}
+                </span>
               </span>
+              <ChevronDownIcon
+                aria-hidden="true"
+                className={openSections.tasks ? "drawer-group-icon open" : "drawer-group-icon"}
+              />
             </button>
+            {openSections.tasks ? (
+              <div
+                aria-label="Tasks"
+                className="drawer-group-content drawer-group-content--tasks"
+                id={`${sectionBaseId}-tasks`}
+              >
+                <div className="drawer-group-scroll drawer-group-scroll--tasks">
+                  <RunTaskList tasks={run.tasks} />
+                </div>
+              </div>
+            ) : null}
+          </section>
+
+          <section className="drawer-group">
             <button
-              aria-selected={section === "timing"}
-              className={section === "timing" ? "tab active" : "tab"}
-              onClick={() => setSection("timing")}
+              aria-controls={`${sectionBaseId}-timing`}
+              aria-expanded={openSections.timing}
+              className="drawer-group-toggle"
+              onClick={() => toggleSection("timing")}
               type="button"
             >
-              Timing
+              <span>Timing</span>
+              <ChevronDownIcon
+                aria-hidden="true"
+                className={openSections.timing ? "drawer-group-icon open" : "drawer-group-icon"}
+              />
             </button>
-            <button
-              aria-selected={section === "events"}
-              className={section === "events" ? "tab active" : "tab"}
-              onClick={() => setSection("events")}
-              type="button"
-            >
-              Events
-            </button>
-          </nav>
-
-          {section === "tasks" ? (
-            <section aria-label="Tasks" className="drawer-panel drawer-panel--tasks">
-              <RunTaskList tasks={run.tasks} />
-            </section>
-          ) : null}
-
-          {section === "timing" ? (
-            <section aria-label="Timing" className="drawer-panel drawer-panel--timing">
-              <div className="drawer-panel-card">
-                <div className="timing-grid">
-                  <div className="timing-row">
-                    <span className="timing-label">Started</span>
-                    <span className="timing-value">{formatTimestamp(run.startedAt)}</span>
-                  </div>
-                  <div className="timing-row">
-                    <span className="timing-label">Ended</span>
-                    <span className="timing-value">{formatTimestamp(run.endedAt)}</span>
-                  </div>
-                  <div className="timing-row">
-                    <span className="timing-label">Exit code</span>
-                    <span className="timing-value">
-                      {run.exitCode === null ? "Not available" : String(run.exitCode)}
-                    </span>
-                  </div>
-                  <div className="timing-row">
-                    <span className="timing-label">CWD</span>
-                    <span className="timing-value">{truncateMiddle(run.cwd)}</span>
-                  </div>
-                  <div className="timing-row">
-                    <span className="timing-label">Assignment path</span>
-                    <span className="timing-value">{truncateMiddle(run.assignmentPath)}</span>
-                  </div>
-                  <div className="timing-row">
-                    <span className="timing-label">Task mode</span>
-                    <span className="timing-value">{run.taskMode}</span>
+            {openSections.timing ? (
+              <div
+                aria-label="Timing"
+                className="drawer-group-content drawer-group-content--timing"
+                id={`${sectionBaseId}-timing`}
+              >
+                <div className="drawer-panel-card">
+                  <div className="timing-grid">
+                    <div className="timing-row">
+                      <span className="timing-label">Started</span>
+                      <span className="timing-value">{formatTimestamp(run.startedAt)}</span>
+                    </div>
+                    <div className="timing-row">
+                      <span className="timing-label">Ended</span>
+                      <span className="timing-value">{formatTimestamp(run.endedAt)}</span>
+                    </div>
+                    <div className="timing-row">
+                      <span className="timing-label">Exit code</span>
+                      <span className="timing-value">
+                        {run.exitCode === null ? "Not available" : String(run.exitCode)}
+                      </span>
+                    </div>
+                    <div className="timing-row">
+                      <span className="timing-label">CWD</span>
+                      <span className="timing-value">{truncateMiddle(run.cwd)}</span>
+                    </div>
+                    <div className="timing-row">
+                      <span className="timing-label">Assignment path</span>
+                      <span className="timing-value">{truncateMiddle(run.assignmentPath)}</span>
+                    </div>
+                    <div className="timing-row">
+                      <span className="timing-label">Task mode</span>
+                      <span className="timing-value">{run.taskMode}</span>
+                    </div>
                   </div>
                 </div>
               </div>
-            </section>
-          ) : null}
+            ) : null}
+          </section>
 
-          {section === "events" ? (
-            <section aria-label="Events" className="drawer-panel drawer-panel--events">
-              <div className="drawer-panel-card">
-                <p className="muted-inline">
-                  Live event timeline is deferred in phase 1. HTTP detail and SSE board refresh are
-                  implemented in this slice.
-                </p>
+          <section className="drawer-group">
+            <button
+              aria-controls={`${sectionBaseId}-events`}
+              aria-expanded={openSections.events}
+              className="drawer-group-toggle"
+              onClick={() => toggleSection("events")}
+              type="button"
+            >
+              <span>Events</span>
+              <ChevronDownIcon
+                aria-hidden="true"
+                className={openSections.events ? "drawer-group-icon open" : "drawer-group-icon"}
+              />
+            </button>
+            {openSections.events ? (
+              <div
+                aria-label="Events"
+                className="drawer-group-content drawer-group-content--events"
+                id={`${sectionBaseId}-events`}
+              >
+                <div className="drawer-panel-card">
+                  <p className="muted-inline">
+                    Live event timeline is deferred in phase 1. HTTP detail and SSE board refresh
+                    are implemented in this slice.
+                  </p>
+                </div>
               </div>
-            </section>
-          ) : null}
+            ) : null}
+          </section>
         </div>
       </aside>
     </>

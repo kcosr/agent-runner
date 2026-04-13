@@ -30,7 +30,7 @@ function taskStatusIcon(status: RunTaskSummary["status"]) {
 
 export function RunTaskList({ tasks }: { tasks: RunTaskSummary[] }) {
   return (
-    <>
+    <div className="tasks">
       {tasks.map((task) => (
         <article className="task" key={task.id}>
           <span className={taskStatusClass(task.status)} aria-label={task.status}>
@@ -49,7 +49,7 @@ export function RunTaskList({ tasks }: { tasks: RunTaskSummary[] }) {
           </div>
         </article>
       ))}
-    </>
+    </div>
   );
 }
 

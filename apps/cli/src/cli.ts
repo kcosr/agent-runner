@@ -66,7 +66,7 @@ Commands:
   run archive <id|path>   Mark a non-running run as archived.
   run unarchive <id|path> Clear a run's archive marker.
   init                    Prepare a run without invoking the backend.
-  serve                   Start the local daemon server on loopback.
+  serve                   Start the local daemon server.
   status <id|path>        Read a run and print its current status.
   task list <id>          List tasks for a run in stable task order.
   task show <id> <task>   Show one task snapshot for a run.
@@ -94,7 +94,7 @@ Host selection:
                           Also honored from TASK_RUNNER_CONNECT.
   --listen <ws-url>       (serve only) Listen URL for the daemon host.
                           Also honored from TASK_RUNNER_LISTEN. The same
-                          loopback listener serves HTTP/SSE under /api/.
+                          listener serves HTTP/SSE under /api/.
 
 Execution options:
   --agent <name|path>     Agent bare name or direct path to agent.md.
