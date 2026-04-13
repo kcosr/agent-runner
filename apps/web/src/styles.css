@@ -2,6 +2,7 @@
 
 body {
   overflow: hidden;
+  overscroll-behavior-x: none;
 }
 
 #root {
@@ -252,6 +253,7 @@ body {
 
 .board {
   overflow-y: hidden;
+  overscroll-behavior-x: contain;
 }
 
 .column {
@@ -269,6 +271,7 @@ body {
   flex-direction: column;
   gap: 16px;
   overflow-y: auto;
+  overscroll-behavior-x: contain;
 }
 
 .drawer-panel {
@@ -442,6 +445,7 @@ body {
   font-size: 12.5px;
   max-height: 320px;
   overflow-y: auto;
+  overscroll-behavior-x: contain;
 }
 
 .task-empty {
@@ -735,11 +739,19 @@ body {
   }
 
   .board {
+    padding-inline: 8vw;
     padding-bottom: 12px;
+    scroll-padding-inline: 8vw;
+    scroll-snap-type: x mandatory;
   }
 
   .field.search {
     width: 180px;
+  }
+
+  .column {
+    scroll-snap-align: center;
+    scroll-snap-stop: always;
   }
 }
 

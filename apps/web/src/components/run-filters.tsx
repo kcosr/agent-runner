@@ -19,9 +19,9 @@ export function RunFilters({
       <header className="topbar">
         <span className="page-title">
           Runs
-          <span className="page-title-meta">
-            {settings.showArchived ? "including archived" : "phase 1 dashboard"}
-          </span>
+          {settings.showArchived ? (
+            <span className="page-title-meta">including archived</span>
+          ) : null}
         </span>
         <span className="topbar-spacer" />
         <div className="toolbar-matrix">

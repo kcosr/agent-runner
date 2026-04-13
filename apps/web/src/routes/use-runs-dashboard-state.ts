@@ -80,6 +80,9 @@ function appendNotice(current: NoticeState[], notice: NoticeState): NoticeState[
 function useRunActionMutation(
   action: (runId: string) => Promise<unknown>,
   setActionError: (message: string | undefined) => void,
+  options: {
+    onSuccess?: () => void;
+  } = {},
 ) {
   return useMutation({
     mutationFn: action,
@@ -92,6 +95,7 @@ function useRunActionMutation(
         queryClient.invalidateQueries({ queryKey: runQueryKeys.list() }),
         queryClient.invalidateQueries({ queryKey: runQueryKeys.detail(runId) }),
       ]);
+      options.onSuccess?.();
     },
   });
 }
@@ -184,7 +188,32 @@ export function useRunsDashboardState() {
     }
   }, [navigate, runsQuery.data, selectedRunId, selectedRunQuery.error]);
 
-  const archiveMutation = useRunActionMutation(api.archiveRun, setActionError);
+  useEffect(() => {
+    if (!selectedRunId) {
+      return;
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape") {
+        return;
+      }
+      setActionError(undefined);
+      void navigate({ to: "/" });
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [navigate, selectedRunId]);
+
+  const closeRun = () => {
+    void navigate({ to: "/" });
+  };
+
+  const archiveMutation = useRunActionMutation(api.archiveRun, setActionError, {
+    onSuccess: closeRun,
+  });
   const unarchiveMutation = useRunActionMutation(api.unarchiveRun, setActionError);
   const resumeMutation = useRunActionMutation(api.resumeRun, setActionError);
   const abortMutation = useRunActionMutation(api.abortRun, setActionError);
@@ -203,9 +232,7 @@ export function useRunsDashboardState() {
     actionError,
     actionPending,
     boardColumns,
-    closeRun: () => {
-      void navigate({ to: "/" });
-    },
+    closeRun,
     copyText: async (value: string, label: string) => {
       try {
         await navigator.clipboard.writeText(value);

@@ -183,9 +183,37 @@ function installFetchMock(
 
     const archiveMatch = /\/api\/runs\/([^/]+)\/(archive|unarchive|resume|abort)$/.exec(url);
     if (archiveMatch) {
-      return new Response(JSON.stringify({ ok: true, result: { runId: archiveMatch[1] } }), {
-        status: 200,
-      });
+      const [, runId, action] = archiveMatch;
+      if (action === "archive") {
+        return new Response(
+          JSON.stringify({
+            result: {
+              archivedAt: "2026-04-13T06:00:00.000Z",
+              changed: true,
+              runId,
+              status: "success",
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      if (action === "unarchive") {
+        return new Response(
+          JSON.stringify({
+            result: {
+              archivedAt: null,
+              changed: true,
+              runId,
+              status: "success",
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      if (action === "resume") {
+        return new Response(JSON.stringify({ runId }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ accepted: true, runId }), { status: 200 });
     }
 
     throw new Error(`Unhandled fetch: ${url}`);
@@ -264,6 +292,26 @@ describe("web app", () => {
 
     await user.click(screen.getByRole("button", { name: /build ui/i, expanded: true }));
     expect(screen.queryByText("working")).not.toBeInTheDocument();
+  });
+
+  it("pressing escape clears selection and closes the detail drawer", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    const runCard = await screen.findByRole("button", { name: /build dashboard/i });
+    await user.click(runCard);
+    expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Run detail")).not.toBeInTheDocument();
+    });
   });
 
   it("resizes the detail drawer via the keyboard separator and persists the width", async () => {
@@ -514,7 +562,17 @@ describe("web app", () => {
             return new Promise<Response>((resolve) => {
               resolveArchive = () => {
                 resolve(
-                  new Response(JSON.stringify({ result: { runId: "resumable" } }), { status: 200 }),
+                  new Response(
+                    JSON.stringify({
+                      result: {
+                        archivedAt: "2026-04-13T06:00:00.000Z",
+                        changed: true,
+                        runId: "resumable",
+                        status: "success",
+                      },
+                    }),
+                    { status: 200 },
+                  ),
                 );
               };
             });
@@ -536,8 +594,9 @@ describe("web app", () => {
 
     resolveArchive?.();
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "Archive" })).not.toBeDisabled());
-    expect(screen.getByRole("button", { name: "Resume" })).not.toBeDisabled();
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Run detail")).not.toBeInTheDocument();
+    });
   });
 
   it("shows Abort only for live running runs", async () => {
