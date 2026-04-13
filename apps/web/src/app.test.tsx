@@ -859,7 +859,7 @@ describe("web app", () => {
     await findRunCard("Build dashboard");
     expect(screen.queryByRole("button", { name: /archived dashboard/i })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Failures" })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Blocked" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Blocked" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Aborted" })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /show archived runs/i }));
@@ -906,6 +906,11 @@ describe("web app", () => {
           archivedAt: "2026-04-13T06:00:00.000Z",
           status: "success",
         }),
+        makeRun({
+          runId: "run-error",
+          assignmentName: "Broken dashboard",
+          status: "error",
+        }),
       ],
       details: {
         "run-1": makeDetail(),
@@ -917,6 +922,10 @@ describe("web app", () => {
           runId: "run-archived",
           status: "success",
         }),
+        "run-error": makeDetail({
+          runId: "run-error",
+          status: "error",
+        }),
       },
     });
 
@@ -926,7 +935,7 @@ describe("web app", () => {
 
     expect(screen.queryByRole("button", { name: /archived dashboard/i })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Failures" })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Blocked" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Blocked" })).toBeInTheDocument();
 
     await user.click(await findRunCard("Build dashboard"));
     const drawer = await screen.findByLabelText("Run detail");
@@ -971,7 +980,7 @@ describe("web app", () => {
       columns: [
         { key: "running", left: 0, width: 180 },
         { key: "completed", left: 200, width: 180 },
-        { key: "failures", left: 400, width: 180 },
+        { key: "blocked", left: 400, width: 180 },
       ],
       scrollTo,
       scrollWidth: 620,
@@ -980,13 +989,13 @@ describe("web app", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Running (1)" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Completed (1)" })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Failures (1)" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Blocked (1)" })).toBeInTheDocument();
     });
 
     expect(screen.queryByRole("button", { name: "Pending (0)" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Aborted (0)" })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Failures (1)" }));
+    await user.click(screen.getByRole("button", { name: "Blocked (1)" }));
 
     expect(scrollTo).toHaveBeenCalledWith({ behavior: "smooth", left: 360 });
   });
@@ -1027,7 +1036,7 @@ describe("web app", () => {
       columns: [
         { key: "running", left: 0, width: 180 },
         { key: "completed", left: 200, width: 180 },
-        { key: "failures", left: 400, width: 180 },
+        { key: "blocked", left: 400, width: 180 },
       ],
       scrollWidth: 800,
     });

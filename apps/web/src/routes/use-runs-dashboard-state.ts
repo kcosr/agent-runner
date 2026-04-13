@@ -23,7 +23,7 @@ export interface NoticeState {
 
 export type RunActionPending = "archive" | "unarchive" | "resume" | "abort" | "rename";
 
-const FAILURE_STATUSES: RunStatus[] = ["blocked", "exhausted", "error"];
+const FAILURE_STATUSES: RunStatus[] = ["exhausted", "error"];
 
 function matchesSearch(run: RunSummary, search: string): boolean {
   if (!search) {
@@ -45,6 +45,7 @@ function buildColumns(runs: RunSummary[], collapseFailureStates: boolean): Board
   ];
 
   if (collapseFailureStates) {
+    base.push({ key: "blocked", title: "Blocked", statuses: ["blocked"], runs: [] });
     base.push({
       key: "failures",
       title: "Failures",
