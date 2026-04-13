@@ -66,8 +66,29 @@ test("loadAgentConfig parses a minimal agent.md from TASK_RUNNER_CONFIG_DIR", ()
     assert.equal(loaded.config.backend, "claude");
     assert.equal(loaded.config.timeoutSec, 3600);
     assert.equal(loaded.config.unrestricted, false);
+    assert.equal(loaded.cwdSource, "default");
     assert.ok(!("maxRetries" in loaded.config), "maxRetries moved to assignment schema");
     assert.ok(loaded.instructions.includes("You are an assistant."));
+  }));
+
+test("loadAgentConfig preserves whether cwd was authored explicitly", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    writeAgent(
+      configDir,
+      "explicit-cwd",
+      `---
+schemaVersion: 1
+name: explicit-cwd
+backend: claude
+cwd: .
+---
+body
+`,
+    );
+
+    const loaded = loadAgentConfig("explicit-cwd", rootDir);
+    assert.equal(loaded.config.cwd, ".");
+    assert.equal(loaded.cwdSource, "explicit");
   }));
 
 test("loadAgentConfig throws AgentConfigError on bad frontmatter", () =>

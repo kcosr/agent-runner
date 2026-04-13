@@ -75,7 +75,7 @@ export interface RunsStartParams {
   agent?: string;
   assignment?: string;
   definitionCwd?: string;
-  baseDir?: string;
+  callerCwd?: string;
   cliVars: Record<string, string>;
   backendSessionId?: string;
   overrides: RunCommandOverrides;

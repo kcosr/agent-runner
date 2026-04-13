@@ -44,7 +44,7 @@ export interface StartRunRequest {
   agent?: string;
   assignment?: string;
   definitionCwd?: string;
-  baseDir?: string;
+  callerCwd?: string;
   backendSessionId?: string;
   cliVars: Record<string, string>;
   overrides: RunCommandOverrides;
@@ -156,7 +156,7 @@ export async function initRun(request: StartRunRequest): Promise<RunDetail> {
     agent: request.agent,
     assignment: request.assignment,
     definitionCwd: request.definitionCwd,
-    baseDir: request.baseDir,
+    callerCwd: request.callerCwd,
     backendSessionId: request.backendSessionId,
     cliVars: request.cliVars,
     overrides: request.overrides,
@@ -172,7 +172,7 @@ export function startRun(request: StartRunRequest): Promise<RunOutcome> {
     agent: request.agent,
     assignment: request.assignment,
     definitionCwd: request.definitionCwd,
-    baseDir: request.baseDir,
+    callerCwd: request.callerCwd,
     backendSessionId: request.backendSessionId,
     cliVars: request.cliVars,
     overrides: request.overrides,

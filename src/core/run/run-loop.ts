@@ -73,7 +73,7 @@ export interface RunOptions {
   loadedAssignment?: LoadedAssignment;
   cliVars: Record<string, string>;
   backend: Backend;
-  baseDir?: string;
+  callerCwd?: string;
   overrides?: RunOverrides;
   resume?: ResolvedResumeTarget;
   initialize?: boolean;
@@ -294,9 +294,24 @@ function validateAddedTaskTitle(title: string, index: number): void {
   }
 }
 
-function resolveCwd(input: string | undefined, fallback: string): string {
+function resolveConfiguredCwd(input: string | undefined, fallback: string): string {
   if (!input || input === ".") return fallback;
   return isAbsolute(input) ? input : resolve(fallback, input);
+}
+
+function resolveFreshRunCwd(
+  loaded: LoadedAgent,
+  overrides: RunOverrides | undefined,
+  callerCwd: string | undefined,
+): string {
+  const resolutionBase = callerCwd ?? process.cwd();
+  if (overrides?.cwd !== undefined) {
+    return resolveConfiguredCwd(overrides.cwd, resolutionBase);
+  }
+  if (loaded.cwdSource === "explicit") {
+    return resolveConfiguredCwd(loaded.config.cwd, resolutionBase);
+  }
+  return resolutionBase;
 }
 
 function emitCallerInstructions(
@@ -599,8 +614,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     checkLockedFieldsFromManifest(resume.manifest, overrides, addedTitles);
   }
 
-  const baseDir = opts.baseDir ?? process.cwd();
-  const cwd = resolveCwd(overrides?.cwd ?? agentConfig.cwd, baseDir);
+  const cwd = resume ? resume.manifest.cwd : resolveFreshRunCwd(loaded, overrides, opts.callerCwd);
   // When --backend overrides the agent's backend, the agent's `model`
   // is also dropped (since model strings are backend-specific). Pass
   // --model alongside --backend to set one for the new backend.

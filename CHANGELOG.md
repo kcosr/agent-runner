@@ -38,6 +38,10 @@
   the existing in-process CLI behavior, while daemon mode moves live run
   ownership and external abort control into the local daemon without
   silently falling back to embedded execution.
+- Fresh run cwd resolution now preserves whether an agent file explicitly
+  authored `cwd`. `--cwd` still wins, explicit agent `cwd` still wins
+  next, daemon runs otherwise use the client caller's cwd, and embedded
+  runs otherwise fall back to the host process cwd.
 - Build and packaging no longer rely on git-tracked `dist/` output. `dist/` is generated locally and during `prepack`, and the build step explicitly marks `dist/cli.js` executable on Unix-like systems.
 - Extracted an explicit internal `src/core/` seam: transport-neutral run lifecycle, command services, schema/interpolation helpers, and the abstract backend contract now live under `src/core/`, while CLI parsing and text rendering remain at the transport edge. `config/loader.ts` is now filesystem-only, and the old mixed `runner/output.ts` responsibilities were split into core live-status shaping plus CLI renderers. ([#20](https://github.com/kcosr/task-runner/pull/20))
 - Refactored command execution around transport-agnostic core contracts: non-run commands now execute through typed `src/commands/` services, `runAgent` emits typed events instead of writing terminal text directly, and the CLI renders text/json output at the transport edge. ([#13](https://github.com/kcosr/task-runner/pull/13))

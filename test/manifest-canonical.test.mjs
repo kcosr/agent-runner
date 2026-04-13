@@ -231,6 +231,7 @@ test("ad-hoc agent: CLI overrides flow into the synthesized config", async () =>
   assert.equal(loaded.config.timeoutSec, 900);
   assert.equal(loaded.config.unrestricted, true);
   assert.equal(loaded.config.cwd, "/opt/work");
+  assert.equal(loaded.cwdSource, "explicit");
   assert.deepEqual(loaded.config.lockedFields, []);
 });
 
@@ -263,6 +264,7 @@ test("loadedAgentFromManifest reconstructs LoadedAgent from frozen fields", asyn
   assert.equal(loaded.config.effort, "low");
   assert.equal(loaded.config.timeoutSec, 1800);
   assert.deepEqual(loaded.config.lockedFields, ["model"]);
+  assert.equal(loaded.cwdSource, "explicit");
   assert.match(loaded.instructions, /walk the checklist/);
   assert.equal(loaded.sourcePath, join(dir, "agents", "canonical-claude", "agent.md"));
 });

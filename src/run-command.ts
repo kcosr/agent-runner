@@ -27,7 +27,7 @@ export interface ExecuteRunCommandOptions {
   agent?: string;
   assignment?: string;
   definitionCwd?: string;
-  baseDir?: string;
+  callerCwd?: string;
   resumeRun?: string;
   backendSessionId?: string;
   cliVars: Record<string, string>;
@@ -154,7 +154,7 @@ export async function executeRunCommand(opts: ExecuteRunCommandOptions): Promise
     loadedAssignment,
     cliVars: opts.cliVars,
     backend,
-    baseDir: opts.baseDir,
+    callerCwd: opts.callerCwd,
     resume: resumeTarget,
     initialize: opts.initialize,
     bootstrapBackendSessionId: opts.backendSessionId,

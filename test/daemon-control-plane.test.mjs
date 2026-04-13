@@ -379,6 +379,35 @@ test("daemon validates override payloads before calling shared services", async 
   }
 });
 
+test("daemon runs.start keeps callerCwd separate from overrides.cwd", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const callerCwd = "/tmp/daemon-start-caller";
+  let seenCallerCwd;
+  let seenOverrideCwd;
+  const server = await serveDaemon(listenUrl, {
+    async startRun(request) {
+      seenCallerCwd = request.callerCwd;
+      seenOverrideCwd = request.overrides.cwd;
+      return { runId: "daemon-start-cwd" };
+    },
+  });
+  const client = await DaemonClient.connect(listenUrl);
+  try {
+    const started = await client.call("runs.start", {
+      callerCwd,
+      cliVars: {},
+      overrides: {},
+    });
+    assert.equal(started.runId, "daemon-start-cwd");
+    assert.equal(seenCallerCwd, callerCwd);
+    assert.equal(seenOverrideCwd, undefined);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
 test("serve and --connect route CLI commands remotely and fail clearly when no daemon is available", async () => {
   const dir = tempDir();
   writeAgent(dir, "daemon-agent", AGENT);
@@ -413,6 +442,37 @@ test("serve and --connect route CLI commands remotely and fail clearly when no d
     } finally {
       await client.close();
     }
+  } finally {
+    await daemon.stop();
+  }
+});
+
+test("daemon init uses the remote caller cwd when the agent omits cwd", async () => {
+  const daemonDir = tempDir();
+  writeAgent(daemonDir, "daemon-agent", AGENT);
+  writeAssignment(daemonDir, "daemon-work", ASSIGNMENT);
+  const clientDir = tempDir();
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const daemon = await startCliDaemon(daemonDir, listenUrl);
+  try {
+    const output = runCli(
+      [
+        "init",
+        "--connect",
+        listenUrl,
+        "--agent",
+        join(daemonDir, "agents", "daemon-agent", "agent.md"),
+        "--assignment",
+        join(daemonDir, "assignments", "daemon-work", "assignment.md"),
+        "--output-format",
+        "json",
+      ],
+      { cwd: clientDir },
+    );
+    const run = JSON.parse(output);
+    assert.equal(run.cwd, clientDir);
   } finally {
     await daemon.stop();
   }
