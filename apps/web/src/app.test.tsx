@@ -250,6 +250,32 @@ describe("web app", () => {
     expect(screen.queryByText("working")).not.toBeInTheDocument();
   });
 
+  it("resizes the detail drawer via the keyboard separator and persists the width", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await screen.findByText("Build dashboard");
+    await user.click(screen.getByRole("button", { name: /build dashboard/i }));
+
+    const drawer = await screen.findByLabelText("Run detail");
+    expect(drawer.style.getPropertyValue("--drawer-width")).toBe("540px");
+
+    const handle = screen.getByRole("separator", { name: /resize detail drawer/i });
+    handle.focus();
+    await user.keyboard("{ArrowLeft}{ArrowLeft}{ArrowLeft}");
+
+    expect(drawer.style.getPropertyValue("--drawer-width")).toBe("570px");
+    expect(handle.getAttribute("aria-valuenow")).toBe("570");
+
+    const stored = window.localStorage.getItem("task-runner:web:board-settings");
+    const parsed = stored ? (JSON.parse(stored) as { drawerWidth?: number }) : null;
+    expect(parsed?.drawerWidth).toBe(570);
+  });
+
   it("renders markdown in task body and notes", async () => {
     installFetchMock({
       runs: [makeRun()],

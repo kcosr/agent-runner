@@ -1,11 +1,23 @@
 import type { RunDetail } from "@task-runner/core/contracts/runs.js";
-import { useState } from "react";
+import { type CSSProperties, type KeyboardEvent, type PointerEvent, useRef, useState } from "react";
 import { formatRelativeTimestamp, formatTimestamp, truncateMiddle } from "../lib/format.js";
+import {
+  DRAWER_WIDTH_MAX,
+  DRAWER_WIDTH_MIN,
+  clampDrawerWidth,
+  useBoardSettings,
+} from "../lib/settings.js";
 import { ArchiveIcon, CloseIcon, CopyIcon, StopIcon } from "./icons.js";
 import { RunTaskList } from "./run-task-list.js";
 import { StatusBadge } from "./status-badge.js";
 
 type SectionKey = "tasks" | "timing" | "events";
+
+interface DragState {
+  pointerId: number;
+  startX: number;
+  startWidth: number;
+}
 
 function summaryRows(run: RunDetail) {
   return [
@@ -42,7 +54,66 @@ export function RunDetailDrawer({
   run: RunDetail;
 }) {
   const [section, setSection] = useState<SectionKey>("tasks");
+  const { settings, updateSettings } = useBoardSettings();
+  const dragRef = useRef<DragState | null>(null);
+  const [dragWidth, setDragWidth] = useState<number | null>(null);
+  const width = dragWidth ?? settings.drawerWidth;
+  const drawerStyle = { "--drawer-width": `${width}px` } as CSSProperties;
   const backendSessionId = run.backendSessionId;
+
+  function handleResizeStart(event: PointerEvent<HTMLDivElement>) {
+    event.preventDefault();
+    const target = event.currentTarget;
+    target.setPointerCapture(event.pointerId);
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startWidth: width,
+    };
+  }
+
+  function handleResizeMove(event: PointerEvent<HTMLDivElement>) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+    const next = clampDrawerWidth(drag.startWidth + (drag.startX - event.clientX));
+    setDragWidth(next);
+  }
+
+  function handleResizeKey(event: KeyboardEvent<HTMLDivElement>) {
+    const step = event.shiftKey ? 40 : 10;
+    let next: number | null = null;
+    if (event.key === "ArrowLeft") {
+      next = clampDrawerWidth(width + step);
+    } else if (event.key === "ArrowRight") {
+      next = clampDrawerWidth(width - step);
+    } else if (event.key === "Home") {
+      next = DRAWER_WIDTH_MIN;
+    } else if (event.key === "End") {
+      next = DRAWER_WIDTH_MAX;
+    }
+    if (next !== null) {
+      event.preventDefault();
+      updateSettings({ drawerWidth: next });
+    }
+  }
+
+  function handleResizeEnd(event: PointerEvent<HTMLDivElement>) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+    const final = clampDrawerWidth(drag.startWidth + (drag.startX - event.clientX));
+    dragRef.current = null;
+    setDragWidth(null);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    if (final !== settings.drawerWidth) {
+      updateSettings({ drawerWidth: final });
+    }
+  }
 
   return (
     <>
@@ -52,7 +123,22 @@ export function RunDetailDrawer({
         onClick={onClose}
         type="button"
       />
-      <aside aria-label="Run detail" className="drawer">
+      <aside aria-label="Run detail" className="drawer" style={drawerStyle}>
+        <div
+          aria-label="Resize detail drawer"
+          aria-orientation="vertical"
+          aria-valuemax={DRAWER_WIDTH_MAX}
+          aria-valuemin={DRAWER_WIDTH_MIN}
+          aria-valuenow={width}
+          className={dragWidth !== null ? "drawer-resize active" : "drawer-resize"}
+          onKeyDown={handleResizeKey}
+          onPointerCancel={handleResizeEnd}
+          onPointerDown={handleResizeStart}
+          onPointerMove={handleResizeMove}
+          onPointerUp={handleResizeEnd}
+          role="separator"
+          tabIndex={0}
+        />
         <header className="drawer-head">
           <div className="drawer-title">
             <span className="run-id-large">{run.runId}</span>

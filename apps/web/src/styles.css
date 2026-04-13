@@ -213,6 +213,39 @@ body {
   min-height: 0;
 }
 
+.drawer {
+  position: relative;
+  flex-basis: var(--drawer-width, 540px);
+  max-width: var(--drawer-width, 540px);
+}
+
+.drawer-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 6px;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 2;
+}
+
+.drawer-resize::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 2px;
+  background: transparent;
+  transition: background 120ms;
+}
+
+.drawer-resize:hover::before,
+.drawer-resize.active::before {
+  background: var(--ring);
+}
+
 .layout {
   align-items: stretch;
 }
@@ -689,6 +722,10 @@ body {
     max-width: none;
     width: 100%;
     z-index: 10;
+  }
+
+  .drawer-resize {
+    display: none;
   }
 
   .board {

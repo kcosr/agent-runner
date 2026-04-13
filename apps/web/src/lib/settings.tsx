@@ -7,6 +7,18 @@ export interface BoardSettings {
   hideEmptyColumns: boolean;
   collapseFailureStates: boolean;
   search: string;
+  drawerWidth: number;
+}
+
+export const DRAWER_WIDTH_MIN = 360;
+export const DRAWER_WIDTH_MAX = 1200;
+export const DRAWER_WIDTH_DEFAULT = 540;
+
+export function clampDrawerWidth(value: number): number {
+  if (!Number.isFinite(value)) {
+    return DRAWER_WIDTH_DEFAULT;
+  }
+  return Math.min(DRAWER_WIDTH_MAX, Math.max(DRAWER_WIDTH_MIN, Math.round(value)));
 }
 
 const STORAGE_KEY = "task-runner:web:board-settings";
@@ -17,6 +29,7 @@ const DEFAULT_SETTINGS: BoardSettings = {
   hideEmptyColumns: true,
   collapseFailureStates: true,
   search: "",
+  drawerWidth: DRAWER_WIDTH_DEFAULT,
 };
 
 interface BoardSettingsContextValue {
@@ -37,7 +50,8 @@ function loadSettings(): BoardSettings {
       return DEFAULT_SETTINGS;
     }
     const parsed = JSON.parse(raw) as Partial<BoardSettings>;
-    return { ...DEFAULT_SETTINGS, ...parsed };
+    const merged = { ...DEFAULT_SETTINGS, ...parsed };
+    return { ...merged, drawerWidth: clampDrawerWidth(merged.drawerWidth) };
   } catch {
     return DEFAULT_SETTINGS;
   }
