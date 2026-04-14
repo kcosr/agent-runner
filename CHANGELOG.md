@@ -70,6 +70,7 @@
 
 ### Changed
 
+- Polished the web detail drawer's Attachments and Dependencies tabs: attachment rows now render with the shared row card styling and human-readable sizes (e.g. `2.1 MB`), dependency rows show a status badge instead of plain-text status, destructive actions use the destructive-outline button tone, and empty "Depends on" / "Required by" sections are hidden instead of showing duplicate empty-state copy.
 - The web dependency editor now searches candidate runs by run name, assignment name, and run id before submitting the selected dependency run id. ([#30](https://github.com/kcosr/task-runner/pull/30))
 
 - Relaxed resume validation so task-backed runs can resume without a
@@ -125,6 +126,8 @@
 
 ### Fixed
 
+- Fixed attachment uploads when the selected filename contained non-ISO-8859-1 characters (emoji, diacritics, non-Latin scripts): the `x-task-runner-attachment-name` header is now percent-encoded by the web and CLI daemon clients and percent-decoded by the daemon HTTP route.
+- Fixed the attachments tab in the web detail drawer showing the native file input's "Choose File / No file chosen" UI next to the Upload button — the `.sr-only` utility class was referenced but never defined, so the supposedly hidden input was fully visible.
 - Fixed Ctrl+C handling for Codex-managed and daemon-target runs so
   task-runner only reports a clean interrupt after cancellation is
   actually confirmed. Unconfirmed interruption now fails loudly instead

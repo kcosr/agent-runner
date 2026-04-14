@@ -104,6 +104,27 @@ body {
   height: 24px;
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.icon-btn--destructive {
+  color: var(--destructive-foreground);
+}
+
+.icon-btn--destructive:hover {
+  background: color-mix(in srgb, var(--destructive) 12%, transparent);
+  color: var(--destructive-foreground);
+}
+
 .skeleton-block,
 .skeleton-line {
   position: relative;
@@ -475,6 +496,24 @@ body {
   justify-content: space-between;
 }
 
+.dependency-summary {
+  flex-wrap: wrap;
+}
+
+.dependency-summary > span:first-child {
+  color: var(--muted-foreground);
+  font-size: 13px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.dependency-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
 .dependency-field {
   flex: 1 1 auto;
   min-width: 0;
@@ -553,34 +592,61 @@ body {
   min-width: 0;
 }
 
-.dependency-name,
-.dependency-meta {
+.dependency-name {
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.dependency-name {
-  font-weight: 600;
 }
 
 .dependency-meta {
   color: var(--muted-foreground);
   font-family: var(--mono);
   font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.dependency-meta-id {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.dependency-section-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted-foreground);
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.dependency-section-title__count {
+  font-weight: 400;
+  font-size: 12px;
+  font-family: var(--mono);
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 @media (max-width: 900px) {
   .dependency-add-row,
-  .dependency-summary,
   .dependency-row {
     align-items: stretch;
     flex-direction: column;
   }
 
   .dependency-add-row > .btn,
-  .dependency-summary > .btn,
-  .dependency-row > .btn {
+  .dependency-row > .btn,
+  .dependency-row > .dependency-actions {
     width: 100%;
     justify-content: center;
   }

@@ -8,6 +8,7 @@ import { readJsonBody, sendBuffer, sendError, sendJson } from "./http-serializer
 import type { DaemonOperations } from "./operations.js";
 import type { RunSetNameParams, RunsStartParams } from "./protocol.js";
 import {
+  RequestValidationError,
   asRecord,
   optionalEnum,
   optionalHeaderString,
@@ -191,10 +192,16 @@ const routes: RouteDefinition[] = [
     method: "POST",
     pattern: ["api", "runs", ":runId", "attachments"],
     handler: async (req, res, ctx, params) => {
-      const name = requiredHeaderString(
+      const rawName = requiredHeaderString(
         req.headers["x-task-runner-attachment-name"],
         "x-task-runner-attachment-name",
       );
+      let name: string;
+      try {
+        name = decodeURIComponent(rawName);
+      } catch {
+        throw new RequestValidationError("x-task-runner-attachment-name must be percent-encoded");
+      }
       const mimeType =
         optionalHeaderString(req.headers["content-type"], "content-type")?.trim() || undefined;
       sendJson(

@@ -344,7 +344,8 @@ function installFetchMock(
         return new Response(JSON.stringify({ attachments: detail.attachments }), { status: 200 });
       }
       if (init.method === "POST") {
-        const name = headerValue(init.headers, "x-task-runner-attachment-name") ?? "upload.bin";
+        const rawName = headerValue(init.headers, "x-task-runner-attachment-name");
+        const name = rawName ? decodeURIComponent(rawName) : "upload.bin";
         const attachment = {
           id: `att-${detail.attachments.length + 1}`,
           name,
@@ -2102,7 +2103,7 @@ describe("web app", () => {
     await user.click(await findRunCard("Current run"));
     expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /^Dependencies /i }));
+    await user.click(screen.getByRole("button", { name: /^Dependencies\b/i }));
     await user.type(screen.getByLabelText("Dependency run search"), "follow-up");
     await user.click(
       await screen.findByRole("button", {
@@ -2115,7 +2116,8 @@ describe("web app", () => {
     expect(
       await screen.findByRole("button", { name: /remove dependency run-2/i }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/run-2 · running/i)).toBeInTheDocument();
+    expect(screen.getByText("run-2", { selector: ".dependency-meta-id" })).toBeInTheDocument();
+    expect(screen.getAllByText("running", { selector: ".badge" }).length).toBeGreaterThan(0);
   });
 
   it("uploads, downloads, and removes attachments from the detail drawer", async () => {
@@ -2144,7 +2146,7 @@ describe("web app", () => {
     await renderApp();
 
     await user.click(await findRunCard("Attachment run"));
-    await user.click(await screen.findByRole("button", { name: /^Attachments /i }));
+    await user.click(await screen.findByRole("button", { name: /^Attachments\b/i }));
 
     await user.upload(
       screen.getByLabelText("Upload attachment file"),
@@ -2152,11 +2154,11 @@ describe("web app", () => {
     );
 
     expect(await screen.findByText("notes.md")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Download" }));
+    await user.click(screen.getByRole("button", { name: /^Download notes\.md$/ }));
     await waitFor(() => expect(createObjectURL).toHaveBeenCalled());
     expect(anchorClick).toHaveBeenCalled();
 
-    await user.click(screen.getByRole("button", { name: "Remove" }));
+    await user.click(screen.getByRole("button", { name: /^Remove notes\.md$/ }));
     await waitFor(() => expect(screen.getByText("No attachments yet.")).toBeInTheDocument());
     expect(revokeObjectURL).toHaveBeenCalled();
 

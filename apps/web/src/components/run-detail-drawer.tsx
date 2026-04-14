@@ -9,14 +9,27 @@ import {
   useRef,
   useState,
 } from "react";
-import { formatRelativeTimestamp, formatTimestamp, truncateMiddle } from "../lib/format.js";
+import {
+  formatBytes,
+  formatRelativeTimestamp,
+  formatTimestamp,
+  truncateMiddle,
+} from "../lib/format.js";
 import {
   DRAWER_WIDTH_MAX,
   DRAWER_WIDTH_MIN,
   clampDrawerWidth,
   useBoardSettings,
 } from "../lib/settings.js";
-import { ArchiveIcon, CloseIcon, CopyIcon, PencilIcon, StopIcon } from "./icons.js";
+import {
+  ArchiveIcon,
+  CloseIcon,
+  CopyIcon,
+  DownloadIcon,
+  PencilIcon,
+  StopIcon,
+  TrashIcon,
+} from "./icons.js";
 import { RunTaskList } from "./run-task-list.js";
 import { StatusBadge } from "./status-badge.js";
 
@@ -148,6 +161,7 @@ export function RunDetailDrawer({
   const satisfiedDependencies = run.dependencies.filter(
     (dependency) => dependency.satisfied,
   ).length;
+  const totalAttachmentSize = run.attachments.reduce((sum, attachment) => sum + attachment.size, 0);
   const configuredDependencyIds = new Set(run.dependencies.map((dependency) => dependency.runId));
   const eligibleDependencyCandidates = dependencyCandidateRuns.filter(
     (candidate) => candidate.runId !== run.runId && !configuredDependencyIds.has(candidate.runId),
@@ -539,10 +553,13 @@ export function RunDetailDrawer({
               onClick={() => setSection("tasks")}
               type="button"
             >
-              Tasks{" "}
-              <span className="tab-count">
-                {run.tasksCompleted}/{run.tasksTotal}
-              </span>
+              Tasks
+              {run.tasksTotal > 0 ? (
+                <span className="tab-count">
+                  {" "}
+                  {run.tasksCompleted}/{run.tasksTotal}
+                </span>
+              ) : null}
             </button>
             <button
               aria-selected={section === "attachments"}
@@ -550,7 +567,10 @@ export function RunDetailDrawer({
               onClick={() => setSection("attachments")}
               type="button"
             >
-              Attachments <span className="tab-count">{run.attachments.length}</span>
+              Attachments
+              {run.attachments.length > 0 ? (
+                <span className="tab-count"> {run.attachments.length}</span>
+              ) : null}
             </button>
             <button
               aria-selected={section === "dependencies"}
@@ -558,10 +578,13 @@ export function RunDetailDrawer({
               onClick={() => setSection("dependencies")}
               type="button"
             >
-              Dependencies{" "}
-              <span className="tab-count">
-                {satisfiedDependencies}/{run.dependencies.length}
-              </span>
+              Dependencies
+              {run.dependencies.length > 0 ? (
+                <span className="tab-count">
+                  {" "}
+                  {satisfiedDependencies}/{run.dependencies.length}
+                </span>
+              ) : null}
             </button>
             <button
               aria-selected={section === "timing"}
@@ -594,54 +617,59 @@ export function RunDetailDrawer({
                   <span>
                     {run.attachments.length === 0
                       ? "No attachments yet."
-                      : `${run.attachments.length} attachment${run.attachments.length === 1 ? "" : "s"} available.`}
+                      : `${run.attachments.length} attachment${run.attachments.length === 1 ? "" : "s"} · ${formatBytes(totalAttachmentSize)}`}
                   </span>
-                  <div className="notice__actions">
-                    <input
-                      aria-label="Upload attachment file"
-                      className="sr-only"
-                      onChange={handleAttachmentInputChange}
-                      ref={attachmentInputRef}
-                      type="file"
-                    />
-                    <button
-                      className="btn"
-                      disabled={actionsLocked}
-                      onClick={() => attachmentInputRef.current?.click()}
-                      type="button"
-                    >
-                      {uploadAttachmentPending ? "Uploading..." : "Upload"}
-                    </button>
-                  </div>
+                  <input
+                    aria-label="Upload attachment file"
+                    className="sr-only"
+                    onChange={handleAttachmentInputChange}
+                    ref={attachmentInputRef}
+                    type="file"
+                  />
+                  <button
+                    className="btn"
+                    disabled={actionsLocked}
+                    onClick={() => attachmentInputRef.current?.click()}
+                    type="button"
+                  >
+                    {uploadAttachmentPending ? "Uploading..." : "Upload"}
+                  </button>
                 </div>
 
                 {run.attachments.length === 0 ? null : (
                   <ul aria-label="Attachment list" className="dependency-list">
                     {run.attachments.map((attachment) => (
-                      <li className="dependency-item" key={attachment.id}>
+                      <li className="dependency-row" key={attachment.id}>
                         <div className="dependency-copy">
-                          <div className="dependency-copy-title">{attachment.name}</div>
-                          <div className="dependency-copy-meta">
-                            {attachment.mimeType} · {attachment.size} B ·{" "}
-                            {formatTimestamp(attachment.addedAt)}
-                          </div>
+                          <span className="dependency-name">{attachment.name}</span>
+                          <span className="dependency-meta">
+                            <span className="dependency-meta-id">{attachment.mimeType}</span>
+                            <span>·</span>
+                            <span>{formatBytes(attachment.size)}</span>
+                            <span>·</span>
+                            <span>{formatTimestamp(attachment.addedAt)}</span>
+                          </span>
                         </div>
                         <div className="dependency-actions">
                           <button
-                            className="btn"
+                            aria-label={`Download ${attachment.name}`}
+                            className="icon-btn"
                             disabled={actionsLocked}
                             onClick={() => void submitAttachmentDownload(attachment)}
+                            title={downloadAttachmentPending ? "Downloading..." : "Download"}
                             type="button"
                           >
-                            {downloadAttachmentPending ? "Downloading..." : "Download"}
+                            <DownloadIcon aria-hidden="true" />
                           </button>
                           <button
-                            className="btn"
+                            aria-label={`Remove ${attachment.name}`}
+                            className="icon-btn icon-btn--destructive"
                             disabled={actionsLocked}
                             onClick={() => void submitAttachmentRemove(attachment.id)}
+                            title={removeAttachmentPending ? "Removing..." : "Remove"}
                             type="button"
                           >
-                            {removeAttachmentPending ? "Removing..." : "Remove"}
+                            <TrashIcon aria-hidden="true" />
                           </button>
                         </div>
                       </li>
@@ -663,7 +691,7 @@ export function RunDetailDrawer({
                   </span>
                   {canEditDependencies && run.dependencies.length > 0 ? (
                     <button
-                      className="btn"
+                      className="btn btn-destructive-outline"
                       disabled={actionsLocked}
                       onClick={() => void submitDependencyClear()}
                       type="button"
@@ -738,61 +766,73 @@ export function RunDetailDrawer({
                   </div>
                 ) : null}
 
-                <div className="dependency-section">
-                  <h4 className="drawer-section-title">Depends on</h4>
-                  {run.dependencies.length === 0 ? (
-                    <p className="muted-inline">No dependencies.</p>
-                  ) : (
+                {run.dependencies.length > 0 ? (
+                  <div className="dependency-section">
+                    <h4 className="dependency-section-title">
+                      Depends on{" "}
+                      <span className="dependency-section-title__count">
+                        {run.dependencies.length}
+                      </span>
+                    </h4>
                     <ul className="dependency-list">
                       {run.dependencies.map((dependency) => (
                         <li className="dependency-row" key={dependency.runId}>
                           <div className="dependency-copy">
                             <span className="dependency-name">{dependency.name ?? "Unnamed"}</span>
                             <span className="dependency-meta">
-                              {dependency.runId} ·{" "}
-                              {dependency.missing
-                                ? "Missing"
-                                : dependency.satisfied
-                                  ? "Satisfied"
-                                  : dependency.effectiveStatus}
+                              <span className="dependency-meta-id">{dependency.runId}</span>
+                              {dependency.missing || !dependency.effectiveStatus ? (
+                                <span className="badge badge-error">missing</span>
+                              ) : (
+                                <StatusBadge status={dependency.effectiveStatus} />
+                              )}
                             </span>
                           </div>
                           {canEditDependencies ? (
                             <button
                               aria-label={`Remove dependency ${dependency.runId}`}
-                              className="btn"
+                              className="icon-btn icon-btn--destructive"
                               disabled={actionsLocked}
                               onClick={() => void submitDependencyRemove(dependency.runId)}
+                              title={removeDependencyPending ? "Removing..." : "Remove"}
                               type="button"
                             >
-                              {removeDependencyPending ? "Removing..." : "Remove"}
+                              <TrashIcon aria-hidden="true" />
                             </button>
                           ) : null}
                         </li>
                       ))}
                     </ul>
-                  )}
-                </div>
+                  </div>
+                ) : null}
 
-                <div className="dependency-section">
-                  <h4 className="drawer-section-title">Required by</h4>
-                  {run.dependents.length === 0 ? (
-                    <p className="muted-inline">No dependents.</p>
-                  ) : (
+                {run.dependents.length > 0 ? (
+                  <div className="dependency-section">
+                    <h4 className="dependency-section-title">
+                      Required by{" "}
+                      <span className="dependency-section-title__count">
+                        {run.dependents.length}
+                      </span>
+                    </h4>
                     <ul className="dependency-list">
                       {run.dependents.map((dependent) => (
                         <li className="dependency-row" key={dependent.runId}>
                           <div className="dependency-copy">
                             <span className="dependency-name">{dependent.name ?? "Unnamed"}</span>
                             <span className="dependency-meta">
-                              {dependent.runId} · {dependent.effectiveStatus}
+                              <span className="dependency-meta-id">{dependent.runId}</span>
+                              {dependent.missing || !dependent.effectiveStatus ? (
+                                <span className="badge badge-error">missing</span>
+                              ) : (
+                                <StatusBadge status={dependent.effectiveStatus} />
+                              )}
                             </span>
                           </div>
                         </li>
                       ))}
                     </ul>
-                  )}
-                </div>
+                  </div>
+                ) : null}
               </div>
             </section>
           ) : null}

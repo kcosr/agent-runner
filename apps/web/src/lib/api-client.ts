@@ -273,7 +273,7 @@ export function createApiClient(config: AppRuntimeConfig) {
     },
     async uploadAttachment(runId: string, file: File): Promise<RunAttachment> {
       const headers: Record<string, string> = {
-        "x-task-runner-attachment-name": file.name,
+        "x-task-runner-attachment-name": encodeURIComponent(file.name),
         accept: "application/json",
       };
       if (file.type) {

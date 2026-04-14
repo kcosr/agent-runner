@@ -96,7 +96,7 @@ export async function daemonAddAttachment(
   input: { sourcePath: string; name: string; mimeType?: string },
 ): Promise<RunAttachment> {
   const headers: Record<string, string> = {
-    "x-task-runner-attachment-name": input.name,
+    "x-task-runner-attachment-name": encodeURIComponent(input.name),
     accept: "application/json",
   };
   if (input.mimeType) {
