@@ -1,3 +1,8 @@
+import type {
+  RunAttachment,
+  RunAttachmentDownloadResult,
+  RunAttachmentRemoveResult,
+} from "@task-runner/core/contracts/attachments.js";
 import type { RunDetail } from "@task-runner/core/contracts/runs.js";
 import type {
   DefinitionDetailsResult,
@@ -53,6 +58,7 @@ export function renderRunStatus(detail: RunDetail): string {
   lines.push(
     `Dependencies: ${detail.dependencies.length === 0 ? "ready (0 total)" : `${detail.dependencies.filter((dependency) => dependency.satisfied).length}/${detail.dependencies.length} satisfied`}`,
   );
+  lines.push(`Attachments: ${detail.attachments.length}`);
 
   if (detail.tasks.length > 0) {
     lines.push("");
@@ -283,4 +289,40 @@ export function renderTaskAdded(result: TaskMutationResult): string {
 
 export function renderTaskSnapshot(task: TaskDetailsResult["task"]): string {
   return `id: ${task.id}\ntitle: ${task.title}\nstatus: ${task.status}\nbody:\n${task.body}\nnotes:\n${task.notes}\n`;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1).replace(/\.0$/, "")} KB`;
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(1).replace(/\.0$/, "")} MB`;
+}
+
+export function renderAttachmentList(attachments: RunAttachment[]): string {
+  if (attachments.length === 0) {
+    return "No attachments.\n";
+  }
+  return `${attachments
+    .map(
+      (attachment) =>
+        `${attachment.id}  ${attachment.name}  ${attachment.mimeType}  ${formatBytes(attachment.size)}  ${attachment.addedAt}`,
+    )
+    .join("\n")}\n`;
+}
+
+export function renderAttachmentAdded(runId: string, attachment: RunAttachment): string {
+  return `task-runner: added attachment ${attachment.id} "${attachment.name}" to run ${runId}\n`;
+}
+
+export function renderAttachmentRemoved(result: RunAttachmentRemoveResult): string {
+  return result.changed
+    ? `task-runner: removed attachment ${result.attachmentId} from run ${result.runId}\n`
+    : `task-runner: attachment ${result.attachmentId} was already absent from run ${result.runId}\n`;
+}
+
+export function renderAttachmentDownloaded(result: RunAttachmentDownloadResult): string {
+  return `task-runner: downloaded attachment ${result.id} to ${result.outputPath}\n`;
 }

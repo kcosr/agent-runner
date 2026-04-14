@@ -3,10 +3,13 @@ import { createServer } from "node:http";
 import { type Socket, createServer as createNetServer } from "node:net";
 import {
   addDependency,
+  addRunAttachmentFromStream,
   appendNotes,
   archive,
   clearDependencies,
   createTask,
+  getAttachment,
+  getAttachmentList,
   getDefinition,
   getDefinitionList,
   getRun,
@@ -15,6 +18,7 @@ import {
   getTaskList,
   initRun,
   removeDependency,
+  removeRunAttachment,
   renameRun,
   reset,
   resumeRun,
@@ -187,6 +191,8 @@ export async function serveDaemon(
   const app: DaemonHandlers = {
     getRun,
     getRunList,
+    getAttachment,
+    getAttachmentList,
     getTask,
     getTaskList,
     getDefinition,
@@ -197,6 +203,8 @@ export async function serveDaemon(
     addDependency,
     removeDependency,
     clearDependencies,
+    addRunAttachmentFromStream,
+    removeRunAttachment,
     reset,
     updateTask,
     appendNotes,
@@ -350,11 +358,14 @@ export async function serveDaemon(
     ...app,
     getRun: getDaemonRun,
     getRunList: getDaemonRunList,
+    getAttachment,
+    getAttachmentList,
     initRun: (request) =>
       app.initRun({
         ...request,
         execution: daemonExecution(daemonInstanceId),
       }),
+    addRunAttachmentFromStream,
     daemonInfo: {
       daemonInstanceId,
       pid: process.pid,
@@ -380,6 +391,7 @@ export async function serveDaemon(
           emitEvent,
         }),
       ),
+    removeRunAttachment,
     abortRun,
   });
 

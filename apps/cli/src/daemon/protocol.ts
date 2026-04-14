@@ -1,6 +1,10 @@
 import type { DefinitionDetail, RunCommandOverrides } from "@task-runner/core/app/service.js";
 import type { DefinitionEntry } from "@task-runner/core/config/loader.js";
 import type {
+  RunAttachment,
+  RunAttachmentRemoveResult,
+} from "@task-runner/core/contracts/attachments.js";
+import type {
   RunArchiveResult,
   RunDependenciesResult,
   RunDetail,
@@ -170,4 +174,16 @@ export interface RunDependenciesRpcResult {
 
 export interface RunsStartResult {
   runId: string;
+}
+
+export interface AttachmentsListResult {
+  attachments: RunAttachment[];
+}
+
+export interface AttachmentResult {
+  attachment: RunAttachment;
+}
+
+export interface AttachmentRemoveHttpResult {
+  result: RunAttachmentRemoveResult;
 }

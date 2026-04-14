@@ -1,6 +1,8 @@
+import type { RunAttachment } from "@task-runner/core/contracts/attachments.js";
 import type { RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
 import {
   type CSSProperties,
+  type ChangeEvent,
   type KeyboardEvent,
   type PointerEvent,
   useEffect,
@@ -18,7 +20,7 @@ import { ArchiveIcon, CloseIcon, CopyIcon, PencilIcon, StopIcon } from "./icons.
 import { RunTaskList } from "./run-task-list.js";
 import { StatusBadge } from "./status-badge.js";
 
-type SectionKey = "tasks" | "dependencies" | "timing" | "events";
+type SectionKey = "tasks" | "attachments" | "dependencies" | "timing" | "events";
 
 interface DragState {
   pointerId: number;
@@ -93,10 +95,13 @@ export function RunDetailDrawer({
   onClearDependencies,
   onClose,
   onCopy,
+  onDownloadAttachment,
   onRemoveDependency,
+  onRemoveAttachment,
   onRename,
   onResume,
   onUnarchive,
+  onUploadAttachment,
   run,
 }: {
   dependencyCandidateRuns: RunSummary[];
@@ -108,10 +113,13 @@ export function RunDetailDrawer({
   onClearDependencies: () => Promise<void>;
   onClose: () => void;
   onCopy: (value: string, label: string) => void;
+  onDownloadAttachment: (attachmentId: string, name: string) => Promise<void>;
   onRemoveDependency: (dependencyRunId: string) => Promise<void>;
+  onRemoveAttachment: (attachmentId: string) => Promise<void>;
   onRename: (name: string | null) => Promise<void>;
   onResume: () => void;
   onUnarchive: () => void;
+  onUploadAttachment: (file: File) => Promise<void>;
   run: RunDetail;
 }) {
   const [section, setSection] = useState<SectionKey>("tasks");
@@ -122,12 +130,16 @@ export function RunDetailDrawer({
   const { settings, updateSettings } = useBoardSettings();
   const dragRef = useRef<DragState | null>(null);
   const nameInputRef = useRef<HTMLInputElement | null>(null);
+  const attachmentInputRef = useRef<HTMLInputElement | null>(null);
   const [dragWidth, setDragWidth] = useState<number | null>(null);
   const width = dragWidth ?? settings.drawerWidth;
   const drawerStyle = { "--drawer-width": `${width}px` } as CSSProperties;
   const backendSessionId = run.backendSessionId;
   const actionsLocked = actionPending !== undefined;
   const renamePending = actionPending === "rename";
+  const uploadAttachmentPending = actionPending === "upload-attachment";
+  const removeAttachmentPending = actionPending === "remove-attachment";
+  const downloadAttachmentPending = actionPending === "download-attachment";
   const visibleName = run.name ?? "Unnamed";
   const canEditDependencies = run.status === "initialized";
   const addDependencyPending = actionPending === "add-dependency";
@@ -319,6 +331,41 @@ export function RunDetailDrawer({
     }
   }
 
+  async function handleAttachmentInputChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || uploadAttachmentPending) {
+      return;
+    }
+    try {
+      await onUploadAttachment(file);
+    } catch {
+      // actionError is surfaced by the shared mutation handler.
+    }
+  }
+
+  async function submitAttachmentDownload(attachment: RunAttachment) {
+    if (downloadAttachmentPending) {
+      return;
+    }
+    try {
+      await onDownloadAttachment(attachment.id, attachment.name);
+    } catch {
+      // actionError is surfaced by the shared mutation handler.
+    }
+  }
+
+  async function submitAttachmentRemove(attachmentId: string) {
+    if (removeAttachmentPending) {
+      return;
+    }
+    try {
+      await onRemoveAttachment(attachmentId);
+    } catch {
+      // actionError is surfaced by the shared mutation handler.
+    }
+  }
+
   return (
     <>
       <button
@@ -498,6 +545,14 @@ export function RunDetailDrawer({
               </span>
             </button>
             <button
+              aria-selected={section === "attachments"}
+              className={section === "attachments" ? "tab active" : "tab"}
+              onClick={() => setSection("attachments")}
+              type="button"
+            >
+              Attachments <span className="tab-count">{run.attachments.length}</span>
+            </button>
+            <button
               aria-selected={section === "dependencies"}
               className={section === "dependencies" ? "tab active" : "tab"}
               onClick={() => setSection("dependencies")}
@@ -529,6 +584,71 @@ export function RunDetailDrawer({
           {section === "tasks" ? (
             <section aria-label="Tasks" className="drawer-panel drawer-panel--tasks">
               <RunTaskList tasks={run.tasks} />
+            </section>
+          ) : null}
+
+          {section === "attachments" ? (
+            <section aria-label="Attachments" className="drawer-panel drawer-panel--attachments">
+              <div className="drawer-panel-card dependency-panel">
+                <div className="dependency-summary">
+                  <span>
+                    {run.attachments.length === 0
+                      ? "No attachments yet."
+                      : `${run.attachments.length} attachment${run.attachments.length === 1 ? "" : "s"} available.`}
+                  </span>
+                  <div className="notice__actions">
+                    <input
+                      aria-label="Upload attachment file"
+                      className="sr-only"
+                      onChange={handleAttachmentInputChange}
+                      ref={attachmentInputRef}
+                      type="file"
+                    />
+                    <button
+                      className="btn"
+                      disabled={actionsLocked}
+                      onClick={() => attachmentInputRef.current?.click()}
+                      type="button"
+                    >
+                      {uploadAttachmentPending ? "Uploading..." : "Upload"}
+                    </button>
+                  </div>
+                </div>
+
+                {run.attachments.length === 0 ? null : (
+                  <ul aria-label="Attachment list" className="dependency-list">
+                    {run.attachments.map((attachment) => (
+                      <li className="dependency-item" key={attachment.id}>
+                        <div className="dependency-copy">
+                          <div className="dependency-copy-title">{attachment.name}</div>
+                          <div className="dependency-copy-meta">
+                            {attachment.mimeType} · {attachment.size} B ·{" "}
+                            {formatTimestamp(attachment.addedAt)}
+                          </div>
+                        </div>
+                        <div className="dependency-actions">
+                          <button
+                            className="btn"
+                            disabled={actionsLocked}
+                            onClick={() => void submitAttachmentDownload(attachment)}
+                            type="button"
+                          >
+                            {downloadAttachmentPending ? "Downloading..." : "Download"}
+                          </button>
+                          <button
+                            className="btn"
+                            disabled={actionsLocked}
+                            onClick={() => void submitAttachmentRemove(attachment.id)}
+                            type="button"
+                          >
+                            {removeAttachmentPending ? "Removing..." : "Remove"}
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </section>
           ) : null}
 

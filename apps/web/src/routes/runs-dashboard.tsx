@@ -70,10 +70,13 @@ export function RunsDashboardRoute() {
           onClearDependencies={state.runActions.clearDependencies}
           onClose={state.closeRun}
           onCopy={state.copyText}
+          onDownloadAttachment={state.runActions.downloadAttachment}
           onRemoveDependency={state.runActions.removeDependency}
+          onRemoveAttachment={state.runActions.removeAttachment}
           onRename={state.runActions.rename}
           onResume={state.runActions.resume}
           onUnarchive={state.runActions.unarchive}
+          onUploadAttachment={state.runActions.uploadAttachment}
           selectedRunId={state.selectedRunId}
           selectedRunQuery={state.selectedRunQuery}
         />

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { LOCKABLE_FIELDS, TASK_MODES } from "../core/config/schema.js";
+import type { RunAttachment } from "./attachments.js";
 import type {
   RunAbortReason,
   RunArchiveResult,
@@ -74,6 +75,16 @@ export const runCapabilitiesSchema: z.ZodType<RunCapabilities> = z.object({
   taskMutation: runTaskMutationCapabilitiesSchema,
 });
 
+export const runAttachmentSchema: z.ZodType<RunAttachment> = z.object({
+  id: z.string(),
+  name: z.string(),
+  mimeType: z.string(),
+  size: z.number(),
+  sha256: z.string(),
+  addedAt: z.string(),
+  relativePath: z.string(),
+});
+
 export const runDependencyStateSchema: z.ZodType<RunDependencyState> = z.object({
   ready: z.boolean(),
   total: z.number(),
@@ -107,6 +118,7 @@ export const runSummarySchema: z.ZodType<RunSummary> = z.object({
   endedAt: z.string().nullable(),
   tasksCompleted: z.number(),
   tasksTotal: z.number(),
+  attachmentCount: z.number(),
   dependencyState: runDependencyStateSchema,
   execution: runExecutionSchema,
   capabilities: runCapabilitiesSchema,
@@ -149,6 +161,7 @@ export const runDetailSchema: z.ZodType<RunDetail> = z.object({
   sessionCount: z.number(),
   tasksCompleted: z.number(),
   tasksTotal: z.number(),
+  attachments: z.array(runAttachmentSchema),
   dependencies: z.array(runDependencyDetailSchema),
   dependents: z.array(runDependencyDetailSchema),
   tasks: z.array(runTaskSummarySchema),

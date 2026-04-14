@@ -141,6 +141,12 @@ chat output.
   Resume rejects runs with unsatisfied dependencies, and CLI/daemon/web
   run projections expose dependency state plus direct dependency and
   dependent lists.
+- **Run attachments**: `attachment add`, `attachment list`,
+  `attachment download`, and `attachment remove` let a run carry
+  immutable file blobs with canonical bytes stored inside the run
+  workspace. CLI, daemon HTTP, and the web detail drawer all read the
+  same manifest-backed attachment metadata, with default limits of 20
+  attachments per run, 25 MiB per file, and 100 MiB total bytes.
 - **Sidecar task mutation**: `task-runner task set` / `task add` let
   an external agent or script drive a run's task list through the CLI
   without task-runner ever invoking a backend. Pair with the
@@ -463,7 +469,7 @@ sequenceDiagram
 ### Workspaces and the run manifest
 
 Each run gets a workspace directory at
-`${TASK_RUNNER_STATE_DIR}/runs/<repo-name>/<run-id>/` with three things
+`${TASK_RUNNER_STATE_DIR}/runs/<repo-name>/<run-id>/` with four things
 in it:
 
 - **`run.json`** — the canonical record, written at run start,
@@ -480,6 +486,9 @@ in it:
 - **`attempts/NN.json`** — raw per-attempt logs (stdout, stderr,
   start/end timestamps), one per backend invocation. Useful for
   forensics.
+- **`attachments/<attachment-id>/<sanitized-name>`** — canonical file
+  storage for run attachments. The bytes live here; `run.json`
+  persists only attachment metadata and workspace-relative paths.
 
 The manifest is the load-bearing piece: **it is the canonical source
 of truth for a run after first write**. Every other CLI command
@@ -492,10 +501,18 @@ once the manifest is written, the agent had no source file to begin
 with and the run doesn't care.
 
 Manifest schema is versioned — the current generation is
-`schemaVersion: 3`. Older runs (v1 pre-canonical and v2
-pre-reset-seed) are not resumable under this version of task-runner;
-attempting to do so surfaces a clear error and you're expected to
-start a fresh run.
+`schemaVersion: 6`. Runtime reads are a hot cut: older manifests are
+not silently upgraded while reading or resuming. If you still have
+`schemaVersion: 5` runs from before attachments landed, use the
+offline migration script first:
+
+```bash
+# Dry-run existing state
+node scripts/migrate-manifests-v6.mjs --root "${TASK_RUNNER_STATE_DIR:-$HOME/.local/state/task-runner}"
+
+# Apply the upgrade in place
+node scripts/migrate-manifests-v6.mjs --root "${TASK_RUNNER_STATE_DIR:-$HOME/.local/state/task-runner}" --write
+```
 
 For the full schema and the rationale, see
 [`docs/design.md`](docs/design.md).
@@ -867,6 +884,11 @@ diverge. For passive runs, `effectiveStatus` becomes `running` when
 any task is `in_progress`, while the canonical manifest status stays
 `initialized` until the task set reaches a terminal state.
 
+Attachment metadata is part of the same JSON contract: `RunDetail`
+includes `attachments`, `list runs --output-format json` exposes
+`attachmentCount`, text `status` shows the attachment count, and the
+web detail drawer uses the same data for its attachment tab.
+
 The JSON `RunDetail` contract also carries a machine-facing
 `execution` block plus a machine-facing `capabilities` block:
 
@@ -917,6 +939,48 @@ fresh `run` or `init` may override the assignment with
 - `task add` remains rejected while a non-passive run is `running`,
   even in `taskMode=cli`. Live mutation in v1 is limited to status and
   notes on existing tasks.
+
+### `task-runner attachment`
+
+Manage files attached to a run without mutating its prompt or backend
+session state. These commands work for initialized, running, terminal,
+and archived runs; the attachment metadata is persisted in `run.json`
+and the canonical bytes are stored inside the run workspace.
+
+Subcommands:
+
+- `attachment add <run-id|path> <source-file>` — copy a local file into
+  the run workspace. Defaults the attachment name to the source
+  basename; `--name` and `--mime-type` override the display name and
+  MIME type.
+- `attachment list <run-id|path>` — list the run's attachments.
+- `attachment download <run-id|path> <attachment-id> <output-path>` —
+  copy one attachment back out. If `output-path` is an existing
+  directory, task-runner writes `<output-path>/<attachment.name>`.
+- `attachment remove <run-id|path> <attachment-id>` — delete the
+  manifest entry and stored bytes.
+
+```bash
+task-runner attachment add <run-id> ./notes.md
+task-runner attachment add <run-id> ./build.zip --name artifacts.zip --mime-type application/zip
+task-runner attachment list <run-id>
+task-runner attachment download <run-id> <attachment-id> ./downloads/
+task-runner attachment remove <run-id> <attachment-id>
+```
+
+Options:
+
+| Flag | Purpose |
+|---|---|
+| `--name <text>` | `attachment add` only. Optional display name. |
+| `--mime-type <type>` | `attachment add` only. Optional MIME override; otherwise task-runner derives from filename extension and falls back to `application/octet-stream`. |
+| `--connect <ws-url>` | Route through the daemon. Attachment bytes use the daemon's HTTP attachment endpoints rather than WebSocket JSON-RPC payloads. |
+| `--output-format <text\|json>` | Default `text`. `json` returns the created attachment row, the attachment array, the remove result, or the download result including `outputPath`. |
+
+Downloads are intentionally conservative: task-runner never overwrites
+an existing destination file, and a path ending in `/` is treated as a
+directory that must already exist. The web detail drawer uses the same
+HTTP download/remove flows as daemon-routed CLI commands.
 
 ### `task-runner task` commands
 

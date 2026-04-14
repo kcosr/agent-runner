@@ -27,6 +27,9 @@ export type RunActionPending =
   | "resume"
   | "abort"
   | "rename"
+  | "upload-attachment"
+  | "remove-attachment"
+  | "download-attachment"
   | "add-dependency"
   | "remove-dependency"
   | "clear-dependencies";
@@ -355,6 +358,51 @@ export function useRunsDashboardState() {
       await invalidateRunQueries(result.runId);
     },
   });
+  const uploadAttachmentMutation = useMutation({
+    mutationFn: ({ runId, file }: { runId: string; file: File }) =>
+      api.uploadAttachment(runId, file),
+    onError: (error: Error) => {
+      setActionError(error.message);
+    },
+    onSuccess: async (_result, { runId }) => {
+      setActionError(undefined);
+      await invalidateRunQueries(runId);
+    },
+  });
+  const removeAttachmentMutation = useMutation({
+    mutationFn: ({ runId, attachmentId }: { runId: string; attachmentId: string }) =>
+      api.removeAttachment(runId, attachmentId),
+    onError: (error: Error) => {
+      setActionError(error.message);
+    },
+    onSuccess: async (result) => {
+      setActionError(undefined);
+      await invalidateRunQueries(result.runId);
+    },
+  });
+  const downloadAttachmentMutation = useMutation({
+    mutationFn: async ({
+      runId,
+      attachmentId,
+      name,
+    }: { runId: string; attachmentId: string; name: string }) => {
+      const blob = await api.downloadAttachment(runId, attachmentId);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = name;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    },
+    onError: (error: Error) => {
+      setActionError(error.message);
+    },
+    onSuccess: () => {
+      setActionError(undefined);
+    },
+  });
 
   const actionPending: RunActionPending | undefined = archiveMutation.isPending
     ? "archive"
@@ -366,13 +414,19 @@ export function useRunsDashboardState() {
           ? "abort"
           : renameMutation.isPending
             ? "rename"
-            : addDependencyMutation.isPending
-              ? "add-dependency"
-              : removeDependencyMutation.isPending
-                ? "remove-dependency"
-                : clearDependenciesMutation.isPending
-                  ? "clear-dependencies"
-                  : undefined;
+            : uploadAttachmentMutation.isPending
+              ? "upload-attachment"
+              : removeAttachmentMutation.isPending
+                ? "remove-attachment"
+                : downloadAttachmentMutation.isPending
+                  ? "download-attachment"
+                  : addDependencyMutation.isPending
+                    ? "add-dependency"
+                    : removeDependencyMutation.isPending
+                      ? "remove-dependency"
+                      : clearDependenciesMutation.isPending
+                        ? "clear-dependencies"
+                        : undefined;
 
   function setColumnCollapsed(columnKey: string, collapsed: boolean) {
     const isCollapsed = collapsedColumnKeySet.has(columnKey);
@@ -438,13 +492,22 @@ export function useRunsDashboardState() {
       clearDependencies: async (runId: string) => {
         await clearDependenciesMutation.mutateAsync(runId);
       },
+      downloadAttachment: async (runId: string, attachmentId: string, name: string) => {
+        await downloadAttachmentMutation.mutateAsync({ runId, attachmentId, name });
+      },
       removeDependency: async (runId: string, dependencyRunId: string) => {
         await removeDependencyMutation.mutateAsync({ runId, dependencyRunId });
+      },
+      removeAttachment: async (runId: string, attachmentId: string) => {
+        await removeAttachmentMutation.mutateAsync({ runId, attachmentId });
       },
       rename: async (runId: string, name: string | null) => {
         await renameMutation.mutateAsync({ runId, name });
       },
       resume: (runId: string) => resumeMutation.mutate(runId),
+      uploadAttachment: async (runId: string, file: File) => {
+        await uploadAttachmentMutation.mutateAsync({ runId, file });
+      },
       unarchive: (runId: string) => unarchiveMutation.mutate(runId),
     },
     runs,

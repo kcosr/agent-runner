@@ -33,7 +33,9 @@ function taskLockPath(workspaceDir: string): string {
   return `${workspaceDir}/${LOCK_DIR_NAME}`;
 }
 
-function withFilesystemLock<T>(lockPath: string, fn: () => T): T {
+function withFilesystemLock<T>(lockPath: string, fn: () => T): T;
+function withFilesystemLock<T>(lockPath: string, fn: () => Promise<T>): Promise<T>;
+function withFilesystemLock<T>(lockPath: string, fn: () => T | Promise<T>): T | Promise<T> {
   const deadline = Date.now() + LOCK_TIMEOUT_MS;
   mkdirSync(dirname(lockPath), { recursive: true });
 
@@ -53,22 +55,44 @@ function withFilesystemLock<T>(lockPath: string, fn: () => T): T {
     }
   }
 
+  let result: T | Promise<T>;
   try {
-    return fn();
-  } finally {
+    result = fn();
+  } catch (error) {
     rmSync(lockPath, { recursive: true, force: true });
+    throw error;
   }
+
+  if (result instanceof Promise) {
+    return result.finally(() => {
+      rmSync(lockPath, { recursive: true, force: true });
+    });
+  }
+
+  rmSync(lockPath, { recursive: true, force: true });
+  return result;
 }
 
-export function withTaskStateLock<T>(workspaceDir: string, fn: () => T): T {
+export function withTaskStateLock<T>(workspaceDir: string, fn: () => T): T;
+export function withTaskStateLock<T>(workspaceDir: string, fn: () => Promise<T>): Promise<T>;
+export function withTaskStateLock<T>(
+  workspaceDir: string,
+  fn: () => T | Promise<T>,
+): T | Promise<T> {
   return withFilesystemLock(taskLockPath(workspaceDir), fn);
 }
 
+export function withGlobalStateLock<T>(lockName: string, fn: () => T, env?: NodeJS.ProcessEnv): T;
 export function withGlobalStateLock<T>(
   lockName: string,
-  fn: () => T,
+  fn: () => Promise<T>,
+  env?: NodeJS.ProcessEnv,
+): Promise<T>;
+export function withGlobalStateLock<T>(
+  lockName: string,
+  fn: () => T | Promise<T>,
   env: NodeJS.ProcessEnv = process.env,
-): T {
+): T | Promise<T> {
   const runsRoot = resolveRunsRoot(env);
   mkdirSync(runsRoot, { recursive: true });
   return withFilesystemLock(join(runsRoot, `.${lockName}.lock`), fn);
@@ -94,6 +118,18 @@ export function taskMapFromManifestSnapshot(manifest: RunManifest): Map<string, 
     });
   }
   return tasks;
+}
+
+export function refreshManifestAttachments(manifest: RunManifest): void {
+  try {
+    const latest = readManifestSnapshot(manifest.workspaceDir);
+    manifest.attachments = latest.attachments.map((attachment) => ({ ...attachment }));
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    if (err.code !== "ENOENT") {
+      throw error;
+    }
+  }
 }
 
 export function refreshManifestTaskState(manifest: RunManifest): Map<string, TaskState> {

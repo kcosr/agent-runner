@@ -73,6 +73,7 @@ function makeRun(
     endedAt: null,
     tasksCompleted: 1,
     tasksTotal: 4,
+    attachmentCount: 0,
     dependencyState: {
       ready: true,
       total: 0,
@@ -165,6 +166,7 @@ function makeDetail(
     sessionCount: 1,
     tasksCompleted: 1,
     tasksTotal: 4,
+    attachments: [],
     dependencies: [],
     dependents: [],
     tasks: [
@@ -286,6 +288,35 @@ function installFetchMock(
     state.runs = state.runs.map((run) => (run.runId === runId ? { ...run, dependencyState } : run));
   }
 
+  function syncAttachmentCount(runId: string) {
+    const detail = state.details[runId];
+    if (!detail) {
+      return;
+    }
+    state.runs = state.runs.map((run) =>
+      run.runId === runId ? { ...run, attachmentCount: detail.attachments.length } : run,
+    );
+  }
+
+  function headerValue(headers: HeadersInit | undefined, key: string): string | null {
+    if (!headers) {
+      return null;
+    }
+    if (headers instanceof Headers) {
+      return headers.get(key);
+    }
+    if (Array.isArray(headers)) {
+      const entry = headers.find(([name]) => name.toLowerCase() === key.toLowerCase());
+      return entry?.[1] ?? null;
+    }
+    for (const [name, value] of Object.entries(headers)) {
+      if (name.toLowerCase() === key.toLowerCase()) {
+        return value;
+      }
+    }
+    return null;
+  }
+
   const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
     const override = await options?.handleRequest?.(url, init);
@@ -298,6 +329,77 @@ function installFetchMock(
 
     if (url.includes("/api/runs?includeArchived=true")) {
       return new Response(JSON.stringify({ runs: state.runs }), { status: 200 });
+    }
+
+    const attachmentsMatch = /\/api\/runs\/([^/]+)\/attachments$/.exec(url);
+    if (attachmentsMatch) {
+      const runId = decodeURIComponent(attachmentsMatch[1] ?? "");
+      const detail = state.details[runId];
+      if (!detail) {
+        return new Response(JSON.stringify({ error: { message: "missing", code: "not_found" } }), {
+          status: 404,
+        });
+      }
+      if (!init?.method || init.method === "GET") {
+        return new Response(JSON.stringify({ attachments: detail.attachments }), { status: 200 });
+      }
+      if (init.method === "POST") {
+        const name = headerValue(init.headers, "x-task-runner-attachment-name") ?? "upload.bin";
+        const attachment = {
+          id: `att-${detail.attachments.length + 1}`,
+          name,
+          mimeType: headerValue(init.headers, "content-type") ?? "application/octet-stream",
+          size: 12,
+          sha256: "abc123",
+          addedAt: "2026-04-14T06:00:00.000Z",
+          relativePath: `attachments/att-${detail.attachments.length + 1}/${name}`,
+        };
+        detail.attachments = [...detail.attachments, attachment];
+        syncAttachmentCount(runId);
+        return new Response(JSON.stringify({ attachment }), { status: 200 });
+      }
+    }
+
+    const attachmentContentMatch = /\/api\/runs\/([^/]+)\/attachments\/([^/]+)\/content$/.exec(url);
+    if (attachmentContentMatch && (!init?.method || init.method === "GET")) {
+      const runId = decodeURIComponent(attachmentContentMatch[1] ?? "");
+      const attachmentId = decodeURIComponent(attachmentContentMatch[2] ?? "");
+      const attachment = state.details[runId]?.attachments.find((item) => item.id === attachmentId);
+      if (!attachment) {
+        return new Response(JSON.stringify({ error: { message: "missing", code: "not_found" } }), {
+          status: 404,
+        });
+      }
+      return new Response("attachment body", {
+        status: 200,
+        headers: { "content-type": attachment.mimeType },
+      });
+    }
+
+    const removeAttachmentMatch = /\/api\/runs\/([^/]+)\/attachments\/([^/]+)$/.exec(url);
+    if (removeAttachmentMatch && init?.method === "DELETE") {
+      const runId = decodeURIComponent(removeAttachmentMatch[1] ?? "");
+      const attachmentId = decodeURIComponent(removeAttachmentMatch[2] ?? "");
+      const detail = state.details[runId];
+      if (!detail) {
+        return new Response(JSON.stringify({ error: { message: "missing", code: "not_found" } }), {
+          status: 404,
+        });
+      }
+      detail.attachments = detail.attachments.filter(
+        (attachment) => attachment.id !== attachmentId,
+      );
+      syncAttachmentCount(runId);
+      return new Response(
+        JSON.stringify({
+          result: {
+            runId,
+            attachmentId,
+            changed: true,
+          },
+        }),
+        { status: 200 },
+      );
     }
 
     const runMatch = /\/api\/runs\/([^/]+)$/.exec(url);
@@ -2014,5 +2116,50 @@ describe("web app", () => {
       await screen.findByRole("button", { name: /remove dependency run-2/i }),
     ).toBeInTheDocument();
     expect(screen.getByText(/run-2 · running/i)).toBeInTheDocument();
+  });
+
+  it("uploads, downloads, and removes attachments from the detail drawer", async () => {
+    installFetchMock({
+      runs: [makeRun({ runId: "run-1", name: "Attachment run" })],
+      details: {
+        "run-1": makeDetail({
+          runId: "run-1",
+          name: "Attachment run",
+          attachments: [],
+        }),
+      },
+    });
+    const createObjectURL = vi.fn(() => "blob:test");
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", {
+      ...URL,
+      createObjectURL,
+      revokeObjectURL,
+    });
+    const anchorClick = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => undefined);
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await user.click(await findRunCard("Attachment run"));
+    await user.click(await screen.findByRole("button", { name: /^Attachments /i }));
+
+    await user.upload(
+      screen.getByLabelText("Upload attachment file"),
+      new File(["hello"], "notes.md", { type: "text/markdown" }),
+    );
+
+    expect(await screen.findByText("notes.md")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Download" }));
+    await waitFor(() => expect(createObjectURL).toHaveBeenCalled());
+    expect(anchorClick).toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(screen.getByText("No attachments yet.")).toBeInTheDocument());
+    expect(revokeObjectURL).toHaveBeenCalled();
+
+    anchorClick.mockRestore();
   });
 });

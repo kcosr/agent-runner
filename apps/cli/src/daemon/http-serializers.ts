@@ -42,6 +42,25 @@ export function sendJson(res: ServerResponse, status: number, payload: unknown):
   res.end(body);
 }
 
+export function sendBuffer(
+  res: ServerResponse,
+  status: number,
+  body: Buffer,
+  contentType: string,
+  headers: Record<string, string> = {},
+): void {
+  if (res.headersSent) {
+    return;
+  }
+  res.statusCode = status;
+  res.setHeader("content-type", contentType);
+  res.setHeader("content-length", body.byteLength);
+  for (const [name, value] of Object.entries(headers)) {
+    res.setHeader(name, value);
+  }
+  res.end(body);
+}
+
 export function sendError(res: ServerResponse, err: unknown): void {
   const httpError = toHttpError(err);
   if (res.headersSent) {

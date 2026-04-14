@@ -153,19 +153,19 @@ test("resolveResumeTarget rejects a manifest whose execution host and controller
   );
 });
 
-test("resolveResumeTarget accepts a well-formed v5 manifest from the unknown bucket", () => {
+test("resolveResumeTarget accepts a well-formed v6 manifest from the unknown bucket", () => {
   const dir = tempDir();
   const workspaceDir = join(dir, "runs", "unknown", "wellformed");
   writeManifest(dir, "unknown", "wellformed", baseManifest("wellformed", workspaceDir));
 
   const resolved = withStateRoot(dir, () => resolveResumeTarget("wellformed", dir));
   assert.equal(resolved.manifest.runId, "wellformed");
-  assert.equal(resolved.manifest.schemaVersion, 5);
+  assert.equal(resolved.manifest.schemaVersion, 6);
 });
 
 function baseManifest(runId, workspaceDir) {
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     runId,
     agent: {
       name: "override-test",
@@ -204,6 +204,7 @@ function baseManifest(runId, workspaceDir) {
     },
     pendingPrompt: null,
     callerInstructions: null,
+    attachments: [],
     resetSeed: {
       model: "claude-sonnet-4-6",
       effort: null,
