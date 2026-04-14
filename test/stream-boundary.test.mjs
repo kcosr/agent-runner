@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { streamBoundarySeparator } from "../packages/core/dist/backends/codex.js";
+import { streamBoundarySeparator } from "../packages/core/dist/backends/shared.js";
 
 test("streamBoundarySeparator: empty prior returns no separator", () => {
   assert.equal(streamBoundarySeparator("", "Hello"), "");

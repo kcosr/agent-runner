@@ -10,7 +10,7 @@ import type {
   ValidateSessionResult,
 } from "../core/backends/types.js";
 import { runProcess } from "../util/spawn.js";
-import { streamBoundarySeparator } from "./codex.js";
+import { isRecord, normalizeBackendModel, streamBoundarySeparator } from "./shared.js";
 
 /**
  * Claude encodes the working directory of a session into the
@@ -46,16 +46,7 @@ function mapEffortToClaude(effort: EffortLevel): string | null {
   }
 }
 
-function normalizeClaudeModel(model: string): string {
-  const idx = model.indexOf("/");
-  if (idx < 0) return model;
-  const stripped = model.slice(idx + 1);
-  return stripped.length > 0 ? stripped : model;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
+const normalizeClaudeModel = normalizeBackendModel;
 
 interface StreamState {
   sessionId: string | null;

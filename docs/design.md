@@ -1393,7 +1393,7 @@ interface BackendInvokeResult {
 }
 
 interface Backend {
-  id: string;
+  id: BackendId;
   invoke(ctx: BackendInvokeContext): Promise<BackendInvokeResult>;
   supportsBootstrapSessionImport?: boolean;
 }

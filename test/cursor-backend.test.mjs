@@ -160,3 +160,57 @@ test("cursor backend rejects successful runs without a final result.result strin
     /without a valid final result\.result string/,
   );
 });
+
+test("cursor backend returns non-zero exits without guessing a transcript", async () => {
+  const dir = tempDir();
+  const command = writeFakeCursorAgent(dir);
+
+  const result = await withEnv({ TASK_RUNNER_CURSOR_BIN: command }, () =>
+    cursorBackend.invoke({
+      prompt: "Inspect the repo",
+      cwd: dir,
+      env: {
+        ...process.env,
+        CURSOR_TEST_STDOUT_JSON: JSON.stringify([
+          `${JSON.stringify({ type: "partial_output", text: "Partial output" })}\n`,
+        ]),
+        CURSOR_TEST_STDERR_JSON: JSON.stringify(["cursor failed\n"]),
+        CURSOR_TEST_EXIT_CODE: "1",
+      },
+      timeoutSec: 10,
+    }),
+  );
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.transcript, null);
+  assert.equal(result.rawStderr, "cursor failed\n");
+});
+
+test("cursor backend inserts a boundary separator before the next partial output", async () => {
+  const dir = tempDir();
+  const command = writeFakeCursorAgent(dir);
+  const events = [];
+
+  await withEnv({ TASK_RUNNER_CURSOR_BIN: command }, () =>
+    cursorBackend.invoke({
+      prompt: "Inspect the repo",
+      cwd: dir,
+      env: {
+        ...process.env,
+        CURSOR_TEST_STDOUT_JSON: JSON.stringify([
+          `${JSON.stringify({ type: "partial_output", text: "Hello world." })}\n`,
+          `${JSON.stringify({ type: "assistant", message: { role: "assistant", content: "Hello world." } })}\n`,
+          `${JSON.stringify({ type: "partial_output", text: "Next message." })}\n`,
+          `${JSON.stringify({ type: "result", result: { result: "Final answer" } })}\n`,
+        ]),
+      },
+      timeoutSec: 10,
+      emit: (event) => events.push(event),
+    }),
+  );
+
+  assert.deepEqual(
+    events.filter((event) => event.type === "agent_message_delta").map((event) => event.text),
+    ["Hello world.", "\n\n", "Next message."],
+  );
+});

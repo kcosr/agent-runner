@@ -1,10 +1,6 @@
 import type { Backend, BackendInvokeContext, BackendInvokeResult } from "../core/backends/types.js";
 import { runProcess } from "../util/spawn.js";
-import { streamBoundarySeparator } from "./codex.js";
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
+import { isRecord, normalizeBackendModel, streamBoundarySeparator } from "./shared.js";
 
 function findSessionId(value: unknown): string | null {
   if (Array.isArray(value)) {
@@ -29,12 +25,7 @@ function findSessionId(value: unknown): string | null {
   return null;
 }
 
-export function normalizeCursorModel(model: string): string {
-  const idx = model.indexOf("/");
-  if (idx < 0) return model;
-  const stripped = model.slice(idx + 1);
-  return stripped.length > 0 ? stripped : model;
-}
+export const normalizeCursorModel = normalizeBackendModel;
 
 export function buildCursorArgs(
   ctx: Pick<BackendInvokeContext, "cwd" | "model" | "prompt" | "resumeSessionId" | "unrestricted">,
