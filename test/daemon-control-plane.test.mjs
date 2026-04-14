@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
 import WebSocket, { WebSocketServer } from "ws";
-import { DaemonClient } from "../apps/cli/dist/daemon/client.js";
+import { DaemonClient, DaemonRpcError } from "../apps/cli/dist/daemon/client.js";
 import { deriveHttpBaseUrl } from "../apps/cli/dist/daemon/config.js";
 import { serveDaemon } from "../apps/cli/dist/daemon/server.js";
 import { streamRunEvents } from "../apps/cli/dist/daemon/sse.js";
@@ -705,6 +705,43 @@ test("daemon HTTP rejects encoded traversal route params without leaking paths",
     assert.equal(response.body.error.code, "NOT_FOUND");
     assert.equal(response.body.error.message, "resource not found");
   } finally {
+    await server.close();
+  }
+});
+
+test("daemon dependency mutation surfaces reject path-like dependency ids over RPC and HTTP", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const init = await initRun(dir);
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  const server = await serveDaemon(listenUrl);
+  const client = await DaemonClient.connect(listenUrl);
+
+  try {
+    await assert.rejects(
+      () =>
+        client.call("runs.addDependency", {
+          target: init.runId,
+          dependencyRunId: "../other-run",
+        }),
+      (err) =>
+        err instanceof DaemonRpcError &&
+        err.message === "dependencyRunId must be a run id, not a path",
+    );
+
+    const response = await httpJson(httpBaseUrl, `/api/runs/${init.runId}/dependencies`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ dependencyRunId: "../other-run" }),
+    });
+    assert.equal(response.status, 400);
+    assert.equal(response.body.error.code, "INVALID_REQUEST");
+    assert.equal(response.body.error.message, "dependencyRunId must be a run id, not a path");
+  } finally {
+    await client.close();
     await server.close();
   }
 });

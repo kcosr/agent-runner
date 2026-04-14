@@ -8,7 +8,7 @@ export interface RunDependencyState {
   unsatisfied: number;
 }
 
-export interface ResolvedRunDependency {
+export interface RunDependencyDetail {
   runId: string;
   name: string | null;
   status: ManifestStatus | null;
@@ -24,7 +24,7 @@ export function buildRunDependencyGraph(
   return new Map(Array.from(manifests, (manifest) => [manifest.runId, manifest]));
 }
 
-function resolvedDependency(runId: string, manifest?: RunManifest): ResolvedRunDependency {
+export function toRunDependencyDetail(runId: string, manifest?: RunManifest): RunDependencyDetail {
   if (!manifest) {
     return {
       runId,
@@ -52,10 +52,21 @@ export function deriveDependencyState(
   manifest: Pick<RunManifest, "dependencyRunIds">,
   graph: ReadonlyMap<string, RunManifest>,
 ): RunDependencyState {
+  const successfulRunIds = new Set<string>();
+  for (const candidate of graph.values()) {
+    if (candidate.status === "success") {
+      successfulRunIds.add(candidate.runId);
+    }
+  }
+  return deriveDependencyStateFromSatisfiedRunIds(manifest, successfulRunIds);
+}
+
+export function deriveDependencyStateFromSatisfiedRunIds(
+  manifest: Pick<RunManifest, "dependencyRunIds">,
+  satisfiedRunIds: ReadonlySet<string>,
+): RunDependencyState {
   const total = manifest.dependencyRunIds.length;
-  const satisfied = manifest.dependencyRunIds.filter(
-    (runId) => graph.get(runId)?.status === "success",
-  ).length;
+  const satisfied = manifest.dependencyRunIds.filter((runId) => satisfiedRunIds.has(runId)).length;
   const unsatisfied = total - satisfied;
   return {
     ready: unsatisfied === 0,
@@ -68,24 +79,34 @@ export function deriveDependencyState(
 export function resolveDependencies(
   manifest: Pick<RunManifest, "dependencyRunIds">,
   graph: ReadonlyMap<string, RunManifest>,
-): ResolvedRunDependency[] {
-  return manifest.dependencyRunIds.map((runId) => resolvedDependency(runId, graph.get(runId)));
+): RunDependencyDetail[] {
+  return manifest.dependencyRunIds.map((runId) => toRunDependencyDetail(runId, graph.get(runId)));
 }
 
 export function resolveDependents(
   manifest: Pick<RunManifest, "runId">,
   graph: ReadonlyMap<string, RunManifest>,
-): ResolvedRunDependency[] {
-  return Array.from(graph.values())
-    .filter(
+): RunDependencyDetail[] {
+  return resolveDependentsFromManifests(
+    manifest.runId,
+    Array.from(graph.values()).filter(
       (candidate) =>
         candidate.runId !== manifest.runId && candidate.dependencyRunIds.includes(manifest.runId),
-    )
+    ),
+  );
+}
+
+export function resolveDependentsFromManifests(
+  targetRunId: string,
+  manifests: Iterable<RunManifest>,
+): RunDependencyDetail[] {
+  return Array.from(manifests)
+    .filter((candidate) => candidate.runId !== targetRunId)
     .sort((left, right) => {
       const byTime = right.startedAt.localeCompare(left.startedAt);
       return byTime !== 0 ? byTime : left.runId.localeCompare(right.runId);
     })
-    .map((candidate) => resolvedDependency(candidate.runId, candidate));
+    .map((candidate) => toRunDependencyDetail(candidate.runId, candidate));
 }
 
 export function countUnsatisfiedDependencies(

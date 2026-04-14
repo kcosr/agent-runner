@@ -2,6 +2,8 @@ import { deriveRepoKey } from "../config/runtime-paths.js";
 import { normalizeTaskMode } from "../core/config/schema.js";
 import type { LockableField, TaskMode } from "../core/config/schema.js";
 import {
+  type RunDependencyDetail,
+  type RunDependencyState,
   deriveDependencyState,
   resolveDependencies,
   resolveDependents,
@@ -14,13 +16,7 @@ import { deriveEffectiveStatus } from "../core/run/status.js";
 // RunManifest remains the internal canonical record; these helpers project
 // from it without doing filesystem, env, or process work.
 export type RunStatus = ManifestStatus;
-
-export interface RunDependencyState {
-  ready: boolean;
-  total: number;
-  satisfied: number;
-  unsatisfied: number;
-}
+export type { RunDependencyDetail, RunDependencyState } from "../core/run/dependencies.js";
 
 export interface RunSummary {
   runId: string;
@@ -72,16 +68,8 @@ export interface RunDetailInput {
   manifest: RunManifest;
   isLive: boolean;
   relatedManifests?: ReadonlyMap<string, RunManifest>;
-}
-
-export interface RunDependencyDetail {
-  runId: string;
-  name: string | null;
-  status: RunStatus | null;
-  effectiveStatus: RunStatus | null;
-  archivedAt: string | null;
-  satisfied: boolean;
-  missing: boolean;
+  dependencies?: RunDependencyDetail[];
+  dependents?: RunDependencyDetail[];
 }
 
 export interface RunDetail {
@@ -226,6 +214,7 @@ export function toRunSummary(
   relatedManifests: ReadonlyMap<string, RunManifest> = new Map([
     [entry.manifest.runId, entry.manifest],
   ]),
+  dependencyState?: RunDependencyState,
 ): RunSummary {
   return {
     runId: entry.manifest.runId,
@@ -243,7 +232,7 @@ export function toRunSummary(
     endedAt: entry.manifest.endedAt,
     tasksCompleted: entry.manifest.tasksCompleted,
     tasksTotal: entry.manifest.tasksTotal,
-    dependencyState: deriveDependencyState(entry.manifest, relatedManifests),
+    dependencyState: dependencyState ?? deriveDependencyState(entry.manifest, relatedManifests),
     execution: entry.manifest.execution,
     capabilities: deriveRunCapabilities(entry.manifest),
   };
@@ -306,8 +295,8 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
     sessionCount: manifest.sessionCount,
     tasksCompleted: manifest.tasksCompleted,
     tasksTotal: manifest.tasksTotal,
-    dependencies: resolveDependencies(manifest, relatedManifests),
-    dependents: resolveDependents(manifest, relatedManifests),
+    dependencies: result.dependencies ?? resolveDependencies(manifest, relatedManifests),
+    dependents: result.dependents ?? resolveDependents(manifest, relatedManifests),
     tasks: Object.values(manifest.finalTasks).map(toRunTaskSummary),
     message: manifest.message,
     callerInstructions: manifest.callerInstructions,

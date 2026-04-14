@@ -53,6 +53,7 @@ import {
   optionalString,
   parseRunSetNameParams,
   parseStartRunParams,
+  requiredRunIdString,
   requiredString,
 } from "./request-parsing.js";
 
@@ -576,7 +577,7 @@ export async function serveDaemon(
               request.id,
               operations.addDependency(
                 requiredString(parsed.target, "target"),
-                requiredString(parsed.dependencyRunId, "dependencyRunId"),
+                requiredRunIdString(parsed.dependencyRunId, "dependencyRunId"),
               ),
             ),
           );
@@ -590,7 +591,7 @@ export async function serveDaemon(
               request.id,
               operations.removeDependency(
                 requiredString(parsed.target, "target"),
-                requiredString(parsed.dependencyRunId, "dependencyRunId"),
+                requiredRunIdString(parsed.dependencyRunId, "dependencyRunId"),
               ),
             ),
           );

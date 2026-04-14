@@ -734,11 +734,19 @@ async function runDependencyCommand(
   }
 
   try {
+    const method =
+      verb === "add-dep"
+        ? "runs.addDependency"
+        : verb === "remove-dep"
+          ? "runs.removeDependency"
+          : "runs.clearDependencies";
+    const params =
+      verb === "clear-deps" ? { target } : { target, dependencyRunId: dependencyArg as string };
     const result =
       connectUrl === undefined
-        ? verb === "add-dep"
+        ? method === "runs.addDependency"
           ? addDependency(target, dependencyArg as string)
-          : verb === "remove-dep"
+          : method === "runs.removeDependency"
             ? removeDependency(target, dependencyArg as string)
             : clearDependencies(target)
         : await withDaemonClient(connectUrl, (client) =>
@@ -748,16 +756,7 @@ async function runDependencyCommand(
                   | ReturnType<typeof addDependency>
                   | ReturnType<typeof removeDependency>
                   | ReturnType<typeof clearDependencies>;
-              }>(
-                verb === "add-dep"
-                  ? "runs.addDependency"
-                  : verb === "remove-dep"
-                    ? "runs.removeDependency"
-                    : "runs.clearDependencies",
-                verb === "clear-deps"
-                  ? { target }
-                  : { target, dependencyRunId: dependencyArg as string },
-              )
+              }>(method, params)
               .then((response) => response.result),
           );
     if (parsed.outputFormat === "json") {

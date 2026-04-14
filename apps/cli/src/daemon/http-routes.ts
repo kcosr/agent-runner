@@ -14,6 +14,7 @@ import {
   parseBooleanQueryValue,
   parseRunSetNameParams,
   parseStartRunParams,
+  requiredRunIdString,
   requiredString,
 } from "./request-parsing.js";
 import { streamRunEvents } from "./sse.js";
@@ -143,7 +144,7 @@ const routes: RouteDefinition[] = [
         200,
         ctx.operations.addDependency(
           routeParam(params, "runId"),
-          requiredString(body.dependencyRunId, "dependencyRunId"),
+          requiredRunIdString(body.dependencyRunId, "dependencyRunId"),
         ),
       );
     },
