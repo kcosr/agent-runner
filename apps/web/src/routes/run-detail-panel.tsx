@@ -1,5 +1,5 @@
 import type { UseQueryResult } from "@tanstack/react-query";
-import type { RunDetail } from "@task-runner/core/contracts/runs.js";
+import type { RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
 import type { CSSProperties } from "react";
 import type { RunActionPending } from "./use-runs-dashboard-state.js";
 
@@ -11,6 +11,7 @@ export function RunDetailPanel({
   actionError,
   actionPending,
   drawerWidth,
+  runs,
   onAbort,
   onArchive,
   onClearDependencies,
@@ -27,6 +28,7 @@ export function RunDetailPanel({
   actionError?: string;
   actionPending?: RunActionPending;
   drawerWidth: number;
+  runs: RunSummary[];
   onAbort: (runId: string) => void;
   onArchive: (runId: string) => void;
   onClearDependencies: (runId: string) => Promise<void>;
@@ -78,6 +80,7 @@ export function RunDetailPanel({
   const selectedRun = selectedRunQuery.data;
   return (
     <RunDetailDrawer
+      dependencyCandidateRuns={runs}
       onAddDependency={(dependencyRunId) => onAddDependency(selectedRun.runId, dependencyRunId)}
       actionError={actionError}
       actionPending={actionPending}

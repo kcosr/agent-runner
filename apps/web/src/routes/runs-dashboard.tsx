@@ -64,6 +64,7 @@ export function RunsDashboardRoute() {
           actionError={state.actionError}
           actionPending={state.actionPending}
           drawerWidth={state.settings.drawerWidth}
+          runs={state.runs}
           onAbort={state.runActions.abort}
           onArchive={state.runActions.archive}
           onClearDependencies={state.runActions.clearDependencies}

@@ -1937,4 +1937,82 @@ describe("web app", () => {
     expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
     expect(MockEventSource.instances).toHaveLength(1);
   });
+
+  it("searches dependency candidates by assignment name and submits the selected run id", async () => {
+    const postedDependencyIds: string[] = [];
+    installFetchMock(
+      {
+        runs: [
+          makeRun({
+            runId: "run-1",
+            status: "initialized",
+            assignmentName: "Current assignment",
+            name: "Current run",
+          }),
+          makeRun({
+            runId: "run-2",
+            assignmentName: "Plan feature follow-up",
+            name: "Dependency target",
+          }),
+        ],
+        details: {
+          "run-1": makeDetail({
+            runId: "run-1",
+            status: "initialized",
+            effectiveStatus: "initialized",
+            assignment: {
+              name: "Current assignment",
+              sourcePath: "/tmp/current.md",
+              workspacePath: "/tmp/current-workspace.md",
+            },
+            name: "Current run",
+          }),
+          "run-2": makeDetail({
+            runId: "run-2",
+            assignment: {
+              name: "Plan feature follow-up",
+              sourcePath: "/tmp/dependency.md",
+              workspacePath: "/tmp/dependency-workspace.md",
+            },
+            name: "Dependency target",
+          }),
+        },
+      },
+      {
+        handleRequest: (url, init) => {
+          if (/\/api\/runs\/run-1\/dependencies$/.test(url) && init?.method === "POST") {
+            const body =
+              typeof init.body === "string" && init.body.length > 0
+                ? (JSON.parse(init.body) as { dependencyRunId?: string })
+                : {};
+            if (body.dependencyRunId) {
+              postedDependencyIds.push(body.dependencyRunId);
+            }
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await user.click(await findRunCard("Current run"));
+    expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^Dependencies /i }));
+    await user.type(screen.getByLabelText("Dependency run search"), "follow-up");
+    await user.click(
+      await screen.findByRole("button", {
+        name: /dependency target.*plan feature follow-up.*run-2/i,
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: /add dependency/i }));
+
+    await waitFor(() => expect(postedDependencyIds).toEqual(["run-2"]));
+    expect(
+      await screen.findByRole("button", { name: /remove dependency run-2/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/run-2 · running/i)).toBeInTheDocument();
+  });
 });

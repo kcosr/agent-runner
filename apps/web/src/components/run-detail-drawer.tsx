@@ -1,4 +1,4 @@
-import type { RunDetail } from "@task-runner/core/contracts/runs.js";
+import type { RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
 import {
   type CSSProperties,
   type KeyboardEvent,
@@ -26,6 +26,45 @@ interface DragState {
   startWidth: number;
 }
 
+function dependencyCandidateTitle(run: RunSummary) {
+  return run.name ?? run.assignmentName ?? "Unnamed";
+}
+
+function dependencyCandidateMeta(run: RunSummary) {
+  const parts: string[] = [];
+  if (run.assignmentName && run.assignmentName !== run.name) {
+    parts.push(run.assignmentName);
+  }
+  if (run.archivedAt) {
+    parts.push("Archived");
+  }
+  parts.push(run.effectiveStatus, run.runId);
+  return parts.join(" · ");
+}
+
+function dependencyCandidateLabel(run: RunSummary) {
+  return `${dependencyCandidateTitle(run)} · ${dependencyCandidateMeta(run)}`;
+}
+
+function matchesDependencyCandidate(run: RunSummary, search: string) {
+  if (!search) {
+    return true;
+  }
+  const haystack = [
+    run.runId,
+    run.name,
+    run.assignmentName,
+    run.repo,
+    run.backend,
+    run.agentName,
+    run.effectiveStatus,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes(search.toLowerCase());
+}
+
 function summaryRows(run: RunDetail) {
   const rows = [
     ["Repo", run.repo],
@@ -45,6 +84,7 @@ function summaryRows(run: RunDetail) {
 }
 
 export function RunDetailDrawer({
+  dependencyCandidateRuns,
   onAddDependency,
   actionError,
   actionPending,
@@ -59,6 +99,7 @@ export function RunDetailDrawer({
   onUnarchive,
   run,
 }: {
+  dependencyCandidateRuns: RunSummary[];
   onAddDependency: (dependencyRunId: string) => Promise<void>;
   actionError?: string;
   actionPending?: string;
@@ -77,6 +118,7 @@ export function RunDetailDrawer({
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(run.name ?? "");
   const [dependencyDraft, setDependencyDraft] = useState("");
+  const [selectedDependencyRunId, setSelectedDependencyRunId] = useState<string | null>(null);
   const { settings, updateSettings } = useBoardSettings();
   const dragRef = useRef<DragState | null>(null);
   const nameInputRef = useRef<HTMLInputElement | null>(null);
@@ -94,6 +136,22 @@ export function RunDetailDrawer({
   const satisfiedDependencies = run.dependencies.filter(
     (dependency) => dependency.satisfied,
   ).length;
+  const configuredDependencyIds = new Set(run.dependencies.map((dependency) => dependency.runId));
+  const eligibleDependencyCandidates = dependencyCandidateRuns.filter(
+    (candidate) => candidate.runId !== run.runId && !configuredDependencyIds.has(candidate.runId),
+  );
+  const normalizedDependencyDraft = dependencyDraft.trim();
+  const matchingDependencyCandidates =
+    normalizedDependencyDraft.length === 0
+      ? []
+      : eligibleDependencyCandidates
+          .filter((candidate) => matchesDependencyCandidate(candidate, normalizedDependencyDraft))
+          .slice(0, 8);
+  const resolvedDependencyRunId =
+    selectedDependencyRunId ??
+    eligibleDependencyCandidates.find(
+      (candidate) => candidate.runId.toLowerCase() === normalizedDependencyDraft.toLowerCase(),
+    )?.runId;
 
   function handleResizeStart(event: PointerEvent<HTMLDivElement>) {
     event.preventDefault();
@@ -214,16 +272,29 @@ export function RunDetailDrawer({
   }, [editingName]);
 
   async function submitDependencyAdd() {
-    const nextDependency = dependencyDraft.trim();
-    if (!nextDependency || addDependencyPending) {
+    if (!resolvedDependencyRunId || addDependencyPending) {
       return;
     }
     try {
-      await onAddDependency(nextDependency);
+      await onAddDependency(resolvedDependencyRunId);
       setDependencyDraft("");
+      setSelectedDependencyRunId(null);
     } catch {
       // actionError is surfaced by the shared mutation handler.
     }
+  }
+
+  function updateDependencyDraft(nextDraft: string) {
+    setDependencyDraft(nextDraft);
+    const exactRunId = eligibleDependencyCandidates.find(
+      (candidate) => candidate.runId.toLowerCase() === nextDraft.trim().toLowerCase(),
+    );
+    setSelectedDependencyRunId(exactRunId?.runId ?? null);
+  }
+
+  function selectDependencyCandidate(candidate: RunSummary) {
+    setDependencyDraft(dependencyCandidateLabel(candidate));
+    setSelectedDependencyRunId(candidate.runId);
   }
 
   async function submitDependencyRemove(dependencyRunId: string) {
@@ -483,30 +554,67 @@ export function RunDetailDrawer({
                 </div>
 
                 {canEditDependencies ? (
-                  <div className="dependency-add-row">
-                    <label className="field dependency-field">
-                      <input
-                        aria-label="Dependency run id"
-                        disabled={actionsLocked}
-                        onChange={(event) => setDependencyDraft(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") {
-                            event.preventDefault();
-                            void submitDependencyAdd();
-                          }
-                        }}
-                        placeholder="Run id"
-                        value={dependencyDraft}
-                      />
-                    </label>
-                    <button
-                      className="btn"
-                      disabled={actionsLocked || dependencyDraft.trim().length === 0}
-                      onClick={() => void submitDependencyAdd()}
-                      type="button"
-                    >
-                      {addDependencyPending ? "Adding..." : "Add dependency"}
-                    </button>
+                  <div className="dependency-add-stack">
+                    <div className="dependency-add-row">
+                      <label className="field dependency-field">
+                        <input
+                          aria-label="Dependency run search"
+                          disabled={actionsLocked}
+                          onChange={(event) => updateDependencyDraft(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              void submitDependencyAdd();
+                            }
+                          }}
+                          placeholder="Search by name, assignment, or run id"
+                          value={dependencyDraft}
+                        />
+                      </label>
+                      <button
+                        className="btn"
+                        disabled={actionsLocked || !resolvedDependencyRunId}
+                        onClick={() => void submitDependencyAdd()}
+                        type="button"
+                      >
+                        {addDependencyPending ? "Adding..." : "Add dependency"}
+                      </button>
+                    </div>
+                    {normalizedDependencyDraft.length > 0 ? (
+                      matchingDependencyCandidates.length > 0 ? (
+                        <ul
+                          aria-label="Dependency suggestions"
+                          className="dependency-suggestion-list"
+                        >
+                          {matchingDependencyCandidates.map((candidate) => (
+                            <li key={candidate.runId}>
+                              <button
+                                aria-pressed={candidate.runId === resolvedDependencyRunId}
+                                className={
+                                  candidate.runId === resolvedDependencyRunId
+                                    ? "dependency-suggestion active"
+                                    : "dependency-suggestion"
+                                }
+                                disabled={actionsLocked}
+                                onClick={() => selectDependencyCandidate(candidate)}
+                                type="button"
+                              >
+                                <span className="dependency-suggestion-title">
+                                  {dependencyCandidateTitle(candidate)}
+                                </span>
+                                <span className="dependency-suggestion-meta">
+                                  {dependencyCandidateMeta(candidate)}
+                                </span>
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="muted-inline">
+                          No matching runs. Search by name, assignment, or run id.
+                        </p>
+                      )
+                    ) : null}
                   </div>
                 ) : null}
 
