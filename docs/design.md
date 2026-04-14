@@ -1660,6 +1660,7 @@ task-runner <run|init>
                [--unrestricted]
                [--name <name>]
                [--connect <ws-url>]
+               [--detach]                       (run only; daemon mode only)
                [--output-format <text|json>]
                [message]
 

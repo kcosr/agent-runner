@@ -16,6 +16,10 @@
 
 ### Added
 
+- Added `task-runner run --detach` for daemon-connected fresh runs and
+  resumes so the CLI can dispatch `runs.start` / `runs.resume`, print a
+  detached confirmation, and exit immediately without waiting for
+  `run_finished`.
 - Added persisted run execution context (`execution.hostMode` plus
   `execution.controller`) to shared run summaries/details and manifest
   writes, and added `daemonInstanceId` to daemon health/read surfaces so
