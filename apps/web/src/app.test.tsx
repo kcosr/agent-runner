@@ -270,6 +270,10 @@ async function findRunCard(name: string | RegExp) {
   });
 }
 
+function escapeRegExp(value: string) {
+  return value.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function getCloseDetailButton() {
   const closeButtons = screen.getAllByRole("button", { name: /close detail/i });
   const closeButton = closeButtons[0];
@@ -280,7 +284,8 @@ function getCloseDetailButton() {
 }
 
 function getBoardColumn(name: string) {
-  const column = screen.getByRole("heading", { name }).closest("article");
+  const headingName = new RegExp(`^${escapeRegExp(name)}(?: \\(\\d+\\))?$`);
+  const column = screen.getByRole("heading", { name: headingName }).closest("article");
   if (!column) {
     throw new Error(`expected board column ${name}`);
   }
@@ -408,16 +413,15 @@ describe("web app", () => {
     await renderApp();
     await findRunCard("Passive active run");
 
-    const runningColumn = screen.getByRole("heading", { name: "Running" }).closest("article");
-    if (!runningColumn) {
-      throw new Error("expected running column");
-    }
+    const runningColumn = getBoardColumn("Running");
 
     expect(
       within(runningColumn).getByRole("button", { name: /passive active run/i }),
     ).toBeInTheDocument();
     expect(within(runningColumn).getByText("running", { selector: ".badge" })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Pending" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: /^Pending(?: \(\d+\))?$/ }),
+    ).not.toBeInTheDocument();
   });
 
   it("shows effective status as primary detail status and canonical lifecycle as secondary metadata", async () => {
@@ -866,17 +870,19 @@ describe("web app", () => {
     const view = await renderApp();
     await findRunCard("Build dashboard");
     expect(screen.queryByRole("button", { name: /archived dashboard/i })).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Failures" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Blocked" })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Aborted" })).not.toBeInTheDocument();
+    expect(getBoardColumn("Failures")).toBeInTheDocument();
+    expect(getBoardColumn("Blocked")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: /^Aborted(?: \(\d+\))?$/ }),
+    ).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /show archived runs/i }));
     await user.click(screen.getByRole("button", { name: /hide empty columns/i }));
     await user.click(screen.getByRole("button", { name: /collapse failure states/i }));
     expect(await screen.findByRole("button", { name: /archived dashboard/i })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Blocked" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Error" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Aborted" })).toBeInTheDocument();
+    expect(getBoardColumn("Blocked")).toBeInTheDocument();
+    expect(getBoardColumn("Error")).toBeInTheDocument();
+    expect(getBoardColumn("Aborted")).toBeInTheDocument();
 
     const blockedColumn = getBoardColumn("Blocked");
     await user.click(
@@ -895,8 +901,8 @@ describe("web app", () => {
     await renderApp();
     expect(await screen.findByRole("button", { name: /archived dashboard/i })).toBeInTheDocument();
     expect(getBoardColumn("Blocked")).toHaveAttribute("data-collapsed", "true");
-    expect(screen.getByRole("heading", { name: "Error" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Aborted" })).toBeInTheDocument();
+    expect(getBoardColumn("Error")).toBeInTheDocument();
+    expect(getBoardColumn("Aborted")).toBeInTheDocument();
   });
 
   it("ignores malformed stored board settings values", async () => {
@@ -955,8 +961,8 @@ describe("web app", () => {
     await findRunCard("Build dashboard");
 
     expect(screen.queryByRole("button", { name: /archived dashboard/i })).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Failures" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Blocked" })).toBeInTheDocument();
+    expect(getBoardColumn("Failures")).toBeInTheDocument();
+    expect(getBoardColumn("Blocked")).toBeInTheDocument();
 
     await user.click(await findRunCard("Build dashboard"));
     const drawer = await screen.findByLabelText("Run detail");
@@ -1003,8 +1009,9 @@ describe("web app", () => {
     expect(
       within(runningColumn).getByRole("button", { name: "Expand Running column" }),
     ).toBeInTheDocument();
+    expect(runningColumn.querySelector(".col-collapsed-count")).toHaveTextContent("1");
 
-    await user.click(within(runningColumn).getByRole("button", { name: "Expand Running column" }));
+    await user.click(runningColumn);
 
     await waitFor(() => {
       expect(runningColumn).toHaveAttribute("data-collapsed", "false");
@@ -1064,7 +1071,7 @@ describe("web app", () => {
     await user.click(screen.getByRole("button", { name: /collapse failure states/i }));
 
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Error" })).toBeInTheDocument();
+      expect(getBoardColumn("Error")).toBeInTheDocument();
     });
     expect(getBoardColumn("Error")).toHaveAttribute("data-collapsed", "false");
 

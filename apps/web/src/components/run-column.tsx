@@ -1,4 +1,5 @@
 import type { RunStatus, RunSummary } from "@task-runner/core/contracts/runs.js";
+import type { KeyboardEvent, MouseEvent } from "react";
 import { ChevronIcon } from "./icons.js";
 import { RunCard } from "./run-card.js";
 
@@ -31,13 +32,37 @@ export function RunColumn({
   const collapseLabel = `Collapse ${column.title} column`;
   const expandLabel = `Expand ${column.title} column`;
 
+  function handleColumnClick(event: MouseEvent<HTMLElement>) {
+    if (!collapsed) {
+      return;
+    }
+    if (event.target instanceof Element && event.target.closest("button")) {
+      return;
+    }
+    onToggleCollapse();
+  }
+
+  function handleColumnKeyDown(event: KeyboardEvent<HTMLElement>) {
+    if (!collapsed) {
+      return;
+    }
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+    event.preventDefault();
+    onToggleCollapse();
+  }
+
   return (
     <article
       aria-labelledby={`col-${column.key}`}
       className="column"
       data-collapsed={collapsed ? "true" : "false"}
       data-status={column.key}
+      onClick={handleColumnClick}
+      onKeyDown={handleColumnKeyDown}
       ref={columnRef}
+      tabIndex={collapsed ? 0 : undefined}
     >
       <header className="col-head">
         <button
@@ -52,6 +77,11 @@ export function RunColumn({
           <ChevronIcon aria-hidden="true" className="col-expand__icon" />
         </button>
         <h2 id={`col-${column.key}`}>{column.title}</h2>
+        {column.runs.length > 0 ? (
+          <span aria-hidden="true" className="col-collapsed-count">
+            {column.runs.length}
+          </span>
+        ) : null}
         <span className="count">{column.runs.length}</span>
         <span className="col-spacer" />
         <button

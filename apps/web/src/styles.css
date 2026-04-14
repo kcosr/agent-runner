@@ -303,8 +303,17 @@ body {
   max-height: 100%;
 }
 
+.col-collapsed-count,
 .col-expand {
   display: none;
+}
+
+.col-collapsed-count {
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+.col-expand {
   width: 24px;
   height: 24px;
   min-width: 24px;
@@ -339,29 +348,40 @@ body {
   .column[data-collapsed="true"] {
     flex-basis: 32px;
     background: var(--card);
+    cursor: pointer;
+  }
+
+  .column[data-collapsed="true"]:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
   }
 
   .column[data-collapsed="true"] .col-head {
+    display: flex;
+    flex-direction: column;
     height: 100%;
+    flex-wrap: nowrap;
     align-content: flex-start;
     align-items: center;
     justify-content: flex-start;
-    gap: 12px;
-    padding: 12px 10px;
+    gap: 8px;
+    padding: 10px 3px;
+    position: relative;
   }
 
   .column[data-collapsed="true"] .col-head h2 {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 100%;
-    writing-mode: vertical-rl;
-    transform: rotate(180deg);
+    position: absolute;
+    top: 104px;
+    left: 50%;
+    margin: 0;
+    transform: translateX(-50%) rotate(-90deg);
+    transform-origin: center;
     text-align: center;
     line-height: 1;
     font-size: 11px;
     letter-spacing: 0.08em;
     text-transform: uppercase;
+    white-space: nowrap;
   }
 
   .column[data-collapsed="true"] .count,
@@ -375,6 +395,22 @@ body {
   .column[data-collapsed="true"] .col-expand {
     display: inline-flex;
     flex: 0 0 auto;
+    width: 20px;
+    height: 20px;
+    min-width: 20px;
+  }
+
+  .column[data-collapsed="true"] .col-collapsed-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: absolute;
+    left: 50%;
+    top: 48px;
+    transform: translateX(-50%);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0;
   }
 }
 
