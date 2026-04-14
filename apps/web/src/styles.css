@@ -983,19 +983,32 @@ body {
   max-width: 7rem;
 }
 
-.dependency-indicator {
+.meta-indicator {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   padding: 0 6px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--warning, #b45309) 12%, transparent);
-  color: color-mix(in srgb, var(--warning, #b45309) 85%, var(--foreground));
   font-size: 11px;
   font-weight: 600;
 }
 
-.dependency-indicator svg {
+.meta-indicator--warning {
+  background: color-mix(in srgb, var(--warning, #b45309) 12%, transparent);
+  color: color-mix(in srgb, var(--warning, #b45309) 85%, var(--foreground));
+}
+
+.meta-indicator--success {
+  background: color-mix(in srgb, var(--success, #15803d) 12%, transparent);
+  color: color-mix(in srgb, var(--success, #15803d) 85%, var(--foreground));
+}
+
+.meta-indicator--neutral {
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
+}
+
+.meta-indicator svg {
   width: 12px;
   height: 12px;
 }

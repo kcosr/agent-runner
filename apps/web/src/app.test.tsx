@@ -800,6 +800,43 @@ describe("web app", () => {
     expect(within(detail).queryByRole("button", { name: "Abort" })).not.toBeInTheDocument();
   });
 
+  it("shows dependency and attachment indicators on run cards", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "run-with-indicators",
+          name: "Indicator run",
+          assignmentName: "Indicator run",
+          attachmentCount: 2,
+          dependencyState: {
+            ready: false,
+            total: 3,
+            satisfied: 1,
+            unsatisfied: 2,
+          },
+        }),
+      ],
+      details: {
+        "run-with-indicators": makeDetail({
+          runId: "run-with-indicators",
+          name: "Indicator run",
+          assignment: {
+            name: "Indicator run",
+            sourcePath: "/tmp/indicator-source.md",
+            workspacePath: "/tmp/indicator-workspace.md",
+          },
+        }),
+      },
+    });
+
+    await renderApp();
+
+    const card = await findRunCard("Indicator run");
+    expect(within(card).getByLabelText("1 of 3 dependencies satisfied")).toBeInTheDocument();
+    expect(within(card).getByText("1/3")).toBeInTheDocument();
+    expect(within(card).getByLabelText("2 attachments")).toBeInTheDocument();
+  });
+
   it("falls back to document copy when clipboard access is unavailable", async () => {
     installFetchMock({
       runs: [makeRun()],
