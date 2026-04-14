@@ -17,6 +17,7 @@
 
 ### Added
 
+- Added `scripts/task-list-markdown.mjs` to render `task-runner task list <run-id> --output-format json` output as Markdown, defaulting to `task-runner` on `PATH` with an optional `TASK_RUNNER_BIN` override.
 - Added `task-runner run --detach` for daemon-connected fresh runs and
   resumes so the CLI can dispatch `runs.start` / `runs.resume`, print a
   detached confirmation, and exit immediately without waiting for
