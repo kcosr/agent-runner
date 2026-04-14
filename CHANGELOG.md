@@ -14,6 +14,9 @@
 
 ### Added
 
+- Added collapsible kanban columns in the web dashboard, including
+  persisted collapsed state, jump-strip expansion, and polished
+  collapsed-label rendering. ([#28](https://github.com/kcosr/task-runner/pull/28))
 - Added derived `effectiveStatus` to shared `RunSummary` / `RunDetail`
   read models so passive runs with `in_progress` tasks surface as
   running in CLI/daemon/web consumers without changing the canonical

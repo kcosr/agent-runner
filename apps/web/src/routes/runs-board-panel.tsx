@@ -6,8 +6,11 @@ import { type BoardColumn, RunColumn } from "../components/run-column.js";
 
 export function RunsBoardPanel({
   boardColumns,
+  collapsedColumnKeys,
+  onExpandColumn,
   onResetFilters,
   onSelectRun,
+  onToggleColumnCollapse,
   runs,
   runsQuery,
   selectedRunActiveTask,
@@ -15,8 +18,11 @@ export function RunsBoardPanel({
   visibleRuns,
 }: {
   boardColumns: BoardColumn[];
+  collapsedColumnKeys: string[];
+  onExpandColumn: (columnKey: string) => void;
   onResetFilters: () => void;
   onSelectRun: (runId: string) => void;
+  onToggleColumnCollapse: (columnKey: string) => void;
   runs: RunSummary[];
   runsQuery: UseQueryResult<RunSummary[], Error>;
   selectedRunActiveTask?: string;
@@ -26,7 +32,9 @@ export function RunsBoardPanel({
   const boardRef = useRef<HTMLElement | null>(null);
   const columnRefs = useRef(new Map<string, HTMLElement>());
   const columnRefCallbacks = useRef(new Map<string, (node: HTMLElement | null) => void>());
+  const pendingScrollColumnKeyRef = useRef<string | undefined>(undefined);
   const [showColumnJumpBar, setShowColumnJumpBar] = useState(false);
+  const collapsedColumnKeySet = useMemo(() => new Set(collapsedColumnKeys), [collapsedColumnKeys]);
   const jumpColumns = useMemo(
     () => boardColumns.filter((column) => column.runs.length > 0),
     [boardColumns],
@@ -75,6 +83,25 @@ export function RunsBoardPanel({
     };
   }, [recomputeJumpBarVisibility]);
 
+  useEffect(() => {
+    const pendingColumnKey = pendingScrollColumnKeyRef.current;
+    if (!pendingColumnKey || collapsedColumnKeySet.has(pendingColumnKey)) {
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      if (pendingScrollColumnKeyRef.current !== pendingColumnKey) {
+        return;
+      }
+      pendingScrollColumnKeyRef.current = undefined;
+      scrollColumnIntoView(pendingColumnKey);
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [collapsedColumnKeySet]);
+
   function columnRefFor(columnKey: string) {
     const existing = columnRefCallbacks.current.get(columnKey);
     if (existing) {
@@ -109,6 +136,17 @@ export function RunsBoardPanel({
     }
 
     board.scrollLeft = targetLeft;
+  }
+
+  function handleJumpToColumn(columnKey: string) {
+    if (collapsedColumnKeySet.has(columnKey)) {
+      pendingScrollColumnKeyRef.current = columnKey;
+      onExpandColumn(columnKey);
+      return;
+    }
+
+    pendingScrollColumnKeyRef.current = undefined;
+    scrollColumnIntoView(columnKey);
   }
 
   if (runsQuery.isPending) {
@@ -186,7 +224,7 @@ export function RunsBoardPanel({
             <button
               className="board-jumpbar__button"
               key={column.key}
-              onClick={() => scrollColumnIntoView(column.key)}
+              onClick={() => handleJumpToColumn(column.key)}
               type="button"
             >
               {column.title} ({column.runs.length})
@@ -197,10 +235,12 @@ export function RunsBoardPanel({
       <section aria-label="Run board" className="board" ref={boardRef}>
         {boardColumns.map((column) => (
           <RunColumn
+            collapsed={collapsedColumnKeySet.has(column.key)}
             column={column}
             columnRef={columnRefFor(column.key)}
             key={column.key}
             onSelectRun={onSelectRun}
+            onToggleCollapse={() => onToggleColumnCollapse(column.key)}
             selectedRunActiveTask={selectedRunActiveTask}
             selectedRunId={selectedRunId}
           />

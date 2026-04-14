@@ -43,10 +43,13 @@ export function RunsDashboardRoute() {
       board={
         <RunsBoardPanel
           boardColumns={state.boardColumns}
+          collapsedColumnKeys={state.collapsedColumnKeys}
+          onExpandColumn={state.columnActions.expand}
           onResetFilters={() =>
             state.updateSettings({ repo: "all", search: "", showArchived: false })
           }
           onSelectRun={state.openRun}
+          onToggleColumnCollapse={state.columnActions.toggleCollapse}
           runs={state.runs}
           runsQuery={state.runsQuery}
           selectedRunActiveTask={state.selectedRunActiveTask}
