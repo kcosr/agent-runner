@@ -128,6 +128,8 @@ Execution options:
   --unrestricted          Bypass the backend's approval prompts.
   --name <name>           Set the persisted run display name.
   --clear                 (run set-name) Clear the persisted run name.
+  --detach                (run only, daemon mode only) Dispatch and exit
+                          after the daemon accepts the run.
   --output-format <fmt>   Output format: "text" (default) or "json".
   --field <name>          (status only, repeatable) Restrict JSON output.
   --include-archived      (list runs only) Include archived runs.
@@ -248,6 +250,17 @@ function renderInitializedRun(detail: ReturnType<typeof getRun>): void {
       text: detail.callerInstructions,
     });
   }
+}
+
+function renderDetachedRun(runId: string, outputFormat: ParsedArgs["outputFormat"]): void {
+  if (outputFormat === "json") {
+    writeJson({ runId, detached: true });
+    return;
+  }
+
+  process.stdout.write(`task-runner: detached run ${runId}\n`);
+  process.stdout.write(`Resume later with: task-runner run --resume-run ${runId} "..."\n`);
+  process.stdout.write(`Check status with: task-runner status ${runId}\n`);
 }
 
 function terminalExitCode(status: string): number {
@@ -514,9 +527,30 @@ function unsupportedFlagsForGroupedCommand(
   if (parsed.taskTitle !== undefined) unsupported.push("--title");
   if (parsed.taskBody !== undefined) unsupported.push("--body");
   if (parsed.addedTasks.length > 0) unsupported.push("--add-task");
+  if (parsed.detach) unsupported.push("--detach");
   if (parsed.listen !== undefined) unsupported.push("--listen");
   if (!opts.allowIncludeArchived && parsed.includeArchived) unsupported.push("--include-archived");
   return unsupported;
+}
+
+async function startOrResumeDaemonRun(
+  client: DaemonClient,
+  parsed: ParsedArgs,
+): Promise<{ runId: string }> {
+  return parsed.resumeRun
+    ? await client.call<{ runId: string }>("runs.resume", {
+        target: normalizeTarget(parsed.resumeRun) ?? parsed.resumeRun,
+        overrides: resolvedOverrides(parsed),
+      })
+    : await client.call<{ runId: string }>("runs.start", {
+        agent: normalizeTarget(parsed.agent),
+        assignment: normalizeTarget(parsed.assignment),
+        definitionCwd: process.cwd(),
+        callerCwd: process.cwd(),
+        backendSessionId: parsed.backendSessionId,
+        cliVars: parsed.vars,
+        overrides: resolvedOverrides(parsed),
+      });
 }
 
 async function runTaskCommand(parsed: ParsedArgs, connectUrl?: string): Promise<never> {
@@ -1069,6 +1103,12 @@ async function runExecuteCommandDaemon(parsed: ParsedArgs, connectUrl: string): 
       process.exit(0);
     }
 
+    if (parsed.detach) {
+      const startResult = await startOrResumeDaemonRun(client, parsed);
+      renderDetachedRun(startResult.runId, parsed.outputFormat);
+      process.exit(0);
+    }
+
     const bufferedEvents: Array<{ runId: string; event: RunEvent }> = [];
     let activeRunId: string | undefined;
     let terminalStatus: string | undefined;
@@ -1133,20 +1173,7 @@ async function runExecuteCommandDaemon(parsed: ParsedArgs, connectUrl: string): 
     });
 
     try {
-      const startResult = parsed.resumeRun
-        ? await client.call<{ runId: string }>("runs.resume", {
-            target: normalizeTarget(parsed.resumeRun) ?? parsed.resumeRun,
-            overrides: resolvedOverrides(parsed),
-          })
-        : await client.call<{ runId: string }>("runs.start", {
-            agent: normalizeTarget(parsed.agent),
-            assignment: normalizeTarget(parsed.assignment),
-            definitionCwd: process.cwd(),
-            callerCwd: process.cwd(),
-            backendSessionId: parsed.backendSessionId,
-            cliVars: parsed.vars,
-            overrides: resolvedOverrides(parsed),
-          });
+      const startResult = await startOrResumeDaemonRun(client, parsed);
       activeRunId = startResult.runId;
       for (const buffered of bufferedEvents) {
         if (buffered.runId !== activeRunId) {
@@ -1218,6 +1245,17 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
+  if (parsed.detach) {
+    if (parsed.command === "init") {
+      process.stderr.write("task-runner: init does not accept --detach\n");
+      process.exit(3);
+    }
+    if (parsed.command !== "run") {
+      process.stderr.write("task-runner: --detach is only valid with `run` in daemon mode\n");
+      process.exit(3);
+    }
+  }
+
   if (parsed.command === "serve") {
     await runServe(parsed);
   }
@@ -1237,6 +1275,13 @@ async function main(): Promise<void> {
     connectUrl = resolveHostMode(parsed.connect).connectUrl;
   } catch (err) {
     process.stderr.write(`task-runner: ${errorMessage(err)}\n`);
+    process.exit(3);
+  }
+
+  if (parsed.detach && parsed.command === "run" && parsed.subcommand === undefined && !connectUrl) {
+    process.stderr.write(
+      "task-runner: --detach requires daemon-connected run execution (--connect or TASK_RUNNER_CONNECT)\n",
+    );
     process.exit(3);
   }
 

@@ -239,6 +239,12 @@ test("parseArgs: --name is captured for fresh run overrides", () => {
   assert.equal(parsed.name, "release prep");
 });
 
+test("parseArgs: --detach is captured for plain run", () => {
+  const parsed = parseArgs(argv("run", "--detach", "--agent", "x"));
+  assert.equal(parsed.command, "run");
+  assert.equal(parsed.detach, true);
+});
+
 test("overridesFromParsedArgs: all other overrides plumbed through", () => {
   const parsed = parseArgs(
     argv(

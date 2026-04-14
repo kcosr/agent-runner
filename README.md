@@ -548,7 +548,34 @@ Common options:
 | `--name <name>` | Set the fresh run's persisted display name (`run.name`). Omitted means unnamed. Forbidden with `--resume-run`. |
 | `--backend-session-id <id>` | Adopt an existing backend session id (claude UUID, codex thread id). Validated before workspace creation. Forbidden with `--resume-run` (the resume target already carries one). |
 | `--connect <ws-url>` | Route the command through the local daemon instead of embedded mode. Also honored from `TASK_RUNNER_CONNECT`. |
+| `--detach` | **Daemon mode only.** Dispatch the daemon-owned run and exit immediately after the daemon accepts it. Valid only on plain `task-runner run`; rejected in embedded mode, on `init`, and on grouped `run` subcommands. |
 | `--output-format <text\|json>` | Default `text`. `json` writes the final manifest-shaped run record to stdout once at end of run. |
+
+Detached daemon dispatch:
+
+- `task-runner run --detach ...` and `task-runner run --detach --resume-run <id>`
+  send `runs.start` / `runs.resume` to the daemon and return
+  immediately after the daemon responds with a `runId`.
+- Detached mode does **not** wait for `run_finished`, does not stream
+  run events, and does not change any manifest/session semantics.
+- Attached behavior remains the default. If you omit `--detach`, a
+  daemon-connected `run` keeps the existing blocking/event-streaming
+  behavior.
+
+Detached success output:
+
+```text
+task-runner: detached run abc123
+Resume later with: task-runner run --resume-run abc123 "..."
+Check status with: task-runner status abc123
+```
+
+```json
+{
+  "runId": "abc123",
+  "detached": true
+}
+```
 
 On `--resume-run`, the "legitimate mid-run" overrides — `--model`,
 `--effort`, `--timeout-sec`, `--max-retries`, `--unrestricted` —
@@ -579,6 +606,9 @@ task-runner init \
 Useful when an outer process wants a resumable handle before
 committing to execution, or wants to inspect the prepared workspace
 before kicking off the actual work.
+
+`init` does not accept `--detach`; detached dispatch is only for
+daemon-connected `run`.
 
 ### `task-runner serve`
 
