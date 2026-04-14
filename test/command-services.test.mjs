@@ -233,6 +233,8 @@ test("command services: readStatus applies the live workspace overlay for runnin
       canArchive: false,
       canUnarchive: false,
       canResume: false,
+      canAbort: false,
+      abortReason: "not_active_in_daemon",
       taskMutation: {
         canSetStatus: false,
         canEditNotes: false,
@@ -356,6 +358,8 @@ test("command services: listRuns returns newest-first rows and filters archived 
       canArchive: true,
       canUnarchive: false,
       canResume: true,
+      canAbort: false,
+      abortReason: "not_active_in_daemon",
       taskMutation: {
         canSetStatus: true,
         canEditNotes: true,
@@ -366,6 +370,8 @@ test("command services: listRuns returns newest-first rows and filters archived 
       canArchive: false,
       canUnarchive: true,
       canResume: false,
+      canAbort: false,
+      abortReason: "not_active_in_daemon",
       taskMutation: {
         canSetStatus: true,
         canEditNotes: true,

@@ -984,13 +984,31 @@ async function runExecuteCommandDaemon(parsed: ParsedArgs, connectUrl: string): 
     let activeRunId: string | undefined;
     let terminalStatus: string | undefined;
     let abortRequested = false;
-    const onSigint = (): void => {
-      if (activeRunId) {
-        abortRequested = true;
-        void client.call("runs.abort", { target: activeRunId }).catch(() => undefined);
+    let cancelRequested = false;
+    let cancelFailed: string | undefined;
+    let cancelPromise: Promise<void> | undefined;
+    const requestCancel = (): void => {
+      if (!activeRunId || cancelRequested) {
         return;
       }
+      cancelRequested = true;
+      cancelPromise = client
+        .call<{ runId: string; accepted: true }>("runs.abort", { target: activeRunId })
+        .then((result) => {
+          if (result.accepted !== true) {
+            cancelFailed = `daemon did not accept cancel for run ${activeRunId}`;
+          }
+        })
+        .catch((err) => {
+          cancelFailed = errorMessage(err);
+        });
+    };
+    const onSigint = (): void => {
       abortRequested = true;
+      if (activeRunId) {
+        requestCancel();
+        return;
+      }
     };
     process.on("SIGINT", onSigint);
 
@@ -1038,16 +1056,44 @@ async function runExecuteCommandDaemon(parsed: ParsedArgs, connectUrl: string): 
         }
       }
       if (abortRequested) {
-        await client.call("runs.abort", { target: activeRunId });
+        requestCancel();
       }
-      while (!terminalStatus) {
+      if (cancelPromise) {
+        await cancelPromise;
+      }
+      if (cancelFailed) {
+        process.stderr.write(
+          `task-runner: Ctrl+C cancel request failed: ${cancelFailed}. Remote run may still be active.\n`,
+        );
+        process.exit(1);
+      }
+      while (!terminalStatus && !cancelFailed) {
         await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      if (cancelPromise) {
+        await cancelPromise;
+      }
+      if (cancelFailed) {
+        process.stderr.write(
+          `task-runner: Ctrl+C cancel request failed: ${cancelFailed}. Remote run may still be active.\n`,
+        );
+        process.exit(1);
       }
       const finalRun = await client.call<{ run: ReturnType<typeof getRun> }>("runs.get", {
         target: activeRunId,
       });
       if (isJson) {
         writeJson(finalRun.run);
+      }
+      if (cancelRequested && terminalStatus !== "aborted") {
+        process.stderr.write(
+          `task-runner: Ctrl+C requested daemon cancel, but interruption was not confirmed (final status: ${terminalStatus}). Remote run may still be active.\n`,
+        );
+        process.exit(1);
+      }
+      if (!terminalStatus) {
+        process.stderr.write("task-runner: daemon run ended without a terminal status\n");
+        process.exit(4);
       }
       process.exit(terminalExitCode(terminalStatus));
     } finally {

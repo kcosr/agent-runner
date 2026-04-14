@@ -21,6 +21,7 @@ import {
   type AttemptRecord,
   type ResolvedResumeTarget,
   ResumeError,
+  type RunExecution,
   type RunManifest,
   type SessionRecord,
   type TaskSnapshot,
@@ -90,6 +91,7 @@ export interface RunOptions {
    * and used as the initial `resumeSessionId` for the first attempt.
    */
   bootstrapBackendSessionId?: string;
+  execution?: RunExecution;
   abortSignal?: AbortSignal;
   emitEvent?: (event: RunEvent) => void;
   resumeFailureDetector?: (result: BackendInvokeResult) => boolean;
@@ -550,6 +552,12 @@ function collectNewTasks(
 export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const { loaded, loadedAssignment, cliVars, backend, overrides, resume } = opts;
   const emitEvent = opts.emitEvent ?? (() => {});
+  const execution: RunExecution = opts.execution ?? {
+    hostMode: "embedded",
+    controller: {
+      kind: "embedded",
+    },
+  };
   const agentConfig = loaded.config;
   const assignmentConfig = loadedAssignment?.config;
   const resumeFailureDetector = opts.resumeFailureDetector ?? defaultResumeFailureDetector;
@@ -891,6 +899,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       status: "running",
       exitCode: null,
       maxAttempts,
+      execution,
       finalTasks: {},
       tasksCompleted: 0,
       tasksTotal: 0,
@@ -908,6 +917,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       status: "running",
       exitCode: null,
       sessionCount: 1,
+      execution,
       pendingPrompt: null,
     };
   } else {
@@ -934,7 +944,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     const frozenCallerInstructions =
       rawCallerInstructions.length > 0 ? interpolate(rawCallerInstructions, injectedVars) : null;
     manifest = {
-      schemaVersion: 3,
+      schemaVersion: 4,
       runId,
       agent: {
         name: agentConfig.name,
@@ -980,6 +990,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       // a backend resume instead of starting a fresh session.
       backendSessionId: opts.bootstrapBackendSessionId ?? null,
       runtimeVars: persistedRuntimeVars,
+      execution,
       pendingPrompt: isInitialize ? initialPrompt : null,
       callerInstructions: frozenCallerInstructions,
       resetSeed: buildRunResetSeed({
@@ -1080,6 +1091,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
           status: "running",
           exitCode: null,
           maxAttempts,
+          execution,
           finalTasks: {},
           tasksCompleted: 0,
           tasksTotal: 0,
@@ -1094,6 +1106,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
           status: "running",
           exitCode: null,
           sessionCount: 1,
+          execution,
           pendingPrompt: null,
         };
       }

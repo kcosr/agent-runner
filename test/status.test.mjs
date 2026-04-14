@@ -448,12 +448,13 @@ test("status --field capabilities exposes the current run capability contract", 
     canArchive: true,
     canUnarchive: false,
     canResume: true,
+    canAbort: false,
+    abortReason: "already_terminal",
     taskMutation: {
       canSetStatus: false,
       canEditNotes: true,
       canAdd: false,
     },
   });
-  assert.equal("canAbort" in projected.capabilities, false);
   assert.equal("canMutateTasks" in projected.capabilities, false);
 });

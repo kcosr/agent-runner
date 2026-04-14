@@ -280,6 +280,8 @@ test("task set: rejected while manifest status=running in taskMode=file", async 
     canArchive: false,
     canUnarchive: false,
     canResume: false,
+    canAbort: false,
+    abortReason: "not_active_in_daemon",
     taskMutation: {
       canSetStatus: false,
       canEditNotes: false,
@@ -333,6 +335,8 @@ test("task set: allowed while manifest status=running in taskMode=cli", async ()
     canArchive: false,
     canUnarchive: false,
     canResume: false,
+    canAbort: false,
+    abortReason: "not_active_in_daemon",
     taskMutation: {
       canSetStatus: true,
       canEditNotes: true,
@@ -767,6 +771,8 @@ test("task set: rejects status changes on a terminal non-passive run", async () 
     canArchive: true,
     canUnarchive: false,
     canResume: true,
+    canAbort: false,
+    abortReason: "already_terminal",
     taskMutation: {
       canSetStatus: false,
       canEditNotes: true,

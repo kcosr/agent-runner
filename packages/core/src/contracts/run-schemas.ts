@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { LOCKABLE_FIELDS, TASK_MODES } from "../core/config/schema.js";
 import type {
+  RunAbortReason,
   RunArchiveResult,
   RunCapabilities,
   RunDetail,
@@ -39,10 +40,30 @@ export const runTaskMutationCapabilitiesSchema: z.ZodType<RunTaskMutationCapabil
   canAdd: z.boolean(),
 });
 
+const runExecutionSchema = z.object({
+  hostMode: z.enum(["embedded", "daemon"]),
+  controller: z.union([
+    z.object({
+      kind: z.literal("embedded"),
+    }),
+    z.object({
+      kind: z.literal("daemon"),
+      daemonInstanceId: z.string(),
+    }),
+  ]),
+});
+
+const runAbortReasonSchema: z.ZodType<RunAbortReason> = z.enum([
+  "already_terminal",
+  "not_active_in_daemon",
+]);
+
 export const runCapabilitiesSchema: z.ZodType<RunCapabilities> = z.object({
   canArchive: z.boolean(),
   canUnarchive: z.boolean(),
   canResume: z.boolean(),
+  canAbort: z.boolean(),
+  abortReason: runAbortReasonSchema.optional(),
   taskMutation: runTaskMutationCapabilitiesSchema,
 });
 
@@ -62,6 +83,7 @@ export const runSummarySchema: z.ZodType<RunSummary> = z.object({
   endedAt: z.string().nullable(),
   tasksCompleted: z.number(),
   tasksTotal: z.number(),
+  execution: runExecutionSchema,
   capabilities: runCapabilitiesSchema,
 });
 
@@ -108,6 +130,7 @@ export const runDetailSchema: z.ZodType<RunDetail> = z.object({
   pendingPrompt: z.string().nullable(),
   lockedFields: z.array(z.enum(LOCKABLE_FIELDS)),
   runtimeVars: z.record(z.string(), z.unknown()),
+  execution: runExecutionSchema,
   capabilities: runCapabilitiesSchema,
 });
 

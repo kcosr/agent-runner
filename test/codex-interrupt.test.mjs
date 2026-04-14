@@ -1,9 +1,11 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import {
+  confirmInterrupt,
   interruptTurnWithGrace,
   interruptTurnWithRetry,
   isExternalInterrupt,
+  waitForTurnCompletion,
   waitForTurnId,
 } from "../packages/core/dist/backends/codex.js";
 
@@ -123,4 +125,155 @@ test("interruptTurnWithRetry: retries after the initial grace window and interru
       params: { threadId: "thread-1", turnId: "turn-late" },
     },
   ]);
+});
+
+test("waitForTurnCompletion: resolves immediately when the turn is already completed", async () => {
+  const state = {
+    turnCompleted: true,
+    turnCompletionWaiters: [],
+  };
+  assert.equal(await waitForTurnCompletion(state, 50), true);
+  assert.equal(state.turnCompletionWaiters.length, 0);
+});
+
+test("confirmInterrupt: reports missing_turn_id when no turn id arrives in time", async () => {
+  const state = {
+    threadId: "thread-1",
+    turnId: null,
+    turnIdWaiters: [],
+    turnCompletionWaiters: [],
+    streamedText: "",
+    completedText: "",
+    lastStreamItemId: null,
+    turnStatus: "in_progress",
+    turnError: null,
+    turnCompleted: false,
+    onText() {},
+    resolveCompleted: null,
+  };
+
+  const result = await confirmInterrupt(
+    {
+      async call() {
+        throw new Error("should not be called");
+      },
+    },
+    state,
+    [5, 5],
+    10,
+  );
+
+  assert.deepEqual(result, {
+    confirmed: false,
+    reason: "missing_turn_id",
+    errorMessage: undefined,
+  });
+});
+
+test("confirmInterrupt: reports rpc_error when turn/interrupt fails", async () => {
+  const state = {
+    threadId: "thread-1",
+    turnId: "turn-1",
+    turnIdWaiters: [],
+    turnCompletionWaiters: [],
+    streamedText: "",
+    completedText: "",
+    lastStreamItemId: null,
+    turnStatus: "in_progress",
+    turnError: null,
+    turnCompleted: false,
+    onText() {},
+    resolveCompleted: null,
+  };
+
+  const result = await confirmInterrupt(
+    {
+      async call() {
+        throw new Error("rpc failed");
+      },
+    },
+    state,
+    [5],
+    10,
+  );
+
+  assert.deepEqual(result, {
+    confirmed: false,
+    reason: "rpc_error",
+    errorMessage: "rpc failed",
+  });
+});
+
+test("confirmInterrupt: confirms only after an interrupted terminal event arrives", async () => {
+  const state = {
+    threadId: "thread-1",
+    turnId: "turn-1",
+    turnIdWaiters: [],
+    turnCompletionWaiters: [],
+    streamedText: "",
+    completedText: "",
+    lastStreamItemId: null,
+    turnStatus: "in_progress",
+    turnError: null,
+    turnCompleted: false,
+    onText() {},
+    resolveCompleted: null,
+  };
+
+  const resultPromise = confirmInterrupt(
+    {
+      async call() {
+        setTimeout(() => {
+          state.turnStatus = "interrupted";
+          state.turnCompleted = true;
+          state.turnCompletionWaiters.shift()?.();
+        }, 5);
+        return null;
+      },
+    },
+    state,
+    [5],
+    50,
+  );
+
+  assert.deepEqual(await resultPromise, { confirmed: true });
+});
+
+test("confirmInterrupt: reports wrong_terminal_status when the turn ends without interruption", async () => {
+  const state = {
+    threadId: "thread-1",
+    turnId: "turn-1",
+    turnIdWaiters: [],
+    turnCompletionWaiters: [],
+    streamedText: "",
+    completedText: "",
+    lastStreamItemId: null,
+    turnStatus: "in_progress",
+    turnError: null,
+    turnCompleted: false,
+    onText() {},
+    resolveCompleted: null,
+  };
+
+  const resultPromise = confirmInterrupt(
+    {
+      async call() {
+        setTimeout(() => {
+          state.turnStatus = "completed";
+          state.turnCompleted = true;
+          state.turnCompletionWaiters.shift()?.();
+        }, 5);
+        return null;
+      },
+    },
+    state,
+    [5],
+    50,
+  );
+
+  assert.deepEqual(await resultPromise, {
+    confirmed: false,
+    reason: "wrong_terminal_status",
+    turnStatus: "completed",
+  });
 });

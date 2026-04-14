@@ -140,8 +140,12 @@ chat output.
   rejects `run` entirely and auto-finalizes the manifest to `success`
   or `blocked` once every task reaches a terminal status.
 - **Clean Ctrl+C**: SIGINT aborts the in-flight backend invocation
-  cleanly (claude gets SIGINT, codex gets `turn/interrupt`), persists
-  the manifest as `aborted`, and exits 130. Resume any time with
+  through the backend-specific interrupt path (claude gets SIGINT,
+  codex gets `turn/interrupt`). `task-runner` only persists
+  `status=aborted` and exits 130 once interruption is actually
+  confirmed; unconfirmed Codex interruption now fails with a diagnostic
+  and exit 1 so the caller does not mistake a still-live remote turn
+  for a clean cancel. Resume any confirmed aborted run with
   `--resume-run`.
 - **External interrupt detection**: when running against codex
   managed mode, if another client cancels the turn from the side
@@ -583,6 +587,9 @@ Rules:
   CLI clients.
 - The same listener also serves browser-facing HTTP endpoints
   under `/api/...` and live run events via SSE under `/api/events/...`.
+- The health payload also carries a stable `daemonInstanceId`, and
+  daemon-projected run DTOs expose persisted `execution` provenance plus
+  daemon-local abort capability (`canAbort`, `abortReason`).
 - `--listen` overrides `TASK_RUNNER_LISTEN`; both fall back to
   `ws://127.0.0.1:4773/`.
 - Run-scoped commands, `list runs`, and definition read commands opt
@@ -778,18 +785,29 @@ any task is `in_progress`, while the canonical manifest status stays
 `initialized` until the task set reaches a terminal state.
 
 The JSON `RunDetail` contract also carries a machine-facing
-`capabilities` block:
+`execution` block plus a machine-facing `capabilities` block:
 
+- `execution.hostMode`
+- `execution.controller.kind`
+- `execution.controller.daemonInstanceId` when the controller is daemon-owned
+- `canAbort`, `abortReason`
 - `canArchive`, `canUnarchive`, `canResume`
 - `taskMutation.canSetStatus`
 - `taskMutation.canEditNotes`
 - `taskMutation.canAdd`
 
-These booleans reflect the current CLI-backed lifecycle rules. In
+`execution` is persisted provenance: embedded runs record
+`{ hostMode: "embedded", controller: { kind: "embedded" } }`, while
+daemon-started runs record daemon ownership and the daemon instance id
+that created them.
+
+Capabilities reflect the current lifecycle and host-ownership rules. In
 particular, passive runs are never resumable through `run`, running
 `taskMode=cli` runs allow `task set` / `task append-notes` but not
-`task add`, and terminal non-passive runs remain notes-editable but do
-not allow task status changes or task creation.
+`task add`, terminal runs report `canAbort=false` with
+`abortReason="already_terminal"`, and nonterminal runs that are merely
+persisted rather than actively owned by the serving daemon report
+`canAbort=false` with `abortReason="not_active_in_daemon"`.
 
 In daemon mode, external live abort control is available through the
 daemon-owned run lifecycle. Embedded mode remains single-process and
@@ -1161,11 +1179,19 @@ top-level fields — you can read the full state with
 
 ### Abort (Ctrl+C)
 
-The first Ctrl+C aborts the in-flight backend invocation cleanly
-(claude gets SIGINT, codex gets `turn/interrupt`), the run loop
-sets `manifest.status = "aborted"`, persists, and exits 130. The
-second Ctrl+C force-exits if the backend doesn't respond. Aborted
-runs are fully resumable like any other terminal state.
+The first Ctrl+C requests backend interruption. For Claude that still
+means a normal subprocess SIGINT. For Codex, `task-runner` now treats
+Ctrl+C as a confirmed-interrupt handshake:
+
+- If Codex confirms interruption, the run persists `status = "aborted"`
+  and exits 130.
+- If Codex never yields a turn id, `turn/interrupt` fails, or the turn
+  finishes without an interrupted terminal event, the run exits 1 with a
+  diagnostic explaining that interruption was not confirmed and the
+  remote session may still be active.
+
+The second Ctrl+C force-exits if the backend doesn't respond. Confirmed
+aborted runs are fully resumable like any other terminal state.
 
 ### External interrupt (codex only)
 

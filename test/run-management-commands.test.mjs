@@ -174,6 +174,8 @@ test("list runs enumerates current-generation runs across buckets and filters ar
   assert.deepEqual(parsed[0].capabilities, {
     canArchive: true,
     canUnarchive: false,
+    canAbort: false,
+    abortReason: "not_active_in_daemon",
     canResume: true,
     taskMutation: {
       canSetStatus: true,
@@ -184,6 +186,8 @@ test("list runs enumerates current-generation runs across buckets and filters ar
   assert.deepEqual(parsed[1].capabilities, {
     canArchive: false,
     canUnarchive: true,
+    canAbort: false,
+    abortReason: "not_active_in_daemon",
     canResume: false,
     taskMutation: {
       canSetStatus: true,

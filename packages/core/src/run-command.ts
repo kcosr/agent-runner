@@ -8,7 +8,12 @@ import {
   loadAssignmentConfig,
 } from "./config/loader.js";
 import { loadedAgentFromManifest, synthesizeAdHocAgent } from "./core/config/loaded.js";
-import { ResumeError, type RunManifest, resolveResumeTarget } from "./core/run/manifest.js";
+import {
+  ResumeError,
+  type RunExecution,
+  type RunManifest,
+  resolveResumeTarget,
+} from "./core/run/manifest.js";
 import { type RunEvent, type RunOptions, type RunOutcome, runAgent } from "./core/run/run-loop.js";
 import { resolveTaskRunnerCommand } from "./task-runner-command.js";
 
@@ -32,6 +37,7 @@ export interface ExecuteRunCommandOptions {
   backendSessionId?: string;
   cliVars: Record<string, string>;
   overrides: NonNullable<RunOptions["overrides"]>;
+  execution?: RunExecution;
   abortSignal?: AbortSignal;
   emitEvent?: (event: RunEvent) => void;
 }
@@ -161,6 +167,7 @@ export async function executeRunCommand(opts: ExecuteRunCommandOptions): Promise
     resume: resumeTarget,
     initialize: opts.initialize,
     bootstrapBackendSessionId: opts.backendSessionId,
+    execution: opts.execution,
     abortSignal: opts.abortSignal,
     overrides: opts.overrides,
     emitEvent: opts.emitEvent,

@@ -99,6 +99,22 @@ export interface SessionRecord {
   backendSessionIdAtEnd: string | null;
 }
 
+export type RunExecutionHostMode = "embedded" | "daemon";
+
+export type RunExecutionController =
+  | {
+      kind: "embedded";
+    }
+  | {
+      kind: "daemon";
+      daemonInstanceId: string;
+    };
+
+export interface RunExecution {
+  hostMode: RunExecutionHostMode;
+  controller: RunExecutionController;
+}
+
 export interface AssignmentInfo {
   name: string;
   sourcePath: string;
@@ -112,13 +128,14 @@ export interface AssignmentInfo {
 // `timeoutSec` are all captured at init / fresh-run time and preserved
 // across all subsequent sessions.
 //
-// schemaVersion: 3 is the current manifest-canonical generation. Manifests written
-// by earlier task-runner versions (v1 pre-canonical, v2 pre-reset-seed) are not
+// schemaVersion: 4 is the current manifest-canonical generation. Manifests written
+// by earlier task-runner versions (v1 pre-canonical, v2 pre-reset-seed, v3
+// pre-execution-provenance) are not
 // resumable by this version — `isRunManifest` rejects them and
 // `resolveResumeTarget` surfaces a clear error telling the caller to
 // create a fresh run.
 export interface RunManifest {
-  schemaVersion: 3;
+  schemaVersion: 4;
   runId: string;
   agent: {
     name: string;
@@ -160,6 +177,7 @@ export interface RunManifest {
   tasksTotal: number;
   backendSessionId: string | null;
   runtimeVars: Record<string, unknown>;
+  execution: RunExecution;
   pendingPrompt: string | null;
   // Assignment-level documentation surface for the caller of
   // task-runner (the human or script invoking `run` / `init`).
@@ -300,11 +318,11 @@ function readManifestCandidate(candidate: string): RunManifest {
     typeof parsed === "object" &&
     "schemaVersion" in parsed &&
     typeof (parsed as { schemaVersion: unknown }).schemaVersion === "number" &&
-    (parsed as { schemaVersion: number }).schemaVersion !== 3
+    (parsed as { schemaVersion: number }).schemaVersion !== 4
   ) {
     const version = (parsed as { schemaVersion: number }).schemaVersion;
     throw new ResumeError(
-      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 3. Manifests from earlier versions cannot be resumed — create a fresh run (task-runner init / run).`,
+      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 4. Manifests from earlier versions cannot be resumed — create a fresh run (task-runner init / run).`,
     );
   }
   if (!isRunManifest(parsed)) {
@@ -420,7 +438,7 @@ export function listRunManifests(env: NodeJS.ProcessEnv = process.env): ListedRu
 function isRunManifest(value: unknown): value is RunManifest {
   if (!value || typeof value !== "object") return false;
   const obj = value as Record<string, unknown>;
-  if (obj.schemaVersion !== 3) return false;
+  if (obj.schemaVersion !== 4) return false;
   if (typeof obj.runId !== "string") return false;
 
   // Top-level scalars required by downstream consumers.
@@ -458,6 +476,7 @@ function isRunManifest(value: unknown): value is RunManifest {
   if (!obj.finalTasks || typeof obj.finalTasks !== "object") return false;
   if (!obj.runtimeVars || typeof obj.runtimeVars !== "object") return false;
   if (!obj.resetSeed || typeof obj.resetSeed !== "object") return false;
+  if (!obj.execution || typeof obj.execution !== "object") return false;
 
   // callerInstructions is string | null.
   if (obj.callerInstructions !== null && typeof obj.callerInstructions !== "string") {
@@ -489,5 +508,16 @@ function isRunManifest(value: unknown): value is RunManifest {
   // sourcePath is string | null (null for ad-hoc agents)
   if (agent.sourcePath !== null && typeof agent.sourcePath !== "string") return false;
 
-  return true;
+  const execution = obj.execution as Record<string, unknown>;
+  if (execution.hostMode !== "embedded" && execution.hostMode !== "daemon") return false;
+  if (!execution.controller || typeof execution.controller !== "object") return false;
+  const controller = execution.controller as Record<string, unknown>;
+  if (controller.kind === "embedded") {
+    return true;
+  }
+  if (controller.kind === "daemon") {
+    return typeof controller.daemonInstanceId === "string";
+  }
+
+  return false;
 }

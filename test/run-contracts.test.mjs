@@ -26,7 +26,7 @@ function buildManifest(overrides = {}) {
   };
 
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     runId: "run123",
     agent: {
       name: "demo-agent",
@@ -61,6 +61,12 @@ function buildManifest(overrides = {}) {
     tasksTotal: Object.keys(finalTasks).length,
     backendSessionId: null,
     runtimeVars: { repo_path: "." },
+    execution: {
+      hostMode: "embedded",
+      controller: {
+        kind: "embedded",
+      },
+    },
     pendingPrompt: "Prompt body",
     callerInstructions: "Caller docs",
     resetSeed: {
@@ -109,10 +115,18 @@ test("run contracts: toRunSummary maps listed manifest rows to the neutral summa
     endedAt: "2026-04-12T10:05:00.000Z",
     tasksCompleted: 1,
     tasksTotal: 2,
+    execution: {
+      hostMode: "embedded",
+      controller: {
+        kind: "embedded",
+      },
+    },
     capabilities: {
       canArchive: true,
       canUnarchive: false,
       canResume: true,
+      canAbort: false,
+      abortReason: "already_terminal",
       taskMutation: {
         canSetStatus: false,
         canEditNotes: true,
@@ -140,13 +154,14 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
     canArchive: true,
     canUnarchive: false,
     canResume: true,
+    canAbort: false,
+    abortReason: "already_terminal",
     taskMutation: {
       canSetStatus: false,
       canEditNotes: true,
       canAdd: false,
     },
   });
-  assert.equal("canAbort" in detail.capabilities, false);
   assert.equal("canMutateTasks" in detail.capabilities, false);
   assert.deepEqual(detail, {
     runId: "run123",
@@ -204,6 +219,12 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
     pendingPrompt: "Prompt body",
     lockedFields: ["backend"],
     runtimeVars: { repo_path: "." },
+    execution: {
+      hostMode: "embedded",
+      controller: {
+        kind: "embedded",
+      },
+    },
     capabilities: detail.capabilities,
   });
 });
@@ -214,6 +235,8 @@ test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mu
     canArchive: true,
     canUnarchive: false,
     canResume: true,
+    canAbort: false,
+    abortReason: "not_active_in_daemon",
     taskMutation: {
       canSetStatus: true,
       canEditNotes: true,
@@ -234,6 +257,8 @@ test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mu
     canArchive: false,
     canUnarchive: true,
     canResume: false,
+    canAbort: false,
+    abortReason: "already_terminal",
     taskMutation: {
       canSetStatus: false,
       canEditNotes: true,
@@ -250,6 +275,8 @@ test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mu
     canArchive: false,
     canUnarchive: false,
     canResume: false,
+    canAbort: false,
+    abortReason: "not_active_in_daemon",
     taskMutation: {
       canSetStatus: false,
       canEditNotes: false,
@@ -275,6 +302,8 @@ test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mu
     }),
   );
   assert.equal(passive.canResume, false);
+  assert.equal(passive.canAbort, false);
+  assert.equal(passive.abortReason, "not_active_in_daemon");
   assert.deepEqual(passive.taskMutation, {
     canSetStatus: true,
     canEditNotes: true,
@@ -331,6 +360,8 @@ test("run contracts: passive summaries and details derive effectiveStatus from t
     canArchive: true,
     canUnarchive: false,
     canResume: false,
+    canAbort: false,
+    abortReason: "not_active_in_daemon",
     taskMutation: {
       canSetStatus: true,
       canEditNotes: true,
