@@ -37,6 +37,8 @@ export interface ParsedArgs {
   taskAppendText?: string;
   taskTitle?: string;
   taskBody?: string;
+  attachmentName?: string;
+  attachmentMimeType?: string;
   connect?: string;
   listen?: string;
   includeArchived?: boolean;
@@ -74,7 +76,12 @@ export function parseArgs(argv: string[]): ParsedArgs {
   // positional collector below. Plain `run ...` keeps its existing
   // positional behavior unless the next token is one of the explicit
   // grouped run-management subcommands.
-  if (result.command === "task" || result.command === "list" || result.command === "show") {
+  if (
+    result.command === "task" ||
+    result.command === "list" ||
+    result.command === "show" ||
+    result.command === "attachment"
+  ) {
     const next = args[0];
     if (next !== undefined && !next.startsWith("-")) {
       result.subcommand = args.shift();
@@ -175,11 +182,23 @@ export function parseArgs(argv: string[]): ParsedArgs {
     } else if (arg === "--name") {
       const next = args.shift();
       if (next === undefined) throw new Error("--name requires a value");
-      try {
-        result.name = trimRunName(next);
-      } catch {
-        throw new Error("--name cannot be empty");
+      if (result.command === "attachment") {
+        if (next.trim().length === 0) {
+          throw new Error("--name cannot be empty");
+        }
+        result.attachmentName = next;
+      } else {
+        try {
+          result.name = trimRunName(next);
+        } catch {
+          throw new Error("--name cannot be empty");
+        }
       }
+    } else if (arg === "--mime-type") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--mime-type requires a value");
+      if (next.trim().length === 0) throw new Error("--mime-type cannot be empty");
+      result.attachmentMimeType = next;
     } else if (arg === "--clear") {
       result.clear = true;
     } else if (arg === "--detach") {

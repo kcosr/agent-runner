@@ -934,13 +934,16 @@ every subsequent operation. Resume never re-reads the source
   instructions are written into the manifest at first write and
   carried forward like any other agent.
 
-**Schema versioning.** `schemaVersion: 4` is the manifest-canonical
-generation. Manifests written by earlier task-runner versions have
-`schemaVersion: 1` (pre-canonical), `schemaVersion: 2`
-(pre-reset-seed), or `schemaVersion: 3` (pre-execution-provenance) and
-are **not resumable** by this version —
-`resolveResumeTarget` rejects them with a clear error and tells the
-caller to start a fresh run. No automatic migration.
+**Schema versioning.** `schemaVersion: 6` is the current
+manifest-canonical generation. Manifests written by earlier
+task-runner versions have `schemaVersion: 1` (pre-canonical),
+`schemaVersion: 2` (pre-reset-seed), `schemaVersion: 3`
+(pre-execution-provenance), `schemaVersion: 4` (pre-run-dependencies),
+or `schemaVersion: 5` (pre-attachments) and are **not resumable** by
+this version as-is. `resolveResumeTarget` rejects them with a clear
+error. The only supported attachment-era upgrade path is the explicit
+offline script `scripts/migrate-manifests-v6.mjs`, which adds
+`attachments: []` to v5 manifests; runtime reads do not auto-upgrade.
 
 ```ts
 type ManifestStatus =
@@ -953,7 +956,7 @@ type ManifestStatus =
   | "error";
 
 interface RunManifest {
-  schemaVersion: 4;
+  schemaVersion: 6;
   runId: string;
   agent: {
     name: string;
@@ -983,6 +986,7 @@ interface RunManifest {
   assignmentPath: string;          // workspace assignment.md (the I/O buffer)
   workspaceDir: string;
   runtimeVars: Record<string, unknown>;  // resolved vars used for this run
+  attachments: RunAttachment[];    // manifest-backed attachment metadata
   startedAt: string;               // ISO-8601; session 0 start
   endedAt: string | null;          // latest session's end, null while running
   archivedAt: string | null;       // orthogonal archive marker for run discovery / resume gating
@@ -1025,6 +1029,16 @@ interface TaskSnapshot {
   notes: string;
 }
 
+interface RunAttachment {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  sha256: string;
+  addedAt: string;
+  relativePath: string;            // always resolves inside workspaceDir
+}
+
 interface RunResetSeed {
   model: string | null;
   effort: string | null;
@@ -1060,6 +1074,40 @@ run from `success` to some new archive state. Instead it is a
 discovery/resume gate used by `task-runner list runs`, `run archive`,
 and `run unarchive`. Archived runs are hidden from default run
 listings and rejected by `--resume-run` until unarchived.
+
+## Run attachments
+
+Attachments are first-class manifest state. `run.json` stores
+`attachments: RunAttachment[]`, while the file bytes live under:
+
+```text
+<workspaceDir>/attachments/<attachment.id>/<sanitized-file-name>
+```
+
+Rules:
+
+- `relativePath` is workspace-relative and must resolve inside
+  `workspaceDir`.
+- Attachment metadata is canonical in the manifest; runtime code never
+  invents attachment rows from stray files on disk.
+- Default limits are 20 attachments per run, 25 MiB per file, and
+  100 MiB total attachment bytes per run.
+- Add operations stream to a temp file, hash while writing, verify
+  size/hash before the final commit, then append the new metadata row
+  under the shared per-run lock.
+- Remove operations delete both the manifest row and the stored file
+  tree under the same lock.
+- Running runs may still accept attachment add/remove operations; the
+  run loop refreshes attachment metadata from disk before manifest
+  writes so a concurrent turn cannot drop those mutations.
+
+Transport/read-model surface:
+
+- CLI exposes `attachment add|list|remove|download`.
+- Daemon transport uses dedicated HTTP endpoints for raw upload and
+  download bytes rather than JSON-RPC payloads.
+- `RunSummary` exposes `attachmentCount`; `RunDetail` exposes
+  `attachments`.
 
 **Transcript, not summary**: `AttemptRecord.transcript` carries the full
 assistant-side text across every turn in the attempt, in order — the same
@@ -1640,7 +1688,7 @@ The raw JSON events are still captured verbatim into
 ## CLI shape
 
 ```
-task-runner <run|init|status|task|list|show> [--connect <ws-url>] [options] [args]
+task-runner <run|init|status|task|attachment|list|show> [--connect <ws-url>] [options] [args]
 task-runner serve [--listen <ws-url>]
 
 # run / init shared flag set
@@ -1697,6 +1745,25 @@ task-runner task set <id> <task-id>
 
 task-runner task add <id>
                --title <text>
+               [--output-format <text|json>]
+
+# attachment — mutate run attachments without touching prompt/session state
+task-runner attachment add <id> <source-file>
+               [--name <display-name>]
+               [--mime-type <type>]
+               [--connect <ws-url>]
+               [--output-format <text|json>]
+
+task-runner attachment list <id>
+               [--connect <ws-url>]
+               [--output-format <text|json>]
+
+task-runner attachment download <id> <attachment-id> <output-path>
+               [--connect <ws-url>]
+               [--output-format <text|json>]
+
+task-runner attachment remove <id> <attachment-id>
+               [--connect <ws-url>]
                [--output-format <text|json>]
 
 # list — enumerate available definitions or runs (read-only)

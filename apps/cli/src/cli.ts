@@ -1,10 +1,15 @@
 #!/usr/bin/env node
+import { existsSync, statSync } from "node:fs";
+import { basename, resolve } from "node:path";
 import {
   addDependency,
+  addRunAttachmentFromFile,
   appendNotes,
   archive,
   clearDependencies,
   createTask,
+  downloadRunAttachment,
+  getAttachmentList,
   getDefinition,
   getDefinitionList,
   getRun,
@@ -13,6 +18,7 @@ import {
   getTaskList,
   initRun,
   removeDependency,
+  removeRunAttachment,
   renameRun,
   reset,
   resumeRun,
@@ -29,6 +35,7 @@ import {
 } from "@task-runner/core/config/loader.js";
 import { isPathArg, resolveInputPath } from "@task-runner/core/config/runtime-paths.js";
 import { CommandError, isCommandError } from "@task-runner/core/core/commands/service.js";
+import { AttachmentError } from "@task-runner/core/core/run/attachments.js";
 import {
   EmptyPromptError,
   InvalidAddedTaskError,
@@ -48,6 +55,10 @@ import { normalizeRunNameMutation } from "@task-runner/core/util/run-name.js";
 import { type ParsedArgs, overridesFromParsedArgs, parseArgs } from "./cli/parse-args.js";
 import { renderRunEvent } from "./cli/render-run.js";
 import {
+  renderAttachmentAdded,
+  renderAttachmentDownloaded,
+  renderAttachmentList,
+  renderAttachmentRemoved,
   renderDefinitionDetails,
   renderDefinitionList,
   renderRunAddDependency,
@@ -63,10 +74,16 @@ import {
 } from "./commands/render.js";
 import { DaemonClient, DaemonConnectionError, DaemonRpcError } from "./daemon/client.js";
 import { resolveHostMode, resolveListenUrl } from "./daemon/config.js";
+import {
+  daemonAddAttachment,
+  daemonDownloadAttachment,
+  daemonListAttachments,
+  daemonRemoveAttachment,
+} from "./daemon/http-client.js";
 import { RPC_ERROR_COMMAND } from "./daemon/protocol.js";
 import { serveDaemon } from "./daemon/server.js";
 
-const HELP = `Usage: task-runner <run|init|serve|status|task|list|show> [options] [args]
+const HELP = `Usage: task-runner <run|init|serve|status|task|attachment|list|show> [options] [args]
 
 Commands:
   run                     Execute an agent. Either a fresh run, a resume,
@@ -89,6 +106,13 @@ Commands:
   task append-notes <id> <task>
                           Append text to a task's notes.
   task add <id>           Append a new task to a run's task list.
+  attachment add <id> <file>
+                          Add a file attachment to a run.
+  attachment list <id>    List attachments for a run.
+  attachment remove <id> <attachment-id>
+                          Remove one attachment from a run.
+  attachment download <id> <attachment-id> <output-path>
+                          Download one attachment from a run.
   list <agents|assignments|runs>
                           Enumerate definitions or runs.
   show <agent|assignment> <name|path>
@@ -103,6 +127,8 @@ Task command options:
   --text <text>           (task append-notes) Text to append.
   --title <text>          (task add) Title for the new task.
   --body <text>           (task add) Optional task body.
+  --name <text>           (attachment add) Optional display name.
+  --mime-type <type>      (attachment add) Optional MIME type override.
 
 Host selection:
   --connect <ws-url>      Route the command through the daemon host.
@@ -169,6 +195,7 @@ function exitCommandFailure(err: unknown, connectUrl?: string): never {
 
   if (
     isCommandError(err) ||
+    err instanceof AttachmentError ||
     err instanceof AgentNotFoundError ||
     err instanceof AgentConfigError ||
     err instanceof AssignmentNotFoundError ||
@@ -502,7 +529,13 @@ async function runShowCommand(parsed: ParsedArgs, connectUrl?: string): Promise<
 
 function unsupportedFlagsForGroupedCommand(
   parsed: ParsedArgs,
-  opts: { allowFields?: boolean; allowIncludeArchived?: boolean; allowClear?: boolean } = {},
+  opts: {
+    allowFields?: boolean;
+    allowIncludeArchived?: boolean;
+    allowClear?: boolean;
+    allowAttachmentName?: boolean;
+    allowAttachmentMimeType?: boolean;
+  } = {},
 ): string[] {
   const unsupported: string[] = [];
   if (parsed.agent !== undefined) unsupported.push("--agent");
@@ -526,6 +559,10 @@ function unsupportedFlagsForGroupedCommand(
   if (parsed.taskAppendText !== undefined) unsupported.push("--text");
   if (parsed.taskTitle !== undefined) unsupported.push("--title");
   if (parsed.taskBody !== undefined) unsupported.push("--body");
+  if (!opts.allowAttachmentName && parsed.attachmentName !== undefined) unsupported.push("--name");
+  if (!opts.allowAttachmentMimeType && parsed.attachmentMimeType !== undefined) {
+    unsupported.push("--mime-type");
+  }
   if (parsed.addedTasks.length > 0) unsupported.push("--add-task");
   if (parsed.detach) unsupported.push("--detach");
   if (parsed.listen !== undefined) unsupported.push("--listen");
@@ -568,6 +605,230 @@ async function runTaskCommand(parsed: ParsedArgs, connectUrl?: string): Promise<
     default:
       process.stderr.write(
         `task-runner: task command requires a subcommand: list | show | set | append-notes | add (got "${parsed.subcommand ?? ""}")\n`,
+      );
+      process.exit(3);
+  }
+}
+
+function validateAttachmentSourceFile(sourceArg: string): string {
+  const sourcePath = resolveInputPath(sourceArg, process.cwd());
+  if (!existsSync(sourcePath)) {
+    throw new CommandError(`attachment add: source file ${sourcePath} was not found`);
+  }
+  if (!statSync(sourcePath).isFile()) {
+    throw new CommandError(`attachment add: ${sourcePath} is not a file`);
+  }
+  return sourcePath;
+}
+
+async function resolveAttachmentTargetForDaemon(
+  target: string,
+  connectUrl: string,
+): Promise<string> {
+  if (!isPathArg(target)) {
+    return target;
+  }
+  return await withDaemonClient(connectUrl, (client) =>
+    client
+      .call<{ run: ReturnType<typeof getRun> }>("runs.get", { target })
+      .then((result) => result.run.runId),
+  );
+}
+
+async function runAttachmentCommand(parsed: ParsedArgs, connectUrl?: string): Promise<never> {
+  switch (parsed.subcommand) {
+    case "list": {
+      const [runArg, extra] = parsed.positionals;
+      const target = normalizeTarget(runArg);
+      if (!target) {
+        process.stderr.write("task-runner: attachment list requires <run-id-or-path>\n");
+        process.exit(3);
+      }
+      if (extra !== undefined) {
+        process.stderr.write(
+          `task-runner: attachment list takes exactly one positional (<run-id-or-path>); got extra "${extra}"\n`,
+        );
+        process.exit(3);
+      }
+      const unsupported = unsupportedFlagsForGroupedCommand(parsed);
+      if (unsupported.length > 0) {
+        process.stderr.write(
+          `task-runner: attachment list only supports <run-id-or-path>, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+        );
+        process.exit(3);
+      }
+
+      try {
+        const attachments =
+          connectUrl === undefined
+            ? getAttachmentList(target)
+            : await daemonListAttachments(
+                connectUrl,
+                await resolveAttachmentTargetForDaemon(target, connectUrl),
+              );
+        if (parsed.outputFormat === "json") {
+          writeJson(attachments);
+        } else {
+          process.stdout.write(renderAttachmentList(attachments));
+        }
+        return process.exit(0);
+      } catch (err) {
+        return exitCommandFailure(err, connectUrl);
+      }
+    }
+    case "add": {
+      const [runArg, sourceArg, extra] = parsed.positionals;
+      const target = normalizeTarget(runArg);
+      if (!target || !sourceArg) {
+        process.stderr.write(
+          "task-runner: attachment add requires <run-id-or-path> <source-file>\n",
+        );
+        process.exit(3);
+      }
+      if (extra !== undefined) {
+        process.stderr.write(
+          `task-runner: attachment add takes exactly two positionals (<run-id-or-path> <source-file>); got extra "${extra}"\n`,
+        );
+        process.exit(3);
+      }
+      const unsupported = unsupportedFlagsForGroupedCommand(parsed, {
+        allowAttachmentName: true,
+        allowAttachmentMimeType: true,
+      });
+      if (unsupported.length > 0) {
+        process.stderr.write(
+          `task-runner: attachment add only supports <run-id-or-path>, <source-file>, --name, --mime-type, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+        );
+        process.exit(3);
+      }
+
+      try {
+        const sourcePath = validateAttachmentSourceFile(sourceArg);
+        const name = parsed.attachmentName ?? basename(sourcePath);
+        const attachment =
+          connectUrl === undefined
+            ? await addRunAttachmentFromFile(target, {
+                sourcePath,
+                name: parsed.attachmentName,
+                mimeType: parsed.attachmentMimeType,
+              })
+            : await daemonAddAttachment(
+                connectUrl,
+                await resolveAttachmentTargetForDaemon(target, connectUrl),
+                {
+                  sourcePath,
+                  name,
+                  mimeType: parsed.attachmentMimeType,
+                },
+              );
+        if (parsed.outputFormat === "json") {
+          writeJson(attachment);
+        } else {
+          const runId =
+            connectUrl === undefined
+              ? target
+              : await resolveAttachmentTargetForDaemon(target, connectUrl);
+          process.stdout.write(renderAttachmentAdded(runId, attachment));
+        }
+        return process.exit(0);
+      } catch (err) {
+        return exitCommandFailure(err, connectUrl);
+      }
+    }
+    case "remove": {
+      const [runArg, attachmentId, extra] = parsed.positionals;
+      const target = normalizeTarget(runArg);
+      if (!target || !attachmentId) {
+        process.stderr.write(
+          "task-runner: attachment remove requires <run-id-or-path> <attachment-id>\n",
+        );
+        process.exit(3);
+      }
+      if (extra !== undefined) {
+        process.stderr.write(
+          `task-runner: attachment remove takes exactly two positionals (<run-id-or-path> <attachment-id>); got extra "${extra}"\n`,
+        );
+        process.exit(3);
+      }
+      const unsupported = unsupportedFlagsForGroupedCommand(parsed);
+      if (unsupported.length > 0) {
+        process.stderr.write(
+          `task-runner: attachment remove only supports <run-id-or-path>, <attachment-id>, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+        );
+        process.exit(3);
+      }
+
+      try {
+        const result =
+          connectUrl === undefined
+            ? removeRunAttachment(target, attachmentId)
+            : await daemonRemoveAttachment(
+                connectUrl,
+                await resolveAttachmentTargetForDaemon(target, connectUrl),
+                attachmentId,
+              );
+        if (parsed.outputFormat === "json") {
+          writeJson(result);
+        } else {
+          process.stdout.write(renderAttachmentRemoved(result));
+        }
+        return process.exit(0);
+      } catch (err) {
+        return exitCommandFailure(err, connectUrl);
+      }
+    }
+    case "download": {
+      const [runArg, attachmentId, outputPath, extra] = parsed.positionals;
+      const target = normalizeTarget(runArg);
+      if (!target || !attachmentId || !outputPath) {
+        process.stderr.write(
+          "task-runner: attachment download requires <run-id-or-path> <attachment-id> <output-path>\n",
+        );
+        process.exit(3);
+      }
+      if (extra !== undefined) {
+        process.stderr.write(
+          `task-runner: attachment download takes exactly three positionals (<run-id-or-path> <attachment-id> <output-path>); got extra "${extra}"\n`,
+        );
+        process.exit(3);
+      }
+      const unsupported = unsupportedFlagsForGroupedCommand(parsed);
+      if (unsupported.length > 0) {
+        process.stderr.write(
+          `task-runner: attachment download only supports <run-id-or-path>, <attachment-id>, <output-path>, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+        );
+        process.exit(3);
+      }
+
+      try {
+        const result =
+          connectUrl === undefined
+            ? downloadRunAttachment(target, attachmentId, outputPath)
+            : await (async () => {
+                const runId = await resolveAttachmentTargetForDaemon(target, connectUrl);
+                const attachment = (await daemonListAttachments(connectUrl, runId)).find(
+                  (candidate) => candidate.id === attachmentId,
+                );
+                if (!attachment) {
+                  throw new AttachmentError(
+                    `attachment "${attachmentId}" not found in run ${runId}`,
+                  );
+                }
+                return await daemonDownloadAttachment(connectUrl, runId, attachment, outputPath);
+              })();
+        if (parsed.outputFormat === "json") {
+          writeJson(result);
+        } else {
+          process.stdout.write(renderAttachmentDownloaded(result));
+        }
+        return process.exit(0);
+      } catch (err) {
+        return exitCommandFailure(err, connectUrl);
+      }
+    }
+    default:
+      process.stderr.write(
+        `task-runner: attachment command requires a subcommand: add | list | remove | download (got "${parsed.subcommand ?? ""}")\n`,
       );
       process.exit(3);
   }
@@ -1315,6 +1576,10 @@ async function main(): Promise<void> {
 
   if (parsed.command === "task") {
     await runTaskCommand(parsed, connectUrl);
+  }
+
+  if (parsed.command === "attachment") {
+    await runAttachmentCommand(parsed, connectUrl);
   }
 
   if (parsed.command === "list") {

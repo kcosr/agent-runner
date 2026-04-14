@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -7,15 +7,19 @@ import { WebSocketServer } from "ws";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import {
   CommandError,
+  addAttachmentFromFile,
   addRunDependency,
   addTask,
   appendTaskNotes,
   archiveRun,
   clearRunDependencies,
+  downloadAttachment,
+  listAttachments,
   listDefinitions,
   listRuns,
   listTasks,
   readStatus,
+  removeAttachment,
   removeRunDependency,
   setRunName,
   setTask,
@@ -619,6 +623,46 @@ test("command services: listRuns returns newest-first rows and filters archived 
       satisfied: 0,
       unsatisfied: 0,
     });
+  });
+});
+
+test("command services: archived runs allow attachment add/list/download/remove with canonical storage", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+  const sourcePath = join(dir, "notes.md");
+  const downloadsDir = join(dir, "downloads");
+  writeFileSync(sourcePath, "hello attachments\n");
+  mkdirSync(downloadsDir);
+
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.status = "success";
+    manifest.exitCode = 0;
+    manifest.endedAt = "2026-04-14T12:00:00.000Z";
+    manifest.archivedAt = "2026-04-14T12:05:00.000Z";
+  });
+
+  await withSharedRuntimeEnv(dir, async () => {
+    const added = await addAttachmentFromFile(outcome.runId, { sourcePath });
+    assert.equal(added.attachment.name, "notes.md");
+    assert.equal(added.attachment.mimeType, "text/markdown; charset=utf-8");
+    assert.match(added.attachment.relativePath, /^attachments\/att-[^/]+\/notes\.md$/);
+
+    const storedPath = join(outcome.workspaceDir, added.attachment.relativePath);
+    assert.equal(readFileSync(storedPath, "utf8"), "hello attachments\n");
+
+    const listed = listAttachments(outcome.runId);
+    assert.equal(listed.attachments.length, 1);
+    assert.equal(listed.attachments[0].id, added.attachment.id);
+
+    const downloaded = downloadAttachment(outcome.runId, added.attachment.id, downloadsDir);
+    assert.equal(readFileSync(downloaded.outputPath, "utf8"), "hello attachments\n");
+
+    const removed = removeAttachment(outcome.runId, added.attachment.id);
+    assert.equal(removed.changed, true);
+    assert.equal(listAttachments(outcome.runId).attachments.length, 0);
+    assert.equal(readManifest(outcome.workspaceDir).attachments.length, 0);
+    assert.equal(existsSync(storedPath), false);
   });
 });
 

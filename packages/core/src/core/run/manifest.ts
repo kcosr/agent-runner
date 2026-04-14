@@ -9,6 +9,7 @@ import {
   resolveRunsRoot,
   resolveUnknownRunsDir,
 } from "../../config/runtime-paths.js";
+import type { RunAttachment } from "../../contracts/attachments.js";
 import { writeTextFileAtomic } from "../../util/write-file-atomic.js";
 import type { LockableField, TaskMode } from "../config/schema.js";
 
@@ -129,14 +130,14 @@ export interface AssignmentInfo {
 // `timeoutSec` are all captured at init / fresh-run time and preserved
 // across all subsequent sessions.
 //
-// schemaVersion: 5 is the current manifest-canonical generation. Manifests written
+// schemaVersion: 6 is the current manifest-canonical generation. Manifests written
 // by earlier task-runner versions (v1 pre-canonical, v2 pre-reset-seed, v3
-// pre-execution-provenance, v4 pre-run-dependencies) are not
+// pre-execution-provenance, v4 pre-run-dependencies, v5 pre-attachments) are not
 // resumable by this version — `isRunManifest` rejects them and
 // `resolveResumeTarget` surfaces a clear error telling the caller to
 // create a fresh run.
 export interface RunManifest {
-  schemaVersion: 5;
+  schemaVersion: 6;
   runId: string;
   agent: {
     name: string;
@@ -196,6 +197,7 @@ export interface RunManifest {
   // Reset-to-init seed frozen at first write. Reset uses this instead
   // of re-reading the current agent/assignment source files.
   resetSeed: RunResetSeed;
+  attachments: RunAttachment[];
   finalTasks: Record<string, TaskSnapshot>;
   sessionCount: number;
   sessions: SessionRecord[];
@@ -322,11 +324,11 @@ function readManifestCandidate(candidate: string): RunManifest {
     typeof parsed === "object" &&
     "schemaVersion" in parsed &&
     typeof (parsed as { schemaVersion: unknown }).schemaVersion === "number" &&
-    (parsed as { schemaVersion: number }).schemaVersion !== 5
+    (parsed as { schemaVersion: number }).schemaVersion !== 6
   ) {
     const version = (parsed as { schemaVersion: number }).schemaVersion;
     throw new ResumeError(
-      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 5. Manifests from earlier versions cannot be resumed — create a fresh run (task-runner init / run).`,
+      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 6. Manifests from earlier versions cannot be resumed — create a fresh run (task-runner init / run).`,
     );
   }
   if (!isRunManifest(parsed)) {
@@ -442,7 +444,7 @@ export function listRunManifests(env: NodeJS.ProcessEnv = process.env): ListedRu
 function isRunManifest(value: unknown): value is RunManifest {
   if (!value || typeof value !== "object") return false;
   const obj = value as Record<string, unknown>;
-  if (obj.schemaVersion !== 5) return false;
+  if (obj.schemaVersion !== 6) return false;
   if (typeof obj.runId !== "string") return false;
 
   // Top-level scalars required by downstream consumers.
@@ -479,6 +481,26 @@ function isRunManifest(value: unknown): value is RunManifest {
   if (!Array.isArray(obj.attemptRecords)) return false;
   if (!Array.isArray(obj.sessions)) return false;
   if (!Array.isArray(obj.lockedFields)) return false;
+  if (!Array.isArray(obj.attachments)) return false;
+  if (
+    obj.attachments.some((attachment) => {
+      if (!attachment || typeof attachment !== "object") {
+        return true;
+      }
+      const record = attachment as Record<string, unknown>;
+      return (
+        typeof record.id !== "string" ||
+        typeof record.name !== "string" ||
+        typeof record.mimeType !== "string" ||
+        typeof record.size !== "number" ||
+        typeof record.sha256 !== "string" ||
+        typeof record.addedAt !== "string" ||
+        typeof record.relativePath !== "string"
+      );
+    })
+  ) {
+    return false;
+  }
 
   // Object-valued fields that are dereferenced by key immediately
   // after resolveResumeTarget returns. `typeof null === "object"`

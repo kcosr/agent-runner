@@ -27,7 +27,7 @@ function buildManifest(overrides = {}) {
   };
 
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     runId: "run123",
     agent: {
       name: "demo-agent",
@@ -71,6 +71,7 @@ function buildManifest(overrides = {}) {
     },
     pendingPrompt: "Prompt body",
     callerInstructions: "Caller docs",
+    attachments: [],
     resetSeed: {
       model: "claude-sonnet-4-6",
       effort: "medium",
@@ -118,6 +119,7 @@ test("run contracts: toRunSummary maps listed manifest rows to the neutral summa
     endedAt: "2026-04-12T10:05:00.000Z",
     tasksCompleted: 1,
     tasksTotal: 2,
+    attachmentCount: 0,
     dependencyState: {
       ready: true,
       total: 0,
@@ -207,6 +209,7 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
     sessionCount: 0,
     tasksCompleted: 1,
     tasksTotal: 2,
+    attachments: [],
     dependencies: [],
     dependents: [],
     tasks: [

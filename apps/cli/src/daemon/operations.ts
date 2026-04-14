@@ -1,9 +1,12 @@
 import type {
   addDependency,
+  addRunAttachmentFromStream,
   appendNotes,
   archive,
   clearDependencies,
   createTask,
+  getAttachment,
+  getAttachmentList,
   getDefinition,
   getDefinitionList,
   getRun,
@@ -12,6 +15,7 @@ import type {
   getTaskList,
   initRun,
   removeDependency,
+  removeRunAttachment,
   renameRun,
   reset,
   resumeRun,
@@ -34,12 +38,16 @@ export interface DaemonHandlers {
   getTaskList: typeof getTaskList;
   getDefinition: typeof getDefinition;
   getDefinitionList: typeof getDefinitionList;
+  getAttachment: typeof getAttachment;
+  getAttachmentList: typeof getAttachmentList;
   archive: typeof archive;
   unarchive: typeof unarchive;
   renameRun: typeof renameRun;
   addDependency: typeof addDependency;
   removeDependency: typeof removeDependency;
   clearDependencies: typeof clearDependencies;
+  addRunAttachmentFromStream: typeof addRunAttachmentFromStream;
+  removeRunAttachment: typeof removeRunAttachment;
   reset: typeof reset;
   updateTask: typeof updateTask;
   appendNotes: typeof appendNotes;
@@ -97,6 +105,18 @@ export function createDaemonOperations(ctx: DaemonOperationContext) {
     },
     clearDependencies(target: string) {
       return { result: ctx.clearDependencies(target) };
+    },
+    listAttachments(target: string) {
+      return { attachments: ctx.getAttachmentList(target) };
+    },
+    async addAttachment(target: string, input: Parameters<typeof addRunAttachmentFromStream>[1]) {
+      return { attachment: await ctx.addRunAttachmentFromStream(target, input) };
+    },
+    getAttachment(target: string, attachmentId: string) {
+      return ctx.getAttachment(target, attachmentId);
+    },
+    removeAttachment(target: string, attachmentId: string) {
+      return { result: ctx.removeRunAttachment(target, attachmentId) };
     },
     abortRun(target: string) {
       return ctx.abortRun(target);

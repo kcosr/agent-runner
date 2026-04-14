@@ -1,6 +1,11 @@
 import type { AppRuntimeConfig } from "@task-runner/core/contracts/app-config.js";
+import type {
+  RunAttachment,
+  RunAttachmentRemoveResult,
+} from "@task-runner/core/contracts/attachments.js";
 import {
   runArchiveResultSchema,
+  runAttachmentSchema,
   runDependenciesResultSchema,
   runDetailSchema,
   runNameResultSchema,
@@ -163,6 +168,58 @@ async function readDependenciesResult(
   );
 }
 
+async function readAttachmentList(response: Response): Promise<RunAttachment[]> {
+  if (!response.ok) {
+    return await readError(response);
+  }
+  return parseField(
+    await parseResponseJson(response, "Attachment list"),
+    response.status,
+    "attachments",
+    z.array(runAttachmentSchema),
+    "Attachment list",
+  );
+}
+
+async function readAttachmentResult(response: Response, label: string): Promise<RunAttachment> {
+  if (!response.ok) {
+    return await readError(response);
+  }
+  return parseField(
+    await parseResponseJson(response, label),
+    response.status,
+    "attachment",
+    runAttachmentSchema,
+    label,
+  );
+}
+
+async function readAttachmentRemoveResult(
+  response: Response,
+  label: string,
+): Promise<RunAttachmentRemoveResult> {
+  if (!response.ok) {
+    return await readError(response);
+  }
+  const parsed = z
+    .object({
+      result: z.object({
+        runId: z.string(),
+        attachmentId: z.string(),
+        changed: z.boolean(),
+      }),
+    })
+    .safeParse(await parseResponseJson(response, label));
+  if (!parsed.success) {
+    throw invalidResponse(
+      `${label} response payload is invalid`,
+      response.status,
+      parsed.error.flatten(),
+    );
+  }
+  return parsed.data.result;
+}
+
 async function readRunIdResult(response: Response, label: string): Promise<string> {
   if (!response.ok) {
     return await readError(response);
@@ -204,6 +261,61 @@ export function createApiClient(config: AppRuntimeConfig) {
         },
       );
       return await readRun(response);
+    },
+    async listAttachments(runId: string): Promise<RunAttachment[]> {
+      const response = await fetch(
+        joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/attachments`),
+        {
+          headers: { accept: "application/json" },
+        },
+      );
+      return await readAttachmentList(response);
+    },
+    async uploadAttachment(runId: string, file: File): Promise<RunAttachment> {
+      const headers: Record<string, string> = {
+        "x-task-runner-attachment-name": encodeURIComponent(file.name),
+        accept: "application/json",
+      };
+      if (file.type) {
+        headers["content-type"] = file.type;
+      }
+      const response = await fetch(
+        joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/attachments`),
+        {
+          method: "POST",
+          headers,
+          body: file,
+        },
+      );
+      return await readAttachmentResult(response, "Upload attachment");
+    },
+    async removeAttachment(
+      runId: string,
+      attachmentId: string,
+    ): Promise<RunAttachmentRemoveResult> {
+      const response = await fetch(
+        joinPath(
+          config.apiBasePath,
+          `/runs/${encodeURIComponent(runId)}/attachments/${encodeURIComponent(attachmentId)}`,
+        ),
+        {
+          method: "DELETE",
+          headers: { accept: "application/json" },
+        },
+      );
+      return await readAttachmentRemoveResult(response, "Remove attachment");
+    },
+    async downloadAttachment(runId: string, attachmentId: string): Promise<Blob> {
+      const response = await fetch(
+        joinPath(
+          config.apiBasePath,
+          `/runs/${encodeURIComponent(runId)}/attachments/${encodeURIComponent(attachmentId)}/content`,
+        ),
+      );
+      if (!response.ok) {
+        return await readError(response);
+      }
+      return await response.blob();
     },
     async archiveRun(runId: string): Promise<RunArchiveResult> {
       const response = await fetch(

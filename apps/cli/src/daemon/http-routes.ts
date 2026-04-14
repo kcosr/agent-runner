@@ -1,19 +1,23 @@
+import { readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { RunCommandOverrides } from "@task-runner/core/app/service.js";
 import { VALID_STATUSES } from "@task-runner/core/assignment/model.js";
 import type { RunEventEnvelope } from "@task-runner/core/contracts/events.js";
 import { HttpError } from "./http-errors.js";
-import { readJsonBody, sendError, sendJson } from "./http-serializers.js";
+import { readJsonBody, sendBuffer, sendError, sendJson } from "./http-serializers.js";
 import type { DaemonOperations } from "./operations.js";
 import type { RunSetNameParams, RunsStartParams } from "./protocol.js";
 import {
+  RequestValidationError,
   asRecord,
   optionalEnum,
+  optionalHeaderString,
   optionalOverrides,
   optionalString,
   parseBooleanQueryValue,
   parseRunSetNameParams,
   parseStartRunParams,
+  requiredHeaderString,
   requiredRunIdString,
   requiredString,
 } from "./request-parsing.js";
@@ -175,6 +179,69 @@ const routes: RouteDefinition[] = [
     pattern: ["api", "runs", ":runId", "abort"],
     handler: (_req, res, ctx, params) => {
       sendJson(res, 200, ctx.operations.abortRun(routeParam(params, "runId")));
+    },
+  },
+  {
+    method: "GET",
+    pattern: ["api", "runs", ":runId", "attachments"],
+    handler: (_req, res, ctx, params) => {
+      sendJson(res, 200, ctx.operations.listAttachments(routeParam(params, "runId")));
+    },
+  },
+  {
+    method: "POST",
+    pattern: ["api", "runs", ":runId", "attachments"],
+    handler: async (req, res, ctx, params) => {
+      const rawName = requiredHeaderString(
+        req.headers["x-task-runner-attachment-name"],
+        "x-task-runner-attachment-name",
+      );
+      let name: string;
+      try {
+        name = decodeURIComponent(rawName);
+      } catch {
+        throw new RequestValidationError("x-task-runner-attachment-name must be percent-encoded");
+      }
+      const mimeType =
+        optionalHeaderString(req.headers["content-type"], "content-type")?.trim() || undefined;
+      sendJson(
+        res,
+        200,
+        await ctx.operations.addAttachment(routeParam(params, "runId"), {
+          name,
+          source: req,
+          mimeType,
+        }),
+      );
+    },
+  },
+  {
+    method: "DELETE",
+    pattern: ["api", "runs", ":runId", "attachments", ":attachmentId"],
+    handler: (_req, res, ctx, params) => {
+      sendJson(
+        res,
+        200,
+        ctx.operations.removeAttachment(
+          routeParam(params, "runId"),
+          routeParam(params, "attachmentId"),
+        ),
+      );
+    },
+  },
+  {
+    method: "GET",
+    pattern: ["api", "runs", ":runId", "attachments", ":attachmentId", "content"],
+    handler: (_req, res, ctx, params) => {
+      const result = ctx.operations.getAttachment(
+        routeParam(params, "runId"),
+        routeParam(params, "attachmentId"),
+      );
+      sendBuffer(res, 200, readFileSync(result.absolutePath), result.attachment.mimeType, {
+        "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(result.attachment.name)}`,
+        "x-task-runner-attachment-id": result.attachment.id,
+        "x-task-runner-sha256": result.attachment.sha256,
+      });
     },
   },
   {

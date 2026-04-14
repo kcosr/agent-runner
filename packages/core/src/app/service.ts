@@ -1,5 +1,10 @@
 import type { DefinitionEntry } from "../config/loader.js";
 import type {
+  RunAttachment,
+  RunAttachmentDownloadResult,
+  RunAttachmentRemoveResult,
+} from "../contracts/attachments.js";
+import type {
   RunArchiveResult,
   RunDependenciesResult,
   RunDetail,
@@ -9,15 +14,21 @@ import type {
 } from "../contracts/runs.js";
 import { toRunDetail } from "../contracts/runs.js";
 import {
+  addAttachmentFromFile,
+  addAttachmentFromStream,
   addRunDependency,
   addTask,
   appendTaskNotes,
   archiveRun,
   clearRunDependencies,
+  downloadAttachment,
+  listAttachments,
   listDefinitions,
   listRuns,
   listTasks,
+  readAttachment,
   readStatus,
+  removeAttachment,
   removeRunDependency,
   resetRun,
   setRunName,
@@ -111,6 +122,24 @@ export function getTask(target: string, taskId: string): RunTaskSummary {
   };
 }
 
+export function getAttachmentList(target: string): RunAttachment[] {
+  return listAttachments(target).attachments;
+}
+
+export function getAttachment(
+  target: string,
+  attachmentId: string,
+): {
+  attachment: RunAttachment;
+  absolutePath: string;
+} {
+  const result = readAttachment(target, attachmentId);
+  return {
+    attachment: result.attachment,
+    absolutePath: result.absolutePath,
+  };
+}
+
 export function getDefinitionList(kind: "agent" | "assignment"): DefinitionEntry[] {
   return listDefinitions(kind).entries;
 }
@@ -149,6 +178,35 @@ export function removeDependency(target: string, dependencyRunId: string): RunDe
 
 export function clearDependencies(target: string): RunDependenciesResult {
   return clearRunDependencies(target);
+}
+
+export function removeRunAttachment(
+  target: string,
+  attachmentId: string,
+): RunAttachmentRemoveResult {
+  return removeAttachment(target, attachmentId);
+}
+
+export function downloadRunAttachment(
+  target: string,
+  attachmentId: string,
+  outputPath: string,
+): RunAttachmentDownloadResult {
+  return downloadAttachment(target, attachmentId, outputPath);
+}
+
+export function addRunAttachmentFromFile(
+  target: string,
+  input: { sourcePath: string; name?: string; mimeType?: string },
+): Promise<RunAttachment> {
+  return addAttachmentFromFile(target, input).then((result) => result.attachment);
+}
+
+export function addRunAttachmentFromStream(
+  target: string,
+  input: { name: string; source: AsyncIterable<Uint8Array>; mimeType?: string },
+): Promise<RunAttachment> {
+  return addAttachmentFromStream(target, input).then((result) => result.attachment);
 }
 
 export function updateTask(

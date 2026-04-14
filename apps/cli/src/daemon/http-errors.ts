@@ -9,6 +9,10 @@ import {
   ConflictError,
   TaskNotFoundError,
 } from "@task-runner/core/core/commands/service.js";
+import {
+  AttachmentError,
+  AttachmentNotFoundError,
+} from "@task-runner/core/core/run/attachments.js";
 import { ResumeError, RunNotFoundError } from "@task-runner/core/core/run/manifest.js";
 import {
   EmptyPromptError,
@@ -43,6 +47,7 @@ export class HttpError extends Error {
 export function isKnownControlPlaneError(err: unknown): boolean {
   return (
     err instanceof RequestValidationError ||
+    err instanceof AttachmentError ||
     err instanceof CommandError ||
     err instanceof ConflictError ||
     err instanceof TaskNotFoundError ||
@@ -70,7 +75,11 @@ export function toHttpError(err: unknown): HttpError {
   if (err instanceof RequestValidationError) {
     return new HttpError(400, "INVALID_REQUEST", err.message, err);
   }
-  if (err instanceof RunNotFoundError || err instanceof TaskNotFoundError) {
+  if (
+    err instanceof RunNotFoundError ||
+    err instanceof TaskNotFoundError ||
+    err instanceof AttachmentNotFoundError
+  ) {
     return new HttpError(404, "NOT_FOUND", "resource not found", err);
   }
   if (err instanceof ConflictError) {

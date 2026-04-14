@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync, statSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import { type TaskState, VALID_STATUSES, isValidStatus } from "../../assignment/model.js";
 import { parseAssignment } from "../../assignment/parser.js";
 import { setCodexThreadName } from "../../backends/codex.js";
@@ -10,6 +11,7 @@ import {
   loadAgentConfig,
   loadAssignmentConfig,
 } from "../../config/loader.js";
+import type { RunAttachment, RunAttachmentRemoveResult } from "../../contracts/attachments.js";
 import {
   type RunArchiveResult,
   type RunDependenciesResult,
@@ -28,6 +30,16 @@ import { resolveTaskRunnerCommand } from "../../task-runner-command.js";
 import { trimRunName } from "../../util/run-name.js";
 import { shortId } from "../../util/short-id.js";
 import type { LoadedAgent, LoadedAssignment } from "../config/loaded.js";
+import {
+  AttachmentError,
+  attachmentStoragePath,
+  cloneAttachments,
+  removeAttachmentFiles,
+  resolveAttachmentOutputPath,
+  stageAttachmentFromFile,
+  stageAttachmentFromStream,
+  validateAttachmentName,
+} from "../run/attachments.js";
 import {
   buildRunDependencyGraph,
   deriveDependencyStateFromSatisfiedRunIds,
@@ -57,6 +69,7 @@ import {
   taskModeFromManifest,
   withGlobalStateLock,
   withTaskStateLock,
+  withTaskStateLockAsync,
 } from "../run/workspace-state.js";
 
 export type StatusCommandResult = RunDetail;
@@ -102,6 +115,22 @@ export interface TaskDetailsResult {
 export interface TaskMutationResult {
   manifest: RunManifest;
   task: TaskSnapshot;
+}
+
+export interface AttachmentListResult {
+  manifest: RunManifest;
+  attachments: RunAttachment[];
+}
+
+export interface AttachmentResult {
+  manifest: RunManifest;
+  attachment: RunAttachment;
+}
+
+export interface AttachmentReadResult {
+  manifest: RunManifest;
+  attachment: RunAttachment;
+  absolutePath: string;
 }
 
 export class CommandError extends Error {
@@ -323,6 +352,16 @@ function validateRunName(name: string): string {
     return trimRunName(name);
   } catch {
     throw new CommandError("run set-name: <name> cannot be empty");
+  }
+}
+
+function validateAttachmentSourcePath(sourcePath: string): void {
+  if (!existsSync(sourcePath)) {
+    throw new CommandError(`attachment add: source file ${sourcePath} was not found`);
+  }
+  const stat = statSync(sourcePath);
+  if (!stat.isFile()) {
+    throw new CommandError(`attachment add: ${sourcePath} is not a file`);
   }
 }
 
@@ -633,6 +672,124 @@ export function listTasks(target: string): TaskListResult {
   };
 }
 
+export function listAttachments(target: string): AttachmentListResult {
+  const resolved = resolveRun(target);
+  refreshRunSnapshotAfterTaskStateSettles(resolved);
+  return {
+    manifest: resolved.manifest,
+    attachments: cloneAttachments(resolved.manifest.attachments),
+  };
+}
+
+export function readAttachment(target: string, attachmentId: string): AttachmentReadResult {
+  const resolved = resolveRun(target);
+  refreshRunSnapshotAfterTaskStateSettles(resolved);
+  const { attachment, absolutePath } = attachmentStoragePath(resolved.manifest, attachmentId);
+  return {
+    manifest: resolved.manifest,
+    attachment,
+    absolutePath,
+  };
+}
+
+export async function addAttachmentFromFile(
+  target: string,
+  input: { sourcePath: string; name?: string; mimeType?: string },
+): Promise<AttachmentResult> {
+  const resolved = resolveRun(target);
+  const sourcePath = resolve(input.sourcePath);
+  validateAttachmentSourcePath(sourcePath);
+  const displayName = input.name ?? basename(sourcePath);
+  try {
+    validateAttachmentName(displayName, "attachment add: --name");
+  } catch (error) {
+    throw new CommandError(error instanceof Error ? error.message : String(error));
+  }
+
+  let attachment!: RunAttachment;
+  await withTaskStateLockAsync(resolved.workspaceDir, async () => {
+    resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
+    attachment = await stageAttachmentFromFile(resolved.manifest, {
+      id: `att-${shortId()}`,
+      name: displayName,
+      sourcePath,
+      mimeType: input.mimeType,
+    });
+    resolved.manifest.attachments = [...resolved.manifest.attachments, attachment];
+    writeManifest(resolved.workspaceDir, resolved.manifest);
+  });
+
+  return {
+    manifest: resolved.manifest,
+    attachment,
+  };
+}
+
+export async function addAttachmentFromStream(
+  target: string,
+  input: { name: string; source: AsyncIterable<Uint8Array>; mimeType?: string },
+): Promise<AttachmentResult> {
+  const resolved = resolveRun(target);
+  try {
+    validateAttachmentName(input.name, "attachment name");
+  } catch (error) {
+    throw new CommandError(error instanceof Error ? error.message : String(error));
+  }
+
+  let attachment!: RunAttachment;
+  await withTaskStateLockAsync(resolved.workspaceDir, async () => {
+    resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
+    attachment = await stageAttachmentFromStream(resolved.manifest, {
+      id: `att-${shortId()}`,
+      name: input.name,
+      source: input.source,
+      mimeType: input.mimeType,
+    });
+    resolved.manifest.attachments = [...resolved.manifest.attachments, attachment];
+    writeManifest(resolved.workspaceDir, resolved.manifest);
+  });
+
+  return {
+    manifest: resolved.manifest,
+    attachment,
+  };
+}
+
+export function removeAttachment(target: string, attachmentId: string): RunAttachmentRemoveResult {
+  const resolved = resolveRun(target);
+  let changed = false;
+
+  withTaskStateLock(resolved.workspaceDir, () => {
+    resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
+    removeAttachmentFiles(resolved.manifest, attachmentId);
+    resolved.manifest.attachments = resolved.manifest.attachments.filter(
+      (attachment) => attachment.id !== attachmentId,
+    );
+    writeManifest(resolved.workspaceDir, resolved.manifest);
+    changed = true;
+  });
+
+  return {
+    runId: resolved.manifest.runId,
+    attachmentId,
+    changed,
+  };
+}
+
+export function downloadAttachment(
+  target: string,
+  attachmentId: string,
+  outputPath: string,
+): RunAttachment & { outputPath: string } {
+  const { attachment, absolutePath } = readAttachment(target, attachmentId);
+  const resolvedOutputPath = resolveAttachmentOutputPath(outputPath, attachment.name);
+  copyFileSync(absolutePath, resolvedOutputPath);
+  return {
+    ...attachment,
+    outputPath: resolvedOutputPath,
+  };
+}
+
 export function showTask(target: string, taskId: string): TaskDetailsResult {
   const resolved = resolveRun(target);
   refreshRunSnapshotAfterTaskStateSettles(resolved);
@@ -750,6 +907,8 @@ export function addTask(
   };
 }
 
-export function isCommandError(err: unknown): err is CommandError | ResumeError {
-  return err instanceof CommandError || err instanceof ResumeError;
+export function isCommandError(err: unknown): err is CommandError | ResumeError | AttachmentError {
+  return (
+    err instanceof CommandError || err instanceof ResumeError || err instanceof AttachmentError
+  );
 }

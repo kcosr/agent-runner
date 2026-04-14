@@ -127,22 +127,33 @@ tasks:
           the nested code-review run
 
       In the planning workspace, verify:
-        - the planner instructs the caller to run init manually
-          instead of initializing the implementer run itself
-        - the init command hard-codes `--backend passive`
-        - the init command includes a short descriptive `--name`
+        - the planner attaches the approved draft and summary to
+          the planning run as `assignment-seed.md` and
+          `assignment-summary.md`
+        - the handoff tells the caller to review the planning-run
+          attachments instead of running `init` immediately
+        - the delayed creation flow hard-codes `--backend passive`
+        - the delayed creation flow includes a short descriptive `--name`
           with the same format rule: capitalized first word,
           about 2-4 words / 32 chars, and no cwd / repo / range
           clutter or redundant `Plan` / `Review` /
           `Implementation` wording
-        - the init command uses a placeholder worktree path
-          such as `--var repo_path=<worktree-dir>` rather than
-          a machine-specific absolute path from the planner's
+        - the delayed creation flow requires the planner to
+          confirm the target directory or worktree path before
+          running `init`, rather than guessing from its own
           environment
-        - the handoff tells the caller how to run the resulting
-          implementer run and where the new run id comes from
+        - the delayed creation flow says the planner will attach
+          the same two artifacts to the new implementer run after
+          `init` succeeds
+        - the handoff tells the caller how to request creation
+          and how to run the resulting implementer run after the
+          planner creates it
         - the draft-review loop itself is reflected accurately in
           the planner tasks and handoff notes
+        - the generated implementer orientation tells the
+          executor to read the run's tasks first and only then
+          optionally download `assignment-summary.md` for
+          supplemental context
 
       Missing or incorrect workflow wiring is usually HIGH
       severity because it causes the caller or implementer to

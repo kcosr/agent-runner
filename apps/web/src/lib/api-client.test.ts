@@ -34,6 +34,7 @@ describe("api client", () => {
                   endedAt: null,
                   tasksCompleted: 1,
                   tasksTotal: 4,
+                  attachmentCount: 0,
                   dependencyState: {
                     ready: true,
                     total: 0,
@@ -97,6 +98,7 @@ describe("api client", () => {
                   endedAt: null,
                   tasksCompleted: 1,
                   tasksTotal: 4,
+                  attachmentCount: 0,
                   dependencyState: {
                     ready: false,
                     total: 2,
@@ -245,5 +247,51 @@ describe("api client", () => {
         method: "POST",
       }),
     );
+  });
+
+  it("uploads and removes attachments through the HTTP API", async () => {
+    const fetchMock = vi.fn(
+      async (_url: string, init?: RequestInit) =>
+        new Response(
+          JSON.stringify(
+            init?.method === "DELETE"
+              ? {
+                  result: {
+                    runId: "run-1",
+                    attachmentId: "att-1",
+                    changed: true,
+                  },
+                }
+              : {
+                  attachment: {
+                    id: "att-1",
+                    name: "notes.md",
+                    mimeType: "text/markdown; charset=utf-8",
+                    size: 12,
+                    sha256: "abc",
+                    addedAt: "2026-04-14T06:00:00.000Z",
+                    relativePath: "attachments/att-1/notes.md",
+                  },
+                },
+          ),
+          { status: 200 },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createApiClient(config);
+    const file = new File(["hello world"], "notes.md", { type: "text/markdown" });
+
+    await expect(api.uploadAttachment("run-1", file)).resolves.toEqual(
+      expect.objectContaining({
+        id: "att-1",
+        name: "notes.md",
+      }),
+    );
+    await expect(api.removeAttachment("run-1", "att-1")).resolves.toEqual({
+      runId: "run-1",
+      attachmentId: "att-1",
+      changed: true,
+    });
   });
 });

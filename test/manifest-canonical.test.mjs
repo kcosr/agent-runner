@@ -133,16 +133,16 @@ function readManifest(workspaceDir) {
   return JSON.parse(readFileSync(join(workspaceDir, "run.json"), "utf8"));
 }
 
-test("manifest schemaVersion is 5", async () => {
+test("manifest schemaVersion is 6", async () => {
   const dir = tempDir();
   writeAgent(dir, "canonical-claude", CLAUDE_AGENT);
   writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
   const outcome = await freshRun(dir, { initialize: true });
-  assert.equal(outcome.manifest.schemaVersion, 5);
+  assert.equal(outcome.manifest.schemaVersion, 6);
   assert.equal(outcome.manifest.archivedAt, null);
 });
 
-test("resolveResumeTarget treats missing archivedAt on schemaVersion 5 manifests as unarchived", async () => {
+test("resolveResumeTarget treats missing archivedAt on schemaVersion 6 manifests as unarchived", async () => {
   const dir = tempDir();
   writeAgent(dir, "canonical-claude", CLAUDE_AGENT);
   writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
@@ -364,7 +364,7 @@ test("schemaVersion mismatch: resume rejects a v1 manifest with a clear error", 
       () => resolveResumeTarget("stale01", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 1/);
-        assert.match(err.message, /requires schemaVersion 5/);
+        assert.match(err.message, /requires schemaVersion 6/);
         return true;
       },
     );
@@ -415,7 +415,7 @@ test("schemaVersion mismatch: resume rejects a v2 manifest with a clear error", 
       () => resolveResumeTarget("stale02", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 2/);
-        assert.match(err.message, /requires schemaVersion 5/);
+        assert.match(err.message, /requires schemaVersion 6/);
         return true;
       },
     );

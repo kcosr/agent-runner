@@ -54,6 +54,7 @@ import {
 } from "./task-workflow.js";
 import {
   mergeWorkspaceAssignmentIntoTaskMap,
+  refreshManifestAttachments,
   refreshManifestTaskState,
   syncManifestTaskState,
   taskModeFromManifest,
@@ -320,6 +321,7 @@ function refreshMutableManifestName(manifest: RunManifest): void {
   const latest = resolveResumeTarget(manifest.workspaceDir).manifest;
   manifest.name = latest.name;
   manifest.resetSeed.name = latest.resetSeed.name;
+  manifest.attachments = latest.attachments.map((attachment) => ({ ...attachment }));
 }
 
 function tryRefreshMutableManifestName(manifest: RunManifest): void {
@@ -954,7 +956,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     const frozenCallerInstructions =
       rawCallerInstructions.length > 0 ? interpolate(rawCallerInstructions, injectedVars) : null;
     manifest = {
-      schemaVersion: 5,
+      schemaVersion: 6,
       runId,
       agent: {
         name: agentConfig.name,
@@ -1016,6 +1018,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         pendingPrompt: initialPrompt,
         finalTasks: snapshotTasks(tasks),
       }),
+      attachments: [],
       finalTasks: {},
       sessionCount: isInitialize ? 0 : 1,
       sessions: [],
@@ -1124,6 +1127,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       }
 
       syncManifestTaskState(manifest, tasks);
+      refreshManifestAttachments(manifest);
       writeTextFileAtomic(assignmentPath, renderAssignment(Array.from(tasks.values())));
       sessionRecord = {
         sessionIndex,
@@ -1158,6 +1162,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       backendSessionIdAtEnd: null,
     };
     manifest.sessions.push(sessionRecord);
+    refreshManifestAttachments(manifest);
     writeManifest(workspaceDir, manifest);
   }
 
@@ -1271,6 +1276,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       }
 
       syncManifestTaskState(manifest, tasks);
+      refreshManifestAttachments(manifest);
       const attemptRecord: AttemptRecord = {
         attempt: globalAttemptNumber,
         sessionIndex,
@@ -1374,6 +1380,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
     orderedTasks = syncManifestTaskState(manifest, tasks);
     tasksCompleted = manifest.tasksCompleted;
+    refreshManifestAttachments(manifest);
 
     sessionRecord.status = terminal.status;
     sessionRecord.exitCode = terminal.exitCode;

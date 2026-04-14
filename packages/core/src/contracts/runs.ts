@@ -11,6 +11,7 @@ import {
 import type { RunExecution, TaskSnapshot } from "../core/run/manifest.js";
 import type { ListedRunManifest, ManifestStatus, RunManifest } from "../core/run/manifest.js";
 import { deriveEffectiveStatus } from "../core/run/status.js";
+import type { RunAttachment } from "./attachments.js";
 
 // Transport-neutral run DTOs for later CLI/web/daemon surfaces.
 // RunManifest remains the internal canonical record; these helpers project
@@ -34,6 +35,7 @@ export interface RunSummary {
   endedAt: string | null;
   tasksCompleted: number;
   tasksTotal: number;
+  attachmentCount: number;
   dependencyState: RunDependencyState;
   execution: RunExecution;
   capabilities: RunCapabilities;
@@ -107,6 +109,7 @@ export interface RunDetail {
   sessionCount: number;
   tasksCompleted: number;
   tasksTotal: number;
+  attachments: RunAttachment[];
   dependencies: RunDependencyDetail[];
   dependents: RunDependencyDetail[];
   tasks: RunTaskSummary[];
@@ -137,6 +140,8 @@ export interface RunDependenciesResult {
   dependencyRunIds: string[];
   changed: boolean;
 }
+
+export type { RunAttachment, RunAttachmentRemoveResult } from "./attachments.js";
 
 export interface RunActionTarget {
   target: string;
@@ -232,6 +237,7 @@ export function toRunSummary(
     endedAt: entry.manifest.endedAt,
     tasksCompleted: entry.manifest.tasksCompleted,
     tasksTotal: entry.manifest.tasksTotal,
+    attachmentCount: entry.manifest.attachments.length,
     dependencyState: dependencyState ?? deriveDependencyState(entry.manifest, relatedManifests),
     execution: entry.manifest.execution,
     capabilities: deriveRunCapabilities(entry.manifest),
@@ -295,6 +301,7 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
     sessionCount: manifest.sessionCount,
     tasksCompleted: manifest.tasksCompleted,
     tasksTotal: manifest.tasksTotal,
+    attachments: manifest.attachments.map((attachment) => ({ ...attachment })),
     dependencies: result.dependencies ?? resolveDependencies(manifest, relatedManifests),
     dependents: result.dependents ?? resolveDependents(manifest, relatedManifests),
     tasks: Object.values(manifest.finalTasks).map(toRunTaskSummary),

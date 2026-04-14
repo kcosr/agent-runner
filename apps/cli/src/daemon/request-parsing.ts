@@ -53,6 +53,30 @@ export function requiredRunIdString(value: unknown, label: string): string {
   return stringValue;
 }
 
+export function optionalHeaderString(
+  value: string | string[] | undefined,
+  label: string,
+): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (Array.isArray(value)) {
+    throw new RequestValidationError(`${label} must be a single header value`);
+  }
+  return value;
+}
+
+export function requiredHeaderString(value: string | string[] | undefined, label: string): string {
+  const stringValue = optionalHeaderString(value, label);
+  if (stringValue === undefined) {
+    throw new RequestValidationError(`${label} is required`);
+  }
+  if (stringValue.trim().length === 0) {
+    throw new RequestValidationError(`${label} cannot be empty`);
+  }
+  return stringValue;
+}
+
 export function requiredNullableRunName(value: unknown, label: string): string | null {
   if (value === null) {
     return null;

@@ -1,6 +1,6 @@
 import type { RunSummary } from "@task-runner/core/contracts/runs.js";
 import { truncateEnd } from "../lib/format.js";
-import { DependencyIcon, RunningIcon } from "./icons.js";
+import { AttachmentIcon, DependencyIcon, RunningIcon } from "./icons.js";
 import { StatusBadge } from "./status-badge.js";
 
 export function RunCard({
@@ -17,8 +17,12 @@ export function RunCard({
   const progress =
     run.tasksTotal === 0 ? 0 : Math.round((run.tasksCompleted / run.tasksTotal) * 100);
   const visibleName = truncateEnd(run.name ?? "Unnamed");
-  const showDependencyIndicator =
-    run.status === "initialized" && run.dependencyState.unsatisfied > 0;
+  const showDependencyIndicator = run.dependencyState.total > 0;
+  const dependencyIndicatorClass =
+    run.dependencyState.unsatisfied > 0
+      ? "meta-indicator meta-indicator--warning"
+      : "meta-indicator meta-indicator--success";
+  const showAttachmentIndicator = run.attachmentCount > 0;
 
   return (
     <button
@@ -45,12 +49,21 @@ export function RunCard({
         <span className="backend-badge">{run.backend}</span>
         {showDependencyIndicator ? (
           <span
-            aria-label={`${run.dependencyState.unsatisfied} unmet dependencies`}
-            className="dependency-indicator"
-            title={`${run.dependencyState.unsatisfied} dependency run(s) not yet successful`}
+            aria-label={`${run.dependencyState.satisfied} of ${run.dependencyState.total} dependencies satisfied`}
+            className={dependencyIndicatorClass}
+            title={`${run.dependencyState.satisfied}/${run.dependencyState.total} dependency run(s) satisfied`}
           >
             <DependencyIcon aria-hidden="true" />
-            {run.dependencyState.unsatisfied}
+            {run.dependencyState.satisfied}/{run.dependencyState.total}
+          </span>
+        ) : null}
+        {showAttachmentIndicator ? (
+          <span
+            aria-label={`${run.attachmentCount} attachment${run.attachmentCount === 1 ? "" : "s"}`}
+            className="meta-indicator meta-indicator--neutral"
+            title={`${run.attachmentCount} attachment${run.attachmentCount === 1 ? "" : "s"}`}
+          >
+            <AttachmentIcon aria-hidden="true" />
           </span>
         ) : null}
       </div>

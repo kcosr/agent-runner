@@ -78,6 +78,17 @@ async function initRun(baseDir) {
   });
 }
 
+function readManifest(workspaceDir) {
+  return JSON.parse(readFileSync(join(workspaceDir, "run.json"), "utf8"));
+}
+
+function patchManifest(workspaceDir, mutator) {
+  const manifestPath = join(workspaceDir, "run.json");
+  const manifest = readManifest(workspaceDir);
+  mutator(manifest);
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
 async function freePort() {
   return await new Promise((resolve, reject) => {
     const server = createServer();
@@ -601,6 +612,93 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
       const malformedBody = await malformed.json();
       assert.equal(malformed.status, 400);
       assert.equal(malformedBody.error.code, "INVALID_REQUEST");
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+test("daemon attachment HTTP routes upload, list, download, remove, and reject max-count overflow", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const init = await initRun(dir);
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl);
+    try {
+      const uploaded = await fetch(new URL(`/api/runs/${init.runId}/attachments`, httpBaseUrl), {
+        method: "POST",
+        headers: {
+          "content-type": "text/plain",
+          "x-task-runner-attachment-name": "evidence.txt",
+        },
+        body: Buffer.from("evidence payload\n"),
+      });
+      const uploadedBody = await uploaded.json();
+      assert.equal(uploaded.status, 200);
+      assert.equal(uploadedBody.attachment.name, "evidence.txt");
+      assert.equal(uploadedBody.attachment.mimeType, "text/plain");
+
+      const attachmentId = uploadedBody.attachment.id;
+      const listed = await httpJson(httpBaseUrl, `/api/runs/${init.runId}/attachments`);
+      assert.equal(listed.status, 200);
+      assert.equal(listed.body.attachments.length, 1);
+      assert.equal(listed.body.attachments[0].id, attachmentId);
+
+      const content = await fetch(
+        new URL(`/api/runs/${init.runId}/attachments/${attachmentId}/content`, httpBaseUrl),
+      );
+      assert.equal(content.status, 200);
+      assert.equal(await content.text(), "evidence payload\n");
+      assert.equal(content.headers.get("x-task-runner-attachment-id"), attachmentId);
+      assert.equal(content.headers.get("x-task-runner-sha256"), uploadedBody.attachment.sha256);
+      assert.match(
+        content.headers.get("content-disposition") ?? "",
+        /attachment; filename\*=UTF-8''evidence\.txt/,
+      );
+
+      const removed = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${init.runId}/attachments/${attachmentId}`,
+        {
+          method: "DELETE",
+        },
+      );
+      assert.equal(removed.status, 200);
+      assert.deepEqual(removed.body.result, {
+        runId: init.runId,
+        attachmentId,
+        changed: true,
+      });
+
+      patchManifest(init.workspaceDir, (manifest) => {
+        manifest.attachments = Array.from({ length: 20 }, (_, index) => ({
+          id: `att-${index}`,
+          name: `existing-${index}.txt`,
+          mimeType: "text/plain",
+          size: 1,
+          sha256: `${index}`.padStart(64, "0"),
+          addedAt: "2026-04-14T00:00:00.000Z",
+          relativePath: `attachments/att-${index}/existing-${index}.txt`,
+        }));
+      });
+
+      const rejected = await fetch(new URL(`/api/runs/${init.runId}/attachments`, httpBaseUrl), {
+        method: "POST",
+        headers: {
+          "content-type": "text/plain",
+          "x-task-runner-attachment-name": "overflow.txt",
+        },
+        body: Buffer.from("x"),
+      });
+      const rejectedBody = await rejected.json();
+      assert.equal(rejected.status, 422);
+      assert.equal(rejectedBody.error.code, "INVALID_COMMAND");
+      assert.match(rejectedBody.error.message, /already has 20 attachments/);
     } finally {
       await server.close();
     }

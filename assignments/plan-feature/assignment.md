@@ -52,22 +52,40 @@ callerInstructions: |
        the draft against the planning evidence. The planner
        applies fixes and reruns the draft review until it is
        approved.
-    4. Produces the exact `{{task_runner_cmd}} init ...` command the
-       caller should run to freeze the approved draft into a
-       new run workspace. The planner does **not** init the
-       implementer run itself.
+    4. Produces a human-facing summary next to the approved
+       draft, then attaches both artifacts to the planning run
+       itself as `assignment-seed.md` and
+       `assignment-summary.md` so the caller can review them
+       directly from the run.
+    5. Prepares the follow-up creation workflow for the later
+       approval step. The planner does **not** init the
+       implementer run during the initial planning pass; if the
+       caller approves and asks for creation, the planner first
+       confirms the target directory or worktree path, then runs
+       `init` and attaches the same two artifacts to the new
+       implementer run.
 
   ## After planning
 
-  Pull the draft path and exact init command from the
+  Pull the handoff summary and attachment info from the
   `handoff` task's notes block:
 
       {{task_runner_cmd}} status {{run_id}}
       {{task_runner_cmd}} status {{run_id}} --output-format json \
         --field tasks
 
-  First initialize the implementer run by executing the handoff's
-  init command. Then execute the resulting run:
+  Review the planning-run attachments first:
+
+      {{task_runner_cmd}} attachment list {{run_id}}
+
+  If `assignment-summary.md` exists there, download it and
+  review it before deciding whether to create the implementer
+  run. If you approve the plan and want the implementer run
+  created, resume this same planning run and ask for creation.
+  The planner will confirm the target directory or worktree
+  path before it runs `init`.
+
+  After the planner creates the implementer run, execute it:
 
       {{task_runner_cmd}} run --resume-run <new-run-id>
 
@@ -86,11 +104,12 @@ callerInstructions: |
   ## What happens to the draft file
 
   The draft under `${TASK_RUNNER_STATE_DIR}/drafts/<repo-name>/`
-  is the planner's output artifact. It remains the source to init
-  from until the caller runs the handoff command. Once init
-  succeeds, the canonical artifact becomes the workspace
-  `assignment.md` inside the new run directory. Edits to the
-  draft file after init have no effect on the run.
+  remains the planner's source artifact, and the planning run
+  also carries it as `assignment-seed.md` plus the human-facing
+  `assignment-summary.md` attachment. Once a later `init`
+  succeeds, the canonical execution artifact becomes the
+  workspace `assignment.md` inside the new run directory. Edits
+  to the draft file after init have no effect on the run.
 tasks:
   - id: orient
     title: Target repo orientation and conventions
@@ -808,30 +827,52 @@ tasks:
       Report the final summary path in this task's Notes, plus
       a one-line confirmation that you diffed the Contract and
       Assumptions blocks against the draft and they match.
-  - id: prepare_init_command
-    title: Prepare the exact init command for the caller
+  - id: attach_artifacts
+    title: Attach the approved draft artifacts to the planning run
     body: |
-      Prepare the exact `{{task_runner_cmd}} init` command the
-      caller should run against the approved draft from
-      `draft_plan`:
+      **Category**: process
+
+      Attach the two approved planning artifacts to **this**
+      planning run so the caller can review them directly from
+      the run context:
+
+        - `assignment-seed.md` from `draft_plan`
+        - `assignment-summary.md` from `produce_summary`
+
+      Use `{{task_runner_cmd}} attachment add {{run_id}} ...` and
+      record the resulting attachment ids in Notes.
+
+      If you are re-running this task after revising the draft or
+      summary, remove any older attachments with those same names
+      first so the planning run ends with one current copy of
+      each artifact.
+
+      Verify the final state with `{{task_runner_cmd}} attachment list {{run_id}}`
+      and paste the command output or equivalent attachment-id
+      summary into Notes.
+  - id: prepare_creation_followup
+    title: Prepare the delayed implementer-run creation flow
+    body: |
+      Prepare the exact `{{task_runner_cmd}} init` command shape
+      the planner will run **later** if the caller approves the
+      plan and asks for implementer-run creation:
 
           {{task_runner_cmd}} init \
             --backend passive \
             --assignment <draft-path-from-draft_plan> \
             --name <short-descriptive-name> \
-            --var repo_path=<worktree-dir>
+            --var repo_path=<confirmed-worktree-dir>
 
       **Always use `--backend passive`.** The planner's job is
-      to hand back an approved draft and create the run
+      to hand back an approved draft and later create the run
       workspace without freezing a specific implementer
       agent into the manifest. The caller will resume the
       run with whatever execution agent they want later.
 
-      **Always use `--var repo_path=<worktree-dir>`.** Do not
-      paste a machine-specific absolute path from your own
-      environment into the handoff command. The caller
-      should substitute the actual feature worktree path
-      when they run init.
+      **Do not guess the target path.** If the caller later asks
+      you to create the implementer run, first confirm the
+      directory or worktree path they want. They may want a fresh
+      worktree rather than the current repo path.
 
       **Always use a short descriptive `--name`.** It should:
       - start with a capitalized first word
@@ -841,46 +882,64 @@ tasks:
       - never include cwd paths, repo names, or git ranges
       Examples: `Run naming`, `Web dashboard`, `Daemon control plane`.
 
-      Capture the full command in this task's Notes exactly as
-      the caller should paste it. Do **not** run it yourself.
-      The planner stops at the draft-plus-command stage so the
-      caller decides when to create the implementer run.
+      Capture the command shape in this task's Notes, but do
+      **not** run it during the initial planning pass.
+
+      Also capture the exact attachment-add commands the planner
+      should run immediately after the later `init` succeeds:
+
+          {{task_runner_cmd}} attachment add <new-run-id> <draft-path> --name assignment-seed.md
+          {{task_runner_cmd}} attachment add <new-run-id> <summary-path> --name assignment-summary.md
 
       Also note:
       - the approved draft path from `draft_plan`
+      - the approved summary path from `produce_summary`
       - the draft-review run id from `review_draft`
-      - that init's stdout/stderr will produce the new run id
-      - that after init succeeds, the canonical artifact becomes
-        the new run workspace `assignment.md`
+      - that the later `init` stdout/stderr will produce the new
+        run id
+      - that after the later `init` succeeds, the canonical
+        artifact becomes the new run workspace `assignment.md`
+      - that the planner should attach the same two artifacts to
+        the new run immediately after creation
   - id: handoff
     title: Handoff summary
     body: |
       Write a short Notes block capturing everything the
-      caller needs to execute the plan. The caller should be
-      able to copy the init command, create the implementer run,
-      and then resume it.
+      caller needs to review the plan and decide whether to ask
+      for implementer-run creation.
 
       Include:
         - **Draft path** from `draft_plan`.
         - **Summary path** from `produce_summary` — the human-
           facing markdown rendering of the approved plan. The
           caller can skim this to sanity-check scope and
-          contract before running init.
+          contract.
+        - **Planning-run attachments** — explicitly name
+          `assignment-seed.md` and `assignment-summary.md` and
+          tell the caller those are attached to the planning run
+          for review. Include the exact listing command:
+
+              {{task_runner_cmd}} attachment list {{run_id}}
         - **Draft-review run id** from `review_draft`, so the
           caller can inspect the final draft-approval audit
           trail if desired.
-        - **Exact init command** from `prepare_init_command` (this is the
-          primary handoff command the caller should run
-          first).
         - **Feature summary** (one or two sentences from
           `capture_feature`).
-        - **Exact command shape** the caller should run
-          *after init succeeds* to execute the plan:
+        - **Follow-up workflow** from `prepare_creation_followup`:
+          the caller should resume this planning run if they
+          approve the plan and want you to create the
+          implementer run.
+        - A note that when resumed for creation, you will first
+          confirm the target directory or worktree path before
+          running `init`.
+        - **Exact command shape** the caller will run *after the
+          planner creates the implementer run* to execute the
+          plan:
 
               {{task_runner_cmd}} run --resume-run <new-run-id>
 
-        - A note that `<new-run-id>` comes from the init
-          command's output, not from the planning run itself.
+        - A note that `<new-run-id>` comes from the later `init`
+          output, not from the planning run itself.
         - A note that the caller environment must allow one
           nested `task-runner run`, because the generated plan
           runs a bundled `code-review` step.
@@ -893,8 +952,9 @@ tasks:
 
       Keep this block tight. The caller will read it via
       `{{task_runner_cmd}} status {{run_id}}` and decide to
-      proceed, adjust the plan, or hand off to a different
-      agent. If there is nothing to flag, say so plainly.
+      proceed, request creation, adjust the plan, or hand off to
+      a different agent. If there is nothing to flag, say so
+      plainly.
 ---
 You are planning, not implementing. Your output is a concrete,
 executable `task-runner` assignment file — not the feature
@@ -942,5 +1002,6 @@ subagents if that would parallelize your work. Do not
 delegate `capture_feature` (the ambiguity gate must live in
 your own context), `produce_contract_artifact` (the contract
 is your deliverable), `draft_plan`, `review_draft`,
-`apply_review_fixes`, `prepare_init_command`, or `handoff`
-— those need to live in your own context.
+`apply_review_fixes`, `attach_artifacts`,
+`prepare_creation_followup`, or `handoff` — those need to
+live in your own context.
