@@ -109,6 +109,9 @@ export function validateAttachmentName(name: string, label = "attachment name"):
   if (Array.from(trimmed).some(isControlCharacter)) {
     throw new AttachmentError(`${label} cannot contain control characters`);
   }
+  if (trimmed === "." || trimmed === "..") {
+    throw new AttachmentError(`${label} cannot be "." or ".."`);
+  }
   if (trimmed.includes("/") || trimmed.includes("\\")) {
     throw new AttachmentError(`${label} must be a single path segment`);
   }

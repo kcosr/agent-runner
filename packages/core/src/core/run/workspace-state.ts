@@ -20,9 +20,14 @@ const LOCK_DIR_NAME = ".task-state.lock";
 const LOCK_WAIT_MS = 10;
 const LOCK_TIMEOUT_MS = 5_000;
 const LOCK_WAIT_BUFFER = new Int32Array(new SharedArrayBuffer(4));
+const ASYNC_LOCK_QUEUES = new Map<string, Promise<void>>();
 
 function sleep(ms: number): void {
   Atomics.wait(LOCK_WAIT_BUFFER, 0, 0, ms);
+}
+
+function sleepAsync(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function taskModeFromManifest(manifest: Pick<RunManifest, "taskMode">): "file" | "cli" {
@@ -33,16 +38,14 @@ function taskLockPath(workspaceDir: string): string {
   return `${workspaceDir}/${LOCK_DIR_NAME}`;
 }
 
-function withFilesystemLock<T>(lockPath: string, fn: () => T): T;
-function withFilesystemLock<T>(lockPath: string, fn: () => Promise<T>): Promise<T>;
-function withFilesystemLock<T>(lockPath: string, fn: () => T | Promise<T>): T | Promise<T> {
+function acquireFilesystemLock(lockPath: string): void {
   const deadline = Date.now() + LOCK_TIMEOUT_MS;
   mkdirSync(dirname(lockPath), { recursive: true });
 
   while (true) {
     try {
       mkdirSync(lockPath);
-      break;
+      return;
     } catch (error) {
       const err = error as NodeJS.ErrnoException;
       if (err.code !== "EEXIST") {
@@ -54,45 +57,85 @@ function withFilesystemLock<T>(lockPath: string, fn: () => T | Promise<T>): T | 
       sleep(LOCK_WAIT_MS);
     }
   }
-
-  let result: T | Promise<T>;
-  try {
-    result = fn();
-  } catch (error) {
-    rmSync(lockPath, { recursive: true, force: true });
-    throw error;
-  }
-
-  if (result instanceof Promise) {
-    return result.finally(() => {
-      rmSync(lockPath, { recursive: true, force: true });
-    });
-  }
-
-  rmSync(lockPath, { recursive: true, force: true });
-  return result;
 }
 
-export function withTaskStateLock<T>(workspaceDir: string, fn: () => T): T;
-export function withTaskStateLock<T>(workspaceDir: string, fn: () => Promise<T>): Promise<T>;
-export function withTaskStateLock<T>(
-  workspaceDir: string,
-  fn: () => T | Promise<T>,
-): T | Promise<T> {
+async function acquireFilesystemLockAsync(lockPath: string): Promise<void> {
+  const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  mkdirSync(dirname(lockPath), { recursive: true });
+
+  while (true) {
+    try {
+      mkdirSync(lockPath);
+      return;
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code !== "EEXIST") {
+        throw error;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(`timed out waiting for task-state lock at ${lockPath}`);
+      }
+      await sleepAsync(LOCK_WAIT_MS);
+    }
+  }
+}
+
+function releaseFilesystemLock(lockPath: string): void {
+  rmSync(lockPath, { recursive: true, force: true });
+}
+
+function withFilesystemLock<T>(lockPath: string, fn: () => T): T {
+  acquireFilesystemLock(lockPath);
+  try {
+    return fn();
+  } finally {
+    releaseFilesystemLock(lockPath);
+  }
+}
+
+async function withFilesystemLockAsync<T>(lockPath: string, fn: () => Promise<T>): Promise<T> {
+  const previous = ASYNC_LOCK_QUEUES.get(lockPath) ?? Promise.resolve();
+  let releaseTurn!: () => void;
+  const turn = new Promise<void>((resolve) => {
+    releaseTurn = resolve;
+  });
+  const tail = previous.then(() => turn);
+  ASYNC_LOCK_QUEUES.set(lockPath, tail);
+  void tail.finally(() => {
+    if (ASYNC_LOCK_QUEUES.get(lockPath) === tail) {
+      ASYNC_LOCK_QUEUES.delete(lockPath);
+    }
+  });
+
+  await previous;
+
+  let locked = false;
+  try {
+    await acquireFilesystemLockAsync(lockPath);
+    locked = true;
+    return await fn();
+  } finally {
+    if (locked) {
+      releaseFilesystemLock(lockPath);
+    }
+    releaseTurn();
+  }
+}
+
+export function withTaskStateLock<T>(workspaceDir: string, fn: () => T): T {
   return withFilesystemLock(taskLockPath(workspaceDir), fn);
+}
+
+export function withTaskStateLockAsync<T>(workspaceDir: string, fn: () => Promise<T>): Promise<T> {
+  return withFilesystemLockAsync(taskLockPath(workspaceDir), fn);
 }
 
 export function withGlobalStateLock<T>(lockName: string, fn: () => T, env?: NodeJS.ProcessEnv): T;
 export function withGlobalStateLock<T>(
   lockName: string,
-  fn: () => Promise<T>,
-  env?: NodeJS.ProcessEnv,
-): Promise<T>;
-export function withGlobalStateLock<T>(
-  lockName: string,
-  fn: () => T | Promise<T>,
+  fn: () => T,
   env: NodeJS.ProcessEnv = process.env,
-): T | Promise<T> {
+): T {
   const runsRoot = resolveRunsRoot(env);
   mkdirSync(runsRoot, { recursive: true });
   return withFilesystemLock(join(runsRoot, `.${lockName}.lock`), fn);

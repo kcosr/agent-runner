@@ -69,6 +69,7 @@ import {
   taskModeFromManifest,
   withGlobalStateLock,
   withTaskStateLock,
+  withTaskStateLockAsync,
 } from "../run/workspace-state.js";
 
 export type StatusCommandResult = RunDetail;
@@ -706,7 +707,7 @@ export async function addAttachmentFromFile(
   }
 
   let attachment!: RunAttachment;
-  await withTaskStateLock(resolved.workspaceDir, async () => {
+  await withTaskStateLockAsync(resolved.workspaceDir, async () => {
     resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
     attachment = await stageAttachmentFromFile(resolved.manifest, {
       id: `att-${shortId()}`,
@@ -736,7 +737,7 @@ export async function addAttachmentFromStream(
   }
 
   let attachment!: RunAttachment;
-  await withTaskStateLock(resolved.workspaceDir, async () => {
+  await withTaskStateLockAsync(resolved.workspaceDir, async () => {
     resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
     attachment = await stageAttachmentFromStream(resolved.manifest, {
       id: `att-${shortId()}`,

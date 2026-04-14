@@ -12,6 +12,7 @@ import {
   resolveAttachmentOutputPath,
   sanitizeAttachmentFilename,
   stageAttachmentFromFile,
+  validateAttachmentName,
 } from "../packages/core/dist/core/run/attachments.js";
 
 function tempDir() {
@@ -32,6 +33,11 @@ test("attachment helpers resolve MIME types and sanitize storage paths", () => {
   assert.equal(resolveAttachmentMimeType("notes.md", "text/plain"), "text/plain");
   assert.equal(sanitizeAttachmentFilename(" ../notes.md "), "notes.md");
   assert.equal(createAttachmentRelativePath("att-123", "notes.md"), "attachments/att-123/notes.md");
+});
+
+test('validateAttachmentName rejects "." and ".."', () => {
+  assert.throws(() => validateAttachmentName("."), /cannot be "\." or "\.\."/);
+  assert.throws(() => validateAttachmentName(".."), /cannot be "\." or "\.\."/);
 });
 
 test("stageAttachmentFromFile enforces attachment count and file size limits", async () => {
