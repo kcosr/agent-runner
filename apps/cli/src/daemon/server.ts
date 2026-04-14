@@ -2,8 +2,10 @@ import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { type Socket, createServer as createNetServer } from "node:net";
 import {
+  addDependency,
   appendNotes,
   archive,
+  clearDependencies,
   createTask,
   getDefinition,
   getDefinitionList,
@@ -12,6 +14,7 @@ import {
   getTask,
   getTaskList,
   initRun,
+  removeDependency,
   renameRun,
   reset,
   resumeRun,
@@ -190,6 +193,9 @@ export async function serveDaemon(
     archive,
     unarchive,
     renameRun,
+    addDependency,
+    removeDependency,
+    clearDependencies,
     reset,
     updateTask,
     appendNotes,
@@ -562,6 +568,45 @@ export async function serveDaemon(
           );
           return;
         }
+        case "runs.addDependency": {
+          const parsed = asRecord(params, "runs.addDependency params");
+          sendJson(
+            ws,
+            resultResponse(
+              request.id,
+              operations.addDependency(
+                requiredString(parsed.target, "target"),
+                requiredString(parsed.dependencyRunId, "dependencyRunId"),
+              ),
+            ),
+          );
+          return;
+        }
+        case "runs.removeDependency": {
+          const parsed = asRecord(params, "runs.removeDependency params");
+          sendJson(
+            ws,
+            resultResponse(
+              request.id,
+              operations.removeDependency(
+                requiredString(parsed.target, "target"),
+                requiredString(parsed.dependencyRunId, "dependencyRunId"),
+              ),
+            ),
+          );
+          return;
+        }
+        case "runs.clearDependencies":
+          sendJson(
+            ws,
+            resultResponse(
+              request.id,
+              operations.clearDependencies(
+                requiredString(asRecord(params, "runs.clearDependencies params").target, "target"),
+              ),
+            ),
+          );
+          return;
         case "tasks.set": {
           const parsed = asRecord(params, "tasks.set params");
           sendJson(

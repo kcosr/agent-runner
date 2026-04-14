@@ -21,7 +21,15 @@ export interface NoticeState {
   autoDismissMs?: number;
 }
 
-export type RunActionPending = "archive" | "unarchive" | "resume" | "abort" | "rename";
+export type RunActionPending =
+  | "archive"
+  | "unarchive"
+  | "resume"
+  | "abort"
+  | "rename"
+  | "add-dependency"
+  | "remove-dependency"
+  | "clear-dependencies";
 
 const FAILURE_STATUSES: RunStatus[] = ["exhausted", "error"];
 
@@ -128,10 +136,7 @@ function useRunActionMutation(
     },
     onSuccess: async (_result, runId) => {
       setActionError(undefined);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: runQueryKeys.list() }),
-        queryClient.invalidateQueries({ queryKey: runQueryKeys.detail(runId) }),
-      ]);
+      await invalidateRunQueries(runId);
       options.onSuccess?.();
     },
   });
@@ -144,6 +149,13 @@ function updateRunNameCaches(result: RunNameResult) {
   queryClient.setQueryData<RunSummary[] | undefined>(runQueryKeys.list(), (current) =>
     current?.map((run) => (run.runId === result.runId ? { ...run, name: result.name } : run)),
   );
+}
+
+async function invalidateRunQueries(runId: string) {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: runQueryKeys.list() }),
+    queryClient.invalidateQueries({ queryKey: runQueryKeys.detail(runId) }),
+  ]);
 }
 
 export function useRunsDashboardState() {
@@ -308,10 +320,39 @@ export function useRunsDashboardState() {
     onSuccess: async (result, { runId }) => {
       setActionError(undefined);
       updateRunNameCaches(result);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: runQueryKeys.list() }),
-        queryClient.invalidateQueries({ queryKey: runQueryKeys.detail(runId) }),
-      ]);
+      await invalidateRunQueries(runId);
+    },
+  });
+  const addDependencyMutation = useMutation({
+    mutationFn: ({ runId, dependencyRunId }: { runId: string; dependencyRunId: string }) =>
+      api.addDependency(runId, dependencyRunId),
+    onError: (error: Error) => {
+      setActionError(error.message);
+    },
+    onSuccess: async (result) => {
+      setActionError(undefined);
+      await invalidateRunQueries(result.runId);
+    },
+  });
+  const removeDependencyMutation = useMutation({
+    mutationFn: ({ runId, dependencyRunId }: { runId: string; dependencyRunId: string }) =>
+      api.removeDependency(runId, dependencyRunId),
+    onError: (error: Error) => {
+      setActionError(error.message);
+    },
+    onSuccess: async (result) => {
+      setActionError(undefined);
+      await invalidateRunQueries(result.runId);
+    },
+  });
+  const clearDependenciesMutation = useMutation({
+    mutationFn: (runId: string) => api.clearDependencies(runId),
+    onError: (error: Error) => {
+      setActionError(error.message);
+    },
+    onSuccess: async (result) => {
+      setActionError(undefined);
+      await invalidateRunQueries(result.runId);
     },
   });
 
@@ -325,7 +366,13 @@ export function useRunsDashboardState() {
           ? "abort"
           : renameMutation.isPending
             ? "rename"
-            : undefined;
+            : addDependencyMutation.isPending
+              ? "add-dependency"
+              : removeDependencyMutation.isPending
+                ? "remove-dependency"
+                : clearDependenciesMutation.isPending
+                  ? "clear-dependencies"
+                  : undefined;
 
   function setColumnCollapsed(columnKey: string, collapsed: boolean) {
     const isCollapsed = collapsedColumnKeySet.has(columnKey);
@@ -384,7 +431,16 @@ export function useRunsDashboardState() {
     repoOptions,
     runActions: {
       abort: (runId: string) => abortMutation.mutate(runId),
+      addDependency: async (runId: string, dependencyRunId: string) => {
+        await addDependencyMutation.mutateAsync({ runId, dependencyRunId });
+      },
       archive: (runId: string) => archiveMutation.mutate(runId),
+      clearDependencies: async (runId: string) => {
+        await clearDependenciesMutation.mutateAsync(runId);
+      },
+      removeDependency: async (runId: string, dependencyRunId: string) => {
+        await removeDependencyMutation.mutateAsync({ runId, dependencyRunId });
+      },
       rename: async (runId: string, name: string | null) => {
         await renameMutation.mutateAsync({ runId, name });
       },

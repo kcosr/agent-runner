@@ -1,6 +1,11 @@
 import { deriveRepoKey } from "../config/runtime-paths.js";
 import { normalizeTaskMode } from "../core/config/schema.js";
 import type { LockableField, TaskMode } from "../core/config/schema.js";
+import {
+  deriveDependencyState,
+  resolveDependencies,
+  resolveDependents,
+} from "../core/run/dependencies.js";
 import type { RunExecution, TaskSnapshot } from "../core/run/manifest.js";
 import type { ListedRunManifest, ManifestStatus, RunManifest } from "../core/run/manifest.js";
 import { deriveEffectiveStatus } from "../core/run/status.js";
@@ -9,6 +14,13 @@ import { deriveEffectiveStatus } from "../core/run/status.js";
 // RunManifest remains the internal canonical record; these helpers project
 // from it without doing filesystem, env, or process work.
 export type RunStatus = ManifestStatus;
+
+export interface RunDependencyState {
+  ready: boolean;
+  total: number;
+  satisfied: number;
+  unsatisfied: number;
+}
 
 export interface RunSummary {
   runId: string;
@@ -26,6 +38,7 @@ export interface RunSummary {
   endedAt: string | null;
   tasksCompleted: number;
   tasksTotal: number;
+  dependencyState: RunDependencyState;
   execution: RunExecution;
   capabilities: RunCapabilities;
 }
@@ -58,6 +71,17 @@ export interface RunCapabilities {
 export interface RunDetailInput {
   manifest: RunManifest;
   isLive: boolean;
+  relatedManifests?: ReadonlyMap<string, RunManifest>;
+}
+
+export interface RunDependencyDetail {
+  runId: string;
+  name: string | null;
+  status: RunStatus | null;
+  effectiveStatus: RunStatus | null;
+  archivedAt: string | null;
+  satisfied: boolean;
+  missing: boolean;
 }
 
 export interface RunDetail {
@@ -95,6 +119,8 @@ export interface RunDetail {
   sessionCount: number;
   tasksCompleted: number;
   tasksTotal: number;
+  dependencies: RunDependencyDetail[];
+  dependents: RunDependencyDetail[];
   tasks: RunTaskSummary[];
   message: string | null;
   callerInstructions: string | null;
@@ -115,6 +141,12 @@ export interface RunArchiveResult {
 export interface RunNameResult {
   runId: string;
   name: string | null;
+  changed: boolean;
+}
+
+export interface RunDependenciesResult {
+  runId: string;
+  dependencyRunIds: string[];
   changed: boolean;
 }
 
@@ -189,7 +221,12 @@ export function deriveTaskMutationCapabilities(manifest: RunManifest): RunTaskMu
   }
 }
 
-export function toRunSummary(entry: ListedRunManifest): RunSummary {
+export function toRunSummary(
+  entry: ListedRunManifest,
+  relatedManifests: ReadonlyMap<string, RunManifest> = new Map([
+    [entry.manifest.runId, entry.manifest],
+  ]),
+): RunSummary {
   return {
     runId: entry.manifest.runId,
     repo: entry.repo,
@@ -206,6 +243,7 @@ export function toRunSummary(entry: ListedRunManifest): RunSummary {
     endedAt: entry.manifest.endedAt,
     tasksCompleted: entry.manifest.tasksCompleted,
     tasksTotal: entry.manifest.tasksTotal,
+    dependencyState: deriveDependencyState(entry.manifest, relatedManifests),
     execution: entry.manifest.execution,
     capabilities: deriveRunCapabilities(entry.manifest),
   };
@@ -229,6 +267,8 @@ export function deriveRunCapabilities(manifest: RunManifest): RunCapabilities {
 
 export function toRunDetail(result: RunDetailInput): RunDetail {
   const { manifest } = result;
+  const relatedManifests =
+    result.relatedManifests ?? new Map<string, RunManifest>([[manifest.runId, manifest]]);
   return {
     runId: manifest.runId,
     repo: deriveRepoKey(manifest.cwd),
@@ -266,6 +306,8 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
     sessionCount: manifest.sessionCount,
     tasksCompleted: manifest.tasksCompleted,
     tasksTotal: manifest.tasksTotal,
+    dependencies: resolveDependencies(manifest, relatedManifests),
+    dependents: resolveDependents(manifest, relatedManifests),
     tasks: Object.values(manifest.finalTasks).map(toRunTaskSummary),
     message: manifest.message,
     callerInstructions: manifest.callerInstructions,
@@ -296,6 +338,17 @@ export function toRunNameResult(result: {
   return {
     runId: result.manifest.runId,
     name: result.manifest.name,
+    changed: result.changed,
+  };
+}
+
+export function toRunDependenciesResult(result: {
+  manifest: RunManifest;
+  changed: boolean;
+}): RunDependenciesResult {
+  return {
+    runId: result.manifest.runId,
+    dependencyRunIds: [...result.manifest.dependencyRunIds],
     changed: result.changed,
   };
 }

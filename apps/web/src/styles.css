@@ -437,6 +437,11 @@ body {
   gap: 12px;
 }
 
+.drawer-panel--dependencies {
+  display: grid;
+  gap: 12px;
+}
+
 .drawer-panel--events {
   padding: 12px 0 0;
 }
@@ -446,6 +451,67 @@ body {
   border-radius: var(--radius-md);
   padding: 12px;
   background: var(--card);
+}
+
+.dependency-panel,
+.dependency-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dependency-summary,
+.dependency-add-row,
+.dependency-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.dependency-field {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.dependency-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.dependency-row {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--background);
+}
+
+.dependency-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.dependency-name,
+.dependency-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dependency-name {
+  font-weight: 600;
+}
+
+.dependency-meta {
+  color: var(--muted-foreground);
+  font-family: var(--mono);
+  font-size: 12px;
 }
 
 .task {
@@ -777,6 +843,23 @@ body {
 .card-meta .repo-badge,
 .card-meta .backend-badge {
   max-width: 7rem;
+}
+
+.dependency-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--warning, #b45309) 12%, transparent);
+  color: color-mix(in srgb, var(--warning, #b45309) 85%, var(--foreground));
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.dependency-indicator svg {
+  width: 12px;
+  height: 12px;
 }
 
 .card-title,

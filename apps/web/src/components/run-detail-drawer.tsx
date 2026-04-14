@@ -18,7 +18,7 @@ import { ArchiveIcon, CloseIcon, CopyIcon, PencilIcon, StopIcon } from "./icons.
 import { RunTaskList } from "./run-task-list.js";
 import { StatusBadge } from "./status-badge.js";
 
-type SectionKey = "tasks" | "timing" | "events";
+type SectionKey = "tasks" | "dependencies" | "timing" | "events";
 
 interface DragState {
   pointerId: number;
@@ -45,23 +45,29 @@ function summaryRows(run: RunDetail) {
 }
 
 export function RunDetailDrawer({
+  onAddDependency,
   actionError,
   actionPending,
   onAbort,
   onArchive,
+  onClearDependencies,
   onClose,
   onCopy,
+  onRemoveDependency,
   onRename,
   onResume,
   onUnarchive,
   run,
 }: {
+  onAddDependency: (dependencyRunId: string) => Promise<void>;
   actionError?: string;
   actionPending?: string;
   onAbort: () => void;
   onArchive: () => void;
+  onClearDependencies: () => Promise<void>;
   onClose: () => void;
   onCopy: (value: string, label: string) => void;
+  onRemoveDependency: (dependencyRunId: string) => Promise<void>;
   onRename: (name: string | null) => Promise<void>;
   onResume: () => void;
   onUnarchive: () => void;
@@ -70,6 +76,7 @@ export function RunDetailDrawer({
   const [section, setSection] = useState<SectionKey>("tasks");
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(run.name ?? "");
+  const [dependencyDraft, setDependencyDraft] = useState("");
   const { settings, updateSettings } = useBoardSettings();
   const dragRef = useRef<DragState | null>(null);
   const nameInputRef = useRef<HTMLInputElement | null>(null);
@@ -80,6 +87,13 @@ export function RunDetailDrawer({
   const actionsLocked = actionPending !== undefined;
   const renamePending = actionPending === "rename";
   const visibleName = run.name ?? "Unnamed";
+  const canEditDependencies = run.status === "initialized";
+  const addDependencyPending = actionPending === "add-dependency";
+  const removeDependencyPending = actionPending === "remove-dependency";
+  const clearDependenciesPending = actionPending === "clear-dependencies";
+  const satisfiedDependencies = run.dependencies.filter(
+    (dependency) => dependency.satisfied,
+  ).length;
 
   function handleResizeStart(event: PointerEvent<HTMLDivElement>) {
     event.preventDefault();
@@ -198,6 +212,41 @@ export function RunDetailDrawer({
       nameInputRef.current?.focus();
     }
   }, [editingName]);
+
+  async function submitDependencyAdd() {
+    const nextDependency = dependencyDraft.trim();
+    if (!nextDependency || addDependencyPending) {
+      return;
+    }
+    try {
+      await onAddDependency(nextDependency);
+      setDependencyDraft("");
+    } catch {
+      // actionError is surfaced by the shared mutation handler.
+    }
+  }
+
+  async function submitDependencyRemove(dependencyRunId: string) {
+    if (removeDependencyPending) {
+      return;
+    }
+    try {
+      await onRemoveDependency(dependencyRunId);
+    } catch {
+      // actionError is surfaced by the shared mutation handler.
+    }
+  }
+
+  async function submitDependencyClear() {
+    if (clearDependenciesPending) {
+      return;
+    }
+    try {
+      await onClearDependencies();
+    } catch {
+      // actionError is surfaced by the shared mutation handler.
+    }
+  }
 
   return (
     <>
@@ -378,6 +427,17 @@ export function RunDetailDrawer({
               </span>
             </button>
             <button
+              aria-selected={section === "dependencies"}
+              className={section === "dependencies" ? "tab active" : "tab"}
+              onClick={() => setSection("dependencies")}
+              type="button"
+            >
+              Dependencies{" "}
+              <span className="tab-count">
+                {satisfiedDependencies}/{run.dependencies.length}
+              </span>
+            </button>
+            <button
               aria-selected={section === "timing"}
               className={section === "timing" ? "tab active" : "tab"}
               onClick={() => setSection("timing")}
@@ -398,6 +458,114 @@ export function RunDetailDrawer({
           {section === "tasks" ? (
             <section aria-label="Tasks" className="drawer-panel drawer-panel--tasks">
               <RunTaskList tasks={run.tasks} />
+            </section>
+          ) : null}
+
+          {section === "dependencies" ? (
+            <section aria-label="Dependencies" className="drawer-panel drawer-panel--dependencies">
+              <div className="drawer-panel-card dependency-panel">
+                <div className="dependency-summary">
+                  <span>
+                    {run.dependencies.length === 0
+                      ? "No dependencies configured."
+                      : `${satisfiedDependencies}/${run.dependencies.length} dependencies satisfied.`}
+                  </span>
+                  {canEditDependencies && run.dependencies.length > 0 ? (
+                    <button
+                      className="btn"
+                      disabled={actionsLocked}
+                      onClick={() => void submitDependencyClear()}
+                      type="button"
+                    >
+                      {clearDependenciesPending ? "Clearing..." : "Clear all"}
+                    </button>
+                  ) : null}
+                </div>
+
+                {canEditDependencies ? (
+                  <div className="dependency-add-row">
+                    <label className="field dependency-field">
+                      <input
+                        aria-label="Dependency run id"
+                        disabled={actionsLocked}
+                        onChange={(event) => setDependencyDraft(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            void submitDependencyAdd();
+                          }
+                        }}
+                        placeholder="Run id"
+                        value={dependencyDraft}
+                      />
+                    </label>
+                    <button
+                      className="btn"
+                      disabled={actionsLocked || dependencyDraft.trim().length === 0}
+                      onClick={() => void submitDependencyAdd()}
+                      type="button"
+                    >
+                      {addDependencyPending ? "Adding..." : "Add dependency"}
+                    </button>
+                  </div>
+                ) : null}
+
+                <div className="dependency-section">
+                  <h4 className="drawer-section-title">Depends on</h4>
+                  {run.dependencies.length === 0 ? (
+                    <p className="muted-inline">No dependencies.</p>
+                  ) : (
+                    <ul className="dependency-list">
+                      {run.dependencies.map((dependency) => (
+                        <li className="dependency-row" key={dependency.runId}>
+                          <div className="dependency-copy">
+                            <span className="dependency-name">{dependency.name ?? "Unnamed"}</span>
+                            <span className="dependency-meta">
+                              {dependency.runId} ·{" "}
+                              {dependency.missing
+                                ? "Missing"
+                                : dependency.satisfied
+                                  ? "Satisfied"
+                                  : dependency.effectiveStatus}
+                            </span>
+                          </div>
+                          {canEditDependencies ? (
+                            <button
+                              aria-label={`Remove dependency ${dependency.runId}`}
+                              className="btn"
+                              disabled={actionsLocked}
+                              onClick={() => void submitDependencyRemove(dependency.runId)}
+                              type="button"
+                            >
+                              {removeDependencyPending ? "Removing..." : "Remove"}
+                            </button>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                <div className="dependency-section">
+                  <h4 className="drawer-section-title">Required by</h4>
+                  {run.dependents.length === 0 ? (
+                    <p className="muted-inline">No dependents.</p>
+                  ) : (
+                    <ul className="dependency-list">
+                      {run.dependents.map((dependent) => (
+                        <li className="dependency-row" key={dependent.runId}>
+                          <div className="dependency-copy">
+                            <span className="dependency-name">{dependent.name ?? "Unnamed"}</span>
+                            <span className="dependency-meta">
+                              {dependent.runId} · {dependent.effectiveStatus}
+                            </span>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
             </section>
           ) : null}
 

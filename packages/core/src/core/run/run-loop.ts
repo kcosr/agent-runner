@@ -954,7 +954,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     const frozenCallerInstructions =
       rawCallerInstructions.length > 0 ? interpolate(rawCallerInstructions, injectedVars) : null;
     manifest = {
-      schemaVersion: 4,
+      schemaVersion: 5,
       runId,
       agent: {
         name: agentConfig.name,
@@ -989,6 +989,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       endedAt: null,
       archivedAt: null,
       status: isInitialize ? "initialized" : "running",
+      dependencyRunIds: [],
       exitCode: null,
       attempts: 0,
       maxAttempts,
@@ -1007,6 +1008,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         model: model ?? null,
         effort: effort ?? null,
         name,
+        dependencyRunIds: [],
         unrestricted,
         timeoutSec,
         maxAttempts,

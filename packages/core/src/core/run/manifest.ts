@@ -60,6 +60,7 @@ export interface RunResetSeed {
   model: string | null;
   effort: string | null;
   name: string | null;
+  dependencyRunIds: string[];
   unrestricted: boolean;
   timeoutSec: number;
   maxAttempts: number;
@@ -128,14 +129,14 @@ export interface AssignmentInfo {
 // `timeoutSec` are all captured at init / fresh-run time and preserved
 // across all subsequent sessions.
 //
-// schemaVersion: 4 is the current manifest-canonical generation. Manifests written
+// schemaVersion: 5 is the current manifest-canonical generation. Manifests written
 // by earlier task-runner versions (v1 pre-canonical, v2 pre-reset-seed, v3
-// pre-execution-provenance) are not
+// pre-execution-provenance, v4 pre-run-dependencies) are not
 // resumable by this version — `isRunManifest` rejects them and
 // `resolveResumeTarget` surfaces a clear error telling the caller to
 // create a fresh run.
 export interface RunManifest {
-  schemaVersion: 4;
+  schemaVersion: 5;
   runId: string;
   agent: {
     name: string;
@@ -170,6 +171,7 @@ export interface RunManifest {
   endedAt: string | null;
   archivedAt: string | null;
   status: ManifestStatus;
+  dependencyRunIds: string[];
   exitCode: number | null;
   attempts: number;
   maxAttempts: number;
@@ -225,6 +227,7 @@ function cloneTaskSnapshots(tasks: Record<string, TaskSnapshot>): Record<string,
 export function buildRunResetSeed(seed: RunResetSeed): RunResetSeed {
   return {
     ...seed,
+    dependencyRunIds: [...seed.dependencyRunIds],
     finalTasks: cloneTaskSnapshots(seed.finalTasks),
   };
 }
@@ -234,6 +237,7 @@ export function applyRunResetSeed(manifest: RunManifest): void {
   manifest.model = seed.model;
   manifest.effort = seed.effort;
   manifest.name = seed.name;
+  manifest.dependencyRunIds = [...seed.dependencyRunIds];
   manifest.unrestricted = seed.unrestricted;
   manifest.timeoutSec = seed.timeoutSec;
   manifest.maxAttempts = seed.maxAttempts;
@@ -318,11 +322,11 @@ function readManifestCandidate(candidate: string): RunManifest {
     typeof parsed === "object" &&
     "schemaVersion" in parsed &&
     typeof (parsed as { schemaVersion: unknown }).schemaVersion === "number" &&
-    (parsed as { schemaVersion: number }).schemaVersion !== 4
+    (parsed as { schemaVersion: number }).schemaVersion !== 5
   ) {
     const version = (parsed as { schemaVersion: number }).schemaVersion;
     throw new ResumeError(
-      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 4. Manifests from earlier versions cannot be resumed — create a fresh run (task-runner init / run).`,
+      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 5. Manifests from earlier versions cannot be resumed — create a fresh run (task-runner init / run).`,
     );
   }
   if (!isRunManifest(parsed)) {
@@ -438,7 +442,7 @@ export function listRunManifests(env: NodeJS.ProcessEnv = process.env): ListedRu
 function isRunManifest(value: unknown): value is RunManifest {
   if (!value || typeof value !== "object") return false;
   const obj = value as Record<string, unknown>;
-  if (obj.schemaVersion !== 4) return false;
+  if (obj.schemaVersion !== 5) return false;
   if (typeof obj.runId !== "string") return false;
 
   // Top-level scalars required by downstream consumers.
@@ -449,6 +453,12 @@ function isRunManifest(value: unknown): value is RunManifest {
   if (typeof obj.workspaceDir !== "string") return false;
   if (typeof obj.startedAt !== "string") return false;
   if (typeof obj.status !== "string") return false;
+  if (
+    !Array.isArray(obj.dependencyRunIds) ||
+    !obj.dependencyRunIds.every((runId) => typeof runId === "string")
+  ) {
+    return false;
+  }
   if (
     obj.archivedAt !== undefined &&
     obj.archivedAt !== null &&
@@ -487,6 +497,12 @@ function isRunManifest(value: unknown): value is RunManifest {
   if (resetSeed.model !== null && typeof resetSeed.model !== "string") return false;
   if (resetSeed.effort !== null && typeof resetSeed.effort !== "string") return false;
   if (resetSeed.name !== null && typeof resetSeed.name !== "string") return false;
+  if (
+    !Array.isArray(resetSeed.dependencyRunIds) ||
+    !resetSeed.dependencyRunIds.every((runId) => typeof runId === "string")
+  ) {
+    return false;
+  }
   if (typeof resetSeed.unrestricted !== "boolean") return false;
   if (typeof resetSeed.timeoutSec !== "number") return false;
   if (typeof resetSeed.maxAttempts !== "number") return false;

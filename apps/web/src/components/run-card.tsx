@@ -1,6 +1,6 @@
 import type { RunSummary } from "@task-runner/core/contracts/runs.js";
 import { truncateEnd } from "../lib/format.js";
-import { RunningIcon } from "./icons.js";
+import { DependencyIcon, RunningIcon } from "./icons.js";
 import { StatusBadge } from "./status-badge.js";
 
 export function RunCard({
@@ -17,6 +17,8 @@ export function RunCard({
   const progress =
     run.tasksTotal === 0 ? 0 : Math.round((run.tasksCompleted / run.tasksTotal) * 100);
   const visibleName = truncateEnd(run.name ?? "Unnamed");
+  const showDependencyIndicator =
+    run.status === "initialized" && run.dependencyState.unsatisfied > 0;
 
   return (
     <button
@@ -41,6 +43,16 @@ export function RunCard({
         <span className="repo-badge">{run.repo}</span>
         <span className="meta-item">{run.agentName}</span>
         <span className="backend-badge">{run.backend}</span>
+        {showDependencyIndicator ? (
+          <span
+            aria-label={`${run.dependencyState.unsatisfied} unmet dependencies`}
+            className="dependency-indicator"
+            title={`${run.dependencyState.unsatisfied} dependency run(s) not yet successful`}
+          >
+            <DependencyIcon aria-hidden="true" />
+            {run.dependencyState.unsatisfied}
+          </span>
+        ) : null}
       </div>
       <div className="card-row">
         <div className="progress" aria-label="task progress">

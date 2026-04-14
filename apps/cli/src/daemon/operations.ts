@@ -1,6 +1,8 @@
 import type {
+  addDependency,
   appendNotes,
   archive,
+  clearDependencies,
   createTask,
   getDefinition,
   getDefinitionList,
@@ -9,6 +11,7 @@ import type {
   getTask,
   getTaskList,
   initRun,
+  removeDependency,
   renameRun,
   reset,
   resumeRun,
@@ -34,6 +37,9 @@ export interface DaemonHandlers {
   archive: typeof archive;
   unarchive: typeof unarchive;
   renameRun: typeof renameRun;
+  addDependency: typeof addDependency;
+  removeDependency: typeof removeDependency;
+  clearDependencies: typeof clearDependencies;
   reset: typeof reset;
   updateTask: typeof updateTask;
   appendNotes: typeof appendNotes;
@@ -82,6 +88,15 @@ export function createDaemonOperations(ctx: DaemonOperationContext) {
     },
     async setRunName(target: string, input: Parameters<typeof renameRun>[1]) {
       return { result: await ctx.renameRun(target, input) };
+    },
+    addDependency(target: string, dependencyRunId: string) {
+      return { result: ctx.addDependency(target, dependencyRunId) };
+    },
+    removeDependency(target: string, dependencyRunId: string) {
+      return { result: ctx.removeDependency(target, dependencyRunId) };
+    },
+    clearDependencies(target: string) {
+      return { result: ctx.clearDependencies(target) };
     },
     abortRun(target: string) {
       return ctx.abortRun(target);

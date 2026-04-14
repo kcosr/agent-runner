@@ -2,6 +2,7 @@ import type { DefinitionDetail, RunCommandOverrides } from "@task-runner/core/ap
 import type { DefinitionEntry } from "@task-runner/core/config/loader.js";
 import type {
   RunArchiveResult,
+  RunDependenciesResult,
   RunDetail,
   RunNameResult,
   RunSummary,
@@ -57,6 +58,10 @@ export interface RunTargetParams {
 
 export interface RunSetNameParams extends RunTargetParams {
   name: string | null;
+}
+
+export interface RunDependencyParams extends RunTargetParams {
+  dependencyRunId: string;
 }
 
 export interface TaskTargetParams extends RunTargetParams {
@@ -157,6 +162,10 @@ export interface RunArchiveRpcResult {
 
 export interface RunSetNameRpcResult {
   result: RunNameResult;
+}
+
+export interface RunDependenciesRpcResult {
+  result: RunDependenciesResult;
 }
 
 export interface RunsStartResult {

@@ -70,8 +70,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
   // Grouped commands shift one more token as their subcommand so that
   // `task set <run> <task>` parses cleanly without colliding with the
-  // positional collector below. `run reset` is the only grouped `run`
-  // subcommand; plain `run ...` keeps its existing positional behavior.
+  // positional collector below. Plain `run ...` keeps its existing
+  // positional behavior unless the next token is one of the explicit
+  // grouped run-management subcommands.
   if (result.command === "task" || result.command === "list" || result.command === "show") {
     const next = args[0];
     if (next !== undefined && !next.startsWith("-")) {
@@ -82,7 +83,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
     (args[0] === "reset" ||
       args[0] === "archive" ||
       args[0] === "unarchive" ||
-      args[0] === "set-name")
+      args[0] === "set-name" ||
+      args[0] === "add-dep" ||
+      args[0] === "remove-dep" ||
+      args[0] === "clear-deps")
   ) {
     result.subcommand = args.shift();
   }

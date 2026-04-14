@@ -7,13 +7,16 @@ import { WebSocketServer } from "ws";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import {
   CommandError,
+  addRunDependency,
   addTask,
   appendTaskNotes,
   archiveRun,
+  clearRunDependencies,
   listDefinitions,
   listRuns,
   listTasks,
   readStatus,
+  removeRunDependency,
   setRunName,
   setTask,
   showDefinition,
@@ -270,6 +273,12 @@ test("command services: listRuns applies the live workspace overlay for running 
     assert.equal(run.tasksTotal, 2);
     assert.equal(run.status, "running");
     assert.equal(run.effectiveStatus, "running");
+    assert.deepEqual(run.dependencyState, {
+      ready: true,
+      total: 0,
+      satisfied: 0,
+      unsatisfied: 0,
+    });
   });
 });
 
@@ -390,6 +399,133 @@ test("command services: addTask returns the new snapshot and persists it", async
   assert.ok(Object.values(manifest.finalTasks).some((task) => task.title === "CLI follow-up"));
 });
 
+test("command services: add/remove/clear dependency mutations validate graph state and projection", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const target = await initRun(dir);
+  const dependency = await initRun(dir);
+
+  patchManifest(dependency.workspaceDir, (manifest) => {
+    manifest.status = "success";
+    manifest.endedAt = "2026-04-12T10:05:00.000Z";
+    manifest.exitCode = 0;
+  });
+
+  await withSharedRuntimeEnv(dir, async () => {
+    const added = addRunDependency(target.runId, dependency.runId);
+    assert.deepEqual(added, {
+      runId: target.runId,
+      dependencyRunIds: [dependency.runId],
+      changed: true,
+    });
+
+    const detail = readStatus(target.runId);
+    assert.deepEqual(detail.dependencies, [
+      {
+        runId: dependency.runId,
+        name: "svc-work",
+        status: "success",
+        effectiveStatus: "success",
+        archivedAt: null,
+        satisfied: true,
+        missing: false,
+      },
+    ]);
+    assert.deepEqual(detail.dependents, []);
+
+    const removed = removeRunDependency(target.runId, dependency.runId);
+    assert.deepEqual(removed, {
+      runId: target.runId,
+      dependencyRunIds: [],
+      changed: true,
+    });
+
+    const cleared = clearRunDependencies(target.runId);
+    assert.deepEqual(cleared, {
+      runId: target.runId,
+      dependencyRunIds: [],
+      changed: false,
+    });
+  });
+
+  const manifest = readManifest(target.workspaceDir);
+  assert.deepEqual(manifest.dependencyRunIds, []);
+  assert.deepEqual(manifest.resetSeed.dependencyRunIds, []);
+});
+
+test("command services: dependency mutations reject missing runs, self edges, duplicates, cycles, and non-initialized targets", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const target = await initRun(dir);
+  const dependency = await initRun(dir);
+  const downstream = await initRun(dir);
+
+  await withSharedRuntimeEnv(dir, async () => {
+    assert.throws(
+      () => addRunDependency(target.runId, "missing-run"),
+      (err) =>
+        err instanceof CommandError &&
+        /run add-dep: dependency run missing-run was not found/.test(err.message),
+    );
+
+    assert.throws(
+      () => addRunDependency(target.runId, target.runId),
+      (err) =>
+        err instanceof CommandError &&
+        new RegExp(`run add-dep: run ${target.runId} cannot depend on itself`).test(err.message),
+    );
+
+    addRunDependency(target.runId, dependency.runId);
+    assert.throws(
+      () => addRunDependency(target.runId, dependency.runId),
+      (err) =>
+        err instanceof CommandError &&
+        new RegExp(`dependency ${dependency.runId} already exists on run ${target.runId}`).test(
+          err.message,
+        ),
+    );
+
+    addRunDependency(dependency.runId, downstream.runId);
+    assert.throws(
+      () => addRunDependency(downstream.runId, target.runId),
+      (err) =>
+        err instanceof CommandError &&
+        new RegExp(`adding dependency ${target.runId} would create a cycle`).test(err.message),
+    );
+
+    patchManifest(target.workspaceDir, (manifest) => {
+      manifest.status = "success";
+      manifest.endedAt = "2026-04-12T10:15:00.000Z";
+      manifest.exitCode = 0;
+    });
+
+    assert.throws(
+      () => addRunDependency(target.runId, downstream.runId),
+      (err) =>
+        err instanceof CommandError &&
+        new RegExp(`cannot add dependencies unless run ${target.runId} is initialized`).test(
+          err.message,
+        ),
+    );
+    assert.throws(
+      () => removeRunDependency(target.runId, dependency.runId),
+      (err) =>
+        err instanceof CommandError &&
+        new RegExp(`cannot remove dependencies unless run ${target.runId} is initialized`).test(
+          err.message,
+        ),
+    );
+    assert.throws(
+      () => clearRunDependencies(target.runId),
+      (err) =>
+        err instanceof CommandError &&
+        new RegExp(`cannot clear dependencies unless run ${target.runId} is initialized`).test(
+          err.message,
+        ),
+    );
+  });
+});
+
 test("command services: locked task lists reject addTask with CommandError", async () => {
   const dir = tempDir();
   writeBundle(dir, LOCKED_ASSIGNMENT, "svc-locked-work");
@@ -459,6 +595,12 @@ test("command services: listRuns returns newest-first rows and filters archived 
         canAdd: true,
       },
     });
+    assert.deepEqual(allRuns[0].dependencyState, {
+      ready: true,
+      total: 0,
+      satisfied: 0,
+      unsatisfied: 0,
+    });
     assert.deepEqual(allRuns[1].capabilities, {
       canArchive: false,
       canUnarchive: true,
@@ -470,6 +612,12 @@ test("command services: listRuns returns newest-first rows and filters archived 
         canEditNotes: true,
         canAdd: true,
       },
+    });
+    assert.deepEqual(allRuns[1].dependencyState, {
+      ready: true,
+      total: 0,
+      satisfied: 0,
+      unsatisfied: 0,
     });
   });
 });

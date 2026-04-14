@@ -135,6 +135,42 @@ const routes: RouteDefinition[] = [
   },
   {
     method: "POST",
+    pattern: ["api", "runs", ":runId", "dependencies"],
+    handler: async (req, res, ctx, params) => {
+      const body = asRecord(await readJsonBody(req), "request body");
+      sendJson(
+        res,
+        200,
+        ctx.operations.addDependency(
+          routeParam(params, "runId"),
+          requiredString(body.dependencyRunId, "dependencyRunId"),
+        ),
+      );
+    },
+  },
+  {
+    method: "DELETE",
+    pattern: ["api", "runs", ":runId", "dependencies", ":dependencyRunId"],
+    handler: (_req, res, ctx, params) => {
+      sendJson(
+        res,
+        200,
+        ctx.operations.removeDependency(
+          routeParam(params, "runId"),
+          routeParam(params, "dependencyRunId"),
+        ),
+      );
+    },
+  },
+  {
+    method: "POST",
+    pattern: ["api", "runs", ":runId", "dependencies", "clear"],
+    handler: (_req, res, ctx, params) => {
+      sendJson(res, 200, ctx.operations.clearDependencies(routeParam(params, "runId")));
+    },
+  },
+  {
+    method: "POST",
     pattern: ["api", "runs", ":runId", "abort"],
     handler: (_req, res, ctx, params) => {
       sendJson(res, 200, ctx.operations.abortRun(routeParam(params, "runId")));

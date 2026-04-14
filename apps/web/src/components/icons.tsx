@@ -66,6 +66,17 @@ export function ArchiveIcon(props: IconProps) {
   );
 }
 
+export function DependencyIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M9 7h6" />
+      <path d="M9 17h6" />
+      <path d="m15 7 3 3-3 3" />
+      <path d="m9 17-3-3 3-3" />
+    </IconBase>
+  );
+}
+
 export function MoreIcon(props: IconProps) {
   return (
     <IconBase {...props}>
