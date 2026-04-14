@@ -10,7 +10,7 @@
 - Run workspace and draft buckets under `${TASK_RUNNER_STATE_DIR}/runs/` and `${TASK_RUNNER_STATE_DIR}/drafts/` now use the repo basename (for example `task-runner`) instead of a slugified absolute repo path. Existing runs remain on disk at their old locations, but short-id lookup now resolves against the new basename bucket unless you resume by explicit workspace path. ([#10](https://github.com/kcosr/task-runner/pull/10))
 - Manifest schema version is now `3`. Existing `schemaVersion: 2` runs from the pre-reset-seed generation are no longer resumable; start a fresh run instead.
 - Manifest schema version is now `4`. Run manifests and daemon/CLI/web DTOs now require persisted `execution` provenance, and older `schemaVersion: 3` runs from before the abort-control hot cut are no longer resumable. ([#29](https://github.com/kcosr/task-runner/pull/29))
-- Manifest schema version is now `5`. Run manifests now persist `dependencyRunIds`, and older `schemaVersion: 4` runs from before run dependencies are no longer resumable.
+- Manifest schema version is now `5`. Run manifests now persist `dependencyRunIds`, and older `schemaVersion: 4` runs from before run dependencies are no longer resumable. ([#30](https://github.com/kcosr/task-runner/pull/30))
 - `task-runner status --output-format json` now emits the shared `RunDetail` contract, and `--field` projects top-level `RunDetail` fields. The raw `finalTasks` status projection is removed; use `--field tasks` instead. ([#17](https://github.com/kcosr/task-runner/pull/17))
 - `RunCapabilities` is now a hot-cut machine-facing contract with nested task mutation booleans (`taskMutation.canSetStatus`, `canEditNotes`, `canAdd`). The old flat `canAbort` / `canMutateTasks` fields are removed, and `list runs --output-format json` now carries `capabilities` on every `RunSummary` row. ([#19](https://github.com/kcosr/task-runner/pull/19))
 
@@ -39,7 +39,8 @@
   run events over `/api/events/...`, and keeps the shared
   `src/app/service.ts` seam as the transport-independent business
   layer. ([#24](https://github.com/kcosr/task-runner/pull/24))
-- Added first-class run dependency management with `task-runner run add-dep`, `run remove-dep`, and `run clear-deps`, plus daemon RPC/HTTP and web dashboard support for editing and inspecting direct dependencies and dependents. Initialized runs now expose dependency readiness in list/status surfaces, and resume rejects unsatisfied prerequisites.
+- Added first-class run dependency management with `task-runner run add-dep`, `run remove-dep`, and `run clear-deps`, plus daemon RPC/HTTP and web dashboard support for editing and inspecting direct dependencies and dependents. Initialized runs now expose dependency readiness in list/status surfaces, and resume rejects unsatisfied prerequisites. ([#30](https://github.com/kcosr/task-runner/pull/30))
+- Added `scripts/migrate-manifests-v5.mjs` to backfill `dependencyRunIds` and upgrade existing v4 run manifests in `${TASK_RUNNER_STATE_DIR}` to schema version 5. ([#30](https://github.com/kcosr/task-runner/pull/30))
 - Added a transport-neutral `src/contracts/runs.ts` seam for shared run DTOs and pure mappers (`RunSummary`, `RunDetail`, `RunArchiveResult`, `RunCapabilities`) so later CLI/web/daemon surfaces can project from `RunManifest` without binding directly to raw manifest internals. ([#16](https://github.com/kcosr/task-runner/pull/16))
 - Added `task-runner task list`, `task show`, and `task append-notes`, plus `task add --body`, for a fuller CLI task workflow surface. The new read commands return stable task snapshots in text or JSON, and append-notes uses deterministic single-newline joining.
 - Added `task-runner run reset <run-id>` to restore a non-running run to its original initialized state, rewrite `run.json` and `assignment.md` from a persisted reset seed, clear prior attempt/session history, and remove stale `attempts/` artifacts.
@@ -61,6 +62,8 @@
   `apps/web/mockups/run-dashboard.{html,css}`. ([#24](https://github.com/kcosr/task-runner/pull/24))
 
 ### Changed
+
+- The web dependency editor now searches candidate runs by run name, assignment name, and run id before submitting the selected dependency run id. ([#30](https://github.com/kcosr/task-runner/pull/30))
 
 - Relaxed resume validation so task-backed runs can resume without a
   caller message when incomplete tasks remain; core now synthesizes an
