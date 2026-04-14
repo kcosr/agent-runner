@@ -227,6 +227,28 @@ function runCliExpectFail(args, opts = {}) {
   }
 }
 
+async function runCliAsync(args, opts = {}) {
+  const child = spawn("node", [CLI_PATH, ...args], {
+    cwd: opts.cwd ?? process.cwd(),
+    env: { ...process.env, ...sharedRuntimeEnv(opts.cwd ?? process.cwd()), ...(opts.env ?? {}) },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk.toString();
+  });
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk.toString();
+  });
+
+  const result = await new Promise((resolve) =>
+    child.once("exit", (code, signal) => resolve({ code, signal })),
+  );
+  return { ...result, stdout, stderr };
+}
+
 async function startCliDaemon(baseDir, listenUrl) {
   const child = spawn("node", [CLI_PATH, "serve", "--listen", listenUrl], {
     cwd: baseDir,
@@ -1497,6 +1519,171 @@ test("daemon init uses the remote caller cwd when the agent omits cwd", async ()
   } finally {
     await daemon.stop();
   }
+});
+
+test("daemon-target CLI detaches fresh runs without subscribing for events", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const wsServer = new WebSocketServer({ host: "127.0.0.1", port });
+  const requests = [];
+  if (wsServer.address() === null) {
+    await new Promise((resolve) => wsServer.once("listening", resolve));
+  }
+
+  wsServer.on("connection", (ws) => {
+    ws.on("message", (payload) => {
+      const request = JSON.parse(payload.toString());
+      requests.push(request);
+      if (request.method === "runs.start") {
+        ws.send(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: request.id,
+            result: { runId: "detached-start-run" },
+          }),
+        );
+        return;
+      }
+      ws.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: request.id,
+          error: {
+            code: -32004,
+            message: `unexpected method ${request.method}`,
+          },
+        }),
+      );
+    });
+  });
+
+  try {
+    const result = await runCliAsync([
+      "run",
+      "--connect",
+      listenUrl,
+      "--detach",
+      "--agent",
+      "daemon-agent",
+      "--assignment",
+      "daemon-work",
+    ]);
+    assert.deepEqual(
+      { code: result.code, signal: result.signal, stderr: result.stderr },
+      { code: 0, signal: null, stderr: "" },
+    );
+    assert.equal(
+      result.stdout,
+      "task-runner: detached run detached-start-run\n" +
+        'Resume later with: task-runner run --resume-run detached-start-run "..."\n' +
+        "Check status with: task-runner status detached-start-run\n",
+    );
+    assert.deepEqual(
+      requests.map((request) => request.method),
+      ["runs.start"],
+    );
+  } finally {
+    for (const client of wsServer.clients) {
+      client.terminate();
+    }
+    await new Promise((resolve) => wsServer.close(() => resolve()));
+  }
+});
+
+test("daemon-target CLI detaches resume runs and supports json output", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const wsServer = new WebSocketServer({ host: "127.0.0.1", port });
+  const requests = [];
+  if (wsServer.address() === null) {
+    await new Promise((resolve) => wsServer.once("listening", resolve));
+  }
+
+  wsServer.on("connection", (ws) => {
+    ws.on("message", (payload) => {
+      const request = JSON.parse(payload.toString());
+      requests.push(request);
+      if (request.method === "runs.resume") {
+        ws.send(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: request.id,
+            result: { runId: "detached-resume-run" },
+          }),
+        );
+        return;
+      }
+      ws.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: request.id,
+          error: {
+            code: -32004,
+            message: `unexpected method ${request.method}`,
+          },
+        }),
+      );
+    });
+  });
+
+  try {
+    const result = await runCliAsync([
+      "run",
+      "--connect",
+      listenUrl,
+      "--detach",
+      "--resume-run",
+      "abc123",
+      "--output-format",
+      "json",
+    ]);
+    assert.deepEqual(
+      { code: result.code, signal: result.signal, stderr: result.stderr },
+      { code: 0, signal: null, stderr: "" },
+    );
+    assert.deepEqual(JSON.parse(result.stdout), {
+      runId: "detached-resume-run",
+      detached: true,
+    });
+    assert.deepEqual(
+      requests.map((request) => request.method),
+      ["runs.resume"],
+    );
+    assert.equal(requests[0].params.target, "abc123");
+  } finally {
+    for (const client of wsServer.clients) {
+      client.terminate();
+    }
+    await new Promise((resolve) => wsServer.close(() => resolve()));
+  }
+});
+
+test("daemon-target CLI rejects --detach without daemon mode", () => {
+  const failure = runCliExpectFail(["run", "--detach"]);
+  assert.equal(failure.status, 3);
+  assert.equal(failure.stdout, "");
+  assert.match(
+    failure.stderr,
+    /--detach requires daemon-connected run execution \(\-\-connect or TASK_RUNNER_CONNECT\)/,
+  );
+});
+
+test("daemon-target CLI rejects init --detach", () => {
+  const failure = runCliExpectFail(["init", "--detach"]);
+  assert.equal(failure.status, 3);
+  assert.equal(failure.stdout, "");
+  assert.match(failure.stderr, /init does not accept --detach/);
+});
+
+test("daemon-target CLI rejects --detach on grouped run subcommands", () => {
+  const failure = runCliExpectFail(["run", "reset", "abc123", "--detach"]);
+  assert.equal(failure.status, 3);
+  assert.equal(failure.stdout, "");
+  assert.match(
+    failure.stderr,
+    /run reset only supports <id-or-path>, --connect, and --output-format/,
+  );
+  assert.match(failure.stderr, /--detach/);
 });
 
 test("daemon-target CLI surfaces Ctrl+C cancel failures instead of exiting as a clean interrupt", async () => {

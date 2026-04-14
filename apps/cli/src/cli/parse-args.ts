@@ -26,6 +26,7 @@ export interface ParsedArgs {
   maxRetries?: number;
   name?: string;
   clear?: boolean;
+  detach?: boolean;
   outputFormat: OutputFormat;
   message?: string;
   positionals: string[];
@@ -181,6 +182,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
       }
     } else if (arg === "--clear") {
       result.clear = true;
+    } else if (arg === "--detach") {
+      result.detach = true;
     } else if (arg === "--field") {
       const next = args.shift();
       if (next === undefined) throw new Error("--field requires a value");
