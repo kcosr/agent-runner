@@ -60,13 +60,17 @@ export function RunsDashboardRoute() {
       bottomNotices={bottomNotices.length > 0 ? bottomNotices : undefined}
       detail={
         <RunDetailPanel
+          onAddDependency={state.runActions.addDependency}
           actionError={state.actionError}
           actionPending={state.actionPending}
           drawerWidth={state.settings.drawerWidth}
+          runs={state.runs}
           onAbort={state.runActions.abort}
           onArchive={state.runActions.archive}
+          onClearDependencies={state.runActions.clearDependencies}
           onClose={state.closeRun}
           onCopy={state.copyText}
+          onRemoveDependency={state.runActions.removeDependency}
           onRename={state.runActions.rename}
           onResume={state.runActions.resume}
           onUnarchive={state.runActions.unarchive}

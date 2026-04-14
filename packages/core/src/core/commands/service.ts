@@ -12,12 +12,14 @@ import {
 } from "../../config/loader.js";
 import {
   type RunArchiveResult,
+  type RunDependenciesResult,
   type RunDetail,
   type RunNameResult,
   type RunSummary,
   type RunTaskMutationCapabilities,
   deriveTaskMutationCapabilities,
   toRunArchiveResult,
+  toRunDependenciesResult,
   toRunDetail,
   toRunNameResult,
   toRunSummary,
@@ -27,8 +29,16 @@ import { trimRunName } from "../../util/run-name.js";
 import { shortId } from "../../util/short-id.js";
 import type { LoadedAgent, LoadedAssignment } from "../config/loaded.js";
 import {
+  buildRunDependencyGraph,
+  deriveDependencyStateFromSatisfiedRunIds,
+  resolveDependencies,
+  resolveDependentsFromManifests,
+  wouldCreateDependencyCycle,
+} from "../run/dependencies.js";
+import {
   ResumeError,
   type RunManifest,
+  RunNotFoundError,
   type TaskSnapshot,
   listRunManifests,
   resolveResumeTarget,
@@ -45,6 +55,7 @@ import {
   persistWorkspaceTaskState,
   resetWorkspaceRun,
   taskModeFromManifest,
+  withGlobalStateLock,
   withTaskStateLock,
 } from "../run/workspace-state.js";
 
@@ -70,7 +81,11 @@ export interface RunResetResult {
 }
 
 export type RunListEntry = RunSummary;
-export type { RunArchiveResult, RunNameResult } from "../../contracts/runs.js";
+export type {
+  RunArchiveResult,
+  RunDependenciesResult,
+  RunNameResult,
+} from "../../contracts/runs.js";
 
 export type RunListResult = RunListEntry[];
 
@@ -122,6 +137,25 @@ function requireArchivableRun(manifest: RunManifest, verb: "archive" | "unarchiv
   if (manifest.status === "running") {
     throw new ConflictError(`cannot ${verb} a running run`);
   }
+}
+
+function requireDependencyMutationAllowed(
+  manifest: RunManifest,
+  verb: "add" | "remove" | "clear",
+): void {
+  if (manifest.status !== "initialized") {
+    throw new CommandError(
+      `cannot ${verb} dependencies unless run ${manifest.runId} is initialized`,
+    );
+  }
+}
+
+function readRunGraph(): ReadonlyMap<string, RunManifest> {
+  return buildRunDependencyGraph(listRunManifests().map((entry) => entry.manifest));
+}
+
+function withDependencyMutationLock<T>(fn: () => T): T {
+  return withGlobalStateLock("run-dependencies", fn);
 }
 
 function refreshRunSnapshotAfterTaskStateSettles(
@@ -312,8 +346,28 @@ export function readStatus(target: string): StatusCommandResult {
     resolved.manifest,
     resolved.workspaceDir,
   );
+  const dependencyGraph = new Map<string, RunManifest>([[manifestView.runId, manifestView]]);
+  const dependents: RunManifest[] = [];
 
-  return toRunDetail({ manifest: manifestView, isLive });
+  for (const entry of listRunManifests()) {
+    const candidate = entry.manifest.runId === manifestView.runId ? manifestView : entry.manifest;
+    if (manifestView.dependencyRunIds.includes(candidate.runId)) {
+      dependencyGraph.set(candidate.runId, candidate);
+    }
+    if (
+      candidate.runId !== manifestView.runId &&
+      candidate.dependencyRunIds.includes(manifestView.runId)
+    ) {
+      dependents.push(candidate);
+    }
+  }
+
+  return toRunDetail({
+    manifest: manifestView,
+    isLive,
+    dependencies: resolveDependencies(manifestView, dependencyGraph),
+    dependents: resolveDependentsFromManifests(manifestView.runId, dependents),
+  });
 }
 
 export function listDefinitions(kind: DefinitionKind): DefinitionListResult {
@@ -325,12 +379,23 @@ export function listDefinitions(kind: DefinitionKind): DefinitionListResult {
 
 export function listRuns(opts: { includeArchived?: boolean } = {}): RunListResult {
   const includeArchived = opts.includeArchived === true;
-  return listRunManifests()
+  const entries = listRunManifests();
+  const projectedEntries = entries.map((entry) => ({
+    ...entry,
+    manifest: readManifestView(entry.manifest, entry.workspaceDir).manifest,
+  }));
+  const successfulRunIds = new Set(
+    projectedEntries
+      .filter((entry) => entry.manifest.status === "success")
+      .map((entry) => entry.manifest.runId),
+  );
+  return projectedEntries
     .map((entry) =>
-      toRunSummary({
-        ...entry,
-        manifest: readManifestView(entry.manifest, entry.workspaceDir).manifest,
-      }),
+      toRunSummary(
+        entry,
+        undefined,
+        deriveDependencyStateFromSatisfiedRunIds(entry.manifest, successfulRunIds),
+      ),
     )
     .filter((entry) => includeArchived || entry.archivedAt === null)
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
@@ -433,6 +498,127 @@ export async function setRunName(
   }
 
   return toRunNameResult({
+    manifest: resolved.manifest,
+    changed,
+  });
+}
+
+export function addRunDependency(target: string, dependencyTarget: string): RunDependenciesResult {
+  const resolved = resolveRun(target);
+  let changed = false;
+
+  withDependencyMutationLock(() => {
+    withTaskStateLock(resolved.workspaceDir, () => {
+      resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
+      requireDependencyMutationAllowed(resolved.manifest, "add");
+
+      let dependencyManifest: RunManifest;
+      try {
+        dependencyManifest = resolveRun(dependencyTarget).manifest;
+      } catch (err) {
+        if (err instanceof RunNotFoundError) {
+          throw new CommandError(`run add-dep: dependency run ${dependencyTarget} was not found`);
+        }
+        throw err;
+      }
+
+      if (dependencyManifest.runId === resolved.manifest.runId) {
+        throw new CommandError(
+          `run add-dep: run ${resolved.manifest.runId} cannot depend on itself`,
+        );
+      }
+      if (resolved.manifest.dependencyRunIds.includes(dependencyManifest.runId)) {
+        throw new CommandError(
+          `run add-dep: dependency ${dependencyManifest.runId} already exists on run ${resolved.manifest.runId}`,
+        );
+      }
+
+      const graph = readRunGraph();
+      const graphWithTarget = new Map(graph);
+      graphWithTarget.set(resolved.manifest.runId, resolved.manifest);
+      graphWithTarget.set(dependencyManifest.runId, dependencyManifest);
+      if (
+        wouldCreateDependencyCycle(
+          graphWithTarget,
+          resolved.manifest.runId,
+          dependencyManifest.runId,
+        )
+      ) {
+        throw new CommandError(
+          `run add-dep: adding dependency ${dependencyManifest.runId} would create a cycle`,
+        );
+      }
+
+      resolved.manifest.dependencyRunIds = [
+        ...resolved.manifest.dependencyRunIds,
+        dependencyManifest.runId,
+      ];
+      resolved.manifest.resetSeed.dependencyRunIds = [...resolved.manifest.dependencyRunIds];
+      writeManifest(resolved.workspaceDir, resolved.manifest);
+      changed = true;
+    });
+  });
+
+  return toRunDependenciesResult({
+    manifest: resolved.manifest,
+    changed,
+  });
+}
+
+export function removeRunDependency(
+  target: string,
+  dependencyRunId: string,
+): RunDependenciesResult {
+  const resolved = resolveRun(target);
+  let changed = false;
+
+  withDependencyMutationLock(() => {
+    withTaskStateLock(resolved.workspaceDir, () => {
+      resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
+      requireDependencyMutationAllowed(resolved.manifest, "remove");
+
+      if (!resolved.manifest.dependencyRunIds.includes(dependencyRunId)) {
+        throw new CommandError(
+          `run remove-dep: dependency ${dependencyRunId} does not exist on run ${resolved.manifest.runId}`,
+        );
+      }
+
+      resolved.manifest.dependencyRunIds = resolved.manifest.dependencyRunIds.filter(
+        (runId) => runId !== dependencyRunId,
+      );
+      resolved.manifest.resetSeed.dependencyRunIds = [...resolved.manifest.dependencyRunIds];
+      writeManifest(resolved.workspaceDir, resolved.manifest);
+      changed = true;
+    });
+  });
+
+  return toRunDependenciesResult({
+    manifest: resolved.manifest,
+    changed,
+  });
+}
+
+export function clearRunDependencies(target: string): RunDependenciesResult {
+  const resolved = resolveRun(target);
+  let changed = false;
+
+  withDependencyMutationLock(() => {
+    withTaskStateLock(resolved.workspaceDir, () => {
+      resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
+      requireDependencyMutationAllowed(resolved.manifest, "clear");
+
+      if (resolved.manifest.dependencyRunIds.length === 0) {
+        return;
+      }
+
+      resolved.manifest.dependencyRunIds = [];
+      resolved.manifest.resetSeed.dependencyRunIds = [];
+      writeManifest(resolved.workspaceDir, resolved.manifest);
+      changed = true;
+    });
+  });
+
+  return toRunDependenciesResult({
     manifest: resolved.manifest,
     changed,
   });

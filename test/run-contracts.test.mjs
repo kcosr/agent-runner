@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   deriveRunCapabilities,
   toRunArchiveResult,
+  toRunDependenciesResult,
   toRunDetail,
   toRunSummary,
 } from "../packages/core/dist/contracts/runs.js";
@@ -26,7 +27,7 @@ function buildManifest(overrides = {}) {
   };
 
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     runId: "run123",
     agent: {
       name: "demo-agent",
@@ -54,6 +55,7 @@ function buildManifest(overrides = {}) {
     endedAt: null,
     archivedAt: null,
     status: "initialized",
+    dependencyRunIds: [],
     exitCode: null,
     attempts: 0,
     maxAttempts: 2,
@@ -73,6 +75,7 @@ function buildManifest(overrides = {}) {
       model: "claude-sonnet-4-6",
       effort: "medium",
       name: "demo session",
+      dependencyRunIds: [],
       unrestricted: false,
       timeoutSec: 3600,
       maxAttempts: 2,
@@ -115,6 +118,12 @@ test("run contracts: toRunSummary maps listed manifest rows to the neutral summa
     endedAt: "2026-04-12T10:05:00.000Z",
     tasksCompleted: 1,
     tasksTotal: 2,
+    dependencyState: {
+      ready: true,
+      total: 0,
+      satisfied: 0,
+      unsatisfied: 0,
+    },
     execution: {
       hostMode: "embedded",
       controller: {
@@ -198,6 +207,8 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
     sessionCount: 0,
     tasksCompleted: 1,
     tasksTotal: 2,
+    dependencies: [],
+    dependents: [],
     tasks: [
       {
         id: "t1",
@@ -227,6 +238,92 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
     },
     capabilities: detail.capabilities,
   });
+});
+
+test("run contracts: dependency summary/detail projection resolves readiness and reverse edges", () => {
+  const target = buildManifest({
+    runId: "run123",
+    dependencyRunIds: ["run456", "missing-run"],
+  });
+  const dependency = buildManifest({
+    runId: "run456",
+    name: null,
+    assignment: {
+      name: "Prerequisite assignment",
+      sourcePath: "/repo/assignments/prerequisite/assignment.md",
+      workspacePath: "/state/runs/demo/run456/assignment.md",
+    },
+    status: "success",
+    endedAt: "2026-04-12T09:30:00.000Z",
+  });
+  const dependent = buildManifest({
+    runId: "run789",
+    name: null,
+    assignment: {
+      name: "Downstream assignment",
+      sourcePath: "/repo/assignments/downstream/assignment.md",
+      workspacePath: "/state/runs/demo/run789/assignment.md",
+    },
+    dependencyRunIds: ["run123"],
+    startedAt: "2026-04-12T10:10:00.000Z",
+  });
+  const graph = new Map([
+    [target.runId, target],
+    [dependency.runId, dependency],
+    [dependent.runId, dependent],
+  ]);
+
+  const summary = toRunSummary(
+    {
+      repo: "demo-repo",
+      workspaceDir: target.workspaceDir,
+      manifest: target,
+    },
+    graph,
+  );
+  const detail = toRunDetail({
+    manifest: target,
+    isLive: false,
+    relatedManifests: graph,
+  });
+
+  assert.deepEqual(summary.dependencyState, {
+    ready: false,
+    total: 2,
+    satisfied: 1,
+    unsatisfied: 1,
+  });
+  assert.deepEqual(detail.dependencies, [
+    {
+      runId: "run456",
+      name: "Prerequisite assignment",
+      status: "success",
+      effectiveStatus: "success",
+      archivedAt: null,
+      satisfied: true,
+      missing: false,
+    },
+    {
+      runId: "missing-run",
+      name: null,
+      status: null,
+      effectiveStatus: null,
+      archivedAt: null,
+      satisfied: false,
+      missing: true,
+    },
+  ]);
+  assert.deepEqual(detail.dependents, [
+    {
+      runId: "run789",
+      name: "Downstream assignment",
+      status: "initialized",
+      effectiveStatus: "initialized",
+      archivedAt: null,
+      satisfied: false,
+      missing: false,
+    },
+  ]);
 });
 
 test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mutation semantics", () => {
@@ -385,6 +482,24 @@ test("run contracts: toRunArchiveResult maps manifest-plus-change to the neutral
       runId: "run123",
       status: "success",
       archivedAt: "2026-04-12T11:00:00.000Z",
+      changed: true,
+    },
+  );
+});
+
+test("run contracts: toRunDependenciesResult maps manifest-plus-change to the dependency DTO", () => {
+  const manifest = buildManifest({
+    dependencyRunIds: ["run456"],
+  });
+
+  assert.deepEqual(
+    toRunDependenciesResult({
+      manifest,
+      changed: true,
+    }),
+    {
+      runId: "run123",
+      dependencyRunIds: ["run456"],
       changed: true,
     },
   );

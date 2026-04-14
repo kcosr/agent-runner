@@ -171,6 +171,12 @@ test("list runs enumerates current-generation runs across buckets and filters ar
   assert.equal(parsed[1].archivedAt, "2026-04-12T12:00:00.000Z");
   assert.equal(parsed[0].status, "initialized");
   assert.equal(parsed[0].effectiveStatus, "initialized");
+  assert.deepEqual(parsed[0].dependencyState, {
+    ready: true,
+    total: 0,
+    satisfied: 0,
+    unsatisfied: 0,
+  });
   assert.deepEqual(parsed[0].capabilities, {
     canArchive: true,
     canUnarchive: false,
@@ -194,6 +200,12 @@ test("list runs enumerates current-generation runs across buckets and filters ar
       canEditNotes: true,
       canAdd: true,
     },
+  });
+  assert.deepEqual(parsed[1].dependencyState, {
+    ready: true,
+    total: 0,
+    satisfied: 0,
+    unsatisfied: 0,
   });
 });
 
@@ -289,6 +301,97 @@ test("run set-name validates required args and empty names", async () => {
   assert.match(result.stderr, /run set-name: <name> cannot be empty/);
 });
 
+test("run add-dep, remove-dep, and clear-deps expose text/json results and persist manifest state", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "run-mgmt-agent", AGENT);
+  writeAssignment(dir, "run-mgmt-work", ASSIGNMENT);
+  const target = await initRun(dir);
+  const dependency = await initRun(dir);
+
+  const addedText = runCli(["run", "add-dep", target.runId, dependency.runId], { cwd: dir });
+  assert.match(
+    addedText,
+    new RegExp(`added dependency ${dependency.runId} to run ${target.runId}`),
+  );
+
+  let manifest = readManifest(target.workspaceDir);
+  assert.deepEqual(manifest.dependencyRunIds, [dependency.runId]);
+  assert.deepEqual(manifest.resetSeed.dependencyRunIds, [dependency.runId]);
+
+  const removedJson = runCli(
+    ["run", "remove-dep", target.runId, dependency.runId, "--output-format", "json"],
+    { cwd: dir },
+  );
+  assert.deepEqual(JSON.parse(removedJson), {
+    runId: target.runId,
+    dependencyRunIds: [],
+    changed: true,
+  });
+
+  manifest = readManifest(target.workspaceDir);
+  assert.deepEqual(manifest.dependencyRunIds, []);
+
+  const clearedJson = runCli(["run", "clear-deps", target.runId, "--output-format", "json"], {
+    cwd: dir,
+  });
+  assert.deepEqual(JSON.parse(clearedJson), {
+    runId: target.runId,
+    dependencyRunIds: [],
+    changed: false,
+  });
+
+  const clearedText = runCli(["run", "clear-deps", target.runId], { cwd: dir });
+  assert.match(clearedText, new RegExp(`run ${target.runId} already has no dependencies`));
+});
+
+test("run dependency commands validate args and graph failures", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "run-mgmt-agent", AGENT);
+  writeAssignment(dir, "run-mgmt-work", ASSIGNMENT);
+  const target = await initRun(dir);
+  const dependency = await initRun(dir);
+  const downstream = await initRun(dir);
+
+  let result = runCliExpectFail(["run", "add-dep", target.runId], { cwd: dir });
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /run add-dep requires <id-or-path> <dependency-run-id>/);
+
+  result = runCliExpectFail(["run", "clear-deps"], { cwd: dir });
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /run clear-deps requires <id-or-path>/);
+
+  result = runCliExpectFail(["run", "add-dep", target.runId, dependency.runId, "--clear"], {
+    cwd: dir,
+  });
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /run add-dep only supports <id-or-path>, <dependency-run-id>/);
+
+  result = runCliExpectFail(["run", "add-dep", target.runId, "missing-run"], { cwd: dir });
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /dependency run missing-run was not found/);
+
+  result = runCliExpectFail(["run", "add-dep", target.runId, target.runId], { cwd: dir });
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, new RegExp(`run ${target.runId} cannot depend on itself`));
+
+  runCli(["run", "add-dep", target.runId, dependency.runId], { cwd: dir });
+  result = runCliExpectFail(["run", "add-dep", target.runId, dependency.runId], { cwd: dir });
+  assert.equal(result.status, 3);
+  assert.match(
+    result.stderr,
+    new RegExp(`dependency ${dependency.runId} already exists on run ${target.runId}`),
+  );
+
+  runCli(["run", "add-dep", dependency.runId, downstream.runId], { cwd: dir });
+  result = runCliExpectFail(["run", "add-dep", downstream.runId, target.runId], { cwd: dir });
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, new RegExp(`adding dependency ${target.runId} would create a cycle`));
+
+  result = runCliExpectFail(["run", "remove-dep", target.runId, "missing-dep"], { cwd: dir });
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /run remove-dep: dependency missing-dep does not exist/);
+});
+
 test("run archive and run reset reject unrelated --clear flag leakage", async () => {
   const dir = tempDir();
   writeAgent(dir, "run-mgmt-agent", AGENT);
@@ -310,6 +413,25 @@ test("run archive and run reset reject unrelated --clear flag leakage", async ()
     /run reset only supports <id-or-path>, --connect, and --output-format/,
   );
   assert.match(result.stderr, /--clear/);
+});
+
+test("run --resume-run rejects initialized runs with unsatisfied dependencies", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "run-mgmt-agent", AGENT);
+  writeAssignment(dir, "run-mgmt-work", ASSIGNMENT);
+  const target = await initRun(dir);
+  const dependency = await initRun(dir);
+
+  runCli(["run", "add-dep", target.runId, dependency.runId], { cwd: dir });
+
+  const result = runCliExpectFail(["run", "--resume-run", target.runId], { cwd: dir });
+  assert.equal(result.status, 3);
+  assert.match(
+    result.stderr,
+    new RegExp(
+      `cannot execute run ${target.runId} because 1 dependency run\\(s\\) are not successful`,
+    ),
+  );
 });
 
 test("run archive rejects running runs", async () => {

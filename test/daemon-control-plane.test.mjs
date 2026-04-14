@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
 import WebSocket, { WebSocketServer } from "ws";
-import { DaemonClient } from "../apps/cli/dist/daemon/client.js";
+import { DaemonClient, DaemonRpcError } from "../apps/cli/dist/daemon/client.js";
 import { deriveHttpBaseUrl } from "../apps/cli/dist/daemon/config.js";
 import { serveDaemon } from "../apps/cli/dist/daemon/server.js";
 import { streamRunEvents } from "../apps/cli/dist/daemon/sse.js";
@@ -293,17 +293,55 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
           canAdd: true,
         },
       });
+      assert.deepEqual(runs.runs[0].dependencyState, {
+        ready: true,
+        total: 0,
+        satisfied: 0,
+        unsatisfied: 0,
+      });
 
       const detail = await client.call("runs.get", { target: init.runId });
       assert.equal(detail.run.runId, init.runId);
       assert.equal(detail.run.assignment.name, "daemon-work");
       assert.equal(detail.run.name, null);
+      assert.deepEqual(detail.run.dependencies, []);
+      assert.deepEqual(detail.run.dependents, []);
       assert.deepEqual(detail.run.execution, {
         hostMode: "embedded",
         controller: { kind: "embedded" },
       });
       assert.equal(detail.run.capabilities.canAbort, false);
       assert.equal(detail.run.capabilities.abortReason, "not_active_in_daemon");
+
+      const dependency = await initRun(dir);
+      const addedDependency = await client.call("runs.addDependency", {
+        target: init.runId,
+        dependencyRunId: dependency.runId,
+      });
+      assert.deepEqual(addedDependency.result, {
+        runId: init.runId,
+        dependencyRunIds: [dependency.runId],
+        changed: true,
+      });
+
+      const removedDependency = await client.call("runs.removeDependency", {
+        target: init.runId,
+        dependencyRunId: dependency.runId,
+      });
+      assert.deepEqual(removedDependency.result, {
+        runId: init.runId,
+        dependencyRunIds: [],
+        changed: true,
+      });
+
+      const clearedDependencies = await client.call("runs.clearDependencies", {
+        target: init.runId,
+      });
+      assert.deepEqual(clearedDependencies.result, {
+        runId: init.runId,
+        dependencyRunIds: [],
+        changed: false,
+      });
 
       const renamed = await client.call("runs.setName", {
         target: init.runId,
@@ -375,6 +413,12 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
       assert.equal(runs.body.runs[0].runId, init.runId);
       assert.equal(runs.body.runs[0].status, "initialized");
       assert.equal(runs.body.runs[0].effectiveStatus, "initialized");
+      assert.deepEqual(runs.body.runs[0].dependencyState, {
+        ready: true,
+        total: 0,
+        satisfied: 0,
+        unsatisfied: 0,
+      });
       assert.deepEqual(runs.body.runs[0].execution, {
         hostMode: "embedded",
         controller: { kind: "embedded" },
@@ -388,12 +432,55 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
       assert.equal(detail.body.run.name, null);
       assert.equal(detail.body.run.status, "initialized");
       assert.equal(detail.body.run.effectiveStatus, "initialized");
+      assert.deepEqual(detail.body.run.dependencies, []);
+      assert.deepEqual(detail.body.run.dependents, []);
       assert.deepEqual(detail.body.run.execution, {
         hostMode: "embedded",
         controller: { kind: "embedded" },
       });
       assert.equal(detail.body.run.capabilities.canAbort, false);
       assert.equal(detail.body.run.capabilities.abortReason, "not_active_in_daemon");
+
+      const dependency = await initRun(dir);
+      const addedDependency = await httpJson(httpBaseUrl, `/api/runs/${init.runId}/dependencies`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ dependencyRunId: dependency.runId }),
+      });
+      assert.equal(addedDependency.status, 200);
+      assert.deepEqual(addedDependency.body.result, {
+        runId: init.runId,
+        dependencyRunIds: [dependency.runId],
+        changed: true,
+      });
+
+      const removedDependency = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${init.runId}/dependencies/${dependency.runId}`,
+        {
+          method: "DELETE",
+        },
+      );
+      assert.equal(removedDependency.status, 200);
+      assert.deepEqual(removedDependency.body.result, {
+        runId: init.runId,
+        dependencyRunIds: [],
+        changed: true,
+      });
+
+      const clearedDependencies = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${init.runId}/dependencies/clear`,
+        {
+          method: "POST",
+        },
+      );
+      assert.equal(clearedDependencies.status, 200);
+      assert.deepEqual(clearedDependencies.body.result, {
+        runId: init.runId,
+        dependencyRunIds: [],
+        changed: false,
+      });
 
       const renamed = await httpJson(httpBaseUrl, `/api/runs/${init.runId}/name`, {
         method: "POST",
@@ -471,6 +558,18 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
       });
       assert.equal(invalidStatus.status, 400);
       assert.equal(invalidStatus.body.error.code, "INVALID_REQUEST");
+
+      const invalidDependencyRequest = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${init.runId}/dependencies`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({}),
+        },
+      );
+      assert.equal(invalidDependencyRequest.status, 400);
+      assert.equal(invalidDependencyRequest.body.error.code, "INVALID_REQUEST");
 
       const malformed = await fetch(new URL(`/api/runs/${init.runId}/tasks/t1`, httpBaseUrl), {
         method: "PATCH",
@@ -606,6 +705,43 @@ test("daemon HTTP rejects encoded traversal route params without leaking paths",
     assert.equal(response.body.error.code, "NOT_FOUND");
     assert.equal(response.body.error.message, "resource not found");
   } finally {
+    await server.close();
+  }
+});
+
+test("daemon dependency mutation surfaces reject path-like dependency ids over RPC and HTTP", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const init = await initRun(dir);
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  const server = await serveDaemon(listenUrl);
+  const client = await DaemonClient.connect(listenUrl);
+
+  try {
+    await assert.rejects(
+      () =>
+        client.call("runs.addDependency", {
+          target: init.runId,
+          dependencyRunId: "../other-run",
+        }),
+      (err) =>
+        err instanceof DaemonRpcError &&
+        err.message === "dependencyRunId must be a run id, not a path",
+    );
+
+    const response = await httpJson(httpBaseUrl, `/api/runs/${init.runId}/dependencies`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ dependencyRunId: "../other-run" }),
+    });
+    assert.equal(response.status, 400);
+    assert.equal(response.body.error.code, "INVALID_REQUEST");
+    assert.equal(response.body.error.message, "dependencyRunId must be a run id, not a path");
+  } finally {
+    await client.close();
     await server.close();
   }
 });

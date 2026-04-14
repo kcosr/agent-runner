@@ -34,6 +34,12 @@ describe("api client", () => {
                   endedAt: null,
                   tasksCompleted: 1,
                   tasksTotal: 4,
+                  dependencyState: {
+                    ready: true,
+                    total: 0,
+                    satisfied: 0,
+                    unsatisfied: 0,
+                  },
                   execution: {
                     hostMode: "embedded",
                     controller: { kind: "embedded" },
@@ -91,6 +97,12 @@ describe("api client", () => {
                   endedAt: null,
                   tasksCompleted: 1,
                   tasksTotal: 4,
+                  dependencyState: {
+                    ready: false,
+                    total: 2,
+                    satisfied: 1,
+                    unsatisfied: 1,
+                  },
                   execution: {
                     hostMode: "embedded",
                     controller: { kind: "embedded" },
@@ -122,6 +134,12 @@ describe("api client", () => {
         runId: "run-1",
         status: "initialized",
         effectiveStatus: "running",
+        dependencyState: {
+          ready: false,
+          total: 2,
+          satisfied: 1,
+          unsatisfied: 1,
+        },
       }),
     ]);
   });
@@ -168,6 +186,63 @@ describe("api client", () => {
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ name: "Dashboard polish" }),
+      }),
+    );
+  });
+
+  it("sends dependency mutation requests and parses the result payload", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            result: {
+              runId: "run-1",
+              dependencyRunIds: ["run-2"],
+              changed: true,
+            },
+          }),
+          { status: 200 },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createApiClient(config);
+    await expect(api.addDependency("run-1", "run-2")).resolves.toEqual({
+      runId: "run-1",
+      dependencyRunIds: ["run-2"],
+      changed: true,
+    });
+    await expect(api.removeDependency("run-1", "run-2")).resolves.toEqual({
+      runId: "run-1",
+      dependencyRunIds: ["run-2"],
+      changed: true,
+    });
+    await expect(api.clearDependencies("run-1")).resolves.toEqual({
+      runId: "run-1",
+      dependencyRunIds: ["run-2"],
+      changed: true,
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/runs/run-1/dependencies",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ dependencyRunId: "run-2" }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/runs/run-1/dependencies/run-2",
+      expect.objectContaining({
+        method: "DELETE",
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/api/runs/run-1/dependencies/clear",
+      expect.objectContaining({
+        method: "POST",
       }),
     );
   });

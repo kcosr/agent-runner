@@ -1,6 +1,7 @@
 import type { DefinitionEntry } from "../config/loader.js";
 import type {
   RunArchiveResult,
+  RunDependenciesResult,
   RunDetail,
   RunNameResult,
   RunSummary,
@@ -8,13 +9,16 @@ import type {
 } from "../contracts/runs.js";
 import { toRunDetail } from "../contracts/runs.js";
 import {
+  addRunDependency,
   addTask,
   appendTaskNotes,
   archiveRun,
+  clearRunDependencies,
   listDefinitions,
   listRuns,
   listTasks,
   readStatus,
+  removeRunDependency,
   resetRun,
   setRunName,
   setTask,
@@ -133,6 +137,18 @@ export function reset(target: string): RunDetail {
 
 export function renameRun(target: string, input: { name: string | null }): Promise<RunNameResult> {
   return setRunName(target, input);
+}
+
+export function addDependency(target: string, dependencyRunId: string): RunDependenciesResult {
+  return addRunDependency(target, dependencyRunId);
+}
+
+export function removeDependency(target: string, dependencyRunId: string): RunDependenciesResult {
+  return removeRunDependency(target, dependencyRunId);
+}
+
+export function clearDependencies(target: string): RunDependenciesResult {
+  return clearRunDependencies(target);
 }
 
 export function updateTask(

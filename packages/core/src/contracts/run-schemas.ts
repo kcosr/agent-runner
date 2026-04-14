@@ -4,6 +4,9 @@ import type {
   RunAbortReason,
   RunArchiveResult,
   RunCapabilities,
+  RunDependenciesResult,
+  RunDependencyDetail,
+  RunDependencyState,
   RunDetail,
   RunNameResult,
   RunStatus,
@@ -71,6 +74,23 @@ export const runCapabilitiesSchema: z.ZodType<RunCapabilities> = z.object({
   taskMutation: runTaskMutationCapabilitiesSchema,
 });
 
+export const runDependencyStateSchema: z.ZodType<RunDependencyState> = z.object({
+  ready: z.boolean(),
+  total: z.number(),
+  satisfied: z.number(),
+  unsatisfied: z.number(),
+});
+
+export const runDependencyDetailSchema: z.ZodType<RunDependencyDetail> = z.object({
+  runId: z.string(),
+  name: z.string().nullable(),
+  status: runStatusSchema.nullable(),
+  effectiveStatus: runStatusSchema.nullable(),
+  archivedAt: z.string().nullable(),
+  satisfied: z.boolean(),
+  missing: z.boolean(),
+});
+
 export const runSummarySchema: z.ZodType<RunSummary> = z.object({
   runId: z.string(),
   repo: z.string(),
@@ -87,6 +107,7 @@ export const runSummarySchema: z.ZodType<RunSummary> = z.object({
   endedAt: z.string().nullable(),
   tasksCompleted: z.number(),
   tasksTotal: z.number(),
+  dependencyState: runDependencyStateSchema,
   execution: runExecutionSchema,
   capabilities: runCapabilitiesSchema,
 });
@@ -128,6 +149,8 @@ export const runDetailSchema: z.ZodType<RunDetail> = z.object({
   sessionCount: z.number(),
   tasksCompleted: z.number(),
   tasksTotal: z.number(),
+  dependencies: z.array(runDependencyDetailSchema),
+  dependents: z.array(runDependencyDetailSchema),
   tasks: z.array(runTaskSummarySchema),
   message: z.string().nullable(),
   callerInstructions: z.string().nullable(),
@@ -148,5 +171,11 @@ export const runArchiveResultSchema: z.ZodType<RunArchiveResult> = z.object({
 export const runNameResultSchema: z.ZodType<RunNameResult> = z.object({
   runId: z.string(),
   name: z.string().nullable(),
+  changed: z.boolean(),
+});
+
+export const runDependenciesResultSchema: z.ZodType<RunDependenciesResult> = z.object({
+  runId: z.string(),
+  dependencyRunIds: z.array(z.string()),
   changed: z.boolean(),
 });

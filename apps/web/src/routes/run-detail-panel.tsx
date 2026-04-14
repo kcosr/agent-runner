@@ -1,5 +1,5 @@
 import type { UseQueryResult } from "@tanstack/react-query";
-import type { RunDetail } from "@task-runner/core/contracts/runs.js";
+import type { RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
 import type { CSSProperties } from "react";
 import type { RunActionPending } from "./use-runs-dashboard-state.js";
 
@@ -7,26 +7,34 @@ import { RunDetailDrawer } from "../components/run-detail-drawer.js";
 import { isNotFoundError } from "../lib/api-client.js";
 
 export function RunDetailPanel({
+  onAddDependency,
   actionError,
   actionPending,
   drawerWidth,
+  runs,
   onAbort,
   onArchive,
+  onClearDependencies,
   onClose,
   onCopy,
+  onRemoveDependency,
   onRename,
   onResume,
   onUnarchive,
   selectedRunId,
   selectedRunQuery,
 }: {
+  onAddDependency: (runId: string, dependencyRunId: string) => Promise<void>;
   actionError?: string;
   actionPending?: RunActionPending;
   drawerWidth: number;
+  runs: RunSummary[];
   onAbort: (runId: string) => void;
   onArchive: (runId: string) => void;
+  onClearDependencies: (runId: string) => Promise<void>;
   onClose: () => void;
   onCopy: (value: string, label: string) => Promise<void>;
+  onRemoveDependency: (runId: string, dependencyRunId: string) => Promise<void>;
   onRename: (runId: string, name: string | null) => Promise<void>;
   onResume: (runId: string) => void;
   onUnarchive: (runId: string) => void;
@@ -72,13 +80,19 @@ export function RunDetailPanel({
   const selectedRun = selectedRunQuery.data;
   return (
     <RunDetailDrawer
+      dependencyCandidateRuns={runs}
+      onAddDependency={(dependencyRunId) => onAddDependency(selectedRun.runId, dependencyRunId)}
       actionError={actionError}
       actionPending={actionPending}
       key={selectedRun.runId}
       onAbort={() => onAbort(selectedRun.runId)}
       onArchive={() => onArchive(selectedRun.runId)}
+      onClearDependencies={() => onClearDependencies(selectedRun.runId)}
       onClose={onClose}
       onCopy={(value, label) => void onCopy(value, label)}
+      onRemoveDependency={(dependencyRunId) =>
+        onRemoveDependency(selectedRun.runId, dependencyRunId)
+      }
       onRename={(name) => onRename(selectedRun.runId, name)}
       onResume={() => onResume(selectedRun.runId)}
       onUnarchive={() => onUnarchive(selectedRun.runId)}

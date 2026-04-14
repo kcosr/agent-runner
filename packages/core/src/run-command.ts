@@ -8,10 +8,12 @@ import {
   loadAssignmentConfig,
 } from "./config/loader.js";
 import { loadedAgentFromManifest, synthesizeAdHocAgent } from "./core/config/loaded.js";
+import { buildRunDependencyGraph, countUnsatisfiedDependencies } from "./core/run/dependencies.js";
 import {
   ResumeError,
   type RunExecution,
   type RunManifest,
+  listRunManifests,
   resolveResumeTarget,
 } from "./core/run/manifest.js";
 import { hasIncompleteTasks, missingResumeInputMessage } from "./core/run/resume-policy.js";
@@ -91,6 +93,13 @@ function validateResumeOverrides(
     if (opts.overrides.name !== undefined) forbidden.push("--name");
     if (forbidden.length > 0) {
       return `resuming an initialized run does not accept ${forbidden.join(", ")} — init froze these at creation. If you need different values, create a fresh run.`;
+    }
+    const unsatisfied = countUnsatisfiedDependencies(
+      manifest,
+      buildRunDependencyGraph(listRunManifests().map((entry) => entry.manifest)),
+    );
+    if (unsatisfied > 0) {
+      return `cannot execute run ${manifest.runId} because ${unsatisfied} dependency run(s) are not successful`;
     }
     return null;
   }

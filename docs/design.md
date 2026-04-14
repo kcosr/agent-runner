@@ -82,6 +82,30 @@ task-runner serve [--listen <ws-url>]
 13. Exit with status code
 ```
 
+## Run dependency model
+
+Runs can declare prerequisite runs by storing `dependencyRunIds` on the
+canonical manifest. The model is intentionally hot-cut and explicit:
+dependency edges are first-class persisted ids, not inferred from task
+notes, names, or assignment paths.
+
+- Dependencies are mutable only while the target run is still
+  `initialized`.
+- `run add-dep` rejects missing runs, duplicate edges, self-edges, and
+  any edge that would introduce a cycle in the run graph.
+- `run reset` restores the frozen dependency list from the manifest's
+  reset seed; reset does not re-read source definitions.
+- Resume is blocked until every dependency run reaches canonical
+  `status=success`. Missing dependencies remain unsatisfied and keep
+  the target blocked from execution.
+- Read models expose both the direct dependencies of a run and its
+  reverse dependents, plus a summary count of satisfied vs unsatisfied
+  dependencies for list views.
+
+Dependency mutation is serialized through a shared lock so cycle checks
+and manifest writes see one consistent graph across concurrent CLI or
+daemon callers.
+
 ## Repo layout
 
 ```

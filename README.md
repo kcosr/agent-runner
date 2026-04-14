@@ -40,6 +40,7 @@ and future local clients, not to become a remote multi-user service.
   - [`task-runner run`](#task-runner-run)
   - [`task-runner init`](#task-runner-init)
   - [`task-runner serve`](#task-runner-serve)
+  - [`task-runner run add-dep / remove-dep / clear-deps`](#task-runner-run-add-dep--remove-dep--clear-deps)
   - [`task-runner run set-name / reset / archive / unarchive`](#task-runner-run-set-name--reset--archive--unarchive)
   - [`task-runner status`](#task-runner-status)
   - [`task-runner task` commands](#task-runner-task-commands)
@@ -58,6 +59,8 @@ and future local clients, not to become a remote multi-user service.
 - [Bundled examples](#bundled-examples)
 - [Development](#development)
 - [Project layout](#project-layout)
+- [`task-runner run add-dep / remove-dep / clear-deps`](#task-runner-run-add-dep--remove-dep--clear-deps)
+- [`task-runner run set-name / reset / archive / unarchive`](#task-runner-run-set-name--reset--archive--unarchive)
 
 ---
 
@@ -133,6 +136,11 @@ chat output.
   archive` / `run unarchive` toggle a run-level archive marker, and
   archived runs are hidden from default listings and rejected by
   `--resume-run` until unarchived.
+- **Run dependencies**: initialized runs can declare prerequisite run
+  ids with `run add-dep`, `run remove-dep`, and `run clear-deps`.
+  Resume rejects runs with unsatisfied dependencies, and CLI/daemon/web
+  run projections expose dependency state plus direct dependency and
+  dependent lists.
 - **Sidecar task mutation**: `task-runner task set` / `task add` let
   an external agent or script drive a run's task list through the CLI
   without task-runner ever invoking a backend. Pair with the
@@ -623,6 +631,51 @@ Web dashboard notes:
 - Development uses the Vite dev server in `apps/web` with a proxy for
   `/api/*`, `/api/events/*`, and `/app-config.json` back to the local
   daemon host.
+
+### `task-runner run add-dep / remove-dep / clear-deps`
+
+Manage prerequisite runs for an initialized run without changing any
+other run metadata.
+
+```bash
+task-runner run add-dep <run-id> <dependency-run-id>
+task-runner run remove-dep <run-id> <dependency-run-id>
+task-runner run clear-deps <run-id>
+
+task-runner run add-dep <run-id> <dependency-run-id> --output-format json
+```
+
+Dependency semantics:
+
+- Allowed only while the target run is still `initialized`.
+- `add-dep` rejects missing runs, self-dependencies, duplicate edges,
+  and any edge that would create a dependency cycle.
+- `remove-dep` rejects unknown dependency ids on the target run.
+- `clear-deps` is idempotent and succeeds with `changed: false` when
+  the run already has no dependencies.
+- Dependency ids are persisted into both `manifest.dependencyRunIds`
+  and the frozen reset seed, so `run reset` restores the same
+  prerequisites.
+- `task-runner run --resume-run <id>` rejects initialized runs until
+  every dependency run reaches canonical `status=success`.
+- `status`, `list runs`, daemon RPC/HTTP, and the web dashboard expose
+  dependency state plus direct dependency/dependent lists.
+
+Success output:
+
+```text
+task-runner: added dependency def456 to run abc123
+task-runner: removed dependency def456 from run abc123
+task-runner: cleared dependencies for run abc123
+```
+
+```json
+{
+  "runId": "abc123",
+  "dependencyRunIds": ["def456"],
+  "changed": true
+}
+```
 
 ### `task-runner run set-name / reset / archive / unarchive`
 

@@ -1,12 +1,14 @@
 import type { AppRuntimeConfig } from "@task-runner/core/contracts/app-config.js";
 import {
   runArchiveResultSchema,
+  runDependenciesResultSchema,
   runDetailSchema,
   runNameResultSchema,
   runSummarySchema,
 } from "@task-runner/core/contracts/run-schemas.js";
 import type {
   RunArchiveResult,
+  RunDependenciesResult,
   RunDetail,
   RunNameResult,
   RunSummary,
@@ -145,6 +147,22 @@ async function readNameResult(response: Response, label: string): Promise<RunNam
   );
 }
 
+async function readDependenciesResult(
+  response: Response,
+  label: string,
+): Promise<RunDependenciesResult> {
+  if (!response.ok) {
+    return await readError(response);
+  }
+  return parseField(
+    await parseResponseJson(response, label),
+    response.status,
+    "result",
+    runDependenciesResultSchema,
+    label,
+  );
+}
+
 async function readRunIdResult(response: Response, label: string): Promise<string> {
   if (!response.ok) {
     return await readError(response);
@@ -244,6 +262,43 @@ export function createApiClient(config: AppRuntimeConfig) {
         },
       );
       return await readNameResult(response, "Rename run");
+    },
+    async addDependency(runId: string, dependencyRunId: string): Promise<RunDependenciesResult> {
+      const response = await fetch(
+        joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/dependencies`),
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json",
+          },
+          body: JSON.stringify({ dependencyRunId }),
+        },
+      );
+      return await readDependenciesResult(response, "Add dependency");
+    },
+    async removeDependency(runId: string, dependencyRunId: string): Promise<RunDependenciesResult> {
+      const response = await fetch(
+        joinPath(
+          config.apiBasePath,
+          `/runs/${encodeURIComponent(runId)}/dependencies/${encodeURIComponent(dependencyRunId)}`,
+        ),
+        {
+          method: "DELETE",
+          headers: { accept: "application/json" },
+        },
+      );
+      return await readDependenciesResult(response, "Remove dependency");
+    },
+    async clearDependencies(runId: string): Promise<RunDependenciesResult> {
+      const response = await fetch(
+        joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/dependencies/clear`),
+        {
+          method: "POST",
+          headers: { accept: "application/json" },
+        },
+      );
+      return await readDependenciesResult(response, "Clear dependencies");
     },
   };
 }

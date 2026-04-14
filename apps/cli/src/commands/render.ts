@@ -3,6 +3,7 @@ import type {
   DefinitionDetailsResult,
   DefinitionListResult,
   RunArchiveResult,
+  RunDependenciesResult,
   RunListResult,
   RunResetResult,
   StatusCommandResult,
@@ -49,6 +50,9 @@ export function renderRunStatus(detail: RunDetail): string {
       `Tasks completed: ${detail.tasksCompleted}/${detail.tasksTotal}    Attempts: ${detail.attempts}/${detail.maxAttempts}    Sessions: ${detail.sessionCount}`,
     );
   }
+  lines.push(
+    `Dependencies: ${detail.dependencies.length === 0 ? "ready (0 total)" : `${detail.dependencies.filter((dependency) => dependency.satisfied).length}/${detail.dependencies.length} satisfied`}`,
+  );
 
   if (detail.tasks.length > 0) {
     lines.push("");
@@ -61,6 +65,27 @@ export function renderRunStatus(detail: RunDetail): string {
           lines.push(`      ${noteLine}`);
         }
       }
+    }
+  }
+
+  if (detail.dependencies.length > 0) {
+    lines.push("");
+    lines.push("Depends on:");
+    for (const dependency of detail.dependencies) {
+      const status = dependency.missing
+        ? "missing"
+        : `${dependency.effectiveStatus ?? dependency.status}${dependency.satisfied ? " satisfied" : " not-ready"}`;
+      lines.push(`  - ${dependency.runId} [${status}] ${dependency.name ?? "Unnamed"}`);
+    }
+  }
+
+  if (detail.dependents.length > 0) {
+    lines.push("");
+    lines.push("Required by:");
+    for (const dependent of detail.dependents) {
+      lines.push(
+        `  - ${dependent.runId} [${dependent.effectiveStatus ?? dependent.status}] ${dependent.name ?? "Unnamed"}`,
+      );
     }
   }
 
@@ -213,6 +238,27 @@ export function renderRunSetName(result: {
   return result.changed
     ? `task-runner: set name for run ${result.runId} to "${result.name}"\n`
     : `task-runner: run ${result.runId} already has name "${result.name}"\n`;
+}
+
+export function renderRunAddDependency(
+  result: RunDependenciesResult,
+  dependencyRunId: string,
+): string {
+  return `task-runner: added dependency ${dependencyRunId} to run ${result.runId}\n`;
+}
+
+export function renderRunRemoveDependency(
+  result: RunDependenciesResult,
+  dependencyRunId: string,
+): string {
+  return `task-runner: removed dependency ${dependencyRunId} from run ${result.runId}\n`;
+}
+
+export function renderRunClearDependencies(result: RunDependenciesResult): string {
+  if (!result.changed) {
+    return `task-runner: run ${result.runId} already has no dependencies\n`;
+  }
+  return `task-runner: cleared dependencies for run ${result.runId}\n`;
 }
 
 export function renderStatus(result: StatusCommandResult): string {

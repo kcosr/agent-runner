@@ -14,6 +14,7 @@ import {
   parseBooleanQueryValue,
   parseRunSetNameParams,
   parseStartRunParams,
+  requiredRunIdString,
   requiredString,
 } from "./request-parsing.js";
 import { streamRunEvents } from "./sse.js";
@@ -131,6 +132,42 @@ const routes: RouteDefinition[] = [
           name: body.name,
         }),
       );
+    },
+  },
+  {
+    method: "POST",
+    pattern: ["api", "runs", ":runId", "dependencies"],
+    handler: async (req, res, ctx, params) => {
+      const body = asRecord(await readJsonBody(req), "request body");
+      sendJson(
+        res,
+        200,
+        ctx.operations.addDependency(
+          routeParam(params, "runId"),
+          requiredRunIdString(body.dependencyRunId, "dependencyRunId"),
+        ),
+      );
+    },
+  },
+  {
+    method: "DELETE",
+    pattern: ["api", "runs", ":runId", "dependencies", ":dependencyRunId"],
+    handler: (_req, res, ctx, params) => {
+      sendJson(
+        res,
+        200,
+        ctx.operations.removeDependency(
+          routeParam(params, "runId"),
+          routeParam(params, "dependencyRunId"),
+        ),
+      );
+    },
+  },
+  {
+    method: "POST",
+    pattern: ["api", "runs", ":runId", "dependencies", "clear"],
+    handler: (_req, res, ctx, params) => {
+      sendJson(res, 200, ctx.operations.clearDependencies(routeParam(params, "runId")));
     },
   },
   {

@@ -1,9 +1,10 @@
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { type MergeOptions, type MergeResult, mergeUpdates } from "../../assignment/merge.js";
 import type { TaskState } from "../../assignment/model.js";
 import { parseAssignment } from "../../assignment/parser.js";
 import { renderAssignment } from "../../assignment/writer.js";
+import { resolveRunsRoot } from "../../config/runtime-paths.js";
 import { writeTextFileAtomic } from "../../util/write-file-atomic.js";
 import { normalizeTaskMode } from "../config/schema.js";
 import {
@@ -32,9 +33,9 @@ function taskLockPath(workspaceDir: string): string {
   return `${workspaceDir}/${LOCK_DIR_NAME}`;
 }
 
-export function withTaskStateLock<T>(workspaceDir: string, fn: () => T): T {
-  const lockPath = taskLockPath(workspaceDir);
+function withFilesystemLock<T>(lockPath: string, fn: () => T): T {
   const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  mkdirSync(dirname(lockPath), { recursive: true });
 
   while (true) {
     try {
@@ -57,6 +58,20 @@ export function withTaskStateLock<T>(workspaceDir: string, fn: () => T): T {
   } finally {
     rmSync(lockPath, { recursive: true, force: true });
   }
+}
+
+export function withTaskStateLock<T>(workspaceDir: string, fn: () => T): T {
+  return withFilesystemLock(taskLockPath(workspaceDir), fn);
+}
+
+export function withGlobalStateLock<T>(
+  lockName: string,
+  fn: () => T,
+  env: NodeJS.ProcessEnv = process.env,
+): T {
+  const runsRoot = resolveRunsRoot(env);
+  mkdirSync(runsRoot, { recursive: true });
+  return withFilesystemLock(join(runsRoot, `.${lockName}.lock`), fn);
 }
 
 function readManifestSnapshot(workspaceDir: string): RunManifest {

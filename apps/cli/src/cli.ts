@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 import {
+  addDependency,
   appendNotes,
   archive,
+  clearDependencies,
   createTask,
   getDefinition,
   getDefinitionList,
@@ -10,6 +12,7 @@ import {
   getTask,
   getTaskList,
   initRun,
+  removeDependency,
   renameRun,
   reset,
   resumeRun,
@@ -47,8 +50,11 @@ import { renderRunEvent } from "./cli/render-run.js";
 import {
   renderDefinitionDetails,
   renderDefinitionList,
+  renderRunAddDependency,
   renderRunArchive,
+  renderRunClearDependencies,
   renderRunList,
+  renderRunRemoveDependency,
   renderRunSetName,
   renderRunUnarchive,
   renderStatus,
@@ -70,6 +76,10 @@ Commands:
   run archive <id|path>   Mark a non-running run as archived.
   run unarchive <id|path> Clear a run's archive marker.
   run set-name <id|path>  Update or clear a run's persisted display name.
+  run add-dep <id> <dep>  Add a dependency to an initialized run.
+  run remove-dep <id> <dep>
+                          Remove a dependency from an initialized run.
+  run clear-deps <id>     Remove all dependencies from an initialized run.
   init                    Prepare a run without invoking the backend.
   serve                   Start the local daemon server.
   status <id|path>        Read a run and print its current status.
@@ -685,6 +695,85 @@ async function runSetNameCommand(parsed: ParsedArgs, connectUrl?: string): Promi
   }
 }
 
+async function runDependencyCommand(
+  parsed: ParsedArgs,
+  connectUrl: string | undefined,
+  verb: "add-dep" | "remove-dep" | "clear-deps",
+): Promise<never> {
+  const [runArg, dependencyArg, extra] = parsed.positionals;
+  const target = normalizeTarget(runArg);
+  if (!target) {
+    process.stderr.write(
+      `task-runner: run ${verb} requires <id-or-path>${verb === "clear-deps" ? "" : " <dependency-run-id>"}\n`,
+    );
+    process.exit(3);
+  }
+  if (verb === "clear-deps") {
+    if (dependencyArg !== undefined) {
+      process.stderr.write(
+        `task-runner: run clear-deps takes exactly one positional (<id-or-path>); got extra "${dependencyArg}"\n`,
+      );
+      process.exit(3);
+    }
+  } else if (!dependencyArg) {
+    process.stderr.write(`task-runner: run ${verb} requires <id-or-path> <dependency-run-id>\n`);
+    process.exit(3);
+  } else if (extra !== undefined) {
+    process.stderr.write(
+      `task-runner: run ${verb} takes exactly two positionals (<id-or-path> <dependency-run-id>); got extra "${extra}"\n`,
+    );
+    process.exit(3);
+  }
+
+  const unsupported = unsupportedFlagsForGroupedCommand(parsed);
+  if (unsupported.length > 0) {
+    process.stderr.write(
+      `task-runner: run ${verb} only supports ${verb === "clear-deps" ? "<id-or-path>" : "<id-or-path>, <dependency-run-id>"}, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+    );
+    process.exit(3);
+  }
+
+  try {
+    const method =
+      verb === "add-dep"
+        ? "runs.addDependency"
+        : verb === "remove-dep"
+          ? "runs.removeDependency"
+          : "runs.clearDependencies";
+    const params =
+      verb === "clear-deps" ? { target } : { target, dependencyRunId: dependencyArg as string };
+    const result =
+      connectUrl === undefined
+        ? method === "runs.addDependency"
+          ? addDependency(target, dependencyArg as string)
+          : method === "runs.removeDependency"
+            ? removeDependency(target, dependencyArg as string)
+            : clearDependencies(target)
+        : await withDaemonClient(connectUrl, (client) =>
+            client
+              .call<{
+                result:
+                  | ReturnType<typeof addDependency>
+                  | ReturnType<typeof removeDependency>
+                  | ReturnType<typeof clearDependencies>;
+              }>(method, params)
+              .then((response) => response.result),
+          );
+    if (parsed.outputFormat === "json") {
+      writeJson(result);
+    } else if (verb === "add-dep") {
+      process.stdout.write(renderRunAddDependency(result, dependencyArg as string));
+    } else if (verb === "remove-dep") {
+      process.stdout.write(renderRunRemoveDependency(result, dependencyArg as string));
+    } else {
+      process.stdout.write(renderRunClearDependencies(result));
+    }
+    process.exit(0);
+  } catch (err) {
+    exitCommandFailure(err, connectUrl);
+  }
+}
+
 async function runTaskList(parsed: ParsedArgs, connectUrl?: string): Promise<never> {
   const [runArg, extra] = parsed.positionals;
   const target = normalizeTarget(runArg);
@@ -1167,6 +1256,15 @@ async function main(): Promise<void> {
     }
     if (parsed.subcommand === "set-name") {
       await runSetNameCommand(parsed, connectUrl);
+    }
+    if (parsed.subcommand === "add-dep") {
+      await runDependencyCommand(parsed, connectUrl, "add-dep");
+    }
+    if (parsed.subcommand === "remove-dep") {
+      await runDependencyCommand(parsed, connectUrl, "remove-dep");
+    }
+    if (parsed.subcommand === "clear-deps") {
+      await runDependencyCommand(parsed, connectUrl, "clear-deps");
     }
   }
 

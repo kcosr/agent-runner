@@ -73,6 +73,12 @@ function makeRun(
     endedAt: null,
     tasksCompleted: 1,
     tasksTotal: 4,
+    dependencyState: {
+      ready: true,
+      total: 0,
+      satisfied: 0,
+      unsatisfied: 0,
+    },
     capabilities: {
       canArchive: false,
       canUnarchive: false,
@@ -159,6 +165,8 @@ function makeDetail(
     sessionCount: 1,
     tasksCompleted: 1,
     tasksTotal: 4,
+    dependencies: [],
+    dependents: [],
     tasks: [
       {
         id: "orient",
@@ -239,6 +247,45 @@ function installFetchMock(
     ) => Promise<Response | undefined> | Response | undefined;
   },
 ) {
+  function dependencyDetailFor(runId: string): RunDetail["dependencies"][number] {
+    const detail = state.details[runId];
+    if (!detail) {
+      return {
+        runId,
+        name: null,
+        status: null,
+        effectiveStatus: null,
+        archivedAt: null,
+        satisfied: false,
+        missing: true,
+      };
+    }
+    return {
+      runId: detail.runId,
+      name: detail.name,
+      status: detail.status,
+      effectiveStatus: detail.effectiveStatus,
+      archivedAt: detail.archivedAt,
+      satisfied: detail.status === "success",
+      missing: false,
+    };
+  }
+
+  function syncDependencyState(runId: string) {
+    const detail = state.details[runId];
+    if (!detail) {
+      return;
+    }
+    const satisfied = detail.dependencies.filter((dependency) => dependency.satisfied).length;
+    const dependencyState = {
+      ready: detail.dependencies.length === satisfied,
+      total: detail.dependencies.length,
+      satisfied,
+      unsatisfied: detail.dependencies.length - satisfied,
+    };
+    state.runs = state.runs.map((run) => (run.runId === runId ? { ...run, dependencyState } : run));
+  }
+
   const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
     const override = await options?.handleRequest?.(url, init);
@@ -318,6 +365,102 @@ function installFetchMock(
       state.details[runId] = { ...detail, name };
       state.runs = state.runs.map((run) => (run.runId === runId ? { ...run, name } : run));
       return new Response(JSON.stringify({ result: { runId, name, changed } }), { status: 200 });
+    }
+
+    const addDependencyMatch = /\/api\/runs\/([^/]+)\/dependencies$/.exec(url);
+    if (addDependencyMatch && init?.method === "POST") {
+      const runId = decodeURIComponent(addDependencyMatch[1] ?? "");
+      const body =
+        typeof init.body === "string" && init.body.length > 0
+          ? (JSON.parse(init.body) as { dependencyRunId?: string })
+          : {};
+      const detail = state.details[runId];
+      if (!detail || !body.dependencyRunId) {
+        return new Response(JSON.stringify({ error: { message: "invalid", code: "invalid" } }), {
+          status: 400,
+        });
+      }
+      const dependencyRunId = body.dependencyRunId;
+      detail.dependencies = [...detail.dependencies, dependencyDetailFor(dependencyRunId)];
+      const dependencyDetail = state.details[dependencyRunId];
+      if (dependencyDetail) {
+        dependencyDetail.dependents = [...dependencyDetail.dependents, dependencyDetailFor(runId)];
+      }
+      syncDependencyState(runId);
+      return new Response(
+        JSON.stringify({
+          result: {
+            runId,
+            dependencyRunIds: detail.dependencies.map((dependency) => dependency.runId),
+            changed: true,
+          },
+        }),
+        { status: 200 },
+      );
+    }
+
+    const removeDependencyMatch = /\/api\/runs\/([^/]+)\/dependencies\/([^/]+)$/.exec(url);
+    if (removeDependencyMatch && init?.method === "DELETE") {
+      const runId = decodeURIComponent(removeDependencyMatch[1] ?? "");
+      const dependencyRunId = decodeURIComponent(removeDependencyMatch[2] ?? "");
+      const detail = state.details[runId];
+      if (!detail) {
+        return new Response(JSON.stringify({ error: { message: "missing", code: "not_found" } }), {
+          status: 404,
+        });
+      }
+      detail.dependencies = detail.dependencies.filter(
+        (dependency) => dependency.runId !== dependencyRunId,
+      );
+      const dependencyDetail = state.details[dependencyRunId];
+      if (dependencyDetail) {
+        dependencyDetail.dependents = dependencyDetail.dependents.filter(
+          (dependent) => dependent.runId !== runId,
+        );
+      }
+      syncDependencyState(runId);
+      return new Response(
+        JSON.stringify({
+          result: {
+            runId,
+            dependencyRunIds: detail.dependencies.map((dependency) => dependency.runId),
+            changed: true,
+          },
+        }),
+        { status: 200 },
+      );
+    }
+
+    const clearDependenciesMatch = /\/api\/runs\/([^/]+)\/dependencies\/clear$/.exec(url);
+    if (clearDependenciesMatch && init?.method === "POST") {
+      const runId = decodeURIComponent(clearDependenciesMatch[1] ?? "");
+      const detail = state.details[runId];
+      if (!detail) {
+        return new Response(JSON.stringify({ error: { message: "missing", code: "not_found" } }), {
+          status: 404,
+        });
+      }
+      const priorDependencyIds = detail.dependencies.map((dependency) => dependency.runId);
+      detail.dependencies = [];
+      for (const dependencyRunId of priorDependencyIds) {
+        const dependencyDetail = state.details[dependencyRunId];
+        if (dependencyDetail) {
+          dependencyDetail.dependents = dependencyDetail.dependents.filter(
+            (dependent) => dependent.runId !== runId,
+          );
+        }
+      }
+      syncDependencyState(runId);
+      return new Response(
+        JSON.stringify({
+          result: {
+            runId,
+            dependencyRunIds: [],
+            changed: priorDependencyIds.length > 0,
+          },
+        }),
+        { status: 200 },
+      );
     }
 
     throw new Error(`Unhandled fetch: ${url}`);
@@ -1793,5 +1936,83 @@ describe("web app", () => {
 
     expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
     expect(MockEventSource.instances).toHaveLength(1);
+  });
+
+  it("searches dependency candidates by assignment name and submits the selected run id", async () => {
+    const postedDependencyIds: string[] = [];
+    installFetchMock(
+      {
+        runs: [
+          makeRun({
+            runId: "run-1",
+            status: "initialized",
+            assignmentName: "Current assignment",
+            name: "Current run",
+          }),
+          makeRun({
+            runId: "run-2",
+            assignmentName: "Plan feature follow-up",
+            name: "Dependency target",
+          }),
+        ],
+        details: {
+          "run-1": makeDetail({
+            runId: "run-1",
+            status: "initialized",
+            effectiveStatus: "initialized",
+            assignment: {
+              name: "Current assignment",
+              sourcePath: "/tmp/current.md",
+              workspacePath: "/tmp/current-workspace.md",
+            },
+            name: "Current run",
+          }),
+          "run-2": makeDetail({
+            runId: "run-2",
+            assignment: {
+              name: "Plan feature follow-up",
+              sourcePath: "/tmp/dependency.md",
+              workspacePath: "/tmp/dependency-workspace.md",
+            },
+            name: "Dependency target",
+          }),
+        },
+      },
+      {
+        handleRequest: (url, init) => {
+          if (/\/api\/runs\/run-1\/dependencies$/.test(url) && init?.method === "POST") {
+            const body =
+              typeof init.body === "string" && init.body.length > 0
+                ? (JSON.parse(init.body) as { dependencyRunId?: string })
+                : {};
+            if (body.dependencyRunId) {
+              postedDependencyIds.push(body.dependencyRunId);
+            }
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await user.click(await findRunCard("Current run"));
+    expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^Dependencies /i }));
+    await user.type(screen.getByLabelText("Dependency run search"), "follow-up");
+    await user.click(
+      await screen.findByRole("button", {
+        name: /dependency target.*plan feature follow-up.*run-2/i,
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: /add dependency/i }));
+
+    await waitFor(() => expect(postedDependencyIds).toEqual(["run-2"]));
+    expect(
+      await screen.findByRole("button", { name: /remove dependency run-2/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/run-2 · running/i)).toBeInTheDocument();
   });
 });
