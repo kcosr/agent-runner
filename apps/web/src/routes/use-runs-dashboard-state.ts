@@ -196,6 +196,10 @@ export function useRunsDashboardState() {
       }),
     [deferredSearch, runs, settings.repo, settings.showArchived],
   );
+  const collapsedColumnKeySet = useMemo(
+    () => new Set(settings.collapsedColumnKeys),
+    [settings.collapsedColumnKeys],
+  );
   const columns = useMemo(
     () => buildColumns(visibleRuns, settings.collapseFailureStates),
     [settings.collapseFailureStates, visibleRuns],
@@ -323,11 +327,33 @@ export function useRunsDashboardState() {
             ? "rename"
             : undefined;
 
+  function setColumnCollapsed(columnKey: string, collapsed: boolean) {
+    const isCollapsed = collapsedColumnKeySet.has(columnKey);
+    if (collapsed === isCollapsed) {
+      return;
+    }
+
+    updateSettings({
+      collapsedColumnKeys: collapsed
+        ? [...settings.collapsedColumnKeys, columnKey]
+        : settings.collapsedColumnKeys.filter((key) => key !== columnKey),
+    });
+  }
+
   return {
     actionError,
     actionPending,
     boardColumns,
+    collapsedColumnKeys: settings.collapsedColumnKeys,
     closeRun,
+    columnActions: {
+      expand: (columnKey: string) => {
+        setColumnCollapsed(columnKey, false);
+      },
+      toggleCollapse: (columnKey: string) => {
+        setColumnCollapsed(columnKey, !collapsedColumnKeySet.has(columnKey));
+      },
+    },
     copyText: async (value: string, label: string) => {
       if (await writeToClipboard(value)) {
         setNotices((current) =>

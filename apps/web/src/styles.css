@@ -303,10 +303,79 @@ body {
   max-height: 100%;
 }
 
+.col-expand {
+  display: none;
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  border-radius: 6px;
+}
+
+.col-action__icon {
+  width: 14px;
+  height: 14px;
+}
+
+.col-expand__icon {
+  width: 12px;
+  height: 12px;
+}
+
+.col-action__icon {
+  transform: rotate(90deg);
+}
+
+.col-expand__icon {
+  transform: rotate(-90deg);
+}
+
 .col-body {
   overflow-x: clip;
   overflow-y: auto;
   overscroll-behavior-y: contain;
+}
+
+@media (min-width: 721px) {
+  .column[data-collapsed="true"] {
+    flex-basis: 32px;
+    background: var(--card);
+  }
+
+  .column[data-collapsed="true"] .col-head {
+    height: 100%;
+    align-content: flex-start;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 12px;
+    padding: 12px 10px;
+  }
+
+  .column[data-collapsed="true"] .col-head h2 {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    text-align: center;
+    line-height: 1;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .column[data-collapsed="true"] .count,
+  .column[data-collapsed="true"] .col-spacer,
+  .column[data-collapsed="true"] .col-sub,
+  .column[data-collapsed="true"] .col-action,
+  .column[data-collapsed="true"] .col-body {
+    display: none;
+  }
+
+  .column[data-collapsed="true"] .col-expand {
+    display: inline-flex;
+    flex: 0 0 auto;
+  }
 }
 
 .drawer-body {
@@ -865,5 +934,10 @@ body {
 
   .board-jumpbar {
     padding: 12px 16px 0;
+  }
+
+  .col-action,
+  .col-expand {
+    display: none !important;
   }
 }

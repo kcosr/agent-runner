@@ -279,6 +279,14 @@ function getCloseDetailButton() {
   return closeButton;
 }
 
+function getBoardColumn(name: string) {
+  const column = screen.getByRole("heading", { name }).closest("article");
+  if (!column) {
+    throw new Error(`expected board column ${name}`);
+  }
+  return column as HTMLElement;
+}
+
 function defineElementMetric(element: Element, key: string, value: number | (() => void)) {
   Object.defineProperty(element, key, {
     configurable: true,
@@ -870,11 +878,23 @@ describe("web app", () => {
     expect(screen.getByRole("heading", { name: "Error" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Aborted" })).toBeInTheDocument();
 
+    const blockedColumn = getBoardColumn("Blocked");
+    await user.click(
+      within(blockedColumn).getByRole("button", { name: "Collapse Blocked column" }),
+    );
+    await waitFor(() => {
+      expect(blockedColumn).toHaveAttribute("data-collapsed", "true");
+    });
+
+    const stored = window.localStorage.getItem("task-runner:web:board-settings");
+    const parsed = stored ? (JSON.parse(stored) as { collapsedColumnKeys?: string[] }) : null;
+    expect(parsed?.collapsedColumnKeys).toEqual(["blocked"]);
+
     view.unmount();
     queryClient.clear();
     await renderApp();
     expect(await screen.findByRole("button", { name: /archived dashboard/i })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Blocked" })).toBeInTheDocument();
+    expect(getBoardColumn("Blocked")).toHaveAttribute("data-collapsed", "true");
     expect(screen.getByRole("heading", { name: "Error" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Aborted" })).toBeInTheDocument();
   });
@@ -884,6 +904,7 @@ describe("web app", () => {
       "task-runner:web:board-settings",
       JSON.stringify({
         collapseFailureStates: "yes",
+        collapsedColumnKeys: ["running", 42],
         drawerWidth: "wide",
         hideEmptyColumns: "no",
         repo: 42,
@@ -940,6 +961,118 @@ describe("web app", () => {
     await user.click(await findRunCard("Build dashboard"));
     const drawer = await screen.findByLabelText("Run detail");
     expect(drawer.style.getPropertyValue("--drawer-width")).toBe("540px");
+    expect(getBoardColumn("Running")).toHaveAttribute("data-collapsed", "false");
+  });
+
+  it("collapses and expands a board column on desktop", async () => {
+    installFetchMock({
+      runs: [
+        makeRun(),
+        makeRun({
+          runId: "run-success",
+          assignmentName: "Done dashboard",
+          status: "success",
+        }),
+      ],
+      details: {
+        "run-1": makeDetail(),
+        "run-success": makeDetail({
+          runId: "run-success",
+          status: "success",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await findRunCard("Build dashboard");
+
+    const runningColumn = getBoardColumn("Running");
+    expect(runningColumn).toHaveAttribute("data-collapsed", "false");
+    expect(
+      within(runningColumn).getByRole("button", { name: /build dashboard/i }),
+    ).toBeInTheDocument();
+
+    await user.click(
+      within(runningColumn).getByRole("button", { name: "Collapse Running column" }),
+    );
+
+    await waitFor(() => {
+      expect(runningColumn).toHaveAttribute("data-collapsed", "true");
+    });
+    expect(
+      within(runningColumn).getByRole("button", { name: "Expand Running column" }),
+    ).toBeInTheDocument();
+
+    await user.click(within(runningColumn).getByRole("button", { name: "Expand Running column" }));
+
+    await waitFor(() => {
+      expect(runningColumn).toHaveAttribute("data-collapsed", "false");
+    });
+    expect(
+      within(runningColumn).getByRole("button", { name: "Collapse Running column" }),
+    ).toBeInTheDocument();
+    expect(
+      within(runningColumn).getByRole("button", { name: /build dashboard/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps grouped failures collapse state independent from split error columns", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "run-blocked",
+          assignmentName: "Blocked dashboard",
+          status: "blocked",
+        }),
+        makeRun({
+          runId: "run-error",
+          assignmentName: "Broken dashboard",
+          status: "error",
+        }),
+      ],
+      details: {
+        "run-blocked": makeDetail({
+          runId: "run-blocked",
+          status: "blocked",
+        }),
+        "run-error": makeDetail({
+          runId: "run-error",
+          status: "error",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await findRunCard("Blocked dashboard");
+
+    const failuresColumn = getBoardColumn("Failures");
+    await user.click(
+      within(failuresColumn).getByRole("button", { name: "Collapse Failures column" }),
+    );
+
+    await waitFor(() => {
+      expect(failuresColumn).toHaveAttribute("data-collapsed", "true");
+    });
+
+    const storedGrouped = window.localStorage.getItem("task-runner:web:board-settings");
+    expect(storedGrouped ? JSON.parse(storedGrouped) : null).toMatchObject({
+      collapsedColumnKeys: ["failures"],
+    });
+
+    await user.click(screen.getByRole("button", { name: /collapse failure states/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Error" })).toBeInTheDocument();
+    });
+    expect(getBoardColumn("Error")).toHaveAttribute("data-collapsed", "false");
+
+    await user.click(screen.getByRole("button", { name: /collapse failure states/i }));
+
+    await waitFor(() => {
+      expect(getBoardColumn("Failures")).toHaveAttribute("data-collapsed", "true");
+    });
   });
 
   it("shows jump buttons for overflowed non-empty columns and scrolls them into view", async () => {
@@ -996,6 +1129,110 @@ describe("web app", () => {
     expect(screen.queryByRole("button", { name: "Aborted (0)" })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Blocked (1)" }));
+
+    expect(scrollTo).toHaveBeenCalledWith({ behavior: "smooth", left: 360 });
+  });
+
+  it("expands a collapsed jumpbar target before scrolling it into view", async () => {
+    installFetchMock({
+      runs: [
+        makeRun(),
+        makeRun({
+          runId: "run-success",
+          assignmentName: "Done dashboard",
+          status: "success",
+        }),
+        makeRun({
+          runId: "run-blocked",
+          assignmentName: "Blocked dashboard",
+          status: "blocked",
+        }),
+      ],
+      details: {
+        "run-1": makeDetail(),
+        "run-success": makeDetail({
+          runId: "run-success",
+          status: "success",
+        }),
+        "run-blocked": makeDetail({
+          runId: "run-blocked",
+          status: "blocked",
+        }),
+      },
+    });
+
+    const frameQueue: FrameRequestCallback[] = [];
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation(
+      (callback: FrameRequestCallback) => {
+        frameQueue.push(callback);
+        return frameQueue.length;
+      },
+    );
+    const flushAnimationFrames = () => {
+      const callbacks = frameQueue.splice(0, frameQueue.length);
+      callbacks.forEach((callback) => callback(0));
+    };
+
+    const user = userEvent.setup();
+    await renderApp();
+    await findRunCard("Build dashboard");
+
+    const scrollTo = vi.fn();
+    setBoardGeometry({
+      clientWidth: 260,
+      columns: [
+        { key: "running", left: 0, width: 180 },
+        { key: "completed", left: 200, width: 180 },
+        { key: "blocked", left: 400, width: 180 },
+      ],
+      scrollTo,
+      scrollWidth: 620,
+    });
+    flushAnimationFrames();
+
+    const blockedColumn = getBoardColumn("Blocked");
+    await user.click(
+      within(blockedColumn).getByRole("button", { name: "Collapse Blocked column" }),
+    );
+    await waitFor(() => {
+      expect(blockedColumn).toHaveAttribute("data-collapsed", "true");
+    });
+
+    setBoardGeometry({
+      clientWidth: 260,
+      columns: [
+        { key: "running", left: 0, width: 180 },
+        { key: "completed", left: 200, width: 180 },
+        { key: "blocked", left: 400, width: 56 },
+      ],
+      scrollTo,
+      scrollWidth: 496,
+    });
+    flushAnimationFrames();
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Blocked (1)" })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Blocked (1)" }));
+    expect(scrollTo).not.toHaveBeenCalled();
+
+    await waitFor(() => {
+      expect(blockedColumn).toHaveAttribute("data-collapsed", "false");
+    });
+
+    setBoardGeometry({
+      clientWidth: 260,
+      columns: [
+        { key: "running", left: 0, width: 180 },
+        { key: "completed", left: 200, width: 180 },
+        { key: "blocked", left: 400, width: 180 },
+      ],
+      scrollTo,
+      scrollWidth: 620,
+    });
+    flushAnimationFrames();
 
     expect(scrollTo).toHaveBeenCalledWith({ behavior: "smooth", left: 360 });
   });
