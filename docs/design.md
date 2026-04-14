@@ -669,7 +669,7 @@ blank lines, non-empty parts only:
 |---|---|
 | Fresh, `tasks.size > 0` | `<agent instructions>` → `<assignment instructions>` → `<workflow>` → `<message>` |
 | Fresh, `tasks.size === 0` | `<agent instructions>` → `<assignment instructions>` → `<message>` |
-| Resume, prior had tasks, no `--add-task` | `<message>` only |
+| Resume, prior had tasks, no `--add-task` | `<message>` only, or `<implicit continue prompt>` when message is omitted and incomplete tasks remain |
 | Resume, prior had tasks, `--add-task` used | short "new tasks" reminder → `<message>` |
 | Resume, prior had 0 tasks, this session has tasks | `<workflow>` → `<message>` |
 
@@ -855,9 +855,11 @@ Every session:
   captured at first write
 - For resume sessions (index > 0), the first attempt's prompt is
   **only the follow-up message** (plus the new-tasks reminder if
-  applicable) — the role instructions and workflow template aren't
-  re-rendered because the backend has them in the cached
-  conversation
+  applicable). If the caller omits the message and incomplete tasks
+  remain, core synthesizes `Continue working through the remaining
+  task list items.` instead. The role instructions and workflow
+  template aren't re-rendered because the backend has them in the
+  cached conversation.
 
 **Resume under the manifest-canonical rule.** Every resume reads the
 agent definition from the frozen manifest via
@@ -908,10 +910,11 @@ every subsequent operation. Resume never re-reads the source
   instructions are written into the manifest at first write and
   carried forward like any other agent.
 
-**Schema versioning.** `schemaVersion: 3` is the manifest-canonical
+**Schema versioning.** `schemaVersion: 4` is the manifest-canonical
 generation. Manifests written by earlier task-runner versions have
-`schemaVersion: 1` (pre-canonical) or `schemaVersion: 2`
-(pre-reset-seed) and are **not resumable** by this version —
+`schemaVersion: 1` (pre-canonical), `schemaVersion: 2`
+(pre-reset-seed), or `schemaVersion: 3` (pre-execution-provenance) and
+are **not resumable** by this version —
 `resolveResumeTarget` rejects them with a clear error and tells the
 caller to start a fresh run. No automatic migration.
 
@@ -926,7 +929,7 @@ type ManifestStatus =
   | "error";
 
 interface RunManifest {
-  schemaVersion: 3;
+  schemaVersion: 4;
   runId: string;
   agent: {
     name: string;
@@ -939,6 +942,12 @@ interface RunManifest {
     workspacePath: string;         // copied workspace assignment.md
   } | null;
   backend: string;
+  execution: {
+    hostMode: "embedded" | "daemon";
+    controller:
+      | { kind: "embedded" }
+      | { kind: "daemon"; daemonInstanceId: string };
+  };
   model: string | null;
   effort: string | null;
   message: string | null;          // session 0's initial message
@@ -1966,11 +1975,14 @@ from a prior session):
   under `${TASK_RUNNER_STATE_DIR}/runs/`, then `runs/unknown/`.
 - `<path>` can be a workspace directory or a direct path to a `run.json`
   file.
-- At least one of a positional `[message]` **or** one or more
-  `--add-task` flags is required when `--resume-run` is set. The runner
-  throws `ResumeError` if both are absent. `--add-task` alone is valid:
-  the "new tasks added" reminder becomes the entire follow-up prompt
-  and tells the agent to re-read the assignment file.
+- A positional `[message]` is optional when the run still has
+  incomplete tasks. In that case, an empty resume synthesizes
+  `Continue working through the remaining task list items.` as the
+  entire follow-up prompt. If no incomplete tasks remain, the runner
+  still requires either a positional `[message]` or one or more
+  `--add-task` flags. `--add-task` alone is valid: the "new tasks
+  added" reminder becomes the entire follow-up prompt and tells the
+  agent to re-read the assignment file.
 - The prior manifest's `backendSessionId` must be non-null — else
   `ResumeError` and exit 3.
 - Non-completed tasks from the prior run are normalized to `pending`
@@ -1982,8 +1994,10 @@ from a prior session):
   union at first write).
 - The first attempt of the new session sends **only the follow-up
   message** (plus the new-tasks reminder if applicable) as its prompt.
-  The instructions are not re-rendered, because the backend already
-  has them in the cached session from the prior run.
+  If the caller omitted the message and incomplete tasks remained, the
+  implicit continue prompt is sent instead. The instructions are not
+  re-rendered, because the backend already has them in the cached
+  session from the prior run.
 
 **Resume override matrix.** All override validation for `--resume-run`
 lives in a single `validateResumeOverrides` function in
@@ -2005,7 +2019,7 @@ lives in a single `validateResumeOverrides` function in
 | `--unrestricted` | allowed | rejected | Per-attempt spawn flag. Init freezes it |
 | `--name` | rejected | rejected | Fresh-run-only persisted run name. Rename existing runs with `task-runner run set-name` |
 | `--add-task` | allowed | rejected | Legitimate mid-run task list extension. Init froze the task list |
-| `[message]` | required | rejected | Required on regular resume; init pre-composed the prompt |
+| `[message]` | allowed | rejected | Optional on regular resume when incomplete tasks remain; otherwise provide `[message]` or `--add-task`. Init pre-composed the prompt |
 | `--output-format`, `--field` | allowed | allowed | Read-only; no state effect |
 
 The `allowed` overrides on regular resume are still vetted by
@@ -2041,7 +2055,8 @@ Rules for this seam:
 - The mappers are pure and deterministic. No filesystem reads, env reads, or
   writes.
 - `RunSummary` and `RunDetail` carry both canonical lifecycle `status`
-  and derived `effectiveStatus`.
+  and derived `effectiveStatus`, plus persisted `execution`
+  context for the latest stored session.
 - Canonical `status` remains the persisted engine lifecycle used for
   resume/reset/archive/task-mutation semantics.
 - `effectiveStatus` is a read-model field: non-passive runs mirror
@@ -2056,16 +2071,27 @@ Rules for this seam:
   `status` emits `RunDetail`, and bundled planner/reviewer workflows read
   `tasks[]` from that DTO instead of projecting raw `finalTasks`.
 - `RunCapabilities` exposes the current CLI-backed action surface:
-  `canArchive`, `canUnarchive`, `canResume`, plus nested task mutation
-  booleans in `RunTaskMutationCapabilities`
+  `canAbort`, `abortReason`, `canArchive`, `canUnarchive`,
+  `canResume`, plus nested task mutation booleans in
+  `RunTaskMutationCapabilities`
   (`canSetStatus`, `canEditNotes`, `canAdd`).
 - Capabilities continue to key off canonical `status`, not
   `effectiveStatus`.
+- `canAbort` is not inferred from persisted `status === "running"`
+  alone. Embedded projections default to `canAbort=false`; daemon
+  servers overlay `canAbort=true` only for runs they actively own, and
+  otherwise expose `abortReason="not_active_in_daemon"`.
+- Terminal runs expose `canAbort=false` with
+  `abortReason="already_terminal"`.
 - `RunSummary` and `RunDetail` both carry `capabilities`, so list/board
   consumers do not need N+1 detail reads just to determine which actions
   are available.
-- Daemon-mode live abort reuses the existing `aborted` lifecycle rather
-  than introducing a second terminal-state family.
+- Daemon health/read surfaces also expose daemon identity and ownership:
+  health returns `daemonInstanceId`, and daemon-started runs persist
+  `execution.hostMode = "daemon"` plus
+  `execution.controller = { kind: "daemon", daemonInstanceId }`.
+- Daemon-mode live abort still reuses the existing `aborted` lifecycle
+  rather than introducing a second terminal-state family.
 
 ## Output modes
 
@@ -2258,20 +2284,25 @@ The CLI installs a `SIGINT` handler that:
      5s grace period.
    - **codex**: races the abort signal alongside the per-attempt
      timeout in the turn-wait loop. On abort, sends `turn/interrupt`
-     to the codex app-server (same path the timeout takes), then
-     closes the transport.
-   The run loop sees `invokeResult.aborted === true`, sets
-   `manifest.status = "aborted"`, persists the manifest, and exits
-   with code 130. The aborted run is resumable like any other
-   terminal state.
+     to the codex app-server, then waits for a bounded confirmation
+     handshake.
+   For codex, the run only lands in `manifest.status = "aborted"` and
+   exits 130 once interruption is confirmed by the remote turn result.
+   If confirmation fails before the turn reaches a confirmed interrupted
+   terminal event (no turn id, RPC error, timeout, or a non-interrupted
+   terminal result), the backend emits a diagnostic that the remote
+   session may still be active. Non-interrupted terminal completion
+   keeps the completed result; other failed confirmations land as
+   `error`.
 2. **Second Ctrl+C**: bypasses the run loop entirely and force-exits
    the process with 130. Use this if the backend is wedged and
    doesn't respond to the interrupt within a few seconds.
 
 The `aborted` manifest status is distinct from `error` (backend
-failure) and `exhausted` (out of retries). It signals "user pulled
-the plug; nothing went wrong." A subsequent `task-runner run
---resume-run <id>` picks up exactly where the aborted run left off.
+failure, including unconfirmed remote interruption) and `exhausted`
+(out of retries). It signals "user interruption was confirmed." A
+subsequent `task-runner run --resume-run <id>` picks up exactly where
+the aborted run left off.
 
 ## Milestones
 

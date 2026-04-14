@@ -42,6 +42,7 @@ function normalizeCodexModel(model: string): string {
 
 const TURN_INTERRUPT_GRACE_MS = 1_000;
 const TURN_INTERRUPT_RETRY_MS = 5_000;
+const TURN_INTERRUPT_CONFIRM_MS = 5_000;
 
 /**
  * Decide whether the turn was interrupted by something *outside* this
@@ -467,6 +468,7 @@ interface AccumulatorState {
   threadId: string | null;
   turnId: string | null;
   turnIdWaiters: Array<(turnId: string) => void>;
+  turnCompletionWaiters: Array<() => void>;
   streamedText: string;
   completedText: string;
   /**
@@ -490,6 +492,14 @@ function setTurnId(state: AccumulatorState, turnId: string): void {
   for (const waiter of waiters) waiter(turnId);
 }
 
+function setTurnCompleted(state: AccumulatorState): void {
+  if (state.turnCompleted) return;
+  state.turnCompleted = true;
+  const waiters = state.turnCompletionWaiters.splice(0);
+  for (const waiter of waiters) waiter();
+  state.resolveCompleted?.();
+}
+
 export function waitForTurnId(state: AccumulatorState, timeoutMs: number): Promise<string | null> {
   if (state.turnId) return Promise.resolve(state.turnId);
   return new Promise((resolve) => {
@@ -506,22 +516,69 @@ export function waitForTurnId(state: AccumulatorState, timeoutMs: number): Promi
   });
 }
 
+export function waitForTurnCompletion(
+  state: AccumulatorState,
+  timeoutMs: number,
+): Promise<boolean> {
+  if (state.turnCompleted) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const onCompleted = () => {
+      clearTimeout(timeoutHandle);
+      resolve(true);
+    };
+    const timeoutHandle = setTimeout(() => {
+      const idx = state.turnCompletionWaiters.indexOf(onCompleted);
+      if (idx >= 0) state.turnCompletionWaiters.splice(idx, 1);
+      resolve(state.turnCompleted);
+    }, timeoutMs);
+    state.turnCompletionWaiters.push(onCompleted);
+  });
+}
+
+type InterruptAttemptFailureReason = "missing_turn_id" | "rpc_error";
+
+interface InterruptAttemptResult {
+  requested: boolean;
+  reason?: InterruptAttemptFailureReason;
+  errorMessage?: string;
+}
+
+async function requestTurnInterrupt(
+  client: Pick<CodexClient, "call">,
+  state: AccumulatorState,
+  retryWindowsMs: number[],
+): Promise<InterruptAttemptResult> {
+  for (const timeoutMs of retryWindowsMs) {
+    const turnId = await waitForTurnId(state, timeoutMs);
+    if (!state.threadId || !turnId) {
+      continue;
+    }
+    try {
+      await client.call("turn/interrupt", {
+        threadId: state.threadId,
+        turnId,
+      });
+      return { requested: true };
+    } catch (err) {
+      return {
+        requested: false,
+        reason: "rpc_error",
+        errorMessage: (err as Error).message,
+      };
+    }
+  }
+  return {
+    requested: false,
+    reason: "missing_turn_id",
+  };
+}
+
 export async function interruptTurnWithGrace(
   client: Pick<CodexClient, "call">,
   state: AccumulatorState,
   timeoutMs = TURN_INTERRUPT_GRACE_MS,
 ): Promise<boolean> {
-  const turnId = await waitForTurnId(state, timeoutMs);
-  if (!state.threadId || !turnId) return false;
-  try {
-    await client.call("turn/interrupt", {
-      threadId: state.threadId,
-      turnId,
-    });
-    return true;
-  } catch {
-    return false;
-  }
+  return (await requestTurnInterrupt(client, state, [timeoutMs])).requested;
 }
 
 export async function interruptTurnWithRetry(
@@ -529,12 +586,51 @@ export async function interruptTurnWithRetry(
   state: AccumulatorState,
   retryWindowsMs = [TURN_INTERRUPT_GRACE_MS, TURN_INTERRUPT_RETRY_MS],
 ): Promise<boolean> {
-  for (const timeoutMs of retryWindowsMs) {
-    if (await interruptTurnWithGrace(client, state, timeoutMs)) {
-      return true;
+  return (await requestTurnInterrupt(client, state, retryWindowsMs)).requested;
+}
+
+type InterruptConfirmationResult =
+  | {
+      confirmed: true;
     }
+  | {
+      confirmed: false;
+      reason: "missing_turn_id" | "rpc_error" | "timeout" | "wrong_terminal_status";
+      errorMessage?: string;
+      turnStatus?: AccumulatorState["turnStatus"];
+    };
+
+export async function confirmInterrupt(
+  client: Pick<CodexClient, "call">,
+  state: AccumulatorState,
+  retryWindowsMs = [TURN_INTERRUPT_GRACE_MS, TURN_INTERRUPT_RETRY_MS],
+  confirmMs = TURN_INTERRUPT_CONFIRM_MS,
+): Promise<InterruptConfirmationResult> {
+  const interrupt = await requestTurnInterrupt(client, state, retryWindowsMs);
+  if (!interrupt.requested) {
+    return {
+      confirmed: false,
+      reason: interrupt.reason ?? "rpc_error",
+      errorMessage: interrupt.errorMessage,
+    };
   }
-  return false;
+
+  if (!(await waitForTurnCompletion(state, confirmMs))) {
+    return {
+      confirmed: false,
+      reason: "timeout",
+    };
+  }
+
+  if (state.turnStatus === "interrupted") {
+    return { confirmed: true };
+  }
+
+  return {
+    confirmed: false,
+    reason: "wrong_terminal_status",
+    turnStatus: state.turnStatus,
+  };
 }
 
 function extractTextFromContent(content: unknown): string {
@@ -614,8 +710,7 @@ function handleNotification(state: AccumulatorState, method: string, params: unk
           state.turnError = errorObj.message;
         }
       }
-      state.turnCompleted = true;
-      state.resolveCompleted?.();
+      setTurnCompleted(state);
       return;
     }
     case "error": {
@@ -814,11 +909,19 @@ export const codexBackend: Backend = {
     let client: CodexClient | undefined;
     let timedOut = false;
     let aborted = false;
+    let abortRequested = false;
+    let diagnostics = "";
+
+    const emitBackendNotice = (text: string): void => {
+      diagnostics += text;
+      ctx.emit?.({ type: "backend_notice", text });
+    };
 
     const state: AccumulatorState = {
       threadId: null,
       turnId: null,
       turnIdWaiters: [],
+      turnCompletionWaiters: [],
       streamedText: "",
       completedText: "",
       lastStreamItemId: null,
@@ -894,10 +997,7 @@ export const codexBackend: Backend = {
             name: ctx.name,
           });
         } catch (err) {
-          ctx.emit?.({
-            type: "backend_notice",
-            text: `codex: thread/name/set failed: ${(err as Error).message}\n`,
-          });
+          emitBackendNotice(`codex: thread/name/set failed: ${(err as Error).message}\n`);
         }
       }
 
@@ -955,10 +1055,33 @@ export const codexBackend: Backend = {
         ctx.abortSignal.removeEventListener("abort", abortListener);
       }
 
-      if (race === "timeout" || race === "abort") {
-        if (race === "timeout") timedOut = true;
-        if (race === "abort") aborted = true;
+      if (race === "timeout") {
+        timedOut = true;
         await interruptTurnWithRetry(client, state);
+      }
+
+      if (race === "abort") {
+        abortRequested = true;
+        const interrupt = await confirmInterrupt(client, state);
+        if (interrupt.confirmed) {
+          aborted = true;
+        } else {
+          const detail = (() => {
+            switch (interrupt.reason) {
+              case "missing_turn_id":
+                return "no turn id was available before the interrupt handshake window expired";
+              case "rpc_error":
+                return `turn/interrupt failed: ${interrupt.errorMessage ?? "unknown error"}`;
+              case "timeout":
+                return "no interrupted terminal event arrived before the confirmation timeout expired";
+              case "wrong_terminal_status":
+                return `turn finished with status ${interrupt.turnStatus ?? "unknown"} instead of interrupted`;
+            }
+          })();
+          emitBackendNotice(
+            `codex: Ctrl+C did not confirm remote interruption (${detail}). The remote session may still be active.\n`,
+          );
+        }
       }
 
       // Detect a turn that codex marked `interrupted` without any
@@ -967,17 +1090,16 @@ export const codexBackend: Backend = {
       // alongside task-runner) cancels the turn from the side. The
       // run loop should treat this as a clean abort, not as a
       // failure that triggers another retry.
-      if (isExternalInterrupt(state.turnStatus, timedOut, aborted)) {
+      if (isExternalInterrupt(state.turnStatus, timedOut, aborted || abortRequested)) {
         aborted = true;
         const taskRunnerCmd = resolveTaskRunnerCommand();
-        ctx.emit?.({
-          type: "backend_notice",
-          text: `\ncodex: turn was interrupted externally (e.g. cancelled from another client connected to the same thread); marking the run aborted instead of retrying. Resume with \`${taskRunnerCmd} run --resume-run <id>\` when ready.\n`,
-        });
+        emitBackendNotice(
+          `\ncodex: turn was interrupted externally (e.g. cancelled from another client connected to the same thread); marking the run aborted instead of retrying. Resume with \`${taskRunnerCmd} run --resume-run <id>\` when ready.\n`,
+        );
       }
     } catch (err) {
       const message = (err as Error).message;
-      ctx.emit?.({ type: "backend_notice", text: `${message}\n` });
+      emitBackendNotice(`${message}\n`);
       return {
         exitCode: 1,
         signal: null,
@@ -986,7 +1108,7 @@ export const codexBackend: Backend = {
         sessionId: state.threadId,
         transcript: null,
         rawStdout: rawStdoutChunks.join("\n"),
-        rawStderr: `${client?.stderr ?? ""}${message}\n`,
+        rawStderr: `${client?.stderr ?? ""}${diagnostics}`,
       };
     } finally {
       await client?.close().catch(() => {});
@@ -1013,7 +1135,7 @@ export const codexBackend: Backend = {
       sessionId: state.threadId,
       transcript,
       rawStdout: rawStdoutChunks.join("\n"),
-      rawStderr: stderrAccumulated,
+      rawStderr: `${stderrAccumulated}${diagnostics}`,
     };
   },
 };

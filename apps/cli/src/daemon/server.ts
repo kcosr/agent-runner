@@ -20,6 +20,14 @@ import {
   updateTask,
 } from "@task-runner/core/app/service.js";
 import { VALID_STATUSES } from "@task-runner/core/assignment/model.js";
+import type {
+  RunAbortReason,
+  RunCapabilities,
+  RunDetail,
+  RunStatus,
+  RunSummary,
+} from "@task-runner/core/contracts/runs.js";
+import { isTerminalStatus } from "@task-runner/core/contracts/runs.js";
 import { ConflictError } from "@task-runner/core/core/commands/service.js";
 import type { RunEvent } from "@task-runner/core/core/run/run-loop.js";
 import { shortId } from "@task-runner/core/util/short-id.js";
@@ -55,6 +63,52 @@ interface SubscriptionRecord {
 interface ActiveRunRecord {
   abortController: AbortController;
   done: Promise<void>;
+}
+
+function daemonExecution(daemonInstanceId: string) {
+  return {
+    hostMode: "daemon" as const,
+    controller: {
+      kind: "daemon" as const,
+      daemonInstanceId,
+    },
+  };
+}
+
+function deriveDaemonAbortCapability(
+  runId: string,
+  status: RunStatus,
+  activeRuns: Map<string, ActiveRunRecord>,
+): Pick<RunCapabilities, "canAbort" | "abortReason"> {
+  if (activeRuns.has(runId)) {
+    return { canAbort: true };
+  }
+
+  const abortReason: RunAbortReason = isTerminalStatus(status)
+    ? "already_terminal"
+    : "not_active_in_daemon";
+  return {
+    canAbort: false,
+    abortReason,
+  };
+}
+
+function withDaemonAbortCapability<T extends RunSummary | RunDetail>(
+  run: T,
+  activeRuns: Map<string, ActiveRunRecord>,
+): T {
+  const abortCapability = deriveDaemonAbortCapability(run.runId, run.status, activeRuns);
+  const capabilities: RunCapabilities = {
+    ...run.capabilities,
+    ...abortCapability,
+  };
+  if (capabilities.canAbort) {
+    capabilities.abortReason = undefined;
+  }
+  return {
+    ...run,
+    capabilities,
+  };
 }
 
 function packageVersion(): string {
@@ -119,6 +173,7 @@ export async function serveDaemon(
   const { host, port, path } = listenSocketConfig(listenUrl);
   const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
   const startedAt = new Date().toISOString();
+  const daemonInstanceId = `daemon-${shortId()}`;
   const version = packageVersion();
   const subscriptions = new Map<string, SubscriptionRecord>();
   const activeRuns = new Map<string, ActiveRunRecord>();
@@ -144,6 +199,11 @@ export async function serveDaemon(
     resumeRun,
     ...handlers,
   };
+
+  const getDaemonRun = (target: string): RunDetail =>
+    withDaemonAbortCapability(app.getRun(target), activeRuns);
+  const getDaemonRunList = (opts?: Parameters<typeof app.getRunList>[0]): RunSummary[] =>
+    app.getRunList(opts).map((run) => withDaemonAbortCapability(run, activeRuns));
 
   await new Promise<void>((resolve, reject) => {
     const probe = createNetServer();
@@ -281,7 +341,15 @@ export async function serveDaemon(
 
   const operations = createDaemonOperations({
     ...app,
+    getRun: getDaemonRun,
+    getRunList: getDaemonRunList,
+    initRun: (request) =>
+      app.initRun({
+        ...request,
+        execution: daemonExecution(daemonInstanceId),
+      }),
     daemonInfo: {
+      daemonInstanceId,
       pid: process.pid,
       listenUrl,
       version,
@@ -291,6 +359,7 @@ export async function serveDaemon(
       executeManagedRun((emitEvent, abortSignal) =>
         app.startRun({
           ...request,
+          execution: daemonExecution(daemonInstanceId),
           abortSignal,
           emitEvent,
         }),
@@ -299,6 +368,7 @@ export async function serveDaemon(
       executeManagedRun((emitEvent, abortSignal) =>
         app.resumeRun({
           ...request,
+          execution: daemonExecution(daemonInstanceId),
           abortSignal,
           emitEvent,
         }),

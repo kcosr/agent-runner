@@ -34,10 +34,16 @@ describe("api client", () => {
                   endedAt: null,
                   tasksCompleted: 1,
                   tasksTotal: 4,
+                  execution: {
+                    hostMode: "embedded",
+                    controller: { kind: "embedded" },
+                  },
                   capabilities: {
                     canArchive: false,
                     canUnarchive: false,
                     canResume: true,
+                    canAbort: false,
+                    abortReason: "not_active_in_daemon",
                     taskMutation: {
                       canAdd: false,
                       canEditNotes: false,
@@ -85,10 +91,16 @@ describe("api client", () => {
                   endedAt: null,
                   tasksCompleted: 1,
                   tasksTotal: 4,
+                  execution: {
+                    hostMode: "embedded",
+                    controller: { kind: "embedded" },
+                  },
                   capabilities: {
                     canArchive: true,
                     canUnarchive: false,
                     canResume: false,
+                    canAbort: false,
+                    abortReason: "not_active_in_daemon",
                     taskMutation: {
                       canAdd: true,
                       canEditNotes: true,

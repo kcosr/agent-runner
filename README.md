@@ -140,8 +140,12 @@ chat output.
   rejects `run` entirely and auto-finalizes the manifest to `success`
   or `blocked` once every task reaches a terminal status.
 - **Clean Ctrl+C**: SIGINT aborts the in-flight backend invocation
-  cleanly (claude gets SIGINT, codex gets `turn/interrupt`), persists
-  the manifest as `aborted`, and exits 130. Resume any time with
+  through the backend-specific interrupt path (claude gets SIGINT,
+  codex gets `turn/interrupt`). `task-runner` only persists
+  `status=aborted` and exits 130 once interruption is actually
+  confirmed; unconfirmed Codex interruption now fails with a diagnostic
+  and exit 1 so the caller does not mistake a still-live remote turn
+  for a clean cancel. Resume any confirmed aborted run with
   `--resume-run`.
 - **External interrupt detection**: when running against codex
   managed mode, if another client cancels the turn from the side
@@ -251,7 +255,7 @@ Task results:
   - summary — Summary [completed]
       Small TS monorepo for an AI agent runner with two backends.
 
-To continue this run with a follow-up message:
+To continue this run, provide a follow-up message or add a task:
   task-runner run --resume-run abc123 "..."
 ```
 
@@ -509,7 +513,7 @@ Execute an agent. Three modes, distinguished by which flags you pass:
 # Fresh run
 task-runner run --agent <name> [--assignment <name>] [options] [message]
 
-# Resume an existing run (sends a follow-up message and/or new tasks)
+# Resume an existing run (follow-up message optional when incomplete tasks remain)
 task-runner run --resume-run <id> [options] [message]
 
 # Execute a previously initialized run (see `init` below)
@@ -583,6 +587,9 @@ Rules:
   CLI clients.
 - The same listener also serves browser-facing HTTP endpoints
   under `/api/...` and live run events via SSE under `/api/events/...`.
+- The health payload also carries a stable `daemonInstanceId`, and
+  daemon-projected run DTOs expose persisted `execution` provenance plus
+  daemon-local abort capability (`canAbort`, `abortReason`).
 - `--listen` overrides `TASK_RUNNER_LISTEN`; both fall back to
   `ws://127.0.0.1:4773/`.
 - Run-scoped commands, `list runs`, and definition read commands opt
@@ -778,18 +785,31 @@ any task is `in_progress`, while the canonical manifest status stays
 `initialized` until the task set reaches a terminal state.
 
 The JSON `RunDetail` contract also carries a machine-facing
-`capabilities` block:
+`execution` block plus a machine-facing `capabilities` block:
 
+- `execution.hostMode`
+- `execution.controller.kind`
+- `execution.controller.daemonInstanceId` when the controller is daemon-owned
+- `canAbort`, `abortReason`
 - `canArchive`, `canUnarchive`, `canResume`
 - `taskMutation.canSetStatus`
 - `taskMutation.canEditNotes`
 - `taskMutation.canAdd`
 
-These booleans reflect the current CLI-backed lifecycle rules. In
+`execution` is the persisted execution context for the latest stored
+session: embedded runs record
+`{ hostMode: "embedded", controller: { kind: "embedded" } }`, while
+daemon-run sessions record daemon ownership and the daemon instance id.
+Resume rewrites this block to the controller that most recently ran the
+session.
+
+Capabilities reflect the current lifecycle and host-ownership rules. In
 particular, passive runs are never resumable through `run`, running
 `taskMode=cli` runs allow `task set` / `task append-notes` but not
-`task add`, and terminal non-passive runs remain notes-editable but do
-not allow task status changes or task creation.
+`task add`, terminal runs report `canAbort=false` with
+`abortReason="already_terminal"`, and nonterminal runs that are merely
+persisted rather than actively owned by the serving daemon report
+`canAbort=false` with `abortReason="not_active_in_daemon"`.
 
 In daemon mode, external live abort control is available through the
 daemon-owned run lifecycle. Embedded mode remains single-process and
@@ -1120,6 +1140,7 @@ task-runner status $RUN | grep "Status: success"
 ### Resume
 
 ```bash
+task-runner run --resume-run <id>
 task-runner run --resume-run <id> "follow-up message"
 ```
 
@@ -1128,9 +1149,13 @@ non-completed tasks back to `pending` (preserving their notes),
 and starts a new session. Under the manifest-canonical design,
 **the agent config is reconstructed from the frozen manifest** —
 the source `agent.md` is not re-read. The first attempt of the new
-session sends *only* the follow-up message (the role instructions
-and task workflow aren't re-rendered, since the backend already
-has them cached in the session it's resuming).
+session sends *only* the follow-up message when one is provided. If
+you resume without a message and the run still has incomplete tasks,
+task-runner synthesizes `Continue working through the remaining task
+list items.` instead. The role instructions and task workflow aren't
+re-rendered, since the backend already has them cached in the session
+it's resuming. If no incomplete tasks remain, resume still requires a
+follow-up message or `--add-task`.
 
 `--add-task "<title>"` works alongside (or instead of) a follow-up
 message; the runner prepends a short reminder telling the agent
@@ -1161,11 +1186,19 @@ top-level fields — you can read the full state with
 
 ### Abort (Ctrl+C)
 
-The first Ctrl+C aborts the in-flight backend invocation cleanly
-(claude gets SIGINT, codex gets `turn/interrupt`), the run loop
-sets `manifest.status = "aborted"`, persists, and exits 130. The
-second Ctrl+C force-exits if the backend doesn't respond. Aborted
-runs are fully resumable like any other terminal state.
+The first Ctrl+C requests backend interruption. For Claude that still
+means a normal subprocess SIGINT. For Codex, `task-runner` now treats
+Ctrl+C as a confirmed-interrupt handshake:
+
+- If Codex confirms interruption, the run persists `status = "aborted"`
+  and exits 130.
+- If Codex never yields a turn id, `turn/interrupt` fails, or the turn
+  finishes without an interrupted terminal event, the run exits 1 with a
+  diagnostic explaining that interruption was not confirmed and the
+  remote session may still be active.
+
+The second Ctrl+C force-exits if the backend doesn't respond. Confirmed
+aborted runs are fully resumable like any other terminal state.
 
 ### External interrupt (codex only)
 

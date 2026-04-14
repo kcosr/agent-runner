@@ -21,6 +21,7 @@ import {
   type AttemptRecord,
   type ResolvedResumeTarget,
   ResumeError,
+  type RunExecution,
   type RunManifest,
   type SessionRecord,
   type TaskSnapshot,
@@ -37,6 +38,11 @@ import {
   checkRecursionDepth,
   readRecursionState,
 } from "./recursion-guard.js";
+import {
+  IMPLICIT_RESUME_MESSAGE,
+  hasIncompleteTasks,
+  missingResumeInputMessage,
+} from "./resume-policy.js";
 import type { RunCompletionStatus, RunCompletionSummary } from "./status.js";
 
 export { RecursionDepthError } from "./recursion-guard.js";
@@ -90,6 +96,7 @@ export interface RunOptions {
    * and used as the initial `resumeSessionId` for the first attempt.
    */
   bootstrapBackendSessionId?: string;
+  execution?: RunExecution;
   abortSignal?: AbortSignal;
   emitEvent?: (event: RunEvent) => void;
   resumeFailureDetector?: (result: BackendInvokeResult) => boolean;
@@ -550,6 +557,12 @@ function collectNewTasks(
 export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const { loaded, loadedAssignment, cliVars, backend, overrides, resume } = opts;
   const emitEvent = opts.emitEvent ?? (() => {});
+  const execution: RunExecution = opts.execution ?? {
+    hostMode: "embedded",
+    controller: {
+      kind: "embedded",
+    },
+  };
   const agentConfig = loaded.config;
   const assignmentConfig = loadedAssignment?.config;
   const resumeFailureDetector = opts.resumeFailureDetector ?? defaultResumeFailureDetector;
@@ -685,10 +698,9 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   if (isResume) {
     const hasMessage = Boolean(message && message.trim().length > 0);
     const hasAddedTasks = addedTitles.length > 0;
-    if (!hasMessage && !hasAddedTasks) {
-      throw new ResumeError(
-        "resuming a run requires either a follow-up message or at least one --add-task",
-      );
+    const canResumeImplicitly = hasIncompleteTasks(resume?.manifest.finalTasks ?? {});
+    if (!hasMessage && !hasAddedTasks && !canResumeImplicitly) {
+      throw new ResumeError(missingResumeInputMessage());
     }
     if (!resume?.manifest.backendSessionId) {
       throw new ResumeError(
@@ -781,8 +793,12 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const hasTasks = tasks.size > 0;
   const firstTimeTasksAppear = isResume && !priorHadTasks && hasTasks;
   const resumeAddedNewTasks = isResume && priorHadTasks && addedTitles.length > 0;
-
   const trimmedMessage = message?.trim() ?? "";
+  const resumeUsesImplicitContinueMessage =
+    isResume &&
+    trimmedMessage.length === 0 &&
+    addedTitles.length === 0 &&
+    hasIncompleteTasks(resume?.manifest.finalTasks ?? {});
 
   // Run name resolution: fresh `run` / `init` may set it via the
   // CLI override, while resume and execute-after-init always reuse
@@ -801,7 +817,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   //
   // Resume follow-up parts:
   //   1. workflow (only if firstTimeTasksAppear) OR new-tasks reminder
-  //   2. message
+  //   2. message, or an implicit continue prompt when unfinished tasks remain
   //
   // Execute-after-init: reuse the stored pendingPrompt verbatim.
   //
@@ -826,6 +842,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     }
     if (trimmedMessage.length > 0) {
       parts.push(trimmedMessage);
+    } else if (resumeUsesImplicitContinueMessage) {
+      parts.push(IMPLICIT_RESUME_MESSAGE);
     }
     initialPrompt = parts.join("\n\n");
   } else {
@@ -891,6 +909,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       status: "running",
       exitCode: null,
       maxAttempts,
+      execution,
       finalTasks: {},
       tasksCompleted: 0,
       tasksTotal: 0,
@@ -908,6 +927,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       status: "running",
       exitCode: null,
       sessionCount: 1,
+      execution,
       pendingPrompt: null,
     };
   } else {
@@ -934,7 +954,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     const frozenCallerInstructions =
       rawCallerInstructions.length > 0 ? interpolate(rawCallerInstructions, injectedVars) : null;
     manifest = {
-      schemaVersion: 3,
+      schemaVersion: 4,
       runId,
       agent: {
         name: agentConfig.name,
@@ -980,6 +1000,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       // a backend resume instead of starting a fresh session.
       backendSessionId: opts.bootstrapBackendSessionId ?? null,
       runtimeVars: persistedRuntimeVars,
+      execution,
       pendingPrompt: isInitialize ? initialPrompt : null,
       callerInstructions: frozenCallerInstructions,
       resetSeed: buildRunResetSeed({
@@ -1080,6 +1101,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
           status: "running",
           exitCode: null,
           maxAttempts,
+          execution,
           finalTasks: {},
           tasksCompleted: 0,
           tasksTotal: 0,
@@ -1094,6 +1116,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
           status: "running",
           exitCode: null,
           sessionCount: 1,
+          execution,
           pendingPrompt: null,
         };
       }

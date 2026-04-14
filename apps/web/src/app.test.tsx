@@ -41,8 +41,23 @@ class MockEventSource {
   }
 }
 
-function makeRun(overrides: Partial<RunSummary> = {}): RunSummary {
-  const run = {
+function abortReasonForStatus(status: RunSummary["status"] | RunDetail["status"]) {
+  return status === "success" ||
+    status === "blocked" ||
+    status === "exhausted" ||
+    status === "aborted" ||
+    status === "error"
+    ? "already_terminal"
+    : "not_active_in_daemon";
+}
+
+function makeRun(
+  overrides: Partial<Omit<RunSummary, "capabilities" | "execution">> & {
+    capabilities?: Partial<RunSummary["capabilities"]>;
+    execution?: RunSummary["execution"];
+  } = {},
+): RunSummary {
+  const base = {
     runId: "run-1",
     repo: "task-runner",
     status: "running",
@@ -62,16 +77,40 @@ function makeRun(overrides: Partial<RunSummary> = {}): RunSummary {
       canArchive: false,
       canUnarchive: false,
       canResume: true,
+      canAbort: false,
+      abortReason: "not_active_in_daemon",
       taskMutation: {
         canAdd: false,
         canEditNotes: false,
         canSetStatus: false,
       },
     },
+    execution: {
+      hostMode: "embedded",
+      controller: {
+        kind: "embedded",
+      },
+    },
+  } satisfies Omit<RunSummary, "capabilities" | "execution"> & {
+    capabilities: RunSummary["capabilities"];
+    execution: RunSummary["execution"];
+  };
+  const run = {
+    ...base,
     ...overrides,
+    capabilities: {
+      ...base.capabilities,
+      ...(overrides.capabilities ?? {}),
+    },
+    execution: overrides.execution ?? base.execution,
   } as RunSummary;
   if (overrides.status !== undefined && !("effectiveStatus" in overrides)) {
     run.effectiveStatus = overrides.status;
+  }
+  if (overrides.capabilities === undefined || overrides.capabilities.abortReason === undefined) {
+    run.capabilities.abortReason = run.capabilities.canAbort
+      ? undefined
+      : abortReasonForStatus(run.status);
   }
   if (overrides.name === undefined && overrides.assignmentName !== undefined) {
     run.name = overrides.assignmentName;
@@ -79,8 +118,13 @@ function makeRun(overrides: Partial<RunSummary> = {}): RunSummary {
   return run;
 }
 
-function makeDetail(overrides: Partial<RunDetail> = {}): RunDetail {
-  const detail = {
+function makeDetail(
+  overrides: Partial<Omit<RunDetail, "capabilities" | "execution">> & {
+    capabilities?: Partial<RunDetail["capabilities"]>;
+    execution?: RunDetail["execution"];
+  } = {},
+): RunDetail {
+  const base = {
     runId: "run-1",
     repo: "task-runner",
     status: "running",
@@ -142,16 +186,40 @@ function makeDetail(overrides: Partial<RunDetail> = {}): RunDetail {
       canArchive: false,
       canUnarchive: false,
       canResume: true,
+      canAbort: false,
+      abortReason: "not_active_in_daemon",
       taskMutation: {
         canAdd: false,
         canEditNotes: false,
         canSetStatus: false,
       },
     },
+    execution: {
+      hostMode: "embedded",
+      controller: {
+        kind: "embedded",
+      },
+    },
+  } satisfies Omit<RunDetail, "capabilities" | "execution"> & {
+    capabilities: RunDetail["capabilities"];
+    execution: RunDetail["execution"];
+  };
+  const detail = {
+    ...base,
     ...overrides,
+    capabilities: {
+      ...base.capabilities,
+      ...(overrides.capabilities ?? {}),
+    },
+    execution: overrides.execution ?? base.execution,
   } as RunDetail;
   if (overrides.status !== undefined && !("effectiveStatus" in overrides)) {
     detail.effectiveStatus = overrides.status;
+  }
+  if (overrides.capabilities === undefined || overrides.capabilities.abortReason === undefined) {
+    detail.capabilities.abortReason = detail.capabilities.canAbort
+      ? undefined
+      : abortReasonForStatus(detail.status);
   }
   if (overrides.name === undefined && overrides.assignment?.name !== undefined) {
     detail.name = overrides.assignment.name;
@@ -1436,11 +1504,11 @@ describe("web app", () => {
     });
   });
 
-  it("shows Abort only for live running runs", async () => {
+  it("shows Abort only when capability says the run can be aborted", async () => {
     installFetchMock({
-      runs: [makeRun()],
+      runs: [makeRun({ capabilities: { canAbort: true, abortReason: undefined } })],
       details: {
-        "run-1": makeDetail(),
+        "run-1": makeDetail({ capabilities: { canAbort: true, abortReason: undefined } }),
       },
     });
 

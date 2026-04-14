@@ -508,6 +508,8 @@ test("passive status json exposes passive task-mutation capabilities and no resu
   assert.deepEqual(projected.capabilities, {
     canArchive: true,
     canUnarchive: false,
+    canAbort: false,
+    abortReason: "not_active_in_daemon",
     canResume: false,
     taskMutation: {
       canSetStatus: true,

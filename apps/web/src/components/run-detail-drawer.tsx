@@ -246,7 +246,7 @@ export function RunDetailDrawer({
                 {actionPending === "resume" ? "Resuming..." : "Resume"}
               </button>
             ) : null}
-            {run.isLive && run.status === "running" ? (
+            {run.capabilities.canAbort ? (
               <button
                 className="btn btn-destructive-outline"
                 disabled={actionsLocked}

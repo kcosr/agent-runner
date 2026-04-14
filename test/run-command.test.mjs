@@ -1,4 +1,6 @@
 import { strict as assert } from "node:assert";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import {
   ResumeError,
@@ -48,6 +50,51 @@ test("executeRunCommand rejects resume-time cli vars before attempting backend e
       (err) =>
         err instanceof ResumeError &&
         /--var cannot be combined with --resume-run/.test(err.message),
+    );
+  }));
+
+test("executeRunCommand allows empty resume preflight when incomplete tasks remain", async () =>
+  withRuntimeRoots("task-runner-run-command-", async () => {
+    const outcome = await executeRunCommand({
+      initialize: true,
+      cliVars: {},
+      overrides: {
+        backend: "passive",
+        message: "Seed a resumable passive run.",
+      },
+    });
+
+    const manifestPath = join(outcome.workspaceDir, "run.json");
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    manifest.status = "blocked";
+    manifest.endedAt = "2026-04-13T00:00:00.000Z";
+    manifest.exitCode = 2;
+    manifest.pendingPrompt = null;
+    manifest.finalTasks = {
+      t1: {
+        id: "t1",
+        title: "First",
+        body: "",
+        status: "pending",
+        notes: "",
+      },
+    };
+    manifest.tasksCompleted = 0;
+    manifest.tasksTotal = 1;
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+    await assert.rejects(
+      () =>
+        executeRunCommand({
+          initialize: false,
+          resumeRun: outcome.runId,
+          cliVars: {},
+          overrides: {},
+        }),
+      (err) =>
+        err instanceof RunCommandError &&
+        /cannot run passive agent/.test(err.message) &&
+        !/follow-up message/.test(err.message),
     );
   }));
 

@@ -131,19 +131,41 @@ test("resolveResumeTarget rejects a manifest with runtimeVars: null", () => {
   );
 });
 
-test("resolveResumeTarget accepts a well-formed v3 manifest from the unknown bucket", () => {
+test("resolveResumeTarget rejects a manifest whose execution host and controller mismatch", () => {
+  const dir = tempDir();
+  const manifest = baseManifest("corrupt4", join(dir, "runs", "unknown", "corrupt4"));
+  manifest.execution = {
+    hostMode: "embedded",
+    controller: {
+      kind: "daemon",
+      daemonInstanceId: "daemon-bad",
+    },
+  };
+  writeManifest(dir, "unknown", "corrupt4", manifest);
+
+  assert.throws(
+    () => withStateRoot(dir, () => resolveResumeTarget("corrupt4", dir)),
+    (err) => {
+      assert.ok(err instanceof ResumeError);
+      assert.match(err.message, /does not look like a task-runner run\.json/);
+      return true;
+    },
+  );
+});
+
+test("resolveResumeTarget accepts a well-formed v4 manifest from the unknown bucket", () => {
   const dir = tempDir();
   const workspaceDir = join(dir, "runs", "unknown", "wellformed");
   writeManifest(dir, "unknown", "wellformed", baseManifest("wellformed", workspaceDir));
 
   const resolved = withStateRoot(dir, () => resolveResumeTarget("wellformed", dir));
   assert.equal(resolved.manifest.runId, "wellformed");
-  assert.equal(resolved.manifest.schemaVersion, 3);
+  assert.equal(resolved.manifest.schemaVersion, 4);
 });
 
 function baseManifest(runId, workspaceDir) {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     runId,
     agent: {
       name: "override-test",
@@ -172,6 +194,12 @@ function baseManifest(runId, workspaceDir) {
     tasksTotal: 1,
     backendSessionId: "sess-base",
     runtimeVars: {},
+    execution: {
+      hostMode: "embedded",
+      controller: {
+        kind: "embedded",
+      },
+    },
     pendingPrompt: null,
     callerInstructions: null,
     resetSeed: {

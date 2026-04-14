@@ -9,11 +9,16 @@
 - Direct file-path args are now recognized only when the argument contains `/` or starts with `./`; bare names no longer implicitly resolve from the repo checkout. ([#8](https://github.com/kcosr/task-runner/pull/8))
 - Run workspace and draft buckets under `${TASK_RUNNER_STATE_DIR}/runs/` and `${TASK_RUNNER_STATE_DIR}/drafts/` now use the repo basename (for example `task-runner`) instead of a slugified absolute repo path. Existing runs remain on disk at their old locations, but short-id lookup now resolves against the new basename bucket unless you resume by explicit workspace path. ([#10](https://github.com/kcosr/task-runner/pull/10))
 - Manifest schema version is now `3`. Existing `schemaVersion: 2` runs from the pre-reset-seed generation are no longer resumable; start a fresh run instead.
+- Manifest schema version is now `4`. Run manifests and daemon/CLI/web DTOs now require persisted `execution` provenance, and older `schemaVersion: 3` runs from before the abort-control hot cut are no longer resumable. ([#29](https://github.com/kcosr/task-runner/pull/29))
 - `task-runner status --output-format json` now emits the shared `RunDetail` contract, and `--field` projects top-level `RunDetail` fields. The raw `finalTasks` status projection is removed; use `--field tasks` instead. ([#17](https://github.com/kcosr/task-runner/pull/17))
 - `RunCapabilities` is now a hot-cut machine-facing contract with nested task mutation booleans (`taskMutation.canSetStatus`, `canEditNotes`, `canAdd`). The old flat `canAbort` / `canMutateTasks` fields are removed, and `list runs --output-format json` now carries `capabilities` on every `RunSummary` row. ([#19](https://github.com/kcosr/task-runner/pull/19))
 
 ### Added
 
+- Added persisted run execution context (`execution.hostMode` plus
+  `execution.controller`) to shared run summaries/details and manifest
+  writes, and added `daemonInstanceId` to daemon health/read surfaces so
+  clients can distinguish embedded runs from daemon-owned sessions. ([#29](https://github.com/kcosr/task-runner/pull/29))
 - Added collapsible kanban columns in the web dashboard, including
   persisted collapsed state, jump-strip expansion, and polished
   collapsed-label rendering. ([#28](https://github.com/kcosr/task-runner/pull/28))
@@ -55,6 +60,13 @@
 
 ### Changed
 
+- Relaxed resume validation so task-backed runs can resume without a
+  caller message when incomplete tasks remain; core now synthesizes an
+  implicit continue prompt for that empty-resume case. ([#29](https://github.com/kcosr/task-runner/pull/29))
+- Run capabilities now expose explicit abort authority:
+  `canAbort=false` with `abortReason` for terminal or daemon-unowned
+  runs, and daemon/read/web surfaces now gate Abort from that
+  capability instead of inferring it from liveness alone.
 - `task-runner status` and `task-runner list runs` now render the
   shared derived `effectiveStatus` as their primary status surface, and
   the web dashboard groups/badges by `effectiveStatus` while keeping
@@ -101,6 +113,10 @@
 
 ### Fixed
 
+- Fixed Ctrl+C handling for Codex-managed and daemon-target runs so
+  task-runner only reports a clean interrupt after cancellation is
+  actually confirmed. Unconfirmed interruption now fails loudly instead
+  of pretending the remote run stopped. ([#29](https://github.com/kcosr/task-runner/pull/29))
 - Fixed the web dashboard so running file-mode kanban cards now show the
   same live task progress as the detail drawer instead of stale persisted
   manifest counts. ([#27](https://github.com/kcosr/task-runner/pull/27))

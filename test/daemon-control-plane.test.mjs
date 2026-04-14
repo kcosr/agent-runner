@@ -6,7 +6,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
-import WebSocket from "ws";
+import WebSocket, { WebSocketServer } from "ws";
 import { DaemonClient } from "../apps/cli/dist/daemon/client.js";
 import { deriveHttpBaseUrl } from "../apps/cli/dist/daemon/config.js";
 import { serveDaemon } from "../apps/cli/dist/daemon/server.js";
@@ -273,14 +273,37 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
     try {
       const info = await client.call("daemon.info");
       assert.equal(info.listenUrl, listenUrl);
+      assert.match(info.daemonInstanceId, /^daemon-/);
 
       const runs = await client.call("runs.list", {});
       assert.equal(runs.runs[0].runId, init.runId);
+      assert.deepEqual(runs.runs[0].execution, {
+        hostMode: "embedded",
+        controller: { kind: "embedded" },
+      });
+      assert.deepEqual(runs.runs[0].capabilities, {
+        canArchive: true,
+        canUnarchive: false,
+        canResume: true,
+        canAbort: false,
+        abortReason: "not_active_in_daemon",
+        taskMutation: {
+          canSetStatus: true,
+          canEditNotes: true,
+          canAdd: true,
+        },
+      });
 
       const detail = await client.call("runs.get", { target: init.runId });
       assert.equal(detail.run.runId, init.runId);
       assert.equal(detail.run.assignment.name, "daemon-work");
       assert.equal(detail.run.name, null);
+      assert.deepEqual(detail.run.execution, {
+        hostMode: "embedded",
+        controller: { kind: "embedded" },
+      });
+      assert.equal(detail.run.capabilities.canAbort, false);
+      assert.equal(detail.run.capabilities.abortReason, "not_active_in_daemon");
 
       const renamed = await client.call("runs.setName", {
         target: init.runId,
@@ -345,12 +368,19 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
       const daemon = await httpJson(httpBaseUrl, "/api/daemon");
       assert.equal(daemon.status, 200);
       assert.equal(daemon.body.daemon.listenUrl, listenUrl);
+      assert.match(daemon.body.daemon.daemonInstanceId, /^daemon-/);
 
       const runs = await httpJson(httpBaseUrl, "/api/runs");
       assert.equal(runs.status, 200);
       assert.equal(runs.body.runs[0].runId, init.runId);
       assert.equal(runs.body.runs[0].status, "initialized");
       assert.equal(runs.body.runs[0].effectiveStatus, "initialized");
+      assert.deepEqual(runs.body.runs[0].execution, {
+        hostMode: "embedded",
+        controller: { kind: "embedded" },
+      });
+      assert.equal(runs.body.runs[0].capabilities.canAbort, false);
+      assert.equal(runs.body.runs[0].capabilities.abortReason, "not_active_in_daemon");
 
       const detail = await httpJson(httpBaseUrl, `/api/runs/${init.runId}`);
       assert.equal(detail.status, 200);
@@ -358,6 +388,12 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
       assert.equal(detail.body.run.name, null);
       assert.equal(detail.body.run.status, "initialized");
       assert.equal(detail.body.run.effectiveStatus, "initialized");
+      assert.deepEqual(detail.body.run.execution, {
+        hostMode: "embedded",
+        controller: { kind: "embedded" },
+      });
+      assert.equal(detail.body.run.capabilities.canAbort, false);
+      assert.equal(detail.body.run.capabilities.abortReason, "not_active_in_daemon");
 
       const renamed = await httpJson(httpBaseUrl, `/api/runs/${init.runId}/name`, {
         method: "POST",
@@ -570,6 +606,197 @@ test("daemon HTTP rejects encoded traversal route params without leaking paths",
     assert.equal(response.body.error.code, "NOT_FOUND");
     assert.equal(response.body.error.message, "resource not found");
   } finally {
+    await server.close();
+  }
+});
+
+test("daemon run projections expose explicit abort capability from local ownership", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  let daemonInstanceId = "daemon-placeholder";
+  const runId = "daemon-owned-run";
+  const server = await serveDaemon(listenUrl, {
+    getRun() {
+      return {
+        runId,
+        repo: "task-runner",
+        status: "running",
+        effectiveStatus: "running",
+        archivedAt: null,
+        isLive: true,
+        workspaceDir: "/tmp/fake",
+        assignmentPath: "/tmp/fake/assignment.md",
+        agent: {
+          name: "daemon-agent",
+          sourcePath: null,
+        },
+        assignment: {
+          name: "daemon-work",
+          sourcePath: "/tmp/fake/source.md",
+          workspacePath: "/tmp/fake/assignment.md",
+        },
+        backend: "codex",
+        model: "gpt-5.4",
+        effort: "high",
+        name: "Daemon-owned run",
+        backendSessionId: "thread-1",
+        cwd: "/tmp/fake",
+        taskMode: "file",
+        unrestricted: false,
+        timeoutSec: 3600,
+        startedAt: "2026-04-13T05:00:00.000Z",
+        endedAt: null,
+        exitCode: null,
+        attempts: 1,
+        maxAttempts: 1,
+        sessionCount: 1,
+        tasksCompleted: 0,
+        tasksTotal: 1,
+        tasks: [
+          {
+            id: "t1",
+            title: "First",
+            body: "",
+            status: "pending",
+            notes: "",
+          },
+        ],
+        message: null,
+        callerInstructions: null,
+        pendingPrompt: null,
+        lockedFields: [],
+        runtimeVars: {},
+        execution: {
+          hostMode: "daemon",
+          controller: {
+            kind: "daemon",
+            daemonInstanceId,
+          },
+        },
+        capabilities: {
+          canArchive: false,
+          canUnarchive: false,
+          canResume: false,
+          canAbort: false,
+          abortReason: "not_active_in_daemon",
+          taskMutation: {
+            canSetStatus: false,
+            canEditNotes: false,
+            canAdd: false,
+          },
+        },
+      };
+    },
+    getRunList() {
+      return [
+        {
+          runId,
+          repo: "task-runner",
+          status: "running",
+          effectiveStatus: "running",
+          archivedAt: null,
+          agentName: "daemon-agent",
+          name: "Daemon-owned run",
+          assignmentName: "daemon-work",
+          backend: "codex",
+          model: "gpt-5.4",
+          cwd: "/tmp/fake",
+          startedAt: "2026-04-13T05:00:00.000Z",
+          endedAt: null,
+          tasksCompleted: 0,
+          tasksTotal: 1,
+          execution: {
+            hostMode: "daemon",
+            controller: {
+              kind: "daemon",
+              daemonInstanceId,
+            },
+          },
+          capabilities: {
+            canArchive: false,
+            canUnarchive: false,
+            canResume: false,
+            canAbort: false,
+            abortReason: "not_active_in_daemon",
+            taskMutation: {
+              canSetStatus: false,
+              canEditNotes: false,
+              canAdd: false,
+            },
+          },
+        },
+      ];
+    },
+    async startRun({ emitEvent, abortSignal }) {
+      emitEvent({
+        type: "run_started",
+        runId,
+        agentName: "daemon-agent",
+        assignmentSourcePath: null,
+        assignmentPath: "/tmp/fake/assignment.md",
+        name: "Daemon-owned run",
+        cwd: "/tmp/fake",
+        sessionIndex: 1,
+      });
+      emitEvent({ type: "attempt_started", attempt: 1 });
+      await new Promise((resolve) => {
+        abortSignal.addEventListener(
+          "abort",
+          () => {
+            emitEvent({ type: "run_aborted" });
+            emitEvent({
+              type: "run_finished",
+              summary: {
+                status: "aborted",
+                attempts: 1,
+                maxAttempts: 1,
+                tasksCompleted: 0,
+                tasksTotal: 1,
+                assignmentPath: "/tmp/fake/assignment.md",
+                tasks: [],
+                runId,
+              },
+            });
+            resolve();
+          },
+          { once: true },
+        );
+      });
+      return { runId };
+    },
+  });
+
+  const client = await DaemonClient.connect(listenUrl);
+  try {
+    daemonInstanceId = (await client.call("daemon.info")).daemonInstanceId;
+    const started = await client.call("runs.start", { cliVars: {}, overrides: {} });
+    assert.equal(started.runId, runId);
+
+    const list = await client.call("runs.list", {});
+    assert.equal(list.runs[0].capabilities.canAbort, true);
+    assert.equal("abortReason" in list.runs[0].capabilities, false);
+    assert.deepEqual(list.runs[0].execution, {
+      hostMode: "daemon",
+      controller: {
+        kind: "daemon",
+        daemonInstanceId,
+      },
+    });
+
+    const detail = await client.call("runs.get", { target: runId });
+    assert.equal(detail.run.capabilities.canAbort, true);
+    assert.equal("abortReason" in detail.run.capabilities, false);
+    assert.deepEqual(detail.run.execution, {
+      hostMode: "daemon",
+      controller: {
+        kind: "daemon",
+        daemonInstanceId,
+      },
+    });
+
+    await client.call("runs.abort", { target: runId });
+  } finally {
+    await client.close();
     await server.close();
   }
 });
@@ -1128,7 +1355,267 @@ test("daemon init uses the remote caller cwd when the agent omits cwd", async ()
     );
     const run = JSON.parse(output);
     assert.equal(run.cwd, clientDir);
+    assert.equal(run.execution.hostMode, "daemon");
+    assert.equal(run.execution.controller.kind, "daemon");
+    assert.match(run.execution.controller.daemonInstanceId, /^daemon-/);
   } finally {
     await daemon.stop();
+  }
+});
+
+test("daemon-target CLI surfaces Ctrl+C cancel failures instead of exiting as a clean interrupt", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const wsServer = new WebSocketServer({ host: "127.0.0.1", port });
+  const subscriptionId = "sub-1";
+  let startHandled = false;
+
+  wsServer.on("connection", (ws) => {
+    ws.on("message", (payload) => {
+      const request = JSON.parse(payload.toString());
+      if (request.method === "events.subscribe") {
+        ws.send(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: request.id,
+            result: { subscriptionId },
+          }),
+        );
+        return;
+      }
+      if (request.method === "runs.start") {
+        startHandled = true;
+        ws.send(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            method: "run.event",
+            params: {
+              subscriptionId,
+              runId: "daemon-cli-run",
+              event: {
+                type: "run_started",
+                runId: "daemon-cli-run",
+                agentName: "daemon-agent",
+                assignmentSourcePath: null,
+                assignmentPath: "/tmp/fake/assignment.md",
+                name: "daemon cli",
+                cwd: process.cwd(),
+                sessionIndex: 1,
+              },
+            },
+          }),
+        );
+        ws.send(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: request.id,
+            result: { runId: "daemon-cli-run" },
+          }),
+        );
+        return;
+      }
+      if (request.method === "runs.abort") {
+        ws.send(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: request.id,
+            error: {
+              code: -32004,
+              message: "cancel failed",
+            },
+          }),
+        );
+        return;
+      }
+      if (request.method === "events.unsubscribe") {
+        ws.send(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: request.id,
+            result: { unsubscribed: true },
+          }),
+        );
+        return;
+      }
+    });
+  });
+
+  const child = spawn(
+    "node",
+    [
+      CLI_PATH,
+      "run",
+      "--connect",
+      listenUrl,
+      "--agent",
+      "daemon-agent",
+      "--assignment",
+      "daemon-work",
+    ],
+    {
+      cwd: process.cwd(),
+      env: process.env,
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+
+  let stderr = "";
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk.toString();
+  });
+
+  try {
+    await new Promise((resolve, reject) => {
+      const startedAt = Date.now();
+      const poll = () => {
+        if (startHandled) {
+          resolve(undefined);
+          return;
+        }
+        if (Date.now() - startedAt > 5_000) {
+          reject(new Error("CLI did not start the daemon-target run in time"));
+          return;
+        }
+        setTimeout(poll, 25);
+      };
+      poll();
+    });
+
+    child.kill("SIGINT");
+    const result = await new Promise((resolve) =>
+      child.once("exit", (code, signal) => resolve({ code, signal })),
+    );
+    assert.deepEqual(result, { code: 1, signal: null });
+    assert.match(stderr, /Ctrl\+C cancel request failed: cancel failed/);
+    assert.doesNotMatch(stderr, /interrupted by user/i);
+  } finally {
+    for (const client of wsServer.clients) {
+      client.terminate();
+    }
+    await new Promise((resolve) => wsServer.close(() => resolve()));
+  }
+});
+
+test("daemon-target CLI force-exits on a second Ctrl+C while daemon cancel is still pending", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const wsServer = new WebSocketServer({ host: "127.0.0.1", port });
+  const subscriptionId = "sub-1";
+  let startHandled = false;
+
+  wsServer.on("connection", (ws) => {
+    ws.on("message", (payload) => {
+      const request = JSON.parse(payload.toString());
+      if (request.method === "events.subscribe") {
+        ws.send(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: request.id,
+            result: { subscriptionId },
+          }),
+        );
+        return;
+      }
+      if (request.method === "runs.start") {
+        startHandled = true;
+        ws.send(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            method: "run.event",
+            params: {
+              subscriptionId,
+              runId: "daemon-cli-run",
+              event: {
+                type: "run_started",
+                runId: "daemon-cli-run",
+                agentName: "daemon-agent",
+                assignmentSourcePath: null,
+                assignmentPath: "/tmp/fake/assignment.md",
+                name: "daemon cli",
+                cwd: process.cwd(),
+                sessionIndex: 1,
+              },
+            },
+          }),
+        );
+        ws.send(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: request.id,
+            result: { runId: "daemon-cli-run" },
+          }),
+        );
+        return;
+      }
+      if (request.method === "runs.abort") {
+        return;
+      }
+      if (request.method === "events.unsubscribe") {
+        ws.send(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: request.id,
+            result: { unsubscribed: true },
+          }),
+        );
+      }
+    });
+  });
+
+  const child = spawn(
+    "node",
+    [
+      CLI_PATH,
+      "run",
+      "--connect",
+      listenUrl,
+      "--agent",
+      "daemon-agent",
+      "--assignment",
+      "daemon-work",
+    ],
+    {
+      cwd: process.cwd(),
+      env: process.env,
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+
+  let stderr = "";
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk.toString();
+  });
+
+  try {
+    await new Promise((resolve, reject) => {
+      const startedAt = Date.now();
+      const poll = () => {
+        if (startHandled) {
+          resolve(undefined);
+          return;
+        }
+        if (Date.now() - startedAt > 5_000) {
+          reject(new Error("CLI did not start the daemon-target run in time"));
+          return;
+        }
+        setTimeout(poll, 25);
+      };
+      poll();
+    });
+
+    child.kill("SIGINT");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    child.kill("SIGINT");
+    const result = await new Promise((resolve) =>
+      child.once("exit", (code, signal) => resolve({ code, signal })),
+    );
+    assert.deepEqual(result, { code: 130, signal: null });
+    assert.match(stderr, /requesting daemon cancel/);
+    assert.match(stderr, /forced exit/);
+  } finally {
+    for (const client of wsServer.clients) {
+      client.terminate();
+    }
+    await new Promise((resolve) => wsServer.close(() => resolve()));
   }
 });

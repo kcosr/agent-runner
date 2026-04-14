@@ -1,7 +1,7 @@
 import { deriveRepoKey } from "../config/runtime-paths.js";
 import { normalizeTaskMode } from "../core/config/schema.js";
 import type { LockableField, TaskMode } from "../core/config/schema.js";
-import type { TaskSnapshot } from "../core/run/manifest.js";
+import type { RunExecution, TaskSnapshot } from "../core/run/manifest.js";
 import type { ListedRunManifest, ManifestStatus, RunManifest } from "../core/run/manifest.js";
 import { deriveEffectiveStatus } from "../core/run/status.js";
 
@@ -26,6 +26,7 @@ export interface RunSummary {
   endedAt: string | null;
   tasksCompleted: number;
   tasksTotal: number;
+  execution: RunExecution;
   capabilities: RunCapabilities;
 }
 
@@ -43,10 +44,14 @@ export interface RunTaskMutationCapabilities {
   canAdd: boolean;
 }
 
+export type RunAbortReason = "already_terminal" | "not_active_in_daemon";
+
 export interface RunCapabilities {
   canArchive: boolean;
   canUnarchive: boolean;
   canResume: boolean;
+  canAbort: boolean;
+  abortReason?: RunAbortReason;
   taskMutation: RunTaskMutationCapabilities;
 }
 
@@ -96,6 +101,7 @@ export interface RunDetail {
   pendingPrompt: string | null;
   lockedFields: LockableField[];
   runtimeVars: Record<string, unknown>;
+  execution: RunExecution;
   capabilities: RunCapabilities;
 }
 
@@ -132,6 +138,16 @@ function isArchived(manifest: RunManifest): boolean {
 
 function isRunning(manifest: RunManifest): boolean {
   return manifest.status === "running";
+}
+
+export function isTerminalStatus(status: RunStatus): boolean {
+  return (
+    status === "success" ||
+    status === "blocked" ||
+    status === "exhausted" ||
+    status === "aborted" ||
+    status === "error"
+  );
 }
 
 export function deriveTaskMutationCapabilities(manifest: RunManifest): RunTaskMutationCapabilities {
@@ -190,15 +206,23 @@ export function toRunSummary(entry: ListedRunManifest): RunSummary {
     endedAt: entry.manifest.endedAt,
     tasksCompleted: entry.manifest.tasksCompleted,
     tasksTotal: entry.manifest.tasksTotal,
+    execution: entry.manifest.execution,
     capabilities: deriveRunCapabilities(entry.manifest),
   };
 }
 
 export function deriveRunCapabilities(manifest: RunManifest): RunCapabilities {
+  const canAbort = false;
   return {
     canArchive: !isRunning(manifest) && !isArchived(manifest),
     canUnarchive: !isRunning(manifest) && isArchived(manifest),
     canResume: !isRunning(manifest) && !isArchived(manifest) && manifest.backend !== "passive",
+    canAbort,
+    abortReason: canAbort
+      ? undefined
+      : isTerminalStatus(manifest.status)
+        ? "already_terminal"
+        : "not_active_in_daemon",
     taskMutation: deriveTaskMutationCapabilities(manifest),
   };
 }
@@ -248,6 +272,7 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
     pendingPrompt: manifest.pendingPrompt,
     lockedFields: [...manifest.lockedFields],
     runtimeVars: { ...manifest.runtimeVars },
+    execution: manifest.execution,
     capabilities: deriveRunCapabilities(manifest),
   };
 }

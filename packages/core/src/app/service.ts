@@ -23,6 +23,7 @@ import {
   unarchiveRun,
 } from "../core/commands/service.js";
 import type { AgentConfig, AssignmentConfig, TaskMode } from "../core/config/schema.js";
+import type { RunExecution } from "../core/run/manifest.js";
 import type { RunEvent, RunOutcome } from "../core/run/run-loop.js";
 import { executeRunCommand } from "../run-command.js";
 
@@ -55,6 +56,7 @@ export interface StartRunRequest {
   backendSessionId?: string;
   cliVars: Record<string, string>;
   overrides: RunCommandOverrides;
+  execution?: RunExecution;
   abortSignal?: AbortSignal;
   emitEvent?: (event: RunEvent) => void;
 }
@@ -62,6 +64,7 @@ export interface StartRunRequest {
 export interface ResumeRunRequest {
   target: string;
   overrides: RunCommandOverrides;
+  execution?: RunExecution;
   abortSignal?: AbortSignal;
   emitEvent?: (event: RunEvent) => void;
 }
@@ -171,6 +174,7 @@ export async function initRun(request: StartRunRequest): Promise<RunDetail> {
     backendSessionId: request.backendSessionId,
     cliVars: request.cliVars,
     overrides: request.overrides,
+    execution: request.execution,
     abortSignal: request.abortSignal,
     emitEvent: request.emitEvent,
   });
@@ -187,6 +191,7 @@ export function startRun(request: StartRunRequest): Promise<RunOutcome> {
     backendSessionId: request.backendSessionId,
     cliVars: request.cliVars,
     overrides: request.overrides,
+    execution: request.execution,
     abortSignal: request.abortSignal,
     emitEvent: request.emitEvent,
   });
@@ -198,6 +203,7 @@ export function resumeRun(request: ResumeRunRequest): Promise<RunOutcome> {
     resumeRun: request.target,
     cliVars: {},
     overrides: request.overrides,
+    execution: request.execution,
     abortSignal: request.abortSignal,
     emitEvent: request.emitEvent,
   });

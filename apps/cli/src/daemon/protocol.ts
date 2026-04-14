@@ -40,6 +40,7 @@ export interface JsonRpcNotification {
 }
 
 export interface DaemonInfo {
+  daemonInstanceId: string;
   pid: number;
   listenUrl: string;
   version: string;
