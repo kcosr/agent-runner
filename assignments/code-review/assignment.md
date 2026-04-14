@@ -175,6 +175,26 @@ tasks:
           review, *also* read each touched file in full (not just
           the diff) so you can judge the change in context.
 
+      Third, if this review was launched from a plan-driven
+      implementer run and that run carries an attachment named
+      `assignment-summary.md`, download it to a temp directory and
+      review it for supplemental context. The summary is
+      supplemental only; the authoritative review inputs remain
+      the repository state, the requested scope, and
+      `implementation_plan` when it is provided.
+
+      Derive the implementer workspace from
+      `implementation_plan` when that var is set:
+
+          workspace_dir="$(dirname "{{implementation_plan}}")"
+          {{task_runner_cmd}} attachment list "$workspace_dir"
+          mkdir -p /tmp/task-runner-review-artifacts-{{run_id}}
+          {{task_runner_cmd}} attachment download "$workspace_dir" <summary-attachment-id> /tmp/task-runner-review-artifacts-{{run_id}}/
+
+      If `implementation_plan` is empty or the run has no
+      `assignment-summary.md` attachment, continue without
+      blocking.
+
       Notes: a 5-10 line summary of what the project is, its
       major modules, and — if scoped — the concrete set of files
       and hunks under review. This is context for the rest of the

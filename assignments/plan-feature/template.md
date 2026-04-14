@@ -25,6 +25,11 @@ callerInstructions: |
 
       {{task_runner_cmd}} run --resume-run {{run_id}}
 
+  This run may also carry an attachment named
+  `assignment-summary.md`. If it exists, download it to a temp
+  directory and review it for supplemental context. The task
+  list in this run remains the canonical execution contract.
+
   The `internal_review` task in this plan launches a nested
   `{{task_runner_cmd}} run` against the `code-reviewer` agent.
   The caller environment must allow one nested review run, or
@@ -148,6 +153,22 @@ tasks:
       run.
 
       ## Re-orient to repo conventions
+
+      Before repo orientation, inspect this run's task list with
+      the normal task commands. Those tasks and their bodies are
+      the canonical execution contract for this run.
+
+      If an attachment named `assignment-summary.md` exists on
+      this run, download it to a temp directory and review it
+      for additional context:
+
+          {{task_runner_cmd}} attachment list {{run_id}}
+          mkdir -p /tmp/task-runner-plan-artifacts-{{run_id}}
+          {{task_runner_cmd}} attachment download {{run_id}} <summary-attachment-id> /tmp/task-runner-plan-artifacts-{{run_id}}/
+
+      If no such attachment exists, continue without blocking.
+      Do not treat the summary attachment as overriding this
+      run's tasks or workspace `assignment.md`.
 
       You are about to implement a feature in the repository
       at `{{repo_path}}`. This is a fresh session — you do
