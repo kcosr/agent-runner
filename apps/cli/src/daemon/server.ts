@@ -24,8 +24,10 @@ import type {
   RunAbortReason,
   RunCapabilities,
   RunDetail,
+  RunStatus,
   RunSummary,
 } from "@task-runner/core/contracts/runs.js";
+import { isTerminalStatus } from "@task-runner/core/contracts/runs.js";
 import { ConflictError } from "@task-runner/core/core/commands/service.js";
 import type { RunEvent } from "@task-runner/core/core/run/run-loop.js";
 import { shortId } from "@task-runner/core/util/short-id.js";
@@ -63,23 +65,28 @@ interface ActiveRunRecord {
   done: Promise<void>;
 }
 
+function daemonExecution(daemonInstanceId: string) {
+  return {
+    hostMode: "daemon" as const,
+    controller: {
+      kind: "daemon" as const,
+      daemonInstanceId,
+    },
+  };
+}
+
 function deriveDaemonAbortCapability(
   runId: string,
-  status: string,
+  status: RunStatus,
   activeRuns: Map<string, ActiveRunRecord>,
 ): Pick<RunCapabilities, "canAbort" | "abortReason"> {
   if (activeRuns.has(runId)) {
     return { canAbort: true };
   }
 
-  const abortReason: RunAbortReason =
-    status === "success" ||
-    status === "blocked" ||
-    status === "exhausted" ||
-    status === "aborted" ||
-    status === "error"
-      ? "already_terminal"
-      : "not_active_in_daemon";
+  const abortReason: RunAbortReason = isTerminalStatus(status)
+    ? "already_terminal"
+    : "not_active_in_daemon";
   return {
     canAbort: false,
     abortReason,
@@ -339,13 +346,7 @@ export async function serveDaemon(
     initRun: (request) =>
       app.initRun({
         ...request,
-        execution: {
-          hostMode: "daemon",
-          controller: {
-            kind: "daemon",
-            daemonInstanceId,
-          },
-        },
+        execution: daemonExecution(daemonInstanceId),
       }),
     daemonInfo: {
       daemonInstanceId,
@@ -358,13 +359,7 @@ export async function serveDaemon(
       executeManagedRun((emitEvent, abortSignal) =>
         app.startRun({
           ...request,
-          execution: {
-            hostMode: "daemon",
-            controller: {
-              kind: "daemon",
-              daemonInstanceId,
-            },
-          },
+          execution: daemonExecution(daemonInstanceId),
           abortSignal,
           emitEvent,
         }),
@@ -373,13 +368,7 @@ export async function serveDaemon(
       executeManagedRun((emitEvent, abortSignal) =>
         app.resumeRun({
           ...request,
-          execution: {
-            hostMode: "daemon",
-            controller: {
-              kind: "daemon",
-              daemonInstanceId,
-            },
-          },
+          execution: daemonExecution(daemonInstanceId),
           abortSignal,
           emitEvent,
         }),

@@ -205,6 +205,19 @@ test("deriveEffectiveStatus marks fully completed passive runs as success", () =
   assert.equal(effectiveStatus, "success");
 });
 
+test("deriveEffectiveStatus marks passive runs with completed work and pending remainder as running", () => {
+  const effectiveStatus = deriveEffectiveStatus({
+    backend: "passive",
+    status: "initialized",
+    finalTasks: {
+      t1: { status: "completed" },
+      t2: { status: "pending" },
+    },
+  });
+
+  assert.equal(effectiveStatus, "running");
+});
+
 test("deriveEffectiveStatus marks completed-and-blocked passive runs as blocked", () => {
   const effectiveStatus = deriveEffectiveStatus({
     backend: "passive",

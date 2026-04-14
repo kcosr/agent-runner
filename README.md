@@ -796,10 +796,12 @@ The JSON `RunDetail` contract also carries a machine-facing
 - `taskMutation.canEditNotes`
 - `taskMutation.canAdd`
 
-`execution` is persisted provenance: embedded runs record
+`execution` is the persisted execution context for the latest stored
+session: embedded runs record
 `{ hostMode: "embedded", controller: { kind: "embedded" } }`, while
-daemon-started runs record daemon ownership and the daemon instance id
-that created them.
+daemon-run sessions record daemon ownership and the daemon instance id.
+Resume rewrites this block to the controller that most recently ran the
+session.
 
 Capabilities reflect the current lifecycle and host-ownership rules. In
 particular, passive runs are never resumable through `run`, running

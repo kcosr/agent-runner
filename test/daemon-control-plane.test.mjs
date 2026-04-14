@@ -1495,3 +1495,127 @@ test("daemon-target CLI surfaces Ctrl+C cancel failures instead of exiting as a 
     await new Promise((resolve) => wsServer.close(() => resolve()));
   }
 });
+
+test("daemon-target CLI force-exits on a second Ctrl+C while daemon cancel is still pending", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const wsServer = new WebSocketServer({ host: "127.0.0.1", port });
+  const subscriptionId = "sub-1";
+  let startHandled = false;
+
+  wsServer.on("connection", (ws) => {
+    ws.on("message", (payload) => {
+      const request = JSON.parse(payload.toString());
+      if (request.method === "events.subscribe") {
+        ws.send(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: request.id,
+            result: { subscriptionId },
+          }),
+        );
+        return;
+      }
+      if (request.method === "runs.start") {
+        startHandled = true;
+        ws.send(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            method: "run.event",
+            params: {
+              subscriptionId,
+              runId: "daemon-cli-run",
+              event: {
+                type: "run_started",
+                runId: "daemon-cli-run",
+                agentName: "daemon-agent",
+                assignmentSourcePath: null,
+                assignmentPath: "/tmp/fake/assignment.md",
+                name: "daemon cli",
+                cwd: process.cwd(),
+                sessionIndex: 1,
+              },
+            },
+          }),
+        );
+        ws.send(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: request.id,
+            result: { runId: "daemon-cli-run" },
+          }),
+        );
+        return;
+      }
+      if (request.method === "runs.abort") {
+        return;
+      }
+      if (request.method === "events.unsubscribe") {
+        ws.send(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: request.id,
+            result: { unsubscribed: true },
+          }),
+        );
+      }
+    });
+  });
+
+  const child = spawn(
+    "node",
+    [
+      CLI_PATH,
+      "run",
+      "--connect",
+      listenUrl,
+      "--agent",
+      "daemon-agent",
+      "--assignment",
+      "daemon-work",
+    ],
+    {
+      cwd: process.cwd(),
+      env: process.env,
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+
+  let stderr = "";
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk.toString();
+  });
+
+  try {
+    await new Promise((resolve, reject) => {
+      const startedAt = Date.now();
+      const poll = () => {
+        if (startHandled) {
+          resolve(undefined);
+          return;
+        }
+        if (Date.now() - startedAt > 5_000) {
+          reject(new Error("CLI did not start the daemon-target run in time"));
+          return;
+        }
+        setTimeout(poll, 25);
+      };
+      poll();
+    });
+
+    child.kill("SIGINT");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    child.kill("SIGINT");
+    const result = await new Promise((resolve) =>
+      child.once("exit", (code, signal) => resolve({ code, signal })),
+    );
+    assert.deepEqual(result, { code: 130, signal: null });
+    assert.match(stderr, /requesting daemon cancel/);
+    assert.match(stderr, /forced exit/);
+  } finally {
+    for (const client of wsServer.clients) {
+      client.terminate();
+    }
+    await new Promise((resolve) => wsServer.close(() => resolve()));
+  }
+});

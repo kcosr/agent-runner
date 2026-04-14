@@ -2049,7 +2049,7 @@ Rules for this seam:
   writes.
 - `RunSummary` and `RunDetail` carry both canonical lifecycle `status`
   and derived `effectiveStatus`, plus persisted `execution`
-  provenance.
+  context for the latest stored session.
 - Canonical `status` remains the persisted engine lifecycle used for
   resume/reset/archive/task-mutation semantics.
 - `effectiveStatus` is a read-model field: non-passive runs mirror
@@ -2281,9 +2281,12 @@ The CLI installs a `SIGINT` handler that:
      handshake.
    For codex, the run only lands in `manifest.status = "aborted"` and
    exits 130 once interruption is confirmed by the remote turn result.
-   If confirmation fails (no turn id, RPC error, timeout, or the turn
-   ends without interrupted status), the run exits as `error` with a
-   diagnostic that the remote session may still be active.
+   If confirmation fails before the turn reaches a confirmed interrupted
+   terminal event (no turn id, RPC error, timeout, or a non-interrupted
+   terminal result), the backend emits a diagnostic that the remote
+   session may still be active. Non-interrupted terminal completion
+   keeps the completed result; other failed confirmations land as
+   `error`.
 2. **Second Ctrl+C**: bypasses the run loop entirely and force-exits
    the process with 130. Use this if the backend is wedged and
    doesn't respond to the interrupt within a few seconds.

@@ -40,18 +40,22 @@ export const runTaskMutationCapabilitiesSchema: z.ZodType<RunTaskMutationCapabil
   canAdd: z.boolean(),
 });
 
-const runExecutionSchema = z.object({
-  hostMode: z.enum(["embedded", "daemon"]),
-  controller: z.union([
-    z.object({
-      kind: z.literal("embedded"),
-    }),
-    z.object({
-      kind: z.literal("daemon"),
-      daemonInstanceId: z.string(),
-    }),
-  ]),
-});
+const runExecutionSchema = z
+  .object({
+    hostMode: z.enum(["embedded", "daemon"]),
+    controller: z.union([
+      z.object({
+        kind: z.literal("embedded"),
+      }),
+      z.object({
+        kind: z.literal("daemon"),
+        daemonInstanceId: z.string(),
+      }),
+    ]),
+  })
+  .refine((value) => value.hostMode === value.controller.kind, {
+    message: "execution.hostMode must match execution.controller.kind",
+  });
 
 const runAbortReasonSchema: z.ZodType<RunAbortReason> = z.enum([
   "already_terminal",

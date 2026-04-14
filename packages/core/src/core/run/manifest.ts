@@ -513,10 +513,10 @@ function isRunManifest(value: unknown): value is RunManifest {
   if (!execution.controller || typeof execution.controller !== "object") return false;
   const controller = execution.controller as Record<string, unknown>;
   if (controller.kind === "embedded") {
-    return true;
+    return execution.hostMode === "embedded";
   }
   if (controller.kind === "daemon") {
-    return typeof controller.daemonInstanceId === "string";
+    return execution.hostMode === "daemon" && typeof controller.daemonInstanceId === "string";
   }
 
   return false;

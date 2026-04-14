@@ -15,10 +15,10 @@
 
 ### Added
 
-- Added persisted run execution provenance (`execution.hostMode` plus
+- Added persisted run execution context (`execution.hostMode` plus
   `execution.controller`) to shared run summaries/details and manifest
   writes, and added `daemonInstanceId` to daemon health/read surfaces so
-  clients can distinguish embedded runs from daemon-owned runs.
+  clients can distinguish embedded runs from daemon-owned sessions.
 - Added derived `effectiveStatus` to shared `RunSummary` / `RunDetail`
   read models so passive runs with `in_progress` tasks surface as
   running in CLI/daemon/web consumers without changing the canonical

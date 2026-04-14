@@ -140,7 +140,7 @@ function isRunning(manifest: RunManifest): boolean {
   return manifest.status === "running";
 }
 
-function isTerminalStatus(status: RunStatus): boolean {
+export function isTerminalStatus(status: RunStatus): boolean {
   return (
     status === "success" ||
     status === "blocked" ||

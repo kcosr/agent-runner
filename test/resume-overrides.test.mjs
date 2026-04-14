@@ -131,6 +131,28 @@ test("resolveResumeTarget rejects a manifest with runtimeVars: null", () => {
   );
 });
 
+test("resolveResumeTarget rejects a manifest whose execution host and controller mismatch", () => {
+  const dir = tempDir();
+  const manifest = baseManifest("corrupt4", join(dir, "runs", "unknown", "corrupt4"));
+  manifest.execution = {
+    hostMode: "embedded",
+    controller: {
+      kind: "daemon",
+      daemonInstanceId: "daemon-bad",
+    },
+  };
+  writeManifest(dir, "unknown", "corrupt4", manifest);
+
+  assert.throws(
+    () => withStateRoot(dir, () => resolveResumeTarget("corrupt4", dir)),
+    (err) => {
+      assert.ok(err instanceof ResumeError);
+      assert.match(err.message, /does not look like a task-runner run\.json/);
+      return true;
+    },
+  );
+});
+
 test("resolveResumeTarget accepts a well-formed v4 manifest from the unknown bucket", () => {
   const dir = tempDir();
   const workspaceDir = join(dir, "runs", "unknown", "wellformed");
