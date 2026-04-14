@@ -19,6 +19,9 @@
   `execution.controller`) to shared run summaries/details and manifest
   writes, and added `daemonInstanceId` to daemon health/read surfaces so
   clients can distinguish embedded runs from daemon-owned sessions.
+- Added collapsible kanban columns in the web dashboard, including
+  persisted collapsed state, jump-strip expansion, and polished
+  collapsed-label rendering. ([#28](https://github.com/kcosr/task-runner/pull/28))
 - Added derived `effectiveStatus` to shared `RunSummary` / `RunDetail`
   read models so passive runs with `in_progress` tasks surface as
   running in CLI/daemon/web consumers without changing the canonical
@@ -111,6 +114,13 @@
   task-runner only reports a clean interrupt after cancellation is
   actually confirmed. Unconfirmed interruption now fails loudly instead
   of pretending the remote run stopped.
+- Fixed the web dashboard so running file-mode kanban cards now show the
+  same live task progress as the detail drawer instead of stale persisted
+  manifest counts. ([#27](https://github.com/kcosr/task-runner/pull/27))
+- Fixed passive `effectiveStatus` so runs with completed work but no
+  currently `in_progress` task still surface as running in CLI, daemon,
+  and web status badges instead of falling back to pending.
+  ([#27](https://github.com/kcosr/task-runner/pull/27))
 - Fixed resume/run startup to reject already-running manifests, claim
   the `running` transition for reused workspaces under the shared
   task-state lock, and refresh the latest initialized task snapshot

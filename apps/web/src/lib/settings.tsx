@@ -6,6 +6,7 @@ export interface BoardSettings {
   showArchived: boolean;
   hideEmptyColumns: boolean;
   collapseFailureStates: boolean;
+  collapsedColumnKeys: string[];
   search: string;
   drawerWidth: number;
 }
@@ -28,6 +29,7 @@ const DEFAULT_SETTINGS: BoardSettings = {
   showArchived: false,
   hideEmptyColumns: true,
   collapseFailureStates: true,
+  collapsedColumnKeys: [],
   search: "",
   drawerWidth: DRAWER_WIDTH_DEFAULT,
 };
@@ -56,6 +58,10 @@ function loadSettings(): BoardSettings {
   }
 }
 
+function parseStringArray(value: unknown): string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string") ? value : [];
+}
+
 function parseStoredSettings(value: unknown): BoardSettings {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return DEFAULT_SETTINGS;
@@ -76,6 +82,7 @@ function parseStoredSettings(value: unknown): BoardSettings {
       typeof record.collapseFailureStates === "boolean"
         ? record.collapseFailureStates
         : DEFAULT_SETTINGS.collapseFailureStates,
+    collapsedColumnKeys: parseStringArray(record.collapsedColumnKeys),
     search: typeof record.search === "string" ? record.search : DEFAULT_SETTINGS.search,
     drawerWidth: clampDrawerWidth(
       typeof record.drawerWidth === "number" ? record.drawerWidth : DEFAULT_SETTINGS.drawerWidth,

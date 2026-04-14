@@ -454,6 +454,45 @@ test("passive status and list surfaces use effectiveStatus while capabilities st
   });
 });
 
+test("passive status and list surfaces keep partial completed progress running between tasks", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "passive-agent", PASSIVE_AGENT);
+  writeAssignment(dir, "two-task", TWO_TASK_ASSIGNMENT);
+  const outcome = await initPassive(dir);
+
+  runCli(["task", "set", outcome.runId, "t1", "--status", "completed"], { cwd: dir });
+
+  const statusText = runCli(["status", outcome.runId], { cwd: dir });
+  assert.match(statusText, /Status: running/);
+  assert.match(statusText, /Lifecycle status: initialized/);
+  assert.match(statusText, /Tasks completed: 1\/2/);
+
+  const listText = runCli(["list", "runs"], { cwd: dir });
+  assert.match(listText, new RegExp(`${outcome.runId} \\[running\\]`));
+
+  const projected = JSON.parse(
+    runCli(
+      [
+        "status",
+        outcome.runId,
+        "--output-format",
+        "json",
+        "--field",
+        "status",
+        "--field",
+        "effectiveStatus",
+      ],
+      {
+        cwd: dir,
+      },
+    ),
+  );
+  assert.deepEqual(projected, {
+    status: "initialized",
+    effectiveStatus: "running",
+  });
+});
+
 test("passive status json exposes passive task-mutation capabilities and no resume", async () => {
   const dir = tempDir();
   writeAgent(dir, "passive-agent", PASSIVE_AGENT);

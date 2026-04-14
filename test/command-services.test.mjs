@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -244,7 +244,7 @@ test("command services: readStatus applies the live workspace overlay for runnin
   });
 });
 
-test("command services: listRuns applies the live workspace overlay for running file-mode runs", async () => {
+test("command services: listRuns applies the live workspace overlay for running file-mode summaries", async () => {
   const dir = tempDir();
   writeBundle(dir);
   const outcome = await initRun(dir);
@@ -253,7 +253,9 @@ test("command services: listRuns applies the live workspace overlay for running 
     manifest.status = "running";
     manifest.exitCode = null;
     manifest.endedAt = null;
-    manifest.startedAt = "2026-04-12T11:00:00.000Z";
+    manifest.finalTasks.t1.status = "pending";
+    manifest.finalTasks.t2.status = "pending";
+    manifest.tasksCompleted = 0;
   });
 
   let assignmentText = readFileSync(outcome.assignmentPath, "utf8");
@@ -262,11 +264,76 @@ test("command services: listRuns applies the live workspace overlay for running 
   writeFileSync(outcome.assignmentPath, assignmentText);
 
   await withSharedRuntimeEnv(dir, async () => {
-    const visible = listRuns();
-    assert.equal(visible.length, 1);
-    assert.equal(visible[0].runId, outcome.runId);
-    assert.equal(visible[0].tasksCompleted, 1);
-    assert.equal(visible[0].effectiveStatus, "running");
+    const run = listRuns({ includeArchived: true }).find((entry) => entry.runId === outcome.runId);
+    assert.ok(run);
+    assert.equal(run.tasksCompleted, 1);
+    assert.equal(run.tasksTotal, 2);
+    assert.equal(run.status, "running");
+    assert.equal(run.effectiveStatus, "running");
+  });
+});
+
+test("command services: listRuns keeps persisted progress for terminal and non-file-mode runs", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const terminal = await initRun(dir);
+  const nonFile = await initRun(dir);
+
+  patchManifest(terminal.workspaceDir, (manifest) => {
+    manifest.status = "success";
+    manifest.finalTasks.t1.status = "pending";
+    manifest.finalTasks.t2.status = "pending";
+    manifest.tasksCompleted = 0;
+  });
+  patchManifest(nonFile.workspaceDir, (manifest) => {
+    manifest.status = "running";
+    manifest.exitCode = null;
+    manifest.endedAt = null;
+    manifest.taskMode = "cli";
+    manifest.finalTasks.t1.status = "pending";
+    manifest.finalTasks.t2.status = "pending";
+    manifest.tasksCompleted = 0;
+  });
+
+  for (const outcome of [terminal, nonFile]) {
+    let assignmentText = readFileSync(outcome.assignmentPath, "utf8");
+    assignmentText = editTaskStatus(assignmentText, "t1", "completed");
+    assignmentText = editTaskStatus(assignmentText, "t2", "in_progress");
+    writeFileSync(outcome.assignmentPath, assignmentText);
+  }
+
+  await withSharedRuntimeEnv(dir, async () => {
+    const runs = listRuns({ includeArchived: true });
+    const terminalSummary = runs.find((entry) => entry.runId === terminal.runId);
+    const nonFileSummary = runs.find((entry) => entry.runId === nonFile.runId);
+
+    assert.ok(terminalSummary);
+    assert.ok(nonFileSummary);
+    assert.equal(terminalSummary.tasksCompleted, 0);
+    assert.equal(nonFileSummary.tasksCompleted, 0);
+  });
+});
+
+test("command services: listRuns falls back to persisted progress when live assignment reads fail", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.status = "running";
+    manifest.exitCode = null;
+    manifest.endedAt = null;
+    manifest.finalTasks.t1.status = "pending";
+    manifest.finalTasks.t2.status = "pending";
+    manifest.tasksCompleted = 0;
+  });
+  rmSync(outcome.assignmentPath);
+
+  await withSharedRuntimeEnv(dir, async () => {
+    const run = listRuns({ includeArchived: true }).find((entry) => entry.runId === outcome.runId);
+    assert.ok(run);
+    assert.equal(run.tasksCompleted, 0);
+    assert.equal(run.tasksTotal, 2);
   });
 });
 
