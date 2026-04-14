@@ -15,6 +15,28 @@ function stdout(text: string): RenderedRunChunk[] {
   return [{ stream: "stdout", text }];
 }
 
+function hasIncompleteTasks(summary: RunCompletionSummary): boolean {
+  return summary.tasks.some((task) => task.status !== "completed");
+}
+
+function appendResumeHint(
+  lines: string[],
+  summary: RunCompletionSummary,
+  taskRunnerCmd: string,
+  intro: string,
+): void {
+  const resumeCmd = `${taskRunnerCmd} run --resume-run ${summary.runId}`;
+  if (hasIncompleteTasks(summary)) {
+    lines.push(intro);
+    lines.push(`  ${resumeCmd}`);
+    lines.push(`  ${resumeCmd} "..."`);
+    return;
+  }
+
+  lines.push("To continue this run, provide a follow-up message or add a task:");
+  lines.push(`  ${resumeCmd} "..."`);
+}
+
 function renderBannerLines(event: {
   agentName: string;
   runId: string;
@@ -62,8 +84,7 @@ function renderSummary(summary: RunCompletionSummary): string {
     lines.push(`Attempts: ${summary.attempts}/${summary.maxAttempts}`);
     lines.push(`Assignment file: ${summary.assignmentPath}`);
     lines.push("");
-    lines.push("Run was interrupted by the user. To resume:");
-    lines.push(`  ${taskRunnerCmd} run --resume-run ${summary.runId} "..."`);
+    appendResumeHint(lines, summary, taskRunnerCmd, "Run was interrupted by the user. To resume:");
     return `${lines.join("\n")}\n`;
   }
 
@@ -88,8 +109,7 @@ function renderSummary(summary: RunCompletionSummary): string {
   }
 
   lines.push("");
-  lines.push("To continue this run with a follow-up message:");
-  lines.push(`  ${taskRunnerCmd} run --resume-run ${summary.runId} "..."`);
+  appendResumeHint(lines, summary, taskRunnerCmd, "To continue this run:");
 
   return `${lines.join("\n")}\n`;
 }

@@ -14,6 +14,7 @@ import {
   type RunManifest,
   resolveResumeTarget,
 } from "./core/run/manifest.js";
+import { hasIncompleteTasks, missingResumeInputMessage } from "./core/run/resume-policy.js";
 import { type RunEvent, type RunOptions, type RunOutcome, runAgent } from "./core/run/run-loop.js";
 import { resolveTaskRunnerCommand } from "./task-runner-command.js";
 
@@ -96,8 +97,8 @@ function validateResumeOverrides(
 
   const hasMessage = Boolean(opts.overrides.message && opts.overrides.message.trim().length > 0);
   const hasAddedTasks = (opts.overrides.addedTasks?.length ?? 0) > 0;
-  if (!hasMessage && !hasAddedTasks) {
-    return "--resume-run requires a follow-up message or at least one --add-task";
+  if (!hasMessage && !hasAddedTasks && !hasIncompleteTasks(manifest.finalTasks)) {
+    return missingResumeInputMessage();
   }
   return null;
 }

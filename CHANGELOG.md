@@ -60,6 +60,9 @@
 
 ### Changed
 
+- Relaxed resume validation so task-backed runs can resume without a
+  caller message when incomplete tasks remain; core now synthesizes an
+  implicit continue prompt for that empty-resume case.
 - Run capabilities now expose explicit abort authority:
   `canAbort=false` with `abortReason` for terminal or daemon-unowned
   runs, and daemon/read/web surfaces now gate Abort from that

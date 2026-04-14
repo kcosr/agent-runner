@@ -524,7 +524,7 @@ test("resume: --add-task alone (no message) is allowed on resume", async () => {
   assert.ok(!seenPrompt.includes("\n\n\n"), "no triple newlines from empty message slot");
 });
 
-test("resume: missing both message and --add-task is a hard error", async () => {
+test("resume: unfinished tasks can resume with an implicit continue prompt", async () => {
   const dir = tempDir();
   writeAgentAndAssignment(dir);
 
@@ -547,22 +547,72 @@ test("resume: missing both message and --add-task is a hard error", async () => 
   });
 
   const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.runId, dir));
+  const firstPlanPath = join(first.workspaceDir, "assignment.md");
+  const second = await runIn(dir, {
+    backend: mockBackend(async (ctx) => {
+      assert.equal(ctx.prompt, "Continue working through the remaining task list items.");
+      let plan = readFileSync(firstPlanPath, "utf8");
+      plan = editStatus(plan, "t1", "completed");
+      plan = editStatus(plan, "t2", "completed");
+      plan = editStatus(plan, "t3", "completed");
+      writeFileSync(firstPlanPath, plan, "utf8");
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "sess-no-msg",
+        transcript: "continued",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    }),
+    overrides: {},
+    resume: target,
+  });
+
+  assert.equal(second.exitCode, 0);
+  assert.equal(second.manifest.status, "success");
+  assert.equal(second.manifest.sessions.at(-1)?.message, null);
+});
+
+test("resume: missing both message and --add-task is still a hard error once all tasks are complete", async () => {
+  const dir = tempDir();
+  writeAgentAndAssignment(dir);
+
+  const first = await runIn(dir, {
+    backend: mockBackend(async (ctx) => {
+      const absPlan = assignmentPathFromPrompt(ctx.prompt);
+      let plan = readFileSync(absPlan, "utf8");
+      for (const id of ["t1", "t2", "t3"]) {
+        plan = editStatus(plan, id, "completed");
+      }
+      writeFileSync(absPlan, plan, "utf8");
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "sess-all-done",
+        transcript: "done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    }),
+  });
+
+  const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.runId, dir));
   await assert.rejects(
     () =>
       runIn(dir, {
-        backend: mockBackend(async () => ({
-          exitCode: 0,
-          signal: null,
-          timedOut: false,
-          sessionId: null,
-          transcript: null,
-          rawStdout: "",
-          rawStderr: "",
-        })),
+        backend: mockBackend(async () => {
+          throw new Error("backend should not be invoked");
+        }),
         overrides: {},
         resume: target,
       }),
-    ResumeError,
+    (err) =>
+      err instanceof ResumeError &&
+      /no incomplete tasks/.test(err.message) &&
+      /follow-up message/.test(err.message),
   );
 });
 
@@ -826,7 +876,9 @@ test("resume: text summary includes the resume-run hint with the run id", async 
         emitEvent: capture.emitEvent,
       });
       const stderr = capture.stderr();
-      assert.ok(stderr.includes("To continue this run with a follow-up message:"));
+      assert.ok(
+        stderr.includes("To continue this run, provide a follow-up message or add a task:"),
+      );
       assert.ok(stderr.includes(`task-runner run --resume-run ${outcome.runId}`));
     } finally {
       process.chdir(originalCwd);

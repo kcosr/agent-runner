@@ -255,7 +255,7 @@ Task results:
   - summary — Summary [completed]
       Small TS monorepo for an AI agent runner with two backends.
 
-To continue this run with a follow-up message:
+To continue this run, provide a follow-up message or add a task:
   task-runner run --resume-run abc123 "..."
 ```
 
@@ -513,7 +513,7 @@ Execute an agent. Three modes, distinguished by which flags you pass:
 # Fresh run
 task-runner run --agent <name> [--assignment <name>] [options] [message]
 
-# Resume an existing run (sends a follow-up message and/or new tasks)
+# Resume an existing run (follow-up message optional when incomplete tasks remain)
 task-runner run --resume-run <id> [options] [message]
 
 # Execute a previously initialized run (see `init` below)
@@ -1140,6 +1140,7 @@ task-runner status $RUN | grep "Status: success"
 ### Resume
 
 ```bash
+task-runner run --resume-run <id>
 task-runner run --resume-run <id> "follow-up message"
 ```
 
@@ -1148,9 +1149,13 @@ non-completed tasks back to `pending` (preserving their notes),
 and starts a new session. Under the manifest-canonical design,
 **the agent config is reconstructed from the frozen manifest** —
 the source `agent.md` is not re-read. The first attempt of the new
-session sends *only* the follow-up message (the role instructions
-and task workflow aren't re-rendered, since the backend already
-has them cached in the session it's resuming).
+session sends *only* the follow-up message when one is provided. If
+you resume without a message and the run still has incomplete tasks,
+task-runner synthesizes `Continue working through the remaining task
+list items.` instead. The role instructions and task workflow aren't
+re-rendered, since the backend already has them cached in the session
+it's resuming. If no incomplete tasks remain, resume still requires a
+follow-up message or `--add-task`.
 
 `--add-task "<title>"` works alongside (or instead of) a follow-up
 message; the runner prepends a short reminder telling the agent

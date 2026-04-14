@@ -669,7 +669,7 @@ blank lines, non-empty parts only:
 |---|---|
 | Fresh, `tasks.size > 0` | `<agent instructions>` → `<assignment instructions>` → `<workflow>` → `<message>` |
 | Fresh, `tasks.size === 0` | `<agent instructions>` → `<assignment instructions>` → `<message>` |
-| Resume, prior had tasks, no `--add-task` | `<message>` only |
+| Resume, prior had tasks, no `--add-task` | `<message>` only, or `<implicit continue prompt>` when message is omitted and incomplete tasks remain |
 | Resume, prior had tasks, `--add-task` used | short "new tasks" reminder → `<message>` |
 | Resume, prior had 0 tasks, this session has tasks | `<workflow>` → `<message>` |
 
@@ -855,9 +855,11 @@ Every session:
   captured at first write
 - For resume sessions (index > 0), the first attempt's prompt is
   **only the follow-up message** (plus the new-tasks reminder if
-  applicable) — the role instructions and workflow template aren't
-  re-rendered because the backend has them in the cached
-  conversation
+  applicable). If the caller omits the message and incomplete tasks
+  remain, core synthesizes `Continue working through the remaining
+  task list items.` instead. The role instructions and workflow
+  template aren't re-rendered because the backend has them in the
+  cached conversation.
 
 **Resume under the manifest-canonical rule.** Every resume reads the
 agent definition from the frozen manifest via
@@ -1973,11 +1975,14 @@ from a prior session):
   under `${TASK_RUNNER_STATE_DIR}/runs/`, then `runs/unknown/`.
 - `<path>` can be a workspace directory or a direct path to a `run.json`
   file.
-- At least one of a positional `[message]` **or** one or more
-  `--add-task` flags is required when `--resume-run` is set. The runner
-  throws `ResumeError` if both are absent. `--add-task` alone is valid:
-  the "new tasks added" reminder becomes the entire follow-up prompt
-  and tells the agent to re-read the assignment file.
+- A positional `[message]` is optional when the run still has
+  incomplete tasks. In that case, an empty resume synthesizes
+  `Continue working through the remaining task list items.` as the
+  entire follow-up prompt. If no incomplete tasks remain, the runner
+  still requires either a positional `[message]` or one or more
+  `--add-task` flags. `--add-task` alone is valid: the "new tasks
+  added" reminder becomes the entire follow-up prompt and tells the
+  agent to re-read the assignment file.
 - The prior manifest's `backendSessionId` must be non-null — else
   `ResumeError` and exit 3.
 - Non-completed tasks from the prior run are normalized to `pending`
@@ -1989,8 +1994,10 @@ from a prior session):
   union at first write).
 - The first attempt of the new session sends **only the follow-up
   message** (plus the new-tasks reminder if applicable) as its prompt.
-  The instructions are not re-rendered, because the backend already
-  has them in the cached session from the prior run.
+  If the caller omitted the message and incomplete tasks remained, the
+  implicit continue prompt is sent instead. The instructions are not
+  re-rendered, because the backend already has them in the cached
+  session from the prior run.
 
 **Resume override matrix.** All override validation for `--resume-run`
 lives in a single `validateResumeOverrides` function in
@@ -2012,7 +2019,7 @@ lives in a single `validateResumeOverrides` function in
 | `--unrestricted` | allowed | rejected | Per-attempt spawn flag. Init freezes it |
 | `--name` | rejected | rejected | Fresh-run-only persisted run name. Rename existing runs with `task-runner run set-name` |
 | `--add-task` | allowed | rejected | Legitimate mid-run task list extension. Init froze the task list |
-| `[message]` | required | rejected | Required on regular resume; init pre-composed the prompt |
+| `[message]` | allowed | rejected | Optional on regular resume when incomplete tasks remain; otherwise provide `[message]` or `--add-task`. Init pre-composed the prompt |
 | `--output-format`, `--field` | allowed | allowed | Read-only; no state effect |
 
 The `allowed` overrides on regular resume are still vetted by

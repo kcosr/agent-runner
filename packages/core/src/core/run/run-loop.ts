@@ -38,6 +38,11 @@ import {
   checkRecursionDepth,
   readRecursionState,
 } from "./recursion-guard.js";
+import {
+  IMPLICIT_RESUME_MESSAGE,
+  hasIncompleteTasks,
+  missingResumeInputMessage,
+} from "./resume-policy.js";
 import type { RunCompletionStatus, RunCompletionSummary } from "./status.js";
 
 export { RecursionDepthError } from "./recursion-guard.js";
@@ -693,10 +698,9 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   if (isResume) {
     const hasMessage = Boolean(message && message.trim().length > 0);
     const hasAddedTasks = addedTitles.length > 0;
-    if (!hasMessage && !hasAddedTasks) {
-      throw new ResumeError(
-        "resuming a run requires either a follow-up message or at least one --add-task",
-      );
+    const canResumeImplicitly = hasIncompleteTasks(resume?.manifest.finalTasks ?? {});
+    if (!hasMessage && !hasAddedTasks && !canResumeImplicitly) {
+      throw new ResumeError(missingResumeInputMessage());
     }
     if (!resume?.manifest.backendSessionId) {
       throw new ResumeError(
@@ -789,8 +793,12 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const hasTasks = tasks.size > 0;
   const firstTimeTasksAppear = isResume && !priorHadTasks && hasTasks;
   const resumeAddedNewTasks = isResume && priorHadTasks && addedTitles.length > 0;
-
   const trimmedMessage = message?.trim() ?? "";
+  const resumeUsesImplicitContinueMessage =
+    isResume &&
+    trimmedMessage.length === 0 &&
+    addedTitles.length === 0 &&
+    hasIncompleteTasks(resume?.manifest.finalTasks ?? {});
 
   // Run name resolution: fresh `run` / `init` may set it via the
   // CLI override, while resume and execute-after-init always reuse
@@ -809,7 +817,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   //
   // Resume follow-up parts:
   //   1. workflow (only if firstTimeTasksAppear) OR new-tasks reminder
-  //   2. message
+  //   2. message, or an implicit continue prompt when unfinished tasks remain
   //
   // Execute-after-init: reuse the stored pendingPrompt verbatim.
   //
@@ -834,6 +842,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     }
     if (trimmedMessage.length > 0) {
       parts.push(trimmedMessage);
+    } else if (resumeUsesImplicitContinueMessage) {
+      parts.push(IMPLICIT_RESUME_MESSAGE);
     }
     initialPrompt = parts.join("\n\n");
   } else {
