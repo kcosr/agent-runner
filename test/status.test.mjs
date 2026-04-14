@@ -192,6 +192,19 @@ test("deriveEffectiveStatus marks passive runs with in-progress tasks as running
   assert.equal(effectiveStatus, "running");
 });
 
+test("deriveEffectiveStatus marks passive runs with completed tasks and pending work as running", () => {
+  const effectiveStatus = deriveEffectiveStatus({
+    backend: "passive",
+    status: "initialized",
+    finalTasks: {
+      t1: { status: "completed" },
+      t2: { status: "pending" },
+    },
+  });
+
+  assert.equal(effectiveStatus, "running");
+});
+
 test("deriveEffectiveStatus marks fully completed passive runs as success", () => {
   const effectiveStatus = deriveEffectiveStatus({
     backend: "passive",
