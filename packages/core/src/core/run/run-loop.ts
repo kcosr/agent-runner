@@ -8,7 +8,7 @@ import { resolveTaskRunnerCommand } from "../../task-runner-command.js";
 import { normalizeOptionalRunName } from "../../util/run-name.js";
 import { shortId } from "../../util/short-id.js";
 import { writeTextFileAtomic } from "../../util/write-file-atomic.js";
-import type { Backend, BackendEvent, BackendInvokeResult } from "../backends/types.js";
+import type { Backend, BackendEvent, BackendId, BackendInvokeResult } from "../backends/types.js";
 import { interpolate } from "../config/interpolate.js";
 import type { LoadedAgent, LoadedAssignment } from "../config/loaded.js";
 import {
@@ -63,9 +63,7 @@ import {
 
 export interface RunOverrides {
   cwd?: string;
-  // Must stay in sync with `agentConfigSchema.backend` in
-  // src/core/config/schema.ts and the backend registry.
-  backend?: "claude" | "codex" | "passive";
+  backend?: BackendId;
   model?: string;
   effort?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   taskMode?: TaskMode;
@@ -709,6 +707,16 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         `cannot resume run ${resume?.manifest.runId ?? "<unknown>"} — prior sessions captured no backend session id`,
       );
     }
+  }
+
+  if (
+    opts.bootstrapBackendSessionId !== undefined &&
+    backend.supportsBootstrapSessionImport === false
+  ) {
+    throw new InvalidBackendSessionError(
+      opts.bootstrapBackendSessionId,
+      `${backend.id} backend-session import is unsupported because public ${backend.id} resume ids are not safely self-validating`,
+    );
   }
 
   // If the caller is importing an existing backend session, validate

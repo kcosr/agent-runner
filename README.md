@@ -4,8 +4,8 @@ A small, focused CLI that drives an AI coding agent through a structured
 task list, tracks per-task status, and retries until every task is
 marked done or blocked.
 
-You write a checklist. `task-runner` hands it to a backend (Claude or
-Codex), the agent works through it and updates each task's status in
+You write a checklist. `task-runner` hands it to a backend (Claude,
+Cursor, or Codex), the agent works through it and updates each task's status in
 place, and the runner loops until the agent has accounted for every
 task: if any are still `pending` when the agent ends its turn, it gets
 re-invoked with a nudge — up to a configurable retry budget. Blocked
@@ -49,6 +49,7 @@ and future local clients, not to become a remote multi-user service.
 - [Backends](#backends)
   - [Claude](#claude)
   - [Codex](#codex)
+  - [Cursor](#cursor)
   - [Passive](#passive)
 - [Resuming, aborting, importing](#resuming-aborting-importing)
 - [Variables and interpolation](#variables-and-interpolation)
@@ -90,7 +91,8 @@ chat output.
 
 ## Features
 
-- **Three backends**: Claude (subprocess wrapping `claude --print`),
+- **Four backends**: Claude (subprocess wrapping `claude --print`),
+  Cursor (subprocess wrapping `cursor-agent -p --output-format stream-json`),
   Codex (JSON-RPC managed mode over stdio or websocket), and Passive
   (null-object for sidecar flows — `init` + `task set` / `task add`
   only, task-runner never invokes a model).
@@ -168,7 +170,9 @@ chat output.
   retry.
 - **Import existing sessions**: `--backend-session-id <id>` adopts an
   existing claude session UUID or codex thread id. Validated
-  read-only before any workspace creation.
+  read-only before any workspace creation. Cursor bootstrap import is
+  intentionally unsupported because public Cursor resume ids are not
+  safely self-validating.
 - **Locked fields**: agents and assignments can declare which fields
   the caller is allowed to override. Useful for distributing an
   agent that pins its own model or working directory.
@@ -197,6 +201,8 @@ Requirements:
 - **Node.js 20+**
 - **Claude CLI** (`claude`) on your `PATH` if you want to use the
   Claude backend, or set `TASK_RUNNER_CLAUDE_BIN` to point at it.
+- **Cursor Agent CLI** (`cursor-agent`) on your `PATH` if you want to
+  use the Cursor backend, or set `TASK_RUNNER_CURSOR_BIN` to point at it.
 - **Codex CLI** (`codex`) for stdio mode, or a running codex
   app-server reachable over WebSocket via
   `TASK_RUNNER_CODEX_WS_URL=ws://host:port`.
@@ -368,6 +374,12 @@ task-runner init --backend passive \
 task-runner run --backend codex --model gpt-5.4 --effort high \
   --assignment ./assignments/code-review/assignment.md \
   --var repo_path=. --var range=HEAD~3..HEAD
+
+# Cursor ad-hoc run — public headless print mode via cursor-agent,
+# with unrestricted mapping to Cursor's --force flag.
+task-runner run --backend cursor --unrestricted \
+  --assignment ./assignments/repo-diagnostics/assignment.md \
+  --var repo_path=.
 ```
 
 Ad-hoc agents have `lockedFields: []` (nothing is locked by default)
@@ -555,15 +567,15 @@ Common options:
 | `--var key=value` (repeatable) | Set an input variable. Validated against the assignment's `vars` schema. **Forbidden with `--resume-run`** — vars are resolved once at first write and frozen into the manifest; they aren't re-resolved on resume. |
 | `--add-task "<title>"` (repeatable) | Append an ad-hoc task with auto-generated id `cli-<short>`. |
 | `--cwd <path>` | Override the agent's `cwd`. **Forbidden with `--resume-run`** — backend sessions are bound to their creation cwd, so a new cwd would invalidate the captured session id. Create a fresh run if you need a different cwd. |
-| `--backend <claude\|codex\|passive>` | Override the agent's backend. Drops the agent's `model` unless `--model` is also passed. Forbidden with `--resume-run` (the backend is locked to the session that created the run). Required when `--agent` is omitted (ad-hoc synthesis). |
+| `--backend <claude\|codex\|cursor\|passive>` | Override the agent's backend. Drops the agent's `model` unless `--model` is also passed. Forbidden with `--resume-run` (the backend is locked to the session that created the run). Required when `--agent` is omitted (ad-hoc synthesis). |
 | `--task-mode <file\|cli>` | Override the assignment's task workflow mode for a fresh `run` or `init`. Forbidden with `--resume-run` because the chosen mode is frozen into the manifest at first write. |
 | `--model <id>` | Override the model. Backend-specific (`claude-sonnet-4-6`, `gpt-5.4`, etc.). |
-| `--effort <off\|minimal\|low\|medium\|high\|xhigh\|max>` | Reasoning effort. Mapped per backend. |
+| `--effort <off\|minimal\|low\|medium\|high\|xhigh\|max>` | Reasoning effort. Mapped per backend; accepted but ignored by Cursor v1. |
 | `--max-retries <n>` | Override the per-run retry budget (default 3). |
 | `--timeout-sec <n>` | Override the per-attempt timeout (default 3600). |
-| `--unrestricted` | Bypass the backend's approval prompts. |
+| `--unrestricted` | Bypass the backend's approval prompts. Cursor maps this to `cursor-agent --force`. |
 | `--name <name>` | Set the fresh run's persisted display name (`run.name`). Omitted means unnamed. Forbidden with `--resume-run`. |
-| `--backend-session-id <id>` | Adopt an existing backend session id (claude UUID, codex thread id). Validated before workspace creation. Forbidden with `--resume-run` (the resume target already carries one). |
+| `--backend-session-id <id>` | Adopt an existing backend session id (claude UUID, codex thread id). Validated before workspace creation. Cursor does not support bootstrap import and rejects this flag. Forbidden with `--resume-run` (the resume target already carries one). |
 | `--connect <ws-url>` | Route the command through the local daemon instead of embedded mode. Also honored from `TASK_RUNNER_CONNECT`. |
 | `--detach` | **Daemon mode only.** Dispatch the daemon-owned run and exit immediately after the daemon accepts it. Valid only on plain `task-runner run`; rejected in embedded mode, on `init`, and on grouped `run` subcommands. |
 | `--output-format <text\|json>` | Default `text`. `json` writes the final manifest-shaped run record to stdout once at end of run. |
@@ -1196,6 +1208,33 @@ start, optionally `thread/name/set` if the run has a persisted
 `name`, then `turn/start` for each attempt and `turn/interrupt`
 on timeout, abort, or external Ctrl+C.
 
+### Cursor
+
+Wraps `cursor-agent` in public headless print mode:
+
+```bash
+cursor-agent -p --trust --output-format stream-json --stream-partial-output \
+  --workspace <cwd> [--model <id>] [--force] [--resume <session-id>] "<prompt>"
+```
+
+- Streams only `partial_output` deltas to the terminal as
+  `agent_message_delta`.
+- Captures the first non-empty `session_id` from any output record and
+  persists it for normal task-runner resume.
+- Uses the final `result.result` string as the canonical attempt
+  transcript; successful runs without that field are treated as backend
+  errors instead of guessing from partial output.
+- Strips any provider prefix from `--model` before forwarding it
+  (for example `provider/foo` -> `foo`).
+- Accepts task-runner's `--effort` surface but ignores it for Cursor
+  v1 because the public CLI does not expose an effort flag.
+- Maps `--unrestricted` to `cursor-agent --force`.
+- Does **not** support bootstrap `--backend-session-id` import; only
+  task-runner-created Cursor runs with a captured session id can be
+  resumed.
+
+Set `TASK_RUNNER_CURSOR_BIN` to use a custom Cursor binary.
+
 ### Passive
 
 A null-object backend for runs that task-runner will never execute.
@@ -1367,7 +1406,8 @@ task-runner init --agent <name> [--assignment <name>] \
 task-runner run --resume-run <id>
 ```
 
-Validates the id read-only before any workspace creation:
+Validates the id read-only before any workspace creation when the
+selected backend supports bootstrap import:
 
 - **claude**: stats the session JSONL file under
   `~/.claude/projects/<encoded-cwd>/`.
@@ -1375,14 +1415,18 @@ Validates the id read-only before any workspace creation:
   enforces that the thread's recorded `cwd` matches the cwd you're
   about to operate under. Mismatched cwd is a hard error — codex
   itself allows it but it almost always means the user is confused.
+- **cursor**: unsupported. Public Cursor resume ids are not safely
+  self-validating, so `--backend-session-id` fails before workspace
+  creation with a validation/config error.
 
 If validation passes, the id is persisted in the manifest and used
 as the resume target on the very first invocation. From then on,
 the run flows through the existing resume path.
 
 `--backend-session-id` also works on `task-runner run` directly
-(without going through `init`) for one-shot import. It is forbidden
-with `--resume-run` (the resume target already carries one).
+(without going through `init`) for one-shot import on supported
+backends. It is forbidden with `--resume-run` (the resume target
+already carries one).
 
 ---
 
@@ -1487,6 +1531,7 @@ printed to stdout.
 | `TASK_RUNNER_CONNECT` | Opt commands into daemon mode by pointing them at a local daemon WebSocket URL. Default: unset (embedded mode). |
 | `TASK_RUNNER_LISTEN` | Default WebSocket listen URL for `task-runner serve`. Falls back to `ws://127.0.0.1:4773/`. The same listener also serves HTTP/SSE on the derived `http://` origin. |
 | `TASK_RUNNER_CLAUDE_BIN` | Path to the `claude` binary. Defaults to `claude` on `PATH`. |
+| `TASK_RUNNER_CURSOR_BIN` | Path to the `cursor-agent` binary. Defaults to `cursor-agent` on `PATH`. |
 | `TASK_RUNNER_CODEX_BIN` | Path to the `codex` binary for stdio mode. Defaults to `codex` on `PATH`. |
 | `TASK_RUNNER_CODEX_WS_URL` | If set, the codex backend connects to this WebSocket URL instead of spawning a stdio subprocess. |
 | `TASK_RUNNER_CALL_DEPTH` | Internal: current recursion depth. Set automatically when one task-runner spawns another via the backend env. |

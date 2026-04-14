@@ -131,3 +131,22 @@ test("executeRunCommand rejects passive execution with a command-level error", a
       (err) => err instanceof RunCommandError && /cannot run passive agent/.test(err.message),
     );
   }));
+
+test("executeRunCommand rejects cursor bootstrap session import with a command-level error", async () =>
+  withRuntimeRoots("task-runner-run-command-", async () => {
+    await assert.rejects(
+      () =>
+        executeRunCommand({
+          initialize: true,
+          backendSessionId: "cursor-chat-1",
+          cliVars: {},
+          overrides: {
+            backend: "cursor",
+            message: "Seed an ad-hoc cursor run.",
+          },
+        }),
+      (err) =>
+        err instanceof RunCommandError &&
+        /--backend-session-id is unsupported for cursor/.test(err.message),
+    );
+  }));

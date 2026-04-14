@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { BACKEND_IDS } from "../backends/types.js";
 
 export const TASK_MODES = ["file", "cli"] as const;
 export type TaskMode = (typeof TASK_MODES)[number];
@@ -95,7 +96,7 @@ export type LockableField = (typeof LOCKABLE_FIELDS)[number];
 export const agentConfigSchema = z.object({
   schemaVersion: z.literal(1),
   name: z.string().min(1),
-  backend: z.enum(["claude", "codex", "passive"]),
+  backend: z.enum(BACKEND_IDS),
   model: z.string().optional(),
   effort: z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]).optional(),
   timeoutSec: z.number().int().positive().default(3600),

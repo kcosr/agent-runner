@@ -37,6 +37,15 @@ model: claude-sonnet-4-6
 Agent.
 `;
 
+const CURSOR_IMPORT_AGENT = `---
+schemaVersion: 1
+name: cursor-import-agent
+backend: cursor
+model: provider/gpt-5.4
+---
+Agent.
+`;
+
 const IMPORT_ASSIGNMENT = `---
 schemaVersion: 1
 name: import-work
@@ -101,9 +110,9 @@ function importableBackend({ validate, captured }) {
   };
 }
 
-async function runImportIn(baseDir, opts) {
+async function runImportIn(baseDir, opts, agentName = "import-agent") {
   return withSharedRuntimeEnv(baseDir, async () => {
-    const loaded = loadAgentConfig("import-agent", baseDir);
+    const loaded = loadAgentConfig(agentName, baseDir);
     const loadedAssignment = loadAssignmentConfig("import-work", baseDir);
     const originalCwd = process.cwd();
     process.chdir(baseDir);
@@ -115,6 +124,7 @@ async function runImportIn(baseDir, opts) {
         backend: opts.backend,
         bootstrapBackendSessionId: opts.bootstrapBackendSessionId,
         initialize: opts.initialize ?? false,
+        overrides: opts.overrides,
         stderr: () => {},
         stdout: () => {},
       });
@@ -317,4 +327,116 @@ test("import: backends without validateSessionId are treated as 'always valid'",
   });
   assert.equal(captured.resumeSessionId, "untrusted-id");
   assert.equal(outcome.manifest.backendSessionId, "untrusted-id");
+});
+
+test("import: cursor bootstrap session import is explicitly rejected", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "cursor-import-agent", CURSOR_IMPORT_AGENT);
+  writeAssignment(dir, "import-work", IMPORT_ASSIGNMENT);
+
+  await assert.rejects(
+    () =>
+      runImportIn(
+        dir,
+        {
+          backend: {
+            id: "cursor",
+            supportsBootstrapSessionImport: false,
+            async invoke() {
+              throw new Error("cursor invoke should not run for rejected bootstrap import");
+            },
+          },
+          bootstrapBackendSessionId: "cursor-chat-1",
+        },
+        "cursor-import-agent",
+      ),
+    (err) => {
+      assert.ok(err instanceof InvalidBackendSessionError);
+      assert.match(err.message, /cursor backend-session import is unsupported/);
+      return true;
+    },
+  );
+});
+
+test("import: task-runner-created cursor runs reuse the captured backend session id on resume", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "cursor-import-agent", CURSOR_IMPORT_AGENT);
+  writeAssignment(dir, "import-work", IMPORT_ASSIGNMENT);
+
+  const firstCalls = [];
+  const fresh = await runImportIn(
+    dir,
+    {
+      backend: {
+        id: "cursor",
+        supportsBootstrapSessionImport: false,
+        async invoke(ctx) {
+          firstCalls.push(ctx.resumeSessionId ?? null);
+          const absPlan = assignmentPathFromPrompt(ctx.prompt);
+          const plan = readFileSync(absPlan, "utf8");
+          writeFileSync(absPlan, editStatus(plan, "t1", "completed"), "utf8");
+          return {
+            exitCode: 0,
+            signal: null,
+            timedOut: false,
+            aborted: false,
+            sessionId: ctx.resumeSessionId ?? "cursor-sess-1",
+            transcript: "ok",
+            rawStdout: "",
+            rawStderr: "",
+          };
+        },
+      },
+    },
+    "cursor-import-agent",
+  );
+
+  assert.deepEqual(firstCalls, [null]);
+  assert.equal(fresh.manifest.backendSessionId, "cursor-sess-1");
+
+  const target = await withSharedRuntimeEnv(dir, async () => resolveResumeTarget(fresh.runId, dir));
+  const secondCalls = [];
+  await withSharedRuntimeEnv(dir, async () => {
+    const loaded = loadAgentConfig("cursor-import-agent", dir);
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      const resumed = await runAgent({
+        loaded,
+        cliVars: {},
+        backend: {
+          id: "cursor",
+          supportsBootstrapSessionImport: false,
+          async invoke(ctx) {
+            secondCalls.push(ctx.resumeSessionId ?? null);
+            const plan = readFileSync(target.manifest.assignmentPath, "utf8");
+            writeFileSync(
+              target.manifest.assignmentPath,
+              editStatus(plan, "t1", "completed"),
+              "utf8",
+            );
+            return {
+              exitCode: 0,
+              signal: null,
+              timedOut: false,
+              aborted: false,
+              sessionId: ctx.resumeSessionId ?? "unexpected-new-session",
+              transcript: "ok",
+              rawStdout: "",
+              rawStderr: "",
+            };
+          },
+        },
+        resume: target,
+        overrides: { message: "Continue" },
+        stderr: () => {},
+        stdout: () => {},
+      });
+      assert.equal(resumed.manifest.backendSessionId, "cursor-sess-1");
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+
+  assert.deepEqual(secondCalls, ["cursor-sess-1"]);
 });
