@@ -870,7 +870,7 @@ describe("web app", () => {
     const view = await renderApp();
     await findRunCard("Build dashboard");
     expect(screen.queryByRole("button", { name: /archived dashboard/i })).not.toBeInTheDocument();
-    expect(getBoardColumn("Failures")).toBeInTheDocument();
+    expect(getBoardColumn("Failed")).toBeInTheDocument();
     expect(getBoardColumn("Blocked")).toBeInTheDocument();
     expect(
       screen.queryByRole("heading", { name: /^Aborted(?: \(\d+\))?$/ }),
@@ -961,7 +961,7 @@ describe("web app", () => {
     await findRunCard("Build dashboard");
 
     expect(screen.queryByRole("button", { name: /archived dashboard/i })).not.toBeInTheDocument();
-    expect(getBoardColumn("Failures")).toBeInTheDocument();
+    expect(getBoardColumn("Failed")).toBeInTheDocument();
     expect(getBoardColumn("Blocked")).toBeInTheDocument();
 
     await user.click(await findRunCard("Build dashboard"));
@@ -1054,9 +1054,9 @@ describe("web app", () => {
     await renderApp();
     await findRunCard("Blocked dashboard");
 
-    const failuresColumn = getBoardColumn("Failures");
+    const failuresColumn = getBoardColumn("Failed");
     await user.click(
-      within(failuresColumn).getByRole("button", { name: "Collapse Failures column" }),
+      within(failuresColumn).getByRole("button", { name: "Collapse Failed column" }),
     );
 
     await waitFor(() => {
@@ -1078,7 +1078,7 @@ describe("web app", () => {
     await user.click(screen.getByRole("button", { name: /collapse failure states/i }));
 
     await waitFor(() => {
-      expect(getBoardColumn("Failures")).toHaveAttribute("data-collapsed", "true");
+      expect(getBoardColumn("Failed")).toHaveAttribute("data-collapsed", "true");
     });
   });
 

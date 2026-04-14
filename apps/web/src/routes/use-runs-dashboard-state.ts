@@ -48,7 +48,7 @@ function buildColumns(runs: RunSummary[], collapseFailureStates: boolean): Board
     base.push({ key: "blocked", title: "Blocked", statuses: ["blocked"], runs: [] });
     base.push({
       key: "failures",
-      title: "Failures",
+      title: "Failed",
       statuses: FAILURE_STATUSES,
       runs: [],
     });
