@@ -72,6 +72,7 @@
 
 ### Changed
 
+- Split the README into focused `docs/` pages (concepts, agents-and-assignments, tasks, runs, backends, resume, cli, daemon, web-dashboard, attachments, dependencies, variables, configuration, examples) and slimmed the README to a tagline, quickstart, exit codes, project layout, and a documentation index.
 - Polished the web detail drawer's Attachments and Dependencies tabs: attachment rows now render with the shared row card styling and human-readable sizes (e.g. `2.1 MB`), dependency rows show a status badge instead of plain-text status, destructive actions use the destructive-outline button tone, and empty "Depends on" / "Required by" sections are hidden instead of showing duplicate empty-state copy. ([#32](https://github.com/kcosr/task-runner/pull/32))
 - Kanban run cards now surface dependency readiness and attachment presence directly in the card metadata row so planning artifacts and blocked prerequisites are visible without opening the drawer. ([#32](https://github.com/kcosr/task-runner/pull/32))
 - `assignments/plan-feature/` now attaches `assignment-seed.md` and `assignment-summary.md` to the planning run, waits for explicit caller approval before creating the implementer run, and teaches generated implementer/code-review orientations to review `assignment-summary.md` for supplemental context when it exists. ([#32](https://github.com/kcosr/task-runner/pull/32))
