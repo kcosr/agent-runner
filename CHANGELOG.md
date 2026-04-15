@@ -20,6 +20,7 @@
 
 ### Added
 
+- Added bundled `planner` and `test` agents for planning and validation flows.
 - Added normalized per-run timeline history at `GET /api/runs/:runId/timeline`, cursored live timeline envelopes over daemon SSE/WebSocket, and an attempt-oriented web drawer timeline that bootstraps from history before continuing live output. ([#36](https://github.com/kcosr/task-runner/pull/36))
 - Added `scripts/task-list-markdown.mjs` to render `task-runner task list <run-id> --output-format json` output as Markdown, defaulting to `task-runner` on `PATH` with an optional `TASK_RUNNER_BIN` override. ([#33](https://github.com/kcosr/task-runner/pull/33))
 - Added first-class `cursor` backend support via the public `cursor-agent` headless print mode, including streamed partial-output rendering, captured session-id resume for task-runner-created runs, `TASK_RUNNER_CURSOR_BIN`, and explicit rejection of unsafe bootstrap `--backend-session-id` import. ([#33](https://github.com/kcosr/task-runner/pull/33))
@@ -75,6 +76,7 @@
 
 ### Changed
 
+- Replaced the bundled `repo-diagnostics` assignment with a bundled `test` assignment that only asks the agent to run `date` and `pwd`, without repo-specific context.
 - The web timeline drawer now uses an `Attempts` section label, drops the redundant per-attempt metadata header, and renders attempt prompts/output as Markdown so streamed transcripts can progressively format in place. ([#36](https://github.com/kcosr/task-runner/pull/36))
 - The web run detail drawer now shows `Start` for initialized resumable runs, keeps `Resume` for existing sessions, makes follow-up messages optional behind a disclosure while incomplete tasks remain, still requires a message once all tasks are complete, and truncates in-progress card task labels so long titles do not widen the board layout. ([#37](https://github.com/kcosr/task-runner/pull/37))
 - The web dashboard now applies live `RunSummary` and `RunDetail` snapshots directly to the board/detail caches, so card progress, attachment/dependency badges, and active-task labels update from streamed projections without relying on selected-run invalidation. ([#35](https://github.com/kcosr/task-runner/pull/35))
@@ -197,6 +199,7 @@
 
 ### Removed
 
+- Removed the legacy bundled `basic`, `chat`, `codex-chat`, `codex-example`, `example`, and `passive-example` agents.
 - Removed `--task-mode`, assignment-level `taskMode`, and all task-mode-specific runtime branching. ([#34](https://github.com/kcosr/task-runner/pull/34))
 - Removed `pendingPrompt` from manifests and public status surfaces. ([#34](https://github.com/kcosr/task-runner/pull/34))
 - Removed the generated workspace `assignment.md` task surface from new runs. ([#34](https://github.com/kcosr/task-runner/pull/34))

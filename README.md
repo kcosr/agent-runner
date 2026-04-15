@@ -60,7 +60,7 @@ Fresh run:
 
 ```bash
 task-runner run \
-  --agent ./agents/example/agent.md \
+  --agent ./agents/implementer/agent.md \
   --assignment ./assignments/repo-orientation/assignment.md \
   --var repo_path="$PWD"
 ```
@@ -78,7 +78,7 @@ Prepare a run without executing it:
 
 ```bash
 task-runner init \
-  --agent ./agents/example/agent.md \
+  --agent ./agents/implementer/agent.md \
   --assignment ./assignments/repo-orientation/assignment.md \
   --var repo_path="$PWD"
 
@@ -239,12 +239,22 @@ transcript deltas.
 The repo ships these bundled assignments:
 
 - `repo-orientation`
-- `repo-diagnostics`
+- `test`
 - `plan-feature`
 - `plan-review`
 - `code-review`
 - `doc-review`
 - `familiarize`
+
+## Built-In Agents
+
+The repo ships these bundled agents:
+
+- `planner`
+- `implementer`
+- `code-reviewer`
+- `doc-reviewer`
+- `test`
 
 Planning/review flows are run-id-centric. Current-run transport instructions
 should use `task-runner brief <run-id>` and task CLI commands, not scraped
