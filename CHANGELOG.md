@@ -135,6 +135,7 @@
 
 ### Fixed
 
+- Fixed per-run timeline recovery to stop retrying forever on unrecoverable live-stream gaps, added explicit client coverage for timeline envelope application, and hardened timeline-history loading to ignore attempt log paths that escape the run workspace.
 - Fixed attachment uploads when the selected filename contained non-ISO-8859-1 characters (emoji, diacritics, non-Latin scripts): the `x-task-runner-attachment-name` header is now percent-encoded by the web and CLI daemon clients and percent-decoded by the daemon HTTP route. ([#32](https://github.com/kcosr/task-runner/pull/32))
 - Fixed the attachments tab in the web detail drawer showing the native file input's "Choose File / No file chosen" UI next to the Upload button — the `.sr-only` utility class was referenced but never defined, so the supposedly hidden input was fully visible. ([#32](https://github.com/kcosr/task-runner/pull/32))
 - Fixed Ctrl+C handling for Codex-managed and daemon-target runs so

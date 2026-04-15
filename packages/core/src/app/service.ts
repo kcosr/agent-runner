@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import type { DefinitionEntry } from "../config/loader.js";
 import type {
   RunAttachment,
@@ -104,7 +104,15 @@ function readAttemptLogForRecord(
   record: AttemptRecord,
 ): AttemptLog {
   try {
-    const raw = readFileSync(join(workspaceDir, record.logPath), "utf8");
+    const workspaceRoot = resolve(workspaceDir);
+    const absoluteLogPath = resolve(workspaceRoot, record.logPath);
+    if (
+      absoluteLogPath !== workspaceRoot &&
+      !absoluteLogPath.startsWith(`${workspaceRoot}${sep}`)
+    ) {
+      throw new Error("attempt log path escapes workspace");
+    }
+    const raw = readFileSync(absoluteLogPath, "utf8");
     return JSON.parse(raw) as AttemptLog;
   } catch {
     return {

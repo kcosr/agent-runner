@@ -180,7 +180,7 @@ async function startCodexRenameServer(options = {}) {
   };
 }
 
-test("command services: getRunTimelineHistory degrades missing or corrupt attempt logs", async () => {
+test("command services: getRunTimelineHistory degrades missing, corrupt, or escaping attempt logs", async () => {
   const dir = tempDir();
   writeBundle(dir);
   const outcome = await initRun(dir);
@@ -222,6 +222,22 @@ test("command services: getRunTimelineHistory degrades missing or corrupt attemp
         tasksAfter: manifest.finalTasks,
         invalidStatuses: [],
       },
+      {
+        attempt: 3,
+        sessionIndex: 0,
+        startedAt: "2026-04-15T01:04:00.000Z",
+        endedAt: "2026-04-15T01:05:00.000Z",
+        prompt: "Attempt three",
+        sessionIdAtStart: null,
+        sessionIdCaptured: null,
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        transcript: "Third output",
+        logPath: "../outside.json",
+        tasksAfter: manifest.finalTasks,
+        invalidStatuses: [],
+      },
     ];
     manifest.attempts = manifest.attemptRecords.length;
   });
@@ -229,11 +245,13 @@ test("command services: getRunTimelineHistory degrades missing or corrupt attemp
   await withSharedRuntimeEnv(dir, async () => {
     const history = getRunTimelineHistory(outcome.runId);
     assert.equal(history.runId, outcome.runId);
-    assert.equal(history.attempts.length, 2);
+    assert.equal(history.attempts.length, 3);
     assert.equal(history.attempts[0]?.transcript, "First output");
     assert.equal(history.attempts[0]?.notices, "");
     assert.equal(history.attempts[1]?.transcript, "Second output");
     assert.equal(history.attempts[1]?.notices, "");
+    assert.equal(history.attempts[2]?.transcript, "Third output");
+    assert.equal(history.attempts[2]?.notices, "");
   });
 });
 

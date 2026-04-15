@@ -14,6 +14,13 @@ export interface RunTimelineState {
   stale: boolean;
 }
 
+export interface ApplyEnvelopeResult {
+  history: RunTimelineHistory;
+  requiresReload: boolean;
+}
+
+const MAX_CONSECUTIVE_RELOADS = 5;
+
 function cloneHistory(history: RunTimelineHistory): RunTimelineHistory {
   return {
     ...history,
@@ -31,7 +38,10 @@ function findLiveAttempt(history: RunTimelineHistory) {
   return null;
 }
 
-function applyEnvelope(history: RunTimelineHistory, envelope: RunTimelineEnvelope) {
+export function applyEnvelope(
+  history: RunTimelineHistory,
+  envelope: RunTimelineEnvelope,
+): ApplyEnvelopeResult {
   if (envelope.cursor <= history.lastCursor) {
     return { history, requiresReload: false };
   }
@@ -85,6 +95,8 @@ function applyEnvelope(history: RunTimelineHistory, envelope: RunTimelineEnvelop
     case "resume_rejected":
     case "run_finished":
       return { history, requiresReload: true };
+    default:
+      return { history, requiresReload: true };
   }
 }
 
@@ -108,6 +120,7 @@ export function useRunTimelineState({
   const bootstrappedRef = useRef(false);
   const bufferRef = useRef<RunTimelineEnvelope[]>([]);
   const loadSeqRef = useRef(0);
+  const reloadCountRef = useRef(0);
 
   useEffect(() => {
     historyRef.current = state.history;
@@ -128,6 +141,23 @@ export function useRunTimelineState({
     }
 
     let disposed = false;
+    const requestReload = () => {
+      if (disposed) {
+        return;
+      }
+      reloadCountRef.current += 1;
+      if (reloadCountRef.current > MAX_CONSECUTIVE_RELOADS) {
+        staleRef.current = true;
+        setState((current) => ({
+          ...current,
+          isLoading: false,
+          stale: true,
+        }));
+        return;
+      }
+      void loadHistory();
+    };
+
     const loadHistory = async () => {
       const loadSeq = ++loadSeqRef.current;
       setState((current) => ({ ...current, error: undefined, isLoading: true }));
@@ -146,7 +176,7 @@ export function useRunTimelineState({
             bufferRef.current = [];
             staleRef.current = true;
             setState((current) => ({ ...current, stale: true }));
-            void loadHistory();
+            requestReload();
             return;
           }
           merged = result.history;
@@ -156,6 +186,7 @@ export function useRunTimelineState({
           (envelope) => envelope.cursor > merged.lastCursor,
         );
         bootstrappedRef.current = true;
+        reloadCountRef.current = 0;
         historyRef.current = merged;
         staleRef.current = false;
         setState({
@@ -181,6 +212,7 @@ export function useRunTimelineState({
     staleRef.current = false;
     bootstrappedRef.current = false;
     bufferRef.current = [];
+    reloadCountRef.current = 0;
     setState({ history: null, isLoading: true, stale: false });
 
     if (!runIsLive) {
@@ -213,10 +245,11 @@ export function useRunTimelineState({
           bufferRef.current = [];
           staleRef.current = true;
           setState((current) => ({ ...current, stale: true }));
-          void loadHistory();
+          requestReload();
           return;
         }
 
+        reloadCountRef.current = 0;
         historyRef.current = result.history;
         staleRef.current = false;
         setState({
