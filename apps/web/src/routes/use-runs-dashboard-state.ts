@@ -13,6 +13,7 @@ import { queryClient, runQueryKeys } from "../lib/query.js";
 import { useRunEvents } from "../lib/run-events.js";
 import { useRuntimeConfig } from "../lib/runtime-config.js";
 import { useBoardSettings } from "../lib/settings.js";
+import { subscribeToRunDetailEvents } from "../lib/sse.js";
 
 export interface NoticeState {
   id: string;
@@ -77,14 +78,6 @@ function buildColumns(runs: RunSummary[], collapseFailureStates: boolean): Board
     ...column,
     runs: runs.filter((run) => column.statuses.includes(run.effectiveStatus)),
   }));
-}
-
-function selectedRunActiveTask(detail: RunDetail | undefined): string | undefined {
-  if (!detail) {
-    return undefined;
-  }
-  const inProgress = detail.tasks.filter((task) => task.status === "in_progress");
-  return inProgress.length === 1 ? inProgress.at(0)?.id : undefined;
 }
 
 function appendNotice(current: NoticeState[], notice: NoticeState): NoticeState[] {
@@ -165,14 +158,16 @@ export function useRunsDashboardState() {
   const config = useRuntimeConfig();
   const api = useMemo(() => createApiClient(config), [config]);
   const { settings, updateSettings } = useBoardSettings();
-  const { streamStale } = useRunEvents();
+  const { streamStale: summaryStreamStale } = useRunEvents();
   const deferredSearch = useDeferredValue(settings.search);
   const navigate = useNavigate();
   const runRouteParams = useParams({ strict: false });
   const selectedRunId = "runId" in runRouteParams ? runRouteParams.runId : undefined;
   const [notices, setNotices] = useState<NoticeState[]>([]);
   const [actionError, setActionError] = useState<string>();
+  const [detailStreamStale, setDetailStreamStale] = useState(false);
   const noticeTimersRef = useRef(new Map<string, number>());
+  const detailStreamStaleRef = useRef(detailStreamStale);
 
   const runsQuery = useQuery({
     queryKey: runQueryKeys.list(),
@@ -222,7 +217,10 @@ export function useRunsDashboardState() {
   const boardColumns = settings.hideEmptyColumns
     ? columns.filter((column) => column.runs.length > 0)
     : columns;
-  const activeTask = selectedRunActiveTask(selectedRunQuery.data);
+
+  useEffect(() => {
+    detailStreamStaleRef.current = detailStreamStale;
+  }, [detailStreamStale]);
 
   useEffect(() => {
     for (const notice of notices) {
@@ -303,6 +301,68 @@ export function useRunsDashboardState() {
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [navigate, selectedRunId]);
+
+  useEffect(() => {
+    if (!selectedRunId) {
+      detailStreamStaleRef.current = false;
+      setDetailStreamStale(false);
+      return;
+    }
+    const runId = selectedRunId;
+
+    let disposed = false;
+
+    async function refreshActiveQueries() {
+      await Promise.all([
+        queryClient.refetchQueries(
+          { queryKey: runQueryKeys.list(), type: "active" },
+          { throwOnError: true },
+        ),
+        queryClient.refetchQueries(
+          { queryKey: runQueryKeys.detail(runId), type: "active" },
+          { throwOnError: true },
+        ),
+      ]);
+    }
+
+    const unsubscribe = subscribeToRunDetailEvents(config, runId, {
+      onOpen: () => {
+        if (!detailStreamStaleRef.current) {
+          return;
+        }
+        void refreshActiveQueries()
+          .then(() => {
+            if (disposed) {
+              return;
+            }
+            detailStreamStaleRef.current = false;
+            setDetailStreamStale(false);
+          })
+          .catch(() => {
+            // Keep the stale banner visible until a reconnect can revalidate successfully.
+          });
+      },
+      onEvent: (payload) => {
+        if (detailStreamStaleRef.current) {
+          detailStreamStaleRef.current = false;
+          setDetailStreamStale(false);
+        }
+        queryClient.setQueryData(runQueryKeys.detail(runId), payload.detail);
+      },
+      onStaleChange: (stale) => {
+        if (!stale) {
+          return;
+        }
+        detailStreamStaleRef.current = true;
+        setDetailStreamStale(true);
+      },
+    });
+
+    return () => {
+      disposed = true;
+      unsubscribe();
+    };
+  }, [config, selectedRunId]);
 
   const closeRun = () => {
     void navigate({ to: "/" });
@@ -512,11 +572,10 @@ export function useRunsDashboardState() {
     },
     runs,
     runsQuery,
-    selectedRunActiveTask: activeTask,
     selectedRunId,
     selectedRunQuery,
     settings,
-    streamStale,
+    streamStale: summaryStreamStale || detailStreamStale,
     updateSettings,
     visibleRuns,
   };

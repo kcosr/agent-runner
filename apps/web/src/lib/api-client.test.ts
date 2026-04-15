@@ -3,7 +3,7 @@ import { ApiError, createApiClient } from "./api-client.js";
 
 const config = {
   apiBasePath: "/api",
-  runEventsPath: "/api/events/runs",
+  runSummaryEventsPath: "/api/events/run-summaries",
 };
 
 describe("api client", () => {
@@ -40,6 +40,10 @@ describe("api client", () => {
                     total: 0,
                     satisfied: 0,
                     unsatisfied: 0,
+                  },
+                  activeTask: {
+                    id: "build",
+                    title: "Build UI",
                   },
                   execution: {
                     hostMode: "embedded",
@@ -104,6 +108,10 @@ describe("api client", () => {
                     total: 2,
                     satisfied: 1,
                     unsatisfied: 1,
+                  },
+                  activeTask: {
+                    id: "build",
+                    title: "Build UI",
                   },
                   execution: {
                     hostMode: "embedded",

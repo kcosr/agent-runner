@@ -1406,7 +1406,6 @@ async function runExecuteCommandDaemon(parsed: ParsedArgs, connectUrl: string): 
       process.exit(0);
     }
 
-    const bufferedEvents: Array<{ runId: string; event: RunEvent }> = [];
     let activeRunId: string | undefined;
     let terminalStatus: string | undefined;
     let abortRequested = false;
@@ -1453,36 +1452,27 @@ async function runExecuteCommandDaemon(parsed: ParsedArgs, connectUrl: string): 
     };
     process.on("SIGINT", onSigint);
 
-    const subscriptionId = await client.subscribe({}, ({ runId, event }) => {
-      if (!activeRunId) {
-        bufferedEvents.push({ runId, event });
-        return;
-      }
-      if (runId !== activeRunId) {
-        return;
-      }
-      if (!isJson) {
-        emitRenderedEvent(event);
-      }
-      if (event.type === "run_finished") {
-        terminalStatus = event.summary.status;
-      }
-    });
-
+    let subscriptionId: string | undefined;
     try {
       const startResult = await startOrResumeDaemonRun(client, parsed);
       activeRunId = startResult.runId;
-      for (const buffered of bufferedEvents) {
-        if (buffered.runId !== activeRunId) {
-          continue;
-        }
-        if (!isJson) {
-          emitRenderedEvent(buffered.event);
-        }
-        if (buffered.event.type === "run_finished") {
-          terminalStatus = buffered.event.summary.status;
-        }
-      }
+      subscriptionId = await client.subscribe(
+        {
+          channel: "run_timeline",
+          runId: activeRunId,
+        },
+        (notification) => {
+          if (notification.method !== "run.timeline") {
+            return;
+          }
+          if (!isJson) {
+            emitRenderedEvent(notification.event);
+          }
+          if (notification.event.type === "run_finished") {
+            terminalStatus = notification.event.summary.status;
+          }
+        },
+      );
       if (abortRequested) {
         requestCancel();
       }
@@ -1520,7 +1510,9 @@ async function runExecuteCommandDaemon(parsed: ParsedArgs, connectUrl: string): 
       process.exit(terminalExitCode(terminalStatus));
     } finally {
       process.off("SIGINT", onSigint);
-      await client.unsubscribe(subscriptionId);
+      if (subscriptionId) {
+        await client.unsubscribe(subscriptionId);
+      }
     }
   });
 

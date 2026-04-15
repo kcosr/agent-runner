@@ -229,6 +229,30 @@ Important rule:
 CLI commands can route through the daemon with `--connect` or
 `TASK_RUNNER_CONNECT`.
 
+Live subscriptions are split by responsibility instead of sharing one mixed
+event bus:
+
+- global summary stream: `/api/events/run-summaries`
+- per-run detail stream: `/api/runs/:runId/events/detail`
+- per-run timeline stream: `/api/runs/:runId/events/timeline`
+
+The WebSocket subscription contract mirrors that split:
+
+- `events.subscribe { channel: "run_summary" }`
+- `events.subscribe { channel: "run_detail", runId }`
+- `events.subscribe { channel: "run_timeline", runId }`
+
+Notifications are likewise explicit:
+
+- `run.summary` carries a fresh `RunSummary`
+- `run.detail` carries a fresh `RunDetail`
+- `run.timeline` carries one execution `RunTimelineEvent`
+
+This keeps board/detail projections manifest-canonical while preserving the
+execution timeline as a separate per-run surface. `RunSummary` and `RunDetail`
+both expose derived `activeTask` data so live consumers do not need to re-scan
+task arrays to render the current in-progress task label.
+
 ## Workspace Layout
 
 Typical workspace:

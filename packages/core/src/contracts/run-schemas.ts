@@ -3,6 +3,7 @@ import { LOCKABLE_FIELDS } from "../core/config/schema.js";
 import type { RunAttachment } from "./attachments.js";
 import type {
   RunAbortReason,
+  RunActiveTask,
   RunArchiveResult,
   RunCapabilities,
   RunDependenciesResult,
@@ -36,6 +37,11 @@ export const runTaskSummarySchema: z.ZodType<RunTaskSummary> = z.object({
   body: z.string(),
   status: z.enum(TASK_STATUSES),
   notes: z.string(),
+});
+
+export const runActiveTaskSchema: z.ZodType<RunActiveTask> = z.object({
+  id: z.string(),
+  title: z.string(),
 });
 
 export const runTaskMutationCapabilitiesSchema: z.ZodType<RunTaskMutationCapabilities> = z.object({
@@ -120,6 +126,7 @@ export const runSummarySchema: z.ZodType<RunSummary> = z.object({
   tasksTotal: z.number(),
   attachmentCount: z.number(),
   dependencyState: runDependencyStateSchema,
+  activeTask: runActiveTaskSchema.nullable(),
   execution: runExecutionSchema,
   capabilities: runCapabilitiesSchema,
 });
@@ -164,6 +171,7 @@ export const runDetailSchema: z.ZodType<RunDetail> = z.object({
   dependencies: z.array(runDependencyDetailSchema),
   dependents: z.array(runDependencyDetailSchema),
   tasks: z.array(runTaskSummarySchema),
+  activeTask: runActiveTaskSchema.nullable(),
   message: z.string().nullable(),
   callerInstructions: z.string().nullable(),
   lockedFields: z.array(z.enum(LOCKABLE_FIELDS)),

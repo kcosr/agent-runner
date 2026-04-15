@@ -213,6 +213,24 @@ ${TASK_RUNNER_STATE_DIR}/runs/<repo-name>/<run-id>/
 Embedded mode still works without the daemon. Daemon mode is local infrastructure,
 not a multi-user remote service.
 
+Live browser/daemon surfaces are split by projection type:
+
+- `GET /api/events/run-summaries` streams `summary_upsert` events carrying full
+  `RunSummary` snapshots for board cards
+- `GET /api/runs/:runId/events/detail` streams `detail_updated` events carrying
+  full `RunDetail` snapshots for the selected run
+- `GET /api/runs/:runId/events/timeline` streams per-run execution timeline
+  events such as `agent_message_delta`
+
+The shared app config surface is:
+
+- `apiBasePath`
+- `runSummaryEventsPath`
+
+Per-run detail and timeline paths are derived from `apiBasePath` and the active
+run id. The global summary stream is projection-only and does not carry
+transcript deltas.
+
 ## Built-In Assignments
 
 The repo ships these bundled assignments:

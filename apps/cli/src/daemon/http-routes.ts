@@ -2,7 +2,11 @@ import { readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { RunCommandOverrides } from "@task-runner/core/app/service.js";
 import { VALID_STATUSES } from "@task-runner/core/assignment/model.js";
-import type { RunEventEnvelope } from "@task-runner/core/contracts/events.js";
+import type {
+  RunDetailStreamEvent,
+  RunSummaryStreamEvent,
+  RunTimelineEvent,
+} from "@task-runner/core/contracts/events.js";
 import { HttpError } from "./http-errors.js";
 import { readJsonBody, sendBuffer, sendError, sendJson } from "./http-serializers.js";
 import type { DaemonOperations } from "./operations.js";
@@ -21,7 +25,7 @@ import {
   requiredRunIdString,
   requiredString,
 } from "./request-parsing.js";
-import { streamRunEvents } from "./sse.js";
+import { streamEvents } from "./sse.js";
 
 interface ResumeRunBody {
   overrides: RunCommandOverrides;
@@ -30,10 +34,12 @@ interface ResumeRunBody {
 interface RouteContext {
   operations: DaemonOperations;
   httpBaseUrl: string;
-  subscribeRunEvents(
-    runId: string | undefined,
-    publish: (payload: RunEventEnvelope) => boolean,
+  subscribeRunSummaries(publish: (payload: RunSummaryStreamEvent) => boolean): () => void;
+  subscribeRunDetail(
+    runId: string,
+    publish: (payload: RunDetailStreamEvent) => boolean,
   ): () => void;
+  subscribeRunTimeline(runId: string, publish: (payload: RunTimelineEvent) => boolean): () => void;
 }
 
 type RouteHandler = (
@@ -310,18 +316,27 @@ const routes: RouteDefinition[] = [
   },
   {
     method: "GET",
-    pattern: ["api", "events", "runs"],
+    pattern: ["api", "events", "run-summaries"],
     handler: (req, res, ctx) => {
-      streamRunEvents(req, res, (publish) => ctx.subscribeRunEvents(undefined, publish));
+      streamEvents(req, res, (publish) => ctx.subscribeRunSummaries(publish));
     },
   },
   {
     method: "GET",
-    pattern: ["api", "events", "runs", ":runId"],
+    pattern: ["api", "runs", ":runId", "events", "detail"],
     handler: (req, res, ctx, params) => {
-      streamRunEvents(req, res, (publish) =>
-        ctx.subscribeRunEvents(routeParam(params, "runId"), publish),
-      );
+      const runId = routeParam(params, "runId");
+      ctx.operations.getRun(runId);
+      streamEvents(req, res, (publish) => ctx.subscribeRunDetail(runId, publish));
+    },
+  },
+  {
+    method: "GET",
+    pattern: ["api", "runs", ":runId", "events", "timeline"],
+    handler: (req, res, ctx, params) => {
+      const runId = routeParam(params, "runId");
+      ctx.operations.getRun(runId);
+      streamEvents(req, res, (publish) => ctx.subscribeRunTimeline(runId, publish));
     },
   },
 ];

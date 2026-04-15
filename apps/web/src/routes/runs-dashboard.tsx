@@ -52,7 +52,6 @@ export function RunsDashboardRoute() {
           onToggleColumnCollapse={state.columnActions.toggleCollapse}
           runs={state.runs}
           runsQuery={state.runsQuery}
-          selectedRunActiveTask={state.selectedRunActiveTask}
           selectedRunId={state.selectedRunId}
           visibleRuns={state.visibleRuns}
         />

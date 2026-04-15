@@ -1,10 +1,9 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { RunEventEnvelope } from "@task-runner/core/contracts/events.js";
 
-export function streamRunEvents(
+export function streamEvents<T>(
   req: IncomingMessage,
   res: ServerResponse,
-  subscribe: (publish: (payload: RunEventEnvelope) => boolean) => () => void,
+  subscribe: (publish: (payload: T) => boolean) => () => void,
 ): void {
   res.statusCode = 200;
   res.setHeader("content-type", "text/event-stream; charset=utf-8");
@@ -33,7 +32,7 @@ export function streamRunEvents(
   res.on("error", cleanup);
 }
 
-function writeEvent(res: ServerResponse, payload: RunEventEnvelope): boolean {
+function writeEvent(res: ServerResponse, payload: unknown): boolean {
   if (res.destroyed || res.writableEnded) {
     return false;
   }
