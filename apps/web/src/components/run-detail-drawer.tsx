@@ -831,6 +831,18 @@ export function RunDetailDrawer({
                       const rowClassName = previewable
                         ? "dependency-row dependency-row--interactive"
                         : "dependency-row";
+                      const attachmentSummary = (
+                        <span className="dependency-copy">
+                          <span className="dependency-name">{attachment.name}</span>
+                          <span className="dependency-meta">
+                            <span className="dependency-meta-id">{attachment.mimeType}</span>
+                            <span>·</span>
+                            <span>{formatBytes(attachment.size)}</span>
+                            <span>·</span>
+                            <span>{formatTimestamp(attachment.addedAt)}</span>
+                          </span>
+                        </span>
+                      );
                       return (
                         <li className={rowClassName} key={attachment.id}>
                           {previewable ? (
@@ -840,31 +852,13 @@ export function RunDetailDrawer({
                               onClick={() => onOpenAttachmentPreview(attachment.id)}
                               type="button"
                             >
-                              <span className="dependency-copy">
-                                <span className="dependency-name">{attachment.name}</span>
-                                <span className="dependency-meta">
-                                  <span className="dependency-meta-id">{attachment.mimeType}</span>
-                                  <span>·</span>
-                                  <span>{formatBytes(attachment.size)}</span>
-                                  <span>·</span>
-                                  <span>{formatTimestamp(attachment.addedAt)}</span>
-                                </span>
-                              </span>
+                              {attachmentSummary}
                               <span className="attachment-row-affordance">
                                 Preview {normalizeAttachmentMimeType(attachment.mimeType)}
                               </span>
                             </button>
                           ) : (
-                            <div className="dependency-copy">
-                              <span className="dependency-name">{attachment.name}</span>
-                              <span className="dependency-meta">
-                                <span className="dependency-meta-id">{attachment.mimeType}</span>
-                                <span>·</span>
-                                <span>{formatBytes(attachment.size)}</span>
-                                <span>·</span>
-                                <span>{formatTimestamp(attachment.addedAt)}</span>
-                              </span>
-                            </div>
+                            attachmentSummary
                           )}
                           <div className="dependency-actions">
                             <button

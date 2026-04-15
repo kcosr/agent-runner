@@ -21,6 +21,7 @@
 
 ### Added
 
+- Added in-app preview for `text/markdown` and `text/plain` attachments in the web run detail drawer, including per-run remembered preview state when switching between runs.
 - Added `task-runner run delete <id|path>` plus daemon HTTP/RPC parity and web detail-drawer support for deleting archived runs. ([#39](https://github.com/kcosr/task-runner/pull/39))
 - Added bundled `planner` and `test` agents for planning and validation flows. ([#38](https://github.com/kcosr/task-runner/pull/38))
 - Added `scripts/migrate-manifests-v7.mjs` to upgrade existing v6 run manifests by converting `pendingPrompt` / `taskMode` into persisted `brief` fields for manifests, reset seeds, and sessions. ([#38](https://github.com/kcosr/task-runner/pull/38))
