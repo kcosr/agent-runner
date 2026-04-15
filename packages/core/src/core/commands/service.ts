@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, readFileSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { type TaskState, VALID_STATUSES, isValidStatus } from "../../assignment/model.js";
 import { setCodexThreadName } from "../../backends/codex.js";
@@ -13,11 +13,16 @@ import {
 import type { RunAttachment, RunAttachmentRemoveResult } from "../../contracts/attachments.js";
 import {
   type RunArchiveResult,
+  type RunDeleteResult,
   type RunDependenciesResult,
   type RunDetail,
   type RunNameResult,
   type RunSummary,
   type RunTaskMutationCapabilities,
+  canArchiveRun,
+  canDeleteRun,
+  canResetRun,
+  canUnarchiveRun,
   deriveTaskMutationCapabilities,
   toRunArchiveResult,
   toRunDependenciesResult,
@@ -90,6 +95,7 @@ export interface RunResetResult {
 export type RunListEntry = RunSummary;
 export type {
   RunArchiveResult,
+  RunDeleteResult,
   RunDependenciesResult,
   RunNameResult,
 } from "../../contracts/runs.js";
@@ -157,9 +163,32 @@ function resolveRun(target: string): ReturnType<typeof resolveResumeTarget> {
 }
 
 function requireArchivableRun(manifest: RunManifest, verb: "archive" | "unarchive"): void {
+  const allowed = verb === "archive" ? canArchiveRun(manifest) : canUnarchiveRun(manifest);
+  if (allowed) {
+    return;
+  }
   if (manifest.status === "running") {
     throw new ConflictError(`cannot ${verb} a running run`);
   }
+}
+
+function requireResettableRun(manifest: RunManifest): void {
+  if (canResetRun(manifest)) {
+    return;
+  }
+  throw new ConflictError(
+    "cannot reset a running run (run reset is rejected while a run is in-flight)",
+  );
+}
+
+function requireDeletableRun(manifest: RunManifest): void {
+  if (canDeleteRun(manifest)) {
+    return;
+  }
+  if (manifest.status === "running") {
+    throw new ConflictError("cannot delete a running run");
+  }
+  throw new CommandError(`cannot delete run ${manifest.runId} unless it is archived`);
 }
 
 function requireDependencyMutationAllowed(
@@ -424,11 +453,7 @@ export function showDefinition(
 
 export function resetRun(target: string): RunResetResult {
   const resolved = resolveRun(target);
-  if (resolved.manifest.status === "running") {
-    throw new ConflictError(
-      "cannot reset a running run (run reset is rejected while a run is in-flight)",
-    );
-  }
+  requireResettableRun(resolved.manifest);
   return {
     manifest: resetWorkspaceRun(resolved.workspaceDir),
   };
@@ -472,6 +497,16 @@ export function archiveRun(target: string): RunArchiveResult {
 
 export function unarchiveRun(target: string): RunArchiveResult {
   return setRunArchived(target, false);
+}
+
+export function deleteRun(target: string): RunDeleteResult {
+  const resolved = resolveRun(target);
+  withTaskStateLock(resolved.workspaceDir, () => {
+    resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
+    requireDeletableRun(resolved.manifest);
+    rmSync(resolved.workspaceDir, { recursive: true, force: true });
+  });
+  return { runId: resolved.manifest.runId };
 }
 
 export async function setRunName(

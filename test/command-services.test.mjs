@@ -302,6 +302,8 @@ test("command services: readStatus reads canonical task state for running runs",
     assert.deepEqual(result.capabilities, {
       canArchive: false,
       canUnarchive: false,
+      canReset: false,
+      canDelete: false,
       canResume: false,
       canAbort: false,
       abortReason: "not_active_in_daemon",
@@ -645,6 +647,8 @@ test("command services: listRuns returns newest-first rows and filters archived 
     assert.deepEqual(allRuns[0].capabilities, {
       canArchive: true,
       canUnarchive: false,
+      canReset: true,
+      canDelete: false,
       canResume: true,
       canAbort: false,
       abortReason: "not_active_in_daemon",
@@ -663,6 +667,8 @@ test("command services: listRuns returns newest-first rows and filters archived 
     assert.deepEqual(allRuns[1].capabilities, {
       canArchive: false,
       canUnarchive: true,
+      canReset: true,
+      canDelete: true,
       canResume: false,
       canAbort: false,
       abortReason: "not_active_in_daemon",

@@ -1,11 +1,16 @@
 import type { RunEvent } from "../core/run/run-loop.js";
 import type { RunDetail, RunSummary } from "./runs.js";
 
-// Global board-projection event: consumers upsert the latest RunSummary snapshot.
-export interface RunSummaryStreamEvent {
-  type: "summary_upsert";
-  summary: RunSummary;
-}
+// Global board-projection events: consumers either upsert or remove one run summary row.
+export type RunSummaryStreamEvent =
+  | {
+      type: "summary_upsert";
+      summary: RunSummary;
+    }
+  | {
+      type: "summary_removed";
+      runId: string;
+    };
 
 // Per-run detail-projection event: consumers replace the selected run detail snapshot.
 export interface RunDetailStreamEvent {

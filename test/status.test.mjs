@@ -397,6 +397,8 @@ test("status --field capabilities exposes the current run capability contract", 
   assert.deepEqual(projected.capabilities, {
     canArchive: true,
     canUnarchive: false,
+    canReset: true,
+    canDelete: false,
     canResume: true,
     canAbort: false,
     abortReason: "already_terminal",

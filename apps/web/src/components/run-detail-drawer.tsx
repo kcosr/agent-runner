@@ -141,9 +141,11 @@ export function RunDetailDrawer({
   onClearDependencies,
   onClose,
   onCopy,
+  onDelete,
   onDownloadAttachment,
   onRemoveDependency,
   onRemoveAttachment,
+  onReset,
   onRename,
   onResume,
   timelineState,
@@ -160,9 +162,11 @@ export function RunDetailDrawer({
   onClearDependencies: () => Promise<void>;
   onClose: () => void;
   onCopy: (value: string, label: string) => void;
+  onDelete: () => void;
   onDownloadAttachment: (attachmentId: string, name: string) => Promise<void>;
   onRemoveDependency: (dependencyRunId: string) => Promise<void>;
   onRemoveAttachment: (attachmentId: string) => Promise<void>;
+  onReset: () => void;
   onRename: (name: string | null) => Promise<void>;
   onResume: (message?: string) => Promise<void>;
   timelineState: RunTimelineState;
@@ -199,6 +203,7 @@ export function RunDetailDrawer({
   const resumeRequiresMessage = !hasIncompleteTasks;
   const showResumeMessageField = resumeRequiresMessage || resumeMessageExpanded;
   const renamePending = actionPending === "rename";
+  const resetPending = actionPending === "reset";
   const uploadAttachmentPending = actionPending === "upload-attachment";
   const removeAttachmentPending = actionPending === "remove-attachment";
   const downloadAttachmentPending = actionPending === "download-attachment";
@@ -585,6 +590,11 @@ export function RunDetailDrawer({
                     : "Resume"}
               </button>
             ) : null}
+            {run.capabilities.canReset ? (
+              <button className="btn" disabled={actionsLocked} onClick={onReset} type="button">
+                {resetPending ? "Resetting..." : "Reset"}
+              </button>
+            ) : null}
             {run.capabilities.canAbort ? (
               <button
                 className="btn btn-destructive-outline"
@@ -594,6 +604,17 @@ export function RunDetailDrawer({
               >
                 <StopIcon aria-hidden="true" />
                 {actionPending === "abort" ? "Aborting..." : "Abort"}
+              </button>
+            ) : null}
+            {run.capabilities.canDelete ? (
+              <button
+                className="btn btn-destructive-outline"
+                disabled={actionsLocked}
+                onClick={onDelete}
+                type="button"
+              >
+                <TrashIcon aria-hidden="true" />
+                {actionPending === "delete" ? "Deleting..." : "Delete"}
               </button>
             ) : null}
             <button

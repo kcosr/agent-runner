@@ -142,6 +142,20 @@ const routes: RouteDefinition[] = [
   },
   {
     method: "POST",
+    pattern: ["api", "runs", ":runId", "reset"],
+    handler: (_req, res, ctx, params) => {
+      sendJson(res, 200, ctx.operations.resetRun(routeParam(params, "runId")));
+    },
+  },
+  {
+    method: "DELETE",
+    pattern: ["api", "runs", ":runId"],
+    handler: (_req, res, ctx, params) => {
+      sendJson(res, 200, ctx.operations.deleteRun(routeParam(params, "runId")));
+    },
+  },
+  {
+    method: "POST",
     pattern: ["api", "runs", ":runId", "name"],
     handler: async (req, res, ctx, params) => {
       const body = await parseRunSetNameBody(req, routeParam(params, "runId"));

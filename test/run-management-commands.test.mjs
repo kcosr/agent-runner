@@ -180,6 +180,8 @@ test("list runs enumerates current-generation runs across buckets and filters ar
   assert.deepEqual(parsed[0].capabilities, {
     canArchive: true,
     canUnarchive: false,
+    canReset: true,
+    canDelete: false,
     canAbort: false,
     abortReason: "not_active_in_daemon",
     canResume: true,
@@ -192,6 +194,8 @@ test("list runs enumerates current-generation runs across buckets and filters ar
   assert.deepEqual(parsed[1].capabilities, {
     canArchive: false,
     canUnarchive: true,
+    canReset: true,
+    canDelete: true,
     canAbort: false,
     abortReason: "not_active_in_daemon",
     canResume: false,

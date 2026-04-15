@@ -52,6 +52,8 @@ describe("api client", () => {
                   capabilities: {
                     canArchive: false,
                     canUnarchive: false,
+                    canReset: true,
+                    canDelete: false,
                     canResume: true,
                     canAbort: false,
                     abortReason: "not_active_in_daemon",
@@ -120,6 +122,8 @@ describe("api client", () => {
                   capabilities: {
                     canArchive: true,
                     canUnarchive: false,
+                    canReset: true,
+                    canDelete: false,
                     canResume: false,
                     canAbort: false,
                     abortReason: "not_active_in_daemon",
@@ -190,6 +194,101 @@ describe("api client", () => {
           message: "Pick up with the failing tests",
         },
       }),
+    });
+  });
+
+  it("posts reset requests and parses the returned run detail", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            run: {
+              runId: "run-1",
+              repo: "task-runner",
+              status: "initialized",
+              effectiveStatus: "initialized",
+              archivedAt: null,
+              isLive: false,
+              workspaceDir: "/tmp/run-1",
+              assignmentPath: "/tmp/run-1/assignment-seed.md",
+              agent: { name: "implementer", sourcePath: null },
+              assignment: null,
+              backend: "codex",
+              model: "gpt-5.4",
+              effort: "high",
+              name: "Build dashboard",
+              backendSessionId: null,
+              cwd: "/tmp/task-runner",
+              unrestricted: false,
+              timeoutSec: 60,
+              startedAt: "2026-04-13T05:00:00.000Z",
+              endedAt: null,
+              exitCode: null,
+              attempts: 0,
+              maxAttempts: 2,
+              sessionCount: 0,
+              tasksCompleted: 0,
+              tasksTotal: 1,
+              attachments: [],
+              dependencies: [],
+              dependents: [],
+              tasks: [],
+              activeTask: null,
+              message: null,
+              callerInstructions: null,
+              lockedFields: [],
+              runtimeVars: {},
+              execution: {
+                hostMode: "embedded",
+                controller: { kind: "embedded" },
+              },
+              capabilities: {
+                canArchive: true,
+                canUnarchive: false,
+                canReset: true,
+                canDelete: false,
+                canResume: true,
+                canAbort: false,
+                abortReason: "not_active_in_daemon",
+                taskMutation: {
+                  canAdd: true,
+                  canEditNotes: true,
+                  canSetStatus: true,
+                },
+              },
+            },
+          }),
+          { status: 200 },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createApiClient(config);
+
+    await expect(api.resetRun("run-1")).resolves.toMatchObject({
+      runId: "run-1",
+      status: "initialized",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/runs/run-1/reset", {
+      method: "POST",
+      headers: { accept: "application/json" },
+    });
+  });
+
+  it("deletes archived runs", async () => {
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ result: { runId: "run-1" } }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createApiClient(config);
+
+    await expect(api.deleteRun("run-1")).resolves.toEqual({ runId: "run-1" });
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/runs/run-1", {
+      method: "DELETE",
+      headers: { accept: "application/json" },
     });
   });
 

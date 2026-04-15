@@ -1,4 +1,5 @@
 import type { AppRuntimeConfig } from "@task-runner/core/contracts/app-config.js";
+import type { RunSummaryStreamEvent } from "@task-runner/core/contracts/events.js";
 import type { RunSummary } from "@task-runner/core/contracts/runs.js";
 import { type ReactNode, createContext, useContext, useEffect, useRef, useState } from "react";
 import { queryClient, runQueryKeys } from "./query.js";
@@ -26,6 +27,16 @@ function upsertSummary(
   const next = [...current];
   next[existingIndex] = incoming;
   return next;
+}
+
+function applySummaryEvent(
+  current: RunSummary[] | undefined,
+  event: RunSummaryStreamEvent,
+): RunSummary[] | undefined {
+  if (event.type === "summary_upsert") {
+    return upsertSummary(current, event.summary);
+  }
+  return current?.filter((run) => run.runId !== event.runId);
 }
 
 export function RunEventsProvider({
@@ -81,7 +92,7 @@ export function RunEventsProvider({
           setStreamStale(false);
         }
         queryClient.setQueryData<RunSummary[] | undefined>(runQueryKeys.list(), (current) =>
-          upsertSummary(current, payload.summary),
+          applySummaryEvent(current, payload),
         );
       },
       onStaleChange: (stale) => {

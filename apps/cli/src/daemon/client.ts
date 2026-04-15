@@ -51,11 +51,24 @@ export type DaemonSubscriptionNotification =
   | ({ method: "run.detail" } & RunDetailNotificationParams)
   | ({ method: "run.timeline" } & RunTimelineNotificationParams);
 
-const runSummaryNotificationSchema = z.object({
-  method: z.literal("run.summary"),
-  subscriptionId: z.string(),
-  summary: runSummarySchema,
-});
+const runSummaryNotificationSchema = z
+  .object({
+    method: z.literal("run.summary"),
+  })
+  .and(
+    z.discriminatedUnion("type", [
+      z.object({
+        subscriptionId: z.string(),
+        type: z.literal("summary_upsert"),
+        summary: runSummarySchema,
+      }),
+      z.object({
+        subscriptionId: z.string(),
+        type: z.literal("summary_removed"),
+        runId: z.string(),
+      }),
+    ]),
+  );
 
 const runDetailNotificationSchema = z.object({
   method: z.literal("run.detail"),

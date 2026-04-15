@@ -5,6 +5,7 @@
 ### Breaking Changes
 
 - Replaced the daemon/browser live-event contract hot-cut: `AppRuntimeConfig.runEventsPath` and the mixed `/api/events/runs` / `run.event` surfaces are removed in favor of `runSummaryEventsPath`, summary-only global streams, per-run detail streams, and per-run timeline streams. `RunSummary` and `RunDetail` now include derived `activeTask` projections for direct board/detail rendering. ([#35](https://github.com/kcosr/task-runner/pull/35))
+- Shared run lifecycle contracts now hot-cut `RunCapabilities` to include `canReset` and `canDelete`, and the global run-summary stream now emits either `summary_upsert` or `summary_removed`. Daemon/web consumers must use the updated capability and event unions directly.
 - Replaced the old assignment-owned/backend display-name contract with first-class nullable `run.name`. Fresh `task-runner run` / `init` now use `--name`, resume rejects name overrides, and bundled assignments/docs/examples no longer describe the removed contract.
 - Replaced the previous single-root runtime env var and cwd-local bare-name definition lookup with split XDG-style roots: `TASK_RUNNER_CONFIG_DIR` for named agent/assignment definitions and `TASK_RUNNER_STATE_DIR` for runtime state. Bare names now resolve only from the config root, and run workspaces now live under repo-scoped state buckets instead of `<cwd>/.task-runner/`. ([#8](https://github.com/kcosr/task-runner/pull/8))
 - Direct file-path args are now recognized only when the argument contains `/` or starts with `./`; bare names no longer implicitly resolve from the repo checkout. ([#8](https://github.com/kcosr/task-runner/pull/8))
@@ -20,6 +21,7 @@
 
 ### Added
 
+- Added `task-runner run delete <id|path>` plus daemon HTTP/RPC parity and web detail-drawer support for deleting archived runs.
 - Added bundled `planner` and `test` agents for planning and validation flows. ([#38](https://github.com/kcosr/task-runner/pull/38))
 - Added `scripts/migrate-manifests-v7.mjs` to upgrade existing v6 run manifests by converting `pendingPrompt` / `taskMode` into persisted `brief` fields for manifests, reset seeds, and sessions. ([#38](https://github.com/kcosr/task-runner/pull/38))
 - Added normalized per-run timeline history at `GET /api/runs/:runId/timeline`, cursored live timeline envelopes over daemon SSE/WebSocket, and an attempt-oriented web drawer timeline that bootstraps from history before continuing live output. ([#36](https://github.com/kcosr/task-runner/pull/36))
@@ -78,6 +80,7 @@
 ### Changed
 
 - Replaced the bundled `repo-diagnostics` assignment with a bundled `test` assignment that only asks the agent to run `date` and `pwd`, without repo-specific context. ([#38](https://github.com/kcosr/task-runner/pull/38))
+- The web run detail drawer now shows `Reset` for non-running runs and only renders `Reset` / `Delete` when the backend-derived shared lifecycle capabilities allow them.
 - The web timeline drawer now uses an `Attempts` section label, drops the redundant per-attempt metadata header, and renders attempt prompts/output as Markdown so streamed transcripts can progressively format in place. ([#36](https://github.com/kcosr/task-runner/pull/36))
 - The web run detail drawer now shows `Start` for initialized resumable runs, keeps `Resume` for existing sessions, makes follow-up messages optional behind a disclosure while incomplete tasks remain, still requires a message once all tasks are complete, and truncates in-progress card task labels so long titles do not widen the board layout. ([#37](https://github.com/kcosr/task-runner/pull/37))
 - The web dashboard now applies live `RunSummary` and `RunDetail` snapshots directly to the board/detail caches, so card progress, attachment/dependency badges, and active-task labels update from streamed projections without relying on selected-run invalidation. ([#35](https://github.com/kcosr/task-runner/pull/35))
@@ -140,6 +143,7 @@
 
 ### Fixed
 
+- Fixed run detail projections to preserve the canonical repo bucket from the workspace path instead of re-probing `cwd`, preventing web dashboard cards from disappearing under repo filters after the detail drawer refreshed a selected run.
 - Fixed non-passive terminal runs so any task left `in_progress` is persisted back to `pending` when the run stops, preventing stale running indicators in CLI/web until the next resume. ([#38](https://github.com/kcosr/task-runner/pull/38))
 - Fixed daemon-managed run settlement so terminal detail projections clear live abort capability immediately after completion or abort, preventing stale `Abort` actions in the web drawer after a resume finishes. ([#36](https://github.com/kcosr/task-runner/pull/36))
 - Fixed per-run timeline recovery to stop retrying forever on unrecoverable live-stream gaps, added explicit client coverage for timeline envelope application, and hardened timeline-history loading to ignore attempt log paths that escape the run workspace. ([#36](https://github.com/kcosr/task-runner/pull/36))

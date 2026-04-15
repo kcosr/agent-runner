@@ -254,6 +254,8 @@ test("task set: allowed while manifest status=running", async () => {
   assert.deepEqual(readCapabilities(outcome.runId, dir), {
     canArchive: false,
     canUnarchive: false,
+    canReset: false,
+    canDelete: false,
     canResume: false,
     canAbort: false,
     abortReason: "not_active_in_daemon",
@@ -304,6 +306,8 @@ test("task append-notes: allowed while manifest status=running", async () => {
   assert.deepEqual(readCapabilities(outcome.runId, dir), {
     canArchive: false,
     canUnarchive: false,
+    canReset: false,
+    canDelete: false,
     canResume: false,
     canAbort: false,
     abortReason: "not_active_in_daemon",
@@ -720,6 +724,8 @@ test("task set: rejects status changes on a terminal non-passive run", async () 
   assert.deepEqual(readCapabilities(outcome.runId, dir), {
     canArchive: true,
     canUnarchive: false,
+    canReset: true,
+    canDelete: false,
     canResume: true,
     canAbort: false,
     abortReason: "already_terminal",

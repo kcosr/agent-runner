@@ -133,6 +133,8 @@ test("run contracts: toRunSummary maps listed manifest rows to the neutral summa
     capabilities: {
       canArchive: true,
       canUnarchive: false,
+      canReset: true,
+      canDelete: false,
       canResume: true,
       canAbort: false,
       abortReason: "already_terminal",
@@ -162,6 +164,8 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
   assert.deepEqual(detail.capabilities, {
     canArchive: true,
     canUnarchive: false,
+    canReset: true,
+    canDelete: false,
     canResume: true,
     canAbort: false,
     abortReason: "already_terminal",
@@ -174,7 +178,7 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
   assert.equal("canMutateTasks" in detail.capabilities, false);
   assert.deepEqual(detail, {
     runId: "run123",
-    repo: "unknown",
+    repo: "demo",
     status: "success",
     effectiveStatus: "success",
     archivedAt: null,
@@ -443,6 +447,8 @@ test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mu
   assert.deepEqual(initialized, {
     canArchive: true,
     canUnarchive: false,
+    canReset: true,
+    canDelete: false,
     canResume: true,
     canAbort: false,
     abortReason: "not_active_in_daemon",
@@ -465,6 +471,8 @@ test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mu
   assert.deepEqual(archived, {
     canArchive: false,
     canUnarchive: true,
+    canReset: true,
+    canDelete: true,
     canResume: false,
     canAbort: false,
     abortReason: "already_terminal",
@@ -483,6 +491,8 @@ test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mu
   assert.deepEqual(running, {
     canArchive: false,
     canUnarchive: false,
+    canReset: false,
+    canDelete: false,
     canResume: false,
     canAbort: false,
     abortReason: "not_active_in_daemon",
@@ -556,6 +566,8 @@ test("run contracts: passive summaries and details derive effectiveStatus from t
   assert.deepEqual(detail.capabilities, {
     canArchive: true,
     canUnarchive: false,
+    canReset: true,
+    canDelete: false,
     canResume: false,
     canAbort: false,
     abortReason: "not_active_in_daemon",

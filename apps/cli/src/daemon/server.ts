@@ -8,6 +8,7 @@ import {
   archive,
   clearDependencies,
   createTask,
+  deleteArchivedRun,
   getAttachment,
   getAttachmentList,
   getDefinition,
@@ -315,6 +316,7 @@ export async function serveDaemon(
     getDefinitionList,
     archive,
     unarchive,
+    deleteArchivedRun,
     renameRun,
     addDependency,
     removeDependency,
@@ -463,6 +465,19 @@ export async function serveDaemon(
     }
   };
 
+  const publishSummaryRemoval = (runId: string): void => {
+    const payload: RunSummaryStreamEvent = {
+      type: "summary_removed",
+      runId,
+    };
+    for (const [id, subscription] of summarySubscriptions) {
+      const keep = subscription.publish(payload);
+      if (!keep) {
+        summarySubscriptions.delete(id);
+      }
+    }
+  };
+
   const publishDetail = (detail: RunDetail): void => {
     const payload: RunDetailStreamEvent = {
       type: "detail_updated",
@@ -550,6 +565,20 @@ export async function serveDaemon(
       publishDependentSummaries: shouldPublishDependentSummaries(previous, current),
       publishDependentDetails: shouldPublishDependentDetails(previous, current),
     });
+  };
+
+  const publishRunDeletion = (runId: string): void => {
+    publishSummaryRemoval(runId);
+    for (const dependentRunId of dependentRunIds(runId)) {
+      const dependentSummary = getProjectedSummary(dependentRunId);
+      if (dependentSummary) {
+        publishSummary(dependentSummary);
+      }
+      const dependentDetail = getProjectedDetail(dependentRunId);
+      if (dependentDetail) {
+        publishDetail(dependentDetail);
+      }
+    }
   };
 
   const withPublishedMutation = <T>(runId: string, mutate: () => T): T => {
@@ -791,6 +820,11 @@ export async function serveDaemon(
     },
     archive: (target) => withPublishedMutation(target, () => app.archive(target)),
     unarchive: (target) => withPublishedMutation(target, () => app.unarchive(target)),
+    deleteArchivedRun: (target) => {
+      const result = app.deleteArchivedRun(target);
+      publishRunDeletion(result.runId);
+      return result;
+    },
     renameRun: (target, input) =>
       withPublishedMutationAsync(target, () => app.renameRun(target, input)),
     addDependency: (target, dependencyRunId) =>
@@ -1039,6 +1073,17 @@ export async function serveDaemon(
             ),
           );
           return;
+        case "runs.delete":
+          sendJson(
+            ws,
+            resultResponse(
+              request.id,
+              operations.deleteRun(
+                requiredString(asRecord(params, "runs.delete params").target, "target"),
+              ),
+            ),
+          );
+          return;
         case "runs.setName": {
           const parsed = parseRunSetNameParams(params, "runs.setName params");
           sendJson(
@@ -1206,10 +1251,20 @@ export async function serveDaemon(
               subscription = subscribeRunSummaries(
                 ws,
                 (summary) =>
-                  sendNotification("run.summary", {
-                    subscriptionId,
-                    summary: summary.summary,
-                  }),
+                  sendNotification(
+                    "run.summary",
+                    summary.type === "summary_upsert"
+                      ? {
+                          subscriptionId,
+                          type: "summary_upsert",
+                          summary: summary.summary,
+                        }
+                      : {
+                          subscriptionId,
+                          type: "summary_removed",
+                          runId: summary.runId,
+                        },
+                  ),
                 subscriptionId,
               );
               break;

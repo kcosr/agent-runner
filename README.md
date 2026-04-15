@@ -114,7 +114,7 @@ Top-level commands:
 - `task-runner attachment add|list|download|remove`
 - `task-runner list agents|assignments|runs`
 - `task-runner show agent|assignment <name|path>`
-- `task-runner run reset|archive|unarchive|set-name|add-dep|remove-dep|clear-deps`
+- `task-runner run reset|archive|unarchive|delete|set-name|add-dep|remove-dep|clear-deps`
 
 Important read-surface rule:
 
@@ -216,7 +216,8 @@ not a multi-user remote service.
 Live browser/daemon surfaces are split by projection type:
 
 - `GET /api/events/run-summaries` streams `summary_upsert` events carrying full
-  `RunSummary` snapshots for board cards
+  `RunSummary` snapshots for board cards and `summary_removed` events carrying
+  deleted `runId` values
 - `GET /api/runs/:runId/events/detail` streams `detail_updated` events carrying
   full `RunDetail` snapshots for the selected run
 - `GET /api/runs/:runId/timeline` returns normalized per-attempt
@@ -233,6 +234,10 @@ The shared app config surface is:
 Per-run detail and timeline paths are derived from `apiBasePath` and the active
 run id. The global summary stream is projection-only and does not carry
 transcript deltas.
+
+Shared lifecycle actions are gated from backend-derived run capabilities:
+`RunCapabilities` now includes `canReset` and `canDelete`, and browser clients
+should use those booleans directly rather than re-implementing lifecycle checks.
 
 ## Built-In Assignments
 

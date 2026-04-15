@@ -98,6 +98,11 @@ export function deriveRepoKey(cwd: string = process.cwd()): string {
   }
 }
 
+export function deriveRepoKeyFromWorkspaceDir(workspaceDir: string): string {
+  const bucket = basename(dirname(workspaceDir));
+  return nonEmpty(bucket) ?? UNKNOWN_REPO_KEY;
+}
+
 export function resolveRunsRoot(env: NodeJS.ProcessEnv = process.env): string {
   return join(resolveTaskRunnerStateDir(env), "runs");
 }

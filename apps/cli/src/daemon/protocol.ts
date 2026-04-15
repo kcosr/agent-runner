@@ -11,6 +11,7 @@ import type {
 } from "@task-runner/core/contracts/events.js";
 import type {
   RunArchiveResult,
+  RunDeleteResult,
   RunDependenciesResult,
   RunDetail,
   RunNameResult,
@@ -131,10 +132,17 @@ export interface EventsUnsubscribeResult {
   unsubscribed: true;
 }
 
-export interface RunSummaryNotificationParams {
-  subscriptionId: string;
-  summary: RunSummary;
-}
+export type RunSummaryNotificationParams =
+  | {
+      subscriptionId: string;
+      type: "summary_upsert";
+      summary: RunSummary;
+    }
+  | {
+      subscriptionId: string;
+      type: "summary_removed";
+      runId: string;
+    };
 
 export interface RunDetailNotificationParams {
   subscriptionId: string;
@@ -155,6 +163,10 @@ export interface RunsListResult {
 
 export interface RunResult {
   run: RunDetail;
+}
+
+export interface RunDeleteResultEnvelope {
+  result: RunDeleteResult;
 }
 
 export interface RunBriefResult {

@@ -8,6 +8,7 @@ import type {
   DefinitionDetailsResult,
   DefinitionListResult,
   RunArchiveResult,
+  RunDeleteResult,
   RunDependenciesResult,
   RunListResult,
   RunResetResult,
@@ -216,6 +217,10 @@ export function renderRunUnarchive(result: RunArchiveResult): string {
     return `task-runner: run ${result.runId} is not archived\n`;
   }
   return `task-runner: unarchived run ${result.runId}\n`;
+}
+
+export function renderRunDelete(result: RunDeleteResult): string {
+  return `task-runner: deleted archived run ${result.runId}\n`;
 }
 
 export function renderRunSetName(result: {
