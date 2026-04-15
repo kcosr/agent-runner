@@ -71,11 +71,46 @@ Set `TASK_RUNNER_CURSOR_BIN` to use a custom Cursor binary.
 ## Passive
 
 A null-object backend for runs that task-runner will never execute.
-Passive agents are driven externally — a script or out-of-process agent
-calls `task-runner init` to create the run, reads the task list and
-role instructions via `status`, and reports progress back through
-`task set` / `task add`. task-runner acts purely as a structured
-checklist service, with no LLM involvement.
+The agent doing the work is something else entirely — your IDE's
+inline assistant (Cursor, Windsurf, Copilot), an interactive Claude
+Code or Codex session, a one-off script, or any other tool you'd
+already be using. task-runner contributes only the structured task
+list and the manifest that backs it; the actual reasoning and code
+edits happen wherever you normally do them.
+
+### When to choose passive
+
+Passive mode is the right pick whenever you want to **stay in the
+agent tool you already use** while still getting the structured
+delivery contract task-runner provides. It is the inverse of the
+**fire-and-wait** pattern (`task-runner run --backend
+claude/codex/cursor`, hand off a self-contained job and wait for the
+runner to drive the agent end-to-end). Here, *you* stay in the
+driver's seat and task-runner is the structured state alongside.
+
+Good fits:
+
+- **Your IDE assistant or interactive coding agent is the primary
+  driver.** Keep working in Cursor / Claude Code / Codex exactly as
+  you do today; the passive task-runner manifest sits alongside as
+  the durable checklist the agent reads and updates between turns.
+  No new tool to learn, no interruption to your loop.
+- **The task list needs to survive context compaction.** Long
+  interactive sessions hit compaction, and "what was I supposed to
+  deliver?" is exactly the kind of detail that gets summarized away.
+  A passive task-runner manifest is the stable answer — the agent
+  can re-read it via `task-runner status` or `task list` after any
+  compaction and pick the plan back up exactly where it was.
+- **You want a delivery contract without enforcement.** Unlike
+  `task-runner run`, passive mode does not loop, retry, or nudge.
+  The list is a reminder and an audit trail, not a programmatic
+  gate. If the agent skips a task it stays `pending` and you handle
+  it next session.
+- **You want to compose with active backends mid-session.** A passive
+  driver session can still spawn active runs as subagents — e.g.,
+  the interactive agent fires off `task-runner run --backend codex
+  --assignment code-review/...` for a focused review pass, waits for
+  it, and folds the result back into its own session.
 
 Declare a passive agent like any other:
 

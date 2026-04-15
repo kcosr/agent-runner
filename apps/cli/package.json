@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "type": "module",
   "description": "CLI and local daemon host for task-runner.",
+  "license": "MIT",
   "files": ["dist/"],
   "bin": {
     "task-runner": "./dist/cli.js"

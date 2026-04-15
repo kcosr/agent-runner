@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "Run dashboard web app for task-runner.",
+  "license": "MIT",
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit && vite build",
     "dev": "vite",

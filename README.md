@@ -79,13 +79,15 @@ chat output.
 - **Run dashboard web app** — `apps/web` ships a same-origin browser
   UI for run status, filtering, archive toggles, and deep-linkable
   detail routes. See [docs/web-dashboard.md](docs/web-dashboard.md).
-- **Attachments**, **run dependencies**, and **sidecar task mutation**
-  — let a run carry immutable file blobs, declare prerequisite runs,
-  and have an external agent drive the checklist through the CLI
-  without task-runner ever invoking a backend. See
-  [docs/attachments.md](docs/attachments.md),
-  [docs/dependencies.md](docs/dependencies.md), and
-  [docs/tasks.md#sidecar-pattern](docs/tasks.md#sidecar-pattern).
+- **Attachments** and **run dependencies** — let a run carry
+  immutable file blobs and declare prerequisite runs. See
+  [docs/attachments.md](docs/attachments.md) and
+  [docs/dependencies.md](docs/dependencies.md).
+- **Bring-your-own-agent (passive) mode** — drive task-runner from
+  your IDE assistant, an interactive Claude Code / Codex session, or
+  a script, with the task list serving as a durable delivery
+  contract that survives context compaction. See
+  [docs/backends.md#passive](docs/backends.md#passive).
 - **Locked fields** and **caller instructions** — agents and
   assignments can declare which fields the caller is allowed to
   override, and carry a `callerInstructions` block aimed at whoever
@@ -346,8 +348,9 @@ below is implemented yet — the list is here so you can see where things
 are heading and flag anything that conflicts with how you're using
 task-runner today.
 
-- **More backends** — `pi` (from
-  [pi-mono](https://github.com/badlogic/pi-mono)) and Gemini.
+- **More backends** — pi, Gemini, and an in-process SDK client (or
+  similar) so callers can embed a backend directly instead of always
+  shelling out to a CLI or RPC server.
 - **Pluggable storage backend** — today the run manifest and workspace
   live on the filesystem. A sqlite or postgres backend would make
   larger run populations, richer queries, and multi-host scenarios
@@ -402,4 +405,4 @@ task-runner today.
 
 ## License
 
-TBD.
+MIT
