@@ -148,6 +148,36 @@ function updateRunNameCaches(result: RunNameResult) {
   );
 }
 
+function syncRunSummaryFromDetail(detail: RunDetail) {
+  queryClient.setQueryData<RunSummary[] | undefined>(runQueryKeys.list(), (current) =>
+    current?.map((run) =>
+      run.runId === detail.runId
+        ? {
+            ...run,
+            repo: detail.repo,
+            status: detail.status,
+            effectiveStatus: detail.effectiveStatus,
+            archivedAt: detail.archivedAt,
+            agentName: detail.agent.name,
+            name: detail.name,
+            assignmentName: detail.assignment?.name ?? null,
+            backend: detail.backend,
+            model: detail.model,
+            cwd: detail.cwd,
+            startedAt: detail.startedAt,
+            endedAt: detail.endedAt,
+            tasksCompleted: detail.tasksCompleted,
+            tasksTotal: detail.tasksTotal,
+            attachmentCount: detail.attachments.length,
+            activeTask: detail.activeTask,
+            execution: detail.execution,
+            capabilities: detail.capabilities,
+          }
+        : run,
+    ),
+  );
+}
+
 async function invalidateRunQueries(runId: string) {
   await Promise.all([
     queryClient.invalidateQueries({ queryKey: runQueryKeys.list() }),
@@ -190,6 +220,13 @@ export function useRunsDashboardState() {
     runId: selectedRunId,
     runIsLive: selectedRunQuery.data?.isLive === true,
   });
+
+  useEffect(() => {
+    if (!selectedRunQuery.data) {
+      return;
+    }
+    syncRunSummaryFromDetail(selectedRunQuery.data);
+  }, [selectedRunQuery.data]);
 
   const runs = runsQuery.data ?? [];
   const repoOptions = useMemo(
@@ -353,6 +390,7 @@ export function useRunsDashboardState() {
           detailStreamStaleRef.current = false;
           setDetailStreamStale(false);
         }
+        syncRunSummaryFromDetail(payload.detail);
         queryClient.setQueryData(runQueryKeys.detail(runId), payload.detail);
       },
       onStaleChange: (stale) => {

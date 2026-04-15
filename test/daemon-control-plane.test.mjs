@@ -1257,6 +1257,217 @@ test("daemon subscriptions fan out run events and abort active runs", async () =
   }
 });
 
+test("daemon republishes summary and detail projections when a run retries", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  const runId = "daemon-retrying-run";
+  let tasksCompleted = 0;
+  let activeTask = { id: "t1", title: "First task" };
+  let status = "initialized";
+
+  const server = await serveDaemon(listenUrl, {
+    getRun() {
+      return {
+        runId,
+        repo: "task-runner",
+        status,
+        effectiveStatus: status,
+        archivedAt: null,
+        isLive: status === "running",
+        workspaceDir: "/tmp/fake",
+        assignmentPath: "/tmp/fake/assignment.md",
+        agent: {
+          name: "daemon-agent",
+          sourcePath: null,
+        },
+        assignment: {
+          name: "daemon-work",
+          sourcePath: "/tmp/fake/source.md",
+          workspacePath: "/tmp/fake/assignment.md",
+        },
+        backend: "codex",
+        model: "gpt-5.4",
+        effort: "high",
+        name: "daemon retrying test",
+        backendSessionId: "thread-1",
+        cwd: "/tmp/fake",
+        unrestricted: false,
+        timeoutSec: 3600,
+        startedAt: "2026-04-13T05:00:00.000Z",
+        endedAt: status === "success" ? "2026-04-13T05:05:00.000Z" : null,
+        exitCode: status === "success" ? 0 : null,
+        attempts: status === "success" ? 2 : 1,
+        maxAttempts: 2,
+        sessionCount: 1,
+        tasksCompleted,
+        tasksTotal: 2,
+        attachments: [],
+        dependencies: [],
+        dependents: [],
+        tasks: [],
+        activeTask,
+        message: null,
+        callerInstructions: null,
+        lockedFields: [],
+        runtimeVars: {},
+        execution: {
+          hostMode: "daemon",
+          controller: {
+            kind: "daemon",
+            daemonInstanceId: "daemon-placeholder",
+          },
+        },
+        capabilities: {
+          canArchive: false,
+          canUnarchive: false,
+          canResume: false,
+          canAbort: status === "running",
+          abortReason: status === "running" ? undefined : "already_terminal",
+          taskMutation: {
+            canSetStatus: false,
+            canEditNotes: false,
+            canAdd: false,
+          },
+        },
+      };
+    },
+    getRunList() {
+      return [
+        {
+          runId,
+          repo: "task-runner",
+          status,
+          effectiveStatus: status,
+          archivedAt: null,
+          agentName: "daemon-agent",
+          name: "daemon retrying test",
+          assignmentName: "daemon-work",
+          backend: "codex",
+          model: "gpt-5.4",
+          cwd: "/tmp/fake",
+          startedAt: "2026-04-13T05:00:00.000Z",
+          endedAt: status === "success" ? "2026-04-13T05:05:00.000Z" : null,
+          tasksCompleted,
+          tasksTotal: 2,
+          attachmentCount: 0,
+          dependencyState: {
+            ready: true,
+            total: 0,
+            satisfied: 0,
+            unsatisfied: 0,
+          },
+          activeTask,
+          execution: {
+            hostMode: "daemon",
+            controller: {
+              kind: "daemon",
+              daemonInstanceId: "daemon-placeholder",
+            },
+          },
+          capabilities: {
+            canArchive: false,
+            canUnarchive: false,
+            canResume: false,
+            canAbort: status === "running",
+            abortReason: status === "running" ? undefined : "already_terminal",
+            taskMutation: {
+              canSetStatus: false,
+              canEditNotes: false,
+              canAdd: false,
+            },
+          },
+        },
+      ];
+    },
+    async startRun({ emitEvent }) {
+      status = "running";
+      emitEvent({
+        type: "run_started",
+        runId,
+        agentName: "daemon-agent",
+        assignmentSourcePath: null,
+        assignmentPath: "/tmp/fake/assignment.md",
+        name: "daemon retrying test",
+        cwd: process.cwd(),
+        sessionIndex: null,
+      });
+      emitEvent({
+        type: "attempt_started",
+        attempt: 1,
+        sessionIndex: 0,
+        startedAt: "2026-04-13T05:00:01.000Z",
+        prompt: "Attempt one",
+      });
+      tasksCompleted = 1;
+      activeTask = { id: "t2", title: "Second task" };
+      emitEvent({
+        type: "retrying",
+        incompleteCount: 1,
+        invalidStatusCount: 0,
+      });
+      status = "success";
+      tasksCompleted = 2;
+      activeTask = null;
+      emitEvent({
+        type: "run_finished",
+        summary: {
+          status: "success",
+          attempts: 2,
+          maxAttempts: 2,
+          tasksCompleted: 2,
+          tasksTotal: 2,
+          assignmentPath: "/tmp/fake/assignment.md",
+          tasks: [],
+          runId,
+        },
+      });
+      return { runId };
+    },
+  });
+
+  const summaries = await openSse(httpBaseUrl, "/api/events/run-summaries");
+  const details = await openSse(httpBaseUrl, `/api/runs/${runId}/events/detail`);
+  try {
+    const started = await httpJson(httpBaseUrl, "/api/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ cliVars: {}, overrides: {} }),
+    });
+    assert.equal(started.status, 200);
+    assert.equal(started.body.runId, runId);
+
+    const startedSummary = await summaries.next();
+    const startedDetail = await details.next();
+    const retriedSummary = await summaries.next();
+    const retriedDetail = await details.next();
+
+    assert.equal(startedSummary.type, "summary_upsert");
+    assert.equal(startedSummary.summary.status, "running");
+    assert.equal(startedSummary.summary.tasksCompleted, 0);
+    assert.deepEqual(startedSummary.summary.activeTask, { id: "t1", title: "First task" });
+
+    assert.equal(startedDetail.type, "detail_updated");
+    assert.equal(startedDetail.detail.status, "running");
+    assert.equal(startedDetail.detail.tasksCompleted, 0);
+    assert.deepEqual(startedDetail.detail.activeTask, { id: "t1", title: "First task" });
+
+    assert.equal(retriedSummary.type, "summary_upsert");
+    assert.equal(retriedSummary.summary.status, "running");
+    assert.equal(retriedSummary.summary.tasksCompleted, 1);
+    assert.deepEqual(retriedSummary.summary.activeTask, { id: "t2", title: "Second task" });
+
+    assert.equal(retriedDetail.type, "detail_updated");
+    assert.equal(retriedDetail.detail.status, "running");
+    assert.equal(retriedDetail.detail.tasksCompleted, 1);
+    assert.deepEqual(retriedDetail.detail.activeTask, { id: "t2", title: "Second task" });
+  } finally {
+    await summaries.close();
+    await details.close();
+    await server.close();
+  }
+});
+
 test("daemon mutation-driven projection SSE events include dependent summary fanout", async () => {
   const dir = tempDir();
   writeAgent(dir, "passive-daemon-agent", PASSIVE_AGENT);

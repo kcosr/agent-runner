@@ -98,13 +98,34 @@ function toDefinitionDetail(result: ReturnType<typeof showDefinition>): Definiti
   };
 }
 
-function readAttemptLogForRecord(workspaceDir: string, record: AttemptRecord): AttemptLog {
-  const raw = readFileSync(join(workspaceDir, record.logPath), "utf8");
-  return JSON.parse(raw) as AttemptLog;
+function readAttemptLogForRecord(
+  runId: string,
+  workspaceDir: string,
+  record: AttemptRecord,
+): AttemptLog {
+  try {
+    const raw = readFileSync(join(workspaceDir, record.logPath), "utf8");
+    return JSON.parse(raw) as AttemptLog;
+  } catch {
+    return {
+      schemaVersion: 1,
+      runId,
+      attempt: record.attempt,
+      sessionIndex: record.sessionIndex,
+      startedAt: record.startedAt,
+      endedAt: record.endedAt,
+      stdout: "",
+      stderr: "",
+    };
+  }
 }
 
-function toRunTimelineAttempt(workspaceDir: string, record: AttemptRecord): RunTimelineAttempt {
-  const log = readAttemptLogForRecord(workspaceDir, record);
+function toRunTimelineAttempt(
+  runId: string,
+  workspaceDir: string,
+  record: AttemptRecord,
+): RunTimelineAttempt {
+  const log = readAttemptLogForRecord(runId, workspaceDir, record);
   return {
     attempt: record.attempt,
     sessionIndex: record.sessionIndex,
@@ -128,7 +149,7 @@ export function getRunTimelineHistory(target: string): RunTimelineHistory {
   return {
     runId: resolved.manifest.runId,
     attempts: resolved.manifest.attemptRecords.map((record) =>
-      toRunTimelineAttempt(resolved.workspaceDir, record),
+      toRunTimelineAttempt(resolved.manifest.runId, resolved.workspaceDir, record),
     ),
     lastCursor: 0,
   };

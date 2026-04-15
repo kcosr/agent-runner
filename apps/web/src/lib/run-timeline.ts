@@ -192,11 +192,17 @@ export function useRunTimelineState({
 
     const unsubscribe = subscribeToRunTimelineEvents(config, runId, {
       onOpen: () => {
+        if (disposed) {
+          return;
+        }
         if (!bootstrappedRef.current || staleRef.current) {
           void loadHistory();
         }
       },
       onEvent: (envelope) => {
+        if (disposed) {
+          return;
+        }
         if (!bootstrappedRef.current || !historyRef.current) {
           bufferRef.current.push(envelope);
           return;
@@ -220,7 +226,7 @@ export function useRunTimelineState({
         });
       },
       onStaleChange: (stale) => {
-        if (!stale) {
+        if (disposed || !stale) {
           return;
         }
         staleRef.current = true;

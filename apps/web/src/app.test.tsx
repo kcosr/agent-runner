@@ -2182,6 +2182,71 @@ describe("web app", () => {
     expect(fetchMock).toHaveBeenCalledTimes(callsBefore);
   });
 
+  it("syncs the selected run card from the fresher detail fetch", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          tasksCompleted: 11,
+          tasksTotal: 14,
+          activeTask: { id: "draft", title: "Draft review notes" },
+        }),
+      ],
+      details: {
+        "run-1": makeDetail({
+          tasksCompleted: 12,
+          tasksTotal: 14,
+          activeTask: { id: "apply", title: "Apply review fixes" },
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    expect((await findRunCard("Build dashboard")).textContent).toContain("11 / 14");
+    expect((await findRunCard("Build dashboard")).textContent).toContain("Draft review notes");
+
+    await user.click(await findRunCard("Build dashboard"));
+
+    await waitFor(async () => {
+      const card = await findRunCard("Build dashboard");
+      expect(card).toHaveAttribute("aria-pressed", "true");
+      expect(card.textContent).toContain("12 / 14");
+      expect(card.textContent).toContain("Apply review fixes");
+    });
+  });
+
+  it("syncs the selected run card from detail SSE updates", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: {
+        "run-1": makeDetail(),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await user.click(await findRunCard("Build dashboard"));
+
+    const detailSource = findEventSource("/api/runs/run-1/events/detail");
+    detailSource.emitOpen();
+    detailSource.emitMessage({
+      type: "detail_updated",
+      detail: makeDetail({
+        tasksCompleted: 2,
+        tasksTotal: 4,
+        activeTask: { id: "ship", title: "Ship the change" },
+      }),
+    });
+
+    await waitFor(async () => {
+      const card = await findRunCard("Build dashboard");
+      expect(card.textContent).toContain("2 / 4");
+      expect(card.textContent).toContain("Ship the change");
+    });
+  });
+
   it("resets drawer and task state when switching runs", async () => {
     installFetchMock({
       runs: [makeRun(), makeRun({ runId: "run-2", assignmentName: "Second run" })],

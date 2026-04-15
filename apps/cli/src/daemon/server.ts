@@ -710,6 +710,7 @@ export async function serveDaemon(
         publishTimeline(resolvedRunId, event);
         if (
           event.type === "run_started" ||
+          event.type === "retrying" ||
           event.type === "run_aborted" ||
           event.type === "run_finished"
         ) {
@@ -744,6 +745,7 @@ export async function serveDaemon(
             rememberRecentTimelineBuffer(runId, active.timelineBuffer);
           }
           activeRuns.delete(runId);
+          lastTimelineCursorByRun.delete(runId);
         }
         resolveDone?.();
       });
