@@ -113,8 +113,9 @@ If you need role instructions or locks, create a real `agent.md`.
 ## Caller instructions
 
 Assignments can carry a `callerInstructions` field with documentation
-for the *human or script* invoking task-runner, as opposed to the
-agent doing the work. It is:
+for whoever is invoking task-runner — a human, a script, or an
+orchestrator agent — as opposed to the target agent task-runner then
+hands the assignment to. It is:
 
 - printed to stderr on fresh `run` / `init` only
 - interpolated with `{{var}}` like other body fields

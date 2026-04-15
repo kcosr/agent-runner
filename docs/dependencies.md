@@ -1,5 +1,15 @@
 # Run dependencies
 
+> **Status:** Dependency wiring is in place end-to-end — you can
+> declare, inspect, and remove dependencies from the CLI, daemon, and
+> web dashboard, and resume refuses to start a dependent run until
+> every prerequisite reaches `status=success`. That gate is the
+> **only** behavior dependencies drive today. task-runner does **not**
+> currently start a dependent run on your behalf when its
+> prerequisites land — you still run `task-runner run --resume-run
+> <dependent-run-id>` yourself. Automatic invocation is on the
+> [roadmap](../README.md#roadmap).
+
 Initialized runs can declare prerequisite run ids. A run with unsatisfied
 dependencies is rejected by `--resume-run` until every dependency
 reaches canonical `status=success`. Useful for chaining orchestration:

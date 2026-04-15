@@ -21,9 +21,6 @@ Two local host modes:
   `--connect` / `TASK_RUNNER_CONNECT`, while browser-style clients
   use HTTP for request/response plus SSE for live run events.
 
-It is intentionally not a web console or a general orchestration
-framework. The daemon is local-only.
-
 ## Table of contents
 
 - [Why](#why)
@@ -34,6 +31,7 @@ framework. The daemon is local-only.
 - [Exit codes](#exit-codes)
 - [Project layout](#project-layout)
 - [Development](#development)
+- [Roadmap](#roadmap)
 - [License](#license)
 
 ---
@@ -90,8 +88,9 @@ chat output.
   [docs/tasks.md#sidecar-pattern](docs/tasks.md#sidecar-pattern).
 - **Locked fields** and **caller instructions** — agents and
   assignments can declare which fields the caller is allowed to
-  override, and carry a `callerInstructions` block aimed at the
-  human/script running task-runner rather than the agent.
+  override, and carry a `callerInstructions` block aimed at whoever
+  is invoking task-runner (a human, a script, or an orchestrator
+  agent) rather than the target agent being invoked.
 - **JSON output mode** for scripting — `status --output-format json`
   returns the shared `RunDetail` DTO, and `run --output-format json`
   writes the final manifest-shaped run record.
@@ -339,6 +338,67 @@ Tests are vanilla `node:test`. Backend integration tests use mock
 Backend objects to keep them hermetic; the only tests that touch real
 subprocesses are a couple of `runProcess` smoke tests against
 `/bin/sleep` for the abort path.
+
+## Roadmap
+
+These are the directions task-runner is likely to grow in next. Nothing
+below is implemented yet — the list is here so you can see where things
+are heading and flag anything that conflicts with how you're using
+task-runner today.
+
+- **More backends** — `pi` (from
+  [pi-mono](https://github.com/badlogic/pi-mono)) and Gemini.
+- **Pluggable storage backend** — today the run manifest and workspace
+  live on the filesystem. A sqlite or postgres backend would make
+  larger run populations, richer queries, and multi-host scenarios
+  tractable.
+- **Live agent output streaming in the web dashboard** — `apps/web`
+  shows run status, per-task state, and the after-the-fact transcript
+  but does not yet tail the backend's live output the way the CLI
+  does.
+- **Live task updates in the web dashboard** — task status and notes
+  currently refresh on SSE run events, not on per-task granularity.
+- **Definitions and run creation from the web dashboard** — browse and
+  manage agents and assignment templates in the UI, and kick off new
+  runs from there instead of dropping to the CLI.
+- **Run task manipulation in the web dashboard** — the equivalent of
+  `task set` / `task add` / `task append-notes`, exposed as inline UI
+  actions on the detail drawer.
+- **Attachment previews in the web dashboard** — render image and text
+  attachments inline in the detail drawer instead of requiring a
+  download round-trip.
+- **Dependency auto-invocation** — today declaring a dependency only
+  gates resume. A future step is to automatically start a dependent
+  run when all its prerequisites reach `status=success`. See
+  [docs/dependencies.md](docs/dependencies.md).
+- **Run lifecycle hooks with re-invocation** — a pluggable pre-run /
+  post-run hook surface. This generalizes the one built-in validation
+  task-runner ships with today (did the agent mark every task
+  completed?): hooks could run arbitrary checks — tests, linters,
+  custom scripts — and re-invoke the agent when they fail, even if
+  the task checklist claims the work is done.
+- **Improved run provenance tracking** — today manifests record which
+  host/controller executed the latest session (`execution.hostMode`,
+  `execution.controller.daemonInstanceId`). A richer audit trail —
+  who/what originally launched the run, which parent spawned which
+  nested child, which caller issued which mid-run mutation — would
+  make cross-run forensics and orchestration replay tractable.
+- **Parent/child run linking for UI filtering** — when one run spawns
+  another through the recursion path, capture the parent-child edge
+  explicitly and let the web dashboard filter, group, and collapse
+  by ancestry so an orchestrator run and its generated implementer /
+  reviewer runs can be viewed as a single tree.
+- **External webhook support** — emit run lifecycle events
+  (`run_started`, `run_finished`, `attempt_started`, per-task updates,
+  etc.) to configured external HTTP endpoints so task-runner can
+  notify CI systems, chat-ops bots, or dashboards without each
+  consumer having to subscribe over SSE directly.
+- **Agent and assignment inheritance** — let an agent or assignment
+  declare an `extends:` parent and inherit frontmatter defaults,
+  locked fields, role instructions, and (for assignments) task lists.
+  Child definitions could override individual fields, append tasks,
+  or redact inherited locks, avoiding today's copy-paste when you
+  want a family of related agents/assignments that share a base.
 
 ## License
 
