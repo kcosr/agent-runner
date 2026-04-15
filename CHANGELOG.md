@@ -20,8 +20,8 @@
 
 ### Added
 
-- Added bundled `planner` and `test` agents for planning and validation flows.
-- Added `scripts/migrate-manifests-v7.mjs` to upgrade existing v6 run manifests by converting `pendingPrompt` / `taskMode` into persisted `brief` fields for manifests, reset seeds, and sessions. ([#999](https://github.com/kcosr/task-runner/pull/999))
+- Added bundled `planner` and `test` agents for planning and validation flows. ([#38](https://github.com/kcosr/task-runner/pull/38))
+- Added `scripts/migrate-manifests-v7.mjs` to upgrade existing v6 run manifests by converting `pendingPrompt` / `taskMode` into persisted `brief` fields for manifests, reset seeds, and sessions. ([#38](https://github.com/kcosr/task-runner/pull/38))
 - Added normalized per-run timeline history at `GET /api/runs/:runId/timeline`, cursored live timeline envelopes over daemon SSE/WebSocket, and an attempt-oriented web drawer timeline that bootstraps from history before continuing live output. ([#36](https://github.com/kcosr/task-runner/pull/36))
 - Added `scripts/task-list-markdown.mjs` to render `task-runner task list <run-id> --output-format json` output as Markdown, defaulting to `task-runner` on `PATH` with an optional `TASK_RUNNER_BIN` override. ([#33](https://github.com/kcosr/task-runner/pull/33))
 - Added first-class `cursor` backend support via the public `cursor-agent` headless print mode, including streamed partial-output rendering, captured session-id resume for task-runner-created runs, `TASK_RUNNER_CURSOR_BIN`, and explicit rejection of unsafe bootstrap `--backend-session-id` import. ([#33](https://github.com/kcosr/task-runner/pull/33))
@@ -77,7 +77,7 @@
 
 ### Changed
 
-- Replaced the bundled `repo-diagnostics` assignment with a bundled `test` assignment that only asks the agent to run `date` and `pwd`, without repo-specific context.
+- Replaced the bundled `repo-diagnostics` assignment with a bundled `test` assignment that only asks the agent to run `date` and `pwd`, without repo-specific context. ([#38](https://github.com/kcosr/task-runner/pull/38))
 - The web timeline drawer now uses an `Attempts` section label, drops the redundant per-attempt metadata header, and renders attempt prompts/output as Markdown so streamed transcripts can progressively format in place. ([#36](https://github.com/kcosr/task-runner/pull/36))
 - The web run detail drawer now shows `Start` for initialized resumable runs, keeps `Resume` for existing sessions, makes follow-up messages optional behind a disclosure while incomplete tasks remain, still requires a message once all tasks are complete, and truncates in-progress card task labels so long titles do not widen the board layout. ([#37](https://github.com/kcosr/task-runner/pull/37))
 - The web dashboard now applies live `RunSummary` and `RunDetail` snapshots directly to the board/detail caches, so card progress, attachment/dependency badges, and active-task labels update from streamed projections without relying on selected-run invalidation. ([#35](https://github.com/kcosr/task-runner/pull/35))
@@ -136,11 +136,11 @@
 - `assignments/plan-feature/` templates now create a review-candidate `commit` before `internal_review`, rename the final git-wrap-up step to `final_commit`, drop the scaffold guidance that implied a pre-edit baseline check gate, and teach task-workflow prompts to use quoted heredocs for multi-line CLI notes. ([#14](https://github.com/kcosr/task-runner/pull/14))
 - `assignments/plan-feature/` now produces a human-facing markdown summary artifact alongside the approved draft. A new `produce_summary` task (inserted after `apply_review_fixes`) renders the planner's existing notes through a new `summary-template.md` into `${TASK_RUNNER_STATE_DIR}/drafts/<repo-name>/plan-<slug>-<shortid>.summary.md`, covering overview, motivation, scope, contract, schema, impact surface, higher-level steps, Mermaid diagrams where applicable, risks, test strategy, and open assumptions. The summary's Contract and Open Assumptions blocks must match the draft verbatim, and `handoff` now surfaces the summary path alongside the draft path so the caller can skim the plan before running init. ([#21](https://github.com/kcosr/task-runner/pull/21))
 - Built-in planner/reviewer/orientation assignments and the local `plan-feature` skill now teach the run-id-plus-`brief` workflow instead of `pendingPrompt` scraping or workspace assignment-file handling. ([#34](https://github.com/kcosr/task-runner/pull/34))
-- The web detail drawer now uses an inline confirm step for attachment deletion: the trash action expands into compact confirm/cancel icon buttons in the same row instead of deleting immediately.
+- The web detail drawer now uses an inline confirm step for attachment deletion: the trash action expands into compact confirm/cancel icon buttons in the same row instead of deleting immediately. ([#38](https://github.com/kcosr/task-runner/pull/38))
 
 ### Fixed
 
-- Fixed non-passive terminal runs so any task left `in_progress` is persisted back to `pending` when the run stops, preventing stale running indicators in CLI/web until the next resume. ([#999](https://github.com/kcosr/task-runner/pull/999))
+- Fixed non-passive terminal runs so any task left `in_progress` is persisted back to `pending` when the run stops, preventing stale running indicators in CLI/web until the next resume. ([#38](https://github.com/kcosr/task-runner/pull/38))
 - Fixed daemon-managed run settlement so terminal detail projections clear live abort capability immediately after completion or abort, preventing stale `Abort` actions in the web drawer after a resume finishes. ([#36](https://github.com/kcosr/task-runner/pull/36))
 - Fixed per-run timeline recovery to stop retrying forever on unrecoverable live-stream gaps, added explicit client coverage for timeline envelope application, and hardened timeline-history loading to ignore attempt log paths that escape the run workspace. ([#36](https://github.com/kcosr/task-runner/pull/36))
 - Fixed attachment uploads when the selected filename contained non-ISO-8859-1 characters (emoji, diacritics, non-Latin scripts): the `x-task-runner-attachment-name` header is now percent-encoded by the web and CLI daemon clients and percent-decoded by the daemon HTTP route. ([#32](https://github.com/kcosr/task-runner/pull/32))
@@ -197,13 +197,13 @@
 - Fixed `assignments/plan-feature/` scaffold guidance to require implementers to verify they are in a non-`main` worktree, confirm local `main` is already in sync with `origin/main`, and sync the current worktree to local `main` before starting. Generated plans now block instead of proceeding when that preflight fails, and `assignments/plan-review/` flags drafts that omit it. ([#15](https://github.com/kcosr/task-runner/pull/15))
 - Fixed workspace persistence to use atomic writes for manifests, attempt logs, and assignment files, and reject resume targets whose manifest paths do not match the workspace they were loaded from. ([#6](https://github.com/kcosr/task-runner/pull/6))
 - Fixed Codex timeout/abort cleanup to wait for late-arriving turn ids and retry interruption, reducing the risk of orphaned remote turns. ([#6](https://github.com/kcosr/task-runner/pull/6))
-- Fixed persisted backend attempt transcripts so streamed partial output is retained on completion instead of shrinking after timeline reloads, joining differing streamed/final text with a Markdown divider when needed. ([#999](https://github.com/kcosr/task-runner/pull/999))
+- Fixed persisted backend attempt transcripts so streamed partial output is retained on completion instead of shrinking after timeline reloads, joining differing streamed/final text with a Markdown divider when needed. ([#38](https://github.com/kcosr/task-runner/pull/38))
 - Fixed assignment/task mutation hardening around structural marker escaping, single-line task titles, terminal non-passive notes-only edits, and undeclared or mistyped runtime vars. ([#6](https://github.com/kcosr/task-runner/pull/6))
 - Fixed subprocess handling to short-circuit pre-aborted launches before spawning child processes. ([#6](https://github.com/kcosr/task-runner/pull/6))
 
 ### Removed
 
-- Removed the legacy bundled `basic`, `chat`, `codex-chat`, `codex-example`, `example`, and `passive-example` agents.
+- Removed the legacy bundled `basic`, `chat`, `codex-chat`, `codex-example`, `example`, and `passive-example` agents. ([#38](https://github.com/kcosr/task-runner/pull/38))
 - Removed `--task-mode`, assignment-level `taskMode`, and all task-mode-specific runtime branching. ([#34](https://github.com/kcosr/task-runner/pull/34))
 - Removed `pendingPrompt` from manifests and public status surfaces. ([#34](https://github.com/kcosr/task-runner/pull/34))
 - Removed the generated workspace `assignment.md` task surface from new runs. ([#34](https://github.com/kcosr/task-runner/pull/34))
@@ -222,4 +222,5 @@
 ### Changed
 
 ### Fixed
+
 ### Removed
