@@ -15,6 +15,7 @@ import {
   formatTimestamp,
   truncateMiddle,
 } from "../lib/format.js";
+import type { RunTimelineState } from "../lib/run-timeline.js";
 import {
   DRAWER_WIDTH_MAX,
   DRAWER_WIDTH_MIN,
@@ -30,10 +31,12 @@ import {
   StopIcon,
   TrashIcon,
 } from "./icons.js";
+import { MarkdownContent } from "./markdown.js";
 import { RunTaskList } from "./run-task-list.js";
 import { StatusBadge } from "./status-badge.js";
 
 type SectionKey = "tasks" | "attachments" | "dependencies" | "timing" | "events";
+type TimelineTab = "prompt" | "output";
 
 interface DragState {
   pointerId: number;
@@ -98,6 +101,34 @@ function summaryRows(run: RunDetail) {
   return rows;
 }
 
+function attemptOutput(attempt: {
+  transcript: string;
+  notices: string;
+}) {
+  if (!attempt.transcript || !attempt.notices) {
+    return `${attempt.transcript}${attempt.notices}`;
+  }
+
+  let trailing = 0;
+  for (let index = attempt.transcript.length - 1; index >= 0; index--) {
+    if (attempt.transcript[index] !== "\n") {
+      break;
+    }
+    trailing += 1;
+  }
+
+  let leading = 0;
+  for (const character of attempt.notices) {
+    if (character !== "\n") {
+      break;
+    }
+    leading += 1;
+  }
+
+  const separator = "\n".repeat(Math.max(0, 2 - trailing - leading));
+  return `${attempt.transcript}${separator}${attempt.notices}`;
+}
+
 export function RunDetailDrawer({
   dependencyCandidateRuns,
   onAddDependency,
@@ -113,6 +144,7 @@ export function RunDetailDrawer({
   onRemoveAttachment,
   onRename,
   onResume,
+  timelineState,
   onUnarchive,
   onUploadAttachment,
   run,
@@ -130,25 +162,33 @@ export function RunDetailDrawer({
   onRemoveDependency: (dependencyRunId: string) => Promise<void>;
   onRemoveAttachment: (attachmentId: string) => Promise<void>;
   onRename: (name: string | null) => Promise<void>;
-  onResume: () => void;
+  onResume: (message?: string) => Promise<void>;
+  timelineState: RunTimelineState;
   onUnarchive: () => void;
   onUploadAttachment: (file: File) => Promise<void>;
   run: RunDetail;
 }) {
   const [section, setSection] = useState<SectionKey>("tasks");
+  const [selectedAttempt, setSelectedAttempt] = useState<number | null>(null);
+  const [timelineTab, setTimelineTab] = useState<TimelineTab>("output");
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(run.name ?? "");
+  const [resumeDialogOpen, setResumeDialogOpen] = useState(false);
+  const [resumeMessageDraft, setResumeMessageDraft] = useState("");
   const [dependencyDraft, setDependencyDraft] = useState("");
   const [selectedDependencyRunId, setSelectedDependencyRunId] = useState<string | null>(null);
   const { settings, updateSettings } = useBoardSettings();
   const dragRef = useRef<DragState | null>(null);
   const nameInputRef = useRef<HTMLInputElement | null>(null);
+  const resumeMessageRef = useRef<HTMLTextAreaElement | null>(null);
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
   const [dragWidth, setDragWidth] = useState<number | null>(null);
   const width = dragWidth ?? settings.drawerWidth;
   const drawerStyle = { "--drawer-width": `${width}px` } as CSSProperties;
   const backendSessionId = run.backendSessionId;
   const actionsLocked = actionPending !== undefined;
+  const resumePending = actionPending === "resume";
+  const trimmedResumeMessage = resumeMessageDraft.trim();
   const renamePending = actionPending === "rename";
   const uploadAttachmentPending = actionPending === "upload-attachment";
   const removeAttachmentPending = actionPending === "remove-attachment";
@@ -178,6 +218,11 @@ export function RunDetailDrawer({
     eligibleDependencyCandidates.find(
       (candidate) => candidate.runId.toLowerCase() === normalizedDependencyDraft.toLowerCase(),
     )?.runId;
+  const timelineAttempts = timelineState.history?.attempts ?? [];
+  const selectedAttemptRecord =
+    timelineAttempts.find((attempt) => attempt.attempt === selectedAttempt) ??
+    timelineAttempts[timelineAttempts.length - 1] ??
+    null;
 
   function handleResizeStart(event: PointerEvent<HTMLDivElement>) {
     event.preventDefault();
@@ -297,6 +342,20 @@ export function RunDetailDrawer({
     }
   }, [editingName]);
 
+  useEffect(() => {
+    if (resumeDialogOpen) {
+      resumeMessageRef.current?.focus();
+    }
+  }, [resumeDialogOpen]);
+
+  useEffect(() => {
+    const availableAttempts = new Set(timelineAttempts.map((attempt) => attempt.attempt));
+    if (selectedAttempt !== null && availableAttempts.has(selectedAttempt)) {
+      return;
+    }
+    setSelectedAttempt(timelineAttempts[timelineAttempts.length - 1]?.attempt ?? null);
+  }, [selectedAttempt, timelineAttempts]);
+
   async function submitDependencyAdd() {
     if (!resolvedDependencyRunId || addDependencyPending) {
       return;
@@ -380,6 +439,54 @@ export function RunDetailDrawer({
     }
   }
 
+  function openResumeDialog() {
+    if (actionsLocked) {
+      return;
+    }
+    setResumeDialogOpen(true);
+  }
+
+  function closeResumeDialog() {
+    if (resumePending) {
+      return;
+    }
+    setResumeDialogOpen(false);
+    setResumeMessageDraft("");
+  }
+
+  async function submitResume() {
+    if (resumePending || trimmedResumeMessage.length === 0) {
+      return;
+    }
+    try {
+      await onResume(trimmedResumeMessage);
+      setResumeDialogOpen(false);
+      setResumeMessageDraft("");
+    } catch {
+      // actionError is surfaced by the shared mutation handler.
+    }
+  }
+
+  function handleResumeMessageKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      closeResumeDialog();
+      return;
+    }
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      event.stopPropagation();
+      void submitResume();
+    }
+  }
+
+  function handleResumeDialogKeyDown(event: KeyboardEvent<HTMLDialogElement>) {
+    if (event.key === "Escape") {
+      event.stopPropagation();
+    }
+  }
+
   return (
     <>
       <button
@@ -423,7 +530,12 @@ export function RunDetailDrawer({
               </button>
             ) : null}
             {run.capabilities.canResume ? (
-              <button className="btn" disabled={actionsLocked} onClick={onResume} type="button">
+              <button
+                className="btn"
+                disabled={actionsLocked}
+                onClick={openResumeDialog}
+                type="button"
+              >
                 {actionPending === "resume" ? "Resuming..." : "Resume"}
               </button>
             ) : null}
@@ -600,7 +712,7 @@ export function RunDetailDrawer({
               onClick={() => setSection("events")}
               type="button"
             >
-              Events
+              Attempts
             </button>
           </nav>
 
@@ -865,17 +977,170 @@ export function RunDetailDrawer({
           ) : null}
 
           {section === "events" ? (
-            <section aria-label="Events" className="drawer-panel drawer-panel--events">
-              <div className="drawer-panel-card">
-                <p className="muted-inline">
-                  Live event timeline is deferred in phase 1. HTTP detail and SSE board refresh are
-                  implemented in this slice.
-                </p>
+            <section aria-label="Attempts" className="drawer-panel drawer-panel--events">
+              <div className="drawer-panel-card timeline-panel">
+                {timelineState.stale ? (
+                  <div className="notice" data-tone="warning">
+                    <span className="notice__message">
+                      Timeline sync is stale. The drawer is waiting for a clean reload.
+                    </span>
+                  </div>
+                ) : null}
+
+                {timelineState.error && !selectedAttemptRecord ? (
+                  <p className="muted-inline">{timelineState.error}</p>
+                ) : null}
+
+                {timelineState.isLoading && timelineAttempts.length === 0 ? (
+                  <p className="muted-inline">Loading timeline history…</p>
+                ) : null}
+
+                {!timelineState.isLoading && timelineAttempts.length === 0 ? (
+                  <p className="muted-inline">No attempt history is available for this run yet.</p>
+                ) : null}
+
+                {timelineAttempts.length > 1 ? (
+                  <div className="timeline-attempts">
+                    <div className="timeline-attempt-tabs" role="tablist" aria-label="Attempts">
+                      {timelineAttempts.map((attempt) => (
+                        <button
+                          aria-selected={selectedAttemptRecord?.attempt === attempt.attempt}
+                          className={
+                            selectedAttemptRecord?.attempt === attempt.attempt
+                              ? "timeline-attempt-tab active"
+                              : "timeline-attempt-tab"
+                          }
+                          key={attempt.attempt}
+                          onClick={() => setSelectedAttempt(attempt.attempt)}
+                          role="tab"
+                          type="button"
+                        >
+                          <span>{attempt.attempt}</span>
+                          {attempt.live ? (
+                            <span aria-hidden="true" className="timeline-live-dot" />
+                          ) : null}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                {selectedAttemptRecord ? (
+                  <div className="timeline-attempt-panel">
+                    <div className="task-tabs" role="tablist" aria-label="Attempt view">
+                      <button
+                        aria-selected={timelineTab === "prompt"}
+                        className={timelineTab === "prompt" ? "task-tab active" : "task-tab"}
+                        onClick={() => setTimelineTab("prompt")}
+                        role="tab"
+                        type="button"
+                      >
+                        Prompt
+                      </button>
+                      <button
+                        aria-selected={timelineTab === "output"}
+                        className={timelineTab === "output" ? "task-tab active" : "task-tab"}
+                        onClick={() => setTimelineTab("output")}
+                        role="tab"
+                        type="button"
+                      >
+                        Output
+                      </button>
+                    </div>
+
+                    {timelineTab === "prompt" ? (
+                      selectedAttemptRecord.prompt ? (
+                        <section aria-label="Attempt prompt">
+                          <MarkdownContent
+                            className="timeline-content"
+                            text={selectedAttemptRecord.prompt}
+                          />
+                        </section>
+                      ) : (
+                        <p className="task-empty">This attempt did not record a prompt.</p>
+                      )
+                    ) : attemptOutput(selectedAttemptRecord) ? (
+                      <section aria-label="Attempt output">
+                        <MarkdownContent
+                          className="timeline-content"
+                          text={attemptOutput(selectedAttemptRecord)}
+                        />
+                      </section>
+                    ) : (
+                      <p className="task-empty">
+                        {selectedAttemptRecord.live
+                          ? "Waiting for live output…"
+                          : "This attempt produced no transcript output."}
+                      </p>
+                    )}
+                  </div>
+                ) : null}
               </div>
             </section>
           ) : null}
         </div>
       </aside>
+      {resumeDialogOpen ? (
+        <dialog
+          aria-labelledby="resume-run-dialog-title"
+          className="resume-dialog-backdrop"
+          onCancel={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            closeResumeDialog();
+          }}
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              closeResumeDialog();
+            }
+          }}
+          onKeyDown={handleResumeDialogKeyDown}
+          open
+        >
+          <div className="resume-dialog">
+            <div className="resume-dialog__header">
+              <h3 className="resume-dialog__title" id="resume-run-dialog-title">
+                Resume run
+              </h3>
+              <p className="resume-dialog__copy">
+                Send a follow-up message describing what the run should do next.
+              </p>
+            </div>
+            <label className="resume-dialog__field" htmlFor="resume-run-message">
+              Message
+            </label>
+            <textarea
+              className="resume-dialog__textarea"
+              disabled={resumePending}
+              id="resume-run-message"
+              onChange={(event) => setResumeMessageDraft(event.target.value)}
+              onKeyDown={handleResumeMessageKeyDown}
+              placeholder="Describe the follow-up work for this resume..."
+              ref={resumeMessageRef}
+              rows={6}
+              value={resumeMessageDraft}
+            />
+            <div className="resume-dialog__actions">
+              <button
+                className="btn"
+                disabled={resumePending}
+                onClick={closeResumeDialog}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary"
+                disabled={resumePending || trimmedResumeMessage.length === 0}
+                onClick={() => void submitResume()}
+                type="button"
+              >
+                {resumePending ? "Resuming..." : "Send"}
+              </button>
+            </div>
+          </div>
+        </dialog>
+      ) : null}
     </>
   );
 }

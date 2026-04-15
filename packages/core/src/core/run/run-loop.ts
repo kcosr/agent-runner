@@ -124,6 +124,9 @@ export type RunEvent =
   | {
       type: "attempt_started";
       attempt: number;
+      sessionIndex: number;
+      startedAt: string;
+      prompt: string;
     }
   | BackendEvent
   | {
@@ -1193,10 +1196,16 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     name = manifest.name;
     sessionAttempts++;
     const globalAttemptNumber = priorAttemptCount + sessionAttempts;
-    emitEvent({ type: "attempt_started", attempt: globalAttemptNumber });
+    const attemptStartedAt = new Date().toISOString();
+    emitEvent({
+      type: "attempt_started",
+      attempt: globalAttemptNumber,
+      sessionIndex,
+      startedAt: attemptStartedAt,
+      prompt: currentPrompt,
+    });
 
     const sessionIdAtStart = sessionId;
-    const attemptStartedAt = new Date().toISOString();
 
     const invokeResult = await backend.invoke({
       prompt: currentPrompt,

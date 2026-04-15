@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { WebSocketServer } from "ws";
+import { getRunTimelineHistory } from "../packages/core/dist/app/service.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import {
   CommandError,
@@ -178,6 +179,81 @@ async function startCodexRenameServer(options = {}) {
     },
   };
 }
+
+test("command services: getRunTimelineHistory degrades missing, corrupt, or escaping attempt logs", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+  const attemptsDir = join(outcome.workspaceDir, "attempts");
+  mkdirSync(attemptsDir, { recursive: true });
+  writeFileSync(join(attemptsDir, "02.json"), "{\n");
+
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.attemptRecords = [
+      {
+        attempt: 1,
+        sessionIndex: 0,
+        startedAt: "2026-04-15T01:00:00.000Z",
+        endedAt: "2026-04-15T01:01:00.000Z",
+        prompt: "Attempt one",
+        sessionIdAtStart: null,
+        sessionIdCaptured: null,
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        transcript: "First output",
+        logPath: "attempts/01.json",
+        tasksAfter: manifest.finalTasks,
+        invalidStatuses: [],
+      },
+      {
+        attempt: 2,
+        sessionIndex: 0,
+        startedAt: "2026-04-15T01:02:00.000Z",
+        endedAt: "2026-04-15T01:03:00.000Z",
+        prompt: "Attempt two",
+        sessionIdAtStart: null,
+        sessionIdCaptured: null,
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        transcript: "Second output",
+        logPath: "attempts/02.json",
+        tasksAfter: manifest.finalTasks,
+        invalidStatuses: [],
+      },
+      {
+        attempt: 3,
+        sessionIndex: 0,
+        startedAt: "2026-04-15T01:04:00.000Z",
+        endedAt: "2026-04-15T01:05:00.000Z",
+        prompt: "Attempt three",
+        sessionIdAtStart: null,
+        sessionIdCaptured: null,
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        transcript: "Third output",
+        logPath: "../outside.json",
+        tasksAfter: manifest.finalTasks,
+        invalidStatuses: [],
+      },
+    ];
+    manifest.attempts = manifest.attemptRecords.length;
+  });
+
+  await withSharedRuntimeEnv(dir, async () => {
+    const history = getRunTimelineHistory(outcome.runId);
+    assert.equal(history.runId, outcome.runId);
+    assert.equal(history.attempts.length, 3);
+    assert.equal(history.attempts[0]?.transcript, "First output");
+    assert.equal(history.attempts[0]?.notices, "");
+    assert.equal(history.attempts[1]?.transcript, "Second output");
+    assert.equal(history.attempts[1]?.notices, "");
+    assert.equal(history.attempts[2]?.transcript, "Third output");
+    assert.equal(history.attempts[2]?.notices, "");
+  });
+});
 
 test("command services: listDefinitions and showDefinition return typed config results", async () => {
   const dir = tempDir();

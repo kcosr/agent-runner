@@ -15,6 +15,7 @@ import {
   getRun,
   getRunBrief,
   getRunList,
+  getRunTimelineHistory,
   getTask,
   getTaskList,
   initRun,
@@ -31,7 +32,10 @@ import { VALID_STATUSES } from "@task-runner/core/assignment/model.js";
 import type {
   RunDetailStreamEvent,
   RunSummaryStreamEvent,
+  RunTimelineAttempt,
+  RunTimelineEnvelope,
   RunTimelineEvent,
+  RunTimelineHistory,
 } from "@task-runner/core/contracts/events.js";
 import type {
   RunAbortReason,
@@ -89,19 +93,20 @@ interface TimelineSubscriptionRecord {
   id: string;
   owner: object;
   runId: string;
-  publish(event: RunTimelineEvent): boolean;
+  publish(event: RunTimelineEnvelope): boolean;
 }
 
 interface ActiveRunRecord {
   abortController: AbortController;
   done: Promise<void>;
   detail: RunDetail | null;
-  timelineBuffer: RunTimelineEvent[];
-  timelineTruncated: boolean;
+  timelineBuffer: RunTimelineEnvelope[];
+  nextCursor: number;
+  currentAttempt: RunTimelineAttempt | null;
 }
 
 interface RecentTimelineRecord {
-  events: RunTimelineEvent[];
+  events: RunTimelineEnvelope[];
   cleanupTimer: ReturnType<typeof setTimeout>;
 }
 
@@ -159,6 +164,16 @@ function withDaemonAbortCapability<T extends RunSummary | RunDetail>(
   };
 }
 
+function withDaemonDetailProjection(
+  run: RunDetail,
+  activeRuns: Map<string, ActiveRunRecord>,
+): RunDetail {
+  return {
+    ...withDaemonAbortCapability(run, activeRuns),
+    isLive: activeRuns.has(run.runId),
+  };
+}
+
 function packageVersion(): string {
   const raw = readFileSync(new URL("../../package.json", import.meta.url), "utf8");
   const parsed = JSON.parse(raw) as { version?: string };
@@ -207,26 +222,60 @@ function sendJson(ws: WebSocket, payload: JsonRpcResponse): void {
   ws.send(JSON.stringify(payload));
 }
 
-function bufferTimelineEvent(record: ActiveRunRecord, event: RunTimelineEvent): void {
-  record.timelineBuffer.push(event);
-  if (record.timelineBuffer.length <= MAX_TIMELINE_BUFFER_EVENTS) {
-    return;
-  }
+function appendTimelineText(current: string, delta: string): string {
+  return `${current}${delta}`;
+}
 
-  const overflow = record.timelineBuffer.length - MAX_TIMELINE_BUFFER_EVENTS;
-  record.timelineBuffer.splice(0, overflow);
-  if (record.timelineTruncated) {
-    return;
+function applyTimelineEnvelope(record: ActiveRunRecord, envelope: RunTimelineEnvelope): void {
+  switch (envelope.event.type) {
+    case "attempt_started":
+      record.currentAttempt = {
+        attempt: envelope.event.attempt,
+        sessionIndex: envelope.event.sessionIndex,
+        startedAt: envelope.event.startedAt,
+        endedAt: null,
+        prompt: envelope.event.prompt,
+        transcript: "",
+        notices: "",
+        exitCode: null,
+        timedOut: false,
+        live: true,
+      };
+      return;
+    case "agent_message_delta":
+      if (record.currentAttempt) {
+        record.currentAttempt.transcript = appendTimelineText(
+          record.currentAttempt.transcript,
+          envelope.event.text,
+        );
+      }
+      return;
+    case "backend_notice":
+      if (record.currentAttempt) {
+        record.currentAttempt.notices = appendTimelineText(
+          record.currentAttempt.notices,
+          envelope.event.text,
+        );
+      }
+      return;
+    case "retrying":
+    case "run_aborted":
+    case "resume_rejected":
+    case "run_finished":
+      record.currentAttempt = null;
+      return;
+    default:
+      return;
   }
+}
 
-  record.timelineTruncated = true;
-  if (record.timelineBuffer.length === MAX_TIMELINE_BUFFER_EVENTS) {
-    record.timelineBuffer.shift();
+function bufferTimelineEvent(record: ActiveRunRecord, envelope: RunTimelineEnvelope): void {
+  record.timelineBuffer.push(envelope);
+  if (record.timelineBuffer.length > MAX_TIMELINE_BUFFER_EVENTS) {
+    const overflow = record.timelineBuffer.length - MAX_TIMELINE_BUFFER_EVENTS;
+    record.timelineBuffer.splice(0, overflow);
   }
-  record.timelineBuffer.unshift({
-    type: "backend_notice",
-    text: `task-runner: timeline replay truncated to the most recent ${MAX_TIMELINE_BUFFER_EVENTS} events.\n`,
-  });
+  applyTimelineEnvelope(record, envelope);
 }
 
 export interface DaemonServerHandle {
@@ -257,6 +306,7 @@ export async function serveDaemon(
     getRun,
     getRunBrief,
     getRunList,
+    getRunTimelineHistory,
     getAttachment,
     getAttachmentList,
     getTask,
@@ -282,7 +332,7 @@ export async function serveDaemon(
   };
 
   const getDaemonRun = (target: string): RunDetail =>
-    withDaemonAbortCapability(app.getRun(target), activeRuns);
+    withDaemonDetailProjection(app.getRun(target), activeRuns);
   const getDaemonRunList = (opts?: Parameters<typeof app.getRunList>[0]): RunSummary[] =>
     app.getRunList(opts).map((run) => withDaemonAbortCapability(run, activeRuns));
 
@@ -300,6 +350,8 @@ export async function serveDaemon(
     }
   };
 
+  const lastTimelineCursorByRun = new Map<string, number>();
+
   const clearRecentTimelineBuffer = (runId: string): void => {
     const existing = recentTimelineBuffers.get(runId);
     if (!existing) {
@@ -309,7 +361,7 @@ export async function serveDaemon(
     recentTimelineBuffers.delete(runId);
   };
 
-  const rememberRecentTimelineBuffer = (runId: string, events: RunTimelineEvent[]): void => {
+  const rememberRecentTimelineBuffer = (runId: string, events: RunTimelineEnvelope[]): void => {
     clearRecentTimelineBuffer(runId);
     const cleanupTimer = setTimeout(() => {
       recentTimelineBuffers.delete(runId);
@@ -321,12 +373,27 @@ export async function serveDaemon(
     });
   };
 
-  const getReplayableTimeline = (runId: string): RunTimelineEvent[] => {
+  const getReplayableTimeline = (runId: string): RunTimelineEnvelope[] => {
     const active = activeRuns.get(runId);
     if (active) {
       return active.timelineBuffer;
     }
     return recentTimelineBuffers.get(runId)?.events ?? [];
+  };
+
+  const getProjectedTimelineHistory = (runId: string): RunTimelineHistory => {
+    const history = app.getRunTimelineHistory(runId);
+    const active = activeRuns.get(runId);
+    if (!active) {
+      return history;
+    }
+    return {
+      runId,
+      attempts: active.currentAttempt
+        ? [...history.attempts, { ...active.currentAttempt }]
+        : history.attempts,
+      lastCursor: active.nextCursor,
+    };
   };
 
   const createActiveRunRecord = (
@@ -340,7 +407,8 @@ export async function serveDaemon(
       done,
       detail: getProjectedDetail(runId),
       timelineBuffer: [],
-      timelineTruncated: false,
+      nextCursor: lastTimelineCursorByRun.get(runId) ?? 0,
+      currentAttempt: null,
     };
   };
 
@@ -413,14 +481,19 @@ export async function serveDaemon(
 
   const publishTimeline = (runId: string, event: RunTimelineEvent): void => {
     const active = activeRuns.get(runId);
-    if (active) {
-      bufferTimelineEvent(active, event);
+    if (!active) {
+      return;
     }
+    const cursor = active.nextCursor + 1;
+    active.nextCursor = cursor;
+    lastTimelineCursorByRun.set(runId, cursor);
+    const envelope: RunTimelineEnvelope = { runId, cursor, event };
+    bufferTimelineEvent(active, envelope);
     for (const [id, subscription] of timelineSubscriptions) {
       if (subscription.runId !== runId) {
         continue;
       }
-      const keep = subscription.publish(event);
+      const keep = subscription.publish(envelope);
       if (!keep) {
         timelineSubscriptions.delete(id);
       }
@@ -572,7 +645,7 @@ export async function serveDaemon(
   const subscribeRunTimeline = (
     owner: object,
     runId: string,
-    publish: (event: RunTimelineEvent) => boolean,
+    publish: (event: RunTimelineEnvelope) => boolean,
     subscriptionId = `sub-${shortId()}`,
   ): SubscriptionHandle =>
     createSubscription(
@@ -586,7 +659,10 @@ export async function serveDaemon(
       subscriptionId,
     );
 
-  const replayTimeline = (runId: string, publish: (event: RunTimelineEvent) => boolean): void => {
+  const replayTimeline = (
+    runId: string,
+    publish: (event: RunTimelineEnvelope) => boolean,
+  ): void => {
     const buffer = getReplayableTimeline(runId);
     for (const event of buffer) {
       if (!publish(event)) {
@@ -644,6 +720,7 @@ export async function serveDaemon(
         publishTimeline(resolvedRunId, event);
         if (
           event.type === "run_started" ||
+          event.type === "retrying" ||
           event.type === "run_aborted" ||
           event.type === "run_finished"
         ) {
@@ -674,10 +751,13 @@ export async function serveDaemon(
       .finally(() => {
         if (runId) {
           const active = activeRuns.get(runId);
+          const previous = active?.detail ?? null;
           if (active && active.timelineBuffer.length > 0) {
             rememberRecentTimelineBuffer(runId, active.timelineBuffer);
           }
           activeRuns.delete(runId);
+          lastTimelineCursorByRun.delete(runId);
+          publishMutationResult(runId, previous, getProjectedDetail(runId));
         }
         resolveDone?.();
       });
@@ -698,6 +778,7 @@ export async function serveDaemon(
     ...app,
     getRun: getDaemonRun,
     getRunList: getDaemonRunList,
+    getRunTimelineHistory: getProjectedTimelineHistory,
     getAttachment,
     getAttachmentList,
     initRun: async (request) => {
@@ -773,8 +854,11 @@ export async function serveDaemon(
         httpBaseUrl,
         subscribeRunSummaries: (publish) => subscribeRunSummaries(res, publish).unsubscribe,
         subscribeRunDetail: (runId, publish) => subscribeRunDetail(res, runId, publish).unsubscribe,
-        subscribeRunTimeline: (runId, publish) =>
-          subscribeRunTimeline(res, runId, publish).unsubscribe,
+        subscribeRunTimeline: (runId, publish) => {
+          const subscription = subscribeRunTimeline(res, runId, publish);
+          replayTimeline(runId, publish);
+          return subscription.unsubscribe;
+        },
       });
       return;
     }
@@ -834,6 +918,20 @@ export async function serveDaemon(
               request.id,
               operations.getRun(
                 requiredRunIdString(asRecord(params, "runs.get params").target, "target"),
+              ),
+            ),
+          );
+          return;
+        case "runs.timelineHistory":
+          sendJson(
+            ws,
+            resultResponse(
+              request.id,
+              operations.getRunTimelineHistory(
+                requiredRunIdString(
+                  asRecord(params, "runs.timelineHistory params").target,
+                  "target",
+                ),
               ),
             ),
           );
@@ -1134,21 +1232,19 @@ export async function serveDaemon(
             case "run_timeline": {
               const requiredRunId = requiredRunIdString(parsed.runId, "runId");
               operations.getRun(requiredRunId);
-              const publish = (event: RunTimelineEvent) =>
+              const publish = (envelope: RunTimelineEnvelope) =>
                 sendNotification("run.timeline", {
                   subscriptionId,
                   runId: requiredRunId,
-                  event,
+                  cursor: envelope.cursor,
+                  event: envelope.event,
                 });
               subscription = subscribeRunTimeline(ws, requiredRunId, publish, subscriptionId);
               sendJson(
                 ws,
                 resultResponse(request.id, { subscriptionId: subscription.subscriptionId }),
               );
-              const replayTimer = setTimeout(() => {
-                replayTimeline(requiredRunId, publish);
-              }, 0);
-              replayTimer.unref?.();
+              replayTimeline(requiredRunId, publish);
               break;
             }
           }

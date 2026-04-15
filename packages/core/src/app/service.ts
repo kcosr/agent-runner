@@ -1,9 +1,12 @@
+import { readFileSync } from "node:fs";
+import { join, resolve, sep } from "node:path";
 import type { DefinitionEntry } from "../config/loader.js";
 import type {
   RunAttachment,
   RunAttachmentDownloadResult,
   RunAttachmentRemoveResult,
 } from "../contracts/attachments.js";
+import type { RunTimelineAttempt, RunTimelineHistory } from "../contracts/events.js";
 import type {
   RunArchiveResult,
   RunDependenciesResult,
@@ -40,7 +43,8 @@ import {
   unarchiveRun,
 } from "../core/commands/service.js";
 import type { AgentConfig, AssignmentConfig } from "../core/config/schema.js";
-import type { RunExecution } from "../core/run/manifest.js";
+import type { AttemptLog, AttemptRecord } from "../core/run/manifest.js";
+import { type RunExecution, resolveResumeTarget } from "../core/run/manifest.js";
 import type { RunEvent, RunOutcome } from "../core/run/run-loop.js";
 import { executeRunCommand } from "../run-command.js";
 
@@ -94,8 +98,69 @@ function toDefinitionDetail(result: ReturnType<typeof showDefinition>): Definiti
   };
 }
 
+function readAttemptLogForRecord(
+  runId: string,
+  workspaceDir: string,
+  record: AttemptRecord,
+): AttemptLog {
+  try {
+    const workspaceRoot = resolve(workspaceDir);
+    const absoluteLogPath = resolve(workspaceRoot, record.logPath);
+    if (
+      absoluteLogPath !== workspaceRoot &&
+      !absoluteLogPath.startsWith(`${workspaceRoot}${sep}`)
+    ) {
+      throw new Error("attempt log path escapes workspace");
+    }
+    const raw = readFileSync(absoluteLogPath, "utf8");
+    return JSON.parse(raw) as AttemptLog;
+  } catch {
+    return {
+      schemaVersion: 1,
+      runId,
+      attempt: record.attempt,
+      sessionIndex: record.sessionIndex,
+      startedAt: record.startedAt,
+      endedAt: record.endedAt,
+      stdout: "",
+      stderr: "",
+    };
+  }
+}
+
+function toRunTimelineAttempt(
+  runId: string,
+  workspaceDir: string,
+  record: AttemptRecord,
+): RunTimelineAttempt {
+  const log = readAttemptLogForRecord(runId, workspaceDir, record);
+  return {
+    attempt: record.attempt,
+    sessionIndex: record.sessionIndex,
+    startedAt: record.startedAt,
+    endedAt: record.endedAt,
+    prompt: record.prompt,
+    transcript: record.transcript ?? "",
+    notices: log.stderr,
+    exitCode: record.exitCode,
+    timedOut: record.timedOut,
+    live: false,
+  };
+}
+
 export function getRun(target: string): RunDetail {
   return readStatus(target);
+}
+
+export function getRunTimelineHistory(target: string): RunTimelineHistory {
+  const resolved = resolveResumeTarget(target);
+  return {
+    runId: resolved.manifest.runId,
+    attempts: resolved.manifest.attemptRecords.map((record) =>
+      toRunTimelineAttempt(resolved.manifest.runId, resolved.workspaceDir, record),
+    ),
+    lastCursor: 0,
+  };
 }
 
 export function getRunBrief(target: string): string {

@@ -9,7 +9,12 @@ import type {
   ValidateSessionResult,
 } from "../core/backends/types.js";
 import { resolveTaskRunnerCommand } from "../task-runner-command.js";
-import { isRecord, normalizeBackendModel, streamBoundarySeparator } from "./shared.js";
+import {
+  isRecord,
+  normalizeBackendModel,
+  silentTranscriptFallback,
+  streamBoundarySeparator,
+} from "./shared.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Effort and model helpers
@@ -1078,6 +1083,10 @@ export const codexBackend: Backend = {
 
     const stderrAccumulated = client?.stderr ?? "";
     const transcript = state.completedText.trim() || state.streamedText.trim() || null;
+    const fallbackDelta = silentTranscriptFallback(state.streamedText, transcript);
+    if (fallbackDelta) {
+      ctx.emit?.({ type: "agent_message_delta", text: fallbackDelta });
+    }
 
     const exitCode = (() => {
       if (timedOut || aborted) return 1;

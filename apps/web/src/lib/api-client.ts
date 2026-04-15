@@ -3,6 +3,7 @@ import type {
   RunAttachment,
   RunAttachmentRemoveResult,
 } from "@task-runner/core/contracts/attachments.js";
+import type { RunTimelineHistory } from "@task-runner/core/contracts/events.js";
 import {
   runArchiveResultSchema,
   runAttachmentSchema,
@@ -10,6 +11,7 @@ import {
   runDetailSchema,
   runNameResultSchema,
   runSummarySchema,
+  runTimelineHistorySchema,
 } from "@task-runner/core/contracts/run-schemas.js";
 import type {
   RunArchiveResult,
@@ -123,6 +125,19 @@ async function readRun(response: Response): Promise<RunDetail> {
     "run",
     runDetailSchema,
     "Run detail",
+  );
+}
+
+async function readRunTimelineHistory(response: Response): Promise<RunTimelineHistory> {
+  if (!response.ok) {
+    return await readError(response);
+  }
+  return parseField(
+    await parseResponseJson(response, "Run timeline history"),
+    response.status,
+    "history",
+    runTimelineHistorySchema,
+    "Run timeline history",
   );
 }
 
@@ -262,6 +277,15 @@ export function createApiClient(config: AppRuntimeConfig) {
       );
       return await readRun(response);
     },
+    async getRunTimelineHistory(runId: string): Promise<RunTimelineHistory> {
+      const response = await fetch(
+        joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/timeline`),
+        {
+          headers: { accept: "application/json" },
+        },
+      );
+      return await readRunTimelineHistory(response);
+    },
     async listAttachments(runId: string): Promise<RunAttachment[]> {
       const response = await fetch(
         joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/attachments`),
@@ -337,7 +361,8 @@ export function createApiClient(config: AppRuntimeConfig) {
       );
       return await readArchiveResult(response, "Unarchive run");
     },
-    async resumeRun(runId: string): Promise<void> {
+    async resumeRun(runId: string, message?: string): Promise<void> {
+      const normalizedMessage = message?.trim().length ? message : undefined;
       const response = await fetch(
         joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/resume`),
         {
@@ -346,7 +371,9 @@ export function createApiClient(config: AppRuntimeConfig) {
             "content-type": "application/json",
             accept: "application/json",
           },
-          body: JSON.stringify({ overrides: {} }),
+          body: JSON.stringify({
+            overrides: normalizedMessage ? { message: normalizedMessage } : {},
+          }),
         },
       );
       await readRunIdResult(response, "Resume run");

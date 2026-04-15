@@ -169,6 +169,91 @@ describe("api client", () => {
     });
   });
 
+  it("sends an optional message when resuming a run", async () => {
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ runId: "run-1" }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createApiClient(config);
+
+    await expect(api.resumeRun("run-1", "Pick up with the failing tests")).resolves.toBeUndefined();
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/runs/run-1/resume", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json",
+      },
+      body: JSON.stringify({
+        overrides: {
+          message: "Pick up with the failing tests",
+        },
+      }),
+    });
+  });
+
+  it("parses run timeline history payloads", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              history: {
+                runId: "run-1",
+                lastCursor: 7,
+                attempts: [
+                  {
+                    attempt: 1,
+                    sessionIndex: 0,
+                    startedAt: "2026-04-13T05:00:00.000Z",
+                    endedAt: "2026-04-13T05:02:00.000Z",
+                    prompt: "Do the thing",
+                    transcript: "done",
+                    notices: "",
+                    exitCode: 0,
+                    timedOut: false,
+                    live: false,
+                  },
+                  {
+                    attempt: 2,
+                    sessionIndex: 1,
+                    startedAt: "2026-04-13T05:03:00.000Z",
+                    endedAt: null,
+                    prompt: "Keep going",
+                    transcript: "streaming",
+                    notices: "warning\n",
+                    exitCode: null,
+                    timedOut: false,
+                    live: true,
+                  },
+                ],
+              },
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+
+    const api = createApiClient(config);
+
+    const history = await api.getRunTimelineHistory("run-1");
+    expect(history.runId).toBe("run-1");
+    expect(history.lastCursor).toBe(7);
+    expect(history.attempts).toHaveLength(2);
+    expect(history.attempts[0]).toMatchObject({
+      attempt: 1,
+      prompt: "Do the thing",
+      live: false,
+    });
+    expect(history.attempts[1]).toMatchObject({
+      attempt: 2,
+      notices: "warning\n",
+      live: true,
+    });
+  });
+
   it("sends rename requests and parses the result payload", async () => {
     const fetchMock = vi.fn(
       async () =>

@@ -12,6 +12,7 @@ import type {
   getRun,
   getRunBrief,
   getRunList,
+  getRunTimelineHistory,
   getTask,
   getTaskList,
   initRun,
@@ -36,6 +37,7 @@ export interface DaemonHandlers {
   getRun: typeof getRun;
   getRunBrief: typeof getRunBrief;
   getRunList: typeof getRunList;
+  getRunTimelineHistory: typeof getRunTimelineHistory;
   getTask: typeof getTask;
   getTaskList: typeof getTaskList;
   getDefinition: typeof getDefinition;
@@ -80,6 +82,9 @@ export function createDaemonOperations(ctx: DaemonOperationContext) {
     },
     getRun(target: string) {
       return { run: ctx.getRun(target) };
+    },
+    getRunTimelineHistory(target: string) {
+      return { history: ctx.getRunTimelineHistory(target) };
     },
     getRunBrief(target: string) {
       return { brief: ctx.getRunBrief(target) };

@@ -219,8 +219,11 @@ Live browser/daemon surfaces are split by projection type:
   `RunSummary` snapshots for board cards
 - `GET /api/runs/:runId/events/detail` streams `detail_updated` events carrying
   full `RunDetail` snapshots for the selected run
+- `GET /api/runs/:runId/timeline` returns normalized per-attempt
+  `RunTimelineHistory` plus the last applied timeline cursor for bootstrap
 - `GET /api/runs/:runId/events/timeline` streams per-run execution timeline
-  events such as `agent_message_delta`
+  envelopes (`RunTimelineEnvelope`) with monotonically increasing `cursor`
+  values and SSE `id:` framing for live continuation after the history fetch
 
 The shared app config surface is:
 

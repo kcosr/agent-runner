@@ -1,6 +1,11 @@
 import type { Backend, BackendInvokeContext, BackendInvokeResult } from "../core/backends/types.js";
 import { runProcess } from "../util/spawn.js";
-import { isRecord, normalizeBackendModel, streamBoundarySeparator } from "./shared.js";
+import {
+  isRecord,
+  normalizeBackendModel,
+  silentTranscriptFallback,
+  streamBoundarySeparator,
+} from "./shared.js";
 
 function findSessionId(value: unknown): string | null {
   if (Array.isArray(value)) {
@@ -183,6 +188,11 @@ export const cursorBackend: Backend = {
       throw new Error(
         "cursor stream-json completed successfully without a valid final result.result string",
       );
+    }
+
+    const fallbackDelta = silentTranscriptFallback(state.streamedText, state.resultText);
+    if (fallbackDelta) {
+      ctx.emit?.({ type: "agent_message_delta", text: fallbackDelta });
     }
 
     return {

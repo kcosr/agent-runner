@@ -11,6 +11,7 @@ import type { BoardColumn } from "../components/run-column.js";
 import { createApiClient, isNotFoundError } from "../lib/api-client.js";
 import { queryClient, runQueryKeys } from "../lib/query.js";
 import { useRunEvents } from "../lib/run-events.js";
+import { useRunTimelineState } from "../lib/run-timeline.js";
 import { useRuntimeConfig } from "../lib/runtime-config.js";
 import { useBoardSettings } from "../lib/settings.js";
 import { subscribeToRunDetailEvents } from "../lib/sse.js";
@@ -147,6 +148,36 @@ function updateRunNameCaches(result: RunNameResult) {
   );
 }
 
+function syncRunSummaryFromDetail(detail: RunDetail) {
+  queryClient.setQueryData<RunSummary[] | undefined>(runQueryKeys.list(), (current) =>
+    current?.map((run) =>
+      run.runId === detail.runId
+        ? {
+            ...run,
+            repo: detail.repo,
+            status: detail.status,
+            effectiveStatus: detail.effectiveStatus,
+            archivedAt: detail.archivedAt,
+            agentName: detail.agent.name,
+            name: detail.name,
+            assignmentName: detail.assignment?.name ?? null,
+            backend: detail.backend,
+            model: detail.model,
+            cwd: detail.cwd,
+            startedAt: detail.startedAt,
+            endedAt: detail.endedAt,
+            tasksCompleted: detail.tasksCompleted,
+            tasksTotal: detail.tasksTotal,
+            attachmentCount: detail.attachments.length,
+            activeTask: detail.activeTask,
+            execution: detail.execution,
+            capabilities: detail.capabilities,
+          }
+        : run,
+    ),
+  );
+}
+
 async function invalidateRunQueries(runId: string) {
   await Promise.all([
     queryClient.invalidateQueries({ queryKey: runQueryKeys.list() }),
@@ -184,6 +215,18 @@ export function useRunsDashboardState() {
     },
     enabled: Boolean(selectedRunId),
   });
+  const timelineState = useRunTimelineState({
+    config,
+    runId: selectedRunId,
+    runIsLive: selectedRunQuery.data?.isLive === true,
+  });
+
+  useEffect(() => {
+    if (!selectedRunQuery.data) {
+      return;
+    }
+    syncRunSummaryFromDetail(selectedRunQuery.data);
+  }, [selectedRunQuery.data]);
 
   const runs = runsQuery.data ?? [];
   const repoOptions = useMemo(
@@ -289,6 +332,9 @@ export function useRunsDashboardState() {
     }
 
     function handleKeyDown(event: KeyboardEvent) {
+      if (event.defaultPrevented) {
+        return;
+      }
       if (event.key !== "Escape") {
         return;
       }
@@ -347,6 +393,7 @@ export function useRunsDashboardState() {
           detailStreamStaleRef.current = false;
           setDetailStreamStale(false);
         }
+        syncRunSummaryFromDetail(payload.detail);
         queryClient.setQueryData(runQueryKeys.detail(runId), payload.detail);
       },
       onStaleChange: (stale) => {
@@ -372,7 +419,17 @@ export function useRunsDashboardState() {
     onSuccess: closeRun,
   });
   const unarchiveMutation = useRunActionMutation(api.unarchiveRun, setActionError);
-  const resumeMutation = useRunActionMutation(api.resumeRun, setActionError);
+  const resumeMutation = useMutation({
+    mutationFn: ({ message, runId }: { runId: string; message?: string }) =>
+      api.resumeRun(runId, message),
+    onError: (error: Error) => {
+      setActionError(error.message);
+    },
+    onSuccess: async (_result, { runId }) => {
+      setActionError(undefined);
+      await invalidateRunQueries(runId);
+    },
+  });
   const abortMutation = useRunActionMutation(api.abortRun, setActionError);
   const renameMutation = useMutation({
     mutationFn: ({ name, runId }: { runId: string; name: string | null }) =>
@@ -564,7 +621,9 @@ export function useRunsDashboardState() {
       rename: async (runId: string, name: string | null) => {
         await renameMutation.mutateAsync({ runId, name });
       },
-      resume: (runId: string) => resumeMutation.mutate(runId),
+      resume: async (runId: string, message?: string) => {
+        await resumeMutation.mutateAsync({ runId, message });
+      },
       uploadAttachment: async (runId: string, file: File) => {
         await uploadAttachmentMutation.mutateAsync({ runId, file });
       },
@@ -575,7 +634,8 @@ export function useRunsDashboardState() {
     selectedRunId,
     selectedRunQuery,
     settings,
-    streamStale: summaryStreamStale || detailStreamStale,
+    streamStale: summaryStreamStale || detailStreamStale || timelineState.stale,
+    timelineState,
     updateSettings,
     visibleRuns,
   };

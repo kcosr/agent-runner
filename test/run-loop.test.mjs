@@ -247,6 +247,59 @@ test("effort level from frontmatter is forwarded to backend", async () => {
   assert.equal(seenEffort, "high");
 });
 
+test("attempt_started events include prompt and session metadata for timeline consumers", async () => {
+  const dir = tempDir();
+  writeAgentAndAssignment(dir);
+
+  const events = [];
+  let seenPrompt;
+  await withSharedRuntimeEnv(dir, async () => {
+    const loaded = loadAgentConfig("three", dir);
+    const loadedAssignment = loadAssignmentConfig("three-work", dir);
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      await runAgent({
+        loaded,
+        loadedAssignment,
+        cliVars: {},
+        backend: {
+          id: "mock",
+          async invoke(ctx) {
+            seenPrompt = ctx.prompt;
+            setTaskStatusesForPrompt(ctx.prompt, {
+              t1: "completed",
+              t2: "completed",
+              t3: "completed",
+            });
+            return {
+              exitCode: 0,
+              signal: null,
+              timedOut: false,
+              sessionId: null,
+              transcript: "done",
+              rawStdout: "",
+              rawStderr: "",
+            };
+          },
+        },
+        emitEvent: (event) => {
+          events.push(event);
+        },
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+
+  const attemptStarted = events.find((event) => event.type === "attempt_started");
+  assert.ok(attemptStarted, "expected attempt_started event");
+  assert.equal(attemptStarted.attempt, 1);
+  assert.equal(attemptStarted.sessionIndex, 0);
+  assert.equal(attemptStarted.prompt, seenPrompt);
+  assert.match(attemptStarted.startedAt, /^\d{4}-\d{2}-\d{2}T/);
+});
+
 test("effort override beats the frontmatter value", async () => {
   const dir = tempDir();
   writeAgentAndAssignment(dir);

@@ -1,6 +1,7 @@
 import type { UseQueryResult } from "@tanstack/react-query";
 import type { RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
 import type { CSSProperties } from "react";
+import type { RunTimelineState } from "../lib/run-timeline.js";
 import type { RunActionPending } from "./use-runs-dashboard-state.js";
 
 import { RunDetailDrawer } from "../components/run-detail-drawer.js";
@@ -26,6 +27,7 @@ export function RunDetailPanel({
   onUploadAttachment,
   selectedRunId,
   selectedRunQuery,
+  timelineState,
 }: {
   onAddDependency: (runId: string, dependencyRunId: string) => Promise<void>;
   actionError?: string;
@@ -41,11 +43,12 @@ export function RunDetailPanel({
   onRemoveDependency: (runId: string, dependencyRunId: string) => Promise<void>;
   onRemoveAttachment: (runId: string, attachmentId: string) => Promise<void>;
   onRename: (runId: string, name: string | null) => Promise<void>;
-  onResume: (runId: string) => void;
+  onResume: (runId: string, message?: string) => Promise<void>;
   onUnarchive: (runId: string) => void;
   onUploadAttachment: (runId: string, file: File) => Promise<void>;
   selectedRunId?: string;
   selectedRunQuery: UseQueryResult<RunDetail, Error>;
+  timelineState: RunTimelineState;
 }) {
   if (!selectedRunId) {
     return undefined;
@@ -104,7 +107,8 @@ export function RunDetailPanel({
       }
       onRemoveAttachment={(attachmentId) => onRemoveAttachment(selectedRun.runId, attachmentId)}
       onRename={(name) => onRename(selectedRun.runId, name)}
-      onResume={() => onResume(selectedRun.runId)}
+      onResume={(message) => onResume(selectedRun.runId, message)}
+      timelineState={timelineState}
       onUnarchive={() => onUnarchive(selectedRun.runId)}
       onUploadAttachment={(file) => onUploadAttachment(selectedRun.runId, file)}
       run={selectedRun}

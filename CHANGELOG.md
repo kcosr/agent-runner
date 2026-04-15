@@ -20,6 +20,7 @@
 
 ### Added
 
+- Added normalized per-run timeline history at `GET /api/runs/:runId/timeline`, cursored live timeline envelopes over daemon SSE/WebSocket, and an attempt-oriented web drawer timeline that bootstraps from history before continuing live output. ([#36](https://github.com/kcosr/task-runner/pull/36))
 - Added `scripts/task-list-markdown.mjs` to render `task-runner task list <run-id> --output-format json` output as Markdown, defaulting to `task-runner` on `PATH` with an optional `TASK_RUNNER_BIN` override. ([#33](https://github.com/kcosr/task-runner/pull/33))
 - Added first-class `cursor` backend support via the public `cursor-agent` headless print mode, including streamed partial-output rendering, captured session-id resume for task-runner-created runs, `TASK_RUNNER_CURSOR_BIN`, and explicit rejection of unsafe bootstrap `--backend-session-id` import. ([#33](https://github.com/kcosr/task-runner/pull/33))
 - Added `task-runner run --detach` for daemon-connected fresh runs and
@@ -74,6 +75,8 @@
 
 ### Changed
 
+- The web timeline drawer now uses an `Attempts` section label, drops the redundant per-attempt metadata header, and renders attempt prompts/output as Markdown so streamed transcripts can progressively format in place. ([#36](https://github.com/kcosr/task-runner/pull/36))
+- The web run detail drawer now always prompts for a follow-up message before resume, keeps the resume flow in a dedicated modal, and requires a non-empty message before dispatching the resume request. ([#36](https://github.com/kcosr/task-runner/pull/36))
 - The web dashboard now applies live `RunSummary` and `RunDetail` snapshots directly to the board/detail caches, so card progress, attachment/dependency badges, and active-task labels update from streamed projections without relying on selected-run invalidation. ([#35](https://github.com/kcosr/task-runner/pull/35))
 - Polished the web detail drawer's Attachments and Dependencies tabs: attachment rows now render with the shared row card styling and human-readable sizes (e.g. `2.1 MB`), dependency rows show a status badge instead of plain-text status, destructive actions use the destructive-outline button tone, and empty "Depends on" / "Required by" sections are hidden instead of showing duplicate empty-state copy. ([#32](https://github.com/kcosr/task-runner/pull/32))
 - Kanban run cards now surface dependency readiness and attachment presence directly in the card metadata row so planning artifacts and blocked prerequisites are visible without opening the drawer. ([#32](https://github.com/kcosr/task-runner/pull/32))
@@ -133,6 +136,8 @@
 
 ### Fixed
 
+- Fixed daemon-managed run settlement so terminal detail projections clear live abort capability immediately after completion or abort, preventing stale `Abort` actions in the web drawer after a resume finishes. ([#36](https://github.com/kcosr/task-runner/pull/36))
+- Fixed per-run timeline recovery to stop retrying forever on unrecoverable live-stream gaps, added explicit client coverage for timeline envelope application, and hardened timeline-history loading to ignore attempt log paths that escape the run workspace. ([#36](https://github.com/kcosr/task-runner/pull/36))
 - Fixed attachment uploads when the selected filename contained non-ISO-8859-1 characters (emoji, diacritics, non-Latin scripts): the `x-task-runner-attachment-name` header is now percent-encoded by the web and CLI daemon clients and percent-decoded by the daemon HTTP route. ([#32](https://github.com/kcosr/task-runner/pull/32))
 - Fixed the attachments tab in the web detail drawer showing the native file input's "Choose File / No file chosen" UI next to the Upload button — the `.sr-only` utility class was referenced but never defined, so the supposedly hidden input was fully visible. ([#32](https://github.com/kcosr/task-runner/pull/32))
 - Fixed Ctrl+C handling for Codex-managed and daemon-target runs so

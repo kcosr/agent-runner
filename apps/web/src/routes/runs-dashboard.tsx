@@ -78,6 +78,7 @@ export function RunsDashboardRoute() {
           onUploadAttachment={state.runActions.uploadAttachment}
           selectedRunId={state.selectedRunId}
           selectedRunQuery={state.selectedRunQuery}
+          timelineState={state.timelineState}
         />
       }
       topNotices={topNotices.length > 0 ? topNotices : undefined}
