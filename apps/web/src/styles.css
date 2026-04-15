@@ -287,6 +287,45 @@ body {
   text-transform: uppercase;
 }
 
+.resume-dialog__disclosure {
+  margin-bottom: 8px;
+}
+
+.resume-dialog__disclosure-toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+  font-weight: 600;
+  padding: 12px 14px;
+  text-align: left;
+}
+
+.resume-dialog__disclosure-toggle:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--border));
+}
+
+.resume-dialog__disclosure-toggle:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 2px;
+}
+
+.resume-dialog__disclosure-icon {
+  width: 16px;
+  height: 16px;
+  transition: transform 140ms ease;
+}
+
+.resume-dialog__disclosure-icon.expanded {
+  transform: rotate(180deg);
+}
+
 .resume-dialog__textarea {
   width: 100%;
   min-height: 8.5rem;

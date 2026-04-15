@@ -24,6 +24,7 @@ import {
 } from "../lib/settings.js";
 import {
   ArchiveIcon,
+  ChevronIcon,
   CloseIcon,
   CopyIcon,
   DownloadIcon,
@@ -174,12 +175,14 @@ export function RunDetailDrawer({
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(run.name ?? "");
   const [resumeDialogOpen, setResumeDialogOpen] = useState(false);
+  const [resumeMessageExpanded, setResumeMessageExpanded] = useState(false);
   const [resumeMessageDraft, setResumeMessageDraft] = useState("");
   const [dependencyDraft, setDependencyDraft] = useState("");
   const [selectedDependencyRunId, setSelectedDependencyRunId] = useState<string | null>(null);
   const { settings, updateSettings } = useBoardSettings();
   const dragRef = useRef<DragState | null>(null);
   const nameInputRef = useRef<HTMLInputElement | null>(null);
+  const resumeDisclosureButtonRef = useRef<HTMLButtonElement | null>(null);
   const resumeMessageRef = useRef<HTMLTextAreaElement | null>(null);
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
   const [dragWidth, setDragWidth] = useState<number | null>(null);
@@ -189,6 +192,10 @@ export function RunDetailDrawer({
   const actionsLocked = actionPending !== undefined;
   const resumePending = actionPending === "resume";
   const trimmedResumeMessage = resumeMessageDraft.trim();
+  const hasIncompleteTasks = run.tasks.some((task) => task.status !== "completed");
+  const startableRun = run.capabilities.canResume && run.status === "initialized";
+  const resumeRequiresMessage = !hasIncompleteTasks;
+  const showResumeMessageField = resumeRequiresMessage || resumeMessageExpanded;
   const renamePending = actionPending === "rename";
   const uploadAttachmentPending = actionPending === "upload-attachment";
   const removeAttachmentPending = actionPending === "remove-attachment";
@@ -343,10 +350,15 @@ export function RunDetailDrawer({
   }, [editingName]);
 
   useEffect(() => {
-    if (resumeDialogOpen) {
-      resumeMessageRef.current?.focus();
+    if (!resumeDialogOpen) {
+      return;
     }
-  }, [resumeDialogOpen]);
+    if (showResumeMessageField) {
+      resumeMessageRef.current?.focus();
+      return;
+    }
+    resumeDisclosureButtonRef.current?.focus();
+  }, [resumeDialogOpen, showResumeMessageField]);
 
   useEffect(() => {
     const availableAttempts = new Set(timelineAttempts.map((attempt) => attempt.attempt));
@@ -439,10 +451,22 @@ export function RunDetailDrawer({
     }
   }
 
+  async function startRun() {
+    if (actionsLocked) {
+      return;
+    }
+    try {
+      await onResume();
+    } catch {
+      // actionError is surfaced by the shared mutation handler.
+    }
+  }
+
   function openResumeDialog() {
     if (actionsLocked) {
       return;
     }
+    setResumeMessageExpanded(resumeRequiresMessage);
     setResumeDialogOpen(true);
   }
 
@@ -451,16 +475,18 @@ export function RunDetailDrawer({
       return;
     }
     setResumeDialogOpen(false);
+    setResumeMessageExpanded(false);
     setResumeMessageDraft("");
   }
 
   async function submitResume() {
-    if (resumePending || trimmedResumeMessage.length === 0) {
+    if (resumePending || (resumeRequiresMessage && trimmedResumeMessage.length === 0)) {
       return;
     }
     try {
-      await onResume(trimmedResumeMessage);
+      await onResume(trimmedResumeMessage.length > 0 ? trimmedResumeMessage : undefined);
       setResumeDialogOpen(false);
+      setResumeMessageExpanded(false);
       setResumeMessageDraft("");
     } catch {
       // actionError is surfaced by the shared mutation handler.
@@ -483,7 +509,9 @@ export function RunDetailDrawer({
 
   function handleResumeDialogKeyDown(event: KeyboardEvent<HTMLDialogElement>) {
     if (event.key === "Escape") {
+      event.preventDefault();
       event.stopPropagation();
+      closeResumeDialog();
     }
   }
 
@@ -533,10 +561,16 @@ export function RunDetailDrawer({
               <button
                 className="btn"
                 disabled={actionsLocked}
-                onClick={openResumeDialog}
+                onClick={startableRun ? () => void startRun() : openResumeDialog}
                 type="button"
               >
-                {actionPending === "resume" ? "Resuming..." : "Resume"}
+                {actionPending === "resume"
+                  ? startableRun
+                    ? "Starting..."
+                    : "Resuming..."
+                  : startableRun
+                    ? "Start"
+                    : "Resume"}
               </button>
             ) : null}
             {run.capabilities.canAbort ? (
@@ -1103,23 +1137,52 @@ export function RunDetailDrawer({
                 Resume run
               </h3>
               <p className="resume-dialog__copy">
-                Send a follow-up message describing what the run should do next.
+                {resumeRequiresMessage
+                  ? "Send a follow-up message describing what the run should do next."
+                  : "Resume immediately or include an optional follow-up message."}
               </p>
             </div>
-            <label className="resume-dialog__field" htmlFor="resume-run-message">
-              Message
-            </label>
-            <textarea
-              className="resume-dialog__textarea"
-              disabled={resumePending}
-              id="resume-run-message"
-              onChange={(event) => setResumeMessageDraft(event.target.value)}
-              onKeyDown={handleResumeMessageKeyDown}
-              placeholder="Describe the follow-up work for this resume..."
-              ref={resumeMessageRef}
-              rows={6}
-              value={resumeMessageDraft}
-            />
+            {!resumeRequiresMessage ? (
+              <div className="resume-dialog__disclosure">
+                <button
+                  aria-controls="resume-run-message-panel"
+                  aria-expanded={resumeMessageExpanded}
+                  className="resume-dialog__disclosure-toggle"
+                  disabled={resumePending}
+                  onClick={() => setResumeMessageExpanded((current) => !current)}
+                  ref={resumeDisclosureButtonRef}
+                  type="button"
+                >
+                  <span>Optional message</span>
+                  <ChevronIcon
+                    aria-hidden="true"
+                    className={
+                      resumeMessageExpanded
+                        ? "resume-dialog__disclosure-icon expanded"
+                        : "resume-dialog__disclosure-icon"
+                    }
+                  />
+                </button>
+              </div>
+            ) : null}
+            {showResumeMessageField ? (
+              <div id="resume-run-message-panel">
+                <label className="resume-dialog__field" htmlFor="resume-run-message">
+                  {resumeRequiresMessage ? "Message" : "Optional message"}
+                </label>
+                <textarea
+                  className="resume-dialog__textarea"
+                  disabled={resumePending}
+                  id="resume-run-message"
+                  onChange={(event) => setResumeMessageDraft(event.target.value)}
+                  onKeyDown={handleResumeMessageKeyDown}
+                  placeholder="Describe the follow-up work for this resume..."
+                  ref={resumeMessageRef}
+                  rows={6}
+                  value={resumeMessageDraft}
+                />
+              </div>
+            ) : null}
             <div className="resume-dialog__actions">
               <button
                 className="btn"
@@ -1131,7 +1194,9 @@ export function RunDetailDrawer({
               </button>
               <button
                 className="btn btn-primary"
-                disabled={resumePending || trimmedResumeMessage.length === 0}
+                disabled={
+                  resumePending || (resumeRequiresMessage && trimmedResumeMessage.length === 0)
+                }
                 onClick={() => void submitResume()}
                 type="button"
               >
