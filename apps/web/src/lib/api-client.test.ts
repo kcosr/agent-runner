@@ -169,6 +169,30 @@ describe("api client", () => {
     });
   });
 
+  it("sends an optional message when resuming a run", async () => {
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ runId: "run-1" }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createApiClient(config);
+
+    await expect(api.resumeRun("run-1", "Pick up with the failing tests")).resolves.toBeUndefined();
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/runs/run-1/resume", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json",
+      },
+      body: JSON.stringify({
+        overrides: {
+          message: "Pick up with the failing tests",
+        },
+      }),
+    });
+  });
+
   it("parses run timeline history payloads", async () => {
     vi.stubGlobal(
       "fetch",

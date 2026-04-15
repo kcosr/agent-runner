@@ -361,7 +361,8 @@ export function createApiClient(config: AppRuntimeConfig) {
       );
       return await readArchiveResult(response, "Unarchive run");
     },
-    async resumeRun(runId: string): Promise<void> {
+    async resumeRun(runId: string, message?: string): Promise<void> {
+      const normalizedMessage = message?.trim().length ? message : undefined;
       const response = await fetch(
         joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/resume`),
         {
@@ -370,7 +371,9 @@ export function createApiClient(config: AppRuntimeConfig) {
             "content-type": "application/json",
             accept: "application/json",
           },
-          body: JSON.stringify({ overrides: {} }),
+          body: JSON.stringify({
+            overrides: normalizedMessage ? { message: normalizedMessage } : {},
+          }),
         },
       );
       await readRunIdResult(response, "Resume run");

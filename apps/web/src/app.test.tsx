@@ -1965,6 +1965,254 @@ describe("web app", () => {
     expect(screen.queryByRole("button", { name: "Abort" })).not.toBeInTheDocument();
   });
 
+  it("opens a resume dialog and does not send a request when cancelled", async () => {
+    const fetchMock = installFetchMock({
+      runs: [makeRun({ runId: "resumable", assignmentName: "Resumable run", status: "success" })],
+      details: {
+        resumable: makeDetail({
+          runId: "resumable",
+          status: "success",
+          assignment: {
+            name: "Resumable run",
+            sourcePath: "/tmp/a.md",
+            workspacePath: "/tmp/b.md",
+          },
+          capabilities: {
+            canArchive: true,
+            canUnarchive: false,
+            canResume: true,
+            taskMutation: {
+              canAdd: false,
+              canEditNotes: false,
+              canSetStatus: false,
+            },
+          },
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await findRunCard("Resumable run");
+    await user.click(await findRunCard("Resumable run"));
+    await user.click(await screen.findByRole("button", { name: "Resume" }));
+
+    expect(await screen.findByRole("dialog", { name: "Resume run" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Resume run" })).not.toBeInTheDocument();
+    });
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/runs/resumable/resume",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("keeps the drawer open when Escape closes the resume dialog", async () => {
+    installFetchMock({
+      runs: [makeRun({ runId: "resumable", assignmentName: "Resumable run", status: "success" })],
+      details: {
+        resumable: makeDetail({
+          runId: "resumable",
+          status: "success",
+          assignment: {
+            name: "Resumable run",
+            sourcePath: "/tmp/a.md",
+            workspacePath: "/tmp/b.md",
+          },
+          capabilities: {
+            canArchive: true,
+            canUnarchive: false,
+            canResume: true,
+            taskMutation: {
+              canAdd: false,
+              canEditNotes: false,
+              canSetStatus: false,
+            },
+          },
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await findRunCard("Resumable run");
+    await user.click(await findRunCard("Resumable run"));
+    await user.click(await screen.findByRole("button", { name: "Resume" }));
+
+    expect(await screen.findByRole("dialog", { name: "Resume run" })).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Resume run" })).not.toBeInTheDocument();
+    });
+    expect(screen.getByLabelText("Run detail")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Resume" })).toBeInTheDocument();
+  });
+
+  it("requires a resume message before enabling send", async () => {
+    installFetchMock({
+      runs: [makeRun({ runId: "resumable", assignmentName: "Resumable run", status: "success" })],
+      details: {
+        resumable: makeDetail({
+          runId: "resumable",
+          status: "success",
+          assignment: {
+            name: "Resumable run",
+            sourcePath: "/tmp/a.md",
+            workspacePath: "/tmp/b.md",
+          },
+          capabilities: {
+            canArchive: true,
+            canUnarchive: false,
+            canResume: true,
+            taskMutation: {
+              canAdd: false,
+              canEditNotes: false,
+              canSetStatus: false,
+            },
+          },
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await findRunCard("Resumable run");
+    await user.click(await findRunCard("Resumable run"));
+    await user.click(await screen.findByRole("button", { name: "Resume" }));
+
+    const sendButton = await screen.findByRole("button", { name: "Send" });
+    expect(sendButton).toBeDisabled();
+    expect(
+      screen.getByText("Send a follow-up message describing what the run should do next."),
+    ).toBeInTheDocument();
+
+    await user.type(await screen.findByLabelText("Message"), "Pick up the failing tests.");
+
+    await waitFor(() => {
+      expect(sendButton).toBeEnabled();
+    });
+  });
+
+  it("sends the resume message from the dialog", async () => {
+    let resumeBody: { overrides?: { message?: string } } | undefined;
+    installFetchMock(
+      {
+        runs: [makeRun({ runId: "resumable", assignmentName: "Resumable run", status: "success" })],
+        details: {
+          resumable: makeDetail({
+            runId: "resumable",
+            status: "success",
+            assignment: {
+              name: "Resumable run",
+              sourcePath: "/tmp/a.md",
+              workspacePath: "/tmp/b.md",
+            },
+            capabilities: {
+              canArchive: true,
+              canUnarchive: false,
+              canResume: true,
+              taskMutation: {
+                canAdd: false,
+                canEditNotes: false,
+                canSetStatus: false,
+              },
+            },
+          }),
+        },
+      },
+      {
+        handleRequest: async (url, init) => {
+          if (url.endsWith("/api/runs/resumable/resume")) {
+            resumeBody =
+              typeof init?.body === "string"
+                ? (JSON.parse(init.body) as { overrides?: { message?: string } })
+                : undefined;
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+    await findRunCard("Resumable run");
+    await user.click(await findRunCard("Resumable run"));
+    await user.click(await screen.findByRole("button", { name: "Resume" }));
+    await user.type(
+      await screen.findByLabelText("Message"),
+      "Continue with the failing web tests first.",
+    );
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => {
+      expect(resumeBody).toEqual({
+        overrides: {
+          message: "Continue with the failing web tests first.",
+        },
+      });
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Resume run" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("updates the selected run actions from summary SSE state changes", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "run-1",
+          status: "running",
+          capabilities: {
+            canResume: false,
+            canAbort: true,
+            abortReason: undefined,
+          },
+        }),
+      ],
+      details: {
+        "run-1": makeDetail({
+          status: "running",
+          capabilities: {
+            canResume: false,
+            canAbort: true,
+            abortReason: undefined,
+          },
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+
+    expect(await screen.findByRole("button", { name: "Abort" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
+
+    findEventSource("/api/events/run-summaries").emitMessage({
+      type: "summary_upsert",
+      summary: makeRun({
+        runId: "run-1",
+        status: "success",
+        endedAt: "2026-04-13T05:10:00.000Z",
+        activeTask: null,
+        capabilities: {
+          canResume: true,
+          canAbort: false,
+        },
+      }),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Resume" })).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("button", { name: "Abort" })).not.toBeInTheDocument();
+  });
+
   it("locks all run-level actions while one mutation is pending", async () => {
     let resolveArchive: (() => void) | undefined;
     installFetchMock(

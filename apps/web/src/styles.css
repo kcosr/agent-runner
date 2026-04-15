@@ -234,6 +234,83 @@ body {
   display: none;
 }
 
+.resume-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.resume-dialog {
+  width: min(32rem, 100%);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--card);
+  box-shadow: 0 28px 64px rgba(0, 0, 0, 0.16);
+  padding: 20px;
+}
+
+.resume-dialog__header {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.resume-dialog__title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.resume-dialog__copy {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 13px;
+}
+
+.resume-dialog__field {
+  display: inline-block;
+  margin-bottom: 8px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.resume-dialog__textarea {
+  width: 100%;
+  min-height: 8.5rem;
+  resize: vertical;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+  line-height: 1.5;
+}
+
+.resume-dialog__textarea::placeholder {
+  color: var(--muted-foreground);
+}
+
+.resume-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+}
+
 .main,
 .layout,
 .board,

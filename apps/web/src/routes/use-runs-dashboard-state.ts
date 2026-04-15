@@ -332,6 +332,9 @@ export function useRunsDashboardState() {
     }
 
     function handleKeyDown(event: KeyboardEvent) {
+      if (event.defaultPrevented) {
+        return;
+      }
       if (event.key !== "Escape") {
         return;
       }
@@ -416,7 +419,17 @@ export function useRunsDashboardState() {
     onSuccess: closeRun,
   });
   const unarchiveMutation = useRunActionMutation(api.unarchiveRun, setActionError);
-  const resumeMutation = useRunActionMutation(api.resumeRun, setActionError);
+  const resumeMutation = useMutation({
+    mutationFn: ({ message, runId }: { runId: string; message?: string }) =>
+      api.resumeRun(runId, message),
+    onError: (error: Error) => {
+      setActionError(error.message);
+    },
+    onSuccess: async (_result, { runId }) => {
+      setActionError(undefined);
+      await invalidateRunQueries(runId);
+    },
+  });
   const abortMutation = useRunActionMutation(api.abortRun, setActionError);
   const renameMutation = useMutation({
     mutationFn: ({ name, runId }: { runId: string; name: string | null }) =>
@@ -608,7 +621,9 @@ export function useRunsDashboardState() {
       rename: async (runId: string, name: string | null) => {
         await renameMutation.mutateAsync({ runId, name });
       },
-      resume: (runId: string) => resumeMutation.mutate(runId),
+      resume: async (runId: string, message?: string) => {
+        await resumeMutation.mutateAsync({ runId, message });
+      },
       uploadAttachment: async (runId: string, file: File) => {
         await uploadAttachmentMutation.mutateAsync({ runId, file });
       },

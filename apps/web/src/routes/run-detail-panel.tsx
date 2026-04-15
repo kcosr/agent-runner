@@ -43,7 +43,7 @@ export function RunDetailPanel({
   onRemoveDependency: (runId: string, dependencyRunId: string) => Promise<void>;
   onRemoveAttachment: (runId: string, attachmentId: string) => Promise<void>;
   onRename: (runId: string, name: string | null) => Promise<void>;
-  onResume: (runId: string) => void;
+  onResume: (runId: string, message?: string) => Promise<void>;
   onUnarchive: (runId: string) => void;
   onUploadAttachment: (runId: string, file: File) => Promise<void>;
   selectedRunId?: string;
@@ -107,7 +107,7 @@ export function RunDetailPanel({
       }
       onRemoveAttachment={(attachmentId) => onRemoveAttachment(selectedRun.runId, attachmentId)}
       onRename={(name) => onRename(selectedRun.runId, name)}
-      onResume={() => onResume(selectedRun.runId)}
+      onResume={(message) => onResume(selectedRun.runId, message)}
       timelineState={timelineState}
       onUnarchive={() => onUnarchive(selectedRun.runId)}
       onUploadAttachment={(file) => onUploadAttachment(selectedRun.runId, file)}

@@ -1,5 +1,5 @@
 import type { AppRuntimeConfig } from "@task-runner/core/contracts/app-config.js";
-import type { RunSummary } from "@task-runner/core/contracts/runs.js";
+import type { RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
 import { type ReactNode, createContext, useContext, useEffect, useRef, useState } from "react";
 import { queryClient, runQueryKeys } from "./query.js";
 import { subscribeToRunSummaryEvents } from "./sse.js";
@@ -26,6 +26,35 @@ function upsertSummary(
   const next = [...current];
   next[existingIndex] = incoming;
   return next;
+}
+
+function syncDetailFromSummary(summary: RunSummary) {
+  queryClient.setQueryData<RunDetail | undefined>(runQueryKeys.detail(summary.runId), (current) =>
+    current
+      ? {
+          ...current,
+          status: summary.status,
+          effectiveStatus: summary.effectiveStatus,
+          archivedAt: summary.archivedAt,
+          name: summary.name,
+          backend: summary.backend,
+          model: summary.model,
+          cwd: summary.cwd,
+          startedAt: summary.startedAt,
+          endedAt: summary.endedAt,
+          tasksCompleted: summary.tasksCompleted,
+          tasksTotal: summary.tasksTotal,
+          activeTask: summary.activeTask,
+          capabilities: summary.capabilities,
+          execution: summary.execution,
+          isLive: summary.status === "running",
+          agent: {
+            ...current.agent,
+            name: summary.agentName,
+          },
+        }
+      : current,
+  );
 }
 
 export function RunEventsProvider({
@@ -80,6 +109,7 @@ export function RunEventsProvider({
           streamStaleRef.current = false;
           setStreamStale(false);
         }
+        syncDetailFromSummary(payload.summary);
         queryClient.setQueryData<RunSummary[] | undefined>(runQueryKeys.list(), (current) =>
           upsertSummary(current, payload.summary),
         );
