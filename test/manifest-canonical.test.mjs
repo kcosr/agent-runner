@@ -124,6 +124,8 @@ function runCli(args, opts = {}) {
       ...process.env,
       TASK_RUNNER_CONFIG_DIR: opts.cwd ?? process.cwd(),
       TASK_RUNNER_STATE_DIR: opts.cwd ?? process.cwd(),
+      TASK_RUNNER_CONNECT: undefined,
+      TASK_RUNNER_LISTEN: undefined,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -210,6 +212,8 @@ test("ad-hoc agent: --agent omitted without --backend errors with exit 3", async
           ...process.env,
           TASK_RUNNER_CONFIG_DIR: dir,
           TASK_RUNNER_STATE_DIR: dir,
+          TASK_RUNNER_CONNECT: undefined,
+          TASK_RUNNER_LISTEN: undefined,
         },
         stdio: ["ignore", "pipe", "pipe"],
       },

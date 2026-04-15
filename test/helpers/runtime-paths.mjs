@@ -75,6 +75,8 @@ export function sharedRuntimeEnv(baseDir) {
     TASK_RUNNER_CONFIG_DIR: baseDir,
     TASK_RUNNER_STATE_DIR: baseDir,
     TASK_RUNNER_CMD: "task-runner",
+    TASK_RUNNER_CONNECT: undefined,
+    TASK_RUNNER_LISTEN: undefined,
   };
 }
 

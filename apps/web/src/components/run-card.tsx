@@ -75,9 +75,9 @@ export function RunCard({
       </div>
       {run.activeTask ? (
         <div className="card-row">
-          <span className="active-task">
+          <span className="active-task" title={run.activeTask.title}>
             <RunningIcon aria-hidden="true" />
-            {run.activeTask.title}
+            <span className="active-task__text">{run.activeTask.title}</span>
           </span>
         </div>
       ) : null}
