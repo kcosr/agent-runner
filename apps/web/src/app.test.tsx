@@ -2161,7 +2161,7 @@ describe("web app", () => {
     });
   });
 
-  it("updates the selected run actions from summary SSE state changes", async () => {
+  it("updates the selected run actions from detail SSE state changes", async () => {
     installFetchMock({
       runs: [
         makeRun({
@@ -2193,9 +2193,9 @@ describe("web app", () => {
     expect(await screen.findByRole("button", { name: "Abort" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
 
-    findEventSource("/api/events/run-summaries").emitMessage({
-      type: "summary_upsert",
-      summary: makeRun({
+    findEventSource("/api/runs/run-1/events/detail").emitMessage({
+      type: "detail_updated",
+      detail: makeDetail({
         runId: "run-1",
         status: "success",
         endedAt: "2026-04-13T05:10:00.000Z",

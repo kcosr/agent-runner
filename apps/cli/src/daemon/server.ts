@@ -751,11 +751,13 @@ export async function serveDaemon(
       .finally(() => {
         if (runId) {
           const active = activeRuns.get(runId);
+          const previous = active?.detail ?? null;
           if (active && active.timelineBuffer.length > 0) {
             rememberRecentTimelineBuffer(runId, active.timelineBuffer);
           }
           activeRuns.delete(runId);
           lastTimelineCursorByRun.delete(runId);
+          publishMutationResult(runId, previous, getProjectedDetail(runId));
         }
         resolveDone?.();
       });

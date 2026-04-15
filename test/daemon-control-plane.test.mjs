@@ -1305,6 +1305,21 @@ test("daemon projects active run detail as live while it owns the run", async ()
     const aborted = await httpJson(httpBaseUrl, `/api/runs/${runId}/abort`, { method: "POST" });
     assert.equal(aborted.status, 200);
     assert.equal(aborted.body.accepted, true);
+
+    let settled = null;
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      const response = await httpJson(httpBaseUrl, `/api/runs/${runId}`);
+      assert.equal(response.status, 200);
+      if (response.body.run.status === "aborted" && response.body.run.isLive === false) {
+        settled = response.body.run;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+
+    assert.ok(settled, "expected the daemon to publish a settled aborted projection");
+    assert.equal(settled.capabilities.canAbort, false);
+    assert.equal(settled.capabilities.abortReason, "already_terminal");
   } finally {
     await server.close();
   }
