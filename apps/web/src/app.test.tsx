@@ -3035,6 +3035,10 @@ describe("web app", () => {
     expect(anchorClick).toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: /^Remove notes\.md$/ }));
+    expect(screen.getByText("notes.md")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Confirm remove notes\.md$/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Cancel remove notes\.md$/ })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^Confirm remove notes\.md$/ }));
     await waitFor(() => expect(screen.getByText("No attachments yet.")).toBeInTheDocument());
     expect(revokeObjectURL).toHaveBeenCalled();
 

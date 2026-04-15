@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
-import { withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
+import { updateTasksForPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 const ABORT_AGENT = `---
 schemaVersion: 1
@@ -144,6 +144,39 @@ test("abort: aborted run is resumable from the same workspace", async () => {
 
   assert.equal(aborted.manifest.status, "aborted");
   assert.equal(aborted.manifest.backendSessionId, "sess-resumable");
+});
+
+test("abort: terminal persistence clears stale in-progress tasks for non-passive runs", async () => {
+  const dir = tempDir();
+  setup(dir);
+
+  const controller = new AbortController();
+  const aborted = await runIn(dir, {
+    abortSignal: controller.signal,
+    backend: mockBackend(async (ctx) => {
+      updateTasksForPrompt(ctx.prompt, {
+        t1: { status: "in_progress", notes: "Halfway done" },
+        t2: { status: "completed", notes: "Wrapped up" },
+      });
+      controller.abort();
+      return {
+        exitCode: 1,
+        signal: null,
+        timedOut: false,
+        aborted: true,
+        sessionId: "sess-reset-progress",
+        transcript: null,
+        rawStdout: "",
+        rawStderr: "",
+      };
+    }),
+  });
+
+  assert.equal(aborted.manifest.status, "aborted");
+  assert.equal(aborted.manifest.finalTasks.t1.status, "pending");
+  assert.equal(aborted.manifest.finalTasks.t1.notes, "Halfway done");
+  assert.equal(aborted.manifest.finalTasks.t2.status, "completed");
+  assert.equal(aborted.manifest.attemptRecords[0]?.tasksAfter.t1.status, "in_progress");
 });
 
 test("abort: backend can pass abortSignal through ctx without crashing", async () => {

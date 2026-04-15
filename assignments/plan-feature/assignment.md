@@ -23,13 +23,14 @@ callerInstructions: |
         --var repo_path=/abs/path/to/target/repo \
         "$(cat /tmp/feature-brief.md)"
 
-  Any general-purpose agent works (for example `example`). The
-  planner doesn't need special role instructions — the detail
-  lives in this assignment's task bodies. It does need shell
-  access (`unrestricted: true`) so it can inspect the repo and
-  validate the generated draft assignment. The caller
-  environment must allow one nested `task-runner run`, because
-  the planner runs `plan-review` before handing the draft back.
+  Use the bundled `planner` agent or another unrestricted
+  general-purpose agent. The planner doesn't need special role
+  instructions beyond what this assignment provides, but it
+  does need shell access (`unrestricted: true`) so it can
+  inspect the repo and validate the generated draft
+  assignment. The caller environment must allow one nested
+  `task-runner run`, because the planner runs `plan-review`
+  before handing the draft back.
 
   ## What the planner does
 

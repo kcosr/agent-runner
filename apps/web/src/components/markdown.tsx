@@ -6,6 +6,13 @@ const components: Components = {
   a({ node: _node, href, ...props }) {
     return <a {...props} href={href} target="_blank" rel="noopener noreferrer" />;
   },
+  table({ node: _node, ...props }) {
+    return (
+      <div className="markdown-table-wrap">
+        <table {...props} />
+      </div>
+    );
+  },
 };
 
 function MarkdownContentInner({ text, className }: { text: string; className?: string }) {

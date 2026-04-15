@@ -24,6 +24,7 @@ import {
 } from "../lib/settings.js";
 import {
   ArchiveIcon,
+  CheckIcon,
   ChevronIcon,
   CloseIcon,
   CopyIcon,
@@ -177,6 +178,7 @@ export function RunDetailDrawer({
   const [resumeDialogOpen, setResumeDialogOpen] = useState(false);
   const [resumeMessageExpanded, setResumeMessageExpanded] = useState(false);
   const [resumeMessageDraft, setResumeMessageDraft] = useState("");
+  const [confirmingAttachmentId, setConfirmingAttachmentId] = useState<string | null>(null);
   const [dependencyDraft, setDependencyDraft] = useState("");
   const [selectedDependencyRunId, setSelectedDependencyRunId] = useState<string | null>(null);
   const { settings, updateSettings } = useBoardSettings();
@@ -368,6 +370,15 @@ export function RunDetailDrawer({
     setSelectedAttempt(timelineAttempts[timelineAttempts.length - 1]?.attempt ?? null);
   }, [selectedAttempt, timelineAttempts]);
 
+  useEffect(() => {
+    if (
+      confirmingAttachmentId !== null &&
+      !run.attachments.some((attachment) => attachment.id === confirmingAttachmentId)
+    ) {
+      setConfirmingAttachmentId(null);
+    }
+  }, [confirmingAttachmentId, run.attachments]);
+
   async function submitDependencyAdd() {
     if (!resolvedDependencyRunId || addDependencyPending) {
       return;
@@ -446,6 +457,7 @@ export function RunDetailDrawer({
     }
     try {
       await onRemoveAttachment(attachmentId);
+      setConfirmingAttachmentId((current) => (current === attachmentId ? null : current));
     } catch {
       // actionError is surfaced by the shared mutation handler.
     }
@@ -807,16 +819,41 @@ export function RunDetailDrawer({
                           >
                             <DownloadIcon aria-hidden="true" />
                           </button>
-                          <button
-                            aria-label={`Remove ${attachment.name}`}
-                            className="icon-btn icon-btn--destructive"
-                            disabled={actionsLocked}
-                            onClick={() => void submitAttachmentRemove(attachment.id)}
-                            title={removeAttachmentPending ? "Removing..." : "Remove"}
-                            type="button"
-                          >
-                            <TrashIcon aria-hidden="true" />
-                          </button>
+                          {confirmingAttachmentId === attachment.id ? (
+                            <>
+                              <button
+                                aria-label={`Confirm remove ${attachment.name}`}
+                                className="icon-btn icon-btn--destructive"
+                                disabled={actionsLocked}
+                                onClick={() => void submitAttachmentRemove(attachment.id)}
+                                title={removeAttachmentPending ? "Removing..." : "Confirm remove"}
+                                type="button"
+                              >
+                                <CheckIcon aria-hidden="true" />
+                              </button>
+                              <button
+                                aria-label={`Cancel remove ${attachment.name}`}
+                                className="icon-btn"
+                                disabled={actionsLocked}
+                                onClick={() => setConfirmingAttachmentId(null)}
+                                title="Cancel remove"
+                                type="button"
+                              >
+                                <CloseIcon aria-hidden="true" />
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              aria-label={`Remove ${attachment.name}`}
+                              className="icon-btn icon-btn--destructive"
+                              disabled={actionsLocked}
+                              onClick={() => setConfirmingAttachmentId(attachment.id)}
+                              title="Remove"
+                              type="button"
+                            >
+                              <TrashIcon aria-hidden="true" />
+                            </button>
+                          )}
                         </div>
                       </li>
                     ))}
