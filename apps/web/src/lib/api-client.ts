@@ -7,6 +7,7 @@ import type { RunTimelineHistory } from "@task-runner/core/contracts/events.js";
 import {
   runArchiveResultSchema,
   runAttachmentSchema,
+  runDeleteResultSchema,
   runDependenciesResultSchema,
   runDetailSchema,
   runNameResultSchema,
@@ -15,6 +16,7 @@ import {
 } from "@task-runner/core/contracts/run-schemas.js";
 import type {
   RunArchiveResult,
+  RunDeleteResult,
   RunDependenciesResult,
   RunDetail,
   RunNameResult,
@@ -163,6 +165,19 @@ async function readNameResult(response: Response, label: string): Promise<RunNam
     response.status,
     "result",
     runNameResultSchema,
+    label,
+  );
+}
+
+async function readDeleteResult(response: Response, label: string): Promise<RunDeleteResult> {
+  if (!response.ok) {
+    return await readError(response);
+  }
+  return parseField(
+    await parseResponseJson(response, label),
+    response.status,
+    "result",
+    runDeleteResultSchema,
     label,
   );
 }
@@ -360,6 +375,26 @@ export function createApiClient(config: AppRuntimeConfig) {
         },
       );
       return await readArchiveResult(response, "Unarchive run");
+    },
+    async resetRun(runId: string): Promise<RunDetail> {
+      const response = await fetch(
+        joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/reset`),
+        {
+          method: "POST",
+          headers: { accept: "application/json" },
+        },
+      );
+      return await readRun(response);
+    },
+    async deleteRun(runId: string): Promise<RunDeleteResult> {
+      const response = await fetch(
+        joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}`),
+        {
+          method: "DELETE",
+          headers: { accept: "application/json" },
+        },
+      );
+      return await readDeleteResult(response, "Delete run");
     },
     async resumeRun(runId: string, message?: string): Promise<void> {
       const normalizedMessage = message?.trim().length ? message : undefined;

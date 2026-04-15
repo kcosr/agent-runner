@@ -87,6 +87,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     (args[0] === "reset" ||
       args[0] === "archive" ||
       args[0] === "unarchive" ||
+      args[0] === "delete" ||
       args[0] === "set-name" ||
       args[0] === "add-dep" ||
       args[0] === "remove-dep" ||

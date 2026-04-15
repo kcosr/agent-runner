@@ -14,6 +14,7 @@ import type {
   RunActiveTask,
   RunArchiveResult,
   RunCapabilities,
+  RunDeleteResult,
   RunDependenciesResult,
   RunDependencyDetail,
   RunDependencyState,
@@ -83,6 +84,8 @@ const runAbortReasonSchema: z.ZodType<RunAbortReason> = z.enum([
 export const runCapabilitiesSchema: z.ZodType<RunCapabilities> = z.object({
   canArchive: z.boolean(),
   canUnarchive: z.boolean(),
+  canReset: z.boolean(),
+  canDelete: z.boolean(),
   canResume: z.boolean(),
   canAbort: z.boolean(),
   abortReason: runAbortReasonSchema.optional(),
@@ -207,10 +210,23 @@ export const runDependenciesResultSchema: z.ZodType<RunDependenciesResult> = z.o
   changed: z.boolean(),
 });
 
-export const runSummaryStreamEventSchema: z.ZodType<RunSummaryStreamEvent> = z.object({
-  type: z.literal("summary_upsert"),
-  summary: runSummarySchema,
+export const runDeleteResultSchema: z.ZodType<RunDeleteResult> = z.object({
+  runId: z.string(),
 });
+
+export const runSummaryStreamEventSchema: z.ZodType<RunSummaryStreamEvent> = z.discriminatedUnion(
+  "type",
+  [
+    z.object({
+      type: z.literal("summary_upsert"),
+      summary: runSummarySchema,
+    }),
+    z.object({
+      type: z.literal("summary_removed"),
+      runId: z.string(),
+    }),
+  ],
+);
 
 export const runDetailStreamEventSchema: z.ZodType<RunDetailStreamEvent> = z.object({
   type: z.literal("detail_updated"),

@@ -8,6 +8,7 @@ import {
   archive,
   clearDependencies,
   createTask,
+  deleteArchivedRun,
   downloadRunAttachment,
   getAttachmentList,
   getDefinition,
@@ -65,6 +66,7 @@ import {
   renderRunAddDependency,
   renderRunArchive,
   renderRunClearDependencies,
+  renderRunDelete,
   renderRunList,
   renderRunRemoveDependency,
   renderRunSetName,
@@ -93,6 +95,7 @@ Commands:
   run reset <id|path>     Restore a non-running run to initialized state.
   run archive <id|path>   Mark a non-running run as archived.
   run unarchive <id|path> Clear a run's archive marker.
+  run delete <id|path>    Delete an archived run workspace.
   run set-name <id|path>  Update or clear a run's persisted display name.
   run add-dep <id> <dep>  Add a dependency to an initialized run.
   run remove-dep <id> <dep>
@@ -911,6 +914,47 @@ async function runResetCommand(parsed: ParsedArgs, connectUrl?: string): Promise
   }
 }
 
+async function runDeleteCommand(parsed: ParsedArgs, connectUrl?: string): Promise<never> {
+  const [runArg, extra] = parsed.positionals;
+  const target = normalizeTarget(runArg);
+  if (!target) {
+    process.stderr.write("task-runner: run delete requires <id-or-path>\n");
+    process.exit(3);
+  }
+  if (extra !== undefined) {
+    process.stderr.write(
+      `task-runner: run delete takes exactly one positional (<id-or-path>); got extra "${extra}"\n`,
+    );
+    process.exit(3);
+  }
+  const unsupported = unsupportedFlagsForGroupedCommand(parsed);
+  if (unsupported.length > 0) {
+    process.stderr.write(
+      `task-runner: run delete only supports <id-or-path>, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+    );
+    process.exit(3);
+  }
+
+  try {
+    const result =
+      connectUrl === undefined
+        ? deleteArchivedRun(target)
+        : await withDaemonClient(connectUrl, (client) =>
+            client
+              .call<{ result: ReturnType<typeof deleteArchivedRun> }>("runs.delete", { target })
+              .then((r) => r.result),
+          );
+    if (parsed.outputFormat === "json") {
+      writeJson(result);
+    } else {
+      process.stdout.write(renderRunDelete(result));
+    }
+    process.exit(0);
+  } catch (err) {
+    exitCommandFailure(err, connectUrl);
+  }
+}
+
 async function runArchiveToggleCommand(
   parsed: ParsedArgs,
   connectUrl: string | undefined,
@@ -1591,6 +1635,9 @@ async function main(): Promise<void> {
     }
     if (parsed.subcommand === "unarchive") {
       await runArchiveToggleCommand(parsed, connectUrl, "unarchive");
+    }
+    if (parsed.subcommand === "delete") {
+      await runDeleteCommand(parsed, connectUrl);
     }
     if (parsed.subcommand === "set-name") {
       await runSetNameCommand(parsed, connectUrl);

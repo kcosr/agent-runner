@@ -370,6 +370,8 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
       assert.deepEqual(runs.runs[0].capabilities, {
         canArchive: true,
         canUnarchive: false,
+        canReset: true,
+        canDelete: false,
         canResume: true,
         canAbort: false,
         abortReason: "not_active_in_daemon",

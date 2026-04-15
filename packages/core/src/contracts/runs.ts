@@ -1,4 +1,4 @@
-import { deriveRepoKey } from "../config/runtime-paths.js";
+import { deriveRepoKeyFromWorkspaceDir } from "../config/runtime-paths.js";
 import type { LockableField } from "../core/config/schema.js";
 import {
   type RunDependencyDetail,
@@ -65,6 +65,8 @@ export type RunAbortReason = "already_terminal" | "not_active_in_daemon";
 export interface RunCapabilities {
   canArchive: boolean;
   canUnarchive: boolean;
+  canReset: boolean;
+  canDelete: boolean;
   canResume: boolean;
   canAbort: boolean;
   abortReason?: RunAbortReason;
@@ -145,6 +147,10 @@ export interface RunDependenciesResult {
   changed: boolean;
 }
 
+export interface RunDeleteResult {
+  runId: string;
+}
+
 export type { RunAttachment, RunAttachmentRemoveResult } from "./attachments.js";
 
 export interface RunActionTarget {
@@ -183,6 +189,22 @@ function isArchived(manifest: RunManifest): boolean {
 
 function isRunning(manifest: RunManifest): boolean {
   return manifest.status === "running";
+}
+
+export function canArchiveRun(manifest: RunManifest): boolean {
+  return !isRunning(manifest) && !isArchived(manifest);
+}
+
+export function canUnarchiveRun(manifest: RunManifest): boolean {
+  return !isRunning(manifest) && isArchived(manifest);
+}
+
+export function canResetRun(manifest: RunManifest): boolean {
+  return !isRunning(manifest);
+}
+
+export function canDeleteRun(manifest: RunManifest): boolean {
+  return !isRunning(manifest) && isArchived(manifest);
 }
 
 export function isTerminalStatus(status: RunStatus): boolean {
@@ -267,8 +289,10 @@ export function toRunSummary(
 export function deriveRunCapabilities(manifest: RunManifest): RunCapabilities {
   const canAbort = false;
   return {
-    canArchive: !isRunning(manifest) && !isArchived(manifest),
-    canUnarchive: !isRunning(manifest) && isArchived(manifest),
+    canArchive: canArchiveRun(manifest),
+    canUnarchive: canUnarchiveRun(manifest),
+    canReset: canResetRun(manifest),
+    canDelete: canDeleteRun(manifest),
     canResume: !isRunning(manifest) && !isArchived(manifest) && manifest.backend !== "passive",
     canAbort,
     abortReason: canAbort
@@ -286,7 +310,7 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
     result.relatedManifests ?? new Map<string, RunManifest>([[manifest.runId, manifest]]);
   return {
     runId: manifest.runId,
-    repo: deriveRepoKey(manifest.cwd),
+    repo: deriveRepoKeyFromWorkspaceDir(manifest.workspaceDir),
     status: manifest.status,
     effectiveStatus: deriveEffectiveStatus(manifest),
     archivedAt: manifest.archivedAt,

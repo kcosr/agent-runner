@@ -254,6 +254,8 @@ test("task set: allowed while manifest status=running", async () => {
   assert.deepEqual(readCapabilities(outcome.runId, dir), {
     canArchive: false,
     canUnarchive: false,
+    canReset: false,
+    canDelete: false,
     canResume: false,
     canAbort: false,
     abortReason: "not_active_in_daemon",
@@ -304,6 +306,8 @@ test("task append-notes: allowed while manifest status=running", async () => {
   assert.deepEqual(readCapabilities(outcome.runId, dir), {
     canArchive: false,
     canUnarchive: false,
+    canReset: false,
+    canDelete: false,
     canResume: false,
     canAbort: false,
     abortReason: "not_active_in_daemon",
@@ -543,6 +547,67 @@ test("run reset: rejects a running run", async () => {
   assert.match(result.stderr, /cannot reset a running run/);
 });
 
+test("run delete: removes an archived run workspace and supports json output", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const textOutcome = await initRun(dir);
+  const jsonOutcome = await initRun(dir);
+
+  patchManifest(textOutcome.workspaceDir, (manifest) => {
+    manifest.status = "success";
+    manifest.archivedAt = "2026-04-12T15:00:00.000Z";
+  });
+  patchManifest(jsonOutcome.workspaceDir, (manifest) => {
+    manifest.status = "success";
+    manifest.archivedAt = "2026-04-12T15:00:00.000Z";
+  });
+
+  const textOut = runCli(["run", "delete", textOutcome.runId], { cwd: dir });
+  assert.match(textOut, new RegExp(`deleted archived run ${textOutcome.runId}`));
+  assert.equal(existsSync(textOutcome.workspaceDir), false);
+
+  const jsonOut = runCli(["run", "delete", jsonOutcome.runId, "--output-format", "json"], {
+    cwd: dir,
+  });
+  assert.deepEqual(JSON.parse(jsonOut), { runId: jsonOutcome.runId });
+  assert.equal(existsSync(jsonOutcome.workspaceDir), false);
+});
+
+test("run delete: rejects non-archived runs", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.status = "success";
+    manifest.archivedAt = null;
+  });
+
+  const result = runCliExpectFail(["run", "delete", outcome.runId], { cwd: dir });
+  assert.equal(result.status, 3);
+  assert.match(
+    result.stderr,
+    new RegExp(`cannot delete run ${outcome.runId} unless it is archived`),
+  );
+  assert.equal(existsSync(outcome.workspaceDir), true);
+});
+
+test("run delete: rejects a running run", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.status = "running";
+    manifest.archivedAt = "2026-04-12T15:00:00.000Z";
+  });
+
+  const result = runCliExpectFail(["run", "delete", outcome.runId], { cwd: dir });
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /cannot delete a running run/);
+  assert.equal(existsSync(outcome.workspaceDir), true);
+});
+
 test("task list: text output follows manifest task order", async () => {
   const dir = tempDir();
   writeBundle(dir);
@@ -720,6 +785,8 @@ test("task set: rejects status changes on a terminal non-passive run", async () 
   assert.deepEqual(readCapabilities(outcome.runId, dir), {
     canArchive: true,
     canUnarchive: false,
+    canReset: true,
+    canDelete: false,
     canResume: true,
     canAbort: false,
     abortReason: "already_terminal",

@@ -131,10 +131,17 @@ export interface EventsUnsubscribeResult {
   unsubscribed: true;
 }
 
-export interface RunSummaryNotificationParams {
-  subscriptionId: string;
-  summary: RunSummary;
-}
+export type RunSummaryNotificationParams =
+  | {
+      subscriptionId: string;
+      type: "summary_upsert";
+      summary: RunSummary;
+    }
+  | {
+      subscriptionId: string;
+      type: "summary_removed";
+      runId: string;
+    };
 
 export interface RunDetailNotificationParams {
   subscriptionId: string;

@@ -26,6 +26,8 @@ export interface NoticeState {
 export type RunActionPending =
   | "archive"
   | "unarchive"
+  | "reset"
+  | "delete"
   | "resume"
   | "abort"
   | "rename"
@@ -419,6 +421,19 @@ export function useRunsDashboardState() {
     onSuccess: closeRun,
   });
   const unarchiveMutation = useRunActionMutation(api.unarchiveRun, setActionError);
+  const resetMutation = useRunActionMutation(api.resetRun, setActionError);
+  const deleteMutation = useMutation({
+    mutationFn: (runId: string) => api.deleteRun(runId),
+    onError: (error: Error) => {
+      setActionError(error.message);
+    },
+    onSuccess: async (result) => {
+      setActionError(undefined);
+      queryClient.removeQueries({ queryKey: runQueryKeys.detail(result.runId) });
+      await invalidateRunQueries(result.runId);
+      closeRun();
+    },
+  });
   const resumeMutation = useMutation({
     mutationFn: ({ message, runId }: { runId: string; message?: string }) =>
       api.resumeRun(runId, message),
@@ -525,25 +540,29 @@ export function useRunsDashboardState() {
     ? "archive"
     : unarchiveMutation.isPending
       ? "unarchive"
-      : resumeMutation.isPending
-        ? "resume"
-        : abortMutation.isPending
-          ? "abort"
-          : renameMutation.isPending
-            ? "rename"
-            : uploadAttachmentMutation.isPending
-              ? "upload-attachment"
-              : removeAttachmentMutation.isPending
-                ? "remove-attachment"
-                : downloadAttachmentMutation.isPending
-                  ? "download-attachment"
-                  : addDependencyMutation.isPending
-                    ? "add-dependency"
-                    : removeDependencyMutation.isPending
-                      ? "remove-dependency"
-                      : clearDependenciesMutation.isPending
-                        ? "clear-dependencies"
-                        : undefined;
+      : resetMutation.isPending
+        ? "reset"
+        : deleteMutation.isPending
+          ? "delete"
+          : resumeMutation.isPending
+            ? "resume"
+            : abortMutation.isPending
+              ? "abort"
+              : renameMutation.isPending
+                ? "rename"
+                : uploadAttachmentMutation.isPending
+                  ? "upload-attachment"
+                  : removeAttachmentMutation.isPending
+                    ? "remove-attachment"
+                    : downloadAttachmentMutation.isPending
+                      ? "download-attachment"
+                      : addDependencyMutation.isPending
+                        ? "add-dependency"
+                        : removeDependencyMutation.isPending
+                          ? "remove-dependency"
+                          : clearDependenciesMutation.isPending
+                            ? "clear-dependencies"
+                            : undefined;
 
   function setColumnCollapsed(columnKey: string, collapsed: boolean) {
     const isCollapsed = collapsedColumnKeySet.has(columnKey);
@@ -609,6 +628,7 @@ export function useRunsDashboardState() {
       clearDependencies: async (runId: string) => {
         await clearDependenciesMutation.mutateAsync(runId);
       },
+      delete: (runId: string) => deleteMutation.mutate(runId),
       downloadAttachment: async (runId: string, attachmentId: string, name: string) => {
         await downloadAttachmentMutation.mutateAsync({ runId, attachmentId, name });
       },
@@ -618,6 +638,7 @@ export function useRunsDashboardState() {
       removeAttachment: async (runId: string, attachmentId: string) => {
         await removeAttachmentMutation.mutateAsync({ runId, attachmentId });
       },
+      reset: (runId: string) => resetMutation.mutate(runId),
       rename: async (runId: string, name: string | null) => {
         await renameMutation.mutateAsync({ runId, name });
       },

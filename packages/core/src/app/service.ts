@@ -9,6 +9,7 @@ import type {
 import type { RunTimelineAttempt, RunTimelineHistory } from "../contracts/events.js";
 import type {
   RunArchiveResult,
+  RunDeleteResult,
   RunDependenciesResult,
   RunDetail,
   RunNameResult,
@@ -25,6 +26,7 @@ import {
   appendTaskNotes,
   archiveRun,
   clearRunDependencies,
+  deleteRun,
   downloadAttachment,
   listAttachments,
   listDefinitions,
@@ -232,6 +234,10 @@ export function unarchive(target: string): RunArchiveResult {
 
 export function reset(target: string): RunDetail {
   return toRunDetail({ manifest: resetRun(target).manifest, isLive: false });
+}
+
+export function deleteArchivedRun(target: string): RunDeleteResult {
+  return deleteRun(target);
 }
 
 export function renameRun(target: string, input: { name: string | null }): Promise<RunNameResult> {

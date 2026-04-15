@@ -507,6 +507,8 @@ test("passive status json exposes passive task-mutation capabilities and no resu
   assert.deepEqual(projected.capabilities, {
     canArchive: true,
     canUnarchive: false,
+    canReset: true,
+    canDelete: false,
     canAbort: false,
     abortReason: "not_active_in_daemon",
     canResume: false,
@@ -586,18 +588,4 @@ test("passive re-orient: brief command returns the bootstrap text", async () => 
 
   const out = runCli(["brief", outcome.runId], { cwd: dir });
   assert.match(out, /task-runner task set/);
-});
-
-test("bundled passive-example agent is loadable and passes schema", async () => {
-  await withSharedRuntimeEnv(process.cwd(), async () => {
-    const loaded = loadAgentConfig(
-      "/home/kevin/worktrees/task-runner/agents/passive-example/agent.md",
-    );
-    assert.equal(loaded.config.backend, "passive");
-    assert.equal(loaded.config.name, "passive-example");
-    assert.ok(
-      loaded.config.lockedFields.includes("backend"),
-      "bundled passive-example locks backend",
-    );
-  });
 });

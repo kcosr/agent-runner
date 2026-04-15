@@ -88,6 +88,8 @@ function makeRun(
     capabilities: {
       canArchive: false,
       canUnarchive: false,
+      canReset: true,
+      canDelete: false,
       canResume: true,
       canAbort: false,
       abortReason: "not_active_in_daemon",
@@ -209,6 +211,8 @@ function makeDetail(
     capabilities: {
       canArchive: false,
       canUnarchive: false,
+      canReset: true,
+      canDelete: false,
       canResume: true,
       canAbort: false,
       abortReason: "not_active_in_daemon",
@@ -317,6 +321,38 @@ function installFetchMock(
     }
     state.runs = state.runs.map((run) =>
       run.runId === runId ? { ...run, attachmentCount: detail.attachments.length } : run,
+    );
+  }
+
+  function syncRunSummary(runId: string) {
+    const detail = state.details[runId];
+    if (!detail) {
+      return;
+    }
+    state.runs = state.runs.map((run) =>
+      run.runId === runId
+        ? {
+            ...run,
+            repo: detail.repo,
+            status: detail.status,
+            effectiveStatus: detail.effectiveStatus,
+            archivedAt: detail.archivedAt,
+            agentName: detail.agent.name,
+            name: detail.name,
+            assignmentName: detail.assignment?.name ?? null,
+            backend: detail.backend,
+            model: detail.model,
+            cwd: detail.cwd,
+            startedAt: detail.startedAt,
+            endedAt: detail.endedAt,
+            tasksCompleted: detail.tasksCompleted,
+            tasksTotal: detail.tasksTotal,
+            attachmentCount: detail.attachments.length,
+            activeTask: detail.activeTask,
+            execution: detail.execution,
+            capabilities: detail.capabilities,
+          }
+        : run,
     );
   }
 
@@ -453,10 +489,29 @@ function installFetchMock(
       return new Response(JSON.stringify({ history }), { status: 200 });
     }
 
-    const archiveMatch = /\/api\/runs\/([^/]+)\/(archive|unarchive|resume|abort)$/.exec(url);
+    const archiveMatch = /\/api\/runs\/([^/]+)\/(archive|unarchive|reset|resume|abort)$/.exec(url);
     if (archiveMatch) {
-      const [, runId, action] = archiveMatch;
+      const [, encodedRunId, action] = archiveMatch;
+      const runId = decodeURIComponent(encodedRunId ?? "");
+      const detail = state.details[runId];
       if (action === "archive") {
+        if (!detail) {
+          return new Response(
+            JSON.stringify({ error: { message: "missing", code: "not_found" } }),
+            {
+              status: 404,
+            },
+          );
+        }
+        detail.archivedAt = "2026-04-13T06:00:00.000Z";
+        detail.capabilities = {
+          ...detail.capabilities,
+          canArchive: false,
+          canUnarchive: true,
+          canDelete: true,
+          canResume: false,
+        };
+        syncRunSummary(runId);
         return new Response(
           JSON.stringify({
             result: {
@@ -470,6 +525,22 @@ function installFetchMock(
         );
       }
       if (action === "unarchive") {
+        if (!detail) {
+          return new Response(
+            JSON.stringify({ error: { message: "missing", code: "not_found" } }),
+            {
+              status: 404,
+            },
+          );
+        }
+        detail.archivedAt = null;
+        detail.capabilities = {
+          ...detail.capabilities,
+          canArchive: true,
+          canUnarchive: false,
+          canDelete: false,
+        };
+        syncRunSummary(runId);
         return new Response(
           JSON.stringify({
             result: {
@@ -482,10 +553,53 @@ function installFetchMock(
           { status: 200 },
         );
       }
+      if (action === "reset") {
+        if (!detail) {
+          return new Response(
+            JSON.stringify({ error: { message: "missing", code: "not_found" } }),
+            {
+              status: 404,
+            },
+          );
+        }
+        detail.status = "initialized";
+        detail.effectiveStatus = "initialized";
+        detail.isLive = false;
+        detail.backendSessionId = null;
+        detail.attempts = 0;
+        detail.sessionCount = 0;
+        detail.endedAt = null;
+        detail.exitCode = null;
+        detail.activeTask = null;
+        detail.capabilities = {
+          ...detail.capabilities,
+          canArchive: true,
+          canUnarchive: false,
+          canReset: true,
+          canDelete: false,
+          canResume: true,
+          canAbort: false,
+          abortReason: "not_active_in_daemon",
+        };
+        syncRunSummary(runId);
+        return new Response(JSON.stringify({ run: detail }), { status: 200 });
+      }
       if (action === "resume") {
         return new Response(JSON.stringify({ runId }), { status: 200 });
       }
       return new Response(JSON.stringify({ accepted: true, runId }), { status: 200 });
+    }
+
+    if (runMatch && init?.method === "DELETE") {
+      const runId = decodeURIComponent(runMatch[1] ?? "");
+      if (!state.details[runId]) {
+        return new Response(JSON.stringify({ error: { message: "missing", code: "not_found" } }), {
+          status: 404,
+        });
+      }
+      delete state.details[runId];
+      state.runs = state.runs.filter((run) => run.runId !== runId);
+      return new Response(JSON.stringify({ result: { runId } }), { status: 200 });
     }
 
     const renameMatch = /\/api\/runs\/([^/]+)\/name$/.exec(url);
@@ -1990,14 +2104,106 @@ describe("web app", () => {
 
     await user.click(await findRunCard("Resumable run"));
     expect(await screen.findByRole("button", { name: "Resume" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reset" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Archive" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Abort" })).not.toBeInTheDocument();
 
     await user.click(getCloseDetailButton());
     await user.click(await findRunCard("Passive run"));
     expect(await screen.findByRole("button", { name: "Archive" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reset" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Abort" })).not.toBeInTheDocument();
+  });
+
+  it("resets a run from the web detail drawer", async () => {
+    installFetchMock({
+      runs: [makeRun({ runId: "resumable", assignmentName: "Resumable run", status: "success" })],
+      details: {
+        resumable: makeDetail({
+          runId: "resumable",
+          status: "success",
+          assignment: {
+            name: "Resumable run",
+            sourcePath: "/tmp/a.md",
+            workspacePath: "/tmp/b.md",
+          },
+          capabilities: {
+            canArchive: true,
+            canUnarchive: false,
+            canReset: true,
+            canDelete: false,
+            canResume: true,
+          },
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Resumable run"));
+
+    await user.click(await screen.findByRole("button", { name: "Reset" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Start" })).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
+  });
+
+  it("deletes archived runs from the web detail drawer", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "run-archived",
+          assignmentName: "Archived run",
+          archivedAt: "2026-04-13T06:00:00.000Z",
+          status: "success",
+          capabilities: {
+            canArchive: false,
+            canUnarchive: true,
+            canReset: true,
+            canDelete: true,
+            canResume: false,
+          },
+        }),
+      ],
+      details: {
+        "run-archived": makeDetail({
+          runId: "run-archived",
+          status: "success",
+          archivedAt: "2026-04-13T06:00:00.000Z",
+          assignment: {
+            name: "Archived run",
+            sourcePath: "/tmp/a.md",
+            workspacePath: "/tmp/b.md",
+          },
+          capabilities: {
+            canArchive: false,
+            canUnarchive: true,
+            canReset: true,
+            canDelete: true,
+            canResume: false,
+          },
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await screen.findByRole("button", { name: /show archived runs/i }));
+    await user.click(await screen.findByTitle("Archived run"));
+
+    expect(await screen.findByRole("button", { name: "Delete" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Run detail")).not.toBeInTheDocument();
+    });
+    expect(screen.queryByTitle("Archived run")).not.toBeInTheDocument();
   });
 
   it("opens a resume dialog and does not send a request when cancelled", async () => {
@@ -2606,6 +2812,12 @@ describe("web app", () => {
     source.emitMessage({ type: "summary_upsert", summary: state.runs[0] });
 
     expect(await screen.findByRole("button", { name: /updated from sse/i })).toBeInTheDocument();
+
+    source.emitMessage({ type: "summary_removed", runId: "run-1" });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: /updated from sse/i })).not.toBeInTheDocument();
+    });
 
     state.runs = [makeRun({ assignmentName: "Recovered after stale" })];
     source.emitError();

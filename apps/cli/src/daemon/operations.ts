@@ -5,6 +5,7 @@ import type {
   archive,
   clearDependencies,
   createTask,
+  deleteArchivedRun,
   getAttachment,
   getAttachmentList,
   getDefinition,
@@ -46,6 +47,7 @@ export interface DaemonHandlers {
   getAttachmentList: typeof getAttachmentList;
   archive: typeof archive;
   unarchive: typeof unarchive;
+  deleteArchivedRun: typeof deleteArchivedRun;
   renameRun: typeof renameRun;
   addDependency: typeof addDependency;
   removeDependency: typeof removeDependency;
@@ -103,6 +105,9 @@ export function createDaemonOperations(ctx: DaemonOperationContext) {
     },
     unarchiveRun(target: string) {
       return { result: ctx.unarchive(target) };
+    },
+    deleteRun(target: string) {
+      return { result: ctx.deleteArchivedRun(target) };
     },
     async setRunName(target: string, input: Parameters<typeof renameRun>[1]) {
       return { result: await ctx.renameRun(target, input) };

@@ -194,7 +194,15 @@ Important rules:
 ### Reset
 
 `task-runner run reset <id|path>` restores the initialized-state seed stored in
-the manifest. Reset does not re-read current source definitions.
+the manifest for non-running runs. Reset does not re-read current source
+definitions.
+
+### Delete Archived Runs
+
+`task-runner run delete <id|path>` permanently removes an archived,
+non-running run workspace. Delete is a hot-cut lifecycle mutation: only
+archived runs are eligible, and the workspace is removed rather than moved to
+trash or soft-deleted.
 
 ## Public Command Contract
 
@@ -215,7 +223,7 @@ Important rule:
 - `task-runner task append-notes`
 - `task-runner task add`
 - `task-runner attachment add|remove`
-- `task-runner run reset|archive|unarchive|set-name`
+- `task-runner run reset|archive|unarchive|delete|set-name`
 - `task-runner run add-dep|remove-dep|clear-deps`
 
 ### Daemon Surface
@@ -232,12 +240,17 @@ CLI commands can route through the daemon with `--connect` or
 Live subscriptions are split by responsibility instead of sharing one mixed
 event bus:
 
-- global summary stream: `/api/events/run-summaries`
+- global summary stream: `/api/events/run-summaries` (`summary_upsert` and `summary_removed`)
 - per-run detail stream: `/api/runs/:runId/events/detail`
 - per-run timeline history query: `/api/runs/:runId/timeline`
 - per-run timeline stream: `/api/runs/:runId/events/timeline`
 
 The WebSocket subscription contract mirrors that split:
+
+Shared run capabilities remain the canonical UX gate for lifecycle actions.
+`RunCapabilities` includes `canReset` and `canDelete`, and browser/daemon
+clients should use those booleans directly instead of reproducing lifecycle
+state checks locally.
 
 - `events.subscribe { channel: "run_summary" }`
 - `events.subscribe { channel: "run_detail", runId }`
@@ -245,7 +258,7 @@ The WebSocket subscription contract mirrors that split:
 
 Notifications are likewise explicit:
 
-- `run.summary` carries a fresh `RunSummary`
+- `run.summary` carries either a `summary_upsert` with a fresh `RunSummary` or a `summary_removed` with a `runId`
 - `run.detail` carries a fresh `RunDetail`
 - `run.timeline` carries one `RunTimelineEnvelope` (`runId`, `cursor`, `event`)
 
