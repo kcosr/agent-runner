@@ -5,12 +5,11 @@ import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
 import { renderRunStatus } from "../apps/cli/dist/commands/render.js";
-import { parseAssignment } from "../packages/core/dist/assignment/parser.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { toRunDetail } from "../packages/core/dist/contracts/runs.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
-import { applyLiveOverlay, deriveEffectiveStatus } from "../packages/core/dist/core/run/status.js";
-import { assignmentPathFromPrompt, sharedRuntimeEnv, withEnv } from "./helpers/runtime-paths.mjs";
+import { deriveEffectiveStatus } from "../packages/core/dist/core/run/status.js";
+import { setTaskStatusesForPrompt, sharedRuntimeEnv, withEnv } from "./helpers/runtime-paths.mjs";
 
 function patchManifest(workspaceDir, mutator) {
   const manifestPath = join(workspaceDir, "run.json");
@@ -59,25 +58,6 @@ function writeAssignment(baseDir, name, body) {
   writeFileSync(join(dir, "assignment.md"), body);
 }
 
-function editStatus(content, taskId, newStatus) {
-  const marker = `<!-- task-id: ${taskId} -->`;
-  const start = content.indexOf(marker);
-  const nextMarker = content.indexOf("<!-- task-id:", start + marker.length);
-  const end = nextMarker < 0 ? content.length : nextMarker;
-  const section = content.slice(start, end);
-  const updated = section.replace(/\*\*Status:\*\*\s*\S+/, `**Status:** ${newStatus}`);
-  return content.slice(0, start) + updated + content.slice(end);
-}
-
-function liveOverlay(rawAssignment) {
-  return new Map(
-    parseAssignment(rawAssignment).map((update) => [
-      update.taskId,
-      { status: update.status, notes: update.notes },
-    ]),
-  );
-}
-
 function withSharedRuntimeEnv(baseDir, fn) {
   return withEnv(
     {
@@ -110,11 +90,7 @@ function runCliExpectFail(args, opts = {}) {
 const okBackend = () => ({
   id: "mock",
   async invoke(ctx) {
-    const planPath = assignmentPathFromPrompt(ctx.prompt);
-    let plan = readFileSync(planPath, "utf8");
-    plan = editStatus(plan, "t1", "completed");
-    plan = editStatus(plan, "t2", "completed");
-    writeFileSync(planPath, plan, "utf8");
+    setTaskStatusesForPrompt(ctx.prompt, { t1: "completed", t2: "completed" });
     return {
       exitCode: 0,
       signal: null,
@@ -163,7 +139,6 @@ test("renderRunStatus prints the persisted run summary", async () => {
   assert.match(text, /Backend: claude \(claude-sonnet-4-6\)/);
   assert.match(text, /Name: status test/);
   assert.match(text, new RegExp(`Workspace: ${outcome.workspaceDir}`));
-  assert.match(text, new RegExp(`Assignment file: ${outcome.assignmentPath}`));
   assert.match(text, /Sessions: 1/);
   assert.match(text, /Tasks completed: 2\/2/);
   assert.match(text, /- t1 — First \[completed\]/);
@@ -268,58 +243,7 @@ test("deriveEffectiveStatus preserves passive terminal error statuses", () => {
   }
 });
 
-test("applyLiveOverlay updates tasksCompleted and finalTasks while manifest.status is running", async () => {
-  const dir = tempDir();
-  writeAgent(dir, "status-agent", STATUS_AGENT);
-  writeAssignment(dir, "status-work", STATUS_ASSIGNMENT);
-  const outcome = await runFresh(dir);
-
-  patchManifest(outcome.workspaceDir, (manifest) => {
-    manifest.status = "running";
-    manifest.exitCode = null;
-    manifest.endedAt = null;
-    manifest.tasksCompleted = 0;
-    manifest.finalTasks.t1.status = "pending";
-    manifest.finalTasks.t2.status = "pending";
-  });
-
-  const planPath = join(outcome.workspaceDir, "assignment.md");
-  let plan = readFileSync(planPath, "utf8");
-  plan = editStatus(plan, "t1", "completed");
-  plan = editStatus(plan, "t2", "in_progress");
-  writeFileSync(planPath, plan, "utf8");
-
-  const overlaid = applyLiveOverlay(outcome.manifest, liveOverlay(plan));
-
-  assert.equal(overlaid.status, "success", "overlay does not mutate the original manifest status");
-  assert.equal(overlaid.tasksCompleted, 1);
-  assert.equal(overlaid.finalTasks.t1.status, "completed");
-  assert.equal(overlaid.finalTasks.t2.status, "in_progress");
-});
-
-test("applyLiveOverlay falls back to the manifest snapshot for invalid live statuses", async () => {
-  const dir = tempDir();
-  writeAgent(dir, "status-agent", STATUS_AGENT);
-  writeAssignment(dir, "status-work", STATUS_ASSIGNMENT);
-  const outcome = await runFresh(dir);
-
-  patchManifest(outcome.workspaceDir, (manifest) => {
-    manifest.status = "running";
-    manifest.exitCode = null;
-    manifest.endedAt = null;
-    manifest.finalTasks.t1.status = "pending";
-  });
-
-  const planPath = join(outcome.workspaceDir, "assignment.md");
-  let plan = readFileSync(planPath, "utf8");
-  plan = editStatus(plan, "t1", "in-progress");
-  writeFileSync(planPath, plan, "utf8");
-
-  const overlaid = applyLiveOverlay(outcome.manifest, liveOverlay(plan));
-  assert.equal(overlaid.finalTasks.t1.status, "completed");
-});
-
-test("renderRunStatus shows the live-overlay note for running runs", async () => {
+test("renderRunStatus shows the canonical-state note for running runs", async () => {
   const dir = tempDir();
   writeAgent(dir, "status-agent", STATUS_AGENT);
   writeAssignment(dir, "status-work", STATUS_ASSIGNMENT);
@@ -336,7 +260,7 @@ test("renderRunStatus shows the live-overlay note for running runs", async () =>
   });
 
   const text = renderRunStatus(runningDetail);
-  assert.match(text, /read live from the workspace assignment\.md/);
+  assert.match(text, /canonical run\.json task state/);
 });
 
 test("renderRunStatus shows effective status separately from lifecycle status", async () => {

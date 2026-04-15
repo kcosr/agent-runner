@@ -28,6 +28,7 @@ import {
   listRuns,
   listTasks,
   readAttachment,
+  readBrief,
   readStatus,
   removeAttachment,
   removeRunDependency,
@@ -38,7 +39,7 @@ import {
   showTask,
   unarchiveRun,
 } from "../core/commands/service.js";
-import type { AgentConfig, AssignmentConfig, TaskMode } from "../core/config/schema.js";
+import type { AgentConfig, AssignmentConfig } from "../core/config/schema.js";
 import type { RunExecution } from "../core/run/manifest.js";
 import type { RunEvent, RunOutcome } from "../core/run/run-loop.js";
 import { executeRunCommand } from "../run-command.js";
@@ -55,7 +56,6 @@ export interface RunCommandOverrides {
   backend?: BackendId;
   model?: string;
   effort?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
-  taskMode?: TaskMode;
   message?: string;
   name?: string;
   timeoutSec?: number;
@@ -96,6 +96,10 @@ function toDefinitionDetail(result: ReturnType<typeof showDefinition>): Definiti
 
 export function getRun(target: string): RunDetail {
   return readStatus(target);
+}
+
+export function getRunBrief(target: string): string {
+  return readBrief(target);
 }
 
 export function getRunList(opts: { includeArchived?: boolean } = {}): RunSummary[] {

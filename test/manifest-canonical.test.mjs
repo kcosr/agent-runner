@@ -133,16 +133,16 @@ function readManifest(workspaceDir) {
   return JSON.parse(readFileSync(join(workspaceDir, "run.json"), "utf8"));
 }
 
-test("manifest schemaVersion is 6", async () => {
+test("manifest schemaVersion is 7", async () => {
   const dir = tempDir();
   writeAgent(dir, "canonical-claude", CLAUDE_AGENT);
   writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
   const outcome = await freshRun(dir, { initialize: true });
-  assert.equal(outcome.manifest.schemaVersion, 6);
+  assert.equal(outcome.manifest.schemaVersion, 7);
   assert.equal(outcome.manifest.archivedAt, null);
 });
 
-test("resolveResumeTarget treats missing archivedAt on schemaVersion 6 manifests as unarchived", async () => {
+test("resolveResumeTarget treats missing archivedAt on current manifests as unarchived", async () => {
   const dir = tempDir();
   writeAgent(dir, "canonical-claude", CLAUDE_AGENT);
   writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
@@ -351,7 +351,7 @@ test("schemaVersion mismatch: resume rejects a v1 manifest with a clear error", 
     tasksTotal: 0,
     backendSessionId: "sess-old",
     runtimeVars: {},
-    pendingPrompt: null,
+    brief: null,
     finalTasks: {},
     sessionCount: 1,
     sessions: [],
@@ -364,7 +364,7 @@ test("schemaVersion mismatch: resume rejects a v1 manifest with a clear error", 
       () => resolveResumeTarget("stale01", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 1/);
-        assert.match(err.message, /requires schemaVersion 6/);
+        assert.match(err.message, /requires schemaVersion 7/);
         return true;
       },
     );
@@ -401,7 +401,7 @@ test("schemaVersion mismatch: resume rejects a v2 manifest with a clear error", 
     tasksTotal: 0,
     backendSessionId: "sess-old",
     runtimeVars: {},
-    pendingPrompt: null,
+    brief: null,
     callerInstructions: null,
     finalTasks: {},
     sessionCount: 1,
@@ -415,7 +415,7 @@ test("schemaVersion mismatch: resume rejects a v2 manifest with a clear error", 
       () => resolveResumeTarget("stale02", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 2/);
-        assert.match(err.message, /requires schemaVersion 6/);
+        assert.match(err.message, /requires schemaVersion 7/);
         return true;
       },
     );

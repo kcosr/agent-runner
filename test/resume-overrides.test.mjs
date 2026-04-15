@@ -153,19 +153,19 @@ test("resolveResumeTarget rejects a manifest whose execution host and controller
   );
 });
 
-test("resolveResumeTarget accepts a well-formed v6 manifest from the unknown bucket", () => {
+test("resolveResumeTarget accepts a well-formed v7 manifest from the unknown bucket", () => {
   const dir = tempDir();
   const workspaceDir = join(dir, "runs", "unknown", "wellformed");
   writeManifest(dir, "unknown", "wellformed", baseManifest("wellformed", workspaceDir));
 
   const resolved = withStateRoot(dir, () => resolveResumeTarget("wellformed", dir));
   assert.equal(resolved.manifest.runId, "wellformed");
-  assert.equal(resolved.manifest.schemaVersion, 6);
+  assert.equal(resolved.manifest.schemaVersion, 7);
 });
 
 function baseManifest(runId, workspaceDir) {
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     runId,
     agent: {
       name: "override-test",
@@ -202,7 +202,7 @@ function baseManifest(runId, workspaceDir) {
         kind: "embedded",
       },
     },
-    pendingPrompt: null,
+    brief: "resume brief",
     callerInstructions: null,
     attachments: [],
     resetSeed: {
@@ -213,7 +213,7 @@ function baseManifest(runId, workspaceDir) {
       unrestricted: false,
       timeoutSec: 3600,
       maxAttempts: 4,
-      pendingPrompt: "seed prompt",
+      brief: "seed prompt",
       finalTasks: {
         t1: {
           id: "t1",

@@ -1,22 +1,14 @@
-import { mkdirSync, readFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
-import { type MergeResult, mergeIntoFile } from "../../assignment/merge.js";
 import type { TaskState, TaskStatus } from "../../assignment/model.js";
-import { renderAssignment } from "../../assignment/writer.js";
 import { resolveRunWorkspaceDir } from "../../config/runtime-paths.js";
 import { resolveTaskRunnerCommand } from "../../task-runner-command.js";
 import { normalizeOptionalRunName } from "../../util/run-name.js";
 import { shortId } from "../../util/short-id.js";
-import { writeTextFileAtomic } from "../../util/write-file-atomic.js";
 import type { Backend, BackendEvent, BackendId, BackendInvokeResult } from "../backends/types.js";
 import { interpolate } from "../config/interpolate.js";
 import type { LoadedAgent, LoadedAssignment } from "../config/loaded.js";
-import {
-  type LockableField,
-  type TaskMode,
-  type VarDef,
-  normalizeTaskMode,
-} from "../config/schema.js";
+import type { LockableField, VarDef } from "../config/schema.js";
 import {
   type AttemptRecord,
   type ResolvedResumeTarget,
@@ -46,18 +38,11 @@ import {
 import type { RunCompletionStatus, RunCompletionSummary } from "./status.js";
 
 export { RecursionDepthError } from "./recursion-guard.js";
+import { WORKER_BRIEF_TEMPLATE, buildAddedTasksReminder } from "./task-workflow.js";
 import {
-  CLI_TASK_WORKFLOW_TEMPLATE,
-  PASSIVE_TASK_WORKFLOW_TEMPLATE,
-  TASK_WORKFLOW_TEMPLATE,
-  buildAddedTasksReminder,
-} from "./task-workflow.js";
-import {
-  mergeWorkspaceAssignmentIntoTaskMap,
   refreshManifestAttachments,
   refreshManifestTaskState,
   syncManifestTaskState,
-  taskModeFromManifest,
   withTaskStateLock,
 } from "./workspace-state.js";
 
@@ -66,7 +51,6 @@ export interface RunOverrides {
   backend?: BackendId;
   model?: string;
   effort?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
-  taskMode?: TaskMode;
   message?: string;
   name?: string;
   timeoutSec?: number;
@@ -121,7 +105,7 @@ export type RunEvent =
       name: string | null;
       cwd: string;
       passive: boolean;
-      pendingPrompt: string;
+      brief: string;
     }
   | {
       type: "caller_instructions";
@@ -236,7 +220,6 @@ function checkLockedFields(
     ["backend", overrides?.backend, agentConfig.backend],
     ["model", overrides?.model, agentConfig.model],
     ["effort", overrides?.effort, agentConfig.effort],
-    ["taskMode", overrides?.taskMode, assignmentConfig?.taskMode ?? "file"],
     ["message", overrides?.message, assignmentConfig?.message],
     ["timeoutSec", overrides?.timeoutSec, agentConfig.timeoutSec],
     ["unrestricted", overrides?.unrestricted, agentConfig.unrestricted],
@@ -276,7 +259,6 @@ function checkLockedFieldsFromManifest(
     ["backend", overrides?.backend, manifest.backend],
     ["model", overrides?.model, manifest.model],
     ["effort", overrides?.effort, manifest.effort],
-    ["taskMode", overrides?.taskMode, manifest.taskMode ?? "file"],
     ["message", overrides?.message, manifest.message],
     ["timeoutSec", overrides?.timeoutSec, manifest.timeoutSec],
     ["unrestricted", overrides?.unrestricted, manifest.unrestricted],
@@ -684,9 +666,6 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const model = overrides?.model ?? (backendOverridden ? undefined : agentConfig.model);
   const effort = overrides?.effort ?? agentConfig.effort;
   const message = overrides?.message ?? assignmentConfig?.message ?? null;
-  const taskMode = normalizeTaskMode(
-    overrides?.taskMode ?? assignmentConfig?.taskMode ?? resume?.manifest.taskMode ?? null,
-  );
   const timeoutSec = overrides?.timeoutSec ?? agentConfig.timeoutSec;
   const unrestricted = overrides?.unrestricted ?? agentConfig.unrestricted;
   // maxRetries lives on the assignment. In chat mode (no assignment
@@ -817,7 +796,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   let name =
     overrideName ?? ((isResume || priorInitialized) && resume ? resume.manifest.name : null);
 
-  // Prompt composition (Option B: broad → specific → mechanics → ask).
+  // Worker handoff composition (Option B: broad → specific → mechanics → ask).
   //
   // Fresh run parts (non-empty only, joined with `\n\n`):
   //   1. agent instructions (role)
@@ -829,26 +808,24 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   //   1. workflow (only if firstTimeTasksAppear) OR new-tasks reminder
   //   2. message, or an implicit continue prompt when unfinished tasks remain
   //
-  // Execute-after-init: reuse the stored pendingPrompt verbatim.
+  // Execute-after-init: reuse the stored brief verbatim.
   //
   // Both message-last. Fresh runs error if parts is empty.
   let initialPrompt: string;
   if (priorInitialized && resume) {
-    const stored = resume.manifest.pendingPrompt ?? "";
+    const stored = resume.manifest.brief;
     if (stored.length === 0) {
       throw new ResumeError(
-        `cannot resume initialized run ${resume.manifest.runId} — manifest has no pendingPrompt`,
+        `cannot resume initialized run ${resume.manifest.runId} — manifest has no brief`,
       );
     }
     initialPrompt = stored;
   } else if (isResume) {
     const parts: string[] = [];
     if (firstTimeTasksAppear) {
-      const workflowTemplate =
-        taskMode === "cli" ? CLI_TASK_WORKFLOW_TEMPLATE : TASK_WORKFLOW_TEMPLATE;
-      parts.push(interpolate(workflowTemplate, injectedVars));
+      parts.push(interpolate(WORKER_BRIEF_TEMPLATE, injectedVars));
     } else if (resumeAddedNewTasks) {
-      parts.push(buildAddedTasksReminder(addedTitles.length, assignmentPath, { runId, taskMode }));
+      parts.push(buildAddedTasksReminder(addedTitles.length, runId));
     }
     if (trimmedMessage.length > 0) {
       parts.push(trimmedMessage);
@@ -857,19 +834,6 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     }
     initialPrompt = parts.join("\n\n");
   } else {
-    // Passive agents compose the same prompt structure as regular
-    // agents but with the CLI-based workflow template (drive the
-    // checklist via `task-runner task set` instead of editing the
-    // assignment file). The composed prompt is stored in
-    // `pendingPrompt` for the sidecar driver to read via
-    // `status --field pendingPrompt`; it is never sent to a backend
-    // because `task-runner run` is rejected on passive agents.
-    const workflowTemplate =
-      agentConfig.backend === "passive"
-        ? PASSIVE_TASK_WORKFLOW_TEMPLATE
-        : taskMode === "cli"
-          ? CLI_TASK_WORKFLOW_TEMPLATE
-          : TASK_WORKFLOW_TEMPLATE;
     const parts: string[] = [];
     if (agentInstructions.length > 0) {
       parts.push(interpolate(agentInstructions, injectedVars));
@@ -878,7 +842,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       parts.push(interpolate(assignmentInstructions, injectedVars));
     }
     if (hasTasks) {
-      parts.push(interpolate(workflowTemplate, injectedVars));
+      parts.push(interpolate(WORKER_BRIEF_TEMPLATE, injectedVars));
     }
     if (trimmedMessage.length > 0) {
       parts.push(trimmedMessage);
@@ -908,7 +872,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       ...resume.manifest,
       model: model ?? null,
       effort: effort ?? null,
-      taskMode,
+      brief: initialPrompt,
       name,
       unrestricted,
       cwd,
@@ -927,18 +891,16 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     };
   } else if (priorInitialized && resume) {
     // Execute-after-init: the manifest was persisted by `init`. Flip it
-    // to "running", promote sessionCount to 1, and clear pendingPrompt
-    // (it has now been consumed by this first real session).
+    // to "running", promote sessionCount to 1, and preserve the brief.
     manifest = {
       ...resume.manifest,
-      taskMode,
+      brief: initialPrompt,
       name,
       endedAt: null,
       status: "running",
       exitCode: null,
       sessionCount: 1,
       execution,
-      pendingPrompt: null,
     };
   } else {
     // Freeze the union of agent + assignment lockedFields into the
@@ -964,7 +926,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     const frozenCallerInstructions =
       rawCallerInstructions.length > 0 ? interpolate(rawCallerInstructions, injectedVars) : null;
     manifest = {
-      schemaVersion: 6,
+      schemaVersion: 7,
       runId,
       agent: {
         name: agentConfig.name,
@@ -994,7 +956,6 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       timeoutSec,
       assignmentPath,
       workspaceDir,
-      taskMode,
       startedAt: now,
       endedAt: null,
       archivedAt: null,
@@ -1012,7 +973,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       backendSessionId: opts.bootstrapBackendSessionId ?? null,
       runtimeVars: persistedRuntimeVars,
       execution,
-      pendingPrompt: isInitialize ? initialPrompt : null,
+      brief: initialPrompt,
       callerInstructions: frozenCallerInstructions,
       resetSeed: buildRunResetSeed({
         model: model ?? null,
@@ -1022,8 +983,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         unrestricted,
         timeoutSec,
         maxAttempts,
-        taskMode,
-        pendingPrompt: initialPrompt,
+        brief: initialPrompt,
         finalTasks: snapshotTasks(tasks),
       }),
       attachments: [],
@@ -1034,12 +994,15 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     };
   }
 
+  if (!reusingWorkspace && loadedAssignment?.sourcePath) {
+    copyFileSync(loadedAssignment.sourcePath, `${workspaceDir}/assignment-seed.md`);
+  }
+
   // `init` stops here: persist the prepared workspace + manifest and
   // return a terminal "initialized" outcome. No session is created; the
   // caller will follow up with `task-runner run --resume-run <id>` —
   // or, for passive agents, with `task-runner task set` / `task add`.
   if (isInitialize) {
-    writeTextFileAtomic(assignmentPath, renderAssignment(Array.from(tasks.values())));
     syncManifestTaskState(manifest, tasks);
     writeManifest(workspaceDir, manifest);
     const isPassive = agentConfig.backend === "passive";
@@ -1052,7 +1015,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       name,
       cwd,
       passive: isPassive,
-      pendingPrompt: initialPrompt,
+      brief: initialPrompt,
     });
     emitCallerInstructions(manifest.callerInstructions, emitEvent);
     return {
@@ -1103,7 +1066,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
           ...latest,
           model: model ?? null,
           effort: effort ?? null,
-          taskMode,
+          brief: initialPrompt,
           name,
           unrestricted,
           cwd,
@@ -1123,20 +1086,18 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       } else {
         manifest = {
           ...latest,
-          taskMode,
+          brief: initialPrompt,
           name,
           endedAt: null,
           status: "running",
           exitCode: null,
           sessionCount: 1,
           execution,
-          pendingPrompt: null,
         };
       }
 
       syncManifestTaskState(manifest, tasks);
       refreshManifestAttachments(manifest);
-      writeTextFileAtomic(assignmentPath, renderAssignment(Array.from(tasks.values())));
       sessionRecord = {
         sessionIndex,
         startedAt: now,
@@ -1144,6 +1105,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         status: "running",
         exitCode: null,
         message: priorInitialized ? latest.message : message,
+        brief: initialPrompt,
         firstAttempt: null,
         lastAttempt: null,
         maxAttempts,
@@ -1154,7 +1116,6 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       writeManifest(workspaceDir, manifest);
     });
   } else {
-    writeTextFileAtomic(assignmentPath, renderAssignment(Array.from(tasks.values())));
     syncManifestTaskState(manifest, tasks);
     sessionRecord = {
       sessionIndex,
@@ -1163,6 +1124,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       status: "running",
       exitCode: null,
       message: message,
+      brief: initialPrompt,
       firstAttempt: null,
       lastAttempt: null,
       maxAttempts,
@@ -1262,27 +1224,13 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       stdout: invokeResult.rawStdout,
       stderr: invokeResult.rawStderr,
     });
-    let rawAssignment = "";
-    let mergeInfo: MergeResult = {
+    const mergeInfo = {
       invalidStatuses: [],
       missingFromFile: [],
       unknownInFile: [],
     };
     withTaskStateLock(workspaceDir, () => {
-      if (taskModeFromManifest(manifest) === "cli") {
-        tasks = refreshManifestTaskState(manifest);
-        rawAssignment = renderAssignment(Array.from(tasks.values()));
-        mergeInfo = {
-          invalidStatuses: [],
-          missingFromFile: [],
-          unknownInFile: [],
-        };
-      } else {
-        const merged = mergeWorkspaceAssignmentIntoTaskMap(manifest, tasks);
-        rawAssignment = merged.rawAssignment;
-        mergeInfo = merged.mergeInfo;
-      }
-
+      tasks = refreshManifestTaskState(manifest);
       syncManifestTaskState(manifest, tasks);
       refreshManifestAttachments(manifest);
       const attemptRecord: AttemptRecord = {
@@ -1354,13 +1302,6 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       break;
     }
 
-    if (taskModeFromManifest(manifest) === "file") {
-      const merged = mergeIntoFile(rawAssignment, tasks);
-      if (merged !== rawAssignment) {
-        writeTextFileAtomic(assignmentPath, merged);
-      }
-    }
-
     const incompleteCount = countBy(tasks, (t) => t.status !== "completed");
     emitEvent({
       type: "retrying",
@@ -1368,10 +1309,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       invalidStatusCount: mergeInfo.invalidStatuses.length,
     });
 
-    currentPrompt = buildNudgeMessage(tasks, mergeInfo.invalidStatuses, assignmentPath, {
-      runId,
-      taskMode: taskModeFromManifest(manifest),
-    });
+    currentPrompt = buildNudgeMessage(tasks, mergeInfo.invalidStatuses, runId);
   }
 
   if (!terminal) {
@@ -1382,10 +1320,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   let tasksCompleted = 0;
   const endedAt = new Date().toISOString();
   withTaskStateLock(workspaceDir, () => {
-    if (taskModeFromManifest(manifest) === "cli") {
-      tasks = refreshManifestTaskState(manifest);
-    }
-
+    tasks = refreshManifestTaskState(manifest);
     orderedTasks = syncManifestTaskState(manifest, tasks);
     tasksCompleted = manifest.tasksCompleted;
     refreshManifestAttachments(manifest);

@@ -1,5 +1,4 @@
 import { BACKEND_IDS, type BackendId } from "@task-runner/core/core/backends/types.js";
-import { TASK_MODES, type TaskMode } from "@task-runner/core/core/config/schema.js";
 import { trimRunName } from "@task-runner/core/util/run-name.js";
 
 export type OutputFormat = "text" | "json";
@@ -18,7 +17,6 @@ export interface ParsedArgs {
   backend?: BackendId;
   model?: string;
   effort?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
-  taskMode?: TaskMode;
   timeoutSec?: number;
   unrestricted?: boolean;
   maxRetries?: number;
@@ -154,13 +152,6 @@ export function parseArgs(argv: string[]): ParsedArgs {
         throw new Error(`--effort must be one of: ${EFFORT_VALUES.join(", ")}`);
       }
       result.effort = next as (typeof EFFORT_VALUES)[number];
-    } else if (arg === "--task-mode") {
-      const next = args.shift();
-      if (next === undefined) throw new Error("--task-mode requires a value");
-      if (!(TASK_MODES as readonly string[]).includes(next)) {
-        throw new Error(`--task-mode must be one of: ${TASK_MODES.join(", ")}`);
-      }
-      result.taskMode = next as TaskMode;
     } else if (arg === "--timeout-sec") {
       const next = args.shift();
       if (next === undefined) throw new Error("--timeout-sec requires a number");
@@ -267,7 +258,6 @@ export function overridesFromParsedArgs(parsed: ParsedArgs) {
     backend: parsed.backend,
     model: parsed.model,
     effort: parsed.effort,
-    taskMode: parsed.taskMode,
     message: parsed.message,
     name: parsed.name,
     timeoutSec: parsed.timeoutSec,

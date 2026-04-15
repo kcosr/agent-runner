@@ -1,6 +1,5 @@
 import { deriveRepoKey } from "../config/runtime-paths.js";
-import { normalizeTaskMode } from "../core/config/schema.js";
-import type { LockableField, TaskMode } from "../core/config/schema.js";
+import type { LockableField } from "../core/config/schema.js";
 import {
   type RunDependencyDetail,
   type RunDependencyState,
@@ -98,7 +97,6 @@ export interface RunDetail {
   name: string | null;
   backendSessionId: string | null;
   cwd: string;
-  taskMode: TaskMode;
   unrestricted: boolean;
   timeoutSec: number;
   startedAt: string;
@@ -115,7 +113,6 @@ export interface RunDetail {
   tasks: RunTaskSummary[];
   message: string | null;
   callerInstructions: string | null;
-  pendingPrompt: string | null;
   lockedFields: LockableField[];
   runtimeVars: Record<string, unknown>;
   execution: RunExecution;
@@ -194,10 +191,9 @@ export function deriveTaskMutationCapabilities(manifest: RunManifest): RunTaskMu
         canAdd: !tasksLocked,
       };
     case "running": {
-      const canMutateRunningTasks = normalizeTaskMode(manifest.taskMode) === "cli";
       return {
-        canSetStatus: canMutateRunningTasks,
-        canEditNotes: canMutateRunningTasks,
+        canSetStatus: true,
+        canEditNotes: true,
         canAdd: false,
       };
     }
@@ -290,7 +286,6 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
     name: manifest.name,
     backendSessionId: manifest.backendSessionId,
     cwd: manifest.cwd,
-    taskMode: normalizeTaskMode(manifest.taskMode),
     unrestricted: manifest.unrestricted,
     timeoutSec: manifest.timeoutSec,
     startedAt: manifest.startedAt,
@@ -307,7 +302,6 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
     tasks: Object.values(manifest.finalTasks).map(toRunTaskSummary),
     message: manifest.message,
     callerInstructions: manifest.callerInstructions,
-    pendingPrompt: manifest.pendingPrompt,
     lockedFields: [...manifest.lockedFields],
     runtimeVars: { ...manifest.runtimeVars },
     execution: manifest.execution,

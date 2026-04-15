@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
@@ -13,28 +13,16 @@ const CLI_PATH = resolvePath(new URL("../apps/cli/dist/cli.js", import.meta.url)
 
 const AGENT = `---
 schemaVersion: 1
-name: task-mode-agent
+name: brief-agent
 backend: claude
 model: claude-sonnet-4-6
 ---
 Agent.
 `;
 
-const FILE_ASSIGNMENT = `---
+const ASSIGNMENT = `---
 schemaVersion: 1
-name: file-work
-tasks:
-  - id: t1
-    title: First
-    body: Do thing one.
----
-Work from the assignment file.
-`;
-
-const CLI_ASSIGNMENT = `---
-schemaVersion: 1
-name: cli-work
-taskMode: cli
+name: brief-work
 tasks:
   - id: t1
     title: First
@@ -44,7 +32,7 @@ Work from task CLI commands.
 `;
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), "task-runner-taskmode-"));
+  return mkdtempSync(join(tmpdir(), "task-runner-brief-"));
 }
 
 function writeAgent(baseDir, name, body) {
@@ -59,9 +47,9 @@ function writeAssignment(baseDir, name, body) {
   writeFileSync(join(dir, "assignment.md"), body);
 }
 
-async function initRun(baseDir, assignmentName, options = {}) {
+async function initRun(baseDir, assignmentName) {
   return withSharedRuntimeEnv(baseDir, async () => {
-    const loaded = loadAgentConfig("task-mode-agent", baseDir);
+    const loaded = loadAgentConfig("brief-agent", baseDir);
     const loadedAssignment = loadAssignmentConfig(assignmentName, baseDir);
     const originalCwd = process.cwd();
     process.chdir(baseDir);
@@ -71,10 +59,7 @@ async function initRun(baseDir, assignmentName, options = {}) {
         loadedAssignment,
         cliVars: {},
         backend: { id: "mock", invoke: async () => ({}) },
-        overrides: options.overrides,
         initialize: true,
-        stderr: () => {},
-        stdout: () => {},
       });
     } finally {
       process.chdir(originalCwd);
@@ -135,126 +120,65 @@ function spawnLockedManifestWriter(dir, workspaceDir, mutateSource) {
   );
 }
 
-test("taskMode=cli init prompt uses task CLI workflow instead of assignment-path workflow", async () => {
+test("init stores a canonical brief and does not generate workspace assignment.md", async () => {
   const dir = tempDir();
-  writeAgent(dir, "task-mode-agent", AGENT);
-  writeAssignment(dir, "cli-work", CLI_ASSIGNMENT);
+  writeAgent(dir, "brief-agent", AGENT);
+  writeAssignment(dir, "brief-work", ASSIGNMENT);
 
-  const outcome = await initRun(dir, "cli-work");
-  const prompt = outcome.manifest.pendingPrompt ?? "";
+  const outcome = await initRun(dir, "brief-work");
+  const brief = outcome.manifest.brief;
 
-  assert.equal(outcome.manifest.taskMode, "cli");
-  assert.match(prompt, new RegExp(`task list ${outcome.runId}`));
-  assert.match(prompt, new RegExp(`task show ${outcome.runId}`));
-  assert.match(prompt, new RegExp(`task set ${outcome.runId}`));
-  assert.match(prompt, new RegExp(`task append-notes ${outcome.runId}`));
-  assert.match(prompt, new RegExp(`status ${outcome.runId}`));
-  assert.match(prompt, new RegExp(outcome.manifest.cwd));
-  assert.doesNotMatch(prompt, /Your assignment is at/);
-  assert.doesNotMatch(
-    prompt,
-    new RegExp(outcome.assignmentPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
-  );
+  assert.match(brief, new RegExp(`task list ${outcome.runId}`));
+  assert.match(brief, new RegExp(`task show ${outcome.runId}`));
+  assert.match(brief, new RegExp(`task set ${outcome.runId}`));
+  assert.match(brief, new RegExp(`task append-notes ${outcome.runId}`));
+  assert.match(brief, new RegExp(`status ${outcome.runId}`));
+  assert.ok(!existsSync(outcome.assignmentPath), "workspace assignment.md is not generated");
+  assert.ok(existsSync(join(outcome.workspaceDir, "assignment-seed.md")), "seed file captured");
 });
 
-test("taskMode omitted defaults to file behavior", async () => {
+test("brief command prints the stored handoff and rejects path targets", async () => {
   const dir = tempDir();
-  writeAgent(dir, "task-mode-agent", AGENT);
-  writeAssignment(dir, "file-work", FILE_ASSIGNMENT);
+  writeAgent(dir, "brief-agent", AGENT);
+  writeAssignment(dir, "brief-work", ASSIGNMENT);
+  const outcome = await initRun(dir, "brief-work");
 
-  const outcome = await initRun(dir, "file-work");
-  const prompt = outcome.manifest.pendingPrompt ?? "";
+  const ok = runCli(["brief", outcome.runId], { cwd: dir });
+  assert.equal(ok.status, 0);
+  assert.match(ok.stdout, new RegExp(`task list ${outcome.runId}`));
 
-  assert.equal(outcome.manifest.taskMode, "file");
-  assert.match(prompt, /Your assignment is at/);
-  assert.match(prompt, new RegExp(outcome.assignmentPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  const bad = runCli(["brief", outcome.workspaceDir], { cwd: dir });
+  assert.equal(bad.status, 3);
+  assert.match(bad.stderr, /brief accepts a run id, not a path/);
 });
 
-test("taskMode CLI override beats the assignment default on init", async () => {
+test("status on a running run reads canonical task state", async () => {
   const dir = tempDir();
-  writeAgent(dir, "task-mode-agent", AGENT);
-  writeAssignment(dir, "file-work", FILE_ASSIGNMENT);
-
-  const outcome = await initRun(dir, "file-work", {
-    overrides: { taskMode: "cli" },
-  });
-  const prompt = outcome.manifest.pendingPrompt ?? "";
-
-  assert.equal(outcome.manifest.taskMode, "cli");
-  assert.match(prompt, new RegExp(`task list ${outcome.runId}`));
-  assert.doesNotMatch(prompt, /Your assignment is at/);
-});
-
-test("taskMode override is rejected on resume-run", async () => {
-  const dir = tempDir();
-  writeAgent(dir, "task-mode-agent", AGENT);
-  writeAssignment(dir, "file-work", FILE_ASSIGNMENT);
-  const outcome = await initRun(dir, "file-work");
-
-  const result = runCli(["run", "--resume-run", outcome.runId, "--task-mode", "cli"], { cwd: dir });
-
-  assert.equal(result.status, 3);
-  assert.match(result.stderr, /--task-mode cannot be combined with --resume-run/);
-});
-
-test("status on a running cli-mode run reads canonical task state and explains the mode", async () => {
-  const dir = tempDir();
-  writeAgent(dir, "task-mode-agent", AGENT);
-  writeAssignment(dir, "cli-work", CLI_ASSIGNMENT);
-  const outcome = await initRun(dir, "cli-work");
+  writeAgent(dir, "brief-agent", AGENT);
+  writeAssignment(dir, "brief-work", ASSIGNMENT);
+  const outcome = await initRun(dir, "brief-work");
 
   patchManifest(outcome.workspaceDir, (manifest) => {
     manifest.status = "running";
-    manifest.taskMode = "cli";
     manifest.finalTasks.t1.status = "in_progress";
     manifest.finalTasks.t1.notes = "Canonical note";
   });
-
-  let plan = readFileSync(outcome.assignmentPath, "utf8");
-  plan = plan.replace(/\*\*Status:\*\* pending/, "**Status:** completed");
-  plan = plan.replace("<!-- notes:start -->", "<!-- notes:start -->\nDrifted note");
-  writeFileSync(outcome.assignmentPath, plan, "utf8");
 
   const res = runCli(["status", outcome.runId], { cwd: dir });
   assert.equal(res.status, 0);
   assert.match(res.stdout, /- t1 — First \[in_progress\]/);
   assert.match(res.stdout, /Canonical note/);
   assert.match(res.stdout, /canonical run\.json task state/);
-  assert.doesNotMatch(res.stdout, /Drifted note/);
 });
 
-test("status on an older manifest with no taskMode still behaves like file mode", async () => {
+test("task-state persistence serializes concurrent writes into run.json only", async () => {
   const dir = tempDir();
-  writeAgent(dir, "task-mode-agent", AGENT);
-  writeAssignment(dir, "file-work", FILE_ASSIGNMENT);
-  const outcome = await initRun(dir, "file-work");
+  writeAgent(dir, "brief-agent", AGENT);
+  writeAssignment(dir, "brief-work", ASSIGNMENT);
+  const outcome = await initRun(dir, "brief-work");
 
   patchManifest(outcome.workspaceDir, (manifest) => {
     manifest.status = "running";
-    manifest.taskMode = undefined;
-  });
-
-  let plan = readFileSync(outcome.assignmentPath, "utf8");
-  plan = plan.replace(/\*\*Status:\*\* pending/, "**Status:** completed");
-  writeFileSync(outcome.assignmentPath, plan, "utf8");
-
-  const res = runCli(["status", outcome.runId, "--output-format", "json", "--field", "tasks"], {
-    cwd: dir,
-  });
-  assert.equal(res.status, 0);
-  const parsed = JSON.parse(res.stdout);
-  assert.equal(parsed.tasks[0].status, "completed");
-});
-
-test("task-state persistence serializes concurrent cli-mode writes and keeps run.json and assignment.md coherent", async () => {
-  const dir = tempDir();
-  writeAgent(dir, "task-mode-agent", AGENT);
-  writeAssignment(dir, "cli-work", CLI_ASSIGNMENT);
-  const outcome = await initRun(dir, "cli-work");
-
-  patchManifest(outcome.workspaceDir, (manifest) => {
-    manifest.status = "running";
-    manifest.taskMode = "cli";
   });
 
   const locker = spawn(
@@ -297,18 +221,17 @@ test("task-state persistence serializes concurrent cli-mode writes and keeps run
   assert.ok(elapsed >= 150, `expected lock wait, saw ${elapsed}ms`);
 
   const manifest = readManifest(outcome.workspaceDir);
-  const planText = readFileSync(outcome.assignmentPath, "utf8");
   assert.equal(manifest.finalTasks.t1.notes, "Serialized write");
-  assert.match(planText, /Serialized write/);
+  assert.ok(!existsSync(outcome.assignmentPath), "no workspace assignment.md was created");
 });
 
-test("status waits for the task-state lock and reads the fresh manifest snapshot", async () => {
+test("status and task commands wait for the task-state lock and read fresh snapshots", async () => {
   const dir = tempDir();
-  writeAgent(dir, "task-mode-agent", AGENT);
-  writeAssignment(dir, "cli-work", CLI_ASSIGNMENT);
-  const outcome = await initRun(dir, "cli-work");
+  writeAgent(dir, "brief-agent", AGENT);
+  writeAssignment(dir, "brief-work", ASSIGNMENT);
+  const outcome = await initRun(dir, "brief-work");
 
-  const locker = spawnLockedManifestWriter(
+  const statusLocker = spawnLockedManifestWriter(
     dir,
     outcome.workspaceDir,
     `
@@ -317,44 +240,18 @@ test("status waits for the task-state lock and reads the fresh manifest snapshot
       manifest.finalTasks.t1.notes = "Fresh from locked write";
     `,
   );
-  await once(locker.stdout, "data");
+  await once(statusLocker.stdout, "data");
 
-  const started = Date.now();
-  const result = runCli(["status", outcome.runId], { cwd: dir });
-  const elapsed = Date.now() - started;
-  await once(locker, "exit");
+  const statusStarted = Date.now();
+  const statusResult = runCli(["status", outcome.runId], { cwd: dir });
+  const statusElapsed = Date.now() - statusStarted;
+  await once(statusLocker, "exit");
 
-  assert.equal(result.status, 0);
-  assert.ok(elapsed >= 150, `expected status to wait for the lock, saw ${elapsed}ms`);
-  assert.match(result.stdout, /Tasks completed: 1\/1/);
-  assert.match(result.stdout, /First \[completed\]/);
-  assert.match(result.stdout, /Fresh from locked write/);
-});
-
-test("task list/show wait for the task-state lock and read fresh task snapshots", async () => {
-  const dir = tempDir();
-  writeAgent(dir, "task-mode-agent", AGENT);
-  writeAssignment(dir, "cli-work", CLI_ASSIGNMENT);
-  const outcome = await initRun(dir, "cli-work");
-
-  const listLocker = spawnLockedManifestWriter(
-    dir,
-    outcome.workspaceDir,
-    `
-      manifest.tasksCompleted = 1;
-      manifest.finalTasks.t1.status = "completed";
-      manifest.finalTasks.t1.notes = "Visible after list wait";
-    `,
-  );
-  await once(listLocker.stdout, "data");
-  const listStarted = Date.now();
-  const listResult = runCli(["task", "list", outcome.runId], { cwd: dir });
-  const listElapsed = Date.now() - listStarted;
-  await once(listLocker, "exit");
-
-  assert.equal(listResult.status, 0);
-  assert.ok(listElapsed >= 150, `expected task list to wait for the lock, saw ${listElapsed}ms`);
-  assert.match(listResult.stdout, /\[completed\] t1 - First/);
+  assert.equal(statusResult.status, 0);
+  assert.ok(statusElapsed >= 150, `expected status to wait for the lock, saw ${statusElapsed}ms`);
+  assert.match(statusResult.stdout, /Tasks completed: 1\/1/);
+  assert.match(statusResult.stdout, /First \[completed\]/);
+  assert.match(statusResult.stdout, /Fresh from locked write/);
 
   const showLocker = spawnLockedManifestWriter(
     dir,

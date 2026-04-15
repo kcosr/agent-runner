@@ -859,14 +859,6 @@ export function RunDetailDrawer({
                     <span className="timing-label">CWD</span>
                     <span className="timing-value">{truncateMiddle(run.cwd)}</span>
                   </div>
-                  <div className="timing-row">
-                    <span className="timing-label">Assignment path</span>
-                    <span className="timing-value">{truncateMiddle(run.assignmentPath)}</span>
-                  </div>
-                  <div className="timing-row">
-                    <span className="timing-label">Task mode</span>
-                    <span className="timing-value">{run.taskMode}</span>
-                  </div>
                 </div>
               </div>
             </section>

@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
@@ -9,7 +9,7 @@ import { resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js"
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import { createRunEventCapture } from "./helpers/run-events.mjs";
 import {
-  assignmentPathFromPrompt,
+  completeAllTasksFromPrompt,
   sharedRuntimeEnv,
   withSharedRuntimeEnv,
 } from "./helpers/runtime-paths.mjs";
@@ -97,12 +97,7 @@ function mockBackend() {
       // Complete all tasks so the run terminates success without
       // retries, keeping these tests fast.
       try {
-        const abs = assignmentPathFromPrompt(ctx.prompt);
-        if (abs) {
-          let plan = readFileSync(abs, "utf8");
-          plan = plan.replace(/\*\*Status:\*\* pending/g, "**Status:** completed");
-          writeFileSync(abs, plan);
-        }
+        completeAllTasksFromPrompt(ctx.prompt);
       } catch {
         // ignore
       }
@@ -264,7 +259,7 @@ test("passive init prints callerInstructions alongside the passive bootstrap", a
   const dir = tempDir();
   writeAgent(dir, "caller-test-passive", PASSIVE_AGENT);
   writeAssignment(dir, "caller-work", ASSIGNMENT_WITH_CALLER);
-  const { stderr, stdout } = await runFreshRun(dir, "caller-work", {
+  const { outcome, stderr, stdout } = await runFreshRun(dir, "caller-work", {
     agentName: "caller-test-passive",
     initialize: true,
   });
@@ -272,10 +267,12 @@ test("passive init prints callerInstructions alongside the passive bootstrap", a
   // Caller instructions on stderr
   assert.match(stderr, /── caller instructions ──/);
   assert.match(stderr, /Hello, caller/);
-  // Passive bootstrap (composed pendingPrompt) on stdout — contains
-  // the PASSIVE_TASK_WORKFLOW_TEMPLATE instead of caller instructions
-  assert.match(stdout, /task-runner task set/);
-  // And does NOT mix in the caller-instructions text
+  // Passive bootstrap is now stored on the manifest/brief surface
+  // instead of being dumped inline during init.
+  assert.match(outcome.manifest.brief, /task-runner task set/);
+  assert.match(outcome.manifest.brief, new RegExp(outcome.runId));
+  // Stdout remains reserved for command output, not caller docs.
+  assert.equal(stdout, "");
   assert.doesNotMatch(stdout, /Hello, caller/);
 });
 
@@ -383,10 +380,14 @@ test("ad-hoc agent + assignment with callerInstructions still prints them", asyn
     },
   );
   assert.equal(spawn.status, 0);
-  assert.match(spawn.stdout, /task-runner task set/);
-  assert.doesNotMatch(spawn.stdout, /Hello, caller/);
   assert.match(spawn.stderr, /── caller instructions ──/);
   assert.match(spawn.stderr, /Hello, caller/);
+  assert.doesNotMatch(spawn.stdout, /Hello, caller/);
+
+  const [runId] = readdirSync(join(dir, "runs", "unknown"));
+  const brief = runCli(["brief", runId], { cwd: dir });
+  assert.match(brief, /task-runner task set/);
+  assert.doesNotMatch(brief, /Hello, caller/);
 });
 
 // ────────────────────────────────────────────────────────────────

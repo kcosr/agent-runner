@@ -1,11 +1,11 @@
 import { strict as assert } from "node:assert";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { EmptyPromptError, runAgent } from "../packages/core/dist/core/run/run-loop.js";
-import { assignmentPathFromPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
+import { setTaskStatusesForPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 function tempDir() {
   return mkdtempSync(join(tmpdir(), "task-runner-emptyprompt-"));
@@ -25,17 +25,6 @@ function writeAssignment(baseDir, name, body) {
   const path = join(dir, "assignment.md");
   writeFileSync(path, body);
   return path;
-}
-
-function editStatus(content, taskId, newStatus) {
-  const marker = `<!-- task-id: ${taskId} -->`;
-  const start = content.indexOf(marker);
-  if (start < 0) throw new Error(`marker not found: ${taskId}`);
-  const nextMarker = content.indexOf("<!-- task-id:", start + marker.length);
-  const end = nextMarker < 0 ? content.length : nextMarker;
-  const section = content.slice(start, end);
-  const updated = section.replace(/\*\*Status:\*\*\s*\S+/, `**Status:** ${newStatus}`);
-  return content.slice(0, start) + updated + content.slice(end);
 }
 
 function mockBackend(handler) {
@@ -164,9 +153,7 @@ test("empty-prompt: tasks only (no body, no message) runs with just the workflow
     assignmentName: "body-less-tasks-work",
     backend: mockBackend(async (ctx) => {
       seenPrompt = ctx.prompt;
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      const plan = readFileSync(absPlan, "utf8");
-      writeFileSync(absPlan, editStatus(plan, "t1", "completed"), "utf8");
+      setTaskStatusesForPrompt(ctx.prompt, { t1: "completed" });
       return {
         exitCode: 0,
         signal: null,
@@ -180,8 +167,11 @@ test("empty-prompt: tasks only (no body, no message) runs with just the workflow
   });
 
   assert.equal(outcome.exitCode, 0);
-  assert.ok(seenPrompt.startsWith("Your assignment is at"), "starts directly with workflow");
-  assert.ok(seenPrompt.includes("Set the task's **Status** to `in_progress`"));
+  assert.ok(
+    seenPrompt.startsWith("You are working through a task list"),
+    "starts directly with workflow",
+  );
+  assert.ok(seenPrompt.includes("task set"));
   // No leading blank lines from a missing body
   assert.ok(!seenPrompt.startsWith("\n"));
 });
@@ -197,9 +187,7 @@ test("empty-prompt: message + tasks (no body) composes workflow above message wi
     overrides: { message: "focus on it" },
     backend: mockBackend(async (ctx) => {
       seenPrompt = ctx.prompt;
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      const plan = readFileSync(absPlan, "utf8");
-      writeFileSync(absPlan, editStatus(plan, "t1", "completed"), "utf8");
+      setTaskStatusesForPrompt(ctx.prompt, { t1: "completed" });
       return {
         exitCode: 0,
         signal: null,
@@ -219,7 +207,7 @@ test("empty-prompt: message + tasks (no body) composes workflow above message wi
     "no triple newlines (i.e. no empty body placeholder)",
   );
   const msgIdx = seenPrompt.indexOf("focus on it");
-  const workflowIdx = seenPrompt.indexOf("Your assignment is at");
+  const workflowIdx = seenPrompt.indexOf("You are working through a task list");
   assert.ok(msgIdx >= 0);
   assert.ok(workflowIdx >= 0);
   assert.ok(workflowIdx < msgIdx, "workflow comes before message (message last)");

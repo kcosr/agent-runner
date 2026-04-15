@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { LOCKABLE_FIELDS, TASK_MODES } from "../core/config/schema.js";
+import { LOCKABLE_FIELDS } from "../core/config/schema.js";
 import type { RunAttachment } from "./attachments.js";
 import type {
   RunAbortReason,
@@ -150,7 +150,6 @@ export const runDetailSchema: z.ZodType<RunDetail> = z.object({
   name: z.string().nullable(),
   backendSessionId: z.string().nullable(),
   cwd: z.string(),
-  taskMode: z.enum(TASK_MODES),
   unrestricted: z.boolean(),
   timeoutSec: z.number(),
   startedAt: z.string(),
@@ -167,7 +166,6 @@ export const runDetailSchema: z.ZodType<RunDetail> = z.object({
   tasks: z.array(runTaskSummarySchema),
   message: z.string().nullable(),
   callerInstructions: z.string().nullable(),
-  pendingPrompt: z.string().nullable(),
   lockedFields: z.array(z.enum(LOCKABLE_FIELDS)),
   runtimeVars: z.record(z.string(), z.unknown()),
   execution: runExecutionSchema,

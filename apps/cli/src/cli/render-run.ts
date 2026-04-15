@@ -41,7 +41,6 @@ function renderBannerLines(event: {
   agentName: string;
   runId: string;
   assignmentSourcePath: string | null;
-  assignmentPath: string;
   name: string | null;
   cwd: string;
   header: string;
@@ -50,7 +49,6 @@ function renderBannerLines(event: {
   if (event.assignmentSourcePath) {
     lines.push(`             source=${event.assignmentSourcePath}`);
   }
-  lines.push(`             assignment=${event.assignmentPath}`);
   lines.push(`             name=${event.name ?? "Unnamed"}`);
   lines.push(`             cwd=${event.cwd}`);
   return lines;
@@ -65,7 +63,6 @@ function renderSummary(summary: RunCompletionSummary): string {
 
   if (summary.status === "initialized") {
     lines.push(`Tasks seeded: ${summary.tasksTotal}`);
-    lines.push(`Assignment file: ${summary.assignmentPath}`);
     if (summary.tasks.length > 0) {
       lines.push("");
       lines.push("Seeded tasks:");
@@ -82,7 +79,6 @@ function renderSummary(summary: RunCompletionSummary): string {
   if (summary.status === "aborted") {
     lines.push(`Tasks completed: ${summary.tasksCompleted}/${summary.tasksTotal}`);
     lines.push(`Attempts: ${summary.attempts}/${summary.maxAttempts}`);
-    lines.push(`Assignment file: ${summary.assignmentPath}`);
     lines.push("");
     appendResumeHint(lines, summary, taskRunnerCmd, "Run was interrupted by the user. To resume:");
     return `${lines.join("\n")}\n`;
@@ -90,7 +86,6 @@ function renderSummary(summary: RunCompletionSummary): string {
 
   lines.push(`Tasks completed: ${summary.tasksCompleted}/${summary.tasksTotal}`);
   lines.push(`Attempts: ${summary.attempts}/${summary.maxAttempts}`);
-  lines.push(`Assignment file: ${summary.assignmentPath}`);
 
   if (summary.tasks.length > 0) {
     lines.push("");
@@ -104,8 +99,6 @@ function renderSummary(summary: RunCompletionSummary): string {
         }
       }
     }
-    lines.push("");
-    lines.push(`Review ${summary.assignmentPath} for additional agent output.`);
   }
 
   lines.push("");
@@ -122,16 +115,16 @@ export function renderRunEvent(event: RunEvent): RenderedRunChunk[] {
         ...event,
         header: `task-runner: initialized ${event.passive ? "passive " : ""}agent=${event.agentName} run=${event.runId}`,
       });
-      lines.push(
-        event.passive
-          ? `             drive with: ${taskRunnerCmd} task set ${event.runId} <task-id> ...`
-          : `             resume with: ${taskRunnerCmd} run --resume-run ${event.runId}`,
-      );
-      const chunks = stderr(`${lines.join("\n")}\n`);
-      if (event.passive && event.pendingPrompt.length > 0) {
-        return [...chunks, ...stdout(`${event.pendingPrompt}\n`)];
+      if (event.passive) {
+        lines.push(`             brief=${taskRunnerCmd} brief ${event.runId}`);
+        lines.push(
+          `             drive with: ${taskRunnerCmd} task set ${event.runId} <task-id> ...`,
+        );
+      } else {
+        lines.push(`             brief=${taskRunnerCmd} brief ${event.runId}`);
+        lines.push(`             resume with: ${taskRunnerCmd} run --resume-run ${event.runId}`);
       }
-      return chunks;
+      return stderr(`${lines.join("\n")}\n`);
     }
     case "caller_instructions":
       return stderr(

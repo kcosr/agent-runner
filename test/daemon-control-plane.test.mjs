@@ -897,7 +897,6 @@ test("daemon run projections expose explicit abort capability from local ownersh
         name: "Daemon-owned run",
         backendSessionId: "thread-1",
         cwd: "/tmp/fake",
-        taskMode: "file",
         unrestricted: false,
         timeoutSec: 3600,
         startedAt: "2026-04-13T05:00:00.000Z",
@@ -919,7 +918,6 @@ test("daemon run projections expose explicit abort capability from local ownersh
         ],
         message: null,
         callerInstructions: null,
-        pendingPrompt: null,
         lockedFields: [],
         runtimeVars: {},
         execution: {
@@ -1361,9 +1359,9 @@ test("daemon validates override payloads before calling shared services", async 
       () =>
         client.call("runs.start", {
           cliVars: {},
-          overrides: { taskMode: "bogus" },
+          overrides: { bogus: "value" },
         }),
-      /overrides\.taskMode must be one of: file, cli/,
+      /overrides\.bogus is not supported/,
     );
     await assert.rejects(
       () =>

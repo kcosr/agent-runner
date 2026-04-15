@@ -155,7 +155,6 @@ function makeDetail(
     name: "Build dashboard",
     backendSessionId: "thread-1",
     cwd: "/tmp/task-runner",
-    taskMode: "file",
     unrestricted: false,
     timeoutSec: 3600,
     startedAt: "2026-04-13T05:00:00.000Z",
@@ -187,7 +186,6 @@ function makeDetail(
     ],
     message: null,
     callerInstructions: null,
-    pendingPrompt: null,
     lockedFields: ["tasks"],
     runtimeVars: {
       repo_path: ".",

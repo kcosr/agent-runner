@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
-import { assignmentPathFromPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
+import { updateTasksForPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 const THREE_AGENT = `---
 schemaVersion: 1
@@ -60,29 +60,6 @@ function writeAgentAndAssignment(baseDir) {
   writeAssignment(baseDir, "three-work", THREE_ASSIGNMENT);
 }
 
-function editStatus(content, taskId, newStatus) {
-  const marker = `<!-- task-id: ${taskId} -->`;
-  const start = content.indexOf(marker);
-  const nextMarker = content.indexOf("<!-- task-id:", start + marker.length);
-  const end = nextMarker < 0 ? content.length : nextMarker;
-  const section = content.slice(start, end);
-  const updated = section.replace(/\*\*Status:\*\*\s*\S+/, `**Status:** ${newStatus}`);
-  return content.slice(0, start) + updated + content.slice(end);
-}
-
-function editNotes(content, taskId, notesText) {
-  const marker = `<!-- task-id: ${taskId} -->`;
-  const start = content.indexOf(marker);
-  const nextMarker = content.indexOf("<!-- task-id:", start + marker.length);
-  const end = nextMarker < 0 ? content.length : nextMarker;
-  const section = content.slice(start, end);
-  const updated = section.replace(
-    /<!-- notes:start -->[\s\S]*?<!-- notes:end -->/,
-    `<!-- notes:start -->\n${notesText}\n<!-- notes:end -->`,
-  );
-  return content.slice(0, start) + updated + content.slice(end);
-}
-
 async function runWithMock(baseDir, mockInvoke, overrides = {}) {
   const backend = { id: "mock", invoke: mockInvoke };
   return withSharedRuntimeEnv(baseDir, async () => {
@@ -112,13 +89,11 @@ test("manifest: run.json is written and matches outcome.manifest", async () => {
   writeAgentAndAssignment(dir);
 
   const outcome = await runWithMock(dir, async (ctx) => {
-    const absPlan = assignmentPathFromPrompt(ctx.prompt);
-    let plan = readFileSync(absPlan, "utf8");
-    for (const id of ["t1", "t2", "t3"]) {
-      plan = editStatus(plan, id, "completed");
-    }
-    plan = editNotes(plan, "t1", "first done");
-    writeFileSync(absPlan, plan, "utf8");
+    updateTasksForPrompt(ctx.prompt, {
+      t1: { status: "completed", notes: "first done" },
+      t2: { status: "completed" },
+      t3: { status: "completed" },
+    });
     return {
       exitCode: 0,
       signal: null,
@@ -172,15 +147,14 @@ test("manifest: attempt records snapshot state after each attempt", async () => 
   let call = 0;
   const outcome = await runWithMock(dir, async (ctx) => {
     call++;
-    const absPlan = assignmentPathFromPrompt(ctx.prompt);
-    let plan = readFileSync(absPlan, "utf8");
     if (call === 1) {
-      plan = editStatus(plan, "t1", "completed");
+      updateTasksForPrompt(ctx.prompt, { t1: { status: "completed" } });
     } else {
-      plan = editStatus(plan, "t2", "completed");
-      plan = editStatus(plan, "t3", "completed");
+      updateTasksForPrompt(ctx.prompt, {
+        t2: { status: "completed" },
+        t3: { status: "completed" },
+      });
     }
-    writeFileSync(absPlan, plan, "utf8");
     return {
       exitCode: 0,
       signal: null,
@@ -223,12 +197,10 @@ test("manifest: blocked run records status and captures final state", async () =
   writeAgentAndAssignment(dir);
 
   const outcome = await runWithMock(dir, async (ctx) => {
-    const absPlan = assignmentPathFromPrompt(ctx.prompt);
-    let plan = readFileSync(absPlan, "utf8");
-    plan = editStatus(plan, "t1", "completed");
-    plan = editStatus(plan, "t2", "blocked");
-    plan = editNotes(plan, "t2", "could not reach the server");
-    writeFileSync(absPlan, plan, "utf8");
+    updateTasksForPrompt(ctx.prompt, {
+      t1: { status: "completed" },
+      t2: { status: "blocked", notes: "could not reach the server" },
+    });
     return {
       exitCode: 0,
       signal: null,
@@ -278,12 +250,11 @@ test("manifest: captures effort override on the run metadata", async () => {
   const outcome = await runWithMock(
     dir,
     async (ctx) => {
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      let plan = readFileSync(absPlan, "utf8");
-      for (const id of ["t1", "t2", "t3"]) {
-        plan = editStatus(plan, id, "completed");
-      }
-      writeFileSync(absPlan, plan, "utf8");
+      updateTasksForPrompt(ctx.prompt, {
+        t1: { status: "completed" },
+        t2: { status: "completed" },
+        t3: { status: "completed" },
+      });
       return {
         exitCode: 0,
         signal: null,
@@ -298,46 +269,4 @@ test("manifest: captures effort override on the run metadata", async () => {
   );
 
   assert.equal(outcome.manifest.effort, "max");
-});
-
-test("manifest: invalid statuses are recorded on the attempt record", async () => {
-  const dir = tempDir();
-  writeAgentAndAssignment(dir);
-
-  let call = 0;
-  const outcome = await runWithMock(dir, async (ctx) => {
-    call++;
-    const absPlan = assignmentPathFromPrompt(ctx.prompt);
-    let plan = readFileSync(absPlan, "utf8");
-    if (call === 1) {
-      // write an invalid status on t1, real completed on t2/t3
-      plan = plan.replace(/(<!-- task-id: t1 -->[\s\S]*?\*\*Status:\*\*) pending/, "$1 done");
-      plan = editStatus(plan, "t2", "completed");
-      plan = editStatus(plan, "t3", "completed");
-    } else {
-      // correct it
-      plan = editStatus(plan, "t1", "completed");
-      plan = editStatus(plan, "t2", "completed");
-      plan = editStatus(plan, "t3", "completed");
-    }
-    writeFileSync(absPlan, plan, "utf8");
-    return {
-      exitCode: 0,
-      signal: null,
-      timedOut: false,
-      sessionId: null,
-      transcript: `attempt ${call}`,
-      rawStdout: "",
-      rawStderr: "",
-    };
-  });
-
-  assert.equal(outcome.exitCode, 0);
-  const first = outcome.manifest.attemptRecords[0];
-  assert.equal(first.invalidStatuses.length, 1);
-  assert.equal(first.invalidStatuses[0].taskId, "t1");
-  assert.equal(first.invalidStatuses[0].rawValue, "done");
-
-  const second = outcome.manifest.attemptRecords[1];
-  assert.equal(second.invalidStatuses.length, 0);
 });

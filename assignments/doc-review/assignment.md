@@ -1,7 +1,6 @@
 ---
 schemaVersion: 1
 name: doc-review
-taskMode: cli
 vars:
   repo_path:
     type: string

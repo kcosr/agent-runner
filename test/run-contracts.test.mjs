@@ -27,7 +27,7 @@ function buildManifest(overrides = {}) {
   };
 
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     runId: "run123",
     agent: {
       name: "demo-agent",
@@ -50,7 +50,6 @@ function buildManifest(overrides = {}) {
     timeoutSec: 3600,
     assignmentPath: "/state/runs/demo/run123/assignment.md",
     workspaceDir: "/state/runs/demo/run123",
-    taskMode: undefined,
     startedAt: "2026-04-12T10:00:00.000Z",
     endedAt: null,
     archivedAt: null,
@@ -69,7 +68,6 @@ function buildManifest(overrides = {}) {
         kind: "embedded",
       },
     },
-    pendingPrompt: "Prompt body",
     callerInstructions: "Caller docs",
     attachments: [],
     resetSeed: {
@@ -80,7 +78,6 @@ function buildManifest(overrides = {}) {
       unrestricted: false,
       timeoutSec: 3600,
       maxAttempts: 2,
-      pendingPrompt: "Prompt body",
       finalTasks,
     },
     finalTasks,
@@ -198,7 +195,6 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
     name: "demo session",
     backendSessionId: "sess-123",
     cwd: "/repo",
-    taskMode: "file",
     unrestricted: false,
     timeoutSec: 3600,
     startedAt: "2026-04-12T10:00:00.000Z",
@@ -230,7 +226,6 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
     ],
     message: "Finish the task list.",
     callerInstructions: "Caller docs",
-    pendingPrompt: "Prompt body",
     lockedFields: ["backend"],
     runtimeVars: { repo_path: "." },
     execution: {
@@ -366,34 +361,22 @@ test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mu
     },
   });
 
-  const runningFileMode = deriveRunCapabilities(
+  const running = deriveRunCapabilities(
     buildManifest({
       status: "running",
     }),
   );
-  assert.deepEqual(runningFileMode, {
+  assert.deepEqual(running, {
     canArchive: false,
     canUnarchive: false,
     canResume: false,
     canAbort: false,
     abortReason: "not_active_in_daemon",
     taskMutation: {
-      canSetStatus: false,
-      canEditNotes: false,
+      canSetStatus: true,
+      canEditNotes: true,
       canAdd: false,
     },
-  });
-
-  const runningCliMode = deriveRunCapabilities(
-    buildManifest({
-      status: "running",
-      taskMode: "cli",
-    }),
-  );
-  assert.deepEqual(runningCliMode.taskMutation, {
-    canSetStatus: true,
-    canEditNotes: true,
-    canAdd: false,
   });
 
   const passive = deriveRunCapabilities(

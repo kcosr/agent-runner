@@ -1,7 +1,6 @@
 ---
 schemaVersion: 1
 name: code-review
-taskMode: cli
 vars:
   repo_path:
     type: string
@@ -22,20 +21,15 @@ vars:
         - `HEAD~N..HEAD`                — N commits back to HEAD
         - `main..<branch>`              — branch divergence
         - any other git range spec      — passed through to git
-  implementation_plan:
+  implementation_run_id:
     type: string
-    required: false
+    required: true
     source: cli
-    default: ""
     description: |
-      Optional absolute path to a task-runner workspace
-      `assignment.md` representing the implementation plan the
-      work under review was produced from. When set, the reviewer
-      adds a plan-coverage pass that verifies every task in the
-      plan actually shipped — catching silent deferrals, dropped
-      review fixes, and unplanned scope creep. Leave unset for
-      reviews that are not driven by a `plan-feature` run; the
-      plan-coverage task becomes a no-op in that case.
+      Canonical task-runner run id for the implementation run
+      being reviewed. The reviewer reads the implementation run's
+      canonical task state and attachments by run id for the
+      plan-coverage pass.
 callerInstructions: |
   This run produces a structured code review in the task notes,
   gated by an explicit ship / no-ship decision at the end. Read
@@ -61,14 +55,12 @@ callerInstructions: |
       {{task_runner_cmd}} status {{run_id}} --output-format json \
         --field tasks | jq -r '.tasks[] | select(.id=="approval") | .notes'
 
-  If this review was launched with `--var implementation_plan=<path>`
-  — typically from a `plan-feature`-generated implementer run —
-  the reviewer verifies that every task in the referenced plan
-  actually landed in the diff under review. Silent deferrals and
-  dropped review fixes are flagged at HIGH/CRITICAL severity,
-  and any unresolved HIGH/CRITICAL from the plan-coverage pass
-  blocks `approval`. Runs launched without the var skip the
-  plan-coverage pass cleanly.
+  This review expects `--var implementation_run_id=<run-id>`.
+  The reviewer verifies that every task in the referenced
+  implementation run actually landed in the diff under review.
+  Silent deferrals and dropped review fixes are flagged at
+  HIGH/CRITICAL severity, and any unresolved HIGH/CRITICAL from
+  the plan-coverage pass blocks `approval`.
 
   ## Reviewing findings
 
@@ -175,25 +167,20 @@ tasks:
           review, *also* read each touched file in full (not just
           the diff) so you can judge the change in context.
 
-      Third, if this review was launched from a plan-driven
-      implementer run and that run carries an attachment named
+      Third, inspect the implementation run and, if it carries an
+      attachment named
       `assignment-summary.md`, download it to a temp directory and
       review it for supplemental context. The summary is
       supplemental only; the authoritative review inputs remain
       the repository state, the requested scope, and
-      `implementation_plan` when it is provided.
+      `implementation_run_id`.
 
-      Derive the implementer workspace from
-      `implementation_plan` when that var is set:
-
-          workspace_dir="$(dirname "{{implementation_plan}}")"
-          {{task_runner_cmd}} attachment list "$workspace_dir"
+          {{task_runner_cmd}} attachment list "{{implementation_run_id}}"
           mkdir -p /tmp/task-runner-review-artifacts-{{run_id}}
-          {{task_runner_cmd}} attachment download "$workspace_dir" <summary-attachment-id> /tmp/task-runner-review-artifacts-{{run_id}}/
+          {{task_runner_cmd}} attachment download "{{implementation_run_id}}" <summary-attachment-id> /tmp/task-runner-review-artifacts-{{run_id}}/
 
-      If `implementation_plan` is empty or the run has no
-      `assignment-summary.md` attachment, continue without
-      blocking.
+      If the implementation run has no `assignment-summary.md`
+      attachment, continue without blocking.
 
       Notes: a 5-10 line summary of what the project is, its
       major modules, and — if scoped — the concrete set of files
@@ -433,22 +420,13 @@ tasks:
   - id: plan_coverage
     title: Plan coverage verification
     body: |
-      This task is conditional on the `implementation_plan` var.
-      Its value for this run is:
+      Read the implementation run's canonical task state:
 
-          {{implementation_plan}}
+          {{task_runner_cmd}} status {{implementation_run_id}} --output-format json --field tasks
 
-      If the indented line above is blank (nothing after the
-      four-space indent), no implementation plan was provided —
-      write "No implementation plan provided; plan-coverage pass skipped."
-      in Notes, mark this task `completed`, and move on. Do not
-      invent findings for a skipped pass.
-
-      Otherwise, read the file at the path above. It is a
-      task-runner workspace `assignment.md` for an implementer run
-      that claims to have finished the work you are now reviewing.
-      Your job is to verify that what shipped matches what was
-      planned, with no silent deferrals.
+      Your job is to verify that what shipped matches what the
+      implementation run claimed to complete, with no silent
+      deferrals.
 
       Also check the plan for explicit design constraints.
       When the plan or repo conventions say to avoid fallback
@@ -682,14 +660,14 @@ tasks:
         - Any finding at HIGH or CRITICAL severity from
           `architecture` through `plan_coverage`
           is unresolved in the current diff.
-        - `plan_coverage` (if it ran) surfaced any HIGH or
+        - `plan_coverage` surfaced any HIGH or
           CRITICAL finding that is not resolved.
         - The `synthesis` recommendation is "block" or "ship
           with changes" — both mean more work is required.
         - You were unable to trace a finding deeply enough to
           judge whether it is real. Uncertainty blocks.
-        - Any assumption from the implementation plan (if one
-          was provided via `implementation_plan`) appears to
+        - Any assumption from the implementation run identified
+          by `implementation_run_id` appears to
           have broken silently during execution and you have
           not confirmed with the caller that the break is
           intentional.
@@ -703,8 +681,7 @@ tasks:
           the caller upstream with a written justification —
           typically in the resume follow-up message that
           triggered this delta pass.
-        - The `plan_coverage` pass either did not run (no
-          plan provided) or ran cleanly with no HIGH /
+        - The `plan_coverage` pass ran cleanly with no HIGH /
           CRITICAL findings open.
         - The `synthesis` recommendation is "ship."
         - You personally would stand behind this change
@@ -742,8 +719,8 @@ tasks:
 ---
 You are reviewing the repository at `{{repo_path}}` with scope
 `{{range}}`. Treat `{{repo_path}}` as the root for everything you
-read. Do not modify any file inside that repo — the only file you
-should write is your workspace plan at `{{assignment_path}}`.
+read. Do not modify any file inside that repo. Use the task CLI as
+the task interface for this run; do not rely on workspace files.
 
 Work the tasks in order. Earlier tasks build context the later
 ones depend on — don't skip ahead. The synthesis task at the end
@@ -825,8 +802,7 @@ findings, do **not** re-walk all 14 tasks from scratch. Instead:
    original findings (including any plan-coverage findings)
    intact there as an audit trail and put the delta in
    `synthesis` only.
-   If an implementation plan was provided for the original run,
-   re-verify plan coverage against the post-fix diff as part of
+   Re-verify plan coverage against the post-fix diff as part of
    step 3 — a plan-coverage finding that was originally HIGH
    because scope was deferred becomes "resolved" once the
    scope lands, or remains open if it did not.

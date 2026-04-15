@@ -1,7 +1,6 @@
 ---
 schemaVersion: 1
 name: plan-feature
-taskMode: cli
 maxRetries: 4
 vars:
   repo_path:
@@ -48,8 +47,8 @@ callerInstructions: |
        `lockedFields: [tasks]` line stays in the frontmatter.
     3. Runs the bundled `plan-review` assignment against the
        draft, passing both the draft path and the planner's own
-       workspace `assignment.md` so the reviewer can validate
-       the draft against the planning evidence. The planner
+       run id so the reviewer can validate the draft against
+       the planning evidence. The planner
        applies fixes and reruns the draft review until it is
        approved.
     4. Produces a human-facing summary next to the approved
@@ -107,9 +106,10 @@ callerInstructions: |
   remains the planner's source artifact, and the planning run
   also carries it as `assignment-seed.md` plus the human-facing
   `assignment-summary.md` attachment. Once a later `init`
-  succeeds, the canonical execution artifact becomes the
-  workspace `assignment.md` inside the new run directory. Edits
-  to the draft file after init have no effect on the run.
+  succeeds, the canonical execution artifact becomes the new
+  implementer run id plus its canonical task state in
+  `run.json`. Edits to the draft file after init have no
+  effect on the run.
 tasks:
   - id: orient
     title: Target repo orientation and conventions
@@ -548,7 +548,7 @@ tasks:
         - Keep a dedicated internal-review task that
           launches `{{task_runner_cmd}} run --agent code-reviewer
           --assignment code-review --var
-          implementation_plan={{assignment_path}} ...` so
+          implementation_run_id={{run_id}} ...` so
           the reviewer sees the full plan context.
         - Keep a dedicated fresh-eyes simplification task
           that runs *before* the internal review — the
@@ -585,7 +585,7 @@ tasks:
           plan's first task — paste a 3-5 sentence summary
           of the feature from your `capture_feature` notes (what it is,
           why, in-scope, out-of-scope). The reviewer reads
-          this via `implementation_plan` to know what it is
+          this via `implementation_run_id` to know what it is
           verifying.
         - `<<PLACEHOLDER_FEATURE_CONTRACT>>` in the same
           task — paste the entire contract artifact from
@@ -617,7 +617,9 @@ tasks:
       Before launching the draft review, finalize the planning
       evidence the reviewer depends on:
 
-        1. Open this run's workspace `assignment.md` and scan
+        1. Inspect this run's task state with
+           `{{task_runner_cmd}} status {{run_id}} --output-format json --field tasks`
+           and scan every task above this one.
            every task above this one.
         2. Every prior task must have status `completed`.
            If a prior task is still `in_progress`, `pending`,
@@ -625,7 +627,8 @@ tasks:
         3. Every prior task must have a non-empty Notes block
            with concrete evidence: repo file paths, commands,
            contract details, reusable code references, and
-           risks. The draft reviewer uses this workspace as
+           risks. The draft reviewer uses this run's canonical
+           task state as
            ground truth for the feature brief, contract, and
            assumptions.
         4. Do not launch the draft reviewer against a half-
@@ -642,13 +645,13 @@ tasks:
             --name <short-descriptive-name> \
             --var repo_path={{repo_path}} \
             --var plan_draft=<draft-path-from-draft_plan> \
-            --var planning_workspace={{assignment_path}}
+            --var planning_run_id={{run_id}}
 
       The reviewer reads both artifacts:
         - `plan_draft` is the exact draft the caller will init.
-        - `planning_workspace` is this planner run's own
-          workspace assignment, which contains the captured
-          brief, contract, risks, and assumptions.
+        - `planning_run_id` is this planner run's own run id,
+          which exposes the captured brief, contract, risks,
+          and assumptions through canonical task state.
 
       Set `--name` to the same short topic label you expect the
       caller to use for the eventual implementer run:
@@ -898,7 +901,7 @@ tasks:
       - that the later `init` stdout/stderr will produce the new
         run id
       - that after the later `init` succeeds, the canonical
-        artifact becomes the new run workspace `assignment.md`
+        execution surface is the new run id plus `task-runner brief <new-run-id>`
       - that the planner should attach the same two artifacts to
         the new run immediately after creation
   - id: handoff
@@ -967,7 +970,7 @@ Do not fabricate scope.
 Work on the repository at `{{repo_path}}`. You may read any
 file under that repo freely. Do not modify any file under
 `{{repo_path}}` — the only files you should write are:
-  - Your own workspace plan at `{{assignment_path}}`.
+  - This run's canonical task state via the task CLI.
   - The draft plan file you create in `draft_plan` under
     `${TASK_RUNNER_STATE_DIR}/drafts/<repo-name>/`.
 
