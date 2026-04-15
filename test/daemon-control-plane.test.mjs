@@ -1117,6 +1117,199 @@ test("daemon run projections expose explicit abort capability from local ownersh
   }
 });
 
+test("daemon projects active run detail as live while it owns the run", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  const runId = "daemon-live-detail";
+  let status = "initialized";
+
+  const server = await serveDaemon(listenUrl, {
+    getRun() {
+      return {
+        runId,
+        repo: "task-runner",
+        status,
+        effectiveStatus: status,
+        archivedAt: null,
+        isLive: false,
+        workspaceDir: "/tmp/fake",
+        assignmentPath: "/tmp/fake/assignment.md",
+        agent: {
+          name: "daemon-agent",
+          sourcePath: null,
+        },
+        assignment: {
+          name: "daemon-work",
+          sourcePath: "/tmp/fake/source.md",
+          workspacePath: "/tmp/fake/assignment.md",
+        },
+        backend: "codex",
+        model: "gpt-5.4",
+        effort: "high",
+        name: "Daemon live detail",
+        backendSessionId: "thread-1",
+        cwd: "/tmp/fake",
+        unrestricted: false,
+        timeoutSec: 3600,
+        startedAt: "2026-04-13T05:00:00.000Z",
+        endedAt: null,
+        exitCode: null,
+        attempts: 1,
+        maxAttempts: 1,
+        sessionCount: 1,
+        tasksCompleted: 0,
+        tasksTotal: 1,
+        activeTask: null,
+        attachments: [],
+        dependencies: [],
+        dependents: [],
+        tasks: [
+          {
+            id: "t1",
+            title: "First",
+            body: "",
+            status: "pending",
+            notes: "",
+          },
+        ],
+        message: null,
+        callerInstructions: null,
+        lockedFields: [],
+        runtimeVars: {},
+        execution: {
+          hostMode: "daemon",
+          controller: {
+            kind: "daemon",
+            daemonInstanceId: "daemon-placeholder",
+          },
+        },
+        capabilities: {
+          canArchive: false,
+          canUnarchive: false,
+          canResume: false,
+          canAbort: false,
+          abortReason: "not_active_in_daemon",
+          taskMutation: {
+            canSetStatus: false,
+            canEditNotes: false,
+            canAdd: false,
+          },
+        },
+      };
+    },
+    getRunList() {
+      return [
+        {
+          runId,
+          repo: "task-runner",
+          status,
+          effectiveStatus: status,
+          archivedAt: null,
+          agentName: "daemon-agent",
+          name: "Daemon live detail",
+          assignmentName: "daemon-work",
+          backend: "codex",
+          model: "gpt-5.4",
+          cwd: "/tmp/fake",
+          startedAt: "2026-04-13T05:00:00.000Z",
+          endedAt: null,
+          tasksCompleted: 0,
+          tasksTotal: 1,
+          attachmentCount: 0,
+          dependencyState: {
+            ready: true,
+            total: 0,
+            satisfied: 0,
+            unsatisfied: 0,
+          },
+          activeTask: null,
+          execution: {
+            hostMode: "daemon",
+            controller: {
+              kind: "daemon",
+              daemonInstanceId: "daemon-placeholder",
+            },
+          },
+          capabilities: {
+            canArchive: false,
+            canUnarchive: false,
+            canResume: false,
+            canAbort: false,
+            abortReason: "not_active_in_daemon",
+            taskMutation: {
+              canSetStatus: false,
+              canEditNotes: false,
+              canAdd: false,
+            },
+          },
+        },
+      ];
+    },
+    async startRun({ emitEvent, abortSignal }) {
+      status = "running";
+      emitEvent({
+        type: "run_started",
+        runId,
+        agentName: "daemon-agent",
+        assignmentSourcePath: null,
+        assignmentPath: "/tmp/fake/assignment.md",
+        name: "Daemon live detail",
+        cwd: process.cwd(),
+        sessionIndex: 0,
+      });
+      await new Promise((resolve) => {
+        abortSignal.addEventListener(
+          "abort",
+          () => {
+            status = "aborted";
+            emitEvent({ type: "run_aborted" });
+            emitEvent({
+              type: "run_finished",
+              summary: {
+                status: "aborted",
+                attempts: 1,
+                maxAttempts: 1,
+                tasksCompleted: 0,
+                tasksTotal: 1,
+                assignmentPath: "/tmp/fake/assignment.md",
+                tasks: [],
+                runId,
+              },
+            });
+            resolve();
+          },
+          { once: true },
+        );
+      });
+      return { runId };
+    },
+  });
+
+  try {
+    const started = await httpJson(httpBaseUrl, "/api/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ cliVars: {}, overrides: {} }),
+    });
+    assert.equal(started.status, 200);
+    assert.equal(started.body.runId, runId);
+
+    const detail = await httpJson(httpBaseUrl, `/api/runs/${runId}`);
+    assert.equal(detail.status, 200);
+    assert.equal(detail.body.run.status, "running");
+    assert.equal(detail.body.run.isLive, true);
+    assert.equal(detail.body.run.capabilities.canAbort, true);
+    assert.equal(detail.body.run.capabilities.abortReason, undefined);
+
+    const aborted = await httpJson(httpBaseUrl, `/api/runs/${runId}/abort`, { method: "POST" });
+    assert.equal(aborted.status, 200);
+    assert.equal(aborted.body.accepted, true);
+  } finally {
+    await server.close();
+  }
+});
+
 test("daemon subscriptions fan out run events and abort active runs", async () => {
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;

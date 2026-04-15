@@ -31,6 +31,7 @@ import {
   StopIcon,
   TrashIcon,
 } from "./icons.js";
+import { MarkdownContent } from "./markdown.js";
 import { RunTaskList } from "./run-task-list.js";
 import { StatusBadge } from "./status-badge.js";
 
@@ -104,7 +105,28 @@ function attemptOutput(attempt: {
   transcript: string;
   notices: string;
 }) {
-  return `${attempt.transcript}${attempt.notices}`;
+  if (!attempt.transcript || !attempt.notices) {
+    return `${attempt.transcript}${attempt.notices}`;
+  }
+
+  let trailing = 0;
+  for (let index = attempt.transcript.length - 1; index >= 0; index--) {
+    if (attempt.transcript[index] !== "\n") {
+      break;
+    }
+    trailing += 1;
+  }
+
+  let leading = 0;
+  for (const character of attempt.notices) {
+    if (character !== "\n") {
+      break;
+    }
+    leading += 1;
+  }
+
+  const separator = "\n".repeat(Math.max(0, 2 - trailing - leading));
+  return `${attempt.transcript}${separator}${attempt.notices}`;
 }
 
 export function RunDetailDrawer({
@@ -626,7 +648,7 @@ export function RunDetailDrawer({
               onClick={() => setSection("events")}
               type="button"
             >
-              Events
+              Attempts
             </button>
           </nav>
 
@@ -891,7 +913,7 @@ export function RunDetailDrawer({
           ) : null}
 
           {section === "events" ? (
-            <section aria-label="Events" className="drawer-panel drawer-panel--events">
+            <section aria-label="Attempts" className="drawer-panel drawer-panel--events">
               <div className="drawer-panel-card timeline-panel">
                 {timelineState.stale ? (
                   <div className="notice" data-tone="warning">
@@ -915,7 +937,6 @@ export function RunDetailDrawer({
 
                 {timelineAttempts.length > 1 ? (
                   <div className="timeline-attempts">
-                    <span className="timeline-attempts__label">Attempts</span>
                     <div className="timeline-attempt-tabs" role="tablist" aria-label="Attempts">
                       {timelineAttempts.map((attempt) => (
                         <button
@@ -942,23 +963,6 @@ export function RunDetailDrawer({
 
                 {selectedAttemptRecord ? (
                   <div className="timeline-attempt-panel">
-                    <div className="timeline-attempt-meta">
-                      <span>Attempt {selectedAttemptRecord.attempt}</span>
-                      <span>Session {selectedAttemptRecord.sessionIndex}</span>
-                      <span>{formatTimestamp(selectedAttemptRecord.startedAt)}</span>
-                      {selectedAttemptRecord.endedAt ? (
-                        <span>Ended {formatTimestamp(selectedAttemptRecord.endedAt)}</span>
-                      ) : null}
-                      <span>
-                        Exit{" "}
-                        {selectedAttemptRecord.exitCode === null
-                          ? selectedAttemptRecord.live
-                            ? "pending"
-                            : "n/a"
-                          : String(selectedAttemptRecord.exitCode)}
-                      </span>
-                    </div>
-
                     <div className="task-tabs" role="tablist" aria-label="Attempt view">
                       <button
                         aria-selected={timelineTab === "prompt"}
@@ -982,16 +986,22 @@ export function RunDetailDrawer({
 
                     {timelineTab === "prompt" ? (
                       selectedAttemptRecord.prompt ? (
-                        <pre className="timeline-content" aria-label="Attempt prompt">
-                          {selectedAttemptRecord.prompt}
-                        </pre>
+                        <section aria-label="Attempt prompt">
+                          <MarkdownContent
+                            className="timeline-content"
+                            text={selectedAttemptRecord.prompt}
+                          />
+                        </section>
                       ) : (
                         <p className="task-empty">This attempt did not record a prompt.</p>
                       )
                     ) : attemptOutput(selectedAttemptRecord) ? (
-                      <pre className="timeline-content" aria-label="Attempt output">
-                        {attemptOutput(selectedAttemptRecord)}
-                      </pre>
+                      <section aria-label="Attempt output">
+                        <MarkdownContent
+                          className="timeline-content"
+                          text={attemptOutput(selectedAttemptRecord)}
+                        />
+                      </section>
                     ) : (
                       <p className="task-empty">
                         {selectedAttemptRecord.live

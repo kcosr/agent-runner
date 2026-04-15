@@ -475,14 +475,6 @@ body {
   gap: 12px;
 }
 
-.timeline-attempts__label {
-  color: var(--muted-foreground);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
 .timeline-attempt-tabs {
   display: flex;
   flex-wrap: wrap;
@@ -516,28 +508,12 @@ body {
   animation: timeline-pulse 1.2s ease-in-out infinite;
 }
 
-.timeline-attempt-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 12px;
-  color: var(--muted-foreground);
-  font-family: var(--mono);
-  font-size: 12px;
-}
-
 .timeline-content {
-  margin: 0;
   padding: 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--secondary);
-  color: var(--foreground);
-  font-family: var(--mono);
-  font-size: 12px;
-  line-height: 1.5;
   overflow-x: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
 }
 
 @keyframes timeline-pulse {

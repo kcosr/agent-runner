@@ -724,7 +724,7 @@ describe("web app", () => {
     expect(screen.getByRole("button", { name: /copy run id/i })).toBeInTheDocument();
   });
 
-  it("renders attempt history in the events tab and merges live output by cursor", async () => {
+  it("renders attempt history in the attempts tab and merges live output by cursor", async () => {
     installFetchMock({
       runs: [makeRun()],
       details: { "run-1": makeDetail() },
@@ -750,9 +750,9 @@ describe("web app", () => {
               sessionIndex: 1,
               startedAt: "2026-04-13T05:03:00.000Z",
               endedAt: null,
-              prompt: "Continue working",
+              prompt: "## Continue working",
               transcript: "Streaming",
-              notices: " warning\n",
+              notices: "\n\n- warning\n",
               exitCode: null,
               timedOut: false,
               live: true,
@@ -765,20 +765,25 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
-    await user.click(screen.getByRole("button", { name: "Events" }));
+    await user.click(screen.getByRole("button", { name: "Attempts" }));
 
     const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
     timelineSource.emitOpen();
 
-    expect(await screen.findByText("Attempts")).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Attempts" })).toBeInTheDocument();
+    expect(await screen.findByRole("tab", { name: "1" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "2" })).toBeInTheDocument();
+    expect(screen.queryByText("Session 1")).not.toBeInTheDocument();
 
-    const output = await screen.findByLabelText("Attempt output");
-    expect(output).toHaveTextContent("Streaming warning");
+    const output = await screen.findByRole("region", { name: "Attempt output" });
+    expect(output).toHaveTextContent("Streaming");
+    expect(within(output).getByText("warning")).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Prompt" }));
-    expect(screen.getByLabelText("Attempt prompt")).toHaveTextContent("Continue working");
+    const prompt = screen.getByRole("region", { name: "Attempt prompt" });
+    expect(
+      within(prompt).getByRole("heading", { level: 2, name: "Continue working" }),
+    ).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Output" }));
     timelineSource.emitMessage({
@@ -791,8 +796,53 @@ describe("web app", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByLabelText("Attempt output")).toHaveTextContent("Streaming live warning");
+      expect(screen.getByRole("region", { name: "Attempt output" })).toHaveTextContent(
+        "Streaming live warning",
+      );
     });
+  });
+
+  it("separates transcript and backend notices instead of gluing them together", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+      timelineHistories: {
+        "run-1": {
+          runId: "run-1",
+          lastCursor: 1,
+          attempts: [
+            {
+              attempt: 1,
+              sessionIndex: 0,
+              startedAt: "2026-04-13T05:00:00.000Z",
+              endedAt: "2026-04-13T05:02:00.000Z",
+              prompt: "Prompt",
+              transcript: "nullable access:",
+              notices: "Good - assignment is indeed nullable on RunDetail.\n\nNow the next note.",
+              exitCode: 0,
+              timedOut: false,
+              live: false,
+            },
+          ],
+        },
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+    await user.click(screen.getByRole("button", { name: "Attempts" }));
+
+    const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
+    timelineSource.emitOpen();
+
+    const output = await screen.findByRole("region", { name: "Attempt output" });
+    expect(output).not.toHaveTextContent("nullable access:Good");
+    expect(within(output).getByText("nullable access:")).toBeInTheDocument();
+    expect(
+      within(output).getByText("Good - assignment is indeed nullable on RunDetail."),
+    ).toBeInTheDocument();
+    expect(within(output).getByText("Now the next note.")).toBeInTheDocument();
   });
 
   it("reloads timeline history after a cursor gap instead of merging heuristically", async () => {
@@ -836,12 +886,14 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
-    await user.click(screen.getByRole("button", { name: "Events" }));
+    await user.click(screen.getByRole("button", { name: "Attempts" }));
 
     const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
     timelineSource.emitOpen();
 
-    expect(await screen.findByLabelText("Attempt output")).toHaveTextContent("Before gap");
+    expect(await screen.findByRole("region", { name: "Attempt output" })).toHaveTextContent(
+      "Before gap",
+    );
 
     const initialAttempt = timelineHistory.attempts[0];
     if (!initialAttempt) {
@@ -864,7 +916,9 @@ describe("web app", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByLabelText("Attempt output")).toHaveTextContent("After reload");
+      expect(screen.getByRole("region", { name: "Attempt output" })).toHaveTextContent(
+        "After reload",
+      );
     });
     expect(
       fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/api/runs/run-1/timeline"))

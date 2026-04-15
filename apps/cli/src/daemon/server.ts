@@ -164,6 +164,16 @@ function withDaemonAbortCapability<T extends RunSummary | RunDetail>(
   };
 }
 
+function withDaemonDetailProjection(
+  run: RunDetail,
+  activeRuns: Map<string, ActiveRunRecord>,
+): RunDetail {
+  return {
+    ...withDaemonAbortCapability(run, activeRuns),
+    isLive: activeRuns.has(run.runId),
+  };
+}
+
 function packageVersion(): string {
   const raw = readFileSync(new URL("../../package.json", import.meta.url), "utf8");
   const parsed = JSON.parse(raw) as { version?: string };
@@ -322,7 +332,7 @@ export async function serveDaemon(
   };
 
   const getDaemonRun = (target: string): RunDetail =>
-    withDaemonAbortCapability(app.getRun(target), activeRuns);
+    withDaemonDetailProjection(app.getRun(target), activeRuns);
   const getDaemonRunList = (opts?: Parameters<typeof app.getRunList>[0]): RunSummary[] =>
     app.getRunList(opts).map((run) => withDaemonAbortCapability(run, activeRuns));
 

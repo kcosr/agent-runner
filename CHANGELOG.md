@@ -75,6 +75,7 @@
 
 ### Changed
 
+- The web timeline drawer now uses an `Attempts` section label, drops the redundant per-attempt metadata header, and renders attempt prompts/output as Markdown so streamed transcripts can progressively format in place.
 - The web dashboard now applies live `RunSummary` and `RunDetail` snapshots directly to the board/detail caches, so card progress, attachment/dependency badges, and active-task labels update from streamed projections without relying on selected-run invalidation. ([#35](https://github.com/kcosr/task-runner/pull/35))
 - Polished the web detail drawer's Attachments and Dependencies tabs: attachment rows now render with the shared row card styling and human-readable sizes (e.g. `2.1 MB`), dependency rows show a status badge instead of plain-text status, destructive actions use the destructive-outline button tone, and empty "Depends on" / "Required by" sections are hidden instead of showing duplicate empty-state copy. ([#32](https://github.com/kcosr/task-runner/pull/32))
 - Kanban run cards now surface dependency readiness and attachment presence directly in the card metadata row so planning artifacts and blocked prerequisites are visible without opening the drawer. ([#32](https://github.com/kcosr/task-runner/pull/32))
