@@ -234,6 +234,7 @@ event bus:
 
 - global summary stream: `/api/events/run-summaries`
 - per-run detail stream: `/api/runs/:runId/events/detail`
+- per-run timeline history query: `/api/runs/:runId/timeline`
 - per-run timeline stream: `/api/runs/:runId/events/timeline`
 
 The WebSocket subscription contract mirrors that split:
@@ -246,12 +247,14 @@ Notifications are likewise explicit:
 
 - `run.summary` carries a fresh `RunSummary`
 - `run.detail` carries a fresh `RunDetail`
-- `run.timeline` carries one execution `RunTimelineEvent`
+- `run.timeline` carries one `RunTimelineEnvelope` (`runId`, `cursor`, `event`)
 
 This keeps board/detail projections manifest-canonical while preserving the
 execution timeline as a separate per-run surface. `RunSummary` and `RunDetail`
 both expose derived `activeTask` data so live consumers do not need to re-scan
-task arrays to render the current in-progress task label.
+task arrays to render the current in-progress task label. Timeline consumers
+subscribe first, fetch `/api/runs/:runId/timeline`, then apply buffered live
+envelopes where `cursor > history.lastCursor`.
 
 ## Workspace Layout
 

@@ -16,6 +16,7 @@ export interface RunDetailStreamEvent {
 // Execution timeline events stay on the per-run timeline surface.
 export type RunTimelineEvent = RunEvent;
 
+// One normalized attempt snapshot in the per-run timeline history response.
 export interface RunTimelineAttempt {
   attempt: number;
   sessionIndex: number;
@@ -29,12 +30,14 @@ export interface RunTimelineAttempt {
   live: boolean;
 }
 
+// Bootstrap payload for per-run timeline consumers before live continuation.
 export interface RunTimelineHistory {
   runId: string;
   attempts: RunTimelineAttempt[];
   lastCursor: number;
 }
 
+// Live per-run timeline payload shared by SSE and WebSocket subscribers.
 export interface RunTimelineEnvelope {
   runId: string;
   cursor: number;
