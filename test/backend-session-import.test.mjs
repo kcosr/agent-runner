@@ -10,7 +10,7 @@ import {
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js";
 import { InvalidBackendSessionError, runAgent } from "../packages/core/dist/core/run/run-loop.js";
-import { assignmentPathFromPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
+import { setTaskStatusesForPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 // ─── claude cwd-encoding helper ─────────────────────────────────────────────
 
@@ -73,16 +73,6 @@ function writeAssignment(baseDir, name, body) {
   writeFileSync(join(dir, "assignment.md"), body);
 }
 
-function editStatus(content, taskId, newStatus) {
-  const marker = `<!-- task-id: ${taskId} -->`;
-  const start = content.indexOf(marker);
-  const nextMarker = content.indexOf("<!-- task-id:", start + marker.length);
-  const end = nextMarker < 0 ? content.length : nextMarker;
-  const section = content.slice(start, end);
-  const updated = section.replace(/\*\*Status:\*\*\s*\S+/, `**Status:** ${newStatus}`);
-  return content.slice(0, start) + updated + content.slice(end);
-}
-
 /**
  * A backend mock with an explicit `validateSessionId` and a capture
  * surface so the test can assert what the runner forwarded.
@@ -93,9 +83,7 @@ function importableBackend({ validate, captured }) {
     validateSessionId: validate,
     async invoke(ctx) {
       captured.resumeSessionId = ctx.resumeSessionId;
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      const plan = readFileSync(absPlan, "utf8");
-      writeFileSync(absPlan, editStatus(plan, "t1", "completed"), "utf8");
+      setTaskStatusesForPrompt(ctx.prompt, { t1: "completed" });
       return {
         exitCode: 0,
         signal: null,
@@ -305,9 +293,7 @@ test("import: backends without validateSessionId are treated as 'always valid'",
     // No validateSessionId at all.
     async invoke(ctx) {
       captured.resumeSessionId = ctx.resumeSessionId;
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      const plan = readFileSync(absPlan, "utf8");
-      writeFileSync(absPlan, editStatus(plan, "t1", "completed"), "utf8");
+      setTaskStatusesForPrompt(ctx.prompt, { t1: "completed" });
       return {
         exitCode: 0,
         signal: null,
@@ -372,9 +358,7 @@ test("import: task-runner-created cursor runs reuse the captured backend session
         supportsBootstrapSessionImport: false,
         async invoke(ctx) {
           firstCalls.push(ctx.resumeSessionId ?? null);
-          const absPlan = assignmentPathFromPrompt(ctx.prompt);
-          const plan = readFileSync(absPlan, "utf8");
-          writeFileSync(absPlan, editStatus(plan, "t1", "completed"), "utf8");
+          setTaskStatusesForPrompt(ctx.prompt, { t1: "completed" });
           return {
             exitCode: 0,
             signal: null,
@@ -409,12 +393,11 @@ test("import: task-runner-created cursor runs reuse the captured backend session
           supportsBootstrapSessionImport: false,
           async invoke(ctx) {
             secondCalls.push(ctx.resumeSessionId ?? null);
-            const plan = readFileSync(target.manifest.assignmentPath, "utf8");
-            writeFileSync(
-              target.manifest.assignmentPath,
-              editStatus(plan, "t1", "completed"),
-              "utf8",
-            );
+            const manifestPath = join(target.workspaceDir, "run.json");
+            const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+            manifest.finalTasks.t1.status = "completed";
+            manifest.tasksCompleted = 1;
+            writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
             return {
               exitCode: 0,
               signal: null,

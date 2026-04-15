@@ -40,7 +40,6 @@ export function renderRunStatus(detail: RunDetail): string {
   }
   lines.push(`Cwd: ${detail.cwd}`);
   lines.push(`Workspace: ${detail.workspaceDir}`);
-  lines.push(`Assignment file: ${detail.assignmentPath}`);
   lines.push(`Started: ${detail.startedAt}`);
   if (detail.endedAt) {
     lines.push(`Ended: ${detail.endedAt}`);
@@ -100,17 +99,7 @@ export function renderRunStatus(detail: RunDetail): string {
 
   if (detail.status === "running") {
     lines.push("");
-    if (detail.taskMode === "cli") {
-      lines.push(
-        "(task statuses above come from canonical run.json task state; assignment.md is rendered for audit only)",
-      );
-    } else if (detail.isLive) {
-      lines.push(
-        "(task statuses above are read live from the workspace assignment.md; the current attempt may still be in progress)",
-      );
-    } else {
-      lines.push("(run is still in progress; status reflects the most recent persisted attempt)");
-    }
+    lines.push("(task statuses above come from canonical run.json task state)");
   } else if (isArchived) {
     lines.push("");
     lines.push("Run is archived. Unarchive it before resuming:");
@@ -119,14 +108,12 @@ export function renderRunStatus(detail: RunDetail): string {
     lines.push("");
     if (isPassive) {
       lines.push("Drive this run externally:");
+      lines.push(`  ${taskRunnerCmd} brief ${detail.runId}`);
       lines.push(`  ${taskRunnerCmd} task set ${detail.runId} <task-id> --status in_progress`);
-      lines.push(
-        `  ${taskRunnerCmd} task set ${detail.runId} <task-id> --status completed --notes "..."`,
-      );
-      lines.push('  For multi-line notes, prefer a quoted heredoc and pass --notes "$notes".');
     } else {
       lines.push("To execute this run:");
       lines.push(`  ${taskRunnerCmd} run --resume-run ${detail.runId}`);
+      lines.push(`  ${taskRunnerCmd} brief ${detail.runId}`);
     }
   } else if (
     detail.status === "blocked" ||

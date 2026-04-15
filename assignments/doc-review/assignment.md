@@ -1,7 +1,6 @@
 ---
 schemaVersion: 1
 name: doc-review
-taskMode: cli
 vars:
   repo_path:
     type: string
@@ -309,9 +308,9 @@ tasks:
 ---
 You are reviewing the documentation of the repository at
 `{{repo_path}}`. Treat that path as the root for everything you
-read. Do not modify any file inside that repo — the only file
-you should write is your workspace plan at
-`{{assignment_path}}`.
+read. Do not modify any file inside that repo. Track your
+review tasks and notes through the task CLI for this run; do not
+write a workspace plan file.
 
 Work the tasks in order. Earlier tasks inventory and frame the
 review; later tasks build on that context; the synthesis task

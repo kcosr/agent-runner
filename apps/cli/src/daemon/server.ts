@@ -13,6 +13,7 @@ import {
   getDefinition,
   getDefinitionList,
   getRun,
+  getRunBrief,
   getRunList,
   getTask,
   getTaskList,
@@ -190,6 +191,7 @@ export async function serveDaemon(
 
   const app: DaemonHandlers = {
     getRun,
+    getRunBrief,
     getRunList,
     getAttachment,
     getAttachmentList,
@@ -471,7 +473,18 @@ export async function serveDaemon(
             resultResponse(
               request.id,
               operations.getRun(
-                requiredString(asRecord(params, "runs.get params").target, "target"),
+                requiredRunIdString(asRecord(params, "runs.get params").target, "target"),
+              ),
+            ),
+          );
+          return;
+        case "runs.brief":
+          sendJson(
+            ws,
+            resultResponse(
+              request.id,
+              operations.getRunBrief(
+                requiredRunIdString(asRecord(params, "runs.brief params").target, "target"),
               ),
             ),
           );

@@ -153,19 +153,49 @@ test("resolveResumeTarget rejects a manifest whose execution host and controller
   );
 });
 
-test("resolveResumeTarget accepts a well-formed v6 manifest from the unknown bucket", () => {
+test("resolveResumeTarget rejects a manifest with a session missing brief", () => {
+  const dir = tempDir();
+  const manifest = baseManifest("corrupt5", join(dir, "runs", "unknown", "corrupt5"));
+  manifest.sessions = [
+    {
+      sessionIndex: 0,
+      startedAt: "2026-04-11T16:00:00Z",
+      endedAt: "2026-04-11T16:05:00Z",
+      status: "success",
+      exitCode: 0,
+      message: null,
+      firstAttempt: 1,
+      lastAttempt: 1,
+      maxAttempts: 4,
+      backendSessionIdAtStart: null,
+      backendSessionIdAtEnd: null,
+    },
+  ];
+  writeManifest(dir, "unknown", "corrupt5", manifest);
+
+  assert.throws(
+    () => withStateRoot(dir, () => resolveResumeTarget("corrupt5", dir)),
+    (err) => {
+      assert.ok(err instanceof ResumeError);
+      assert.match(err.message, /does not look like a task-runner run\.json/);
+      return true;
+    },
+  );
+});
+
+test("resolveResumeTarget accepts a well-formed v7 manifest from the unknown bucket", () => {
   const dir = tempDir();
   const workspaceDir = join(dir, "runs", "unknown", "wellformed");
   writeManifest(dir, "unknown", "wellformed", baseManifest("wellformed", workspaceDir));
 
   const resolved = withStateRoot(dir, () => resolveResumeTarget("wellformed", dir));
   assert.equal(resolved.manifest.runId, "wellformed");
-  assert.equal(resolved.manifest.schemaVersion, 6);
+  assert.equal(resolved.manifest.schemaVersion, 7);
 });
 
 function baseManifest(runId, workspaceDir) {
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     runId,
     agent: {
       name: "override-test",
@@ -202,7 +232,7 @@ function baseManifest(runId, workspaceDir) {
         kind: "embedded",
       },
     },
-    pendingPrompt: null,
+    brief: "resume brief",
     callerInstructions: null,
     attachments: [],
     resetSeed: {
@@ -213,7 +243,7 @@ function baseManifest(runId, workspaceDir) {
       unrestricted: false,
       timeoutSec: 3600,
       maxAttempts: 4,
-      pendingPrompt: "seed prompt",
+      brief: "seed prompt",
       finalTasks: {
         t1: {
           id: "t1",

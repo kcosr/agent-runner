@@ -1,7 +1,6 @@
 ---
 schemaVersion: 1
 name: plan-review
-taskMode: cli
 vars:
   repo_path:
     type: string
@@ -13,19 +12,19 @@ vars:
     required: true
     source: cli
     description: Absolute path to the draft assignment file being reviewed.
-  planning_workspace:
+  planning_run_id:
     type: string
     required: true
     source: cli
     description: |
-      Absolute path to the planner run's workspace `assignment.md`,
-      which contains the captured brief, contract, assumptions, and
+      Canonical run id for the planning run whose task notes
+      contain the captured brief, contract, assumptions, and
       planning evidence the draft should reflect.
 callerInstructions: |
   This run reviews a draft implementation plan before it is
   handed back to the caller. It is typically launched as a
   nested review from `plan-feature`, but it can also be run
-  directly against any draft-plus-planning-workspace pair.
+  directly against any draft-plus-planning-run pair.
 
   The final decision lives in `approval.notes`. Exit semantics
   match the code reviewer: `success` (code 0) means the draft is
@@ -43,20 +42,20 @@ tasks:
   - id: orient_inputs
     title: Load the draft and planning artifacts
     body: |
-      Read both review inputs in full:
+      Read the draft plan file plus the planning run's task notes:
 
           {{plan_draft}}
-          {{planning_workspace}}
+          {{task_runner_cmd}} status {{planning_run_id}} --output-format json --field tasks
 
-      First, confirm the files exist and are readable. If either
-      one is missing or obviously not a task-runner assignment,
-      mark this task `blocked` with the exact path and problem.
+      First, confirm the draft exists and is readable. If it is
+      missing or obviously not a task-runner assignment, mark this
+      task `blocked` with the exact path and problem.
 
       Then summarize in Notes:
         - what feature the draft claims to implement
         - the draft's task shape at a high level
         - the feature brief / contract / assumptions captured in
-          the planning workspace
+          the planning run notes
 
       This is context for the rest of the review, not a finding
       section.
@@ -64,7 +63,7 @@ tasks:
     title: Review contract fidelity and scope discipline
     body: |
       Compare the draft against the planner's captured evidence in
-      `{{planning_workspace}}`.
+      run `{{planning_run_id}}`.
 
       Look for:
         - feature brief details that disappeared or drifted
@@ -112,13 +111,13 @@ tasks:
   - id: review_workflow_and_handoff
     title: Review workflow wiring and caller handoff
     body: |
-      Review both the draft and the planner workspace for workflow
+      Review both the draft and the planning run for workflow
       correctness.
 
       In the draft, verify:
         - the internal review step passes
-          `implementation_plan={{assignment_path}}` so the code
-          reviewer sees the implementer workspace
+          `implementation_run_id={{run_id}}` so the code
+          reviewer sees the implementer run
         - the internal review step passes a short descriptive
           `--name` (same topic, capitalized first word, no cwd /
           repo / range noise, no redundant `Review` /
@@ -126,7 +125,7 @@ tasks:
         - the draft explains the recursion-depth requirement for
           the nested code-review run
 
-      In the planning workspace, verify:
+      In the planning run, verify:
         - the planner attaches the approved draft and summary to
           the planning run as `assignment-seed.md` and
           `assignment-summary.md`
@@ -215,11 +214,11 @@ implementation code itself. Treat `{{repo_path}}` as context for
 the repo the draft targets, but the primary review artifacts are:
 
   - `{{plan_draft}}`
-  - `{{planning_workspace}}`
+  - `{{task_runner_cmd}} status {{planning_run_id}} --output-format json --field tasks`
 
-Do not modify any file under `{{repo_path}}`, `{{plan_draft}}`, or
-`{{planning_workspace}}`. The only file you should write is your
-own workspace plan at `{{assignment_path}}`.
+Do not modify any file under `{{repo_path}}` or `{{plan_draft}}`.
+Use the task CLI as the task interface for this run; do not rely
+on workspace files.
 
 Work the tasks in order. Earlier tasks establish the contract and
 workflow context the later tasks depend on.
@@ -238,7 +237,7 @@ focused delta pass:
 
 1. Re-read your prior findings and prior `approval` notes.
 2. Inspect what changed in `{{plan_draft}}` and, if relevant, in
-   `{{planning_workspace}}`.
+   `{{planning_run_id}}`.
 3. For each prior finding, decide whether it is resolved, still
    open, or only partially addressed.
 4. Scan the updated draft for any new issues introduced by the

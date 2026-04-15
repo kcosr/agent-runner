@@ -1,7 +1,6 @@
 import { copyFileSync, existsSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { type TaskState, VALID_STATUSES, isValidStatus } from "../../assignment/model.js";
-import { parseAssignment } from "../../assignment/parser.js";
 import { setCodexThreadName } from "../../backends/codex.js";
 import {
   type DefinitionEntry,
@@ -54,25 +53,20 @@ import {
   type TaskSnapshot,
   listRunManifests,
   resolveResumeTarget,
-  workspaceAssignmentPath,
   writeManifest,
 } from "../run/manifest.js";
-import {
-  type LiveTaskOverlay,
-  applyLiveOverlay,
-  derivePassiveTerminalStatus,
-} from "../run/status.js";
+import { derivePassiveTerminalStatus } from "../run/status.js";
 import {
   loadWorkspaceTaskMap,
   persistWorkspaceTaskState,
   resetWorkspaceRun,
-  taskModeFromManifest,
   withGlobalStateLock,
   withTaskStateLock,
   withTaskStateLockAsync,
 } from "../run/workspace-state.js";
 
 export type StatusCommandResult = RunDetail;
+export type BriefCommandResult = string;
 
 export interface DefinitionListResult {
   kind: DefinitionKind;
@@ -244,7 +238,7 @@ function requireTaskMutationAllowed(
   if (manifest.status === "running") {
     const verb = kind === "add" ? "add tasks" : "mutate tasks";
     throw new ConflictError(
-      `cannot ${verb} on a running ${taskModeFromManifest(manifest)}-mode run${kind === "add" ? " (task add remains rejected while a run is in-flight)" : " (task CLI mutation during a run is only allowed in taskMode=cli for task set/append-notes)"}`,
+      `cannot ${verb} on a running run${kind === "add" ? " (task add remains rejected while a run is in-flight)" : " (task set and task append-notes remain allowed while a run is in-flight)"}`,
     );
   }
 
@@ -289,46 +283,14 @@ function persistTaskMap(
 
 function updateTaskMap(
   resolved: ReturnType<typeof resolveResumeTarget>,
-  mergeOptions: Parameters<typeof loadWorkspaceTaskMap>[1],
   updater: (tasks: Map<string, TaskState>) => void,
 ): void {
   withTaskStateLock(resolved.workspaceDir, () => {
     resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
-    const tasks = loadWorkspaceTaskMap(resolved.manifest, mergeOptions);
+    const tasks = loadWorkspaceTaskMap(resolved.manifest);
     updater(tasks);
     persistTaskMap(resolved, tasks);
   });
-}
-
-function liveOverlay(rawAssignment: string): LiveTaskOverlay {
-  const overlay: LiveTaskOverlay = new Map();
-  for (const update of parseAssignment(rawAssignment)) {
-    overlay.set(update.taskId, { status: update.status, notes: update.notes });
-  }
-  return overlay;
-}
-
-function readManifestView(
-  manifest: RunManifest,
-  workspaceDir: string,
-): { manifest: RunManifest; isLive: boolean } {
-  if (manifest.status !== "running" || taskModeFromManifest(manifest) !== "file") {
-    return { manifest, isLive: false };
-  }
-
-  try {
-    const raw = readFileSync(workspaceAssignmentPath(workspaceDir), "utf8");
-    const overlay = liveOverlay(raw);
-    if (overlay.size === 0) {
-      return { manifest, isLive: false };
-    }
-    return {
-      manifest: applyLiveOverlay(manifest, overlay),
-      isLive: true,
-    };
-  } catch {
-    return { manifest, isLive: false };
-  }
 }
 
 function validateTaskTitle(title: string): string {
@@ -381,10 +343,7 @@ export function readStatus(target: string): StatusCommandResult {
   const resolved = resolveRun(target);
   refreshRunSnapshotAfterTaskStateSettles(resolved);
 
-  const { manifest: manifestView, isLive } = readManifestView(
-    resolved.manifest,
-    resolved.workspaceDir,
-  );
+  const manifestView = resolved.manifest;
   const dependencyGraph = new Map<string, RunManifest>([[manifestView.runId, manifestView]]);
   const dependents: RunManifest[] = [];
 
@@ -403,10 +362,16 @@ export function readStatus(target: string): StatusCommandResult {
 
   return toRunDetail({
     manifest: manifestView,
-    isLive,
+    isLive: false,
     dependencies: resolveDependencies(manifestView, dependencyGraph),
     dependents: resolveDependentsFromManifests(manifestView.runId, dependents),
   });
+}
+
+export function readBrief(target: string): BriefCommandResult {
+  const resolved = resolveRun(target);
+  refreshRunSnapshotAfterTaskStateSettles(resolved);
+  return resolved.manifest.brief;
 }
 
 export function listDefinitions(kind: DefinitionKind): DefinitionListResult {
@@ -421,7 +386,7 @@ export function listRuns(opts: { includeArchived?: boolean } = {}): RunListResul
   const entries = listRunManifests();
   const projectedEntries = entries.map((entry) => ({
     ...entry,
-    manifest: readManifestView(entry.manifest, entry.workspaceDir).manifest,
+    manifest: entry.manifest,
   }));
   const successfulRunIds = new Set(
     projectedEntries
@@ -816,33 +781,27 @@ export function setTask(
   const resolved = resolveRun(target);
   const capabilities = requireTaskMutationAllowed(resolved.manifest, "set");
 
-  updateTaskMap(
-    resolved,
-    {
-      applyStatus: capabilities.canSetStatus,
-    },
-    (tasks) => {
-      const task = tasks.get(taskId);
-      if (!task) {
-        throw new TaskNotFoundError(resolved.manifest.runId, taskId);
-      }
-      if (
-        update.status !== undefined &&
-        update.status !== task.status &&
-        !capabilities.canSetStatus
-      ) {
-        throw new CommandError(
-          `cannot change task status on a terminal non-passive run; use ${resolveTaskRunnerCommand()} run --resume-run <id> with a follow-up message instead`,
-        );
-      }
-      if (update.status !== undefined) {
-        task.status = update.status as TaskState["status"];
-      }
-      if (update.notes !== undefined) {
-        task.notes = update.notes;
-      }
-    },
-  );
+  updateTaskMap(resolved, (tasks) => {
+    const task = tasks.get(taskId);
+    if (!task) {
+      throw new TaskNotFoundError(resolved.manifest.runId, taskId);
+    }
+    if (
+      update.status !== undefined &&
+      update.status !== task.status &&
+      !capabilities.canSetStatus
+    ) {
+      throw new CommandError(
+        `cannot change task status on a terminal non-passive run; use ${resolveTaskRunnerCommand()} run --resume-run <id> with a follow-up message instead`,
+      );
+    }
+    if (update.status !== undefined) {
+      task.status = update.status as TaskState["status"];
+    }
+    if (update.notes !== undefined) {
+      task.notes = update.notes;
+    }
+  });
 
   return {
     manifest: resolved.manifest,
@@ -859,19 +818,13 @@ export function appendTaskNotes(target: string, taskId: string, text: string): T
   const resolved = resolveRun(target);
   const capabilities = requireTaskMutationAllowed(resolved.manifest, "append-notes");
 
-  updateTaskMap(
-    resolved,
-    {
-      applyStatus: capabilities.canSetStatus,
-    },
-    (tasks) => {
-      const task = tasks.get(taskId);
-      if (!task) {
-        throw new TaskNotFoundError(resolved.manifest.runId, taskId);
-      }
-      task.notes = task.notes.length === 0 ? appendText : `${task.notes}\n${appendText}`;
-    },
-  );
+  updateTaskMap(resolved, (tasks) => {
+    const task = tasks.get(taskId);
+    if (!task) {
+      throw new TaskNotFoundError(resolved.manifest.runId, taskId);
+    }
+    task.notes = task.notes.length === 0 ? appendText : `${task.notes}\n${appendText}`;
+  });
 
   return {
     manifest: resolved.manifest,
@@ -888,7 +841,7 @@ export function addTask(
   requireTaskMutationAllowed(resolved.manifest, "add");
 
   let taskId = "";
-  updateTaskMap(resolved, {}, (tasks) => {
+  updateTaskMap(resolved, (tasks) => {
     do {
       taskId = `cli-${shortId()}`;
     } while (tasks.has(taskId));

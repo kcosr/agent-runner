@@ -151,9 +151,9 @@ test("passive agent: init creates manifest with backend=passive, status=initiali
   assert.equal(outcome.manifest.tasksCompleted, 0);
   assert.equal(outcome.exitCode, 0);
 
-  // pendingPrompt should contain the PASSIVE workflow template
-  const prompt = outcome.manifest.pendingPrompt ?? "";
-  assert.ok(prompt.length > 0, "pendingPrompt populated");
+  // brief should contain the PASSIVE workflow template
+  const prompt = outcome.manifest.brief ?? "";
+  assert.ok(prompt.length > 0, "brief populated");
   assert.match(prompt, /task-runner task set/, "prompt uses CLI workflow template");
   assert.match(prompt, new RegExp(outcome.runId), "prompt interpolates run id");
 });
@@ -180,9 +180,8 @@ test("passive agent: init output — bootstrap on stdout, progress on stderr", a
   // Progress lines on stderr
   assert.match(res.stderr, /initialized passive agent=passive-agent/);
   assert.match(res.stderr, /drive with: task-runner task set/);
-  // Bootstrap on stdout — contains the CLI workflow instructions
-  assert.match(res.stdout, /task-runner task set/);
-  assert.match(res.stdout, /claim it/i);
+  // Stdout is empty; callers re-orient with `task-runner brief <run-id>`.
+  assert.equal(res.stdout, "");
 });
 
 test("passive agent: `run` is rejected with a clear error", async () => {
@@ -268,7 +267,7 @@ test("passive reset: success run returns to initialized with original tasks", as
   assert.equal(manifest.endedAt, null);
   assert.equal(manifest.finalTasks.t1.status, "pending");
   assert.equal(manifest.finalTasks.t2.status, "pending");
-  assert.equal(manifest.pendingPrompt, manifest.resetSeed.pendingPrompt);
+  assert.equal(manifest.brief, manifest.resetSeed.brief);
 });
 
 test("passive reset: blocked run returns to initialized with notes cleared", async () => {
@@ -579,19 +578,14 @@ test("passive finalized run: notes-only task set preserves endedAt and exitCode"
   );
 });
 
-test("passive re-orient: status --field pendingPrompt returns the bootstrap text", async () => {
+test("passive re-orient: brief command returns the bootstrap text", async () => {
   const dir = tempDir();
   writeAgent(dir, "passive-agent", PASSIVE_AGENT);
   writeAssignment(dir, "two-task", TWO_TASK_ASSIGNMENT);
   const outcome = await initPassive(dir);
 
-  const out = runCli(
-    ["status", outcome.runId, "--output-format", "json", "--field", "pendingPrompt"],
-    { cwd: dir },
-  );
-  const parsed = JSON.parse(out);
-  assert.ok(parsed.pendingPrompt);
-  assert.match(parsed.pendingPrompt, /task-runner task set/);
+  const out = runCli(["brief", outcome.runId], { cwd: dir });
+  assert.match(out, /task-runner task set/);
 });
 
 test("bundled passive-example agent is loadable and passes schema", async () => {

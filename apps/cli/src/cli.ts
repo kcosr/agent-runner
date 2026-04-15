@@ -13,6 +13,7 @@ import {
   getDefinition,
   getDefinitionList,
   getRun,
+  getRunBrief,
   getRunList,
   getTask,
   getTaskList,
@@ -83,7 +84,7 @@ import {
 import { RPC_ERROR_COMMAND } from "./daemon/protocol.js";
 import { serveDaemon } from "./daemon/server.js";
 
-const HELP = `Usage: task-runner <run|init|serve|status|task|attachment|list|show> [options] [args]
+const HELP = `Usage: task-runner <run|init|serve|status|brief|task|attachment|list|show> [options] [args]
 
 Commands:
   run                     Execute an agent. Either a fresh run, a resume,
@@ -99,7 +100,8 @@ Commands:
   run clear-deps <id>     Remove all dependencies from an initialized run.
   init                    Prepare a run without invoking the backend.
   serve                   Start the local daemon server.
-  status <id|path>        Read a run and print its current status.
+  status <id>             Read a run and print its current status.
+  brief <id>              Print the canonical worker handoff for a run.
   task list <id>          List tasks for a run in stable task order.
   task show <id> <task>   Show one task snapshot for a run.
   task set <id> <task>    Update a task's status and/or notes.
@@ -146,7 +148,6 @@ Execution options:
   --add-task <title>      Append a task to the run's task list.
   --cwd <path>            Override the agent's cwd.
   --backend <id>          Override the agent's backend.
-  --task-mode <m>         Override the assignment task workflow mode.
   --model <id>            Override the agent's model.
   --effort <level>        Override effort level.
   --timeout-sec <n>       Override the per-attempt timeout.
@@ -252,6 +253,16 @@ function normalizeTarget(target: string | undefined): string | undefined {
   return isPathArg(target) ? resolveInputPath(target, process.cwd()) : target;
 }
 
+function normalizeRunIdTarget(target: string | undefined, commandName: string): string | undefined {
+  if (!target) {
+    return target;
+  }
+  if (isPathArg(target) || target.includes("..")) {
+    throw new CommandError(`${commandName} accepts a run id, not a path`);
+  }
+  return target;
+}
+
 function resolvedOverrides(parsed: ParsedArgs) {
   return {
     ...overridesFromParsedArgs(parsed),
@@ -269,7 +280,7 @@ function renderInitializedRun(detail: ReturnType<typeof getRun>): void {
     name: detail.name,
     cwd: detail.cwd,
     passive: detail.backend === "passive",
-    pendingPrompt: detail.pendingPrompt ?? "",
+    brief: "",
   });
   if (detail.callerInstructions) {
     emitRenderedEvent({
@@ -352,16 +363,15 @@ async function runServe(parsed: ParsedArgs): Promise<never> {
 }
 
 async function runStatus(parsed: ParsedArgs, connectUrl?: string): Promise<never> {
-  const target = normalizeTarget(parsed.message?.trim());
-  if (!target) {
-    process.stderr.write("task-runner: status requires a run id or workspace path\n");
-    process.stderr.write(
-      "Usage: task-runner status <id-or-path> [--output-format json] [--field name]...\n",
-    );
-    process.exit(3);
-  }
-
   try {
+    const target = normalizeRunIdTarget(parsed.message?.trim(), "status");
+    if (!target) {
+      process.stderr.write("task-runner: status requires a run id\n");
+      process.stderr.write(
+        "Usage: task-runner status <id> [--output-format json] [--field name]...\n",
+      );
+      process.exit(3);
+    }
     const result =
       connectUrl === undefined
         ? getRun(target)
@@ -378,6 +388,33 @@ async function runStatus(parsed: ParsedArgs, connectUrl?: string): Promise<never
       }
       process.stdout.write(renderStatus(result));
     }
+    process.exit(0);
+  } catch (err) {
+    exitCommandFailure(err, connectUrl);
+  }
+}
+
+async function runBrief(parsed: ParsedArgs, connectUrl?: string): Promise<never> {
+  try {
+    if (parsed.outputFormat !== "text") {
+      throw new CommandError("brief does not support --output-format");
+    }
+    if (parsed.fields.length > 0) {
+      throw new CommandError("brief does not support --field");
+    }
+    const target = normalizeRunIdTarget(parsed.message?.trim(), "brief");
+    if (!target) {
+      process.stderr.write("task-runner: brief requires a run id\n");
+      process.stderr.write("Usage: task-runner brief <id>\n");
+      process.exit(3);
+    }
+    const brief =
+      connectUrl === undefined
+        ? getRunBrief(target)
+        : await withDaemonClient(connectUrl, (client) =>
+            client.call<{ brief: string }>("runs.brief", { target }).then((r) => r.brief),
+          );
+    process.stdout.write(`${brief}\n`);
     process.exit(0);
   } catch (err) {
     exitCommandFailure(err, connectUrl);
@@ -547,7 +584,6 @@ function unsupportedFlagsForGroupedCommand(
   if (parsed.backend !== undefined) unsupported.push("--backend");
   if (parsed.model !== undefined) unsupported.push("--model");
   if (parsed.effort !== undefined) unsupported.push("--effort");
-  if (parsed.taskMode !== undefined) unsupported.push("--task-mode");
   if (parsed.timeoutSec !== undefined) unsupported.push("--timeout-sec");
   if (parsed.unrestricted !== undefined) unsupported.push("--unrestricted");
   if (parsed.maxRetries !== undefined) unsupported.push("--max-retries");
@@ -1548,6 +1584,10 @@ async function main(): Promise<void> {
 
   if (parsed.command === "status") {
     await runStatus(parsed, connectUrl);
+  }
+
+  if (parsed.command === "brief") {
+    await runBrief(parsed, connectUrl);
   }
 
   if (parsed.command === "run") {

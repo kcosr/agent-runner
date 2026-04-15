@@ -6,7 +6,11 @@ import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import { createRunEventCapture } from "./helpers/run-events.mjs";
-import { assignmentPathFromPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
+import {
+  setTaskStatusesForPrompt,
+  updateTasksForPrompt,
+  withSharedRuntimeEnv,
+} from "./helpers/runtime-paths.mjs";
 
 const THREE_AGENT = `---
 schemaVersion: 1
@@ -83,17 +87,6 @@ function writeAgentAndAssignment(baseDir) {
   writeAssignment(baseDir, "three-work", THREE_ASSIGNMENT);
 }
 
-function editStatus(content, taskId, newStatus) {
-  const marker = `<!-- task-id: ${taskId} -->`;
-  const start = content.indexOf(marker);
-  if (start < 0) throw new Error(`marker not found: ${taskId}`);
-  const nextMarker = content.indexOf("<!-- task-id:", start + marker.length);
-  const end = nextMarker < 0 ? content.length : nextMarker;
-  const section = content.slice(start, end);
-  const updated = section.replace(/\*\*Status:\*\*\s*\S+/, `**Status:** ${newStatus}`);
-  return content.slice(0, start) + updated + content.slice(end);
-}
-
 async function runWithMock(baseDir, mockInvoke, overrides = {}, options = {}) {
   const backend = {
     id: "mock",
@@ -137,12 +130,11 @@ test("fresh runs use callerCwd when the agent omits cwd", async () => {
     dir,
     async (ctx) => {
       seenCwd = ctx.cwd;
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      let plan = readFileSync(absPlan, "utf8");
-      for (const id of ["t1", "t2", "t3"]) {
-        plan = editStatus(plan, id, "completed");
-      }
-      writeFileSync(absPlan, plan, "utf8");
+      setTaskStatusesForPrompt(ctx.prompt, {
+        t1: "completed",
+        t2: "completed",
+        t3: "completed",
+      });
       return {
         exitCode: 0,
         signal: null,
@@ -172,12 +164,11 @@ test("explicit agent cwd resolves relative to callerCwd", async () => {
     dir,
     async (ctx) => {
       seenCwd = ctx.cwd;
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      let plan = readFileSync(absPlan, "utf8");
-      for (const id of ["t1", "t2", "t3"]) {
-        plan = editStatus(plan, id, "completed");
-      }
-      writeFileSync(absPlan, plan, "utf8");
+      setTaskStatusesForPrompt(ctx.prompt, {
+        t1: "completed",
+        t2: "completed",
+        t3: "completed",
+      });
       return {
         exitCode: 0,
         signal: null,
@@ -207,12 +198,11 @@ test("explicit --cwd override beats agent cwd and callerCwd", async () => {
     dir,
     async (ctx) => {
       seenCwd = ctx.cwd;
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      let plan = readFileSync(absPlan, "utf8");
-      for (const id of ["t1", "t2", "t3"]) {
-        plan = editStatus(plan, id, "completed");
-      }
-      writeFileSync(absPlan, plan, "utf8");
+      setTaskStatusesForPrompt(ctx.prompt, {
+        t1: "completed",
+        t2: "completed",
+        t3: "completed",
+      });
       return {
         exitCode: 0,
         signal: null,
@@ -237,12 +227,11 @@ test("effort level from frontmatter is forwarded to backend", async () => {
   let seenEffort;
   const { outcome } = await runWithMock(dir, async (ctx) => {
     seenEffort = ctx.effort;
-    const absPlan = assignmentPathFromPrompt(ctx.prompt);
-    let plan = readFileSync(absPlan, "utf8");
-    plan = editStatus(plan, "t1", "completed");
-    plan = editStatus(plan, "t2", "completed");
-    plan = editStatus(plan, "t3", "completed");
-    writeFileSync(absPlan, plan, "utf8");
+    setTaskStatusesForPrompt(ctx.prompt, {
+      t1: "completed",
+      t2: "completed",
+      t3: "completed",
+    });
     return {
       exitCode: 0,
       signal: null,
@@ -267,12 +256,11 @@ test("effort override beats the frontmatter value", async () => {
     dir,
     async (ctx) => {
       seenEffort = ctx.effort;
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      let plan = readFileSync(absPlan, "utf8");
-      plan = editStatus(plan, "t1", "completed");
-      plan = editStatus(plan, "t2", "completed");
-      plan = editStatus(plan, "t3", "completed");
-      writeFileSync(absPlan, plan, "utf8");
+      setTaskStatusesForPrompt(ctx.prompt, {
+        t1: "completed",
+        t2: "completed",
+        t3: "completed",
+      });
       return {
         exitCode: 0,
         signal: null,
@@ -297,12 +285,11 @@ test("happy path: mock marks all tasks completed in one attempt → exit 0", asy
   let invocations = 0;
   const { outcome, stdout, stderr } = await runWithMock(dir, async (ctx) => {
     invocations++;
-    const plan = readFileSync(assignmentPathFromPrompt(ctx.prompt), "utf8");
-    let updated = plan;
-    for (const id of ["t1", "t2", "t3"]) {
-      updated = editStatus(updated, id, "completed");
-    }
-    writeFileSync(assignmentPathFromPrompt(ctx.prompt), updated, "utf8");
+    setTaskStatusesForPrompt(ctx.prompt, {
+      t1: "completed",
+      t2: "completed",
+      t3: "completed",
+    });
     return {
       exitCode: 0,
       signal: null,
@@ -322,7 +309,6 @@ test("happy path: mock marks all tasks completed in one attempt → exit 0", asy
   assert.ok(stderr.includes("── attempt 1 ──"), "divider on stderr");
   assert.ok(!stdout.includes("── attempt 1 ──"), "divider not on stdout");
   assert.ok(stderr.includes("Task results:"), "summary shows task results section");
-  assert.ok(stderr.includes("Review "), "summary shows plan file review hint");
 });
 
 test("retry path: first attempt leaves one incomplete, second completes → exit 0", async () => {
@@ -334,18 +320,11 @@ test("retry path: first attempt leaves one incomplete, second completes → exit
   const { outcome } = await runWithMock(dir, async (ctx) => {
     invocations++;
     lastPrompt = ctx.prompt;
-    const absPlan = assignmentPathFromPrompt(ctx.prompt);
-
-    const plan = readFileSync(absPlan, "utf8");
-    let updated = plan;
     if (invocations === 1) {
-      updated = editStatus(updated, "t1", "completed");
-      updated = editStatus(updated, "t2", "completed");
-      // leave t3 pending
+      setTaskStatusesForPrompt(ctx.prompt, { t1: "completed", t2: "completed" });
     } else {
-      updated = editStatus(updated, "t3", "completed");
+      setTaskStatusesForPrompt(ctx.prompt, { t3: "completed" });
     }
-    writeFileSync(absPlan, updated, "utf8");
     return {
       exitCode: 0,
       signal: null,
@@ -372,12 +351,10 @@ test("blocked path: marking one task blocked → exit 2, no further retries", as
   let invocations = 0;
   const { outcome } = await runWithMock(dir, async (ctx) => {
     invocations++;
-    const absPlan = assignmentPathFromPrompt(ctx.prompt);
-    let plan = readFileSync(absPlan, "utf8");
-    plan = editStatus(plan, "t1", "completed");
-    plan = editStatus(plan, "t2", "blocked");
-    // leave t3 pending
-    writeFileSync(absPlan, plan, "utf8");
+    updateTasksForPrompt(ctx.prompt, {
+      t1: { status: "completed" },
+      t2: { status: "blocked" },
+    });
     return {
       exitCode: 0,
       signal: null,
@@ -430,16 +407,15 @@ test("session resume: first attempt session ID passed on retry", async () => {
   const { outcome } = await runWithMock(dir, async (ctx) => {
     invocations++;
     seenResumeIds.push(ctx.resumeSessionId ?? null);
-    const absPlan = assignmentPathFromPrompt(ctx.prompt);
-    let plan = readFileSync(absPlan, "utf8");
     if (invocations === 1) {
-      plan = editStatus(plan, "t1", "completed");
+      setTaskStatusesForPrompt(ctx.prompt, { t1: "completed" });
     } else {
-      plan = editStatus(plan, "t1", "completed");
-      plan = editStatus(plan, "t2", "completed");
-      plan = editStatus(plan, "t3", "completed");
+      setTaskStatusesForPrompt(ctx.prompt, {
+        t1: "completed",
+        t2: "completed",
+        t3: "completed",
+      });
     }
-    writeFileSync(absPlan, plan, "utf8");
     return {
       exitCode: 0,
       signal: null,
@@ -468,9 +444,7 @@ test("in-run resume rejection stops the run with an error", async () => {
       // attempt 1 succeeds but leaves tasks incomplete; attempt 2 is the retry
       // that carries --resume; the mock pretends claude rejects that session
       if (invocations === 1) {
-        const absPlan = assignmentPathFromPrompt(ctx.prompt);
-        const plan = readFileSync(absPlan, "utf8");
-        writeFileSync(absPlan, editStatus(plan, "t1", "completed"), "utf8");
+        setTaskStatusesForPrompt(ctx.prompt, { t1: "completed" });
         return {
           exitCode: 0,
           signal: null,

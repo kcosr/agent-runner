@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -10,7 +10,11 @@ import {
   LockedFieldError,
   runAgent,
 } from "../packages/core/dist/core/run/run-loop.js";
-import { assignmentPathFromPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
+import {
+  completeAllTasksFromPrompt,
+  setTaskStatusesForPrompt,
+  withSharedRuntimeEnv,
+} from "./helpers/runtime-paths.mjs";
 
 // ─── two-task assignment with an agent ──────────────────────────────────────
 const TWO_AGENT = `---
@@ -97,27 +101,6 @@ function setupLockedTasks(dir) {
   writeAssignment(dir, "locked-tasks-work", LOCKED_TASKS_ASSIGNMENT);
 }
 
-function editStatus(content, taskId, newStatus) {
-  const marker = `<!-- task-id: ${taskId} -->`;
-  const start = content.indexOf(marker);
-  if (start < 0) throw new Error(`marker not found: ${taskId}`);
-  const nextMarker = content.indexOf("<!-- task-id:", start + marker.length);
-  const end = nextMarker < 0 ? content.length : nextMarker;
-  const section = content.slice(start, end);
-  const updated = section.replace(/\*\*Status:\*\*\s*\S+/, `**Status:** ${newStatus}`);
-  return content.slice(0, start) + updated + content.slice(end);
-}
-
-function completeEverything(absPlan) {
-  let plan = readFileSync(absPlan, "utf8");
-  const ids = [...plan.matchAll(/<!-- task-id:\s*([A-Za-z0-9._:-]+)\s*-->/g)].map((m) => m[1]);
-  for (const id of ids) {
-    plan = editStatus(plan, id, "completed");
-  }
-  writeFileSync(absPlan, plan, "utf8");
-  return ids;
-}
-
 function mockBackend(handler) {
   return { id: "mock", invoke: handler };
 }
@@ -156,8 +139,7 @@ test("add-task: CLI-added task is appended to the frontmatter list on fresh run"
     "two",
     { addedTasks: ["Check the logs"] },
     mockBackend(async (ctx) => {
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      seenIds = completeEverything(absPlan);
+      seenIds = Object.keys(completeAllTasksFromPrompt(ctx.prompt).finalTasks);
       return {
         exitCode: 0,
         signal: null,
@@ -191,8 +173,7 @@ test("add-task: multiple added tasks preserve order", async () => {
     "two",
     { addedTasks: ["First added", "Second added", "Third added"] },
     mockBackend(async (ctx) => {
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      completeEverything(absPlan);
+      completeAllTasksFromPrompt(ctx.prompt);
       return {
         exitCode: 0,
         signal: null,
@@ -224,11 +205,7 @@ test("add-task: works on resume — appends after task normalization", async () 
     "two",
     undefined,
     mockBackend(async (ctx) => {
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      let plan = readFileSync(absPlan, "utf8");
-      plan = editStatus(plan, "t1", "completed");
-      plan = editStatus(plan, "t2", "blocked");
-      writeFileSync(absPlan, plan, "utf8");
+      setTaskStatusesForPrompt(ctx.prompt, { t1: "completed", t2: "blocked" });
       return {
         exitCode: 0,
         signal: null,
@@ -245,15 +222,14 @@ test("add-task: works on resume — appends after task normalization", async () 
   await withSharedRuntimeEnv(dir, async () => {
     const target = resolveResumeTarget(first.runId, dir);
     const loaded = loadAgentConfig("two", dir);
-    const firstAssignmentPath = join(first.workspaceDir, "assignment.md");
     const originalCwd = process.cwd();
     process.chdir(dir);
     try {
       const second = await runAgent({
         loaded,
         cliVars: {},
-        backend: mockBackend(async () => {
-          completeEverything(firstAssignmentPath);
+        backend: mockBackend(async (ctx) => {
+          completeAllTasksFromPrompt(ctx.prompt);
           return {
             exitCode: 0,
             signal: null,
@@ -297,8 +273,7 @@ test("add-task: frontmatter with no tasks and one --add-task runs successfully",
     "notasks",
     { addedTasks: ["Do the thing"] },
     mockBackend(async (ctx) => {
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      completeEverything(absPlan);
+      completeAllTasksFromPrompt(ctx.prompt);
       return {
         exitCode: 0,
         signal: null,
@@ -432,8 +407,7 @@ test("add-task: locked `tasks` still allows runs without --add-task", async () =
     "locked-tasks",
     undefined,
     mockBackend(async (ctx) => {
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      completeEverything(absPlan);
+      completeAllTasksFromPrompt(ctx.prompt);
       return {
         exitCode: 0,
         signal: null,

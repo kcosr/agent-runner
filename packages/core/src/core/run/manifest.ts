@@ -11,7 +11,7 @@ import {
 } from "../../config/runtime-paths.js";
 import type { RunAttachment } from "../../contracts/attachments.js";
 import { writeTextFileAtomic } from "../../util/write-file-atomic.js";
-import type { LockableField, TaskMode } from "../config/schema.js";
+import type { LockableField } from "../config/schema.js";
 
 export type ManifestStatus =
   | "initialized"
@@ -65,8 +65,7 @@ export interface RunResetSeed {
   unrestricted: boolean;
   timeoutSec: number;
   maxAttempts: number;
-  taskMode?: TaskMode;
-  pendingPrompt: string;
+  brief: string;
   finalTasks: Record<string, TaskSnapshot>;
 }
 
@@ -94,6 +93,7 @@ export interface SessionRecord {
   status: ManifestStatus;
   exitCode: number | null;
   message: string | null;
+  brief: string;
   firstAttempt: number | null;
   lastAttempt: number | null;
   maxAttempts: number;
@@ -130,14 +130,13 @@ export interface AssignmentInfo {
 // `timeoutSec` are all captured at init / fresh-run time and preserved
 // across all subsequent sessions.
 //
-// schemaVersion: 6 is the current manifest-canonical generation. Manifests written
-// by earlier task-runner versions (v1 pre-canonical, v2 pre-reset-seed, v3
-// pre-execution-provenance, v4 pre-run-dependencies, v5 pre-attachments) are not
-// resumable by this version — `isRunManifest` rejects them and
+// schemaVersion: 7 is the current manifest-canonical generation. Manifests written
+// by earlier task-runner versions are not resumable by this version —
+// `isRunManifest` rejects them and
 // `resolveResumeTarget` surfaces a clear error telling the caller to
 // create a fresh run.
 export interface RunManifest {
-  schemaVersion: 6;
+  schemaVersion: 7;
   runId: string;
   agent: {
     name: string;
@@ -167,7 +166,6 @@ export interface RunManifest {
   timeoutSec: number;
   assignmentPath: string;
   workspaceDir: string;
-  taskMode?: TaskMode;
   startedAt: string;
   endedAt: string | null;
   archivedAt: string | null;
@@ -181,7 +179,7 @@ export interface RunManifest {
   backendSessionId: string | null;
   runtimeVars: Record<string, unknown>;
   execution: RunExecution;
-  pendingPrompt: string | null;
+  brief: string;
   // Assignment-level documentation surface for the caller of
   // task-runner (the human or script invoking `run` / `init`).
   // Frozen at first write from `assignmentConfig.callerInstructions`
@@ -189,7 +187,7 @@ export interface RunManifest {
   // injectedVars as other body fields. `null` when no assignment
   // was supplied or the assignment didn't carry the field.
   //
-  // Unlike `pendingPrompt`, this text is **never** sent to the
+  // Unlike `brief`, this text is **never** sent to the
   // backend — it's strictly for the caller, printed to stderr on
   // fresh `run` and `init` and always included in
   // `status --output-format json` for later retrieval.
@@ -243,13 +241,12 @@ export function applyRunResetSeed(manifest: RunManifest): void {
   manifest.unrestricted = seed.unrestricted;
   manifest.timeoutSec = seed.timeoutSec;
   manifest.maxAttempts = seed.maxAttempts;
-  manifest.taskMode = seed.taskMode;
   manifest.endedAt = null;
   manifest.status = "initialized";
   manifest.exitCode = null;
   manifest.attempts = 0;
   manifest.backendSessionId = null;
-  manifest.pendingPrompt = seed.pendingPrompt;
+  manifest.brief = seed.brief;
   manifest.finalTasks = cloneTaskSnapshots(seed.finalTasks);
   manifest.tasksCompleted = Object.values(manifest.finalTasks).filter(
     (task) => task.status === "completed",
@@ -324,11 +321,11 @@ function readManifestCandidate(candidate: string): RunManifest {
     typeof parsed === "object" &&
     "schemaVersion" in parsed &&
     typeof (parsed as { schemaVersion: unknown }).schemaVersion === "number" &&
-    (parsed as { schemaVersion: number }).schemaVersion !== 6
+    (parsed as { schemaVersion: number }).schemaVersion !== 7
   ) {
     const version = (parsed as { schemaVersion: number }).schemaVersion;
     throw new ResumeError(
-      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 6. Manifests from earlier versions cannot be resumed — create a fresh run (task-runner init / run).`,
+      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 7. Manifests from earlier versions cannot be resumed — create a fresh run (task-runner init / run).`,
     );
   }
   if (!isRunManifest(parsed)) {
@@ -444,7 +441,7 @@ export function listRunManifests(env: NodeJS.ProcessEnv = process.env): ListedRu
 function isRunManifest(value: unknown): value is RunManifest {
   if (!value || typeof value !== "object") return false;
   const obj = value as Record<string, unknown>;
-  if (obj.schemaVersion !== 6) return false;
+  if (obj.schemaVersion !== 7) return false;
   if (typeof obj.runId !== "string") return false;
 
   // Top-level scalars required by downstream consumers.
@@ -475,7 +472,7 @@ function isRunManifest(value: unknown): value is RunManifest {
   if (typeof obj.tasksCompleted !== "number") return false;
   if (typeof obj.tasksTotal !== "number") return false;
   if (typeof obj.sessionCount !== "number") return false;
-  if (obj.taskMode !== undefined && obj.taskMode !== "file" && obj.taskMode !== "cli") return false;
+  if (typeof obj.brief !== "string") return false;
 
   // Arrays.
   if (!Array.isArray(obj.attemptRecords)) return false;
@@ -528,14 +525,7 @@ function isRunManifest(value: unknown): value is RunManifest {
   if (typeof resetSeed.unrestricted !== "boolean") return false;
   if (typeof resetSeed.timeoutSec !== "number") return false;
   if (typeof resetSeed.maxAttempts !== "number") return false;
-  if (typeof resetSeed.pendingPrompt !== "string") return false;
-  if (
-    resetSeed.taskMode !== undefined &&
-    resetSeed.taskMode !== "file" &&
-    resetSeed.taskMode !== "cli"
-  ) {
-    return false;
-  }
+  if (typeof resetSeed.brief !== "string") return false;
   if (!resetSeed.finalTasks || typeof resetSeed.finalTasks !== "object") return false;
 
   // Nested agent record.
@@ -550,6 +540,16 @@ function isRunManifest(value: unknown): value is RunManifest {
   if (execution.hostMode !== "embedded" && execution.hostMode !== "daemon") return false;
   if (!execution.controller || typeof execution.controller !== "object") return false;
   const controller = execution.controller as Record<string, unknown>;
+  if (
+    obj.sessions.some((session) => {
+      if (!session || typeof session !== "object") {
+        return true;
+      }
+      return typeof (session as Record<string, unknown>).brief !== "string";
+    })
+  ) {
+    return false;
+  }
   if (controller.kind === "embedded") {
     return execution.hostMode === "embedded";
   }

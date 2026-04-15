@@ -1,12 +1,12 @@
 import { strict as assert } from "node:assert";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { parseArgs } from "../apps/cli/dist/cli/parse-args.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { LockedFieldError, runAgent } from "../packages/core/dist/core/run/run-loop.js";
-import { assignmentPathFromPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
+import { setTaskStatusesForPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 const CLAUDE_AGENT = `---
 schemaVersion: 1
@@ -68,25 +68,13 @@ function writeAssignment(baseDir, name, body) {
   return path;
 }
 
-function editStatus(content, taskId, newStatus) {
-  const marker = `<!-- task-id: ${taskId} -->`;
-  const start = content.indexOf(marker);
-  const nextMarker = content.indexOf("<!-- task-id:", start + marker.length);
-  const end = nextMarker < 0 ? content.length : nextMarker;
-  const section = content.slice(start, end);
-  const updated = section.replace(/\*\*Status:\*\*\s*\S+/, `**Status:** ${newStatus}`);
-  return content.slice(0, start) + updated + content.slice(end);
-}
-
 const okBackend = (id) => ({
   id,
   async invoke(ctx) {
     try {
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      const plan = readFileSync(absPlan, "utf8");
-      writeFileSync(absPlan, editStatus(plan, "t1", "completed"), "utf8");
+      setTaskStatusesForPrompt(ctx.prompt, { t1: "completed" });
     } catch {
-      // Chat-mode prompts do not embed an assignment path.
+      // Chat-mode prompts do not expose task state.
     }
     return {
       exitCode: 0,

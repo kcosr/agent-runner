@@ -99,19 +99,6 @@ function patchManifest(workspaceDir, mutator) {
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
-function editTaskStatus(content, taskId, status) {
-  const marker = `<!-- task-id: ${taskId} -->`;
-  const start = content.indexOf(marker);
-  const nextMarker = content.indexOf("<!-- task-id:", start + marker.length);
-  const end = nextMarker < 0 ? content.length : nextMarker;
-  const section = content.slice(start, end);
-  return (
-    content.slice(0, start) +
-    section.replace(/\*\*Status:\*\*\s*\S+/, `**Status:** ${status}`) +
-    content.slice(end)
-  );
-}
-
 async function initRun(baseDir, assignmentName = "svc-work") {
   return withSharedRuntimeEnv(baseDir, async () => {
     const loaded = loadAgentConfig("svc-agent", baseDir);
@@ -211,7 +198,7 @@ test("command services: listDefinitions and showDefinition return typed config r
   });
 });
 
-test("command services: readStatus applies the live workspace overlay for running file-mode runs", async () => {
+test("command services: readStatus reads canonical task state for running runs", async () => {
   const dir = tempDir();
   writeBundle(dir);
   const outcome = await initRun(dir);
@@ -224,15 +211,15 @@ test("command services: readStatus applies the live workspace overlay for runnin
     manifest.finalTasks.t2.status = "pending";
     manifest.tasksCompleted = 0;
   });
-
-  let assignmentText = readFileSync(outcome.assignmentPath, "utf8");
-  assignmentText = editTaskStatus(assignmentText, "t1", "completed");
-  assignmentText = editTaskStatus(assignmentText, "t2", "in_progress");
-  writeFileSync(outcome.assignmentPath, assignmentText);
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.finalTasks.t1.status = "completed";
+    manifest.finalTasks.t2.status = "in_progress";
+    manifest.tasksCompleted = 1;
+  });
 
   await withSharedRuntimeEnv(dir, async () => {
     const result = readStatus(outcome.runId);
-    assert.equal(result.isLive, true);
+    assert.equal(result.isLive, false);
     assert.equal(result.tasks[0].status, "completed");
     assert.equal(result.tasks[1].status, "in_progress");
     assert.equal(result.tasksCompleted, 1);
@@ -243,15 +230,15 @@ test("command services: readStatus applies the live workspace overlay for runnin
       canAbort: false,
       abortReason: "not_active_in_daemon",
       taskMutation: {
-        canSetStatus: false,
-        canEditNotes: false,
+        canSetStatus: true,
+        canEditNotes: true,
         canAdd: false,
       },
     });
   });
 });
 
-test("command services: listRuns applies the live workspace overlay for running file-mode summaries", async () => {
+test("command services: listRuns reflects canonical task state for running summaries", async () => {
   const dir = tempDir();
   writeBundle(dir);
   const outcome = await initRun(dir);
@@ -264,11 +251,11 @@ test("command services: listRuns applies the live workspace overlay for running 
     manifest.finalTasks.t2.status = "pending";
     manifest.tasksCompleted = 0;
   });
-
-  let assignmentText = readFileSync(outcome.assignmentPath, "utf8");
-  assignmentText = editTaskStatus(assignmentText, "t1", "completed");
-  assignmentText = editTaskStatus(assignmentText, "t2", "in_progress");
-  writeFileSync(outcome.assignmentPath, assignmentText);
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.finalTasks.t1.status = "completed";
+    manifest.finalTasks.t2.status = "in_progress";
+    manifest.tasksCompleted = 1;
+  });
 
   await withSharedRuntimeEnv(dir, async () => {
     const run = listRuns({ includeArchived: true }).find((entry) => entry.runId === outcome.runId);
@@ -286,7 +273,7 @@ test("command services: listRuns applies the live workspace overlay for running 
   });
 });
 
-test("command services: listRuns keeps persisted progress for terminal and non-file-mode runs", async () => {
+test("command services: listRuns keeps persisted progress for terminal and running runs", async () => {
   const dir = tempDir();
   writeBundle(dir);
   const terminal = await initRun(dir);
@@ -302,18 +289,10 @@ test("command services: listRuns keeps persisted progress for terminal and non-f
     manifest.status = "running";
     manifest.exitCode = null;
     manifest.endedAt = null;
-    manifest.taskMode = "cli";
     manifest.finalTasks.t1.status = "pending";
     manifest.finalTasks.t2.status = "pending";
     manifest.tasksCompleted = 0;
   });
-
-  for (const outcome of [terminal, nonFile]) {
-    let assignmentText = readFileSync(outcome.assignmentPath, "utf8");
-    assignmentText = editTaskStatus(assignmentText, "t1", "completed");
-    assignmentText = editTaskStatus(assignmentText, "t2", "in_progress");
-    writeFileSync(outcome.assignmentPath, assignmentText);
-  }
 
   await withSharedRuntimeEnv(dir, async () => {
     const runs = listRuns({ includeArchived: true });
@@ -327,7 +306,7 @@ test("command services: listRuns keeps persisted progress for terminal and non-f
   });
 });
 
-test("command services: listRuns falls back to persisted progress when live assignment reads fail", async () => {
+test("command services: listRuns tolerates missing workspace assignment artifacts", async () => {
   const dir = tempDir();
   writeBundle(dir);
   const outcome = await initRun(dir);
@@ -340,7 +319,7 @@ test("command services: listRuns falls back to persisted progress when live assi
     manifest.finalTasks.t2.status = "pending";
     manifest.tasksCompleted = 0;
   });
-  rmSync(outcome.assignmentPath);
+  assert.equal(existsSync(outcome.assignmentPath), false);
 
   await withSharedRuntimeEnv(dir, async () => {
     const run = listRuns({ includeArchived: true }).find((entry) => entry.runId === outcome.runId);

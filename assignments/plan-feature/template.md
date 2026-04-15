@@ -46,11 +46,9 @@ callerInstructions: |
 
   The internal-review task launches a nested `{{task_runner_cmd}} run`
   against the `code-reviewer` agent with
-  `--var implementation_plan={{assignment_path}}` — which is
-  the absolute path to **this run's own** workspace
-  `assignment.md`. The reviewer opens that file, walks every
-  task in it, and runs its plan-coverage pass against the
-  Notes blocks you wrote.
+  `--var implementation_run_id={{run_id}}`. The reviewer reads
+  this run's canonical task state by run id and runs its
+  plan-coverage pass against the Notes blocks you wrote.
 
   What this means in practice: when you edit a task's Notes
   block during execution, **you are writing directly to the
@@ -168,7 +166,7 @@ tasks:
 
       If no such attachment exists, continue without blocking.
       Do not treat the summary attachment as overriding this
-      run's tasks or workspace `assignment.md`.
+      run's canonical task state.
 
       You are about to implement a feature in the repository
       at `{{repo_path}}`. This is a fresh session — you do
@@ -323,13 +321,15 @@ tasks:
       **Category**: process
 
       **Preflight: finalize every prior task.** The reviewer
-      will read this run's workspace `assignment.md` via the
-      `implementation_plan` var and its plan-coverage task
-      consumes exactly what you have written there. Before
+      will read this run's canonical task state via
+      `implementation_run_id={{run_id}}`, and its
+      plan-coverage task consumes exactly what you have written
+      into those task notes. Before
       launching the reviewer:
 
-        1. Open this run's workspace `assignment.md` and scan
-           every task above this one.
+        1. Inspect this run with
+           `{{task_runner_cmd}} status {{run_id}} --output-format json --field tasks`
+           and scan every task above this one.
         2. Every prior task must have status `completed`.
            If a prior task is still `in_progress`, `pending`,
            or `blocked`, fix that first — either by actually
@@ -348,8 +348,7 @@ tasks:
 
       Once every prior task is finalized, launch the bundled
       `code-review` assignment as a nested `{{task_runner_cmd}} run`,
-      passing this plan's workspace assignment as the
-      implementation context:
+      passing this plan's run id as the implementation context:
 
           {{task_runner_cmd}} run \
             --agent code-reviewer \
@@ -357,12 +356,12 @@ tasks:
             --name "<same-short-topic-name>" \
             --var repo_path={{repo_path}} \
             --var "range=<<PLACEHOLDER_REVIEW_RANGE>>" \
-            --var implementation_plan={{assignment_path}}
+            --var implementation_run_id={{run_id}}
 
       Substitute `<<PLACEHOLDER_REVIEW_RANGE>>` with the
       appropriate git-range spec for the changes you
       produced (e.g. `HEAD~N..HEAD`, `main..HEAD`, or
-      `staged`). The `implementation_plan` var points the
+      `staged`). The `implementation_run_id` var points the
       reviewer at this plan so it can cross-check that
       every planned task actually shipped — that is what
       the reviewer's plan-coverage task consumes.

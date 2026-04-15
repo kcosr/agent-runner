@@ -136,6 +136,10 @@ export interface RunResult {
   run: RunDetail;
 }
 
+export interface RunBriefResult {
+  brief: string;
+}
+
 export interface TasksListResult {
   tasks: RunTaskSummary[];
 }

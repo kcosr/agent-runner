@@ -64,9 +64,6 @@ function validateResumeOverrides(
   if (opts.overrides.backend !== undefined) {
     return "--backend cannot be combined with --resume-run (backend is locked to the run that created the session)";
   }
-  if (opts.overrides.taskMode !== undefined) {
-    return "--task-mode cannot be combined with --resume-run — task interaction mode is frozen into the manifest at first write. If you need a different mode, create a fresh run instead.";
-  }
   if (opts.backendSessionId !== undefined) {
     return "--backend-session-id cannot be combined with --resume-run (the resume target already carries a backend session id)";
   }
