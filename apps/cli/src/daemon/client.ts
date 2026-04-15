@@ -1,5 +1,9 @@
 import type { RunTimelineEvent } from "@task-runner/core/contracts/events.js";
-import { runDetailSchema, runSummarySchema } from "@task-runner/core/contracts/run-schemas.js";
+import {
+  runDetailSchema,
+  runSummarySchema,
+  runTimelineEventSchema,
+} from "@task-runner/core/contracts/run-schemas.js";
 import WebSocket from "ws";
 import { z } from "zod";
 import type {
@@ -60,16 +64,11 @@ const runDetailNotificationSchema = z.object({
   detail: runDetailSchema,
 });
 
-const runTimelineEventSchema = z
-  .object({
-    type: z.string(),
-  })
-  .passthrough();
-
 const runTimelineNotificationSchema = z.object({
   method: z.literal("run.timeline"),
   subscriptionId: z.string(),
   runId: z.string(),
+  cursor: z.number().int().positive(),
   event: runTimelineEventSchema,
 });
 
@@ -79,7 +78,10 @@ const runDetailNotificationResultSchema: z.ZodType<DaemonSubscriptionNotificatio
   runDetailNotificationSchema;
 const runTimelineNotificationResultSchema = runTimelineNotificationSchema.transform(
   (value): DaemonSubscriptionNotification => ({
-    ...value,
+    method: "run.timeline",
+    subscriptionId: value.subscriptionId,
+    runId: value.runId,
+    cursor: value.cursor,
     event: value.event as RunTimelineEvent,
   }),
 );

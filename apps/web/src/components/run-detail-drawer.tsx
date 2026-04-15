@@ -15,6 +15,7 @@ import {
   formatTimestamp,
   truncateMiddle,
 } from "../lib/format.js";
+import type { RunTimelineState } from "../lib/run-timeline.js";
 import {
   DRAWER_WIDTH_MAX,
   DRAWER_WIDTH_MIN,
@@ -34,6 +35,7 @@ import { RunTaskList } from "./run-task-list.js";
 import { StatusBadge } from "./status-badge.js";
 
 type SectionKey = "tasks" | "attachments" | "dependencies" | "timing" | "events";
+type TimelineTab = "prompt" | "output";
 
 interface DragState {
   pointerId: number;
@@ -98,6 +100,13 @@ function summaryRows(run: RunDetail) {
   return rows;
 }
 
+function attemptOutput(attempt: {
+  transcript: string;
+  notices: string;
+}) {
+  return `${attempt.transcript}${attempt.notices}`;
+}
+
 export function RunDetailDrawer({
   dependencyCandidateRuns,
   onAddDependency,
@@ -113,6 +122,7 @@ export function RunDetailDrawer({
   onRemoveAttachment,
   onRename,
   onResume,
+  timelineState,
   onUnarchive,
   onUploadAttachment,
   run,
@@ -131,11 +141,14 @@ export function RunDetailDrawer({
   onRemoveAttachment: (attachmentId: string) => Promise<void>;
   onRename: (name: string | null) => Promise<void>;
   onResume: () => void;
+  timelineState: RunTimelineState;
   onUnarchive: () => void;
   onUploadAttachment: (file: File) => Promise<void>;
   run: RunDetail;
 }) {
   const [section, setSection] = useState<SectionKey>("tasks");
+  const [selectedAttempt, setSelectedAttempt] = useState<number | null>(null);
+  const [timelineTab, setTimelineTab] = useState<TimelineTab>("output");
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(run.name ?? "");
   const [dependencyDraft, setDependencyDraft] = useState("");
@@ -178,6 +191,11 @@ export function RunDetailDrawer({
     eligibleDependencyCandidates.find(
       (candidate) => candidate.runId.toLowerCase() === normalizedDependencyDraft.toLowerCase(),
     )?.runId;
+  const timelineAttempts = timelineState.history?.attempts ?? [];
+  const selectedAttemptRecord =
+    timelineAttempts.find((attempt) => attempt.attempt === selectedAttempt) ??
+    timelineAttempts[timelineAttempts.length - 1] ??
+    null;
 
   function handleResizeStart(event: PointerEvent<HTMLDivElement>) {
     event.preventDefault();
@@ -296,6 +314,14 @@ export function RunDetailDrawer({
       nameInputRef.current?.focus();
     }
   }, [editingName]);
+
+  useEffect(() => {
+    const availableAttempts = new Set(timelineAttempts.map((attempt) => attempt.attempt));
+    if (selectedAttempt !== null && availableAttempts.has(selectedAttempt)) {
+      return;
+    }
+    setSelectedAttempt(timelineAttempts[timelineAttempts.length - 1]?.attempt ?? null);
+  }, [selectedAttempt, timelineAttempts]);
 
   async function submitDependencyAdd() {
     if (!resolvedDependencyRunId || addDependencyPending) {
@@ -866,11 +892,115 @@ export function RunDetailDrawer({
 
           {section === "events" ? (
             <section aria-label="Events" className="drawer-panel drawer-panel--events">
-              <div className="drawer-panel-card">
-                <p className="muted-inline">
-                  Live event timeline is deferred in phase 1. HTTP detail and SSE board refresh are
-                  implemented in this slice.
-                </p>
+              <div className="drawer-panel-card timeline-panel">
+                {timelineState.stale ? (
+                  <div className="notice" data-tone="warning">
+                    <span className="notice__message">
+                      Timeline sync is stale. The drawer is waiting for a clean reload.
+                    </span>
+                  </div>
+                ) : null}
+
+                {timelineState.error && !selectedAttemptRecord ? (
+                  <p className="muted-inline">{timelineState.error}</p>
+                ) : null}
+
+                {timelineState.isLoading && timelineAttempts.length === 0 ? (
+                  <p className="muted-inline">Loading timeline history…</p>
+                ) : null}
+
+                {!timelineState.isLoading && timelineAttempts.length === 0 ? (
+                  <p className="muted-inline">No attempt history is available for this run yet.</p>
+                ) : null}
+
+                {timelineAttempts.length > 1 ? (
+                  <div className="timeline-attempts">
+                    <span className="timeline-attempts__label">Attempts</span>
+                    <div className="timeline-attempt-tabs" role="tablist" aria-label="Attempts">
+                      {timelineAttempts.map((attempt) => (
+                        <button
+                          aria-selected={selectedAttemptRecord?.attempt === attempt.attempt}
+                          className={
+                            selectedAttemptRecord?.attempt === attempt.attempt
+                              ? "timeline-attempt-tab active"
+                              : "timeline-attempt-tab"
+                          }
+                          key={attempt.attempt}
+                          onClick={() => setSelectedAttempt(attempt.attempt)}
+                          role="tab"
+                          type="button"
+                        >
+                          <span>{attempt.attempt}</span>
+                          {attempt.live ? (
+                            <span aria-hidden="true" className="timeline-live-dot" />
+                          ) : null}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                {selectedAttemptRecord ? (
+                  <div className="timeline-attempt-panel">
+                    <div className="timeline-attempt-meta">
+                      <span>Attempt {selectedAttemptRecord.attempt}</span>
+                      <span>Session {selectedAttemptRecord.sessionIndex}</span>
+                      <span>{formatTimestamp(selectedAttemptRecord.startedAt)}</span>
+                      {selectedAttemptRecord.endedAt ? (
+                        <span>Ended {formatTimestamp(selectedAttemptRecord.endedAt)}</span>
+                      ) : null}
+                      <span>
+                        Exit{" "}
+                        {selectedAttemptRecord.exitCode === null
+                          ? selectedAttemptRecord.live
+                            ? "pending"
+                            : "n/a"
+                          : String(selectedAttemptRecord.exitCode)}
+                      </span>
+                    </div>
+
+                    <div className="task-tabs" role="tablist" aria-label="Attempt view">
+                      <button
+                        aria-selected={timelineTab === "prompt"}
+                        className={timelineTab === "prompt" ? "task-tab active" : "task-tab"}
+                        onClick={() => setTimelineTab("prompt")}
+                        role="tab"
+                        type="button"
+                      >
+                        Prompt
+                      </button>
+                      <button
+                        aria-selected={timelineTab === "output"}
+                        className={timelineTab === "output" ? "task-tab active" : "task-tab"}
+                        onClick={() => setTimelineTab("output")}
+                        role="tab"
+                        type="button"
+                      >
+                        Output
+                      </button>
+                    </div>
+
+                    {timelineTab === "prompt" ? (
+                      selectedAttemptRecord.prompt ? (
+                        <pre className="timeline-content" aria-label="Attempt prompt">
+                          {selectedAttemptRecord.prompt}
+                        </pre>
+                      ) : (
+                        <p className="task-empty">This attempt did not record a prompt.</p>
+                      )
+                    ) : attemptOutput(selectedAttemptRecord) ? (
+                      <pre className="timeline-content" aria-label="Attempt output">
+                        {attemptOutput(selectedAttemptRecord)}
+                      </pre>
+                    ) : (
+                      <p className="task-empty">
+                        {selectedAttemptRecord.live
+                          ? "Waiting for live output…"
+                          : "This attempt produced no transcript output."}
+                      </p>
+                    )}
+                  </div>
+                ) : null}
               </div>
             </section>
           ) : null}

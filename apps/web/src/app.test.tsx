@@ -1,3 +1,4 @@
+import type { RunTimelineHistory } from "@task-runner/core/contracts/events.js";
 import type { RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -261,6 +262,7 @@ function installFetchMock(
   state: {
     runs: RunSummary[];
     details: Record<string, RunDetail>;
+    timelineHistories?: Record<string, RunTimelineHistory>;
   },
   options?: {
     handleRequest?: (
@@ -435,6 +437,22 @@ function installFetchMock(
       return new Response(JSON.stringify({ run: detail }), { status: 200 });
     }
 
+    const timelineMatch = /\/api\/runs\/([^/]+)\/timeline$/.exec(url);
+    if (timelineMatch && (!init?.method || init.method === "GET")) {
+      const runId = decodeURIComponent(timelineMatch[1] ?? "");
+      if (!state.details[runId]) {
+        return new Response(JSON.stringify({ error: { message: "missing", code: "not_found" } }), {
+          status: 404,
+        });
+      }
+      const history = state.timelineHistories?.[runId] ?? {
+        runId,
+        attempts: [],
+        lastCursor: 0,
+      };
+      return new Response(JSON.stringify({ history }), { status: 200 });
+    }
+
     const archiveMatch = /\/api\/runs\/([^/]+)\/(archive|unarchive|resume|abort)$/.exec(url);
     if (archiveMatch) {
       const [, runId, action] = archiveMatch;
@@ -604,6 +622,14 @@ async function findRunCard(name: string | RegExp) {
   });
 }
 
+function findEventSource(urlSuffix: string) {
+  const instance = MockEventSource.instances.find((candidate) => candidate.url.endsWith(urlSuffix));
+  if (!instance) {
+    throw new Error(`expected EventSource for ${urlSuffix}`);
+  }
+  return instance;
+}
+
 function escapeRegExp(value: string) {
   return value.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -696,6 +722,154 @@ describe("web app", () => {
     expect(screen.getAllByText("Build UI").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("Repo").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByRole("button", { name: /copy run id/i })).toBeInTheDocument();
+  });
+
+  it("renders attempt history in the events tab and merges live output by cursor", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+      timelineHistories: {
+        "run-1": {
+          runId: "run-1",
+          lastCursor: 3,
+          attempts: [
+            {
+              attempt: 1,
+              sessionIndex: 0,
+              startedAt: "2026-04-13T05:00:00.000Z",
+              endedAt: "2026-04-13T05:02:00.000Z",
+              prompt: "Initial prompt",
+              transcript: "Attempt one output\n",
+              notices: "",
+              exitCode: 0,
+              timedOut: false,
+              live: false,
+            },
+            {
+              attempt: 2,
+              sessionIndex: 1,
+              startedAt: "2026-04-13T05:03:00.000Z",
+              endedAt: null,
+              prompt: "Continue working",
+              transcript: "Streaming",
+              notices: " warning\n",
+              exitCode: null,
+              timedOut: false,
+              live: true,
+            },
+          ],
+        },
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+    await user.click(screen.getByRole("button", { name: "Events" }));
+
+    const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
+    timelineSource.emitOpen();
+
+    expect(await screen.findByText("Attempts")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "1" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "2" })).toBeInTheDocument();
+
+    const output = await screen.findByLabelText("Attempt output");
+    expect(output).toHaveTextContent("Streaming warning");
+
+    await user.click(screen.getByRole("tab", { name: "Prompt" }));
+    expect(screen.getByLabelText("Attempt prompt")).toHaveTextContent("Continue working");
+
+    await user.click(screen.getByRole("tab", { name: "Output" }));
+    timelineSource.emitMessage({
+      runId: "run-1",
+      cursor: 4,
+      event: {
+        type: "agent_message_delta",
+        text: " live",
+      },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Attempt output")).toHaveTextContent("Streaming live warning");
+    });
+  });
+
+  it("reloads timeline history after a cursor gap instead of merging heuristically", async () => {
+    const timelineHistory = {
+      runId: "run-1",
+      lastCursor: 1,
+      attempts: [
+        {
+          attempt: 1,
+          sessionIndex: 0,
+          startedAt: "2026-04-13T05:00:00.000Z",
+          endedAt: null,
+          prompt: "Initial prompt",
+          transcript: "Before gap",
+          notices: "",
+          exitCode: null,
+          timedOut: false,
+          live: true,
+        },
+      ],
+    } satisfies RunTimelineHistory;
+
+    const fetchMock = installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+        timelineHistories: {
+          "run-1": timelineHistory,
+        },
+      },
+      {
+        handleRequest: async (url) => {
+          if (url.endsWith("/api/runs/run-1/timeline")) {
+            return new Response(JSON.stringify({ history: timelineHistory }), { status: 200 });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+    await user.click(screen.getByRole("button", { name: "Events" }));
+
+    const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
+    timelineSource.emitOpen();
+
+    expect(await screen.findByLabelText("Attempt output")).toHaveTextContent("Before gap");
+
+    const initialAttempt = timelineHistory.attempts[0];
+    if (!initialAttempt) {
+      throw new Error("expected initial timeline attempt");
+    }
+    timelineHistory.lastCursor = 3;
+    timelineHistory.attempts = [
+      {
+        ...initialAttempt,
+        transcript: "After reload",
+      },
+    ];
+    timelineSource.emitMessage({
+      runId: "run-1",
+      cursor: 3,
+      event: {
+        type: "agent_message_delta",
+        text: " skipped",
+      },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Attempt output")).toHaveTextContent("After reload");
+    });
+    expect(
+      fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/api/runs/run-1/timeline"))
+        .length,
+    ).toBeGreaterThanOrEqual(2);
   });
 
   it("groups the board by effective status instead of canonical lifecycle status", async () => {
@@ -2090,13 +2264,13 @@ describe("web app", () => {
 
     await user.click(await findRunCard("Build dashboard"));
     expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
-    expect(MockEventSource.instances).toHaveLength(2);
+    expect(MockEventSource.instances).toHaveLength(3);
 
     await user.click(getCloseDetailButton());
     await user.click(await findRunCard("Second run"));
 
     expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
-    expect(MockEventSource.instances).toHaveLength(3);
+    expect(MockEventSource.instances).toHaveLength(5);
   });
 
   it("searches dependency candidates by assignment name and submits the selected run id", async () => {

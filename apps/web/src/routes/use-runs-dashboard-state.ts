@@ -11,6 +11,7 @@ import type { BoardColumn } from "../components/run-column.js";
 import { createApiClient, isNotFoundError } from "../lib/api-client.js";
 import { queryClient, runQueryKeys } from "../lib/query.js";
 import { useRunEvents } from "../lib/run-events.js";
+import { useRunTimelineState } from "../lib/run-timeline.js";
 import { useRuntimeConfig } from "../lib/runtime-config.js";
 import { useBoardSettings } from "../lib/settings.js";
 import { subscribeToRunDetailEvents } from "../lib/sse.js";
@@ -183,6 +184,11 @@ export function useRunsDashboardState() {
       return await api.getRun(selectedRunId);
     },
     enabled: Boolean(selectedRunId),
+  });
+  const timelineState = useRunTimelineState({
+    config,
+    runId: selectedRunId,
+    runIsLive: selectedRunQuery.data?.isLive === true,
   });
 
   const runs = runsQuery.data ?? [];
@@ -575,7 +581,8 @@ export function useRunsDashboardState() {
     selectedRunId,
     selectedRunQuery,
     settings,
-    streamStale: summaryStreamStale || detailStreamStale,
+    streamStale: summaryStreamStale || detailStreamStale || timelineState.stale,
+    timelineState,
     updateSettings,
     visibleRuns,
   };

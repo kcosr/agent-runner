@@ -2,9 +2,14 @@ import type { AppRuntimeConfig } from "@task-runner/core/contracts/app-config.js
 import type {
   RunDetailStreamEvent,
   RunSummaryStreamEvent,
+  RunTimelineEnvelope,
 } from "@task-runner/core/contracts/events.js";
-import { runDetailSchema, runSummarySchema } from "@task-runner/core/contracts/run-schemas.js";
-import { z } from "zod";
+import {
+  runDetailStreamEventSchema,
+  runSummaryStreamEventSchema,
+  runTimelineEnvelopeSchema,
+} from "@task-runner/core/contracts/run-schemas.js";
+import type { z } from "zod";
 
 export interface SummaryEventsSubscriptionOptions {
   onEvent: (payload: RunSummaryStreamEvent) => void;
@@ -18,15 +23,11 @@ export interface DetailEventsSubscriptionOptions {
   onStaleChange?: (stale: boolean) => void;
 }
 
-const runSummaryStreamEventSchema: z.ZodType<RunSummaryStreamEvent> = z.object({
-  type: z.literal("summary_upsert"),
-  summary: runSummarySchema,
-});
-
-const runDetailStreamEventSchema: z.ZodType<RunDetailStreamEvent> = z.object({
-  type: z.literal("detail_updated"),
-  detail: runDetailSchema,
-});
+export interface TimelineEventsSubscriptionOptions {
+  onEvent: (payload: RunTimelineEnvelope) => void;
+  onOpen?: () => void;
+  onStaleChange?: (stale: boolean) => void;
+}
 
 function joinPath(basePath: string, path: string): string {
   return `${basePath.replace(/\/$/, "")}${path.startsWith("/") ? path : `/${path}`}`;
@@ -84,6 +85,18 @@ export function subscribeToRunDetailEvents(
   return subscribeToEventSource(
     joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/events/detail`),
     runDetailStreamEventSchema,
+    options,
+  );
+}
+
+export function subscribeToRunTimelineEvents(
+  config: AppRuntimeConfig,
+  runId: string,
+  options: TimelineEventsSubscriptionOptions,
+): () => void {
+  return subscribeToEventSource(
+    joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/events/timeline`),
+    runTimelineEnvelopeSchema,
     options,
   );
 }

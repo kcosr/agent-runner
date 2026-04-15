@@ -4,7 +4,11 @@ import type {
   RunAttachment,
   RunAttachmentRemoveResult,
 } from "@task-runner/core/contracts/attachments.js";
-import type { RunTimelineEvent } from "@task-runner/core/contracts/events.js";
+import type {
+  RunTimelineEnvelope,
+  RunTimelineEvent,
+  RunTimelineHistory,
+} from "@task-runner/core/contracts/events.js";
 import type {
   RunArchiveResult,
   RunDependenciesResult,
@@ -108,6 +112,8 @@ export interface RunsResumeParams {
   overrides: RunCommandOverrides;
 }
 
+export interface RunsTimelineHistoryParams extends RunTargetParams {}
+
 export interface EventsSubscribeParams {
   channel: RunEventChannel;
   runId?: string;
@@ -139,6 +145,7 @@ export interface RunDetailNotificationParams {
 export interface RunTimelineNotificationParams {
   subscriptionId: string;
   runId: string;
+  cursor: number;
   event: RunTimelineEvent;
 }
 
@@ -152,6 +159,10 @@ export interface RunResult {
 
 export interface RunBriefResult {
   brief: string;
+}
+
+export interface RunsTimelineHistoryResult {
+  history: RunTimelineHistory;
 }
 
 export interface TasksListResult {
@@ -205,3 +216,7 @@ export interface AttachmentResult {
 export interface AttachmentRemoveHttpResult {
   result: RunAttachmentRemoveResult;
 }
+
+export type RunTimelineNotification = RunTimelineEnvelope & {
+  subscriptionId: string;
+};

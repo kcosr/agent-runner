@@ -2,6 +2,14 @@ import { z } from "zod";
 import { LOCKABLE_FIELDS } from "../core/config/schema.js";
 import type { RunAttachment } from "./attachments.js";
 import type {
+  RunDetailStreamEvent,
+  RunSummaryStreamEvent,
+  RunTimelineAttempt,
+  RunTimelineEnvelope,
+  RunTimelineEvent,
+  RunTimelineHistory,
+} from "./events.js";
+import type {
   RunAbortReason,
   RunActiveTask,
   RunArchiveResult,
@@ -197,4 +205,45 @@ export const runDependenciesResultSchema: z.ZodType<RunDependenciesResult> = z.o
   runId: z.string(),
   dependencyRunIds: z.array(z.string()),
   changed: z.boolean(),
+});
+
+export const runSummaryStreamEventSchema: z.ZodType<RunSummaryStreamEvent> = z.object({
+  type: z.literal("summary_upsert"),
+  summary: runSummarySchema,
+});
+
+export const runDetailStreamEventSchema: z.ZodType<RunDetailStreamEvent> = z.object({
+  type: z.literal("detail_updated"),
+  detail: runDetailSchema,
+});
+
+export const runTimelineEventSchema = z
+  .object({
+    type: z.string(),
+  })
+  .passthrough() as z.ZodType<RunTimelineEvent>;
+
+export const runTimelineAttemptSchema: z.ZodType<RunTimelineAttempt> = z.object({
+  attempt: z.number().int().positive(),
+  sessionIndex: z.number().int().nonnegative(),
+  startedAt: z.string(),
+  endedAt: z.string().nullable(),
+  prompt: z.string(),
+  transcript: z.string(),
+  notices: z.string(),
+  exitCode: z.number().int().nullable(),
+  timedOut: z.boolean(),
+  live: z.boolean(),
+});
+
+export const runTimelineHistorySchema: z.ZodType<RunTimelineHistory> = z.object({
+  runId: z.string(),
+  attempts: z.array(runTimelineAttemptSchema),
+  lastCursor: z.number().int().nonnegative(),
+});
+
+export const runTimelineEnvelopeSchema: z.ZodType<RunTimelineEnvelope> = z.object({
+  runId: z.string(),
+  cursor: z.number().int().positive(),
+  event: runTimelineEventSchema,
 });

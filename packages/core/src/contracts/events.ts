@@ -15,3 +15,28 @@ export interface RunDetailStreamEvent {
 
 // Execution timeline events stay on the per-run timeline surface.
 export type RunTimelineEvent = RunEvent;
+
+export interface RunTimelineAttempt {
+  attempt: number;
+  sessionIndex: number;
+  startedAt: string;
+  endedAt: string | null;
+  prompt: string;
+  transcript: string;
+  notices: string;
+  exitCode: number | null;
+  timedOut: boolean;
+  live: boolean;
+}
+
+export interface RunTimelineHistory {
+  runId: string;
+  attempts: RunTimelineAttempt[];
+  lastCursor: number;
+}
+
+export interface RunTimelineEnvelope {
+  runId: string;
+  cursor: number;
+  event: RunTimelineEvent;
+}
