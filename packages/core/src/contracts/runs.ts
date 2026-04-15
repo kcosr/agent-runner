@@ -18,6 +18,11 @@ import type { RunAttachment } from "./attachments.js";
 export type RunStatus = ManifestStatus;
 export type { RunDependencyDetail, RunDependencyState } from "../core/run/dependencies.js";
 
+export interface RunActiveTask {
+  id: string;
+  title: string;
+}
+
 export interface RunSummary {
   runId: string;
   repo: string;
@@ -36,6 +41,7 @@ export interface RunSummary {
   tasksTotal: number;
   attachmentCount: number;
   dependencyState: RunDependencyState;
+  activeTask: RunActiveTask | null;
   execution: RunExecution;
   capabilities: RunCapabilities;
 }
@@ -111,6 +117,7 @@ export interface RunDetail {
   dependencies: RunDependencyDetail[];
   dependents: RunDependencyDetail[];
   tasks: RunTaskSummary[];
+  activeTask: RunActiveTask | null;
   message: string | null;
   callerInstructions: string | null;
   lockedFields: LockableField[];
@@ -151,6 +158,22 @@ function toRunTaskSummary(task: TaskSnapshot): RunTaskSummary {
     body: task.body,
     status: task.status,
     notes: task.notes,
+  };
+}
+
+function deriveActiveTask(tasks: Record<string, TaskSnapshot>): RunActiveTask | null {
+  const inProgress = Object.values(tasks).filter((task) => task.status === "in_progress");
+  if (inProgress.length !== 1) {
+    return null;
+  }
+  const [task] = inProgress;
+  if (!task) {
+    return null;
+  }
+
+  return {
+    id: task.id,
+    title: task.title,
   };
 }
 
@@ -235,6 +258,7 @@ export function toRunSummary(
     tasksTotal: entry.manifest.tasksTotal,
     attachmentCount: entry.manifest.attachments.length,
     dependencyState: dependencyState ?? deriveDependencyState(entry.manifest, relatedManifests),
+    activeTask: deriveActiveTask(entry.manifest.finalTasks),
     execution: entry.manifest.execution,
     capabilities: deriveRunCapabilities(entry.manifest),
   };
@@ -300,6 +324,7 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
     dependencies: result.dependencies ?? resolveDependencies(manifest, relatedManifests),
     dependents: result.dependents ?? resolveDependents(manifest, relatedManifests),
     tasks: Object.values(manifest.finalTasks).map(toRunTaskSummary),
+    activeTask: deriveActiveTask(manifest.finalTasks),
     message: manifest.message,
     callerInstructions: manifest.callerInstructions,
     lockedFields: [...manifest.lockedFields],

@@ -8,7 +8,7 @@ import { router } from "./router.js";
 
 const APP_CONFIG = {
   apiBasePath: "/api",
-  runEventsPath: "/api/events/runs",
+  runSummaryEventsPath: "/api/events/run-summaries",
 };
 
 class MockEventSource {
@@ -80,6 +80,10 @@ function makeRun(
       satisfied: 0,
       unsatisfied: 0,
     },
+    activeTask: {
+      id: "build",
+      title: "Build UI",
+    },
     capabilities: {
       canArchive: false,
       canUnarchive: false,
@@ -113,6 +117,13 @@ function makeRun(
   } as RunSummary;
   if (overrides.status !== undefined && !("effectiveStatus" in overrides)) {
     run.effectiveStatus = overrides.status;
+  }
+  if (
+    overrides.status !== undefined &&
+    overrides.activeTask === undefined &&
+    overrides.status !== "running"
+  ) {
+    run.activeTask = null;
   }
   if (overrides.capabilities === undefined || overrides.capabilities.abortReason === undefined) {
     run.capabilities.abortReason = run.capabilities.canAbort
@@ -184,6 +195,10 @@ function makeDetail(
         notes: "working",
       },
     ],
+    activeTask: {
+      id: "build",
+      title: "Build UI",
+    },
     message: null,
     callerInstructions: null,
     lockedFields: ["tasks"],
@@ -223,6 +238,13 @@ function makeDetail(
   } as RunDetail;
   if (overrides.status !== undefined && !("effectiveStatus" in overrides)) {
     detail.effectiveStatus = overrides.status;
+  }
+  if (
+    overrides.status !== undefined &&
+    overrides.activeTask === undefined &&
+    overrides.status !== "running"
+  ) {
+    detail.activeTask = null;
   }
   if (overrides.capabilities === undefined || overrides.capabilities.abortReason === undefined) {
     detail.capabilities.abortReason = detail.capabilities.canAbort
@@ -671,7 +693,7 @@ describe("web app", () => {
     await user.click(await findRunCard("Build dashboard"));
 
     expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
-    expect(screen.getByText("Build UI")).toBeInTheDocument();
+    expect(screen.getAllByText("Build UI").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("Repo").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByRole("button", { name: /copy run id/i })).toBeInTheDocument();
   });
@@ -1828,10 +1850,7 @@ describe("web app", () => {
     state.details["run-1"] = makeDetail({
       assignment: { name: "Updated from SSE", sourcePath: "/tmp/a.md", workspacePath: "/tmp/b.md" },
     });
-    source.emitMessage({
-      runId: "run-1",
-      event: { type: "run_finished", summary: { runId: "run-1" } },
-    });
+    source.emitMessage({ type: "summary_upsert", summary: state.runs[0] });
 
     expect(await screen.findByRole("button", { name: /updated from sse/i })).toBeInTheDocument();
 
@@ -1839,9 +1858,10 @@ describe("web app", () => {
     source.emitError();
 
     expect(await screen.findByText(/live updates are temporarily stale/i)).toBeInTheDocument();
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: /recovered after stale/i })).toBeInTheDocument(),
-    );
+    await userEvent.setup().click(screen.getByRole("button", { name: /refetch now/i }));
+    expect(
+      await screen.findByRole("button", { name: /recovered after stale/i }),
+    ).toBeInTheDocument();
   });
 
   it("revalidates after SSE reconnect before clearing the stale banner", async () => {
@@ -1885,6 +1905,8 @@ describe("web app", () => {
     source.emitError();
 
     expect(await screen.findByText(/live updates are temporarily stale/i)).toBeInTheDocument();
+    source.emitOpen();
+    expect(screen.getByText(/live updates are temporarily stale/i)).toBeInTheDocument();
     source.emitOpen();
 
     await waitFor(() =>
@@ -1946,12 +1968,12 @@ describe("web app", () => {
       throw new Error("expected an EventSource subscription");
     }
     source.emitOpen();
-    source.emitMessage({ runId: "run-1", event: {} });
+    source.emitMessage({ type: "summary_upsert", summary: {} });
 
     expect(await screen.findByText(/live updates are temporarily stale/i)).toBeInTheDocument();
   });
 
-  it("ignores non-stateful SSE events for HTTP refresh", async () => {
+  it("applies summary SSE upserts without forcing an HTTP refetch", async () => {
     const fetchMock = installFetchMock({
       runs: [makeRun({ assignmentName: "Original title" })],
       details: {
@@ -1976,12 +1998,13 @@ describe("web app", () => {
 
     const callsBefore = fetchMock.mock.calls.length;
     source.emitMessage({
-      runId: "run-1",
-      event: { type: "backend_notice", text: "noise" },
+      type: "summary_upsert",
+      summary: makeRun({ assignmentName: "Updated without refetch" }),
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 250));
-
+    expect(
+      await screen.findByRole("button", { name: /updated without refetch/i }),
+    ).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(callsBefore);
   });
 
@@ -2067,13 +2090,13 @@ describe("web app", () => {
 
     await user.click(await findRunCard("Build dashboard"));
     expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
-    expect(MockEventSource.instances).toHaveLength(1);
+    expect(MockEventSource.instances).toHaveLength(2);
 
     await user.click(getCloseDetailButton());
     await user.click(await findRunCard("Second run"));
 
     expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
-    expect(MockEventSource.instances).toHaveLength(1);
+    expect(MockEventSource.instances).toHaveLength(3);
   });
 
   it("searches dependency candidates by assignment name and submits the selected run id", async () => {

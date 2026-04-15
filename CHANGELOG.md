@@ -4,6 +4,7 @@
 
 ### Breaking Changes
 
+- Replaced the daemon/browser live-event contract hot-cut: `AppRuntimeConfig.runEventsPath` and the mixed `/api/events/runs` / `run.event` surfaces are removed in favor of `runSummaryEventsPath`, summary-only global streams, per-run detail streams, and per-run timeline streams. `RunSummary` and `RunDetail` now include derived `activeTask` projections for direct board/detail rendering.
 - Replaced the old assignment-owned/backend display-name contract with first-class nullable `run.name`. Fresh `task-runner run` / `init` now use `--name`, resume rejects name overrides, and bundled assignments/docs/examples no longer describe the removed contract.
 - Replaced the previous single-root runtime env var and cwd-local bare-name definition lookup with split XDG-style roots: `TASK_RUNNER_CONFIG_DIR` for named agent/assignment definitions and `TASK_RUNNER_STATE_DIR` for runtime state. Bare names now resolve only from the config root, and run workspaces now live under repo-scoped state buckets instead of `<cwd>/.task-runner/`. ([#8](https://github.com/kcosr/task-runner/pull/8))
 - Direct file-path args are now recognized only when the argument contains `/` or starts with `./`; bare names no longer implicitly resolve from the repo checkout. ([#8](https://github.com/kcosr/task-runner/pull/8))
@@ -73,6 +74,7 @@
 
 ### Changed
 
+- The web dashboard now applies live `RunSummary` and `RunDetail` snapshots directly to the board/detail caches, so card progress, attachment/dependency badges, and active-task labels update from streamed projections without relying on selected-run invalidation.
 - Polished the web detail drawer's Attachments and Dependencies tabs: attachment rows now render with the shared row card styling and human-readable sizes (e.g. `2.1 MB`), dependency rows show a status badge instead of plain-text status, destructive actions use the destructive-outline button tone, and empty "Depends on" / "Required by" sections are hidden instead of showing duplicate empty-state copy. ([#32](https://github.com/kcosr/task-runner/pull/32))
 - Kanban run cards now surface dependency readiness and attachment presence directly in the card metadata row so planning artifacts and blocked prerequisites are visible without opening the drawer. ([#32](https://github.com/kcosr/task-runner/pull/32))
 - `assignments/plan-feature/` now attaches `assignment-seed.md` and `assignment-summary.md` to the planning run, waits for explicit caller approval before creating the implementer run, and teaches generated implementer/code-review orientations to review `assignment-summary.md` for supplemental context when it exists. ([#32](https://github.com/kcosr/task-runner/pull/32))

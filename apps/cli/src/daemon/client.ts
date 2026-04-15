@@ -4,7 +4,9 @@ import type {
   JsonRpcNotification,
   JsonRpcRequest,
   JsonRpcResponse,
-  RunEventNotificationParams,
+  RunDetailNotificationParams,
+  RunSummaryNotificationParams,
+  RunTimelineNotificationParams,
 } from "./protocol.js";
 
 export class DaemonConnectionError extends Error {
@@ -37,10 +39,18 @@ type PendingCall = {
   reject: (error: unknown) => void;
 };
 
+export type DaemonSubscriptionNotification =
+  | ({ method: "run.summary" } & RunSummaryNotificationParams)
+  | ({ method: "run.detail" } & RunDetailNotificationParams)
+  | ({ method: "run.timeline" } & RunTimelineNotificationParams);
+
 export class DaemonClient {
   private nextId = 1;
   private readonly pending = new Map<string, PendingCall>();
-  private readonly subscriptions = new Map<string, (params: RunEventNotificationParams) => void>();
+  private readonly subscriptions = new Map<
+    string,
+    (params: DaemonSubscriptionNotification) => void
+  >();
 
   private constructor(
     private readonly ws: WebSocket,
@@ -92,7 +102,7 @@ export class DaemonClient {
 
   async subscribe(
     params: EventsSubscribeParams,
-    onEvent: (params: RunEventNotificationParams) => void,
+    onEvent: (params: DaemonSubscriptionNotification) => void,
   ): Promise<string> {
     const result = await this.call<{ subscriptionId: string }>("events.subscribe", params);
     this.subscriptions.set(result.subscriptionId, onEvent);
@@ -138,10 +148,17 @@ export class DaemonClient {
       return;
     }
 
-    if (parsed.method !== "run.event") {
+    if (
+      parsed.method !== "run.summary" &&
+      parsed.method !== "run.detail" &&
+      parsed.method !== "run.timeline"
+    ) {
       return;
     }
-    const params = parsed.params as RunEventNotificationParams;
+    const params = {
+      method: parsed.method,
+      ...(parsed.params as object),
+    } as DaemonSubscriptionNotification;
     const handler = this.subscriptions.get(params.subscriptionId);
     if (handler) {
       handler(params);

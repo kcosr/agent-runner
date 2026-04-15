@@ -6,12 +6,10 @@ import { StatusBadge } from "./status-badge.js";
 export function RunCard({
   run,
   selected,
-  activeTaskLabel,
   onSelect,
 }: {
   run: RunSummary;
   selected: boolean;
-  activeTaskLabel?: string;
   onSelect: () => void;
 }) {
   const progress =
@@ -75,11 +73,11 @@ export function RunCard({
           {run.tasksCompleted} / {run.tasksTotal}
         </span>
       </div>
-      {activeTaskLabel ? (
+      {run.activeTask ? (
         <div className="card-row">
           <span className="active-task">
             <RunningIcon aria-hidden="true" />
-            {activeTaskLabel}
+            {run.activeTask.title}
           </span>
         </div>
       ) : null}

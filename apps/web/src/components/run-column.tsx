@@ -16,7 +16,6 @@ export function RunColumn({
   column,
   columnRef,
   selectedRunId,
-  selectedRunActiveTask,
   onToggleCollapse,
   onSelectRun,
 }: {
@@ -24,7 +23,6 @@ export function RunColumn({
   column: BoardColumn;
   columnRef?: (node: HTMLElement | null) => void;
   selectedRunId?: string;
-  selectedRunActiveTask?: string;
   onToggleCollapse: () => void;
   onSelectRun: (runId: string) => void;
 }) {
@@ -100,7 +98,6 @@ export function RunColumn({
       <div className="col-body" id={bodyId}>
         {column.runs.map((run) => (
           <RunCard
-            activeTaskLabel={run.runId === selectedRunId ? selectedRunActiveTask : undefined}
             key={run.runId}
             onSelect={() => onSelectRun(run.runId)}
             run={run}

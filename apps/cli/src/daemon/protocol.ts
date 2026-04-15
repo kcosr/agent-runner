@@ -4,6 +4,7 @@ import type {
   RunAttachment,
   RunAttachmentRemoveResult,
 } from "@task-runner/core/contracts/attachments.js";
+import type { RunTimelineEvent } from "@task-runner/core/contracts/events.js";
 import type {
   RunArchiveResult,
   RunDependenciesResult,
@@ -12,7 +13,8 @@ import type {
   RunSummary,
   RunTaskSummary,
 } from "@task-runner/core/contracts/runs.js";
-import type { RunEvent } from "@task-runner/core/core/run/run-loop.js";
+
+export type RunEventChannel = "run_summary" | "run_detail" | "run_timeline";
 
 export const DEFAULT_DAEMON_URL = "ws://127.0.0.1:4773/";
 export const TASK_RUNNER_LISTEN_ENV = "TASK_RUNNER_LISTEN";
@@ -107,6 +109,7 @@ export interface RunsResumeParams {
 }
 
 export interface EventsSubscribeParams {
+  channel: RunEventChannel;
   runId?: string;
 }
 
@@ -122,10 +125,21 @@ export interface EventsUnsubscribeResult {
   unsubscribed: true;
 }
 
-export interface RunEventNotificationParams {
+export interface RunSummaryNotificationParams {
+  subscriptionId: string;
+  summary: RunSummary;
+}
+
+export interface RunDetailNotificationParams {
   subscriptionId: string;
   runId: string;
-  event: RunEvent;
+  detail: RunDetail;
+}
+
+export interface RunTimelineNotificationParams {
+  subscriptionId: string;
+  runId: string;
+  event: RunTimelineEvent;
 }
 
 export interface RunsListResult {

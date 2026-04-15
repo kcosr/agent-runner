@@ -29,6 +29,11 @@ import {
 } from "@task-runner/core/app/service.js";
 import { VALID_STATUSES } from "@task-runner/core/assignment/model.js";
 import type {
+  RunDetailStreamEvent,
+  RunSummaryStreamEvent,
+  RunTimelineEvent,
+} from "@task-runner/core/contracts/events.js";
+import type {
   RunAbortReason,
   RunCapabilities,
   RunDetail,
@@ -37,6 +42,7 @@ import type {
 } from "@task-runner/core/contracts/runs.js";
 import { isTerminalStatus } from "@task-runner/core/contracts/runs.js";
 import { ConflictError } from "@task-runner/core/core/commands/service.js";
+import { listRunManifests } from "@task-runner/core/core/run/manifest.js";
 import type { RunEvent } from "@task-runner/core/core/run/run-loop.js";
 import { shortId } from "@task-runner/core/util/short-id.js";
 import { WebSocket, WebSocketServer } from "ws";
@@ -50,8 +56,13 @@ import {
   type JsonRpcResponse,
   RPC_ERROR_COMMAND,
   RPC_ERROR_RUNTIME,
+  type RunDetailNotificationParams,
+  type RunEventChannel,
+  type RunSummaryNotificationParams,
+  type RunTimelineNotificationParams,
 } from "./protocol.js";
 import {
+  RequestValidationError,
   asRecord,
   optionalEnum,
   optionalOverrides,
@@ -62,16 +73,31 @@ import {
   requiredString,
 } from "./request-parsing.js";
 
-interface SubscriptionRecord {
+interface SummarySubscriptionRecord {
   id: string;
   owner: object;
-  runId?: string;
-  publish(runId: string, event: RunEvent): boolean;
+  publish(summary: RunSummaryStreamEvent): boolean;
+}
+
+interface DetailSubscriptionRecord {
+  id: string;
+  owner: object;
+  runId: string;
+  publish(detail: RunDetailStreamEvent): boolean;
+}
+
+interface TimelineSubscriptionRecord {
+  id: string;
+  owner: object;
+  runId: string;
+  publish(event: RunTimelineEvent): boolean;
 }
 
 interface ActiveRunRecord {
   abortController: AbortController;
   done: Promise<void>;
+  detail: RunDetail | null;
+  timelineBuffer: RunTimelineEvent[];
 }
 
 function daemonExecution(daemonInstanceId: string) {
@@ -184,7 +210,9 @@ export async function serveDaemon(
   const startedAt = new Date().toISOString();
   const daemonInstanceId = `daemon-${shortId()}`;
   const version = packageVersion();
-  const subscriptions = new Map<string, SubscriptionRecord>();
+  const summarySubscriptions = new Map<string, SummarySubscriptionRecord>();
+  const detailSubscriptions = new Map<string, DetailSubscriptionRecord>();
+  const timelineSubscriptions = new Map<string, TimelineSubscriptionRecord>();
   const activeRuns = new Map<string, ActiveRunRecord>();
   const sockets = new Set<Socket>();
   const wsClients = new Set<WebSocket>();
@@ -222,6 +250,155 @@ export async function serveDaemon(
   const getDaemonRunList = (opts?: Parameters<typeof app.getRunList>[0]): RunSummary[] =>
     app.getRunList(opts).map((run) => withDaemonAbortCapability(run, activeRuns));
 
+  const getProjectedSummary = (runId: string): RunSummary | null =>
+    getDaemonRunList({ includeArchived: true }).find((run) => run.runId === runId) ?? null;
+
+  const getProjectedDetail = (runId: string): RunDetail | null => {
+    try {
+      return getDaemonRun(runId);
+    } catch {
+      return null;
+    }
+  };
+
+  const dependentRunIds = (runId: string): string[] =>
+    listRunManifests()
+      .map((entry) => entry.manifest)
+      .filter((manifest) => manifest.runId !== runId && manifest.dependencyRunIds.includes(runId))
+      .map((manifest) => manifest.runId);
+
+  const shouldPublishDependentSummaries = (
+    previous: RunDetail | null,
+    current: RunDetail | null,
+  ): boolean =>
+    previous !== null &&
+    current !== null &&
+    (previous.status !== current.status || previous.effectiveStatus !== current.effectiveStatus);
+
+  const shouldPublishDependentDetails = (
+    previous: RunDetail | null,
+    current: RunDetail | null,
+  ): boolean =>
+    previous !== null &&
+    current !== null &&
+    (shouldPublishDependentSummaries(previous, current) ||
+      previous.archivedAt !== current.archivedAt ||
+      previous.name !== current.name);
+
+  const publishSummary = (summary: RunSummary): void => {
+    const payload: RunSummaryStreamEvent = {
+      type: "summary_upsert",
+      summary,
+    };
+    for (const [id, subscription] of summarySubscriptions) {
+      const keep = subscription.publish(payload);
+      if (!keep) {
+        summarySubscriptions.delete(id);
+      }
+    }
+  };
+
+  const publishDetail = (detail: RunDetail): void => {
+    const payload: RunDetailStreamEvent = {
+      type: "detail_updated",
+      detail,
+    };
+    for (const [id, subscription] of detailSubscriptions) {
+      if (subscription.runId !== detail.runId) {
+        continue;
+      }
+      const keep = subscription.publish(payload);
+      if (!keep) {
+        detailSubscriptions.delete(id);
+      }
+    }
+  };
+
+  const publishTimeline = (runId: string, event: RunTimelineEvent): void => {
+    const active = activeRuns.get(runId);
+    if (active) {
+      active.timelineBuffer.push(event);
+    }
+    for (const [id, subscription] of timelineSubscriptions) {
+      if (subscription.runId !== runId) {
+        continue;
+      }
+      const keep = subscription.publish(event);
+      if (!keep) {
+        timelineSubscriptions.delete(id);
+      }
+    }
+  };
+
+  const publishRunProjections = (
+    runId: string,
+    options: {
+      publishDependentSummaries?: boolean;
+      publishDependentDetails?: boolean;
+    } = {},
+  ): void => {
+    const summary = getProjectedSummary(runId);
+    if (summary) {
+      publishSummary(summary);
+    }
+
+    const detail = getProjectedDetail(runId);
+    if (detail) {
+      publishDetail(detail);
+      const active = activeRuns.get(runId);
+      if (active) {
+        active.detail = detail;
+      }
+    }
+
+    if (!options.publishDependentSummaries && !options.publishDependentDetails) {
+      return;
+    }
+
+    for (const dependentRunId of dependentRunIds(runId)) {
+      if (options.publishDependentSummaries) {
+        const dependentSummary = getProjectedSummary(dependentRunId);
+        if (dependentSummary) {
+          publishSummary(dependentSummary);
+        }
+      }
+      if (options.publishDependentDetails) {
+        const dependentDetail = getProjectedDetail(dependentRunId);
+        if (dependentDetail) {
+          publishDetail(dependentDetail);
+        }
+      }
+    }
+  };
+
+  const publishMutationResult = (
+    runId: string,
+    previous: RunDetail | null,
+    current: RunDetail | null,
+  ): void => {
+    publishRunProjections(runId, {
+      publishDependentSummaries: shouldPublishDependentSummaries(previous, current),
+      publishDependentDetails: shouldPublishDependentDetails(previous, current),
+    });
+  };
+
+  const withPublishedMutation = <T>(runId: string, mutate: () => T): T => {
+    const previous = getProjectedDetail(runId);
+    const result = mutate();
+    publishMutationResult(runId, previous, getProjectedDetail(runId));
+    return result;
+  };
+
+  const withPublishedMutationAsync = async <T>(
+    runId: string,
+    mutate: () => Promise<T>,
+  ): Promise<T> => {
+    const previous = getProjectedDetail(runId);
+    const result = await mutate();
+    publishMutationResult(runId, previous, getProjectedDetail(runId));
+    return result;
+  };
+
   await new Promise<void>((resolve, reject) => {
     const probe = createNetServer();
     const onListening = () => {
@@ -249,13 +426,31 @@ export async function serveDaemon(
     probe.listen(port, host);
   });
 
-  const subscribeRunEvents = (
+  const subscribeRunSummaries = (
     owner: object,
-    runId: string | undefined,
-    publish: (runId: string, event: RunEvent) => boolean,
+    publish: (summary: RunSummaryStreamEvent) => boolean,
   ): { subscriptionId: string; unsubscribe(): void } => {
     const subscriptionId = `sub-${shortId()}`;
-    subscriptions.set(subscriptionId, {
+    summarySubscriptions.set(subscriptionId, {
+      id: subscriptionId,
+      owner,
+      publish,
+    });
+    return {
+      subscriptionId,
+      unsubscribe: () => {
+        summarySubscriptions.delete(subscriptionId);
+      },
+    };
+  };
+
+  const subscribeRunDetail = (
+    owner: object,
+    runId: string,
+    publish: (detail: RunDetailStreamEvent) => boolean,
+  ): { subscriptionId: string; unsubscribe(): void } => {
+    const subscriptionId = `sub-${shortId()}`;
+    detailSubscriptions.set(subscriptionId, {
       id: subscriptionId,
       owner,
       runId,
@@ -264,27 +459,52 @@ export async function serveDaemon(
     return {
       subscriptionId,
       unsubscribe: () => {
-        subscriptions.delete(subscriptionId);
+        detailSubscriptions.delete(subscriptionId);
+      },
+    };
+  };
+
+  const subscribeRunTimeline = (
+    owner: object,
+    runId: string,
+    publish: (event: RunTimelineEvent) => boolean,
+  ): { subscriptionId: string; unsubscribe(): void } => {
+    const subscriptionId = `sub-${shortId()}`;
+    timelineSubscriptions.set(subscriptionId, {
+      id: subscriptionId,
+      owner,
+      runId,
+      publish,
+    });
+    const buffer = activeRuns.get(runId)?.timelineBuffer ?? [];
+    for (const event of buffer) {
+      if (!publish(event)) {
+        timelineSubscriptions.delete(subscriptionId);
+        break;
+      }
+    }
+    return {
+      subscriptionId,
+      unsubscribe: () => {
+        timelineSubscriptions.delete(subscriptionId);
       },
     };
   };
 
   const removeSubscriptionsByOwner = (owner: object): void => {
-    for (const [id, subscription] of subscriptions) {
+    for (const [id, subscription] of summarySubscriptions) {
       if (subscription.owner === owner) {
-        subscriptions.delete(id);
+        summarySubscriptions.delete(id);
       }
     }
-  };
-
-  const broadcastRunEvent = (runId: string, event: RunEvent): void => {
-    for (const [id, subscription] of subscriptions) {
-      if (subscription.runId && subscription.runId !== runId) {
-        continue;
+    for (const [id, subscription] of detailSubscriptions) {
+      if (subscription.owner === owner) {
+        detailSubscriptions.delete(id);
       }
-      const keep = subscription.publish(runId, event);
-      if (!keep) {
-        subscriptions.delete(id);
+    }
+    for (const [id, subscription] of timelineSubscriptions) {
+      if (subscription.owner === owner) {
+        timelineSubscriptions.delete(id);
       }
     }
   };
@@ -311,19 +531,34 @@ export async function serveDaemon(
     void startManagedRun((event) => {
       if ((event.type === "run_started" || event.type === "run_initialized") && !runId) {
         runId = event.runId;
-        activeRuns.set(runId, { abortController, done });
+        activeRuns.set(runId, {
+          abortController,
+          done,
+          detail: getProjectedDetail(runId),
+          timelineBuffer: [],
+        });
         resolveRunId?.(runId);
       }
       const resolvedRunId =
         runId ?? (event.type === "run_finished" ? event.summary.runId : undefined);
       if (resolvedRunId) {
-        broadcastRunEvent(resolvedRunId, event);
+        publishTimeline(resolvedRunId, event);
+        if (event.type === "run_started" || event.type === "run_finished") {
+          const previous = activeRuns.get(resolvedRunId)?.detail ?? null;
+          const current = getProjectedDetail(resolvedRunId);
+          publishMutationResult(resolvedRunId, previous, current);
+        }
       }
     }, abortController.signal)
       .then((outcome) => {
         if (!runId) {
           runId = outcome.runId;
-          activeRuns.set(runId, { abortController, done });
+          activeRuns.set(runId, {
+            abortController,
+            done,
+            detail: getProjectedDetail(runId),
+            timelineBuffer: [],
+          });
           resolveRunId?.(runId);
         }
       })
@@ -332,10 +567,11 @@ export async function serveDaemon(
           rejectRunId?.(err);
           return;
         }
-        broadcastRunEvent(runId, {
+        const event: RunTimelineEvent = {
           type: "backend_notice",
           text: `task-runner: ${err instanceof Error ? err.message : String(err)}\n`,
-        });
+        };
+        publishTimeline(runId, event);
       })
       .finally(() => {
         if (runId) {
@@ -362,12 +598,35 @@ export async function serveDaemon(
     getRunList: getDaemonRunList,
     getAttachment,
     getAttachmentList,
-    initRun: (request) =>
-      app.initRun({
+    initRun: async (request) => {
+      const run = await app.initRun({
         ...request,
         execution: daemonExecution(daemonInstanceId),
-      }),
-    addRunAttachmentFromStream,
+      });
+      publishRunProjections(run.runId);
+      return run;
+    },
+    archive: (target) => withPublishedMutation(target, () => app.archive(target)),
+    unarchive: (target) => withPublishedMutation(target, () => app.unarchive(target)),
+    renameRun: (target, input) =>
+      withPublishedMutationAsync(target, () => app.renameRun(target, input)),
+    addDependency: (target, dependencyRunId) =>
+      withPublishedMutation(target, () => app.addDependency(target, dependencyRunId)),
+    removeDependency: (target, dependencyRunId) =>
+      withPublishedMutation(target, () => app.removeDependency(target, dependencyRunId)),
+    clearDependencies: (target) =>
+      withPublishedMutation(target, () => app.clearDependencies(target)),
+    addRunAttachmentFromStream: (target, input) =>
+      withPublishedMutationAsync(target, () => app.addRunAttachmentFromStream(target, input)),
+    removeRunAttachment: (target, attachmentId) =>
+      withPublishedMutation(target, () => app.removeRunAttachment(target, attachmentId)),
+    reset: (target) => withPublishedMutation(target, () => app.reset(target)),
+    updateTask: (target, taskId, updates) =>
+      withPublishedMutation(target, () => app.updateTask(target, taskId, updates)),
+    appendNotes: (target, taskId, text) =>
+      withPublishedMutation(target, () => app.appendNotes(target, taskId, text)),
+    createTask: (target, input) =>
+      withPublishedMutation(target, () => app.createTask(target, input)),
     daemonInfo: {
       daemonInstanceId,
       pid: process.pid,
@@ -393,7 +652,6 @@ export async function serveDaemon(
           emitEvent,
         }),
       ),
-    removeRunAttachment,
     abortRun,
   });
 
@@ -411,10 +669,10 @@ export async function serveDaemon(
       void handleHttpRequest(req, res, {
         operations,
         httpBaseUrl,
-        subscribeRunEvents: (runId, publish) =>
-          subscribeRunEvents(res, runId, (eventRunId, event) =>
-            publish({ runId: eventRunId, event }),
-          ).unsubscribe,
+        subscribeRunSummaries: (publish) => subscribeRunSummaries(res, publish).unsubscribe,
+        subscribeRunDetail: (runId, publish) => subscribeRunDetail(res, runId, publish).unsubscribe,
+        subscribeRunTimeline: (runId, publish) =>
+          subscribeRunTimeline(res, runId, publish).unsubscribe,
       });
       return;
     }
@@ -713,37 +971,82 @@ export async function serveDaemon(
           const parsed: Record<string, unknown> = params
             ? asRecord(params, "events.subscribe params")
             : {};
-          const subscription = subscribeRunEvents(
-            ws,
-            optionalString(parsed.runId, "runId"),
-            (runId, event) => {
-              if (ws.readyState !== WebSocket.OPEN) {
-                return false;
+          const channel = requiredString(parsed.channel, "channel") as RunEventChannel;
+          const runId = optionalString(parsed.runId, "runId");
+          let subscription: { subscriptionId: string; unsubscribe(): void } | undefined;
+          const sendNotification = (
+            method: "run.summary" | "run.detail" | "run.timeline",
+            notificationParams:
+              | RunSummaryNotificationParams
+              | RunDetailNotificationParams
+              | RunTimelineNotificationParams,
+          ): boolean => {
+            if (ws.readyState !== WebSocket.OPEN) {
+              return false;
+            }
+            try {
+              ws.send(
+                JSON.stringify({
+                  jsonrpc: "2.0",
+                  method,
+                  params: notificationParams,
+                }),
+              );
+              return true;
+            } catch {
+              return false;
+            }
+          };
+          switch (channel) {
+            case "run_summary":
+              if (runId !== undefined) {
+                throw new RequestValidationError("runId must be omitted for channel run_summary");
               }
-              try {
-                ws.send(
-                  JSON.stringify({
-                    jsonrpc: "2.0",
-                    method: "run.event",
-                    params: {
-                      subscriptionId: subscription.subscriptionId,
-                      runId,
-                      event,
-                    },
-                  }),
-                );
-                return true;
-              } catch {
-                return false;
-              }
-            },
-          );
+              subscription = subscribeRunSummaries(ws, (summary) =>
+                sendNotification("run.summary", {
+                  subscriptionId: subscription?.subscriptionId ?? "",
+                  summary: summary.summary,
+                }),
+              );
+              break;
+            case "run_detail": {
+              const requiredRunId = requiredRunIdString(parsed.runId, "runId");
+              operations.getRun(requiredRunId);
+              subscription = subscribeRunDetail(ws, requiredRunId, (detail) =>
+                sendNotification("run.detail", {
+                  subscriptionId: subscription?.subscriptionId ?? "",
+                  runId: requiredRunId,
+                  detail: detail.detail,
+                }),
+              );
+              break;
+            }
+            case "run_timeline": {
+              const requiredRunId = requiredRunIdString(parsed.runId, "runId");
+              operations.getRun(requiredRunId);
+              subscription = subscribeRunTimeline(ws, requiredRunId, (event) =>
+                sendNotification("run.timeline", {
+                  subscriptionId: subscription?.subscriptionId ?? "",
+                  runId: requiredRunId,
+                  event,
+                }),
+              );
+              break;
+            }
+            default:
+              throw new RequestValidationError(
+                'channel must be one of "run_summary", "run_detail", or "run_timeline"',
+              );
+          }
           sendJson(ws, resultResponse(request.id, { subscriptionId: subscription.subscriptionId }));
           return;
         }
         case "events.unsubscribe": {
           const parsed = asRecord(params, "events.unsubscribe params");
-          subscriptions.delete(requiredString(parsed.subscriptionId, "subscriptionId"));
+          const subscriptionId = requiredString(parsed.subscriptionId, "subscriptionId");
+          summarySubscriptions.delete(subscriptionId);
+          detailSubscriptions.delete(subscriptionId);
+          timelineSubscriptions.delete(subscriptionId);
           sendJson(ws, resultResponse(request.id, { unsubscribed: true }));
           return;
         }
@@ -814,7 +1117,9 @@ export async function serveDaemon(
         record.abortController.abort();
       }
       await Promise.allSettled(active.map((record) => record.done));
-      subscriptions.clear();
+      summarySubscriptions.clear();
+      detailSubscriptions.clear();
+      timelineSubscriptions.clear();
       for (const ws of wsClients) {
         ws.terminate();
       }

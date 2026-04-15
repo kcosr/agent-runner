@@ -13,7 +13,6 @@ export function RunsBoardPanel({
   onToggleColumnCollapse,
   runs,
   runsQuery,
-  selectedRunActiveTask,
   selectedRunId,
   visibleRuns,
 }: {
@@ -25,7 +24,6 @@ export function RunsBoardPanel({
   onToggleColumnCollapse: (columnKey: string) => void;
   runs: RunSummary[];
   runsQuery: UseQueryResult<RunSummary[], Error>;
-  selectedRunActiveTask?: string;
   selectedRunId?: string;
   visibleRuns: RunSummary[];
 }) {
@@ -241,7 +239,6 @@ export function RunsBoardPanel({
             key={column.key}
             onSelectRun={onSelectRun}
             onToggleCollapse={() => onToggleColumnCollapse(column.key)}
-            selectedRunActiveTask={selectedRunActiveTask}
             selectedRunId={selectedRunId}
           />
         ))}

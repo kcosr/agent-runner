@@ -73,6 +73,6 @@ export function deriveHttpBaseUrl(listenUrl: string): string {
 export function deriveAppRuntimeConfig(): AppRuntimeConfig {
   return {
     apiBasePath: "/api",
-    runEventsPath: "/api/events/runs",
+    runSummaryEventsPath: "/api/events/run-summaries",
   };
 }

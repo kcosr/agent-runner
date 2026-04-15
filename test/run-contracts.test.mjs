@@ -123,6 +123,7 @@ test("run contracts: toRunSummary maps listed manifest rows to the neutral summa
       satisfied: 0,
       unsatisfied: 0,
     },
+    activeTask: null,
     execution: {
       hostMode: "embedded",
       controller: {
@@ -224,6 +225,7 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
         notes: "",
       },
     ],
+    activeTask: null,
     message: "Finish the task list.",
     callerInstructions: "Caller docs",
     lockedFields: ["backend"],
@@ -322,6 +324,48 @@ test("run contracts: dependency summary/detail projection resolves readiness and
       missing: false,
     },
   ]);
+});
+
+test("run contracts: activeTask is derived only when exactly one task is in progress", () => {
+  const manifest = buildManifest({
+    finalTasks: {
+      t1: {
+        id: "t1",
+        title: "First",
+        body: "Do the first thing.",
+        status: "completed",
+        notes: "Done.",
+      },
+      t2: {
+        id: "t2",
+        title: "Second",
+        body: "Do the second thing.",
+        status: "in_progress",
+        notes: "",
+      },
+    },
+    tasksCompleted: 1,
+    tasksTotal: 2,
+  });
+
+  const summary = toRunSummary({
+    repo: "demo-repo",
+    workspaceDir: manifest.workspaceDir,
+    manifest,
+  });
+  const detail = toRunDetail({
+    manifest,
+    isLive: true,
+  });
+
+  assert.deepEqual(summary.activeTask, {
+    id: "t2",
+    title: "Second",
+  });
+  assert.deepEqual(detail.activeTask, {
+    id: "t2",
+    title: "Second",
+  });
 });
 
 test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mutation semantics", () => {
