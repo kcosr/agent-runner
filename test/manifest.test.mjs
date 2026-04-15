@@ -198,7 +198,7 @@ test("manifest: blocked run records status and captures final state", async () =
 
   const outcome = await runWithMock(dir, async (ctx) => {
     updateTasksForPrompt(ctx.prompt, {
-      t1: { status: "completed" },
+      t1: { status: "in_progress", notes: "still investigating" },
       t2: { status: "blocked", notes: "could not reach the server" },
     });
     return {
@@ -214,8 +214,11 @@ test("manifest: blocked run records status and captures final state", async () =
 
   assert.equal(outcome.manifest.status, "blocked");
   assert.equal(outcome.manifest.exitCode, 2);
+  assert.equal(outcome.manifest.finalTasks.t1.status, "pending");
+  assert.equal(outcome.manifest.finalTasks.t1.notes, "still investigating");
   assert.equal(outcome.manifest.finalTasks.t2.status, "blocked");
   assert.equal(outcome.manifest.finalTasks.t2.notes, "could not reach the server");
+  assert.equal(outcome.manifest.attemptRecords[0]?.tasksAfter.t1.status, "in_progress");
 });
 
 test("manifest: exhausted run records all attempts", async () => {
@@ -223,8 +226,11 @@ test("manifest: exhausted run records all attempts", async () => {
   writeAgentAndAssignment(dir);
 
   let call = 0;
-  const outcome = await runWithMock(dir, async () => {
+  const outcome = await runWithMock(dir, async (ctx) => {
     call++;
+    updateTasksForPrompt(ctx.prompt, {
+      t1: { status: "in_progress", notes: `attempt ${call} in flight` },
+    });
     return {
       exitCode: 0,
       signal: null,
@@ -241,6 +247,9 @@ test("manifest: exhausted run records all attempts", async () => {
   assert.equal(outcome.manifest.attempts, 3);
   assert.equal(outcome.manifest.attemptRecords.length, 3);
   assert.equal(outcome.manifest.tasksCompleted, 0);
+  assert.equal(outcome.manifest.finalTasks.t1.status, "pending");
+  assert.equal(outcome.manifest.finalTasks.t1.notes, "attempt 3 in flight");
+  assert.equal(outcome.manifest.attemptRecords[2]?.tasksAfter.t1.status, "in_progress");
 });
 
 test("manifest: captures effort override on the run metadata", async () => {

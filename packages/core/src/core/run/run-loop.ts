@@ -526,6 +526,23 @@ function normalizeResumeStatus(status: TaskStatus): TaskStatus {
   return status === "completed" ? "completed" : "pending";
 }
 
+function normalizeTerminalTaskStatus(status: TaskStatus): TaskStatus {
+  return status === "in_progress" ? "pending" : status;
+}
+
+function normalizeInactiveNonPassiveTasks(
+  backendId: string,
+  tasks: Map<string, TaskState>,
+): Map<string, TaskState> {
+  if (backendId === "passive") {
+    return tasks;
+  }
+  for (const task of tasks.values()) {
+    task.status = normalizeTerminalTaskStatus(task.status);
+  }
+  return tasks;
+}
+
 function rebuildTasksFromAssignmentAndSnapshot(
   assignment: LoadedAssignment | undefined,
   snapshot: Record<string, TaskSnapshot>,
@@ -1347,6 +1364,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const endedAt = new Date().toISOString();
   withTaskStateLock(workspaceDir, () => {
     tasks = refreshManifestTaskState(manifest);
+    tasks = normalizeInactiveNonPassiveTasks(manifest.backend, tasks);
     orderedTasks = syncManifestTaskState(manifest, tasks);
     tasksCompleted = manifest.tasksCompleted;
     refreshManifestAttachments(manifest);

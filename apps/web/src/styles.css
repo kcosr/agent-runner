@@ -555,18 +555,24 @@ body {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  min-width: 0;
   overflow-y: auto;
   overscroll-behavior-x: contain;
 }
 
 .drawer-panel {
   min-height: 0;
+  min-width: 0;
 }
 
 .drawer-panel--tasks {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.drawer-panel--tasks > .tasks {
+  min-width: 0;
 }
 
 .drawer-panel--timing {
@@ -589,6 +595,11 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-width: 0;
+}
+
+.timeline-attempt-panel > section {
+  min-width: 0;
 }
 
 .timeline-attempt-tabs {
@@ -833,6 +844,7 @@ body {
 .task {
   display: flex;
   flex-direction: column;
+  align-items: stretch;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--card);
@@ -928,6 +940,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0;
   padding: 0 12px 12px 50px;
 }
 
@@ -974,7 +987,10 @@ body {
   color: var(--muted-foreground);
   font-size: 12.5px;
   max-height: 320px;
+  min-width: 0;
+  overflow-x: auto;
   overflow-y: auto;
+  overscroll-behavior-y: contain;
   overscroll-behavior-x: contain;
 }
 
@@ -987,7 +1003,9 @@ body {
 }
 
 .markdown {
+  min-width: 0;
   word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .markdown > :first-child {
@@ -1057,6 +1075,8 @@ body {
   color: var(--foreground);
   font-family: var(--mono);
   font-size: 0.92em;
+  overflow-wrap: anywhere;
+  white-space: break-spaces;
 }
 
 .markdown pre {
@@ -1064,15 +1084,20 @@ body {
   padding: 10px 12px;
   border-radius: var(--radius-sm);
   background: var(--secondary);
-  overflow-x: auto;
+  min-width: 100%;
+  width: max-content;
+  box-sizing: border-box;
 }
 
 .markdown pre code {
+  display: block;
   padding: 0;
   background: transparent;
   border-radius: 0;
   font-size: 12px;
   line-height: 1.45;
+  overflow-wrap: normal;
+  white-space: pre;
 }
 
 .markdown blockquote {
@@ -1082,10 +1107,18 @@ body {
   color: var(--muted-foreground);
 }
 
-.markdown table {
+.markdown-table-wrap {
+  max-width: 100%;
   margin: 0 0 0.6em;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.markdown table {
+  margin: 0;
   border-collapse: collapse;
-  width: 100%;
+  min-width: 100%;
+  width: max-content;
 }
 
 .markdown th,
