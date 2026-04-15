@@ -18,6 +18,15 @@ effort: medium
 Agent role.
 `;
 
+const CURSOR_AGENT = `---
+schemaVersion: 1
+name: cursor-agent
+backend: cursor
+model: provider/gpt-5.4
+---
+Agent role.
+`;
+
 const LOCKED_BACKEND_AGENT = `---
 schemaVersion: 1
 name: locked-backend
@@ -114,11 +123,13 @@ async function runIn(baseDir, agentName, overrides) {
   });
 }
 
-test("parseArgs: --backend accepts claude and codex", () => {
+test("parseArgs: --backend accepts claude, codex, and cursor", () => {
   const a = parseArgs(["node", "task-runner", "run", "--agent", "x", "--backend", "claude"]);
   assert.equal(a.backend, "claude");
   const b = parseArgs(["node", "task-runner", "run", "--agent", "x", "--backend", "codex"]);
   assert.equal(b.backend, "codex");
+  const c = parseArgs(["node", "task-runner", "run", "--agent", "x", "--backend", "cursor"]);
+  assert.equal(c.backend, "cursor");
 });
 
 test("parseArgs: --backend rejects unknown values", () => {
@@ -194,4 +205,62 @@ test("locked: locked backend still allows other unrelated overrides", async () =
   const outcome = await runIn(dir, "locked-backend", { maxRetries: 5 });
   assert.equal(outcome.exitCode, 0);
   assert.equal(outcome.manifest.backend, "claude");
+});
+
+test("override: switching from claude to cursor drops the claude model", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "claude-agent", CLAUDE_AGENT);
+  writeAssignment(dir, "one-work", ONE_TASK_ASSIGNMENT);
+
+  const outcome = await withSharedRuntimeEnv(dir, async () => {
+    const loaded = loadAgentConfig("claude-agent", dir);
+    const loadedAssignment = loadAssignmentConfig("one-work", dir);
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      return await runAgent({
+        loaded,
+        loadedAssignment,
+        cliVars: {},
+        backend: okBackend("cursor"),
+        overrides: { backend: "cursor" },
+        stderr: () => {},
+        stdout: () => {},
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+
+  assert.equal(outcome.manifest.backend, "cursor");
+  assert.equal(outcome.manifest.model, null);
+});
+
+test("override: switching from cursor to codex drops the cursor model", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "cursor-agent", CURSOR_AGENT);
+  writeAssignment(dir, "one-work", ONE_TASK_ASSIGNMENT);
+
+  const outcome = await withSharedRuntimeEnv(dir, async () => {
+    const loaded = loadAgentConfig("cursor-agent", dir);
+    const loadedAssignment = loadAssignmentConfig("one-work", dir);
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      return await runAgent({
+        loaded,
+        loadedAssignment,
+        cliVars: {},
+        backend: okBackend("codex"),
+        overrides: { backend: "codex" },
+        stderr: () => {},
+        stdout: () => {},
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+
+  assert.equal(outcome.manifest.backend, "codex");
+  assert.equal(outcome.manifest.model, null);
 });

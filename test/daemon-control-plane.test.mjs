@@ -1388,6 +1388,30 @@ test("daemon validates override payloads before calling shared services", async 
   }
 });
 
+test("daemon parses and forwards cursor backend overrides", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  let seenBackend;
+  const server = await serveDaemon(listenUrl, {
+    async startRun(request) {
+      seenBackend = request.overrides.backend;
+      return { runId: "daemon-cursor-backend" };
+    },
+  });
+  const client = await DaemonClient.connect(listenUrl);
+  try {
+    const started = await client.call("runs.start", {
+      cliVars: {},
+      overrides: { backend: "cursor" },
+    });
+    assert.equal(started.runId, "daemon-cursor-backend");
+    assert.equal(seenBackend, "cursor");
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
 test("daemon runs.start keeps callerCwd separate from overrides.cwd", async () => {
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;

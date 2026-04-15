@@ -1,10 +1,8 @@
+import { BACKEND_IDS, type BackendId } from "@task-runner/core/core/backends/types.js";
 import { TASK_MODES, type TaskMode } from "@task-runner/core/core/config/schema.js";
 import { trimRunName } from "@task-runner/core/util/run-name.js";
 
 export type OutputFormat = "text" | "json";
-// Kept in sync with `agentConfigSchema.backend` in src/core/config/schema.ts
-// and the backend registry in src/backends/registry.ts.
-export type BackendId = "claude" | "codex" | "passive";
 
 export interface ParsedArgs {
   command: string;
@@ -47,7 +45,7 @@ export interface ParsedArgs {
 
 const EFFORT_VALUES = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const OUTPUT_FORMATS = ["text", "json"] as const;
-const BACKEND_VALUES = ["claude", "codex", "passive"] as const;
+const BACKEND_VALUES = BACKEND_IDS;
 export function parseArgs(argv: string[]): ParsedArgs {
   const args = argv.slice(2);
   const result: ParsedArgs = {

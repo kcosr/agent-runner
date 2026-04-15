@@ -17,6 +17,8 @@
 
 ### Added
 
+- Added `scripts/task-list-markdown.mjs` to render `task-runner task list <run-id> --output-format json` output as Markdown, defaulting to `task-runner` on `PATH` with an optional `TASK_RUNNER_BIN` override. ([#33](https://github.com/kcosr/task-runner/pull/33))
+- Added first-class `cursor` backend support via the public `cursor-agent` headless print mode, including streamed partial-output rendering, captured session-id resume for task-runner-created runs, `TASK_RUNNER_CURSOR_BIN`, and explicit rejection of unsafe bootstrap `--backend-session-id` import. ([#33](https://github.com/kcosr/task-runner/pull/33))
 - Added `task-runner run --detach` for daemon-connected fresh runs and
   resumes so the CLI can dispatch `runs.start` / `runs.resume`, print a
   detached confirmation, and exit immediately without waiting for

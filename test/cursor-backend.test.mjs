@@ -1,0 +1,216 @@
+import { strict as assert } from "node:assert";
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test } from "node:test";
+import { buildCursorArgs, cursorBackend } from "../packages/core/dist/backends/cursor.js";
+import { withEnv } from "./helpers/runtime-paths.mjs";
+
+function tempDir() {
+  return mkdtempSync(join(tmpdir(), "task-runner-cursor-"));
+}
+
+function writeFakeCursorAgent(baseDir) {
+  const path = join(baseDir, "fake-cursor-agent.mjs");
+  writeFileSync(
+    path,
+    `#!/usr/bin/env node
+import { writeFileSync } from "node:fs";
+
+if (process.env.CURSOR_TEST_ARGS_PATH) {
+  writeFileSync(process.env.CURSOR_TEST_ARGS_PATH, JSON.stringify(process.argv.slice(2)));
+}
+
+for (const chunk of JSON.parse(process.env.CURSOR_TEST_STDOUT_JSON ?? "[]")) {
+  process.stdout.write(chunk);
+}
+for (const chunk of JSON.parse(process.env.CURSOR_TEST_STDERR_JSON ?? "[]")) {
+  process.stderr.write(chunk);
+}
+
+process.exit(Number(process.env.CURSOR_TEST_EXIT_CODE ?? "0"));
+`,
+  );
+  chmodSync(path, 0o755);
+  return path;
+}
+
+test("buildCursorArgs builds the public print-mode argv", () => {
+  assert.deepEqual(
+    buildCursorArgs({
+      cwd: "/tmp/repo",
+      model: "provider/gpt-5.4",
+      prompt: "Inspect the repo",
+      resumeSessionId: "sess-prev",
+      unrestricted: true,
+    }),
+    [
+      "-p",
+      "--trust",
+      "--output-format",
+      "stream-json",
+      "--stream-partial-output",
+      "--workspace",
+      "/tmp/repo",
+      "--model",
+      "gpt-5.4",
+      "--force",
+      "--resume",
+      "sess-prev",
+      "Inspect the repo",
+    ],
+  );
+});
+
+test("cursor backend streams partial output, captures session_id, and uses final result.result", async () => {
+  const dir = tempDir();
+  const argsPath = join(dir, "args.json");
+  const command = writeFakeCursorAgent(dir);
+  const events = [];
+
+  const result = await withEnv({ TASK_RUNNER_CURSOR_BIN: command }, () =>
+    cursorBackend.invoke({
+      prompt: "Inspect the repo",
+      cwd: dir,
+      env: {
+        ...process.env,
+        CURSOR_TEST_ARGS_PATH: argsPath,
+        CURSOR_TEST_STDOUT_JSON: JSON.stringify([
+          `${JSON.stringify({ type: "partial_output", text: "Hello", meta: { session_id: "sess-123" } })}\n`,
+          `${JSON.stringify({ type: "partial_output", text: " world" })}\n`,
+          `${JSON.stringify({ type: "assistant", message: { role: "assistant", content: "Hello world" } })}\n`,
+          `${JSON.stringify({ type: "tool_call", tool: "shell", arguments: "echo hi" })}\n`,
+          `${JSON.stringify({ type: "result", result: { result: "Final answer" } })}\n`,
+        ]),
+      },
+      model: "provider/gpt-5.4",
+      unrestricted: true,
+      timeoutSec: 10,
+      resumeSessionId: "sess-prev",
+      emit: (event) => events.push(event),
+    }),
+  );
+
+  assert.deepEqual(JSON.parse(readFileSync(argsPath, "utf8")), [
+    "-p",
+    "--trust",
+    "--output-format",
+    "stream-json",
+    "--stream-partial-output",
+    "--workspace",
+    dir,
+    "--model",
+    "gpt-5.4",
+    "--force",
+    "--resume",
+    "sess-prev",
+    "Inspect the repo",
+  ]);
+  assert.equal(result.sessionId, "sess-123");
+  assert.equal(result.transcript, "Final answer");
+  assert.equal(
+    events
+      .filter((event) => event.type === "agent_message_delta")
+      .map((event) => event.text)
+      .join(""),
+    "Hello world",
+  );
+});
+
+test("cursor backend rejects malformed stream-json output", async () => {
+  const dir = tempDir();
+  const command = writeFakeCursorAgent(dir);
+
+  await assert.rejects(
+    () =>
+      withEnv({ TASK_RUNNER_CURSOR_BIN: command }, () =>
+        cursorBackend.invoke({
+          prompt: "Inspect the repo",
+          cwd: dir,
+          env: {
+            ...process.env,
+            CURSOR_TEST_STDOUT_JSON: JSON.stringify(["not-json\n"]),
+          },
+          timeoutSec: 10,
+        }),
+      ),
+    /non-JSON line/,
+  );
+});
+
+test("cursor backend rejects successful runs without a final result.result string", async () => {
+  const dir = tempDir();
+  const command = writeFakeCursorAgent(dir);
+
+  await assert.rejects(
+    () =>
+      withEnv({ TASK_RUNNER_CURSOR_BIN: command }, () =>
+        cursorBackend.invoke({
+          prompt: "Inspect the repo",
+          cwd: dir,
+          env: {
+            ...process.env,
+            CURSOR_TEST_STDOUT_JSON: JSON.stringify([
+              `${JSON.stringify({ type: "partial_output", text: "Hello" })}\n`,
+            ]),
+          },
+          timeoutSec: 10,
+        }),
+      ),
+    /without a valid final result\.result string/,
+  );
+});
+
+test("cursor backend returns non-zero exits without guessing a transcript", async () => {
+  const dir = tempDir();
+  const command = writeFakeCursorAgent(dir);
+
+  const result = await withEnv({ TASK_RUNNER_CURSOR_BIN: command }, () =>
+    cursorBackend.invoke({
+      prompt: "Inspect the repo",
+      cwd: dir,
+      env: {
+        ...process.env,
+        CURSOR_TEST_STDOUT_JSON: JSON.stringify([
+          `${JSON.stringify({ type: "partial_output", text: "Partial output" })}\n`,
+        ]),
+        CURSOR_TEST_STDERR_JSON: JSON.stringify(["cursor failed\n"]),
+        CURSOR_TEST_EXIT_CODE: "1",
+      },
+      timeoutSec: 10,
+    }),
+  );
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.transcript, null);
+  assert.equal(result.rawStderr, "cursor failed\n");
+});
+
+test("cursor backend inserts a boundary separator before the next partial output", async () => {
+  const dir = tempDir();
+  const command = writeFakeCursorAgent(dir);
+  const events = [];
+
+  await withEnv({ TASK_RUNNER_CURSOR_BIN: command }, () =>
+    cursorBackend.invoke({
+      prompt: "Inspect the repo",
+      cwd: dir,
+      env: {
+        ...process.env,
+        CURSOR_TEST_STDOUT_JSON: JSON.stringify([
+          `${JSON.stringify({ type: "partial_output", text: "Hello world." })}\n`,
+          `${JSON.stringify({ type: "assistant", message: { role: "assistant", content: "Hello world." } })}\n`,
+          `${JSON.stringify({ type: "partial_output", text: "Next message." })}\n`,
+          `${JSON.stringify({ type: "result", result: { result: "Final answer" } })}\n`,
+        ]),
+      },
+      timeoutSec: 10,
+      emit: (event) => events.push(event),
+    }),
+  );
+
+  assert.deepEqual(
+    events.filter((event) => event.type === "agent_message_delta").map((event) => event.text),
+    ["Hello world.", "\n\n", "Next message."],
+  );
+});

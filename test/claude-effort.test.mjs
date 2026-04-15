@@ -33,7 +33,7 @@ test("canonical effort enum rejects unknown values", () => {
   }
 });
 
-test("backend enum accepts claude and codex only", () => {
+test("backend enum accepts the supported backend ids", () => {
   const base = {
     schemaVersion: 1,
     name: "t",
@@ -41,6 +41,8 @@ test("backend enum accepts claude and codex only", () => {
   };
   assert.equal(agentConfigSchema.safeParse({ ...base, backend: "claude" }).success, true);
   assert.equal(agentConfigSchema.safeParse({ ...base, backend: "codex" }).success, true);
+  assert.equal(agentConfigSchema.safeParse({ ...base, backend: "cursor" }).success, true);
+  assert.equal(agentConfigSchema.safeParse({ ...base, backend: "passive" }).success, true);
   assert.equal(agentConfigSchema.safeParse({ ...base, backend: "gemini" }).success, false);
   assert.equal(agentConfigSchema.safeParse({ ...base, backend: "" }).success, false);
 });

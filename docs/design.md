@@ -163,6 +163,7 @@ task-runner/
 │           ├── backends/
 │           │   ├── registry.ts    # name → adapter lookup
 │           │   ├── claude.ts      # Claude CLI subprocess adapter
+│           │   ├── cursor.ts      # Cursor CLI subprocess adapter
 │           │   └── codex.ts       # Codex JSON-RPC adapter (stdio + ws transports)
 │           ├── config/
 │           │   ├── loader.ts      # filesystem-backed definition lookup + parsing
@@ -245,7 +246,7 @@ two never drift.
 ---
 schemaVersion: 1                  # required, must be 1
 name: claude-worker               # required, string
-backend: claude                   # required; "claude" | "codex" | "passive"
+backend: claude                   # required; "claude" | "codex" | "cursor" | "passive"
 model: claude-sonnet-4-6          # optional; ignored for backend=passive
 effort: medium                    # optional; off|minimal|low|medium|high|xhigh|max
 timeoutSec: 3600                  # optional, default 3600; ignored for backend=passive
@@ -263,7 +264,7 @@ Record findings in each task's notes block.
 |---|---|
 | `schemaVersion` | Future migrations |
 | `name` | Identity in errors/logs |
-| `backend` | Adapter dispatch (`claude`, `codex`, or `passive`) |
+| `backend` | Adapter dispatch (`claude`, `codex`, `cursor`, or `passive`) |
 | `model` | Model identifier; per-backend namespace prefix is stripped. Ignored for `passive` |
 | `effort` | Canonical effort enum; mapped per-adapter. Ignored for `passive` |
 | `timeoutSec` | Per-invocation wall clock. Ignored for `passive` (no invocation) |
@@ -1347,6 +1348,7 @@ stop and report it instead of retrying.
 One small interface. Backends live under `packages/core/src/backends/` and are
 registered in `packages/core/src/backends/registry.ts`. Current backends:
 **claude** (subprocess),
+**cursor** (subprocess),
 **codex** (JSON-RPC over stdio or WebSocket), and **passive** (null-object
 for sidecar-only runs; see [Passive implementation](#passive-implementation)
 below).
@@ -1391,8 +1393,9 @@ interface BackendInvokeResult {
 }
 
 interface Backend {
-  id: string;
+  id: BackendId;
   invoke(ctx: BackendInvokeContext): Promise<BackendInvokeResult>;
+  supportsBootstrapSessionImport?: boolean;
 }
 ```
 
@@ -1434,6 +1437,44 @@ claude --print --output-format stream-json --verbose \
   to SIGKILL after 5 seconds.
 - **Completion detection**: process exit. Non-zero exit code counts as a
   failed attempt (and a failed attempt still produces a manifest entry).
+
+### Cursor implementation
+
+Spawns `cursor-agent` as a subprocess. Binary resolved from
+`process.env.TASK_RUNNER_CURSOR_BIN` or falls back to `"cursor-agent"`
+on `PATH`.
+
+Command shape:
+
+```
+cursor-agent -p --trust --output-format stream-json --stream-partial-output \
+             --workspace <cwd> \
+             [--model <model>] \
+             [--force] \
+             [--resume <session-id>] \
+             "<prompt>"
+```
+
+- **Output format**: `stream-json` with `--stream-partial-output`.
+  The adapter parses NDJSON line-by-line and extracts:
+  1. **Session ID** from the first non-empty `session_id` seen
+     anywhere in the event record.
+  2. **Live assistant text** from top-level `partial_output` records
+     only. Final full `assistant` messages and `tool_call` records are
+     ignored for terminal streaming so task-runner does not double-print.
+  3. **Transcript** from the final `result.result` string only. If the
+     process exits successfully without a valid final result record, the
+     adapter throws a backend/runtime error instead of guessing from
+     partial output.
+- **Model normalization**: strips any provider prefix
+  (`provider/foo` -> `foo`) before forwarding `--model`.
+- **Effort**: task-runner accepts the canonical `EffortLevel` surface,
+  but Cursor v1 ignores it because the public CLI has no effort flag.
+- **Permissions**: `unrestricted: true` maps to `cursor-agent --force`.
+- **Bootstrap import**: unsupported. `supportsBootstrapSessionImport`
+  is `false` because public Cursor resume ids are not safely
+  self-validating. Normal resume of task-runner-created Cursor runs
+  still works via the captured `backendSessionId`.
 
 ### Codex implementation
 
@@ -1536,15 +1577,15 @@ cross-invocation resume (`--resume-run`), the runner passes the stored
 Task-runner's canonical `EffortLevel` enum is a superset. Per-backend
 mapping tables:
 
-| canonical | claude (`--effort`) | codex (`effort` param) |
-|---|---|---|
-| `off` | *(omit)* | *(omit)* |
-| `minimal` | `low` | `minimal` |
-| `low` | `low` | `low` |
-| `medium` | `medium` | `medium` |
-| `high` | `high` | `high` |
-| `xhigh` | `max` | `xhigh` |
-| `max` | `max` | `xhigh` |
+| canonical | claude (`--effort`) | cursor | codex (`effort` param) |
+|---|---|---|---|
+| `off` | *(omit)* | *(omit)* | *(omit)* |
+| `minimal` | `low` | *(ignored)* | `minimal` |
+| `low` | `low` | *(ignored)* | `low` |
+| `medium` | `medium` | *(ignored)* | `medium` |
+| `high` | `high` | *(ignored)* | `high` |
+| `xhigh` | `max` | *(ignored)* | `xhigh` |
+| `max` | `max` | *(ignored)* | `xhigh` |
 
 Each adapter has a small local `mapEffortTo<Backend>()` function with
 this table. The canonical enum is validated at schema load time.
@@ -2259,8 +2300,8 @@ stdout.
 `task-runner` can adopt an existing backend session (claude session
 UUID, codex thread id) instead of starting a fresh one. The flag is
 `--backend-session-id <id>` and works on `init` and on a fresh
-`run` (forbidden with `--resume-run`, since the resume target
-already carries one).
+`run` for backends that support bootstrap import (forbidden with
+`--resume-run`, since the resume target already carries one).
 
 ### Validation
 
@@ -2282,9 +2323,14 @@ and the CLI exits with code 3.
   codex itself allows it on resume (mismatched cwd almost always
   means the user is confused, and silent semantic drift is worse
   than a hard error).
+- **cursor**: explicitly unsupported. The public `cursor-agent --resume`
+  ids are not safely self-validating, so task-runner rejects bootstrap
+  import before workspace creation instead of pretending it can verify
+  them.
 
-Backends that don't implement `validateSessionId` are treated as
-"always valid" and the first real invocation discovers the truth.
+Backends that support bootstrap import but don't implement
+`validateSessionId` are treated as "always valid" and the first real
+invocation discovers the truth.
 
 ### Wiring
 
@@ -2419,10 +2465,12 @@ the aborted run left off.
   A middle-ground permission mode (e.g., `acceptEdits` only) would be a
   nice alternative to the blunt `unrestricted: true` toggle.
 - **Additional backends**: Codex shipped in M5 (JSON-RPC over stdio
-  and websocket transports). Passive shipped as a null-object backend
-  for sidecar-only runs. Future adapters (Gemini, Ollama, etc.) can
-  be added to `packages/core/src/backends/registry.ts` by implementing
-  the `Backend` interface — no other code should need to know about them.
+  and websocket transports). Cursor shipped as a subprocess backend
+  using the public headless CLI. Passive shipped as a null-object
+  backend for sidecar-only runs. Future adapters (Gemini, Ollama, etc.)
+  can be added to `packages/core/src/backends/registry.ts` by
+  implementing the `Backend` interface — no other code should need to
+  know about them.
 - **Task ID uniqueness**: enforced via zod `refine` at load time.
 - **Max task count**: enforced at 100 in schema.
 - **Concurrent resume**: two `task-runner run --resume-run <id>`

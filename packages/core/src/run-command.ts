@@ -157,6 +157,12 @@ export async function executeRunCommand(opts: ExecuteRunCommandOptions): Promise
     opts.overrides.backend ?? resumeTarget?.manifest.backend ?? loaded.config.backend;
   const backend = resolveBackend(backendId);
 
+  if (opts.backendSessionId !== undefined && backend.supportsBootstrapSessionImport === false) {
+    throw new RunCommandError(
+      `--backend-session-id is unsupported for ${backendId} because public ${backendId} resume ids are not safely self-validating`,
+    );
+  }
+
   if (!opts.initialize && backendId === "passive") {
     const taskRunnerCmd = resolveTaskRunnerCommand();
     const runId = resumeTarget?.manifest.runId;

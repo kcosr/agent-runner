@@ -1,4 +1,5 @@
 import type { RunCommandOverrides } from "@task-runner/core/app/service.js";
+import { BACKEND_IDS } from "@task-runner/core/core/backends/types.js";
 import { trimRunName } from "@task-runner/core/util/run-name.js";
 import type { RunSetNameParams, RunsStartParams } from "./protocol.js";
 
@@ -206,7 +207,7 @@ export function optionalOverrides(value: unknown): RunCommandOverrides {
   }
   return {
     cwd: optionalString(record.cwd, "overrides.cwd"),
-    backend: optionalEnum(record.backend, "overrides.backend", ["claude", "codex", "passive"]),
+    backend: optionalEnum(record.backend, "overrides.backend", BACKEND_IDS),
     model: optionalString(record.model, "overrides.model"),
     effort: optionalEnum(record.effort, "overrides.effort", [
       "off",

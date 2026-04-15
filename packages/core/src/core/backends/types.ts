@@ -1,3 +1,6 @@
+export const BACKEND_IDS = ["claude", "codex", "cursor", "passive"] as const;
+export type BackendId = (typeof BACKEND_IDS)[number];
+
 export type EffortLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 export type BackendEvent =
@@ -44,8 +47,16 @@ export interface ValidateSessionContext {
 export type ValidateSessionResult = { valid: true } | { valid: false; reason: string };
 
 export interface Backend {
-  id: string;
+  id: BackendId;
   invoke(ctx: BackendInvokeContext): Promise<BackendInvokeResult>;
+  /**
+   * Whether `--backend-session-id` bootstrap import is supported for
+   * this backend. Omitted means "supported" to preserve the existing
+   * behavior for backends that either validate explicitly or accept the
+   * imported id as-is. Backends can set this to `false` when their
+   * public resume ids are not safely self-validating.
+   */
+  supportsBootstrapSessionImport?: boolean;
   /**
    * Optional. Cheap, read-only check that the given backend session id
    * exists and is compatible with the supplied `cwd`. Used by the

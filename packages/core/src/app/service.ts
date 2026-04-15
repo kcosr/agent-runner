@@ -13,6 +13,7 @@ import type {
   RunTaskSummary,
 } from "../contracts/runs.js";
 import { toRunDetail } from "../contracts/runs.js";
+import type { BackendId } from "../core/backends/types.js";
 import {
   addAttachmentFromFile,
   addAttachmentFromStream,
@@ -51,7 +52,7 @@ export interface DefinitionDetail {
 
 export interface RunCommandOverrides {
   cwd?: string;
-  backend?: "claude" | "codex" | "passive";
+  backend?: BackendId;
   model?: string;
   effort?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   taskMode?: TaskMode;

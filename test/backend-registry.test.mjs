@@ -6,10 +6,12 @@ import {
   resolveBackend,
 } from "../packages/core/dist/backends/registry.js";
 
-test("registry: claude and codex are known", () => {
+test("registry: claude, codex, cursor, and passive are known", () => {
   const known = knownBackends();
   assert.ok(known.includes("claude"));
   assert.ok(known.includes("codex"));
+  assert.ok(known.includes("cursor"));
+  assert.ok(known.includes("passive"));
 });
 
 test("registry: resolveBackend returns the adapter", () => {
@@ -17,6 +19,8 @@ test("registry: resolveBackend returns the adapter", () => {
   assert.equal(claude.id, "claude");
   const codex = resolveBackend("codex");
   assert.equal(codex.id, "codex");
+  const cursor = resolveBackend("cursor");
+  assert.equal(cursor.id, "cursor");
 });
 
 test("registry: unknown backend throws UnknownBackendError", () => {

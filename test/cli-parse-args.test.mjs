@@ -87,6 +87,11 @@ test("parseArgs: --task-mode rejects unknown values", () => {
   );
 });
 
+test("parseArgs: --backend accepts cursor", () => {
+  const parsed = parseArgs(argv("run", "--agent", "x", "--backend", "cursor"));
+  assert.equal(parsed.backend, "cursor");
+});
+
 // ── list/show command parsing ────────────────────────────────────────
 
 test("parseArgs: list agents is parsed as command=list subcommand=agents", () => {
