@@ -1219,7 +1219,21 @@ body {
 }
 
 .card-row > .active-task {
-  flex: 1 1 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  flex: 1 1 0%;
+  min-width: 0;
+}
+
+.active-task__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .drawer-title-block {

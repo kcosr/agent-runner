@@ -1380,6 +1380,41 @@ describe("web app", () => {
     expect(card).not.toHaveTextContent(longName);
   });
 
+  it("preserves the full active task title on cards while rendering it in the truncation wrapper", async () => {
+    const longTaskTitle =
+      "Investigate the long-running resume-start UX regression before the card layout expands unexpectedly";
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "run-long-task",
+          assignmentName: "plan-feature",
+          activeTask: { id: "long-task", title: longTaskTitle },
+        }),
+      ],
+      details: {
+        "run-long-task": makeDetail({
+          runId: "run-long-task",
+          assignment: {
+            name: "plan-feature",
+            sourcePath: "/tmp/assignment.md",
+            workspacePath: "/tmp/task-runner/assignment.md",
+          },
+          activeTask: { id: "long-task", title: longTaskTitle },
+        }),
+      },
+    });
+
+    await renderApp();
+
+    const card = await screen.findByRole("button", { name: /plan-feature/i });
+    const activeTask = card.querySelector(".active-task");
+    const activeTaskText = card.querySelector(".active-task__text");
+    expect(activeTask).not.toBeNull();
+    expect(activeTaskText).not.toBeNull();
+    expect(activeTask).toHaveAttribute("title", longTaskTitle);
+    expect(activeTaskText).toHaveTextContent(longTaskTitle);
+  });
+
   it("renames a run from the detail drawer title editor", async () => {
     const state = {
       runs: [makeRun()],
