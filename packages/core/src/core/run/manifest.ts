@@ -540,13 +540,6 @@ function isRunManifest(value: unknown): value is RunManifest {
   if (execution.hostMode !== "embedded" && execution.hostMode !== "daemon") return false;
   if (!execution.controller || typeof execution.controller !== "object") return false;
   const controller = execution.controller as Record<string, unknown>;
-  if (controller.kind === "embedded") {
-    return execution.hostMode === "embedded";
-  }
-  if (controller.kind === "daemon") {
-    return execution.hostMode === "daemon" && typeof controller.daemonInstanceId === "string";
-  }
-
   if (
     obj.sessions.some((session) => {
       if (!session || typeof session !== "object") {
@@ -556,6 +549,12 @@ function isRunManifest(value: unknown): value is RunManifest {
     })
   ) {
     return false;
+  }
+  if (controller.kind === "embedded") {
+    return execution.hostMode === "embedded";
+  }
+  if (controller.kind === "daemon") {
+    return execution.hostMode === "daemon" && typeof controller.daemonInstanceId === "string";
   }
 
   return false;

@@ -150,6 +150,10 @@ test("brief command prints the stored handoff and rejects path targets", async (
   const bad = runCli(["brief", outcome.workspaceDir], { cwd: dir });
   assert.equal(bad.status, 3);
   assert.match(bad.stderr, /brief accepts a run id, not a path/);
+
+  const dotDot = runCli(["brief", ".."], { cwd: dir });
+  assert.equal(dotDot.status, 3);
+  assert.match(dotDot.stderr, /brief accepts a run id, not a path/);
 });
 
 test("status on a running run reads canonical task state", async () => {

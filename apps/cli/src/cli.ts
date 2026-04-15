@@ -257,7 +257,7 @@ function normalizeRunIdTarget(target: string | undefined, commandName: string): 
   if (!target) {
     return target;
   }
-  if (isPathArg(target)) {
+  if (isPathArg(target) || target.includes("..")) {
     throw new CommandError(`${commandName} accepts a run id, not a path`);
   }
   return target;

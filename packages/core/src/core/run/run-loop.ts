@@ -275,6 +275,46 @@ function checkLockedFieldsFromManifest(
   }
 }
 
+function buildResumeSessionManifest(
+  base: RunManifest,
+  initialPrompt: string,
+  overrides: {
+    model: string | null;
+    effort: RunManifest["effort"];
+    name: string | null;
+    unrestricted: boolean;
+    cwd: string;
+    timeoutSec: number;
+    assignmentPath: string;
+    workspaceDir: string;
+    maxAttempts: number;
+    execution: RunExecution;
+    sessionCount: number;
+  },
+): RunManifest {
+  return {
+    ...base,
+    model: overrides.model,
+    effort: overrides.effort,
+    brief: initialPrompt,
+    name: overrides.name,
+    unrestricted: overrides.unrestricted,
+    cwd: overrides.cwd,
+    timeoutSec: overrides.timeoutSec,
+    assignmentPath: overrides.assignmentPath,
+    workspaceDir: overrides.workspaceDir,
+    endedAt: null,
+    status: "running",
+    exitCode: null,
+    maxAttempts: overrides.maxAttempts,
+    execution: overrides.execution,
+    finalTasks: {},
+    tasksCompleted: 0,
+    tasksTotal: 0,
+    sessionCount: overrides.sessionCount,
+  };
+}
+
 const MAX_TITLE_LENGTH = 200;
 
 function validateAddedTaskTitle(title: string, index: number): void {
@@ -861,34 +901,19 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
   let manifest: RunManifest;
   if (isResume && resume) {
-    // On resume, the new manifest spreads the prior one and then
-    // overrides only the fields that can legitimately change across
-    // sessions. `agent.instructions`, `lockedFields`, and
-    // `agent.sourcePath` are frozen at first write and preserved by
-    // the spread. `timeoutSec` is persisted so a `--timeout-sec`
-    // override on resume stays in effect for the next resume too,
-    // matching the model/effort behavior.
-    manifest = {
-      ...resume.manifest,
+    manifest = buildResumeSessionManifest(resume.manifest, initialPrompt, {
       model: model ?? null,
       effort: effort ?? null,
-      brief: initialPrompt,
       name,
       unrestricted,
       cwd,
       timeoutSec,
       assignmentPath,
       workspaceDir,
-      endedAt: null,
-      status: "running",
-      exitCode: null,
       maxAttempts,
       execution,
-      finalTasks: {},
-      tasksCompleted: 0,
-      tasksTotal: 0,
       sessionCount: priorSessionCount + 1,
-    };
+    });
   } else if (priorInitialized && resume) {
     // Execute-after-init: the manifest was persisted by `init`. Flip it
     // to "running", promote sessionCount to 1, and preserve the brief.
@@ -1062,27 +1087,19 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       }
 
       if (isResume) {
-        manifest = {
-          ...latest,
+        manifest = buildResumeSessionManifest(latest, initialPrompt, {
           model: model ?? null,
           effort: effort ?? null,
-          brief: initialPrompt,
           name,
           unrestricted,
           cwd,
           timeoutSec,
           assignmentPath,
           workspaceDir,
-          endedAt: null,
-          status: "running",
-          exitCode: null,
           maxAttempts,
           execution,
-          finalTasks: {},
-          tasksCompleted: 0,
-          tasksTotal: 0,
           sessionCount: priorSessionCount + 1,
-        };
+        });
       } else {
         manifest = {
           ...latest,

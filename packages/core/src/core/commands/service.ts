@@ -293,10 +293,6 @@ function updateTaskMap(
   });
 }
 
-function readManifestView(manifest: RunManifest): { manifest: RunManifest; isLive: boolean } {
-  return { manifest, isLive: false };
-}
-
 function validateTaskTitle(title: string): string {
   const trimmed = title.trim();
   if (trimmed.length === 0) {
@@ -347,7 +343,7 @@ export function readStatus(target: string): StatusCommandResult {
   const resolved = resolveRun(target);
   refreshRunSnapshotAfterTaskStateSettles(resolved);
 
-  const { manifest: manifestView, isLive } = readManifestView(resolved.manifest);
+  const manifestView = resolved.manifest;
   const dependencyGraph = new Map<string, RunManifest>([[manifestView.runId, manifestView]]);
   const dependents: RunManifest[] = [];
 
@@ -366,7 +362,7 @@ export function readStatus(target: string): StatusCommandResult {
 
   return toRunDetail({
     manifest: manifestView,
-    isLive,
+    isLive: false,
     dependencies: resolveDependencies(manifestView, dependencyGraph),
     dependents: resolveDependentsFromManifests(manifestView.runId, dependents),
   });
@@ -390,7 +386,7 @@ export function listRuns(opts: { includeArchived?: boolean } = {}): RunListResul
   const entries = listRunManifests();
   const projectedEntries = entries.map((entry) => ({
     ...entry,
-    manifest: readManifestView(entry.manifest).manifest,
+    manifest: entry.manifest,
   }));
   const successfulRunIds = new Set(
     projectedEntries
