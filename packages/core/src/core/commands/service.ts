@@ -162,16 +162,6 @@ function resolveRun(target: string): ReturnType<typeof resolveResumeTarget> {
   return resolveResumeTarget(target);
 }
 
-function requireArchivableRun(manifest: RunManifest, verb: "archive" | "unarchive"): void {
-  const allowed = verb === "archive" ? canArchiveRun(manifest) : canUnarchiveRun(manifest);
-  if (allowed) {
-    return;
-  }
-  if (manifest.status === "running") {
-    throw new ConflictError(`cannot ${verb} a running run`);
-  }
-}
-
 function requireResettableRun(manifest: RunManifest): void {
   if (canResetRun(manifest)) {
     return;
@@ -465,7 +455,9 @@ function setRunArchived(target: string, archived: boolean): RunArchiveResult {
 
   withTaskStateLock(resolved.workspaceDir, () => {
     resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
-    requireArchivableRun(resolved.manifest, archived ? "archive" : "unarchive");
+    if (resolved.manifest.status === "running") {
+      throw new ConflictError(`cannot ${archived ? "archive" : "unarchive"} a running run`);
+    }
 
     const alreadyArchived = resolved.manifest.archivedAt !== null;
     if (archived) {

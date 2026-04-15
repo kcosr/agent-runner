@@ -11,7 +11,6 @@ import type {
 } from "@task-runner/core/contracts/events.js";
 import type {
   RunArchiveResult,
-  RunDeleteResult,
   RunDependenciesResult,
   RunDetail,
   RunNameResult,
@@ -163,10 +162,6 @@ export interface RunsListResult {
 
 export interface RunResult {
   run: RunDetail;
-}
-
-export interface RunDeleteResultEnvelope {
-  result: RunDeleteResult;
 }
 
 export interface RunBriefResult {

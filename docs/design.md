@@ -258,7 +258,7 @@ state checks locally.
 
 Notifications are likewise explicit:
 
-- `run.summary` carries a fresh `RunSummary`
+- `run.summary` carries either a `summary_upsert` with a fresh `RunSummary` or a `summary_removed` with a `runId`
 - `run.detail` carries a fresh `RunDetail`
 - `run.timeline` carries one `RunTimelineEnvelope` (`runId`, `cursor`, `event`)
 
