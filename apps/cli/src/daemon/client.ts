@@ -51,6 +51,7 @@ export class DaemonClient {
     string,
     (params: DaemonSubscriptionNotification) => void
   >();
+  private readonly queuedNotifications = new Map<string, DaemonSubscriptionNotification[]>();
 
   private constructor(
     private readonly ws: WebSocket,
@@ -106,11 +107,19 @@ export class DaemonClient {
   ): Promise<string> {
     const result = await this.call<{ subscriptionId: string }>("events.subscribe", params);
     this.subscriptions.set(result.subscriptionId, onEvent);
+    const queued = this.queuedNotifications.get(result.subscriptionId);
+    if (queued) {
+      this.queuedNotifications.delete(result.subscriptionId);
+      for (const notification of queued) {
+        onEvent(notification);
+      }
+    }
     return result.subscriptionId;
   }
 
   async unsubscribe(subscriptionId: string): Promise<void> {
     this.subscriptions.delete(subscriptionId);
+    this.queuedNotifications.delete(subscriptionId);
     await this.call("events.unsubscribe", { subscriptionId });
   }
 
@@ -162,7 +171,11 @@ export class DaemonClient {
     const handler = this.subscriptions.get(params.subscriptionId);
     if (handler) {
       handler(params);
+      return;
     }
+    const queued = this.queuedNotifications.get(params.subscriptionId) ?? [];
+    queued.push(params);
+    this.queuedNotifications.set(params.subscriptionId, queued);
   }
 
   private failPending(error: Error): void {

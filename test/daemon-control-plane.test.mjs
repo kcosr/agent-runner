@@ -26,6 +26,14 @@ model: claude-sonnet-4-6
 Daemon agent.
 `;
 
+const PASSIVE_AGENT = `---
+schemaVersion: 1
+name: passive-daemon-agent
+backend: passive
+---
+Passive daemon agent.
+`;
+
 const ASSIGNMENT = `---
 schemaVersion: 1
 name: daemon-work
@@ -53,9 +61,9 @@ function writeAssignment(baseDir, name, body) {
   writeFileSync(join(dir, "assignment.md"), body);
 }
 
-async function initRun(baseDir) {
+async function initRun(baseDir, agentName = "daemon-agent") {
   return withEnv(sharedRuntimeEnv(baseDir), async () => {
-    const loaded = loadAgentConfig("daemon-agent", baseDir);
+    const loaded = loadAgentConfig(agentName, baseDir);
     const loadedAssignment = loadAssignmentConfig("daemon-work", baseDir);
     const originalCwd = process.cwd();
     process.chdir(baseDir);
@@ -1195,11 +1203,112 @@ test("daemon subscriptions fan out run events and abort active runs", async () =
 
     await new Promise((resolve) => setTimeout(resolve, 50));
 
-    assert.deepEqual(seenA, ["run_aborted", "run_finished"]);
-    assert.deepEqual(seenB, ["run_aborted", "run_finished"]);
+    assert.deepEqual(seenA, ["run_started", "attempt_started", "run_aborted", "run_finished"]);
+    assert.deepEqual(seenB, ["run_started", "attempt_started", "run_aborted", "run_finished"]);
   } finally {
     await clientA.close();
     await clientB.close();
+    await server.close();
+  }
+});
+
+test("daemon mutation-driven projection SSE events include dependent summary fanout", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "passive-daemon-agent", PASSIVE_AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const source = await initRun(dir, "passive-daemon-agent");
+  const dependent = await initRun(dir, "passive-daemon-agent");
+  patchManifest(dependent.workspaceDir, (manifest) => {
+    manifest.dependencyRunIds = [source.runId];
+  });
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl);
+    const summaries = await openSse(httpBaseUrl, "/api/events/run-summaries");
+    const sourceDetails = await openSse(httpBaseUrl, `/api/runs/${source.runId}/events/detail`);
+    try {
+      const response = await httpJson(httpBaseUrl, `/api/runs/${source.runId}/tasks/t1`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ status: "completed" }),
+      });
+      assert.equal(response.status, 200);
+      assert.equal(response.body.task.status, "completed");
+
+      const sourceSummary = await summaries.next();
+      const sourceDetailEvent = await sourceDetails.next();
+      const dependentSummary = await summaries.next();
+
+      assert.equal(sourceSummary.type, "summary_upsert");
+      assert.equal(sourceSummary.summary.runId, source.runId);
+      assert.equal(sourceSummary.summary.effectiveStatus, "success");
+
+      assert.equal(sourceDetailEvent.type, "detail_updated");
+      assert.equal(sourceDetailEvent.detail.runId, source.runId);
+      assert.equal(sourceDetailEvent.detail.effectiveStatus, "success");
+
+      assert.equal(dependentSummary.type, "summary_upsert");
+      assert.equal(dependentSummary.summary.runId, dependent.runId);
+      assert.deepEqual(dependentSummary.summary.dependencyState, {
+        ready: true,
+        total: 1,
+        satisfied: 1,
+        unsatisfied: 0,
+      });
+    } finally {
+      await summaries.close();
+      await sourceDetails.close();
+      await server.close();
+    }
+  });
+});
+
+test("daemon websocket validates events.subscribe channel and runId rules", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const server = await serveDaemon(listenUrl);
+  const ws = await openRawWebSocket(listenUrl);
+  try {
+    ws.send(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "events.subscribe",
+        params: { channel: "bogus" },
+      }),
+    );
+    const invalidChannel = await nextRawMessage(ws);
+    assert.equal(
+      invalidChannel.error.message,
+      'channel must be one of "run_summary", "run_detail", or "run_timeline"',
+    );
+
+    ws.send(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "events.subscribe",
+        params: { channel: "run_summary", runId: "run-123" },
+      }),
+    );
+    const summaryWithRunId = await nextRawMessage(ws);
+    assert.equal(summaryWithRunId.error.message, "runId must be omitted for channel run_summary");
+
+    ws.send(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 3,
+        method: "events.subscribe",
+        params: { channel: "run_detail" },
+      }),
+    );
+    const missingRunId = await nextRawMessage(ws);
+    assert.equal(missingRunId.error.message, "runId is required");
+  } finally {
+    ws.terminate();
     await server.close();
   }
 });

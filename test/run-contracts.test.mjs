@@ -366,6 +366,76 @@ test("run contracts: activeTask is derived only when exactly one task is in prog
     id: "t2",
     title: "Second",
   });
+
+  const noActiveManifest = buildManifest({
+    finalTasks: {
+      t1: {
+        id: "t1",
+        title: "First",
+        body: "Do the first thing.",
+        status: "completed",
+        notes: "Done.",
+      },
+      t2: {
+        id: "t2",
+        title: "Second",
+        body: "Do the second thing.",
+        status: "pending",
+        notes: "",
+      },
+    },
+  });
+  assert.equal(
+    toRunSummary({
+      repo: "demo-repo",
+      workspaceDir: noActiveManifest.workspaceDir,
+      manifest: noActiveManifest,
+    }).activeTask,
+    null,
+  );
+  assert.equal(
+    toRunDetail({
+      manifest: noActiveManifest,
+      isLive: true,
+    }).activeTask,
+    null,
+  );
+
+  const ambiguousActiveManifest = buildManifest({
+    finalTasks: {
+      t1: {
+        id: "t1",
+        title: "First",
+        body: "Do the first thing.",
+        status: "in_progress",
+        notes: "",
+      },
+      t2: {
+        id: "t2",
+        title: "Second",
+        body: "Do the second thing.",
+        status: "in_progress",
+        notes: "",
+      },
+    },
+    tasksCompleted: 0,
+    tasksTotal: 2,
+  });
+  assert.equal(
+    toRunSummary({
+      repo: "demo-repo",
+      workspaceDir: ambiguousActiveManifest.workspaceDir,
+      manifest: ambiguousActiveManifest,
+    }).activeTask,
+    null,
+  );
+  assert.equal(
+    toRunDetail({
+      manifest: ambiguousActiveManifest,
+      isLive: true,
+    }).activeTask,
+    null,
+  );
 });
 
 test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mutation semantics", () => {

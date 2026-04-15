@@ -42,7 +42,7 @@ import type {
 } from "@task-runner/core/contracts/runs.js";
 import { isTerminalStatus } from "@task-runner/core/contracts/runs.js";
 import { ConflictError } from "@task-runner/core/core/commands/service.js";
-import { listRunManifests } from "@task-runner/core/core/run/manifest.js";
+import { RunNotFoundError, listRunManifests } from "@task-runner/core/core/run/manifest.js";
 import type { RunEvent } from "@task-runner/core/core/run/run-loop.js";
 import { shortId } from "@task-runner/core/util/short-id.js";
 import { WebSocket, WebSocketServer } from "ws";
@@ -57,7 +57,6 @@ import {
   RPC_ERROR_COMMAND,
   RPC_ERROR_RUNTIME,
   type RunDetailNotificationParams,
-  type RunEventChannel,
   type RunSummaryNotificationParams,
   type RunTimelineNotificationParams,
 } from "./protocol.js";
@@ -98,7 +97,16 @@ interface ActiveRunRecord {
   done: Promise<void>;
   detail: RunDetail | null;
   timelineBuffer: RunTimelineEvent[];
+  timelineTruncated: boolean;
 }
+
+interface RecentTimelineRecord {
+  events: RunTimelineEvent[];
+  cleanupTimer: ReturnType<typeof setTimeout>;
+}
+
+const MAX_TIMELINE_BUFFER_EVENTS = 1_000;
+const COMPLETED_TIMELINE_BUFFER_TTL_MS = 5_000;
 
 function daemonExecution(daemonInstanceId: string) {
   return {
@@ -194,6 +202,28 @@ function sendJson(ws: WebSocket, payload: JsonRpcResponse): void {
   ws.send(JSON.stringify(payload));
 }
 
+function bufferTimelineEvent(record: ActiveRunRecord, event: RunTimelineEvent): void {
+  record.timelineBuffer.push(event);
+  if (record.timelineBuffer.length <= MAX_TIMELINE_BUFFER_EVENTS) {
+    return;
+  }
+
+  const overflow = record.timelineBuffer.length - MAX_TIMELINE_BUFFER_EVENTS;
+  record.timelineBuffer.splice(0, overflow);
+  if (record.timelineTruncated) {
+    return;
+  }
+
+  record.timelineTruncated = true;
+  if (record.timelineBuffer.length === MAX_TIMELINE_BUFFER_EVENTS) {
+    record.timelineBuffer.shift();
+  }
+  record.timelineBuffer.unshift({
+    type: "backend_notice",
+    text: `task-runner: timeline replay truncated to the most recent ${MAX_TIMELINE_BUFFER_EVENTS} events.\n`,
+  });
+}
+
 export interface DaemonServerHandle {
   listenUrl: string;
   httpBaseUrl: string;
@@ -214,6 +244,7 @@ export async function serveDaemon(
   const detailSubscriptions = new Map<string, DetailSubscriptionRecord>();
   const timelineSubscriptions = new Map<string, TimelineSubscriptionRecord>();
   const activeRuns = new Map<string, ActiveRunRecord>();
+  const recentTimelineBuffers = new Map<string, RecentTimelineRecord>();
   const sockets = new Set<Socket>();
   const wsClients = new Set<WebSocket>();
 
@@ -256,8 +287,69 @@ export async function serveDaemon(
   const getProjectedDetail = (runId: string): RunDetail | null => {
     try {
       return getDaemonRun(runId);
-    } catch {
-      return null;
+    } catch (err) {
+      if (err instanceof RunNotFoundError) {
+        return null;
+      }
+      throw err;
+    }
+  };
+
+  const clearRecentTimelineBuffer = (runId: string): void => {
+    const existing = recentTimelineBuffers.get(runId);
+    if (!existing) {
+      return;
+    }
+    clearTimeout(existing.cleanupTimer);
+    recentTimelineBuffers.delete(runId);
+  };
+
+  const rememberRecentTimelineBuffer = (runId: string, events: RunTimelineEvent[]): void => {
+    clearRecentTimelineBuffer(runId);
+    const cleanupTimer = setTimeout(() => {
+      recentTimelineBuffers.delete(runId);
+    }, COMPLETED_TIMELINE_BUFFER_TTL_MS);
+    cleanupTimer.unref?.();
+    recentTimelineBuffers.set(runId, {
+      events: [...events],
+      cleanupTimer,
+    });
+  };
+
+  const getReplayableTimeline = (runId: string): RunTimelineEvent[] => {
+    const active = activeRuns.get(runId);
+    if (active) {
+      return active.timelineBuffer;
+    }
+    return recentTimelineBuffers.get(runId)?.events ?? [];
+  };
+
+  const createActiveRunRecord = (
+    abortController: AbortController,
+    done: Promise<void>,
+    runId: string,
+  ): ActiveRunRecord => {
+    clearRecentTimelineBuffer(runId);
+    return {
+      abortController,
+      done,
+      detail: getProjectedDetail(runId),
+      timelineBuffer: [],
+      timelineTruncated: false,
+    };
+  };
+
+  const parseRunEventChannel = (value: unknown): "run_summary" | "run_detail" | "run_timeline" => {
+    const channel = requiredString(value, "channel");
+    switch (channel) {
+      case "run_summary":
+      case "run_detail":
+      case "run_timeline":
+        return channel;
+      default:
+        throw new RequestValidationError(
+          'channel must be one of "run_summary", "run_detail", or "run_timeline"',
+        );
     }
   };
 
@@ -317,7 +409,7 @@ export async function serveDaemon(
   const publishTimeline = (runId: string, event: RunTimelineEvent): void => {
     const active = activeRuns.get(runId);
     if (active) {
-      active.timelineBuffer.push(event);
+      bufferTimelineEvent(active, event);
     }
     for (const [id, subscription] of timelineSubscriptions) {
       if (subscription.runId !== runId) {
@@ -429,8 +521,8 @@ export async function serveDaemon(
   const subscribeRunSummaries = (
     owner: object,
     publish: (summary: RunSummaryStreamEvent) => boolean,
+    subscriptionId = `sub-${shortId()}`,
   ): { subscriptionId: string; unsubscribe(): void } => {
-    const subscriptionId = `sub-${shortId()}`;
     summarySubscriptions.set(subscriptionId, {
       id: subscriptionId,
       owner,
@@ -448,8 +540,8 @@ export async function serveDaemon(
     owner: object,
     runId: string,
     publish: (detail: RunDetailStreamEvent) => boolean,
+    subscriptionId = `sub-${shortId()}`,
   ): { subscriptionId: string; unsubscribe(): void } => {
-    const subscriptionId = `sub-${shortId()}`;
     detailSubscriptions.set(subscriptionId, {
       id: subscriptionId,
       owner,
@@ -468,27 +560,29 @@ export async function serveDaemon(
     owner: object,
     runId: string,
     publish: (event: RunTimelineEvent) => boolean,
+    subscriptionId = `sub-${shortId()}`,
   ): { subscriptionId: string; unsubscribe(): void } => {
-    const subscriptionId = `sub-${shortId()}`;
     timelineSubscriptions.set(subscriptionId, {
       id: subscriptionId,
       owner,
       runId,
       publish,
     });
-    const buffer = activeRuns.get(runId)?.timelineBuffer ?? [];
-    for (const event of buffer) {
-      if (!publish(event)) {
-        timelineSubscriptions.delete(subscriptionId);
-        break;
-      }
-    }
     return {
       subscriptionId,
       unsubscribe: () => {
         timelineSubscriptions.delete(subscriptionId);
       },
     };
+  };
+
+  const replayTimeline = (runId: string, publish: (event: RunTimelineEvent) => boolean): void => {
+    const buffer = getReplayableTimeline(runId);
+    for (const event of buffer) {
+      if (!publish(event)) {
+        break;
+      }
+    }
   };
 
   const removeSubscriptionsByOwner = (owner: object): void => {
@@ -531,19 +625,18 @@ export async function serveDaemon(
     void startManagedRun((event) => {
       if ((event.type === "run_started" || event.type === "run_initialized") && !runId) {
         runId = event.runId;
-        activeRuns.set(runId, {
-          abortController,
-          done,
-          detail: getProjectedDetail(runId),
-          timelineBuffer: [],
-        });
+        activeRuns.set(runId, createActiveRunRecord(abortController, done, runId));
         resolveRunId?.(runId);
       }
       const resolvedRunId =
         runId ?? (event.type === "run_finished" ? event.summary.runId : undefined);
       if (resolvedRunId) {
         publishTimeline(resolvedRunId, event);
-        if (event.type === "run_started" || event.type === "run_finished") {
+        if (
+          event.type === "run_started" ||
+          event.type === "run_aborted" ||
+          event.type === "run_finished"
+        ) {
           const previous = activeRuns.get(resolvedRunId)?.detail ?? null;
           const current = getProjectedDetail(resolvedRunId);
           publishMutationResult(resolvedRunId, previous, current);
@@ -553,12 +646,7 @@ export async function serveDaemon(
       .then((outcome) => {
         if (!runId) {
           runId = outcome.runId;
-          activeRuns.set(runId, {
-            abortController,
-            done,
-            detail: getProjectedDetail(runId),
-            timelineBuffer: [],
-          });
+          activeRuns.set(runId, createActiveRunRecord(abortController, done, runId));
           resolveRunId?.(runId);
         }
       })
@@ -575,6 +663,10 @@ export async function serveDaemon(
       })
       .finally(() => {
         if (runId) {
+          const active = activeRuns.get(runId);
+          if (active && active.timelineBuffer.length > 0) {
+            rememberRecentTimelineBuffer(runId, active.timelineBuffer);
+          }
           activeRuns.delete(runId);
         }
         resolveDone?.();
@@ -971,8 +1063,9 @@ export async function serveDaemon(
           const parsed: Record<string, unknown> = params
             ? asRecord(params, "events.subscribe params")
             : {};
-          const channel = requiredString(parsed.channel, "channel") as RunEventChannel;
+          const channel = parseRunEventChannel(parsed.channel);
           const runId = optionalString(parsed.runId, "runId");
+          const subscriptionId = `sub-${shortId()}`;
           let subscription: { subscriptionId: string; unsubscribe(): void } | undefined;
           const sendNotification = (
             method: "run.summary" | "run.detail" | "run.timeline",
@@ -1002,43 +1095,59 @@ export async function serveDaemon(
               if (runId !== undefined) {
                 throw new RequestValidationError("runId must be omitted for channel run_summary");
               }
-              subscription = subscribeRunSummaries(ws, (summary) =>
-                sendNotification("run.summary", {
-                  subscriptionId: subscription?.subscriptionId ?? "",
-                  summary: summary.summary,
-                }),
+              subscription = subscribeRunSummaries(
+                ws,
+                (summary) =>
+                  sendNotification("run.summary", {
+                    subscriptionId,
+                    summary: summary.summary,
+                  }),
+                subscriptionId,
               );
               break;
             case "run_detail": {
               const requiredRunId = requiredRunIdString(parsed.runId, "runId");
               operations.getRun(requiredRunId);
-              subscription = subscribeRunDetail(ws, requiredRunId, (detail) =>
-                sendNotification("run.detail", {
-                  subscriptionId: subscription?.subscriptionId ?? "",
-                  runId: requiredRunId,
-                  detail: detail.detail,
-                }),
+              subscription = subscribeRunDetail(
+                ws,
+                requiredRunId,
+                (detail) =>
+                  sendNotification("run.detail", {
+                    subscriptionId,
+                    runId: requiredRunId,
+                    detail: detail.detail,
+                  }),
+                subscriptionId,
               );
               break;
             }
             case "run_timeline": {
               const requiredRunId = requiredRunIdString(parsed.runId, "runId");
               operations.getRun(requiredRunId);
-              subscription = subscribeRunTimeline(ws, requiredRunId, (event) =>
+              const publish = (event: RunTimelineEvent) =>
                 sendNotification("run.timeline", {
-                  subscriptionId: subscription?.subscriptionId ?? "",
+                  subscriptionId,
                   runId: requiredRunId,
                   event,
-                }),
+                });
+              subscription = subscribeRunTimeline(ws, requiredRunId, publish, subscriptionId);
+              sendJson(
+                ws,
+                resultResponse(request.id, { subscriptionId: subscription.subscriptionId }),
               );
+              const replayTimer = setTimeout(() => {
+                replayTimeline(requiredRunId, publish);
+              }, 0);
+              replayTimer.unref?.();
               break;
             }
-            default:
-              throw new RequestValidationError(
-                'channel must be one of "run_summary", "run_detail", or "run_timeline"',
-              );
           }
-          sendJson(ws, resultResponse(request.id, { subscriptionId: subscription.subscriptionId }));
+          if (channel !== "run_timeline") {
+            sendJson(
+              ws,
+              resultResponse(request.id, { subscriptionId: subscription.subscriptionId }),
+            );
+          }
           return;
         }
         case "events.unsubscribe": {
@@ -1120,6 +1229,10 @@ export async function serveDaemon(
       summarySubscriptions.clear();
       detailSubscriptions.clear();
       timelineSubscriptions.clear();
+      for (const record of recentTimelineBuffers.values()) {
+        clearTimeout(record.cleanupTimer);
+      }
+      recentTimelineBuffers.clear();
       for (const ws of wsClients) {
         ws.terminate();
       }
