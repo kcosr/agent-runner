@@ -39,6 +39,25 @@ export function streamBoundarySeparator(prior: string, delta: string): string {
   return "\n".repeat(needed);
 }
 
+function normalizeTranscriptText(text: string | null | undefined): string | null {
+  if (typeof text !== "string") return null;
+  const normalized = text.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+export function composePersistedTranscript(
+  streamedText: string,
+  finalText: string | null,
+): string | null {
+  const streamed = normalizeTranscriptText(streamedText);
+  const finalTranscript = normalizeTranscriptText(finalText);
+
+  if (streamed === null) return finalTranscript;
+  if (finalTranscript === null) return streamed;
+  if (streamed === finalTranscript) return streamed;
+  return `${streamed}\n\n---\n\n${finalTranscript}`;
+}
+
 /**
  * Some backends can finish with a transcript even when they never emitted
  * incremental text deltas. In that case, surface the whole transcript once

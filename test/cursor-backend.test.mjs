@@ -62,7 +62,7 @@ test("buildCursorArgs builds the public print-mode argv", () => {
   );
 });
 
-test("cursor backend streams partial output, captures session_id, and uses final result.result", async () => {
+test("cursor backend merges streamed and final transcripts when they differ", async () => {
   const dir = tempDir();
   const argsPath = join(dir, "args.json");
   const command = writeFakeCursorAgent(dir);
@@ -107,7 +107,7 @@ test("cursor backend streams partial output, captures session_id, and uses final
     "Inspect the repo",
   ]);
   assert.equal(result.sessionId, "sess-123");
-  assert.equal(result.transcript, "Final answer");
+  assert.equal(result.transcript, "Hello world\n\n---\n\nFinal answer");
   assert.equal(
     events
       .filter((event) => event.type === "agent_message_delta")

@@ -194,6 +194,7 @@
 - Fixed `assignments/plan-feature/` scaffold guidance to require implementers to verify they are in a non-`main` worktree, confirm local `main` is already in sync with `origin/main`, and sync the current worktree to local `main` before starting. Generated plans now block instead of proceeding when that preflight fails, and `assignments/plan-review/` flags drafts that omit it. ([#15](https://github.com/kcosr/task-runner/pull/15))
 - Fixed workspace persistence to use atomic writes for manifests, attempt logs, and assignment files, and reject resume targets whose manifest paths do not match the workspace they were loaded from. ([#6](https://github.com/kcosr/task-runner/pull/6))
 - Fixed Codex timeout/abort cleanup to wait for late-arriving turn ids and retry interruption, reducing the risk of orphaned remote turns. ([#6](https://github.com/kcosr/task-runner/pull/6))
+- Fixed persisted backend attempt transcripts so streamed partial output is retained on completion instead of shrinking after timeline reloads, joining differing streamed/final text with a Markdown divider when needed. ([#999](https://github.com/kcosr/task-runner/pull/999))
 - Fixed assignment/task mutation hardening around structural marker escaping, single-line task titles, terminal non-passive notes-only edits, and undeclared or mistyped runtime vars. ([#6](https://github.com/kcosr/task-runner/pull/6))
 - Fixed subprocess handling to short-circuit pre-aborted launches before spawning child processes. ([#6](https://github.com/kcosr/task-runner/pull/6))
 

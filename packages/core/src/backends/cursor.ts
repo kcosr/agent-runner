@@ -1,6 +1,7 @@
 import type { Backend, BackendInvokeContext, BackendInvokeResult } from "../core/backends/types.js";
 import { runProcess } from "../util/spawn.js";
 import {
+  composePersistedTranscript,
   isRecord,
   normalizeBackendModel,
   silentTranscriptFallback,
@@ -190,7 +191,11 @@ export const cursorBackend: Backend = {
       );
     }
 
-    const fallbackDelta = silentTranscriptFallback(state.streamedText, state.resultText);
+    const transcript =
+      result.exitCode === 0
+        ? composePersistedTranscript(state.streamedText, state.resultText)
+        : state.resultText;
+    const fallbackDelta = silentTranscriptFallback(state.streamedText, transcript);
     if (fallbackDelta) {
       ctx.emit?.({ type: "agent_message_delta", text: fallbackDelta });
     }
@@ -201,7 +206,7 @@ export const cursorBackend: Backend = {
       timedOut: result.timedOut,
       aborted: result.aborted,
       sessionId: state.sessionId,
-      transcript: state.resultText,
+      transcript,
       rawStdout: result.stdoutText,
       rawStderr: result.stderrText,
     };

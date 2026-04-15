@@ -10,6 +10,7 @@ import type {
 } from "../core/backends/types.js";
 import { resolveTaskRunnerCommand } from "../task-runner-command.js";
 import {
+  composePersistedTranscript,
   isRecord,
   normalizeBackendModel,
   silentTranscriptFallback,
@@ -1082,7 +1083,7 @@ export const codexBackend: Backend = {
     }
 
     const stderrAccumulated = client?.stderr ?? "";
-    const transcript = state.completedText.trim() || state.streamedText.trim() || null;
+    const transcript = composePersistedTranscript(state.streamedText, state.completedText);
     const fallbackDelta = silentTranscriptFallback(state.streamedText, transcript);
     if (fallbackDelta) {
       ctx.emit?.({ type: "agent_message_delta", text: fallbackDelta });
