@@ -1,4 +1,7 @@
+import type { RunTimelineEvent } from "@task-runner/core/contracts/events.js";
+import { runDetailSchema, runSummarySchema } from "@task-runner/core/contracts/run-schemas.js";
 import WebSocket from "ws";
+import { z } from "zod";
 import type {
   EventsSubscribeParams,
   JsonRpcNotification,
@@ -43,6 +46,73 @@ export type DaemonSubscriptionNotification =
   | ({ method: "run.summary" } & RunSummaryNotificationParams)
   | ({ method: "run.detail" } & RunDetailNotificationParams)
   | ({ method: "run.timeline" } & RunTimelineNotificationParams);
+
+const runSummaryNotificationSchema = z.object({
+  method: z.literal("run.summary"),
+  subscriptionId: z.string(),
+  summary: runSummarySchema,
+});
+
+const runDetailNotificationSchema = z.object({
+  method: z.literal("run.detail"),
+  subscriptionId: z.string(),
+  runId: z.string(),
+  detail: runDetailSchema,
+});
+
+const runTimelineEventSchema = z
+  .object({
+    type: z.string(),
+  })
+  .passthrough();
+
+const runTimelineNotificationSchema = z.object({
+  method: z.literal("run.timeline"),
+  subscriptionId: z.string(),
+  runId: z.string(),
+  event: runTimelineEventSchema,
+});
+
+const runSummaryNotificationResultSchema: z.ZodType<DaemonSubscriptionNotification> =
+  runSummaryNotificationSchema;
+const runDetailNotificationResultSchema: z.ZodType<DaemonSubscriptionNotification> =
+  runDetailNotificationSchema;
+const runTimelineNotificationResultSchema = runTimelineNotificationSchema.transform(
+  (value): DaemonSubscriptionNotification => ({
+    ...value,
+    event: value.event as RunTimelineEvent,
+  }),
+);
+
+function parseSubscriptionNotification(
+  parsed: JsonRpcNotification,
+): DaemonSubscriptionNotification | null {
+  switch (parsed.method) {
+    case "run.summary": {
+      const result = runSummaryNotificationResultSchema.safeParse({
+        method: parsed.method,
+        ...(parsed.params as object),
+      });
+      return result.success ? result.data : null;
+    }
+    case "run.detail": {
+      const result = runDetailNotificationResultSchema.safeParse({
+        method: parsed.method,
+        ...(parsed.params as object),
+      });
+      return result.success ? result.data : null;
+    }
+    case "run.timeline": {
+      const result = runTimelineNotificationResultSchema.safeParse({
+        method: parsed.method,
+        ...(parsed.params as object),
+      });
+      return result.success ? result.data : null;
+    }
+    default:
+      return null;
+  }
+}
 
 export class DaemonClient {
   private nextId = 1;
@@ -157,17 +227,10 @@ export class DaemonClient {
       return;
     }
 
-    if (
-      parsed.method !== "run.summary" &&
-      parsed.method !== "run.detail" &&
-      parsed.method !== "run.timeline"
-    ) {
+    const params = parseSubscriptionNotification(parsed);
+    if (!params) {
       return;
     }
-    const params = {
-      method: parsed.method,
-      ...(parsed.params as object),
-    } as DaemonSubscriptionNotification;
     const handler = this.subscriptions.get(params.subscriptionId);
     if (handler) {
       handler(params);

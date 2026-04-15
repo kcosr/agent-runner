@@ -105,6 +105,11 @@ interface RecentTimelineRecord {
   cleanupTimer: ReturnType<typeof setTimeout>;
 }
 
+interface SubscriptionHandle {
+  subscriptionId: string;
+  unsubscribe(): void;
+}
+
 const MAX_TIMELINE_BUFFER_EVENTS = 1_000;
 const COMPLETED_TIMELINE_BUFFER_TTL_MS = 5_000;
 
@@ -518,63 +523,68 @@ export async function serveDaemon(
     probe.listen(port, host);
   });
 
+  const createSubscription = <TRecord extends { id: string }>(
+    store: Map<string, TRecord>,
+    buildRecord: (subscriptionId: string) => TRecord,
+    subscriptionId = `sub-${shortId()}`,
+  ): SubscriptionHandle => {
+    store.set(subscriptionId, buildRecord(subscriptionId));
+    return {
+      subscriptionId,
+      unsubscribe: () => {
+        store.delete(subscriptionId);
+      },
+    };
+  };
+
   const subscribeRunSummaries = (
     owner: object,
     publish: (summary: RunSummaryStreamEvent) => boolean,
     subscriptionId = `sub-${shortId()}`,
-  ): { subscriptionId: string; unsubscribe(): void } => {
-    summarySubscriptions.set(subscriptionId, {
-      id: subscriptionId,
-      owner,
-      publish,
-    });
-    return {
+  ): SubscriptionHandle =>
+    createSubscription(
+      summarySubscriptions,
+      (id) => ({
+        id,
+        owner,
+        publish,
+      }),
       subscriptionId,
-      unsubscribe: () => {
-        summarySubscriptions.delete(subscriptionId);
-      },
-    };
-  };
+    );
 
   const subscribeRunDetail = (
     owner: object,
     runId: string,
     publish: (detail: RunDetailStreamEvent) => boolean,
     subscriptionId = `sub-${shortId()}`,
-  ): { subscriptionId: string; unsubscribe(): void } => {
-    detailSubscriptions.set(subscriptionId, {
-      id: subscriptionId,
-      owner,
-      runId,
-      publish,
-    });
-    return {
+  ): SubscriptionHandle =>
+    createSubscription(
+      detailSubscriptions,
+      (id) => ({
+        id,
+        owner,
+        runId,
+        publish,
+      }),
       subscriptionId,
-      unsubscribe: () => {
-        detailSubscriptions.delete(subscriptionId);
-      },
-    };
-  };
+    );
 
   const subscribeRunTimeline = (
     owner: object,
     runId: string,
     publish: (event: RunTimelineEvent) => boolean,
     subscriptionId = `sub-${shortId()}`,
-  ): { subscriptionId: string; unsubscribe(): void } => {
-    timelineSubscriptions.set(subscriptionId, {
-      id: subscriptionId,
-      owner,
-      runId,
-      publish,
-    });
-    return {
+  ): SubscriptionHandle =>
+    createSubscription(
+      timelineSubscriptions,
+      (id) => ({
+        id,
+        owner,
+        runId,
+        publish,
+      }),
       subscriptionId,
-      unsubscribe: () => {
-        timelineSubscriptions.delete(subscriptionId);
-      },
-    };
-  };
+    );
 
   const replayTimeline = (runId: string, publish: (event: RunTimelineEvent) => boolean): void => {
     const buffer = getReplayableTimeline(runId);

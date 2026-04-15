@@ -1313,6 +1313,96 @@ test("daemon websocket validates events.subscribe channel and runId rules", asyn
   }
 });
 
+test("daemon client ignores malformed subscription notifications and still delivers valid ones", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const wsServer = new WebSocketServer({ host: "127.0.0.1", port });
+  const received = [];
+
+  wsServer.on("connection", (ws) => {
+    ws.on("message", (payload) => {
+      const request = JSON.parse(payload.toString());
+      if (request.method !== "events.subscribe") {
+        return;
+      }
+
+      ws.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: request.id,
+          result: { subscriptionId: "sub-1" },
+        }),
+      );
+      ws.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          method: "run.timeline",
+          params: {
+            runId: "daemon-client-run",
+            event: { type: "run_started" },
+          },
+        }),
+      );
+      ws.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          method: "run.summary",
+          params: {
+            subscriptionId: "sub-1",
+            summary: {},
+          },
+        }),
+      );
+      ws.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          method: "run.detail",
+          params: {
+            subscriptionId: "sub-1",
+            runId: "daemon-client-run",
+            detail: { runId: "daemon-client-run" },
+          },
+        }),
+      );
+      ws.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          method: "run.timeline",
+          params: {
+            subscriptionId: "sub-1",
+            runId: "daemon-client-run",
+            event: { type: "run_started" },
+          },
+        }),
+      );
+    });
+  });
+
+  const client = await DaemonClient.connect(listenUrl);
+  try {
+    await client.subscribe({ channel: "run_timeline", runId: "daemon-client-run" }, (msg) => {
+      received.push(msg);
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    assert.deepEqual(received, [
+      {
+        method: "run.timeline",
+        subscriptionId: "sub-1",
+        runId: "daemon-client-run",
+        event: { type: "run_started" },
+      },
+    ]);
+  } finally {
+    await client.close();
+    for (const socket of wsServer.clients) {
+      socket.terminate();
+    }
+    await new Promise((resolve) => wsServer.close(() => resolve()));
+  }
+});
+
 test("daemon SSE streams split summary, detail, and timeline subscriptions", async () => {
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
