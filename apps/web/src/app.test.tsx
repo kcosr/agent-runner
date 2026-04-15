@@ -1,3 +1,4 @@
+import type { RunAttachment } from "@task-runner/core/contracts/attachments.js";
 import type { RunTimelineHistory } from "@task-runner/core/contracts/events.js";
 import type { RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
@@ -260,6 +261,20 @@ function makeDetail(
     detail.name = overrides.assignment.name;
   }
   return detail;
+}
+
+function makeAttachment(
+  overrides: Partial<RunAttachment> & Pick<RunAttachment, "id" | "name">,
+): RunAttachment {
+  return {
+    id: overrides.id,
+    name: overrides.name,
+    mimeType: overrides.mimeType ?? "text/plain; charset=utf-8",
+    size: overrides.size ?? 24,
+    sha256: overrides.sha256 ?? "abc123",
+    addedAt: overrides.addedAt ?? "2026-04-14T06:00:00.000Z",
+    relativePath: overrides.relativePath ?? `attachments/${overrides.id}/${overrides.name}`,
+  };
 }
 
 function installFetchMock(
@@ -3038,62 +3053,81 @@ describe("web app", () => {
     });
   });
 
-  it("resets drawer and task state when switching runs", async () => {
-    installFetchMock({
-      runs: [makeRun(), makeRun({ runId: "run-2", assignmentName: "Second run" })],
-      details: {
-        "run-1": makeDetail({
-          tasks: [
-            {
-              id: "shared-task",
-              title: "Shared task",
-              body: "First run description",
-              status: "in_progress",
-              notes: "First run notes",
+  it("remembers per-run drawer preview and detail state across switching and close/reselect", async () => {
+    installFetchMock(
+      {
+        runs: [makeRun(), makeRun({ runId: "run-2", assignmentName: "Second run" })],
+        details: {
+          "run-1": makeDetail({
+            attachments: [
+              makeAttachment({
+                id: "att-md",
+                name: "notes.md",
+                mimeType: "text/markdown; charset=utf-8",
+              }),
+            ],
+          }),
+          "run-2": makeDetail({
+            runId: "run-2",
+            assignment: {
+              name: "Second run",
+              sourcePath: "/tmp/a.md",
+              workspacePath: "/tmp/b.md",
             },
-          ],
-        }),
-        "run-2": makeDetail({
-          runId: "run-2",
-          assignment: {
-            name: "Second run",
-            sourcePath: "/tmp/a.md",
-            workspacePath: "/tmp/b.md",
-          },
-          tasks: [
-            {
-              id: "shared-task",
-              title: "Shared task",
-              body: "Second run description",
-              status: "in_progress",
-              notes: "Second run notes",
-            },
-          ],
-        }),
+            tasks: [
+              {
+                id: "shared-task",
+                title: "Shared task",
+                body: "Second run description",
+                status: "in_progress",
+                notes: "Second run notes",
+              },
+            ],
+          }),
+        },
       },
-    });
+      {
+        handleRequest: (url) => {
+          if (/\/api\/runs\/run-1\/attachments\/att-md\/content$/.test(url)) {
+            return new Response("# Markdown preview", {
+              status: 200,
+              headers: { "content-type": "text/markdown; charset=utf-8" },
+            });
+          }
+          return undefined;
+        },
+      },
+    );
 
     const user = userEvent.setup();
     await renderApp();
     await findRunCard("Second run");
 
-    await user.click(await findRunCard("Second run"));
-    expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
-    await router.navigate({ to: "/" });
-
     await user.click(await findRunCard("Build dashboard"));
-    await screen.findByLabelText("Run detail");
-    await user.click(screen.getByRole("button", { name: /shared task/i, expanded: false }));
-    await user.click(screen.getByRole("button", { name: "Notes" }));
-    expect(await screen.findByText("First run notes")).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: /^Attachments\b/i }));
+    await user.click(screen.getByRole("button", { name: /^Preview notes\.md$/ }));
+    expect(await screen.findByLabelText("Attachment preview")).toBeInTheDocument();
+    expect(await screen.findByText("Markdown preview")).toBeInTheDocument();
 
-    await router.navigate({ to: "/runs/$runId", params: { runId: "run-2" } });
-
+    await user.click(await findRunCard("Second run"));
     expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /shared task/i, expanded: false }),
     ).toBeInTheDocument();
-    expect(screen.queryByText("Second run notes")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Attachment preview")).not.toBeInTheDocument();
+
+    await user.click(await findRunCard("Build dashboard"));
+    expect(await screen.findByLabelText("Attachment preview")).toBeInTheDocument();
+    expect(await screen.findByText("Markdown preview")).toBeInTheDocument();
+
+    await user.click(getCloseDetailButton());
+    await user.click(await findRunCard("Build dashboard"));
+    expect(await screen.findByLabelText("Attachment preview")).toBeInTheDocument();
+    expect(await screen.findByText("Markdown preview")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /back to attachments/i }));
+    expect(await screen.findByRole("button", { name: /^Upload$/ })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Attachment preview")).not.toBeInTheDocument();
   });
 
   it("keeps one SSE subscription while switching selected runs", async () => {
@@ -3206,6 +3240,136 @@ describe("web app", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("run-2", { selector: ".dependency-meta-id" })).toBeInTheDocument();
     expect(screen.getAllByText("running", { selector: ".badge" }).length).toBeGreaterThan(0);
+  });
+
+  it("renders markdown and plain-text attachment previews in the drawer", async () => {
+    installFetchMock(
+      {
+        runs: [makeRun({ runId: "run-1", name: "Attachment run" })],
+        details: {
+          "run-1": makeDetail({
+            runId: "run-1",
+            name: "Attachment run",
+            attachments: [
+              makeAttachment({
+                id: "att-md",
+                name: "notes.md",
+                mimeType: "text/markdown; charset=utf-8",
+              }),
+              makeAttachment({
+                id: "att-log",
+                name: "build.log",
+                mimeType: "text/plain; charset=utf-8",
+              }),
+            ],
+          }),
+        },
+      },
+      {
+        handleRequest: (url) => {
+          if (/\/api\/runs\/run-1\/attachments\/att-md\/content$/.test(url)) {
+            return new Response("# Notes\n\n- first item", {
+              status: 200,
+              headers: { "content-type": "text/markdown; charset=utf-8" },
+            });
+          }
+          if (/\/api\/runs\/run-1\/attachments\/att-log\/content$/.test(url)) {
+            return new Response("line one\nline two", {
+              status: 200,
+              headers: { "content-type": "text/plain; charset=utf-8" },
+            });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await user.click(await findRunCard("Attachment run"));
+    await user.click(await screen.findByRole("button", { name: /^Attachments\b/i }));
+
+    await user.click(screen.getByRole("button", { name: /^Preview notes\.md$/ }));
+    expect(await screen.findByRole("heading", { name: "Notes" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /back to attachments/i }));
+
+    await user.click(screen.getByRole("button", { name: /^Preview build\.log$/ }));
+    const preview = await screen.findByLabelText("Attachment preview content");
+    expect(preview.querySelector("pre code")?.textContent).toBe("line one\nline two");
+    expect(preview.querySelector("pre code")).not.toBeNull();
+  });
+
+  it("keeps preview errors inline and isolates row preview clicks from attachment actions", async () => {
+    installFetchMock(
+      {
+        runs: [makeRun({ runId: "run-1", name: "Attachment run" })],
+        details: {
+          "run-1": makeDetail({
+            runId: "run-1",
+            name: "Attachment run",
+            attachments: [
+              makeAttachment({
+                id: "att-md",
+                name: "notes.md",
+                mimeType: "text/markdown; charset=utf-8",
+              }),
+              makeAttachment({
+                id: "att-pdf",
+                name: "report.pdf",
+                mimeType: "application/pdf",
+              }),
+            ],
+          }),
+        },
+      },
+      {
+        handleRequest: (url) => {
+          if (/\/api\/runs\/run-1\/attachments\/att-md\/content$/.test(url)) {
+            return new Response(JSON.stringify({ error: { message: "preview failed" } }), {
+              status: 500,
+              headers: { "content-type": "application/json" },
+            });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const createObjectURL = vi.fn(() => "blob:test");
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", {
+      ...URL,
+      createObjectURL,
+      revokeObjectURL,
+    });
+    const anchorClick = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => undefined);
+    const user = userEvent.setup();
+    await renderApp();
+
+    await user.click(await findRunCard("Attachment run"));
+    await user.click(await screen.findByRole("button", { name: /^Attachments\b/i }));
+
+    await user.click(screen.getByRole("button", { name: /^Download report\.pdf$/ }));
+    await waitFor(() => expect(createObjectURL).toHaveBeenCalled());
+    expect(screen.queryByLabelText("Attachment preview")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^Remove notes\.md$/ }));
+    expect(screen.getByRole("button", { name: /^Confirm remove notes\.md$/ })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Attachment preview")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^Cancel remove notes\.md$/ }));
+    expect(screen.queryByLabelText("Attachment preview")).not.toBeInTheDocument();
+
+    expect(screen.queryByRole("button", { name: /^Preview report\.pdf$/ })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^Preview notes\.md$/ }));
+    expect(await screen.findByLabelText("Attachment preview")).toBeInTheDocument();
+    expect(await screen.findByText("Attachment preview failed to load")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /back to attachments/i })).toBeInTheDocument();
+
+    anchorClick.mockRestore();
   });
 
   it("uploads, downloads, and removes attachments from the detail drawer", async () => {

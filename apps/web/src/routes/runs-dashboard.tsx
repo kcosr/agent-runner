@@ -63,7 +63,9 @@ export function RunsDashboardRoute() {
           actionError={state.actionError}
           actionPending={state.actionPending}
           drawerWidth={state.settings.drawerWidth}
+          drawerView={state.selectedDrawerView}
           runs={state.runs}
+          onBackToAttachments={state.returnSelectedRunToAttachments}
           onAbort={state.runActions.abort}
           onArchive={state.runActions.archive}
           onClearDependencies={state.runActions.clearDependencies}
@@ -71,11 +73,13 @@ export function RunsDashboardRoute() {
           onCopy={state.copyText}
           onDelete={state.runActions.delete}
           onDownloadAttachment={state.runActions.downloadAttachment}
+          onOpenAttachmentPreview={state.openSelectedRunAttachmentPreview}
           onRemoveDependency={state.runActions.removeDependency}
           onRemoveAttachment={state.runActions.removeAttachment}
           onReset={state.runActions.reset}
           onRename={state.runActions.rename}
           onResume={state.runActions.resume}
+          onSelectDetailSection={state.updateSelectedRunDetailSection}
           onUnarchive={state.runActions.unarchive}
           onUploadAttachment={state.runActions.uploadAttachment}
           selectedRunId={state.selectedRunId}

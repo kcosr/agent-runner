@@ -486,4 +486,23 @@ describe("api client", () => {
       changed: true,
     });
   });
+
+  it("reads attachment preview text and normalizes the response media type", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response("# Notes", {
+          status: 200,
+          headers: { "content-type": "text/markdown; charset=utf-8" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createApiClient(config);
+
+    await expect(api.readAttachmentText("run-1", "att-1")).resolves.toEqual({
+      mediaType: "text/markdown",
+      text: "# Notes",
+    });
+    expect(fetchMock).toHaveBeenCalledWith("/api/runs/run-1/attachments/att-1/content");
+  });
 });

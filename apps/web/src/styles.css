@@ -774,11 +774,42 @@ body {
   background: var(--background);
 }
 
+.dependency-row--interactive {
+  padding: 0;
+}
+
+.dependency-row--interactive:hover,
+.dependency-row--interactive:focus-within {
+  border-color: var(--ring);
+  background: color-mix(in srgb, var(--accent) 72%, var(--card));
+}
+
+.attachment-row-trigger {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.attachment-row-trigger:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -1px;
+}
+
 .dependency-copy {
   display: flex;
   flex-direction: column;
   gap: 4px;
   min-width: 0;
+  flex: 1 1 auto;
 }
 
 .dependency-name {
@@ -806,6 +837,15 @@ body {
   min-width: 0;
 }
 
+.attachment-row-affordance {
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .dependency-section-title {
   display: flex;
   align-items: baseline;
@@ -831,6 +871,16 @@ body {
   .dependency-row {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .attachment-row-trigger {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .attachment-row-affordance {
+    text-transform: none;
+    letter-spacing: 0;
   }
 
   .dependency-add-row > .btn,
@@ -1312,6 +1362,67 @@ body {
 .drawer-title-edit-trigger svg {
   width: 13px;
   height: 13px;
+}
+
+.drawer-head--preview {
+  align-items: flex-start;
+}
+
+.drawer-title--preview {
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.attachment-preview-title-group {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.attachment-preview-title-group .drawer-section-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.attachment-preview-back-icon {
+  transform: rotate(90deg);
+}
+
+.attachment-preview-meta {
+  padding: 0 18px;
+}
+
+.attachment-preview-state {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 18px;
+}
+
+.attachment-preview-state h4,
+.attachment-preview-state p {
+  margin: 0;
+}
+
+.attachment-preview-state p {
+  color: var(--muted-foreground);
+}
+
+.attachment-preview-content {
+  margin: 0 18px 18px;
+  padding: 0;
+  overflow: hidden;
+}
+
+.attachment-preview-content > .markdown {
+  padding: 18px;
+}
+
+.attachment-preview-plain {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
 }
 
 .backend-badge {
