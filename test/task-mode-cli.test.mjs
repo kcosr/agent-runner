@@ -1,7 +1,14 @@
 import { strict as assert } from "node:assert";
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
@@ -79,6 +86,14 @@ function readManifest(workspaceDir) {
   return JSON.parse(readFileSync(join(workspaceDir, "run.json"), "utf8"));
 }
 
+function listAssignmentFiles(baseDir) {
+  const assignmentsDir = join(baseDir, "assignments");
+  return readdirSync(assignmentsDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => join(assignmentsDir, entry.name, "assignment.md"))
+    .filter((filePath) => existsSync(filePath));
+}
+
 function patchManifest(workspaceDir, mutator) {
   const manifestPath = join(workspaceDir, "run.json");
   const manifest = readManifest(workspaceDir);
@@ -154,6 +169,19 @@ test("brief command prints the stored handoff and rejects path targets", async (
   const dotDot = runCli(["brief", ".."], { cwd: dir });
   assert.equal(dotDot.status, 3);
   assert.match(dotDot.stderr, /brief accepts a run id, not a path/);
+});
+
+test("bundled assignments do not instruct agents to write workspace plan files", () => {
+  const assignmentFiles = listAssignmentFiles(process.cwd());
+
+  for (const assignmentFile of assignmentFiles) {
+    const body = readFileSync(assignmentFile, "utf8");
+    assert.doesNotMatch(
+      body,
+      /workspace plan at `\{\{assignment_path\}\}`|only file you should write/i,
+      `${assignmentFile} still contains legacy workspace-plan guidance`,
+    );
+  }
 });
 
 test("status on a running run reads canonical task state", async () => {

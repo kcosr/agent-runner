@@ -185,8 +185,8 @@ same session, so the context you build here is the context
 those tasks will rely on.
 
 Read thoroughly. Do not skim. Do not modify any file inside
-`{{repo_path}}` — the only file you should write is your
-workspace plan at `{{assignment_path}}`.
+`{{repo_path}}`. Track your task progress and notes through the
+task CLI for this run; do not write a workspace plan file.
 
 Work the tasks in order. Each task builds context that the
 later ones depend on; the final self-check pulls from your
