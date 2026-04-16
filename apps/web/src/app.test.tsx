@@ -1352,7 +1352,7 @@ describe("web app", () => {
     expect(parsed?.drawerWidth).toBe(570);
   });
 
-  it("keeps the pending detail skeleton at the persisted drawer width", async () => {
+  it("keeps the pending detail skeleton in fullscreen when that setting is enabled", async () => {
     let resolveDetail: ((response: Response) => void) | undefined;
     installFetchMock(
       {
@@ -1373,7 +1373,7 @@ describe("web app", () => {
 
     window.localStorage.setItem(
       "task-runner:web:board-settings",
-      JSON.stringify({ drawerWidth: 700 }),
+      JSON.stringify({ drawerFullscreen: true, drawerWidth: 700 }),
     );
 
     const user = userEvent.setup();
@@ -1381,6 +1381,7 @@ describe("web app", () => {
     await user.click(await findRunCard("Build dashboard"));
 
     const skeletonDrawer = await screen.findByLabelText("Run detail");
+    expect(skeletonDrawer.className).toContain("drawer--fullscreen");
     expect(skeletonDrawer.style.getPropertyValue("--drawer-width")).toBe("700px");
 
     resolveDetail?.(new Response(JSON.stringify({ run: makeDetail() }), { status: 200 }));
@@ -1388,6 +1389,40 @@ describe("web app", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /copy run id/i })).toBeInTheDocument();
     });
+  });
+
+  it("keeps the detail error shell in fullscreen when that setting is enabled", async () => {
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest: (url, init) => {
+          if (/\/api\/runs\/run-1$/.test(url) && (!init?.method || init.method === "GET")) {
+            return new Response(JSON.stringify({ error: { message: "detail exploded" } }), {
+              status: 500,
+              headers: { "content-type": "application/json" },
+            });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    window.localStorage.setItem(
+      "task-runner:web:board-settings",
+      JSON.stringify({ drawerFullscreen: true, drawerWidth: 700 }),
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+
+    const errorDrawer = await screen.findByLabelText("Run detail");
+    expect(await screen.findByText("Run detail failed to load")).toBeInTheDocument();
+    expect(errorDrawer.className).toContain("drawer--fullscreen");
+    expect(errorDrawer.style.getPropertyValue("--drawer-width")).toBe("700px");
   });
 
   it("renders markdown in task body and notes", async () => {
@@ -1695,7 +1730,7 @@ describe("web app", () => {
     expect(getBoardColumn("Aborted")).toBeInTheDocument();
   });
 
-  it("clamps persisted drawer width to the current viewport", async () => {
+  it("clamps persisted drawer width to the current viewport without overwriting the saved preference", async () => {
     installFetchMock({
       runs: [makeRun()],
       details: { "run-1": makeDetail() },
@@ -1722,11 +1757,26 @@ describe("web app", () => {
     const drawer = await screen.findByLabelText("Run detail");
     await waitFor(() => expect(drawer.getAttribute("style")).toContain("--drawer-width: 564px"));
 
-    await waitFor(() => {
-      const stored = window.localStorage.getItem("task-runner:web:board-settings");
-      const parsed = stored ? (JSON.parse(stored) as { drawerWidth?: number }) : null;
-      expect(parsed?.drawerWidth).toBe(564);
+    const stored = window.localStorage.getItem("task-runner:web:board-settings");
+    const parsed = stored ? (JSON.parse(stored) as { drawerWidth?: number }) : null;
+    expect(parsed?.drawerWidth).toBe(1400);
+
+    cleanup();
+    queryClient.clear();
+
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1800,
+      writable: true,
     });
+
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+
+    const restoredDrawer = await screen.findByLabelText("Run detail");
+    await waitFor(() =>
+      expect(restoredDrawer.getAttribute("style")).toContain("--drawer-width: 1400px"),
+    );
 
     Object.defineProperty(window, "innerWidth", {
       configurable: true,

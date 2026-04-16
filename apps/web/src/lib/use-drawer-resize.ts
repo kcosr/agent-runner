@@ -58,12 +58,6 @@ export function useDrawerResize(): DrawerResize {
     }
   }, [dragWidth, maxWidth]);
 
-  useEffect(() => {
-    if (!isFullscreen && storedWidth > maxWidth) {
-      updateSettings({ drawerWidth: maxWidth });
-    }
-  }, [isFullscreen, maxWidth, storedWidth, updateSettings]);
-
   function handleResizeStart(event: PointerEvent<HTMLDivElement>) {
     if (isFullscreen) return;
     event.preventDefault();

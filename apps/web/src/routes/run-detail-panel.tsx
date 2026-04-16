@@ -15,6 +15,7 @@ export function RunDetailPanel({
   onAddDependency,
   actionError,
   actionPending,
+  drawerFullscreen,
   drawerWidth,
   drawerView,
   runs,
@@ -42,6 +43,7 @@ export function RunDetailPanel({
   onAddDependency: (runId: string, dependencyRunId: string) => Promise<void>;
   actionError?: string;
   actionPending?: RunActionPending;
+  drawerFullscreen: boolean;
   drawerWidth: number;
   drawerView?: RunDrawerView;
   runs: RunSummary[];
@@ -71,10 +73,15 @@ export function RunDetailPanel({
   }
 
   const drawerStyle = { "--drawer-width": `${drawerWidth}px` } as CSSProperties;
+  const drawerClassName = drawerFullscreen ? "drawer drawer--fullscreen" : "drawer";
 
   if (selectedRunQuery.isPending) {
     return (
-      <aside aria-label="Run detail" className="drawer drawer-skeleton" style={drawerStyle}>
+      <aside
+        aria-label="Run detail"
+        className={`${drawerClassName} drawer-skeleton`}
+        style={drawerStyle}
+      >
         <div className="drawer-state">
           <div className="skeleton-line skeleton-line--short" />
           <div className="skeleton-line skeleton-line--medium" style={{ marginTop: "12px" }} />
@@ -86,7 +93,7 @@ export function RunDetailPanel({
 
   if (selectedRunQuery.isError && !isNotFoundError(selectedRunQuery.error)) {
     return (
-      <aside aria-label="Run detail" className="drawer" style={drawerStyle}>
+      <aside aria-label="Run detail" className={drawerClassName} style={drawerStyle}>
         <div className="drawer-state">
           <h3>Run detail failed to load</h3>
           <p>{selectedRunQuery.error.message}</p>

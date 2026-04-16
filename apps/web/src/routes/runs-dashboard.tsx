@@ -64,6 +64,7 @@ export function RunsDashboardRoute() {
           onAddDependency={state.runActions.addDependency}
           actionError={state.actionError}
           actionPending={state.actionPending}
+          drawerFullscreen={state.settings.drawerFullscreen}
           drawerWidth={state.settings.drawerWidth}
           drawerView={state.selectedDrawerView}
           runs={state.runs}
