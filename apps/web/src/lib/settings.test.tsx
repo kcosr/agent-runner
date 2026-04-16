@@ -20,10 +20,19 @@ function SettingsProbe() {
       </button>
       <button
         onClick={() =>
+          updatePreferences({
+            sortByRecentUpdates: true,
+          })
+        }
+        type="button"
+      >
+        Enable recent updates sort
+      </button>
+      <button
+        onClick={() =>
           updateViewState({
             drawerWidth: 700,
             repo: "task-runner-web",
-            sortMode: "recent-updates",
           })
         }
         type="button"
@@ -65,13 +74,13 @@ describe("DashboardSettingsProvider", () => {
         hideEmptyColumns: true,
         collapseFailureStates: true,
         showArchived: false,
+        sortByRecentUpdates: false,
       }),
     );
     expect(screen.getByTestId("view-state")).toHaveTextContent(
       JSON.stringify({
         repo: "all",
         search: "",
-        sortMode: "started",
         collapsedColumnKeys: [],
         drawerWidth: 540,
         drawerFullscreen: false,
@@ -88,6 +97,7 @@ describe("DashboardSettingsProvider", () => {
         showArchived: true,
         hideEmptyColumns: false,
         collapseFailureStates: false,
+        sortByRecentUpdates: true,
         drawerWidth: 1200,
       }),
     );
@@ -97,6 +107,7 @@ describe("DashboardSettingsProvider", () => {
         showArchived: true,
         hideEmptyColumns: false,
         collapseFailureStates: false,
+        sortByRecentUpdates: true,
       }),
     );
 
@@ -107,28 +118,29 @@ describe("DashboardSettingsProvider", () => {
         hideEmptyColumns: false,
         collapseFailureStates: false,
         showArchived: true,
+        sortByRecentUpdates: true,
       }),
     );
     expect(screen.getByTestId("view-state")).toHaveTextContent('"drawerWidth":540');
-    expect(screen.getByTestId("view-state")).toHaveTextContent('"sortMode":"started"');
   });
 
-  it("hydrates the persisted sort mode while keeping other view-state fields transient", () => {
+  it("hydrates the persisted recent-updates preference while keeping view-state fields transient", () => {
     window.localStorage.setItem(
-      "task-runner:web:dashboard-view-state",
-      JSON.stringify({ sortMode: "recent-updates", drawerWidth: 1234 }),
+      "task-runner:web:dashboard-preferences",
+      JSON.stringify({ sortByRecentUpdates: true }),
     );
 
     renderSettingsProbe();
 
-    expect(screen.getByTestId("view-state")).toHaveTextContent('"sortMode":"recent-updates"');
+    expect(screen.getByTestId("preferences")).toHaveTextContent('"sortByRecentUpdates":true');
     expect(screen.getByTestId("view-state")).toHaveTextContent('"drawerWidth":540');
   });
 
-  it("persists preferences and sort mode without persisting other transient view-state updates", () => {
+  it("persists preferences without persisting transient view-state updates", () => {
     renderSettingsProbe();
 
     fireEvent.click(screen.getByRole("button", { name: "Enable archived" }));
+    fireEvent.click(screen.getByRole("button", { name: "Enable recent updates sort" }));
     fireEvent.click(screen.getByRole("button", { name: "Update view state" }));
 
     expect(window.localStorage.getItem("task-runner:web:dashboard-preferences")).toBe(
@@ -136,10 +148,8 @@ describe("DashboardSettingsProvider", () => {
         hideEmptyColumns: true,
         collapseFailureStates: true,
         showArchived: true,
+        sortByRecentUpdates: true,
       }),
-    );
-    expect(window.localStorage.getItem("task-runner:web:dashboard-view-state")).toBe(
-      JSON.stringify({ sortMode: "recent-updates" }),
     );
     expect(screen.getByTestId("view-state")).toHaveTextContent('"drawerWidth":700');
     expect(screen.getByTestId("view-state")).toHaveTextContent('"repo":"task-runner-web"');
@@ -156,6 +166,7 @@ describe("DashboardSettingsProvider", () => {
         hideEmptyColumns: true,
         collapseFailureStates: true,
         showArchived: false,
+        sortByRecentUpdates: false,
       }),
     );
   });
@@ -171,6 +182,7 @@ describe("DashboardSettingsProvider", () => {
         hideEmptyColumns: true,
         collapseFailureStates: true,
         showArchived: false,
+        sortByRecentUpdates: false,
       }),
     );
   });

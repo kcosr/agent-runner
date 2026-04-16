@@ -21,7 +21,7 @@
 
 ### Added
 
-- Added a persisted kanban topbar sort toggle in the web dashboard so runs can switch between `started` and session-local `recent-updates` ordering, with move/reorder/insert card motion that respects `prefers-reduced-motion`.
+- Added a persisted dashboard preference for recent-updates board ordering so runs can promote touched cards to the top of their columns, with move/reorder/insert card motion that respects `prefers-reduced-motion`.
 - Added in-app preview for `text/markdown` and `text/plain` attachments in the web run detail drawer, including per-run remembered preview state when switching between runs. ([#40](https://github.com/kcosr/task-runner/pull/40))
 - Added Mermaid diagram rendering for fenced `mermaid` blocks anywhere shared markdown is shown, including attachment previews, with inline render errors when a diagram fails to load. ([#40](https://github.com/kcosr/task-runner/pull/40))
 - The attachment preview drawer is now resizable via the same edge drag/keyboard handle used by the run detail drawer, and both drawers gained a full-width toggle next to the close button (desktop only) that expands the drawer to fill the entire main content area while keeping the top bar and left sidebar interactive. ([#40](https://github.com/kcosr/task-runner/pull/40))
@@ -83,7 +83,7 @@
 
 ### Changed
 
-- The web dashboard settings split now persists durable board preferences (`hideEmptyColumns`, `collapseFailureStates`, `showArchived`) under `task-runner:web:dashboard-preferences` and the kanban sort mode under `task-runner:web:dashboard-view-state`; transient filters, drawer width/fullscreen state, collapsed columns, and per-run drawer tabs reset on full reload instead of carrying across sessions.
+- The web dashboard settings split now persists durable board preferences (`hideEmptyColumns`, `collapseFailureStates`, `showArchived`, `sortByRecentUpdates`) under `task-runner:web:dashboard-preferences`; transient filters, drawer width/fullscreen state, collapsed columns, and per-run drawer tabs reset on full reload instead of carrying across sessions.
 - The attachment preview drawer now uses a more compact header layout and hides MIME type metadata in preview mode to reduce wasted vertical space, especially on mobile. ([#40](https://github.com/kcosr/task-runner/pull/40))
 - Replaced the bundled `repo-diagnostics` assignment with a bundled `test` assignment that only asks the agent to run `date` and `pwd`, without repo-specific context. ([#38](https://github.com/kcosr/task-runner/pull/38))
 - The web run detail drawer now shows `Reset` for non-running runs and only renders `Reset` / `Delete` when the backend-derived shared lifecycle capabilities allow them. ([#39](https://github.com/kcosr/task-runner/pull/39))

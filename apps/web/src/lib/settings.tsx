@@ -5,10 +5,10 @@ export interface DashboardPreferences {
   hideEmptyColumns: boolean;
   collapseFailureStates: boolean;
   showArchived: boolean;
+  sortByRecentUpdates: boolean;
 }
 
 export type DashboardPreferenceKey = keyof DashboardPreferences;
-export type BoardSortMode = "started" | "recent-updates";
 
 export type DrawerDetailSection = "tasks" | "attachments" | "dependencies" | "timing" | "events";
 
@@ -27,7 +27,6 @@ export type RunDrawerView =
 export interface DashboardViewState {
   repo: string;
   search: string;
-  sortMode: BoardSortMode;
   collapsedColumnKeys: string[];
   drawerWidth: number;
   drawerFullscreen: boolean;
@@ -51,12 +50,12 @@ export const DEFAULT_DASHBOARD_PREFERENCES: DashboardPreferences = {
   hideEmptyColumns: true,
   collapseFailureStates: true,
   showArchived: false,
+  sortByRecentUpdates: false,
 };
 
 export const DEFAULT_DASHBOARD_VIEW_STATE: DashboardViewState = {
   repo: "all",
   search: "",
-  sortMode: "started",
   collapsedColumnKeys: [],
   drawerWidth: DRAWER_WIDTH_DEFAULT,
   drawerFullscreen: false,
@@ -77,7 +76,6 @@ export function computeDrawerMaxWidth(viewportWidth: number): number {
 }
 
 const PREFERENCES_STORAGE_KEY = "task-runner:web:dashboard-preferences";
-const VIEW_STATE_STORAGE_KEY = "task-runner:web:dashboard-view-state";
 
 interface DashboardPreferencesContextValue {
   preferences: DashboardPreferences;
@@ -114,38 +112,6 @@ function loadDashboardPreferences(): DashboardPreferences {
   }
 }
 
-function parseBoardSortMode(value: unknown): BoardSortMode {
-  return value === "recent-updates" || value === "started"
-    ? value
-    : DEFAULT_DASHBOARD_VIEW_STATE.sortMode;
-}
-
-function loadDashboardViewState(): DashboardViewState {
-  if (typeof window === "undefined") {
-    return DEFAULT_DASHBOARD_VIEW_STATE;
-  }
-
-  try {
-    const raw = window.localStorage.getItem(VIEW_STATE_STORAGE_KEY);
-    if (!raw) {
-      return DEFAULT_DASHBOARD_VIEW_STATE;
-    }
-
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return DEFAULT_DASHBOARD_VIEW_STATE;
-    }
-
-    const record = parsed as Record<string, unknown>;
-    return {
-      ...DEFAULT_DASHBOARD_VIEW_STATE,
-      sortMode: parseBoardSortMode(record.sortMode),
-    };
-  } catch {
-    return DEFAULT_DASHBOARD_VIEW_STATE;
-  }
-}
-
 function parseStoredDashboardPreferences(value: unknown): DashboardPreferences {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return DEFAULT_DASHBOARD_PREFERENCES;
@@ -165,6 +131,10 @@ function parseStoredDashboardPreferences(value: unknown): DashboardPreferences {
       typeof record.showArchived === "boolean"
         ? record.showArchived
         : DEFAULT_DASHBOARD_PREFERENCES.showArchived,
+    sortByRecentUpdates:
+      typeof record.sortByRecentUpdates === "boolean"
+        ? record.sortByRecentUpdates
+        : DEFAULT_DASHBOARD_PREFERENCES.sortByRecentUpdates,
   };
 }
 
@@ -172,18 +142,11 @@ export function DashboardSettingsProvider({ children }: { children: ReactNode })
   const [preferences, setPreferences] = useState<DashboardPreferences>(() =>
     loadDashboardPreferences(),
   );
-  const [viewState, setViewState] = useState<DashboardViewState>(() => loadDashboardViewState());
+  const [viewState, setViewState] = useState<DashboardViewState>(DEFAULT_DASHBOARD_VIEW_STATE);
 
   useEffect(() => {
     window.localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(preferences));
   }, [preferences]);
-
-  useEffect(() => {
-    window.localStorage.setItem(
-      VIEW_STATE_STORAGE_KEY,
-      JSON.stringify({ sortMode: viewState.sortMode }),
-    );
-  }, [viewState.sortMode]);
 
   const preferencesValue = useMemo<DashboardPreferencesContextValue>(
     () => ({

@@ -28,6 +28,12 @@ const PREFERENCE_ROWS: PreferenceRowDefinition[] = [
     title: "Show archived runs",
     description: "Include archived runs in the board and counts until you hide them again.",
   },
+  {
+    key: "sortByRecentUpdates",
+    title: "Sort by recent updates",
+    description:
+      "Promote touched runs to the top of their columns instead of keeping the board in pure started-time order.",
+  },
 ];
 
 export function SettingsGeneralRoute() {
@@ -45,7 +51,7 @@ export function SettingsGeneralRoute() {
           Restore defaults
         </button>
       }
-      description="These local settings stay in sync with the quick toggles in the runs toolbar."
+      description="These local settings stay in sync with the remaining quick toggles in the runs toolbar."
       title="General"
     >
       <SettingsSection

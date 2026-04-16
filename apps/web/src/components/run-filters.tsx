@@ -1,5 +1,5 @@
 import type { DashboardPreferences, DashboardViewState } from "../lib/settings.js";
-import { AlertIcon, ArchiveIcon, GridIcon, SearchIcon, SortIcon } from "./icons.js";
+import { AlertIcon, ArchiveIcon, GridIcon, SearchIcon } from "./icons.js";
 
 export function RunFilters({
   preferences,
@@ -14,8 +14,6 @@ export function RunFilters({
   updateViewState: (updates: Partial<DashboardViewState>) => void;
   viewState: DashboardViewState;
 }) {
-  const sortModeLabel = viewState.sortMode === "recent-updates" ? "Recent updates" : "Started time";
-
   return (
     <header className="topbar">
       <span className="page-title">
@@ -76,21 +74,6 @@ export function RunFilters({
           type="button"
         >
           <AlertIcon aria-hidden="true" />
-        </button>
-
-        <button
-          aria-label={`Board sort mode: ${sortModeLabel}. Activate to switch modes.`}
-          aria-pressed={viewState.sortMode === "recent-updates"}
-          className="icon-btn"
-          onClick={() =>
-            updateViewState({
-              sortMode: viewState.sortMode === "started" ? "recent-updates" : "started",
-            })
-          }
-          title={`Board sort mode: ${sortModeLabel}`}
-          type="button"
-        >
-          <SortIcon aria-hidden="true" />
         </button>
 
         <button

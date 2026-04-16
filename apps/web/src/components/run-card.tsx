@@ -14,7 +14,8 @@ interface CardRectSnapshot {
   top: number;
 }
 
-const CARD_FLASH_DURATION_MS = 260;
+const CARD_MOVE_DURATION_MS = 260;
+const CARD_HIGHLIGHT_DURATION_MS = 720;
 const cardRectByRunId = new Map<string, CardRectSnapshot>();
 
 function usePrefersReducedMotion(): boolean {
@@ -87,7 +88,7 @@ export function RunCard({
     setActiveMotionRevision(motion.revision);
     const timeoutId = window.setTimeout(() => {
       setActiveMotionRevision((current) => (current === motion.revision ? null : current));
-    }, CARD_FLASH_DURATION_MS);
+    }, CARD_HIGHLIGHT_DURATION_MS);
     return () => {
       window.clearTimeout(timeoutId);
     };
@@ -116,7 +117,7 @@ export function RunCard({
     node.animate(
       [{ transform: `translate(${deltaX}px, ${deltaY}px)` }, { transform: "translate(0, 0)" }],
       {
-        duration: CARD_FLASH_DURATION_MS,
+        duration: CARD_MOVE_DURATION_MS,
         easing: "cubic-bezier(0.2, 0.7, 0.2, 1)",
       },
     );
