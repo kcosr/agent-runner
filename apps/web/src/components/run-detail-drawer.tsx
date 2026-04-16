@@ -217,6 +217,7 @@ export function RunDetailDrawer({
   const resumeMessageRef = useRef<HTMLTextAreaElement | null>(null);
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
   const backendSessionId = run.backendSessionId;
+  const isPassiveRun = run.backend === "passive";
   const actionsLocked = actionPending !== undefined;
   const resumePending = actionPending === "resume";
   const trimmedResumeMessage = resumeMessageDraft.trim();
@@ -349,6 +350,12 @@ export function RunDetailDrawer({
       setConfirmingDelete(false);
     }
   }, [run.capabilities.canDelete]);
+
+  useEffect(() => {
+    if (isPassiveRun && activeSection === "events") {
+      onSelectSection("tasks");
+    }
+  }, [activeSection, isPassiveRun, onSelectSection]);
 
   useEffect(() => {
     if (activeSection !== "events" || timelineTab !== "output" || selectedAttemptNumber === null) {
@@ -1019,14 +1026,16 @@ export function RunDetailDrawer({
             >
               Timing
             </button>
-            <button
-              aria-selected={activeSection === "events"}
-              className={activeSection === "events" ? "tab active" : "tab"}
-              onClick={() => onSelectSection("events")}
-              type="button"
-            >
-              Attempts
-            </button>
+            {isPassiveRun ? null : (
+              <button
+                aria-selected={activeSection === "events"}
+                className={activeSection === "events" ? "tab active" : "tab"}
+                onClick={() => onSelectSection("events")}
+                type="button"
+              >
+                Attempts
+              </button>
+            )}
           </nav>
 
           {activeSection === "tasks" ? (
