@@ -85,9 +85,15 @@ callerInstructions: |
   The planner will confirm the target directory or worktree
   path before it runs `init`.
 
-  After the planner creates the implementer run, execute it:
+  After the planner creates the implementer run, hand off the
+  new run id via:
 
-      {{task_runner_cmd}} run --resume-run <new-run-id>
+      {{task_runner_cmd}} brief <new-run-id>
+
+  The implementer run is created with the `implementer` agent
+  on the passive backend, so execution continues through the
+  passive task workflow described in the brief rather than
+  `run --resume-run`.
 
   Nested review must be allowed at both stages:
   - the planner run nests `plan-review`
@@ -862,16 +868,17 @@ tasks:
       plan and asks for implementer-run creation:
 
           {{task_runner_cmd}} init \
+            --agent implementer \
             --backend passive \
             --assignment <draft-path-from-draft_plan> \
             --name <short-descriptive-name> \
             --var repo_path=<confirmed-worktree-dir>
 
-      **Always use `--backend passive`.** The planner's job is
-      to hand back an approved draft and later create the run
-      workspace without freezing a specific implementer
-      agent into the manifest. The caller will resume the
-      run with whatever execution agent they want later.
+      **Always use `--agent implementer --backend passive`.**
+      The planner's job is to hand back an approved draft and
+      later create an implementer run that carries the shared
+      implementer instructions while keeping execution
+      externally driven through the passive workflow.
 
       **Do not guess the target path.** If the caller later asks
       you to create the implementer run, first confirm the
@@ -936,11 +943,17 @@ tasks:
         - A note that when resumed for creation, you will first
           confirm the target directory or worktree path before
           running `init`.
-        - **Exact command shape** the caller will run *after the
-          planner creates the implementer run* to execute the
-          plan:
+        - **Execution handoff** — the implementer execution
+          surface is:
 
-              {{task_runner_cmd}} run --resume-run <new-run-id>
+              {{task_runner_cmd}} brief <new-run-id>
+
+          Because the implementer run is created with the
+          `implementer` agent on the passive backend, do not
+          tell the caller/executing agent to use
+          `run --resume-run` here. Instruct them to use the run
+          id plus `brief` and follow the task workflow from
+          there.
 
         - A note that `<new-run-id>` comes from the later `init`
           output, not from the planning run itself.

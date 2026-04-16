@@ -23,7 +23,13 @@ callerInstructions: |
 
   ## Executing the plan
 
-      {{task_runner_cmd}} run --resume-run {{run_id}}
+      {{task_runner_cmd}} brief {{run_id}}
+
+  Use the run id plus `brief` as the canonical execution
+  handoff. This implementer run is created with the
+  `implementer` agent on the passive backend, so execution is
+  externally driven through the task workflow surfaced in the
+  brief rather than `run --resume-run`.
 
   This run may also carry an attachment named
   `assignment-summary.md`. If it exists, download it to a temp
@@ -35,12 +41,14 @@ callerInstructions: |
   The caller environment must allow one nested review run, or
   that step will be rejected.
 
-  Any agent with shell access can execute this run. The plan
-  is deliberately agent-agnostic — task-runner reconstructs
-  agent identity from the frozen manifest. If you want to
-  execute with a different agent than the one that did
-  planning, pass `--agent` on the first resume; after that,
-  the resumed agent is locked in.
+  Any agent with shell access can execute this run through the
+  passive workflow surfaced in the brief. The run is created
+  with the shared `implementer` agent so the execution
+  contract is stable even when planning and execution happen
+  in different sessions or under different coordinators.
+  Any agent with shell access can drive the passive workflow;
+  the `implementer` agent pins the role instructions, not the
+  execution environment.
 
   ## How the reviewer sees your work
 
