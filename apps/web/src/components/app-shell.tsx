@@ -1,3 +1,4 @@
+import { useNavigate, useRouterState } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { FileIcon, GridIcon, SettingsIcon } from "./icons.js";
 
@@ -14,6 +15,12 @@ export function AppShell({
   board: ReactNode;
   detail?: ReactNode;
 }) {
+  const navigate = useNavigate();
+  const pathname = useRouterState({
+    select: (state) => state.location.pathname,
+  });
+  const activeSection = pathname.startsWith("/settings") ? "settings" : "runs";
+
   return (
     <div className="app">
       <div className="shell">
@@ -21,7 +28,13 @@ export function AppShell({
           <span aria-label="task-runner" className="brand-mark">
             tr
           </span>
-          <button aria-current="page" className="nav-item active" title="Runs" type="button">
+          <button
+            aria-current={activeSection === "runs" ? "page" : undefined}
+            className={activeSection === "runs" ? "nav-item active" : "nav-item"}
+            onClick={() => void navigate({ to: "/" })}
+            title="Runs"
+            type="button"
+          >
             <GridIcon aria-hidden="true" />
           </button>
           <button
@@ -34,7 +47,13 @@ export function AppShell({
             <FileIcon aria-hidden="true" />
           </button>
           <span className="nav-spacer" />
-          <button className="nav-item" title="Settings" type="button">
+          <button
+            aria-current={activeSection === "settings" ? "page" : undefined}
+            className={activeSection === "settings" ? "nav-item active" : "nav-item"}
+            onClick={() => void navigate({ to: "/settings/general" })}
+            title="Settings"
+            type="button"
+          >
             <SettingsIcon aria-hidden="true" />
           </button>
         </aside>

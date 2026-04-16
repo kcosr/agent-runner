@@ -1,22 +1,65 @@
 import type { ReactNode } from "react";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 
-export interface BoardSettings {
-  repo: string;
-  showArchived: boolean;
+export interface DashboardPreferences {
   hideEmptyColumns: boolean;
   collapseFailureStates: boolean;
-  collapsedColumnKeys: string[];
+  showArchived: boolean;
+}
+
+export type DashboardPreferenceKey = keyof DashboardPreferences;
+
+export type DrawerDetailSection = "tasks" | "attachments" | "dependencies" | "timing" | "events";
+
+export type RunDrawerView =
+  | {
+      mode: "detail";
+      detailSection: DrawerDetailSection;
+      attachmentId: null;
+    }
+  | {
+      mode: "attachment";
+      detailSection: "attachments";
+      attachmentId: string;
+    };
+
+export interface DashboardViewState {
+  repo: string;
   search: string;
+  collapsedColumnKeys: string[];
   drawerWidth: number;
   drawerFullscreen: boolean;
+  drawerViewsByRunId: Record<string, RunDrawerView>;
+  activeBoardColumnKey: string | null;
 }
+
+export const DEFAULT_DRAWER_VIEW: RunDrawerView = {
+  mode: "detail",
+  detailSection: "tasks",
+  attachmentId: null,
+};
 
 export const DRAWER_WIDTH_MIN = 360;
 export const DRAWER_WIDTH_MAX = 2400;
 export const DRAWER_WIDTH_DEFAULT = 540;
 export const DRAWER_SIDEBAR_ALLOWANCE = 56;
 export const DRAWER_BOARD_MIN = 280;
+
+export const DEFAULT_DASHBOARD_PREFERENCES: DashboardPreferences = {
+  hideEmptyColumns: true,
+  collapseFailureStates: true,
+  showArchived: false,
+};
+
+export const DEFAULT_DASHBOARD_VIEW_STATE: DashboardViewState = {
+  repo: "all",
+  search: "",
+  collapsedColumnKeys: [],
+  drawerWidth: DRAWER_WIDTH_DEFAULT,
+  drawerFullscreen: false,
+  drawerViewsByRunId: {},
+  activeBoardColumnKey: null,
+};
 
 export function clampDrawerWidth(value: number): number {
   if (!Number.isFinite(value)) {
@@ -30,103 +73,121 @@ export function computeDrawerMaxWidth(viewportWidth: number): number {
   return Math.min(DRAWER_WIDTH_MAX, Math.max(DRAWER_WIDTH_MIN, Math.round(available)));
 }
 
-const STORAGE_KEY = "task-runner:web:board-settings";
+const STORAGE_KEY = "task-runner:web:dashboard-preferences";
 
-const DEFAULT_SETTINGS: BoardSettings = {
-  repo: "all",
-  showArchived: false,
-  hideEmptyColumns: true,
-  collapseFailureStates: true,
-  collapsedColumnKeys: [],
-  search: "",
-  drawerWidth: DRAWER_WIDTH_DEFAULT,
-  drawerFullscreen: false,
-};
-
-interface BoardSettingsContextValue {
-  settings: BoardSettings;
-  updateSettings: (updates: Partial<BoardSettings>) => void;
+interface DashboardPreferencesContextValue {
+  preferences: DashboardPreferences;
+  updatePreferences: (updates: Partial<DashboardPreferences>) => void;
+  resetPreferences: () => void;
+  resetPreference: (key: DashboardPreferenceKey) => void;
 }
 
-const BoardSettingsContext = createContext<BoardSettingsContextValue | null>(null);
+interface DashboardViewStateContextValue {
+  viewState: DashboardViewState;
+  updateViewState: (updates: Partial<DashboardViewState>) => void;
+}
 
-function loadSettings(): BoardSettings {
+const DashboardPreferencesContext = createContext<DashboardPreferencesContextValue | null>(null);
+const DashboardViewStateContext = createContext<DashboardViewStateContextValue | null>(null);
+
+function loadDashboardPreferences(): DashboardPreferences {
   if (typeof window === "undefined") {
-    return DEFAULT_SETTINGS;
+    return DEFAULT_DASHBOARD_PREFERENCES;
   }
 
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) {
-      return DEFAULT_SETTINGS;
+      return DEFAULT_DASHBOARD_PREFERENCES;
     }
-    const parsed = JSON.parse(raw);
-    return parseStoredSettings(parsed);
+    return parseStoredDashboardPreferences(JSON.parse(raw));
   } catch {
-    return DEFAULT_SETTINGS;
+    return DEFAULT_DASHBOARD_PREFERENCES;
   }
 }
 
-function parseStringArray(value: unknown): string[] {
-  return Array.isArray(value) && value.every((entry) => typeof entry === "string") ? value : [];
-}
-
-function parseStoredSettings(value: unknown): BoardSettings {
+function parseStoredDashboardPreferences(value: unknown): DashboardPreferences {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return DEFAULT_SETTINGS;
+    return DEFAULT_DASHBOARD_PREFERENCES;
   }
 
   const record = value as Record<string, unknown>;
   return {
-    repo: typeof record.repo === "string" ? record.repo : DEFAULT_SETTINGS.repo,
-    showArchived:
-      typeof record.showArchived === "boolean"
-        ? record.showArchived
-        : DEFAULT_SETTINGS.showArchived,
     hideEmptyColumns:
       typeof record.hideEmptyColumns === "boolean"
         ? record.hideEmptyColumns
-        : DEFAULT_SETTINGS.hideEmptyColumns,
+        : DEFAULT_DASHBOARD_PREFERENCES.hideEmptyColumns,
     collapseFailureStates:
       typeof record.collapseFailureStates === "boolean"
         ? record.collapseFailureStates
-        : DEFAULT_SETTINGS.collapseFailureStates,
-    collapsedColumnKeys: parseStringArray(record.collapsedColumnKeys),
-    search: typeof record.search === "string" ? record.search : DEFAULT_SETTINGS.search,
-    drawerWidth: clampDrawerWidth(
-      typeof record.drawerWidth === "number" ? record.drawerWidth : DEFAULT_SETTINGS.drawerWidth,
-    ),
-    drawerFullscreen:
-      typeof record.drawerFullscreen === "boolean"
-        ? record.drawerFullscreen
-        : DEFAULT_SETTINGS.drawerFullscreen,
+        : DEFAULT_DASHBOARD_PREFERENCES.collapseFailureStates,
+    showArchived:
+      typeof record.showArchived === "boolean"
+        ? record.showArchived
+        : DEFAULT_DASHBOARD_PREFERENCES.showArchived,
   };
 }
 
-export function BoardSettingsProvider({ children }: { children: ReactNode }) {
-  const [settings, setSettings] = useState<BoardSettings>(() => loadSettings());
+export function DashboardSettingsProvider({ children }: { children: ReactNode }) {
+  const [preferences, setPreferences] = useState<DashboardPreferences>(() =>
+    loadDashboardPreferences(),
+  );
+  const [viewState, setViewState] = useState<DashboardViewState>(DEFAULT_DASHBOARD_VIEW_STATE);
 
   useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
-  }, [settings]);
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(preferences));
+  }, [preferences]);
 
-  const value = useMemo<BoardSettingsContextValue>(
+  const preferencesValue = useMemo<DashboardPreferencesContextValue>(
     () => ({
-      settings,
-      updateSettings: (updates) => {
-        setSettings((current) => ({ ...current, ...updates }));
+      preferences,
+      updatePreferences: (updates) => {
+        setPreferences((current) => ({ ...current, ...updates }));
+      },
+      resetPreferences: () => {
+        setPreferences(DEFAULT_DASHBOARD_PREFERENCES);
+      },
+      resetPreference: (key) => {
+        setPreferences((current) => ({
+          ...current,
+          [key]: DEFAULT_DASHBOARD_PREFERENCES[key],
+        }));
       },
     }),
-    [settings],
+    [preferences],
   );
 
-  return <BoardSettingsContext.Provider value={value}>{children}</BoardSettingsContext.Provider>;
+  const viewStateValue = useMemo<DashboardViewStateContextValue>(
+    () => ({
+      viewState,
+      updateViewState: (updates) => {
+        setViewState((current) => ({ ...current, ...updates }));
+      },
+    }),
+    [viewState],
+  );
+
+  return (
+    <DashboardPreferencesContext.Provider value={preferencesValue}>
+      <DashboardViewStateContext.Provider value={viewStateValue}>
+        {children}
+      </DashboardViewStateContext.Provider>
+    </DashboardPreferencesContext.Provider>
+  );
 }
 
-export function useBoardSettings() {
-  const context = useContext(BoardSettingsContext);
+export function useDashboardPreferences() {
+  const context = useContext(DashboardPreferencesContext);
   if (!context) {
-    throw new Error("Board settings context is unavailable");
+    throw new Error("Dashboard preferences context is unavailable");
+  }
+  return context;
+}
+
+export function useDashboardViewState() {
+  const context = useContext(DashboardViewStateContext);
+  if (!context) {
+    throw new Error("Dashboard view state context is unavailable");
   }
   return context;
 }

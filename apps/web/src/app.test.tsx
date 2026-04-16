@@ -753,8 +753,8 @@ function installFetchMock(
   return fetchMock;
 }
 
-async function renderApp() {
-  await router.navigate({ to: "/" });
+async function renderApp(initialPath = "/") {
+  await router.navigate({ to: initialPath });
   return render(<App />);
 }
 
@@ -1327,7 +1327,55 @@ describe("web app", () => {
     });
   });
 
-  it("resizes the detail drawer via the keyboard separator and persists the width", async () => {
+  it("navigates between runs and settings through the shell", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await findRunCard("Build dashboard");
+
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+
+    expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Settings", current: "page" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Keybindings/ }));
+    expect(await screen.findByRole("heading", { name: "Keybindings" })).toBeInTheDocument();
+    expect(
+      screen.getByText("Configurable keybindings will be added in a later change."),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Runs" }));
+
+    expect(await screen.findByPlaceholderText("Search runs")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Runs", current: "page" })).toBeInTheDocument();
+  });
+
+  it("uses browser back navigation to leave settings on escape", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await findRunCard("Build dashboard");
+
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+
+    await waitFor(() => {
+      expect(screen.queryByRole("heading", { name: "General" })).not.toBeInTheDocument();
+    });
+    expect(screen.getByPlaceholderText("Search runs")).toBeInTheDocument();
+  });
+
+  it("resizes the detail drawer via the keyboard separator for the current session only", async () => {
     installFetchMock({
       runs: [makeRun()],
       details: { "run-1": makeDetail() },
@@ -1347,82 +1395,21 @@ describe("web app", () => {
     expect(drawer.style.getPropertyValue("--drawer-width")).toBe("570px");
     expect(handle.getAttribute("aria-valuenow")).toBe("570");
 
-    const stored = window.localStorage.getItem("task-runner:web:board-settings");
-    const parsed = stored ? (JSON.parse(stored) as { drawerWidth?: number }) : null;
-    expect(parsed?.drawerWidth).toBe(570);
-  });
-
-  it("keeps the pending detail skeleton in fullscreen when that setting is enabled", async () => {
-    let resolveDetail: ((response: Response) => void) | undefined;
-    installFetchMock(
-      {
-        runs: [makeRun()],
-        details: { "run-1": makeDetail() },
-      },
-      {
-        handleRequest: (url, init) => {
-          if (/\/api\/runs\/run-1$/.test(url) && (!init?.method || init.method === "GET")) {
-            return new Promise<Response>((resolve) => {
-              resolveDetail = resolve;
-            });
-          }
-          return undefined;
-        },
-      },
-    );
-
-    window.localStorage.setItem(
-      "task-runner:web:board-settings",
-      JSON.stringify({ drawerFullscreen: true, drawerWidth: 700 }),
-    );
-
-    const user = userEvent.setup();
-    await renderApp();
-    await user.click(await findRunCard("Build dashboard"));
-
-    const skeletonDrawer = await screen.findByLabelText("Run detail");
-    expect(skeletonDrawer.className).toContain("drawer--fullscreen");
-    expect(skeletonDrawer.style.getPropertyValue("--drawer-width")).toBe("700px");
-
-    resolveDetail?.(new Response(JSON.stringify({ run: makeDetail() }), { status: 200 }));
-
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: /copy run id/i })).toBeInTheDocument();
+    const stored = window.localStorage.getItem("task-runner:web:dashboard-preferences");
+    expect(stored ? JSON.parse(stored) : null).toEqual({
+      hideEmptyColumns: true,
+      collapseFailureStates: true,
+      showArchived: false,
     });
-  });
 
-  it("keeps the detail error shell in fullscreen when that setting is enabled", async () => {
-    installFetchMock(
-      {
-        runs: [makeRun()],
-        details: { "run-1": makeDetail() },
-      },
-      {
-        handleRequest: (url, init) => {
-          if (/\/api\/runs\/run-1$/.test(url) && (!init?.method || init.method === "GET")) {
-            return new Response(JSON.stringify({ error: { message: "detail exploded" } }), {
-              status: 500,
-              headers: { "content-type": "application/json" },
-            });
-          }
-          return undefined;
-        },
-      },
-    );
+    cleanup();
+    queryClient.clear();
 
-    window.localStorage.setItem(
-      "task-runner:web:board-settings",
-      JSON.stringify({ drawerFullscreen: true, drawerWidth: 700 }),
-    );
-
-    const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
 
-    const errorDrawer = await screen.findByLabelText("Run detail");
-    expect(await screen.findByText("Run detail failed to load")).toBeInTheDocument();
-    expect(errorDrawer.className).toContain("drawer--fullscreen");
-    expect(errorDrawer.style.getPropertyValue("--drawer-width")).toBe("700px");
+    const restoredDrawer = await screen.findByLabelText("Run detail");
+    expect(restoredDrawer.style.getPropertyValue("--drawer-width")).toBe("540px");
   });
 
   it("renders markdown in task body and notes", async () => {
@@ -1638,7 +1625,7 @@ describe("web app", () => {
     );
   });
 
-  it("persists board settings in localStorage", async () => {
+  it("keeps toolbar toggles and settings rows synchronized through persisted preferences", async () => {
     installFetchMock({
       runs: [
         makeRun(),
@@ -1709,28 +1696,115 @@ describe("web app", () => {
     expect(getBoardColumn("Error")).toBeInTheDocument();
     expect(getBoardColumn("Aborted")).toBeInTheDocument();
 
-    const blockedColumn = getBoardColumn("Blocked");
-    await user.click(
-      within(blockedColumn).getByRole("button", { name: "Collapse Blocked column" }),
-    );
-    await waitFor(() => {
-      expect(blockedColumn).toHaveAttribute("data-collapsed", "true");
-    });
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
 
-    const stored = window.localStorage.getItem("task-runner:web:board-settings");
-    const parsed = stored ? (JSON.parse(stored) as { collapsedColumnKeys?: string[] }) : null;
-    expect(parsed?.collapsedColumnKeys).toEqual(["blocked"]);
+    const hideEmptyColumns = screen.getByRole("checkbox", { name: "Hide empty columns" });
+    const collapseFailureStates = screen.getByRole("checkbox", {
+      name: "Collapse failure states",
+    });
+    const showArchived = screen.getByRole("checkbox", { name: "Show archived runs" });
+    expect(hideEmptyColumns).not.toBeChecked();
+    expect(collapseFailureStates).not.toBeChecked();
+    expect(showArchived).toBeChecked();
+
+    const stored = window.localStorage.getItem("task-runner:web:dashboard-preferences");
+    expect(stored ? JSON.parse(stored) : null).toEqual({
+      hideEmptyColumns: false,
+      collapseFailureStates: false,
+      showArchived: true,
+    });
 
     view.unmount();
     queryClient.clear();
     await renderApp();
     expect(await screen.findByRole("button", { name: /archived dashboard/i })).toBeInTheDocument();
-    expect(getBoardColumn("Blocked")).toHaveAttribute("data-collapsed", "true");
     expect(getBoardColumn("Error")).toBeInTheDocument();
     expect(getBoardColumn("Aborted")).toBeInTheDocument();
   });
 
-  it("clamps persisted drawer width to the current viewport without overwriting the saved preference", async () => {
+  it("restores the in-scope dashboard preferences to defaults from settings", async () => {
+    installFetchMock({
+      runs: [
+        makeRun(),
+        makeRun({
+          runId: "run-archived",
+          assignmentName: "Archived dashboard",
+          archivedAt: "2026-04-13T06:00:00.000Z",
+          status: "success",
+        }),
+        makeRun({
+          runId: "run-error",
+          assignmentName: "Broken dashboard",
+          status: "error",
+        }),
+      ],
+      details: {
+        "run-1": makeDetail(),
+        "run-archived": makeDetail({
+          runId: "run-archived",
+          status: "success",
+        }),
+        "run-error": makeDetail({
+          runId: "run-error",
+          status: "error",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp("/settings/general");
+    await screen.findByRole("heading", { name: "General" });
+
+    await user.click(screen.getByRole("checkbox", { name: "Hide empty columns" }));
+    await user.click(screen.getByRole("checkbox", { name: "Collapse failure states" }));
+    await user.click(screen.getByRole("checkbox", { name: "Show archived runs" }));
+
+    await user.click(screen.getByRole("button", { name: "Restore defaults" }));
+
+    expect(screen.getByRole("checkbox", { name: "Hide empty columns" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Collapse failure states" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Show archived runs" })).not.toBeChecked();
+    expect(screen.getByRole("button", { name: "Restore defaults" })).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "Runs" }));
+
+    expect(await screen.findByPlaceholderText("Search runs")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /archived dashboard/i })).not.toBeInTheDocument();
+    expect(getBoardColumn("Failed")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: /^Aborted(?: \(\d+\))?$/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("resets a single preference row without affecting the others", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    const user = userEvent.setup();
+    await renderApp("/settings/general");
+    await screen.findByRole("heading", { name: "General" });
+
+    await user.click(screen.getByRole("checkbox", { name: "Hide empty columns" }));
+    await user.click(screen.getByRole("checkbox", { name: "Show archived runs" }));
+
+    await user.click(screen.getByRole("button", { name: "Reset Hide empty columns to default" }));
+
+    expect(screen.getByRole("checkbox", { name: "Hide empty columns" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Show archived runs" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Collapse failure states" })).toBeChecked();
+
+    const stored = window.localStorage.getItem("task-runner:web:dashboard-preferences");
+    expect(stored ? JSON.parse(stored) : null).toEqual({
+      hideEmptyColumns: true,
+      collapseFailureStates: true,
+      showArchived: true,
+    });
+  });
+
+  it("clamps the transient drawer width to the current viewport", async () => {
     installFetchMock({
       runs: [makeRun()],
       details: { "run-1": makeDetail() },
@@ -1742,41 +1816,17 @@ describe("web app", () => {
       value: 900,
       writable: true,
     });
-    window.localStorage.setItem(
-      "task-runner:web:board-settings",
-      JSON.stringify({
-        drawerFullscreen: false,
-        drawerWidth: 1400,
-      }),
-    );
 
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
 
     const drawer = await screen.findByLabelText("Run detail");
+    const handle = screen.getByRole("separator", { name: /resize detail drawer/i });
+    handle.focus();
+    await user.keyboard("{End}");
+
     await waitFor(() => expect(drawer.getAttribute("style")).toContain("--drawer-width: 564px"));
-
-    const stored = window.localStorage.getItem("task-runner:web:board-settings");
-    const parsed = stored ? (JSON.parse(stored) as { drawerWidth?: number }) : null;
-    expect(parsed?.drawerWidth).toBe(1400);
-
-    cleanup();
-    queryClient.clear();
-
-    Object.defineProperty(window, "innerWidth", {
-      configurable: true,
-      value: 1800,
-      writable: true,
-    });
-
-    await renderApp();
-    await user.click(await findRunCard("Build dashboard"));
-
-    const restoredDrawer = await screen.findByLabelText("Run detail");
-    await waitFor(() =>
-      expect(restoredDrawer.getAttribute("style")).toContain("--drawer-width: 1400px"),
-    );
 
     Object.defineProperty(window, "innerWidth", {
       configurable: true,
@@ -1785,16 +1835,12 @@ describe("web app", () => {
     });
   });
 
-  it("ignores malformed stored board settings values", async () => {
+  it("falls back to defaults when stored dashboard preferences are malformed", async () => {
     window.localStorage.setItem(
-      "task-runner:web:board-settings",
+      "task-runner:web:dashboard-preferences",
       JSON.stringify({
         collapseFailureStates: "yes",
-        collapsedColumnKeys: ["running", 42],
-        drawerWidth: "wide",
         hideEmptyColumns: "no",
-        repo: 42,
-        search: ["dashboard"],
         showArchived: "sure",
       }),
     );
@@ -1844,10 +1890,18 @@ describe("web app", () => {
     expect(getBoardColumn("Failed")).toBeInTheDocument();
     expect(getBoardColumn("Blocked")).toBeInTheDocument();
 
-    await user.click(await findRunCard("Build dashboard"));
-    const drawer = await screen.findByLabelText("Run detail");
-    expect(drawer.style.getPropertyValue("--drawer-width")).toBe("540px");
-    expect(getBoardColumn("Running")).toHaveAttribute("data-collapsed", "false");
+    expect(screen.getByRole("button", { name: /hide empty columns/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: /collapse failure states/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: /show archived runs/i })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
   });
 
   it("collapses and expands a board column on desktop", async () => {
@@ -1941,11 +1995,6 @@ describe("web app", () => {
 
     await waitFor(() => {
       expect(failuresColumn).toHaveAttribute("data-collapsed", "true");
-    });
-
-    const storedGrouped = window.localStorage.getItem("task-runner:web:board-settings");
-    expect(storedGrouped ? JSON.parse(storedGrouped) : null).toMatchObject({
-      collapsedColumnKeys: ["failures"],
     });
 
     await user.click(screen.getByRole("button", { name: /collapse failure states/i }));
