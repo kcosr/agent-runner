@@ -121,6 +121,7 @@ export function useRunTimelineState({
   const bufferRef = useRef<RunTimelineEnvelope[]>([]);
   const loadSeqRef = useRef(0);
   const reloadCountRef = useRef(0);
+  const previousRunIdRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     historyRef.current = state.history;
@@ -208,12 +209,22 @@ export function useRunTimelineState({
       }
     };
 
-    historyRef.current = null;
-    staleRef.current = false;
-    bootstrappedRef.current = false;
-    bufferRef.current = [];
-    reloadCountRef.current = 0;
-    setState({ history: null, isLoading: true, stale: false });
+    // On a run-id change, reset everything. On re-entering this effect for
+    // the same run (e.g. runIsLive flipping from true to false when the run
+    // ends), keep the already-loaded history so the drawer doesn't flash
+    // through an empty "Loading…" state.
+    const sameRunId = previousRunIdRef.current === runId;
+    previousRunIdRef.current = runId;
+    if (!sameRunId) {
+      historyRef.current = null;
+      staleRef.current = false;
+      bootstrappedRef.current = false;
+      bufferRef.current = [];
+      reloadCountRef.current = 0;
+      setState({ history: null, isLoading: true, stale: false });
+    } else {
+      setState((current) => ({ ...current, isLoading: true, error: undefined }));
+    }
 
     if (!runIsLive) {
       void loadHistory();
