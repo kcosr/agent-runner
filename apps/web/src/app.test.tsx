@@ -7,6 +7,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./app.js";
 import { queryClient } from "./lib/query.js";
 import { router } from "./router.js";
+import attachmentMermaidMarkdown from "./test/fixtures/attachment-mermaid.md?raw";
+
+const initializeMermaid = vi.fn();
+const renderMermaid = vi.fn(async () => ({
+  svg: "<svg><text>attachment diagram</text></svg>",
+}));
+
+vi.mock("mermaid", () => ({
+  default: {
+    initialize: initializeMermaid,
+    render: renderMermaid,
+  },
+}));
 
 const APP_CONFIG = {
   apiBasePath: "/api",
@@ -826,6 +839,8 @@ describe("web app", () => {
     queryClient.clear();
     window.localStorage.clear();
     MockEventSource.instances = [];
+    initializeMermaid.mockClear();
+    renderMermaid.mockClear();
     vi.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
   });
 
@@ -3268,7 +3283,7 @@ describe("web app", () => {
       {
         handleRequest: (url) => {
           if (/\/api\/runs\/run-1\/attachments\/att-md\/content$/.test(url)) {
-            return new Response("# Notes\n\n- first item", {
+            return new Response(attachmentMermaidMarkdown, {
               status: 200,
               headers: { "content-type": "text/markdown; charset=utf-8" },
             });
@@ -3292,6 +3307,11 @@ describe("web app", () => {
 
     await user.click(screen.getByRole("button", { name: /^Preview notes\.md$/ }));
     expect(await screen.findByRole("heading", { name: "Notes" })).toBeInTheDocument();
+    expect(await screen.findByLabelText("Mermaid diagram")).toBeInTheDocument();
+    expect(renderMermaid).toHaveBeenCalledWith(
+      expect.stringMatching(/^mermaid-/),
+      "graph TD\nStart-->Finish",
+    );
     await user.click(screen.getByRole("button", { name: /back to attachments/i }));
 
     await user.click(screen.getByRole("button", { name: /^Preview build\.log$/ }));

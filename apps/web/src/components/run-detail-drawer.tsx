@@ -1,14 +1,6 @@
 import type { RunAttachment } from "@task-runner/core/contracts/attachments.js";
 import type { RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
-import {
-  type CSSProperties,
-  type ChangeEvent,
-  type KeyboardEvent,
-  type PointerEvent,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { type ChangeEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
 import {
   formatBytes,
   formatRelativeTimestamp,
@@ -16,24 +8,19 @@ import {
   truncateMiddle,
 } from "../lib/format.js";
 import type { RunTimelineState } from "../lib/run-timeline.js";
-import {
-  DRAWER_WIDTH_MAX,
-  DRAWER_WIDTH_MIN,
-  clampDrawerWidth,
-  useBoardSettings,
-} from "../lib/settings.js";
+import { useDrawerResize } from "../lib/use-drawer-resize.js";
 import type { DrawerDetailSection, RunActionPending } from "../routes/use-runs-dashboard-state.js";
-import {
-  isPreviewableAttachment,
-  normalizeAttachmentMimeType,
-} from "./attachment-preview-drawer.js";
+import { isPreviewableAttachment } from "./attachment-preview-drawer.js";
+import { DrawerResizeHandle } from "./drawer-resize-handle.js";
 import {
   ArchiveIcon,
   CheckIcon,
   ChevronIcon,
   CloseIcon,
+  CollapseIcon,
   CopyIcon,
   DownloadIcon,
+  ExpandIcon,
   PencilIcon,
   StopIcon,
   TrashIcon,
@@ -43,12 +30,6 @@ import { RunTaskList } from "./run-task-list.js";
 import { StatusBadge } from "./status-badge.js";
 
 type TimelineTab = "prompt" | "output";
-
-interface DragState {
-  pointerId: number;
-  startX: number;
-  startWidth: number;
-}
 
 function dependencyCandidateTitle(run: RunSummary) {
   return run.name ?? run.assignmentName ?? "Unnamed";
@@ -194,15 +175,12 @@ export function RunDetailDrawer({
   const [confirmingAttachmentId, setConfirmingAttachmentId] = useState<string | null>(null);
   const [dependencyDraft, setDependencyDraft] = useState("");
   const [selectedDependencyRunId, setSelectedDependencyRunId] = useState<string | null>(null);
-  const { settings, updateSettings } = useBoardSettings();
-  const dragRef = useRef<DragState | null>(null);
+  const resize = useDrawerResize();
+  const { drawerStyle, isFullscreen, toggleFullscreen } = resize;
   const nameInputRef = useRef<HTMLInputElement | null>(null);
   const resumeDisclosureButtonRef = useRef<HTMLButtonElement | null>(null);
   const resumeMessageRef = useRef<HTMLTextAreaElement | null>(null);
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
-  const [dragWidth, setDragWidth] = useState<number | null>(null);
-  const width = dragWidth ?? settings.drawerWidth;
-  const drawerStyle = { "--drawer-width": `${width}px` } as CSSProperties;
   const backendSessionId = run.backendSessionId;
   const actionsLocked = actionPending !== undefined;
   const resumePending = actionPending === "resume";
@@ -246,72 +224,6 @@ export function RunDetailDrawer({
     timelineAttempts.find((attempt) => attempt.attempt === selectedAttempt) ??
     timelineAttempts[timelineAttempts.length - 1] ??
     null;
-
-  function handleResizeStart(event: PointerEvent<HTMLDivElement>) {
-    event.preventDefault();
-    const target = event.currentTarget;
-    target.setPointerCapture(event.pointerId);
-    dragRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startWidth: width,
-    };
-  }
-
-  function handleResizeMove(event: PointerEvent<HTMLDivElement>) {
-    const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) {
-      return;
-    }
-    const next = clampDrawerWidth(drag.startWidth + (drag.startX - event.clientX));
-    setDragWidth(next);
-  }
-
-  function handleResizeKey(event: KeyboardEvent<HTMLDivElement>) {
-    const step = event.shiftKey ? 40 : 10;
-    let next: number | null = null;
-    if (event.key === "ArrowLeft") {
-      next = clampDrawerWidth(width + step);
-    } else if (event.key === "ArrowRight") {
-      next = clampDrawerWidth(width - step);
-    } else if (event.key === "Home") {
-      next = DRAWER_WIDTH_MIN;
-    } else if (event.key === "End") {
-      next = DRAWER_WIDTH_MAX;
-    }
-    if (next !== null) {
-      event.preventDefault();
-      updateSettings({ drawerWidth: next });
-    }
-  }
-
-  function handleResizeEnd(event: PointerEvent<HTMLDivElement>) {
-    const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) {
-      return;
-    }
-    const final = clampDrawerWidth(drag.startWidth + (drag.startX - event.clientX));
-    dragRef.current = null;
-    setDragWidth(null);
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    if (final !== settings.drawerWidth) {
-      updateSettings({ drawerWidth: final });
-    }
-  }
-
-  function handleResizeCancel(event: PointerEvent<HTMLDivElement>) {
-    const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) {
-      return;
-    }
-    dragRef.current = null;
-    setDragWidth(null);
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-  }
 
   function startNameEdit() {
     if (actionsLocked) {
@@ -549,22 +461,12 @@ export function RunDetailDrawer({
         onClick={onClose}
         type="button"
       />
-      <aside aria-label="Run detail" className="drawer" style={drawerStyle}>
-        <div
-          aria-label="Resize detail drawer"
-          aria-orientation="vertical"
-          aria-valuemax={DRAWER_WIDTH_MAX}
-          aria-valuemin={DRAWER_WIDTH_MIN}
-          aria-valuenow={width}
-          className={dragWidth !== null ? "drawer-resize active" : "drawer-resize"}
-          onKeyDown={handleResizeKey}
-          onPointerCancel={handleResizeCancel}
-          onPointerDown={handleResizeStart}
-          onPointerMove={handleResizeMove}
-          onPointerUp={handleResizeEnd}
-          role="separator"
-          tabIndex={0}
-        />
+      <aside
+        aria-label="Run detail"
+        className={isFullscreen ? "drawer drawer--fullscreen" : "drawer"}
+        style={drawerStyle}
+      >
+        <DrawerResizeHandle label="Resize detail drawer" resize={resize} />
         <header className="drawer-head">
           <div className="drawer-title">
             <span className="run-id-large">{run.runId}</span>
@@ -634,6 +536,20 @@ export function RunDetailDrawer({
               type="button"
             >
               <CopyIcon aria-hidden="true" />
+            </button>
+            <button
+              aria-label={isFullscreen ? "Exit full-width drawer" : "Expand drawer to full width"}
+              aria-pressed={isFullscreen}
+              className="icon-btn drawer-fullscreen-toggle"
+              onClick={toggleFullscreen}
+              title={isFullscreen ? "Restore drawer width" : "Expand to full width"}
+              type="button"
+            >
+              {isFullscreen ? (
+                <CollapseIcon aria-hidden="true" />
+              ) : (
+                <ExpandIcon aria-hidden="true" />
+              )}
             </button>
             <button aria-label="Close detail" className="icon-btn" onClick={onClose} type="button">
               <CloseIcon aria-hidden="true" />
@@ -835,10 +751,14 @@ export function RunDetailDrawer({
                         <span className="dependency-copy">
                           <span className="dependency-name">{attachment.name}</span>
                           <span className="dependency-meta">
-                            <span className="dependency-meta-id">{attachment.mimeType}</span>
-                            <span>·</span>
+                            <span className="dependency-meta-id attachment-row-mime">
+                              {attachment.mimeType}
+                            </span>
+                            <span aria-hidden="true" className="attachment-row-mime">
+                              ·
+                            </span>
                             <span>{formatBytes(attachment.size)}</span>
-                            <span>·</span>
+                            <span aria-hidden="true">·</span>
                             <span>{formatTimestamp(attachment.addedAt)}</span>
                           </span>
                         </span>
@@ -853,9 +773,6 @@ export function RunDetailDrawer({
                               type="button"
                             >
                               {attachmentSummary}
-                              <span className="attachment-row-affordance">
-                                Preview {normalizeAttachmentMimeType(attachment.mimeType)}
-                              </span>
                             </button>
                           ) : (
                             attachmentSummary

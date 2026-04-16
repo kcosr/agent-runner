@@ -1,12 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import type { RunAttachment } from "@task-runner/core/contracts/attachments.js";
-import type { CSSProperties } from "react";
 import { createApiClient } from "../lib/api-client.js";
 import { formatBytes, formatTimestamp } from "../lib/format.js";
 import { useRuntimeConfig } from "../lib/runtime-config.js";
-import { useBoardSettings } from "../lib/settings.js";
+import { useDrawerResize } from "../lib/use-drawer-resize.js";
 import type { RunActionPending } from "../routes/use-runs-dashboard-state.js";
-import { ChevronIcon, CloseIcon, DownloadIcon } from "./icons.js";
+import { DrawerResizeHandle } from "./drawer-resize-handle.js";
+import { ChevronIcon, CloseIcon, CollapseIcon, DownloadIcon, ExpandIcon } from "./icons.js";
 import { MarkdownContent } from "./markdown.js";
 
 export function normalizeAttachmentMimeType(mimeType: string): string {
@@ -37,9 +37,9 @@ export function AttachmentPreviewDrawer({
 }) {
   const config = useRuntimeConfig();
   const api = createApiClient(config);
-  const { settings } = useBoardSettings();
+  const resize = useDrawerResize();
+  const { drawerStyle, isFullscreen, toggleFullscreen } = resize;
   const downloadPending = actionPending === "download-attachment";
-  const drawerStyle = { "--drawer-width": `${settings.drawerWidth}px` } as CSSProperties;
   const previewQuery = useQuery({
     queryKey: ["attachment-preview", runId, attachmentId],
     queryFn: () => api.readAttachmentText(runId, attachmentId),
@@ -58,19 +58,40 @@ export function AttachmentPreviewDrawer({
         onClick={onClose}
         type="button"
       />
-      <aside aria-label="Attachment preview" className="drawer" style={drawerStyle}>
+      <aside
+        aria-label="Attachment preview"
+        className={isFullscreen ? "drawer drawer--fullscreen" : "drawer"}
+        style={drawerStyle}
+      >
+        <DrawerResizeHandle label="Resize attachment preview drawer" resize={resize} />
         <header className="drawer-head drawer-head--preview">
-          <div className="drawer-title drawer-title--preview">
-            <button aria-label="Back to attachments" className="btn" onClick={onBack} type="button">
-              <ChevronIcon aria-hidden="true" className="attachment-preview-back-icon" />
-              Back
-            </button>
-            <div className="attachment-preview-title-group">
-              <span className="run-id-large">{runId}</span>
-              <h3 className="drawer-section-title">
+          <button
+            aria-label="Back to attachments"
+            className="icon-btn attachment-preview-back"
+            onClick={onBack}
+            type="button"
+          >
+            <ChevronIcon aria-hidden="true" className="attachment-preview-back-icon" />
+          </button>
+          <div className="attachment-preview-head">
+            <div className="attachment-preview-title-row">
+              <span className="attachment-preview-run-id">{runId}</span>
+              <span aria-hidden="true" className="attachment-preview-title-separator">
+                /
+              </span>
+              <h3 className="attachment-preview-title">
                 {attachment?.name ?? "Attachment preview unavailable"}
               </h3>
             </div>
+            {attachment ? (
+              <div className="attachment-preview-meta-inline">
+                <span className="mono">{attachment.mimeType}</span>
+                <span aria-hidden="true">·</span>
+                <span>{formatBytes(attachment.size)}</span>
+                <span aria-hidden="true">·</span>
+                <span>{formatTimestamp(attachment.addedAt)}</span>
+              </div>
+            ) : null}
           </div>
           <div className="drawer-actions">
             {attachment ? (
@@ -84,6 +105,20 @@ export function AttachmentPreviewDrawer({
                 {downloadPending ? "Downloading..." : "Download"}
               </button>
             ) : null}
+            <button
+              aria-label={isFullscreen ? "Exit full-width drawer" : "Expand drawer to full width"}
+              aria-pressed={isFullscreen}
+              className="icon-btn drawer-fullscreen-toggle"
+              onClick={toggleFullscreen}
+              title={isFullscreen ? "Restore drawer width" : "Expand to full width"}
+              type="button"
+            >
+              {isFullscreen ? (
+                <CollapseIcon aria-hidden="true" />
+              ) : (
+                <ExpandIcon aria-hidden="true" />
+              )}
+            </button>
             <button aria-label="Close detail" className="icon-btn" onClick={onClose} type="button">
               <CloseIcon aria-hidden="true" />
             </button>
@@ -91,23 +126,6 @@ export function AttachmentPreviewDrawer({
         </header>
 
         <div className="drawer-body">
-          {attachment ? (
-            <section aria-label="Attachment metadata" className="meta-grid attachment-preview-meta">
-              <div className="meta-cell">
-                <span className="meta-label">Type</span>
-                <span className="meta-value mono">{attachment.mimeType}</span>
-              </div>
-              <div className="meta-cell">
-                <span className="meta-label">Size</span>
-                <span className="meta-value">{formatBytes(attachment.size)}</span>
-              </div>
-              <div className="meta-cell full">
-                <span className="meta-label">Added</span>
-                <span className="meta-value">{formatTimestamp(attachment.addedAt)}</span>
-              </div>
-            </section>
-          ) : null}
-
           {attachment === undefined ? (
             <section aria-label="Attachment preview error" className="drawer-panel">
               <div className="drawer-panel-card attachment-preview-state">
