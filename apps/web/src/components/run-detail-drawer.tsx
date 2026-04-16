@@ -183,6 +183,7 @@ export function RunDetailDrawer({
   const drawerBodyRef = useRef<HTMLDivElement | null>(null);
   const sectionTabsRef = useRef<HTMLElement | null>(null);
   const timelineContentScrollRef = useRef<HTMLDivElement | null>(null);
+  const timelineOutputAtBottomRef = useRef(true);
   const [selectedAttempt, setSelectedAttempt] = useState<number | null>(null);
   const [timelineTab, setTimelineTab] = useState<TimelineTab>("output");
   const [editingName, setEditingName] = useState(false);
@@ -248,7 +249,6 @@ export function RunDetailDrawer({
     null;
   const selectedAttemptNumber = selectedAttemptRecord?.attempt ?? null;
   const selectedAttemptOutput = selectedAttemptRecord ? attemptOutput(selectedAttemptRecord) : "";
-  const selectedAttemptLive = selectedAttemptRecord?.live ?? false;
 
   function startNameEdit() {
     if (actionsLocked) {
@@ -343,6 +343,10 @@ export function RunDetailDrawer({
   }, [activeSection, isPassiveRun, onSelectSection]);
 
   useEffect(() => {
+    timelineOutputAtBottomRef.current = timelineOutputAtBottom;
+  }, [timelineOutputAtBottom]);
+
+  useEffect(() => {
     if (activeSection !== "events" || timelineTab !== "output" || selectedAttemptNumber === null) {
       return;
     }
@@ -379,36 +383,36 @@ export function RunDetailDrawer({
     if (activeSection !== "events" || timelineTab !== "output" || selectedAttemptNumber === null) {
       return;
     }
-    if (!selectedAttemptLive) {
+    const element = timelineContentScrollRef.current;
+    if (!element) {
       return;
     }
 
     let frameId = 0;
-    const syncBottom = () => {
+    const followTail = () => {
       frameId = 0;
-      const element = timelineContentScrollRef.current;
-      if (!element || !timelineOutputAtBottom) {
+      const target = timelineContentScrollRef.current;
+      if (!target || !timelineOutputAtBottomRef.current) {
         return;
       }
-      scrollElementToBottom(element);
+      scrollElementToBottom(target);
     };
-    const scheduleBottomSync = () => {
+    const scheduleFollowTail = () => {
       if (frameId !== 0) {
         return;
       }
-      frameId = requestAnimationFrame(syncBottom);
+      frameId = requestAnimationFrame(followTail);
     };
 
-    scheduleBottomSync();
+    scheduleFollowTail();
 
     const ResizeObserverCtor = window.ResizeObserver;
     const observer =
-      ResizeObserverCtor !== undefined ? new ResizeObserver(() => scheduleBottomSync()) : null;
-    if (observer && timelineContentScrollRef.current) {
-      observer.observe(timelineContentScrollRef.current);
-      const firstChild = timelineContentScrollRef.current.firstElementChild;
-      if (selectedAttemptOutput.length > 0 && firstChild) {
-        observer.observe(firstChild);
+      ResizeObserverCtor !== undefined ? new ResizeObserver(() => scheduleFollowTail()) : null;
+    if (observer) {
+      observer.observe(element);
+      for (const child of Array.from(element.children)) {
+        observer.observe(child);
       }
     }
 
@@ -418,14 +422,7 @@ export function RunDetailDrawer({
       }
       observer?.disconnect();
     };
-  }, [
-    activeSection,
-    selectedAttemptOutput,
-    selectedAttemptLive,
-    selectedAttemptNumber,
-    timelineOutputAtBottom,
-    timelineTab,
-  ]);
+  }, [activeSection, selectedAttemptNumber, timelineTab]);
 
   async function submitDependencyAdd() {
     if (!resolvedDependencyRunId || addDependencyPending) {
