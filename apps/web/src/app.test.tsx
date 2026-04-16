@@ -759,9 +759,15 @@ async function renderApp() {
 }
 
 async function findRunCard(name: string | RegExp) {
-  return await screen.findByRole("button", {
-    name: typeof name === "string" ? new RegExp(name, "i") : name,
-  });
+  return await screen.findByRole(
+    "button",
+    {
+      name: typeof name === "string" ? new RegExp(name, "i") : name,
+    },
+    {
+      timeout: 5000,
+    },
+  );
 }
 
 function findEventSource(urlSuffix: string) {
@@ -846,6 +852,61 @@ function setBoardGeometry(options: {
   return board as HTMLElement;
 }
 
+function getTimelineContentScrollRegion() {
+  const scrollRegion = document.querySelector(".timeline-content-scroll");
+  if (!(scrollRegion instanceof HTMLElement)) {
+    throw new Error("expected timeline content scroll region");
+  }
+  return scrollRegion;
+}
+
+function setTimelineScrollGeometry(options: {
+  clientHeight: number;
+  scrollHeight: number;
+  scrollTop?: number;
+}) {
+  const detail = screen.getByLabelText("Run detail");
+  const drawerBody = detail.querySelector(".drawer-body");
+  const stickyControls = detail.querySelector(".timeline-sticky-controls");
+  const scrollRegion = getTimelineContentScrollRegion();
+  if (!(drawerBody instanceof HTMLElement) || !(stickyControls instanceof HTMLElement)) {
+    throw new Error("expected timeline layout elements");
+  }
+
+  defineElementMetric(scrollRegion, "clientHeight", options.clientHeight);
+  defineElementMetric(scrollRegion, "scrollHeight", options.scrollHeight);
+  defineElementMetric(scrollRegion, "scrollTop", options.scrollTop ?? 0);
+  defineElementMetric(drawerBody, "getBoundingClientRect", () => ({
+    top: 0,
+    bottom: 480,
+    left: 0,
+    right: 320,
+    width: 320,
+    height: 480,
+    x: 0,
+    y: 0,
+    toJSON() {
+      return {};
+    },
+  }));
+  defineElementMetric(stickyControls, "getBoundingClientRect", () => ({
+    top: 0,
+    bottom: 72,
+    left: 0,
+    right: 320,
+    width: 320,
+    height: 72,
+    x: 0,
+    y: 0,
+    toJSON() {
+      return {};
+    },
+  }));
+
+  window.dispatchEvent(new Event("resize"));
+  return scrollRegion;
+}
+
 describe("web app", () => {
   beforeEach(() => {
     queryClient.clear();
@@ -880,7 +941,7 @@ describe("web app", () => {
     expect(screen.getByRole("button", { name: /copy run id/i })).toBeInTheDocument();
   });
 
-  it("renders attempt history in the attempts tab and merges live output by cursor", async () => {
+  it("renders attempt history in the attempts tab with nested scroll-follow behavior", async () => {
     installFetchMock({
       runs: [makeRun()],
       details: { "run-1": makeDetail() },
@@ -931,9 +992,27 @@ describe("web app", () => {
     expect(screen.getByRole("tab", { name: "2" })).toBeInTheDocument();
     expect(screen.queryByText("Session 1")).not.toBeInTheDocument();
 
+    const detail = screen.getByLabelText("Run detail");
+    const stickyControls = detail.querySelector(".timeline-sticky-controls");
+    expect(stickyControls).not.toBeNull();
+    expect(stickyControls?.querySelector('[role="tablist"][aria-label="Attempts"]')).not.toBeNull();
+    expect(
+      stickyControls?.querySelector('[role="tablist"][aria-label="Attempt view"]'),
+    ).not.toBeNull();
+
     const output = await screen.findByRole("region", { name: "Attempt output" });
     expect(output).toHaveTextContent("Streaming");
     expect(within(output).getByText("warning")).toBeInTheDocument();
+
+    const scrollRegion = setTimelineScrollGeometry({
+      clientHeight: 120,
+      scrollHeight: 280,
+      scrollTop: 160,
+    });
+    await waitFor(() => {
+      expect(scrollRegion.dataset.innerScrollEnabled).toBe("true");
+    });
+    expect(scrollRegion.querySelector('[aria-label="Attempt output"]')).not.toBeNull();
 
     await user.click(screen.getByRole("tab", { name: "Prompt" }));
     const prompt = screen.getByRole("region", { name: "Attempt prompt" });
@@ -950,12 +1029,36 @@ describe("web app", () => {
         text: " live",
       },
     });
+    defineElementMetric(scrollRegion, "scrollHeight", 360);
 
     await waitFor(() => {
       expect(screen.getByRole("region", { name: "Attempt output" })).toHaveTextContent(
         "Streaming live warning",
       );
     });
+    await waitFor(() => {
+      expect(scrollRegion.scrollTop).toBe(240);
+    });
+
+    defineElementMetric(scrollRegion, "scrollTop", 32);
+    scrollRegion.dispatchEvent(new Event("scroll"));
+
+    timelineSource.emitMessage({
+      runId: "run-1",
+      cursor: 5,
+      event: {
+        type: "agent_message_delta",
+        text: " detached",
+      },
+    });
+    defineElementMetric(scrollRegion, "scrollHeight", 420);
+
+    await waitFor(() => {
+      expect(screen.getByRole("region", { name: "Attempt output" })).toHaveTextContent(
+        "Streaming live detached warning",
+      );
+    });
+    expect(scrollRegion.scrollTop).toBe(32);
   });
 
   it("separates transcript and backend notices instead of gluing them together", async () => {
@@ -2286,7 +2389,7 @@ describe("web app", () => {
   });
 
   it("deletes archived runs from the web detail drawer", async () => {
-    installFetchMock({
+    const fetchMock = installFetchMock({
       runs: [
         makeRun({
           runId: "run-archived",
@@ -2331,6 +2434,25 @@ describe("web app", () => {
     expect(await screen.findByRole("button", { name: "Delete" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Delete" }));
+    expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Confirm delete run" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel delete run" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Run detail")).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.filter(
+        ([url, init]) =>
+          String(url).endsWith("/api/runs/run-archived") && init?.method === "DELETE",
+      ),
+    ).toHaveLength(0);
+
+    await user.click(screen.getByRole("button", { name: "Cancel delete run" }));
+    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Confirm delete run" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel delete run" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Run detail")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    await user.click(screen.getByRole("button", { name: "Confirm delete run" }));
 
     await waitFor(() => {
       expect(screen.queryByLabelText("Run detail")).not.toBeInTheDocument();

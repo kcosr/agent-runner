@@ -617,20 +617,48 @@ body {
 }
 
 .drawer-panel--events {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   padding: 12px 0 0;
 }
 
+.drawer-confirm-actions,
 .timeline-panel,
 .timeline-attempt-panel,
-.timeline-attempts {
+.timeline-attempts,
+.timeline-sticky-controls {
   display: flex;
   flex-direction: column;
   gap: 12px;
   min-width: 0;
 }
 
-.timeline-attempt-panel > section {
+.drawer-confirm-actions {
+  flex-direction: row;
+  align-items: center;
+}
+
+.timeline-panel,
+.timeline-attempt-panel {
+  min-height: 0;
+}
+
+.timeline-attempt-panel > section,
+.timeline-content-scroll > section {
   min-width: 0;
+}
+
+.timeline-sticky-controls {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding-bottom: 4px;
+  background: var(--card);
+}
+
+.timeline-sticky-controls[data-pinned="true"] {
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
 }
 
 .timeline-attempt-tabs {
@@ -672,6 +700,16 @@ body {
   border-radius: var(--radius-md);
   background: var(--secondary);
   overflow-x: auto;
+}
+
+.timeline-content-scroll {
+  min-height: 0;
+  min-width: 0;
+}
+
+.timeline-content-scroll[data-inner-scroll-enabled="true"] {
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
 }
 
 @keyframes timeline-pulse {
