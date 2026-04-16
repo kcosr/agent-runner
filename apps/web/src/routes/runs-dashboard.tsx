@@ -42,9 +42,11 @@ export function RunsDashboardRoute() {
     <AppShell
       board={
         <RunsBoardPanel
+          activeBoardColumnKey={state.activeBoardColumnKey}
           boardColumns={state.boardColumns}
           collapsedColumnKeys={state.collapsedColumnKeys}
           onExpandColumn={state.columnActions.expand}
+          onActiveBoardColumnKeyChange={state.setActiveBoardColumnKey}
           onResetFilters={() =>
             state.updateSettings({ repo: "all", search: "", showArchived: false })
           }

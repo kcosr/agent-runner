@@ -798,7 +798,19 @@ function defineElementMetric(element: Element, key: string, value: number | (() 
   Object.defineProperty(element, key, {
     configurable: true,
     value,
+    writable: true,
   });
+}
+
+function dispatchHorizontalWheel(element: Element, deltaX = 80) {
+  const event = new WheelEvent("wheel", {
+    bubbles: true,
+    cancelable: true,
+    deltaX,
+    deltaY: 0,
+  });
+  element.dispatchEvent(event);
+  return event;
 }
 
 function setBoardGeometry(options: {
@@ -2832,7 +2844,120 @@ describe("web app", () => {
     resolveArchive?.();
 
     await waitFor(() => {
-      expect(screen.queryByLabelText("Run detail")).not.toBeInTheDocument();
+      expect(screen.getByLabelText("Run detail")).toBeInTheDocument();
+    });
+  });
+
+  it("prevents horizontal wheel gestures from escaping the board and drawers", async () => {
+    installFetchMock(
+      {
+        runs: [makeRun({ runId: "run-1", name: "Gesture run" })],
+        details: {
+          "run-1": makeDetail({
+            runId: "run-1",
+            name: "Gesture run",
+            attachments: [
+              makeAttachment({
+                id: "att-md",
+                name: "notes.md",
+                mimeType: "text/markdown; charset=utf-8",
+              }),
+            ],
+          }),
+        },
+      },
+      {
+        handleRequest: (url) => {
+          if (/\/api\/runs\/run-1\/attachments\/att-md\/content$/.test(url)) {
+            return new Response(attachmentMermaidMarkdown, {
+              status: 200,
+              headers: { "content-type": "text/markdown; charset=utf-8" },
+            });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+    await findRunCard("Gesture run");
+
+    const board = setBoardGeometry({
+      clientWidth: 320,
+      columns: [{ key: "running", left: 0, width: 280 }],
+      scrollWidth: 960,
+    });
+    await waitFor(() => {
+      dispatchHorizontalWheel(board);
+      expect(board.scrollLeft).toBe(80);
+    });
+
+    await user.click(await findRunCard("Gesture run"));
+    await waitFor(() => {
+      const detailWheel = dispatchHorizontalWheel(screen.getByLabelText("Run detail"));
+      expect(detailWheel.defaultPrevented).toBe(true);
+    });
+
+    await user.click(await screen.findByRole("button", { name: /^Attachments\b/i }));
+    await user.click(screen.getByRole("button", { name: /^Preview notes\.md$/ }));
+    await waitFor(() => {
+      const previewWheel = dispatchHorizontalWheel(screen.getByLabelText("Attachment preview"));
+      expect(previewWheel.defaultPrevented).toBe(true);
+    });
+
+    await user.click(screen.getByRole("button", { name: /Expand drawer to full width/i }));
+    await waitFor(() => {
+      const fullscreenPreviewWheel = dispatchHorizontalWheel(
+        screen.getByLabelText("Attachment preview"),
+      );
+      expect(fullscreenPreviewWheel.defaultPrevented).toBe(true);
+    });
+  });
+
+  it("restores the previously snapped board column after closing detail", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({ runId: "run-1", name: "First run", status: "running" }),
+        makeRun({ runId: "run-2", name: "Second run", status: "success" }),
+      ],
+      details: {
+        "run-1": makeDetail({ runId: "run-1", name: "First run", status: "running" }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await findRunCard("First run");
+    await findRunCard("Second run");
+
+    const board = setBoardGeometry({
+      clientWidth: 320,
+      columns: [
+        { key: "running", left: 0, width: 280 },
+        { key: "completed", left: 320, width: 280 },
+      ],
+      scrollLeft: 300,
+      scrollWidth: 960,
+    });
+    board.dispatchEvent(new Event("scroll"));
+
+    await user.click(await findRunCard("First run"));
+    await screen.findByLabelText("Run detail");
+    await user.click(getCloseDetailButton());
+
+    const restoredBoard = setBoardGeometry({
+      clientWidth: 320,
+      columns: [
+        { key: "running", left: 0, width: 280 },
+        { key: "completed", left: 320, width: 280 },
+      ],
+      scrollLeft: 0,
+      scrollWidth: 960,
+    });
+
+    await waitFor(() => {
+      expect(restoredBoard.scrollLeft).toBe(300);
     });
   });
 

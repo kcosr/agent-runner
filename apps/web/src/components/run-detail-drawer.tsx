@@ -9,6 +9,7 @@ import {
 } from "../lib/format.js";
 import type { RunTimelineState } from "../lib/run-timeline.js";
 import { useDrawerResize } from "../lib/use-drawer-resize.js";
+import { useHorizontalWheelGuard } from "../lib/use-horizontal-wheel-guard.js";
 import type { DrawerDetailSection, RunActionPending } from "../routes/use-runs-dashboard-state.js";
 import { isPreviewableAttachment } from "./attachment-preview-drawer.js";
 import { DrawerResizeHandle } from "./drawer-resize-handle.js";
@@ -165,6 +166,7 @@ export function RunDetailDrawer({
   onUploadAttachment: (file: File) => Promise<void>;
   run: RunDetail;
 }) {
+  const drawerRef = useRef<HTMLElement | null>(null);
   const [selectedAttempt, setSelectedAttempt] = useState<number | null>(null);
   const [timelineTab, setTimelineTab] = useState<TimelineTab>("output");
   const [editingName, setEditingName] = useState(false);
@@ -199,6 +201,7 @@ export function RunDetailDrawer({
   const addDependencyPending = actionPending === "add-dependency";
   const removeDependencyPending = actionPending === "remove-dependency";
   const clearDependenciesPending = actionPending === "clear-dependencies";
+  useHorizontalWheelGuard(drawerRef);
   const satisfiedDependencies = run.dependencies.filter(
     (dependency) => dependency.satisfied,
   ).length;
@@ -464,6 +467,7 @@ export function RunDetailDrawer({
       <aside
         aria-label="Run detail"
         className={isFullscreen ? "drawer drawer--fullscreen" : "drawer"}
+        ref={drawerRef}
         style={drawerStyle}
       >
         <DrawerResizeHandle label="Resize detail drawer" resize={resize} />

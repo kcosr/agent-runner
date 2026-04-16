@@ -1,9 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import type { RunAttachment } from "@task-runner/core/contracts/attachments.js";
+import { useRef } from "react";
 import { createApiClient } from "../lib/api-client.js";
 import { formatBytes, formatTimestamp } from "../lib/format.js";
 import { useRuntimeConfig } from "../lib/runtime-config.js";
 import { useDrawerResize } from "../lib/use-drawer-resize.js";
+import { useHorizontalWheelGuard } from "../lib/use-horizontal-wheel-guard.js";
 import type { RunActionPending } from "../routes/use-runs-dashboard-state.js";
 import { DrawerResizeHandle } from "./drawer-resize-handle.js";
 import { ChevronIcon, CloseIcon, CollapseIcon, DownloadIcon, ExpandIcon } from "./icons.js";
@@ -35,11 +37,13 @@ export function AttachmentPreviewDrawer({
   onDownload: (attachmentId: string, name: string) => Promise<void>;
   runId: string;
 }) {
+  const drawerRef = useRef<HTMLElement | null>(null);
   const config = useRuntimeConfig();
   const api = createApiClient(config);
   const resize = useDrawerResize();
   const { drawerStyle, isFullscreen, toggleFullscreen } = resize;
   const downloadPending = actionPending === "download-attachment";
+  useHorizontalWheelGuard(drawerRef);
   const previewQuery = useQuery({
     queryKey: ["attachment-preview", runId, attachmentId],
     queryFn: () => api.readAttachmentText(runId, attachmentId),
@@ -61,6 +65,7 @@ export function AttachmentPreviewDrawer({
       <aside
         aria-label="Attachment preview"
         className={isFullscreen ? "drawer drawer--fullscreen" : "drawer"}
+        ref={drawerRef}
         style={drawerStyle}
       >
         <DrawerResizeHandle label="Resize attachment preview drawer" resize={resize} />
