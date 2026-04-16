@@ -32,7 +32,7 @@ const PREFERENCE_ROWS: PreferenceRowDefinition[] = [
     key: "sortByRecentUpdates",
     title: "Sort by recent updates",
     description:
-      "Promote touched runs to the top of their columns instead of keeping the board in pure started-time order.",
+      "Promote touched runs to the top of their columns instead of keeping the board in pure started-time order. The touched-run ordering is in-memory only and resets on page restart.",
   },
 ];
 
