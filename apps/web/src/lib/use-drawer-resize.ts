@@ -1,6 +1,6 @@
 import type { CSSProperties, KeyboardEvent, PointerEvent } from "react";
 import { useEffect, useRef, useState } from "react";
-import { DRAWER_WIDTH_MIN, computeDrawerMaxWidth, useBoardSettings } from "./settings.js";
+import { DRAWER_WIDTH_MIN, computeDrawerMaxWidth, useDashboardViewState } from "./settings.js";
 
 interface DragState {
   pointerId: number;
@@ -30,7 +30,7 @@ export interface DrawerResize {
 }
 
 export function useDrawerResize(): DrawerResize {
-  const { settings, updateSettings } = useBoardSettings();
+  const { viewState, updateViewState } = useDashboardViewState();
   const [dragWidth, setDragWidth] = useState<number | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const [maxWidth, setMaxWidth] = useState(() => computeDrawerMaxWidth(readViewportWidth()));
@@ -43,8 +43,8 @@ export function useDrawerResize(): DrawerResize {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  const isFullscreen = settings.drawerFullscreen;
-  const storedWidth = settings.drawerWidth;
+  const isFullscreen = viewState.drawerFullscreen;
+  const storedWidth = viewState.drawerWidth;
   const width = isFullscreen ? maxWidth : clamp(dragWidth ?? storedWidth);
   const drawerStyle = { "--drawer-width": `${width}px` } as CSSProperties;
 
@@ -93,7 +93,7 @@ export function useDrawerResize(): DrawerResize {
     }
     if (next !== null) {
       event.preventDefault();
-      updateSettings({ drawerWidth: next });
+      updateViewState({ drawerWidth: next });
     }
   }
 
@@ -108,8 +108,8 @@ export function useDrawerResize(): DrawerResize {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
-    if (final !== settings.drawerWidth) {
-      updateSettings({ drawerWidth: final });
+    if (final !== viewState.drawerWidth) {
+      updateViewState({ drawerWidth: final });
     }
   }
 
@@ -126,7 +126,7 @@ export function useDrawerResize(): DrawerResize {
   }
 
   function toggleFullscreen() {
-    updateSettings({ drawerFullscreen: !isFullscreen });
+    updateViewState({ drawerFullscreen: !isFullscreen });
   }
 
   return {

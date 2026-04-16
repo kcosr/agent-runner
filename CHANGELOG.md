@@ -83,6 +83,7 @@
 
 ### Changed
 
+- The web dashboard settings split now persists durable board preferences (`hideEmptyColumns`, `collapseFailureStates`, `showArchived`) under `task-runner:web:dashboard-preferences` and the kanban sort mode under `task-runner:web:dashboard-view-state`; transient filters, drawer width/fullscreen state, collapsed columns, and per-run drawer tabs reset on full reload instead of carrying across sessions.
 - The attachment preview drawer now uses a more compact header layout and hides MIME type metadata in preview mode to reduce wasted vertical space, especially on mobile. ([#40](https://github.com/kcosr/task-runner/pull/40))
 - Replaced the bundled `repo-diagnostics` assignment with a bundled `test` assignment that only asks the agent to run `date` and `pwd`, without repo-specific context. ([#38](https://github.com/kcosr/task-runner/pull/38))
 - The web run detail drawer now shows `Reset` for non-running runs and only renders `Reset` / `Delete` when the backend-derived shared lifecycle capabilities allow them. ([#39](https://github.com/kcosr/task-runner/pull/39))

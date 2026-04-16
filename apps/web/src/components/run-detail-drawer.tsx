@@ -8,9 +8,10 @@ import {
   truncateMiddle,
 } from "../lib/format.js";
 import type { RunTimelineState } from "../lib/run-timeline.js";
+import type { DrawerDetailSection } from "../lib/settings.js";
 import { useDrawerResize } from "../lib/use-drawer-resize.js";
 import { useHorizontalWheelGuard } from "../lib/use-horizontal-wheel-guard.js";
-import type { DrawerDetailSection, RunActionPending } from "../routes/use-runs-dashboard-state.js";
+import type { RunActionPending } from "../routes/use-runs-dashboard-state.js";
 import { isPreviewableAttachment } from "./attachment-preview-drawer.js";
 import { DrawerResizeHandle } from "./drawer-resize-handle.js";
 import {

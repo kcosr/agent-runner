@@ -5,11 +5,8 @@ import { AttachmentPreviewDrawer } from "../components/attachment-preview-drawer
 import { RunDetailDrawer } from "../components/run-detail-drawer.js";
 import { isNotFoundError } from "../lib/api-client.js";
 import type { RunTimelineState } from "../lib/run-timeline.js";
-import type {
-  DrawerDetailSection,
-  RunActionPending,
-  RunDrawerView,
-} from "./use-runs-dashboard-state.js";
+import type { DrawerDetailSection, RunDrawerView } from "../lib/settings.js";
+import type { RunActionPending } from "./use-runs-dashboard-state.js";
 
 export function RunDetailPanel({
   onAddDependency,

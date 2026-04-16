@@ -40,16 +40,14 @@ export function RunsDashboardRoute() {
 
   return (
     <AppShell
-      board={
+      primary={
         <RunsBoardPanel
           activeBoardColumnKey={state.activeBoardColumnKey}
           boardColumns={state.boardColumns}
           collapsedColumnKeys={state.collapsedColumnKeys}
           onExpandColumn={state.columnActions.expand}
           onActiveBoardColumnKeyChange={state.setActiveBoardColumnKey}
-          onResetFilters={() =>
-            state.updateSettings({ repo: "all", search: "", showArchived: false })
-          }
+          onResetFilters={state.resetBoardFilters}
           onSelectRun={state.openRun}
           onToggleColumnCollapse={state.columnActions.toggleCollapse}
           runs={state.runs}
@@ -59,13 +57,13 @@ export function RunsDashboardRoute() {
         />
       }
       bottomNotices={bottomNotices.length > 0 ? bottomNotices : undefined}
-      detail={
+      secondary={
         <RunDetailPanel
           onAddDependency={state.runActions.addDependency}
           actionError={state.actionError}
           actionPending={state.actionPending}
-          drawerFullscreen={state.settings.drawerFullscreen}
-          drawerWidth={state.settings.drawerWidth}
+          drawerFullscreen={state.viewState.drawerFullscreen}
+          drawerWidth={state.viewState.drawerWidth}
           drawerView={state.selectedDrawerView}
           runs={state.runs}
           onBackToAttachments={state.returnSelectedRunToAttachments}
@@ -93,9 +91,11 @@ export function RunsDashboardRoute() {
       topNotices={topNotices.length > 0 ? topNotices : undefined}
       toolbar={
         <RunFilters
+          preferences={state.preferences}
           repoOptions={state.repoOptions}
-          settings={state.settings}
-          updateSettings={state.updateSettings}
+          updatePreferences={state.updatePreferences}
+          updateViewState={state.updateViewState}
+          viewState={state.viewState}
         />
       }
     />

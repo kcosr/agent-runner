@@ -6,19 +6,7 @@ import type {
   RunStatus,
   RunSummary,
 } from "@task-runner/core/contracts/runs.js";
-import {
-  type Dispatch,
-  type ReactNode,
-  type SetStateAction,
-  createContext,
-  createElement,
-  useContext,
-  useDeferredValue,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { BoardColumn } from "../components/run-column.js";
 import { createApiClient, isNotFoundError } from "../lib/api-client.js";
 import { queryClient, runQueryKeys } from "../lib/query.js";
@@ -26,7 +14,14 @@ import { useRunEvents } from "../lib/run-events.js";
 import { compareRunsByStartedAtDesc, sortRunsByStartedAtDesc } from "../lib/run-order.js";
 import { useRunTimelineState } from "../lib/run-timeline.js";
 import { useRuntimeConfig } from "../lib/runtime-config.js";
-import { type BoardSortMode, useBoardSettings } from "../lib/settings.js";
+import {
+  type BoardSortMode,
+  DEFAULT_DRAWER_VIEW,
+  type DrawerDetailSection,
+  type RunDrawerView,
+  useDashboardPreferences,
+  useDashboardViewState,
+} from "../lib/settings.js";
 import { subscribeToRunDetailEvents } from "../lib/sse.js";
 
 export interface NoticeState {
@@ -50,62 +45,6 @@ export type RunActionPending =
   | "add-dependency"
   | "remove-dependency"
   | "clear-dependencies";
-
-export type DrawerDetailSection = "tasks" | "attachments" | "dependencies" | "timing" | "events";
-
-export type RunDrawerView =
-  | {
-      mode: "detail";
-      detailSection: DrawerDetailSection;
-      attachmentId: null;
-    }
-  | {
-      mode: "attachment";
-      detailSection: "attachments";
-      attachmentId: string;
-    };
-
-const DEFAULT_DRAWER_VIEW: RunDrawerView = {
-  mode: "detail",
-  detailSection: "tasks",
-  attachmentId: null,
-};
-
-const DrawerViewsContext = createContext<{
-  activeBoardColumnKey: string | null;
-  drawerViewsByRunId: Record<string, RunDrawerView>;
-  setActiveBoardColumnKey: Dispatch<SetStateAction<string | null>>;
-  setDrawerViewsByRunId: Dispatch<SetStateAction<Record<string, RunDrawerView>>>;
-} | null>(null);
-
-export function RunsDashboardStateProvider({
-  children,
-}: {
-  children: ReactNode;
-}) {
-  const [activeBoardColumnKey, setActiveBoardColumnKey] = useState<string | null>(null);
-  const [drawerViewsByRunId, setDrawerViewsByRunId] = useState<Record<string, RunDrawerView>>({});
-  return createElement(
-    DrawerViewsContext.Provider,
-    {
-      value: {
-        activeBoardColumnKey,
-        drawerViewsByRunId,
-        setActiveBoardColumnKey,
-        setDrawerViewsByRunId,
-      },
-    },
-    children,
-  );
-}
-
-function useDrawerViewsState() {
-  const value = useContext(DrawerViewsContext);
-  if (!value) {
-    throw new Error("RunsDashboardStateProvider is required");
-  }
-  return value;
-}
 
 const FAILURE_STATUSES: RunStatus[] = ["exhausted", "error"];
 
@@ -287,19 +226,14 @@ async function invalidateRunQueries(runId: string) {
 export function useRunsDashboardState() {
   const config = useRuntimeConfig();
   const api = useMemo(() => createApiClient(config), [config]);
-  const { settings, updateSettings } = useBoardSettings();
-  const {
-    activeBoardColumnKey,
-    drawerViewsByRunId,
-    setActiveBoardColumnKey,
-    setDrawerViewsByRunId,
-  } = useDrawerViewsState();
+  const { preferences, updatePreferences } = useDashboardPreferences();
+  const { viewState, updateViewState } = useDashboardViewState();
   const {
     markRunTouched,
     recentUpdateSequenceByRunId,
     streamStale: summaryStreamStale,
   } = useRunEvents();
-  const deferredSearch = useDeferredValue(settings.search);
+  const deferredSearch = useDeferredValue(viewState.search);
   const navigate = useNavigate();
   const runRouteParams = useParams({ strict: false });
   const selectedRunId = "runId" in runRouteParams ? runRouteParams.runId : undefined;
@@ -348,34 +282,39 @@ export function useRunsDashboardState() {
   const visibleRuns = useMemo(
     () =>
       runs.filter((run) => {
-        if (!settings.showArchived && run.archivedAt) {
+        if (!preferences.showArchived && run.archivedAt) {
           return false;
         }
-        if (settings.repo !== "all" && run.repo !== settings.repo) {
+        if (viewState.repo !== "all" && run.repo !== viewState.repo) {
           return false;
         }
         return matchesSearch(run, deferredSearch);
       }),
-    [deferredSearch, runs, settings.repo, settings.showArchived],
+    [deferredSearch, preferences.showArchived, runs, viewState.repo],
   );
   const collapsedColumnKeySet = useMemo(
-    () => new Set(settings.collapsedColumnKeys),
-    [settings.collapsedColumnKeys],
+    () => new Set(viewState.collapsedColumnKeys),
+    [viewState.collapsedColumnKeys],
   );
   const columns = useMemo(
     () =>
       buildColumns(
-        sortRunsForBoard(visibleRuns, settings.sortMode, recentUpdateSequenceByRunId),
-        settings.collapseFailureStates,
+        sortRunsForBoard(visibleRuns, viewState.sortMode, recentUpdateSequenceByRunId),
+        preferences.collapseFailureStates,
       ),
-    [recentUpdateSequenceByRunId, settings.collapseFailureStates, settings.sortMode, visibleRuns],
+    [
+      preferences.collapseFailureStates,
+      recentUpdateSequenceByRunId,
+      viewState.sortMode,
+      visibleRuns,
+    ],
   );
-  const boardColumns = settings.hideEmptyColumns
+  const boardColumns = preferences.hideEmptyColumns
     ? columns.filter((column) => column.runs.length > 0)
     : columns;
   const selectedDrawerView =
     selectedRunId !== undefined
-      ? (drawerViewsByRunId[selectedRunId] ?? DEFAULT_DRAWER_VIEW)
+      ? (viewState.drawerViewsByRunId[selectedRunId] ?? DEFAULT_DRAWER_VIEW)
       : undefined;
 
   useEffect(() => {
@@ -687,19 +626,28 @@ export function useRunsDashboardState() {
       return;
     }
 
-    updateSettings({
+    updateViewState({
       collapsedColumnKeys: collapsed
-        ? [...settings.collapsedColumnKeys, columnKey]
-        : settings.collapsedColumnKeys.filter((key) => key !== columnKey),
+        ? [...viewState.collapsedColumnKeys, columnKey]
+        : viewState.collapsedColumnKeys.filter((key) => key !== columnKey),
     });
+  }
+
+  function setSelectedRunDrawerView(runId: string, drawerView: RunDrawerView) {
+    updateViewState((current) => ({
+      drawerViewsByRunId: {
+        ...current.drawerViewsByRunId,
+        [runId]: drawerView,
+      },
+    }));
   }
 
   return {
     actionError,
-    activeBoardColumnKey,
+    activeBoardColumnKey: viewState.activeBoardColumnKey,
     actionPending,
     boardColumns,
-    collapsedColumnKeys: settings.collapsedColumnKeys,
+    collapsedColumnKeys: viewState.collapsedColumnKeys,
     closeRun,
     columnActions: {
       expand: (columnKey: string) => {
@@ -740,15 +688,13 @@ export function useRunsDashboardState() {
       if (!selectedRunId) {
         return;
       }
-      setDrawerViewsByRunId((current) => ({
-        ...current,
-        [selectedRunId]: {
-          mode: "attachment",
-          detailSection: "attachments",
-          attachmentId,
-        },
-      }));
+      setSelectedRunDrawerView(selectedRunId, {
+        mode: "attachment",
+        detailSection: "attachments",
+        attachmentId,
+      });
     },
+    preferences,
     repoOptions,
     runActions: {
       abort: (runId: string) => abortMutation.mutate(runId),
@@ -786,37 +732,41 @@ export function useRunsDashboardState() {
     selectedRunId,
     selectedDrawerView,
     selectedRunQuery,
-    settings,
     streamStale: summaryStreamStale || detailStreamStale || timelineState.stale,
     timelineState,
     returnSelectedRunToAttachments: () => {
       if (!selectedRunId) {
         return;
       }
-      setDrawerViewsByRunId((current) => ({
-        ...current,
-        [selectedRunId]: {
-          mode: "detail",
-          detailSection: "attachments",
-          attachmentId: null,
-        },
-      }));
+      setSelectedRunDrawerView(selectedRunId, {
+        mode: "detail",
+        detailSection: "attachments",
+        attachmentId: null,
+      });
     },
-    setActiveBoardColumnKey,
+    resetBoardFilters: () => {
+      updateViewState({ repo: "all", search: "" });
+      updatePreferences({ showArchived: false });
+    },
+    setActiveBoardColumnKey: (columnKey: string | null) => {
+      if (viewState.activeBoardColumnKey === columnKey) {
+        return;
+      }
+      updateViewState({ activeBoardColumnKey: columnKey });
+    },
     updateSelectedRunDetailSection: (detailSection: DrawerDetailSection) => {
       if (!selectedRunId) {
         return;
       }
-      setDrawerViewsByRunId((current) => ({
-        ...current,
-        [selectedRunId]: {
-          mode: "detail",
-          detailSection,
-          attachmentId: null,
-        },
-      }));
+      setSelectedRunDrawerView(selectedRunId, {
+        mode: "detail",
+        detailSection,
+        attachmentId: null,
+      });
     },
-    updateSettings,
+    updatePreferences,
+    updateViewState,
     visibleRuns,
+    viewState,
   };
 }
