@@ -90,8 +90,6 @@ export function AttachmentPreviewDrawer({
             </div>
             {attachment ? (
               <div className="attachment-preview-meta-inline">
-                <span className="mono">{attachment.mimeType}</span>
-                <span aria-hidden="true">·</span>
                 <span>{formatBytes(attachment.size)}</span>
                 <span aria-hidden="true">·</span>
                 <span>{formatTimestamp(attachment.addedAt)}</span>
