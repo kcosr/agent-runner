@@ -1,12 +1,15 @@
 import type { ReactNode } from "react";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 
+export type BoardSortMode = "started" | "recent-updates";
+
 export interface BoardSettings {
   repo: string;
   showArchived: boolean;
   hideEmptyColumns: boolean;
   collapseFailureStates: boolean;
   collapsedColumnKeys: string[];
+  sortMode: BoardSortMode;
   search: string;
   drawerWidth: number;
   drawerFullscreen: boolean;
@@ -38,6 +41,7 @@ const DEFAULT_SETTINGS: BoardSettings = {
   hideEmptyColumns: true,
   collapseFailureStates: true,
   collapsedColumnKeys: [],
+  sortMode: "started",
   search: "",
   drawerWidth: DRAWER_WIDTH_DEFAULT,
   drawerFullscreen: false,
@@ -71,6 +75,10 @@ function parseStringArray(value: unknown): string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === "string") ? value : [];
 }
 
+function parseBoardSortMode(value: unknown): BoardSortMode {
+  return value === "recent-updates" || value === "started" ? value : DEFAULT_SETTINGS.sortMode;
+}
+
 function parseStoredSettings(value: unknown): BoardSettings {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return DEFAULT_SETTINGS;
@@ -92,6 +100,7 @@ function parseStoredSettings(value: unknown): BoardSettings {
         ? record.collapseFailureStates
         : DEFAULT_SETTINGS.collapseFailureStates,
     collapsedColumnKeys: parseStringArray(record.collapsedColumnKeys),
+    sortMode: parseBoardSortMode(record.sortMode),
     search: typeof record.search === "string" ? record.search : DEFAULT_SETTINGS.search,
     drawerWidth: clampDrawerWidth(
       typeof record.drawerWidth === "number" ? record.drawerWidth : DEFAULT_SETTINGS.drawerWidth,

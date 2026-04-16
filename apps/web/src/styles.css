@@ -1270,6 +1270,19 @@ body {
   gap: 8px;
 }
 
+.card[data-motion-active="true"] {
+  will-change: transform, box-shadow, background-color, border-color;
+}
+
+.card[data-motion-kind="insert"][data-motion-active="true"] {
+  animation: card-insert-motion 260ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.card[data-motion-kind="move"][data-motion-active="true"],
+.card[data-motion-kind="reorder"][data-motion-active="true"] {
+  animation: card-flash-motion 260ms ease-out;
+}
+
 .repo-badge {
   display: inline-flex;
   align-items: center;
@@ -1360,6 +1373,59 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+@keyframes card-flash-motion {
+  0% {
+    border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 18%, transparent);
+    background: color-mix(in srgb, var(--accent) 8%, var(--card));
+  }
+
+  45% {
+    border-color: color-mix(in srgb, var(--accent) 62%, var(--border));
+    box-shadow: 0 0 0 8px color-mix(in srgb, var(--accent) 14%, transparent);
+    background: color-mix(in srgb, var(--accent) 12%, var(--card));
+  }
+
+  100% {
+    border-color: var(--border);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent);
+    background: var(--card);
+  }
+}
+
+@keyframes card-insert-motion {
+  0% {
+    transform: translateY(12px) scale(0.985);
+    opacity: 0;
+    border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 18%, transparent);
+    background: color-mix(in srgb, var(--accent) 10%, var(--card));
+  }
+
+  55% {
+    opacity: 1;
+    border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
+    box-shadow: 0 0 0 8px color-mix(in srgb, var(--accent) 14%, transparent);
+    background: color-mix(in srgb, var(--accent) 12%, var(--card));
+  }
+
+  100% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+    border-color: var(--border);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent);
+    background: var(--card);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card[data-motion-kind="insert"][data-motion-active="true"],
+  .card[data-motion-kind="move"][data-motion-active="true"],
+  .card[data-motion-kind="reorder"][data-motion-active="true"] {
+    animation: card-flash-motion 180ms ease-out;
+  }
 }
 
 .drawer-title-block {

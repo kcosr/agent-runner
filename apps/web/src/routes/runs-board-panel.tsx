@@ -2,8 +2,39 @@ import type { UseQueryResult } from "@tanstack/react-query";
 import type { RunSummary } from "@task-runner/core/contracts/runs.js";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { EmptyPanel } from "../components/empty-states.js";
+import type { RunCardMotion } from "../components/run-card.js";
 import { type BoardColumn, RunColumn } from "../components/run-column.js";
 import { useHorizontalWheelGuard } from "../lib/use-horizontal-wheel-guard.js";
+
+interface RunBoardPosition {
+  columnKey: string;
+  index: number;
+}
+
+function buildRunBoardPositions(boardColumns: BoardColumn[]): Record<string, RunBoardPosition> {
+  const positions: Record<string, RunBoardPosition> = {};
+  for (const column of boardColumns) {
+    column.runs.forEach((run, index) => {
+      positions[run.runId] = { columnKey: column.key, index };
+    });
+  }
+  return positions;
+}
+
+function haveSameCardMotions(
+  left: Record<string, RunCardMotion>,
+  right: Record<string, RunCardMotion>,
+): boolean {
+  const leftEntries = Object.entries(left);
+  const rightEntries = Object.entries(right);
+  if (leftEntries.length !== rightEntries.length) {
+    return false;
+  }
+  return leftEntries.every(([runId, motion]) => {
+    const candidate = right[runId];
+    return candidate?.kind === motion.kind && candidate.revision === motion.revision;
+  });
+}
 
 export function RunsBoardPanel({
   activeBoardColumnKey,
@@ -37,6 +68,9 @@ export function RunsBoardPanel({
   const columnRefCallbacks = useRef(new Map<string, (node: HTMLElement | null) => void>());
   const pendingScrollColumnKeyRef = useRef<string | undefined>(undefined);
   const pendingRestoreColumnKeyRef = useRef<string | null>(activeBoardColumnKey);
+  const cardMotionRevisionRef = useRef(0);
+  const previousRunBoardPositionsRef = useRef<Record<string, RunBoardPosition> | null>(null);
+  const [motionsByRunId, setMotionsByRunId] = useState<Record<string, RunCardMotion>>({});
   const [showColumnJumpBar, setShowColumnJumpBar] = useState(false);
   const collapsedColumnKeySet = useMemo(() => new Set(collapsedColumnKeys), [collapsedColumnKeys]);
   const jumpColumns = useMemo(
@@ -44,6 +78,39 @@ export function RunsBoardPanel({
     [boardColumns],
   );
   useHorizontalWheelGuard(boardRef);
+
+  useLayoutEffect(() => {
+    const nextPositions = buildRunBoardPositions(boardColumns);
+    const previousPositions = previousRunBoardPositionsRef.current;
+    previousRunBoardPositionsRef.current = nextPositions;
+
+    if (!previousPositions) {
+      return;
+    }
+
+    const nextMotions: Record<string, RunCardMotion> = {};
+    for (const [runId, position] of Object.entries(nextPositions)) {
+      const previousPosition = previousPositions[runId];
+      if (!previousPosition) {
+        cardMotionRevisionRef.current += 1;
+        nextMotions[runId] = { kind: "insert", revision: cardMotionRevisionRef.current };
+        continue;
+      }
+      if (previousPosition.columnKey !== position.columnKey) {
+        cardMotionRevisionRef.current += 1;
+        nextMotions[runId] = { kind: "move", revision: cardMotionRevisionRef.current };
+        continue;
+      }
+      if (previousPosition.index !== position.index) {
+        cardMotionRevisionRef.current += 1;
+        nextMotions[runId] = { kind: "reorder", revision: cardMotionRevisionRef.current };
+      }
+    }
+
+    setMotionsByRunId((current) =>
+      haveSameCardMotions(current, nextMotions) ? current : nextMotions,
+    );
+  }, [boardColumns]);
 
   const resolveCenteredColumnKey = useCallback(
     (board: HTMLElement): string | null => {
@@ -287,6 +354,7 @@ export function RunsBoardPanel({
             column={column}
             columnRef={columnRefFor(column.key)}
             key={column.key}
+            motionsByRunId={motionsByRunId}
             onSelectRun={onSelectRun}
             onToggleCollapse={() => onToggleColumnCollapse(column.key)}
             selectedRunId={selectedRunId}
