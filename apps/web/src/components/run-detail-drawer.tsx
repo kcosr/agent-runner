@@ -183,7 +183,7 @@ export function RunDetailDrawer({
   const drawerBodyRef = useRef<HTMLDivElement | null>(null);
   const sectionTabsRef = useRef<HTMLElement | null>(null);
   const timelineContentScrollRef = useRef<HTMLDivElement | null>(null);
-  const timelineOutputAtBottomRef = useRef(true);
+  const timelineOutputAtBottomRef = useRef(false);
   const [selectedAttempt, setSelectedAttempt] = useState<number | null>(null);
   const [timelineTab, setTimelineTab] = useState<TimelineTab>("output");
   const [editingName, setEditingName] = useState(false);
@@ -195,7 +195,6 @@ export function RunDetailDrawer({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [dependencyDraft, setDependencyDraft] = useState("");
   const [selectedDependencyRunId, setSelectedDependencyRunId] = useState<string | null>(null);
-  const [timelineOutputAtBottom, setTimelineOutputAtBottom] = useState(true);
   const resize = useDrawerResize();
   const { drawerStyle, isFullscreen, toggleFullscreen } = resize;
   const nameInputRef = useRef<HTMLInputElement | null>(null);
@@ -249,6 +248,7 @@ export function RunDetailDrawer({
     null;
   const selectedAttemptNumber = selectedAttemptRecord?.attempt ?? null;
   const selectedAttemptOutput = selectedAttemptRecord ? attemptOutput(selectedAttemptRecord) : "";
+  const selectedAttemptLive = selectedAttemptRecord?.live ?? false;
 
   function startNameEdit() {
     if (actionsLocked) {
@@ -343,17 +343,6 @@ export function RunDetailDrawer({
   }, [activeSection, isPassiveRun, onSelectSection]);
 
   useEffect(() => {
-    timelineOutputAtBottomRef.current = timelineOutputAtBottom;
-  }, [timelineOutputAtBottom]);
-
-  useEffect(() => {
-    if (activeSection !== "events" || timelineTab !== "output" || selectedAttemptNumber === null) {
-      return;
-    }
-    setTimelineOutputAtBottom(true);
-  }, [activeSection, selectedAttemptNumber, timelineTab]);
-
-  useEffect(() => {
     const drawer = drawerRef.current;
     const drawerBody = drawerBodyRef.current;
     const sectionTabs = sectionTabsRef.current;
@@ -379,50 +368,47 @@ export function RunDetailDrawer({
     };
   }, []);
 
+  // Seed the "at bottom" ref whenever the output tab is (re)activated for an
+  // attempt, so the live-stream follow check reflects the user's actual
+  // position instead of a defaulted value.
   useEffect(() => {
     if (activeSection !== "events" || timelineTab !== "output" || selectedAttemptNumber === null) {
+      return;
+    }
+    const element = timelineContentScrollRef.current;
+    if (element) {
+      timelineOutputAtBottomRef.current = isScrolledToBottom(element);
+    }
+  }, [activeSection, selectedAttemptNumber, timelineTab]);
+
+  // While the selected attempt is live, whenever the transcript grows, keep
+  // the scroll pinned to the bottom if the user was already at the bottom.
+  // Do nothing on tab/attempt open — only react to actual deltas.
+  useEffect(() => {
+    if (activeSection !== "events" || timelineTab !== "output" || selectedAttemptNumber === null) {
+      return;
+    }
+    if (!selectedAttemptLive) {
+      return;
+    }
+    if (!selectedAttemptOutput) {
+      return;
+    }
+    if (!timelineOutputAtBottomRef.current) {
       return;
     }
     const element = timelineContentScrollRef.current;
     if (!element) {
       return;
     }
-
-    let frameId = 0;
-    const followTail = () => {
-      frameId = 0;
-      const target = timelineContentScrollRef.current;
-      if (!target || !timelineOutputAtBottomRef.current) {
-        return;
-      }
-      scrollElementToBottom(target);
-    };
-    const scheduleFollowTail = () => {
-      if (frameId !== 0) {
-        return;
-      }
-      frameId = requestAnimationFrame(followTail);
-    };
-
-    scheduleFollowTail();
-
-    const ResizeObserverCtor = window.ResizeObserver;
-    const observer =
-      ResizeObserverCtor !== undefined ? new ResizeObserver(() => scheduleFollowTail()) : null;
-    if (observer) {
-      observer.observe(element);
-      for (const child of Array.from(element.children)) {
-        observer.observe(child);
-      }
-    }
-
-    return () => {
-      if (frameId !== 0) {
-        cancelAnimationFrame(frameId);
-      }
-      observer?.disconnect();
-    };
-  }, [activeSection, selectedAttemptNumber, timelineTab]);
+    scrollElementToBottom(element);
+  }, [
+    activeSection,
+    selectedAttemptLive,
+    selectedAttemptNumber,
+    selectedAttemptOutput,
+    timelineTab,
+  ]);
 
   async function submitDependencyAdd() {
     if (!resolvedDependencyRunId || addDependencyPending) {
@@ -513,7 +499,7 @@ export function RunDetailDrawer({
     if (!element || timelineTab !== "output") {
       return;
     }
-    setTimelineOutputAtBottom(isScrolledToBottom(element));
+    timelineOutputAtBottomRef.current = isScrolledToBottom(element);
   }
 
   async function startRun() {
