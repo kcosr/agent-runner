@@ -896,14 +896,12 @@ body {
 
 .drawer-panel--events {
   display: flex;
+  flex: 0 0 auto;
   flex-direction: column;
-  min-height: 0;
   padding: 12px 0 0;
 }
 
 .drawer-confirm-actions,
-.timeline-panel,
-.timeline-attempt-panel,
 .timeline-attempts,
 .timeline-sticky-controls {
   display: flex;
@@ -917,9 +915,22 @@ body {
   align-items: center;
 }
 
-.timeline-panel,
+.timeline-panel {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  max-height: calc(var(--drawer-body-height, 100dvh) - var(--drawer-tabs-height, 0px) + 13px);
+}
+
 .timeline-attempt-panel {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 12px;
   min-height: 0;
+  min-width: 0;
 }
 
 .timeline-attempt-panel > section,
@@ -929,14 +940,12 @@ body {
 
 .timeline-sticky-controls {
   position: sticky;
-  top: 0;
+  top: var(--drawer-tabs-height, 0px);
   z-index: 1;
+  flex: 0 0 auto;
   padding-bottom: 4px;
-  background: var(--card);
-}
-
-.timeline-sticky-controls[data-pinned="true"] {
   border-bottom: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  background: var(--card);
 }
 
 .timeline-attempt-tabs {
@@ -973,20 +982,13 @@ body {
 }
 
 .timeline-content {
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--secondary);
   overflow-x: auto;
 }
 
 .timeline-content-scroll {
-  flex: 0 0 auto;
+  flex: 1 1 auto;
   min-height: 0;
   min-width: 0;
-}
-
-.timeline-content-scroll[data-inner-scroll-enabled="true"] {
   overflow-y: auto;
 }
 

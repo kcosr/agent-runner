@@ -888,70 +888,11 @@ function setTimelineScrollGeometry(options: {
   clientHeight: number;
   scrollHeight: number;
   scrollTop?: number;
-  tabsHeight?: number;
-  stickyHeight?: number;
-  stickyTop?: number;
 }) {
-  const detail = screen.getByLabelText("Run detail");
-  const drawerBody = detail.querySelector(".drawer-body");
-  const sectionTabs = detail.querySelector(".tabs");
-  const stickyControls = detail.querySelector(".timeline-sticky-controls");
   const scrollRegion = getTimelineContentScrollRegion();
-  if (
-    !(drawerBody instanceof HTMLElement) ||
-    !(sectionTabs instanceof HTMLElement) ||
-    !(stickyControls instanceof HTMLElement)
-  ) {
-    throw new Error("expected timeline layout elements");
-  }
-
   defineElementMetric(scrollRegion, "clientHeight", options.clientHeight);
   defineElementMetric(scrollRegion, "scrollHeight", options.scrollHeight);
   defineElementMetric(scrollRegion, "scrollTop", options.scrollTop ?? 0);
-  const tabsHeight = options.tabsHeight ?? 48;
-  const stickyTop = options.stickyTop ?? 0;
-  const stickyHeight = options.stickyHeight ?? 72;
-  defineElementMetric(drawerBody, "getBoundingClientRect", () => ({
-    top: 0,
-    bottom: 480,
-    left: 0,
-    right: 320,
-    width: 320,
-    height: 480,
-    x: 0,
-    y: 0,
-    toJSON() {
-      return {};
-    },
-  }));
-  defineElementMetric(sectionTabs, "getBoundingClientRect", () => ({
-    top: 0,
-    bottom: tabsHeight,
-    left: 0,
-    right: 320,
-    width: 320,
-    height: tabsHeight,
-    x: 0,
-    y: 0,
-    toJSON() {
-      return {};
-    },
-  }));
-  defineElementMetric(stickyControls, "getBoundingClientRect", () => ({
-    top: stickyTop,
-    bottom: stickyTop + stickyHeight,
-    left: 0,
-    right: 320,
-    width: 320,
-    height: stickyHeight,
-    x: 0,
-    y: stickyTop,
-    toJSON() {
-      return {};
-    },
-  }));
-
-  window.dispatchEvent(new Event("resize"));
   return scrollRegion;
 }
 
@@ -1056,13 +997,6 @@ describe("web app", () => {
       clientHeight: 120,
       scrollHeight: 280,
       scrollTop: 160,
-      stickyTop: 180,
-    });
-    await waitFor(() => {
-      expect(scrollRegion.dataset.innerScrollEnabled).toBe("false");
-    });
-    await waitFor(() => {
-      expect(stickyControls?.getAttribute("data-pinned")).toBe("false");
     });
     expect(scrollRegion.querySelector('[aria-label="Attempt output"]')).not.toBeNull();
 
@@ -1077,12 +1011,7 @@ describe("web app", () => {
       clientHeight: 120,
       scrollHeight: 280,
       scrollTop: 160,
-      stickyTop: 48,
     });
-    await waitFor(() => {
-      expect(scrollRegion.dataset.innerScrollEnabled).toBe("true");
-    });
-    expect((stickyControls as HTMLElement).style.top).toBe("48px");
     timelineSource.emitMessage({
       runId: "run-1",
       cursor: 4,

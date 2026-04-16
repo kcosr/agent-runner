@@ -1,13 +1,6 @@
 import type { RunAttachment } from "@task-runner/core/contracts/attachments.js";
 import type { RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
-import {
-  type ChangeEvent,
-  type KeyboardEvent,
-  type WheelEvent as ReactWheelEvent,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { type ChangeEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
 import {
   formatBytes,
   formatRelativeTimestamp,
@@ -41,8 +34,6 @@ import { StatusBadge } from "./status-badge.js";
 type TimelineTab = "prompt" | "output";
 
 const TIMELINE_BOTTOM_THRESHOLD_PX = 24;
-const TIMELINE_MIN_CONTENT_HEIGHT_PX = 160;
-const TIMELINE_BOTTOM_GAP_PX = 12;
 
 function dependencyCandidateTitle(run: RunSummary) {
   return run.name ?? run.assignmentName ?? "Unnamed";
@@ -191,9 +182,7 @@ export function RunDetailDrawer({
   const drawerRef = useRef<HTMLElement | null>(null);
   const drawerBodyRef = useRef<HTMLDivElement | null>(null);
   const sectionTabsRef = useRef<HTMLElement | null>(null);
-  const timelineStickyRef = useRef<HTMLDivElement | null>(null);
   const timelineContentScrollRef = useRef<HTMLDivElement | null>(null);
-  const timelinePendingInnerScrollDeltaRef = useRef(0);
   const [selectedAttempt, setSelectedAttempt] = useState<number | null>(null);
   const [timelineTab, setTimelineTab] = useState<TimelineTab>("output");
   const [editingName, setEditingName] = useState(false);
@@ -205,10 +194,6 @@ export function RunDetailDrawer({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [dependencyDraft, setDependencyDraft] = useState("");
   const [selectedDependencyRunId, setSelectedDependencyRunId] = useState<string | null>(null);
-  const [timelineContentMaxHeight, setTimelineContentMaxHeight] = useState<number | null>(null);
-  const [timelineInnerScrollEnabled, setTimelineInnerScrollEnabled] = useState(false);
-  const [timelineStickyTopOffset, setTimelineStickyTopOffset] = useState(0);
-  const [timelineStickyPinned, setTimelineStickyPinned] = useState(false);
   const [timelineOutputAtBottom, setTimelineOutputAtBottom] = useState(true);
   const resize = useDrawerResize();
   const { drawerStyle, isFullscreen, toggleFullscreen } = resize;
@@ -365,114 +350,30 @@ export function RunDetailDrawer({
   }, [activeSection, selectedAttemptNumber, timelineTab]);
 
   useEffect(() => {
-    if (activeSection !== "events" || selectedAttemptNumber === null) {
-      setTimelineStickyPinned(false);
-      setTimelineInnerScrollEnabled(false);
-      setTimelineContentMaxHeight(null);
-      setTimelineStickyTopOffset(0);
-      timelinePendingInnerScrollDeltaRef.current = 0;
+    const drawer = drawerRef.current;
+    const drawerBody = drawerBodyRef.current;
+    const sectionTabs = sectionTabsRef.current;
+    if (!drawer || !drawerBody || !sectionTabs) {
       return;
     }
 
-    let frameId = 0;
-    const updateLayout = () => {
-      frameId = 0;
-      const drawerBody = drawerBodyRef.current;
-      const stickyControls = timelineStickyRef.current;
-      if (!drawerBody || !stickyControls) {
-        return;
-      }
-      const drawerBodyRect = drawerBody.getBoundingClientRect();
-      const sectionTabsRect = sectionTabsRef.current?.getBoundingClientRect();
-      const stickyRect = stickyControls.getBoundingClientRect();
-      const content = timelineContentScrollRef.current;
-      const nextStickyTopOffset = Math.max(0, Math.floor(sectionTabsRect?.height ?? 0));
-      const pinned = stickyRect.top <= drawerBodyRect.top + nextStickyTopOffset + 1;
-      const nextInnerScrollEnabled = pinned;
-      const nextContentHeight = pinned
-        ? (() => {
-            const nextMaxHeight = Math.max(
-              TIMELINE_MIN_CONTENT_HEIGHT_PX,
-              Math.floor(
-                drawerBodyRect.height -
-                  nextStickyTopOffset -
-                  stickyRect.height -
-                  TIMELINE_BOTTOM_GAP_PX,
-              ),
-            );
-            return Math.max(
-              TIMELINE_MIN_CONTENT_HEIGHT_PX,
-              Math.min(nextMaxHeight, content?.scrollHeight ?? nextMaxHeight),
-            );
-          })()
-        : null;
-      setTimelineStickyTopOffset((current) =>
-        current === nextStickyTopOffset ? current : nextStickyTopOffset,
-      );
-      setTimelineStickyPinned((current) => (current === pinned ? current : pinned));
-      setTimelineInnerScrollEnabled((current) => {
-        return current === nextInnerScrollEnabled ? current : nextInnerScrollEnabled;
-      });
-      setTimelineContentMaxHeight((current) =>
-        current === nextContentHeight ? current : nextContentHeight,
-      );
-      if (nextInnerScrollEnabled && timelinePendingInnerScrollDeltaRef.current > 0 && content) {
-        const pendingDelta = timelinePendingInnerScrollDeltaRef.current;
-        timelinePendingInnerScrollDeltaRef.current = 0;
-        requestAnimationFrame(() => {
-          const nextContent = timelineContentScrollRef.current;
-          if (!nextContent) {
-            return;
-          }
-          const maxScrollTop = Math.max(0, nextContent.scrollHeight - nextContent.clientHeight);
-          const nextScrollTop = Math.min(maxScrollTop, nextContent.scrollTop + pendingDelta);
-          if (nextScrollTop === nextContent.scrollTop) {
-            return;
-          }
-          nextContent.scrollTop = nextScrollTop;
-          nextContent.dispatchEvent(new Event("scroll"));
-        });
-      }
+    const updateVars = () => {
+      drawer.style.setProperty("--drawer-body-height", `${drawerBody.clientHeight}px`);
+      drawer.style.setProperty("--drawer-tabs-height", `${sectionTabs.offsetHeight}px`);
     };
-    const scheduleLayoutUpdate = () => {
-      if (frameId !== 0) {
-        return;
-      }
-      frameId = requestAnimationFrame(updateLayout);
-    };
-
-    scheduleLayoutUpdate();
-    const drawerBody = drawerBodyRef.current;
-    drawerBody?.addEventListener("scroll", scheduleLayoutUpdate, { passive: true });
-    window.addEventListener("resize", scheduleLayoutUpdate);
+    updateVars();
 
     const ResizeObserverCtor = window.ResizeObserver;
-    const observer =
-      ResizeObserverCtor !== undefined ? new ResizeObserver(() => scheduleLayoutUpdate()) : null;
-    if (observer) {
-      if (drawerBodyRef.current) {
-        observer.observe(drawerBodyRef.current);
-      }
-      if (timelineStickyRef.current) {
-        observer.observe(timelineStickyRef.current);
-      }
-      if (sectionTabsRef.current) {
-        observer.observe(sectionTabsRef.current);
-      }
-      if (timelineContentScrollRef.current) {
-        observer.observe(timelineContentScrollRef.current);
-      }
-    }
+    const observer = ResizeObserverCtor !== undefined ? new ResizeObserver(updateVars) : null;
+    observer?.observe(drawerBody);
+    observer?.observe(sectionTabs);
+    window.addEventListener("resize", updateVars);
 
     return () => {
-      if (frameId !== 0) {
-        cancelAnimationFrame(frameId);
-      }
-      drawerBody?.removeEventListener("scroll", scheduleLayoutUpdate);
-      window.removeEventListener("resize", scheduleLayoutUpdate);
       observer?.disconnect();
+      window.removeEventListener("resize", updateVars);
     };
-  }, [activeSection, selectedAttemptNumber]);
+  }, []);
 
   useEffect(() => {
     if (activeSection !== "events" || timelineTab !== "output" || selectedAttemptNumber === null) {
@@ -616,77 +517,6 @@ export function RunDetailDrawer({
       return;
     }
     setTimelineOutputAtBottom(isScrolledToBottom(element));
-  }
-
-  function handleTimelineContentWheel(event: ReactWheelEvent<HTMLDivElement>) {
-    if (Math.abs(event.deltaY) < 1) {
-      return;
-    }
-    const content = timelineContentScrollRef.current;
-    const drawerBody = drawerBodyRef.current;
-    if (!content || !drawerBody) {
-      return;
-    }
-    if (timelineInnerScrollEnabled) {
-      const maxContentScrollTop = Math.max(0, content.scrollHeight - content.clientHeight);
-      const nextContentScrollTop = Math.min(
-        maxContentScrollTop,
-        Math.max(0, content.scrollTop + event.deltaY),
-      );
-      if (nextContentScrollTop !== content.scrollTop) {
-        content.scrollTop = nextContentScrollTop;
-        content.dispatchEvent(new Event("scroll"));
-        event.preventDefault();
-        return;
-      }
-      if (event.deltaY > 0) {
-        event.preventDefault();
-        return;
-      }
-      const maxDrawerScrollTop = Math.max(0, drawerBody.scrollHeight - drawerBody.clientHeight);
-      const nextDrawerScrollTop = Math.min(
-        maxDrawerScrollTop,
-        Math.max(0, drawerBody.scrollTop + event.deltaY),
-      );
-      if (nextDrawerScrollTop !== drawerBody.scrollTop) {
-        drawerBody.scrollTop = nextDrawerScrollTop;
-        drawerBody.dispatchEvent(new Event("scroll"));
-      }
-      event.preventDefault();
-      return;
-    }
-
-    if (event.deltaY > 0 && timelineStickyRef.current) {
-      const drawerBodyRect = drawerBody.getBoundingClientRect();
-      const stickyRect = timelineStickyRef.current.getBoundingClientRect();
-      const remainingToPin = Math.max(0, Math.ceil(stickyRect.top - drawerBodyRect.top));
-      const outerDelta = Math.min(event.deltaY, remainingToPin);
-      if (outerDelta > 0) {
-        const maxDrawerScrollTop = Math.max(0, drawerBody.scrollHeight - drawerBody.clientHeight);
-        const nextDrawerScrollTop = Math.min(maxDrawerScrollTop, drawerBody.scrollTop + outerDelta);
-        if (nextDrawerScrollTop !== drawerBody.scrollTop) {
-          drawerBody.scrollTop = nextDrawerScrollTop;
-          drawerBody.dispatchEvent(new Event("scroll"));
-        }
-        const overshoot = event.deltaY - outerDelta;
-        if (overshoot > 0) {
-          timelinePendingInnerScrollDeltaRef.current += overshoot;
-        }
-        event.preventDefault();
-        return;
-      }
-    }
-
-    const maxDrawerScrollTop = Math.max(0, drawerBody.scrollHeight - drawerBody.clientHeight);
-    const nextDrawerScrollTop = Math.min(
-      maxDrawerScrollTop,
-      Math.max(0, drawerBody.scrollTop + event.deltaY),
-    );
-    if (nextDrawerScrollTop !== drawerBody.scrollTop) {
-      drawerBody.scrollTop = nextDrawerScrollTop;
-      drawerBody.dispatchEvent(new Event("scroll"));
-      event.preventDefault();
-    }
   }
 
   async function startRun() {
@@ -1372,16 +1202,7 @@ export function RunDetailDrawer({
 
                 {selectedAttemptRecord ? (
                   <div className="timeline-attempt-panel">
-                    <div
-                      className="timeline-sticky-controls"
-                      data-pinned={timelineStickyPinned}
-                      ref={timelineStickyRef}
-                      style={
-                        timelineStickyTopOffset > 0
-                          ? { top: `${timelineStickyTopOffset}px` }
-                          : undefined
-                      }
-                    >
+                    <div className="timeline-sticky-controls">
                       {timelineAttempts.length > 1 ? (
                         <div className="timeline-attempts">
                           <div
@@ -1436,18 +1257,8 @@ export function RunDetailDrawer({
 
                     <div
                       className="timeline-content-scroll"
-                      data-inner-scroll-enabled={timelineInnerScrollEnabled}
-                      onWheel={handleTimelineContentWheel}
                       onScroll={handleTimelineContentScroll}
                       ref={timelineContentScrollRef}
-                      style={
-                        timelineContentMaxHeight === null
-                          ? undefined
-                          : {
-                              height: `${timelineContentMaxHeight}px`,
-                              maxHeight: `${timelineContentMaxHeight}px`,
-                            }
-                      }
                     >
                       {timelineTab === "prompt" ? (
                         selectedAttemptRecord.prompt ? (
