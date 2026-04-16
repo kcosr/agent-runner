@@ -147,6 +147,7 @@
 
 ### Fixed
 
+- Fixed `plan-feature` workflow drift around delayed implementer-run creation and execution handoff. The planner assignment now prepares `task-runner init --agent implementor --backend passive ...`, the planning handoff now treats `task-runner brief <new-run-id>` as the canonical execution surface for that passive implementer run, the generated implementation template now teaches the same brief-first passive workflow, and the local `plan-feature` skill was slimmed down to defer run-specific operational detail to the emitted assignment/brief.
 - Fixed restored web drawer widths to clamp to the current viewport, kept the detail drawer open after archiving, restored the active mobile board column after closing the detail overlay, and blocked horizontal swipe gestures in the board and drawers from triggering browser navigation. ([#40](https://github.com/kcosr/task-runner/pull/40))
 - Fixed Mermaid preview rendering to apply Mermaid's returned post-render bindings so interactive diagrams keep their event handlers. ([#40](https://github.com/kcosr/task-runner/pull/40))
 - Fixed run detail projections to preserve the canonical repo bucket from the workspace path instead of re-probing `cwd`, preventing web dashboard cards from disappearing under repo filters after the detail drawer refreshed a selected run. ([#39](https://github.com/kcosr/task-runner/pull/39))
