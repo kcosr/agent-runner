@@ -9,9 +9,8 @@ import {
   RuntimeConfigError,
   loadRuntimeConfig,
 } from "./lib/runtime-config.js";
-import { BoardSettingsProvider } from "./lib/settings.js";
+import { DashboardSettingsProvider } from "./lib/settings.js";
 import { router } from "./router.js";
-import { RunsDashboardStateProvider } from "./routes/use-runs-dashboard-state.js";
 
 type BootState =
   | { status: "loading" }
@@ -74,11 +73,9 @@ export function App() {
     <RuntimeConfigContext.Provider value={bootState.config}>
       <QueryClientProvider client={queryClient}>
         <RunEventsProvider config={bootState.config}>
-          <BoardSettingsProvider>
-            <RunsDashboardStateProvider>
-              <RouterProvider router={router} />
-            </RunsDashboardStateProvider>
-          </BoardSettingsProvider>
+          <DashboardSettingsProvider>
+            <RouterProvider router={router} />
+          </DashboardSettingsProvider>
         </RunEventsProvider>
       </QueryClientProvider>
     </RuntimeConfigContext.Provider>

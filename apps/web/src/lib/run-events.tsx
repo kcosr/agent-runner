@@ -1,15 +1,30 @@
 import type { AppRuntimeConfig } from "@task-runner/core/contracts/app-config.js";
 import type { RunSummaryStreamEvent } from "@task-runner/core/contracts/events.js";
 import type { RunSummary } from "@task-runner/core/contracts/runs.js";
-import { type ReactNode, createContext, useContext, useEffect, useRef, useState } from "react";
+import {
+  type ReactNode,
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { queryClient, runQueryKeys } from "./query.js";
+import { sortRunsByStartedAtDesc } from "./run-order.js";
 import { subscribeToRunSummaryEvents } from "./sse.js";
 
 interface RunEventsState {
   streamStale: boolean;
+  recentUpdateSequenceByRunId: Record<string, number>;
+  markRunTouched: (runId: string) => void;
 }
 
-const RunEventsContext = createContext<RunEventsState>({ streamStale: false });
+const RunEventsContext = createContext<RunEventsState>({
+  streamStale: false,
+  recentUpdateSequenceByRunId: {},
+  markRunTouched: () => {},
+});
 
 function upsertSummary(
   current: RunSummary[] | undefined,
@@ -20,9 +35,7 @@ function upsertSummary(
   }
   const existingIndex = current.findIndex((run) => run.runId === incoming.runId);
   if (existingIndex === -1) {
-    return [...current, incoming].sort((left, right) =>
-      right.startedAt.localeCompare(left.startedAt),
-    );
+    return sortRunsByStartedAtDesc([...current, incoming]);
   }
   const next = [...current];
   next[existingIndex] = incoming;
@@ -47,7 +60,19 @@ export function RunEventsProvider({
   config: AppRuntimeConfig;
 }) {
   const [streamStale, setStreamStale] = useState(false);
+  const [recentUpdateSequenceByRunId, setRecentUpdateSequenceByRunId] = useState<
+    Record<string, number>
+  >({});
   const streamStaleRef = useRef(streamStale);
+  const nextRecentUpdateSequenceRef = useRef(0);
+
+  const markRunTouched = useCallback((runId: string) => {
+    setRecentUpdateSequenceByRunId((current) => {
+      const nextSequence = nextRecentUpdateSequenceRef.current + 1;
+      nextRecentUpdateSequenceRef.current = nextSequence;
+      return { ...current, [runId]: nextSequence };
+    });
+  }, []);
 
   useEffect(() => {
     streamStaleRef.current = streamStale;
@@ -91,6 +116,9 @@ export function RunEventsProvider({
           streamStaleRef.current = false;
           setStreamStale(false);
         }
+        if (payload.type === "summary_upsert") {
+          markRunTouched(payload.summary.runId);
+        }
         queryClient.setQueryData<RunSummary[] | undefined>(runQueryKeys.list(), (current) =>
           applySummaryEvent(current, payload),
         );
@@ -108,9 +136,13 @@ export function RunEventsProvider({
       disposed = true;
       unsubscribe();
     };
-  }, [config]);
+  }, [config, markRunTouched]);
 
-  return <RunEventsContext.Provider value={{ streamStale }}>{children}</RunEventsContext.Provider>;
+  return (
+    <RunEventsContext.Provider value={{ streamStale, recentUpdateSequenceByRunId, markRunTouched }}>
+      {children}
+    </RunEventsContext.Provider>
+  );
 }
 
 export function useRunEvents(): RunEventsState {

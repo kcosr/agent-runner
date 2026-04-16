@@ -6,26 +6,21 @@ import type {
   RunStatus,
   RunSummary,
 } from "@task-runner/core/contracts/runs.js";
-import {
-  type Dispatch,
-  type ReactNode,
-  type SetStateAction,
-  createContext,
-  createElement,
-  useContext,
-  useDeferredValue,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { BoardColumn } from "../components/run-column.js";
 import { createApiClient, isNotFoundError } from "../lib/api-client.js";
 import { queryClient, runQueryKeys } from "../lib/query.js";
 import { useRunEvents } from "../lib/run-events.js";
+import { compareRunsByStartedAtDesc, sortRunsByStartedAtDesc } from "../lib/run-order.js";
 import { useRunTimelineState } from "../lib/run-timeline.js";
 import { useRuntimeConfig } from "../lib/runtime-config.js";
-import { useBoardSettings } from "../lib/settings.js";
+import {
+  DEFAULT_DRAWER_VIEW,
+  type DrawerDetailSection,
+  type RunDrawerView,
+  useDashboardPreferences,
+  useDashboardViewState,
+} from "../lib/settings.js";
 import { subscribeToRunDetailEvents } from "../lib/sse.js";
 
 export interface NoticeState {
@@ -49,62 +44,6 @@ export type RunActionPending =
   | "add-dependency"
   | "remove-dependency"
   | "clear-dependencies";
-
-export type DrawerDetailSection = "tasks" | "attachments" | "dependencies" | "timing" | "events";
-
-export type RunDrawerView =
-  | {
-      mode: "detail";
-      detailSection: DrawerDetailSection;
-      attachmentId: null;
-    }
-  | {
-      mode: "attachment";
-      detailSection: "attachments";
-      attachmentId: string;
-    };
-
-const DEFAULT_DRAWER_VIEW: RunDrawerView = {
-  mode: "detail",
-  detailSection: "tasks",
-  attachmentId: null,
-};
-
-const DrawerViewsContext = createContext<{
-  activeBoardColumnKey: string | null;
-  drawerViewsByRunId: Record<string, RunDrawerView>;
-  setActiveBoardColumnKey: Dispatch<SetStateAction<string | null>>;
-  setDrawerViewsByRunId: Dispatch<SetStateAction<Record<string, RunDrawerView>>>;
-} | null>(null);
-
-export function RunsDashboardStateProvider({
-  children,
-}: {
-  children: ReactNode;
-}) {
-  const [activeBoardColumnKey, setActiveBoardColumnKey] = useState<string | null>(null);
-  const [drawerViewsByRunId, setDrawerViewsByRunId] = useState<Record<string, RunDrawerView>>({});
-  return createElement(
-    DrawerViewsContext.Provider,
-    {
-      value: {
-        activeBoardColumnKey,
-        drawerViewsByRunId,
-        setActiveBoardColumnKey,
-        setDrawerViewsByRunId,
-      },
-    },
-    children,
-  );
-}
-
-function useDrawerViewsState() {
-  const value = useContext(DrawerViewsContext);
-  if (!value) {
-    throw new Error("RunsDashboardStateProvider is required");
-  }
-  return value;
-}
 
 const FAILURE_STATUSES: RunStatus[] = ["exhausted", "error"];
 
@@ -151,6 +90,32 @@ function buildColumns(runs: RunSummary[], collapseFailureStates: boolean): Board
   }));
 }
 
+function compareRunsByRecentUpdate(
+  left: RunSummary,
+  right: RunSummary,
+  recentUpdateSequenceByRunId: Record<string, number>,
+): number {
+  const leftSequence = recentUpdateSequenceByRunId[left.runId] ?? 0;
+  const rightSequence = recentUpdateSequenceByRunId[right.runId] ?? 0;
+  if (leftSequence !== rightSequence) {
+    return rightSequence - leftSequence;
+  }
+  return compareRunsByStartedAtDesc(left, right);
+}
+
+function sortRunsForBoard(
+  runs: RunSummary[],
+  sortByRecentUpdates: boolean,
+  recentUpdateSequenceByRunId: Record<string, number>,
+): RunSummary[] {
+  if (sortByRecentUpdates) {
+    return [...runs].sort((left, right) =>
+      compareRunsByRecentUpdate(left, right, recentUpdateSequenceByRunId),
+    );
+  }
+  return sortRunsByStartedAtDesc(runs);
+}
+
 function appendNotice(current: NoticeState[], notice: NoticeState): NoticeState[] {
   if (current.some((entry) => entry.id === notice.id)) {
     return current;
@@ -193,7 +158,7 @@ function useRunActionMutation(
   action: (runId: string) => Promise<unknown>,
   setActionError: (message: string | undefined) => void,
   options: {
-    onSuccess?: () => void;
+    onSuccess?: (runId: string) => void;
   } = {},
 ) {
   return useMutation({
@@ -204,7 +169,7 @@ function useRunActionMutation(
     onSuccess: async (_result, runId) => {
       setActionError(undefined);
       await invalidateRunQueries(runId);
-      options.onSuccess?.();
+      options.onSuccess?.(runId);
     },
   });
 }
@@ -258,15 +223,14 @@ async function invalidateRunQueries(runId: string) {
 export function useRunsDashboardState() {
   const config = useRuntimeConfig();
   const api = useMemo(() => createApiClient(config), [config]);
-  const { settings, updateSettings } = useBoardSettings();
+  const { preferences, updatePreferences } = useDashboardPreferences();
+  const { viewState, updateViewState } = useDashboardViewState();
   const {
-    activeBoardColumnKey,
-    drawerViewsByRunId,
-    setActiveBoardColumnKey,
-    setDrawerViewsByRunId,
-  } = useDrawerViewsState();
-  const { streamStale: summaryStreamStale } = useRunEvents();
-  const deferredSearch = useDeferredValue(settings.search);
+    markRunTouched,
+    recentUpdateSequenceByRunId,
+    streamStale: summaryStreamStale,
+  } = useRunEvents();
+  const deferredSearch = useDeferredValue(viewState.search);
   const navigate = useNavigate();
   const runRouteParams = useParams({ strict: false });
   const selectedRunId = "runId" in runRouteParams ? runRouteParams.runId : undefined;
@@ -315,30 +279,39 @@ export function useRunsDashboardState() {
   const visibleRuns = useMemo(
     () =>
       runs.filter((run) => {
-        if (!settings.showArchived && run.archivedAt) {
+        if (!preferences.showArchived && run.archivedAt) {
           return false;
         }
-        if (settings.repo !== "all" && run.repo !== settings.repo) {
+        if (viewState.repo !== "all" && run.repo !== viewState.repo) {
           return false;
         }
         return matchesSearch(run, deferredSearch);
       }),
-    [deferredSearch, runs, settings.repo, settings.showArchived],
+    [deferredSearch, preferences.showArchived, runs, viewState.repo],
   );
   const collapsedColumnKeySet = useMemo(
-    () => new Set(settings.collapsedColumnKeys),
-    [settings.collapsedColumnKeys],
+    () => new Set(viewState.collapsedColumnKeys),
+    [viewState.collapsedColumnKeys],
   );
   const columns = useMemo(
-    () => buildColumns(visibleRuns, settings.collapseFailureStates),
-    [settings.collapseFailureStates, visibleRuns],
+    () =>
+      buildColumns(
+        sortRunsForBoard(visibleRuns, preferences.sortByRecentUpdates, recentUpdateSequenceByRunId),
+        preferences.collapseFailureStates,
+      ),
+    [
+      preferences.collapseFailureStates,
+      preferences.sortByRecentUpdates,
+      recentUpdateSequenceByRunId,
+      visibleRuns,
+    ],
   );
-  const boardColumns = settings.hideEmptyColumns
+  const boardColumns = preferences.hideEmptyColumns
     ? columns.filter((column) => column.runs.length > 0)
     : columns;
   const selectedDrawerView =
     selectedRunId !== undefined
-      ? (drawerViewsByRunId[selectedRunId] ?? DEFAULT_DRAWER_VIEW)
+      ? (viewState.drawerViewsByRunId[selectedRunId] ?? DEFAULT_DRAWER_VIEW)
       : undefined;
 
   useEffect(() => {
@@ -398,6 +371,7 @@ export function useRunsDashboardState() {
     if (!selectedRunId) {
       return;
     }
+    const runId = selectedRunId;
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.defaultPrevented) {
@@ -407,6 +381,14 @@ export function useRunsDashboardState() {
         return;
       }
       setActionError(undefined);
+      if (selectedDrawerView?.mode === "attachment") {
+        setSelectedRunDrawerView(runId, {
+          mode: "detail",
+          detailSection: "attachments",
+          attachmentId: null,
+        });
+        return;
+      }
       void navigate({ to: "/" });
     }
 
@@ -414,7 +396,7 @@ export function useRunsDashboardState() {
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [navigate, selectedRunId]);
+  }, [navigate, selectedRunId, selectedDrawerView?.mode]);
 
   useEffect(() => {
     if (!selectedRunId) {
@@ -461,6 +443,7 @@ export function useRunsDashboardState() {
           detailStreamStaleRef.current = false;
           setDetailStreamStale(false);
         }
+        markRunTouched(payload.detail.runId);
         syncRunSummaryFromDetail(payload.detail);
         queryClient.setQueryData(runQueryKeys.detail(runId), payload.detail);
       },
@@ -477,15 +460,21 @@ export function useRunsDashboardState() {
       disposed = true;
       unsubscribe();
     };
-  }, [config, selectedRunId]);
+  }, [config, markRunTouched, selectedRunId]);
 
   const closeRun = () => {
     void navigate({ to: "/" });
   };
 
-  const archiveMutation = useRunActionMutation(api.archiveRun, setActionError);
-  const unarchiveMutation = useRunActionMutation(api.unarchiveRun, setActionError);
-  const resetMutation = useRunActionMutation(api.resetRun, setActionError);
+  const archiveMutation = useRunActionMutation(api.archiveRun, setActionError, {
+    onSuccess: markRunTouched,
+  });
+  const unarchiveMutation = useRunActionMutation(api.unarchiveRun, setActionError, {
+    onSuccess: markRunTouched,
+  });
+  const resetMutation = useRunActionMutation(api.resetRun, setActionError, {
+    onSuccess: markRunTouched,
+  });
   const deleteMutation = useMutation({
     mutationFn: (runId: string) => api.deleteRun(runId),
     onError: (error: Error) => {
@@ -506,10 +495,13 @@ export function useRunsDashboardState() {
     },
     onSuccess: async (_result, { runId }) => {
       setActionError(undefined);
+      markRunTouched(runId);
       await invalidateRunQueries(runId);
     },
   });
-  const abortMutation = useRunActionMutation(api.abortRun, setActionError);
+  const abortMutation = useRunActionMutation(api.abortRun, setActionError, {
+    onSuccess: markRunTouched,
+  });
   const renameMutation = useMutation({
     mutationFn: ({ name, runId }: { runId: string; name: string | null }) =>
       api.setRunName(runId, name),
@@ -519,6 +511,7 @@ export function useRunsDashboardState() {
     onSuccess: async (result, { runId }) => {
       setActionError(undefined);
       updateRunNameCaches(result);
+      markRunTouched(runId);
       await invalidateRunQueries(runId);
     },
   });
@@ -530,6 +523,7 @@ export function useRunsDashboardState() {
     },
     onSuccess: async (result) => {
       setActionError(undefined);
+      markRunTouched(result.runId);
       await invalidateRunQueries(result.runId);
     },
   });
@@ -541,6 +535,7 @@ export function useRunsDashboardState() {
     },
     onSuccess: async (result) => {
       setActionError(undefined);
+      markRunTouched(result.runId);
       await invalidateRunQueries(result.runId);
     },
   });
@@ -551,6 +546,7 @@ export function useRunsDashboardState() {
     },
     onSuccess: async (result) => {
       setActionError(undefined);
+      markRunTouched(result.runId);
       await invalidateRunQueries(result.runId);
     },
   });
@@ -562,6 +558,7 @@ export function useRunsDashboardState() {
     },
     onSuccess: async (_result, { runId }) => {
       setActionError(undefined);
+      markRunTouched(runId);
       await invalidateRunQueries(runId);
     },
   });
@@ -573,6 +570,7 @@ export function useRunsDashboardState() {
     },
     onSuccess: async (result) => {
       setActionError(undefined);
+      markRunTouched(result.runId);
       await invalidateRunQueries(result.runId);
     },
   });
@@ -634,19 +632,28 @@ export function useRunsDashboardState() {
       return;
     }
 
-    updateSettings({
+    updateViewState({
       collapsedColumnKeys: collapsed
-        ? [...settings.collapsedColumnKeys, columnKey]
-        : settings.collapsedColumnKeys.filter((key) => key !== columnKey),
+        ? [...viewState.collapsedColumnKeys, columnKey]
+        : viewState.collapsedColumnKeys.filter((key) => key !== columnKey),
     });
+  }
+
+  function setSelectedRunDrawerView(runId: string, drawerView: RunDrawerView) {
+    updateViewState((current) => ({
+      drawerViewsByRunId: {
+        ...current.drawerViewsByRunId,
+        [runId]: drawerView,
+      },
+    }));
   }
 
   return {
     actionError,
-    activeBoardColumnKey,
+    activeBoardColumnKey: viewState.activeBoardColumnKey,
     actionPending,
     boardColumns,
-    collapsedColumnKeys: settings.collapsedColumnKeys,
+    collapsedColumnKeys: viewState.collapsedColumnKeys,
     closeRun,
     columnActions: {
       expand: (columnKey: string) => {
@@ -687,15 +694,13 @@ export function useRunsDashboardState() {
       if (!selectedRunId) {
         return;
       }
-      setDrawerViewsByRunId((current) => ({
-        ...current,
-        [selectedRunId]: {
-          mode: "attachment",
-          detailSection: "attachments",
-          attachmentId,
-        },
-      }));
+      setSelectedRunDrawerView(selectedRunId, {
+        mode: "attachment",
+        detailSection: "attachments",
+        attachmentId,
+      });
     },
+    preferences,
     repoOptions,
     runActions: {
       abort: (runId: string) => abortMutation.mutate(runId),
@@ -733,37 +738,41 @@ export function useRunsDashboardState() {
     selectedRunId,
     selectedDrawerView,
     selectedRunQuery,
-    settings,
     streamStale: summaryStreamStale || detailStreamStale || timelineState.stale,
     timelineState,
     returnSelectedRunToAttachments: () => {
       if (!selectedRunId) {
         return;
       }
-      setDrawerViewsByRunId((current) => ({
-        ...current,
-        [selectedRunId]: {
-          mode: "detail",
-          detailSection: "attachments",
-          attachmentId: null,
-        },
-      }));
+      setSelectedRunDrawerView(selectedRunId, {
+        mode: "detail",
+        detailSection: "attachments",
+        attachmentId: null,
+      });
     },
-    setActiveBoardColumnKey,
+    resetBoardFilters: () => {
+      updateViewState({ repo: "all", search: "" });
+      updatePreferences({ showArchived: false });
+    },
+    setActiveBoardColumnKey: (columnKey: string | null) => {
+      if (viewState.activeBoardColumnKey === columnKey) {
+        return;
+      }
+      updateViewState({ activeBoardColumnKey: columnKey });
+    },
     updateSelectedRunDetailSection: (detailSection: DrawerDetailSection) => {
       if (!selectedRunId) {
         return;
       }
-      setDrawerViewsByRunId((current) => ({
-        ...current,
-        [selectedRunId]: {
-          mode: "detail",
-          detailSection,
-          attachmentId: null,
-        },
-      }));
+      setSelectedRunDrawerView(selectedRunId, {
+        mode: "detail",
+        detailSection,
+        attachmentId: null,
+      });
     },
-    updateSettings,
+    updatePreferences,
+    updateViewState,
     visibleRuns,
+    viewState,
   };
 }

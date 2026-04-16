@@ -66,6 +66,17 @@ export function ArchiveIcon(props: IconProps) {
   );
 }
 
+export function SortIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M7 4v16" />
+      <path d="m4 7 3-3 3 3" />
+      <path d="M17 20V4" />
+      <path d="m14 17 3 3 3-3" />
+    </IconBase>
+  );
+}
+
 export function DependencyIcon(props: IconProps) {
   return (
     <IconBase {...props}>

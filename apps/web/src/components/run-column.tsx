@@ -1,7 +1,7 @@
 import type { RunStatus, RunSummary } from "@task-runner/core/contracts/runs.js";
 import type { KeyboardEvent, MouseEvent } from "react";
 import { ChevronIcon } from "./icons.js";
-import { RunCard } from "./run-card.js";
+import { RunCard, type RunCardMotion } from "./run-card.js";
 
 export interface BoardColumn {
   key: string;
@@ -15,6 +15,7 @@ export function RunColumn({
   collapsed,
   column,
   columnRef,
+  motionsByRunId,
   selectedRunId,
   onToggleCollapse,
   onSelectRun,
@@ -22,6 +23,7 @@ export function RunColumn({
   collapsed: boolean;
   column: BoardColumn;
   columnRef?: (node: HTMLElement | null) => void;
+  motionsByRunId: Record<string, RunCardMotion>;
   selectedRunId?: string;
   onToggleCollapse: () => void;
   onSelectRun: (runId: string) => void;
@@ -99,6 +101,7 @@ export function RunColumn({
         {column.runs.map((run) => (
           <RunCard
             key={run.runId}
+            motion={motionsByRunId[run.runId]}
             onSelect={() => onSelectRun(run.runId)}
             run={run}
             selected={run.runId === selectedRunId}

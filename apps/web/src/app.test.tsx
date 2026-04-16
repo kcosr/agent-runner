@@ -26,6 +26,13 @@ const APP_CONFIG = {
   runSummaryEventsPath: "/api/events/run-summaries",
 };
 
+const DEFAULT_DASHBOARD_PREFERENCES = {
+  hideEmptyColumns: true,
+  collapseFailureStates: true,
+  showArchived: false,
+  sortByRecentUpdates: false,
+};
+
 class MockEventSource {
   static instances: MockEventSource[] = [];
 
@@ -54,6 +61,16 @@ class MockEventSource {
   emitOpen() {
     this.onopen?.(new Event("open"));
   }
+}
+
+function setStoredDashboardPreferences(overrides: Partial<typeof DEFAULT_DASHBOARD_PREFERENCES>) {
+  window.localStorage.setItem(
+    "task-runner:web:dashboard-preferences",
+    JSON.stringify({
+      ...DEFAULT_DASHBOARD_PREFERENCES,
+      ...overrides,
+    }),
+  );
 }
 
 function abortReasonForStatus(status: RunSummary["status"] | RunDetail["status"]) {
@@ -753,15 +770,21 @@ function installFetchMock(
   return fetchMock;
 }
 
-async function renderApp() {
-  await router.navigate({ to: "/" });
+async function renderApp(initialPath = "/") {
+  await router.navigate({ to: initialPath });
   return render(<App />);
 }
 
 async function findRunCard(name: string | RegExp) {
-  return await screen.findByRole("button", {
-    name: typeof name === "string" ? new RegExp(name, "i") : name,
-  });
+  return await screen.findByRole(
+    "button",
+    {
+      name: typeof name === "string" ? new RegExp(name, "i") : name,
+    },
+    {
+      timeout: 5000,
+    },
+  );
 }
 
 function findEventSource(urlSuffix: string) {
@@ -792,6 +815,13 @@ function getBoardColumn(name: string) {
     throw new Error(`expected board column ${name}`);
   }
   return column as HTMLElement;
+}
+
+function getColumnRunNames(name: string) {
+  const column = getBoardColumn(name);
+  return Array.from(column.querySelectorAll(".col-body .card .card-title")).map(
+    (element) => element.textContent ?? "",
+  );
 }
 
 function defineElementMetric(element: Element, key: string, value: number | (() => void)) {
@@ -846,6 +876,26 @@ function setBoardGeometry(options: {
   return board as HTMLElement;
 }
 
+function getTimelineContentScrollRegion() {
+  const scrollRegion = document.querySelector(".timeline-content-scroll");
+  if (!(scrollRegion instanceof HTMLElement)) {
+    throw new Error("expected timeline content scroll region");
+  }
+  return scrollRegion;
+}
+
+function setTimelineScrollGeometry(options: {
+  clientHeight: number;
+  scrollHeight: number;
+  scrollTop?: number;
+}) {
+  const scrollRegion = getTimelineContentScrollRegion();
+  defineElementMetric(scrollRegion, "clientHeight", options.clientHeight);
+  defineElementMetric(scrollRegion, "scrollHeight", options.scrollHeight);
+  defineElementMetric(scrollRegion, "scrollTop", options.scrollTop ?? 0);
+  return scrollRegion;
+}
+
 describe("web app", () => {
   beforeEach(() => {
     queryClient.clear();
@@ -880,7 +930,7 @@ describe("web app", () => {
     expect(screen.getByRole("button", { name: /copy run id/i })).toBeInTheDocument();
   });
 
-  it("renders attempt history in the attempts tab and merges live output by cursor", async () => {
+  it("renders attempt history in the attempts tab with nested scroll-follow behavior", async () => {
     installFetchMock({
       runs: [makeRun()],
       details: { "run-1": makeDetail() },
@@ -931,9 +981,24 @@ describe("web app", () => {
     expect(screen.getByRole("tab", { name: "2" })).toBeInTheDocument();
     expect(screen.queryByText("Session 1")).not.toBeInTheDocument();
 
+    const detail = screen.getByLabelText("Run detail");
+    const stickyControls = detail.querySelector(".timeline-sticky-controls");
+    expect(stickyControls).not.toBeNull();
+    expect(stickyControls?.querySelector('[role="tablist"][aria-label="Attempts"]')).not.toBeNull();
+    expect(
+      stickyControls?.querySelector('[role="tablist"][aria-label="Attempt view"]'),
+    ).not.toBeNull();
+
     const output = await screen.findByRole("region", { name: "Attempt output" });
     expect(output).toHaveTextContent("Streaming");
     expect(within(output).getByText("warning")).toBeInTheDocument();
+
+    const scrollRegion = setTimelineScrollGeometry({
+      clientHeight: 120,
+      scrollHeight: 280,
+      scrollTop: 160,
+    });
+    expect(scrollRegion.querySelector('[aria-label="Attempt output"]')).not.toBeNull();
 
     await user.click(screen.getByRole("tab", { name: "Prompt" }));
     const prompt = screen.getByRole("region", { name: "Attempt prompt" });
@@ -942,6 +1007,11 @@ describe("web app", () => {
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Output" }));
+    setTimelineScrollGeometry({
+      clientHeight: 120,
+      scrollHeight: 280,
+      scrollTop: 160,
+    });
     timelineSource.emitMessage({
       runId: "run-1",
       cursor: 4,
@@ -950,12 +1020,36 @@ describe("web app", () => {
         text: " live",
       },
     });
+    defineElementMetric(scrollRegion, "scrollHeight", 360);
 
     await waitFor(() => {
       expect(screen.getByRole("region", { name: "Attempt output" })).toHaveTextContent(
         "Streaming live warning",
       );
     });
+    await waitFor(() => {
+      expect(scrollRegion.scrollTop).toBe(240);
+    });
+
+    defineElementMetric(scrollRegion, "scrollTop", 32);
+    scrollRegion.dispatchEvent(new Event("scroll"));
+
+    timelineSource.emitMessage({
+      runId: "run-1",
+      cursor: 5,
+      event: {
+        type: "agent_message_delta",
+        text: " detached",
+      },
+    });
+    defineElementMetric(scrollRegion, "scrollHeight", 420);
+
+    await waitFor(() => {
+      expect(screen.getByRole("region", { name: "Attempt output" })).toHaveTextContent(
+        "Streaming live detached warning",
+      );
+    });
+    expect(scrollRegion.scrollTop).toBe(32);
   });
 
   it("separates transcript and backend notices instead of gluing them together", async () => {
@@ -1327,7 +1421,94 @@ describe("web app", () => {
     });
   });
 
-  it("resizes the detail drawer via the keyboard separator and persists the width", async () => {
+  it("navigates between runs and settings through the shell", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await findRunCard("Build dashboard");
+
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+
+    expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Settings", current: "page" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Keybindings/ }));
+    expect(await screen.findByRole("heading", { name: "Keybindings" })).toBeInTheDocument();
+    expect(
+      screen.getByText("Configurable keybindings will be added in a later change."),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Runs" }));
+
+    expect(await screen.findByPlaceholderText("Search runs")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Runs", current: "page" })).toBeInTheDocument();
+  });
+
+  it("leaves settings on escape after opening them from the runs dashboard", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await findRunCard("Build dashboard");
+
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+
+    await waitFor(() => {
+      expect(screen.queryByRole("heading", { name: "General" })).not.toBeInTheDocument();
+    });
+    expect(screen.getByPlaceholderText("Search runs")).toBeInTheDocument();
+  });
+
+  it("leaves settings on escape from a deep-linked settings route", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    const user = userEvent.setup();
+    await renderApp("/settings/general");
+    expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+
+    await waitFor(() => {
+      expect(screen.queryByRole("heading", { name: "General" })).not.toBeInTheDocument();
+    });
+    expect(screen.getByPlaceholderText("Search runs")).toBeInTheDocument();
+  });
+
+  it("leaves settings on escape after switching sections within settings", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    const user = userEvent.setup();
+    await renderApp("/settings/general");
+    expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Keybindings/ }));
+    expect(await screen.findByRole("heading", { name: "Keybindings" })).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+
+    await waitFor(() => {
+      expect(screen.queryByRole("heading", { name: "Keybindings" })).not.toBeInTheDocument();
+    });
+    expect(screen.getByPlaceholderText("Search runs")).toBeInTheDocument();
+  });
+
+  it("resizes the detail drawer via the keyboard separator for the current session only", async () => {
     installFetchMock({
       runs: [makeRun()],
       details: { "run-1": makeDetail() },
@@ -1347,82 +1528,22 @@ describe("web app", () => {
     expect(drawer.style.getPropertyValue("--drawer-width")).toBe("570px");
     expect(handle.getAttribute("aria-valuenow")).toBe("570");
 
-    const stored = window.localStorage.getItem("task-runner:web:board-settings");
-    const parsed = stored ? (JSON.parse(stored) as { drawerWidth?: number }) : null;
-    expect(parsed?.drawerWidth).toBe(570);
-  });
-
-  it("keeps the pending detail skeleton in fullscreen when that setting is enabled", async () => {
-    let resolveDetail: ((response: Response) => void) | undefined;
-    installFetchMock(
-      {
-        runs: [makeRun()],
-        details: { "run-1": makeDetail() },
-      },
-      {
-        handleRequest: (url, init) => {
-          if (/\/api\/runs\/run-1$/.test(url) && (!init?.method || init.method === "GET")) {
-            return new Promise<Response>((resolve) => {
-              resolveDetail = resolve;
-            });
-          }
-          return undefined;
-        },
-      },
-    );
-
-    window.localStorage.setItem(
-      "task-runner:web:board-settings",
-      JSON.stringify({ drawerFullscreen: true, drawerWidth: 700 }),
-    );
-
-    const user = userEvent.setup();
-    await renderApp();
-    await user.click(await findRunCard("Build dashboard"));
-
-    const skeletonDrawer = await screen.findByLabelText("Run detail");
-    expect(skeletonDrawer.className).toContain("drawer--fullscreen");
-    expect(skeletonDrawer.style.getPropertyValue("--drawer-width")).toBe("700px");
-
-    resolveDetail?.(new Response(JSON.stringify({ run: makeDetail() }), { status: 200 }));
-
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: /copy run id/i })).toBeInTheDocument();
+    const stored = window.localStorage.getItem("task-runner:web:dashboard-preferences");
+    expect(stored ? JSON.parse(stored) : null).toEqual({
+      hideEmptyColumns: true,
+      collapseFailureStates: true,
+      showArchived: false,
+      sortByRecentUpdates: false,
     });
-  });
 
-  it("keeps the detail error shell in fullscreen when that setting is enabled", async () => {
-    installFetchMock(
-      {
-        runs: [makeRun()],
-        details: { "run-1": makeDetail() },
-      },
-      {
-        handleRequest: (url, init) => {
-          if (/\/api\/runs\/run-1$/.test(url) && (!init?.method || init.method === "GET")) {
-            return new Response(JSON.stringify({ error: { message: "detail exploded" } }), {
-              status: 500,
-              headers: { "content-type": "application/json" },
-            });
-          }
-          return undefined;
-        },
-      },
-    );
+    cleanup();
+    queryClient.clear();
 
-    window.localStorage.setItem(
-      "task-runner:web:board-settings",
-      JSON.stringify({ drawerFullscreen: true, drawerWidth: 700 }),
-    );
-
-    const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
 
-    const errorDrawer = await screen.findByLabelText("Run detail");
-    expect(await screen.findByText("Run detail failed to load")).toBeInTheDocument();
-    expect(errorDrawer.className).toContain("drawer--fullscreen");
-    expect(errorDrawer.style.getPropertyValue("--drawer-width")).toBe("700px");
+    const restoredDrawer = await screen.findByLabelText("Run detail");
+    expect(restoredDrawer.style.getPropertyValue("--drawer-width")).toBe("540px");
   });
 
   it("renders markdown in task body and notes", async () => {
@@ -1638,7 +1759,7 @@ describe("web app", () => {
     );
   });
 
-  it("persists board settings in localStorage", async () => {
+  it("keeps toolbar toggles and settings rows synchronized through persisted preferences", async () => {
     installFetchMock({
       runs: [
         makeRun(),
@@ -1709,28 +1830,131 @@ describe("web app", () => {
     expect(getBoardColumn("Error")).toBeInTheDocument();
     expect(getBoardColumn("Aborted")).toBeInTheDocument();
 
-    const blockedColumn = getBoardColumn("Blocked");
-    await user.click(
-      within(blockedColumn).getByRole("button", { name: "Collapse Blocked column" }),
-    );
-    await waitFor(() => {
-      expect(blockedColumn).toHaveAttribute("data-collapsed", "true");
-    });
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
 
-    const stored = window.localStorage.getItem("task-runner:web:board-settings");
-    const parsed = stored ? (JSON.parse(stored) as { collapsedColumnKeys?: string[] }) : null;
-    expect(parsed?.collapsedColumnKeys).toEqual(["blocked"]);
+    const hideEmptyColumns = screen.getByRole("checkbox", { name: "Hide empty columns" });
+    const collapseFailureStates = screen.getByRole("checkbox", {
+      name: "Collapse failure states",
+    });
+    const showArchived = screen.getByRole("checkbox", { name: "Show archived runs" });
+    const sortByRecentUpdates = screen.getByRole("checkbox", { name: "Sort by recent updates" });
+    expect(hideEmptyColumns).not.toBeChecked();
+    expect(collapseFailureStates).not.toBeChecked();
+    expect(showArchived).toBeChecked();
+    expect(sortByRecentUpdates).not.toBeChecked();
+
+    await user.click(sortByRecentUpdates);
+    expect(sortByRecentUpdates).toBeChecked();
+
+    const stored = window.localStorage.getItem("task-runner:web:dashboard-preferences");
+    expect(stored ? JSON.parse(stored) : null).toEqual({
+      hideEmptyColumns: false,
+      collapseFailureStates: false,
+      showArchived: true,
+      sortByRecentUpdates: true,
+    });
 
     view.unmount();
     queryClient.clear();
     await renderApp();
+    await findRunCard("Build dashboard");
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Show archived runs" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Sort by recent updates" })).toBeChecked();
+
+    await user.click(screen.getByRole("button", { name: "Runs" }));
     expect(await screen.findByRole("button", { name: /archived dashboard/i })).toBeInTheDocument();
-    expect(getBoardColumn("Blocked")).toHaveAttribute("data-collapsed", "true");
     expect(getBoardColumn("Error")).toBeInTheDocument();
     expect(getBoardColumn("Aborted")).toBeInTheDocument();
   });
 
-  it("clamps persisted drawer width to the current viewport without overwriting the saved preference", async () => {
+  it("restores the in-scope dashboard preferences to defaults from settings", async () => {
+    installFetchMock({
+      runs: [
+        makeRun(),
+        makeRun({
+          runId: "run-archived",
+          assignmentName: "Archived dashboard",
+          archivedAt: "2026-04-13T06:00:00.000Z",
+          status: "success",
+        }),
+        makeRun({
+          runId: "run-error",
+          assignmentName: "Broken dashboard",
+          status: "error",
+        }),
+      ],
+      details: {
+        "run-1": makeDetail(),
+        "run-archived": makeDetail({
+          runId: "run-archived",
+          status: "success",
+        }),
+        "run-error": makeDetail({
+          runId: "run-error",
+          status: "error",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp("/settings/general");
+    await screen.findByRole("heading", { name: "General" });
+
+    await user.click(screen.getByRole("checkbox", { name: "Hide empty columns" }));
+    await user.click(screen.getByRole("checkbox", { name: "Collapse failure states" }));
+    await user.click(screen.getByRole("checkbox", { name: "Show archived runs" }));
+    await user.click(screen.getByRole("checkbox", { name: "Sort by recent updates" }));
+
+    await user.click(screen.getByRole("button", { name: "Restore defaults" }));
+
+    expect(screen.getByRole("checkbox", { name: "Hide empty columns" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Collapse failure states" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Show archived runs" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Sort by recent updates" })).not.toBeChecked();
+    expect(screen.getByRole("button", { name: "Restore defaults" })).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "Runs" }));
+
+    expect(await screen.findByPlaceholderText("Search runs")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /archived dashboard/i })).not.toBeInTheDocument();
+    expect(getBoardColumn("Failed")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: /^Aborted(?: \(\d+\))?$/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("resets a single preference row without affecting the others", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    const user = userEvent.setup();
+    await renderApp("/settings/general");
+    await screen.findByRole("heading", { name: "General" });
+
+    await user.click(screen.getByRole("checkbox", { name: "Hide empty columns" }));
+    await user.click(screen.getByRole("checkbox", { name: "Show archived runs" }));
+
+    await user.click(screen.getByRole("button", { name: "Reset Hide empty columns to default" }));
+
+    expect(screen.getByRole("checkbox", { name: "Hide empty columns" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Show archived runs" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Collapse failure states" })).toBeChecked();
+
+    const stored = window.localStorage.getItem("task-runner:web:dashboard-preferences");
+    expect(stored ? JSON.parse(stored) : null).toEqual({
+      hideEmptyColumns: true,
+      collapseFailureStates: true,
+      showArchived: true,
+      sortByRecentUpdates: false,
+    });
+  });
+
+  it("clamps the transient drawer width to the current viewport", async () => {
     installFetchMock({
       runs: [makeRun()],
       details: { "run-1": makeDetail() },
@@ -1742,41 +1966,17 @@ describe("web app", () => {
       value: 900,
       writable: true,
     });
-    window.localStorage.setItem(
-      "task-runner:web:board-settings",
-      JSON.stringify({
-        drawerFullscreen: false,
-        drawerWidth: 1400,
-      }),
-    );
 
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
 
     const drawer = await screen.findByLabelText("Run detail");
+    const handle = screen.getByRole("separator", { name: /resize detail drawer/i });
+    handle.focus();
+    await user.keyboard("{End}");
+
     await waitFor(() => expect(drawer.getAttribute("style")).toContain("--drawer-width: 564px"));
-
-    const stored = window.localStorage.getItem("task-runner:web:board-settings");
-    const parsed = stored ? (JSON.parse(stored) as { drawerWidth?: number }) : null;
-    expect(parsed?.drawerWidth).toBe(1400);
-
-    cleanup();
-    queryClient.clear();
-
-    Object.defineProperty(window, "innerWidth", {
-      configurable: true,
-      value: 1800,
-      writable: true,
-    });
-
-    await renderApp();
-    await user.click(await findRunCard("Build dashboard"));
-
-    const restoredDrawer = await screen.findByLabelText("Run detail");
-    await waitFor(() =>
-      expect(restoredDrawer.getAttribute("style")).toContain("--drawer-width: 1400px"),
-    );
 
     Object.defineProperty(window, "innerWidth", {
       configurable: true,
@@ -1785,17 +1985,14 @@ describe("web app", () => {
     });
   });
 
-  it("ignores malformed stored board settings values", async () => {
+  it("falls back to defaults when stored dashboard preferences are malformed", async () => {
     window.localStorage.setItem(
-      "task-runner:web:board-settings",
+      "task-runner:web:dashboard-preferences",
       JSON.stringify({
         collapseFailureStates: "yes",
-        collapsedColumnKeys: ["running", 42],
-        drawerWidth: "wide",
         hideEmptyColumns: "no",
-        repo: 42,
-        search: ["dashboard"],
         showArchived: "sure",
+        sortByRecentUpdates: "yes",
       }),
     );
 
@@ -1844,10 +2041,27 @@ describe("web app", () => {
     expect(getBoardColumn("Failed")).toBeInTheDocument();
     expect(getBoardColumn("Blocked")).toBeInTheDocument();
 
+    expect(screen.getByRole("button", { name: /hide empty columns/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: /collapse failure states/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: /show archived runs/i })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+
     await user.click(await findRunCard("Build dashboard"));
     const drawer = await screen.findByLabelText("Run detail");
     expect(drawer.style.getPropertyValue("--drawer-width")).toBe("540px");
     expect(getBoardColumn("Running")).toHaveAttribute("data-collapsed", "false");
+
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Sort by recent updates" })).not.toBeChecked();
   });
 
   it("collapses and expands a board column on desktop", async () => {
@@ -1941,11 +2155,6 @@ describe("web app", () => {
 
     await waitFor(() => {
       expect(failuresColumn).toHaveAttribute("data-collapsed", "true");
-    });
-
-    const storedGrouped = window.localStorage.getItem("task-runner:web:board-settings");
-    expect(storedGrouped ? JSON.parse(storedGrouped) : null).toMatchObject({
-      collapsedColumnKeys: ["failures"],
     });
 
     await user.click(screen.getByRole("button", { name: /collapse failure states/i }));
@@ -2286,7 +2495,7 @@ describe("web app", () => {
   });
 
   it("deletes archived runs from the web detail drawer", async () => {
-    installFetchMock({
+    const fetchMock = installFetchMock({
       runs: [
         makeRun({
           runId: "run-archived",
@@ -2331,6 +2540,25 @@ describe("web app", () => {
     expect(await screen.findByRole("button", { name: "Delete" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Delete" }));
+    expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Confirm delete run" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel delete run" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Run detail")).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.filter(
+        ([url, init]) =>
+          String(url).endsWith("/api/runs/run-archived") && init?.method === "DELETE",
+      ),
+    ).toHaveLength(0);
+
+    await user.click(screen.getByRole("button", { name: "Cancel delete run" }));
+    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Confirm delete run" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel delete run" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Run detail")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    await user.click(screen.getByRole("button", { name: "Confirm delete run" }));
 
     await waitFor(() => {
       expect(screen.queryByLabelText("Run detail")).not.toBeInTheDocument();
@@ -3216,6 +3444,292 @@ describe("web app", () => {
       await screen.findByRole("button", { name: /updated without refetch/i }),
     ).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(callsBefore);
+  });
+
+  it("promotes an updated run to the top of its column in recent-updates mode", async () => {
+    setStoredDashboardPreferences({ sortByRecentUpdates: true });
+    const fetchMock = installFetchMock({
+      runs: [
+        makeRun({
+          runId: "run-newer",
+          assignmentName: "Newest run",
+          name: "Newest run",
+          startedAt: "2026-04-13T05:05:00.000Z",
+        }),
+        makeRun({
+          runId: "run-older",
+          assignmentName: "Older run",
+          name: "Older run",
+          startedAt: "2026-04-13T05:00:00.000Z",
+        }),
+      ],
+      details: {
+        "run-newer": makeDetail({
+          runId: "run-newer",
+          assignment: {
+            name: "Newest run",
+            sourcePath: "/tmp/newer.md",
+            workspacePath: "/tmp/newer-workspace.md",
+          },
+          name: "Newest run",
+          startedAt: "2026-04-13T05:05:00.000Z",
+        }),
+        "run-older": makeDetail({
+          runId: "run-older",
+          assignment: {
+            name: "Older run",
+            sourcePath: "/tmp/older.md",
+            workspacePath: "/tmp/older-workspace.md",
+          },
+          name: "Older run",
+          startedAt: "2026-04-13T05:00:00.000Z",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await findRunCard("Newest run");
+    expect(getColumnRunNames("Running")).toEqual(["Newest run", "Older run"]);
+
+    const source = MockEventSource.instances[0];
+    if (!source) {
+      throw new Error("expected an EventSource subscription");
+    }
+    source.emitOpen();
+
+    const callsBefore = fetchMock.mock.calls.length;
+    source.emitMessage({
+      type: "summary_upsert",
+      summary: makeRun({
+        runId: "run-older",
+        assignmentName: "Older run",
+        name: "Older run",
+        startedAt: "2026-04-13T05:00:00.000Z",
+      }),
+    });
+
+    await waitFor(() => {
+      expect(getColumnRunNames("Running")).toEqual(["Older run", "Newest run"]);
+    });
+    expect(await findRunCard("Older run")).toHaveAttribute("data-motion-kind", "reorder");
+    expect(fetchMock).toHaveBeenCalledTimes(callsBefore);
+  });
+
+  it("promotes a selected run into the top of its destination column from detail SSE", async () => {
+    setStoredDashboardPreferences({ sortByRecentUpdates: true });
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "run-selected",
+          assignmentName: "Selected run",
+          name: "Selected run",
+          startedAt: "2026-04-13T05:00:00.000Z",
+        }),
+        makeRun({
+          runId: "run-complete",
+          assignmentName: "Completed run",
+          name: "Completed run",
+          startedAt: "2026-04-13T05:04:00.000Z",
+          status: "success",
+        }),
+      ],
+      details: {
+        "run-selected": makeDetail({
+          runId: "run-selected",
+          assignment: {
+            name: "Selected run",
+            sourcePath: "/tmp/selected.md",
+            workspacePath: "/tmp/selected-workspace.md",
+          },
+          name: "Selected run",
+          startedAt: "2026-04-13T05:00:00.000Z",
+        }),
+        "run-complete": makeDetail({
+          runId: "run-complete",
+          assignment: {
+            name: "Completed run",
+            sourcePath: "/tmp/completed.md",
+            workspacePath: "/tmp/completed-workspace.md",
+          },
+          name: "Completed run",
+          startedAt: "2026-04-13T05:04:00.000Z",
+          status: "success",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await findRunCard("Selected run");
+    await user.click(await findRunCard("Selected run"));
+
+    const detailSource = findEventSource("/api/runs/run-selected/events/detail");
+    detailSource.emitOpen();
+    detailSource.emitMessage({
+      type: "detail_updated",
+      detail: makeDetail({
+        runId: "run-selected",
+        assignment: {
+          name: "Selected run",
+          sourcePath: "/tmp/selected.md",
+          workspacePath: "/tmp/selected-workspace.md",
+        },
+        name: "Selected run",
+        startedAt: "2026-04-13T05:00:00.000Z",
+        status: "success",
+      }),
+    });
+
+    await waitFor(() => {
+      expect(getColumnRunNames("Completed")).toEqual(["Selected run", "Completed run"]);
+    });
+  });
+
+  it("marks brand-new runs as inserts and places them at the top in recent-updates mode", async () => {
+    setStoredDashboardPreferences({ sortByRecentUpdates: true });
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "run-existing",
+          assignmentName: "Existing run",
+          name: "Existing run",
+          startedAt: "2026-04-13T05:05:00.000Z",
+        }),
+      ],
+      details: {
+        "run-existing": makeDetail({
+          runId: "run-existing",
+          assignment: {
+            name: "Existing run",
+            sourcePath: "/tmp/existing.md",
+            workspacePath: "/tmp/existing-workspace.md",
+          },
+          name: "Existing run",
+          startedAt: "2026-04-13T05:05:00.000Z",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await findRunCard("Existing run");
+
+    const source = MockEventSource.instances[0];
+    if (!source) {
+      throw new Error("expected an EventSource subscription");
+    }
+    source.emitOpen();
+    source.emitMessage({
+      type: "summary_upsert",
+      summary: makeRun({
+        runId: "run-inserted",
+        assignmentName: "Inserted run",
+        name: "Inserted run",
+        startedAt: "2026-04-13T04:50:00.000Z",
+      }),
+    });
+
+    await waitFor(() => {
+      expect(getColumnRunNames("Running")).toEqual(["Inserted run", "Existing run"]);
+    });
+    expect(await findRunCard("Inserted run")).toHaveAttribute("data-motion-kind", "insert");
+  });
+
+  it("suppresses transform animation for reduced-motion users while keeping reorder markers", async () => {
+    const animateMock = vi.fn();
+    const originalAnimateDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, "animate");
+    Object.defineProperty(Element.prototype, "animate", {
+      configurable: true,
+      value: animateMock,
+      writable: true,
+    });
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn().mockImplementation((query: string) => ({
+        addEventListener: vi.fn(),
+        addListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+        matches: query === "(prefers-reduced-motion: reduce)",
+        media: query,
+        onchange: null,
+        removeEventListener: vi.fn(),
+        removeListener: vi.fn(),
+      })),
+    );
+
+    try {
+      setStoredDashboardPreferences({ sortByRecentUpdates: true });
+      installFetchMock({
+        runs: [
+          makeRun({
+            runId: "run-newer",
+            assignmentName: "Newest run",
+            name: "Newest run",
+            startedAt: "2026-04-13T05:05:00.000Z",
+          }),
+          makeRun({
+            runId: "run-older",
+            assignmentName: "Older run",
+            name: "Older run",
+            startedAt: "2026-04-13T05:00:00.000Z",
+          }),
+        ],
+        details: {
+          "run-newer": makeDetail({
+            runId: "run-newer",
+            assignment: {
+              name: "Newest run",
+              sourcePath: "/tmp/newer.md",
+              workspacePath: "/tmp/newer-workspace.md",
+            },
+            name: "Newest run",
+            startedAt: "2026-04-13T05:05:00.000Z",
+          }),
+          "run-older": makeDetail({
+            runId: "run-older",
+            assignment: {
+              name: "Older run",
+              sourcePath: "/tmp/older.md",
+              workspacePath: "/tmp/older-workspace.md",
+            },
+            name: "Older run",
+            startedAt: "2026-04-13T05:00:00.000Z",
+          }),
+        },
+      });
+
+      const user = userEvent.setup();
+      await renderApp();
+      await findRunCard("Newest run");
+
+      const source = MockEventSource.instances[0];
+      if (!source) {
+        throw new Error("expected an EventSource subscription");
+      }
+      source.emitOpen();
+      source.emitMessage({
+        type: "summary_upsert",
+        summary: makeRun({
+          runId: "run-older",
+          assignmentName: "Older run",
+          name: "Older run",
+          startedAt: "2026-04-13T05:00:00.000Z",
+        }),
+      });
+
+      await waitFor(() => {
+        expect(getColumnRunNames("Running")).toEqual(["Older run", "Newest run"]);
+      });
+      expect(await findRunCard("Older run")).toHaveAttribute("data-motion-kind", "reorder");
+      expect(animateMock).not.toHaveBeenCalled();
+    } finally {
+      if (originalAnimateDescriptor) {
+        Object.defineProperty(Element.prototype, "animate", originalAnimateDescriptor);
+      } else {
+        (Element.prototype as { animate?: typeof Element.prototype.animate }).animate = undefined;
+      }
+    }
   });
 
   it("syncs the selected run card from the fresher detail fetch", async () => {
