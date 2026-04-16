@@ -84,7 +84,11 @@ interface DashboardPreferencesContextValue {
 
 interface DashboardViewStateContextValue {
   viewState: DashboardViewState;
-  updateViewState: (updates: Partial<DashboardViewState>) => void;
+  updateViewState: (
+    updates:
+      | Partial<DashboardViewState>
+      | ((current: DashboardViewState) => Partial<DashboardViewState>),
+  ) => void;
 }
 
 const DashboardPreferencesContext = createContext<DashboardPreferencesContextValue | null>(null);
@@ -161,7 +165,10 @@ export function DashboardSettingsProvider({ children }: { children: ReactNode })
     () => ({
       viewState,
       updateViewState: (updates) => {
-        setViewState((current) => ({ ...current, ...updates }));
+        setViewState((current) => ({
+          ...current,
+          ...(typeof updates === "function" ? updates(current) : updates),
+        }));
       },
     }),
     [viewState],

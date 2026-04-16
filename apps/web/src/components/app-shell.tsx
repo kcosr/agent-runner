@@ -6,14 +6,14 @@ export function AppShell({
   topNotices,
   bottomNotices,
   toolbar,
-  board,
-  detail,
+  primary,
+  secondary,
 }: {
   topNotices?: ReactNode;
   bottomNotices?: ReactNode;
   toolbar: ReactNode;
-  board: ReactNode;
-  detail?: ReactNode;
+  primary: ReactNode;
+  secondary?: ReactNode;
 }) {
   const navigate = useNavigate();
   const pathname = useRouterState({
@@ -61,8 +61,8 @@ export function AppShell({
           {toolbar}
           {topNotices ? <div className="notice-stack">{topNotices}</div> : null}
           <main className="layout">
-            {board}
-            {detail}
+            {primary}
+            {secondary}
           </main>
           {bottomNotices ? (
             <div className="notice-stack notice-stack--bottom">{bottomNotices}</div>

@@ -1,27 +1,29 @@
-import { Outlet } from "@tanstack/react-router";
+import { Outlet, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { AppShell } from "../components/app-shell.js";
 import { SettingsLayout } from "../components/settings/settings-layout.js";
 import { SettingsSidebarNav } from "../components/settings/settings-sidebar-nav.js";
 
 export function SettingsLayoutRoute() {
+  const navigate = useNavigate();
+
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.defaultPrevented || event.key !== "Escape") {
         return;
       }
-      window.history.back();
+      void navigate({ to: "/" });
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, []);
+  }, [navigate]);
 
   return (
     <AppShell
-      board={
+      primary={
         <SettingsLayout navigation={<SettingsSidebarNav />}>
           <Outlet />
         </SettingsLayout>

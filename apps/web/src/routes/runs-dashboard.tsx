@@ -40,7 +40,7 @@ export function RunsDashboardRoute() {
 
   return (
     <AppShell
-      board={
+      primary={
         <RunsBoardPanel
           activeBoardColumnKey={state.activeBoardColumnKey}
           boardColumns={state.boardColumns}
@@ -57,7 +57,7 @@ export function RunsDashboardRoute() {
         />
       }
       bottomNotices={bottomNotices.length > 0 ? bottomNotices : undefined}
-      detail={
+      secondary={
         <RunDetailPanel
           onAddDependency={state.runActions.addDependency}
           actionError={state.actionError}

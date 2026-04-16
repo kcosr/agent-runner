@@ -1354,7 +1354,7 @@ describe("web app", () => {
     expect(screen.getByRole("button", { name: "Runs", current: "page" })).toBeInTheDocument();
   });
 
-  it("uses browser back navigation to leave settings on escape", async () => {
+  it("leaves settings on escape after opening them from the runs dashboard", async () => {
     installFetchMock({
       runs: [makeRun()],
       details: { "run-1": makeDetail() },
@@ -1371,6 +1371,45 @@ describe("web app", () => {
 
     await waitFor(() => {
       expect(screen.queryByRole("heading", { name: "General" })).not.toBeInTheDocument();
+    });
+    expect(screen.getByPlaceholderText("Search runs")).toBeInTheDocument();
+  });
+
+  it("leaves settings on escape from a deep-linked settings route", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    const user = userEvent.setup();
+    await renderApp("/settings/general");
+    expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+
+    await waitFor(() => {
+      expect(screen.queryByRole("heading", { name: "General" })).not.toBeInTheDocument();
+    });
+    expect(screen.getByPlaceholderText("Search runs")).toBeInTheDocument();
+  });
+
+  it("leaves settings on escape after switching sections within settings", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    const user = userEvent.setup();
+    await renderApp("/settings/general");
+    expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Keybindings/ }));
+    expect(await screen.findByRole("heading", { name: "Keybindings" })).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+
+    await waitFor(() => {
+      expect(screen.queryByRole("heading", { name: "Keybindings" })).not.toBeInTheDocument();
     });
     expect(screen.getByPlaceholderText("Search runs")).toBeInTheDocument();
   });

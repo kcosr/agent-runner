@@ -575,12 +575,12 @@ export function useRunsDashboardState() {
   }
 
   function setSelectedRunDrawerView(runId: string, drawerView: RunDrawerView) {
-    updateViewState({
+    updateViewState((current) => ({
       drawerViewsByRunId: {
-        ...viewState.drawerViewsByRunId,
+        ...current.drawerViewsByRunId,
         [runId]: drawerView,
       },
-    });
+    }));
   }
 
   return {

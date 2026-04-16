@@ -7,7 +7,8 @@ import {
 } from "./settings.js";
 
 function SettingsProbe() {
-  const { preferences, updatePreferences } = useDashboardPreferences();
+  const { preferences, resetPreference, resetPreferences, updatePreferences } =
+    useDashboardPreferences();
   const { viewState, updateViewState } = useDashboardViewState();
 
   return (
@@ -22,6 +23,12 @@ function SettingsProbe() {
         type="button"
       >
         Update view state
+      </button>
+      <button onClick={() => resetPreference("showArchived")} type="button">
+        Reset archived
+      </button>
+      <button onClick={() => resetPreferences()} type="button">
+        Reset all preferences
       </button>
     </div>
   );
@@ -113,5 +120,35 @@ describe("DashboardSettingsProvider", () => {
     );
     expect(screen.getByTestId("view-state")).toHaveTextContent('"drawerWidth":700');
     expect(screen.getByTestId("view-state")).toHaveTextContent('"repo":"task-runner-web"');
+  });
+
+  it("resets a single preference without affecting the others", () => {
+    renderSettingsProbe();
+
+    fireEvent.click(screen.getByRole("button", { name: "Enable archived" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reset archived" }));
+
+    expect(screen.getByTestId("preferences")).toHaveTextContent(
+      JSON.stringify({
+        hideEmptyColumns: true,
+        collapseFailureStates: true,
+        showArchived: false,
+      }),
+    );
+  });
+
+  it("resets all preferences to the defaults", () => {
+    renderSettingsProbe();
+
+    fireEvent.click(screen.getByRole("button", { name: "Enable archived" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reset all preferences" }));
+
+    expect(screen.getByTestId("preferences")).toHaveTextContent(
+      JSON.stringify({
+        hideEmptyColumns: true,
+        collapseFailureStates: true,
+        showArchived: false,
+      }),
+    );
   });
 });

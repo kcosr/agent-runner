@@ -1,19 +1,5 @@
 import { useNavigate, useRouterState } from "@tanstack/react-router";
-
-const SETTINGS_SECTIONS = [
-  {
-    description: "Dashboard defaults and board preferences",
-    id: "general",
-    path: "/settings/general",
-    title: "General",
-  },
-  {
-    description: "Configurable shortcuts placeholder",
-    id: "keybindings",
-    path: "/settings/keybindings",
-    title: "Keybindings",
-  },
-] as const;
+import { SETTINGS_SECTIONS } from "./settings-sections.js";
 
 export function SettingsSidebarNav() {
   const navigate = useNavigate();
@@ -39,7 +25,7 @@ export function SettingsSidebarNav() {
                 isActive ? "settings-sidebar-nav__item active" : "settings-sidebar-nav__item"
               }
               key={section.id}
-              onClick={() => void navigate({ to: section.path })}
+              onClick={() => void navigate({ replace: true, to: section.path })}
               type="button"
             >
               <span className="settings-sidebar-nav__title">{section.title}</span>
