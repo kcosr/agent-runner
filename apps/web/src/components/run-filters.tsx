@@ -1,5 +1,5 @@
 import type { BoardSettings } from "../lib/settings.js";
-import { AlertIcon, ArchiveIcon, GridIcon, SearchIcon } from "./icons.js";
+import { AlertIcon, ArchiveIcon, GridIcon, SearchIcon, SortIcon } from "./icons.js";
 
 export function RunFilters({
   repoOptions,
@@ -10,6 +10,8 @@ export function RunFilters({
   settings: BoardSettings;
   updateSettings: (updates: Partial<BoardSettings>) => void;
 }) {
+  const sortModeLabel = settings.sortMode === "recent-updates" ? "Recent updates" : "Started time";
+
   return (
     <header className="topbar">
       <span className="page-title">
@@ -64,6 +66,21 @@ export function RunFilters({
           type="button"
         >
           <AlertIcon aria-hidden="true" />
+        </button>
+
+        <button
+          aria-label={`Board sort mode: ${sortModeLabel}. Activate to switch modes.`}
+          aria-pressed={settings.sortMode === "recent-updates"}
+          className="icon-btn"
+          onClick={() =>
+            updateSettings({
+              sortMode: settings.sortMode === "started" ? "recent-updates" : "started",
+            })
+          }
+          title={`Board sort mode: ${sortModeLabel}`}
+          type="button"
+        >
+          <SortIcon aria-hidden="true" />
         </button>
 
         <button

@@ -23,9 +23,10 @@ import type { BoardColumn } from "../components/run-column.js";
 import { createApiClient, isNotFoundError } from "../lib/api-client.js";
 import { queryClient, runQueryKeys } from "../lib/query.js";
 import { useRunEvents } from "../lib/run-events.js";
+import { compareRunsByStartedAtDesc, sortRunsByStartedAtDesc } from "../lib/run-order.js";
 import { useRunTimelineState } from "../lib/run-timeline.js";
 import { useRuntimeConfig } from "../lib/runtime-config.js";
-import { useBoardSettings } from "../lib/settings.js";
+import { type BoardSortMode, useBoardSettings } from "../lib/settings.js";
 import { subscribeToRunDetailEvents } from "../lib/sse.js";
 
 export interface NoticeState {
@@ -151,6 +152,34 @@ function buildColumns(runs: RunSummary[], collapseFailureStates: boolean): Board
   }));
 }
 
+function compareRunsByRecentUpdate(
+  left: RunSummary,
+  right: RunSummary,
+  recentUpdateSequenceByRunId: Record<string, number>,
+): number {
+  const leftSequence = recentUpdateSequenceByRunId[left.runId] ?? 0;
+  const rightSequence = recentUpdateSequenceByRunId[right.runId] ?? 0;
+  if (leftSequence !== rightSequence) {
+    return rightSequence - leftSequence;
+  }
+  return compareRunsByStartedAtDesc(left, right);
+}
+
+function sortRunsForBoard(
+  runs: RunSummary[],
+  sortMode: BoardSortMode,
+  recentUpdateSequenceByRunId: Record<string, number>,
+): RunSummary[] {
+  switch (sortMode) {
+    case "recent-updates":
+      return [...runs].sort((left, right) =>
+        compareRunsByRecentUpdate(left, right, recentUpdateSequenceByRunId),
+      );
+    case "started":
+      return sortRunsByStartedAtDesc(runs);
+  }
+}
+
 function appendNotice(current: NoticeState[], notice: NoticeState): NoticeState[] {
   if (current.some((entry) => entry.id === notice.id)) {
     return current;
@@ -193,7 +222,7 @@ function useRunActionMutation(
   action: (runId: string) => Promise<unknown>,
   setActionError: (message: string | undefined) => void,
   options: {
-    onSuccess?: () => void;
+    onSuccess?: (runId: string) => void;
   } = {},
 ) {
   return useMutation({
@@ -204,7 +233,7 @@ function useRunActionMutation(
     onSuccess: async (_result, runId) => {
       setActionError(undefined);
       await invalidateRunQueries(runId);
-      options.onSuccess?.();
+      options.onSuccess?.(runId);
     },
   });
 }
@@ -265,7 +294,11 @@ export function useRunsDashboardState() {
     setActiveBoardColumnKey,
     setDrawerViewsByRunId,
   } = useDrawerViewsState();
-  const { streamStale: summaryStreamStale } = useRunEvents();
+  const {
+    markRunTouched,
+    recentUpdateSequenceByRunId,
+    streamStale: summaryStreamStale,
+  } = useRunEvents();
   const deferredSearch = useDeferredValue(settings.search);
   const navigate = useNavigate();
   const runRouteParams = useParams({ strict: false });
@@ -330,8 +363,12 @@ export function useRunsDashboardState() {
     [settings.collapsedColumnKeys],
   );
   const columns = useMemo(
-    () => buildColumns(visibleRuns, settings.collapseFailureStates),
-    [settings.collapseFailureStates, visibleRuns],
+    () =>
+      buildColumns(
+        sortRunsForBoard(visibleRuns, settings.sortMode, recentUpdateSequenceByRunId),
+        settings.collapseFailureStates,
+      ),
+    [recentUpdateSequenceByRunId, settings.collapseFailureStates, settings.sortMode, visibleRuns],
   );
   const boardColumns = settings.hideEmptyColumns
     ? columns.filter((column) => column.runs.length > 0)
@@ -461,6 +498,7 @@ export function useRunsDashboardState() {
           detailStreamStaleRef.current = false;
           setDetailStreamStale(false);
         }
+        markRunTouched(payload.detail.runId);
         syncRunSummaryFromDetail(payload.detail);
         queryClient.setQueryData(runQueryKeys.detail(runId), payload.detail);
       },
@@ -477,15 +515,21 @@ export function useRunsDashboardState() {
       disposed = true;
       unsubscribe();
     };
-  }, [config, selectedRunId]);
+  }, [config, markRunTouched, selectedRunId]);
 
   const closeRun = () => {
     void navigate({ to: "/" });
   };
 
-  const archiveMutation = useRunActionMutation(api.archiveRun, setActionError);
-  const unarchiveMutation = useRunActionMutation(api.unarchiveRun, setActionError);
-  const resetMutation = useRunActionMutation(api.resetRun, setActionError);
+  const archiveMutation = useRunActionMutation(api.archiveRun, setActionError, {
+    onSuccess: markRunTouched,
+  });
+  const unarchiveMutation = useRunActionMutation(api.unarchiveRun, setActionError, {
+    onSuccess: markRunTouched,
+  });
+  const resetMutation = useRunActionMutation(api.resetRun, setActionError, {
+    onSuccess: markRunTouched,
+  });
   const deleteMutation = useMutation({
     mutationFn: (runId: string) => api.deleteRun(runId),
     onError: (error: Error) => {
@@ -506,10 +550,13 @@ export function useRunsDashboardState() {
     },
     onSuccess: async (_result, { runId }) => {
       setActionError(undefined);
+      markRunTouched(runId);
       await invalidateRunQueries(runId);
     },
   });
-  const abortMutation = useRunActionMutation(api.abortRun, setActionError);
+  const abortMutation = useRunActionMutation(api.abortRun, setActionError, {
+    onSuccess: markRunTouched,
+  });
   const renameMutation = useMutation({
     mutationFn: ({ name, runId }: { runId: string; name: string | null }) =>
       api.setRunName(runId, name),
@@ -519,6 +566,7 @@ export function useRunsDashboardState() {
     onSuccess: async (result, { runId }) => {
       setActionError(undefined);
       updateRunNameCaches(result);
+      markRunTouched(runId);
       await invalidateRunQueries(runId);
     },
   });
@@ -530,6 +578,7 @@ export function useRunsDashboardState() {
     },
     onSuccess: async (result) => {
       setActionError(undefined);
+      markRunTouched(result.runId);
       await invalidateRunQueries(result.runId);
     },
   });
@@ -541,6 +590,7 @@ export function useRunsDashboardState() {
     },
     onSuccess: async (result) => {
       setActionError(undefined);
+      markRunTouched(result.runId);
       await invalidateRunQueries(result.runId);
     },
   });
@@ -551,6 +601,7 @@ export function useRunsDashboardState() {
     },
     onSuccess: async (result) => {
       setActionError(undefined);
+      markRunTouched(result.runId);
       await invalidateRunQueries(result.runId);
     },
   });
@@ -562,6 +613,7 @@ export function useRunsDashboardState() {
     },
     onSuccess: async (_result, { runId }) => {
       setActionError(undefined);
+      markRunTouched(runId);
       await invalidateRunQueries(runId);
     },
   });
@@ -573,6 +625,7 @@ export function useRunsDashboardState() {
     },
     onSuccess: async (result) => {
       setActionError(undefined);
+      markRunTouched(result.runId);
       await invalidateRunQueries(result.runId);
     },
   });

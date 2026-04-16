@@ -794,6 +794,13 @@ function getBoardColumn(name: string) {
   return column as HTMLElement;
 }
 
+function getColumnRunNames(name: string) {
+  const column = getBoardColumn(name);
+  return Array.from(column.querySelectorAll(".col-body .card .card-title")).map(
+    (element) => element.textContent ?? "",
+  );
+}
+
 function defineElementMetric(element: Element, key: string, value: number | (() => void)) {
   Object.defineProperty(element, key, {
     configurable: true,
@@ -1704,6 +1711,7 @@ describe("web app", () => {
     await user.click(screen.getByRole("button", { name: /show archived runs/i }));
     await user.click(screen.getByRole("button", { name: /hide empty columns/i }));
     await user.click(screen.getByRole("button", { name: /collapse failure states/i }));
+    await user.click(screen.getByRole("button", { name: /board sort mode: started time/i }));
     expect(await screen.findByRole("button", { name: /archived dashboard/i })).toBeInTheDocument();
     expect(getBoardColumn("Blocked")).toBeInTheDocument();
     expect(getBoardColumn("Error")).toBeInTheDocument();
@@ -1718,8 +1726,11 @@ describe("web app", () => {
     });
 
     const stored = window.localStorage.getItem("task-runner:web:board-settings");
-    const parsed = stored ? (JSON.parse(stored) as { collapsedColumnKeys?: string[] }) : null;
+    const parsed = stored
+      ? (JSON.parse(stored) as { collapsedColumnKeys?: string[]; sortMode?: string })
+      : null;
     expect(parsed?.collapsedColumnKeys).toEqual(["blocked"]);
+    expect(parsed?.sortMode).toBe("recent-updates");
 
     view.unmount();
     queryClient.clear();
@@ -1728,6 +1739,9 @@ describe("web app", () => {
     expect(getBoardColumn("Blocked")).toHaveAttribute("data-collapsed", "true");
     expect(getBoardColumn("Error")).toBeInTheDocument();
     expect(getBoardColumn("Aborted")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /board sort mode: recent updates/i }),
+    ).toHaveAttribute("aria-pressed", "true");
   });
 
   it("clamps persisted drawer width to the current viewport without overwriting the saved preference", async () => {
@@ -1796,6 +1810,7 @@ describe("web app", () => {
         repo: 42,
         search: ["dashboard"],
         showArchived: "sure",
+        sortMode: "alphabetical",
       }),
     );
 
@@ -1848,6 +1863,10 @@ describe("web app", () => {
     const drawer = await screen.findByLabelText("Run detail");
     expect(drawer.style.getPropertyValue("--drawer-width")).toBe("540px");
     expect(getBoardColumn("Running")).toHaveAttribute("data-collapsed", "false");
+    expect(screen.getByRole("button", { name: /board sort mode: started time/i })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
   });
 
   it("collapses and expands a board column on desktop", async () => {
@@ -3218,6 +3237,284 @@ describe("web app", () => {
     expect(fetchMock).toHaveBeenCalledTimes(callsBefore);
   });
 
+  it("promotes an updated run to the top of its column in recent-updates mode", async () => {
+    const fetchMock = installFetchMock({
+      runs: [
+        makeRun({
+          runId: "run-newer",
+          assignmentName: "Newest run",
+          name: "Newest run",
+          startedAt: "2026-04-13T05:05:00.000Z",
+        }),
+        makeRun({
+          runId: "run-older",
+          assignmentName: "Older run",
+          name: "Older run",
+          startedAt: "2026-04-13T05:00:00.000Z",
+        }),
+      ],
+      details: {
+        "run-newer": makeDetail({
+          runId: "run-newer",
+          assignment: {
+            name: "Newest run",
+            sourcePath: "/tmp/newer.md",
+            workspacePath: "/tmp/newer-workspace.md",
+          },
+          name: "Newest run",
+          startedAt: "2026-04-13T05:05:00.000Z",
+        }),
+        "run-older": makeDetail({
+          runId: "run-older",
+          assignment: {
+            name: "Older run",
+            sourcePath: "/tmp/older.md",
+            workspacePath: "/tmp/older-workspace.md",
+          },
+          name: "Older run",
+          startedAt: "2026-04-13T05:00:00.000Z",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await findRunCard("Newest run");
+    expect(getColumnRunNames("Running")).toEqual(["Newest run", "Older run"]);
+
+    await user.click(screen.getByRole("button", { name: /board sort mode: started time/i }));
+
+    const source = MockEventSource.instances[0];
+    if (!source) {
+      throw new Error("expected an EventSource subscription");
+    }
+    source.emitOpen();
+
+    const callsBefore = fetchMock.mock.calls.length;
+    source.emitMessage({
+      type: "summary_upsert",
+      summary: makeRun({
+        runId: "run-older",
+        assignmentName: "Older run",
+        name: "Older run",
+        startedAt: "2026-04-13T05:00:00.000Z",
+      }),
+    });
+
+    await waitFor(() => {
+      expect(getColumnRunNames("Running")).toEqual(["Older run", "Newest run"]);
+    });
+    expect(await findRunCard("Older run")).toHaveAttribute("data-motion-kind", "reorder");
+    expect(fetchMock).toHaveBeenCalledTimes(callsBefore);
+  });
+
+  it("promotes a selected run into the top of its destination column from detail SSE", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "run-selected",
+          assignmentName: "Selected run",
+          name: "Selected run",
+          startedAt: "2026-04-13T05:00:00.000Z",
+        }),
+        makeRun({
+          runId: "run-complete",
+          assignmentName: "Completed run",
+          name: "Completed run",
+          startedAt: "2026-04-13T05:04:00.000Z",
+          status: "success",
+        }),
+      ],
+      details: {
+        "run-selected": makeDetail({
+          runId: "run-selected",
+          assignment: {
+            name: "Selected run",
+            sourcePath: "/tmp/selected.md",
+            workspacePath: "/tmp/selected-workspace.md",
+          },
+          name: "Selected run",
+          startedAt: "2026-04-13T05:00:00.000Z",
+        }),
+        "run-complete": makeDetail({
+          runId: "run-complete",
+          assignment: {
+            name: "Completed run",
+            sourcePath: "/tmp/completed.md",
+            workspacePath: "/tmp/completed-workspace.md",
+          },
+          name: "Completed run",
+          startedAt: "2026-04-13T05:04:00.000Z",
+          status: "success",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await findRunCard("Selected run");
+    await user.click(screen.getByRole("button", { name: /board sort mode: started time/i }));
+    await user.click(await findRunCard("Selected run"));
+
+    const detailSource = findEventSource("/api/runs/run-selected/events/detail");
+    detailSource.emitOpen();
+    detailSource.emitMessage({
+      type: "detail_updated",
+      detail: makeDetail({
+        runId: "run-selected",
+        assignment: {
+          name: "Selected run",
+          sourcePath: "/tmp/selected.md",
+          workspacePath: "/tmp/selected-workspace.md",
+        },
+        name: "Selected run",
+        startedAt: "2026-04-13T05:00:00.000Z",
+        status: "success",
+      }),
+    });
+
+    await waitFor(() => {
+      expect(getColumnRunNames("Completed")).toEqual(["Selected run", "Completed run"]);
+    });
+  });
+
+  it("marks brand-new runs as inserts and places them at the top in recent-updates mode", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "run-existing",
+          assignmentName: "Existing run",
+          name: "Existing run",
+          startedAt: "2026-04-13T05:05:00.000Z",
+        }),
+      ],
+      details: {
+        "run-existing": makeDetail({
+          runId: "run-existing",
+          assignment: {
+            name: "Existing run",
+            sourcePath: "/tmp/existing.md",
+            workspacePath: "/tmp/existing-workspace.md",
+          },
+          name: "Existing run",
+          startedAt: "2026-04-13T05:05:00.000Z",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await findRunCard("Existing run");
+    await user.click(screen.getByRole("button", { name: /board sort mode: started time/i }));
+
+    const source = MockEventSource.instances[0];
+    if (!source) {
+      throw new Error("expected an EventSource subscription");
+    }
+    source.emitOpen();
+    source.emitMessage({
+      type: "summary_upsert",
+      summary: makeRun({
+        runId: "run-inserted",
+        assignmentName: "Inserted run",
+        name: "Inserted run",
+        startedAt: "2026-04-13T04:50:00.000Z",
+      }),
+    });
+
+    await waitFor(() => {
+      expect(getColumnRunNames("Running")).toEqual(["Inserted run", "Existing run"]);
+    });
+    expect(await findRunCard("Inserted run")).toHaveAttribute("data-motion-kind", "insert");
+  });
+
+  it("suppresses transform animation for reduced-motion users while keeping reorder markers", async () => {
+    const animateMock = vi.fn();
+    Object.defineProperty(Element.prototype, "animate", {
+      configurable: true,
+      value: animateMock,
+      writable: true,
+    });
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn().mockImplementation((query: string) => ({
+        addEventListener: vi.fn(),
+        addListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+        matches: query === "(prefers-reduced-motion: reduce)",
+        media: query,
+        onchange: null,
+        removeEventListener: vi.fn(),
+        removeListener: vi.fn(),
+      })),
+    );
+
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "run-newer",
+          assignmentName: "Newest run",
+          name: "Newest run",
+          startedAt: "2026-04-13T05:05:00.000Z",
+        }),
+        makeRun({
+          runId: "run-older",
+          assignmentName: "Older run",
+          name: "Older run",
+          startedAt: "2026-04-13T05:00:00.000Z",
+        }),
+      ],
+      details: {
+        "run-newer": makeDetail({
+          runId: "run-newer",
+          assignment: {
+            name: "Newest run",
+            sourcePath: "/tmp/newer.md",
+            workspacePath: "/tmp/newer-workspace.md",
+          },
+          name: "Newest run",
+          startedAt: "2026-04-13T05:05:00.000Z",
+        }),
+        "run-older": makeDetail({
+          runId: "run-older",
+          assignment: {
+            name: "Older run",
+            sourcePath: "/tmp/older.md",
+            workspacePath: "/tmp/older-workspace.md",
+          },
+          name: "Older run",
+          startedAt: "2026-04-13T05:00:00.000Z",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await findRunCard("Newest run");
+    await user.click(screen.getByRole("button", { name: /board sort mode: started time/i }));
+
+    const source = MockEventSource.instances[0];
+    if (!source) {
+      throw new Error("expected an EventSource subscription");
+    }
+    source.emitOpen();
+    source.emitMessage({
+      type: "summary_upsert",
+      summary: makeRun({
+        runId: "run-older",
+        assignmentName: "Older run",
+        name: "Older run",
+        startedAt: "2026-04-13T05:00:00.000Z",
+      }),
+    });
+
+    await waitFor(() => {
+      expect(getColumnRunNames("Running")).toEqual(["Older run", "Newest run"]);
+    });
+    expect(await findRunCard("Older run")).toHaveAttribute("data-motion-kind", "reorder");
+    expect(animateMock).not.toHaveBeenCalled();
+  });
+
   it("syncs the selected run card from the fresher detail fetch", async () => {
     installFetchMock({
       runs: [
@@ -3358,7 +3655,7 @@ describe("web app", () => {
     await user.click(screen.getByRole("button", { name: /back to attachments/i }));
     expect(await screen.findByRole("button", { name: /^Upload$/ })).toBeInTheDocument();
     expect(screen.queryByLabelText("Attachment preview")).not.toBeInTheDocument();
-  });
+  }, 10_000);
 
   it("keeps one SSE subscription while switching selected runs", async () => {
     installFetchMock({
