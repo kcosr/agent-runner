@@ -3430,6 +3430,7 @@ describe("web app", () => {
 
   it("suppresses transform animation for reduced-motion users while keeping reorder markers", async () => {
     const animateMock = vi.fn();
+    const originalAnimateDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, "animate");
     Object.defineProperty(Element.prototype, "animate", {
       configurable: true,
       value: animateMock,
@@ -3449,70 +3450,78 @@ describe("web app", () => {
       })),
     );
 
-    installFetchMock({
-      runs: [
-        makeRun({
-          runId: "run-newer",
-          assignmentName: "Newest run",
-          name: "Newest run",
-          startedAt: "2026-04-13T05:05:00.000Z",
-        }),
-        makeRun({
+    try {
+      installFetchMock({
+        runs: [
+          makeRun({
+            runId: "run-newer",
+            assignmentName: "Newest run",
+            name: "Newest run",
+            startedAt: "2026-04-13T05:05:00.000Z",
+          }),
+          makeRun({
+            runId: "run-older",
+            assignmentName: "Older run",
+            name: "Older run",
+            startedAt: "2026-04-13T05:00:00.000Z",
+          }),
+        ],
+        details: {
+          "run-newer": makeDetail({
+            runId: "run-newer",
+            assignment: {
+              name: "Newest run",
+              sourcePath: "/tmp/newer.md",
+              workspacePath: "/tmp/newer-workspace.md",
+            },
+            name: "Newest run",
+            startedAt: "2026-04-13T05:05:00.000Z",
+          }),
+          "run-older": makeDetail({
+            runId: "run-older",
+            assignment: {
+              name: "Older run",
+              sourcePath: "/tmp/older.md",
+              workspacePath: "/tmp/older-workspace.md",
+            },
+            name: "Older run",
+            startedAt: "2026-04-13T05:00:00.000Z",
+          }),
+        },
+      });
+
+      const user = userEvent.setup();
+      await renderApp();
+      await findRunCard("Newest run");
+      await user.click(screen.getByRole("button", { name: /board sort mode: started time/i }));
+
+      const source = MockEventSource.instances[0];
+      if (!source) {
+        throw new Error("expected an EventSource subscription");
+      }
+      source.emitOpen();
+      source.emitMessage({
+        type: "summary_upsert",
+        summary: makeRun({
           runId: "run-older",
           assignmentName: "Older run",
           name: "Older run",
           startedAt: "2026-04-13T05:00:00.000Z",
         }),
-      ],
-      details: {
-        "run-newer": makeDetail({
-          runId: "run-newer",
-          assignment: {
-            name: "Newest run",
-            sourcePath: "/tmp/newer.md",
-            workspacePath: "/tmp/newer-workspace.md",
-          },
-          name: "Newest run",
-          startedAt: "2026-04-13T05:05:00.000Z",
-        }),
-        "run-older": makeDetail({
-          runId: "run-older",
-          assignment: {
-            name: "Older run",
-            sourcePath: "/tmp/older.md",
-            workspacePath: "/tmp/older-workspace.md",
-          },
-          name: "Older run",
-          startedAt: "2026-04-13T05:00:00.000Z",
-        }),
-      },
-    });
+      });
 
-    const user = userEvent.setup();
-    await renderApp();
-    await findRunCard("Newest run");
-    await user.click(screen.getByRole("button", { name: /board sort mode: started time/i }));
-
-    const source = MockEventSource.instances[0];
-    if (!source) {
-      throw new Error("expected an EventSource subscription");
+      await waitFor(() => {
+        expect(getColumnRunNames("Running")).toEqual(["Older run", "Newest run"]);
+      });
+      expect(await findRunCard("Older run")).toHaveAttribute("data-motion-kind", "reorder");
+      expect(animateMock).not.toHaveBeenCalled();
+    } finally {
+      if (originalAnimateDescriptor) {
+        Object.defineProperty(Element.prototype, "animate", originalAnimateDescriptor);
+      } else {
+        (Element.prototype as { animate?: typeof Element.prototype.animate }).animate = undefined;
+      }
     }
-    source.emitOpen();
-    source.emitMessage({
-      type: "summary_upsert",
-      summary: makeRun({
-        runId: "run-older",
-        assignmentName: "Older run",
-        name: "Older run",
-        startedAt: "2026-04-13T05:00:00.000Z",
-      }),
-    });
-
-    await waitFor(() => {
-      expect(getColumnRunNames("Running")).toEqual(["Older run", "Newest run"]);
-    });
-    expect(await findRunCard("Older run")).toHaveAttribute("data-motion-kind", "reorder");
-    expect(animateMock).not.toHaveBeenCalled();
   });
 
   it("syncs the selected run card from the fresher detail fetch", async () => {
@@ -3655,7 +3664,7 @@ describe("web app", () => {
     await user.click(screen.getByRole("button", { name: /back to attachments/i }));
     expect(await screen.findByRole("button", { name: /^Upload$/ })).toBeInTheDocument();
     expect(screen.queryByLabelText("Attachment preview")).not.toBeInTheDocument();
-  }, 10_000);
+  });
 
   it("keeps one SSE subscription while switching selected runs", async () => {
     installFetchMock({

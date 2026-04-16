@@ -21,6 +21,7 @@
 
 ### Added
 
+- Added a persisted kanban topbar sort toggle in the web dashboard so runs can switch between `started` and session-local `recent-updates` ordering, with move/reorder/insert card motion that respects `prefers-reduced-motion`.
 - Added in-app preview for `text/markdown` and `text/plain` attachments in the web run detail drawer, including per-run remembered preview state when switching between runs. ([#40](https://github.com/kcosr/task-runner/pull/40))
 - Added Mermaid diagram rendering for fenced `mermaid` blocks anywhere shared markdown is shown, including attachment previews, with inline render errors when a diagram fails to load. ([#40](https://github.com/kcosr/task-runner/pull/40))
 - The attachment preview drawer is now resizable via the same edge drag/keyboard handle used by the run detail drawer, and both drawers gained a full-width toggle next to the close button (desktop only) that expands the drawer to fill the entire main content area while keeping the top bar and left sidebar interactive. ([#40](https://github.com/kcosr/task-runner/pull/40))
