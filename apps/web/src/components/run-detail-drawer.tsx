@@ -547,17 +547,6 @@ export function RunDetailDrawer({
     }
   }
 
-  async function submitDelete() {
-    if (actionPending === "delete") {
-      return;
-    }
-    try {
-      await onDelete();
-    } catch {
-      // actionError is surfaced by the shared mutation handler.
-    }
-  }
-
   function handleTimelineContentScroll() {
     const element = timelineContentScrollRef.current;
     if (!element || timelineTab !== "output") {
@@ -702,7 +691,7 @@ export function RunDetailDrawer({
                     aria-label="Confirm delete run"
                     className="icon-btn icon-btn--destructive"
                     disabled={actionsLocked}
-                    onClick={() => void submitDelete()}
+                    onClick={onDelete}
                     title={actionPending === "delete" ? "Deleting run..." : "Confirm delete run"}
                     type="button"
                   >

@@ -709,7 +709,6 @@ body {
 
 .timeline-content-scroll[data-inner-scroll-enabled="true"] {
   overflow-y: auto;
-  overscroll-behavior-y: contain;
 }
 
 @keyframes timeline-pulse {
