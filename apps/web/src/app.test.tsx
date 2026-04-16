@@ -1,3 +1,4 @@
+import type { RunAttachment } from "@task-runner/core/contracts/attachments.js";
 import type { RunTimelineHistory } from "@task-runner/core/contracts/events.js";
 import type { RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
@@ -6,6 +7,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./app.js";
 import { queryClient } from "./lib/query.js";
 import { router } from "./router.js";
+import attachmentMermaidMarkdown from "./test/fixtures/attachment-mermaid.md?raw";
+
+const initializeMermaid = vi.fn();
+const renderMermaid = vi.fn(async () => ({
+  svg: "<svg><text>attachment diagram</text></svg>",
+}));
+
+vi.mock("mermaid", () => ({
+  default: {
+    initialize: initializeMermaid,
+    render: renderMermaid,
+  },
+}));
 
 const APP_CONFIG = {
   apiBasePath: "/api",
@@ -260,6 +274,20 @@ function makeDetail(
     detail.name = overrides.assignment.name;
   }
   return detail;
+}
+
+function makeAttachment(
+  overrides: Partial<RunAttachment> & Pick<RunAttachment, "id" | "name">,
+): RunAttachment {
+  return {
+    id: overrides.id,
+    name: overrides.name,
+    mimeType: overrides.mimeType ?? "text/plain; charset=utf-8",
+    size: overrides.size ?? 24,
+    sha256: overrides.sha256 ?? "abc123",
+    addedAt: overrides.addedAt ?? "2026-04-14T06:00:00.000Z",
+    relativePath: overrides.relativePath ?? `attachments/${overrides.id}/${overrides.name}`,
+  };
 }
 
 function installFetchMock(
@@ -770,7 +798,19 @@ function defineElementMetric(element: Element, key: string, value: number | (() 
   Object.defineProperty(element, key, {
     configurable: true,
     value,
+    writable: true,
   });
+}
+
+function dispatchHorizontalWheel(element: Element, deltaX = 80) {
+  const event = new WheelEvent("wheel", {
+    bubbles: true,
+    cancelable: true,
+    deltaX,
+    deltaY: 0,
+  });
+  element.dispatchEvent(event);
+  return event;
 }
 
 function setBoardGeometry(options: {
@@ -811,6 +851,8 @@ describe("web app", () => {
     queryClient.clear();
     window.localStorage.clear();
     MockEventSource.instances = [];
+    initializeMermaid.mockClear();
+    renderMermaid.mockClear();
     vi.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
   });
 
@@ -1310,7 +1352,7 @@ describe("web app", () => {
     expect(parsed?.drawerWidth).toBe(570);
   });
 
-  it("keeps the pending detail skeleton at the persisted drawer width", async () => {
+  it("keeps the pending detail skeleton in fullscreen when that setting is enabled", async () => {
     let resolveDetail: ((response: Response) => void) | undefined;
     installFetchMock(
       {
@@ -1331,7 +1373,7 @@ describe("web app", () => {
 
     window.localStorage.setItem(
       "task-runner:web:board-settings",
-      JSON.stringify({ drawerWidth: 700 }),
+      JSON.stringify({ drawerFullscreen: true, drawerWidth: 700 }),
     );
 
     const user = userEvent.setup();
@@ -1339,6 +1381,7 @@ describe("web app", () => {
     await user.click(await findRunCard("Build dashboard"));
 
     const skeletonDrawer = await screen.findByLabelText("Run detail");
+    expect(skeletonDrawer.className).toContain("drawer--fullscreen");
     expect(skeletonDrawer.style.getPropertyValue("--drawer-width")).toBe("700px");
 
     resolveDetail?.(new Response(JSON.stringify({ run: makeDetail() }), { status: 200 }));
@@ -1346,6 +1389,40 @@ describe("web app", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /copy run id/i })).toBeInTheDocument();
     });
+  });
+
+  it("keeps the detail error shell in fullscreen when that setting is enabled", async () => {
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest: (url, init) => {
+          if (/\/api\/runs\/run-1$/.test(url) && (!init?.method || init.method === "GET")) {
+            return new Response(JSON.stringify({ error: { message: "detail exploded" } }), {
+              status: 500,
+              headers: { "content-type": "application/json" },
+            });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    window.localStorage.setItem(
+      "task-runner:web:board-settings",
+      JSON.stringify({ drawerFullscreen: true, drawerWidth: 700 }),
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+
+    const errorDrawer = await screen.findByLabelText("Run detail");
+    expect(await screen.findByText("Run detail failed to load")).toBeInTheDocument();
+    expect(errorDrawer.className).toContain("drawer--fullscreen");
+    expect(errorDrawer.style.getPropertyValue("--drawer-width")).toBe("700px");
   });
 
   it("renders markdown in task body and notes", async () => {
@@ -1651,6 +1728,61 @@ describe("web app", () => {
     expect(getBoardColumn("Blocked")).toHaveAttribute("data-collapsed", "true");
     expect(getBoardColumn("Error")).toBeInTheDocument();
     expect(getBoardColumn("Aborted")).toBeInTheDocument();
+  });
+
+  it("clamps persisted drawer width to the current viewport without overwriting the saved preference", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    const originalInnerWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 900,
+      writable: true,
+    });
+    window.localStorage.setItem(
+      "task-runner:web:board-settings",
+      JSON.stringify({
+        drawerFullscreen: false,
+        drawerWidth: 1400,
+      }),
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+
+    const drawer = await screen.findByLabelText("Run detail");
+    await waitFor(() => expect(drawer.getAttribute("style")).toContain("--drawer-width: 564px"));
+
+    const stored = window.localStorage.getItem("task-runner:web:board-settings");
+    const parsed = stored ? (JSON.parse(stored) as { drawerWidth?: number }) : null;
+    expect(parsed?.drawerWidth).toBe(1400);
+
+    cleanup();
+    queryClient.clear();
+
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1800,
+      writable: true,
+    });
+
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+
+    const restoredDrawer = await screen.findByLabelText("Run detail");
+    await waitFor(() =>
+      expect(restoredDrawer.getAttribute("style")).toContain("--drawer-width: 1400px"),
+    );
+
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: originalInnerWidth,
+      writable: true,
+    });
   });
 
   it("ignores malformed stored board settings values", async () => {
@@ -2762,7 +2894,120 @@ describe("web app", () => {
     resolveArchive?.();
 
     await waitFor(() => {
-      expect(screen.queryByLabelText("Run detail")).not.toBeInTheDocument();
+      expect(screen.getByLabelText("Run detail")).toBeInTheDocument();
+    });
+  });
+
+  it("prevents horizontal wheel gestures from escaping the board and drawers", async () => {
+    installFetchMock(
+      {
+        runs: [makeRun({ runId: "run-1", name: "Gesture run" })],
+        details: {
+          "run-1": makeDetail({
+            runId: "run-1",
+            name: "Gesture run",
+            attachments: [
+              makeAttachment({
+                id: "att-md",
+                name: "notes.md",
+                mimeType: "text/markdown; charset=utf-8",
+              }),
+            ],
+          }),
+        },
+      },
+      {
+        handleRequest: (url) => {
+          if (/\/api\/runs\/run-1\/attachments\/att-md\/content$/.test(url)) {
+            return new Response(attachmentMermaidMarkdown, {
+              status: 200,
+              headers: { "content-type": "text/markdown; charset=utf-8" },
+            });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+    await findRunCard("Gesture run");
+
+    const board = setBoardGeometry({
+      clientWidth: 320,
+      columns: [{ key: "running", left: 0, width: 280 }],
+      scrollWidth: 960,
+    });
+    await waitFor(() => {
+      dispatchHorizontalWheel(board);
+      expect(board.scrollLeft).toBe(80);
+    });
+
+    await user.click(await findRunCard("Gesture run"));
+    await waitFor(() => {
+      const detailWheel = dispatchHorizontalWheel(screen.getByLabelText("Run detail"));
+      expect(detailWheel.defaultPrevented).toBe(true);
+    });
+
+    await user.click(await screen.findByRole("button", { name: /^Attachments\b/i }));
+    await user.click(screen.getByRole("button", { name: /^Preview notes\.md$/ }));
+    await waitFor(() => {
+      const previewWheel = dispatchHorizontalWheel(screen.getByLabelText("Attachment preview"));
+      expect(previewWheel.defaultPrevented).toBe(true);
+    });
+
+    await user.click(screen.getByRole("button", { name: /Expand drawer to full width/i }));
+    await waitFor(() => {
+      const fullscreenPreviewWheel = dispatchHorizontalWheel(
+        screen.getByLabelText("Attachment preview"),
+      );
+      expect(fullscreenPreviewWheel.defaultPrevented).toBe(true);
+    });
+  });
+
+  it("restores the previously snapped board column after closing detail", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({ runId: "run-1", name: "First run", status: "running" }),
+        makeRun({ runId: "run-2", name: "Second run", status: "success" }),
+      ],
+      details: {
+        "run-1": makeDetail({ runId: "run-1", name: "First run", status: "running" }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await findRunCard("First run");
+    await findRunCard("Second run");
+
+    const board = setBoardGeometry({
+      clientWidth: 320,
+      columns: [
+        { key: "running", left: 0, width: 280 },
+        { key: "completed", left: 320, width: 280 },
+      ],
+      scrollLeft: 300,
+      scrollWidth: 960,
+    });
+    board.dispatchEvent(new Event("scroll"));
+
+    await user.click(await findRunCard("First run"));
+    await screen.findByLabelText("Run detail");
+    await user.click(getCloseDetailButton());
+
+    const restoredBoard = setBoardGeometry({
+      clientWidth: 320,
+      columns: [
+        { key: "running", left: 0, width: 280 },
+        { key: "completed", left: 320, width: 280 },
+      ],
+      scrollLeft: 0,
+      scrollWidth: 960,
+    });
+
+    await waitFor(() => {
+      expect(restoredBoard.scrollLeft).toBe(300);
     });
   });
 
@@ -3038,62 +3283,81 @@ describe("web app", () => {
     });
   });
 
-  it("resets drawer and task state when switching runs", async () => {
-    installFetchMock({
-      runs: [makeRun(), makeRun({ runId: "run-2", assignmentName: "Second run" })],
-      details: {
-        "run-1": makeDetail({
-          tasks: [
-            {
-              id: "shared-task",
-              title: "Shared task",
-              body: "First run description",
-              status: "in_progress",
-              notes: "First run notes",
+  it("remembers per-run drawer preview and detail state across switching and close/reselect", async () => {
+    installFetchMock(
+      {
+        runs: [makeRun(), makeRun({ runId: "run-2", assignmentName: "Second run" })],
+        details: {
+          "run-1": makeDetail({
+            attachments: [
+              makeAttachment({
+                id: "att-md",
+                name: "notes.md",
+                mimeType: "text/markdown; charset=utf-8",
+              }),
+            ],
+          }),
+          "run-2": makeDetail({
+            runId: "run-2",
+            assignment: {
+              name: "Second run",
+              sourcePath: "/tmp/a.md",
+              workspacePath: "/tmp/b.md",
             },
-          ],
-        }),
-        "run-2": makeDetail({
-          runId: "run-2",
-          assignment: {
-            name: "Second run",
-            sourcePath: "/tmp/a.md",
-            workspacePath: "/tmp/b.md",
-          },
-          tasks: [
-            {
-              id: "shared-task",
-              title: "Shared task",
-              body: "Second run description",
-              status: "in_progress",
-              notes: "Second run notes",
-            },
-          ],
-        }),
+            tasks: [
+              {
+                id: "shared-task",
+                title: "Shared task",
+                body: "Second run description",
+                status: "in_progress",
+                notes: "Second run notes",
+              },
+            ],
+          }),
+        },
       },
-    });
+      {
+        handleRequest: (url) => {
+          if (/\/api\/runs\/run-1\/attachments\/att-md\/content$/.test(url)) {
+            return new Response("# Markdown preview", {
+              status: 200,
+              headers: { "content-type": "text/markdown; charset=utf-8" },
+            });
+          }
+          return undefined;
+        },
+      },
+    );
 
     const user = userEvent.setup();
     await renderApp();
     await findRunCard("Second run");
 
-    await user.click(await findRunCard("Second run"));
-    expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
-    await router.navigate({ to: "/" });
-
     await user.click(await findRunCard("Build dashboard"));
-    await screen.findByLabelText("Run detail");
-    await user.click(screen.getByRole("button", { name: /shared task/i, expanded: false }));
-    await user.click(screen.getByRole("button", { name: "Notes" }));
-    expect(await screen.findByText("First run notes")).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: /^Attachments\b/i }));
+    await user.click(screen.getByRole("button", { name: /^Preview notes\.md$/ }));
+    expect(await screen.findByLabelText("Attachment preview")).toBeInTheDocument();
+    expect(await screen.findByText("Markdown preview")).toBeInTheDocument();
 
-    await router.navigate({ to: "/runs/$runId", params: { runId: "run-2" } });
-
+    await user.click(await findRunCard("Second run"));
     expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /shared task/i, expanded: false }),
     ).toBeInTheDocument();
-    expect(screen.queryByText("Second run notes")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Attachment preview")).not.toBeInTheDocument();
+
+    await user.click(await findRunCard("Build dashboard"));
+    expect(await screen.findByLabelText("Attachment preview")).toBeInTheDocument();
+    expect(await screen.findByText("Markdown preview")).toBeInTheDocument();
+
+    await user.click(getCloseDetailButton());
+    await user.click(await findRunCard("Build dashboard"));
+    expect(await screen.findByLabelText("Attachment preview")).toBeInTheDocument();
+    expect(await screen.findByText("Markdown preview")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /back to attachments/i }));
+    expect(await screen.findByRole("button", { name: /^Upload$/ })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Attachment preview")).not.toBeInTheDocument();
   });
 
   it("keeps one SSE subscription while switching selected runs", async () => {
@@ -3206,6 +3470,141 @@ describe("web app", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("run-2", { selector: ".dependency-meta-id" })).toBeInTheDocument();
     expect(screen.getAllByText("running", { selector: ".badge" }).length).toBeGreaterThan(0);
+  });
+
+  it("renders markdown and plain-text attachment previews in the drawer", async () => {
+    installFetchMock(
+      {
+        runs: [makeRun({ runId: "run-1", name: "Attachment run" })],
+        details: {
+          "run-1": makeDetail({
+            runId: "run-1",
+            name: "Attachment run",
+            attachments: [
+              makeAttachment({
+                id: "att-md",
+                name: "notes.md",
+                mimeType: "text/markdown; charset=utf-8",
+              }),
+              makeAttachment({
+                id: "att-log",
+                name: "build.log",
+                mimeType: "text/plain; charset=utf-8",
+              }),
+            ],
+          }),
+        },
+      },
+      {
+        handleRequest: (url) => {
+          if (/\/api\/runs\/run-1\/attachments\/att-md\/content$/.test(url)) {
+            return new Response(attachmentMermaidMarkdown, {
+              status: 200,
+              headers: { "content-type": "text/markdown; charset=utf-8" },
+            });
+          }
+          if (/\/api\/runs\/run-1\/attachments\/att-log\/content$/.test(url)) {
+            return new Response("line one\nline two", {
+              status: 200,
+              headers: { "content-type": "text/plain; charset=utf-8" },
+            });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await user.click(await findRunCard("Attachment run"));
+    await user.click(await screen.findByRole("button", { name: /^Attachments\b/i }));
+
+    await user.click(screen.getByRole("button", { name: /^Preview notes\.md$/ }));
+    expect(await screen.findByRole("heading", { name: "Notes" })).toBeInTheDocument();
+    expect(await screen.findByLabelText("Mermaid diagram")).toBeInTheDocument();
+    expect(renderMermaid).toHaveBeenCalledWith(
+      expect.stringMatching(/^mermaid-/),
+      "graph TD\nStart-->Finish",
+    );
+    await user.click(screen.getByRole("button", { name: /back to attachments/i }));
+
+    await user.click(screen.getByRole("button", { name: /^Preview build\.log$/ }));
+    const preview = await screen.findByLabelText("Attachment preview content");
+    expect(preview.querySelector("pre code")?.textContent).toBe("line one\nline two");
+    expect(preview.querySelector("pre code")).not.toBeNull();
+  });
+
+  it("keeps preview errors inline and isolates row preview clicks from attachment actions", async () => {
+    installFetchMock(
+      {
+        runs: [makeRun({ runId: "run-1", name: "Attachment run" })],
+        details: {
+          "run-1": makeDetail({
+            runId: "run-1",
+            name: "Attachment run",
+            attachments: [
+              makeAttachment({
+                id: "att-md",
+                name: "notes.md",
+                mimeType: "text/markdown; charset=utf-8",
+              }),
+              makeAttachment({
+                id: "att-pdf",
+                name: "report.pdf",
+                mimeType: "application/pdf",
+              }),
+            ],
+          }),
+        },
+      },
+      {
+        handleRequest: (url) => {
+          if (/\/api\/runs\/run-1\/attachments\/att-md\/content$/.test(url)) {
+            return new Response(JSON.stringify({ error: { message: "preview failed" } }), {
+              status: 500,
+              headers: { "content-type": "application/json" },
+            });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const createObjectURL = vi.fn(() => "blob:test");
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", {
+      ...URL,
+      createObjectURL,
+      revokeObjectURL,
+    });
+    const anchorClick = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => undefined);
+    const user = userEvent.setup();
+    await renderApp();
+
+    await user.click(await findRunCard("Attachment run"));
+    await user.click(await screen.findByRole("button", { name: /^Attachments\b/i }));
+
+    await user.click(screen.getByRole("button", { name: /^Download report\.pdf$/ }));
+    await waitFor(() => expect(createObjectURL).toHaveBeenCalled());
+    expect(screen.queryByLabelText("Attachment preview")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^Remove notes\.md$/ }));
+    expect(screen.getByRole("button", { name: /^Confirm remove notes\.md$/ })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Attachment preview")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^Cancel remove notes\.md$/ }));
+    expect(screen.queryByLabelText("Attachment preview")).not.toBeInTheDocument();
+
+    expect(screen.queryByRole("button", { name: /^Preview report\.pdf$/ })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^Preview notes\.md$/ }));
+    expect(await screen.findByLabelText("Attachment preview")).toBeInTheDocument();
+    expect(await screen.findByText("Attachment preview failed to load")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /back to attachments/i })).toBeInTheDocument();
+
+    anchorClick.mockRestore();
   });
 
   it("uploads, downloads, and removes attachments from the detail drawer", async () => {

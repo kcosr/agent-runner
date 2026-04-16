@@ -3,10 +3,13 @@ import type { RunSummary } from "@task-runner/core/contracts/runs.js";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { EmptyPanel } from "../components/empty-states.js";
 import { type BoardColumn, RunColumn } from "../components/run-column.js";
+import { useHorizontalWheelGuard } from "../lib/use-horizontal-wheel-guard.js";
 
 export function RunsBoardPanel({
+  activeBoardColumnKey,
   boardColumns,
   collapsedColumnKeys,
+  onActiveBoardColumnKeyChange,
   onExpandColumn,
   onResetFilters,
   onSelectRun,
@@ -16,8 +19,10 @@ export function RunsBoardPanel({
   selectedRunId,
   visibleRuns,
 }: {
+  activeBoardColumnKey: string | null;
   boardColumns: BoardColumn[];
   collapsedColumnKeys: string[];
+  onActiveBoardColumnKeyChange: (columnKey: string | null) => void;
   onExpandColumn: (columnKey: string) => void;
   onResetFilters: () => void;
   onSelectRun: (runId: string) => void;
@@ -31,18 +36,78 @@ export function RunsBoardPanel({
   const columnRefs = useRef(new Map<string, HTMLElement>());
   const columnRefCallbacks = useRef(new Map<string, (node: HTMLElement | null) => void>());
   const pendingScrollColumnKeyRef = useRef<string | undefined>(undefined);
+  const pendingRestoreColumnKeyRef = useRef<string | null>(activeBoardColumnKey);
   const [showColumnJumpBar, setShowColumnJumpBar] = useState(false);
   const collapsedColumnKeySet = useMemo(() => new Set(collapsedColumnKeys), [collapsedColumnKeys]);
   const jumpColumns = useMemo(
     () => boardColumns.filter((column) => column.runs.length > 0),
     [boardColumns],
   );
+  useHorizontalWheelGuard(boardRef);
 
-  const recomputeJumpBarVisibility = useCallback(() => {
+  const resolveCenteredColumnKey = useCallback(
+    (board: HTMLElement): string | null => {
+      const viewportCenter = board.scrollLeft + board.clientWidth / 2;
+      let bestKey: string | null = null;
+      let bestDistance = Number.POSITIVE_INFINITY;
+
+      for (const column of boardColumns) {
+        const element = columnRefs.current.get(column.key);
+        if (!element) {
+          continue;
+        }
+
+        const width = element.offsetWidth;
+        if (width <= 0) {
+          continue;
+        }
+
+        const center = element.offsetLeft + width / 2;
+        const distance = Math.abs(center - viewportCenter);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          bestKey = column.key;
+        }
+      }
+
+      return bestKey;
+    },
+    [boardColumns],
+  );
+
+  const scrollColumnIntoView = useCallback(
+    (columnKey: string, behavior: ScrollBehavior = "smooth"): boolean => {
+      const board = boardRef.current;
+      const column = columnRefs.current.get(columnKey);
+      if (!board || !column || column.offsetWidth <= 0) {
+        return false;
+      }
+
+      const maxScrollLeft = Math.max(0, board.scrollWidth - board.clientWidth);
+      const centeredLeft = column.offsetLeft - (board.clientWidth - column.offsetWidth) / 2;
+      const targetLeft = Math.min(maxScrollLeft, Math.max(0, centeredLeft));
+
+      if (typeof board.scrollTo === "function") {
+        board.scrollTo({ behavior, left: targetLeft });
+      } else {
+        board.scrollLeft = targetLeft;
+      }
+
+      return true;
+    },
+    [],
+  );
+
+  const recomputeBoardViewportState = useCallback(() => {
     const board = boardRef.current;
     if (!board || jumpColumns.length === 0) {
       setShowColumnJumpBar(false);
       return;
+    }
+
+    const pendingRestoreColumnKey = pendingRestoreColumnKeyRef.current;
+    if (pendingRestoreColumnKey && scrollColumnIntoView(pendingRestoreColumnKey, "auto")) {
+      pendingRestoreColumnKeyRef.current = null;
     }
 
     const viewportLeft = board.scrollLeft;
@@ -58,10 +123,14 @@ export function RunsBoardPanel({
     });
 
     setShowColumnJumpBar(!allVisible);
-  }, [jumpColumns]);
+    const centeredColumnKey = resolveCenteredColumnKey(board);
+    if (centeredColumnKey) {
+      onActiveBoardColumnKeyChange(centeredColumnKey);
+    }
+  }, [jumpColumns, onActiveBoardColumnKeyChange, resolveCenteredColumnKey, scrollColumnIntoView]);
 
   useLayoutEffect(() => {
-    recomputeJumpBarVisibility();
+    recomputeBoardViewportState();
   });
 
   useEffect(() => {
@@ -70,16 +139,16 @@ export function RunsBoardPanel({
       return;
     }
 
-    const frameId = window.requestAnimationFrame(recomputeJumpBarVisibility);
-    board.addEventListener("scroll", recomputeJumpBarVisibility, { passive: true });
-    window.addEventListener("resize", recomputeJumpBarVisibility);
+    const frameId = window.requestAnimationFrame(recomputeBoardViewportState);
+    board.addEventListener("scroll", recomputeBoardViewportState, { passive: true });
+    window.addEventListener("resize", recomputeBoardViewportState);
 
     return () => {
       window.cancelAnimationFrame(frameId);
-      board.removeEventListener("scroll", recomputeJumpBarVisibility);
-      window.removeEventListener("resize", recomputeJumpBarVisibility);
+      board.removeEventListener("scroll", recomputeBoardViewportState);
+      window.removeEventListener("resize", recomputeBoardViewportState);
     };
-  }, [recomputeJumpBarVisibility]);
+  }, [recomputeBoardViewportState]);
 
   useEffect(() => {
     const pendingColumnKey = pendingScrollColumnKeyRef.current;
@@ -98,7 +167,7 @@ export function RunsBoardPanel({
     return () => {
       window.cancelAnimationFrame(frameId);
     };
-  }, [collapsedColumnKeySet]);
+  }, [collapsedColumnKeySet, scrollColumnIntoView]);
 
   function columnRefFor(columnKey: string) {
     const existing = columnRefCallbacks.current.get(columnKey);
@@ -115,25 +184,6 @@ export function RunsBoardPanel({
     };
     columnRefCallbacks.current.set(columnKey, callback);
     return callback;
-  }
-
-  function scrollColumnIntoView(columnKey: string) {
-    const board = boardRef.current;
-    const column = columnRefs.current.get(columnKey);
-    if (!board || !column) {
-      return;
-    }
-
-    const maxScrollLeft = Math.max(0, board.scrollWidth - board.clientWidth);
-    const centeredLeft = column.offsetLeft - (board.clientWidth - column.offsetWidth) / 2;
-    const targetLeft = Math.min(maxScrollLeft, Math.max(0, centeredLeft));
-
-    if (typeof board.scrollTo === "function") {
-      board.scrollTo({ behavior: "smooth", left: targetLeft });
-      return;
-    }
-
-    board.scrollLeft = targetLeft;
   }
 
   function handleJumpToColumn(columnKey: string) {

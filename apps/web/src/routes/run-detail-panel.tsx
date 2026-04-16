@@ -1,18 +1,25 @@
 import type { UseQueryResult } from "@tanstack/react-query";
 import type { RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
 import type { CSSProperties } from "react";
-import type { RunTimelineState } from "../lib/run-timeline.js";
-import type { RunActionPending } from "./use-runs-dashboard-state.js";
-
+import { AttachmentPreviewDrawer } from "../components/attachment-preview-drawer.js";
 import { RunDetailDrawer } from "../components/run-detail-drawer.js";
 import { isNotFoundError } from "../lib/api-client.js";
+import type { RunTimelineState } from "../lib/run-timeline.js";
+import type {
+  DrawerDetailSection,
+  RunActionPending,
+  RunDrawerView,
+} from "./use-runs-dashboard-state.js";
 
 export function RunDetailPanel({
   onAddDependency,
   actionError,
   actionPending,
+  drawerFullscreen,
   drawerWidth,
+  drawerView,
   runs,
+  onBackToAttachments,
   onAbort,
   onArchive,
   onClearDependencies,
@@ -20,11 +27,13 @@ export function RunDetailPanel({
   onCopy,
   onDelete,
   onDownloadAttachment,
+  onOpenAttachmentPreview,
   onRemoveDependency,
   onRemoveAttachment,
   onReset,
   onRename,
   onResume,
+  onSelectDetailSection,
   onUnarchive,
   onUploadAttachment,
   selectedRunId,
@@ -34,8 +43,11 @@ export function RunDetailPanel({
   onAddDependency: (runId: string, dependencyRunId: string) => Promise<void>;
   actionError?: string;
   actionPending?: RunActionPending;
+  drawerFullscreen: boolean;
   drawerWidth: number;
+  drawerView?: RunDrawerView;
   runs: RunSummary[];
+  onBackToAttachments: () => void;
   onAbort: (runId: string) => void;
   onArchive: (runId: string) => void;
   onClearDependencies: (runId: string) => Promise<void>;
@@ -43,11 +55,13 @@ export function RunDetailPanel({
   onCopy: (value: string, label: string) => Promise<void>;
   onDelete: (runId: string) => void;
   onDownloadAttachment: (runId: string, attachmentId: string, name: string) => Promise<void>;
+  onOpenAttachmentPreview: (attachmentId: string) => void;
   onRemoveDependency: (runId: string, dependencyRunId: string) => Promise<void>;
   onRemoveAttachment: (runId: string, attachmentId: string) => Promise<void>;
   onReset: (runId: string) => void;
   onRename: (runId: string, name: string | null) => Promise<void>;
   onResume: (runId: string, message?: string) => Promise<void>;
+  onSelectDetailSection: (section: DrawerDetailSection) => void;
   onUnarchive: (runId: string) => void;
   onUploadAttachment: (runId: string, file: File) => Promise<void>;
   selectedRunId?: string;
@@ -59,10 +73,15 @@ export function RunDetailPanel({
   }
 
   const drawerStyle = { "--drawer-width": `${drawerWidth}px` } as CSSProperties;
+  const drawerClassName = drawerFullscreen ? "drawer drawer--fullscreen" : "drawer";
 
   if (selectedRunQuery.isPending) {
     return (
-      <aside aria-label="Run detail" className="drawer drawer-skeleton" style={drawerStyle}>
+      <aside
+        aria-label="Run detail"
+        className={`${drawerClassName} drawer-skeleton`}
+        style={drawerStyle}
+      >
         <div className="drawer-state">
           <div className="skeleton-line skeleton-line--short" />
           <div className="skeleton-line skeleton-line--medium" style={{ marginTop: "12px" }} />
@@ -74,7 +93,7 @@ export function RunDetailPanel({
 
   if (selectedRunQuery.isError && !isNotFoundError(selectedRunQuery.error)) {
     return (
-      <aside aria-label="Run detail" className="drawer" style={drawerStyle}>
+      <aside aria-label="Run detail" className={drawerClassName} style={drawerStyle}>
         <div className="drawer-state">
           <h3>Run detail failed to load</h3>
           <p>{selectedRunQuery.error.message}</p>
@@ -91,8 +110,28 @@ export function RunDetailPanel({
   }
 
   const selectedRun = selectedRunQuery.data;
+  if (drawerView?.mode === "attachment") {
+    const attachment = selectedRun.attachments.find(
+      (candidate) => candidate.id === drawerView.attachmentId,
+    );
+    return (
+      <AttachmentPreviewDrawer
+        actionPending={actionPending}
+        attachment={attachment}
+        attachmentId={drawerView.attachmentId}
+        onBack={onBackToAttachments}
+        onClose={onClose}
+        onDownload={(attachmentId, name) =>
+          onDownloadAttachment(selectedRun.runId, attachmentId, name)
+        }
+        runId={selectedRun.runId}
+      />
+    );
+  }
+
   return (
     <RunDetailDrawer
+      activeSection={drawerView?.detailSection ?? "tasks"}
       dependencyCandidateRuns={runs}
       onAddDependency={(dependencyRunId) => onAddDependency(selectedRun.runId, dependencyRunId)}
       actionError={actionError}
@@ -107,6 +146,7 @@ export function RunDetailPanel({
       onDownloadAttachment={(attachmentId, name) =>
         onDownloadAttachment(selectedRun.runId, attachmentId, name)
       }
+      onOpenAttachmentPreview={onOpenAttachmentPreview}
       onRemoveDependency={(dependencyRunId) =>
         onRemoveDependency(selectedRun.runId, dependencyRunId)
       }
@@ -114,6 +154,7 @@ export function RunDetailPanel({
       onReset={() => onReset(selectedRun.runId)}
       onRename={(name) => onRename(selectedRun.runId, name)}
       onResume={(message) => onResume(selectedRun.runId, message)}
+      onSelectSection={onSelectDetailSection}
       timelineState={timelineState}
       onUnarchive={() => onUnarchive(selectedRun.runId)}
       onUploadAttachment={(file) => onUploadAttachment(selectedRun.runId, file)}

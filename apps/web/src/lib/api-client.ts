@@ -36,6 +36,11 @@ export class ApiError extends Error {
   }
 }
 
+export interface AttachmentContentResult {
+  mediaType: string | null;
+  text: string;
+}
+
 interface ErrorEnvelope {
   error?: {
     code?: string;
@@ -275,6 +280,11 @@ function joinPath(basePath: string, path: string): string {
   return `${basePath.replace(/\/$/, "")}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
+function normalizeResponseMediaType(value: string | null): string | null {
+  const mediaType = value?.split(";")[0]?.trim().toLowerCase();
+  return mediaType && mediaType.length > 0 ? mediaType : null;
+}
+
 export function createApiClient(config: AppRuntimeConfig) {
   return {
     async listRuns(): Promise<RunSummary[]> {
@@ -355,6 +365,24 @@ export function createApiClient(config: AppRuntimeConfig) {
         return await readError(response);
       }
       return await response.blob();
+    },
+    async readAttachmentText(
+      runId: string,
+      attachmentId: string,
+    ): Promise<AttachmentContentResult> {
+      const response = await fetch(
+        joinPath(
+          config.apiBasePath,
+          `/runs/${encodeURIComponent(runId)}/attachments/${encodeURIComponent(attachmentId)}/content`,
+        ),
+      );
+      if (!response.ok) {
+        return await readError(response);
+      }
+      return {
+        mediaType: normalizeResponseMediaType(response.headers.get("content-type")),
+        text: await response.text(),
+      };
     },
     async archiveRun(runId: string): Promise<RunArchiveResult> {
       const response = await fetch(

@@ -21,6 +21,9 @@
 
 ### Added
 
+- Added in-app preview for `text/markdown` and `text/plain` attachments in the web run detail drawer, including per-run remembered preview state when switching between runs. ([#40](https://github.com/kcosr/task-runner/pull/40))
+- Added Mermaid diagram rendering for fenced `mermaid` blocks anywhere shared markdown is shown, including attachment previews, with inline render errors when a diagram fails to load. ([#40](https://github.com/kcosr/task-runner/pull/40))
+- The attachment preview drawer is now resizable via the same edge drag/keyboard handle used by the run detail drawer, and both drawers gained a full-width toggle next to the close button (desktop only) that expands the drawer to fill the entire main content area while keeping the top bar and left sidebar interactive. ([#40](https://github.com/kcosr/task-runner/pull/40))
 - Added `task-runner run delete <id|path>` plus daemon HTTP/RPC parity and web detail-drawer support for deleting archived runs. ([#39](https://github.com/kcosr/task-runner/pull/39))
 - Added bundled `planner` and `test` agents for planning and validation flows. ([#38](https://github.com/kcosr/task-runner/pull/38))
 - Added `scripts/migrate-manifests-v7.mjs` to upgrade existing v6 run manifests by converting `pendingPrompt` / `taskMode` into persisted `brief` fields for manifests, reset seeds, and sessions. ([#38](https://github.com/kcosr/task-runner/pull/38))
@@ -79,6 +82,7 @@
 
 ### Changed
 
+- The attachment preview drawer now uses a more compact header layout and hides MIME type metadata in preview mode to reduce wasted vertical space, especially on mobile. ([#40](https://github.com/kcosr/task-runner/pull/40))
 - Replaced the bundled `repo-diagnostics` assignment with a bundled `test` assignment that only asks the agent to run `date` and `pwd`, without repo-specific context. ([#38](https://github.com/kcosr/task-runner/pull/38))
 - The web run detail drawer now shows `Reset` for non-running runs and only renders `Reset` / `Delete` when the backend-derived shared lifecycle capabilities allow them. ([#39](https://github.com/kcosr/task-runner/pull/39))
 - The web timeline drawer now uses an `Attempts` section label, drops the redundant per-attempt metadata header, and renders attempt prompts/output as Markdown so streamed transcripts can progressively format in place. ([#36](https://github.com/kcosr/task-runner/pull/36))
@@ -143,6 +147,8 @@
 
 ### Fixed
 
+- Fixed restored web drawer widths to clamp to the current viewport, kept the detail drawer open after archiving, restored the active mobile board column after closing the detail overlay, and blocked horizontal swipe gestures in the board and drawers from triggering browser navigation. ([#40](https://github.com/kcosr/task-runner/pull/40))
+- Fixed Mermaid preview rendering to apply Mermaid's returned post-render bindings so interactive diagrams keep their event handlers. ([#40](https://github.com/kcosr/task-runner/pull/40))
 - Fixed run detail projections to preserve the canonical repo bucket from the workspace path instead of re-probing `cwd`, preventing web dashboard cards from disappearing under repo filters after the detail drawer refreshed a selected run. ([#39](https://github.com/kcosr/task-runner/pull/39))
 - Fixed non-passive terminal runs so any task left `in_progress` is persisted back to `pending` when the run stops, preventing stale running indicators in CLI/web until the next resume. ([#38](https://github.com/kcosr/task-runner/pull/38))
 - Fixed daemon-managed run settlement so terminal detail projections clear live abort capability immediately after completion or abort, preventing stale `Abort` actions in the web drawer after a resume finishes. ([#36](https://github.com/kcosr/task-runner/pull/36))

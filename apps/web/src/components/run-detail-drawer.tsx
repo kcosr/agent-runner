@@ -1,14 +1,6 @@
 import type { RunAttachment } from "@task-runner/core/contracts/attachments.js";
 import type { RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
-import {
-  type CSSProperties,
-  type ChangeEvent,
-  type KeyboardEvent,
-  type PointerEvent,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { type ChangeEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
 import {
   formatBytes,
   formatRelativeTimestamp,
@@ -16,19 +8,20 @@ import {
   truncateMiddle,
 } from "../lib/format.js";
 import type { RunTimelineState } from "../lib/run-timeline.js";
-import {
-  DRAWER_WIDTH_MAX,
-  DRAWER_WIDTH_MIN,
-  clampDrawerWidth,
-  useBoardSettings,
-} from "../lib/settings.js";
+import { useDrawerResize } from "../lib/use-drawer-resize.js";
+import { useHorizontalWheelGuard } from "../lib/use-horizontal-wheel-guard.js";
+import type { DrawerDetailSection, RunActionPending } from "../routes/use-runs-dashboard-state.js";
+import { isPreviewableAttachment } from "./attachment-preview-drawer.js";
+import { DrawerResizeHandle } from "./drawer-resize-handle.js";
 import {
   ArchiveIcon,
   CheckIcon,
   ChevronIcon,
   CloseIcon,
+  CollapseIcon,
   CopyIcon,
   DownloadIcon,
+  ExpandIcon,
   PencilIcon,
   StopIcon,
   TrashIcon,
@@ -37,14 +30,7 @@ import { MarkdownContent } from "./markdown.js";
 import { RunTaskList } from "./run-task-list.js";
 import { StatusBadge } from "./status-badge.js";
 
-type SectionKey = "tasks" | "attachments" | "dependencies" | "timing" | "events";
 type TimelineTab = "prompt" | "output";
-
-interface DragState {
-  pointerId: number;
-  startX: number;
-  startWidth: number;
-}
 
 function dependencyCandidateTitle(run: RunSummary) {
   return run.name ?? run.assignmentName ?? "Unnamed";
@@ -132,6 +118,7 @@ function attemptOutput(attempt: {
 }
 
 export function RunDetailDrawer({
+  activeSection,
   dependencyCandidateRuns,
   onAddDependency,
   actionError,
@@ -143,20 +130,23 @@ export function RunDetailDrawer({
   onCopy,
   onDelete,
   onDownloadAttachment,
+  onOpenAttachmentPreview,
   onRemoveDependency,
   onRemoveAttachment,
   onReset,
   onRename,
   onResume,
+  onSelectSection,
   timelineState,
   onUnarchive,
   onUploadAttachment,
   run,
 }: {
+  activeSection: DrawerDetailSection;
   dependencyCandidateRuns: RunSummary[];
   onAddDependency: (dependencyRunId: string) => Promise<void>;
   actionError?: string;
-  actionPending?: string;
+  actionPending?: RunActionPending;
   onAbort: () => void;
   onArchive: () => void;
   onClearDependencies: () => Promise<void>;
@@ -164,17 +154,19 @@ export function RunDetailDrawer({
   onCopy: (value: string, label: string) => void;
   onDelete: () => void;
   onDownloadAttachment: (attachmentId: string, name: string) => Promise<void>;
+  onOpenAttachmentPreview: (attachmentId: string) => void;
   onRemoveDependency: (dependencyRunId: string) => Promise<void>;
   onRemoveAttachment: (attachmentId: string) => Promise<void>;
   onReset: () => void;
   onRename: (name: string | null) => Promise<void>;
   onResume: (message?: string) => Promise<void>;
+  onSelectSection: (section: DrawerDetailSection) => void;
   timelineState: RunTimelineState;
   onUnarchive: () => void;
   onUploadAttachment: (file: File) => Promise<void>;
   run: RunDetail;
 }) {
-  const [section, setSection] = useState<SectionKey>("tasks");
+  const drawerRef = useRef<HTMLElement | null>(null);
   const [selectedAttempt, setSelectedAttempt] = useState<number | null>(null);
   const [timelineTab, setTimelineTab] = useState<TimelineTab>("output");
   const [editingName, setEditingName] = useState(false);
@@ -185,15 +177,12 @@ export function RunDetailDrawer({
   const [confirmingAttachmentId, setConfirmingAttachmentId] = useState<string | null>(null);
   const [dependencyDraft, setDependencyDraft] = useState("");
   const [selectedDependencyRunId, setSelectedDependencyRunId] = useState<string | null>(null);
-  const { settings, updateSettings } = useBoardSettings();
-  const dragRef = useRef<DragState | null>(null);
+  const resize = useDrawerResize();
+  const { drawerStyle, isFullscreen, toggleFullscreen } = resize;
   const nameInputRef = useRef<HTMLInputElement | null>(null);
   const resumeDisclosureButtonRef = useRef<HTMLButtonElement | null>(null);
   const resumeMessageRef = useRef<HTMLTextAreaElement | null>(null);
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
-  const [dragWidth, setDragWidth] = useState<number | null>(null);
-  const width = dragWidth ?? settings.drawerWidth;
-  const drawerStyle = { "--drawer-width": `${width}px` } as CSSProperties;
   const backendSessionId = run.backendSessionId;
   const actionsLocked = actionPending !== undefined;
   const resumePending = actionPending === "resume";
@@ -212,6 +201,7 @@ export function RunDetailDrawer({
   const addDependencyPending = actionPending === "add-dependency";
   const removeDependencyPending = actionPending === "remove-dependency";
   const clearDependenciesPending = actionPending === "clear-dependencies";
+  useHorizontalWheelGuard(drawerRef);
   const satisfiedDependencies = run.dependencies.filter(
     (dependency) => dependency.satisfied,
   ).length;
@@ -237,72 +227,6 @@ export function RunDetailDrawer({
     timelineAttempts.find((attempt) => attempt.attempt === selectedAttempt) ??
     timelineAttempts[timelineAttempts.length - 1] ??
     null;
-
-  function handleResizeStart(event: PointerEvent<HTMLDivElement>) {
-    event.preventDefault();
-    const target = event.currentTarget;
-    target.setPointerCapture(event.pointerId);
-    dragRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startWidth: width,
-    };
-  }
-
-  function handleResizeMove(event: PointerEvent<HTMLDivElement>) {
-    const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) {
-      return;
-    }
-    const next = clampDrawerWidth(drag.startWidth + (drag.startX - event.clientX));
-    setDragWidth(next);
-  }
-
-  function handleResizeKey(event: KeyboardEvent<HTMLDivElement>) {
-    const step = event.shiftKey ? 40 : 10;
-    let next: number | null = null;
-    if (event.key === "ArrowLeft") {
-      next = clampDrawerWidth(width + step);
-    } else if (event.key === "ArrowRight") {
-      next = clampDrawerWidth(width - step);
-    } else if (event.key === "Home") {
-      next = DRAWER_WIDTH_MIN;
-    } else if (event.key === "End") {
-      next = DRAWER_WIDTH_MAX;
-    }
-    if (next !== null) {
-      event.preventDefault();
-      updateSettings({ drawerWidth: next });
-    }
-  }
-
-  function handleResizeEnd(event: PointerEvent<HTMLDivElement>) {
-    const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) {
-      return;
-    }
-    const final = clampDrawerWidth(drag.startWidth + (drag.startX - event.clientX));
-    dragRef.current = null;
-    setDragWidth(null);
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    if (final !== settings.drawerWidth) {
-      updateSettings({ drawerWidth: final });
-    }
-  }
-
-  function handleResizeCancel(event: PointerEvent<HTMLDivElement>) {
-    const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) {
-      return;
-    }
-    dragRef.current = null;
-    setDragWidth(null);
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-  }
 
   function startNameEdit() {
     if (actionsLocked) {
@@ -540,22 +464,13 @@ export function RunDetailDrawer({
         onClick={onClose}
         type="button"
       />
-      <aside aria-label="Run detail" className="drawer" style={drawerStyle}>
-        <div
-          aria-label="Resize detail drawer"
-          aria-orientation="vertical"
-          aria-valuemax={DRAWER_WIDTH_MAX}
-          aria-valuemin={DRAWER_WIDTH_MIN}
-          aria-valuenow={width}
-          className={dragWidth !== null ? "drawer-resize active" : "drawer-resize"}
-          onKeyDown={handleResizeKey}
-          onPointerCancel={handleResizeCancel}
-          onPointerDown={handleResizeStart}
-          onPointerMove={handleResizeMove}
-          onPointerUp={handleResizeEnd}
-          role="separator"
-          tabIndex={0}
-        />
+      <aside
+        aria-label="Run detail"
+        className={isFullscreen ? "drawer drawer--fullscreen" : "drawer"}
+        ref={drawerRef}
+        style={drawerStyle}
+      >
+        <DrawerResizeHandle label="Resize detail drawer" resize={resize} />
         <header className="drawer-head">
           <div className="drawer-title">
             <span className="run-id-large">{run.runId}</span>
@@ -625,6 +540,20 @@ export function RunDetailDrawer({
               type="button"
             >
               <CopyIcon aria-hidden="true" />
+            </button>
+            <button
+              aria-label={isFullscreen ? "Exit full-width drawer" : "Expand drawer to full width"}
+              aria-pressed={isFullscreen}
+              className="icon-btn drawer-fullscreen-toggle"
+              onClick={toggleFullscreen}
+              title={isFullscreen ? "Restore drawer width" : "Expand to full width"}
+              type="button"
+            >
+              {isFullscreen ? (
+                <CollapseIcon aria-hidden="true" />
+              ) : (
+                <ExpandIcon aria-hidden="true" />
+              )}
             </button>
             <button aria-label="Close detail" className="icon-btn" onClick={onClose} type="button">
               <CloseIcon aria-hidden="true" />
@@ -727,9 +656,9 @@ export function RunDetailDrawer({
 
           <nav aria-label="Run sections" className="tabs">
             <button
-              aria-selected={section === "tasks"}
-              className={section === "tasks" ? "tab active" : "tab"}
-              onClick={() => setSection("tasks")}
+              aria-selected={activeSection === "tasks"}
+              className={activeSection === "tasks" ? "tab active" : "tab"}
+              onClick={() => onSelectSection("tasks")}
               type="button"
             >
               Tasks
@@ -741,9 +670,9 @@ export function RunDetailDrawer({
               ) : null}
             </button>
             <button
-              aria-selected={section === "attachments"}
-              className={section === "attachments" ? "tab active" : "tab"}
-              onClick={() => setSection("attachments")}
+              aria-selected={activeSection === "attachments"}
+              className={activeSection === "attachments" ? "tab active" : "tab"}
+              onClick={() => onSelectSection("attachments")}
               type="button"
             >
               Attachments
@@ -752,9 +681,9 @@ export function RunDetailDrawer({
               ) : null}
             </button>
             <button
-              aria-selected={section === "dependencies"}
-              className={section === "dependencies" ? "tab active" : "tab"}
-              onClick={() => setSection("dependencies")}
+              aria-selected={activeSection === "dependencies"}
+              className={activeSection === "dependencies" ? "tab active" : "tab"}
+              onClick={() => onSelectSection("dependencies")}
               type="button"
             >
               Dependencies
@@ -766,30 +695,30 @@ export function RunDetailDrawer({
               ) : null}
             </button>
             <button
-              aria-selected={section === "timing"}
-              className={section === "timing" ? "tab active" : "tab"}
-              onClick={() => setSection("timing")}
+              aria-selected={activeSection === "timing"}
+              className={activeSection === "timing" ? "tab active" : "tab"}
+              onClick={() => onSelectSection("timing")}
               type="button"
             >
               Timing
             </button>
             <button
-              aria-selected={section === "events"}
-              className={section === "events" ? "tab active" : "tab"}
-              onClick={() => setSection("events")}
+              aria-selected={activeSection === "events"}
+              className={activeSection === "events" ? "tab active" : "tab"}
+              onClick={() => onSelectSection("events")}
               type="button"
             >
               Attempts
             </button>
           </nav>
 
-          {section === "tasks" ? (
+          {activeSection === "tasks" ? (
             <section aria-label="Tasks" className="drawer-panel drawer-panel--tasks">
               <RunTaskList tasks={run.tasks} />
             </section>
           ) : null}
 
-          {section === "attachments" ? (
+          {activeSection === "attachments" ? (
             <section aria-label="Attachments" className="drawer-panel drawer-panel--attachments">
               <div className="drawer-panel-card dependency-panel">
                 <div className="dependency-summary">
@@ -817,74 +746,98 @@ export function RunDetailDrawer({
 
                 {run.attachments.length === 0 ? null : (
                   <ul aria-label="Attachment list" className="dependency-list">
-                    {run.attachments.map((attachment) => (
-                      <li className="dependency-row" key={attachment.id}>
-                        <div className="dependency-copy">
+                    {run.attachments.map((attachment) => {
+                      const previewable = isPreviewableAttachment(attachment);
+                      const rowClassName = previewable
+                        ? "dependency-row dependency-row--interactive"
+                        : "dependency-row";
+                      const attachmentSummary = (
+                        <span className="dependency-copy">
                           <span className="dependency-name">{attachment.name}</span>
                           <span className="dependency-meta">
-                            <span className="dependency-meta-id">{attachment.mimeType}</span>
-                            <span>·</span>
+                            <span className="dependency-meta-id attachment-row-mime">
+                              {attachment.mimeType}
+                            </span>
+                            <span aria-hidden="true" className="attachment-row-mime">
+                              ·
+                            </span>
                             <span>{formatBytes(attachment.size)}</span>
-                            <span>·</span>
+                            <span aria-hidden="true">·</span>
                             <span>{formatTimestamp(attachment.addedAt)}</span>
                           </span>
-                        </div>
-                        <div className="dependency-actions">
-                          <button
-                            aria-label={`Download ${attachment.name}`}
-                            className="icon-btn"
-                            disabled={actionsLocked}
-                            onClick={() => void submitAttachmentDownload(attachment)}
-                            title={downloadAttachmentPending ? "Downloading..." : "Download"}
-                            type="button"
-                          >
-                            <DownloadIcon aria-hidden="true" />
-                          </button>
-                          {confirmingAttachmentId === attachment.id ? (
-                            <>
-                              <button
-                                aria-label={`Confirm remove ${attachment.name}`}
-                                className="icon-btn icon-btn--destructive"
-                                disabled={actionsLocked}
-                                onClick={() => void submitAttachmentRemove(attachment.id)}
-                                title={removeAttachmentPending ? "Removing..." : "Confirm remove"}
-                                type="button"
-                              >
-                                <CheckIcon aria-hidden="true" />
-                              </button>
-                              <button
-                                aria-label={`Cancel remove ${attachment.name}`}
-                                className="icon-btn"
-                                disabled={actionsLocked}
-                                onClick={() => setConfirmingAttachmentId(null)}
-                                title="Cancel remove"
-                                type="button"
-                              >
-                                <CloseIcon aria-hidden="true" />
-                              </button>
-                            </>
-                          ) : (
+                        </span>
+                      );
+                      return (
+                        <li className={rowClassName} key={attachment.id}>
+                          {previewable ? (
                             <button
-                              aria-label={`Remove ${attachment.name}`}
-                              className="icon-btn icon-btn--destructive"
-                              disabled={actionsLocked}
-                              onClick={() => setConfirmingAttachmentId(attachment.id)}
-                              title="Remove"
+                              aria-label={`Preview ${attachment.name}`}
+                              className="attachment-row-trigger"
+                              onClick={() => onOpenAttachmentPreview(attachment.id)}
                               type="button"
                             >
-                              <TrashIcon aria-hidden="true" />
+                              {attachmentSummary}
                             </button>
+                          ) : (
+                            attachmentSummary
                           )}
-                        </div>
-                      </li>
-                    ))}
+                          <div className="dependency-actions">
+                            <button
+                              aria-label={`Download ${attachment.name}`}
+                              className="icon-btn"
+                              disabled={actionsLocked}
+                              onClick={() => void submitAttachmentDownload(attachment)}
+                              title={downloadAttachmentPending ? "Downloading..." : "Download"}
+                              type="button"
+                            >
+                              <DownloadIcon aria-hidden="true" />
+                            </button>
+                            {confirmingAttachmentId === attachment.id ? (
+                              <>
+                                <button
+                                  aria-label={`Confirm remove ${attachment.name}`}
+                                  className="icon-btn icon-btn--destructive"
+                                  disabled={actionsLocked}
+                                  onClick={() => void submitAttachmentRemove(attachment.id)}
+                                  title={removeAttachmentPending ? "Removing..." : "Confirm remove"}
+                                  type="button"
+                                >
+                                  <CheckIcon aria-hidden="true" />
+                                </button>
+                                <button
+                                  aria-label={`Cancel remove ${attachment.name}`}
+                                  className="icon-btn"
+                                  disabled={actionsLocked}
+                                  onClick={() => setConfirmingAttachmentId(null)}
+                                  title="Cancel remove"
+                                  type="button"
+                                >
+                                  <CloseIcon aria-hidden="true" />
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                aria-label={`Remove ${attachment.name}`}
+                                className="icon-btn icon-btn--destructive"
+                                disabled={actionsLocked}
+                                onClick={() => setConfirmingAttachmentId(attachment.id)}
+                                title="Remove"
+                                type="button"
+                              >
+                                <TrashIcon aria-hidden="true" />
+                              </button>
+                            )}
+                          </div>
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
               </div>
             </section>
           ) : null}
 
-          {section === "dependencies" ? (
+          {activeSection === "dependencies" ? (
             <section aria-label="Dependencies" className="drawer-panel drawer-panel--dependencies">
               <div className="drawer-panel-card dependency-panel">
                 <div className="dependency-summary">
@@ -1041,7 +994,7 @@ export function RunDetailDrawer({
             </section>
           ) : null}
 
-          {section === "timing" ? (
+          {activeSection === "timing" ? (
             <section aria-label="Timing" className="drawer-panel drawer-panel--timing">
               <div className="drawer-panel-card">
                 <div className="timing-grid">
@@ -1068,7 +1021,7 @@ export function RunDetailDrawer({
             </section>
           ) : null}
 
-          {section === "events" ? (
+          {activeSection === "events" ? (
             <section aria-label="Attempts" className="drawer-panel drawer-panel--events">
               <div className="drawer-panel-card timeline-panel">
                 {timelineState.stale ? (

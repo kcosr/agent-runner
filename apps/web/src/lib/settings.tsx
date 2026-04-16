@@ -9,17 +9,25 @@ export interface BoardSettings {
   collapsedColumnKeys: string[];
   search: string;
   drawerWidth: number;
+  drawerFullscreen: boolean;
 }
 
 export const DRAWER_WIDTH_MIN = 360;
-export const DRAWER_WIDTH_MAX = 1200;
+export const DRAWER_WIDTH_MAX = 2400;
 export const DRAWER_WIDTH_DEFAULT = 540;
+export const DRAWER_SIDEBAR_ALLOWANCE = 56;
+export const DRAWER_BOARD_MIN = 280;
 
 export function clampDrawerWidth(value: number): number {
   if (!Number.isFinite(value)) {
     return DRAWER_WIDTH_DEFAULT;
   }
   return Math.min(DRAWER_WIDTH_MAX, Math.max(DRAWER_WIDTH_MIN, Math.round(value)));
+}
+
+export function computeDrawerMaxWidth(viewportWidth: number): number {
+  const available = viewportWidth - DRAWER_SIDEBAR_ALLOWANCE - DRAWER_BOARD_MIN;
+  return Math.min(DRAWER_WIDTH_MAX, Math.max(DRAWER_WIDTH_MIN, Math.round(available)));
 }
 
 const STORAGE_KEY = "task-runner:web:board-settings";
@@ -32,6 +40,7 @@ const DEFAULT_SETTINGS: BoardSettings = {
   collapsedColumnKeys: [],
   search: "",
   drawerWidth: DRAWER_WIDTH_DEFAULT,
+  drawerFullscreen: false,
 };
 
 interface BoardSettingsContextValue {
@@ -87,6 +96,10 @@ function parseStoredSettings(value: unknown): BoardSettings {
     drawerWidth: clampDrawerWidth(
       typeof record.drawerWidth === "number" ? record.drawerWidth : DEFAULT_SETTINGS.drawerWidth,
     ),
+    drawerFullscreen:
+      typeof record.drawerFullscreen === "boolean"
+        ? record.drawerFullscreen
+        : DEFAULT_SETTINGS.drawerFullscreen,
   };
 }
 

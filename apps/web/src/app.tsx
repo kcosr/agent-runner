@@ -11,6 +11,7 @@ import {
 } from "./lib/runtime-config.js";
 import { BoardSettingsProvider } from "./lib/settings.js";
 import { router } from "./router.js";
+import { RunsDashboardStateProvider } from "./routes/use-runs-dashboard-state.js";
 
 type BootState =
   | { status: "loading" }
@@ -74,7 +75,9 @@ export function App() {
       <QueryClientProvider client={queryClient}>
         <RunEventsProvider config={bootState.config}>
           <BoardSettingsProvider>
-            <RouterProvider router={router} />
+            <RunsDashboardStateProvider>
+              <RouterProvider router={router} />
+            </RunsDashboardStateProvider>
           </BoardSettingsProvider>
         </RunEventsProvider>
       </QueryClientProvider>

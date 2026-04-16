@@ -6,7 +6,19 @@ import type {
   RunStatus,
   RunSummary,
 } from "@task-runner/core/contracts/runs.js";
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction,
+  createContext,
+  createElement,
+  useContext,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { BoardColumn } from "../components/run-column.js";
 import { createApiClient, isNotFoundError } from "../lib/api-client.js";
 import { queryClient, runQueryKeys } from "../lib/query.js";
@@ -37,6 +49,62 @@ export type RunActionPending =
   | "add-dependency"
   | "remove-dependency"
   | "clear-dependencies";
+
+export type DrawerDetailSection = "tasks" | "attachments" | "dependencies" | "timing" | "events";
+
+export type RunDrawerView =
+  | {
+      mode: "detail";
+      detailSection: DrawerDetailSection;
+      attachmentId: null;
+    }
+  | {
+      mode: "attachment";
+      detailSection: "attachments";
+      attachmentId: string;
+    };
+
+const DEFAULT_DRAWER_VIEW: RunDrawerView = {
+  mode: "detail",
+  detailSection: "tasks",
+  attachmentId: null,
+};
+
+const DrawerViewsContext = createContext<{
+  activeBoardColumnKey: string | null;
+  drawerViewsByRunId: Record<string, RunDrawerView>;
+  setActiveBoardColumnKey: Dispatch<SetStateAction<string | null>>;
+  setDrawerViewsByRunId: Dispatch<SetStateAction<Record<string, RunDrawerView>>>;
+} | null>(null);
+
+export function RunsDashboardStateProvider({
+  children,
+}: {
+  children: ReactNode;
+}) {
+  const [activeBoardColumnKey, setActiveBoardColumnKey] = useState<string | null>(null);
+  const [drawerViewsByRunId, setDrawerViewsByRunId] = useState<Record<string, RunDrawerView>>({});
+  return createElement(
+    DrawerViewsContext.Provider,
+    {
+      value: {
+        activeBoardColumnKey,
+        drawerViewsByRunId,
+        setActiveBoardColumnKey,
+        setDrawerViewsByRunId,
+      },
+    },
+    children,
+  );
+}
+
+function useDrawerViewsState() {
+  const value = useContext(DrawerViewsContext);
+  if (!value) {
+    throw new Error("RunsDashboardStateProvider is required");
+  }
+  return value;
+}
 
 const FAILURE_STATUSES: RunStatus[] = ["exhausted", "error"];
 
@@ -191,6 +259,12 @@ export function useRunsDashboardState() {
   const config = useRuntimeConfig();
   const api = useMemo(() => createApiClient(config), [config]);
   const { settings, updateSettings } = useBoardSettings();
+  const {
+    activeBoardColumnKey,
+    drawerViewsByRunId,
+    setActiveBoardColumnKey,
+    setDrawerViewsByRunId,
+  } = useDrawerViewsState();
   const { streamStale: summaryStreamStale } = useRunEvents();
   const deferredSearch = useDeferredValue(settings.search);
   const navigate = useNavigate();
@@ -262,6 +336,10 @@ export function useRunsDashboardState() {
   const boardColumns = settings.hideEmptyColumns
     ? columns.filter((column) => column.runs.length > 0)
     : columns;
+  const selectedDrawerView =
+    selectedRunId !== undefined
+      ? (drawerViewsByRunId[selectedRunId] ?? DEFAULT_DRAWER_VIEW)
+      : undefined;
 
   useEffect(() => {
     detailStreamStaleRef.current = detailStreamStale;
@@ -304,18 +382,6 @@ export function useRunsDashboardState() {
       return;
     }
 
-    if (runsQuery.data && !runsQuery.data.some((run) => run.runId === selectedRunId)) {
-      setNotices((current) =>
-        appendNotice(current, {
-          id: `missing-${selectedRunId}`,
-          message: `Run ${selectedRunId} is no longer available. The detail view was closed.`,
-          tone: "warning",
-        }),
-      );
-      void navigate({ to: "/" });
-      return;
-    }
-
     if (selectedRunQuery.error && isNotFoundError(selectedRunQuery.error)) {
       setNotices((current) =>
         appendNotice(current, {
@@ -326,7 +392,7 @@ export function useRunsDashboardState() {
       );
       void navigate({ to: "/" });
     }
-  }, [navigate, runsQuery.data, selectedRunId, selectedRunQuery.error]);
+  }, [navigate, selectedRunId, selectedRunQuery.error]);
 
   useEffect(() => {
     if (!selectedRunId) {
@@ -417,9 +483,7 @@ export function useRunsDashboardState() {
     void navigate({ to: "/" });
   };
 
-  const archiveMutation = useRunActionMutation(api.archiveRun, setActionError, {
-    onSuccess: closeRun,
-  });
+  const archiveMutation = useRunActionMutation(api.archiveRun, setActionError);
   const unarchiveMutation = useRunActionMutation(api.unarchiveRun, setActionError);
   const resetMutation = useRunActionMutation(api.resetRun, setActionError);
   const deleteMutation = useMutation({
@@ -579,6 +643,7 @@ export function useRunsDashboardState() {
 
   return {
     actionError,
+    activeBoardColumnKey,
     actionPending,
     boardColumns,
     collapsedColumnKeys: settings.collapsedColumnKeys,
@@ -618,6 +683,19 @@ export function useRunsDashboardState() {
       setActionError(undefined);
       void navigate({ to: `/runs/${runId}` });
     },
+    openSelectedRunAttachmentPreview: (attachmentId: string) => {
+      if (!selectedRunId) {
+        return;
+      }
+      setDrawerViewsByRunId((current) => ({
+        ...current,
+        [selectedRunId]: {
+          mode: "attachment",
+          detailSection: "attachments",
+          attachmentId,
+        },
+      }));
+    },
     repoOptions,
     runActions: {
       abort: (runId: string) => abortMutation.mutate(runId),
@@ -653,10 +731,38 @@ export function useRunsDashboardState() {
     runs,
     runsQuery,
     selectedRunId,
+    selectedDrawerView,
     selectedRunQuery,
     settings,
     streamStale: summaryStreamStale || detailStreamStale || timelineState.stale,
     timelineState,
+    returnSelectedRunToAttachments: () => {
+      if (!selectedRunId) {
+        return;
+      }
+      setDrawerViewsByRunId((current) => ({
+        ...current,
+        [selectedRunId]: {
+          mode: "detail",
+          detailSection: "attachments",
+          attachmentId: null,
+        },
+      }));
+    },
+    setActiveBoardColumnKey,
+    updateSelectedRunDetailSection: (detailSection: DrawerDetailSection) => {
+      if (!selectedRunId) {
+        return;
+      }
+      setDrawerViewsByRunId((current) => ({
+        ...current,
+        [selectedRunId]: {
+          mode: "detail",
+          detailSection,
+          attachmentId: null,
+        },
+      }));
+    },
     updateSettings,
     visibleRuns,
   };
