@@ -15,7 +15,6 @@ import { compareRunsByStartedAtDesc, sortRunsByStartedAtDesc } from "../lib/run-
 import { useRunTimelineState } from "../lib/run-timeline.js";
 import { useRuntimeConfig } from "../lib/runtime-config.js";
 import {
-  type BoardSortMode,
   DEFAULT_DRAWER_VIEW,
   type DrawerDetailSection,
   type RunDrawerView,
@@ -106,17 +105,15 @@ function compareRunsByRecentUpdate(
 
 function sortRunsForBoard(
   runs: RunSummary[],
-  sortMode: BoardSortMode,
+  sortByRecentUpdates: boolean,
   recentUpdateSequenceByRunId: Record<string, number>,
 ): RunSummary[] {
-  switch (sortMode) {
-    case "recent-updates":
-      return [...runs].sort((left, right) =>
-        compareRunsByRecentUpdate(left, right, recentUpdateSequenceByRunId),
-      );
-    case "started":
-      return sortRunsByStartedAtDesc(runs);
+  if (sortByRecentUpdates) {
+    return [...runs].sort((left, right) =>
+      compareRunsByRecentUpdate(left, right, recentUpdateSequenceByRunId),
+    );
   }
+  return sortRunsByStartedAtDesc(runs);
 }
 
 function appendNotice(current: NoticeState[], notice: NoticeState): NoticeState[] {
@@ -299,13 +296,13 @@ export function useRunsDashboardState() {
   const columns = useMemo(
     () =>
       buildColumns(
-        sortRunsForBoard(visibleRuns, viewState.sortMode, recentUpdateSequenceByRunId),
+        sortRunsForBoard(visibleRuns, preferences.sortByRecentUpdates, recentUpdateSequenceByRunId),
         preferences.collapseFailureStates,
       ),
     [
       preferences.collapseFailureStates,
+      preferences.sortByRecentUpdates,
       recentUpdateSequenceByRunId,
-      viewState.sortMode,
       visibleRuns,
     ],
   );
@@ -374,6 +371,7 @@ export function useRunsDashboardState() {
     if (!selectedRunId) {
       return;
     }
+    const runId = selectedRunId;
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.defaultPrevented) {
@@ -383,6 +381,14 @@ export function useRunsDashboardState() {
         return;
       }
       setActionError(undefined);
+      if (selectedDrawerView?.mode === "attachment") {
+        setSelectedRunDrawerView(runId, {
+          mode: "detail",
+          detailSection: "attachments",
+          attachmentId: null,
+        });
+        return;
+      }
       void navigate({ to: "/" });
     }
 
@@ -390,7 +396,7 @@ export function useRunsDashboardState() {
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [navigate, selectedRunId]);
+  }, [navigate, selectedRunId, selectedDrawerView?.mode]);
 
   useEffect(() => {
     if (!selectedRunId) {

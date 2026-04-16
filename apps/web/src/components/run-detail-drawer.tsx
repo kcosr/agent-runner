@@ -190,6 +190,7 @@ export function RunDetailDrawer({
 }) {
   const drawerRef = useRef<HTMLElement | null>(null);
   const drawerBodyRef = useRef<HTMLDivElement | null>(null);
+  const sectionTabsRef = useRef<HTMLElement | null>(null);
   const timelineStickyRef = useRef<HTMLDivElement | null>(null);
   const timelineContentScrollRef = useRef<HTMLDivElement | null>(null);
   const timelinePendingInnerScrollDeltaRef = useRef(0);
@@ -206,6 +207,7 @@ export function RunDetailDrawer({
   const [selectedDependencyRunId, setSelectedDependencyRunId] = useState<string | null>(null);
   const [timelineContentMaxHeight, setTimelineContentMaxHeight] = useState<number | null>(null);
   const [timelineInnerScrollEnabled, setTimelineInnerScrollEnabled] = useState(false);
+  const [timelineStickyTopOffset, setTimelineStickyTopOffset] = useState(0);
   const [timelineStickyPinned, setTimelineStickyPinned] = useState(false);
   const [timelineOutputAtBottom, setTimelineOutputAtBottom] = useState(true);
   const resize = useDrawerResize();
@@ -360,6 +362,7 @@ export function RunDetailDrawer({
       setTimelineStickyPinned(false);
       setTimelineInnerScrollEnabled(false);
       setTimelineContentMaxHeight(null);
+      setTimelineStickyTopOffset(0);
       timelinePendingInnerScrollDeltaRef.current = 0;
       return;
     }
@@ -373,18 +376,32 @@ export function RunDetailDrawer({
         return;
       }
       const drawerBodyRect = drawerBody.getBoundingClientRect();
+      const sectionTabsRect = sectionTabsRef.current?.getBoundingClientRect();
       const stickyRect = stickyControls.getBoundingClientRect();
       const content = timelineContentScrollRef.current;
-      const pinned = stickyRect.top <= drawerBodyRect.top + 1;
-      const nextMaxHeight = Math.max(
-        TIMELINE_MIN_CONTENT_HEIGHT_PX,
-        Math.floor(drawerBodyRect.height - stickyRect.height - TIMELINE_BOTTOM_GAP_PX),
-      );
-      const nextContentHeight = Math.max(
-        TIMELINE_MIN_CONTENT_HEIGHT_PX,
-        Math.min(nextMaxHeight, content?.scrollHeight ?? nextMaxHeight),
-      );
+      const nextStickyTopOffset = Math.max(0, Math.floor(sectionTabsRect?.height ?? 0));
+      const pinned = stickyRect.top <= drawerBodyRect.top + nextStickyTopOffset + 1;
       const nextInnerScrollEnabled = pinned;
+      const nextContentHeight = pinned
+        ? (() => {
+            const nextMaxHeight = Math.max(
+              TIMELINE_MIN_CONTENT_HEIGHT_PX,
+              Math.floor(
+                drawerBodyRect.height -
+                  nextStickyTopOffset -
+                  stickyRect.height -
+                  TIMELINE_BOTTOM_GAP_PX,
+              ),
+            );
+            return Math.max(
+              TIMELINE_MIN_CONTENT_HEIGHT_PX,
+              Math.min(nextMaxHeight, content?.scrollHeight ?? nextMaxHeight),
+            );
+          })()
+        : null;
+      setTimelineStickyTopOffset((current) =>
+        current === nextStickyTopOffset ? current : nextStickyTopOffset,
+      );
       setTimelineStickyPinned((current) => (current === pinned ? current : pinned));
       setTimelineInnerScrollEnabled((current) => {
         return current === nextInnerScrollEnabled ? current : nextInnerScrollEnabled;
@@ -431,6 +448,9 @@ export function RunDetailDrawer({
       }
       if (timelineStickyRef.current) {
         observer.observe(timelineStickyRef.current);
+      }
+      if (sectionTabsRef.current) {
+        observer.observe(sectionTabsRef.current);
       }
       if (timelineContentScrollRef.current) {
         observer.observe(timelineContentScrollRef.current);
@@ -951,7 +971,7 @@ export function RunDetailDrawer({
             </div>
           ) : null}
 
-          <nav aria-label="Run sections" className="tabs">
+          <nav aria-label="Run sections" className="tabs" ref={sectionTabsRef}>
             <button
               aria-selected={activeSection === "tasks"}
               className={activeSection === "tasks" ? "tab active" : "tab"}
@@ -1347,6 +1367,11 @@ export function RunDetailDrawer({
                       className="timeline-sticky-controls"
                       data-pinned={timelineStickyPinned}
                       ref={timelineStickyRef}
+                      style={
+                        timelineStickyTopOffset > 0
+                          ? { top: `${timelineStickyTopOffset}px` }
+                          : undefined
+                      }
                     >
                       {timelineAttempts.length > 1 ? (
                         <div className="timeline-attempts">

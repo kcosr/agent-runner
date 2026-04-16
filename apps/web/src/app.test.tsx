@@ -26,6 +26,13 @@ const APP_CONFIG = {
   runSummaryEventsPath: "/api/events/run-summaries",
 };
 
+const DEFAULT_DASHBOARD_PREFERENCES = {
+  hideEmptyColumns: true,
+  collapseFailureStates: true,
+  showArchived: false,
+  sortByRecentUpdates: false,
+};
+
 class MockEventSource {
   static instances: MockEventSource[] = [];
 
@@ -54,6 +61,16 @@ class MockEventSource {
   emitOpen() {
     this.onopen?.(new Event("open"));
   }
+}
+
+function setStoredDashboardPreferences(overrides: Partial<typeof DEFAULT_DASHBOARD_PREFERENCES>) {
+  window.localStorage.setItem(
+    "task-runner:web:dashboard-preferences",
+    JSON.stringify({
+      ...DEFAULT_DASHBOARD_PREFERENCES,
+      ...overrides,
+    }),
+  );
 }
 
 function abortReasonForStatus(status: RunSummary["status"] | RunDetail["status"]) {
@@ -871,20 +888,27 @@ function setTimelineScrollGeometry(options: {
   clientHeight: number;
   scrollHeight: number;
   scrollTop?: number;
+  tabsHeight?: number;
   stickyHeight?: number;
   stickyTop?: number;
 }) {
   const detail = screen.getByLabelText("Run detail");
   const drawerBody = detail.querySelector(".drawer-body");
+  const sectionTabs = detail.querySelector(".tabs");
   const stickyControls = detail.querySelector(".timeline-sticky-controls");
   const scrollRegion = getTimelineContentScrollRegion();
-  if (!(drawerBody instanceof HTMLElement) || !(stickyControls instanceof HTMLElement)) {
+  if (
+    !(drawerBody instanceof HTMLElement) ||
+    !(sectionTabs instanceof HTMLElement) ||
+    !(stickyControls instanceof HTMLElement)
+  ) {
     throw new Error("expected timeline layout elements");
   }
 
   defineElementMetric(scrollRegion, "clientHeight", options.clientHeight);
   defineElementMetric(scrollRegion, "scrollHeight", options.scrollHeight);
   defineElementMetric(scrollRegion, "scrollTop", options.scrollTop ?? 0);
+  const tabsHeight = options.tabsHeight ?? 48;
   const stickyTop = options.stickyTop ?? 0;
   const stickyHeight = options.stickyHeight ?? 72;
   defineElementMetric(drawerBody, "getBoundingClientRect", () => ({
@@ -894,6 +918,19 @@ function setTimelineScrollGeometry(options: {
     right: 320,
     width: 320,
     height: 480,
+    x: 0,
+    y: 0,
+    toJSON() {
+      return {};
+    },
+  }));
+  defineElementMetric(sectionTabs, "getBoundingClientRect", () => ({
+    top: 0,
+    bottom: tabsHeight,
+    left: 0,
+    right: 320,
+    width: 320,
+    height: tabsHeight,
     x: 0,
     y: 0,
     toJSON() {
@@ -1040,11 +1077,12 @@ describe("web app", () => {
       clientHeight: 120,
       scrollHeight: 280,
       scrollTop: 160,
-      stickyTop: 0,
+      stickyTop: 48,
     });
     await waitFor(() => {
       expect(scrollRegion.dataset.innerScrollEnabled).toBe("true");
     });
+    expect((stickyControls as HTMLElement).style.top).toBe("48px");
     timelineSource.emitMessage({
       runId: "run-1",
       cursor: 4,
@@ -1566,6 +1604,7 @@ describe("web app", () => {
       hideEmptyColumns: true,
       collapseFailureStates: true,
       showArchived: false,
+      sortByRecentUpdates: false,
     });
 
     cleanup();
@@ -1857,7 +1896,6 @@ describe("web app", () => {
     await user.click(screen.getByRole("button", { name: /show archived runs/i }));
     await user.click(screen.getByRole("button", { name: /hide empty columns/i }));
     await user.click(screen.getByRole("button", { name: /collapse failure states/i }));
-    await user.click(screen.getByRole("button", { name: /board sort mode: started time/i }));
     expect(await screen.findByRole("button", { name: /archived dashboard/i })).toBeInTheDocument();
     expect(getBoardColumn("Blocked")).toBeInTheDocument();
     expect(getBoardColumn("Error")).toBeInTheDocument();
@@ -1871,26 +1909,36 @@ describe("web app", () => {
       name: "Collapse failure states",
     });
     const showArchived = screen.getByRole("checkbox", { name: "Show archived runs" });
+    const sortByRecentUpdates = screen.getByRole("checkbox", { name: "Sort by recent updates" });
     expect(hideEmptyColumns).not.toBeChecked();
     expect(collapseFailureStates).not.toBeChecked();
     expect(showArchived).toBeChecked();
+    expect(sortByRecentUpdates).not.toBeChecked();
+
+    await user.click(sortByRecentUpdates);
+    expect(sortByRecentUpdates).toBeChecked();
 
     const stored = window.localStorage.getItem("task-runner:web:dashboard-preferences");
     expect(stored ? JSON.parse(stored) : null).toEqual({
       hideEmptyColumns: false,
       collapseFailureStates: false,
       showArchived: true,
+      sortByRecentUpdates: true,
     });
 
     view.unmount();
     queryClient.clear();
     await renderApp();
+    await findRunCard("Build dashboard");
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Show archived runs" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Sort by recent updates" })).toBeChecked();
+
+    await user.click(screen.getByRole("button", { name: "Runs" }));
     expect(await screen.findByRole("button", { name: /archived dashboard/i })).toBeInTheDocument();
     expect(getBoardColumn("Error")).toBeInTheDocument();
     expect(getBoardColumn("Aborted")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /board sort mode: recent updates/i }),
-    ).toHaveAttribute("aria-pressed", "true");
   });
 
   it("restores the in-scope dashboard preferences to defaults from settings", async () => {
@@ -1929,12 +1977,14 @@ describe("web app", () => {
     await user.click(screen.getByRole("checkbox", { name: "Hide empty columns" }));
     await user.click(screen.getByRole("checkbox", { name: "Collapse failure states" }));
     await user.click(screen.getByRole("checkbox", { name: "Show archived runs" }));
+    await user.click(screen.getByRole("checkbox", { name: "Sort by recent updates" }));
 
     await user.click(screen.getByRole("button", { name: "Restore defaults" }));
 
     expect(screen.getByRole("checkbox", { name: "Hide empty columns" })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "Collapse failure states" })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "Show archived runs" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Sort by recent updates" })).not.toBeChecked();
     expect(screen.getByRole("button", { name: "Restore defaults" })).toBeDisabled();
 
     await user.click(screen.getByRole("button", { name: "Runs" }));
@@ -1971,6 +2021,7 @@ describe("web app", () => {
       hideEmptyColumns: true,
       collapseFailureStates: true,
       showArchived: true,
+      sortByRecentUpdates: false,
     });
   });
 
@@ -2012,7 +2063,7 @@ describe("web app", () => {
         collapseFailureStates: "yes",
         hideEmptyColumns: "no",
         showArchived: "sure",
-        sortMode: "alphabetical",
+        sortByRecentUpdates: "yes",
       }),
     );
 
@@ -2078,10 +2129,10 @@ describe("web app", () => {
     const drawer = await screen.findByLabelText("Run detail");
     expect(drawer.style.getPropertyValue("--drawer-width")).toBe("540px");
     expect(getBoardColumn("Running")).toHaveAttribute("data-collapsed", "false");
-    expect(screen.getByRole("button", { name: /board sort mode: started time/i })).toHaveAttribute(
-      "aria-pressed",
-      "false",
-    );
+
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Sort by recent updates" })).not.toBeChecked();
   });
 
   it("collapses and expands a board column on desktop", async () => {
@@ -3467,6 +3518,7 @@ describe("web app", () => {
   });
 
   it("promotes an updated run to the top of its column in recent-updates mode", async () => {
+    setStoredDashboardPreferences({ sortByRecentUpdates: true });
     const fetchMock = installFetchMock({
       runs: [
         makeRun({
@@ -3511,8 +3563,6 @@ describe("web app", () => {
     await findRunCard("Newest run");
     expect(getColumnRunNames("Running")).toEqual(["Newest run", "Older run"]);
 
-    await user.click(screen.getByRole("button", { name: /board sort mode: started time/i }));
-
     const source = MockEventSource.instances[0];
     if (!source) {
       throw new Error("expected an EventSource subscription");
@@ -3538,6 +3588,7 @@ describe("web app", () => {
   });
 
   it("promotes a selected run into the top of its destination column from detail SSE", async () => {
+    setStoredDashboardPreferences({ sortByRecentUpdates: true });
     installFetchMock({
       runs: [
         makeRun({
@@ -3582,7 +3633,6 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await findRunCard("Selected run");
-    await user.click(screen.getByRole("button", { name: /board sort mode: started time/i }));
     await user.click(await findRunCard("Selected run"));
 
     const detailSource = findEventSource("/api/runs/run-selected/events/detail");
@@ -3608,6 +3658,7 @@ describe("web app", () => {
   });
 
   it("marks brand-new runs as inserts and places them at the top in recent-updates mode", async () => {
+    setStoredDashboardPreferences({ sortByRecentUpdates: true });
     installFetchMock({
       runs: [
         makeRun({
@@ -3634,7 +3685,6 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await findRunCard("Existing run");
-    await user.click(screen.getByRole("button", { name: /board sort mode: started time/i }));
 
     const source = MockEventSource.instances[0];
     if (!source) {
@@ -3680,6 +3730,7 @@ describe("web app", () => {
     );
 
     try {
+      setStoredDashboardPreferences({ sortByRecentUpdates: true });
       installFetchMock({
         runs: [
           makeRun({
@@ -3722,7 +3773,6 @@ describe("web app", () => {
       const user = userEvent.setup();
       await renderApp();
       await findRunCard("Newest run");
-      await user.click(screen.getByRole("button", { name: /board sort mode: started time/i }));
 
       const source = MockEventSource.instances[0];
       if (!source) {

@@ -863,6 +863,12 @@ body {
   overscroll-behavior-x: contain;
 }
 
+.tabs {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
 .drawer-panel {
   min-height: 0;
   min-width: 0;
