@@ -28,6 +28,19 @@ describe("MarkdownContent", () => {
     );
   });
 
+  it("binds mermaid interactions after the diagram mounts", async () => {
+    const bindFunctions = vi.fn();
+    renderMermaid.mockResolvedValueOnce({
+      bindFunctions,
+      svg: "<svg><text>diagram</text></svg>",
+    });
+
+    render(<MarkdownContent text={"```mermaid\ngraph TD\nA-->B\n```"} />);
+
+    const diagram = await screen.findByLabelText("Mermaid diagram");
+    await waitFor(() => expect(bindFunctions).toHaveBeenCalledWith(diagram));
+  });
+
   it("shows an inline error when mermaid rendering fails", async () => {
     renderMermaid.mockRejectedValueOnce(new Error("Parse error"));
 

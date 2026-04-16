@@ -1683,6 +1683,46 @@ describe("web app", () => {
     expect(getBoardColumn("Aborted")).toBeInTheDocument();
   });
 
+  it("clamps persisted drawer width to the current viewport", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    const originalInnerWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 900,
+      writable: true,
+    });
+    window.localStorage.setItem(
+      "task-runner:web:board-settings",
+      JSON.stringify({
+        drawerFullscreen: false,
+        drawerWidth: 1400,
+      }),
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+
+    const drawer = await screen.findByLabelText("Run detail");
+    await waitFor(() => expect(drawer.getAttribute("style")).toContain("--drawer-width: 564px"));
+
+    await waitFor(() => {
+      const stored = window.localStorage.getItem("task-runner:web:board-settings");
+      const parsed = stored ? (JSON.parse(stored) as { drawerWidth?: number }) : null;
+      expect(parsed?.drawerWidth).toBe(564);
+    });
+
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: originalInnerWidth,
+      writable: true,
+    });
+  });
+
   it("ignores malformed stored board settings values", async () => {
     window.localStorage.setItem(
       "task-runner:web:board-settings",

@@ -57,7 +57,13 @@ function readMermaidBlock(children: ReactNode): string | null {
 
 function MermaidDiagram({ code }: { code: string }) {
   const [state, setState] = useState<
-    { status: "loading" } | { status: "ready"; svg: string } | { status: "error"; message: string }
+    | { status: "loading" }
+    | {
+        status: "ready";
+        svg: string;
+        bindFunctions?: (element: Element) => void;
+      }
+    | { status: "error"; message: string }
   >({ status: "loading" });
   const instanceId = useId().replace(/:/g, "-");
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -69,9 +75,9 @@ function MermaidDiagram({ code }: { code: string }) {
       setState({ status: "loading" });
       try {
         const mermaid = await loadMermaidApi();
-        const { svg } = await mermaid.render(`mermaid-${instanceId}`, code);
+        const { bindFunctions, svg } = await mermaid.render(`mermaid-${instanceId}`, code);
         if (!cancelled) {
-          setState({ status: "ready", svg });
+          setState({ status: "ready", svg, bindFunctions });
         }
       } catch (error) {
         const message =
@@ -101,7 +107,16 @@ function MermaidDiagram({ code }: { code: string }) {
       setState({ status: "error", message: MERMAID_ERROR_MESSAGE });
       return;
     }
-    containerRef.current.replaceChildren(document.importNode(parsedSvg, true));
+    try {
+      containerRef.current.replaceChildren(document.importNode(parsedSvg, true));
+      state.bindFunctions?.(containerRef.current);
+    } catch (error) {
+      containerRef.current.replaceChildren();
+      const message =
+        error instanceof Error && error.message.length > 0 ? error.message : MERMAID_ERROR_MESSAGE;
+      setState({ status: "error", message });
+      return;
+    }
     return () => {
       containerRef.current?.replaceChildren();
     };
