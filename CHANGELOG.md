@@ -21,6 +21,7 @@
 
 ### Added
 
+- Added a dedicated Settings area in the web shell with General and Keybindings sections, and moved dashboard defaults there while keeping the runs-toolbar toggles in sync.
 - Added a persisted dashboard preference for recent-updates board ordering so runs can promote touched cards to the top of their columns, with move/reorder/insert card motion that respects `prefers-reduced-motion`.
 - Added in-app preview for `text/markdown` and `text/plain` attachments in the web run detail drawer, including per-run remembered preview state when switching between runs. ([#40](https://github.com/kcosr/task-runner/pull/40))
 - Added Mermaid diagram rendering for fenced `mermaid` blocks anywhere shared markdown is shown, including attachment previews, with inline render errors when a diagram fails to load. ([#40](https://github.com/kcosr/task-runner/pull/40))
@@ -83,7 +84,7 @@
 
 ### Changed
 
-- The web dashboard settings split now persists durable board preferences (`hideEmptyColumns`, `collapseFailureStates`, `showArchived`, `sortByRecentUpdates`) under `task-runner:web:dashboard-preferences`; transient filters, drawer width/fullscreen state, collapsed columns, and per-run drawer tabs reset on full reload instead of carrying across sessions.
+- The web dashboard now persists only durable board preferences (`hideEmptyColumns`, `collapseFailureStates`, `showArchived`, `sortByRecentUpdates`); transient filters, collapsed columns, drawer width/fullscreen state, and per-run drawer tabs reset on full reload instead of carrying across sessions.
 - The attachment preview drawer now uses a more compact header layout and hides MIME type metadata in preview mode to reduce wasted vertical space, especially on mobile. ([#40](https://github.com/kcosr/task-runner/pull/40))
 - Replaced the bundled `repo-diagnostics` assignment with a bundled `test` assignment that only asks the agent to run `date` and `pwd`, without repo-specific context. ([#38](https://github.com/kcosr/task-runner/pull/38))
 - The web run detail drawer now shows `Reset` for non-running runs and only renders `Reset` / `Delete` when the backend-derived shared lifecycle capabilities allow them. ([#39](https://github.com/kcosr/task-runner/pull/39))
@@ -150,6 +151,7 @@
 
 ### Fixed
 
+- Fixed the Attempts drawer to preserve loaded timeline history when a live run settles instead of flashing back through a loading state.
 - Fixed `plan-feature` workflow drift around delayed implementer-run creation and execution handoff. The planner assignment now prepares `task-runner init --agent implementor --backend passive ...`, the planning handoff now treats `task-runner brief <new-run-id>` as the canonical execution surface for that passive implementer run, the generated implementation template now teaches the same brief-first passive workflow, and the local `plan-feature` skill was slimmed down to defer run-specific operational detail to the emitted assignment/brief.
 - Fixed restored web drawer widths to clamp to the current viewport, kept the detail drawer open after archiving, restored the active mobile board column after closing the detail overlay, and blocked horizontal swipe gestures in the board and drawers from triggering browser navigation. ([#40](https://github.com/kcosr/task-runner/pull/40))
 - Fixed Mermaid preview rendering to apply Mermaid's returned post-render bindings so interactive diagrams keep their event handlers. ([#40](https://github.com/kcosr/task-runner/pull/40))
