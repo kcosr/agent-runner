@@ -975,6 +975,7 @@ body {
 }
 
 .timeline-content-scroll {
+  flex: 0 0 auto;
   min-height: 0;
   min-width: 0;
 }

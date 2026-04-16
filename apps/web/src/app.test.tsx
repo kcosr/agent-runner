@@ -871,6 +871,8 @@ function setTimelineScrollGeometry(options: {
   clientHeight: number;
   scrollHeight: number;
   scrollTop?: number;
+  stickyHeight?: number;
+  stickyTop?: number;
 }) {
   const detail = screen.getByLabelText("Run detail");
   const drawerBody = detail.querySelector(".drawer-body");
@@ -883,6 +885,8 @@ function setTimelineScrollGeometry(options: {
   defineElementMetric(scrollRegion, "clientHeight", options.clientHeight);
   defineElementMetric(scrollRegion, "scrollHeight", options.scrollHeight);
   defineElementMetric(scrollRegion, "scrollTop", options.scrollTop ?? 0);
+  const stickyTop = options.stickyTop ?? 0;
+  const stickyHeight = options.stickyHeight ?? 72;
   defineElementMetric(drawerBody, "getBoundingClientRect", () => ({
     top: 0,
     bottom: 480,
@@ -897,14 +901,14 @@ function setTimelineScrollGeometry(options: {
     },
   }));
   defineElementMetric(stickyControls, "getBoundingClientRect", () => ({
-    top: 0,
-    bottom: 72,
+    top: stickyTop,
+    bottom: stickyTop + stickyHeight,
     left: 0,
     right: 320,
     width: 320,
-    height: 72,
+    height: stickyHeight,
     x: 0,
-    y: 0,
+    y: stickyTop,
     toJSON() {
       return {};
     },
@@ -1015,9 +1019,13 @@ describe("web app", () => {
       clientHeight: 120,
       scrollHeight: 280,
       scrollTop: 160,
+      stickyTop: 180,
     });
     await waitFor(() => {
-      expect(scrollRegion.dataset.innerScrollEnabled).toBe("true");
+      expect(scrollRegion.dataset.innerScrollEnabled).toBe("false");
+    });
+    await waitFor(() => {
+      expect(stickyControls?.getAttribute("data-pinned")).toBe("false");
     });
     expect(scrollRegion.querySelector('[aria-label="Attempt output"]')).not.toBeNull();
 
@@ -1028,6 +1036,15 @@ describe("web app", () => {
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Output" }));
+    setTimelineScrollGeometry({
+      clientHeight: 120,
+      scrollHeight: 280,
+      scrollTop: 160,
+      stickyTop: 0,
+    });
+    await waitFor(() => {
+      expect(scrollRegion.dataset.innerScrollEnabled).toBe("true");
+    });
     timelineSource.emitMessage({
       runId: "run-1",
       cursor: 4,
