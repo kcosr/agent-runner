@@ -32,6 +32,10 @@ import { StatusBadge } from "./status-badge.js";
 
 type TimelineTab = "prompt" | "output";
 
+const TIMELINE_BOTTOM_THRESHOLD_PX = 24;
+const TIMELINE_MIN_CONTENT_HEIGHT_PX = 160;
+const TIMELINE_BOTTOM_GAP_PX = 12;
+
 function dependencyCandidateTitle(run: RunSummary) {
   return run.name ?? run.assignmentName ?? "Unnamed";
 }
@@ -117,6 +121,16 @@ function attemptOutput(attempt: {
   return `${attempt.transcript}${separator}${attempt.notices}`;
 }
 
+function isScrolledToBottom(element: HTMLElement) {
+  return (
+    element.scrollHeight - element.scrollTop - element.clientHeight <= TIMELINE_BOTTOM_THRESHOLD_PX
+  );
+}
+
+function scrollElementToBottom(element: HTMLElement) {
+  element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
+}
+
 export function RunDetailDrawer({
   activeSection,
   dependencyCandidateRuns,
@@ -167,6 +181,9 @@ export function RunDetailDrawer({
   run: RunDetail;
 }) {
   const drawerRef = useRef<HTMLElement | null>(null);
+  const drawerBodyRef = useRef<HTMLDivElement | null>(null);
+  const timelineStickyRef = useRef<HTMLDivElement | null>(null);
+  const timelineContentScrollRef = useRef<HTMLDivElement | null>(null);
   const [selectedAttempt, setSelectedAttempt] = useState<number | null>(null);
   const [timelineTab, setTimelineTab] = useState<TimelineTab>("output");
   const [editingName, setEditingName] = useState(false);
@@ -175,8 +192,12 @@ export function RunDetailDrawer({
   const [resumeMessageExpanded, setResumeMessageExpanded] = useState(false);
   const [resumeMessageDraft, setResumeMessageDraft] = useState("");
   const [confirmingAttachmentId, setConfirmingAttachmentId] = useState<string | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [dependencyDraft, setDependencyDraft] = useState("");
   const [selectedDependencyRunId, setSelectedDependencyRunId] = useState<string | null>(null);
+  const [timelineContentMaxHeight, setTimelineContentMaxHeight] = useState<number | null>(null);
+  const [timelineStickyPinned, setTimelineStickyPinned] = useState(false);
+  const [timelineOutputAtBottom, setTimelineOutputAtBottom] = useState(true);
   const resize = useDrawerResize();
   const { drawerStyle, isFullscreen, toggleFullscreen } = resize;
   const nameInputRef = useRef<HTMLInputElement | null>(null);
@@ -227,6 +248,9 @@ export function RunDetailDrawer({
     timelineAttempts.find((attempt) => attempt.attempt === selectedAttempt) ??
     timelineAttempts[timelineAttempts.length - 1] ??
     null;
+  const selectedAttemptNumber = selectedAttemptRecord?.attempt ?? null;
+  const selectedAttemptOutput = selectedAttemptRecord ? attemptOutput(selectedAttemptRecord) : "";
+  const selectedAttemptLive = selectedAttemptRecord?.live ?? false;
 
   function startNameEdit() {
     if (actionsLocked) {
@@ -307,6 +331,137 @@ export function RunDetailDrawer({
       setConfirmingAttachmentId(null);
     }
   }, [confirmingAttachmentId, run.attachments]);
+
+  useEffect(() => {
+    if (!run.capabilities.canDelete) {
+      setConfirmingDelete(false);
+    }
+  }, [run.capabilities.canDelete]);
+
+  useEffect(() => {
+    if (activeSection !== "events" || timelineTab !== "output" || selectedAttemptNumber === null) {
+      return;
+    }
+    setTimelineOutputAtBottom(true);
+  }, [activeSection, selectedAttemptNumber, timelineTab]);
+
+  useEffect(() => {
+    if (activeSection !== "events" || selectedAttemptNumber === null) {
+      setTimelineStickyPinned(false);
+      setTimelineContentMaxHeight(null);
+      return;
+    }
+
+    let frameId = 0;
+    const updateLayout = () => {
+      frameId = 0;
+      const drawerBody = drawerBodyRef.current;
+      const stickyControls = timelineStickyRef.current;
+      if (!drawerBody || !stickyControls) {
+        return;
+      }
+      const drawerBodyRect = drawerBody.getBoundingClientRect();
+      const stickyRect = stickyControls.getBoundingClientRect();
+      const pinned = stickyRect.top <= drawerBodyRect.top + 1;
+      const nextMaxHeight = pinned
+        ? Math.max(
+            TIMELINE_MIN_CONTENT_HEIGHT_PX,
+            Math.floor(drawerBodyRect.bottom - stickyRect.bottom - TIMELINE_BOTTOM_GAP_PX),
+          )
+        : null;
+      setTimelineStickyPinned((current) => (current === pinned ? current : pinned));
+      setTimelineContentMaxHeight((current) =>
+        current === nextMaxHeight ? current : nextMaxHeight,
+      );
+    };
+    const scheduleLayoutUpdate = () => {
+      if (frameId !== 0) {
+        return;
+      }
+      frameId = requestAnimationFrame(updateLayout);
+    };
+
+    scheduleLayoutUpdate();
+    const drawerBody = drawerBodyRef.current;
+    drawerBody?.addEventListener("scroll", scheduleLayoutUpdate, { passive: true });
+    window.addEventListener("resize", scheduleLayoutUpdate);
+
+    const ResizeObserverCtor = window.ResizeObserver;
+    const observer =
+      ResizeObserverCtor !== undefined ? new ResizeObserver(() => scheduleLayoutUpdate()) : null;
+    if (observer) {
+      if (drawerBodyRef.current) {
+        observer.observe(drawerBodyRef.current);
+      }
+      if (timelineStickyRef.current) {
+        observer.observe(timelineStickyRef.current);
+      }
+      if (timelineContentScrollRef.current) {
+        observer.observe(timelineContentScrollRef.current);
+      }
+    }
+
+    return () => {
+      if (frameId !== 0) {
+        cancelAnimationFrame(frameId);
+      }
+      drawerBody?.removeEventListener("scroll", scheduleLayoutUpdate);
+      window.removeEventListener("resize", scheduleLayoutUpdate);
+      observer?.disconnect();
+    };
+  }, [activeSection, selectedAttemptNumber]);
+
+  useEffect(() => {
+    if (activeSection !== "events" || timelineTab !== "output" || selectedAttemptNumber === null) {
+      return;
+    }
+    if (!selectedAttemptOutput && !selectedAttemptLive) {
+      return;
+    }
+
+    let frameId = 0;
+    const syncBottom = () => {
+      frameId = 0;
+      const element = timelineContentScrollRef.current;
+      if (!element || !timelineOutputAtBottom) {
+        return;
+      }
+      scrollElementToBottom(element);
+    };
+    const scheduleBottomSync = () => {
+      if (frameId !== 0) {
+        return;
+      }
+      frameId = requestAnimationFrame(syncBottom);
+    };
+
+    scheduleBottomSync();
+
+    const ResizeObserverCtor = window.ResizeObserver;
+    const observer =
+      ResizeObserverCtor !== undefined ? new ResizeObserver(() => scheduleBottomSync()) : null;
+    if (observer && timelineContentScrollRef.current) {
+      observer.observe(timelineContentScrollRef.current);
+      const firstChild = timelineContentScrollRef.current.firstElementChild;
+      if (firstChild) {
+        observer.observe(firstChild);
+      }
+    }
+
+    return () => {
+      if (frameId !== 0) {
+        cancelAnimationFrame(frameId);
+      }
+      observer?.disconnect();
+    };
+  }, [
+    activeSection,
+    selectedAttemptOutput,
+    selectedAttemptLive,
+    selectedAttemptNumber,
+    timelineOutputAtBottom,
+    timelineTab,
+  ]);
 
   async function submitDependencyAdd() {
     if (!resolvedDependencyRunId || addDependencyPending) {
@@ -390,6 +545,14 @@ export function RunDetailDrawer({
     } catch {
       // actionError is surfaced by the shared mutation handler.
     }
+  }
+
+  function handleTimelineContentScroll() {
+    const element = timelineContentScrollRef.current;
+    if (!element || timelineTab !== "output") {
+      return;
+    }
+    setTimelineOutputAtBottom(isScrolledToBottom(element));
   }
 
   async function startRun() {
@@ -522,15 +685,42 @@ export function RunDetailDrawer({
               </button>
             ) : null}
             {run.capabilities.canDelete ? (
-              <button
-                className="btn btn-destructive-outline"
-                disabled={actionsLocked}
-                onClick={onDelete}
-                type="button"
-              >
-                <TrashIcon aria-hidden="true" />
-                {actionPending === "delete" ? "Deleting..." : "Delete"}
-              </button>
+              confirmingDelete ? (
+                <div className="drawer-confirm-actions">
+                  <button
+                    aria-label="Confirm delete run"
+                    className="icon-btn icon-btn--destructive"
+                    disabled={actionsLocked}
+                    onClick={onDelete}
+                    title={actionPending === "delete" ? "Deleting run..." : "Confirm delete run"}
+                    type="button"
+                  >
+                    <CheckIcon aria-hidden="true" />
+                  </button>
+                  <button
+                    aria-label="Cancel delete run"
+                    className="icon-btn"
+                    disabled={actionsLocked}
+                    onClick={() => setConfirmingDelete(false)}
+                    title={
+                      actionPending === "delete" ? "Delete is pending..." : "Cancel delete run"
+                    }
+                    type="button"
+                  >
+                    <CloseIcon aria-hidden="true" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  className="btn btn-destructive-outline"
+                  disabled={actionsLocked}
+                  onClick={() => setConfirmingDelete(true)}
+                  type="button"
+                >
+                  <TrashIcon aria-hidden="true" />
+                  Delete
+                </button>
+              )
             ) : null}
             <button
               aria-label="Copy run id"
@@ -561,7 +751,7 @@ export function RunDetailDrawer({
           </div>
         </header>
 
-        <div className="drawer-body">
+        <div className="drawer-body" ref={drawerBodyRef}>
           <div className="drawer-title-block">
             {editingName ? (
               <div className="drawer-title-edit">
@@ -1044,80 +1234,102 @@ export function RunDetailDrawer({
                   <p className="muted-inline">No attempt history is available for this run yet.</p>
                 ) : null}
 
-                {timelineAttempts.length > 1 ? (
-                  <div className="timeline-attempts">
-                    <div className="timeline-attempt-tabs" role="tablist" aria-label="Attempts">
-                      {timelineAttempts.map((attempt) => (
+                {selectedAttemptRecord ? (
+                  <div className="timeline-attempt-panel">
+                    <div
+                      className="timeline-sticky-controls"
+                      data-pinned={timelineStickyPinned}
+                      ref={timelineStickyRef}
+                    >
+                      {timelineAttempts.length > 1 ? (
+                        <div className="timeline-attempts">
+                          <div
+                            className="timeline-attempt-tabs"
+                            role="tablist"
+                            aria-label="Attempts"
+                          >
+                            {timelineAttempts.map((attempt) => (
+                              <button
+                                aria-selected={selectedAttemptRecord?.attempt === attempt.attempt}
+                                className={
+                                  selectedAttemptRecord?.attempt === attempt.attempt
+                                    ? "timeline-attempt-tab active"
+                                    : "timeline-attempt-tab"
+                                }
+                                key={attempt.attempt}
+                                onClick={() => setSelectedAttempt(attempt.attempt)}
+                                role="tab"
+                                type="button"
+                              >
+                                <span>{attempt.attempt}</span>
+                                {attempt.live ? (
+                                  <span aria-hidden="true" className="timeline-live-dot" />
+                                ) : null}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+
+                      <div className="task-tabs" role="tablist" aria-label="Attempt view">
                         <button
-                          aria-selected={selectedAttemptRecord?.attempt === attempt.attempt}
-                          className={
-                            selectedAttemptRecord?.attempt === attempt.attempt
-                              ? "timeline-attempt-tab active"
-                              : "timeline-attempt-tab"
-                          }
-                          key={attempt.attempt}
-                          onClick={() => setSelectedAttempt(attempt.attempt)}
+                          aria-selected={timelineTab === "prompt"}
+                          className={timelineTab === "prompt" ? "task-tab active" : "task-tab"}
+                          onClick={() => setTimelineTab("prompt")}
                           role="tab"
                           type="button"
                         >
-                          <span>{attempt.attempt}</span>
-                          {attempt.live ? (
-                            <span aria-hidden="true" className="timeline-live-dot" />
-                          ) : null}
+                          Prompt
                         </button>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-
-                {selectedAttemptRecord ? (
-                  <div className="timeline-attempt-panel">
-                    <div className="task-tabs" role="tablist" aria-label="Attempt view">
-                      <button
-                        aria-selected={timelineTab === "prompt"}
-                        className={timelineTab === "prompt" ? "task-tab active" : "task-tab"}
-                        onClick={() => setTimelineTab("prompt")}
-                        role="tab"
-                        type="button"
-                      >
-                        Prompt
-                      </button>
-                      <button
-                        aria-selected={timelineTab === "output"}
-                        className={timelineTab === "output" ? "task-tab active" : "task-tab"}
-                        onClick={() => setTimelineTab("output")}
-                        role="tab"
-                        type="button"
-                      >
-                        Output
-                      </button>
+                        <button
+                          aria-selected={timelineTab === "output"}
+                          className={timelineTab === "output" ? "task-tab active" : "task-tab"}
+                          onClick={() => setTimelineTab("output")}
+                          role="tab"
+                          type="button"
+                        >
+                          Output
+                        </button>
+                      </div>
                     </div>
 
-                    {timelineTab === "prompt" ? (
-                      selectedAttemptRecord.prompt ? (
-                        <section aria-label="Attempt prompt">
+                    <div
+                      className="timeline-content-scroll"
+                      data-inner-scroll-enabled={timelineStickyPinned}
+                      onScroll={handleTimelineContentScroll}
+                      ref={timelineContentScrollRef}
+                      style={
+                        timelineContentMaxHeight === null
+                          ? undefined
+                          : { maxHeight: `${timelineContentMaxHeight}px` }
+                      }
+                    >
+                      {timelineTab === "prompt" ? (
+                        selectedAttemptRecord.prompt ? (
+                          <section aria-label="Attempt prompt">
+                            <MarkdownContent
+                              className="timeline-content"
+                              text={selectedAttemptRecord.prompt}
+                            />
+                          </section>
+                        ) : (
+                          <p className="task-empty">This attempt did not record a prompt.</p>
+                        )
+                      ) : selectedAttemptOutput ? (
+                        <section aria-label="Attempt output">
                           <MarkdownContent
                             className="timeline-content"
-                            text={selectedAttemptRecord.prompt}
+                            text={selectedAttemptOutput}
                           />
                         </section>
                       ) : (
-                        <p className="task-empty">This attempt did not record a prompt.</p>
-                      )
-                    ) : attemptOutput(selectedAttemptRecord) ? (
-                      <section aria-label="Attempt output">
-                        <MarkdownContent
-                          className="timeline-content"
-                          text={attemptOutput(selectedAttemptRecord)}
-                        />
-                      </section>
-                    ) : (
-                      <p className="task-empty">
-                        {selectedAttemptRecord.live
-                          ? "Waiting for live output…"
-                          : "This attempt produced no transcript output."}
-                      </p>
-                    )}
+                        <p className="task-empty">
+                          {selectedAttemptRecord.live
+                            ? "Waiting for live output…"
+                            : "This attempt produced no transcript output."}
+                        </p>
+                      )}
+                    </div>
                   </div>
                 ) : null}
               </div>
