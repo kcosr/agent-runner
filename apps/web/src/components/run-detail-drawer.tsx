@@ -330,6 +330,10 @@ export function RunDetailDrawer({
       setEditingBackendSession(false);
       return;
     }
+    if (trimmed.length === 0) {
+      await submitBackendSessionClear();
+      return;
+    }
     if (trimmed === run.backendSessionId) {
       setEditingBackendSession(false);
       return;

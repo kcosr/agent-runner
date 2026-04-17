@@ -1900,6 +1900,51 @@ describe("web app", () => {
     );
   });
 
+  it("treats saving an empty passive backend-session draft as a clear action", async () => {
+    const fetchMock = installFetchMock({
+      runs: [makeRun({ runId: "passive-run", assignmentName: "Passive run", backend: "passive" })],
+      details: {
+        "passive-run": makeDetail({
+          runId: "passive-run",
+          backend: "passive",
+          model: null,
+          effort: null,
+          name: "Passive run",
+          assignment: {
+            name: "Passive run",
+            sourcePath: "/tmp/a.md",
+            workspacePath: "/tmp/b.md",
+          },
+          backendSessionId: "thread-1",
+          capabilities: { canResume: false },
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Passive run"));
+
+    await user.click(await screen.findByRole("button", { name: /edit backend session/i }));
+    const input = screen.getByRole("textbox", { name: /backend session/i });
+    await user.clear(input);
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+
+    await waitFor(() => expect(screen.getByText("Not set")).toBeInTheDocument());
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs/passive-run/backend-session/clear",
+      expect.objectContaining({
+        method: "POST",
+      }),
+    );
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/runs/passive-run/backend-session",
+      expect.objectContaining({
+        body: JSON.stringify({ backendSessionId: "" }),
+      }),
+    );
+  });
+
   it("cancels passive backend-session edits with Escape without mutating", async () => {
     const fetchMock = installFetchMock({
       runs: [makeRun({ runId: "passive-run", assignmentName: "Passive run", backend: "passive" })],

@@ -1175,29 +1175,39 @@ async function runBackendSessionCommand(
   }
 
   try {
-    const result =
-      connectUrl === undefined
-        ? verb === "set-backend-session"
-          ? updateRunBackendSession(target, { backendSessionId: backendSessionArg as string })
-          : clearBackendSession(target)
-        : await withDaemonClient(connectUrl, (client) =>
-            verb === "set-backend-session"
-              ? client
-                  .call<{ result: ReturnType<typeof updateRunBackendSession> }>(
-                    "runs.setBackendSession",
-                    {
-                      target,
-                      backendSessionId: backendSessionArg,
-                    },
-                  )
-                  .then((response) => response.result)
-              : client
-                  .call<{ result: ReturnType<typeof clearBackendSession> }>(
-                    "runs.clearBackendSession",
-                    { target },
-                  )
-                  .then((response) => response.result),
-          );
+    let result: Awaited<ReturnType<typeof updateRunBackendSession>>;
+    if (verb === "set-backend-session") {
+      const backendSessionId = backendSessionArg;
+      if (backendSessionId === undefined) {
+        throw new Error("task-runner: internal error: missing backend session id");
+      }
+      result =
+        connectUrl === undefined
+          ? updateRunBackendSession(target, { backendSessionId })
+          : await withDaemonClient(connectUrl, (client) =>
+              client
+                .call<{ result: ReturnType<typeof updateRunBackendSession> }>(
+                  "runs.setBackendSession",
+                  {
+                    target,
+                    backendSessionId,
+                  },
+                )
+                .then((response) => response.result),
+            );
+    } else {
+      result =
+        connectUrl === undefined
+          ? clearBackendSession(target)
+          : await withDaemonClient(connectUrl, (client) =>
+              client
+                .call<{ result: ReturnType<typeof clearBackendSession> }>(
+                  "runs.clearBackendSession",
+                  { target },
+                )
+                .then((response) => response.result),
+            );
+    }
     if (parsed.outputFormat === "json") {
       writeJson(result);
     } else {
