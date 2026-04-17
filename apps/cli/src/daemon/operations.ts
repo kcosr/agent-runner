@@ -77,9 +77,7 @@ export function createDaemonOperations(ctx: DaemonOperationContext) {
     },
     listRuns(params: RunsListParams = {}) {
       return {
-        runs: ctx.getRunList({
-          includeArchived: params.includeArchived === true,
-        }),
+        runs: ctx.getRunList(params),
       };
     },
     getRun(target: string) {

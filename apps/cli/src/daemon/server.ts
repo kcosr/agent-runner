@@ -72,6 +72,7 @@ import {
   optionalOverrides,
   optionalString,
   parseRunSetNameParams,
+  parseRunsListParams,
   parseStartRunParams,
   requiredRunIdString,
   requiredString,
@@ -935,14 +936,8 @@ export async function serveDaemon(
           sendJson(ws, resultResponse(request.id, operations.readDaemonInfo().daemon));
           return;
         case "runs.list": {
-          const parsed = params ? asRecord(params, "runs.list params") : {};
-          sendJson(
-            ws,
-            resultResponse(
-              request.id,
-              operations.listRuns({ includeArchived: parsed.includeArchived === true }),
-            ),
-          );
+          const parsed = params ? parseRunsListParams(params, "runs.list params") : {};
+          sendJson(ws, resultResponse(request.id, operations.listRuns(parsed)));
           return;
         }
         case "runs.get":

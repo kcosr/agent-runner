@@ -114,10 +114,12 @@ function patchManifest(workspaceDir, mutator) {
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
-test("list runs enumerates current-generation runs across buckets and filters archived by default", async () => {
+test("list runs scopes to cwd by default and supports explicit cwd, repo, global, and archived filters", async () => {
   const dir = tempDir();
   writeAgent(dir, "run-mgmt-agent", AGENT);
   writeAssignment(dir, "run-mgmt-work", ASSIGNMENT);
+  const otherCwd = join(dir, "other-cwd");
+  mkdirSync(otherCwd, { recursive: true });
 
   const first = await initRun(dir);
   const second = await initRun(dir);
@@ -128,6 +130,7 @@ test("list runs enumerates current-generation runs across buckets and filters ar
   });
   patchManifest(second.workspaceDir, (manifest) => {
     manifest.startedAt = "2026-04-12T11:00:00.000Z";
+    manifest.cwd = otherCwd;
   });
 
   const otherWorkspaceDir = join(dir, "runs", "other-repo", "oth123");
@@ -135,6 +138,7 @@ test("list runs enumerates current-generation runs across buckets and filters ar
   const otherManifest = readManifest(second.workspaceDir);
   otherManifest.runId = "oth123";
   otherManifest.repo = "other-repo";
+  otherManifest.cwd = join(dir, "other-repo-cwd");
   otherManifest.workspaceDir = otherWorkspaceDir;
   otherManifest.assignmentPath = join(otherWorkspaceDir, "assignment.md");
   otherManifest.startedAt = "2026-04-12T09:00:00.000Z";
@@ -145,13 +149,8 @@ test("list runs enumerates current-generation runs across buckets and filters ar
   mkdirSync(join(dir, "runs", "broken", "bad111"), { recursive: true });
   writeFileSync(join(dir, "runs", "broken", "bad111", "run.json"), "{ bad json\n");
 
-  const text = runCli(["list", "runs"], { cwd: dir });
-  assert.doesNotMatch(text, new RegExp(first.runId));
-  assert.match(
-    text,
-    new RegExp(`^${second.runId} \\[initialized\\] name=<unnamed> 0/2 repo=unknown`, "m"),
-  );
-  assert.match(text, /^oth123 \[initialized\] name=<unnamed> 0\/2 repo=other-repo/m);
+  const defaultText = runCli(["list", "runs"], { cwd: dir });
+  assert.equal(defaultText.trim(), "No runs found.");
 
   const includeArchived = runCli(["list", "runs", "--include-archived"], { cwd: dir });
   assert.match(
@@ -160,10 +159,35 @@ test("list runs enumerates current-generation runs across buckets and filters ar
       `${first.runId} \\[initialized\\] name=<unnamed> 0/2 .* archived=2026-04-12T12:00:00.000Z`,
     ),
   );
+  assert.doesNotMatch(includeArchived, new RegExp(second.runId));
 
-  const jsonOut = runCli(["list", "runs", "--include-archived", "--output-format", "json"], {
-    cwd: dir,
-  });
+  const explicitCwd = runCli(["list", "runs", "--cwd", otherCwd], { cwd: dir });
+  assert.match(
+    explicitCwd,
+    new RegExp(`^${second.runId} \\[initialized\\] name=<unnamed> 0/2 repo=unknown`, "m"),
+  );
+  assert.doesNotMatch(explicitCwd, /^oth123 /m);
+
+  const repoScoped = runCli(["list", "runs", "--repo", "other-repo"], { cwd: dir });
+  assert.equal(
+    repoScoped.trim(),
+    "oth123 [initialized] name=<unnamed> 0/2 repo=other-repo agent=run-mgmt-agent assignment=run-mgmt-work",
+  );
+
+  const globalText = runCli(["list", "runs", "--global"], { cwd: dir });
+  assert.doesNotMatch(globalText, new RegExp(first.runId));
+  assert.match(
+    globalText,
+    new RegExp(`^${second.runId} \\[initialized\\] name=<unnamed> 0/2 repo=unknown`, "m"),
+  );
+  assert.match(globalText, /^oth123 \[initialized\] name=<unnamed> 0\/2 repo=other-repo/m);
+
+  const jsonOut = runCli(
+    ["list", "runs", "--global", "--include-archived", "--output-format", "json"],
+    {
+      cwd: dir,
+    },
+  );
   const parsed = JSON.parse(jsonOut);
   assert.deepEqual(
     parsed.map((run) => run.runId),
@@ -212,6 +236,15 @@ test("list runs enumerates current-generation runs across buckets and filters ar
     satisfied: 0,
     unsatisfied: 0,
   });
+});
+
+test("list runs rejects conflicting scope flags with exit code 3", () => {
+  const dir = tempDir();
+  const failure = runCliExpectFail(["list", "runs", "--cwd", dir, "--repo", "task-runner"], {
+    cwd: dir,
+  });
+  assert.equal(failure.status, 3);
+  assert.match(failure.stderr, /list runs accepts only one of --cwd, --repo, or --global/);
 });
 
 test("run archive and run unarchive expose idempotent text and json results", async () => {

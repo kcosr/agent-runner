@@ -350,6 +350,11 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
   writeAgent(dir, "daemon-agent", AGENT);
   writeAssignment(dir, "daemon-work", ASSIGNMENT);
   const init = await initRun(dir);
+  const otherCwd = join(dir, "other-cwd");
+  mkdirSync(otherCwd, { recursive: true });
+  patchManifest(init.workspaceDir, (manifest) => {
+    manifest.cwd = otherCwd;
+  });
 
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
@@ -363,6 +368,22 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
 
       const runs = await client.call("runs.list", {});
       assert.equal(runs.runs[0].runId, init.runId);
+
+      const cwdScoped = await client.call("runs.list", {
+        scope: { kind: "cwd", cwd: otherCwd },
+      });
+      assert.deepEqual(
+        cwdScoped.runs.map((run) => run.runId),
+        [init.runId],
+      );
+
+      const globalScoped = await client.call("runs.list", {
+        scope: { kind: "global" },
+      });
+      assert.deepEqual(
+        globalScoped.runs.map((run) => run.runId),
+        [init.runId],
+      );
       assert.deepEqual(runs.runs[0].execution, {
         hostMode: "embedded",
         controller: { kind: "embedded" },
@@ -477,6 +498,66 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
       await server.close();
     }
   });
+});
+
+test("connected cli sends caller cwd scope while daemon and http defaults remain global", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const first = await initRun(dir);
+  const otherCwd = join(dir, "other-cwd");
+  mkdirSync(otherCwd, { recursive: true });
+  const second = await initRun(dir);
+
+  patchManifest(first.workspaceDir, (manifest) => {
+    manifest.startedAt = "2026-04-12T10:00:00.000Z";
+  });
+  patchManifest(second.workspaceDir, (manifest) => {
+    manifest.startedAt = "2026-04-12T11:00:00.000Z";
+    manifest.cwd = otherCwd;
+  });
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const daemon = await startCliDaemon(dir, listenUrl);
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  try {
+    const defaultHttp = await httpJson(httpBaseUrl, "/api/runs");
+    assert.equal(defaultHttp.status, 200);
+    assert.deepEqual(
+      defaultHttp.body.runs.map((run) => run.runId),
+      [second.runId, first.runId],
+    );
+
+    const scopedHttp = await httpJson(httpBaseUrl, `/api/runs?cwd=${encodeURIComponent(otherCwd)}`);
+    assert.equal(scopedHttp.status, 200);
+    assert.deepEqual(
+      scopedHttp.body.runs.map((run) => run.runId),
+      [second.runId],
+    );
+
+    const cliDefault = runCli(["list", "runs", "--connect", listenUrl], { cwd: dir });
+    assert.equal(
+      cliDefault.trim(),
+      `${first.runId} [initialized] name=<unnamed> 0/1 repo=unknown agent=daemon-agent assignment=daemon-work`,
+    );
+    assert.doesNotMatch(cliDefault, new RegExp(second.runId));
+
+    const cliScoped = runCli(["list", "runs", "--connect", listenUrl], { cwd: otherCwd });
+    assert.match(cliScoped, new RegExp(`^${second.runId} \\[initialized\\]`, "m"));
+    assert.doesNotMatch(cliScoped, new RegExp(first.runId));
+
+    const cliGlobal = runCli(["list", "runs", "--global", "--connect", listenUrl], {
+      cwd: dir,
+    });
+    assert.match(cliGlobal, new RegExp(`^${second.runId} \\[initialized\\]`, "m"));
+    assert.match(cliGlobal, new RegExp(`^${first.runId} \\[initialized\\]`, "m"));
+
+    const statusText = runCli(["status", second.runId, "--connect", listenUrl], { cwd: dir });
+    assert.match(statusText, new RegExp(`── run ${second.runId} ──`));
+  } finally {
+    await daemon.stop();
+  }
 });
 
 test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async () => {

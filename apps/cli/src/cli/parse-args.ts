@@ -38,6 +38,8 @@ export interface ParsedArgs {
   connect?: string;
   listen?: string;
   includeArchived?: boolean;
+  repo?: string;
+  global?: boolean;
   showHelp: boolean;
 }
 
@@ -135,6 +137,12 @@ export function parseArgs(argv: string[]): ParsedArgs {
       const next = args.shift();
       if (next === undefined) throw new Error("--cwd requires a value");
       result.cwd = next;
+    } else if (arg === "--repo") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--repo requires a value");
+      result.repo = next;
+    } else if (arg === "--global") {
+      result.global = true;
     } else if (arg === "--backend") {
       const next = args.shift();
       if (next === undefined) throw new Error("--backend requires a value");

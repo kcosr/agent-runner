@@ -668,11 +668,13 @@ test("command services: locked task lists reject addTask with CommandError", asy
   });
 });
 
-test("command services: listRuns returns newest-first rows and filters archived unless requested", async () => {
+test("command services: listRuns supports exact cwd scope, repo scope, and unscoped newest-first results", async () => {
   const dir = tempDir();
   writeBundle(dir);
   const first = await initRun(dir);
   const second = await initRun(dir);
+  const otherCwd = join(dir, "other-cwd");
+  mkdirSync(otherCwd, { recursive: true });
 
   patchManifest(first.workspaceDir, (manifest) => {
     manifest.startedAt = "2026-04-12T10:00:00.000Z";
@@ -680,6 +682,7 @@ test("command services: listRuns returns newest-first rows and filters archived 
   });
   patchManifest(second.workspaceDir, (manifest) => {
     manifest.startedAt = "2026-04-12T11:00:00.000Z";
+    manifest.cwd = otherCwd;
   });
 
   const otherWorkspaceDir = join(dir, "runs", "other-repo", "oth123");
@@ -687,6 +690,7 @@ test("command services: listRuns returns newest-first rows and filters archived 
   const otherManifest = readManifest(second.workspaceDir);
   otherManifest.runId = "oth123";
   otherManifest.repo = "other-repo";
+  otherManifest.cwd = join(dir, "other-repo-cwd");
   otherManifest.workspaceDir = otherWorkspaceDir;
   otherManifest.assignmentPath = join(otherWorkspaceDir, "assignment.md");
   otherManifest.startedAt = "2026-04-12T09:00:00.000Z";
@@ -698,13 +702,47 @@ test("command services: listRuns returns newest-first rows and filters archived 
   writeFileSync(join(dir, "runs", "broken-repo", "bad999", "run.json"), "{not json\n");
 
   await withSharedRuntimeEnv(dir, async () => {
-    const visible = listRuns();
+    const visible = listRuns({
+      includeArchived: true,
+      scope: {
+        kind: "cwd",
+        cwd: dir,
+      },
+    });
     assert.deepEqual(
       visible.map((run) => run.runId),
+      [first.runId],
+    );
+
+    const exactOtherCwd = listRuns({
+      scope: {
+        kind: "cwd",
+        cwd: otherCwd,
+      },
+    });
+    assert.deepEqual(
+      exactOtherCwd.map((run) => run.runId),
+      [second.runId],
+    );
+
+    const repoScoped = listRuns({
+      scope: {
+        kind: "repo",
+        repo: "other-repo",
+      },
+    });
+    assert.deepEqual(
+      repoScoped.map((run) => run.runId),
+      ["oth123"],
+    );
+
+    const globalVisible = listRuns();
+    assert.deepEqual(
+      globalVisible.map((run) => run.runId),
       [second.runId, "oth123"],
     );
-    assert.equal(visible[0].repo, "unknown");
-    assert.equal(visible[1].repo, "other-repo");
+    assert.equal(globalVisible[0].repo, "unknown");
+    assert.equal(globalVisible[1].repo, "other-repo");
 
     const allRuns = listRuns({ includeArchived: true });
     assert.deepEqual(
