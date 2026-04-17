@@ -162,20 +162,23 @@ tasks:
           review, *also* read each touched file in full (not just
           the diff) so you can judge the change in context.
 
-      Third, inspect the implementation run and, if it carries an
-      attachment named
-      `assignment-summary.md`, download it to a temp directory and
-      review it for supplemental context. The summary is
+      Third, inspect the implementation run's cwd-scoped
+      attachment view and, if it includes an
+      `assignment-summary.md` row from a same-cwd planning run,
+      download it to a temp directory and review it for
+      supplemental context. The summary is
       supplemental only; the authoritative review inputs remain
       the repository state, the requested scope, and
       `implementation_run_id`.
 
-          {{task_runner_cmd}} attachment list "{{implementation_run_id}}"
+          {{task_runner_cmd}} attachment list "{{implementation_run_id}}" --cwd-scope --output-format json
           mkdir -p /tmp/task-runner-review-artifacts-{{run_id}}
-          {{task_runner_cmd}} attachment download "{{implementation_run_id}}" <summary-attachment-id> /tmp/task-runner-review-artifacts-{{run_id}}/
+          {{task_runner_cmd}} attachment download <owner-run-id> <summary-attachment-id> /tmp/task-runner-review-artifacts-{{run_id}}/
 
-      If the implementation run has no `assignment-summary.md`
-      attachment, continue without blocking.
+      In the cwd-scoped JSON output, find the row whose `name` is
+      `assignment-summary.md` and use that row's `ownerRunId` plus
+      `id` in the download command above. If no such row exists,
+      continue without blocking.
 
       Notes: a 5-10 line summary of what the project is, its
       major modules, and — if scoped — the concrete set of files

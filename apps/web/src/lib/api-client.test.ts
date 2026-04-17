@@ -545,6 +545,45 @@ describe("api client", () => {
     });
   });
 
+  it("lists attachments with cwd scope and parses ownerRunId", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            attachments: [
+              {
+                id: "att-1",
+                name: "peer-notes.md",
+                mimeType: "text/markdown; charset=utf-8",
+                size: 12,
+                sha256: "abc",
+                addedAt: "2026-04-14T06:00:00.000Z",
+                relativePath: "attachments/att-1/peer-notes.md",
+                ownerRunId: "run-2",
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createApiClient(config);
+
+    await expect(api.listAttachments("run-1", { cwdScope: true })).resolves.toEqual([
+      expect.objectContaining({
+        id: "att-1",
+        ownerRunId: "run-2",
+      }),
+    ]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs/run-1/attachments?cwdScope=true",
+      expect.objectContaining({
+        headers: { accept: "application/json" },
+      }),
+    );
+  });
+
   it("reads attachment preview text and normalizes the response media type", async () => {
     const fetchMock = vi.fn(
       async () =>

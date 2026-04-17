@@ -961,6 +961,7 @@ test("command services: archived runs allow attachment add/list/download/remove 
     const listed = listAttachments(outcome.runId);
     assert.equal(listed.attachments.length, 1);
     assert.equal(listed.attachments[0].id, added.attachment.id);
+    assert.equal(listed.attachments[0].ownerRunId, outcome.runId);
 
     const downloaded = downloadAttachment(outcome.runId, added.attachment.id, downloadsDir);
     assert.equal(readFileSync(downloaded.outputPath, "utf8"), "hello attachments\n");
@@ -970,6 +971,47 @@ test("command services: archived runs allow attachment add/list/download/remove 
     assert.equal(listAttachments(outcome.runId).attachments.length, 0);
     assert.equal(readManifest(outcome.workspaceDir).attachments.length, 0);
     assert.equal(existsSync(storedPath), false);
+  });
+});
+
+test("command services: attachment list cwd scope includes exact same-cwd peers only", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const target = await initRun(dir);
+  const peer = await initRun(dir);
+  const different = await initRun(dir);
+  const targetFile = join(dir, "target.txt");
+  const peerFile = join(dir, "peer.txt");
+  const differentFile = join(dir, "different.txt");
+  writeFileSync(targetFile, "target\n");
+  writeFileSync(peerFile, "peer\n");
+  writeFileSync(differentFile, "different\n");
+
+  patchManifest(different.workspaceDir, (manifest) => {
+    manifest.cwd = join(dir, "other-cwd");
+  });
+
+  await withSharedRuntimeEnv(dir, async () => {
+    await addAttachmentFromFile(target.runId, { sourcePath: targetFile });
+    await addAttachmentFromFile(peer.runId, { sourcePath: peerFile });
+    await addAttachmentFromFile(different.runId, { sourcePath: differentFile });
+
+    const runOnly = listAttachments(target.runId);
+    assert.deepEqual(
+      runOnly.attachments.map((attachment) => attachment.ownerRunId),
+      [target.runId],
+    );
+
+    const scoped = listAttachments(target.runId, { cwdScope: true });
+    assert.equal(scoped.attachments.length, 2);
+    assert.deepEqual(
+      new Set(scoped.attachments.map((attachment) => attachment.ownerRunId)),
+      new Set([target.runId, peer.runId]),
+    );
+    assert.equal(
+      scoped.attachments.some((attachment) => attachment.ownerRunId === different.runId),
+      false,
+    );
   });
 });
 

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { LOCKABLE_FIELDS } from "../core/config/schema.js";
-import type { RunAttachment } from "./attachments.js";
+import type { AttachmentListEntry, RunAttachment } from "./attachments.js";
 import type {
   RunDetailStreamEvent,
   RunSummaryStreamEvent,
@@ -93,7 +93,7 @@ export const runCapabilitiesSchema: z.ZodType<RunCapabilities> = z.object({
   taskMutation: runTaskMutationCapabilitiesSchema,
 });
 
-export const runAttachmentSchema: z.ZodType<RunAttachment> = z.object({
+const runAttachmentObjectSchema = z.object({
   id: z.string(),
   name: z.string(),
   mimeType: z.string(),
@@ -102,6 +102,13 @@ export const runAttachmentSchema: z.ZodType<RunAttachment> = z.object({
   addedAt: z.string(),
   relativePath: z.string(),
 });
+
+export const runAttachmentSchema: z.ZodType<RunAttachment> = runAttachmentObjectSchema;
+
+export const attachmentListEntrySchema: z.ZodType<AttachmentListEntry> =
+  runAttachmentObjectSchema.extend({
+    ownerRunId: z.string(),
+  });
 
 export const runDependencyStateSchema: z.ZodType<RunDependencyState> = z.object({
   ready: z.boolean(),

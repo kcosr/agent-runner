@@ -146,6 +146,7 @@ Task command options:
   --body <text>           (task add) Optional task body.
   --name <text>           (attachment add) Optional display name.
   --mime-type <type>      (attachment add) Optional MIME type override.
+  --cwd-scope             (attachment list) Include same-cwd peer-run attachments.
 
 Host selection:
   --connect <ws-url>      Route the command through the daemon host.
@@ -590,6 +591,7 @@ function unsupportedFlagsForGroupedCommand(
     allowClear?: boolean;
     allowAttachmentName?: boolean;
     allowAttachmentMimeType?: boolean;
+    allowCwdScope?: boolean;
   } = {},
 ): string[] {
   const unsupported: string[] = [];
@@ -619,6 +621,7 @@ function unsupportedFlagsForGroupedCommand(
   if (!opts.allowAttachmentMimeType && parsed.attachmentMimeType !== undefined) {
     unsupported.push("--mime-type");
   }
+  if (!opts.allowCwdScope && parsed.cwdScope) unsupported.push("--cwd-scope");
   if (parsed.addedTasks.length > 0) unsupported.push("--add-task");
   if (parsed.detach) unsupported.push("--detach");
   if (parsed.listen !== undefined) unsupported.push("--listen");
@@ -747,10 +750,10 @@ async function runAttachmentCommand(parsed: ParsedArgs, connectUrl?: string): Pr
         );
         process.exit(3);
       }
-      const unsupported = unsupportedFlagsForGroupedCommand(parsed);
+      const unsupported = unsupportedFlagsForGroupedCommand(parsed, { allowCwdScope: true });
       if (unsupported.length > 0) {
         process.stderr.write(
-          `task-runner: attachment list only supports <run-id-or-path>, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+          `task-runner: attachment list only supports <run-id-or-path>, --cwd-scope, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
         );
         process.exit(3);
       }
@@ -758,15 +761,18 @@ async function runAttachmentCommand(parsed: ParsedArgs, connectUrl?: string): Pr
       try {
         const attachments =
           connectUrl === undefined
-            ? getAttachmentList(target)
+            ? getAttachmentList(target, { cwdScope: parsed.cwdScope })
             : await daemonListAttachments(
                 connectUrl,
                 await resolveAttachmentTargetForDaemon(target, connectUrl),
+                { cwdScope: parsed.cwdScope },
               );
         if (parsed.outputFormat === "json") {
           writeJson(attachments);
         } else {
-          process.stdout.write(renderAttachmentList(attachments));
+          process.stdout.write(
+            renderAttachmentList(attachments, { showOwnerRunId: parsed.cwdScope === true }),
+          );
         }
         return process.exit(0);
       } catch (err) {

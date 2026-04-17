@@ -11,7 +11,12 @@ import {
   loadAssignmentConfig,
 } from "../../config/loader.js";
 import { isPathArg } from "../../config/runtime-paths.js";
-import type { RunAttachment, RunAttachmentRemoveResult } from "../../contracts/attachments.js";
+import type {
+  AttachmentListEntry,
+  AttachmentListOptions,
+  RunAttachment,
+  RunAttachmentRemoveResult,
+} from "../../contracts/attachments.js";
 import {
   type RunArchiveResult,
   type RunBackendSessionResult,
@@ -140,7 +145,7 @@ export interface TaskMutationResult {
 
 export interface AttachmentListResult {
   manifest: RunManifest;
-  attachments: RunAttachment[];
+  attachments: AttachmentListEntry[];
 }
 
 export interface AttachmentResult {
@@ -793,12 +798,55 @@ export function listTasks(target: string): TaskListResult {
   };
 }
 
-export function listAttachments(target: string): AttachmentListResult {
+function toAttachmentListEntry(attachment: RunAttachment, ownerRunId: string): AttachmentListEntry {
+  return {
+    ...attachment,
+    ownerRunId,
+  };
+}
+
+function listAttachmentOwnerManifests(
+  target: string,
+  options: AttachmentListOptions = {},
+): AttachmentListResult["manifest"][] {
   const resolved = resolveRun(target);
   refreshRunSnapshotAfterTaskStateSettles(resolved);
+  if (!options.cwdScope) {
+    return [resolved.manifest];
+  }
+
+  const matchingEntries = listRunManifests()
+    .filter((entry) => entry.manifest.cwd === resolved.manifest.cwd)
+    .sort((left, right) => {
+      const startedAtCompare = left.manifest.startedAt.localeCompare(right.manifest.startedAt);
+      if (startedAtCompare !== 0) {
+        return startedAtCompare;
+      }
+      return left.manifest.runId.localeCompare(right.manifest.runId);
+    });
+
+  return matchingEntries.map((entry) => {
+    const peerResolved = resolveResumeTarget(entry.workspaceDir);
+    refreshRunSnapshotAfterTaskStateSettles(peerResolved);
+    return peerResolved.manifest;
+  });
+}
+
+export function listAttachments(
+  target: string,
+  options: AttachmentListOptions = {},
+): AttachmentListResult {
+  const [manifest, ...peerManifests] = listAttachmentOwnerManifests(target, options);
+  if (manifest === undefined) {
+    throw new Error("attachment list requires a resolved run manifest");
+  }
   return {
-    manifest: resolved.manifest,
-    attachments: cloneAttachments(resolved.manifest.attachments),
+    manifest,
+    attachments: [manifest, ...peerManifests].flatMap((entry) =>
+      cloneAttachments(entry.attachments).map((attachment) =>
+        toAttachmentListEntry(attachment, entry.runId),
+      ),
+    ),
   };
 }
 

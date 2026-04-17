@@ -8,6 +8,14 @@ export interface RunAttachment {
   relativePath: string;
 }
 
+export interface AttachmentListEntry extends RunAttachment {
+  ownerRunId: string;
+}
+
+export interface AttachmentListOptions {
+  cwdScope?: boolean;
+}
+
 export interface RunAttachmentRemoveResult {
   runId: string;
   attachmentId: string;

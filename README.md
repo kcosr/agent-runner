@@ -126,6 +126,7 @@ Important read-surface rule:
 - `brief` is text-only. It does not support `--output-format` or `--field`.
 - `status --output-format json` returns the shared `RunDetail` DTO.
 - `list runs` defaults to the caller's cwd. Use `--cwd <path>` for a different exact cwd, `--repo <name>` for an exact repo bucket, or `--global` to restore the previous global listing behavior.
+- `attachment list <run-id> --cwd-scope` keeps the target run as the anchor but includes attachment rows from peer runs whose persisted `cwd` exactly matches the target run's persisted `cwd`. JSON list rows include `ownerRunId`, and the web run-detail Attachments area now splits those results into `Run` and `Group` tabs, with `Group` kept read-only.
 
 ## Workflow
 

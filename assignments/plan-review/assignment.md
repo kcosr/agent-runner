@@ -136,9 +136,9 @@ tasks:
           confirm the target directory or worktree path before
           running `init`, rather than guessing from its own
           environment
-        - the delayed creation flow says the planner will attach
-          the same two artifacts to the new implementer run after
-          `init` succeeds
+        - the delayed creation flow says the planner keeps those
+          artifacts on the planning run rather than duplicating
+          them onto the new implementer run
         - the handoff tells the caller how to request creation
           and how to run the resulting implementer run after the
           planner creates it
@@ -146,8 +146,9 @@ tasks:
           the planner tasks and handoff notes
         - the generated implementer orientation tells the
           executor to read the run's tasks first and only then
-          optionally download `assignment-summary.md` for
-          supplemental context
+          optionally discover and download
+          `assignment-summary.md` through cwd-scoped attachment
+          listing for supplemental context
 
       Missing or incorrect workflow wiring is usually HIGH
       severity because it causes the caller or implementer to

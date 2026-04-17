@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import type { DefinitionEntry } from "../config/loader.js";
 import type {
+  AttachmentListEntry,
+  AttachmentListOptions,
   RunAttachment,
   RunAttachmentDownloadResult,
   RunAttachmentRemoveResult,
@@ -199,8 +201,11 @@ export function getTask(target: string, taskId: string): RunTaskSummary {
   };
 }
 
-export function getAttachmentList(target: string): RunAttachment[] {
-  return listAttachments(target).attachments;
+export function getAttachmentList(
+  target: string,
+  options: AttachmentListOptions = {},
+): AttachmentListEntry[] {
+  return listAttachments(target, options).attachments;
 }
 
 export function getAttachment(

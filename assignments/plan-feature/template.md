@@ -25,8 +25,9 @@ callerInstructions: |
   externally driven through the task workflow surfaced in the
   brief rather than `run --resume-run`.
 
-  This run may also carry an attachment named
-  `assignment-summary.md`. If it exists, download it to a temp
+  A same-cwd planning run may carry an attachment named
+  `assignment-summary.md`. If it exists in the cwd-scoped
+  attachment view rooted at this run, download it to a temp
   directory and review it for supplemental context. The task
   list in this run remains the canonical execution contract.
 
@@ -158,17 +159,21 @@ tasks:
       the normal task commands. Those tasks and their bodies are
       the canonical execution contract for this run.
 
-      If an attachment named `assignment-summary.md` exists on
-      this run, download it to a temp directory and review it
-      for additional context:
+      If a same-cwd planning run attached
+      `assignment-summary.md`, you can load it for additional
+      context:
 
-          {{task_runner_cmd}} attachment list {{run_id}}
+          {{task_runner_cmd}} attachment list {{run_id}} --cwd-scope --output-format json
           mkdir -p /tmp/task-runner-plan-artifacts-{{run_id}}
-          {{task_runner_cmd}} attachment download {{run_id}} <summary-attachment-id> /tmp/task-runner-plan-artifacts-{{run_id}}/
+          {{task_runner_cmd}} attachment download <owner-run-id> <summary-attachment-id> /tmp/task-runner-plan-artifacts-{{run_id}}/
 
-      If no such attachment exists, continue without blocking.
-      Do not treat the summary attachment as overriding this
-      run's canonical task state.
+      In the cwd-scoped JSON output, find the row whose `name` is
+      `assignment-summary.md` and use that row's `ownerRunId` plus
+      `id` in the download command above.
+
+      If no such attachment exists in the same cwd group,
+      continue without blocking. Do not treat the summary
+      attachment as overriding this run's canonical task state.
 
       You are about to implement a feature in the repository
       at `{{cwd}}`. This is a fresh session — you do

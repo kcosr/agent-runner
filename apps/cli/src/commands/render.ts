@@ -1,4 +1,5 @@
 import type {
+  AttachmentListEntry,
   RunAttachment,
   RunAttachmentDownloadResult,
   RunAttachmentRemoveResult,
@@ -311,15 +312,18 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1).replace(/\.0$/, "")} MB`;
 }
 
-export function renderAttachmentList(attachments: RunAttachment[]): string {
+export function renderAttachmentList(
+  attachments: AttachmentListEntry[],
+  options: { showOwnerRunId?: boolean } = {},
+): string {
   if (attachments.length === 0) {
     return "No attachments.\n";
   }
   return `${attachments
-    .map(
-      (attachment) =>
-        `${attachment.id}  ${attachment.name}  ${attachment.mimeType}  ${formatBytes(attachment.size)}  ${attachment.addedAt}`,
-    )
+    .map((attachment) => {
+      const owner = options.showOwnerRunId ? `  owner=${attachment.ownerRunId}` : "";
+      return `${attachment.id}  ${attachment.name}  ${attachment.mimeType}  ${formatBytes(attachment.size)}  ${attachment.addedAt}${owner}`;
+    })
     .join("\n")}\n`;
 }
 
