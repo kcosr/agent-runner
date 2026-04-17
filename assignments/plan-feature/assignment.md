@@ -596,7 +596,11 @@ tasks:
           verifying.
         - `<<PLACEHOLDER_FEATURE_CONTRACT>>` in the same
           task — paste the entire contract artifact from
-          your `produce_contract_artifact` notes, verbatim, inside a fenced block.
+          your `produce_contract_artifact` notes verbatim as
+          standard markdown sections. Do not wrap the whole
+          contract in one outer fenced block; use fenced
+          blocks only for code/schema/query snippets that
+          are part of the contract itself.
           The reviewer cross-checks the final implementation
           against this contract: every listed flag,
           every listed exit code, every listed sample
