@@ -10,7 +10,7 @@ import type {
 import { HttpError } from "./http-errors.js";
 import { readJsonBody, sendBuffer, sendError, sendJson } from "./http-serializers.js";
 import type { DaemonOperations } from "./operations.js";
-import type { RunSetNameParams, RunsStartParams } from "./protocol.js";
+import type { RunSetNameParams, RunsListParams, RunsStartParams } from "./protocol.js";
 import {
   RequestValidationError,
   asRecord,
@@ -71,16 +71,7 @@ const routes: RouteDefinition[] = [
     method: "GET",
     pattern: ["api", "runs"],
     handler: (_req, res, ctx, _params, url) => {
-      sendJson(
-        res,
-        200,
-        ctx.operations.listRuns({
-          includeArchived: parseBooleanQueryValue(
-            url.searchParams.get("includeArchived"),
-            "includeArchived",
-          ),
-        }),
-      );
+      sendJson(res, 200, ctx.operations.listRuns(parseRunListQuery(url)));
     },
   },
   {
@@ -457,4 +448,44 @@ function routeParam(params: Record<string, string>, key: string): string {
     throw new HttpError(404, "NOT_FOUND", "resource not found");
   }
   return value;
+}
+
+function parseRunListQuery(url: URL): RunsListParams {
+  const includeArchived = parseBooleanQueryValue(
+    url.searchParams.get("includeArchived"),
+    "includeArchived",
+  );
+  const cwd = url.searchParams.get("cwd");
+  const repo = url.searchParams.get("repo");
+  const global = parseBooleanQueryValue(url.searchParams.get("global"), "global");
+  const scopeCount = Number(cwd !== null) + Number(repo !== null) + Number(global === true);
+
+  if (scopeCount > 1) {
+    throw new RequestValidationError("runs.list accepts only one of cwd, repo, or global=true");
+  }
+  if (cwd !== null) {
+    return {
+      includeArchived,
+      scope: {
+        kind: "cwd",
+        cwd,
+      },
+    };
+  }
+  if (repo !== null) {
+    return {
+      includeArchived,
+      scope: {
+        kind: "repo",
+        repo,
+      },
+    };
+  }
+  if (global === true) {
+    return {
+      includeArchived,
+      scope: { kind: "global" },
+    };
+  }
+  return { includeArchived };
 }

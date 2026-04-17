@@ -36,7 +36,11 @@ import {
   DefinitionListError,
 } from "@task-runner/core/config/loader.js";
 import { isPathArg, resolveInputPath } from "@task-runner/core/config/runtime-paths.js";
-import { CommandError, isCommandError } from "@task-runner/core/core/commands/service.js";
+import {
+  CommandError,
+  type RunListFilter,
+  isCommandError,
+} from "@task-runner/core/core/commands/service.js";
 import { AttachmentError } from "@task-runner/core/core/run/attachments.js";
 import {
   EmptyPromptError,
@@ -149,7 +153,7 @@ Execution options:
   --resume-run <id|path>  Continue an existing run by short id or path.
   --var <key>=<value>     Set an input variable (repeatable).
   --add-task <title>      Append a task to the run's task list.
-  --cwd <path>            Override the run cwd.
+  --cwd <path>            Override the run cwd, or scope list runs to a cwd.
   --backend <id>          Override the agent's backend.
   --model <id>            Override the agent's model.
   --effort <level>        Override effort level.
@@ -160,6 +164,8 @@ Execution options:
   --clear                 (run set-name) Clear the persisted run name.
   --detach                (run only, daemon mode only) Dispatch and exit
                           after the daemon accepts the run.
+  --repo <name>           (list runs only) Scope runs to an exact repo.
+  --global                (list runs only) Disable default cwd scoping.
   --output-format <fmt>   Output format: "text" (default) or "json".
   --field <name>          (status only, repeatable) Restrict JSON output.
   --include-archived      (list runs only) Include archived runs.
@@ -431,7 +437,7 @@ async function runListCommand(parsed: ParsedArgs, connectUrl?: string): Promise<
       `task-runner: list requires a kind: agents, assignments, or runs${kindArg ? ` (got "${kindArg}")` : ""}\n`,
     );
     process.stderr.write(
-      "Usage: task-runner list <agents|assignments|runs> [--include-archived] [--output-format json]\n",
+      "Usage: task-runner list <agents|assignments|runs> [--cwd <path> | --repo <name> | --global] [--include-archived] [--output-format json]\n",
     );
     process.exit(3);
   }
@@ -446,21 +452,21 @@ async function runListCommand(parsed: ParsedArgs, connectUrl?: string): Promise<
       }
       const unsupported = unsupportedFlagsForGroupedCommand(parsed, {
         allowIncludeArchived: true,
+        allowRunListScope: true,
       });
       if (unsupported.length > 0) {
         process.stderr.write(
-          `task-runner: list runs only supports --connect, --include-archived, and --output-format (got ${unsupported.join(", ")})\n`,
+          `task-runner: list runs only supports --cwd, --repo, --global, --connect, --include-archived, and --output-format (got ${unsupported.join(", ")})\n`,
         );
         process.exit(3);
       }
+      const filter = resolveRunListFilter(parsed);
       const result =
         connectUrl === undefined
-          ? getRunList({ includeArchived: parsed.includeArchived })
+          ? getRunList(filter)
           : await withDaemonClient(connectUrl, (client) =>
               client
-                .call<{ runs: ReturnType<typeof getRunList> }>("runs.list", {
-                  includeArchived: parsed.includeArchived,
-                })
+                .call<{ runs: ReturnType<typeof getRunList> }>("runs.list", filter)
                 .then((r) => r.runs),
             );
       if (parsed.outputFormat === "json") {
@@ -572,6 +578,7 @@ function unsupportedFlagsForGroupedCommand(
   opts: {
     allowFields?: boolean;
     allowIncludeArchived?: boolean;
+    allowRunListScope?: boolean;
     allowClear?: boolean;
     allowAttachmentName?: boolean;
     allowAttachmentMimeType?: boolean;
@@ -583,7 +590,9 @@ function unsupportedFlagsForGroupedCommand(
   if (parsed.resumeRun !== undefined) unsupported.push("--resume-run");
   if (parsed.backendSessionId !== undefined) unsupported.push("--backend-session-id");
   if (Object.keys(parsed.vars).length > 0) unsupported.push("--var");
-  if (parsed.cwd !== undefined) unsupported.push("--cwd");
+  if (!opts.allowRunListScope && parsed.cwd !== undefined) unsupported.push("--cwd");
+  if (!opts.allowRunListScope && parsed.repo !== undefined) unsupported.push("--repo");
+  if (!opts.allowRunListScope && parsed.global) unsupported.push("--global");
   if (parsed.backend !== undefined) unsupported.push("--backend");
   if (parsed.model !== undefined) unsupported.push("--model");
   if (parsed.effort !== undefined) unsupported.push("--effort");
@@ -607,6 +616,47 @@ function unsupportedFlagsForGroupedCommand(
   if (parsed.listen !== undefined) unsupported.push("--listen");
   if (!opts.allowIncludeArchived && parsed.includeArchived) unsupported.push("--include-archived");
   return unsupported;
+}
+
+function resolveRunListFilter(parsed: ParsedArgs): RunListFilter {
+  const explicitScopeCount =
+    Number(parsed.cwd !== undefined) +
+    Number(parsed.repo !== undefined) +
+    Number(parsed.global === true);
+  if (explicitScopeCount > 1) {
+    throw new CommandError("list runs accepts only one of --cwd, --repo, or --global");
+  }
+  if (parsed.cwd !== undefined) {
+    return {
+      includeArchived: parsed.includeArchived,
+      scope: {
+        kind: "cwd",
+        cwd: resolveInputPath(parsed.cwd, process.cwd()),
+      },
+    };
+  }
+  if (parsed.repo !== undefined) {
+    return {
+      includeArchived: parsed.includeArchived,
+      scope: {
+        kind: "repo",
+        repo: parsed.repo,
+      },
+    };
+  }
+  if (parsed.global) {
+    return {
+      includeArchived: parsed.includeArchived,
+      scope: { kind: "global" },
+    };
+  }
+  return {
+    includeArchived: parsed.includeArchived,
+    scope: {
+      kind: "cwd",
+      cwd: resolveInputPath(".", process.cwd()),
+    },
+  };
 }
 
 async function startOrResumeDaemonRun(

@@ -19,6 +19,7 @@ import type {
 import { toRunDetail } from "../contracts/runs.js";
 import type { BackendId } from "../core/backends/types.js";
 import {
+  type RunListFilter,
   addAttachmentFromFile,
   addAttachmentFromStream,
   addRunDependency,
@@ -170,8 +171,8 @@ export function getRunBrief(target: string): string {
   return readBrief(target);
 }
 
-export function getRunList(opts: { includeArchived?: boolean } = {}): RunSummary[] {
-  return listRuns(opts);
+export function getRunList(filter: RunListFilter = {}): RunSummary[] {
+  return listRuns(filter);
 }
 
 export function getTaskList(target: string): RunTaskSummary[] {

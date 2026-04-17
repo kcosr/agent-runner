@@ -17,6 +17,7 @@ import type {
   RunSummary,
   RunTaskSummary,
 } from "@task-runner/core/contracts/runs.js";
+import type { RunListFilter } from "@task-runner/core/core/commands/service.js";
 
 export type RunEventChannel = "run_summary" | "run_detail" | "run_timeline";
 
@@ -58,9 +59,7 @@ export interface DaemonInfo {
   startedAt: string;
 }
 
-export interface RunsListParams {
-  includeArchived?: boolean;
-}
+export type RunsListParams = RunListFilter;
 
 export interface RunTargetParams {
   target: string;

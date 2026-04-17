@@ -102,6 +102,23 @@ export type {
 } from "../../contracts/runs.js";
 
 export type RunListResult = RunListEntry[];
+export type RunListScopeFilter =
+  | {
+      kind: "cwd";
+      cwd: string;
+    }
+  | {
+      kind: "repo";
+      repo: string;
+    }
+  | {
+      kind: "global";
+    };
+
+export interface RunListFilter {
+  includeArchived?: boolean;
+  scope?: RunListScopeFilter;
+}
 
 export interface TaskListResult {
   manifest: RunManifest;
@@ -426,8 +443,27 @@ export function listDefinitions(kind: DefinitionKind): DefinitionListResult {
   };
 }
 
-export function listRuns(opts: { includeArchived?: boolean } = {}): RunListResult {
-  const includeArchived = opts.includeArchived === true;
+function matchesRunListScope(
+  manifest: RunManifest,
+  scope: RunListScopeFilter | undefined,
+): boolean {
+  if (scope === undefined || scope.kind === "global") {
+    return true;
+  }
+  switch (scope.kind) {
+    case "cwd":
+      return manifest.cwd === scope.cwd;
+    case "repo":
+      return manifest.repo === scope.repo;
+    default: {
+      const unreachableScope: never = scope;
+      return unreachableScope;
+    }
+  }
+}
+
+export function listRuns(filter: RunListFilter = {}): RunListResult {
+  const includeArchived = filter.includeArchived === true;
   const entries = listRunManifests();
   const projectedEntries = entries.map((entry) => ({
     ...entry,
@@ -439,6 +475,7 @@ export function listRuns(opts: { includeArchived?: boolean } = {}): RunListResul
       .map((entry) => entry.manifest.runId),
   );
   return projectedEntries
+    .filter((entry) => matchesRunListScope(entry.manifest, filter.scope))
     .map((entry) =>
       toRunSummary(
         entry,

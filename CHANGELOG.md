@@ -4,6 +4,7 @@
 
 ### Breaking Changes
 
+- `task-runner list runs` now defaults to the caller's cwd instead of listing every repo. Use `--cwd <path>` to target a different exact cwd, `--repo <name>` to target one repo bucket, or `--global` to restore the previous global listing behavior. ([#44](https://github.com/kcosr/task-runner/pull/44))
 - Manifest schema version is now `8`. Authored `cwd` moved from agent definitions to assignment definitions, run manifests now persist first-class `repo` alongside frozen `cwd`, and older `schemaVersion: 7` runs must be upgraded explicitly with `scripts/migrate-manifests-v8.mjs` or recreated. Built-in assignments/docs now use `{{cwd}}` instead of redundant canonical `repo_path` vars. ([#43](https://github.com/kcosr/task-runner/pull/43))
 - Replaced the daemon/browser live-event contract hot-cut: `AppRuntimeConfig.runEventsPath` and the mixed `/api/events/runs` / `run.event` surfaces are removed in favor of `runSummaryEventsPath`, summary-only global streams, per-run detail streams, and per-run timeline streams. `RunSummary` and `RunDetail` now include derived `activeTask` projections for direct board/detail rendering. ([#35](https://github.com/kcosr/task-runner/pull/35))
 - Shared run lifecycle contracts now hot-cut `RunCapabilities` to include `canReset` and `canDelete`, and the global run-summary stream now emits either `summary_upsert` or `summary_removed`. Daemon/web consumers must use the updated capability and event unions directly. ([#39](https://github.com/kcosr/task-runner/pull/39))

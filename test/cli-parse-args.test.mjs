@@ -125,6 +125,27 @@ test("parseArgs: list runs captures --include-archived", () => {
   assert.equal(parsed.outputFormat, "json");
 });
 
+test("parseArgs: list runs captures --cwd scope", () => {
+  const parsed = parseArgs(argv("list", "runs", "--cwd", "../other"));
+  assert.equal(parsed.command, "list");
+  assert.equal(parsed.subcommand, "runs");
+  assert.equal(parsed.cwd, "../other");
+});
+
+test("parseArgs: list runs captures --repo scope", () => {
+  const parsed = parseArgs(argv("list", "runs", "--repo", "assistant"));
+  assert.equal(parsed.command, "list");
+  assert.equal(parsed.subcommand, "runs");
+  assert.equal(parsed.repo, "assistant");
+});
+
+test("parseArgs: list runs captures --global scope", () => {
+  const parsed = parseArgs(argv("list", "runs", "--global"));
+  assert.equal(parsed.command, "list");
+  assert.equal(parsed.subcommand, "runs");
+  assert.equal(parsed.global, true);
+});
+
 test("parseArgs: list with no kind still parses (validation in handler)", () => {
   const parsed = parseArgs(argv("list"));
   assert.equal(parsed.command, "list");

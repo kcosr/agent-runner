@@ -1,7 +1,8 @@
 import type { RunCommandOverrides } from "@task-runner/core/app/service.js";
 import { BACKEND_IDS } from "@task-runner/core/core/backends/types.js";
+import type { RunListScopeFilter } from "@task-runner/core/core/commands/service.js";
 import { trimRunName } from "@task-runner/core/util/run-name.js";
-import type { RunSetNameParams, RunsStartParams } from "./protocol.js";
+import type { RunSetNameParams, RunsListParams, RunsStartParams } from "./protocol.js";
 
 export class RequestValidationError extends Error {
   constructor(message: string) {
@@ -244,5 +245,37 @@ export function parseRunSetNameParams(value: unknown, label: string): RunSetName
   return {
     target: requiredString(record.target, `${label}.target`),
     name: requiredNullableRunName(record.name, `${label}.name`),
+  };
+}
+
+export function parseRunListScope(value: unknown, label: string): RunListScopeFilter | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const record = asRecord(value, label);
+  const kind = optionalEnum(record.kind, `${label}.kind`, ["cwd", "repo", "global"]);
+  if (kind === undefined) {
+    throw new RequestValidationError(`${label}.kind is required`);
+  }
+  if (kind === "cwd") {
+    return {
+      kind,
+      cwd: requiredString(record.cwd, `${label}.cwd`),
+    };
+  }
+  if (kind === "repo") {
+    return {
+      kind,
+      repo: requiredString(record.repo, `${label}.repo`),
+    };
+  }
+  return { kind };
+}
+
+export function parseRunsListParams(value: unknown, label: string): RunsListParams {
+  const record = asRecord(value, label);
+  return {
+    includeArchived: optionalBoolean(record.includeArchived, `${label}.includeArchived`),
+    scope: parseRunListScope(record.scope, `${label}.scope`),
   };
 }
