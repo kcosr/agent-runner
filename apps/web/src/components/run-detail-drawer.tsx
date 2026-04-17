@@ -139,6 +139,49 @@ interface AttachmentRowEntry {
   ownerRunId: string;
 }
 
+function InlineConfirmActions({
+  cancelLabel,
+  cancelTitle,
+  confirmLabel,
+  confirmTitle,
+  disabled,
+  onCancel,
+  onConfirm,
+}: {
+  cancelLabel: string;
+  cancelTitle: string;
+  confirmLabel: string;
+  confirmTitle: string;
+  disabled: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="drawer-confirm-actions">
+      <button
+        aria-label={confirmLabel}
+        className="icon-btn icon-btn--destructive"
+        disabled={disabled}
+        onClick={onConfirm}
+        title={confirmTitle}
+        type="button"
+      >
+        <CheckIcon aria-hidden="true" />
+      </button>
+      <button
+        aria-label={cancelLabel}
+        className="icon-btn"
+        disabled={disabled}
+        onClick={onCancel}
+        title={cancelTitle}
+        type="button"
+      >
+        <CloseIcon aria-hidden="true" />
+      </button>
+    </div>
+  );
+}
+
 export function RunDetailDrawer({
   activeSection,
   dependencyCandidateRuns,
@@ -154,12 +197,14 @@ export function RunDetailDrawer({
   groupAttachmentsQuery,
   onDownloadAttachment,
   onOpenAttachmentPreview,
+  onClearBackendSession,
   onRemoveDependency,
   onRemoveAttachment,
   onReset,
   onRename,
   onResume,
   onSelectAttachmentTab,
+  onSetBackendSession,
   onSelectSection,
   selectedAttachmentTab,
   timelineState,
@@ -185,12 +230,14 @@ export function RunDetailDrawer({
     attachmentId: string,
     attachmentTab: AttachmentTab,
   ) => void;
+  onClearBackendSession: () => Promise<void>;
   onRemoveDependency: (dependencyRunId: string) => Promise<void>;
   onRemoveAttachment: (attachmentId: string) => Promise<void>;
   onReset: () => void;
   onRename: (name: string | null) => Promise<void>;
   onResume: (message?: string) => Promise<void>;
   onSelectAttachmentTab: (attachmentTab: AttachmentTab) => void;
+  onSetBackendSession: (backendSessionId: string) => Promise<void>;
   onSelectSection: (section: DrawerDetailSection) => void;
   selectedAttachmentTab: AttachmentTab;
   timelineState: RunTimelineState;
@@ -206,11 +253,15 @@ export function RunDetailDrawer({
   const [selectedAttempt, setSelectedAttempt] = useState<number | null>(null);
   const [timelineTab, setTimelineTab] = useState<TimelineTab>("output");
   const [editingName, setEditingName] = useState(false);
+  const [editingBackendSession, setEditingBackendSession] = useState(false);
   const [nameDraft, setNameDraft] = useState(run.name ?? "");
+  const [backendSessionDraft, setBackendSessionDraft] = useState(run.backendSessionId ?? "");
   const [resumeDialogOpen, setResumeDialogOpen] = useState(false);
   const [resumeMessageExpanded, setResumeMessageExpanded] = useState(false);
   const [resumeMessageDraft, setResumeMessageDraft] = useState("");
   const [confirmingAttachmentId, setConfirmingAttachmentId] = useState<string | null>(null);
+  const [confirmingReset, setConfirmingReset] = useState(false);
+  const [confirmingAbort, setConfirmingAbort] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [dependencyDraft, setDependencyDraft] = useState("");
   const [selectedDependencyRunId, setSelectedDependencyRunId] = useState<string | null>(null);
@@ -220,8 +271,10 @@ export function RunDetailDrawer({
   const resumeDisclosureButtonRef = useRef<HTMLButtonElement | null>(null);
   const resumeMessageRef = useRef<HTMLTextAreaElement | null>(null);
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
+  const backendSessionInputRef = useRef<HTMLInputElement | null>(null);
   const backendSessionId = run.backendSessionId;
   const isPassiveRun = run.backend === "passive";
+  const canEditBackendSession = isPassiveRun;
   const actionsLocked = actionPending !== undefined;
   const resumePending = actionPending === "resume";
   const trimmedResumeMessage = resumeMessageDraft.trim();
@@ -230,7 +283,9 @@ export function RunDetailDrawer({
   const resumeRequiresMessage = !hasIncompleteTasks;
   const showResumeMessageField = resumeRequiresMessage || resumeMessageExpanded;
   const renamePending = actionPending === "rename";
+  const backendSessionPending = actionPending === "backend-session";
   const resetPending = actionPending === "reset";
+  const abortPending = actionPending === "abort";
   const uploadAttachmentPending = actionPending === "upload-attachment";
   const removeAttachmentPending = actionPending === "remove-attachment";
   const downloadAttachmentPending = actionPending === "download-attachment";
@@ -321,11 +376,82 @@ export function RunDetailDrawer({
     }
   }
 
+  function startBackendSessionEdit() {
+    if (actionsLocked || !canEditBackendSession) {
+      return;
+    }
+    setBackendSessionDraft(run.backendSessionId ?? "");
+    setEditingBackendSession(true);
+  }
+
+  function cancelBackendSessionEdit() {
+    if (backendSessionPending) {
+      return;
+    }
+    setBackendSessionDraft(run.backendSessionId ?? "");
+    setEditingBackendSession(false);
+  }
+
+  async function submitBackendSessionEdit() {
+    if (backendSessionPending) {
+      return;
+    }
+    const trimmed = backendSessionDraft.trim();
+    if (trimmed.length === 0 && run.backendSessionId === null) {
+      setEditingBackendSession(false);
+      return;
+    }
+    if (trimmed.length === 0) {
+      await submitBackendSessionClear();
+      return;
+    }
+    if (trimmed === run.backendSessionId) {
+      setEditingBackendSession(false);
+      return;
+    }
+    try {
+      await onSetBackendSession(trimmed);
+      setEditingBackendSession(false);
+    } catch {
+      // actionError is surfaced by the shared mutation handler.
+    }
+  }
+
+  async function submitBackendSessionClear() {
+    if (backendSessionPending || run.backendSessionId === null) {
+      return;
+    }
+    try {
+      await onClearBackendSession();
+      setEditingBackendSession(false);
+    } catch {
+      // actionError is surfaced by the shared mutation handler.
+    }
+  }
+
+  function handleBackendSessionInputKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      void submitBackendSessionEdit();
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cancelBackendSessionEdit();
+    }
+  }
+
   useEffect(() => {
     if (editingName) {
       nameInputRef.current?.focus();
     }
   }, [editingName]);
+
+  useEffect(() => {
+    if (editingBackendSession) {
+      backendSessionInputRef.current?.focus();
+    }
+  }, [editingBackendSession]);
 
   useEffect(() => {
     if (!resumeDialogOpen) {
@@ -354,6 +480,18 @@ export function RunDetailDrawer({
       setConfirmingAttachmentId(null);
     }
   }, [confirmingAttachmentId, run.attachments]);
+
+  useEffect(() => {
+    if (!run.capabilities.canReset) {
+      setConfirmingReset(false);
+    }
+  }, [run.capabilities.canReset]);
+
+  useEffect(() => {
+    if (!run.capabilities.canAbort) {
+      setConfirmingAbort(false);
+    }
+  }, [run.capabilities.canAbort]);
 
   useEffect(() => {
     if (!run.capabilities.canDelete) {
@@ -732,47 +870,68 @@ export function RunDetailDrawer({
               </button>
             ) : null}
             {run.capabilities.canReset ? (
-              <button className="btn" disabled={actionsLocked} onClick={onReset} type="button">
-                {resetPending ? "Resetting..." : "Reset"}
-              </button>
+              confirmingReset ? (
+                <InlineConfirmActions
+                  cancelLabel="Cancel reset run"
+                  cancelTitle={resetPending ? "Reset is pending..." : "Cancel reset run"}
+                  confirmLabel="Confirm reset run"
+                  confirmTitle={resetPending ? "Resetting run..." : "Confirm reset run"}
+                  disabled={actionsLocked}
+                  onCancel={() => setConfirmingReset(false)}
+                  onConfirm={() => {
+                    setConfirmingReset(false);
+                    onReset();
+                  }}
+                />
+              ) : (
+                <button
+                  className="btn"
+                  disabled={actionsLocked}
+                  onClick={() => setConfirmingReset(true)}
+                  type="button"
+                >
+                  {resetPending ? "Resetting..." : "Reset"}
+                </button>
+              )
             ) : null}
             {run.capabilities.canAbort ? (
-              <button
-                className="btn btn-destructive-outline"
-                disabled={actionsLocked}
-                onClick={onAbort}
-                type="button"
-              >
-                <StopIcon aria-hidden="true" />
-                {actionPending === "abort" ? "Aborting..." : "Abort"}
-              </button>
+              confirmingAbort ? (
+                <InlineConfirmActions
+                  cancelLabel="Cancel abort run"
+                  cancelTitle={abortPending ? "Abort is pending..." : "Cancel abort run"}
+                  confirmLabel="Confirm abort run"
+                  confirmTitle={abortPending ? "Aborting run..." : "Confirm abort run"}
+                  disabled={actionsLocked}
+                  onCancel={() => setConfirmingAbort(false)}
+                  onConfirm={onAbort}
+                />
+              ) : (
+                <button
+                  className="btn btn-destructive-outline"
+                  disabled={actionsLocked}
+                  onClick={() => setConfirmingAbort(true)}
+                  type="button"
+                >
+                  <StopIcon aria-hidden="true" />
+                  Abort
+                </button>
+              )
             ) : null}
             {run.capabilities.canDelete ? (
               confirmingDelete ? (
-                <div className="drawer-confirm-actions">
-                  <button
-                    aria-label="Confirm delete run"
-                    className="icon-btn icon-btn--destructive"
-                    disabled={actionsLocked}
-                    onClick={onDelete}
-                    title={actionPending === "delete" ? "Deleting run..." : "Confirm delete run"}
-                    type="button"
-                  >
-                    <CheckIcon aria-hidden="true" />
-                  </button>
-                  <button
-                    aria-label="Cancel delete run"
-                    className="icon-btn"
-                    disabled={actionsLocked}
-                    onClick={() => setConfirmingDelete(false)}
-                    title={
-                      actionPending === "delete" ? "Delete is pending..." : "Cancel delete run"
-                    }
-                    type="button"
-                  >
-                    <CloseIcon aria-hidden="true" />
-                  </button>
-                </div>
+                <InlineConfirmActions
+                  cancelLabel="Cancel delete run"
+                  cancelTitle={
+                    actionPending === "delete" ? "Delete is pending..." : "Cancel delete run"
+                  }
+                  confirmLabel="Confirm delete run"
+                  confirmTitle={
+                    actionPending === "delete" ? "Deleting run..." : "Confirm delete run"
+                  }
+                  disabled={actionsLocked}
+                  onCancel={() => setConfirmingDelete(false)}
+                  onConfirm={onDelete}
+                />
               ) : (
                 <button
                   className="btn btn-destructive-outline"
@@ -897,20 +1056,76 @@ export function RunDetailDrawer({
                 </button>
               </span>
             </div>
-            {backendSessionId ? (
+            {isPassiveRun || backendSessionId ? (
               <div className="meta-cell full">
                 <span className="meta-label">Backend session</span>
-                <span className="meta-value mono">
-                  {truncateMiddle(backendSessionId)}
-                  <button
-                    aria-label="Copy backend session id"
-                    className="copy"
-                    onClick={() => onCopy(backendSessionId, "backend session id")}
-                    type="button"
-                  >
-                    <CopyIcon aria-hidden="true" />
-                  </button>
-                </span>
+                {editingBackendSession ? (
+                  <div className="drawer-title-edit">
+                    <label className="field drawer-title-field">
+                      <input
+                        aria-label="Backend session"
+                        disabled={backendSessionPending}
+                        onChange={(event) => setBackendSessionDraft(event.target.value)}
+                        onKeyDown={handleBackendSessionInputKeyDown}
+                        placeholder="Not set"
+                        ref={backendSessionInputRef}
+                        value={backendSessionDraft}
+                      />
+                    </label>
+                    <button
+                      className="btn"
+                      disabled={backendSessionPending}
+                      onClick={() => void submitBackendSessionEdit()}
+                      type="button"
+                    >
+                      {backendSessionPending ? "Saving..." : "Save"}
+                    </button>
+                    {run.backendSessionId !== null ? (
+                      <button
+                        className="btn"
+                        disabled={backendSessionPending}
+                        onClick={() => void submitBackendSessionClear()}
+                        type="button"
+                      >
+                        {backendSessionPending ? "Clearing..." : "Clear"}
+                      </button>
+                    ) : null}
+                    <button
+                      className="btn"
+                      disabled={backendSessionPending}
+                      onClick={cancelBackendSessionEdit}
+                      type="button"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <span className="meta-value mono">
+                    {backendSessionId ? truncateMiddle(backendSessionId) : "Not set"}
+                    {backendSessionId ? (
+                      <button
+                        aria-label="Copy backend session id"
+                        className="copy"
+                        onClick={() => onCopy(backendSessionId, "backend session id")}
+                        type="button"
+                      >
+                        <CopyIcon aria-hidden="true" />
+                      </button>
+                    ) : null}
+                    {canEditBackendSession ? (
+                      <button
+                        aria-label="Edit backend session"
+                        className="icon-btn icon-btn--small drawer-title-edit-trigger"
+                        disabled={actionsLocked}
+                        onClick={startBackendSessionEdit}
+                        title="Edit backend session"
+                        type="button"
+                      >
+                        <PencilIcon aria-hidden="true" />
+                      </button>
+                    ) : null}
+                  </span>
+                )}
               </div>
             ) : null}
           </section>

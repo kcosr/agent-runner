@@ -95,8 +95,15 @@ task-runner init \
 task-runner brief <run-id>
 task-runner task set <run-id> <task-id> --status in_progress
 task-runner task append-notes <run-id> <task-id> --text "Observed ..."
+task-runner run set-backend-session <run-id> <session-id>
+task-runner run clear-backend-session <run-id>
 task-runner task set <run-id> <task-id> --status completed
 ```
+
+Passive runs can also mutate the persisted `backendSessionId` metadata through
+`run set-backend-session` / `run clear-backend-session`. The web detail drawer
+surfaces the same edit/clear flow inline for passive runs, including archived
+passive runs.
 
 ## Command Surface
 
@@ -111,7 +118,7 @@ Top-level commands:
 - `task-runner attachment add|list|download|remove`
 - `task-runner list agents|assignments|runs [--cwd <path> | --repo <name> | --global] [--include-archived]`
 - `task-runner show agent|assignment <name|path>`
-- `task-runner run reset|archive|unarchive|delete|set-name|add-dep|remove-dep|clear-deps`
+- `task-runner run reset|archive|unarchive|delete|set-name|set-backend-session|clear-backend-session|add-dep|remove-dep|clear-deps`
 
 Important read-surface rule:
 
@@ -244,6 +251,9 @@ transcript deltas.
 Shared lifecycle actions are gated from backend-derived run capabilities:
 `RunCapabilities` now includes `canReset` and `canDelete`, and browser clients
 should use those booleans directly rather than re-implementing lifecycle checks.
+Passive run detail views can also edit or clear `backendSessionId` inline; the
+dashboard routes those mutations through the same dedicated daemon HTTP/RPC
+surfaces as the CLI grouped commands.
 
 ## Built-In Assignments
 

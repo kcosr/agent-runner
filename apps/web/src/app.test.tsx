@@ -673,6 +673,48 @@ function installFetchMock(
       return new Response(JSON.stringify({ result: { runId, name, changed } }), { status: 200 });
     }
 
+    const backendSessionMatch = /\/api\/runs\/([^/]+)\/backend-session$/.exec(url);
+    if (backendSessionMatch && init?.method === "POST") {
+      const runId = decodeURIComponent(backendSessionMatch[1] ?? "");
+      const body =
+        typeof init.body === "string" && init.body.length > 0
+          ? (JSON.parse(init.body) as { backendSessionId?: string })
+          : {};
+      const backendSessionId = body.backendSessionId?.trim() ?? "";
+      const detail = state.details[runId];
+      if (!detail) {
+        return new Response(JSON.stringify({ error: { message: "missing", code: "not_found" } }), {
+          status: 404,
+        });
+      }
+      if (backendSessionId.length === 0) {
+        return new Response(JSON.stringify({ error: { message: "invalid", code: "invalid" } }), {
+          status: 400,
+        });
+      }
+      const changed = detail.backendSessionId !== backendSessionId;
+      state.details[runId] = { ...detail, backendSessionId };
+      return new Response(JSON.stringify({ result: { runId, backendSessionId, changed } }), {
+        status: 200,
+      });
+    }
+
+    const clearBackendSessionMatch = /\/api\/runs\/([^/]+)\/backend-session\/clear$/.exec(url);
+    if (clearBackendSessionMatch && init?.method === "POST") {
+      const runId = decodeURIComponent(clearBackendSessionMatch[1] ?? "");
+      const detail = state.details[runId];
+      if (!detail) {
+        return new Response(JSON.stringify({ error: { message: "missing", code: "not_found" } }), {
+          status: 404,
+        });
+      }
+      const changed = detail.backendSessionId !== null;
+      state.details[runId] = { ...detail, backendSessionId: null };
+      return new Response(JSON.stringify({ result: { runId, backendSessionId: null, changed } }), {
+        status: 200,
+      });
+    }
+
     const addDependencyMatch = /\/api\/runs\/([^/]+)\/dependencies$/.exec(url);
     if (addDependencyMatch && init?.method === "POST") {
       const runId = decodeURIComponent(addDependencyMatch[1] ?? "");
@@ -1768,6 +1810,243 @@ describe("web app", () => {
     );
   });
 
+  it("shows backend-session editing only for passive runs and preserves the row when empty", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({ runId: "passive-run", assignmentName: "Passive run", backend: "passive" }),
+        makeRun({ runId: "codex-run", assignmentName: "Codex run", backend: "codex" }),
+      ],
+      details: {
+        "passive-run": makeDetail({
+          runId: "passive-run",
+          backend: "passive",
+          model: null,
+          effort: null,
+          name: "Passive run",
+          assignment: {
+            name: "Passive run",
+            sourcePath: "/tmp/a.md",
+            workspacePath: "/tmp/b.md",
+          },
+          backendSessionId: null,
+          capabilities: { canResume: false },
+        }),
+        "codex-run": makeDetail({
+          runId: "codex-run",
+          backend: "codex",
+          name: "Codex run",
+          assignment: {
+            name: "Codex run",
+            sourcePath: "/tmp/a.md",
+            workspacePath: "/tmp/b.md",
+          },
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await user.click(await findRunCard("Passive run"));
+    expect(await screen.findByText("Not set")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /edit backend session/i })).toBeInTheDocument();
+
+    await user.click(await findRunCard("Codex run"));
+    expect(await screen.findByText("thread-1")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /edit backend session/i })).not.toBeInTheDocument();
+  });
+
+  it("saves and clears passive backend sessions from the detail drawer", async () => {
+    const fetchMock = installFetchMock({
+      runs: [makeRun({ runId: "passive-run", assignmentName: "Passive run", backend: "passive" })],
+      details: {
+        "passive-run": makeDetail({
+          runId: "passive-run",
+          backend: "passive",
+          model: null,
+          effort: null,
+          name: "Passive run",
+          assignment: {
+            name: "Passive run",
+            sourcePath: "/tmp/a.md",
+            workspacePath: "/tmp/b.md",
+          },
+          backendSessionId: "thread-1",
+          capabilities: { canResume: false },
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Passive run"));
+
+    await user.click(await screen.findByRole("button", { name: /edit backend session/i }));
+    const input = screen.getByRole("textbox", { name: /backend session/i });
+    await user.clear(input);
+    await user.type(input, "thread-99");
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+
+    await waitFor(() => expect(screen.getByText("thread-99")).toBeInTheDocument());
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs/passive-run/backend-session",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ backendSessionId: "thread-99" }),
+      }),
+    );
+
+    await user.click(screen.getByRole("button", { name: /edit backend session/i }));
+    await user.click(screen.getByRole("button", { name: /^clear$/i }));
+
+    await waitFor(() => expect(screen.getByText("Not set")).toBeInTheDocument());
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs/passive-run/backend-session/clear",
+      expect.objectContaining({
+        method: "POST",
+      }),
+    );
+  });
+
+  it("treats saving an empty passive backend-session draft as a clear action", async () => {
+    const fetchMock = installFetchMock({
+      runs: [makeRun({ runId: "passive-run", assignmentName: "Passive run", backend: "passive" })],
+      details: {
+        "passive-run": makeDetail({
+          runId: "passive-run",
+          backend: "passive",
+          model: null,
+          effort: null,
+          name: "Passive run",
+          assignment: {
+            name: "Passive run",
+            sourcePath: "/tmp/a.md",
+            workspacePath: "/tmp/b.md",
+          },
+          backendSessionId: "thread-1",
+          capabilities: { canResume: false },
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Passive run"));
+
+    await user.click(await screen.findByRole("button", { name: /edit backend session/i }));
+    const input = screen.getByRole("textbox", { name: /backend session/i });
+    await user.clear(input);
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+
+    await waitFor(() => expect(screen.getByText("Not set")).toBeInTheDocument());
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs/passive-run/backend-session/clear",
+      expect.objectContaining({
+        method: "POST",
+      }),
+    );
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/runs/passive-run/backend-session",
+      expect.objectContaining({
+        body: JSON.stringify({ backendSessionId: "" }),
+      }),
+    );
+  });
+
+  it("cancels passive backend-session edits with Escape without mutating", async () => {
+    const fetchMock = installFetchMock({
+      runs: [makeRun({ runId: "passive-run", assignmentName: "Passive run", backend: "passive" })],
+      details: {
+        "passive-run": makeDetail({
+          runId: "passive-run",
+          backend: "passive",
+          model: null,
+          effort: null,
+          name: "Passive run",
+          assignment: {
+            name: "Passive run",
+            sourcePath: "/tmp/a.md",
+            workspacePath: "/tmp/b.md",
+          },
+          backendSessionId: null,
+          capabilities: { canResume: false },
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Passive run"));
+    await user.click(await screen.findByRole("button", { name: /edit backend session/i }));
+
+    const input = screen.getByRole("textbox", { name: /backend session/i });
+    await user.type(input, "thread-cancel");
+    await user.keyboard("{Escape}");
+
+    await waitFor(() =>
+      expect(screen.queryByRole("textbox", { name: /backend session/i })).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText("Not set")).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.filter(([url]) => String(url).includes("/backend-session")),
+    ).toHaveLength(0);
+  });
+
+  it("edits archived passive backend sessions from the detail drawer", async () => {
+    const fetchMock = installFetchMock({
+      runs: [
+        makeRun({
+          runId: "archived-passive",
+          assignmentName: "Archived passive run",
+          backend: "passive",
+          archivedAt: "2026-04-13T06:00:00.000Z",
+          status: "success",
+        }),
+      ],
+      details: {
+        "archived-passive": makeDetail({
+          runId: "archived-passive",
+          backend: "passive",
+          model: null,
+          effort: null,
+          name: "Archived passive run",
+          status: "success",
+          archivedAt: "2026-04-13T06:00:00.000Z",
+          assignment: {
+            name: "Archived passive run",
+            sourcePath: "/tmp/a.md",
+            workspacePath: "/tmp/b.md",
+          },
+          capabilities: {
+            canArchive: false,
+            canUnarchive: true,
+            canResume: false,
+          },
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await screen.findByRole("button", { name: /show archived runs/i }));
+    await user.click(await screen.findByTitle("Archived passive run"));
+    await user.click(await screen.findByRole("button", { name: /edit backend session/i }));
+
+    const input = screen.getByRole("textbox", { name: /backend session/i });
+    await user.clear(input);
+    await user.type(input, "archived-thread-2");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => expect(screen.getByText("archived-thread-2")).toBeInTheDocument());
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs/archived-passive/backend-session",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ backendSessionId: "archived-thread-2" }),
+      }),
+    );
+  });
+
   it("keeps toolbar toggles and settings rows synchronized through persisted preferences", async () => {
     installFetchMock({
       runs: [
@@ -2468,8 +2747,8 @@ describe("web app", () => {
     expect(screen.queryByRole("button", { name: "Abort" })).not.toBeInTheDocument();
   });
 
-  it("resets a run from the web detail drawer", async () => {
-    installFetchMock({
+  it("confirms Reset inline before sending the reset request", async () => {
+    const fetchMock = installFetchMock({
       runs: [makeRun({ runId: "resumable", assignmentName: "Resumable run", status: "success" })],
       details: {
         resumable: makeDetail({
@@ -2497,10 +2776,40 @@ describe("web app", () => {
 
     await user.click(await screen.findByRole("button", { name: "Reset" }));
 
+    expect(screen.queryByRole("button", { name: "Reset" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Confirm reset run" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel reset run" })).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.filter(
+        ([url, init]) =>
+          String(url).endsWith("/api/runs/resumable/reset") && init?.method === "POST",
+      ),
+    ).toHaveLength(0);
+
+    await user.click(screen.getByRole("button", { name: "Cancel reset run" }));
+
+    expect(screen.getByRole("button", { name: "Reset" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Confirm reset run" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel reset run" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Reset" }));
+    await user.click(screen.getByRole("button", { name: "Confirm reset run" }));
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.filter(
+          ([url, init]) =>
+            String(url).endsWith("/api/runs/resumable/reset") && init?.method === "POST",
+        ),
+      ).toHaveLength(1);
+    });
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Start" })).toBeInTheDocument();
     });
+    expect(screen.getByRole("button", { name: "Reset" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Confirm reset run" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel reset run" })).not.toBeInTheDocument();
   });
 
   it("deletes archived runs from the web detail drawer", async () => {
@@ -3245,6 +3554,93 @@ describe("web app", () => {
 
     await waitFor(() => {
       expect(restoredBoard.scrollLeft).toBe(300);
+    });
+  });
+
+  it("confirms Abort inline before sending the abort request", async () => {
+    const state = {
+      runs: [makeRun({ capabilities: { canAbort: true, abortReason: undefined } })],
+      details: {
+        "run-1": makeDetail({ capabilities: { canAbort: true, abortReason: undefined } }),
+      },
+    };
+    const fetchMock = installFetchMock(state, {
+      handleRequest: (url, init) => {
+        if (url.endsWith("/api/runs/run-1/abort") && init?.method === "POST") {
+          const detail = state.details["run-1"];
+          const run = state.runs[0];
+          if (!detail || !run) {
+            throw new Error("expected abortable run state");
+          }
+          state.details["run-1"] = makeDetail({
+            ...detail,
+            status: "aborted",
+            effectiveStatus: "aborted",
+            isLive: false,
+            activeTask: null,
+            endedAt: "2026-04-13T05:05:00.000Z",
+            capabilities: {
+              ...detail.capabilities,
+              canAbort: false,
+              abortReason: "already_terminal",
+            },
+          });
+          state.runs = [
+            makeRun({
+              ...run,
+              status: "aborted",
+              effectiveStatus: "aborted",
+              endedAt: "2026-04-13T05:05:00.000Z",
+              activeTask: null,
+              capabilities: {
+                ...run.capabilities,
+                canAbort: false,
+                abortReason: "already_terminal",
+              },
+            }),
+          ];
+        }
+        return undefined;
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+
+    expect(await screen.findByRole("button", { name: "Abort" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Abort" }));
+
+    expect(screen.queryByRole("button", { name: "Abort" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Confirm abort run" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel abort run" })).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.filter(
+        ([url, init]) => String(url).endsWith("/api/runs/run-1/abort") && init?.method === "POST",
+      ),
+    ).toHaveLength(0);
+
+    await user.click(screen.getByRole("button", { name: "Cancel abort run" }));
+
+    expect(screen.getByRole("button", { name: "Abort" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Confirm abort run" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel abort run" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Abort" }));
+    await user.click(screen.getByRole("button", { name: "Confirm abort run" }));
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.filter(
+          ([url, init]) => String(url).endsWith("/api/runs/run-1/abort") && init?.method === "POST",
+        ),
+      ).toHaveLength(1);
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Abort" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Confirm abort run" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Cancel abort run" })).not.toBeInTheDocument();
     });
   });
 

@@ -11,6 +11,7 @@ import type {
 import type { RunTimelineAttempt, RunTimelineHistory } from "../contracts/events.js";
 import type {
   RunArchiveResult,
+  RunBackendSessionResult,
   RunDeleteResult,
   RunDependenciesResult,
   RunDetail,
@@ -28,6 +29,7 @@ import {
   addTask,
   appendTaskNotes,
   archiveRun,
+  clearRunBackendSession,
   clearRunDependencies,
   deleteRun,
   downloadAttachment,
@@ -41,6 +43,7 @@ import {
   removeAttachment,
   removeRunDependency,
   resetRun,
+  setRunBackendSession,
   setRunName,
   setTask,
   showDefinition,
@@ -249,6 +252,17 @@ export function deleteArchivedRun(target: string): RunDeleteResult {
 
 export function renameRun(target: string, input: { name: string | null }): Promise<RunNameResult> {
   return setRunName(target, input);
+}
+
+export function updateRunBackendSession(
+  target: string,
+  input: { backendSessionId: string },
+): RunBackendSessionResult {
+  return setRunBackendSession(target, input);
+}
+
+export function clearBackendSession(target: string): RunBackendSessionResult {
+  return clearRunBackendSession(target);
 }
 
 export function addDependency(target: string, dependencyRunId: string): RunDependenciesResult {

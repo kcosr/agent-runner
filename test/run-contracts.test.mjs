@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   deriveRunCapabilities,
   toRunArchiveResult,
+  toRunBackendSessionResult,
   toRunDependenciesResult,
   toRunDetail,
   toRunSummary,
@@ -613,6 +614,24 @@ test("run contracts: toRunDependenciesResult maps manifest-plus-change to the de
     {
       runId: "run123",
       dependencyRunIds: ["run456"],
+      changed: true,
+    },
+  );
+});
+
+test("run contracts: toRunBackendSessionResult maps manifest-plus-change to the backend session DTO", () => {
+  const manifest = buildManifest({
+    backendSessionId: "thread-42",
+  });
+
+  assert.deepEqual(
+    toRunBackendSessionResult({
+      manifest,
+      changed: true,
+    }),
+    {
+      runId: "run123",
+      backendSessionId: "thread-42",
       changed: true,
     },
   );

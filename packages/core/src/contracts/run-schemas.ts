@@ -13,6 +13,7 @@ import type {
   RunAbortReason,
   RunActiveTask,
   RunArchiveResult,
+  RunBackendSessionResult,
   RunCapabilities,
   RunDeleteResult,
   RunDependenciesResult,
@@ -208,6 +209,12 @@ export const runArchiveResultSchema: z.ZodType<RunArchiveResult> = z.object({
 export const runNameResultSchema: z.ZodType<RunNameResult> = z.object({
   runId: z.string(),
   name: z.string().nullable(),
+  changed: z.boolean(),
+});
+
+export const runBackendSessionResultSchema: z.ZodType<RunBackendSessionResult> = z.object({
+  runId: z.string(),
+  backendSessionId: z.string().nullable(),
   changed: z.boolean(),
 });
 

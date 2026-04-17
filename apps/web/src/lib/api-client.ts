@@ -9,6 +9,7 @@ import {
   attachmentListEntrySchema,
   runArchiveResultSchema,
   runAttachmentSchema,
+  runBackendSessionResultSchema,
   runDeleteResultSchema,
   runDependenciesResultSchema,
   runDetailSchema,
@@ -18,6 +19,7 @@ import {
 } from "@task-runner/core/contracts/run-schemas.js";
 import type {
   RunArchiveResult,
+  RunBackendSessionResult,
   RunDeleteResult,
   RunDependenciesResult,
   RunDetail,
@@ -172,6 +174,22 @@ async function readNameResult(response: Response, label: string): Promise<RunNam
     response.status,
     "result",
     runNameResultSchema,
+    label,
+  );
+}
+
+async function readBackendSessionResult(
+  response: Response,
+  label: string,
+): Promise<RunBackendSessionResult> {
+  if (!response.ok) {
+    return await readError(response);
+  }
+  return parseField(
+    await parseResponseJson(response, label),
+    response.status,
+    "result",
+    runBackendSessionResultSchema,
     label,
   );
 }
@@ -476,6 +494,33 @@ export function createApiClient(config: AppRuntimeConfig) {
         },
       );
       return await readNameResult(response, "Rename run");
+    },
+    async setBackendSession(
+      runId: string,
+      backendSessionId: string,
+    ): Promise<RunBackendSessionResult> {
+      const response = await fetch(
+        joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/backend-session`),
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json",
+          },
+          body: JSON.stringify({ backendSessionId }),
+        },
+      );
+      return await readBackendSessionResult(response, "Set backend session");
+    },
+    async clearBackendSession(runId: string): Promise<RunBackendSessionResult> {
+      const response = await fetch(
+        joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/backend-session/clear`),
+        {
+          method: "POST",
+          headers: { accept: "application/json" },
+        },
+      );
+      return await readBackendSessionResult(response, "Clear backend session");
     },
     async addDependency(runId: string, dependencyRunId: string): Promise<RunDependenciesResult> {
       const response = await fetch(

@@ -4,7 +4,7 @@ import type {
   RunAttachmentDownloadResult,
   RunAttachmentRemoveResult,
 } from "@task-runner/core/contracts/attachments.js";
-import type { RunDetail } from "@task-runner/core/contracts/runs.js";
+import type { RunBackendSessionResult, RunDetail } from "@task-runner/core/contracts/runs.js";
 import type {
   DefinitionDetailsResult,
   DefinitionListResult,
@@ -240,6 +240,21 @@ export function renderRunSetName(result: {
   return result.changed
     ? `task-runner: set name for run ${result.runId} to "${result.name}"\n`
     : `task-runner: run ${result.runId} already has name "${result.name}"\n`;
+}
+
+export function renderRunSetBackendSession(result: RunBackendSessionResult): string {
+  if (result.backendSessionId === null) {
+    throw new Error("renderRunSetBackendSession requires a non-null backendSessionId");
+  }
+  return result.changed
+    ? `task-runner: set backend session for run ${result.runId} to "${result.backendSessionId}"\n`
+    : `task-runner: run ${result.runId} already has backend session "${result.backendSessionId}"\n`;
+}
+
+export function renderRunClearBackendSession(result: RunBackendSessionResult): string {
+  return result.changed
+    ? `task-runner: cleared backend session for run ${result.runId}\n`
+    : `task-runner: run ${result.runId} already has no backend session\n`;
 }
 
 export function renderRunAddDependency(

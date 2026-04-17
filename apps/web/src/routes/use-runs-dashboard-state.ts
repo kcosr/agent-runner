@@ -39,6 +39,7 @@ export type RunActionPending =
   | "resume"
   | "abort"
   | "rename"
+  | "backend-session"
   | "upload-attachment"
   | "remove-attachment"
   | "download-attachment"
@@ -219,6 +220,10 @@ async function invalidateRunQueries(runId: string) {
     queryClient.invalidateQueries({ queryKey: runQueryKeys.list() }),
     queryClient.invalidateQueries({ queryKey: runQueryKeys.detail(runId) }),
   ]);
+}
+
+async function invalidateRunDetailQuery(runId: string) {
+  await queryClient.invalidateQueries({ queryKey: runQueryKeys.detail(runId) });
 }
 
 export function useRunsDashboardState() {
@@ -532,6 +537,25 @@ export function useRunsDashboardState() {
       await invalidateRunQueries(runId);
     },
   });
+  const backendSessionMutation = useMutation({
+    mutationFn: ({
+      backendSessionId,
+      clear,
+      runId,
+    }: {
+      runId: string;
+      backendSessionId?: string;
+      clear?: boolean;
+    }) =>
+      clear ? api.clearBackendSession(runId) : api.setBackendSession(runId, backendSessionId ?? ""),
+    onError: (error: Error) => {
+      setActionError(error.message);
+    },
+    onSuccess: async (result) => {
+      setActionError(undefined);
+      await invalidateRunDetailQuery(result.runId);
+    },
+  });
   const addDependencyMutation = useMutation({
     mutationFn: ({ runId, dependencyRunId }: { runId: string; dependencyRunId: string }) =>
       api.addDependency(runId, dependencyRunId),
@@ -629,19 +653,21 @@ export function useRunsDashboardState() {
               ? "abort"
               : renameMutation.isPending
                 ? "rename"
-                : uploadAttachmentMutation.isPending
-                  ? "upload-attachment"
-                  : removeAttachmentMutation.isPending
-                    ? "remove-attachment"
-                    : downloadAttachmentMutation.isPending
-                      ? "download-attachment"
-                      : addDependencyMutation.isPending
-                        ? "add-dependency"
-                        : removeDependencyMutation.isPending
-                          ? "remove-dependency"
-                          : clearDependenciesMutation.isPending
-                            ? "clear-dependencies"
-                            : undefined;
+                : backendSessionMutation.isPending
+                  ? "backend-session"
+                  : uploadAttachmentMutation.isPending
+                    ? "upload-attachment"
+                    : removeAttachmentMutation.isPending
+                      ? "remove-attachment"
+                      : downloadAttachmentMutation.isPending
+                        ? "download-attachment"
+                        : addDependencyMutation.isPending
+                          ? "add-dependency"
+                          : removeDependencyMutation.isPending
+                            ? "remove-dependency"
+                            : clearDependenciesMutation.isPending
+                              ? "clear-dependencies"
+                              : undefined;
 
   function setColumnCollapsed(columnKey: string, collapsed: boolean) {
     const isCollapsed = collapsedColumnKeySet.has(columnKey);
@@ -748,8 +774,14 @@ export function useRunsDashboardState() {
       rename: async (runId: string, name: string | null) => {
         await renameMutation.mutateAsync({ runId, name });
       },
+      clearBackendSession: async (runId: string) => {
+        await backendSessionMutation.mutateAsync({ runId, clear: true });
+      },
       resume: async (runId: string, message?: string) => {
         await resumeMutation.mutateAsync({ runId, message });
+      },
+      setBackendSession: async (runId: string, backendSessionId: string) => {
+        await backendSessionMutation.mutateAsync({ runId, backendSessionId });
       },
       uploadAttachment: async (runId: string, file: File) => {
         await uploadAttachmentMutation.mutateAsync({ runId, file });

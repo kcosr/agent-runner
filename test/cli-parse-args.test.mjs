@@ -252,6 +252,23 @@ test("parseArgs: run set-name parses grouped subcommand positionals and --clear"
   assert.equal(parsed.outputFormat, "json");
 });
 
+test("parseArgs: run set-backend-session parses grouped subcommand positionals", () => {
+  const parsed = parseArgs(
+    argv("run", "set-backend-session", "abc123", "thread-42", "--output-format", "json"),
+  );
+  assert.equal(parsed.command, "run");
+  assert.equal(parsed.subcommand, "set-backend-session");
+  assert.deepEqual(parsed.positionals, ["abc123", "thread-42"]);
+  assert.equal(parsed.outputFormat, "json");
+});
+
+test("parseArgs: run clear-backend-session parses as a grouped run subcommand", () => {
+  const parsed = parseArgs(argv("run", "clear-backend-session", "abc123"));
+  assert.equal(parsed.command, "run");
+  assert.equal(parsed.subcommand, "clear-backend-session");
+  assert.deepEqual(parsed.positionals, ["abc123"]);
+});
+
 test("parseArgs: --name is captured for fresh run overrides", () => {
   const parsed = parseArgs(argv("run", "--agent", "x", "--name", "release prep"));
   assert.equal(parsed.name, "release prep");
