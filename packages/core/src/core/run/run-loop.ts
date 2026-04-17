@@ -522,6 +522,16 @@ function countBy(tasks: Map<string, TaskState>, predicate: (t: TaskState) => boo
   return n;
 }
 
+function formatUnhandledAttemptError(error: unknown): string {
+  if (error instanceof Error) {
+    if (typeof error.stack === "string" && error.stack.length > 0) {
+      return error.stack;
+    }
+    return error.message;
+  }
+  return String(error);
+}
+
 function normalizeResumeStatus(status: TaskStatus): TaskStatus {
   return status === "completed" ? "completed" : "pending";
 }
@@ -1211,78 +1221,134 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   let currentPrompt = initialPrompt;
   const attemptTranscripts: string[] = [];
   let terminal: { status: RunCompletionStatus; exitCode: number } | null = null;
-
-  while (sessionAttempts < maxAttempts && !terminal) {
-    tryRefreshMutableManifestName(manifest);
-    name = manifest.name;
-    sessionAttempts++;
-    const globalAttemptNumber = priorAttemptCount + sessionAttempts;
-    const attemptStartedAt = new Date().toISOString();
-    emitEvent({
-      type: "attempt_started",
-      attempt: globalAttemptNumber,
-      sessionIndex,
-      startedAt: attemptStartedAt,
-      prompt: currentPrompt,
-    });
-
-    const sessionIdAtStart = sessionId;
-
-    const invokeResult = await backend.invoke({
-      prompt: currentPrompt,
-      cwd,
-      env: {
-        ...(process.env as Record<string, string>),
-        // Increment recursion depth so a nested `task-runner run` spawned
-        // by this backend can detect it. Always last so it overrides any
-        // stale value the parent inherited.
-        ...buildChildRecursionEnv(recursionState),
-      },
-      model,
-      effort,
-      unrestricted,
-      timeoutSec,
-      resumeSessionId: sessionId ?? undefined,
-      name: name ?? undefined,
-      abortSignal: opts.abortSignal,
-      emit: emitEvent,
-    });
-    const attemptEndedAt = new Date().toISOString();
-
-    if (invokeResult.transcript) {
-      attemptTranscripts.push(invokeResult.transcript);
-    }
-
-    const invokedWithResume = sessionIdAtStart !== null;
-    const resumeRejected = invokedWithResume && resumeFailureDetector(invokeResult);
-
-    if (!resumeRejected && invokeResult.sessionId) {
-      sessionId = invokeResult.sessionId;
-      manifest.backendSessionId = invokeResult.sessionId;
-    }
-
+  let thrownError: unknown = null;
+  let pendingAttempt: {
+    attempt: number;
+    startedAt: string;
+    prompt: string;
+    sessionIdAtStart: string | null;
+  } | null = null;
+  const persistAttemptRecord = (record: {
+    attempt: number;
+    startedAt: string;
+    endedAt: string;
+    prompt: string;
+    sessionIdAtStart: string | null;
+    sessionIdCaptured: string | null;
+    exitCode: number | null;
+    signal: NodeJS.Signals | null;
+    timedOut: boolean;
+    transcript: string | null;
+    rawStdout: string;
+    rawStderr: string;
+    invalidStatuses: AttemptRecord["invalidStatuses"];
+  }): void => {
     const logPath = writeAttemptLog(workspaceDir, {
       schemaVersion: 1,
       runId,
-      attempt: globalAttemptNumber,
+      attempt: record.attempt,
       sessionIndex,
-      startedAt: attemptStartedAt,
-      endedAt: attemptEndedAt,
-      stdout: invokeResult.rawStdout,
-      stderr: invokeResult.rawStderr,
+      startedAt: record.startedAt,
+      endedAt: record.endedAt,
+      stdout: record.rawStdout,
+      stderr: record.rawStderr,
     });
-    const mergeInfo = {
-      invalidStatuses: [],
-      missingFromFile: [],
-      unknownInFile: [],
-    };
     withTaskStateLock(workspaceDir, () => {
       tasks = refreshManifestTaskState(manifest);
       syncManifestTaskState(manifest, tasks);
       refreshManifestAttachments(manifest);
       const attemptRecord: AttemptRecord = {
+        attempt: record.attempt,
+        sessionIndex,
+        startedAt: record.startedAt,
+        endedAt: record.endedAt,
+        prompt: record.prompt,
+        sessionIdAtStart: record.sessionIdAtStart,
+        sessionIdCaptured: record.sessionIdCaptured,
+        exitCode: record.exitCode,
+        signal: record.signal,
+        timedOut: record.timedOut,
+        transcript: record.transcript,
+        logPath,
+        tasksAfter: manifest.finalTasks,
+        invalidStatuses: record.invalidStatuses,
+      };
+      manifest.attemptRecords.push(attemptRecord);
+      manifest.attempts = manifest.attemptRecords.length;
+
+      if (sessionRecord.firstAttempt === null) {
+        sessionRecord.firstAttempt = record.attempt;
+      }
+      sessionRecord.lastAttempt = record.attempt;
+
+      tryRefreshMutableManifestName(manifest);
+      writeManifest(workspaceDir, manifest);
+    });
+  };
+
+  try {
+    while (sessionAttempts < maxAttempts && !terminal) {
+      tryRefreshMutableManifestName(manifest);
+      name = manifest.name;
+      sessionAttempts++;
+      const globalAttemptNumber = priorAttemptCount + sessionAttempts;
+      const attemptStartedAt = new Date().toISOString();
+      emitEvent({
+        type: "attempt_started",
         attempt: globalAttemptNumber,
         sessionIndex,
+        startedAt: attemptStartedAt,
+        prompt: currentPrompt,
+      });
+
+      const sessionIdAtStart = sessionId;
+      pendingAttempt = {
+        attempt: globalAttemptNumber,
+        startedAt: attemptStartedAt,
+        prompt: currentPrompt,
+        sessionIdAtStart,
+      };
+
+      const invokeResult = await backend.invoke({
+        prompt: currentPrompt,
+        cwd,
+        env: {
+          ...(process.env as Record<string, string>),
+          // Increment recursion depth so a nested `task-runner run` spawned
+          // by this backend can detect it. Always last so it overrides any
+          // stale value the parent inherited.
+          ...buildChildRecursionEnv(recursionState),
+        },
+        model,
+        effort,
+        unrestricted,
+        timeoutSec,
+        resumeSessionId: sessionId ?? undefined,
+        name: name ?? undefined,
+        abortSignal: opts.abortSignal,
+        emit: emitEvent,
+      });
+      const attemptEndedAt = new Date().toISOString();
+
+      if (invokeResult.transcript) {
+        attemptTranscripts.push(invokeResult.transcript);
+      }
+
+      const invokedWithResume = sessionIdAtStart !== null;
+      const resumeRejected = invokedWithResume && resumeFailureDetector(invokeResult);
+
+      if (!resumeRejected && invokeResult.sessionId) {
+        sessionId = invokeResult.sessionId;
+        manifest.backendSessionId = invokeResult.sessionId;
+      }
+
+      const mergeInfo = {
+        invalidStatuses: [],
+        missingFromFile: [],
+        unknownInFile: [],
+      };
+      persistAttemptRecord({
+        attempt: globalAttemptNumber,
         startedAt: attemptStartedAt,
         endedAt: attemptEndedAt,
         prompt: currentPrompt,
@@ -1292,71 +1358,88 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         signal: invokeResult.signal,
         timedOut: invokeResult.timedOut,
         transcript: invokeResult.transcript,
-        logPath,
-        tasksAfter: manifest.finalTasks,
+        rawStdout: invokeResult.rawStdout,
+        rawStderr: invokeResult.rawStderr,
         invalidStatuses: mergeInfo.invalidStatuses,
-      };
-      manifest.attemptRecords.push(attemptRecord);
-      manifest.attempts = manifest.attemptRecords.length;
+      });
+      pendingAttempt = null;
 
-      if (sessionRecord.firstAttempt === null) {
-        sessionRecord.firstAttempt = globalAttemptNumber;
+      if (invokeResult.aborted) {
+        terminal = { status: "aborted", exitCode: 130 };
+        emitEvent({ type: "run_aborted" });
+        break;
       }
-      sessionRecord.lastAttempt = globalAttemptNumber;
 
-      tryRefreshMutableManifestName(manifest);
-      writeManifest(workspaceDir, manifest);
-    });
-
-    if (invokeResult.aborted) {
-      terminal = { status: "aborted", exitCode: 130 };
-      emitEvent({ type: "run_aborted" });
-      break;
-    }
-
-    if (resumeRejected) {
-      terminal = { status: "error", exitCode: 4 };
-      emitEvent({ type: "resume_rejected" });
-      break;
-    }
-
-    // Zero-task runs have no enforcement loop — the success criterion is
-    // just "backend invocation succeeded". One attempt, check the backend
-    // result, done.
-    if (tasks.size === 0) {
-      if (invokeResult.exitCode === 0 && !invokeResult.timedOut) {
-        terminal = { status: "success", exitCode: 0 };
-      } else {
+      if (resumeRejected) {
         terminal = { status: "error", exitCode: 4 };
+        emitEvent({ type: "resume_rejected" });
+        break;
       }
-      break;
-    }
 
-    const allCompleted = countBy(tasks, (t) => t.status === "completed") === tasks.size;
-    const noInvalid = mergeInfo.invalidStatuses.length === 0;
-    const blockedCount = countBy(tasks, (t) => t.status === "blocked");
+      // Zero-task runs have no enforcement loop — the success criterion is
+      // just "backend invocation succeeded". One attempt, check the backend
+      // result, done.
+      if (tasks.size === 0) {
+        if (invokeResult.exitCode === 0 && !invokeResult.timedOut) {
+          terminal = { status: "success", exitCode: 0 };
+        } else {
+          terminal = { status: "error", exitCode: 4 };
+        }
+        break;
+      }
 
-    if (allCompleted && noInvalid) {
-      terminal = { status: "success", exitCode: 0 };
-      break;
-    }
-    if (blockedCount > 0) {
-      terminal = { status: "blocked", exitCode: 2 };
-      break;
-    }
-    if (sessionAttempts >= maxAttempts) {
-      terminal = { status: "exhausted", exitCode: 1 };
-      break;
-    }
+      const allCompleted = countBy(tasks, (t) => t.status === "completed") === tasks.size;
+      const noInvalid = mergeInfo.invalidStatuses.length === 0;
+      const blockedCount = countBy(tasks, (t) => t.status === "blocked");
 
-    const incompleteCount = countBy(tasks, (t) => t.status !== "completed");
-    emitEvent({
-      type: "retrying",
-      incompleteCount,
-      invalidStatusCount: mergeInfo.invalidStatuses.length,
-    });
+      if (allCompleted && noInvalid) {
+        terminal = { status: "success", exitCode: 0 };
+        break;
+      }
+      if (blockedCount > 0) {
+        terminal = { status: "blocked", exitCode: 2 };
+        break;
+      }
+      if (sessionAttempts >= maxAttempts) {
+        terminal = { status: "exhausted", exitCode: 1 };
+        break;
+      }
 
-    currentPrompt = buildNudgeMessage(tasks, mergeInfo.invalidStatuses, runId);
+      const incompleteCount = countBy(tasks, (t) => t.status !== "completed");
+      emitEvent({
+        type: "retrying",
+        incompleteCount,
+        invalidStatusCount: mergeInfo.invalidStatuses.length,
+      });
+
+      currentPrompt = buildNudgeMessage(tasks, mergeInfo.invalidStatuses, runId);
+    }
+  } catch (error) {
+    thrownError = error;
+    if (pendingAttempt) {
+      try {
+        persistAttemptRecord({
+          attempt: pendingAttempt.attempt,
+          startedAt: pendingAttempt.startedAt,
+          endedAt: new Date().toISOString(),
+          prompt: pendingAttempt.prompt,
+          sessionIdAtStart: pendingAttempt.sessionIdAtStart,
+          sessionIdCaptured: null,
+          exitCode: null,
+          signal: null,
+          timedOut: false,
+          transcript: null,
+          rawStdout: "",
+          rawStderr: formatUnhandledAttemptError(error),
+          invalidStatuses: [],
+        });
+      } catch {
+        // Best-effort: never let attempt-log persistence mask the original error
+        // or block terminalization of the run manifest.
+      }
+      pendingAttempt = null;
+    }
+    terminal = { status: "error", exitCode: 4 };
   }
 
   if (!terminal) {
@@ -1396,6 +1479,10 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     runId,
   };
   emitEvent({ type: "run_finished", summary });
+
+  if (thrownError) {
+    throw thrownError;
+  }
 
   return {
     summary,

@@ -1,5 +1,12 @@
 import { strict as assert } from "node:assert";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -250,6 +257,46 @@ test("manifest: exhausted run records all attempts", async () => {
   assert.equal(outcome.manifest.finalTasks.t1.status, "pending");
   assert.equal(outcome.manifest.finalTasks.t1.notes, "attempt 3 in flight");
   assert.equal(outcome.manifest.attemptRecords[2]?.tasksAfter.t1.status, "in_progress");
+});
+
+test("manifest: thrown backend launch errors still settle the run as error", async () => {
+  const dir = tempDir();
+  writeAgentAndAssignment(dir);
+
+  await assert.rejects(
+    async () => {
+      await runWithMock(dir, async () => {
+        const err = new Error("spawn claude ENOENT");
+        err.code = "ENOENT";
+        throw err;
+      });
+    },
+    (error) => {
+      assert.equal(error.message, "spawn claude ENOENT");
+      assert.equal(error.code, "ENOENT");
+      return true;
+    },
+  );
+
+  const runsRoot = join(dir, "runs");
+  const [repoDir] = readdirSync(runsRoot);
+  const [runDir] = readdirSync(join(runsRoot, repoDir));
+  const workspaceDir = join(runsRoot, repoDir, runDir);
+  const manifestPath = join(workspaceDir, "run.json");
+  const onDisk = JSON.parse(readFileSync(manifestPath, "utf8"));
+
+  assert.equal(onDisk.status, "error");
+  assert.equal(onDisk.exitCode, 4);
+  assert.match(onDisk.endedAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(onDisk.attempts, 1);
+  assert.equal(onDisk.attemptRecords.length, 1);
+  assert.equal(onDisk.sessions[0].status, "error");
+  assert.equal(onDisk.sessions[0].firstAttempt, 1);
+  assert.equal(onDisk.sessions[0].lastAttempt, 1);
+
+  const log = JSON.parse(readFileSync(join(workspaceDir, "attempts", "01.json"), "utf8"));
+  assert.equal(log.stdout, "");
+  assert.match(log.stderr, /spawn claude ENOENT/);
 });
 
 test("manifest: captures effort override on the run metadata", async () => {
