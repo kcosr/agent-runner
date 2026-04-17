@@ -149,7 +149,7 @@ Execution options:
   --resume-run <id|path>  Continue an existing run by short id or path.
   --var <key>=<value>     Set an input variable (repeatable).
   --add-task <title>      Append a task to the run's task list.
-  --cwd <path>            Override the agent's cwd.
+  --cwd <path>            Override the run cwd.
   --backend <id>          Override the agent's backend.
   --model <id>            Override the agent's model.
   --effort <level>        Override effort level.

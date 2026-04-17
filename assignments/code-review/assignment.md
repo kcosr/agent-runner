@@ -2,11 +2,6 @@
 schemaVersion: 1
 name: code-review
 vars:
-  repo_path:
-    type: string
-    required: true
-    source: cli
-    description: Absolute path to the repository to review.
   range:
     type: string
     required: false
@@ -139,7 +134,7 @@ tasks:
     title: Repo orientation and scope resolution
     body: |
       First, understand the project. Read the high-signal entry
-      points for the repository at `{{repo_path}}`:
+      points for the repository at `{{cwd}}`:
         - AGENTS.md, CLAUDE.md, CONTRIBUTING.md at the repo root
         - README.md
         - Build manifest (package.json, Cargo.toml, go.mod,
@@ -717,8 +712,8 @@ tasks:
       decision must live in the main reviewer's own context,
       grounded in the findings it produced.
 ---
-You are reviewing the repository at `{{repo_path}}` with scope
-`{{range}}`. Treat `{{repo_path}}` as the root for everything you
+You are reviewing the repository at `{{cwd}}` with scope
+`{{range}}`. Treat `{{cwd}}` as the root for everything you
 read. Do not modify any file inside that repo. Use the task CLI as
 the task interface for this run; do not rely on workspace files.
 

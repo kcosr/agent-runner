@@ -11,7 +11,7 @@ task list. The system is designed around a small number of explicit concepts:
 - `brief` is the canonical worker handoff
 - caller-facing documentation stays separate from worker-facing instructions
 
-The current manifest generation is schema version `7`. Older manifest shapes are
+The current manifest generation is schema version `8`. Older manifest shapes are
 not silently upgraded or dual-read at runtime.
 
 ## Non-Goals
@@ -30,7 +30,6 @@ An agent definition provides backend/runtime configuration and role instructions
 - backend
 - model
 - effort
-- cwd
 - timeout
 - unrestricted
 - locked fields
@@ -40,6 +39,7 @@ An agent definition provides backend/runtime configuration and role instructions
 
 An assignment definition provides reusable work:
 
+- cwd
 - vars schema
 - task list
 - optional default message
@@ -62,6 +62,8 @@ The canonical record is `run.json`. Important persisted fields:
 
 - frozen agent metadata
 - frozen assignment metadata
+- `repo`
+- `cwd`
 - `finalTasks`
 - `brief`
 - `callerInstructions`
@@ -149,12 +151,13 @@ Mutation rules:
 `task-runner run`:
 
 1. resolves agent and assignment
-2. resolves vars
-3. enforces locked fields
-4. creates the run workspace
-5. freezes the initial manifest
-6. composes and stores `brief`
-7. either invokes the backend or, for passive runs, leaves the run initialized
+2. resolves cwd from `--cwd` -> assignment `cwd` -> caller cwd
+3. resolves vars
+4. enforces locked fields
+5. captures `repo` from the resolved cwd and creates the run workspace
+6. freezes the initial manifest
+7. composes and stores `brief`
+8. either invokes the backend or, for passive runs, leaves the run initialized
 
 ### Init
 

@@ -2,12 +2,6 @@
 schemaVersion: 1
 name: plan-feature
 maxRetries: 4
-vars:
-  repo_path:
-    type: string
-    required: true
-    source: cli
-    description: Absolute path to the repository the feature will be added to.
 callerInstructions: |
   This assignment turns a free-form feature description into an
   executable task-runner plan. The feature summary and any
@@ -20,7 +14,6 @@ callerInstructions: |
       {{task_runner_cmd}} run \
         --agent <your-planner-agent> \
         --assignment plan-feature \
-        --var repo_path=/abs/path/to/target/repo \
         "$(cat /tmp/feature-brief.md)"
 
   Use the bundled `planner` agent or another unrestricted
@@ -122,7 +115,7 @@ tasks:
     title: Target repo orientation and conventions
     body: |
       Read the high-signal entry points for the repository at
-      `{{repo_path}}`:
+      `{{cwd}}`:
         - AGENTS.md, CLAUDE.md, CONTRIBUTING.md at the repo
           root
         - README.md
@@ -654,7 +647,7 @@ tasks:
             --agent code-reviewer \
             --assignment plan-review \
             --name <short-descriptive-name> \
-            --var repo_path={{repo_path}} \
+            --cwd {{cwd}} \
             --var plan_draft=<draft-path-from-draft_plan> \
             --var planning_run_id={{run_id}}
 
@@ -876,7 +869,7 @@ tasks:
             --backend passive \
             --assignment <draft-path-from-draft_plan> \
             --name <short-descriptive-name> \
-            --var repo_path=<confirmed-worktree-dir>
+            --cwd <confirmed-worktree-dir>
 
       **Always use `--agent implementer --backend passive`.**
       The planner's job is to hand back an approved draft and
@@ -985,9 +978,9 @@ The feature you are planning for was handed to you as the user
 message that started this run. Read it before you start `orient`.
 Do not fabricate scope.
 
-Work on the repository at `{{repo_path}}`. You may read any
+Work on the repository at `{{cwd}}`. You may read any
 file under that repo freely. Do not modify any file under
-`{{repo_path}}` — the only files you should write are:
+`{{cwd}}` — the only files you should write are:
   - This run's canonical task state via the task CLI.
   - The draft plan file you create in `draft_plan` under
     `${TASK_RUNNER_STATE_DIR}/drafts/<repo-name>/`.

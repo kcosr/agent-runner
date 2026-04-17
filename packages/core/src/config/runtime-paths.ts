@@ -98,11 +98,6 @@ export function deriveRepoKey(cwd: string = process.cwd()): string {
   }
 }
 
-export function deriveRepoKeyFromWorkspaceDir(workspaceDir: string): string {
-  const bucket = basename(dirname(workspaceDir));
-  return nonEmpty(bucket) ?? UNKNOWN_REPO_KEY;
-}
-
 export function resolveRunsRoot(env: NodeJS.ProcessEnv = process.env): string {
   return join(resolveTaskRunnerStateDir(env), "runs");
 }
@@ -118,6 +113,14 @@ export function resolveRepoRunsDir(
   return resolveRunsBucketDir(deriveRepoKey(cwd), env);
 }
 
+export function resolveRunWorkspaceDirForRepo(
+  repo: string,
+  runId: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return join(resolveRunsBucketDir(repo, env), runId);
+}
+
 export function resolveUnknownRunsDir(env: NodeJS.ProcessEnv = process.env): string {
   return resolveRunsBucketDir(UNKNOWN_REPO_KEY, env);
 }
@@ -127,7 +130,7 @@ export function resolveRunWorkspaceDir(
   runId: string,
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  return join(resolveRepoRunsDir(cwd, env), runId);
+  return resolveRunWorkspaceDirForRepo(deriveRepoKey(cwd), runId, env);
 }
 
 export function resolveInputPath(arg: string, cwd: string): string {

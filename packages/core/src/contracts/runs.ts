@@ -1,4 +1,3 @@
-import { deriveRepoKeyFromWorkspaceDir } from "../config/runtime-paths.js";
 import type { LockableField } from "../core/config/schema.js";
 import {
   type RunDependencyDetail,
@@ -264,7 +263,7 @@ export function toRunSummary(
 ): RunSummary {
   return {
     runId: entry.manifest.runId,
-    repo: entry.repo,
+    repo: entry.manifest.repo,
     status: entry.manifest.status,
     effectiveStatus: deriveEffectiveStatus(entry.manifest),
     archivedAt: entry.manifest.archivedAt,
@@ -310,7 +309,7 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
     result.relatedManifests ?? new Map<string, RunManifest>([[manifest.runId, manifest]]);
   return {
     runId: manifest.runId,
-    repo: deriveRepoKeyFromWorkspaceDir(manifest.workspaceDir),
+    repo: manifest.repo,
     status: manifest.status,
     effectiveStatus: deriveEffectiveStatus(manifest),
     archivedAt: manifest.archivedAt,

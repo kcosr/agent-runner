@@ -27,8 +27,9 @@ function buildManifest(overrides = {}) {
   };
 
   return {
-    schemaVersion: 7,
+    schemaVersion: 8,
     runId: "run123",
+    repo: "demo-repo",
     agent: {
       name: "demo-agent",
       sourcePath: "/repo/agents/demo/agent.md",
@@ -61,7 +62,7 @@ function buildManifest(overrides = {}) {
     tasksCompleted: Object.values(finalTasks).filter((task) => task.status === "completed").length,
     tasksTotal: Object.keys(finalTasks).length,
     backendSessionId: null,
-    runtimeVars: { repo_path: "." },
+    runtimeVars: {},
     execution: {
       hostMode: "embedded",
       controller: {
@@ -178,7 +179,7 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
   assert.equal("canMutateTasks" in detail.capabilities, false);
   assert.deepEqual(detail, {
     runId: "run123",
-    repo: "demo",
+    repo: "demo-repo",
     status: "success",
     effectiveStatus: "success",
     archivedAt: null,
@@ -233,7 +234,7 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
     message: "Finish the task list.",
     callerInstructions: "Caller docs",
     lockedFields: ["backend"],
-    runtimeVars: { repo_path: "." },
+    runtimeVars: {},
     execution: {
       hostMode: "embedded",
       controller: {

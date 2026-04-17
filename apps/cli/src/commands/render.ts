@@ -39,6 +39,7 @@ export function renderRunStatus(detail: RunDetail): string {
   if (detail.backendSessionId) {
     lines.push(`Backend session: ${detail.backendSessionId}`);
   }
+  lines.push(`Repo: ${detail.repo}`);
   lines.push(`Cwd: ${detail.cwd}`);
   lines.push(`Workspace: ${detail.workspaceDir}`);
   lines.push(`Started: ${detail.startedAt}`);
@@ -152,7 +153,6 @@ export function renderDefinitionDetails(result: DefinitionDetailsResult): string
     if (loaded.config.effort) lines.push(`  effort:       ${loaded.config.effort}`);
     lines.push(`  timeoutSec:   ${loaded.config.timeoutSec}`);
     lines.push(`  unrestricted: ${loaded.config.unrestricted}`);
-    lines.push(`  cwd:          ${loaded.config.cwd}`);
     if (loaded.config.lockedFields.length > 0) {
       lines.push(`  lockedFields: ${loaded.config.lockedFields.join(", ")}`);
     }
@@ -167,6 +167,9 @@ export function renderDefinitionDetails(result: DefinitionDetailsResult): string
   const { loaded } = result;
   const lines: string[] = [];
   lines.push(`Assignment: ${loaded.config.name}`);
+  if (loaded.config.cwd !== undefined) {
+    lines.push(`  cwd:          ${loaded.config.cwd}`);
+  }
   lines.push(`  maxRetries:   ${loaded.config.maxRetries}`);
   if (loaded.config.tasks.length > 0) {
     lines.push(`  tasks:        ${loaded.config.tasks.length}`);

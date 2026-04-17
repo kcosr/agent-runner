@@ -39,9 +39,9 @@ npm run task-runner -- <args>
 
 ## Core Model
 
-- **Agent**: backend, model, cwd, timeout, and role instructions.
-- **Assignment**: reusable task list, vars schema, optional caller-facing docs,
-  and assignment instructions.
+- **Agent**: backend, model, timeout, and role instructions.
+- **Assignment**: reusable task list, vars schema, optional authored `cwd`,
+  optional caller-facing docs, and assignment instructions.
 - **Run**: one persisted execution instance under
   `${TASK_RUNNER_STATE_DIR}/runs/<repo>/<run-id>/`.
 - **Brief**: the composed worker-facing handoff for a run. Re-fetch it with
@@ -61,8 +61,7 @@ Fresh run:
 ```bash
 task-runner run \
   --agent ./agents/implementer/agent.md \
-  --assignment ./assignments/repo-orientation/assignment.md \
-  --var repo_path="$PWD"
+  --assignment ./assignments/repo-orientation/assignment.md
 ```
 
 Inspect a run:
@@ -79,8 +78,7 @@ Prepare a run without executing it:
 ```bash
 task-runner init \
   --agent ./agents/implementer/agent.md \
-  --assignment ./assignments/repo-orientation/assignment.md \
-  --var repo_path="$PWD"
+  --assignment ./assignments/repo-orientation/assignment.md
 
 task-runner run --resume-run <run-id>
 ```
@@ -92,7 +90,6 @@ task-runner init \
   --backend passive \
   --assignment plan-feature \
   --name "Web dashboard" \
-  --var repo_path="$PWD" \
   "Design the dashboard work"
 
 task-runner brief <run-id>
@@ -129,6 +126,12 @@ Important read-surface rule:
 `task-runner run` resolves the agent and assignment, freezes a manifest, composes
 the worker brief, and invokes the backend immediately unless the backend is
 `passive`.
+
+Fresh-run cwd precedence is:
+
+1. `--cwd` override
+2. authored assignment `cwd`
+3. caller cwd
 
 Prompt composition is:
 
@@ -196,6 +199,7 @@ ${TASK_RUNNER_STATE_DIR}/runs/<repo-name>/<run-id>/
 `run.json` is the canonical record. It stores:
 
 - the frozen agent and assignment metadata
+- frozen `repo` and `cwd`
 - canonical task snapshots
 - `brief`
 - caller instructions

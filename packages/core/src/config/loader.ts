@@ -97,9 +97,6 @@ export function loadAgentConfig(arg: string, cwd: string = process.cwd()): Loade
   const sourcePath = resolveAgentPath(arg, cwd);
   const raw = readFileSync(sourcePath, "utf8");
   const parsed = matter(raw);
-  const cwdSource = Object.prototype.hasOwnProperty.call(parsed.data, "cwd")
-    ? "explicit"
-    : "default";
   const result = agentConfigSchema.safeParse(parsed.data);
   if (!result.success) {
     const issues = result.error.issues
@@ -119,7 +116,6 @@ export function loadAgentConfig(arg: string, cwd: string = process.cwd()): Loade
   return {
     config: result.data,
     instructions: parsed.content.trim(),
-    cwdSource,
     sourcePath,
   };
 }
