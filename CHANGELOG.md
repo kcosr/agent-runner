@@ -158,6 +158,7 @@
 
 ### Fixed
 
+- Fixed embedded and daemon-managed runs so thrown backend launch failures such as `ENOENT` still settle `run.json` to terminal `error` and write an attempt log, instead of leaving the run stuck in `running`. ([#48](https://github.com/kcosr/task-runner/pull/48))
 - Fixed shared run detail and timeline lookup so bare run ids can resolve across repo buckets after v8 manifest migration, preventing dashboard/sidebar fetches from failing when the selected run lives outside the daemon's local repo bucket. ([#43](https://github.com/kcosr/task-runner/pull/43))
 - Fixed the Attempts drawer to preserve loaded timeline history when a live run settles instead of flashing back through a loading state. ([#42](https://github.com/kcosr/task-runner/pull/42))
 - Fixed `plan-feature` workflow drift around delayed implementer-run creation and execution handoff. The planner assignment now prepares `task-runner init --agent implementor --backend passive ...`, the planning handoff now treats `task-runner brief <new-run-id>` as the canonical execution surface for that passive implementer run, the generated implementation template now teaches the same brief-first passive workflow, and the local `plan-feature` skill was slimmed down to defer run-specific operational detail to the emitted assignment/brief.
