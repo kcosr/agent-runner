@@ -384,6 +384,64 @@ describe("api client", () => {
     );
   });
 
+  it("sends backend-session mutation requests and parses the result payload", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            result: {
+              runId: "run-1",
+              backendSessionId: "thread-42",
+              changed: true,
+            },
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            result: {
+              runId: "run-1",
+              backendSessionId: null,
+              changed: true,
+            },
+          }),
+          { status: 200 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createApiClient(config);
+    await expect(api.setBackendSession("run-1", "thread-42")).resolves.toEqual({
+      runId: "run-1",
+      backendSessionId: "thread-42",
+      changed: true,
+    });
+    await expect(api.clearBackendSession("run-1")).resolves.toEqual({
+      runId: "run-1",
+      backendSessionId: null,
+      changed: true,
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/runs/run-1/backend-session",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ backendSessionId: "thread-42" }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/runs/run-1/backend-session/clear",
+      expect.objectContaining({
+        method: "POST",
+      }),
+    );
+  });
+
   it("sends dependency mutation requests and parses the result payload", async () => {
     const fetchMock = vi.fn(
       async () =>

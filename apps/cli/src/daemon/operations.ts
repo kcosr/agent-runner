@@ -3,6 +3,7 @@ import type {
   addRunAttachmentFromStream,
   appendNotes,
   archive,
+  clearBackendSession,
   clearDependencies,
   createTask,
   deleteArchivedRun,
@@ -24,6 +25,7 @@ import type {
   resumeRun,
   startRun,
   unarchive,
+  updateRunBackendSession,
   updateTask,
 } from "@task-runner/core/app/service.js";
 import type {
@@ -49,6 +51,8 @@ export interface DaemonHandlers {
   unarchive: typeof unarchive;
   deleteArchivedRun: typeof deleteArchivedRun;
   renameRun: typeof renameRun;
+  updateRunBackendSession: typeof updateRunBackendSession;
+  clearBackendSession: typeof clearBackendSession;
   addDependency: typeof addDependency;
   removeDependency: typeof removeDependency;
   clearDependencies: typeof clearDependencies;
@@ -109,6 +113,12 @@ export function createDaemonOperations(ctx: DaemonOperationContext) {
     },
     async setRunName(target: string, input: Parameters<typeof renameRun>[1]) {
       return { result: await ctx.renameRun(target, input) };
+    },
+    setRunBackendSession(target: string, input: Parameters<typeof updateRunBackendSession>[1]) {
+      return { result: ctx.updateRunBackendSession(target, input) };
+    },
+    clearBackendSession(target: string) {
+      return { result: ctx.clearBackendSession(target) };
     },
     addDependency(target: string, dependencyRunId: string) {
       return { result: ctx.addDependency(target, dependencyRunId) };

@@ -25,11 +25,13 @@ export function RunDetailPanel({
   onDelete,
   onDownloadAttachment,
   onOpenAttachmentPreview,
+  onClearBackendSession,
   onRemoveDependency,
   onRemoveAttachment,
   onReset,
   onRename,
   onResume,
+  onSetBackendSession,
   onSelectDetailSection,
   onUnarchive,
   onUploadAttachment,
@@ -53,11 +55,13 @@ export function RunDetailPanel({
   onDelete: (runId: string) => void;
   onDownloadAttachment: (runId: string, attachmentId: string, name: string) => Promise<void>;
   onOpenAttachmentPreview: (attachmentId: string) => void;
+  onClearBackendSession: (runId: string) => Promise<void>;
   onRemoveDependency: (runId: string, dependencyRunId: string) => Promise<void>;
   onRemoveAttachment: (runId: string, attachmentId: string) => Promise<void>;
   onReset: (runId: string) => void;
   onRename: (runId: string, name: string | null) => Promise<void>;
   onResume: (runId: string, message?: string) => Promise<void>;
+  onSetBackendSession: (runId: string, backendSessionId: string) => Promise<void>;
   onSelectDetailSection: (section: DrawerDetailSection) => void;
   onUnarchive: (runId: string) => void;
   onUploadAttachment: (runId: string, file: File) => Promise<void>;
@@ -144,6 +148,7 @@ export function RunDetailPanel({
         onDownloadAttachment(selectedRun.runId, attachmentId, name)
       }
       onOpenAttachmentPreview={onOpenAttachmentPreview}
+      onClearBackendSession={() => onClearBackendSession(selectedRun.runId)}
       onRemoveDependency={(dependencyRunId) =>
         onRemoveDependency(selectedRun.runId, dependencyRunId)
       }
@@ -151,6 +156,9 @@ export function RunDetailPanel({
       onReset={() => onReset(selectedRun.runId)}
       onRename={(name) => onRename(selectedRun.runId, name)}
       onResume={(message) => onResume(selectedRun.runId, message)}
+      onSetBackendSession={(backendSessionId) =>
+        onSetBackendSession(selectedRun.runId, backendSessionId)
+      }
       onSelectSection={onSelectDetailSection}
       timelineState={timelineState}
       onUnarchive={() => onUnarchive(selectedRun.runId)}

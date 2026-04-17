@@ -23,6 +23,7 @@
 
 ### Added
 
+- Added `task-runner run set-backend-session <id|path> <session-id>` and `task-runner run clear-backend-session <id|path>` for passive runs, with daemon HTTP/RPC parity plus inline web detail-drawer editing for passive and archived-passive backend session ids. ([#45](https://github.com/kcosr/task-runner/pull/45))
 - Added `scripts/migrate-manifests-v8.mjs` to backfill persisted `repo` capture for existing `schemaVersion: 7` run manifests, including legacy state roots passed via `--root` such as `~/.local/state/agent-runner`, with repeated `--repo <name>` filters for migrating only selected repo buckets. ([#43](https://github.com/kcosr/task-runner/pull/43))
 - Added a dedicated Settings area in the web shell with General and Keybindings sections, and moved dashboard defaults there while keeping the runs-toolbar toggles in sync. ([#42](https://github.com/kcosr/task-runner/pull/42))
 - Added a persisted dashboard preference for recent-updates board ordering so runs can promote touched cards to the top of their columns, with move/reorder/insert card motion that respects `prefers-reduced-motion`. ([#42](https://github.com/kcosr/task-runner/pull/42))

@@ -2,7 +2,12 @@ import type { RunCommandOverrides } from "@task-runner/core/app/service.js";
 import { BACKEND_IDS } from "@task-runner/core/core/backends/types.js";
 import type { RunListScopeFilter } from "@task-runner/core/core/commands/service.js";
 import { trimRunName } from "@task-runner/core/util/run-name.js";
-import type { RunSetNameParams, RunsListParams, RunsStartParams } from "./protocol.js";
+import type {
+  RunSetBackendSessionParams,
+  RunSetNameParams,
+  RunsListParams,
+  RunsStartParams,
+} from "./protocol.js";
 
 export class RequestValidationError extends Error {
   constructor(message: string) {
@@ -43,6 +48,14 @@ export function requiredString(value: unknown, label: string): string {
   const stringValue = optionalString(value, label);
   if (stringValue === undefined) {
     throw new RequestValidationError(`${label} is required`);
+  }
+  return stringValue;
+}
+
+export function requiredNonEmptyString(value: unknown, label: string): string {
+  const stringValue = requiredString(value, label);
+  if (stringValue.trim().length === 0) {
+    throw new RequestValidationError(`${label} cannot be empty`);
   }
   return stringValue;
 }
@@ -245,6 +258,17 @@ export function parseRunSetNameParams(value: unknown, label: string): RunSetName
   return {
     target: requiredString(record.target, `${label}.target`),
     name: requiredNullableRunName(record.name, `${label}.name`),
+  };
+}
+
+export function parseRunSetBackendSessionParams(
+  value: unknown,
+  label: string,
+): RunSetBackendSessionParams {
+  const record = asRecord(value, label);
+  return {
+    target: requiredString(record.target, `${label}.target`),
+    backendSessionId: requiredNonEmptyString(record.backendSessionId, `${label}.backendSessionId`),
   };
 }
 

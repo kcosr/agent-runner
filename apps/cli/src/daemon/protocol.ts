@@ -11,6 +11,7 @@ import type {
 } from "@task-runner/core/contracts/events.js";
 import type {
   RunArchiveResult,
+  RunBackendSessionResult,
   RunDependenciesResult,
   RunDetail,
   RunNameResult,
@@ -67,6 +68,10 @@ export interface RunTargetParams {
 
 export interface RunSetNameParams extends RunTargetParams {
   name: string | null;
+}
+
+export interface RunSetBackendSessionParams extends RunTargetParams {
+  backendSessionId: string;
 }
 
 export interface RunDependencyParams extends RunTargetParams {
@@ -201,6 +206,10 @@ export interface RunArchiveRpcResult {
 
 export interface RunSetNameRpcResult {
   result: RunNameResult;
+}
+
+export interface RunBackendSessionRpcResult {
+  result: RunBackendSessionResult;
 }
 
 export interface RunDependenciesRpcResult {

@@ -21,6 +21,7 @@ import {
   addTask,
   appendTaskNotes,
   archiveRun,
+  clearRunBackendSession,
   clearRunDependencies,
   downloadAttachment,
   listAttachments,
@@ -30,6 +31,7 @@ import {
   readStatus,
   removeAttachment,
   removeRunDependency,
+  setRunBackendSession,
   setRunName,
   setTask,
   showDefinition,
@@ -46,6 +48,14 @@ backend: claude
 model: claude-sonnet-4-6
 ---
 Service test agent.
+`;
+
+const PASSIVE_AGENT = `---
+schemaVersion: 1
+name: svc-passive-agent
+backend: passive
+---
+Passive service test agent.
 `;
 
 const ASSIGNMENT = `---
@@ -94,6 +104,7 @@ function writeAssignment(baseDir, name, body) {
 
 function writeBundle(baseDir, assignmentBody = ASSIGNMENT, assignmentName = "svc-work") {
   writeAgent(baseDir, "svc-agent", AGENT);
+  writeAgent(baseDir, "svc-passive-agent", PASSIVE_AGENT);
   writeAssignment(baseDir, assignmentName, assignmentBody);
 }
 
@@ -123,9 +134,9 @@ function moveRunToRepoBucket(baseDir, workspaceDir, repo) {
   return nextWorkspaceDir;
 }
 
-async function initRun(baseDir, assignmentName = "svc-work") {
+async function initRun(baseDir, assignmentName = "svc-work", agentName = "svc-agent") {
   return withSharedRuntimeEnv(baseDir, async () => {
-    const loaded = loadAgentConfig("svc-agent", baseDir);
+    const loaded = loadAgentConfig(agentName, baseDir);
     const loadedAssignment = loadAssignmentConfig(assignmentName, baseDir);
     const originalCwd = process.cwd();
     process.chdir(baseDir);
@@ -147,6 +158,135 @@ async function initRun(baseDir, assignmentName = "svc-work") {
     }
   });
 }
+
+test("command services: passive backend session mutations update only metadata and reject non-passive runs", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const passiveRun = await initRun(dir, "svc-work", "svc-passive-agent");
+  const nonPassiveRun = await initRun(dir);
+
+  patchManifest(passiveRun.workspaceDir, (manifest) => {
+    manifest.status = "success";
+    manifest.archivedAt = "2026-04-17T10:00:00.000Z";
+    manifest.endedAt = "2026-04-17T09:59:00.000Z";
+    manifest.exitCode = 0;
+    manifest.attempts = 2;
+    manifest.sessionCount = 1;
+    manifest.backendSessionId = "thread-original";
+    manifest.sessions = [
+      {
+        sessionIndex: 0,
+        startedAt: "2026-04-17T09:00:00.000Z",
+        endedAt: "2026-04-17T09:30:00.000Z",
+        status: "success",
+        exitCode: 0,
+        message: "seed message",
+        brief: "seed brief",
+        firstAttempt: 1,
+        lastAttempt: 2,
+        maxAttempts: 3,
+        backendSessionIdAtStart: null,
+        backendSessionIdAtEnd: "thread-original",
+      },
+    ];
+    manifest.attemptRecords = [
+      {
+        attempt: 1,
+        sessionIndex: 0,
+        startedAt: "2026-04-17T09:00:00.000Z",
+        endedAt: "2026-04-17T09:10:00.000Z",
+        prompt: "prompt 1",
+        sessionIdAtStart: null,
+        sessionIdCaptured: "thread-original",
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        transcript: "transcript 1",
+        logPath: "attempts/01.json",
+        tasksAfter: manifest.finalTasks,
+        invalidStatuses: [],
+      },
+    ];
+  });
+
+  const before = readManifest(passiveRun.workspaceDir);
+  const preservedBefore = {
+    status: before.status,
+    archivedAt: before.archivedAt,
+    endedAt: before.endedAt,
+    exitCode: before.exitCode,
+    attempts: before.attempts,
+    sessionCount: before.sessionCount,
+    sessions: before.sessions,
+    attemptRecords: before.attemptRecords,
+    finalTasks: before.finalTasks,
+    tasksCompleted: before.tasksCompleted,
+    tasksTotal: before.tasksTotal,
+    resetSeed: before.resetSeed,
+  };
+
+  await withSharedRuntimeEnv(dir, async () => {
+    assert.deepEqual(setRunBackendSession(passiveRun.runId, { backendSessionId: "thread-42" }), {
+      runId: passiveRun.runId,
+      backendSessionId: "thread-42",
+      changed: true,
+    });
+    assert.deepEqual(setRunBackendSession(passiveRun.runId, { backendSessionId: " thread-42 " }), {
+      runId: passiveRun.runId,
+      backendSessionId: "thread-42",
+      changed: false,
+    });
+    assert.deepEqual(clearRunBackendSession(passiveRun.runId), {
+      runId: passiveRun.runId,
+      backendSessionId: null,
+      changed: true,
+    });
+    assert.deepEqual(clearRunBackendSession(passiveRun.runId), {
+      runId: passiveRun.runId,
+      backendSessionId: null,
+      changed: false,
+    });
+
+    assert.throws(
+      () => setRunBackendSession(nonPassiveRun.runId, { backendSessionId: "thread-9" }),
+      (err) =>
+        err instanceof CommandError &&
+        /post-creation backend session mutation is only allowed for passive runs/.test(err.message),
+    );
+    assert.throws(
+      () => clearRunBackendSession(nonPassiveRun.runId),
+      (err) =>
+        err instanceof CommandError &&
+        /post-creation backend session mutation is only allowed for passive runs/.test(err.message),
+    );
+    assert.throws(
+      () => setRunBackendSession(passiveRun.runId, { backendSessionId: "   " }),
+      (err) =>
+        err instanceof CommandError &&
+        /run set-backend-session: <session-id> cannot be empty/.test(err.message),
+    );
+  });
+
+  const after = readManifest(passiveRun.workspaceDir);
+  assert.equal(after.backendSessionId, null);
+  assert.deepEqual(
+    {
+      status: after.status,
+      archivedAt: after.archivedAt,
+      endedAt: after.endedAt,
+      exitCode: after.exitCode,
+      attempts: after.attempts,
+      sessionCount: after.sessionCount,
+      sessions: after.sessions,
+      attemptRecords: after.attemptRecords,
+      finalTasks: after.finalTasks,
+      tasksCompleted: after.tasksCompleted,
+      tasksTotal: after.tasksTotal,
+      resetSeed: after.resetSeed,
+    },
+    preservedBefore,
+  );
+});
 
 async function startCodexRenameServer(options = {}) {
   const renameCalls = [];

@@ -75,11 +75,13 @@ export function RunsDashboardRoute() {
           onDelete={state.runActions.delete}
           onDownloadAttachment={state.runActions.downloadAttachment}
           onOpenAttachmentPreview={state.openSelectedRunAttachmentPreview}
+          onClearBackendSession={state.runActions.clearBackendSession}
           onRemoveDependency={state.runActions.removeDependency}
           onRemoveAttachment={state.runActions.removeAttachment}
           onReset={state.runActions.reset}
           onRename={state.runActions.rename}
           onResume={state.runActions.resume}
+          onSetBackendSession={state.runActions.setBackendSession}
           onSelectDetailSection={state.updateSelectedRunDetailSection}
           onUnarchive={state.runActions.unarchive}
           onUploadAttachment={state.runActions.uploadAttachment}

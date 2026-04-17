@@ -226,8 +226,13 @@ Important rule:
 - `task-runner task append-notes`
 - `task-runner task add`
 - `task-runner attachment add|remove`
-- `task-runner run reset|archive|unarchive|delete|set-name`
+- `task-runner run reset|archive|unarchive|delete|set-name|set-backend-session|clear-backend-session`
 - `task-runner run add-dep|remove-dep|clear-deps`
+
+`run set-backend-session` / `run clear-backend-session` are passive-only
+metadata mutations. They update `manifest.backendSessionId` without changing
+task state, lifecycle status, attempts, archive state, or dependency
+projections.
 
 ### Daemon Surface
 
@@ -254,6 +259,10 @@ Shared run capabilities remain the canonical UX gate for lifecycle actions.
 `RunCapabilities` includes `canReset` and `canDelete`, and browser/daemon
 clients should use those booleans directly instead of reproducing lifecycle
 state checks locally.
+Passive backend-session editing is an explicit detail-surface mutation, not a
+summary mutation: the daemon publishes a fresh `RunDetail` after set/clear, but
+does not fan out summary or dependent-run updates because `backendSessionId`
+does not participate in `RunSummary`.
 
 - `events.subscribe { channel: "run_summary" }`
 - `events.subscribe { channel: "run_detail", runId }`

@@ -19,6 +19,14 @@ model: claude-sonnet-4-6
 Agent.
 `;
 
+const PASSIVE_AGENT = `---
+schemaVersion: 1
+name: run-mgmt-passive-agent
+backend: passive
+---
+Passive agent.
+`;
+
 const ASSIGNMENT = `---
 schemaVersion: 1
 name: run-mgmt-work
@@ -48,9 +56,9 @@ function writeAssignment(baseDir, name, body) {
   writeFileSync(join(dir, "assignment.md"), body);
 }
 
-async function initRun(baseDir) {
+async function initRun(baseDir, agentName = "run-mgmt-agent") {
   return withSharedRuntimeEnv(baseDir, async () => {
-    const loaded = loadAgentConfig("run-mgmt-agent", baseDir);
+    const loaded = loadAgentConfig(agentName, baseDir);
     const loadedAssignment = loadAssignmentConfig("run-mgmt-work", baseDir);
     const originalCwd = process.cwd();
     process.chdir(baseDir);
@@ -280,6 +288,7 @@ test("run archive and run unarchive expose idempotent text and json results", as
 test("run set-name updates, clears, and preserves reset seed", async () => {
   const dir = tempDir();
   writeAgent(dir, "run-mgmt-agent", AGENT);
+  writeAgent(dir, "run-mgmt-passive-agent", PASSIVE_AGENT);
   writeAssignment(dir, "run-mgmt-work", ASSIGNMENT);
   const outcome = await initRun(dir);
 
@@ -321,6 +330,7 @@ test("run set-name updates, clears, and preserves reset seed", async () => {
 test("run set-name validates required args and empty names", async () => {
   const dir = tempDir();
   writeAgent(dir, "run-mgmt-agent", AGENT);
+  writeAgent(dir, "run-mgmt-passive-agent", PASSIVE_AGENT);
   writeAssignment(dir, "run-mgmt-work", ASSIGNMENT);
   const outcome = await initRun(dir);
 
@@ -337,6 +347,73 @@ test("run set-name validates required args and empty names", async () => {
   });
   assert.equal(result.status, 3);
   assert.match(result.stderr, /run set-name: <name> cannot be empty/);
+});
+
+test("run set-backend-session and clear-backend-session mutate passive metadata only", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "run-mgmt-agent", AGENT);
+  writeAgent(dir, "run-mgmt-passive-agent", PASSIVE_AGENT);
+  writeAssignment(dir, "run-mgmt-work", ASSIGNMENT);
+  const passiveRun = await initRun(dir, "run-mgmt-passive-agent");
+  const nonPassiveRun = await initRun(dir);
+
+  patchManifest(passiveRun.workspaceDir, (manifest) => {
+    manifest.status = "blocked";
+    manifest.archivedAt = "2026-04-17T12:00:00.000Z";
+  });
+
+  const setText = runCli(["run", "set-backend-session", passiveRun.runId, "thread-42"], {
+    cwd: dir,
+  });
+  assert.match(setText, /set backend session for run .*"thread-42"/);
+  let manifest = readManifest(passiveRun.workspaceDir);
+  assert.equal(manifest.backendSessionId, "thread-42");
+  assert.equal(manifest.status, "blocked");
+  assert.equal(manifest.archivedAt, "2026-04-17T12:00:00.000Z");
+
+  const setAgainJson = runCli(
+    ["run", "set-backend-session", passiveRun.runId, " thread-42 ", "--output-format", "json"],
+    { cwd: dir },
+  );
+  assert.deepEqual(JSON.parse(setAgainJson), {
+    runId: passiveRun.runId,
+    backendSessionId: "thread-42",
+    changed: false,
+  });
+
+  const clearText = runCli(["run", "clear-backend-session", passiveRun.runId], { cwd: dir });
+  assert.match(clearText, /cleared backend session for run/);
+  manifest = readManifest(passiveRun.workspaceDir);
+  assert.equal(manifest.backendSessionId, null);
+  assert.equal(manifest.status, "blocked");
+
+  const clearAgainJson = runCli(
+    ["run", "clear-backend-session", passiveRun.runId, "--output-format", "json"],
+    { cwd: dir },
+  );
+  assert.deepEqual(JSON.parse(clearAgainJson), {
+    runId: passiveRun.runId,
+    backendSessionId: null,
+    changed: false,
+  });
+
+  let result = runCliExpectFail(["run", "set-backend-session"], { cwd: dir });
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /run set-backend-session requires <id-or-path> <session-id>/);
+
+  result = runCliExpectFail(["run", "set-backend-session", passiveRun.runId, "   "], { cwd: dir });
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /run set-backend-session: <session-id> cannot be empty/);
+
+  result = runCliExpectFail(["run", "clear-backend-session"], { cwd: dir });
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /run clear-backend-session requires <id-or-path>/);
+
+  result = runCliExpectFail(["run", "set-backend-session", nonPassiveRun.runId, "thread-9"], {
+    cwd: dir,
+  });
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /only allowed for passive runs/);
 });
 
 test("run add-dep, remove-dep, and clear-deps expose text/json results and persist manifest state", async () => {

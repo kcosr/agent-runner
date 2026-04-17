@@ -14,6 +14,7 @@ import { isPathArg } from "../../config/runtime-paths.js";
 import type { RunAttachment, RunAttachmentRemoveResult } from "../../contracts/attachments.js";
 import {
   type RunArchiveResult,
+  type RunBackendSessionResult,
   type RunDeleteResult,
   type RunDependenciesResult,
   type RunDetail,
@@ -26,6 +27,7 @@ import {
   canUnarchiveRun,
   deriveTaskMutationCapabilities,
   toRunArchiveResult,
+  toRunBackendSessionResult,
   toRunDependenciesResult,
   toRunDetail,
   toRunNameResult,
@@ -96,6 +98,7 @@ export interface RunResetResult {
 export type RunListEntry = RunSummary;
 export type {
   RunArchiveResult,
+  RunBackendSessionResult,
   RunDeleteResult,
   RunDependenciesResult,
   RunNameResult,
@@ -379,6 +382,14 @@ function validateRunName(name: string): string {
   }
 }
 
+function validateBackendSessionId(sessionId: string): string {
+  const trimmed = sessionId.trim();
+  if (trimmed.length === 0) {
+    throw new CommandError("run set-backend-session: <session-id> cannot be empty");
+  }
+  return trimmed;
+}
+
 function validateAttachmentSourcePath(sourcePath: string): void {
   if (!existsSync(sourcePath)) {
     throw new CommandError(`attachment add: source file ${sourcePath} was not found`);
@@ -592,6 +603,61 @@ export async function setRunName(
   }
 
   return toRunNameResult({
+    manifest: resolved.manifest,
+    changed,
+  });
+}
+
+function requirePassiveBackendSessionMutation(manifest: RunManifest, verb: "set" | "clear"): void {
+  if (manifest.backend === "passive") {
+    return;
+  }
+  throw new CommandError(
+    `run ${verb}-backend-session: post-creation backend session mutation is only allowed for passive runs`,
+  );
+}
+
+export function setRunBackendSession(
+  target: string,
+  input: { backendSessionId: string },
+): RunBackendSessionResult {
+  const resolved = resolveRun(target);
+  let changed = false;
+
+  withTaskStateLock(resolved.workspaceDir, () => {
+    resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
+    requirePassiveBackendSessionMutation(resolved.manifest, "set");
+    const nextBackendSessionId = validateBackendSessionId(input.backendSessionId);
+    if (resolved.manifest.backendSessionId === nextBackendSessionId) {
+      return;
+    }
+    resolved.manifest.backendSessionId = nextBackendSessionId;
+    writeManifest(resolved.workspaceDir, resolved.manifest);
+    changed = true;
+  });
+
+  return toRunBackendSessionResult({
+    manifest: resolved.manifest,
+    changed,
+  });
+}
+
+export function clearRunBackendSession(target: string): RunBackendSessionResult {
+  const resolved = resolveRun(target);
+  let changed = false;
+
+  withTaskStateLock(resolved.workspaceDir, () => {
+    resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
+    requirePassiveBackendSessionMutation(resolved.manifest, "clear");
+    if (resolved.manifest.backendSessionId === null) {
+      return;
+    }
+    resolved.manifest.backendSessionId = null;
+    writeManifest(resolved.workspaceDir, resolved.manifest);
+    changed = true;
+  });
+
+  return toRunBackendSessionResult({
     manifest: resolved.manifest,
     changed,
   });

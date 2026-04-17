@@ -10,7 +10,12 @@ import type {
 import { HttpError } from "./http-errors.js";
 import { readJsonBody, sendBuffer, sendError, sendJson } from "./http-serializers.js";
 import type { DaemonOperations } from "./operations.js";
-import type { RunSetNameParams, RunsListParams, RunsStartParams } from "./protocol.js";
+import type {
+  RunSetBackendSessionParams,
+  RunSetNameParams,
+  RunsListParams,
+  RunsStartParams,
+} from "./protocol.js";
 import {
   RequestValidationError,
   asRecord,
@@ -19,6 +24,7 @@ import {
   optionalOverrides,
   optionalString,
   parseBooleanQueryValue,
+  parseRunSetBackendSessionParams,
   parseRunSetNameParams,
   parseStartRunParams,
   requiredHeaderString,
@@ -157,6 +163,27 @@ const routes: RouteDefinition[] = [
           name: body.name,
         }),
       );
+    },
+  },
+  {
+    method: "POST",
+    pattern: ["api", "runs", ":runId", "backend-session"],
+    handler: async (req, res, ctx, params) => {
+      const body = await parseRunSetBackendSessionBody(req, routeParam(params, "runId"));
+      sendJson(
+        res,
+        200,
+        ctx.operations.setRunBackendSession(body.target, {
+          backendSessionId: body.backendSessionId,
+        }),
+      );
+    },
+  },
+  {
+    method: "POST",
+    pattern: ["api", "runs", ":runId", "backend-session", "clear"],
+    handler: (_req, res, ctx, params) => {
+      sendJson(res, 200, ctx.operations.clearBackendSession(routeParam(params, "runId")));
     },
   },
   {
@@ -412,6 +439,14 @@ async function parseResumeRunBody(req: IncomingMessage): Promise<ResumeRunBody> 
 async function parseRunSetNameBody(req: IncomingMessage, runId: string): Promise<RunSetNameParams> {
   const body = asRecord(await readJsonBody(req), "request body");
   return parseRunSetNameParams({ ...body, target: runId }, "request body");
+}
+
+async function parseRunSetBackendSessionBody(
+  req: IncomingMessage,
+  runId: string,
+): Promise<RunSetBackendSessionParams> {
+  const body = asRecord(await readJsonBody(req), "request body");
+  return parseRunSetBackendSessionParams({ ...body, target: runId }, "request body");
 }
 
 function splitPath(pathname: string): string[] {
