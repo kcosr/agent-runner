@@ -35,6 +35,7 @@ export interface ParsedArgs {
   taskBody?: string;
   attachmentName?: string;
   attachmentMimeType?: string;
+  cwdScope?: boolean;
   connect?: string;
   listen?: string;
   includeArchived?: boolean;
@@ -197,6 +198,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
       if (next === undefined) throw new Error("--mime-type requires a value");
       if (next.trim().length === 0) throw new Error("--mime-type cannot be empty");
       result.attachmentMimeType = next;
+    } else if (arg === "--cwd-scope") {
+      result.cwdScope = true;
     } else if (arg === "--clear") {
       result.clear = true;
     } else if (arg === "--detach") {

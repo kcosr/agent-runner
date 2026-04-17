@@ -75,6 +75,7 @@ export function RunsDashboardRoute() {
           onDelete={state.runActions.delete}
           onDownloadAttachment={state.runActions.downloadAttachment}
           onOpenAttachmentPreview={state.openSelectedRunAttachmentPreview}
+          onSelectAttachmentTab={state.updateSelectedRunAttachmentTab}
           onRemoveDependency={state.runActions.removeDependency}
           onRemoveAttachment={state.runActions.removeAttachment}
           onReset={state.runActions.reset}
@@ -83,6 +84,7 @@ export function RunsDashboardRoute() {
           onSelectDetailSection={state.updateSelectedRunDetailSection}
           onUnarchive={state.runActions.unarchive}
           onUploadAttachment={state.runActions.uploadAttachment}
+          selectedRunGroupAttachmentsQuery={state.selectedRunGroupAttachmentsQuery}
           selectedRunId={state.selectedRunId}
           selectedRunQuery={state.selectedRunQuery}
           timelineState={state.timelineState}

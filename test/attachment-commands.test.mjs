@@ -100,6 +100,13 @@ function readManifest(workspaceDir) {
   return JSON.parse(readFileSync(join(workspaceDir, "run.json"), "utf8"));
 }
 
+function patchManifest(workspaceDir, mutate) {
+  const manifestPath = join(workspaceDir, "run.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  mutate(manifest);
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
 test("attachment commands add, list, download, and remove attachments", async () => {
   const dir = tempDir();
   writeBundle(dir);
@@ -135,6 +142,7 @@ test("attachment commands add, list, download, and remove attachments", async ()
   );
   assert.equal(listed.length, 1);
   assert.equal(listed[0].id, attachment.id);
+  assert.equal(listed[0].ownerRunId, outcome.runId);
 
   const downloaded = runCli(
     ["attachment", "download", outcome.runId, attachment.id, downloadsDir],
@@ -151,6 +159,51 @@ test("attachment commands add, list, download, and remove attachments", async ()
   assert.equal(removed.changed, true);
   assert.equal(removed.attachmentId, attachment.id);
   assert.match(runCli(["attachment", "list", outcome.runId], { cwd: dir }), /No attachments\./);
+});
+
+test("attachment list --cwd-scope includes exact same-cwd peers and preserves default run-only output", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const target = await initRun(dir);
+  const peer = await initRun(dir);
+  const different = await initRun(dir);
+  const targetFile = join(dir, "target.txt");
+  const peerFile = join(dir, "peer.txt");
+  const differentFile = join(dir, "different.txt");
+  writeFileSync(targetFile, "target\n");
+  writeFileSync(peerFile, "peer\n");
+  writeFileSync(differentFile, "different\n");
+
+  patchManifest(different.workspaceDir, (manifest) => {
+    manifest.cwd = join(dir, "other-cwd");
+  });
+
+  runCli(["attachment", "add", target.runId, targetFile], { cwd: dir });
+  runCli(["attachment", "add", peer.runId, peerFile], { cwd: dir });
+  runCli(["attachment", "add", different.runId, differentFile], { cwd: dir });
+
+  const runOnly = JSON.parse(
+    runCli(["attachment", "list", target.runId, "--output-format", "json"], { cwd: dir }),
+  );
+  assert.deepEqual(
+    runOnly.map((attachment) => attachment.ownerRunId),
+    [target.runId],
+  );
+
+  const scoped = JSON.parse(
+    runCli(["attachment", "list", target.runId, "--cwd-scope", "--output-format", "json"], {
+      cwd: dir,
+    }),
+  );
+  assert.equal(scoped.length, 2);
+  assert.deepEqual(
+    new Set(scoped.map((attachment) => attachment.ownerRunId)),
+    new Set([target.runId, peer.runId]),
+  );
+  assert.equal(
+    scoped.some((attachment) => attachment.ownerRunId === different.runId),
+    false,
+  );
 });
 
 test("attachment download rejects an existing destination path", async () => {

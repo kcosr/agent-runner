@@ -205,8 +205,14 @@ const routes: RouteDefinition[] = [
   {
     method: "GET",
     pattern: ["api", "runs", ":runId", "attachments"],
-    handler: (_req, res, ctx, params) => {
-      sendJson(res, 200, ctx.operations.listAttachments(routeParam(params, "runId")));
+    handler: (_req, res, ctx, params, url) => {
+      sendJson(
+        res,
+        200,
+        ctx.operations.listAttachments(routeParam(params, "runId"), {
+          cwdScope: parseBooleanQueryValue(url.searchParams.get("cwdScope"), "cwdScope"),
+        }),
+      );
     },
   },
   {

@@ -1,10 +1,12 @@
 import type { AppRuntimeConfig } from "@task-runner/core/contracts/app-config.js";
 import type {
+  AttachmentListEntry,
   RunAttachment,
   RunAttachmentRemoveResult,
 } from "@task-runner/core/contracts/attachments.js";
 import type { RunTimelineHistory } from "@task-runner/core/contracts/events.js";
 import {
+  attachmentListEntrySchema,
   runArchiveResultSchema,
   runAttachmentSchema,
   runDeleteResultSchema,
@@ -203,7 +205,7 @@ async function readDependenciesResult(
   );
 }
 
-async function readAttachmentList(response: Response): Promise<RunAttachment[]> {
+async function readAttachmentList(response: Response): Promise<AttachmentListEntry[]> {
   if (!response.ok) {
     return await readError(response);
   }
@@ -211,7 +213,7 @@ async function readAttachmentList(response: Response): Promise<RunAttachment[]> 
     await parseResponseJson(response, "Attachment list"),
     response.status,
     "attachments",
-    z.array(runAttachmentSchema),
+    z.array(attachmentListEntrySchema),
     "Attachment list",
   );
 }
@@ -311,9 +313,19 @@ export function createApiClient(config: AppRuntimeConfig) {
       );
       return await readRunTimelineHistory(response);
     },
-    async listAttachments(runId: string): Promise<RunAttachment[]> {
+    async listAttachments(
+      runId: string,
+      options: { cwdScope?: boolean } = {},
+    ): Promise<AttachmentListEntry[]> {
+      const params = new URLSearchParams();
+      if (options.cwdScope !== undefined) {
+        params.set("cwdScope", String(options.cwdScope));
+      }
       const response = await fetch(
-        joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/attachments`),
+        joinPath(
+          config.apiBasePath,
+          `/runs/${encodeURIComponent(runId)}/attachments${params.size > 0 ? `?${params.toString()}` : ""}`,
+        ),
         {
           headers: { accept: "application/json" },
         },

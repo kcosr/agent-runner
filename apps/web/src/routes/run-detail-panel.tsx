@@ -1,4 +1,5 @@
 import type { UseQueryResult } from "@tanstack/react-query";
+import type { AttachmentListEntry } from "@task-runner/core/contracts/attachments.js";
 import type { RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
 import type { CSSProperties } from "react";
 import { AttachmentPreviewDrawer } from "../components/attachment-preview-drawer.js";
@@ -25,6 +26,7 @@ export function RunDetailPanel({
   onDelete,
   onDownloadAttachment,
   onOpenAttachmentPreview,
+  onSelectAttachmentTab,
   onRemoveDependency,
   onRemoveAttachment,
   onReset,
@@ -33,6 +35,7 @@ export function RunDetailPanel({
   onSelectDetailSection,
   onUnarchive,
   onUploadAttachment,
+  selectedRunGroupAttachmentsQuery,
   selectedRunId,
   selectedRunQuery,
   timelineState,
@@ -52,7 +55,12 @@ export function RunDetailPanel({
   onCopy: (value: string, label: string) => Promise<void>;
   onDelete: (runId: string) => void;
   onDownloadAttachment: (runId: string, attachmentId: string, name: string) => Promise<void>;
-  onOpenAttachmentPreview: (attachmentId: string) => void;
+  onOpenAttachmentPreview: (
+    attachmentOwnerRunId: string,
+    attachmentId: string,
+    attachmentTab: "run" | "group",
+  ) => void;
+  onSelectAttachmentTab: (attachmentTab: "run" | "group") => void;
   onRemoveDependency: (runId: string, dependencyRunId: string) => Promise<void>;
   onRemoveAttachment: (runId: string, attachmentId: string) => Promise<void>;
   onReset: (runId: string) => void;
@@ -61,6 +69,7 @@ export function RunDetailPanel({
   onSelectDetailSection: (section: DrawerDetailSection) => void;
   onUnarchive: (runId: string) => void;
   onUploadAttachment: (runId: string, file: File) => Promise<void>;
+  selectedRunGroupAttachmentsQuery: UseQueryResult<AttachmentListEntry[], Error>;
   selectedRunId?: string;
   selectedRunQuery: UseQueryResult<RunDetail, Error>;
   timelineState: RunTimelineState;
@@ -108,20 +117,34 @@ export function RunDetailPanel({
 
   const selectedRun = selectedRunQuery.data;
   if (drawerView?.mode === "attachment") {
-    const attachment = selectedRun.attachments.find(
-      (candidate) => candidate.id === drawerView.attachmentId,
-    );
+    const attachment =
+      drawerView.attachmentOwnerRunId === selectedRun.runId
+        ? selectedRun.attachments.find((candidate) => candidate.id === drawerView.attachmentId)
+        : selectedRunGroupAttachmentsQuery.data?.find(
+            (candidate) =>
+              candidate.id === drawerView.attachmentId &&
+              candidate.ownerRunId === drawerView.attachmentOwnerRunId,
+          );
     return (
       <AttachmentPreviewDrawer
         actionPending={actionPending}
         attachment={attachment}
         attachmentId={drawerView.attachmentId}
+        attachmentLookupError={
+          drawerView.attachmentOwnerRunId === selectedRun.runId
+            ? undefined
+            : selectedRunGroupAttachmentsQuery.error?.message
+        }
+        attachmentLookupPending={
+          drawerView.attachmentOwnerRunId !== selectedRun.runId &&
+          selectedRunGroupAttachmentsQuery.isPending
+        }
         onBack={onBackToAttachments}
         onClose={onClose}
         onDownload={(attachmentId, name) =>
-          onDownloadAttachment(selectedRun.runId, attachmentId, name)
+          onDownloadAttachment(drawerView.attachmentOwnerRunId, attachmentId, name)
         }
-        runId={selectedRun.runId}
+        runId={drawerView.attachmentOwnerRunId}
       />
     );
   }
@@ -140,6 +163,7 @@ export function RunDetailPanel({
       onClose={onClose}
       onCopy={(value, label) => void onCopy(value, label)}
       onDelete={() => onDelete(selectedRun.runId)}
+      groupAttachmentsQuery={selectedRunGroupAttachmentsQuery}
       onDownloadAttachment={(attachmentId, name) =>
         onDownloadAttachment(selectedRun.runId, attachmentId, name)
       }
@@ -151,10 +175,12 @@ export function RunDetailPanel({
       onReset={() => onReset(selectedRun.runId)}
       onRename={(name) => onRename(selectedRun.runId, name)}
       onResume={(message) => onResume(selectedRun.runId, message)}
+      onSelectAttachmentTab={onSelectAttachmentTab}
       onSelectSection={onSelectDetailSection}
       timelineState={timelineState}
       onUnarchive={() => onUnarchive(selectedRun.runId)}
       onUploadAttachment={(file) => onUploadAttachment(selectedRun.runId, file)}
+      selectedAttachmentTab={drawerView?.attachmentTab ?? "run"}
       run={selectedRun}
     />
   );

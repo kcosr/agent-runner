@@ -442,7 +442,15 @@ function installFetchMock(
         });
       }
       if (!init?.method || init.method === "GET") {
-        return new Response(JSON.stringify({ attachments: detail.attachments }), { status: 200 });
+        return new Response(
+          JSON.stringify({
+            attachments: detail.attachments.map((attachment) => ({
+              ...attachment,
+              ownerRunId: runId,
+            })),
+          }),
+          { status: 200 },
+        );
       }
       if (init.method === "POST") {
         const rawName = headerValue(init.headers, "x-task-runner-attachment-name");
@@ -4167,6 +4175,95 @@ describe("web app", () => {
     await user.click(screen.getByRole("button", { name: /^Confirm remove notes\.md$/ }));
     await waitFor(() => expect(screen.getByText("No attachments yet.")).toBeInTheDocument());
     expect(revokeObjectURL).toHaveBeenCalled();
+
+    anchorClick.mockRestore();
+  });
+
+  it("shows Run and Group attachment tabs and uses ownerRunId for peer preview/download", async () => {
+    installFetchMock(
+      {
+        runs: [makeRun({ runId: "run-1", name: "Attachment run" })],
+        details: {
+          "run-1": makeDetail({
+            runId: "run-1",
+            name: "Attachment run",
+            attachments: [makeAttachment({ id: "att-run", name: "run-notes.md" })],
+          }),
+          "run-2": makeDetail({
+            runId: "run-2",
+            name: "Peer run",
+            attachments: [makeAttachment({ id: "att-peer", name: "peer-notes.md" })],
+          }),
+        },
+      },
+      {
+        handleRequest: (url) => {
+          if (/\/api\/runs\/run-1\/attachments\?cwdScope=true$/.test(url)) {
+            return new Response(
+              JSON.stringify({
+                attachments: [
+                  {
+                    ...makeAttachment({ id: "att-run", name: "run-notes.md" }),
+                    ownerRunId: "run-1",
+                  },
+                  {
+                    ...makeAttachment({ id: "att-peer", name: "peer-notes.md" }),
+                    ownerRunId: "run-2",
+                  },
+                ],
+              }),
+              { status: 200 },
+            );
+          }
+          if (/\/api\/runs\/run-2\/attachments\/att-peer\/content$/.test(url)) {
+            return new Response("peer attachment body", {
+              status: 200,
+              headers: { "content-type": "text/plain; charset=utf-8" },
+            });
+          }
+          return undefined;
+        },
+      },
+    );
+    const createObjectURL = vi.fn(() => "blob:test");
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", {
+      ...URL,
+      createObjectURL,
+      revokeObjectURL,
+    });
+    const anchorClick = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => undefined);
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await user.click(await findRunCard("Attachment run"));
+    await user.click(await screen.findByRole("button", { name: /^Attachments\b/i }));
+
+    expect(screen.getByRole("tab", { name: "Run" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("run-notes.md")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Group" }));
+    expect(await screen.findByText("peer-notes.md")).toBeInTheDocument();
+    expect(screen.queryByText("run-notes.md")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Upload attachment file")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^Remove peer-notes\.md$/ }),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^Preview peer-notes\.md$/ }));
+    expect(await screen.findByText("peer attachment body")).toBeInTheDocument();
+    expect(screen.getByText("run-2")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^Download$/ }));
+    await waitFor(() => expect(createObjectURL).toHaveBeenCalled());
+    expect(anchorClick).toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: /back to attachments/i }));
+    expect(await screen.findByText("peer-notes.md")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Group" })).toHaveAttribute("aria-selected", "true");
 
     anchorClick.mockRestore();
   });

@@ -15,6 +15,7 @@ import { compareRunsByStartedAtDesc, sortRunsByStartedAtDesc } from "../lib/run-
 import { useRunTimelineState } from "../lib/run-timeline.js";
 import { useRuntimeConfig } from "../lib/runtime-config.js";
 import {
+  type AttachmentTab,
   DEFAULT_DRAWER_VIEW,
   type DrawerDetailSection,
   type RunDrawerView,
@@ -313,6 +314,20 @@ export function useRunsDashboardState() {
     selectedRunId !== undefined
       ? (viewState.drawerViewsByRunId[selectedRunId] ?? DEFAULT_DRAWER_VIEW)
       : undefined;
+  const selectedRunGroupAttachmentsQuery = useQuery({
+    queryKey: ["attachment-list", selectedRunId, "cwd-scope"],
+    queryFn: async () => {
+      if (!selectedRunId) {
+        throw new Error("Selected run id is required");
+      }
+      return await api.listAttachments(selectedRunId, { cwdScope: true });
+    },
+    enabled:
+      Boolean(selectedRunId) &&
+      selectedDrawerView?.detailSection === "attachments" &&
+      selectedDrawerView.attachmentTab === "group",
+    retry: false,
+  });
 
   useEffect(() => {
     detailStreamStaleRef.current = detailStreamStale;
@@ -386,6 +401,8 @@ export function useRunsDashboardState() {
           mode: "detail",
           detailSection: "attachments",
           attachmentId: null,
+          attachmentOwnerRunId: null,
+          attachmentTab: selectedDrawerView.attachmentTab,
         });
         return;
       }
@@ -396,7 +413,7 @@ export function useRunsDashboardState() {
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [navigate, selectedRunId, selectedDrawerView?.mode]);
+  }, [navigate, selectedRunId, selectedDrawerView?.attachmentTab, selectedDrawerView?.mode]);
 
   useEffect(() => {
     if (!selectedRunId) {
@@ -690,7 +707,11 @@ export function useRunsDashboardState() {
       setActionError(undefined);
       void navigate({ to: `/runs/${runId}` });
     },
-    openSelectedRunAttachmentPreview: (attachmentId: string) => {
+    openSelectedRunAttachmentPreview: (
+      attachmentOwnerRunId: string,
+      attachmentId: string,
+      attachmentTab: AttachmentTab,
+    ) => {
       if (!selectedRunId) {
         return;
       }
@@ -698,6 +719,8 @@ export function useRunsDashboardState() {
         mode: "attachment",
         detailSection: "attachments",
         attachmentId,
+        attachmentOwnerRunId,
+        attachmentTab,
       });
     },
     preferences,
@@ -737,6 +760,7 @@ export function useRunsDashboardState() {
     runsQuery,
     selectedRunId,
     selectedDrawerView,
+    selectedRunGroupAttachmentsQuery,
     selectedRunQuery,
     streamStale: summaryStreamStale || detailStreamStale || timelineState.stale,
     timelineState,
@@ -748,6 +772,8 @@ export function useRunsDashboardState() {
         mode: "detail",
         detailSection: "attachments",
         attachmentId: null,
+        attachmentOwnerRunId: null,
+        attachmentTab: selectedDrawerView?.attachmentTab ?? "run",
       });
     },
     resetBoardFilters: () => {
@@ -768,6 +794,20 @@ export function useRunsDashboardState() {
         mode: "detail",
         detailSection,
         attachmentId: null,
+        attachmentOwnerRunId: null,
+        attachmentTab: selectedDrawerView?.attachmentTab ?? "run",
+      });
+    },
+    updateSelectedRunAttachmentTab: (attachmentTab: AttachmentTab) => {
+      if (!selectedRunId) {
+        return;
+      }
+      setSelectedRunDrawerView(selectedRunId, {
+        mode: "detail",
+        detailSection: "attachments",
+        attachmentId: null,
+        attachmentOwnerRunId: null,
+        attachmentTab,
       });
     },
     updatePreferences,

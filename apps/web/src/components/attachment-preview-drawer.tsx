@@ -1,5 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
-import type { RunAttachment } from "@task-runner/core/contracts/attachments.js";
+import type {
+  AttachmentListEntry,
+  RunAttachment,
+} from "@task-runner/core/contracts/attachments.js";
 import { useRef } from "react";
 import { createApiClient } from "../lib/api-client.js";
 import { formatBytes, formatTimestamp } from "../lib/format.js";
@@ -24,14 +27,18 @@ export function AttachmentPreviewDrawer({
   actionPending,
   attachment,
   attachmentId,
+  attachmentLookupError,
+  attachmentLookupPending,
   onBack,
   onClose,
   onDownload,
   runId,
 }: {
   actionPending?: RunActionPending;
-  attachment?: RunAttachment;
+  attachment?: RunAttachment | AttachmentListEntry;
   attachmentId: string;
+  attachmentLookupError?: string;
+  attachmentLookupPending?: boolean;
   onBack: () => void;
   onClose: () => void;
   onDownload: (attachmentId: string, name: string) => Promise<void>;
@@ -129,7 +136,28 @@ export function AttachmentPreviewDrawer({
         </header>
 
         <div className="drawer-body">
-          {attachment === undefined ? (
+          {attachmentLookupPending ? (
+            <section aria-label="Attachment preview loading" className="drawer-panel">
+              <div className="drawer-panel-card attachment-preview-state">
+                <div className="skeleton-line skeleton-line--short" />
+                <div
+                  className="skeleton-line skeleton-line--medium"
+                  style={{ marginTop: "12px" }}
+                />
+                <div
+                  className="skeleton-line skeleton-line--medium"
+                  style={{ marginTop: "12px" }}
+                />
+              </div>
+            </section>
+          ) : attachmentLookupError ? (
+            <section aria-label="Attachment preview error" className="drawer-panel">
+              <div className="drawer-panel-card attachment-preview-state">
+                <h4>Attachment preview failed to load</h4>
+                <p>{attachmentLookupError}</p>
+              </div>
+            </section>
+          ) : attachment === undefined ? (
             <section aria-label="Attachment preview error" className="drawer-panel">
               <div className="drawer-panel-card attachment-preview-state">
                 <h4>Attachment preview unavailable</h4>

@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import type {
+  AttachmentListEntry,
   RunAttachment,
   RunAttachmentDownloadResult,
   RunAttachmentRemoveResult,
@@ -49,6 +50,18 @@ function parseAttachment(value: unknown): RunAttachment {
   };
 }
 
+function parseAttachmentListEntry(value: unknown): AttachmentListEntry {
+  const attachment = parseAttachment(value);
+  const record = asRecord(value);
+  if (!record || typeof record.ownerRunId !== "string") {
+    throw new Error("invalid attachment list payload from daemon");
+  }
+  return {
+    ...attachment,
+    ownerRunId: record.ownerRunId,
+  };
+}
+
 async function readError(response: Response): Promise<never> {
   let message = `Request failed with status ${response.status}`;
   try {
@@ -73,13 +86,17 @@ async function readJson(response: Response): Promise<unknown> {
 export async function daemonListAttachments(
   connectUrl: string,
   runId: string,
-): Promise<RunAttachment[]> {
-  const response = await fetch(
+  options: { cwdScope?: boolean } = {},
+): Promise<AttachmentListEntry[]> {
+  const url = new URL(
     joinPath(deriveHttpBaseUrl(connectUrl), `/api/runs/${encodeURIComponent(runId)}/attachments`),
-    {
-      headers: { accept: "application/json" },
-    },
   );
+  if (options.cwdScope !== undefined) {
+    url.searchParams.set("cwdScope", String(options.cwdScope));
+  }
+  const response = await fetch(url, {
+    headers: { accept: "application/json" },
+  });
   if (!response.ok) {
     return await readError(response);
   }
@@ -87,7 +104,7 @@ export async function daemonListAttachments(
   if (!body || !Array.isArray(body.attachments)) {
     throw new Error("invalid attachment list payload from daemon");
   }
-  return body.attachments.map(parseAttachment);
+  return body.attachments.map(parseAttachmentListEntry);
 }
 
 export async function daemonAddAttachment(

@@ -11,17 +11,22 @@ export interface DashboardPreferences {
 export type DashboardPreferenceKey = keyof DashboardPreferences;
 
 export type DrawerDetailSection = "tasks" | "attachments" | "dependencies" | "timing" | "events";
+export type AttachmentTab = "run" | "group";
 
 export type RunDrawerView =
   | {
       mode: "detail";
       detailSection: DrawerDetailSection;
       attachmentId: null;
+      attachmentOwnerRunId: null;
+      attachmentTab: AttachmentTab;
     }
   | {
       mode: "attachment";
       detailSection: "attachments";
       attachmentId: string;
+      attachmentOwnerRunId: string;
+      attachmentTab: AttachmentTab;
     };
 
 export interface DashboardViewState {
@@ -38,6 +43,8 @@ export const DEFAULT_DRAWER_VIEW: RunDrawerView = {
   mode: "detail",
   detailSection: "tasks",
   attachmentId: null,
+  attachmentOwnerRunId: null,
+  attachmentTab: "run",
 };
 
 export const DRAWER_WIDTH_MIN = 360;

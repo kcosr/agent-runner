@@ -784,6 +784,7 @@ test("daemon attachment HTTP routes upload, list, download, remove, and reject m
       assert.equal(listed.status, 200);
       assert.equal(listed.body.attachments.length, 1);
       assert.equal(listed.body.attachments[0].id, attachmentId);
+      assert.equal(listed.body.attachments[0].ownerRunId, init.runId);
 
       const content = await fetch(
         new URL(`/api/runs/${init.runId}/attachments/${attachmentId}/content`, httpBaseUrl),
@@ -835,6 +836,66 @@ test("daemon attachment HTTP routes upload, list, download, remove, and reject m
       assert.equal(rejected.status, 422);
       assert.equal(rejectedBody.error.code, "INVALID_COMMAND");
       assert.match(rejectedBody.error.message, /already has 20 attachments/);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+test("daemon attachment HTTP routes scope cwd listings and reject invalid cwdScope query values", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const target = await initRun(dir);
+  const peer = await initRun(dir);
+  const different = await initRun(dir);
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  patchManifest(different.workspaceDir, (manifest) => {
+    manifest.cwd = join(dir, "other-cwd");
+  });
+
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl);
+    try {
+      for (const [runId, name] of [
+        [target.runId, "target.txt"],
+        [peer.runId, "peer.txt"],
+        [different.runId, "different.txt"],
+      ]) {
+        const response = await fetch(new URL(`/api/runs/${runId}/attachments`, httpBaseUrl), {
+          method: "POST",
+          headers: {
+            "content-type": "text/plain",
+            "x-task-runner-attachment-name": name,
+          },
+          body: Buffer.from(`${name}\n`),
+        });
+        assert.equal(response.status, 200);
+      }
+
+      const scoped = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${target.runId}/attachments?cwdScope=true`,
+      );
+      assert.equal(scoped.status, 200);
+      assert.deepEqual(
+        new Set(scoped.body.attachments.map((attachment) => attachment.ownerRunId)),
+        new Set([target.runId, peer.runId]),
+      );
+      assert.equal(
+        scoped.body.attachments.some((attachment) => attachment.ownerRunId === different.runId),
+        false,
+      );
+
+      const invalid = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${target.runId}/attachments?cwdScope=maybe`,
+      );
+      assert.equal(invalid.status, 400);
+      assert.equal(invalid.body.error.code, "INVALID_REQUEST");
+      assert.match(invalid.body.error.message, /cwdScope must be "true" or "false"/);
     } finally {
       await server.close();
     }
