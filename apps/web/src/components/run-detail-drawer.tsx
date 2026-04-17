@@ -241,6 +241,7 @@ export function RunDetailDrawer({
   const [resumeMessageExpanded, setResumeMessageExpanded] = useState(false);
   const [resumeMessageDraft, setResumeMessageDraft] = useState("");
   const [confirmingAttachmentId, setConfirmingAttachmentId] = useState<string | null>(null);
+  const [confirmingReset, setConfirmingReset] = useState(false);
   const [confirmingAbort, setConfirmingAbort] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [dependencyDraft, setDependencyDraft] = useState("");
@@ -454,6 +455,12 @@ export function RunDetailDrawer({
       setConfirmingAttachmentId(null);
     }
   }, [confirmingAttachmentId, run.attachments]);
+
+  useEffect(() => {
+    if (!run.capabilities.canReset) {
+      setConfirmingReset(false);
+    }
+  }, [run.capabilities.canReset]);
 
   useEffect(() => {
     if (!run.capabilities.canAbort) {
@@ -747,9 +754,29 @@ export function RunDetailDrawer({
               </button>
             ) : null}
             {run.capabilities.canReset ? (
-              <button className="btn" disabled={actionsLocked} onClick={onReset} type="button">
-                {resetPending ? "Resetting..." : "Reset"}
-              </button>
+              confirmingReset ? (
+                <InlineConfirmActions
+                  cancelLabel="Cancel reset run"
+                  cancelTitle={resetPending ? "Reset is pending..." : "Cancel reset run"}
+                  confirmLabel="Confirm reset run"
+                  confirmTitle={resetPending ? "Resetting run..." : "Confirm reset run"}
+                  disabled={actionsLocked}
+                  onCancel={() => setConfirmingReset(false)}
+                  onConfirm={() => {
+                    setConfirmingReset(false);
+                    onReset();
+                  }}
+                />
+              ) : (
+                <button
+                  className="btn"
+                  disabled={actionsLocked}
+                  onClick={() => setConfirmingReset(true)}
+                  type="button"
+                >
+                  {resetPending ? "Resetting..." : "Reset"}
+                </button>
+              )
             ) : null}
             {run.capabilities.canAbort ? (
               confirmingAbort ? (

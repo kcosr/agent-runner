@@ -2739,8 +2739,8 @@ describe("web app", () => {
     expect(screen.queryByRole("button", { name: "Abort" })).not.toBeInTheDocument();
   });
 
-  it("resets a run from the web detail drawer", async () => {
-    installFetchMock({
+  it("confirms Reset inline before sending the reset request", async () => {
+    const fetchMock = installFetchMock({
       runs: [makeRun({ runId: "resumable", assignmentName: "Resumable run", status: "success" })],
       details: {
         resumable: makeDetail({
@@ -2768,10 +2768,40 @@ describe("web app", () => {
 
     await user.click(await screen.findByRole("button", { name: "Reset" }));
 
+    expect(screen.queryByRole("button", { name: "Reset" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Confirm reset run" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel reset run" })).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.filter(
+        ([url, init]) =>
+          String(url).endsWith("/api/runs/resumable/reset") && init?.method === "POST",
+      ),
+    ).toHaveLength(0);
+
+    await user.click(screen.getByRole("button", { name: "Cancel reset run" }));
+
+    expect(screen.getByRole("button", { name: "Reset" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Confirm reset run" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel reset run" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Reset" }));
+    await user.click(screen.getByRole("button", { name: "Confirm reset run" }));
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.filter(
+          ([url, init]) =>
+            String(url).endsWith("/api/runs/resumable/reset") && init?.method === "POST",
+        ),
+      ).toHaveLength(1);
+    });
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Start" })).toBeInTheDocument();
     });
+    expect(screen.getByRole("button", { name: "Reset" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Confirm reset run" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel reset run" })).not.toBeInTheDocument();
   });
 
   it("deletes archived runs from the web detail drawer", async () => {
