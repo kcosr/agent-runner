@@ -64,11 +64,6 @@ export function RunDetailPanel({
   ) => void;
   onSelectAttachmentTab: (attachmentTab: AttachmentTab) => void;
   onClearBackendSession: (runId: string) => Promise<void>;
-  onOpenAttachmentPreview: (
-    attachmentOwnerRunId: string,
-    attachmentId: string,
-    attachmentTab: AttachmentTab,
-  ) => void;
   onRemoveDependency: (runId: string, dependencyRunId: string) => Promise<void>;
   onRemoveAttachment: (runId: string, attachmentId: string) => Promise<void>;
   onReset: (runId: string) => void;
@@ -189,7 +184,6 @@ export function RunDetailPanel({
       onSetBackendSession={(backendSessionId) =>
         onSetBackendSession(selectedRun.runId, backendSessionId)
       }
-      onSelectAttachmentTab={onSelectAttachmentTab}
       onSelectSection={onSelectDetailSection}
       timelineState={timelineState}
       onUnarchive={() => onUnarchive(selectedRun.runId)}
