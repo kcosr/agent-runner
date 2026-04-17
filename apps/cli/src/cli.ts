@@ -762,7 +762,9 @@ async function runAttachmentCommand(parsed: ParsedArgs, connectUrl?: string): Pr
         if (parsed.outputFormat === "json") {
           writeJson(attachments);
         } else {
-          process.stdout.write(renderAttachmentList(attachments));
+          process.stdout.write(
+            renderAttachmentList(attachments, { showOwnerRunId: parsed.cwdScope === true }),
+          );
         }
         return process.exit(0);
       } catch (err) {

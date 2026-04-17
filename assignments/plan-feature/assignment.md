@@ -55,8 +55,10 @@ callerInstructions: |
        implementer run during the initial planning pass; if the
        caller approves and asks for creation, the planner first
        confirms the target directory or worktree path, then runs
-       `init` and attaches the same two artifacts to the new
-       implementer run.
+       `init`. The planning artifacts stay attached to the
+       planning run; later implementer and reviewer flows can
+       discover them through cwd-scoped attachment listing when
+       they need supplemental context.
 
   ## After planning
 
@@ -893,12 +895,6 @@ tasks:
       Capture the command shape in this task's Notes, but do
       **not** run it during the initial planning pass.
 
-      Also capture the exact attachment-add commands the planner
-      should run immediately after the later `init` succeeds:
-
-          {{task_runner_cmd}} attachment add <new-run-id> <draft-path> --name assignment-seed.md
-          {{task_runner_cmd}} attachment add <new-run-id> <summary-path> --name assignment-summary.md
-
       Also note:
       - the approved draft path from `draft_plan`
       - the approved summary path from `produce_summary`
@@ -907,8 +903,12 @@ tasks:
         run id
       - that after the later `init` succeeds, the canonical
         execution surface is the new run id plus `task-runner brief <new-run-id>`
-      - that the planner should attach the same two artifacts to
-        the new run immediately after creation
+      - that the planner should **not** duplicate
+        `assignment-seed.md` or `assignment-summary.md` onto the
+        new run; they remain attached to the planning run
+      - that later implementer and reviewer flows can discover
+        the planning artifacts with cwd-scoped attachment
+        listing rooted at the new run id
   - id: handoff
     title: Handoff summary
     body: |
@@ -937,6 +937,11 @@ tasks:
           the caller should resume this planning run if they
           approve the plan and want you to create the
           implementer run.
+        - A note that `assignment-seed.md` and
+          `assignment-summary.md` stay attached to the planning
+          run rather than being duplicated onto the implementer
+          run. Later implementer and reviewer flows should
+          discover them through cwd-scoped attachment listing.
         - A note that when resumed for creation, you will first
           confirm the target directory or worktree path before
           running `init`.

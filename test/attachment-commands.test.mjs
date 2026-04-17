@@ -189,6 +189,17 @@ test("attachment list --cwd-scope includes exact same-cwd peers and preserves de
     runOnly.map((attachment) => attachment.ownerRunId),
     [target.runId],
   );
+  const runOnlyText = runCli(["attachment", "list", target.runId], { cwd: dir });
+  assert.match(
+    runOnlyText,
+    /target\.txt/,
+    "default text output should still render the target attachment row",
+  );
+  assert.doesNotMatch(
+    runOnlyText,
+    /owner=/,
+    "default text output should not show owner run ids without --cwd-scope",
+  );
 
   const scoped = JSON.parse(
     runCli(["attachment", "list", target.runId, "--cwd-scope", "--output-format", "json"], {
@@ -204,6 +215,10 @@ test("attachment list --cwd-scope includes exact same-cwd peers and preserves de
     scoped.some((attachment) => attachment.ownerRunId === different.runId),
     false,
   );
+  const scopedText = runCli(["attachment", "list", target.runId, "--cwd-scope"], { cwd: dir });
+  assert.match(scopedText, new RegExp(`owner=${target.runId}`));
+  assert.match(scopedText, new RegExp(`owner=${peer.runId}`));
+  assert.doesNotMatch(scopedText, new RegExp(`owner=${different.runId}`));
 });
 
 test("attachment download rejects an existing destination path", async () => {

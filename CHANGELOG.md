@@ -88,6 +88,7 @@
 
 ### Changed
 
+- `task-runner attachment list --cwd-scope` now shows `owner=<run-id>` in text output so humans can download peer attachments without switching to JSON, and the bundled planning/review assignments now keep `assignment-seed.md` / `assignment-summary.md` on the planning run while teaching implementer and reviewer flows to discover them through cwd-scoped attachment listing.
 - The web dashboard now persists only durable board preferences (`hideEmptyColumns`, `collapseFailureStates`, `showArchived`, `sortByRecentUpdates`); transient filters, collapsed columns, drawer width/fullscreen state, and per-run drawer tabs reset on full reload instead of carrying across sessions. ([#42](https://github.com/kcosr/task-runner/pull/42))
 - The attachment preview drawer now uses a more compact header layout and hides MIME type metadata in preview mode to reduce wasted vertical space, especially on mobile. ([#40](https://github.com/kcosr/task-runner/pull/40))
 - Replaced the bundled `repo-diagnostics` assignment with a bundled `test` assignment that only asks the agent to run `date` and `pwd`, without repo-specific context. ([#38](https://github.com/kcosr/task-runner/pull/38))
