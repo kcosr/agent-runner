@@ -6,7 +6,7 @@ import { AttachmentPreviewDrawer } from "../components/attachment-preview-drawer
 import { RunDetailDrawer } from "../components/run-detail-drawer.js";
 import { isNotFoundError } from "../lib/api-client.js";
 import type { RunTimelineState } from "../lib/run-timeline.js";
-import type { DrawerDetailSection, RunDrawerView } from "../lib/settings.js";
+import type { AttachmentTab, DrawerDetailSection, RunDrawerView } from "../lib/settings.js";
 import type { RunActionPending } from "./use-runs-dashboard-state.js";
 
 export function RunDetailPanel({
@@ -58,9 +58,9 @@ export function RunDetailPanel({
   onOpenAttachmentPreview: (
     attachmentOwnerRunId: string,
     attachmentId: string,
-    attachmentTab: "run" | "group",
+    attachmentTab: AttachmentTab,
   ) => void;
-  onSelectAttachmentTab: (attachmentTab: "run" | "group") => void;
+  onSelectAttachmentTab: (attachmentTab: AttachmentTab) => void;
   onRemoveDependency: (runId: string, dependencyRunId: string) => Promise<void>;
   onRemoveAttachment: (runId: string, attachmentId: string) => Promise<void>;
   onReset: (runId: string) => void;
@@ -164,8 +164,8 @@ export function RunDetailPanel({
       onCopy={(value, label) => void onCopy(value, label)}
       onDelete={() => onDelete(selectedRun.runId)}
       groupAttachmentsQuery={selectedRunGroupAttachmentsQuery}
-      onDownloadAttachment={(attachmentId, name) =>
-        onDownloadAttachment(selectedRun.runId, attachmentId, name)
+      onDownloadAttachment={(ownerRunId, attachmentId, name) =>
+        onDownloadAttachment(ownerRunId, attachmentId, name)
       }
       onOpenAttachmentPreview={onOpenAttachmentPreview}
       onRemoveDependency={(dependencyRunId) =>

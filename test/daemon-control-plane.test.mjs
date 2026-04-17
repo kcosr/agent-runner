@@ -889,6 +889,16 @@ test("daemon attachment HTTP routes scope cwd listings and reject invalid cwdSco
         false,
       );
 
+      const unscoped = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${target.runId}/attachments?cwdScope=false`,
+      );
+      assert.equal(unscoped.status, 200);
+      assert.deepEqual(
+        unscoped.body.attachments.map((attachment) => attachment.ownerRunId),
+        [target.runId],
+      );
+
       const invalid = await httpJson(
         httpBaseUrl,
         `/api/runs/${target.runId}/attachments?cwdScope=maybe`,

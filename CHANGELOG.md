@@ -23,6 +23,7 @@
 
 ### Added
 
+- Added `task-runner attachment list --cwd-scope` for exact same-cwd peer attachment discovery, and split the web run-detail Attachments area into `Run` and `Group` tabs so peer attachments can be previewed and downloaded without changing per-run ownership.
 - Added `scripts/migrate-manifests-v8.mjs` to backfill persisted `repo` capture for existing `schemaVersion: 7` run manifests, including legacy state roots passed via `--root` such as `~/.local/state/agent-runner`, with repeated `--repo <name>` filters for migrating only selected repo buckets. ([#43](https://github.com/kcosr/task-runner/pull/43))
 - Added a dedicated Settings area in the web shell with General and Keybindings sections, and moved dashboard defaults there while keeping the runs-toolbar toggles in sync. ([#42](https://github.com/kcosr/task-runner/pull/42))
 - Added a persisted dashboard preference for recent-updates board ordering so runs can promote touched cards to the top of their columns, with move/reorder/insert card motion that respects `prefers-reduced-motion`. ([#42](https://github.com/kcosr/task-runner/pull/42))

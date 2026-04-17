@@ -215,10 +215,12 @@ trash or soft-deleted.
 - `task-runner brief <run-id>`
 - `task-runner task list <run-id>`
 - `task-runner task show <run-id> <task-id>`
+- `task-runner attachment list <run-id> [--cwd-scope]`
 
 Important rule:
 
 - `status` and `brief` are run-id-only read surfaces
+- `attachment list --cwd-scope` uses the target run's persisted `cwd` as an exact-match scope key; it does not infer groups from the caller cwd, repo bucket, or path prefixes
 
 ### Mutation Surfaces
 
@@ -292,6 +294,7 @@ Notes:
 - attempt logs are append-only audit records
 - attachment metadata lives in the manifest; attachment bytes live under
   `attachments/`
+- cwd-scoped attachment grouping is derived at read time only; ownership and storage remain per-run, and web `Group` rows stay preview/download-only
 
 ## Prompt And Retry Behavior
 

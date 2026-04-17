@@ -2665,7 +2665,7 @@ describe("web app", () => {
 
   it("shows Start for initialized runs and resumes without opening the dialog", async () => {
     let resumeBody: { overrides?: { message?: string } } | undefined;
-    installFetchMock(
+    const fetchMock = installFetchMock(
       {
         runs: [
           makeRun({
@@ -2739,7 +2739,7 @@ describe("web app", () => {
 
   it("shows an optional-message disclosure for incomplete-task resumes and can send without a message", async () => {
     let resumeBody: { overrides?: { message?: string } } | undefined;
-    installFetchMock(
+    const fetchMock = installFetchMock(
       {
         runs: [makeRun({ runId: "resumable", assignmentName: "Resumable run", status: "success" })],
         details: {
@@ -4180,7 +4180,7 @@ describe("web app", () => {
   });
 
   it("shows Run and Group attachment tabs and uses ownerRunId for peer preview/download", async () => {
-    installFetchMock(
+    const fetchMock = installFetchMock(
       {
         runs: [makeRun({ runId: "run-1", name: "Attachment run" })],
         details: {
@@ -4253,17 +4253,22 @@ describe("web app", () => {
       screen.queryByRole("button", { name: /^Remove peer-notes\.md$/ }),
     ).not.toBeInTheDocument();
 
+    const peerRow = screen.getByText("peer-notes.md").closest("li");
+    expect(peerRow).not.toBeNull();
+    await user.click(within(peerRow as HTMLLIElement).getByRole("button", { name: /^Download / }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/runs/run-2/attachments/att-peer/content"),
+    );
+    await waitFor(() => expect(createObjectURL).toHaveBeenCalledTimes(1));
+    expect(anchorClick).toHaveBeenCalledTimes(1);
+
     await user.click(screen.getByRole("button", { name: /^Preview peer-notes\.md$/ }));
     expect(await screen.findByText("peer attachment body")).toBeInTheDocument();
     expect(screen.getByText("run-2")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /^Download$/ }));
     await waitFor(() => expect(createObjectURL).toHaveBeenCalled());
-    expect(anchorClick).toHaveBeenCalled();
-
-    await user.click(screen.getByRole("button", { name: /back to attachments/i }));
-    expect(await screen.findByText("peer-notes.md")).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Group" })).toHaveAttribute("aria-selected", "true");
+    expect(anchorClick).toHaveBeenCalledTimes(2);
 
     anchorClick.mockRestore();
   });

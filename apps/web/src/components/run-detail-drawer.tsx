@@ -179,7 +179,7 @@ export function RunDetailDrawer({
   onCopy: (value: string, label: string) => void;
   onDelete: () => void;
   groupAttachmentsQuery: UseQueryResult<AttachmentListEntry[], Error>;
-  onDownloadAttachment: (attachmentId: string, name: string) => Promise<void>;
+  onDownloadAttachment: (ownerRunId: string, attachmentId: string, name: string) => Promise<void>;
   onOpenAttachmentPreview: (
     attachmentOwnerRunId: string,
     attachmentId: string,
@@ -557,7 +557,9 @@ export function RunDetailDrawer({
                   aria-label={`Download ${attachment.name}`}
                   className="icon-btn"
                   disabled={actionsLocked}
-                  onClick={() => void onDownloadAttachment(attachment.id, attachment.name)}
+                  onClick={() =>
+                    void onDownloadAttachment(ownerRunId, attachment.id, attachment.name)
+                  }
                   title={downloadAttachmentPending ? "Downloading..." : "Download"}
                   type="button"
                 >
