@@ -109,7 +109,7 @@ Top-level commands:
 - `task-runner brief <run-id>`
 - `task-runner task list|show|set|append-notes|add`
 - `task-runner attachment add|list|download|remove`
-- `task-runner list agents|assignments|runs`
+- `task-runner list agents|assignments|runs [--cwd <path> | --repo <name> | --global] [--include-archived]`
 - `task-runner show agent|assignment <name|path>`
 - `task-runner run reset|archive|unarchive|delete|set-name|add-dep|remove-dep|clear-deps`
 
@@ -118,6 +118,7 @@ Important read-surface rule:
 - `status` and `brief` accept a run id, not a workspace path.
 - `brief` is text-only. It does not support `--output-format` or `--field`.
 - `status --output-format json` returns the shared `RunDetail` DTO.
+- `list runs` defaults to the caller's cwd. Use `--cwd <path>` for a different exact cwd, `--repo <name>` for an exact repo bucket, or `--global` to restore the previous global listing behavior.
 
 ## Workflow
 

@@ -450,10 +450,16 @@ function matchesRunListScope(
   if (scope === undefined || scope.kind === "global") {
     return true;
   }
-  if (scope.kind === "cwd") {
-    return manifest.cwd === scope.cwd;
+  switch (scope.kind) {
+    case "cwd":
+      return manifest.cwd === scope.cwd;
+    case "repo":
+      return manifest.repo === scope.repo;
+    default: {
+      const unreachableScope: never = scope;
+      return unreachableScope;
+    }
   }
-  return manifest.repo === scope.repo;
 }
 
 export function listRuns(filter: RunListFilter = {}): RunListResult {

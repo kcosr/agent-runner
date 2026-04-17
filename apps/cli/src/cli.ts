@@ -153,7 +153,7 @@ Execution options:
   --resume-run <id|path>  Continue an existing run by short id or path.
   --var <key>=<value>     Set an input variable (repeatable).
   --add-task <title>      Append a task to the run's task list.
-  --cwd <path>            Override the run cwd.
+  --cwd <path>            Override the run cwd, or scope list runs to a cwd.
   --backend <id>          Override the agent's backend.
   --model <id>            Override the agent's model.
   --effort <level>        Override effort level.
@@ -164,6 +164,8 @@ Execution options:
   --clear                 (run set-name) Clear the persisted run name.
   --detach                (run only, daemon mode only) Dispatch and exit
                           after the daemon accepts the run.
+  --repo <name>           (list runs only) Scope runs to an exact repo.
+  --global                (list runs only) Disable default cwd scoping.
   --output-format <fmt>   Output format: "text" (default) or "json".
   --field <name>          (status only, repeatable) Restrict JSON output.
   --include-archived      (list runs only) Include archived runs.
@@ -435,7 +437,7 @@ async function runListCommand(parsed: ParsedArgs, connectUrl?: string): Promise<
       `task-runner: list requires a kind: agents, assignments, or runs${kindArg ? ` (got "${kindArg}")` : ""}\n`,
     );
     process.stderr.write(
-      "Usage: task-runner list <agents|assignments|runs> [--include-archived] [--output-format json]\n",
+      "Usage: task-runner list <agents|assignments|runs> [--cwd <path> | --repo <name> | --global] [--include-archived] [--output-format json]\n",
     );
     process.exit(3);
   }
