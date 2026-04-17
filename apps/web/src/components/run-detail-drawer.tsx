@@ -130,6 +130,49 @@ function scrollElementToBottom(element: HTMLElement) {
   element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
 }
 
+function InlineConfirmActions({
+  cancelLabel,
+  cancelTitle,
+  confirmLabel,
+  confirmTitle,
+  disabled,
+  onCancel,
+  onConfirm,
+}: {
+  cancelLabel: string;
+  cancelTitle: string;
+  confirmLabel: string;
+  confirmTitle: string;
+  disabled: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="drawer-confirm-actions">
+      <button
+        aria-label={confirmLabel}
+        className="icon-btn icon-btn--destructive"
+        disabled={disabled}
+        onClick={onConfirm}
+        title={confirmTitle}
+        type="button"
+      >
+        <CheckIcon aria-hidden="true" />
+      </button>
+      <button
+        aria-label={cancelLabel}
+        className="icon-btn"
+        disabled={disabled}
+        onClick={onCancel}
+        title={cancelTitle}
+        type="button"
+      >
+        <CloseIcon aria-hidden="true" />
+      </button>
+    </div>
+  );
+}
+
 export function RunDetailDrawer({
   activeSection,
   dependencyCandidateRuns,
@@ -198,6 +241,8 @@ export function RunDetailDrawer({
   const [resumeMessageExpanded, setResumeMessageExpanded] = useState(false);
   const [resumeMessageDraft, setResumeMessageDraft] = useState("");
   const [confirmingAttachmentId, setConfirmingAttachmentId] = useState<string | null>(null);
+  const [confirmingReset, setConfirmingReset] = useState(false);
+  const [confirmingAbort, setConfirmingAbort] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [dependencyDraft, setDependencyDraft] = useState("");
   const [selectedDependencyRunId, setSelectedDependencyRunId] = useState<string | null>(null);
@@ -221,6 +266,7 @@ export function RunDetailDrawer({
   const renamePending = actionPending === "rename";
   const backendSessionPending = actionPending === "backend-session";
   const resetPending = actionPending === "reset";
+  const abortPending = actionPending === "abort";
   const uploadAttachmentPending = actionPending === "upload-attachment";
   const removeAttachmentPending = actionPending === "remove-attachment";
   const downloadAttachmentPending = actionPending === "download-attachment";
@@ -409,6 +455,18 @@ export function RunDetailDrawer({
       setConfirmingAttachmentId(null);
     }
   }, [confirmingAttachmentId, run.attachments]);
+
+  useEffect(() => {
+    if (!run.capabilities.canReset) {
+      setConfirmingReset(false);
+    }
+  }, [run.capabilities.canReset]);
+
+  useEffect(() => {
+    if (!run.capabilities.canAbort) {
+      setConfirmingAbort(false);
+    }
+  }, [run.capabilities.canAbort]);
 
   useEffect(() => {
     if (!run.capabilities.canDelete) {
@@ -696,47 +754,68 @@ export function RunDetailDrawer({
               </button>
             ) : null}
             {run.capabilities.canReset ? (
-              <button className="btn" disabled={actionsLocked} onClick={onReset} type="button">
-                {resetPending ? "Resetting..." : "Reset"}
-              </button>
+              confirmingReset ? (
+                <InlineConfirmActions
+                  cancelLabel="Cancel reset run"
+                  cancelTitle={resetPending ? "Reset is pending..." : "Cancel reset run"}
+                  confirmLabel="Confirm reset run"
+                  confirmTitle={resetPending ? "Resetting run..." : "Confirm reset run"}
+                  disabled={actionsLocked}
+                  onCancel={() => setConfirmingReset(false)}
+                  onConfirm={() => {
+                    setConfirmingReset(false);
+                    onReset();
+                  }}
+                />
+              ) : (
+                <button
+                  className="btn"
+                  disabled={actionsLocked}
+                  onClick={() => setConfirmingReset(true)}
+                  type="button"
+                >
+                  {resetPending ? "Resetting..." : "Reset"}
+                </button>
+              )
             ) : null}
             {run.capabilities.canAbort ? (
-              <button
-                className="btn btn-destructive-outline"
-                disabled={actionsLocked}
-                onClick={onAbort}
-                type="button"
-              >
-                <StopIcon aria-hidden="true" />
-                {actionPending === "abort" ? "Aborting..." : "Abort"}
-              </button>
+              confirmingAbort ? (
+                <InlineConfirmActions
+                  cancelLabel="Cancel abort run"
+                  cancelTitle={abortPending ? "Abort is pending..." : "Cancel abort run"}
+                  confirmLabel="Confirm abort run"
+                  confirmTitle={abortPending ? "Aborting run..." : "Confirm abort run"}
+                  disabled={actionsLocked}
+                  onCancel={() => setConfirmingAbort(false)}
+                  onConfirm={onAbort}
+                />
+              ) : (
+                <button
+                  className="btn btn-destructive-outline"
+                  disabled={actionsLocked}
+                  onClick={() => setConfirmingAbort(true)}
+                  type="button"
+                >
+                  <StopIcon aria-hidden="true" />
+                  Abort
+                </button>
+              )
             ) : null}
             {run.capabilities.canDelete ? (
               confirmingDelete ? (
-                <div className="drawer-confirm-actions">
-                  <button
-                    aria-label="Confirm delete run"
-                    className="icon-btn icon-btn--destructive"
-                    disabled={actionsLocked}
-                    onClick={onDelete}
-                    title={actionPending === "delete" ? "Deleting run..." : "Confirm delete run"}
-                    type="button"
-                  >
-                    <CheckIcon aria-hidden="true" />
-                  </button>
-                  <button
-                    aria-label="Cancel delete run"
-                    className="icon-btn"
-                    disabled={actionsLocked}
-                    onClick={() => setConfirmingDelete(false)}
-                    title={
-                      actionPending === "delete" ? "Delete is pending..." : "Cancel delete run"
-                    }
-                    type="button"
-                  >
-                    <CloseIcon aria-hidden="true" />
-                  </button>
-                </div>
+                <InlineConfirmActions
+                  cancelLabel="Cancel delete run"
+                  cancelTitle={
+                    actionPending === "delete" ? "Delete is pending..." : "Cancel delete run"
+                  }
+                  confirmLabel="Confirm delete run"
+                  confirmTitle={
+                    actionPending === "delete" ? "Deleting run..." : "Confirm delete run"
+                  }
+                  disabled={actionsLocked}
+                  onCancel={() => setConfirmingDelete(false)}
+                  onConfirm={onDelete}
+                />
               ) : (
                 <button
                   className="btn btn-destructive-outline"

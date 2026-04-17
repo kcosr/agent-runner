@@ -2739,8 +2739,8 @@ describe("web app", () => {
     expect(screen.queryByRole("button", { name: "Abort" })).not.toBeInTheDocument();
   });
 
-  it("resets a run from the web detail drawer", async () => {
-    installFetchMock({
+  it("confirms Reset inline before sending the reset request", async () => {
+    const fetchMock = installFetchMock({
       runs: [makeRun({ runId: "resumable", assignmentName: "Resumable run", status: "success" })],
       details: {
         resumable: makeDetail({
@@ -2768,10 +2768,40 @@ describe("web app", () => {
 
     await user.click(await screen.findByRole("button", { name: "Reset" }));
 
+    expect(screen.queryByRole("button", { name: "Reset" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Confirm reset run" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel reset run" })).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.filter(
+        ([url, init]) =>
+          String(url).endsWith("/api/runs/resumable/reset") && init?.method === "POST",
+      ),
+    ).toHaveLength(0);
+
+    await user.click(screen.getByRole("button", { name: "Cancel reset run" }));
+
+    expect(screen.getByRole("button", { name: "Reset" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Confirm reset run" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel reset run" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Reset" }));
+    await user.click(screen.getByRole("button", { name: "Confirm reset run" }));
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.filter(
+          ([url, init]) =>
+            String(url).endsWith("/api/runs/resumable/reset") && init?.method === "POST",
+        ),
+      ).toHaveLength(1);
+    });
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Start" })).toBeInTheDocument();
     });
+    expect(screen.getByRole("button", { name: "Reset" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Confirm reset run" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel reset run" })).not.toBeInTheDocument();
   });
 
   it("deletes archived runs from the web detail drawer", async () => {
@@ -3516,6 +3546,93 @@ describe("web app", () => {
 
     await waitFor(() => {
       expect(restoredBoard.scrollLeft).toBe(300);
+    });
+  });
+
+  it("confirms Abort inline before sending the abort request", async () => {
+    const state = {
+      runs: [makeRun({ capabilities: { canAbort: true, abortReason: undefined } })],
+      details: {
+        "run-1": makeDetail({ capabilities: { canAbort: true, abortReason: undefined } }),
+      },
+    };
+    const fetchMock = installFetchMock(state, {
+      handleRequest: (url, init) => {
+        if (url.endsWith("/api/runs/run-1/abort") && init?.method === "POST") {
+          const detail = state.details["run-1"];
+          const run = state.runs[0];
+          if (!detail || !run) {
+            throw new Error("expected abortable run state");
+          }
+          state.details["run-1"] = makeDetail({
+            ...detail,
+            status: "aborted",
+            effectiveStatus: "aborted",
+            isLive: false,
+            activeTask: null,
+            endedAt: "2026-04-13T05:05:00.000Z",
+            capabilities: {
+              ...detail.capabilities,
+              canAbort: false,
+              abortReason: "already_terminal",
+            },
+          });
+          state.runs = [
+            makeRun({
+              ...run,
+              status: "aborted",
+              effectiveStatus: "aborted",
+              endedAt: "2026-04-13T05:05:00.000Z",
+              activeTask: null,
+              capabilities: {
+                ...run.capabilities,
+                canAbort: false,
+                abortReason: "already_terminal",
+              },
+            }),
+          ];
+        }
+        return undefined;
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+
+    expect(await screen.findByRole("button", { name: "Abort" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Abort" }));
+
+    expect(screen.queryByRole("button", { name: "Abort" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Confirm abort run" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel abort run" })).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.filter(
+        ([url, init]) => String(url).endsWith("/api/runs/run-1/abort") && init?.method === "POST",
+      ),
+    ).toHaveLength(0);
+
+    await user.click(screen.getByRole("button", { name: "Cancel abort run" }));
+
+    expect(screen.getByRole("button", { name: "Abort" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Confirm abort run" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel abort run" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Abort" }));
+    await user.click(screen.getByRole("button", { name: "Confirm abort run" }));
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.filter(
+          ([url, init]) => String(url).endsWith("/api/runs/run-1/abort") && init?.method === "POST",
+        ),
+      ).toHaveLength(1);
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Abort" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Confirm abort run" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Cancel abort run" })).not.toBeInTheDocument();
     });
   });
 
