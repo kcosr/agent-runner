@@ -108,7 +108,7 @@ export const assignmentConfigSchema = z
   .object({
     schemaVersion: z.literal(1),
     name: z.string().min(1),
-    cwd: z.string().optional(),
+    cwd: z.string().trim().min(1).optional(),
     message: z.string().optional(),
     maxRetries: z.number().int().min(0).max(20).default(3),
     // Documentation surface for the human / script invoking

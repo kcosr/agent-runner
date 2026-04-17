@@ -125,14 +125,6 @@ export function resolveUnknownRunsDir(env: NodeJS.ProcessEnv = process.env): str
   return resolveRunsBucketDir(UNKNOWN_REPO_KEY, env);
 }
 
-export function resolveRunWorkspaceDir(
-  cwd: string,
-  runId: string,
-  env: NodeJS.ProcessEnv = process.env,
-): string {
-  return resolveRunWorkspaceDirForRepo(deriveRepoKey(cwd), runId, env);
-}
-
 export function resolveInputPath(arg: string, cwd: string): string {
   return isAbsolute(arg) ? arg : resolve(cwd, arg);
 }

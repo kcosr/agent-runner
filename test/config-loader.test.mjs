@@ -95,6 +95,26 @@ body
     assert.equal(loaded.config.cwd, ".");
   }));
 
+test("loadAssignmentConfig rejects empty authored cwd after trimming", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    writeAssignment(
+      configDir,
+      "blank-cwd",
+      `---
+schemaVersion: 1
+name: blank-cwd
+cwd: "   "
+tasks:
+  - id: t1
+    title: First
+---
+body
+`,
+    );
+
+    assert.throws(() => loadAssignmentConfig("blank-cwd", rootDir), AssignmentConfigError);
+  }));
+
 test("loadAgentConfig throws AgentConfigError on bad frontmatter", () =>
   withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
     writeAgent(

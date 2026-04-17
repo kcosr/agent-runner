@@ -926,6 +926,7 @@ describe("web app", () => {
     expect(screen.getAllByText("Build UI").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("Repo").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("CWD").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("/tmp/task-runner")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /copy cwd path/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /copy run id/i })).toBeInTheDocument();
   });

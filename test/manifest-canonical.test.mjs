@@ -412,6 +412,58 @@ test("schemaVersion mismatch: resume rejects a v2 manifest with a clear error", 
   });
 });
 
+test("schemaVersion mismatch: resume rejects a v7 manifest with a clear error", async () => {
+  const dir = tempDir();
+  const workspaceDir = join(dir, "runs", "unknown", "stale07");
+  mkdirSync(workspaceDir, { recursive: true });
+  const v7Manifest = {
+    schemaVersion: 7,
+    runId: "stale07",
+    agent: { name: "old", sourcePath: "/tmp/agent.md", instructions: "" },
+    assignment: null,
+    backend: "claude",
+    model: null,
+    effort: null,
+    message: null,
+    name: null,
+    unrestricted: false,
+    cwd: dir,
+    lockedFields: [],
+    timeoutSec: 3600,
+    assignmentPath: join(workspaceDir, "assignment.md"),
+    workspaceDir,
+    startedAt: "2024-01-01T00:00:00Z",
+    endedAt: null,
+    status: "success",
+    exitCode: 0,
+    attempts: 1,
+    maxAttempts: 4,
+    tasksCompleted: 0,
+    tasksTotal: 0,
+    backendSessionId: "sess-old",
+    runtimeVars: {},
+    brief: null,
+    callerInstructions: null,
+    finalTasks: {},
+    sessionCount: 1,
+    sessions: [],
+    attemptRecords: [],
+    archivedAt: null,
+  };
+  writeFileSync(join(workspaceDir, "run.json"), `${JSON.stringify(v7Manifest, null, 2)}\n`);
+
+  await withSharedRuntimeEnv(dir, async () => {
+    assert.throws(
+      () => resolveResumeTarget("stale07", dir),
+      (err) => {
+        assert.match(err.message, /schemaVersion 7/);
+        assert.match(err.message, /requires schemaVersion 8/);
+        return true;
+      },
+    );
+  });
+});
+
 test("resume manifest: model + timeoutSec preserved across an init-run cycle", async () => {
   const dir = tempDir();
   writeAgent(dir, "canonical-claude", CLAUDE_AGENT);
