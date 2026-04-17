@@ -348,8 +348,10 @@ async function startCliDaemon(baseDir, listenUrl) {
 test("daemon rpc mirrors shared run and definition DTOs", async () => {
   const dir = tempDir();
   writeAgent(dir, "daemon-agent", AGENT);
+  writeAgent(dir, "passive-daemon-agent", PASSIVE_AGENT);
   writeAssignment(dir, "daemon-work", ASSIGNMENT);
   const init = await initRun(dir);
+  const passiveInit = await initRun(dir, "passive-daemon-agent");
   const otherCwd = join(dir, "other-cwd");
   mkdirSync(otherCwd, { recursive: true });
   patchManifest(init.workspaceDir, (manifest) => {
@@ -367,7 +369,8 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
       assert.match(info.daemonInstanceId, /^daemon-/);
 
       const runs = await client.call("runs.list", {});
-      assert.equal(runs.runs[0].runId, init.runId);
+      assert.ok(runs.runs.some((run) => run.runId === init.runId));
+      assert.ok(runs.runs.some((run) => run.runId === passiveInit.runId));
 
       const cwdScoped = await client.call("runs.list", {
         scope: { kind: "cwd", cwd: otherCwd },
@@ -380,15 +383,13 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
       const globalScoped = await client.call("runs.list", {
         scope: { kind: "global" },
       });
-      assert.deepEqual(
-        globalScoped.runs.map((run) => run.runId),
-        [init.runId],
-      );
-      assert.deepEqual(runs.runs[0].execution, {
+      assert.ok(globalScoped.runs.some((run) => run.runId === init.runId));
+      assert.ok(globalScoped.runs.some((run) => run.runId === passiveInit.runId));
+      assert.deepEqual(runs.runs.find((run) => run.runId === init.runId)?.execution, {
         hostMode: "embedded",
         controller: { kind: "embedded" },
       });
-      assert.deepEqual(runs.runs[0].capabilities, {
+      assert.deepEqual(runs.runs.find((run) => run.runId === init.runId)?.capabilities, {
         canArchive: true,
         canUnarchive: false,
         canReset: true,
@@ -402,7 +403,7 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
           canAdd: true,
         },
       });
-      assert.deepEqual(runs.runs[0].dependencyState, {
+      assert.deepEqual(runs.runs.find((run) => run.runId === init.runId)?.dependencyState, {
         ready: true,
         total: 0,
         satisfied: 0,
@@ -472,6 +473,25 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
       assert.deepEqual(cleared.result, {
         runId: init.runId,
         name: null,
+        changed: true,
+      });
+
+      const setBackendSession = await client.call("runs.setBackendSession", {
+        target: passiveInit.runId,
+        backendSessionId: "rpc-thread-9",
+      });
+      assert.deepEqual(setBackendSession.result, {
+        runId: passiveInit.runId,
+        backendSessionId: "rpc-thread-9",
+        changed: true,
+      });
+
+      const clearedBackendSession = await client.call("runs.clearBackendSession", {
+        target: passiveInit.runId,
+      });
+      assert.deepEqual(clearedBackendSession.result, {
+        runId: passiveInit.runId,
+        backendSessionId: null,
         changed: true,
       });
 
@@ -563,8 +583,10 @@ test("connected cli sends caller cwd scope while daemon and http defaults remain
 test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async () => {
   const dir = tempDir();
   writeAgent(dir, "daemon-agent", AGENT);
+  writeAgent(dir, "passive-daemon-agent", PASSIVE_AGENT);
   writeAssignment(dir, "daemon-work", ASSIGNMENT);
   const init = await initRun(dir);
+  const passiveInit = await initRun(dir, "passive-daemon-agent");
 
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
@@ -579,21 +601,22 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
 
       const runs = await httpJson(httpBaseUrl, "/api/runs");
       assert.equal(runs.status, 200);
-      assert.equal(runs.body.runs[0].runId, init.runId);
-      assert.equal(runs.body.runs[0].status, "initialized");
-      assert.equal(runs.body.runs[0].effectiveStatus, "initialized");
-      assert.deepEqual(runs.body.runs[0].dependencyState, {
+      const initSummary = runs.body.runs.find((run) => run.runId === init.runId);
+      assert.equal(initSummary?.runId, init.runId);
+      assert.equal(initSummary?.status, "initialized");
+      assert.equal(initSummary?.effectiveStatus, "initialized");
+      assert.deepEqual(initSummary?.dependencyState, {
         ready: true,
         total: 0,
         satisfied: 0,
         unsatisfied: 0,
       });
-      assert.deepEqual(runs.body.runs[0].execution, {
+      assert.deepEqual(initSummary?.execution, {
         hostMode: "embedded",
         controller: { kind: "embedded" },
       });
-      assert.equal(runs.body.runs[0].capabilities.canAbort, false);
-      assert.equal(runs.body.runs[0].capabilities.abortReason, "not_active_in_daemon");
+      assert.equal(initSummary?.capabilities.canAbort, false);
+      assert.equal(initSummary?.capabilities.abortReason, "not_active_in_daemon");
 
       const detail = await httpJson(httpBaseUrl, `/api/runs/${init.runId}`);
       assert.equal(detail.status, 200);
@@ -678,6 +701,48 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
         name: null,
         changed: true,
       });
+
+      const setBackendSession = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${passiveInit.runId}/backend-session`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ backendSessionId: "http-thread-5" }),
+        },
+      );
+      assert.equal(setBackendSession.status, 200);
+      assert.deepEqual(setBackendSession.body.result, {
+        runId: passiveInit.runId,
+        backendSessionId: "http-thread-5",
+        changed: true,
+      });
+
+      const clearedBackendSession = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${passiveInit.runId}/backend-session/clear`,
+        {
+          method: "POST",
+        },
+      );
+      assert.equal(clearedBackendSession.status, 200);
+      assert.deepEqual(clearedBackendSession.body.result, {
+        runId: passiveInit.runId,
+        backendSessionId: null,
+        changed: true,
+      });
+
+      const invalidBackendSessionRequest = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${passiveInit.runId}/backend-session`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ backendSessionId: "   " }),
+        },
+      );
+      assert.equal(invalidBackendSessionRequest.status, 400);
+      assert.equal(invalidBackendSessionRequest.body.error.code, "INVALID_REQUEST");
 
       const tasks = await httpJson(httpBaseUrl, `/api/runs/${init.runId}/tasks`);
       assert.equal(tasks.status, 200);
@@ -2699,8 +2764,10 @@ test("daemon HTTP run start keeps callerCwd separate from overrides.cwd", async 
 test("serve and --connect route CLI commands remotely and fail clearly when no daemon is available", async () => {
   const dir = tempDir();
   writeAgent(dir, "daemon-agent", AGENT);
+  writeAgent(dir, "passive-daemon-agent", PASSIVE_AGENT);
   writeAssignment(dir, "daemon-work", ASSIGNMENT);
   const init = await initRun(dir);
+  const passiveInit = await initRun(dir, "passive-daemon-agent");
 
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
@@ -2724,6 +2791,15 @@ test("serve and --connect route CLI commands remotely and fail clearly when no d
       },
     );
     assert.match(renameText, new RegExp(`set name for run ${init.runId} to "Remote CLI name"`));
+
+    const backendSessionText = runCli(
+      ["run", "set-backend-session", passiveInit.runId, "remote-thread-7", "--connect", listenUrl],
+      { cwd: dir },
+    );
+    assert.match(
+      backendSessionText,
+      new RegExp(`set backend session for run ${passiveInit.runId} to "remote-thread-7"`),
+    );
 
     const statusViaEnv = runCli(["status", init.runId], {
       cwd: dir,

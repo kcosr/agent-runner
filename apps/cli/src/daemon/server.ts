@@ -6,6 +6,7 @@ import {
   addRunAttachmentFromStream,
   appendNotes,
   archive,
+  clearBackendSession,
   clearDependencies,
   createTask,
   deleteArchivedRun,
@@ -27,6 +28,7 @@ import {
   resumeRun,
   startRun,
   unarchive,
+  updateRunBackendSession,
   updateTask,
 } from "@task-runner/core/app/service.js";
 import { VALID_STATUSES } from "@task-runner/core/assignment/model.js";
@@ -71,6 +73,7 @@ import {
   optionalEnum,
   optionalOverrides,
   optionalString,
+  parseRunSetBackendSessionParams,
   parseRunSetNameParams,
   parseRunsListParams,
   parseStartRunParams,
@@ -319,6 +322,8 @@ export async function serveDaemon(
     unarchive,
     deleteArchivedRun,
     renameRun,
+    updateRunBackendSession,
+    clearBackendSession,
     addDependency,
     removeDependency,
     clearDependencies,
@@ -599,6 +604,20 @@ export async function serveDaemon(
     return result;
   };
 
+  const withPublishedDetailMutation = <T>(runId: string, mutate: () => T): T => {
+    const result = mutate();
+    const detail = getProjectedDetail(runId);
+    if (!detail) {
+      return result;
+    }
+    publishDetail(detail);
+    const active = activeRuns.get(runId);
+    if (active) {
+      active.detail = detail;
+    }
+    return result;
+  };
+
   await new Promise<void>((resolve, reject) => {
     const probe = createNetServer();
     const onListening = () => {
@@ -828,6 +847,10 @@ export async function serveDaemon(
     },
     renameRun: (target, input) =>
       withPublishedMutationAsync(target, () => app.renameRun(target, input)),
+    updateRunBackendSession: (target, input) =>
+      withPublishedDetailMutation(target, () => app.updateRunBackendSession(target, input)),
+    clearBackendSession: (target) =>
+      withPublishedDetailMutation(target, () => app.clearBackendSession(target)),
     addDependency: (target, dependencyRunId) =>
       withPublishedMutation(target, () => app.addDependency(target, dependencyRunId)),
     removeDependency: (target, dependencyRunId) =>
@@ -1092,6 +1115,33 @@ export async function serveDaemon(
           );
           return;
         }
+        case "runs.setBackendSession": {
+          const parsed = parseRunSetBackendSessionParams(params, "runs.setBackendSession params");
+          sendJson(
+            ws,
+            resultResponse(
+              request.id,
+              operations.setRunBackendSession(parsed.target, {
+                backendSessionId: parsed.backendSessionId,
+              }),
+            ),
+          );
+          return;
+        }
+        case "runs.clearBackendSession":
+          sendJson(
+            ws,
+            resultResponse(
+              request.id,
+              operations.clearBackendSession(
+                requiredString(
+                  asRecord(params, "runs.clearBackendSession params").target,
+                  "target",
+                ),
+              ),
+            ),
+          );
+          return;
         case "runs.addDependency": {
           const parsed = asRecord(params, "runs.addDependency params");
           sendJson(

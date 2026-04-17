@@ -6,6 +6,7 @@ import {
   addRunAttachmentFromFile,
   appendNotes,
   archive,
+  clearBackendSession,
   clearDependencies,
   createTask,
   deleteArchivedRun,
@@ -26,6 +27,7 @@ import {
   resumeRun,
   startRun,
   unarchive,
+  updateRunBackendSession,
   updateTask,
 } from "@task-runner/core/app/service.js";
 import {
@@ -69,10 +71,12 @@ import {
   renderDefinitionList,
   renderRunAddDependency,
   renderRunArchive,
+  renderRunClearBackendSession,
   renderRunClearDependencies,
   renderRunDelete,
   renderRunList,
   renderRunRemoveDependency,
+  renderRunSetBackendSession,
   renderRunSetName,
   renderRunUnarchive,
   renderStatus,
@@ -101,6 +105,10 @@ Commands:
   run unarchive <id|path> Clear a run's archive marker.
   run delete <id|path>    Delete an archived run workspace.
   run set-name <id|path>  Update or clear a run's persisted display name.
+  run set-backend-session <id|path> <session-id>
+                          Persist a passive run backend session reference.
+  run clear-backend-session <id|path>
+                          Clear a passive run backend session reference.
   run add-dep <id> <dep>  Add a dependency to an initialized run.
   run remove-dep <id> <dep>
                           Remove a dependency from an initialized run.
@@ -1120,6 +1128,91 @@ async function runSetNameCommand(parsed: ParsedArgs, connectUrl?: string): Promi
   }
 }
 
+async function runBackendSessionCommand(
+  parsed: ParsedArgs,
+  connectUrl: string | undefined,
+  verb: "set-backend-session" | "clear-backend-session",
+): Promise<never> {
+  const [runArg, backendSessionArg, extra] = parsed.positionals;
+  const target = normalizeTarget(runArg);
+  if (!target) {
+    process.stderr.write(
+      `task-runner: run ${verb} requires <id-or-path>${verb === "set-backend-session" ? " <session-id>" : ""}\n`,
+    );
+    process.exit(3);
+  }
+
+  if (verb === "set-backend-session") {
+    if (backendSessionArg === undefined) {
+      process.stderr.write(
+        "task-runner: run set-backend-session requires <id-or-path> <session-id>\n",
+      );
+      process.exit(3);
+    }
+    if (extra !== undefined) {
+      process.stderr.write(
+        `task-runner: run set-backend-session takes exactly two positionals (<id-or-path> <session-id>); got extra "${extra}"\n`,
+      );
+      process.exit(3);
+    }
+    if (backendSessionArg.trim().length === 0) {
+      process.stderr.write("task-runner: run set-backend-session: <session-id> cannot be empty\n");
+      process.exit(3);
+    }
+  } else if (backendSessionArg !== undefined) {
+    process.stderr.write(
+      `task-runner: run clear-backend-session takes exactly one positional (<id-or-path>); got extra "${backendSessionArg}"\n`,
+    );
+    process.exit(3);
+  }
+
+  const unsupported = unsupportedFlagsForGroupedCommand(parsed);
+  if (unsupported.length > 0) {
+    process.stderr.write(
+      `task-runner: run ${verb} only supports <id-or-path>${verb === "set-backend-session" ? ", <session-id>" : ""}, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+    );
+    process.exit(3);
+  }
+
+  try {
+    const result =
+      connectUrl === undefined
+        ? verb === "set-backend-session"
+          ? updateRunBackendSession(target, { backendSessionId: backendSessionArg as string })
+          : clearBackendSession(target)
+        : await withDaemonClient(connectUrl, (client) =>
+            verb === "set-backend-session"
+              ? client
+                  .call<{ result: ReturnType<typeof updateRunBackendSession> }>(
+                    "runs.setBackendSession",
+                    {
+                      target,
+                      backendSessionId: backendSessionArg,
+                    },
+                  )
+                  .then((response) => response.result)
+              : client
+                  .call<{ result: ReturnType<typeof clearBackendSession> }>(
+                    "runs.clearBackendSession",
+                    { target },
+                  )
+                  .then((response) => response.result),
+          );
+    if (parsed.outputFormat === "json") {
+      writeJson(result);
+    } else {
+      process.stdout.write(
+        verb === "set-backend-session"
+          ? renderRunSetBackendSession(result)
+          : renderRunClearBackendSession(result),
+      );
+    }
+    process.exit(0);
+  } catch (err) {
+    exitCommandFailure(err, connectUrl);
+  }
+}
+
 async function runDependencyCommand(
   parsed: ParsedArgs,
   connectUrl: string | undefined,
@@ -1691,6 +1784,12 @@ async function main(): Promise<void> {
     }
     if (parsed.subcommand === "set-name") {
       await runSetNameCommand(parsed, connectUrl);
+    }
+    if (parsed.subcommand === "set-backend-session") {
+      await runBackendSessionCommand(parsed, connectUrl, "set-backend-session");
+    }
+    if (parsed.subcommand === "clear-backend-session") {
+      await runBackendSessionCommand(parsed, connectUrl, "clear-backend-session");
     }
     if (parsed.subcommand === "add-dep") {
       await runDependencyCommand(parsed, connectUrl, "add-dep");

@@ -140,6 +140,12 @@ export interface RunNameResult {
   changed: boolean;
 }
 
+export interface RunBackendSessionResult {
+  runId: string;
+  backendSessionId: string | null;
+  changed: boolean;
+}
+
 export interface RunDependenciesResult {
   runId: string;
   dependencyRunIds: string[];
@@ -376,6 +382,17 @@ export function toRunNameResult(result: {
   return {
     runId: result.manifest.runId,
     name: result.manifest.name,
+    changed: result.changed,
+  };
+}
+
+export function toRunBackendSessionResult(result: {
+  manifest: RunManifest;
+  changed: boolean;
+}): RunBackendSessionResult {
+  return {
+    runId: result.manifest.runId,
+    backendSessionId: result.manifest.backendSessionId,
     changed: result.changed,
   };
 }
