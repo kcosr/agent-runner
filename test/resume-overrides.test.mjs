@@ -183,20 +183,21 @@ test("resolveResumeTarget rejects a manifest with a session missing brief", () =
   );
 });
 
-test("resolveResumeTarget accepts a well-formed v7 manifest from the unknown bucket", () => {
+test("resolveResumeTarget accepts a well-formed v8 manifest from the unknown bucket", () => {
   const dir = tempDir();
   const workspaceDir = join(dir, "runs", "unknown", "wellformed");
   writeManifest(dir, "unknown", "wellformed", baseManifest("wellformed", workspaceDir));
 
   const resolved = withStateRoot(dir, () => resolveResumeTarget("wellformed", dir));
   assert.equal(resolved.manifest.runId, "wellformed");
-  assert.equal(resolved.manifest.schemaVersion, 7);
+  assert.equal(resolved.manifest.schemaVersion, 8);
 });
 
 function baseManifest(runId, workspaceDir) {
   return {
-    schemaVersion: 7,
+    schemaVersion: 8,
     runId,
+    repo: "unknown",
     agent: {
       name: "override-test",
       sourcePath: null,

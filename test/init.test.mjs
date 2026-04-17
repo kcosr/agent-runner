@@ -22,12 +22,8 @@ const TWO_ASSIGNMENT = `---
 schemaVersion: 1
 name: two-work
 maxRetries: 2
+cwd: repo-root
 message: the-ask
-vars:
-  repo_path:
-    type: string
-    required: true
-    source: cli
 tasks:
   - id: t1
     title: First
@@ -36,7 +32,7 @@ tasks:
     title: Second
     body: Do the second thing.
 ---
-Work on {{repo_path}}. Plan at {{assignment_path}}.
+Work on {{cwd}}. Plan at {{assignment_path}}.
 `;
 
 function tempDir() {
@@ -88,11 +84,12 @@ async function initIn(baseDir, { cliVars, overrides } = {}) {
       return await runAgent({
         loaded,
         loadedAssignment,
-        cliVars: cliVars ?? { repo_path: "/tmp/fake-repo" },
+        cliVars: cliVars ?? {},
         backend: mockBackend(async () => {
           throw new Error("backend should not be invoked during init");
         }),
         initialize: true,
+        callerCwd: baseDir,
         overrides,
         stderr: () => {},
         stdout: () => {},
@@ -138,7 +135,9 @@ test("init: persists workspace seed and manifest without invoking the backend", 
   assert.equal(outcome.manifest.attemptRecords.length, 0);
   assert.equal(outcome.manifest.backendSessionId, null);
   assert.equal(outcome.manifest.tasksTotal, 2);
-  assert.equal(outcome.manifest.runtimeVars.repo_path, "/tmp/fake-repo");
+  assert.deepEqual(outcome.manifest.runtimeVars, {});
+  assert.equal(outcome.manifest.cwd, join(dir, "repo-root"));
+  assert.equal(outcome.manifest.repo, "unknown");
 
   assert.ok(!existsSync(outcome.assignmentPath), "workspace assignment.md is not generated");
   assert.ok(existsSync(join(outcome.workspaceDir, "assignment-seed.md")), "workspace seed exists");
@@ -146,7 +145,7 @@ test("init: persists workspace seed and manifest without invoking the backend", 
   // brief is stored verbatim
   assert.ok(outcome.manifest.brief, "brief is set");
   assert.ok(outcome.manifest.brief.includes("Agent role instructions."));
-  assert.ok(outcome.manifest.brief.includes("Work on /tmp/fake-repo."));
+  assert.ok(outcome.manifest.brief.includes(`Work on ${join(dir, "repo-root")}.`));
   assert.ok(outcome.manifest.brief.endsWith("the-ask"));
 });
 
@@ -167,7 +166,7 @@ test("init: rejects --resume-run", async () => {
         await runAgent({
           loaded,
           loadedAssignment,
-          cliVars: { repo_path: "/tmp/other" },
+          cliVars: {},
           backend: mockBackend(async () => ({
             exitCode: 0,
             signal: null,
@@ -179,6 +178,7 @@ test("init: rejects --resume-run", async () => {
           })),
           initialize: true,
           resume: target,
+          callerCwd: dir,
           stderr: () => {},
           stdout: () => {},
         });

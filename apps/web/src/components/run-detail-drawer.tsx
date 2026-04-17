@@ -754,6 +754,20 @@ export function RunDetailDrawer({
               </div>
             ))}
             <div className="meta-cell full">
+              <span className="meta-label">CWD</span>
+              <span className="meta-value mono">
+                {truncateMiddle(run.cwd)}
+                <button
+                  aria-label="Copy cwd path"
+                  className="copy"
+                  onClick={() => onCopy(run.cwd, "cwd path")}
+                  type="button"
+                >
+                  <CopyIcon aria-hidden="true" />
+                </button>
+              </span>
+            </div>
+            <div className="meta-cell full">
               <span className="meta-label">Workspace</span>
               <span className="meta-value mono">
                 {truncateMiddle(run.workspaceDir)}

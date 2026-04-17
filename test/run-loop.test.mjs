@@ -22,26 +22,40 @@ effort: high
 Agent prompt.
 `;
 
-const EXPLICIT_DOT_AGENT = `---
+const EXPLICIT_DOT_ASSIGNMENT = `---
 schemaVersion: 1
-name: three-dot
-backend: claude
-model: claude-sonnet-4-6
-effort: high
+name: three-dot-work
 cwd: .
+tasks:
+  - id: t1
+    title: First
+    body: Do the first thing.
+  - id: t2
+    title: Second
+    body: Do the second thing.
+  - id: t3
+    title: Third
+    body: Do the third thing.
 ---
-Agent prompt.
+Work on the repo. Plan at {{assignment_path}}.
 `;
 
-const EXPLICIT_RELATIVE_AGENT = `---
+const EXPLICIT_RELATIVE_ASSIGNMENT = `---
 schemaVersion: 1
-name: three-relative
-backend: claude
-model: claude-sonnet-4-6
-effort: high
+name: three-relative-work
 cwd: nested/worktree
+tasks:
+  - id: t1
+    title: First
+    body: Do the first thing.
+  - id: t2
+    title: Second
+    body: Do the second thing.
+  - id: t3
+    title: Third
+    body: Do the third thing.
 ---
-Agent prompt.
+Work on the repo. Plan at {{assignment_path}}.
 `;
 
 const THREE_ASSIGNMENT = `---
@@ -119,7 +133,7 @@ async function runWithMock(baseDir, mockInvoke, overrides = {}, options = {}) {
   });
 }
 
-test("fresh runs use callerCwd when the agent omits cwd", async () => {
+test("fresh runs use callerCwd when the assignment omits cwd", async () => {
   const dir = tempDir();
   writeAgentAndAssignment(dir);
   const callerDir = join(dir, "client-root");
@@ -152,10 +166,10 @@ test("fresh runs use callerCwd when the agent omits cwd", async () => {
   assert.equal(seenCwd, callerDir);
 });
 
-test("explicit agent cwd resolves relative to callerCwd", async () => {
+test("explicit assignment cwd resolves relative to callerCwd", async () => {
   const dir = tempDir();
-  writeAgent(dir, "three-relative", EXPLICIT_RELATIVE_AGENT);
-  writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
+  writeAgent(dir, "three", THREE_AGENT);
+  writeAssignment(dir, "three-relative-work", EXPLICIT_RELATIVE_ASSIGNMENT);
   const callerDir = join(dir, "client-root");
   mkdirSync(join(callerDir, "nested", "worktree"), { recursive: true });
 
@@ -180,16 +194,16 @@ test("explicit agent cwd resolves relative to callerCwd", async () => {
       };
     },
     {},
-    { agentName: "three-relative", callerCwd: callerDir },
+    { assignmentName: "three-relative-work", callerCwd: callerDir },
   );
 
   assert.equal(seenCwd, join(callerDir, "nested", "worktree"));
 });
 
-test("explicit --cwd override beats agent cwd and callerCwd", async () => {
+test("explicit --cwd override beats assignment cwd and callerCwd", async () => {
   const dir = tempDir();
-  writeAgent(dir, "three-dot", EXPLICIT_DOT_AGENT);
-  writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
+  writeAgent(dir, "three", THREE_AGENT);
+  writeAssignment(dir, "three-dot-work", EXPLICIT_DOT_ASSIGNMENT);
   const callerDir = join(dir, "client-root");
   mkdirSync(join(callerDir, "override-root"), { recursive: true });
 
@@ -214,7 +228,7 @@ test("explicit --cwd override beats agent cwd and callerCwd", async () => {
       };
     },
     { cwd: "override-root" },
-    { agentName: "three-dot", callerCwd: callerDir },
+    { assignmentName: "three-dot-work", callerCwd: callerDir },
   );
 
   assert.equal(seenCwd, join(callerDir, "override-root"));

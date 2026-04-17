@@ -134,6 +134,7 @@ test("list runs enumerates current-generation runs across buckets and filters ar
   mkdirSync(otherWorkspaceDir, { recursive: true });
   const otherManifest = readManifest(second.workspaceDir);
   otherManifest.runId = "oth123";
+  otherManifest.repo = "other-repo";
   otherManifest.workspaceDir = otherWorkspaceDir;
   otherManifest.assignmentPath = join(otherWorkspaceDir, "assignment.md");
   otherManifest.startedAt = "2026-04-12T09:00:00.000Z";

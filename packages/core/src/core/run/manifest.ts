@@ -130,14 +130,15 @@ export interface AssignmentInfo {
 // `timeoutSec` are all captured at init / fresh-run time and preserved
 // across all subsequent sessions.
 //
-// schemaVersion: 7 is the current manifest-canonical generation. Manifests written
+// schemaVersion: 8 is the current manifest-canonical generation. Manifests written
 // by earlier task-runner versions are not resumable by this version —
 // `isRunManifest` rejects them and
 // `resolveResumeTarget` surfaces a clear error telling the caller to
 // create a fresh run.
 export interface RunManifest {
-  schemaVersion: 7;
+  schemaVersion: 8;
   runId: string;
+  repo: string;
   agent: {
     name: string;
     // null for ad-hoc agents (synthesized from CLI overrides with no
@@ -292,7 +293,6 @@ export interface ResolvedResumeTarget {
 }
 
 export interface ListedRunManifest {
-  repo: string;
   workspaceDir: string;
   manifest: RunManifest;
 }
@@ -321,11 +321,11 @@ function readManifestCandidate(candidate: string): RunManifest {
     typeof parsed === "object" &&
     "schemaVersion" in parsed &&
     typeof (parsed as { schemaVersion: unknown }).schemaVersion === "number" &&
-    (parsed as { schemaVersion: number }).schemaVersion !== 7
+    (parsed as { schemaVersion: number }).schemaVersion !== 8
   ) {
     const version = (parsed as { schemaVersion: number }).schemaVersion;
     throw new ResumeError(
-      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 7. Manifests from earlier versions cannot be resumed — create a fresh run (task-runner init / run).`,
+      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 8. Manifests from earlier versions cannot be resumed — create a fresh run (task-runner init / run).`,
     );
   }
   if (!isRunManifest(parsed)) {
@@ -412,7 +412,7 @@ export function listRunManifests(env: NodeJS.ProcessEnv = process.env): ListedRu
         ) {
           continue;
         }
-        runs.push({ repo: bucket.name, workspaceDir, manifest });
+        runs.push({ workspaceDir, manifest });
       } catch (err) {
         // Unsupported or corrupt manifests are skipped for discovery,
         // but unexpected failures should still surface.
@@ -441,8 +441,9 @@ export function listRunManifests(env: NodeJS.ProcessEnv = process.env): ListedRu
 function isRunManifest(value: unknown): value is RunManifest {
   if (!value || typeof value !== "object") return false;
   const obj = value as Record<string, unknown>;
-  if (obj.schemaVersion !== 7) return false;
+  if (obj.schemaVersion !== 8) return false;
   if (typeof obj.runId !== "string") return false;
+  if (typeof obj.repo !== "string") return false;
 
   // Top-level scalars required by downstream consumers.
   if (typeof obj.backend !== "string") return false;

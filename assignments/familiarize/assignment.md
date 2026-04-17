@@ -1,12 +1,6 @@
 ---
 schemaVersion: 1
 name: familiarize
-vars:
-  repo_path:
-    type: string
-    required: true
-    source: cli
-    description: Absolute path to the repository you're going to work in.
 tasks:
   - id: read_primary_entry_points
     title: Read the high-signal entry points
@@ -179,13 +173,13 @@ tasks:
       Notes: the five answers above, each in 1-3 sentences.
 ---
 You are being asked to familiarize yourself with the repository
-at `{{repo_path}}`. This is preparation work — the user will
+at `{{cwd}}`. This is preparation work — the user will
 follow up with actual tasks in subsequent messages using the
 same session, so the context you build here is the context
 those tasks will rely on.
 
 Read thoroughly. Do not skim. Do not modify any file inside
-`{{repo_path}}`. Track your task progress and notes through the
+`{{cwd}}`. Track your task progress and notes through the
 task CLI for this run; do not write a workspace plan file.
 
 Work the tasks in order. Each task builds context that the

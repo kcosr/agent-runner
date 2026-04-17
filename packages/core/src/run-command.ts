@@ -141,7 +141,6 @@ export async function executeRunCommand(opts: ExecuteRunCommandOptions): Promise
               effort: opts.overrides.effort,
               timeoutSec: opts.overrides.timeoutSec,
               unrestricted: opts.overrides.unrestricted,
-              cwd: opts.overrides.cwd,
             });
           })();
 

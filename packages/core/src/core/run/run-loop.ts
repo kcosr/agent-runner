@@ -1,7 +1,7 @@
 import { copyFileSync, mkdirSync, readFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import type { TaskState, TaskStatus } from "../../assignment/model.js";
-import { resolveRunWorkspaceDir } from "../../config/runtime-paths.js";
+import { deriveRepoKey, resolveRunWorkspaceDirForRepo } from "../../config/runtime-paths.js";
 import { resolveTaskRunnerCommand } from "../../task-runner-command.js";
 import { normalizeOptionalRunName } from "../../util/run-name.js";
 import { shortId } from "../../util/short-id.js";
@@ -219,7 +219,7 @@ function checkLockedFields(
   if (locked.size === 0) return;
 
   const overrideEntries: [LockableField, unknown, unknown][] = [
-    ["cwd", overrides?.cwd, agentConfig.cwd],
+    ["cwd", overrides?.cwd, assignmentConfig?.cwd],
     ["backend", overrides?.backend, agentConfig.backend],
     ["model", overrides?.model, agentConfig.model],
     ["effort", overrides?.effort, agentConfig.effort],
@@ -362,7 +362,7 @@ function resolveConfiguredCwd(input: string | undefined, fallback: string): stri
 }
 
 function resolveFreshRunCwd(
-  loaded: LoadedAgent,
+  assignment: LoadedAssignment | undefined,
   overrides: RunOverrides | undefined,
   callerCwd: string | undefined,
 ): string {
@@ -370,8 +370,8 @@ function resolveFreshRunCwd(
   if (overrides?.cwd !== undefined) {
     return resolveConfiguredCwd(overrides.cwd, resolutionBase);
   }
-  if (loaded.cwdSource === "explicit") {
-    return resolveConfiguredCwd(loaded.config.cwd, resolutionBase);
+  if (assignment?.config.cwd !== undefined) {
+    return resolveConfiguredCwd(assignment.config.cwd, resolutionBase);
   }
   return resolutionBase;
 }
@@ -718,7 +718,10 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     checkLockedFieldsFromManifest(resume.manifest, overrides, addedTitles);
   }
 
-  const cwd = resume ? resume.manifest.cwd : resolveFreshRunCwd(loaded, overrides, opts.callerCwd);
+  const cwd = resume
+    ? resume.manifest.cwd
+    : resolveFreshRunCwd(loadedAssignment, overrides, opts.callerCwd);
+  const repo = resume ? resume.manifest.repo : deriveRepoKey(cwd);
   // When --backend overrides the agent's backend, the agent's `model`
   // is also dropped (since model strings are backend-specific). Pass
   // --model alongside --backend to set one for the new backend.
@@ -792,7 +795,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const reusingWorkspace = (isResume && resume) || (priorInitialized && resume);
   const runId = reusingWorkspace && resume ? resume.manifest.runId : shortId();
   const workspaceDir =
-    reusingWorkspace && resume ? resume.workspaceDir : resolveRunWorkspaceDir(cwd, runId);
+    reusingWorkspace && resume ? resume.workspaceDir : resolveRunWorkspaceDirForRepo(repo, runId);
   mkdirSync(workspaceDir, { recursive: true });
   const assignmentPath = workspaceAssignmentPath(workspaceDir);
 
@@ -971,8 +974,9 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     const frozenCallerInstructions =
       rawCallerInstructions.length > 0 ? interpolate(rawCallerInstructions, injectedVars) : null;
     manifest = {
-      schemaVersion: 7,
+      schemaVersion: 8,
       runId,
+      repo,
       agent: {
         name: agentConfig.name,
         sourcePath: loaded.sourcePath,

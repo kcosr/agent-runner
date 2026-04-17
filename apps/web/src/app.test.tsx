@@ -236,9 +236,7 @@ function makeDetail(
     message: null,
     callerInstructions: null,
     lockedFields: ["tasks"],
-    runtimeVars: {
-      repo_path: ".",
-    },
+    runtimeVars: {},
     capabilities: {
       canArchive: false,
       canUnarchive: false,
@@ -927,6 +925,9 @@ describe("web app", () => {
     expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
     expect(screen.getAllByText("Build UI").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("Repo").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("CWD").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("/tmp/task-runner")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /copy cwd path/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /copy run id/i })).toBeInTheDocument();
   });
 

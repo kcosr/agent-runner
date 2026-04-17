@@ -10,6 +10,7 @@ import {
   loadAgentConfig,
   loadAssignmentConfig,
 } from "../../config/loader.js";
+import { isPathArg } from "../../config/runtime-paths.js";
 import type { RunAttachment, RunAttachmentRemoveResult } from "../../contracts/attachments.js";
 import {
   type RunArchiveResult,
@@ -159,7 +160,32 @@ type TaskMutationKind = "set" | "append-notes" | "add";
 const MAX_TITLE_LENGTH = 200;
 
 function resolveRun(target: string): ReturnType<typeof resolveResumeTarget> {
-  return resolveResumeTarget(target);
+  try {
+    return resolveResumeTarget(target);
+  } catch (error) {
+    if (!(error instanceof RunNotFoundError) || isPathArg(target)) {
+      throw error;
+    }
+
+    const matches = listRunManifests().filter((entry) => entry.manifest.runId === target);
+    if (matches.length === 0) {
+      throw error;
+    }
+    if (matches.length > 1) {
+      throw new CommandError(
+        `run id "${target}" is ambiguous across repo buckets; use a workspace path instead (${matches.map((entry) => entry.workspaceDir).join(", ")})`,
+      );
+    }
+    const [match] = matches;
+    if (!match) {
+      throw error;
+    }
+
+    return {
+      workspaceDir: match.workspaceDir,
+      manifest: match.manifest,
+    };
+  }
 }
 
 function requireResettableRun(manifest: RunManifest): void {

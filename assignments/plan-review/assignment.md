@@ -2,11 +2,6 @@
 schemaVersion: 1
 name: plan-review
 vars:
-  repo_path:
-    type: string
-    required: true
-    source: cli
-    description: Absolute path to the repository the reviewed plan targets.
   plan_draft:
     type: string
     required: true
@@ -210,13 +205,13 @@ tasks:
             must revise in the draft or handoff.>
 ---
 You are reviewing a task-runner draft assignment, not the
-implementation code itself. Treat `{{repo_path}}` as context for
+implementation code itself. Treat `{{cwd}}` as context for
 the repo the draft targets, but the primary review artifacts are:
 
   - `{{plan_draft}}`
   - `{{task_runner_cmd}} status {{planning_run_id}} --output-format json --field tasks`
 
-Do not modify any file under `{{repo_path}}` or `{{plan_draft}}`.
+Do not modify any file under `{{cwd}}` or `{{plan_draft}}`.
 Use the task CLI as the task interface for this run; do not rely
 on workspace files.
 
