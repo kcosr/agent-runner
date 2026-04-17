@@ -1,5 +1,13 @@
 import { strict as assert } from "node:assert";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -98,6 +106,21 @@ function patchManifest(workspaceDir, mutator) {
   const manifest = readManifest(workspaceDir);
   mutator(manifest);
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+function moveRunToRepoBucket(baseDir, workspaceDir, repo) {
+  const nextWorkspaceDir = join(baseDir, "runs", repo, readManifest(workspaceDir).runId);
+  mkdirSync(join(baseDir, "runs", repo), { recursive: true });
+  renameSync(workspaceDir, nextWorkspaceDir);
+  patchManifest(nextWorkspaceDir, (manifest) => {
+    manifest.repo = repo;
+    manifest.workspaceDir = nextWorkspaceDir;
+    manifest.assignmentPath = join(nextWorkspaceDir, "assignment.md");
+    if (manifest.assignment) {
+      manifest.assignment.workspacePath = join(nextWorkspaceDir, "assignment.md");
+    }
+  });
+  return nextWorkspaceDir;
 }
 
 async function initRun(baseDir, assignmentName = "svc-work") {
@@ -313,6 +336,50 @@ test("command services: readStatus reads canonical task state for running runs",
         canAdd: false,
       },
     });
+  });
+});
+
+test("command services: readStatus and timeline history resolve bare run ids across repo buckets", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+  const relocatedWorkspaceDir = moveRunToRepoBucket(dir, outcome.workspaceDir, "assistant");
+
+  patchManifest(relocatedWorkspaceDir, (manifest) => {
+    manifest.status = "running";
+    manifest.exitCode = null;
+    manifest.endedAt = null;
+    manifest.attemptRecords = [
+      {
+        attempt: 1,
+        sessionIndex: 0,
+        startedAt: "2026-04-15T01:00:00.000Z",
+        endedAt: "2026-04-15T01:01:00.000Z",
+        prompt: "Attempt one",
+        sessionIdAtStart: null,
+        sessionIdCaptured: null,
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        transcript: "First output",
+        logPath: "attempts/01.json",
+        tasksAfter: manifest.finalTasks,
+        invalidStatuses: [],
+      },
+    ];
+    manifest.attempts = 1;
+  });
+
+  await withSharedRuntimeEnv(dir, async () => {
+    const status = readStatus(outcome.runId);
+    const history = getRunTimelineHistory(outcome.runId);
+
+    assert.equal(status.runId, outcome.runId);
+    assert.equal(status.repo, "assistant");
+    assert.equal(status.workspaceDir, relocatedWorkspaceDir);
+    assert.equal(history.runId, outcome.runId);
+    assert.equal(history.attempts.length, 1);
+    assert.equal(history.attempts[0]?.transcript, "First output");
   });
 });
 

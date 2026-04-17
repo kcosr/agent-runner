@@ -155,7 +155,8 @@ export function getRun(target: string): RunDetail {
 }
 
 export function getRunTimelineHistory(target: string): RunTimelineHistory {
-  const resolved = resolveResumeTarget(target);
+  const detail = getRun(target);
+  const resolved = resolveResumeTarget(detail.workspaceDir);
   return {
     runId: resolved.manifest.runId,
     attempts: resolved.manifest.attemptRecords.map((record) =>

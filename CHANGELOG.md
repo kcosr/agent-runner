@@ -4,7 +4,7 @@
 
 ### Breaking Changes
 
-- Manifest schema version is now `8`. Authored `cwd` moved from agent definitions to assignment definitions, run manifests now persist first-class `repo` alongside frozen `cwd`, and older `schemaVersion: 7` runs are no longer resumable. Built-in assignments/docs now use `{{cwd}}` instead of redundant canonical `repo_path` vars.
+- Manifest schema version is now `8`. Authored `cwd` moved from agent definitions to assignment definitions, run manifests now persist first-class `repo` alongside frozen `cwd`, and older `schemaVersion: 7` runs must be upgraded explicitly with `scripts/migrate-manifests-v8.mjs` or recreated. Built-in assignments/docs now use `{{cwd}}` instead of redundant canonical `repo_path` vars.
 - Replaced the daemon/browser live-event contract hot-cut: `AppRuntimeConfig.runEventsPath` and the mixed `/api/events/runs` / `run.event` surfaces are removed in favor of `runSummaryEventsPath`, summary-only global streams, per-run detail streams, and per-run timeline streams. `RunSummary` and `RunDetail` now include derived `activeTask` projections for direct board/detail rendering. ([#35](https://github.com/kcosr/task-runner/pull/35))
 - Shared run lifecycle contracts now hot-cut `RunCapabilities` to include `canReset` and `canDelete`, and the global run-summary stream now emits either `summary_upsert` or `summary_removed`. Daemon/web consumers must use the updated capability and event unions directly. ([#39](https://github.com/kcosr/task-runner/pull/39))
 - Replaced the old assignment-owned/backend display-name contract with first-class nullable `run.name`. Fresh `task-runner run` / `init` now use `--name`, resume rejects name overrides, and bundled assignments/docs/examples no longer describe the removed contract.
@@ -22,6 +22,7 @@
 
 ### Added
 
+- Added `scripts/migrate-manifests-v8.mjs` to backfill persisted `repo` capture for existing `schemaVersion: 7` run manifests, including legacy state roots passed via `--root` such as `~/.local/state/agent-runner`, with repeated `--repo <name>` filters for migrating only selected repo buckets.
 - Added a dedicated Settings area in the web shell with General and Keybindings sections, and moved dashboard defaults there while keeping the runs-toolbar toggles in sync. ([#42](https://github.com/kcosr/task-runner/pull/42))
 - Added a persisted dashboard preference for recent-updates board ordering so runs can promote touched cards to the top of their columns, with move/reorder/insert card motion that respects `prefers-reduced-motion`. ([#42](https://github.com/kcosr/task-runner/pull/42))
 - Added in-app preview for `text/markdown` and `text/plain` attachments in the web run detail drawer, including per-run remembered preview state when switching between runs. ([#40](https://github.com/kcosr/task-runner/pull/40))
