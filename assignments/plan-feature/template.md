@@ -1,6 +1,6 @@
 ---
 schemaVersion: 1
-name: plan-<<KEBAB_FEATURE_SLUG>>
+name: implement-<<KEBAB_FEATURE_SLUG>>
 maxRetries: 4
 lockedFields:
   - tasks

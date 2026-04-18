@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
@@ -59,6 +59,12 @@ function writeAssignment(baseDir, name, body) {
 
 const BUILTIN_PLAN_FEATURE_PATH = resolvePath(
   new URL("../assignments/plan-feature/assignment.md", import.meta.url).pathname,
+);
+const BUILTIN_PLAN_TEMPLATE_PATH = resolvePath(
+  new URL("../assignments/plan-feature/template.md", import.meta.url).pathname,
+);
+const BUILTIN_IMPLEMENTER_AGENT_PATH = resolvePath(
+  new URL("../agents/implementer/agent.md", import.meta.url).pathname,
 );
 
 test("loadAgentConfig parses a minimal agent.md from TASK_RUNNER_CONFIG_DIR", () =>
@@ -208,6 +214,18 @@ test("built-in plan-feature assignment uses cwd instead of repo_path for canonic
   assert.equal(loaded.config.vars.repo_path, undefined);
   assert.match(loaded.instructions, /`{{cwd}}`/);
   assert.ok((loaded.config.callerInstructions ?? "").includes("--assignment plan-feature"));
+});
+
+test("built-in plan-feature template emits implement-prefixed assignment names", () => {
+  const template = readFileSync(BUILTIN_PLAN_TEMPLATE_PATH, "utf8");
+  assert.match(template, /^name: implement-<<KEBAB_FEATURE_SLUG>>$/m);
+  assert.doesNotMatch(template, /^name: plan-<<KEBAB_FEATURE_SLUG>>$/m);
+});
+
+test("built-in implementer agent points reviewers at the run record, not workspace assignment.md", () => {
+  const loaded = loadAgentConfig(BUILTIN_IMPLEMENTER_AGENT_PATH);
+  assert.match(loaded.instructions, /reading the run record after the fact/i);
+  assert.doesNotMatch(loaded.instructions, /workspace `assignment\.md`/i);
 });
 
 test("loadAssignmentConfig throws AssignmentNotFoundError for missing assignment and lists config-root path", () =>

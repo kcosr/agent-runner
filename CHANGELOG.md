@@ -4,7 +4,7 @@
 
 ### Breaking Changes
 
-- Hot-cut the run-targeted read surfaces under `task-runner run`: use `task-runner run status <run-id>` and `task-runner run brief <run-id>`, while top-level `task-runner status` now reports system/environment status instead of run state.
+- Hot-cut the run-targeted read surfaces under `task-runner run`: use `task-runner run status <run-id>` and `task-runner run brief <run-id>`, while top-level `task-runner status` now reports system/environment status instead of run state. ([#52](https://github.com/kcosr/task-runner/pull/52))
 - `task-runner list runs` now defaults to the caller's cwd instead of listing every repo. Use `--cwd <path>` to target a different exact cwd, `--repo <name>` to target one repo bucket, or `--global` to restore the previous global listing behavior. ([#44](https://github.com/kcosr/task-runner/pull/44))
 - Manifest schema version is now `8`. Authored `cwd` moved from agent definitions to assignment definitions, run manifests now persist first-class `repo` alongside frozen `cwd`, and older `schemaVersion: 7` runs must be upgraded explicitly with `scripts/migrate-manifests-v8.mjs` or recreated. Built-in assignments/docs now use `{{cwd}}` instead of redundant canonical `repo_path` vars. ([#43](https://github.com/kcosr/task-runner/pull/43))
 - Replaced the daemon/browser live-event contract hot-cut: `AppRuntimeConfig.runEventsPath` and the mixed `/api/events/runs` / `run.event` surfaces are removed in favor of `runSummaryEventsPath`, summary-only global streams, per-run detail streams, and per-run timeline streams. `RunSummary` and `RunDetail` now include derived `activeTask` projections for direct board/detail rendering. ([#35](https://github.com/kcosr/task-runner/pull/35))
@@ -24,7 +24,7 @@
 
 ### Added
 
-- Added runner-injected interpolation vars `config_dir`, `state_dir`, and `assignment_name` for repo-owned assignments and caller instructions.
+- Added runner-injected interpolation vars `config_dir`, `state_dir`, and `assignment_name` for repo-owned assignments and caller instructions. ([#52](https://github.com/kcosr/task-runner/pull/52))
 - Added static web dashboard keyboard shortcuts for route-aware Escape handling, arrow-key run navigation, Ctrl+F search focus, and Enter primary actions for the selected run. ([#50](https://github.com/kcosr/task-runner/pull/50))
 - Added `f` as a web dashboard shortcut to toggle the visible detail drawer between normal and fullscreen widths. ([#50](https://github.com/kcosr/task-runner/pull/50))
 - Added previous/next navigation for attachment previews in the web detail drawer, including fullscreen left/right keyboard navigation while previewing attachments. ([#50](https://github.com/kcosr/task-runner/pull/50))

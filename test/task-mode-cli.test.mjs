@@ -94,6 +94,14 @@ function listAssignmentFiles(baseDir) {
     .filter((filePath) => existsSync(filePath));
 }
 
+function listAgentFiles(baseDir) {
+  const agentsDir = join(baseDir, "agents");
+  return readdirSync(agentsDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => join(agentsDir, entry.name, "agent.md"))
+    .filter((filePath) => existsSync(filePath));
+}
+
 function patchManifest(workspaceDir, mutator) {
   const manifestPath = join(workspaceDir, "run.json");
   const manifest = readManifest(workspaceDir);
@@ -190,6 +198,19 @@ test("bundled assignments do not instruct agents to write workspace plan files",
       body,
       /workspace plan at `\{\{assignment_path\}\}`|only file you should write/i,
       `${assignmentFile} still contains legacy workspace-plan guidance`,
+    );
+  }
+});
+
+test("bundled agents do not mention workspace assignment.md review flows", () => {
+  const agentFiles = listAgentFiles(process.cwd());
+
+  for (const agentFile of agentFiles) {
+    const body = readFileSync(agentFile, "utf8");
+    assert.doesNotMatch(
+      body,
+      /workspace `assignment\.md`/i,
+      `${agentFile} still contains legacy workspace-assignment guidance`,
     );
   }
 });
