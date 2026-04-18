@@ -13,12 +13,21 @@ import type {
   RunDependenciesResult,
   RunListResult,
   RunResetResult,
-  StatusCommandResult,
   TaskDetailsResult,
   TaskListResult,
   TaskMutationResult,
 } from "@task-runner/core/core/commands/service.js";
 import { resolveTaskRunnerCommand } from "@task-runner/core/task-runner-command.js";
+import type { HostMode } from "../daemon/config.js";
+import type { DaemonInfo } from "../daemon/protocol.js";
+
+export interface SystemStatusResult {
+  configDir: string;
+  stateDir: string;
+  hostMode: HostMode;
+  connectUrl: string | null;
+  daemon: DaemonInfo | null;
+}
 
 export function renderRunStatus(detail: RunDetail): string {
   const taskRunnerCmd = resolveTaskRunnerCommand();
@@ -111,12 +120,12 @@ export function renderRunStatus(detail: RunDetail): string {
     lines.push("");
     if (isPassive) {
       lines.push("Drive this run externally:");
-      lines.push(`  ${taskRunnerCmd} brief ${detail.runId}`);
+      lines.push(`  ${taskRunnerCmd} run brief ${detail.runId}`);
       lines.push(`  ${taskRunnerCmd} task set ${detail.runId} <task-id> --status in_progress`);
     } else {
       lines.push("To execute this run:");
       lines.push(`  ${taskRunnerCmd} run --resume-run ${detail.runId}`);
-      lines.push(`  ${taskRunnerCmd} brief ${detail.runId}`);
+      lines.push(`  ${taskRunnerCmd} run brief ${detail.runId}`);
     }
   } else if (
     detail.status === "blocked" ||
@@ -132,6 +141,22 @@ export function renderRunStatus(detail: RunDetail): string {
       lines.push("To resume this run:");
       lines.push(`  ${taskRunnerCmd} run --resume-run ${detail.runId} "..."`);
     }
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+export function renderSystemStatus(result: SystemStatusResult): string {
+  const lines = [
+    `Config dir: ${result.configDir}`,
+    `State dir: ${result.stateDir}`,
+    `Host mode: ${result.hostMode}`,
+    `Connect URL: ${result.connectUrl ?? "none"}`,
+    `Daemon: ${result.daemon ? "connected" : "not connected"}`,
+  ];
+
+  if (result.daemon) {
+    lines.push(`Daemon listen URL: ${result.daemon.listenUrl}`);
   }
 
   return `${lines.join("\n")}\n`;
@@ -276,10 +301,6 @@ export function renderRunClearDependencies(result: RunDependenciesResult): strin
     return `task-runner: run ${result.runId} already has no dependencies\n`;
   }
   return `task-runner: cleared dependencies for run ${result.runId}\n`;
-}
-
-export function renderStatus(result: StatusCommandResult): string {
-  return renderRunStatus(result);
 }
 
 export function renderTaskList(result: TaskListResult): string {

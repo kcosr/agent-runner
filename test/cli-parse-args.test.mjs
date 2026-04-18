@@ -99,16 +99,25 @@ test("parseArgs: list with --output-format json", () => {
   assert.equal(parsed.outputFormat, "json");
 });
 
-test("parseArgs: --connect is captured on routed commands", () => {
-  const parsed = parseArgs(argv("status", "abc123", "--connect", "ws://127.0.0.1:4773/"));
+test("parseArgs: top-level status captures --connect without a run id", () => {
+  const parsed = parseArgs(argv("status", "--connect", "ws://127.0.0.1:4773/"));
   assert.equal(parsed.command, "status");
   assert.equal(parsed.connect, "ws://127.0.0.1:4773/");
 });
 
-test("parseArgs: brief captures the run id positional", () => {
-  const parsed = parseArgs(argv("brief", "abc123"));
-  assert.equal(parsed.command, "brief");
-  assert.equal(parsed.message, "abc123");
+test("parseArgs: run status parses as a grouped run subcommand", () => {
+  const parsed = parseArgs(argv("run", "status", "abc123", "--field", "tasks"));
+  assert.equal(parsed.command, "run");
+  assert.equal(parsed.subcommand, "status");
+  assert.deepEqual(parsed.positionals, ["abc123"]);
+  assert.deepEqual(parsed.fields, ["tasks"]);
+});
+
+test("parseArgs: run brief parses as a grouped run subcommand", () => {
+  const parsed = parseArgs(argv("run", "brief", "abc123"));
+  assert.equal(parsed.command, "run");
+  assert.equal(parsed.subcommand, "brief");
+  assert.deepEqual(parsed.positionals, ["abc123"]);
 });
 
 test("parseArgs: serve captures --listen", () => {

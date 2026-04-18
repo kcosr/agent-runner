@@ -40,7 +40,7 @@ schemaVersion: 1
 name: caller-work
 callerInstructions: |
   Hello, caller. Your run id is {{run_id}} and you're working on
-  {{repo_path}}. Use {{task_runner_cmd}} status {{run_id}} to
+  {{repo_path}}. Use {{task_runner_cmd}} run status {{run_id}} to
   inspect the run, and pass --output-format json for structured
   data.
 vars:
@@ -385,7 +385,7 @@ test("ad-hoc agent + assignment with callerInstructions still prints them", asyn
   assert.doesNotMatch(spawn.stdout, /Hello, caller/);
 
   const [runId] = readdirSync(join(dir, "runs", "unknown"));
-  const brief = runCli(["brief", runId], { cwd: dir });
+  const brief = runCli(["run", "brief", runId], { cwd: dir });
   assert.match(brief, /task-runner task set/);
   assert.doesNotMatch(brief, /Hello, caller/);
 });
@@ -394,29 +394,29 @@ test("ad-hoc agent + assignment with callerInstructions still prints them", asyn
 // Status output integration
 // ────────────────────────────────────────────────────────────────
 
-test("status --output-format json includes callerInstructions", async () => {
+test("run status --output-format json includes callerInstructions", async () => {
   const dir = tempDir();
   writeAgent(dir, "caller-test", AGENT);
   writeAssignment(dir, "caller-work", ASSIGNMENT_WITH_CALLER);
   const { outcome } = await runFreshRun(dir, "caller-work", { initialize: true });
   const out = runCli(
-    ["status", outcome.runId, "--output-format", "json", "--field", "callerInstructions"],
+    ["run", "status", outcome.runId, "--output-format", "json", "--field", "callerInstructions"],
     { cwd: dir },
   );
   const parsed = JSON.parse(out);
   assert.ok(parsed.callerInstructions);
   assert.match(parsed.callerInstructions, /Hello, caller/);
   assert.match(parsed.callerInstructions, new RegExp(outcome.runId));
-  assert.match(parsed.callerInstructions, /task-runner status/);
+  assert.match(parsed.callerInstructions, /task-runner run status/);
 });
 
-test("status text output does NOT reprint callerInstructions", async () => {
+test("run status text output does NOT reprint callerInstructions", async () => {
   const dir = tempDir();
   writeAgent(dir, "caller-test", AGENT);
   writeAssignment(dir, "caller-work", ASSIGNMENT_WITH_CALLER);
   const { outcome } = await runFreshRun(dir, "caller-work", { initialize: true });
 
-  const text = runCli(["status", outcome.runId], { cwd: dir });
+  const text = runCli(["run", "status", outcome.runId], { cwd: dir });
   // status text output is a read-only inspector and should stay
   // terse — the caller read the instructions on the first write
   // and can re-fetch via --output-format json if needed.

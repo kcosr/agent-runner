@@ -1,7 +1,12 @@
 import { copyFileSync, mkdirSync, readFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import type { TaskState, TaskStatus } from "../../assignment/model.js";
-import { deriveRepoKey, resolveRunWorkspaceDirForRepo } from "../../config/runtime-paths.js";
+import {
+  deriveRepoKey,
+  resolveRunWorkspaceDirForRepo,
+  resolveTaskRunnerConfigDir,
+  resolveTaskRunnerStateDir,
+} from "../../config/runtime-paths.js";
 import { resolveTaskRunnerCommand } from "../../task-runner-command.js";
 import { normalizeOptionalRunName } from "../../util/run-name.js";
 import { shortId } from "../../util/short-id.js";
@@ -808,6 +813,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     reusingWorkspace && resume ? resume.workspaceDir : resolveRunWorkspaceDirForRepo(repo, runId);
   mkdirSync(workspaceDir, { recursive: true });
   const assignmentPath = workspaceAssignmentPath(workspaceDir);
+  const assignmentName = loadedAssignment?.config.name ?? resume?.manifest.assignment?.name;
 
   // `injectedVars` has to be built *before* the task-map rebuild so
   // that fresh-run task titles and bodies get `{{var}}` references
@@ -818,7 +824,10 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     assignment_path: assignmentPath,
     run_id: runId,
     cwd,
+    config_dir: resolveTaskRunnerConfigDir(),
+    state_dir: resolveTaskRunnerStateDir(),
     task_runner_cmd: resolveTaskRunnerCommand(),
+    ...(assignmentName !== undefined ? { assignment_name: assignmentName } : {}),
   };
 
   const priorHadTasks = Boolean(

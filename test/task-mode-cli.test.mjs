@@ -147,28 +147,38 @@ test("init stores a canonical brief and does not generate workspace assignment.m
   assert.match(brief, new RegExp(`task show ${outcome.runId}`));
   assert.match(brief, new RegExp(`task set ${outcome.runId}`));
   assert.match(brief, new RegExp(`task append-notes ${outcome.runId}`));
-  assert.match(brief, new RegExp(`status ${outcome.runId}`));
+  assert.match(brief, new RegExp(`run status ${outcome.runId}`));
   assert.ok(!existsSync(outcome.assignmentPath), "workspace assignment.md is not generated");
   assert.ok(existsSync(join(outcome.workspaceDir, "assignment-seed.md")), "seed file captured");
 });
 
-test("brief command prints the stored handoff and rejects path targets", async () => {
+test("run brief command prints the stored handoff and rejects path targets", async () => {
   const dir = tempDir();
   writeAgent(dir, "brief-agent", AGENT);
   writeAssignment(dir, "brief-work", ASSIGNMENT);
   const outcome = await initRun(dir, "brief-work");
 
-  const ok = runCli(["brief", outcome.runId], { cwd: dir });
+  const legacy = runCli(["brief", outcome.runId], { cwd: dir });
+  assert.equal(legacy.status, 3);
+  assert.match(legacy.stderr, /unknown command "brief"/);
+
+  const ok = runCli(["run", "brief", outcome.runId], { cwd: dir });
   assert.equal(ok.status, 0);
   assert.match(ok.stdout, new RegExp(`task list ${outcome.runId}`));
 
-  const bad = runCli(["brief", outcome.workspaceDir], { cwd: dir });
+  const bad = runCli(["run", "brief", outcome.workspaceDir], { cwd: dir });
   assert.equal(bad.status, 3);
-  assert.match(bad.stderr, /brief accepts a run id, not a path/);
+  assert.match(bad.stderr, /run brief accepts a run id, not a path/);
 
-  const dotDot = runCli(["brief", ".."], { cwd: dir });
+  const dotDot = runCli(["run", "brief", ".."], { cwd: dir });
   assert.equal(dotDot.status, 3);
-  assert.match(dotDot.stderr, /brief accepts a run id, not a path/);
+  assert.match(dotDot.stderr, /run brief accepts a run id, not a path/);
+
+  const explicitText = runCli(["run", "brief", outcome.runId, "--output-format", "text"], {
+    cwd: dir,
+  });
+  assert.equal(explicitText.status, 3);
+  assert.match(explicitText.stderr, /run brief does not support --output-format/);
 });
 
 test("bundled assignments do not instruct agents to write workspace plan files", () => {
@@ -184,7 +194,7 @@ test("bundled assignments do not instruct agents to write workspace plan files",
   }
 });
 
-test("status on a running run reads canonical task state", async () => {
+test("run status on a running run reads canonical task state", async () => {
   const dir = tempDir();
   writeAgent(dir, "brief-agent", AGENT);
   writeAssignment(dir, "brief-work", ASSIGNMENT);
@@ -196,7 +206,7 @@ test("status on a running run reads canonical task state", async () => {
     manifest.finalTasks.t1.notes = "Canonical note";
   });
 
-  const res = runCli(["status", outcome.runId], { cwd: dir });
+  const res = runCli(["run", "status", outcome.runId], { cwd: dir });
   assert.equal(res.status, 0);
   assert.match(res.stdout, /- t1 — First \[in_progress\]/);
   assert.match(res.stdout, /Canonical note/);
@@ -275,7 +285,7 @@ test("status and task commands wait for the task-state lock and read fresh snaps
   await once(statusLocker.stdout, "data");
 
   const statusStarted = Date.now();
-  const statusResult = runCli(["status", outcome.runId], { cwd: dir });
+  const statusResult = runCli(["run", "status", outcome.runId], { cwd: dir });
   const statusElapsed = Date.now() - statusStarted;
   await once(statusLocker, "exit");
 

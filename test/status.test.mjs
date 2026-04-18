@@ -4,7 +4,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
-import { renderRunStatus } from "../apps/cli/dist/commands/render.js";
+import { renderRunStatus, renderSystemStatus } from "../apps/cli/dist/commands/render.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { toRunDetail } from "../packages/core/dist/contracts/runs.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
@@ -294,6 +294,43 @@ test("renderRunStatus shows effective status separately from lifecycle status", 
   assert.match(text, /Status: running/);
   assert.match(text, /Lifecycle status: initialized/);
   assert.match(text, /Drive this run externally:/);
+  assert.match(text, /task-runner run brief/);
+});
+
+test("renderSystemStatus prints embedded-mode environment details", () => {
+  const text = renderSystemStatus({
+    configDir: "/tmp/config",
+    stateDir: "/tmp/state",
+    hostMode: "embedded",
+    connectUrl: null,
+    daemon: null,
+  });
+
+  assert.equal(
+    text,
+    "Config dir: /tmp/config\nState dir: /tmp/state\nHost mode: embedded\nConnect URL: none\nDaemon: not connected\n",
+  );
+});
+
+test("renderSystemStatus prints connected daemon details", () => {
+  const text = renderSystemStatus({
+    configDir: "/tmp/config",
+    stateDir: "/tmp/state",
+    hostMode: "daemon",
+    connectUrl: "ws://127.0.0.1:4773/",
+    daemon: {
+      daemonInstanceId: "daemon-ab12cd",
+      pid: 424242,
+      listenUrl: "ws://127.0.0.1:4773/",
+      version: "0.1.0",
+      startedAt: "2026-04-18T19:43:54.599Z",
+    },
+  });
+
+  assert.match(text, /Host mode: daemon/);
+  assert.match(text, /Connect URL: ws:\/\/127\.0\.0\.1:4773\//);
+  assert.match(text, /Daemon: connected/);
+  assert.match(text, /Daemon listen URL: ws:\/\/127\.0\.0\.1:4773\//);
 });
 
 test("renderRunStatus shows archive metadata and the unarchive hint", async () => {
@@ -315,7 +352,7 @@ test("renderRunStatus shows archive metadata and the unarchive hint", async () =
   assert.match(text, /task-runner run unarchive/);
 });
 
-test("status CLI reports unreadable manifest snapshots as clean unexpected failures", async () => {
+test("run status CLI reports unreadable manifest snapshots as clean unexpected failures", async () => {
   const dir = tempDir();
   writeAgent(dir, "status-agent", STATUS_AGENT);
   writeAssignment(dir, "status-work", STATUS_ASSIGNMENT);
@@ -325,7 +362,7 @@ test("status CLI reports unreadable manifest snapshots as clean unexpected failu
   chmodSync(runJsonPath, 0o000);
 
   try {
-    const result = runCliExpectFail(["status", outcome.runId], { cwd: dir });
+    const result = runCliExpectFail(["run", "status", outcome.runId], { cwd: dir });
     assert.equal(result.status, 4);
     assert.match(result.stderr, /task-runner:/);
   } finally {
@@ -333,7 +370,7 @@ test("status CLI reports unreadable manifest snapshots as clean unexpected failu
   }
 });
 
-test("status --field projects RunDetail fields and rejects removed manifest-only keys", async () => {
+test("run status --field projects RunDetail fields and rejects removed manifest-only keys", async () => {
   const dir = tempDir();
   writeAgent(dir, "status-agent", STATUS_AGENT);
   writeAssignment(dir, "status-work", STATUS_ASSIGNMENT);
@@ -342,7 +379,7 @@ test("status --field projects RunDetail fields and rejects removed manifest-only
   const projected = JSON.parse(
     execFileSync(
       "node",
-      [CLI_PATH, "status", outcome.runId, "--output-format", "json", "--field", "tasks"],
+      [CLI_PATH, "run", "status", outcome.runId, "--output-format", "json", "--field", "tasks"],
       {
         cwd: dir,
         env: { ...process.env, ...sharedRuntimeEnv(dir) },
@@ -356,7 +393,16 @@ test("status --field projects RunDetail fields and rejects removed manifest-only
   const effectiveStatus = JSON.parse(
     execFileSync(
       "node",
-      [CLI_PATH, "status", outcome.runId, "--output-format", "json", "--field", "effectiveStatus"],
+      [
+        CLI_PATH,
+        "run",
+        "status",
+        outcome.runId,
+        "--output-format",
+        "json",
+        "--field",
+        "effectiveStatus",
+      ],
       {
         cwd: dir,
         env: { ...process.env, ...sharedRuntimeEnv(dir) },
@@ -368,14 +414,14 @@ test("status --field projects RunDetail fields and rejects removed manifest-only
   assert.equal(effectiveStatus.effectiveStatus, "success");
 
   const failed = runCliExpectFail(
-    ["status", outcome.runId, "--output-format", "json", "--field", "finalTasks"],
+    ["run", "status", outcome.runId, "--output-format", "json", "--field", "finalTasks"],
     { cwd: dir },
   );
   assert.equal(failed.status, 3);
   assert.match(failed.stderr, /unknown status field\(s\): finalTasks/);
 });
 
-test("status --field capabilities exposes the current run capability contract", async () => {
+test("run status --field capabilities exposes the current run capability contract", async () => {
   const dir = tempDir();
   writeAgent(dir, "status-agent", STATUS_AGENT);
   writeAssignment(dir, "status-work", STATUS_ASSIGNMENT);
@@ -384,7 +430,16 @@ test("status --field capabilities exposes the current run capability contract", 
   const projected = JSON.parse(
     execFileSync(
       "node",
-      [CLI_PATH, "status", outcome.runId, "--output-format", "json", "--field", "capabilities"],
+      [
+        CLI_PATH,
+        "run",
+        "status",
+        outcome.runId,
+        "--output-format",
+        "json",
+        "--field",
+        "capabilities",
+      ],
       {
         cwd: dir,
         env: { ...process.env, ...sharedRuntimeEnv(dir) },
@@ -409,4 +464,45 @@ test("status --field capabilities exposes the current run capability contract", 
     },
   });
   assert.equal("canMutateTasks" in projected.capabilities, false);
+});
+
+test("top-level status rejects unexpected run-id positionals", () => {
+  const result = runCliExpectFail(["status", "abc123"]);
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /status takes no positional arguments/);
+  assert.match(result.stderr, /Usage: task-runner status \[--output-format text\|json\]/);
+});
+
+test("top-level status reports embedded environment details", () => {
+  const dir = tempDir();
+  const text = execFileSync("node", [CLI_PATH, "status"], {
+    cwd: dir,
+    env: { ...process.env, ...sharedRuntimeEnv(dir) },
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  assert.match(text, new RegExp(`Config dir: ${dir}`));
+  assert.match(text, new RegExp(`State dir: ${dir}`));
+  assert.match(text, /Host mode: embedded/);
+  assert.match(text, /Connect URL: none/);
+  assert.match(text, /Daemon: not connected/);
+});
+
+test("top-level status --output-format json reports embedded environment details", () => {
+  const dir = tempDir();
+  const parsed = JSON.parse(
+    execFileSync("node", [CLI_PATH, "status", "--output-format", "json"], {
+      cwd: dir,
+      env: { ...process.env, ...sharedRuntimeEnv(dir) },
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    }),
+  );
+
+  assert.equal(parsed.configDir, dir);
+  assert.equal(parsed.stateDir, dir);
+  assert.equal(parsed.hostMode, "embedded");
+  assert.equal(parsed.connectUrl, null);
+  assert.equal(parsed.daemon, null);
 });

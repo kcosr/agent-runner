@@ -125,7 +125,9 @@ function readManifest(workspaceDir) {
 
 function readCapabilities(runId, cwd) {
   return JSON.parse(
-    runCli(["status", runId, "--output-format", "json", "--field", "capabilities"], { cwd }),
+    runCli(["run", "status", runId, "--output-format", "json", "--field", "capabilities"], {
+      cwd,
+    }),
   ).capabilities;
 }
 
@@ -838,16 +840,19 @@ test("task command: missing subcommand prints usage and exits 3", async () => {
   assert.match(result.stderr, /task command requires a subcommand/);
 });
 
-test("task set: status-only call can then be read back via status --output-format json --field tasks", async () => {
+test("task set: status-only call can then be read back via run status --output-format json --field tasks", async () => {
   const dir = tempDir();
   writeBundle(dir);
   const outcome = await initRun(dir);
 
   runCli(["task", "set", outcome.runId, "t1", "--status", "completed"], { cwd: dir });
 
-  const out = runCli(["status", outcome.runId, "--output-format", "json", "--field", "tasks"], {
-    cwd: dir,
-  });
+  const out = runCli(
+    ["run", "status", outcome.runId, "--output-format", "json", "--field", "tasks"],
+    {
+      cwd: dir,
+    },
+  );
   const parsed = JSON.parse(out);
   assert.equal(parsed.tasks[0].status, "completed");
   assert.equal(parsed.tasks[1].status, "pending");
