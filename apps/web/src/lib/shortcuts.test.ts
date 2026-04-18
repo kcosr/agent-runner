@@ -144,6 +144,18 @@ describe("resolveRunsShortcutCommand", () => {
         context,
       ),
     ).toBe("ui.focusSearch");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "f",
+          metaKey: false,
+          shiftKey: false,
+        },
+        context,
+      ),
+    ).toBe("ui.toggleDrawerFullscreen");
   });
 
   it("prioritizes search clearing before route close on Escape", () => {
@@ -230,9 +242,24 @@ describe("resolveRunsShortcutCommand", () => {
         },
       ),
     ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "f",
+          metaKey: false,
+          shiftKey: false,
+        },
+        {
+          ...context,
+          resumeDialogOpen: true,
+        },
+      ),
+    ).toBeNull();
   });
 
-  it("blocks non-Escape dashboard shortcuts while the drawer is fullscreen", () => {
+  it("blocks non-Escape dashboard shortcuts while the drawer is fullscreen except fullscreen toggle", () => {
     expect(
       resolveRunsShortcutCommand(
         {
@@ -248,6 +275,21 @@ describe("resolveRunsShortcutCommand", () => {
         },
       ),
     ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "f",
+          metaKey: false,
+          shiftKey: false,
+        },
+        {
+          ...context,
+          drawerFullscreen: true,
+        },
+      ),
+    ).toBe("ui.toggleDrawerFullscreen");
     expect(
       resolveRunsShortcutCommand(
         {
@@ -292,7 +334,7 @@ describe("resolveRunsShortcutCommand", () => {
           drawerFullscreen: true,
         },
       ),
-    ).toBe("run.close");
+    ).toBe("ui.toggleDrawerFullscreen");
   });
 
   it("does not emit run.primaryAction when the selected run action is unavailable", () => {

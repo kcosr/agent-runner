@@ -46,7 +46,13 @@ const SHORTCUT_SECTIONS: readonly ShortcutSection[] = [
       },
       {
         description:
-          "Clear the focused search when it has text, then blur it on a second press. Otherwise close attachment preview or selected run detail.",
+          "Toggle the selected detail drawer or attachment preview between normal and fullscreen widths.",
+        keys: ["F"],
+        title: "Toggle drawer fullscreen",
+      },
+      {
+        description:
+          "Clear the focused search when it has text, then blur it on a second press. When the drawer is fullscreen, exit fullscreen first. Otherwise close attachment preview or selected run detail.",
         keys: ["Escape"],
         title: "Back or close",
       },

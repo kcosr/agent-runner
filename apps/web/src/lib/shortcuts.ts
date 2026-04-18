@@ -6,6 +6,7 @@ export type RunsShortcutCommand =
   | "board.moveDown"
   | "board.moveLeft"
   | "board.moveRight"
+  | "ui.toggleDrawerFullscreen"
   | "ui.blurSearch"
   | "run.close"
   | "run.closeAttachmentPreview"
@@ -152,13 +153,19 @@ export function resolveRunsShortcutCommand(
   event: ShortcutEventLike,
   context: RunsShortcutContext,
 ): RunsShortcutCommand | null {
+  if (
+    matchesShortcut(event, { key: "f" }) &&
+    !context.typingTarget &&
+    !context.resumeDialogOpen &&
+    context.selectedRunId
+  ) {
+    return "ui.toggleDrawerFullscreen";
+  }
+
   if (context.drawerFullscreen) {
     if (normalizeEventKey(event.key) === "escape") {
-      if (context.selectedDrawerView?.mode === "attachment") {
-        return "run.closeAttachmentPreview";
-      }
       if (context.selectedRunId) {
-        return "run.close";
+        return "ui.toggleDrawerFullscreen";
       }
     }
     return null;

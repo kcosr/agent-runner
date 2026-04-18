@@ -13,9 +13,14 @@ import { useRunsDashboardState } from "./use-runs-dashboard-state.js";
 export function RunsDashboardRoute() {
   const state = useRunsDashboardState();
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const latestStateRef = useRef(state);
   const navigableBoardColumns = state.boardColumns.filter(
     (column) => !state.collapsedColumnKeys.includes(column.key),
   );
+  const latestNavigableBoardColumnsRef = useRef(navigableBoardColumns);
+
+  latestStateRef.current = state;
+  latestNavigableBoardColumnsRef.current = navigableBoardColumns;
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -23,22 +28,30 @@ export function RunsDashboardRoute() {
         return;
       }
 
+      const currentState = latestStateRef.current;
+      const currentBoardColumns = latestNavigableBoardColumnsRef.current;
+      const drawerFullscreen =
+        currentState.viewState.drawerFullscreen ||
+        document.querySelector(".drawer--fullscreen") !== null;
+
       const command = resolveRunsShortcutCommand(event, {
-        activeBoardColumnKey: state.activeBoardColumnKey,
-        boardColumns: navigableBoardColumns,
-        drawerFullscreen: state.viewState.drawerFullscreen,
-        resumeDialogOpen: state.resumeDialogOpen,
+        activeBoardColumnKey: currentState.activeBoardColumnKey,
+        boardColumns: currentBoardColumns,
+        drawerFullscreen,
+        resumeDialogOpen: currentState.resumeDialogOpen,
         searchFocused: document.activeElement === searchInputRef.current,
-        searchValue: state.viewState.search,
-        selectedRunPrimaryActionAvailable: state.selectedRunPrimaryActionAvailable,
-        selectedDrawerView: state.selectedDrawerView,
-        selectedRunId: state.selectedRunId,
+        searchValue: currentState.viewState.search,
+        selectedRunPrimaryActionAvailable: currentState.selectedRunPrimaryActionAvailable,
+        selectedDrawerView: currentState.selectedDrawerView,
+        selectedRunId: currentState.selectedRunId,
         typingTarget: isEditableEventTarget(event.target),
       });
 
       if (!command) {
         return;
       }
+
+      event.stopImmediatePropagation();
 
       if (command === "ui.focusSearch") {
         event.preventDefault();
@@ -47,9 +60,15 @@ export function RunsDashboardRoute() {
         return;
       }
 
+      if (command === "ui.toggleDrawerFullscreen") {
+        event.preventDefault();
+        currentState.toggleDrawerFullscreen();
+        return;
+      }
+
       if (command === "ui.clearSearch") {
         event.preventDefault();
-        state.updateViewState({ search: "" });
+        currentState.updateViewState({ search: "" });
         return;
       }
 
@@ -61,19 +80,19 @@ export function RunsDashboardRoute() {
 
       if (command === "run.closeAttachmentPreview") {
         event.preventDefault();
-        state.returnSelectedRunToAttachments();
+        currentState.returnSelectedRunToAttachments();
         return;
       }
 
       if (command === "run.close") {
         event.preventDefault();
-        state.closeRun();
+        currentState.closeRun();
         return;
       }
 
       if (command === "run.primaryAction") {
         event.preventDefault();
-        void state.triggerSelectedRunPrimaryAction();
+        void currentState.triggerSelectedRunPrimaryAction();
         return;
       }
 
@@ -93,17 +112,17 @@ export function RunsDashboardRoute() {
                 : "right";
 
         const nextRunId = resolveBoardNeighborRunId({
-          activeBoardColumnKey: state.activeBoardColumnKey,
-          boardColumns: navigableBoardColumns,
+          activeBoardColumnKey: currentState.activeBoardColumnKey,
+          boardColumns: currentBoardColumns,
           direction,
-          selectedRunId: state.selectedRunId,
+          selectedRunId: currentState.selectedRunId,
         });
-        if (!nextRunId || nextRunId === state.selectedRunId) {
+        if (!nextRunId || nextRunId === currentState.selectedRunId) {
           return;
         }
 
         event.preventDefault();
-        state.openRun(nextRunId, { replace: true });
+        currentState.openRun(nextRunId, { replace: true });
         return;
       }
 
@@ -115,21 +134,7 @@ export function RunsDashboardRoute() {
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [
-    state.activeBoardColumnKey,
-    state.closeRun,
-    navigableBoardColumns,
-    state.openRun,
-    state.resumeDialogOpen,
-    state.returnSelectedRunToAttachments,
-    state.selectedRunPrimaryActionAvailable,
-    state.selectedDrawerView,
-    state.selectedRunId,
-    state.triggerSelectedRunPrimaryAction,
-    state.updateViewState,
-    state.viewState.drawerFullscreen,
-    state.viewState.search,
-  ]);
+  }, []);
 
   const topNotices = [
     state.streamStale ? (

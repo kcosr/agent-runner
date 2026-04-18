@@ -905,6 +905,9 @@ export function useRunsDashboardState() {
       }
       updateViewState({ activeBoardColumnKey: columnKey });
     },
+    toggleDrawerFullscreen: () => {
+      updateViewState({ drawerFullscreen: !viewState.drawerFullscreen });
+    },
     updateSelectedRunDetailSection: (detailSection: DrawerDetailSection) => {
       if (!selectedRunId) {
         return;

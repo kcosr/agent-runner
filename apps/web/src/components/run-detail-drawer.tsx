@@ -4,7 +4,13 @@ import type {
   RunAttachment,
 } from "@task-runner/core/contracts/attachments.js";
 import type { RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
-import { type ChangeEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
+import {
+  type ChangeEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   formatBytes,
   formatRelativeTimestamp,
@@ -13,6 +19,7 @@ import {
 } from "../lib/format.js";
 import type { RunTimelineState } from "../lib/run-timeline.js";
 import type { AttachmentTab, DrawerDetailSection } from "../lib/settings.js";
+import { isEditableEventTarget } from "../lib/shortcuts.js";
 import { useDrawerResize } from "../lib/use-drawer-resize.js";
 import { useHorizontalWheelGuard } from "../lib/use-horizontal-wheel-guard.js";
 import type { RunActionPending } from "../routes/use-runs-dashboard-state.js";
@@ -308,6 +315,13 @@ export function RunDetailDrawer({
   const removeDependencyPending = actionPending === "remove-dependency";
   const clearDependenciesPending = actionPending === "clear-dependencies";
   useHorizontalWheelGuard(drawerRef);
+  useEffect(() => {
+    if (!isFullscreen) {
+      return;
+    }
+    drawerRef.current?.focus();
+  }, [isFullscreen]);
+
   const satisfiedDependencies = run.dependencies.filter(
     (dependency) => dependency.satisfied,
   ).length;
@@ -377,7 +391,7 @@ export function RunDetailDrawer({
     }
   }
 
-  function handleNameInputKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+  function handleNameInputKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
     if (event.key === "Enter") {
       event.preventDefault();
       void submitNameEdit();
@@ -442,7 +456,7 @@ export function RunDetailDrawer({
     }
   }
 
-  function handleBackendSessionInputKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+  function handleBackendSessionInputKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
     if (event.key === "Enter") {
       event.preventDefault();
       void submitBackendSessionEdit();
@@ -769,7 +783,7 @@ export function RunDetailDrawer({
     timelineOutputAtBottomRef.current = isScrolledToBottom(element);
   }
 
-  function handleResumeMessageKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+  function handleResumeMessageKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
@@ -783,12 +797,30 @@ export function RunDetailDrawer({
     }
   }
 
-  function handleResumeDialogKeyDown(event: KeyboardEvent<HTMLDialogElement>) {
+  function handleResumeDialogKeyDown(event: ReactKeyboardEvent<HTMLDialogElement>) {
     if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
       onCloseResumeDialog();
     }
+  }
+
+  function handleDrawerKeyDownCapture(event: ReactKeyboardEvent<HTMLElement>) {
+    if (
+      !isFullscreen ||
+      resumeDialogOpen ||
+      event.defaultPrevented ||
+      isEditableEventTarget(event.target)
+    ) {
+      return;
+    }
+    if (event.key !== "Escape") {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    toggleFullscreen();
   }
 
   return (
@@ -802,8 +834,10 @@ export function RunDetailDrawer({
       <aside
         aria-label="Run detail"
         className={isFullscreen ? "drawer drawer--fullscreen" : "drawer"}
+        onKeyDownCapture={handleDrawerKeyDownCapture}
         ref={drawerRef}
         style={drawerStyle}
+        tabIndex={-1}
       >
         <DrawerResizeHandle label="Resize detail drawer" resize={resize} />
         <header className="drawer-head">

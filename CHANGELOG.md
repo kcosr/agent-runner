@@ -24,8 +24,13 @@
 ### Added
 
 - Added static web dashboard keyboard shortcuts for route-aware Escape handling, arrow-key run navigation, Ctrl+F search focus, and Enter primary actions for the selected run.
+- Added `f` as a web dashboard shortcut to toggle the visible detail drawer between normal and fullscreen widths.
 - Added previous/next navigation for attachment previews in the web detail drawer, including fullscreen left/right keyboard navigation while previewing attachments.
 - Added a populated Keybindings settings page in the web dashboard so the current shortcut set is visible in the UI with keycap styling.
+
+### Changed
+
+- Changed web dashboard Escape behavior so a fullscreen detail drawer exits fullscreen first, and only closes on a subsequent Escape.
 - Added first-class `pi` backend support via Pi RPC over stdio, including
   cwd-scoped session-id validation/import, run-name propagation, and automatic
   cancellation of unsupported extension UI prompts while leaving extensions,

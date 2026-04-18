@@ -1809,6 +1809,59 @@ describe("web app", () => {
     await user.keyboard("{Enter}");
     expect(screen.queryByRole("dialog", { name: "Resume run" })).not.toBeInTheDocument();
     expect(resumeBody).toBeUndefined();
+
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("button", { name: "Expand drawer to full width" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    expect(screen.getByLabelText("Run detail")).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Run detail")).not.toBeInTheDocument();
+    });
+  });
+
+  it("toggles drawer fullscreen with f when a run detail is open", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "run-fullscreen-toggle",
+          assignmentName: "Fullscreen toggle",
+          name: "Fullscreen toggle",
+        }),
+      ],
+      details: {
+        "run-fullscreen-toggle": makeDetail({
+          runId: "run-fullscreen-toggle",
+          assignment: {
+            name: "Fullscreen toggle",
+            sourcePath: "/tmp/fullscreen-toggle-a.md",
+            workspacePath: "/tmp/fullscreen-toggle-b.md",
+          },
+          name: "Fullscreen toggle",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await user.click(await findRunCard("Fullscreen toggle"));
+    expect(screen.getByRole("button", { name: "Expand drawer to full width" })).toBeInTheDocument();
+
+    await user.keyboard("f");
+    expect(screen.getByRole("button", { name: "Exit full-width drawer" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    await user.keyboard("f");
+    expect(screen.getByRole("button", { name: "Expand drawer to full width" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
   });
 
   it("scrolls an offscreen target column into view during arrow-key navigation", async () => {

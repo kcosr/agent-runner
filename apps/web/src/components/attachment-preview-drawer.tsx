@@ -3,7 +3,7 @@ import type {
   AttachmentListEntry,
   RunAttachment,
 } from "@task-runner/core/contracts/attachments.js";
-import { useEffect, useRef } from "react";
+import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useRef } from "react";
 import { createApiClient } from "../lib/api-client.js";
 import { formatBytes, formatTimestamp } from "../lib/format.js";
 import { useRuntimeConfig } from "../lib/runtime-config.js";
@@ -74,9 +74,23 @@ export function AttachmentPreviewDrawer({
     if (!isFullscreen) {
       return;
     }
+    drawerRef.current?.focus();
+  }, [isFullscreen]);
+
+  useEffect(() => {
+    if (!isFullscreen) {
+      return;
+    }
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.defaultPrevented || isEditableEventTarget(event.target)) {
+        return;
+      }
+
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleFullscreen();
         return;
       }
 
@@ -92,11 +106,24 @@ export function AttachmentPreviewDrawer({
       }
     }
 
-    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown, { capture: true });
     return () => {
-      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keydown", handleKeyDown, { capture: true });
     };
-  }, [isFullscreen, onNextAttachment, onPreviousAttachment]);
+  }, [isFullscreen, onNextAttachment, onPreviousAttachment, toggleFullscreen]);
+
+  function handleDrawerKeyDownCapture(event: ReactKeyboardEvent<HTMLElement>) {
+    if (!isFullscreen || event.defaultPrevented || isEditableEventTarget(event.target)) {
+      return;
+    }
+    if (event.key !== "Escape") {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    toggleFullscreen();
+  }
 
   return (
     <>
@@ -109,8 +136,10 @@ export function AttachmentPreviewDrawer({
       <aside
         aria-label="Attachment preview"
         className={isFullscreen ? "drawer drawer--fullscreen" : "drawer"}
+        onKeyDownCapture={handleDrawerKeyDownCapture}
         ref={drawerRef}
         style={drawerStyle}
+        tabIndex={-1}
       >
         <DrawerResizeHandle label="Resize attachment preview drawer" resize={resize} />
         <header className="drawer-head drawer-head--preview">
