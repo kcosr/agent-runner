@@ -158,6 +158,88 @@ describe("api client", () => {
     ]);
   });
 
+  it("passes an abort signal to run-detail requests", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            run: {
+              runId: "run-1",
+              repo: "task-runner",
+              status: "running",
+              effectiveStatus: "running",
+              archivedAt: null,
+              isLive: true,
+              workspaceDir: "/tmp/run-1",
+              assignmentPath: "/tmp/run-1/assignment-seed.md",
+              agent: { name: "implementer", sourcePath: null },
+              assignment: null,
+              backend: "codex",
+              model: "gpt-5.4",
+              effort: "high",
+              name: "Build dashboard",
+              backendSessionId: null,
+              cwd: "/tmp/task-runner",
+              unrestricted: false,
+              timeoutSec: 60,
+              startedAt: "2026-04-13T05:00:00.000Z",
+              endedAt: null,
+              exitCode: null,
+              attempts: 1,
+              maxAttempts: 2,
+              sessionCount: 1,
+              tasksCompleted: 1,
+              tasksTotal: 1,
+              attachments: [],
+              dependencies: [],
+              dependents: [],
+              tasks: [],
+              activeTask: null,
+              message: null,
+              callerInstructions: null,
+              lockedFields: [],
+              runtimeVars: {},
+              execution: {
+                hostMode: "embedded",
+                controller: { kind: "embedded" },
+              },
+              capabilities: {
+                canArchive: false,
+                canUnarchive: false,
+                canReset: true,
+                canDelete: false,
+                canResume: true,
+                canAbort: false,
+                abortReason: "not_active_in_daemon",
+                taskMutation: {
+                  canAdd: false,
+                  canEditNotes: false,
+                  canSetStatus: false,
+                },
+              },
+            },
+          }),
+          { status: 200 },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createApiClient(config);
+    const controller = new AbortController();
+
+    await expect(api.getRun("run-1", { signal: controller.signal })).resolves.toMatchObject({
+      runId: "run-1",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs/run-1",
+      expect.objectContaining({
+        headers: { accept: "application/json" },
+        signal: controller.signal,
+      }),
+    );
+  });
+
   it("rejects invalid resume responses", async () => {
     vi.stubGlobal(
       "fetch",
@@ -351,6 +433,41 @@ describe("api client", () => {
       notices: "warning\n",
       live: true,
     });
+  });
+
+  it("passes an abort signal to run timeline history requests", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            history: {
+              runId: "run-1",
+              lastCursor: 0,
+              attempts: [],
+            },
+          }),
+          { status: 200 },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createApiClient(config);
+    const controller = new AbortController();
+
+    await expect(
+      api.getRunTimelineHistory("run-1", { signal: controller.signal }),
+    ).resolves.toMatchObject({
+      runId: "run-1",
+      lastCursor: 0,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs/run-1/timeline",
+      expect.objectContaining({
+        headers: { accept: "application/json" },
+        signal: controller.signal,
+      }),
+    );
   });
 
   it("sends rename requests and parses the result payload", async () => {

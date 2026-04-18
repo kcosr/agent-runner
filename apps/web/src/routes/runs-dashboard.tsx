@@ -1,11 +1,140 @@
+import { useEffect, useRef } from "react";
 import { AppShell } from "../components/app-shell.js";
 import { RunFilters } from "../components/run-filters.js";
+import {
+  isEditableEventTarget,
+  resolveBoardNeighborRunId,
+  resolveRunsShortcutCommand,
+} from "../lib/shortcuts.js";
 import { RunDetailPanel } from "./run-detail-panel.js";
 import { RunsBoardPanel } from "./runs-board-panel.js";
 import { useRunsDashboardState } from "./use-runs-dashboard-state.js";
 
 export function RunsDashboardRoute() {
   const state = useRunsDashboardState();
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const latestStateRef = useRef(state);
+  const navigableBoardColumns = state.boardColumns.filter(
+    (column) => !state.collapsedColumnKeys.includes(column.key),
+  );
+  const latestNavigableBoardColumnsRef = useRef(navigableBoardColumns);
+
+  latestStateRef.current = state;
+  latestNavigableBoardColumnsRef.current = navigableBoardColumns;
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.defaultPrevented) {
+        return;
+      }
+
+      const currentState = latestStateRef.current;
+      const currentBoardColumns = latestNavigableBoardColumnsRef.current;
+      const drawerFullscreen =
+        currentState.viewState.drawerFullscreen ||
+        document.querySelector(".drawer--fullscreen") !== null;
+
+      const command = resolveRunsShortcutCommand(event, {
+        activeBoardColumnKey: currentState.activeBoardColumnKey,
+        boardColumns: currentBoardColumns,
+        drawerFullscreen,
+        resumeDialogOpen: currentState.resumeDialogOpen,
+        searchFocused: document.activeElement === searchInputRef.current,
+        searchValue: currentState.viewState.search,
+        selectedRunPrimaryActionAvailable: currentState.selectedRunPrimaryActionAvailable,
+        selectedDrawerView: currentState.selectedDrawerView,
+        selectedRunId: currentState.selectedRunId,
+        typingTarget: isEditableEventTarget(event.target),
+      });
+
+      if (!command) {
+        return;
+      }
+
+      event.stopImmediatePropagation();
+
+      if (command === "ui.focusSearch") {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+        return;
+      }
+
+      if (command === "ui.toggleDrawerFullscreen") {
+        event.preventDefault();
+        currentState.toggleDrawerFullscreen();
+        return;
+      }
+
+      if (command === "ui.clearSearch") {
+        event.preventDefault();
+        currentState.updateViewState({ search: "" });
+        return;
+      }
+
+      if (command === "ui.blurSearch") {
+        event.preventDefault();
+        searchInputRef.current?.blur();
+        return;
+      }
+
+      if (command === "run.closeAttachmentPreview") {
+        event.preventDefault();
+        currentState.returnSelectedRunToAttachments();
+        return;
+      }
+
+      if (command === "run.close") {
+        event.preventDefault();
+        currentState.closeRun();
+        return;
+      }
+
+      if (command === "run.primaryAction") {
+        event.preventDefault();
+        void currentState.triggerSelectedRunPrimaryAction();
+        return;
+      }
+
+      if (
+        command === "board.moveUp" ||
+        command === "board.moveDown" ||
+        command === "board.moveLeft" ||
+        command === "board.moveRight"
+      ) {
+        const direction =
+          command === "board.moveUp"
+            ? "up"
+            : command === "board.moveDown"
+              ? "down"
+              : command === "board.moveLeft"
+                ? "left"
+                : "right";
+
+        const nextRunId = resolveBoardNeighborRunId({
+          activeBoardColumnKey: currentState.activeBoardColumnKey,
+          boardColumns: currentBoardColumns,
+          direction,
+          selectedRunId: currentState.selectedRunId,
+        });
+        if (!nextRunId || nextRunId === currentState.selectedRunId) {
+          return;
+        }
+
+        event.preventDefault();
+        currentState.openRun(nextRunId, { replace: true });
+        return;
+      }
+
+      const exhaustiveCommand: never = command;
+      throw new Error(`Unhandled shortcut command: ${exhaustiveCommand}`);
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
 
   const topNotices = [
     state.streamStale ? (
@@ -71,9 +200,11 @@ export function RunsDashboardRoute() {
           onArchive={state.runActions.archive}
           onClearDependencies={state.runActions.clearDependencies}
           onClose={state.closeRun}
+          onCloseResumeDialog={state.closeSelectedRunResumeDialog}
           onCopy={state.copyText}
           onDelete={state.runActions.delete}
           onDownloadAttachment={state.runActions.downloadAttachment}
+          onOpenResumeDialog={state.openSelectedRunResumeDialog}
           onOpenAttachmentPreview={state.openSelectedRunAttachmentPreview}
           onSelectAttachmentTab={state.updateSelectedRunAttachmentTab}
           onClearBackendSession={state.runActions.clearBackendSession}
@@ -81,11 +212,18 @@ export function RunsDashboardRoute() {
           onRemoveAttachment={state.runActions.removeAttachment}
           onReset={state.runActions.reset}
           onRename={state.runActions.rename}
-          onResume={state.runActions.resume}
+          onResumeMessageDraftChange={state.setResumeMessageDraft}
+          onResumeMessageExpandedChange={state.setResumeMessageExpanded}
           onSetBackendSession={state.runActions.setBackendSession}
           onSelectDetailSection={state.updateSelectedRunDetailSection}
+          onSubmitResume={state.submitSelectedRunResume}
+          onTriggerPrimaryAction={state.triggerSelectedRunPrimaryAction}
           onUnarchive={state.runActions.unarchive}
           onUploadAttachment={state.runActions.uploadAttachment}
+          resumeDialogOpen={state.resumeDialogOpen}
+          resumeMessageDraft={state.resumeMessageDraft}
+          resumeMessageExpanded={state.resumeMessageExpanded}
+          detailSettling={state.detailSettling}
           selectedRunGroupAttachmentsQuery={state.selectedRunGroupAttachmentsQuery}
           selectedRunId={state.selectedRunId}
           selectedRunQuery={state.selectedRunQuery}
@@ -97,6 +235,7 @@ export function RunsDashboardRoute() {
         <RunFilters
           preferences={state.preferences}
           repoOptions={state.repoOptions}
+          searchInputRef={searchInputRef}
           updatePreferences={state.updatePreferences}
           updateViewState={state.updateViewState}
           viewState={state.viewState}

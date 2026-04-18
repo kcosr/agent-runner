@@ -7,7 +7,7 @@ export const SETTINGS_SECTIONS = [
     title: "General",
   },
   {
-    description: "Configurable shortcuts placeholder",
+    description: "Current keyboard shortcuts and navigation",
     id: "keybindings",
     path: "/settings/keybindings",
     routePath: "keybindings",

@@ -45,6 +45,10 @@ export interface AttachmentContentResult {
   text: string;
 }
 
+interface RequestOptions {
+  signal?: AbortSignal;
+}
+
 interface ErrorEnvelope {
   error?: {
     code?: string;
@@ -313,20 +317,25 @@ export function createApiClient(config: AppRuntimeConfig) {
       });
       return await readRuns(response);
     },
-    async getRun(runId: string): Promise<RunDetail> {
+    async getRun(runId: string, options: RequestOptions = {}): Promise<RunDetail> {
       const response = await fetch(
         joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}`),
         {
           headers: { accept: "application/json" },
+          signal: options.signal,
         },
       );
       return await readRun(response);
     },
-    async getRunTimelineHistory(runId: string): Promise<RunTimelineHistory> {
+    async getRunTimelineHistory(
+      runId: string,
+      options: RequestOptions = {},
+    ): Promise<RunTimelineHistory> {
       const response = await fetch(
         joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/timeline`),
         {
           headers: { accept: "application/json" },
+          signal: options.signal,
         },
       );
       return await readRunTimelineHistory(response);

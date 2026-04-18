@@ -4,7 +4,13 @@ import type {
   RunAttachment,
 } from "@task-runner/core/contracts/attachments.js";
 import type { RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
-import { type ChangeEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
+import {
+  type ChangeEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   formatBytes,
   formatRelativeTimestamp,
@@ -13,6 +19,7 @@ import {
 } from "../lib/format.js";
 import type { RunTimelineState } from "../lib/run-timeline.js";
 import type { AttachmentTab, DrawerDetailSection } from "../lib/settings.js";
+import { isEditableEventTarget } from "../lib/shortcuts.js";
 import { useDrawerResize } from "../lib/use-drawer-resize.js";
 import { useHorizontalWheelGuard } from "../lib/use-horizontal-wheel-guard.js";
 import type { RunActionPending } from "../routes/use-runs-dashboard-state.js";
@@ -192,24 +199,32 @@ export function RunDetailDrawer({
   onArchive,
   onClearDependencies,
   onClose,
+  onCloseResumeDialog,
   onCopy,
   onDelete,
   groupAttachmentsQuery,
   onDownloadAttachment,
+  onOpenResumeDialog,
   onOpenAttachmentPreview,
   onClearBackendSession,
   onRemoveDependency,
   onRemoveAttachment,
   onReset,
   onRename,
-  onResume,
+  onResumeMessageDraftChange,
+  onResumeMessageExpandedChange,
   onSelectAttachmentTab,
   onSetBackendSession,
   onSelectSection,
+  onSubmitResume,
+  onTriggerPrimaryAction,
   selectedAttachmentTab,
   timelineState,
   onUnarchive,
   onUploadAttachment,
+  resumeDialogOpen,
+  resumeMessageDraft,
+  resumeMessageExpanded,
   run,
 }: {
   activeSection: DrawerDetailSection;
@@ -221,10 +236,12 @@ export function RunDetailDrawer({
   onArchive: () => void;
   onClearDependencies: () => Promise<void>;
   onClose: () => void;
+  onCloseResumeDialog: () => void;
   onCopy: (value: string, label: string) => void;
   onDelete: () => void;
   groupAttachmentsQuery: UseQueryResult<AttachmentListEntry[], Error>;
   onDownloadAttachment: (ownerRunId: string, attachmentId: string, name: string) => Promise<void>;
+  onOpenResumeDialog: () => void;
   onOpenAttachmentPreview: (
     attachmentOwnerRunId: string,
     attachmentId: string,
@@ -235,10 +252,16 @@ export function RunDetailDrawer({
   onRemoveAttachment: (attachmentId: string) => Promise<void>;
   onReset: () => void;
   onRename: (name: string | null) => Promise<void>;
-  onResume: (message?: string) => Promise<void>;
+  onResumeMessageDraftChange: (value: string) => void;
+  onResumeMessageExpandedChange: (expanded: boolean) => void;
   onSelectAttachmentTab: (attachmentTab: AttachmentTab) => void;
   onSetBackendSession: (backendSessionId: string) => Promise<void>;
   onSelectSection: (section: DrawerDetailSection) => void;
+  onSubmitResume: () => Promise<void>;
+  onTriggerPrimaryAction: () => Promise<void>;
+  resumeDialogOpen: boolean;
+  resumeMessageDraft: string;
+  resumeMessageExpanded: boolean;
   selectedAttachmentTab: AttachmentTab;
   timelineState: RunTimelineState;
   onUnarchive: () => void;
@@ -256,9 +279,6 @@ export function RunDetailDrawer({
   const [editingBackendSession, setEditingBackendSession] = useState(false);
   const [nameDraft, setNameDraft] = useState(run.name ?? "");
   const [backendSessionDraft, setBackendSessionDraft] = useState(run.backendSessionId ?? "");
-  const [resumeDialogOpen, setResumeDialogOpen] = useState(false);
-  const [resumeMessageExpanded, setResumeMessageExpanded] = useState(false);
-  const [resumeMessageDraft, setResumeMessageDraft] = useState("");
   const [confirmingAttachmentId, setConfirmingAttachmentId] = useState<string | null>(null);
   const [confirmingReset, setConfirmingReset] = useState(false);
   const [confirmingAbort, setConfirmingAbort] = useState(false);
@@ -295,6 +315,13 @@ export function RunDetailDrawer({
   const removeDependencyPending = actionPending === "remove-dependency";
   const clearDependenciesPending = actionPending === "clear-dependencies";
   useHorizontalWheelGuard(drawerRef);
+  useEffect(() => {
+    if (!isFullscreen) {
+      return;
+    }
+    drawerRef.current?.focus();
+  }, [isFullscreen]);
+
   const satisfiedDependencies = run.dependencies.filter(
     (dependency) => dependency.satisfied,
   ).length;
@@ -364,7 +391,7 @@ export function RunDetailDrawer({
     }
   }
 
-  function handleNameInputKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+  function handleNameInputKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
     if (event.key === "Enter") {
       event.preventDefault();
       void submitNameEdit();
@@ -429,7 +456,7 @@ export function RunDetailDrawer({
     }
   }
 
-  function handleBackendSessionInputKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+  function handleBackendSessionInputKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
     if (event.key === "Enter") {
       event.preventDefault();
       void submitBackendSessionEdit();
@@ -756,68 +783,44 @@ export function RunDetailDrawer({
     timelineOutputAtBottomRef.current = isScrolledToBottom(element);
   }
 
-  async function startRun() {
-    if (actionsLocked) {
-      return;
-    }
-    try {
-      await onResume();
-    } catch {
-      // actionError is surfaced by the shared mutation handler.
-    }
-  }
-
-  function openResumeDialog() {
-    if (actionsLocked) {
-      return;
-    }
-    setResumeMessageExpanded(resumeRequiresMessage);
-    setResumeDialogOpen(true);
-  }
-
-  function closeResumeDialog() {
-    if (resumePending) {
-      return;
-    }
-    setResumeDialogOpen(false);
-    setResumeMessageExpanded(false);
-    setResumeMessageDraft("");
-  }
-
-  async function submitResume() {
-    if (resumePending || (resumeRequiresMessage && trimmedResumeMessage.length === 0)) {
-      return;
-    }
-    try {
-      await onResume(trimmedResumeMessage.length > 0 ? trimmedResumeMessage : undefined);
-      setResumeDialogOpen(false);
-      setResumeMessageExpanded(false);
-      setResumeMessageDraft("");
-    } catch {
-      // actionError is surfaced by the shared mutation handler.
-    }
-  }
-
-  function handleResumeMessageKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+  function handleResumeMessageKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
-      closeResumeDialog();
+      onCloseResumeDialog();
       return;
     }
     if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
       event.preventDefault();
       event.stopPropagation();
-      void submitResume();
+      void onSubmitResume();
     }
   }
 
-  function handleResumeDialogKeyDown(event: KeyboardEvent<HTMLDialogElement>) {
+  function handleResumeDialogKeyDown(event: ReactKeyboardEvent<HTMLDialogElement>) {
     if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
-      closeResumeDialog();
+      onCloseResumeDialog();
     }
+  }
+
+  function handleDrawerKeyDownCapture(event: ReactKeyboardEvent<HTMLElement>) {
+    if (
+      !isFullscreen ||
+      resumeDialogOpen ||
+      event.defaultPrevented ||
+      isEditableEventTarget(event.target)
+    ) {
+      return;
+    }
+    if (event.key !== "Escape") {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    toggleFullscreen();
   }
 
   return (
@@ -831,8 +834,10 @@ export function RunDetailDrawer({
       <aside
         aria-label="Run detail"
         className={isFullscreen ? "drawer drawer--fullscreen" : "drawer"}
+        onKeyDownCapture={handleDrawerKeyDownCapture}
         ref={drawerRef}
         style={drawerStyle}
+        tabIndex={-1}
       >
         <DrawerResizeHandle label="Resize detail drawer" resize={resize} />
         <header className="drawer-head">
@@ -857,7 +862,7 @@ export function RunDetailDrawer({
               <button
                 className="btn"
                 disabled={actionsLocked}
-                onClick={startableRun ? () => void startRun() : openResumeDialog}
+                onClick={() => void onTriggerPrimaryAction()}
                 type="button"
               >
                 {actionPending === "resume"
@@ -1609,11 +1614,11 @@ export function RunDetailDrawer({
           onCancel={(event) => {
             event.preventDefault();
             event.stopPropagation();
-            closeResumeDialog();
+            onCloseResumeDialog();
           }}
           onClick={(event) => {
             if (event.target === event.currentTarget) {
-              closeResumeDialog();
+              onCloseResumeDialog();
             }
           }}
           onKeyDown={handleResumeDialogKeyDown}
@@ -1637,7 +1642,7 @@ export function RunDetailDrawer({
                   aria-expanded={resumeMessageExpanded}
                   className="resume-dialog__disclosure-toggle"
                   disabled={resumePending}
-                  onClick={() => setResumeMessageExpanded((current) => !current)}
+                  onClick={() => onResumeMessageExpandedChange(!resumeMessageExpanded)}
                   ref={resumeDisclosureButtonRef}
                   type="button"
                 >
@@ -1662,7 +1667,7 @@ export function RunDetailDrawer({
                   className="resume-dialog__textarea"
                   disabled={resumePending}
                   id="resume-run-message"
-                  onChange={(event) => setResumeMessageDraft(event.target.value)}
+                  onChange={(event) => onResumeMessageDraftChange(event.target.value)}
                   onKeyDown={handleResumeMessageKeyDown}
                   placeholder="Describe the follow-up work for this resume..."
                   ref={resumeMessageRef}
@@ -1675,7 +1680,7 @@ export function RunDetailDrawer({
               <button
                 className="btn"
                 disabled={resumePending}
-                onClick={closeResumeDialog}
+                onClick={onCloseResumeDialog}
                 type="button"
               >
                 Cancel
@@ -1685,7 +1690,7 @@ export function RunDetailDrawer({
                 disabled={
                   resumePending || (resumeRequiresMessage && trimmedResumeMessage.length === 0)
                 }
-                onClick={() => void submitResume()}
+                onClick={() => void onSubmitResume()}
                 type="button"
               >
                 {resumePending ? "Resuming..." : "Send"}

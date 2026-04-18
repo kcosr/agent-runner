@@ -213,6 +213,17 @@ export function DownloadIcon(props: IconProps) {
   );
 }
 
+export function KeyIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <circle cx="7.5" cy="12" r="3.5" />
+      <path d="M11 12h10" />
+      <path d="M17 12v3" />
+      <path d="M20 12v2" />
+    </IconBase>
+  );
+}
+
 export function ExpandIcon(props: IconProps) {
   return (
     <IconBase {...props}>

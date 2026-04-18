@@ -130,6 +130,7 @@ export function RunCard({
       data-motion-active={activeMotionRevision === motion?.revision ? "true" : undefined}
       data-motion-kind={motion?.kind}
       data-motion-revision={motion?.revision}
+      data-run-id={run.runId}
       onClick={onSelect}
       ref={cardRef}
       title={run.name ?? "Unnamed"}

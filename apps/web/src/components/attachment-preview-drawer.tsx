@@ -3,10 +3,11 @@ import type {
   AttachmentListEntry,
   RunAttachment,
 } from "@task-runner/core/contracts/attachments.js";
-import { useRef } from "react";
+import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useRef } from "react";
 import { createApiClient } from "../lib/api-client.js";
 import { formatBytes, formatTimestamp } from "../lib/format.js";
 import { useRuntimeConfig } from "../lib/runtime-config.js";
+import { isEditableEventTarget } from "../lib/shortcuts.js";
 import { useDrawerResize } from "../lib/use-drawer-resize.js";
 import { useHorizontalWheelGuard } from "../lib/use-horizontal-wheel-guard.js";
 import type { RunActionPending } from "../routes/use-runs-dashboard-state.js";
@@ -32,6 +33,10 @@ export function AttachmentPreviewDrawer({
   onBack,
   onClose,
   onDownload,
+  onNextAttachment,
+  onPreviousAttachment,
+  nextAttachmentName,
+  previousAttachmentName,
   runId,
 }: {
   actionPending?: RunActionPending;
@@ -42,6 +47,10 @@ export function AttachmentPreviewDrawer({
   onBack: () => void;
   onClose: () => void;
   onDownload: (attachmentId: string, name: string) => Promise<void>;
+  onNextAttachment?: () => void;
+  onPreviousAttachment?: () => void;
+  nextAttachmentName?: string;
+  previousAttachmentName?: string;
   runId: string;
 }) {
   const drawerRef = useRef<HTMLElement | null>(null);
@@ -61,6 +70,61 @@ export function AttachmentPreviewDrawer({
     previewQuery.data?.mediaType ??
     (attachment ? normalizeAttachmentMimeType(attachment.mimeType) : null);
 
+  useEffect(() => {
+    if (!isFullscreen) {
+      return;
+    }
+    drawerRef.current?.focus();
+  }, [isFullscreen]);
+
+  useEffect(() => {
+    if (!isFullscreen) {
+      return;
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.defaultPrevented || isEditableEventTarget(event.target)) {
+        return;
+      }
+
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleFullscreen();
+        return;
+      }
+
+      if (event.key === "ArrowLeft" && onPreviousAttachment) {
+        event.preventDefault();
+        onPreviousAttachment();
+        return;
+      }
+
+      if (event.key === "ArrowRight" && onNextAttachment) {
+        event.preventDefault();
+        onNextAttachment();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown, { capture: true });
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown, { capture: true });
+    };
+  }, [isFullscreen, onNextAttachment, onPreviousAttachment, toggleFullscreen]);
+
+  function handleDrawerKeyDownCapture(event: ReactKeyboardEvent<HTMLElement>) {
+    if (!isFullscreen || event.defaultPrevented || isEditableEventTarget(event.target)) {
+      return;
+    }
+    if (event.key !== "Escape") {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    toggleFullscreen();
+  }
+
   return (
     <>
       <button
@@ -72,8 +136,10 @@ export function AttachmentPreviewDrawer({
       <aside
         aria-label="Attachment preview"
         className={isFullscreen ? "drawer drawer--fullscreen" : "drawer"}
+        onKeyDownCapture={handleDrawerKeyDownCapture}
         ref={drawerRef}
         style={drawerStyle}
+        tabIndex={-1}
       >
         <DrawerResizeHandle label="Resize attachment preview drawer" resize={resize} />
         <header className="drawer-head drawer-head--preview">
@@ -104,6 +170,38 @@ export function AttachmentPreviewDrawer({
             ) : null}
           </div>
           <div className="drawer-actions">
+            <div className="attachment-preview-nav">
+              <button
+                aria-label={
+                  previousAttachmentName
+                    ? `Previous attachment: ${previousAttachmentName}`
+                    : "Previous attachment"
+                }
+                className="icon-btn"
+                disabled={!onPreviousAttachment}
+                onClick={onPreviousAttachment}
+                type="button"
+              >
+                <ChevronIcon
+                  aria-hidden="true"
+                  className="attachment-preview-chevron attachment-preview-chevron--left"
+                />
+              </button>
+              <button
+                aria-label={
+                  nextAttachmentName ? `Next attachment: ${nextAttachmentName}` : "Next attachment"
+                }
+                className="icon-btn"
+                disabled={!onNextAttachment}
+                onClick={onNextAttachment}
+                type="button"
+              >
+                <ChevronIcon
+                  aria-hidden="true"
+                  className="attachment-preview-chevron attachment-preview-chevron--right"
+                />
+              </button>
+            </div>
             {attachment ? (
               <button
                 className="btn"

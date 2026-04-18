@@ -22,9 +22,11 @@ export function RunDetailPanel({
   onArchive,
   onClearDependencies,
   onClose,
+  onCloseResumeDialog,
   onCopy,
   onDelete,
   onDownloadAttachment,
+  onOpenResumeDialog,
   onOpenAttachmentPreview,
   onSelectAttachmentTab,
   onClearBackendSession,
@@ -32,11 +34,18 @@ export function RunDetailPanel({
   onRemoveAttachment,
   onReset,
   onRename,
-  onResume,
+  onResumeMessageDraftChange,
+  onResumeMessageExpandedChange,
   onSetBackendSession,
   onSelectDetailSection,
+  onSubmitResume,
+  onTriggerPrimaryAction,
   onUnarchive,
   onUploadAttachment,
+  resumeDialogOpen,
+  resumeMessageDraft,
+  resumeMessageExpanded,
+  detailSettling,
   selectedRunGroupAttachmentsQuery,
   selectedRunId,
   selectedRunQuery,
@@ -54,9 +63,11 @@ export function RunDetailPanel({
   onArchive: (runId: string) => void;
   onClearDependencies: (runId: string) => Promise<void>;
   onClose: () => void;
+  onCloseResumeDialog: () => void;
   onCopy: (value: string, label: string) => Promise<void>;
   onDelete: (runId: string) => void;
   onDownloadAttachment: (runId: string, attachmentId: string, name: string) => Promise<void>;
+  onOpenResumeDialog: () => void;
   onOpenAttachmentPreview: (
     attachmentOwnerRunId: string,
     attachmentId: string,
@@ -68,11 +79,18 @@ export function RunDetailPanel({
   onRemoveAttachment: (runId: string, attachmentId: string) => Promise<void>;
   onReset: (runId: string) => void;
   onRename: (runId: string, name: string | null) => Promise<void>;
-  onResume: (runId: string, message?: string) => Promise<void>;
+  onResumeMessageDraftChange: (value: string) => void;
+  onResumeMessageExpandedChange: (expanded: boolean) => void;
   onSetBackendSession: (runId: string, backendSessionId: string) => Promise<void>;
   onSelectDetailSection: (section: DrawerDetailSection) => void;
+  onSubmitResume: () => Promise<void>;
+  onTriggerPrimaryAction: () => Promise<void>;
   onUnarchive: (runId: string) => void;
   onUploadAttachment: (runId: string, file: File) => Promise<void>;
+  resumeDialogOpen: boolean;
+  resumeMessageDraft: string;
+  resumeMessageExpanded: boolean;
+  detailSettling: boolean;
   selectedRunGroupAttachmentsQuery: UseQueryResult<AttachmentListEntry[], Error>;
   selectedRunId?: string;
   selectedRunQuery: UseQueryResult<RunDetail, Error>;
@@ -85,7 +103,7 @@ export function RunDetailPanel({
   const drawerStyle = { "--drawer-width": `${drawerWidth}px` } as CSSProperties;
   const drawerClassName = drawerFullscreen ? "drawer drawer--fullscreen" : "drawer";
 
-  if (selectedRunQuery.isPending) {
+  function renderLoadingState() {
     return (
       <aside
         aria-label="Run detail"
@@ -99,6 +117,10 @@ export function RunDetailPanel({
         </div>
       </aside>
     );
+  }
+
+  if (detailSettling || selectedRunQuery.isPending) {
+    return renderLoadingState();
   }
 
   if (selectedRunQuery.isError && !isNotFoundError(selectedRunQuery.error)) {
@@ -121,6 +143,24 @@ export function RunDetailPanel({
 
   const selectedRun = selectedRunQuery.data;
   if (drawerView?.mode === "attachment") {
+    const attachmentEntries =
+      drawerView.attachmentTab === "run"
+        ? selectedRun.attachments.map((candidate) => ({
+            attachment: candidate,
+            ownerRunId: selectedRun.runId,
+          }))
+        : (selectedRunGroupAttachmentsQuery.data ?? []).map((candidate) => ({
+            attachment: candidate,
+            ownerRunId: candidate.ownerRunId,
+          }));
+    const currentAttachmentIndex = attachmentEntries.findIndex(
+      ({ attachment, ownerRunId }) =>
+        attachment.id === drawerView.attachmentId && ownerRunId === drawerView.attachmentOwnerRunId,
+    );
+    const previousAttachment =
+      currentAttachmentIndex > 0 ? attachmentEntries[currentAttachmentIndex - 1] : undefined;
+    const nextAttachment =
+      currentAttachmentIndex >= 0 ? attachmentEntries[currentAttachmentIndex + 1] : undefined;
     const attachment =
       drawerView.attachmentOwnerRunId === selectedRun.runId
         ? selectedRun.attachments.find((candidate) => candidate.id === drawerView.attachmentId)
@@ -148,6 +188,28 @@ export function RunDetailPanel({
         onDownload={(attachmentId, name) =>
           onDownloadAttachment(drawerView.attachmentOwnerRunId, attachmentId, name)
         }
+        onNextAttachment={
+          nextAttachment
+            ? () =>
+                onOpenAttachmentPreview(
+                  nextAttachment.ownerRunId,
+                  nextAttachment.attachment.id,
+                  drawerView.attachmentTab,
+                )
+            : undefined
+        }
+        onPreviousAttachment={
+          previousAttachment
+            ? () =>
+                onOpenAttachmentPreview(
+                  previousAttachment.ownerRunId,
+                  previousAttachment.attachment.id,
+                  drawerView.attachmentTab,
+                )
+            : undefined
+        }
+        nextAttachmentName={nextAttachment?.attachment.name}
+        previousAttachmentName={previousAttachment?.attachment.name}
         runId={drawerView.attachmentOwnerRunId}
       />
     );
@@ -165,12 +227,14 @@ export function RunDetailPanel({
       onArchive={() => onArchive(selectedRun.runId)}
       onClearDependencies={() => onClearDependencies(selectedRun.runId)}
       onClose={onClose}
+      onCloseResumeDialog={onCloseResumeDialog}
       onCopy={(value, label) => void onCopy(value, label)}
       onDelete={() => onDelete(selectedRun.runId)}
       groupAttachmentsQuery={selectedRunGroupAttachmentsQuery}
       onDownloadAttachment={(ownerRunId, attachmentId, name) =>
         onDownloadAttachment(ownerRunId, attachmentId, name)
       }
+      onOpenResumeDialog={onOpenResumeDialog}
       onOpenAttachmentPreview={onOpenAttachmentPreview}
       onClearBackendSession={() => onClearBackendSession(selectedRun.runId)}
       onRemoveDependency={(dependencyRunId) =>
@@ -179,15 +243,21 @@ export function RunDetailPanel({
       onRemoveAttachment={(attachmentId) => onRemoveAttachment(selectedRun.runId, attachmentId)}
       onReset={() => onReset(selectedRun.runId)}
       onRename={(name) => onRename(selectedRun.runId, name)}
-      onResume={(message) => onResume(selectedRun.runId, message)}
+      onResumeMessageDraftChange={onResumeMessageDraftChange}
+      onResumeMessageExpandedChange={onResumeMessageExpandedChange}
       onSelectAttachmentTab={onSelectAttachmentTab}
       onSetBackendSession={(backendSessionId) =>
         onSetBackendSession(selectedRun.runId, backendSessionId)
       }
       onSelectSection={onSelectDetailSection}
+      onSubmitResume={onSubmitResume}
+      onTriggerPrimaryAction={onTriggerPrimaryAction}
       timelineState={timelineState}
       onUnarchive={() => onUnarchive(selectedRun.runId)}
       onUploadAttachment={(file) => onUploadAttachment(selectedRun.runId, file)}
+      resumeDialogOpen={resumeDialogOpen}
+      resumeMessageDraft={resumeMessageDraft}
+      resumeMessageExpanded={resumeMessageExpanded}
       selectedAttachmentTab={drawerView?.attachmentTab ?? "run"}
       run={selectedRun}
     />

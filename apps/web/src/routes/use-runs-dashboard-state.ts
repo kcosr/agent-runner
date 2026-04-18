@@ -48,6 +48,34 @@ export type RunActionPending =
   | "clear-dependencies";
 
 const FAILURE_STATUSES: RunStatus[] = ["exhausted", "error"];
+const DETAIL_LOAD_DELAY_MS = 120;
+
+function useSettledDetailRunId(selectedRunId?: string) {
+  const [detailRunId, setDetailRunId] = useState<string | undefined>(selectedRunId);
+
+  useEffect(() => {
+    if (detailRunId === selectedRunId) {
+      return;
+    }
+    if (!selectedRunId) {
+      setDetailRunId(undefined);
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setDetailRunId(selectedRunId);
+    }, DETAIL_LOAD_DELAY_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [detailRunId, selectedRunId]);
+
+  return {
+    detailRunId,
+    detailSettling: detailRunId !== selectedRunId,
+  };
+}
 
 function matchesSearch(run: RunSummary, search: string): boolean {
   if (!search) {
@@ -243,6 +271,10 @@ export function useRunsDashboardState() {
   const [notices, setNotices] = useState<NoticeState[]>([]);
   const [actionError, setActionError] = useState<string>();
   const [detailStreamStale, setDetailStreamStale] = useState(false);
+  const { detailRunId, detailSettling } = useSettledDetailRunId(selectedRunId);
+  const [resumeDialogOpen, setResumeDialogOpen] = useState(false);
+  const [resumeMessageExpanded, setResumeMessageExpanded] = useState(false);
+  const [resumeMessageDraft, setResumeMessageDraft] = useState("");
   const noticeTimersRef = useRef(new Map<string, number>());
   const detailStreamStaleRef = useRef(detailStreamStale);
 
@@ -252,19 +284,19 @@ export function useRunsDashboardState() {
   });
 
   const selectedRunQuery = useQuery({
-    queryKey: selectedRunId ? runQueryKeys.detail(selectedRunId) : runQueryKeys.detail("__none__"),
-    queryFn: async () => {
-      if (!selectedRunId) {
+    queryKey: detailRunId ? runQueryKeys.detail(detailRunId) : runQueryKeys.detail("__none__"),
+    queryFn: async ({ signal }) => {
+      if (!detailRunId) {
         throw new Error("Selected run id is required");
       }
-      return await api.getRun(selectedRunId);
+      return await api.getRun(detailRunId, { signal });
     },
-    enabled: Boolean(selectedRunId),
+    enabled: Boolean(detailRunId),
   });
   const timelineState = useRunTimelineState({
     config,
-    runId: selectedRunId,
-    runIsLive: selectedRunQuery.data?.isLive === true,
+    runId: detailRunId,
+    runIsLive: detailRunId === selectedRunId && selectedRunQuery.data?.isLive === true,
   });
 
   useEffect(() => {
@@ -320,15 +352,15 @@ export function useRunsDashboardState() {
       ? (viewState.drawerViewsByRunId[selectedRunId] ?? DEFAULT_DRAWER_VIEW)
       : undefined;
   const selectedRunGroupAttachmentsQuery = useQuery({
-    queryKey: ["attachment-list", selectedRunId, "cwd-scope"],
+    queryKey: ["attachment-list", detailRunId, "cwd-scope"],
     queryFn: async () => {
-      if (!selectedRunId) {
+      if (!detailRunId) {
         throw new Error("Selected run id is required");
       }
-      return await api.listAttachments(selectedRunId, { cwdScope: true });
+      return await api.listAttachments(detailRunId, { cwdScope: true });
     },
     enabled:
-      Boolean(selectedRunId) &&
+      Boolean(detailRunId) &&
       selectedDrawerView?.detailSection === "attachments" &&
       selectedDrawerView.attachmentTab === "group",
     retry: false,
@@ -337,6 +369,13 @@ export function useRunsDashboardState() {
   useEffect(() => {
     detailStreamStaleRef.current = detailStreamStale;
   }, [detailStreamStale]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: run on selection change to clear the prior run's pending resume-dialog state
+  useEffect(() => {
+    setResumeDialogOpen(false);
+    setResumeMessageExpanded(false);
+    setResumeMessageDraft("");
+  }, [selectedRunId]);
 
   useEffect(() => {
     for (const notice of notices) {
@@ -371,62 +410,29 @@ export function useRunsDashboardState() {
   );
 
   useEffect(() => {
-    if (!selectedRunId) {
+    if (!detailRunId || detailRunId !== selectedRunId) {
       return;
     }
 
     if (selectedRunQuery.error && isNotFoundError(selectedRunQuery.error)) {
       setNotices((current) =>
         appendNotice(current, {
-          id: `deleted-${selectedRunId}`,
-          message: `Run ${selectedRunId} was deleted while selected.`,
+          id: `deleted-${detailRunId}`,
+          message: `Run ${detailRunId} was deleted while selected.`,
           tone: "warning",
         }),
       );
       void navigate({ to: "/" });
     }
-  }, [navigate, selectedRunId, selectedRunQuery.error]);
+  }, [detailRunId, navigate, selectedRunId, selectedRunQuery.error]);
 
   useEffect(() => {
-    if (!selectedRunId) {
-      return;
-    }
-    const runId = selectedRunId;
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.defaultPrevented) {
-        return;
-      }
-      if (event.key !== "Escape") {
-        return;
-      }
-      setActionError(undefined);
-      if (selectedDrawerView?.mode === "attachment") {
-        setSelectedRunDrawerView(runId, {
-          mode: "detail",
-          detailSection: "attachments",
-          attachmentId: null,
-          attachmentOwnerRunId: null,
-          attachmentTab: selectedDrawerView.attachmentTab,
-        });
-        return;
-      }
-      void navigate({ to: "/" });
-    }
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [navigate, selectedRunId, selectedDrawerView?.attachmentTab, selectedDrawerView?.mode]);
-
-  useEffect(() => {
-    if (!selectedRunId) {
+    if (!detailRunId) {
       detailStreamStaleRef.current = false;
       setDetailStreamStale(false);
       return;
     }
-    const runId = selectedRunId;
+    const runId = detailRunId;
 
     let disposed = false;
 
@@ -482,7 +488,7 @@ export function useRunsDashboardState() {
       disposed = true;
       unsubscribe();
     };
-  }, [config, markRunTouched, selectedRunId]);
+  }, [config, detailRunId, markRunTouched]);
 
   const closeRun = () => {
     void navigate({ to: "/" });
@@ -668,6 +674,24 @@ export function useRunsDashboardState() {
                             : clearDependenciesMutation.isPending
                               ? "clear-dependencies"
                               : undefined;
+  const selectedRunDetailReady =
+    detailRunId !== undefined &&
+    detailRunId === selectedRunId &&
+    selectedRunQuery.data?.runId === detailRunId;
+  const selectedRunDetail = selectedRunDetailReady ? selectedRunQuery.data : undefined;
+  const selectedRunCanResume = selectedRunDetail?.capabilities.canResume === true;
+  const selectedRunPrimaryActionAvailable = selectedRunCanResume && actionPending === undefined;
+  const selectedRunStartable = selectedRunCanResume && selectedRunDetail?.status === "initialized";
+  const selectedRunHasIncompleteTasks =
+    selectedRunDetail?.tasks.some((task) => task.status !== "completed") ?? true;
+  const selectedRunResumeRequiresMessage = selectedRunCanResume && !selectedRunHasIncompleteTasks;
+  const trimmedResumeMessage = resumeMessageDraft.trim();
+
+  function resetResumeDialogState() {
+    setResumeDialogOpen(false);
+    setResumeMessageExpanded(false);
+    setResumeMessageDraft("");
+  }
 
   function setColumnCollapsed(columnKey: string, collapsed: boolean) {
     const isCollapsed = collapsedColumnKeySet.has(columnKey);
@@ -689,6 +713,58 @@ export function useRunsDashboardState() {
         [runId]: drawerView,
       },
     }));
+  }
+
+  function closeResumeDialog() {
+    if (actionPending === "resume") {
+      return;
+    }
+    resetResumeDialogState();
+  }
+
+  function openResumeDialog() {
+    if (!selectedRunCanResume || actionPending !== undefined) {
+      return;
+    }
+    setResumeMessageExpanded(selectedRunResumeRequiresMessage);
+    setResumeDialogOpen(true);
+  }
+
+  async function submitSelectedRunResume() {
+    if (
+      !selectedRunId ||
+      !selectedRunCanResume ||
+      actionPending === "resume" ||
+      (selectedRunResumeRequiresMessage && trimmedResumeMessage.length === 0)
+    ) {
+      return;
+    }
+    try {
+      await resumeMutation.mutateAsync({
+        runId: selectedRunId,
+        message: trimmedResumeMessage.length > 0 ? trimmedResumeMessage : undefined,
+      });
+      setActionError(undefined);
+      resetResumeDialogState();
+    } catch {
+      // actionError is surfaced by the shared mutation handler.
+    }
+  }
+
+  async function triggerSelectedRunPrimaryAction() {
+    if (!selectedRunId || !selectedRunCanResume || actionPending !== undefined) {
+      return;
+    }
+    if (!selectedRunStartable) {
+      openResumeDialog();
+      return;
+    }
+    try {
+      await resumeMutation.mutateAsync({ runId: selectedRunId });
+      setActionError(undefined);
+    } catch {
+      // actionError is surfaced by the shared mutation handler.
+    }
   }
 
   return {
@@ -729,10 +805,11 @@ export function useRunsDashboardState() {
       setNotices((current) => current.filter((notice) => notice.id !== id));
     },
     notices,
-    openRun: (runId: string) => {
+    openRun: (runId: string, options?: { replace?: boolean }) => {
       setActionError(undefined);
-      void navigate({ to: `/runs/${runId}` });
+      void navigate({ replace: options?.replace, to: `/runs/${runId}` });
     },
+    openSelectedRunResumeDialog: openResumeDialog,
     openSelectedRunAttachmentPreview: (
       attachmentOwnerRunId: string,
       attachmentId: string,
@@ -751,6 +828,9 @@ export function useRunsDashboardState() {
     },
     preferences,
     repoOptions,
+    resumeDialogOpen,
+    resumeMessageDraft,
+    resumeMessageExpanded,
     runActions: {
       abort: (runId: string) => abortMutation.mutate(runId),
       addDependency: async (runId: string, dependencyRunId: string) => {
@@ -790,12 +870,19 @@ export function useRunsDashboardState() {
     },
     runs,
     runsQuery,
+    detailSettling,
     selectedRunId,
     selectedDrawerView,
     selectedRunGroupAttachmentsQuery,
+    selectedRunCanResume,
+    selectedRunPrimaryActionAvailable,
     selectedRunQuery,
+    setResumeMessageDraft,
+    setResumeMessageExpanded,
     streamStale: summaryStreamStale || detailStreamStale || timelineState.stale,
+    submitSelectedRunResume,
     timelineState,
+    triggerSelectedRunPrimaryAction,
     returnSelectedRunToAttachments: () => {
       if (!selectedRunId) {
         return;
@@ -817,6 +904,9 @@ export function useRunsDashboardState() {
         return;
       }
       updateViewState({ activeBoardColumnKey: columnKey });
+    },
+    toggleDrawerFullscreen: () => {
+      updateViewState({ drawerFullscreen: !viewState.drawerFullscreen });
     },
     updateSelectedRunDetailSection: (detailSection: DrawerDetailSection) => {
       if (!selectedRunId) {
@@ -846,5 +936,6 @@ export function useRunsDashboardState() {
     updateViewState,
     visibleRuns,
     viewState,
+    closeSelectedRunResumeDialog: closeResumeDialog,
   };
 }

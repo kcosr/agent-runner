@@ -23,6 +23,14 @@
 
 ### Added
 
+- Added static web dashboard keyboard shortcuts for route-aware Escape handling, arrow-key run navigation, Ctrl+F search focus, and Enter primary actions for the selected run. ([#50](https://github.com/kcosr/task-runner/pull/50))
+- Added `f` as a web dashboard shortcut to toggle the visible detail drawer between normal and fullscreen widths. ([#50](https://github.com/kcosr/task-runner/pull/50))
+- Added previous/next navigation for attachment previews in the web detail drawer, including fullscreen left/right keyboard navigation while previewing attachments. ([#50](https://github.com/kcosr/task-runner/pull/50))
+- Added a populated Keybindings settings page in the web dashboard so the current shortcut set is visible in the UI with keycap styling. ([#50](https://github.com/kcosr/task-runner/pull/50))
+
+### Changed
+
+- Changed web dashboard Escape behavior so a fullscreen detail drawer exits fullscreen first, and only closes on a subsequent Escape. ([#50](https://github.com/kcosr/task-runner/pull/50))
 - Added first-class `pi` backend support via Pi RPC over stdio, including
   cwd-scoped session-id validation/import, run-name propagation, and automatic
   cancellation of unsupported extension UI prompts while leaving extensions,
@@ -93,6 +101,7 @@
 
 ### Changed
 
+- Attachment uploads now allow up to 100 attachments per run while keeping the existing 25 MiB per-attachment and 100 MiB total-per-run quotas. ([#50](https://github.com/kcosr/task-runner/pull/50))
 - `task-runner attachment list --cwd-scope` now shows `owner=<run-id>` in text output so humans can download peer attachments without switching to JSON, and the bundled planning/review assignments now keep `assignment-seed.md` / `assignment-summary.md` on the planning run while teaching implementer and reviewer flows to discover them through cwd-scoped attachment listing. ([#47](https://github.com/kcosr/task-runner/pull/47))
 - The web run detail drawer now requires inline confirmation before aborting or resetting a run. ([#46](https://github.com/kcosr/task-runner/pull/46))
 - The web dashboard now persists only durable board preferences (`hideEmptyColumns`, `collapseFailureStates`, `showArchived`, `sortByRecentUpdates`); transient filters, collapsed columns, drawer width/fullscreen state, and per-run drawer tabs reset on full reload instead of carrying across sessions. ([#42](https://github.com/kcosr/task-runner/pull/42))

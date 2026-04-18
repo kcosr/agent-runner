@@ -1,15 +1,18 @@
+import type { RefObject } from "react";
 import type { DashboardPreferences, DashboardViewState } from "../lib/settings.js";
 import { AlertIcon, ArchiveIcon, GridIcon, SearchIcon } from "./icons.js";
 
 export function RunFilters({
   preferences,
   repoOptions,
+  searchInputRef,
   updatePreferences,
   updateViewState,
   viewState,
 }: {
   preferences: DashboardPreferences;
   repoOptions: string[];
+  searchInputRef?: RefObject<HTMLInputElement | null>;
   updatePreferences: (updates: Partial<DashboardPreferences>) => void;
   updateViewState: (updates: Partial<DashboardViewState>) => void;
   viewState: DashboardViewState;
@@ -29,6 +32,7 @@ export function RunFilters({
           <input
             onChange={(event) => updateViewState({ search: event.target.value })}
             placeholder="Search runs"
+            ref={searchInputRef}
             type="search"
             value={viewState.search}
           />

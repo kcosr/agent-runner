@@ -12,6 +12,7 @@ export interface BoardColumn {
 }
 
 export function RunColumn({
+  bodyRef,
   collapsed,
   column,
   columnRef,
@@ -20,6 +21,7 @@ export function RunColumn({
   onToggleCollapse,
   onSelectRun,
 }: {
+  bodyRef?: (node: HTMLElement | null) => void;
   collapsed: boolean;
   column: BoardColumn;
   columnRef?: (node: HTMLElement | null) => void;
@@ -97,7 +99,7 @@ export function RunColumn({
         </button>
         {column.subLabel ? <span className="col-sub">{column.subLabel}</span> : null}
       </header>
-      <div className="col-body" id={bodyId}>
+      <div className="col-body" id={bodyId} ref={bodyRef}>
         {column.runs.map((run) => (
           <RunCard
             key={run.runId}
