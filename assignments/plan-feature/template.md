@@ -1,6 +1,6 @@
 ---
 schemaVersion: 1
-name: plan-<<KEBAB_FEATURE_SLUG>>
+name: implement-<<KEBAB_FEATURE_SLUG>>
 maxRetries: 4
 lockedFields:
   - tasks
@@ -10,14 +10,14 @@ callerInstructions: |
   and risk analysis live in the **planning** run's task notes —
   pull them via:
 
-      {{task_runner_cmd}} status <planning-run-id>
+      {{task_runner_cmd}} run status <planning-run-id>
 
   If you don't know the planning run id, it's captured in this
   run's first task notes as part of orient.
 
   ## Executing the plan
 
-      {{task_runner_cmd}} brief {{run_id}}
+      {{task_runner_cmd}} run brief {{run_id}}
 
   Use the run id plus `brief` as the canonical execution
   handoff. This implementer run is created with the
@@ -74,7 +74,7 @@ callerInstructions: |
   test results, and a pointer to the review run id. Start
   there:
 
-      {{task_runner_cmd}} status {{run_id}}
+      {{task_runner_cmd}} run status {{run_id}}
 
   The review run is a separate task-runner run; its findings
   live in that run's own workspace and are referenced by id
@@ -192,7 +192,7 @@ tasks:
       If you want the full planning context (impact survey,
       duplication check, risk analysis), pull it via:
 
-          {{task_runner_cmd}} status <<PLACEHOLDER_PLANNING_RUN_ID>> \
+          {{task_runner_cmd}} run status <<PLACEHOLDER_PLANNING_RUN_ID>> \
             --output-format json --field tasks
 
       Paste the planning run id into this task's Notes for
@@ -335,7 +335,7 @@ tasks:
       launching the reviewer:
 
         1. Inspect this run with
-           `{{task_runner_cmd}} status {{run_id}} --output-format json --field tasks`
+           `{{task_runner_cmd}} run status {{run_id}} --output-format json --field tasks`
            and scan every task above this one.
         2. Every prior task must have status `completed`.
            If a prior task is still `in_progress`, `pending`,
@@ -387,7 +387,7 @@ tasks:
       finishes, check its **terminal status** first — not
       just its synthesis:
 
-          {{task_runner_cmd}} status <review-run-id> --output-format json \
+          {{task_runner_cmd}} run status <review-run-id> --output-format json \
             --field status
 
       The code-review assignment has a final `approval`
@@ -405,10 +405,10 @@ tasks:
 
       Pull the synthesis and the approval decision record:
 
-          {{task_runner_cmd}} status <review-run-id> --output-format json \
+          {{task_runner_cmd}} run status <review-run-id> --output-format json \
             --field tasks | jq -r '.tasks[] | select(.id=="synthesis") | .notes'
 
-          {{task_runner_cmd}} status <review-run-id> --output-format json \
+          {{task_runner_cmd}} run status <review-run-id> --output-format json \
             --field tasks | jq -r '.tasks[] | select(.id=="approval") | .notes'
 
       Paste the reviewer's top-findings synthesis and the
@@ -454,7 +454,7 @@ tasks:
       approval gate, and the only signal that the change
       is cleared to ship. Check after each delta pass:
 
-          {{task_runner_cmd}} status <review-run-id> --output-format json \
+          {{task_runner_cmd}} run status <review-run-id> --output-format json \
             --field status
 
       If it still returns `blocked`, read the updated

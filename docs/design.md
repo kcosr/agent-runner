@@ -116,15 +116,15 @@ The workflow template teaches the worker to use:
 - `task-runner task show <run-id> <task-id>`
 - `task-runner task set <run-id> <task-id> --status ...`
 - `task-runner task append-notes <run-id> <task-id> --text ...`
-- `task-runner status <run-id>`
+- `task-runner run status <run-id>`
 
 The public read surface is:
 
 ```bash
-task-runner brief <run-id>
+task-runner run brief <run-id>
 ```
 
-`brief` is text-only. It is not projected through `status --field ...`.
+`run brief` is text-only. It is not projected through `run status --field ...`.
 
 ### Caller instructions
 
@@ -133,7 +133,7 @@ task-runner. They are:
 
 - interpolated at run creation time
 - printed on fresh `run` / `init`
-- available in `status --output-format json`
+- available in `run status --output-format json`
 - never sent to the backend
 
 This split keeps operator workflow text out of worker prompts.
@@ -192,7 +192,7 @@ backend. This is important for:
   executing it
 
 `init` no longer dumps the worker handoff body to stdout. Operators
-fetch it explicitly with `task-runner brief <run-id>`.
+fetch it explicitly with `task-runner run brief <run-id>`.
 
 ### Execute-after-init
 
@@ -240,15 +240,17 @@ rather than moved to trash.
 
 ### Read surfaces
 
-- `task-runner status <run-id>`
-- `task-runner brief <run-id>`
+- `task-runner status`
+- `task-runner run status <run-id>`
+- `task-runner run brief <run-id>`
 - `task-runner task list <run-id>`
 - `task-runner task show <run-id> <task-id>`
 - `task-runner attachment list <run-id> [--cwd-scope]`
 
 Rules:
 
-- `status` and `brief` are run-id-only.
+- Top-level `status` reports system/environment status and takes no run id.
+- `run status` and `run brief` are run-id-only.
 - `attachment list --cwd-scope` uses the target run's persisted `cwd` as
   an exact-match scope key. It does not infer groups from caller cwd,
   repo buckets, or path prefixes.

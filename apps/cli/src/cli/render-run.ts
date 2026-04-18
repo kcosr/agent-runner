@@ -116,12 +116,12 @@ export function renderRunEvent(event: RunEvent): RenderedRunChunk[] {
         header: `task-runner: initialized ${event.passive ? "passive " : ""}agent=${event.agentName} run=${event.runId}`,
       });
       if (event.passive) {
-        lines.push(`             brief=${taskRunnerCmd} brief ${event.runId}`);
+        lines.push(`             brief=${taskRunnerCmd} run brief ${event.runId}`);
         lines.push(
           `             drive with: ${taskRunnerCmd} task set ${event.runId} <task-id> ...`,
         );
       } else {
-        lines.push(`             brief=${taskRunnerCmd} brief ${event.runId}`);
+        lines.push(`             brief=${taskRunnerCmd} run brief ${event.runId}`);
         lines.push(`             resume with: ${taskRunnerCmd} run --resume-run ${event.runId}`);
       }
       return stderr(`${lines.join("\n")}\n`);

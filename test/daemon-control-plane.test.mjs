@@ -573,7 +573,9 @@ test("connected cli sends caller cwd scope while daemon and http defaults remain
     assert.match(cliGlobal, new RegExp(`^${second.runId} \\[initialized\\]`, "m"));
     assert.match(cliGlobal, new RegExp(`^${first.runId} \\[initialized\\]`, "m"));
 
-    const statusText = runCli(["status", second.runId, "--connect", listenUrl], { cwd: dir });
+    const statusText = runCli(["run", "status", second.runId, "--connect", listenUrl], {
+      cwd: dir,
+    });
     assert.match(statusText, new RegExp(`── run ${second.runId} ──`));
   } finally {
     await daemon.stop();
@@ -2843,7 +2845,7 @@ test("serve and --connect route CLI commands remotely and fail clearly when no d
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
 
-  const unavailable = runCliExpectFail(["status", init.runId, "--connect", listenUrl], {
+  const unavailable = runCliExpectFail(["status", "--connect", listenUrl], {
     cwd: dir,
   });
   assert.equal(unavailable.status, 3);
@@ -2854,6 +2856,32 @@ test("serve and --connect route CLI commands remotely and fail clearly when no d
   try {
     const agentsText = runCli(["list", "agents", "--connect", listenUrl], { cwd: dir });
     assert.match(agentsText, /daemon-agent/);
+
+    const systemStatus = runCli(["status", "--connect", listenUrl], { cwd: dir });
+    assert.match(systemStatus, /Host mode: daemon/);
+    assert.match(
+      systemStatus,
+      new RegExp(`Connect URL: ${listenUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
+    );
+    assert.match(systemStatus, /Daemon: connected/);
+    assert.match(
+      systemStatus,
+      new RegExp(`Daemon listen URL: ${listenUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
+    );
+
+    const systemStatusJson = JSON.parse(
+      runCli(["status", "--connect", listenUrl, "--output-format", "json"], { cwd: dir }),
+    );
+    assert.equal(systemStatusJson.hostMode, "daemon");
+    assert.equal(systemStatusJson.connectUrl, listenUrl);
+    assert.deepEqual(Object.keys(systemStatusJson.daemon).sort(), [
+      "daemonInstanceId",
+      "listenUrl",
+      "pid",
+      "startedAt",
+      "version",
+    ]);
+    assert.equal(systemStatusJson.daemon.listenUrl, listenUrl);
 
     const renameText = runCli(
       ["run", "set-name", init.runId, "Remote CLI name", "--connect", listenUrl],
@@ -2872,7 +2900,7 @@ test("serve and --connect route CLI commands remotely and fail clearly when no d
       new RegExp(`set backend session for run ${passiveInit.runId} to "remote-thread-7"`),
     );
 
-    const statusViaEnv = runCli(["status", init.runId], {
+    const statusViaEnv = runCli(["run", "status", init.runId], {
       cwd: dir,
       env: { TASK_RUNNER_CONNECT: listenUrl },
     });
@@ -3067,7 +3095,7 @@ test("daemon-target CLI detaches fresh runs without subscribing for events", asy
       result.stdout,
       "task-runner: detached run detached-start-run\n" +
         'Resume later with: task-runner run --resume-run detached-start-run "..."\n' +
-        "Check status with: task-runner status detached-start-run\n",
+        "Check status with: task-runner run status detached-start-run\n",
     );
     assert.deepEqual(
       requests.map((request) => request.method),

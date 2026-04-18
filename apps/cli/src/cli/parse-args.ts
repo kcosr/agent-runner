@@ -24,6 +24,7 @@ export interface ParsedArgs {
   clear?: boolean;
   detach?: boolean;
   outputFormat: OutputFormat;
+  outputFormatExplicit: boolean;
   message?: string;
   positionals: string[];
   addedTasks: string[];
@@ -53,6 +54,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     command: "",
     vars: {},
     outputFormat: "text",
+    outputFormatExplicit: false,
     positionals: [],
     addedTasks: [],
     fields: [],
@@ -87,7 +89,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
     }
   } else if (
     result.command === "run" &&
-    (args[0] === "reset" ||
+    (args[0] === "status" ||
+      args[0] === "brief" ||
+      args[0] === "reset" ||
       args[0] === "archive" ||
       args[0] === "unarchive" ||
       args[0] === "delete" ||
@@ -237,6 +241,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       if (!(OUTPUT_FORMATS as readonly string[]).includes(next)) {
         throw new Error(`--output-format must be one of: ${OUTPUT_FORMATS.join(", ")}`);
       }
+      result.outputFormatExplicit = true;
       result.outputFormat = next as OutputFormat;
     } else if (arg === "--connect") {
       const next = args.shift();

@@ -122,7 +122,7 @@ interface:
 - Record evidence (`task append-notes ... --text "..."`).
 - Mark completion (`task set ... --status completed`).
 - Mark blockers (`task set ... --status blocked --notes "..."`).
-- Check overall status (`status <run-id>`).
+- Check overall status (`run status <run-id>`).
 
 The worker does not edit `assignment.md` or any workspace file to change
 task state.

@@ -41,7 +41,7 @@ output back into the relevant task's Notes before marking it
 complete.
 
 Output discipline: write task Notes blocks in a way that a reviewer
-reading the workspace `assignment.md` after the fact can tell exactly
-what shipped, without needing to cross-reference the diff. File
-paths, test commands, exit codes, commit shas — concrete evidence
-over narrative.
+reading the run record after the fact can tell exactly what shipped,
+without needing to cross-reference the diff. File paths, test
+commands, exit codes, commit shas — concrete evidence over
+narrative.

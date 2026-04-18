@@ -180,7 +180,7 @@ test("passive agent: init output — bootstrap on stdout, progress on stderr", a
   // Progress lines on stderr
   assert.match(res.stderr, /initialized passive agent=passive-agent/);
   assert.match(res.stderr, /drive with: task-runner task set/);
-  // Stdout is empty; callers re-orient with `task-runner brief <run-id>`.
+  // Stdout is empty; callers re-orient with `task-runner run brief <run-id>`.
   assert.equal(res.stdout, "");
 });
 
@@ -393,7 +393,7 @@ test("passive status: Attempts and Sessions lines are hidden", async () => {
   writeAssignment(dir, "two-task", TWO_TASK_ASSIGNMENT);
   const outcome = await initPassive(dir);
 
-  const text = runCli(["status", outcome.runId], { cwd: dir });
+  const text = runCli(["run", "status", outcome.runId], { cwd: dir });
   assert.doesNotMatch(text, /Attempts:/);
   assert.doesNotMatch(text, /Sessions:/);
   assert.match(text, /Status: initialized/);
@@ -405,7 +405,7 @@ test("passive status: initialized footer points at task set, not run", async () 
   writeAssignment(dir, "two-task", TWO_TASK_ASSIGNMENT);
   const outcome = await initPassive(dir);
 
-  const text = runCli(["status", outcome.runId], { cwd: dir });
+  const text = runCli(["run", "status", outcome.runId], { cwd: dir });
   assert.match(text, /Drive this run externally:/);
   assert.match(
     text,
@@ -422,7 +422,7 @@ test("passive status and list surfaces use effectiveStatus while capabilities st
 
   runCli(["task", "set", outcome.runId, "t1", "--status", "in_progress"], { cwd: dir });
 
-  const statusText = runCli(["status", outcome.runId], { cwd: dir });
+  const statusText = runCli(["run", "status", outcome.runId], { cwd: dir });
   assert.match(statusText, /Status: running/);
   assert.match(statusText, /Lifecycle status: initialized/);
   assert.match(statusText, /Drive this run externally:/);
@@ -433,6 +433,7 @@ test("passive status and list surfaces use effectiveStatus while capabilities st
   const projected = JSON.parse(
     runCli(
       [
+        "run",
         "status",
         outcome.runId,
         "--output-format",
@@ -461,7 +462,7 @@ test("passive status and list surfaces keep partial completed progress running b
 
   runCli(["task", "set", outcome.runId, "t1", "--status", "completed"], { cwd: dir });
 
-  const statusText = runCli(["status", outcome.runId], { cwd: dir });
+  const statusText = runCli(["run", "status", outcome.runId], { cwd: dir });
   assert.match(statusText, /Status: running/);
   assert.match(statusText, /Lifecycle status: initialized/);
   assert.match(statusText, /Tasks completed: 1\/2/);
@@ -472,6 +473,7 @@ test("passive status and list surfaces keep partial completed progress running b
   const projected = JSON.parse(
     runCli(
       [
+        "run",
         "status",
         outcome.runId,
         "--output-format",
@@ -499,7 +501,7 @@ test("passive status json exposes passive task-mutation capabilities and no resu
   const outcome = await initPassive(dir);
 
   const projected = JSON.parse(
-    runCli(["status", outcome.runId, "--output-format", "json", "--field", "capabilities"], {
+    runCli(["run", "status", outcome.runId, "--output-format", "json", "--field", "capabilities"], {
       cwd: dir,
     }),
   );
@@ -580,12 +582,12 @@ test("passive finalized run: notes-only task set preserves endedAt and exitCode"
   );
 });
 
-test("passive re-orient: brief command returns the bootstrap text", async () => {
+test("passive re-orient: run brief command returns the bootstrap text", async () => {
   const dir = tempDir();
   writeAgent(dir, "passive-agent", PASSIVE_AGENT);
   writeAssignment(dir, "two-task", TWO_TASK_ASSIGNMENT);
   const outcome = await initPassive(dir);
 
-  const out = runCli(["brief", outcome.runId], { cwd: dir });
+  const out = runCli(["run", "brief", outcome.runId], { cwd: dir });
   assert.match(out, /task-runner task set/);
 });

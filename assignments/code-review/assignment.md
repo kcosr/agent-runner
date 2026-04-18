@@ -47,7 +47,7 @@ callerInstructions: |
   format (`APPROVED for ship` or `BLOCKED — cannot approve`)
   so you can grep it directly:
 
-      {{task_runner_cmd}} status {{run_id}} --output-format json \
+      {{task_runner_cmd}} run status {{run_id}} --output-format json \
         --field tasks | jq -r '.tasks[] | select(.id=="approval") | .notes'
 
   This review expects `--var implementation_run_id=<run-id>`.
@@ -61,8 +61,8 @@ callerInstructions: |
 
   Pull the full review:
 
-      {{task_runner_cmd}} status {{run_id}}                         # human-readable
-      {{task_runner_cmd}} status {{run_id}} --output-format json    # machine-readable
+      {{task_runner_cmd}} run status {{run_id}}                         # human-readable
+      {{task_runner_cmd}} run status {{run_id}} --output-format json    # machine-readable
 
   Each finding in a task's notes block follows this format:
 
@@ -420,7 +420,7 @@ tasks:
     body: |
       Read the implementation run's canonical task state:
 
-          {{task_runner_cmd}} status {{implementation_run_id}} --output-format json --field tasks
+          {{task_runner_cmd}} run status {{implementation_run_id}} --output-format json --field tasks
 
       Your job is to verify that what shipped matches what the
       implementation run claimed to complete, with no silent

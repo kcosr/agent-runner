@@ -31,7 +31,7 @@ notes:
    \`{{task_runner_cmd}} task set {{run_id}} <task-id> --status blocked --notes "..."\`
 
 Check overall run status at any time:
-   \`{{task_runner_cmd}} status {{run_id}}\`
+   \`{{task_runner_cmd}} run status {{run_id}}\`
 
 Use the task CLI as the task interface for this run. \`assignment.md\`
 may exist on disk for human audit, but it is not your work surface.`;

@@ -43,13 +43,18 @@ tasks:
     title: Second task
     body: |
       Also record the run id {{run_id}} and assignment path
-      {{assignment_path}} so the notes are self-contained.
+      {{assignment_path}}. Assignment name: {{assignment_name}}.
+      Config dir: {{config_dir}}. State dir: {{state_dir}}.
 ---
 Work on {{repo_path}}.
 `;
 
 function tempDir() {
   return mkdtempSync(join(tmpdir(), "task-runner-interp-"));
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function writeAgent(baseDir, name, body) {
@@ -128,10 +133,13 @@ test("task title and body interpolate {{var}} refs from assignment vars", async 
   assert.match(t1.body, /Scope is\s+`unstaged`\./);
   assert.doesNotMatch(t1.body, /\{\{/);
 
-  // Runner-injected vars (run_id, assignment_path) also interpolate.
+  // Runner-injected vars also interpolate.
   const t2 = outcome.manifest.finalTasks.t2;
   assert.match(t2.body, new RegExp(`run id ${outcome.runId}`));
   assert.ok(t2.body.includes(outcome.assignmentPath));
+  assert.match(t2.body, /Assignment name: interp-work\./);
+  assert.match(t2.body, new RegExp(`Config dir: ${escapeRegExp(dir)}\\.`));
+  assert.match(t2.body, new RegExp(`State dir: ${escapeRegExp(dir)}\\.`));
   assert.doesNotMatch(t2.body, /\{\{/);
 });
 

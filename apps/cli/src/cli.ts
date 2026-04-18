@@ -37,7 +37,12 @@ import {
   AssignmentNotFoundError,
   DefinitionListError,
 } from "@task-runner/core/config/loader.js";
-import { isPathArg, resolveInputPath } from "@task-runner/core/config/runtime-paths.js";
+import {
+  isPathArg,
+  resolveInputPath,
+  resolveTaskRunnerConfigDir,
+  resolveTaskRunnerStateDir,
+} from "@task-runner/core/config/runtime-paths.js";
 import {
   CommandError,
   type RunListFilter,
@@ -78,8 +83,9 @@ import {
   renderRunRemoveDependency,
   renderRunSetBackendSession,
   renderRunSetName,
+  renderRunStatus,
   renderRunUnarchive,
-  renderStatus,
+  renderSystemStatus,
   renderTaskDetails,
   renderTaskList,
 } from "./commands/render.js";
@@ -91,15 +97,17 @@ import {
   daemonListAttachments,
   daemonRemoveAttachment,
 } from "./daemon/http-client.js";
-import { RPC_ERROR_COMMAND } from "./daemon/protocol.js";
+import { type DaemonInfo, RPC_ERROR_COMMAND } from "./daemon/protocol.js";
 import { serveDaemon } from "./daemon/server.js";
 
-const HELP = `Usage: task-runner <run|init|serve|status|brief|task|attachment|list|show> [options] [args]
+const HELP = `Usage: task-runner <run|init|serve|status|task|attachment|list|show> [options] [args]
 
 Commands:
   run                     Execute an agent. Either a fresh run, a resume,
                           or execute-after-init (when --resume-run points
                           at an initialized run).
+  run status <id>         Read a run and print its current status.
+  run brief <id>          Print the canonical worker handoff for a run.
   run reset <id|path>     Restore a non-running run to initialized state.
   run archive <id|path>   Mark a non-running run as archived.
   run unarchive <id|path> Clear a run's archive marker.
@@ -115,8 +123,7 @@ Commands:
   run clear-deps <id>     Remove all dependencies from an initialized run.
   init                    Prepare a run without invoking the backend.
   serve                   Start the local daemon server.
-  status <id>             Read a run and print its current status.
-  brief <id>              Print the canonical worker handoff for a run.
+  status                  Print the current task-runner environment status.
   task list <id>          List tasks for a run in stable task order.
   task show <id> <task>   Show one task snapshot for a run.
   task set <id> <task>    Update a task's status and/or notes.
@@ -176,7 +183,7 @@ Execution options:
   --repo <name>           (list runs only) Scope runs to an exact repo.
   --global                (list runs only) Disable default cwd scoping.
   --output-format <fmt>   Output format: "text" (default) or "json".
-  --field <name>          (status only, repeatable) Restrict JSON output.
+  --field <name>          (run status only, repeatable) Restrict JSON output.
   --include-archived      (list runs only) Include archived runs.
   --help, -h              Print this message.
 
@@ -316,7 +323,7 @@ function renderDetachedRun(runId: string, outputFormat: ParsedArgs["outputFormat
 
   process.stdout.write(`task-runner: detached run ${runId}\n`);
   process.stdout.write(`Resume later with: task-runner run --resume-run ${runId} "..."\n`);
-  process.stdout.write(`Check status with: task-runner status ${runId}\n`);
+  process.stdout.write(`Check status with: task-runner run status ${runId}\n`);
 }
 
 function terminalExitCode(status: string): number {
@@ -380,13 +387,67 @@ async function runServe(parsed: ParsedArgs): Promise<never> {
   return await new Promise<never>(() => {});
 }
 
-async function runStatus(parsed: ParsedArgs, connectUrl?: string): Promise<never> {
+async function runSystemStatus(parsed: ParsedArgs, connectUrl?: string): Promise<never> {
   try {
-    const target = normalizeRunIdTarget(parsed.message?.trim(), "status");
-    if (!target) {
-      process.stderr.write("task-runner: status requires a run id\n");
+    if (parsed.fields.length > 0) {
+      throw new CommandError("status does not support --field");
+    }
+    if (parsed.positionals.length > 0) {
+      process.stderr.write("task-runner: status takes no positional arguments\n");
+      process.stderr.write("Usage: task-runner status [--output-format text|json]\n");
+      process.exit(3);
+    }
+
+    const result =
+      connectUrl === undefined
+        ? {
+            configDir: resolveTaskRunnerConfigDir(),
+            stateDir: resolveTaskRunnerStateDir(),
+            hostMode: "embedded" as const,
+            connectUrl: null,
+            daemon: null,
+          }
+        : await withDaemonClient(connectUrl, (client) =>
+            client.call<DaemonInfo>("daemon.info").then((daemon) => ({
+              configDir: resolveTaskRunnerConfigDir(),
+              stateDir: resolveTaskRunnerStateDir(),
+              hostMode: "daemon" as const,
+              connectUrl,
+              daemon,
+            })),
+          );
+
+    if (parsed.outputFormat === "json") {
+      writeJson(result);
+    } else {
+      process.stdout.write(renderSystemStatus(result));
+    }
+    process.exit(0);
+  } catch (err) {
+    exitCommandFailure(err, connectUrl);
+  }
+}
+
+async function runRunStatus(parsed: ParsedArgs, connectUrl?: string): Promise<never> {
+  try {
+    const unsupported = unsupportedFlagsForGroupedCommand(parsed, { allowFields: true });
+    if (unsupported.length > 0) {
       process.stderr.write(
-        "Usage: task-runner status <id> [--output-format json] [--field name]...\n",
+        `task-runner: run status only supports <run-id>, --connect, --output-format, and --field (got ${unsupported.join(", ")})\n`,
+      );
+      process.exit(3);
+    }
+    const target = normalizeRunIdTarget(parsed.positionals[0], "run status");
+    if (!target) {
+      process.stderr.write("task-runner: run status requires a run id\n");
+      process.stderr.write(
+        "Usage: task-runner run status <id> [--output-format json] [--field name]...\n",
+      );
+      process.exit(3);
+    }
+    if (parsed.positionals.length > 1) {
+      process.stderr.write(
+        `task-runner: run status takes exactly one run id; got "${parsed.positionals[1]}"\n`,
       );
       process.exit(3);
     }
@@ -404,7 +465,7 @@ async function runStatus(parsed: ParsedArgs, connectUrl?: string): Promise<never
       if (parsed.fields.length > 0) {
         throw new CommandError("--field requires --output-format json");
       }
-      process.stdout.write(renderStatus(result));
+      process.stdout.write(renderRunStatus(result));
     }
     process.exit(0);
   } catch (err) {
@@ -412,18 +473,31 @@ async function runStatus(parsed: ParsedArgs, connectUrl?: string): Promise<never
   }
 }
 
-async function runBrief(parsed: ParsedArgs, connectUrl?: string): Promise<never> {
+async function runRunBrief(parsed: ParsedArgs, connectUrl?: string): Promise<never> {
   try {
-    if (parsed.outputFormat !== "text") {
-      throw new CommandError("brief does not support --output-format");
+    if (parsed.outputFormatExplicit) {
+      throw new CommandError("run brief does not support --output-format");
     }
     if (parsed.fields.length > 0) {
-      throw new CommandError("brief does not support --field");
+      throw new CommandError("run brief does not support --field");
     }
-    const target = normalizeRunIdTarget(parsed.message?.trim(), "brief");
+    const unsupported = unsupportedFlagsForGroupedCommand(parsed);
+    if (unsupported.length > 0) {
+      process.stderr.write(
+        `task-runner: run brief only supports <run-id> and --connect (got ${unsupported.join(", ")})\n`,
+      );
+      process.exit(3);
+    }
+    const target = normalizeRunIdTarget(parsed.positionals[0], "run brief");
     if (!target) {
-      process.stderr.write("task-runner: brief requires a run id\n");
-      process.stderr.write("Usage: task-runner brief <id>\n");
+      process.stderr.write("task-runner: run brief requires a run id\n");
+      process.stderr.write("Usage: task-runner run brief <id>\n");
+      process.exit(3);
+    }
+    if (parsed.positionals.length > 1) {
+      process.stderr.write(
+        `task-runner: run brief takes exactly one run id; got "${parsed.positionals[1]}"\n`,
+      );
       process.exit(3);
     }
     const brief =
@@ -1778,14 +1852,16 @@ async function main(): Promise<void> {
   }
 
   if (parsed.command === "status") {
-    await runStatus(parsed, connectUrl);
-  }
-
-  if (parsed.command === "brief") {
-    await runBrief(parsed, connectUrl);
+    await runSystemStatus(parsed, connectUrl);
   }
 
   if (parsed.command === "run") {
+    if (parsed.subcommand === "status") {
+      await runRunStatus(parsed, connectUrl);
+    }
+    if (parsed.subcommand === "brief") {
+      await runRunBrief(parsed, connectUrl);
+    }
     if (parsed.subcommand === "reset") {
       await runResetCommand(parsed, connectUrl);
     }

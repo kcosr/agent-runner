@@ -12,8 +12,8 @@ All commands accept `--help` / `-h`.
 | `run` | Execute a fresh run, resume an existing run, or execute-after-init |
 | `init` | Prepare a run workspace without invoking the backend |
 | `serve` | Start the local daemon / control plane |
-| `status <run-id>` | Print the run's current state |
-| `brief <run-id>` | Print the composed worker handoff |
+| `status` | Print system/environment status |
+| `run status\|brief` | Print run state or the composed worker handoff |
 | `task list\|show\|set\|append-notes\|add` | Task state inspection and mutation |
 | `attachment add\|list\|download\|remove` | Attachment management |
 | `list agents\|assignments\|runs` | Enumerate definitions and runs |
@@ -106,7 +106,7 @@ task-runner init \
 ```
 
 `init` does not dump the worker brief to stdout — fetch it with
-`task-runner brief <run-id>`.
+`task-runner run brief <run-id>`.
 
 ## `serve`
 
@@ -122,25 +122,40 @@ task-runner serve [--listen <ws-url>]
 
 See [daemon.md](daemon.md).
 
-## `status <run-id>`
+## `status`
+
+Print the current task-runner system/environment context for this
+invocation.
+
+```bash
+task-runner status [--output-format text|json]
+```
+
+- Takes no positional arguments.
+- Text output prints the resolved config dir, state dir, host mode,
+  connect URL, and daemon connectivity state.
+- JSON output returns `{ configDir, stateDir, hostMode, connectUrl, daemon }`.
+- `--field` is not supported.
+
+## `run status <run-id>`
 
 Print the run's current state.
 
 ```bash
-task-runner status <run-id> [--output-format json] [--field <name> ...]
+task-runner run status <run-id> [--output-format json] [--field <name> ...]
 ```
 
 - Run-id-only. Paths are not accepted.
 - `--output-format json` returns the shared `RunDetail` DTO.
 - `--field <name>` — repeatable. Projects top-level JSON fields.
 
-## `brief <run-id>`
+## `run brief <run-id>`
 
 Print the composed worker handoff for a run. Text-only — does not support
 `--output-format` or `--field`. Run-id-only.
 
 ```bash
-task-runner brief <run-id>
+task-runner run brief <run-id>
 ```
 
 ## `task`

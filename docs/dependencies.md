@@ -99,7 +99,7 @@ drawer's Resume button is disabled when the dependency gate is not ready.
 
 ## CLI output
 
-`task-runner status <run-id> --output-format json` includes the full
+`task-runner run status <run-id> --output-format json` includes the full
 `RunDetail` with `dependencies` and `dependents` arrays. `task-runner list
 runs` includes `dependencyState` so scripts can filter runs that are ready
 to execute.

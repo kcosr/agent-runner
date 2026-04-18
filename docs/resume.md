@@ -72,7 +72,7 @@ Passive runs are externally driven; `run --resume-run` is rejected for
 them. Drive them through the task CLI instead:
 
 ```bash
-task-runner brief <run-id>
+task-runner run brief <run-id>
 task-runner task set <run-id> <task-id> --status in_progress
 task-runner task append-notes <run-id> <task-id> --text "Observed ..."
 task-runner task set <run-id> <task-id> --status completed
