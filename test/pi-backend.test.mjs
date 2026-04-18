@@ -60,6 +60,11 @@ function emitPromptEvents() {
       send(entry);
     }
   }
+  if (process.env.PI_TEST_EXIT_AFTER_PROMPT === "1") {
+    setImmediate(() => {
+      process.exit(Number(process.env.PI_TEST_EXIT_CODE ?? "0"));
+    });
+  }
 }
 
 const rl = createInterface({ input: process.stdin });
@@ -149,6 +154,10 @@ rl.on("close", () => {
   );
   chmodSync(path, 0o755);
   return path;
+}
+
+function failAfter(ms, message) {
+  return new Promise((_, reject) => setTimeout(() => reject(new Error(message)), ms));
 }
 
 test("buildPiArgs wires rpc mode, disabled resources, thinking, and session path", () => {
@@ -330,4 +339,54 @@ test("pi backend auto-cancels dialog-style extension ui requests without hanging
     id: "ext-1",
     cancelled: true,
   });
+});
+
+test("pi backend rejects when the process exits before agent_end", async () => {
+  const dir = tempDir();
+  const command = writeFakePiAgent(dir);
+
+  await assert.rejects(
+    () =>
+      Promise.race([
+        withEnv({ TASK_RUNNER_PI_BIN: command }, () =>
+          piBackend.invoke({
+            prompt: "Inspect the repo",
+            cwd: dir,
+            env: {
+              ...process.env,
+              PI_TEST_PROMPT_EVENTS_JSON: JSON.stringify([
+                { type: "message_start", message: { role: "assistant", content: [] } },
+                {
+                  type: "message_end",
+                  message: { role: "assistant", content: [{ type: "text", text: "Partial" }] },
+                },
+              ]),
+              PI_TEST_EXIT_AFTER_PROMPT: "1",
+            },
+            timeoutSec: 10,
+          }),
+        ),
+        failAfter(2_000, "pi backend hung after exiting without agent_end"),
+      ]),
+    /pi exited before finishing/,
+  );
+});
+
+test("pi backend rejects cleanly when the pi binary is missing", async () => {
+  const dir = tempDir();
+
+  await assert.rejects(
+    () =>
+      Promise.race([
+        withEnv({ TASK_RUNNER_PI_BIN: join(dir, "missing-pi-bin") }, () =>
+          piBackend.invoke({
+            prompt: "Inspect the repo",
+            cwd: dir,
+            timeoutSec: 10,
+          }),
+        ),
+        failAfter(2_000, "pi backend hung on missing binary"),
+      ]),
+    /ENOENT|spawn/,
+  );
 });

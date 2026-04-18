@@ -181,10 +181,6 @@ function extractAssistantText(message: unknown): string {
   let combined = "";
   for (const item of content) {
     if (!isRecord(item)) continue;
-    if (item.type === "text" && typeof item.text === "string") {
-      combined += item.text;
-      continue;
-    }
     if (typeof item.text === "string") {
       combined += item.text;
     }
@@ -252,7 +248,6 @@ function handlePiEvent(
       return;
     }
     case "agent_end": {
-      state.agentEnded = true;
       resolveAgentEnd();
       return;
     }
@@ -323,15 +318,13 @@ function createPiProcess(ctx: BackendInvokeContext): Promise<{
     let timedOut = false;
     let aborted = false;
     let closed = false;
+    let exitResult: PiProcessResult | null = null;
     let killTimer: NodeJS.Timeout | null = null;
     let shutdownTimer: NodeJS.Timeout | null = null;
-    let waitForAgentEndRequested = false;
+    let agentEndError: Error | null = null;
+    let agentEndPromise: Promise<void> | null = null;
     let agentEndResolve: (() => void) | null = null;
     let agentEndReject: ((error: Error) => void) | null = null;
-    const agentEndPromise = new Promise<void>((resolveAgentEnd, rejectAgentEnd) => {
-      agentEndResolve = resolveAgentEnd;
-      agentEndReject = rejectAgentEnd;
-    });
 
     const state: PiStreamState = {
       streamedText: "",
@@ -347,14 +340,74 @@ function createPiProcess(ctx: BackendInvokeContext): Promise<{
       ctx.emit?.({ type: "backend_notice", text });
     };
 
+    const resolveAgentEnd = (): void => {
+      if (state.agentEnded || agentEndError !== null) {
+        return;
+      }
+      state.agentEnded = true;
+      agentEndResolve?.();
+      agentEndResolve = null;
+      agentEndReject = null;
+    };
+
+    const rejectAgentEnd = (error: Error): void => {
+      if (state.agentEnded || agentEndError !== null) {
+        return;
+      }
+      agentEndError = error;
+      agentEndReject?.(error);
+      agentEndReject = null;
+      agentEndResolve = null;
+    };
+
     const settleRequestsWithError = (error: Error): void => {
       for (const entry of pending.values()) {
-        entry.reject(error);
+        queueMicrotask(() => {
+          entry.reject(error);
+        });
       }
       pending.clear();
-      if (waitForAgentEndRequested) {
-        agentEndReject?.(error);
+      rejectAgentEnd(error);
+    };
+
+    const finalizeProcess = (exitCode: number | null, signal: NodeJS.Signals | null): void => {
+      if (exitResult !== null) {
+        return;
       }
+
+      closed = true;
+      clearTimeout(timeoutHandle);
+      if (shutdownTimer) clearTimeout(shutdownTimer);
+      if (killTimer) clearTimeout(killTimer);
+      ctx.abortSignal?.removeEventListener("abort", onAbort);
+      if (stdoutBuffer.trim().length > 0) {
+        processLine(stdoutBuffer);
+        stdoutBuffer = "";
+      }
+
+      if (pending.size > 0 || !state.agentEnded) {
+        settleRequestsWithError(
+          new Error(
+            `pi exited before finishing (exit=${exitCode ?? "null"} signal=${signal ?? "null"})`,
+          ),
+        );
+      }
+
+      exitResult = {
+        exitCode,
+        signal,
+        rawStdout: Buffer.concat(stdoutChunks).toString("utf8"),
+        rawStderr: Buffer.concat(stderrChunks).toString("utf8"),
+        timedOut,
+        aborted,
+      };
+    };
+
+    const requireExitResult = (): PiProcessResult => {
+      if (exitResult === null) {
+        throw new Error("pi process exit result was not captured");
+      }
+      return exitResult;
     };
 
     const scheduleKill = (signal: NodeJS.Signals): void => {
@@ -371,6 +424,7 @@ function createPiProcess(ctx: BackendInvokeContext): Promise<{
     };
 
     const requestAbort = (): void => {
+      if (closed) return;
       try {
         child.stdin?.write(`${JSON.stringify({ type: "abort", id: nextId++ })}\n`);
       } catch {
@@ -410,7 +464,11 @@ function createPiProcess(ctx: BackendInvokeContext): Promise<{
 
     const send = (payload: Record<string, unknown>): void => {
       if (closed) return;
-      child.stdin?.write(`${JSON.stringify(payload)}\n`);
+      try {
+        child.stdin?.write(`${JSON.stringify(payload)}\n`);
+      } catch {
+        // ignore
+      }
     };
 
     const call = (command: string, payload: Record<string, unknown>): Promise<PiResponse> => {
@@ -477,9 +535,7 @@ function createPiProcess(ctx: BackendInvokeContext): Promise<{
         return;
       }
 
-      handlePiEvent(parsed, state, send, emitBackendNotice, () => {
-        agentEndResolve?.();
-      });
+      handlePiEvent(parsed, state, send, emitBackendNotice, resolveAgentEnd);
     };
 
     child.stdout?.on("data", (chunk: Buffer) => {
@@ -499,45 +555,39 @@ function createPiProcess(ctx: BackendInvokeContext): Promise<{
       emitBackendNotice(chunk.toString("utf8"));
     });
 
-    const waitForExit = (): Promise<PiProcessResult> =>
-      new Promise((resolveExit, rejectExit) => {
-        child.once("error", rejectExit);
-        child.once("close", (exitCode, signal) => {
-          closed = true;
-          clearTimeout(timeoutHandle);
-          if (shutdownTimer) clearTimeout(shutdownTimer);
-          if (killTimer) clearTimeout(killTimer);
-          ctx.abortSignal?.removeEventListener("abort", onAbort);
-          if (stdoutBuffer.trim().length > 0) {
-            processLine(stdoutBuffer);
-            stdoutBuffer = "";
-          }
-          if (!state.agentEnded && waitForAgentEndRequested) {
-            agentEndReject?.(
-              new Error(
-                `pi exited before agent_end (exit=${exitCode ?? "null"} signal=${signal ?? "null"})`,
-              ),
-            );
-          }
-          resolveExit({
-            exitCode,
-            signal,
-            rawStdout: Buffer.concat(stdoutChunks).toString("utf8"),
-            rawStderr: Buffer.concat(stderrChunks).toString("utf8"),
-            timedOut,
-            aborted,
-          });
-        });
+    const exitPromise = new Promise<PiProcessResult>((resolveExit) => {
+      child.once("error", (error) => {
+        settleRequestsWithError(error);
+        finalizeProcess(child.exitCode, child.signalCode);
+        resolveExit(requireExitResult());
       });
 
-    child.on("error", (error) => {
-      settleRequestsWithError(error);
+      child.once("exit", (exitCode, signal) => {
+        finalizeProcess(exitCode, signal);
+        resolveExit(requireExitResult());
+      });
+
+      child.once("close", (exitCode, signal) => {
+        finalizeProcess(exitCode, signal);
+        resolveExit(requireExitResult());
+      });
     });
 
     resolve({
       call,
       waitForAgentEnd: () => {
-        waitForAgentEndRequested = true;
+        if (state.agentEnded) {
+          return Promise.resolve();
+        }
+        if (agentEndError !== null) {
+          return Promise.reject(agentEndError);
+        }
+        if (agentEndPromise === null) {
+          agentEndPromise = new Promise<void>((resolveWaitForAgentEnd, rejectWaitForAgentEnd) => {
+            agentEndResolve = resolveWaitForAgentEnd;
+            agentEndReject = rejectWaitForAgentEnd;
+          });
+        }
         return agentEndPromise;
       },
       closeInput: () => {
@@ -549,7 +599,7 @@ function createPiProcess(ctx: BackendInvokeContext): Promise<{
       },
       getTranscript: () => composePiTranscript(state),
       getStreamedText: () => state.streamedText,
-      waitForExit,
+      waitForExit: () => exitPromise,
     });
   });
 }
@@ -573,19 +623,19 @@ export async function setPiSessionName(ctx: {
     emit: () => {},
   });
 
+  let result: PiProcessResult | null = null;
   try {
     await processHandle.call("set_session_name", {
       type: "set_session_name",
       name: ctx.name,
     });
+  } finally {
     processHandle.closeInput();
-    const result = await processHandle.waitForExit();
-    if (result.exitCode !== 0) {
-      throw new Error(`pi rename exited with code ${result.exitCode ?? "null"}`);
-    }
-  } catch (error) {
-    processHandle.closeInput();
-    throw error;
+    result = await processHandle.waitForExit();
+  }
+
+  if (result === null || result.exitCode !== 0) {
+    throw new Error(`pi rename exited with code ${result?.exitCode ?? "null"}`);
   }
 }
 
