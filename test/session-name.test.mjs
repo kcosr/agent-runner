@@ -17,6 +17,15 @@ backend: claude
 Agent role.
 `;
 
+const PI_NAMED_AGENT = `---
+schemaVersion: 1
+name: named-pi
+backend: pi
+model: openai/gpt-5.4
+---
+Agent role.
+`;
+
 const BASIC_ASSIGNMENT = `---
 schemaVersion: 1
 name: named-work
@@ -151,6 +160,42 @@ test("run name: persists across resume from the manifest", async () => {
       });
       assert.equal(captured.name, "Nightly cleanup");
       assert.equal(second.manifest.name, "Nightly cleanup");
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+});
+
+test("run name: pi backend receives the persisted name on fresh run and resume", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "named-pi", PI_NAMED_AGENT);
+  writeAssignment(dir, "named-work", BASIC_ASSIGNMENT);
+
+  const firstCaptured = {};
+  await withSharedRuntimeEnv(dir, async () => {
+    const loaded = loadAgentConfig("named-pi", dir);
+    const loadedAssignment = loadAssignmentConfig("named-work", dir);
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      const first = await runAgent({
+        loaded,
+        loadedAssignment,
+        cliVars: {},
+        backend: captureBackend(firstCaptured),
+        overrides: { name: "Pi named run" },
+      });
+      assert.equal(firstCaptured.name, "Pi named run");
+      const target = resolveResumeTarget(first.runId, dir);
+      const resumedCaptured = {};
+      await runAgent({
+        loaded,
+        cliVars: {},
+        backend: captureBackend(resumedCaptured),
+        resume: target,
+        overrides: { message: "resume follow-up" },
+      });
+      assert.equal(resumedCaptured.name, "Pi named run");
     } finally {
       process.chdir(originalCwd);
     }

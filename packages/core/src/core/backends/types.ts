@@ -1,4 +1,4 @@
-export const BACKEND_IDS = ["claude", "codex", "cursor", "passive"] as const;
+export const BACKEND_IDS = ["claude", "codex", "cursor", "pi", "passive"] as const;
 export type BackendId = (typeof BACKEND_IDS)[number];
 
 export type EffortLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";

@@ -1133,6 +1133,55 @@ test("command services: setRunName does not hang on codex post-open transport er
   }
 });
 
+test("command services: setRunName propagates pi session renames into the session file", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+  const sessionPath = join(dir, "pi-session.jsonl");
+  writeFileSync(
+    sessionPath,
+    `${JSON.stringify({
+      type: "session",
+      version: 3,
+      id: "pi-session-rename",
+      timestamp: "2026-04-17T12:00:00.000Z",
+      cwd: dir,
+    })}\n${JSON.stringify({
+      type: "message",
+      id: "assistant-msg-1",
+      parentId: null,
+      timestamp: "2026-04-17T12:01:00.000Z",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "Existing answer" }],
+      },
+    })}\n`,
+  );
+
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.backend = "pi";
+    manifest.backendSessionId = sessionPath;
+    manifest.cwd = dir;
+  });
+
+  await withSharedRuntimeEnv(dir, async () => {
+    const renamed = await setRunName(outcome.runId, { name: "  Pi rename  " });
+    assert.deepEqual(renamed, {
+      runId: outcome.runId,
+      name: "Pi rename",
+      changed: true,
+    });
+  });
+
+  const sessionLines = readFileSync(sessionPath, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  const infoEntry = sessionLines.find((entry) => entry.type === "session_info");
+  assert.ok(infoEntry);
+  assert.equal(infoEntry.name, "Pi rename");
+});
+
 test("command services: archiveRun and unarchiveRun are idempotent and reject running runs", async () => {
   const dir = tempDir();
   writeBundle(dir);

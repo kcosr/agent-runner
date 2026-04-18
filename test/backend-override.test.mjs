@@ -111,13 +111,15 @@ async function runIn(baseDir, agentName, overrides) {
   });
 }
 
-test("parseArgs: --backend accepts claude, codex, and cursor", () => {
+test("parseArgs: --backend accepts claude, codex, cursor, and pi", () => {
   const a = parseArgs(["node", "task-runner", "run", "--agent", "x", "--backend", "claude"]);
   assert.equal(a.backend, "claude");
   const b = parseArgs(["node", "task-runner", "run", "--agent", "x", "--backend", "codex"]);
   assert.equal(b.backend, "codex");
   const c = parseArgs(["node", "task-runner", "run", "--agent", "x", "--backend", "cursor"]);
   assert.equal(c.backend, "cursor");
+  const d = parseArgs(["node", "task-runner", "run", "--agent", "x", "--backend", "pi"]);
+  assert.equal(d.backend, "pi");
 });
 
 test("parseArgs: --backend rejects unknown values", () => {
