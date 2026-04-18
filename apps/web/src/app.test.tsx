@@ -5337,6 +5337,83 @@ describe("web app", () => {
     expect(preview.querySelector("pre code")).not.toBeNull();
   });
 
+  it("navigates attachment previews with buttons and fullscreen arrow keys", async () => {
+    installFetchMock(
+      {
+        runs: [makeRun({ runId: "run-1", name: "Attachment run" })],
+        details: {
+          "run-1": makeDetail({
+            runId: "run-1",
+            name: "Attachment run",
+            attachments: [
+              makeAttachment({
+                id: "att-alpha",
+                name: "alpha.txt",
+                mimeType: "text/plain; charset=utf-8",
+              }),
+              makeAttachment({
+                id: "att-beta",
+                name: "beta.txt",
+                mimeType: "text/plain; charset=utf-8",
+              }),
+              makeAttachment({
+                id: "att-gamma",
+                name: "gamma.txt",
+                mimeType: "text/plain; charset=utf-8",
+              }),
+            ],
+          }),
+        },
+      },
+      {
+        handleRequest: (url) => {
+          if (/\/api\/runs\/run-1\/attachments\/att-alpha\/content$/.test(url)) {
+            return new Response("alpha body", {
+              status: 200,
+              headers: { "content-type": "text/plain; charset=utf-8" },
+            });
+          }
+          if (/\/api\/runs\/run-1\/attachments\/att-beta\/content$/.test(url)) {
+            return new Response("beta body", {
+              status: 200,
+              headers: { "content-type": "text/plain; charset=utf-8" },
+            });
+          }
+          if (/\/api\/runs\/run-1\/attachments\/att-gamma\/content$/.test(url)) {
+            return new Response("gamma body", {
+              status: 200,
+              headers: { "content-type": "text/plain; charset=utf-8" },
+            });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await user.click(await findRunCard("Attachment run"));
+    await user.click(await screen.findByRole("button", { name: /^Attachments\b/i }));
+    await user.click(screen.getByRole("button", { name: /^Preview alpha\.txt$/ }));
+
+    expect(await screen.findByText("alpha body")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Previous attachment" })).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "Next attachment: beta.txt" }));
+    expect(await screen.findByText("beta body")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Expand drawer to full width" }));
+    expect(screen.getByRole("button", { name: "Exit full-width drawer" })).toBeInTheDocument();
+
+    await user.keyboard("{ArrowRight}");
+    expect(await screen.findByText("gamma body")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Next attachment" })).toBeDisabled();
+
+    await user.keyboard("{ArrowLeft}");
+    expect(await screen.findByText("beta body")).toBeInTheDocument();
+  });
+
   it("keeps preview errors inline and isolates row preview clicks from attachment actions", async () => {
     installFetchMock(
       {

@@ -143,6 +143,24 @@ export function RunDetailPanel({
 
   const selectedRun = selectedRunQuery.data;
   if (drawerView?.mode === "attachment") {
+    const attachmentEntries =
+      drawerView.attachmentTab === "run"
+        ? selectedRun.attachments.map((candidate) => ({
+            attachment: candidate,
+            ownerRunId: selectedRun.runId,
+          }))
+        : (selectedRunGroupAttachmentsQuery.data ?? []).map((candidate) => ({
+            attachment: candidate,
+            ownerRunId: candidate.ownerRunId,
+          }));
+    const currentAttachmentIndex = attachmentEntries.findIndex(
+      ({ attachment, ownerRunId }) =>
+        attachment.id === drawerView.attachmentId && ownerRunId === drawerView.attachmentOwnerRunId,
+    );
+    const previousAttachment =
+      currentAttachmentIndex > 0 ? attachmentEntries[currentAttachmentIndex - 1] : undefined;
+    const nextAttachment =
+      currentAttachmentIndex >= 0 ? attachmentEntries[currentAttachmentIndex + 1] : undefined;
     const attachment =
       drawerView.attachmentOwnerRunId === selectedRun.runId
         ? selectedRun.attachments.find((candidate) => candidate.id === drawerView.attachmentId)
@@ -170,6 +188,28 @@ export function RunDetailPanel({
         onDownload={(attachmentId, name) =>
           onDownloadAttachment(drawerView.attachmentOwnerRunId, attachmentId, name)
         }
+        onNextAttachment={
+          nextAttachment
+            ? () =>
+                onOpenAttachmentPreview(
+                  nextAttachment.ownerRunId,
+                  nextAttachment.attachment.id,
+                  drawerView.attachmentTab,
+                )
+            : undefined
+        }
+        onPreviousAttachment={
+          previousAttachment
+            ? () =>
+                onOpenAttachmentPreview(
+                  previousAttachment.ownerRunId,
+                  previousAttachment.attachment.id,
+                  drawerView.attachmentTab,
+                )
+            : undefined
+        }
+        nextAttachmentName={nextAttachment?.attachment.name}
+        previousAttachmentName={previousAttachment?.attachment.name}
         runId={drawerView.attachmentOwnerRunId}
       />
     );

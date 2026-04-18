@@ -1806,6 +1806,13 @@ body {
   flex: 0 0 auto;
 }
 
+.attachment-preview-nav {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+
 .attachment-preview-head {
   display: flex;
   min-width: 0;

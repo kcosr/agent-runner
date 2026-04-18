@@ -24,6 +24,7 @@
 ### Added
 
 - Added static web dashboard keyboard shortcuts for route-aware Escape handling, arrow-key run navigation, Ctrl+F search focus, and Enter primary actions for the selected run.
+- Added previous/next navigation for attachment previews in the web detail drawer, including fullscreen left/right keyboard navigation while previewing attachments.
 - Added first-class `pi` backend support via Pi RPC over stdio, including
   cwd-scoped session-id validation/import, run-name propagation, and automatic
   cancellation of unsupported extension UI prompts while leaving extensions,
