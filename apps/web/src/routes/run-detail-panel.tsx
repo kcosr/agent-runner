@@ -45,8 +45,8 @@ export function RunDetailPanel({
   resumeDialogOpen,
   resumeMessageDraft,
   resumeMessageExpanded,
+  detailSettling,
   selectedRunGroupAttachmentsQuery,
-  selectedRunDetailRunId,
   selectedRunId,
   selectedRunQuery,
   timelineState,
@@ -90,8 +90,8 @@ export function RunDetailPanel({
   resumeDialogOpen: boolean;
   resumeMessageDraft: string;
   resumeMessageExpanded: boolean;
+  detailSettling: boolean;
   selectedRunGroupAttachmentsQuery: UseQueryResult<AttachmentListEntry[], Error>;
-  selectedRunDetailRunId?: string;
   selectedRunId?: string;
   selectedRunQuery: UseQueryResult<RunDetail, Error>;
   timelineState: RunTimelineState;
@@ -102,7 +102,6 @@ export function RunDetailPanel({
 
   const drawerStyle = { "--drawer-width": `${drawerWidth}px` } as CSSProperties;
   const drawerClassName = drawerFullscreen ? "drawer drawer--fullscreen" : "drawer";
-  const detailSettling = selectedRunDetailRunId !== selectedRunId;
 
   function renderLoadingState() {
     return (

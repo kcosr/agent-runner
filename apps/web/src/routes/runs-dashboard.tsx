@@ -216,8 +216,8 @@ export function RunsDashboardRoute() {
           resumeDialogOpen={state.resumeDialogOpen}
           resumeMessageDraft={state.resumeMessageDraft}
           resumeMessageExpanded={state.resumeMessageExpanded}
+          detailSettling={state.detailSettling}
           selectedRunGroupAttachmentsQuery={state.selectedRunGroupAttachmentsQuery}
-          selectedRunDetailRunId={state.selectedRunDetailRunId}
           selectedRunId={state.selectedRunId}
           selectedRunQuery={state.selectedRunQuery}
           timelineState={state.timelineState}

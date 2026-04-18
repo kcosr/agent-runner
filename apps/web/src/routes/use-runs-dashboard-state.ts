@@ -50,6 +50,30 @@ export type RunActionPending =
 const FAILURE_STATUSES: RunStatus[] = ["exhausted", "error"];
 const DETAIL_LOAD_DELAY_MS = 120;
 
+function useSettledDetailRunId(selectedRunId?: string) {
+  const [detailRunId, setDetailRunId] = useState<string | undefined>(selectedRunId);
+
+  useEffect(() => {
+    if (!selectedRunId) {
+      setDetailRunId(undefined);
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setDetailRunId(selectedRunId);
+    }, DETAIL_LOAD_DELAY_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [selectedRunId]);
+
+  return {
+    detailRunId,
+    detailSettling: detailRunId !== selectedRunId,
+  };
+}
+
 function matchesSearch(run: RunSummary, search: string): boolean {
   if (!search) {
     return true;
@@ -244,7 +268,7 @@ export function useRunsDashboardState() {
   const [notices, setNotices] = useState<NoticeState[]>([]);
   const [actionError, setActionError] = useState<string>();
   const [detailStreamStale, setDetailStreamStale] = useState(false);
-  const [detailRunId, setDetailRunId] = useState<string | undefined>(selectedRunId);
+  const { detailRunId, detailSettling } = useSettledDetailRunId(selectedRunId);
   const [resumeDialogOpen, setResumeDialogOpen] = useState(false);
   const [resumeMessageExpanded, setResumeMessageExpanded] = useState(false);
   const [resumeMessageDraft, setResumeMessageDraft] = useState("");
@@ -344,19 +368,10 @@ export function useRunsDashboardState() {
   }, [detailStreamStale]);
 
   useEffect(() => {
-    resetResumeDialogState();
-    if (!selectedRunId) {
-      setDetailRunId(undefined);
-      return;
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      setDetailRunId(selectedRunId);
-    }, DETAIL_LOAD_DELAY_MS);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
+    void selectedRunId;
+    setResumeDialogOpen(false);
+    setResumeMessageExpanded(false);
+    setResumeMessageDraft("");
   }, [selectedRunId]);
 
   useEffect(() => {
@@ -852,8 +867,8 @@ export function useRunsDashboardState() {
     },
     runs,
     runsQuery,
+    detailSettling,
     selectedRunId,
-    selectedRunDetailRunId: detailRunId,
     selectedDrawerView,
     selectedRunGroupAttachmentsQuery,
     selectedRunCanResume,
