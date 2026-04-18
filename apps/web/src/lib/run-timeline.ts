@@ -21,6 +21,12 @@ export interface ApplyEnvelopeResult {
 
 const MAX_CONSECUTIVE_RELOADS = 5;
 
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException
+    ? error.name === "AbortError"
+    : error instanceof Error && error.name === "AbortError";
+}
+
 function cloneHistory(history: RunTimelineHistory): RunTimelineHistory {
   return {
     ...history,
@@ -120,6 +126,7 @@ export function useRunTimelineState({
   const bootstrappedRef = useRef(false);
   const bufferRef = useRef<RunTimelineEnvelope[]>([]);
   const loadSeqRef = useRef(0);
+  const loadAbortControllerRef = useRef<AbortController | null>(null);
   const reloadCountRef = useRef(0);
   const previousRunIdRef = useRef<string | undefined>(undefined);
 
@@ -133,6 +140,8 @@ export function useRunTimelineState({
 
   useEffect(() => {
     if (!runId) {
+      loadAbortControllerRef.current?.abort();
+      loadAbortControllerRef.current = null;
       historyRef.current = null;
       staleRef.current = false;
       bootstrappedRef.current = false;
@@ -161,9 +170,12 @@ export function useRunTimelineState({
 
     const loadHistory = async () => {
       const loadSeq = ++loadSeqRef.current;
+      loadAbortControllerRef.current?.abort();
+      const controller = new AbortController();
+      loadAbortControllerRef.current = controller;
       setState((current) => ({ ...current, error: undefined, isLoading: true }));
       try {
-        const fetched = await api.getRunTimelineHistory(runId);
+        const fetched = await api.getRunTimelineHistory(runId, { signal: controller.signal });
         if (disposed || loadSeq !== loadSeqRef.current) {
           return;
         }
@@ -196,6 +208,9 @@ export function useRunTimelineState({
           stale: false,
         });
       } catch (error) {
+        if (isAbortError(error)) {
+          return;
+        }
         if (disposed || loadSeq !== loadSeqRef.current) {
           return;
         }
@@ -230,6 +245,8 @@ export function useRunTimelineState({
       void loadHistory();
       return () => {
         disposed = true;
+        loadAbortControllerRef.current?.abort();
+        loadAbortControllerRef.current = null;
       };
     }
 
@@ -280,6 +297,8 @@ export function useRunTimelineState({
 
     return () => {
       disposed = true;
+      loadAbortControllerRef.current?.abort();
+      loadAbortControllerRef.current = null;
       unsubscribe();
     };
   }, [api, config, runId, runIsLive]);

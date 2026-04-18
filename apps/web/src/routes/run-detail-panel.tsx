@@ -46,6 +46,7 @@ export function RunDetailPanel({
   resumeMessageDraft,
   resumeMessageExpanded,
   selectedRunGroupAttachmentsQuery,
+  selectedRunDetailRunId,
   selectedRunId,
   selectedRunQuery,
   timelineState,
@@ -90,6 +91,7 @@ export function RunDetailPanel({
   resumeMessageDraft: string;
   resumeMessageExpanded: boolean;
   selectedRunGroupAttachmentsQuery: UseQueryResult<AttachmentListEntry[], Error>;
+  selectedRunDetailRunId?: string;
   selectedRunId?: string;
   selectedRunQuery: UseQueryResult<RunDetail, Error>;
   timelineState: RunTimelineState;
@@ -100,8 +102,9 @@ export function RunDetailPanel({
 
   const drawerStyle = { "--drawer-width": `${drawerWidth}px` } as CSSProperties;
   const drawerClassName = drawerFullscreen ? "drawer drawer--fullscreen" : "drawer";
+  const detailSettling = selectedRunDetailRunId !== selectedRunId;
 
-  if (selectedRunQuery.isPending) {
+  function renderLoadingState() {
     return (
       <aside
         aria-label="Run detail"
@@ -115,6 +118,10 @@ export function RunDetailPanel({
         </div>
       </aside>
     );
+  }
+
+  if (detailSettling || selectedRunQuery.isPending) {
+    return renderLoadingState();
   }
 
   if (selectedRunQuery.isError && !isNotFoundError(selectedRunQuery.error)) {
@@ -136,6 +143,9 @@ export function RunDetailPanel({
   }
 
   const selectedRun = selectedRunQuery.data;
+  if (selectedRun.runId !== selectedRunId) {
+    return renderLoadingState();
+  }
   if (drawerView?.mode === "attachment") {
     const attachment =
       drawerView.attachmentOwnerRunId === selectedRun.runId

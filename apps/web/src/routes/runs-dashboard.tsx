@@ -217,6 +217,7 @@ export function RunsDashboardRoute() {
           resumeMessageDraft={state.resumeMessageDraft}
           resumeMessageExpanded={state.resumeMessageExpanded}
           selectedRunGroupAttachmentsQuery={state.selectedRunGroupAttachmentsQuery}
+          selectedRunDetailRunId={state.selectedRunDetailRunId}
           selectedRunId={state.selectedRunId}
           selectedRunQuery={state.selectedRunQuery}
           timelineState={state.timelineState}

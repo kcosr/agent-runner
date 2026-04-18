@@ -258,6 +258,36 @@ export function RunsBoardPanel({
       return;
     }
 
+    const activeElement = document.activeElement;
+    if (!(activeElement instanceof HTMLElement)) {
+      return;
+    }
+
+    const board = boardRef.current;
+    if (!board) {
+      return;
+    }
+
+    const activeCard = activeElement.closest("[data-run-id]");
+    const activeWithinBoard = activeCard instanceof HTMLElement && board?.contains(activeCard);
+    const activeIsDocumentBody = activeElement === document.body;
+    if (!activeWithinBoard && !activeIsDocumentBody) {
+      return;
+    }
+
+    const nextCard = board.querySelector(`[data-run-id="${CSS.escape(selectedRunId)}"]`);
+    if (!(nextCard instanceof HTMLElement) || nextCard === activeCard) {
+      return;
+    }
+
+    nextCard.focus({ preventScroll: true });
+  }, [selectedRunId]);
+
+  useEffect(() => {
+    if (!selectedRunId) {
+      return;
+    }
+
     const selectedPosition = runBoardPositions[selectedRunId];
     if (!selectedPosition) {
       return;
@@ -286,23 +316,31 @@ export function RunsBoardPanel({
       return;
     }
 
-    const cardTop = selectedCard.offsetTop;
-    const cardBottom = cardTop + selectedCard.offsetHeight;
-    const viewportTop = selectedColumnBody.scrollTop;
-    const viewportBottom = viewportTop + selectedColumnBody.clientHeight;
-    const targetTop = selectedPosition.index === 0 ? 0 : cardTop;
-
-    if (targetTop < viewportTop) {
+    const bodyRect = selectedColumnBody.getBoundingClientRect();
+    const cardRect = selectedCard.getBoundingClientRect();
+    const relativeTop = cardRect.top - bodyRect.top;
+    const relativeBottom = cardRect.bottom - bodyRect.bottom;
+    if (selectedPosition.index === 0 && selectedColumnBody.scrollTop > 0) {
       if (typeof selectedColumnBody.scrollTo === "function") {
-        selectedColumnBody.scrollTo({ behavior: "smooth", top: targetTop });
+        selectedColumnBody.scrollTo({ behavior: "smooth", top: 0 });
       } else {
-        selectedColumnBody.scrollTop = targetTop;
+        selectedColumnBody.scrollTop = 0;
       }
       return;
     }
 
-    if (cardBottom > viewportBottom) {
-      const nextScrollTop = Math.max(0, cardBottom - selectedColumnBody.clientHeight);
+    if (relativeTop < 0) {
+      const nextScrollTop = Math.max(0, selectedColumnBody.scrollTop + relativeTop);
+      if (typeof selectedColumnBody.scrollTo === "function") {
+        selectedColumnBody.scrollTo({ behavior: "smooth", top: nextScrollTop });
+      } else {
+        selectedColumnBody.scrollTop = nextScrollTop;
+      }
+      return;
+    }
+
+    if (relativeBottom > 0) {
+      const nextScrollTop = Math.max(0, selectedColumnBody.scrollTop + relativeBottom);
       if (typeof selectedColumnBody.scrollTo === "function") {
         selectedColumnBody.scrollTo({ behavior: "smooth", top: nextScrollTop });
       } else {

@@ -925,6 +925,7 @@ function setBoardGeometry(options: {
 }
 
 function setColumnBodyGeometry(options: {
+  bodyTop?: number;
   columnName: string;
   clientHeight: number;
   scrollTop?: number;
@@ -937,6 +938,7 @@ function setColumnBodyGeometry(options: {
     throw new Error(`expected scrollable body for column ${options.columnName}`);
   }
 
+  const bodyTop = options.bodyTop ?? 100;
   defineElementMetric(body, "clientHeight", options.clientHeight);
   defineElementMetric(body, "scrollTop", options.scrollTop ?? 0);
   defineElementMetric(
@@ -947,6 +949,17 @@ function setColumnBodyGeometry(options: {
         defineElementMetric(body, "scrollTop", top);
       }),
   );
+  defineElementMetric(body, "getBoundingClientRect", () => ({
+    x: 0,
+    y: bodyTop,
+    top: bodyTop,
+    left: 0,
+    right: 240,
+    bottom: bodyTop + body.clientHeight,
+    width: 240,
+    height: body.clientHeight,
+    toJSON: () => ({}),
+  }));
 
   for (const card of options.cards) {
     const element = body.querySelector(`[data-run-id="${card.runId}"]`);
@@ -955,6 +968,20 @@ function setColumnBodyGeometry(options: {
     }
     defineElementMetric(element, "offsetTop", card.top);
     defineElementMetric(element, "offsetHeight", card.height);
+    defineElementMetric(element, "getBoundingClientRect", () => {
+      const top = bodyTop + card.top - body.scrollTop;
+      return {
+        x: 0,
+        y: top,
+        top,
+        left: 0,
+        right: 220,
+        bottom: top + card.height,
+        width: 220,
+        height: card.height,
+        toJSON: () => ({}),
+      };
+    });
   }
 
   return body;
@@ -1660,6 +1687,8 @@ describe("web app", () => {
         "true",
       );
     });
+    expect(screen.getByRole("button", { name: /running dashboard/i })).toHaveFocus();
+    expect(screen.getByRole("button", { name: /pending dashboard/i })).not.toHaveFocus();
     expect(screen.getByLabelText("Run detail")).toBeInTheDocument();
 
     await user.keyboard("{ArrowRight}");
@@ -1670,6 +1699,8 @@ describe("web app", () => {
         "true",
       );
     });
+    expect(screen.getByRole("button", { name: /completed dashboard/i })).toHaveFocus();
+    expect(screen.getByRole("button", { name: /running dashboard/i })).not.toHaveFocus();
   });
 
   it("scrolls an offscreen target column into view during arrow-key navigation", async () => {
@@ -1861,6 +1892,97 @@ describe("web app", () => {
       );
     });
     expect(scrollTo).toHaveBeenCalledWith({ behavior: "smooth", top: 0 });
+  });
+
+  it("adds top-edge padding when arrow navigation lands on a card clipped at the top", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "run-running-1",
+          assignmentName: "Running shortcuts 1",
+          name: "Running shortcuts 1",
+        }),
+        makeRun({
+          runId: "run-running-2",
+          assignmentName: "Running shortcuts 2",
+          name: "Running shortcuts 2",
+        }),
+        makeRun({
+          runId: "run-running-3",
+          assignmentName: "Running shortcuts 3",
+          name: "Running shortcuts 3",
+        }),
+      ],
+      details: {
+        "run-running-1": makeDetail({
+          runId: "run-running-1",
+          assignment: {
+            name: "Running shortcuts 1",
+            sourcePath: "/tmp/running-shortcuts-1-a.md",
+            workspacePath: "/tmp/running-shortcuts-1-b.md",
+          },
+          name: "Running shortcuts 1",
+        }),
+        "run-running-2": makeDetail({
+          runId: "run-running-2",
+          assignment: {
+            name: "Running shortcuts 2",
+            sourcePath: "/tmp/running-shortcuts-2-a.md",
+            workspacePath: "/tmp/running-shortcuts-2-b.md",
+          },
+          name: "Running shortcuts 2",
+        }),
+        "run-running-3": makeDetail({
+          runId: "run-running-3",
+          assignment: {
+            name: "Running shortcuts 3",
+            sourcePath: "/tmp/running-shortcuts-3-a.md",
+            workspacePath: "/tmp/running-shortcuts-3-b.md",
+          },
+          name: "Running shortcuts 3",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await user.click(await findRunCard("Running shortcuts 3"));
+
+    setBoardGeometry({
+      clientWidth: 260,
+      columns: [{ key: "running", left: 0, width: 220 }],
+      scrollLeft: 0,
+      scrollWidth: 260,
+    });
+    const scrollTo = vi.fn(({ top }: { top: number }) => {
+      defineElementMetric(
+        getBoardColumn("Running").querySelector(".col-body") as Element,
+        "scrollTop",
+        top,
+      );
+    });
+    setColumnBodyGeometry({
+      columnName: "Running",
+      clientHeight: 140,
+      scrollTo,
+      scrollTop: 86,
+      cards: [
+        { runId: "run-running-1", top: 12, height: 60 },
+        { runId: "run-running-2", top: 82, height: 60 },
+        { runId: "run-running-3", top: 152, height: 60 },
+      ],
+    });
+    scrollTo.mockClear();
+
+    await user.keyboard("{ArrowUp}");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /running shortcuts 2/i })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+    });
+    expect(scrollTo).toHaveBeenCalledWith({ behavior: "smooth", top: 82 });
   });
 
   it("skips collapsed columns during arrow-key navigation", async () => {
@@ -4910,7 +5032,7 @@ describe("web app", () => {
     await user.click(await findRunCard("Second run"));
     expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /shared task/i, expanded: false }),
+      await screen.findByRole("button", { name: /shared task/i, expanded: false }),
     ).toBeInTheDocument();
     expect(screen.queryByLabelText("Attachment preview")).not.toBeInTheDocument();
 
@@ -4952,13 +5074,17 @@ describe("web app", () => {
 
     await user.click(await findRunCard("Build dashboard"));
     expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
-    expect(MockEventSource.instances).toHaveLength(3);
+    await waitFor(() => {
+      expect(MockEventSource.instances).toHaveLength(3);
+    });
 
     await user.click(getCloseDetailButton());
     await user.click(await findRunCard("Second run"));
 
     expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
-    expect(MockEventSource.instances).toHaveLength(5);
+    await waitFor(() => {
+      expect(MockEventSource.instances).toHaveLength(5);
+    });
   });
 
   it("searches dependency candidates by assignment name and submits the selected run id", async () => {
