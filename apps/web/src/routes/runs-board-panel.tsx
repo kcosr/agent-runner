@@ -66,6 +66,8 @@ export function RunsBoardPanel({
   const boardRef = useRef<HTMLElement | null>(null);
   const columnRefs = useRef(new Map<string, HTMLElement>());
   const columnRefCallbacks = useRef(new Map<string, (node: HTMLElement | null) => void>());
+  const columnBodyRefs = useRef(new Map<string, HTMLElement>());
+  const columnBodyRefCallbacks = useRef(new Map<string, (node: HTMLElement | null) => void>());
   const pendingScrollColumnKeyRef = useRef<string | undefined>(undefined);
   const pendingRestoreColumnKeyRef = useRef<string | null>(activeBoardColumnKey);
   const cardMotionRevisionRef = useRef(0);
@@ -73,6 +75,7 @@ export function RunsBoardPanel({
   const [motionsByRunId, setMotionsByRunId] = useState<Record<string, RunCardMotion>>({});
   const [showColumnJumpBar, setShowColumnJumpBar] = useState(false);
   const collapsedColumnKeySet = useMemo(() => new Set(collapsedColumnKeys), [collapsedColumnKeys]);
+  const runBoardPositions = useMemo(() => buildRunBoardPositions(boardColumns), [boardColumns]);
   const jumpColumns = useMemo(
     () => boardColumns.filter((column) => column.runs.length > 0),
     [boardColumns],
@@ -80,7 +83,7 @@ export function RunsBoardPanel({
   useHorizontalWheelGuard(boardRef);
 
   useLayoutEffect(() => {
-    const nextPositions = buildRunBoardPositions(boardColumns);
+    const nextPositions = runBoardPositions;
     const previousPositions = previousRunBoardPositionsRef.current;
     previousRunBoardPositionsRef.current = nextPositions;
 
@@ -110,7 +113,7 @@ export function RunsBoardPanel({
     setMotionsByRunId((current) =>
       haveSameCardMotions(current, nextMotions) ? current : nextMotions,
     );
-  }, [boardColumns]);
+  }, [runBoardPositions]);
 
   const resolveCenteredColumnKey = useCallback(
     (board: HTMLElement): string | null => {
@@ -163,6 +166,20 @@ export function RunsBoardPanel({
       return true;
     },
     [],
+  );
+
+  const bringColumnIntoView = useCallback(
+    (columnKey: string, behavior: ScrollBehavior = "smooth"): boolean => {
+      if (collapsedColumnKeySet.has(columnKey)) {
+        pendingScrollColumnKeyRef.current = columnKey;
+        onExpandColumn(columnKey);
+        return true;
+      }
+
+      pendingScrollColumnKeyRef.current = undefined;
+      return scrollColumnIntoView(columnKey, behavior);
+    },
+    [collapsedColumnKeySet, onExpandColumn, scrollColumnIntoView],
   );
 
   const recomputeBoardViewportState = useCallback(() => {
@@ -236,6 +253,64 @@ export function RunsBoardPanel({
     };
   }, [collapsedColumnKeySet, scrollColumnIntoView]);
 
+  useEffect(() => {
+    if (!selectedRunId) {
+      return;
+    }
+
+    const selectedPosition = runBoardPositions[selectedRunId];
+    if (!selectedPosition) {
+      return;
+    }
+
+    const board = boardRef.current;
+    const selectedColumn = columnRefs.current.get(selectedPosition.columnKey);
+    const selectedColumnBody = columnBodyRefs.current.get(selectedPosition.columnKey);
+    if (!board || !selectedColumn || !selectedColumnBody) {
+      return;
+    }
+
+    const viewportLeft = board.scrollLeft;
+    const viewportRight = viewportLeft + board.clientWidth;
+    const columnLeft = selectedColumn.offsetLeft;
+    const columnRight = columnLeft + selectedColumn.offsetWidth;
+    const columnFullyVisible = columnLeft >= viewportLeft && columnRight <= viewportRight;
+    if (!columnFullyVisible) {
+      bringColumnIntoView(selectedPosition.columnKey);
+    }
+
+    const selectedCard = selectedColumnBody.querySelector(
+      `[data-run-id="${CSS.escape(selectedRunId)}"]`,
+    );
+    if (!(selectedCard instanceof HTMLElement)) {
+      return;
+    }
+
+    const cardTop = selectedCard.offsetTop;
+    const cardBottom = cardTop + selectedCard.offsetHeight;
+    const viewportTop = selectedColumnBody.scrollTop;
+    const viewportBottom = viewportTop + selectedColumnBody.clientHeight;
+    const targetTop = selectedPosition.index === 0 ? 0 : cardTop;
+
+    if (targetTop < viewportTop) {
+      if (typeof selectedColumnBody.scrollTo === "function") {
+        selectedColumnBody.scrollTo({ behavior: "smooth", top: targetTop });
+      } else {
+        selectedColumnBody.scrollTop = targetTop;
+      }
+      return;
+    }
+
+    if (cardBottom > viewportBottom) {
+      const nextScrollTop = Math.max(0, cardBottom - selectedColumnBody.clientHeight);
+      if (typeof selectedColumnBody.scrollTo === "function") {
+        selectedColumnBody.scrollTo({ behavior: "smooth", top: nextScrollTop });
+      } else {
+        selectedColumnBody.scrollTop = nextScrollTop;
+      }
+    }
+  }, [bringColumnIntoView, runBoardPositions, selectedRunId]);
+
   function columnRefFor(columnKey: string) {
     const existing = columnRefCallbacks.current.get(columnKey);
     if (existing) {
@@ -253,15 +328,25 @@ export function RunsBoardPanel({
     return callback;
   }
 
-  function handleJumpToColumn(columnKey: string) {
-    if (collapsedColumnKeySet.has(columnKey)) {
-      pendingScrollColumnKeyRef.current = columnKey;
-      onExpandColumn(columnKey);
-      return;
+  function columnBodyRefFor(columnKey: string) {
+    const existing = columnBodyRefCallbacks.current.get(columnKey);
+    if (existing) {
+      return existing;
     }
 
-    pendingScrollColumnKeyRef.current = undefined;
-    scrollColumnIntoView(columnKey);
+    const callback = (node: HTMLElement | null) => {
+      if (node) {
+        columnBodyRefs.current.set(columnKey, node);
+      } else {
+        columnBodyRefs.current.delete(columnKey);
+      }
+    };
+    columnBodyRefCallbacks.current.set(columnKey, callback);
+    return callback;
+  }
+
+  function handleJumpToColumn(columnKey: string) {
+    bringColumnIntoView(columnKey);
   }
 
   if (runsQuery.isPending) {
@@ -350,6 +435,7 @@ export function RunsBoardPanel({
       <section aria-label="Run board" className="board" ref={boardRef}>
         {boardColumns.map((column) => (
           <RunColumn
+            bodyRef={columnBodyRefFor(column.key)}
             collapsed={collapsedColumnKeySet.has(column.key)}
             column={column}
             columnRef={columnRefFor(column.key)}

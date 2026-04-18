@@ -924,6 +924,42 @@ function setBoardGeometry(options: {
   return board as HTMLElement;
 }
 
+function setColumnBodyGeometry(options: {
+  columnName: string;
+  clientHeight: number;
+  scrollTop?: number;
+  scrollTo?: ReturnType<typeof vi.fn>;
+  cards: Array<{ runId: string; top: number; height: number }>;
+}) {
+  const column = getBoardColumn(options.columnName);
+  const body = column.querySelector(".col-body");
+  if (!(body instanceof HTMLElement)) {
+    throw new Error(`expected scrollable body for column ${options.columnName}`);
+  }
+
+  defineElementMetric(body, "clientHeight", options.clientHeight);
+  defineElementMetric(body, "scrollTop", options.scrollTop ?? 0);
+  defineElementMetric(
+    body,
+    "scrollTo",
+    options.scrollTo ??
+      vi.fn(({ top }: { top: number }) => {
+        defineElementMetric(body, "scrollTop", top);
+      }),
+  );
+
+  for (const card of options.cards) {
+    const element = body.querySelector(`[data-run-id="${card.runId}"]`);
+    if (!(element instanceof HTMLElement)) {
+      continue;
+    }
+    defineElementMetric(element, "offsetTop", card.top);
+    defineElementMetric(element, "offsetHeight", card.height);
+  }
+
+  return body;
+}
+
 function getTimelineContentScrollRegion() {
   const scrollRegion = document.querySelector(".timeline-content-scroll");
   if (!(scrollRegion instanceof HTMLElement)) {
@@ -1470,6 +1506,450 @@ describe("web app", () => {
     await waitFor(() => {
       expect(screen.queryByLabelText("Run detail")).not.toBeInTheDocument();
     });
+  });
+
+  it("clears then blurs a focused search before closing the selected run detail", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await user.click(await findRunCard("Build dashboard"));
+    const searchInput = screen.getByPlaceholderText("Search runs");
+    await user.type(searchInput, "build");
+
+    expect(searchInput).toHaveValue("build");
+    expect(screen.getByLabelText("Run detail")).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+
+    expect(searchInput).toHaveValue("");
+    expect(searchInput).toHaveFocus();
+    expect(screen.getByLabelText("Run detail")).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+
+    expect(searchInput).not.toHaveFocus();
+    expect(screen.getByLabelText("Run detail")).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Run detail")).not.toBeInTheDocument();
+    });
+  });
+
+  it("blurs the focused search on Enter while preserving the current query", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await user.click(await findRunCard("Build dashboard"));
+    const searchInput = screen.getByPlaceholderText("Search runs");
+    await user.type(searchInput, "build");
+
+    expect(searchInput).toHaveValue("build");
+    expect(searchInput).toHaveFocus();
+
+    await user.keyboard("{Enter}");
+
+    expect(searchInput).toHaveValue("build");
+    expect(searchInput).not.toHaveFocus();
+    expect(screen.getByLabelText("Run detail")).toBeInTheDocument();
+  });
+
+  it("focuses the run search with Ctrl+F", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    const runCard = await findRunCard("Build dashboard");
+    runCard.focus();
+    expect(runCard).toHaveFocus();
+
+    await user.keyboard("{Control>}{f}{/Control}");
+
+    expect(screen.getByPlaceholderText("Search runs")).toHaveFocus();
+  });
+
+  it("navigates between selected runs with arrow keys", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "run-pending",
+          assignmentName: "Pending dashboard",
+          effectiveStatus: "initialized",
+          name: "Pending dashboard",
+          status: "initialized",
+        }),
+        makeRun({
+          runId: "run-running",
+          assignmentName: "Running dashboard",
+          name: "Running dashboard",
+        }),
+        makeRun({
+          activeTask: null,
+          effectiveStatus: "success",
+          runId: "run-completed",
+          assignmentName: "Completed dashboard",
+          name: "Completed dashboard",
+          status: "success",
+        }),
+      ],
+      details: {
+        "run-pending": makeDetail({
+          runId: "run-pending",
+          effectiveStatus: "initialized",
+          assignment: {
+            name: "Pending dashboard",
+            sourcePath: "/tmp/pending-a.md",
+            workspacePath: "/tmp/pending-b.md",
+          },
+          name: "Pending dashboard",
+          status: "initialized",
+        }),
+        "run-running": makeDetail({
+          runId: "run-running",
+          assignment: {
+            name: "Running dashboard",
+            sourcePath: "/tmp/running-a.md",
+            workspacePath: "/tmp/running-b.md",
+          },
+          name: "Running dashboard",
+        }),
+        "run-completed": makeDetail({
+          runId: "run-completed",
+          activeTask: null,
+          effectiveStatus: "success",
+          assignment: {
+            name: "Completed dashboard",
+            sourcePath: "/tmp/completed-a.md",
+            workspacePath: "/tmp/completed-b.md",
+          },
+          name: "Completed dashboard",
+          status: "success",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await user.click(await findRunCard("Pending dashboard"));
+    expect(screen.getByRole("button", { name: /pending dashboard/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    await user.keyboard("{ArrowRight}");
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /running dashboard/i })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+    });
+    expect(screen.getByLabelText("Run detail")).toBeInTheDocument();
+
+    await user.keyboard("{ArrowRight}");
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /completed dashboard/i })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+    });
+  });
+
+  it("scrolls an offscreen target column into view during arrow-key navigation", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "run-running-shortcuts",
+          assignmentName: "Running shortcuts",
+          name: "Running shortcuts",
+        }),
+        makeRun({
+          activeTask: null,
+          effectiveStatus: "success",
+          runId: "run-completed-shortcuts",
+          assignmentName: "Completed shortcuts",
+          name: "Completed shortcuts",
+          status: "success",
+        }),
+      ],
+      details: {
+        "run-running-shortcuts": makeDetail({
+          runId: "run-running-shortcuts",
+          assignment: {
+            name: "Running shortcuts",
+            sourcePath: "/tmp/running-shortcuts-a.md",
+            workspacePath: "/tmp/running-shortcuts-b.md",
+          },
+          name: "Running shortcuts",
+        }),
+        "run-completed-shortcuts": makeDetail({
+          runId: "run-completed-shortcuts",
+          activeTask: null,
+          effectiveStatus: "success",
+          assignment: {
+            name: "Completed shortcuts",
+            sourcePath: "/tmp/completed-shortcuts-a.md",
+            workspacePath: "/tmp/completed-shortcuts-b.md",
+          },
+          name: "Completed shortcuts",
+          status: "success",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await user.click(await findRunCard("Running shortcuts"));
+
+    const scrollTo = vi.fn();
+    setBoardGeometry({
+      clientWidth: 260,
+      columns: [
+        { key: "running", left: 0, width: 180 },
+        { key: "completed", left: 200, width: 180 },
+      ],
+      scrollLeft: 0,
+      scrollTo,
+      scrollWidth: 420,
+    });
+    scrollTo.mockClear();
+
+    await user.keyboard("{ArrowRight}");
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /completed shortcuts/i })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+    });
+    expect(scrollTo).toHaveBeenCalledWith({ behavior: "smooth", left: 160 });
+  });
+
+  it("scrolls the selected card into view within a column during vertical arrow navigation", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "run-running-1",
+          assignmentName: "Running shortcuts 1",
+          name: "Running shortcuts 1",
+        }),
+        makeRun({
+          runId: "run-running-2",
+          assignmentName: "Running shortcuts 2",
+          name: "Running shortcuts 2",
+        }),
+        makeRun({
+          runId: "run-running-3",
+          assignmentName: "Running shortcuts 3",
+          name: "Running shortcuts 3",
+        }),
+      ],
+      details: {
+        "run-running-1": makeDetail({
+          runId: "run-running-1",
+          assignment: {
+            name: "Running shortcuts 1",
+            sourcePath: "/tmp/running-shortcuts-1-a.md",
+            workspacePath: "/tmp/running-shortcuts-1-b.md",
+          },
+          name: "Running shortcuts 1",
+        }),
+        "run-running-2": makeDetail({
+          runId: "run-running-2",
+          assignment: {
+            name: "Running shortcuts 2",
+            sourcePath: "/tmp/running-shortcuts-2-a.md",
+            workspacePath: "/tmp/running-shortcuts-2-b.md",
+          },
+          name: "Running shortcuts 2",
+        }),
+        "run-running-3": makeDetail({
+          runId: "run-running-3",
+          assignment: {
+            name: "Running shortcuts 3",
+            sourcePath: "/tmp/running-shortcuts-3-a.md",
+            workspacePath: "/tmp/running-shortcuts-3-b.md",
+          },
+          name: "Running shortcuts 3",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await user.click(await findRunCard("Running shortcuts 1"));
+
+    setBoardGeometry({
+      clientWidth: 260,
+      columns: [{ key: "running", left: 0, width: 220 }],
+      scrollLeft: 0,
+      scrollWidth: 260,
+    });
+    const scrollTo = vi.fn(({ top }: { top: number }) => {
+      defineElementMetric(
+        getBoardColumn("Running").querySelector(".col-body") as Element,
+        "scrollTop",
+        top,
+      );
+    });
+    setColumnBodyGeometry({
+      columnName: "Running",
+      clientHeight: 140,
+      scrollTo,
+      scrollTop: 0,
+      cards: [
+        { runId: "run-running-1", top: 12, height: 60 },
+        { runId: "run-running-2", top: 82, height: 60 },
+        { runId: "run-running-3", top: 152, height: 60 },
+      ],
+    });
+    scrollTo.mockClear();
+
+    await user.keyboard("{ArrowDown}");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /running shortcuts 2/i })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+    });
+    expect(scrollTo).toHaveBeenCalledWith({ behavior: "smooth", top: 2 });
+
+    await user.keyboard("{ArrowDown}");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /running shortcuts 3/i })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+    });
+    expect(scrollTo).toHaveBeenCalledWith({ behavior: "smooth", top: 72 });
+
+    scrollTo.mockClear();
+
+    await user.keyboard("{ArrowUp}");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /running shortcuts 2/i })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+    });
+    expect(scrollTo).not.toHaveBeenCalled();
+
+    await user.keyboard("{ArrowUp}");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /running shortcuts 1/i })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+    });
+    expect(scrollTo).toHaveBeenCalledWith({ behavior: "smooth", top: 0 });
+  });
+
+  it("skips collapsed columns during arrow-key navigation", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "run-running-shortcuts",
+          assignmentName: "Running shortcuts",
+          name: "Running shortcuts",
+        }),
+        makeRun({
+          activeTask: null,
+          effectiveStatus: "success",
+          runId: "run-completed-shortcuts",
+          assignmentName: "Completed shortcuts",
+          name: "Completed shortcuts",
+          status: "success",
+        }),
+        makeRun({
+          activeTask: null,
+          effectiveStatus: "blocked",
+          runId: "run-blocked-shortcuts",
+          assignmentName: "Blocked shortcuts",
+          name: "Blocked shortcuts",
+          status: "blocked",
+        }),
+      ],
+      details: {
+        "run-running-shortcuts": makeDetail({
+          runId: "run-running-shortcuts",
+          assignment: {
+            name: "Running shortcuts",
+            sourcePath: "/tmp/running-shortcuts-a.md",
+            workspacePath: "/tmp/running-shortcuts-b.md",
+          },
+          name: "Running shortcuts",
+        }),
+        "run-completed-shortcuts": makeDetail({
+          runId: "run-completed-shortcuts",
+          activeTask: null,
+          effectiveStatus: "success",
+          assignment: {
+            name: "Completed shortcuts",
+            sourcePath: "/tmp/completed-shortcuts-a.md",
+            workspacePath: "/tmp/completed-shortcuts-b.md",
+          },
+          name: "Completed shortcuts",
+          status: "success",
+        }),
+        "run-blocked-shortcuts": makeDetail({
+          runId: "run-blocked-shortcuts",
+          activeTask: null,
+          effectiveStatus: "blocked",
+          assignment: {
+            name: "Blocked shortcuts",
+            sourcePath: "/tmp/blocked-shortcuts-a.md",
+            workspacePath: "/tmp/blocked-shortcuts-b.md",
+          },
+          name: "Blocked shortcuts",
+          status: "blocked",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await findRunCard("Running shortcuts");
+
+    const blockedColumn = getBoardColumn("Blocked");
+    await user.click(
+      within(blockedColumn).getByRole("button", { name: "Collapse Blocked column" }),
+    );
+    await waitFor(() => {
+      expect(blockedColumn).toHaveAttribute("data-collapsed", "true");
+    });
+
+    await user.click(await findRunCard("Completed shortcuts"));
+    expect(screen.getByRole("button", { name: /completed shortcuts/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    await user.keyboard("{ArrowRight}");
+
+    expect(screen.getByRole("button", { name: /completed shortcuts/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByLabelText("Run detail")).toBeInTheDocument();
   });
 
   it("navigates between runs and settings through the shell", async () => {
@@ -3044,6 +3524,175 @@ describe("web app", () => {
     await waitFor(() => {
       expect(resumeBody).toEqual({ overrides: {} });
     });
+  });
+
+  it("starts selected initialized runs with Enter without opening the resume dialog", async () => {
+    let resumeBody: { overrides?: { message?: string } } | undefined;
+    installFetchMock(
+      {
+        runs: [
+          makeRun({
+            runId: "initialized-enter",
+            assignmentName: "Initialized from keyboard",
+            name: "Initialized from keyboard",
+            status: "initialized",
+            effectiveStatus: "initialized",
+            activeTask: null,
+          }),
+        ],
+        details: {
+          "initialized-enter": makeDetail({
+            runId: "initialized-enter",
+            status: "initialized",
+            effectiveStatus: "initialized",
+            isLive: false,
+            backendSessionId: null,
+            name: "Initialized from keyboard",
+            assignment: {
+              name: "Initialized from keyboard",
+              sourcePath: "/tmp/keyboard-a.md",
+              workspacePath: "/tmp/keyboard-b.md",
+            },
+            tasks: [
+              {
+                id: "setup",
+                title: "Setup",
+                body: "Prepare the run",
+                status: "pending",
+                notes: "",
+              },
+            ],
+            capabilities: {
+              canArchive: true,
+              canUnarchive: false,
+              canResume: true,
+              taskMutation: {
+                canAdd: false,
+                canEditNotes: false,
+                canSetStatus: false,
+              },
+            },
+          }),
+        },
+      },
+      {
+        handleRequest: async (url, init) => {
+          if (url.endsWith("/api/runs/initialized-enter/resume")) {
+            resumeBody =
+              typeof init?.body === "string"
+                ? (JSON.parse(init.body) as { overrides?: { message?: string } })
+                : undefined;
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Initialized from keyboard"));
+
+    await user.keyboard("{Enter}");
+
+    expect(screen.queryByRole("dialog", { name: "Resume run" })).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(resumeBody).toEqual({ overrides: {} });
+    });
+  });
+
+  it("opens the resume dialog with Enter for selected resumable runs", async () => {
+    let resumeRequestCount = 0;
+    installFetchMock(
+      {
+        runs: [
+          makeRun({
+            runId: "resumable-enter",
+            assignmentName: "Resumable from keyboard",
+            name: "Resumable from keyboard",
+            status: "success",
+            effectiveStatus: "success",
+          }),
+        ],
+        details: {
+          "resumable-enter": makeDetail({
+            runId: "resumable-enter",
+            status: "success",
+            effectiveStatus: "success",
+            name: "Resumable from keyboard",
+            assignment: {
+              name: "Resumable from keyboard",
+              sourcePath: "/tmp/resume-a.md",
+              workspacePath: "/tmp/resume-b.md",
+            },
+            capabilities: {
+              canArchive: true,
+              canUnarchive: false,
+              canResume: true,
+              taskMutation: {
+                canAdd: false,
+                canEditNotes: false,
+                canSetStatus: false,
+              },
+            },
+          }),
+        },
+      },
+      {
+        handleRequest: async (url) => {
+          if (url.endsWith("/api/runs/resumable-enter/resume")) {
+            resumeRequestCount += 1;
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Resumable from keyboard"));
+
+    await user.keyboard("{Enter}");
+
+    expect(await screen.findByRole("dialog", { name: "Resume run" })).toBeInTheDocument();
+    expect(resumeRequestCount).toBe(0);
+  });
+
+  it("does not swallow Enter on unrelated focused buttons when the selected run cannot resume", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "passive-enter",
+          assignmentName: "Passive keyboard run",
+          backend: "passive",
+          name: "Passive keyboard run",
+        }),
+      ],
+      details: {
+        "passive-enter": makeDetail({
+          runId: "passive-enter",
+          backend: "passive",
+          name: "Passive keyboard run",
+          assignment: {
+            name: "Passive keyboard run",
+            sourcePath: "/tmp/passive-enter-a.md",
+            workspacePath: "/tmp/passive-enter-b.md",
+          },
+          capabilities: { canResume: false },
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Passive keyboard run"));
+
+    const settingsButton = screen.getByRole("button", { name: "Settings" });
+    settingsButton.focus();
+    expect(settingsButton).toHaveFocus();
+
+    await user.keyboard("{Enter}");
+
+    expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
   });
 
   it("shows an optional-message disclosure for incomplete-task resumes and can send without a message", async () => {

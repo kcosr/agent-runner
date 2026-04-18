@@ -243,6 +243,9 @@ export function useRunsDashboardState() {
   const [notices, setNotices] = useState<NoticeState[]>([]);
   const [actionError, setActionError] = useState<string>();
   const [detailStreamStale, setDetailStreamStale] = useState(false);
+  const [resumeDialogOpen, setResumeDialogOpen] = useState(false);
+  const [resumeMessageExpanded, setResumeMessageExpanded] = useState(false);
+  const [resumeMessageDraft, setResumeMessageDraft] = useState("");
   const noticeTimersRef = useRef(new Map<string, number>());
   const detailStreamStaleRef = useRef(detailStreamStale);
 
@@ -339,6 +342,14 @@ export function useRunsDashboardState() {
   }, [detailStreamStale]);
 
   useEffect(() => {
+    if (selectedRunId !== undefined) {
+      resetResumeDialogState();
+      return;
+    }
+    resetResumeDialogState();
+  }, [selectedRunId]);
+
+  useEffect(() => {
     for (const notice of notices) {
       if (!notice.autoDismissMs || noticeTimersRef.current.has(notice.id)) {
         continue;
@@ -386,39 +397,6 @@ export function useRunsDashboardState() {
       void navigate({ to: "/" });
     }
   }, [navigate, selectedRunId, selectedRunQuery.error]);
-
-  useEffect(() => {
-    if (!selectedRunId) {
-      return;
-    }
-    const runId = selectedRunId;
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.defaultPrevented) {
-        return;
-      }
-      if (event.key !== "Escape") {
-        return;
-      }
-      setActionError(undefined);
-      if (selectedDrawerView?.mode === "attachment") {
-        setSelectedRunDrawerView(runId, {
-          mode: "detail",
-          detailSection: "attachments",
-          attachmentId: null,
-          attachmentOwnerRunId: null,
-          attachmentTab: selectedDrawerView.attachmentTab,
-        });
-        return;
-      }
-      void navigate({ to: "/" });
-    }
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [navigate, selectedRunId, selectedDrawerView?.attachmentTab, selectedDrawerView?.mode]);
 
   useEffect(() => {
     if (!selectedRunId) {
@@ -668,6 +646,20 @@ export function useRunsDashboardState() {
                             : clearDependenciesMutation.isPending
                               ? "clear-dependencies"
                               : undefined;
+  const selectedRunCanResume = selectedRunQuery.data?.capabilities.canResume === true;
+  const selectedRunPrimaryActionAvailable = selectedRunCanResume && actionPending === undefined;
+  const selectedRunStartable =
+    selectedRunCanResume && selectedRunQuery.data?.status === "initialized";
+  const selectedRunHasIncompleteTasks =
+    selectedRunQuery.data?.tasks.some((task) => task.status !== "completed") ?? true;
+  const selectedRunResumeRequiresMessage = selectedRunCanResume && !selectedRunHasIncompleteTasks;
+  const trimmedResumeMessage = resumeMessageDraft.trim();
+
+  function resetResumeDialogState() {
+    setResumeDialogOpen(false);
+    setResumeMessageExpanded(false);
+    setResumeMessageDraft("");
+  }
 
   function setColumnCollapsed(columnKey: string, collapsed: boolean) {
     const isCollapsed = collapsedColumnKeySet.has(columnKey);
@@ -689,6 +681,58 @@ export function useRunsDashboardState() {
         [runId]: drawerView,
       },
     }));
+  }
+
+  function closeResumeDialog() {
+    if (actionPending === "resume") {
+      return;
+    }
+    resetResumeDialogState();
+  }
+
+  function openResumeDialog() {
+    if (!selectedRunCanResume || actionPending !== undefined) {
+      return;
+    }
+    setResumeMessageExpanded(selectedRunResumeRequiresMessage);
+    setResumeDialogOpen(true);
+  }
+
+  async function submitSelectedRunResume() {
+    if (
+      !selectedRunId ||
+      !selectedRunCanResume ||
+      actionPending === "resume" ||
+      (selectedRunResumeRequiresMessage && trimmedResumeMessage.length === 0)
+    ) {
+      return;
+    }
+    try {
+      await resumeMutation.mutateAsync({
+        runId: selectedRunId,
+        message: trimmedResumeMessage.length > 0 ? trimmedResumeMessage : undefined,
+      });
+      setActionError(undefined);
+      resetResumeDialogState();
+    } catch {
+      // actionError is surfaced by the shared mutation handler.
+    }
+  }
+
+  async function triggerSelectedRunPrimaryAction() {
+    if (!selectedRunId || !selectedRunCanResume || actionPending !== undefined) {
+      return;
+    }
+    if (!selectedRunStartable) {
+      openResumeDialog();
+      return;
+    }
+    try {
+      await resumeMutation.mutateAsync({ runId: selectedRunId });
+      setActionError(undefined);
+    } catch {
+      // actionError is surfaced by the shared mutation handler.
+    }
   }
 
   return {
@@ -729,10 +773,11 @@ export function useRunsDashboardState() {
       setNotices((current) => current.filter((notice) => notice.id !== id));
     },
     notices,
-    openRun: (runId: string) => {
+    openRun: (runId: string, options?: { replace?: boolean }) => {
       setActionError(undefined);
-      void navigate({ to: `/runs/${runId}` });
+      void navigate({ replace: options?.replace, to: `/runs/${runId}` });
     },
+    openSelectedRunResumeDialog: openResumeDialog,
     openSelectedRunAttachmentPreview: (
       attachmentOwnerRunId: string,
       attachmentId: string,
@@ -751,6 +796,9 @@ export function useRunsDashboardState() {
     },
     preferences,
     repoOptions,
+    resumeDialogOpen,
+    resumeMessageDraft,
+    resumeMessageExpanded,
     runActions: {
       abort: (runId: string) => abortMutation.mutate(runId),
       addDependency: async (runId: string, dependencyRunId: string) => {
@@ -793,9 +841,15 @@ export function useRunsDashboardState() {
     selectedRunId,
     selectedDrawerView,
     selectedRunGroupAttachmentsQuery,
+    selectedRunCanResume,
+    selectedRunPrimaryActionAvailable,
     selectedRunQuery,
+    setResumeMessageDraft,
+    setResumeMessageExpanded,
     streamStale: summaryStreamStale || detailStreamStale || timelineState.stale,
+    submitSelectedRunResume,
     timelineState,
+    triggerSelectedRunPrimaryAction,
     returnSelectedRunToAttachments: () => {
       if (!selectedRunId) {
         return;
@@ -846,5 +900,6 @@ export function useRunsDashboardState() {
     updateViewState,
     visibleRuns,
     viewState,
+    closeSelectedRunResumeDialog: closeResumeDialog,
   };
 }
