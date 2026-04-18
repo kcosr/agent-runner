@@ -21,14 +21,13 @@ function writeFakePiAgent(baseDir) {
   writeFileSync(
     path,
     `#!/usr/bin/env node
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { createInterface } from "node:readline";
 
 const args = process.argv.slice(2);
 const sessionFlagIndex = args.indexOf("--session");
-const sessionFile =
-  process.env.PI_TEST_SESSION_FILE ??
-  (sessionFlagIndex >= 0 ? args[sessionFlagIndex + 1] : \`\${process.cwd()}/fake-session.jsonl\`);
+const sessionArg = sessionFlagIndex >= 0 ? args[sessionFlagIndex + 1] : null;
 const rawStartupLine = process.env.PI_TEST_RAW_STDOUT_LINE ?? "";
 const promptEvents = JSON.parse(process.env.PI_TEST_PROMPT_EVENTS_JSON ?? "[]");
 const renameCallsPath = process.env.PI_TEST_RENAME_CALLS_PATH;
@@ -56,6 +55,22 @@ function appendRename(name) {
   if (!renameCallsPath) return;
   promptResponses.push(name);
   writeFileSync(renameCallsPath, JSON.stringify(promptResponses));
+}
+
+function appendRenameToSession(name) {
+  if (!sessionArg || !sessionArg.endsWith(".jsonl")) return;
+  mkdirSync(dirname(sessionArg), { recursive: true });
+  writeFileSync(
+    sessionArg,
+    JSON.stringify({
+      type: "session_info",
+      id: "session-info-1",
+      parentId: null,
+      timestamp: "2026-04-17T12:02:00.000Z",
+      name,
+    }) + "\\n",
+    { flag: "a" },
+  );
 }
 
 function emitPromptEvents() {
@@ -94,7 +109,6 @@ rl.on("line", (line) => {
       command: "get_state",
       success: true,
       data: {
-        sessionFile,
         sessionId: "pi-session-1",
         isStreaming: false,
       },
@@ -103,6 +117,7 @@ rl.on("line", (line) => {
   }
   if (message.type === "set_session_name") {
     appendRename(message.name);
+    appendRenameToSession(message.name);
     if (process.env.PI_TEST_FAIL_RENAME === "1") {
       send({
         id: message.id,
@@ -171,6 +186,11 @@ test("encodePiSessionDir preserves dots and wraps cwd buckets with sentinels", (
   assert.equal(encodePiSessionDir("/home/kevin/.agents"), "--home-kevin-.agents--");
 });
 
+test("encodePiSessionDir documents Pi's lossy cwd bucket convention", () => {
+  assert.equal(encodePiSessionDir("/tmp/a-b/c"), "--tmp-a-b-c--");
+  assert.equal(encodePiSessionDir("/tmp/a/b-c"), "--tmp-a-b-c--");
+});
+
 test("buildPiArgs wires rpc mode, thinking, and session id resume", () => {
   assert.deepEqual(
     buildPiArgs({
@@ -202,6 +222,32 @@ test("findPiSessionFile locates a session id inside the cwd-scoped Pi bucket", a
 
   await withEnv({ PI_HOME: piHome }, () => {
     assert.equal(findPiSessionFile(dir, "pi-session-1"), sessionPath);
+  });
+});
+
+test("findPiSessionFile matches a bare session-id filename", async () => {
+  const dir = tempDir();
+  const piHome = join(dir, ".pi-home");
+  const bucketDir = join(piHome, "agent", "sessions", encodePiSessionDir(dir));
+  const sessionPath = join(bucketDir, "pi-session-1.jsonl");
+  mkdirSync(bucketDir, { recursive: true });
+  writeFileSync(sessionPath, `${JSON.stringify({ type: "session", cwd: dir })}\n`);
+
+  await withEnv({ PI_HOME: piHome }, () => {
+    assert.equal(findPiSessionFile(dir, "pi-session-1"), sessionPath);
+  });
+});
+
+test("findPiSessionFile returns null when the cwd bucket has no matching file", async () => {
+  const dir = tempDir();
+  const piHome = join(dir, ".pi-home");
+  const bucketDir = join(piHome, "agent", "sessions", encodePiSessionDir(dir));
+  mkdirSync(bucketDir, { recursive: true });
+  writeFileSync(join(bucketDir, "2026-04-18T01-22-57-578Z_other-session.jsonl"), "{}\n");
+  mkdirSync(join(bucketDir, "pi-session-1.jsonl"), { recursive: true });
+
+  await withEnv({ PI_HOME: piHome }, () => {
+    assert.equal(findPiSessionFile(dir, "pi-session-1"), null);
   });
 });
 
@@ -242,7 +288,6 @@ test("pi backend launches in rpc mode, captures streamed text, and persists tran
         PI_TEST_ARGS_PATH: argsPath,
         PI_TEST_CWD_PATH: cwdPath,
         PI_TEST_RENAME_CALLS_PATH: renameCallsPath,
-        PI_TEST_SESSION_FILE: join(dir, "session.jsonl"),
         PI_TEST_PROMPT_EVENTS_JSON: JSON.stringify([
           { type: "message_start", message: { role: "assistant", content: [] } },
           {

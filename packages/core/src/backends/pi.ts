@@ -135,6 +135,10 @@ export function readPiSessionHeader(sessionPath: string): PiSessionHeader {
   return parsePiSessionHeader(sessionPath);
 }
 
+function piHomeRoot(): string {
+  return process.env.PI_HOME?.trim() || join(homedir(), ".pi");
+}
+
 /**
  * Pi stores cwd-scoped sessions under `agent/sessions/<encoded-cwd>/`
  * using leading/trailing `--` sentinels and `/ -> -` path folding while
@@ -146,18 +150,25 @@ export function encodePiSessionDir(cwd: string): string {
   return `--${cwd.replaceAll("/", "-").replace(/^-+/, "")}--`;
 }
 
+function piSessionsBucketDir(cwd: string): string {
+  return join(piHomeRoot(), "agent", "sessions", encodePiSessionDir(cwd));
+}
+
 export function findPiSessionFile(cwd: string, sessionId: string): string | null {
-  const root = process.env.PI_HOME?.trim() || join(homedir(), ".pi");
-  const bucketDir = join(root, "agent", "sessions", encodePiSessionDir(cwd));
+  const bucketDir = piSessionsBucketDir(cwd);
   if (!existsSync(bucketDir)) {
     return null;
   }
 
-  for (const entry of readdirSync(bucketDir, { withFileTypes: true })) {
-    if (!entry.isFile()) continue;
-    if (entry.name === `${sessionId}.jsonl` || entry.name.endsWith(`_${sessionId}.jsonl`)) {
-      return join(bucketDir, entry.name);
+  try {
+    for (const entry of readdirSync(bucketDir, { withFileTypes: true })) {
+      if (!entry.isFile()) continue;
+      if (entry.name === `${sessionId}.jsonl` || entry.name.endsWith(`_${sessionId}.jsonl`)) {
+        return join(bucketDir, entry.name);
+      }
     }
+  } catch {
+    return null;
   }
   return null;
 }
@@ -172,11 +183,26 @@ async function validatePiSession(ctx: ValidateSessionContext): Promise<ValidateS
   }
   const sessionPath = findPiSessionFile(ctx.cwd, sessionId);
   if (sessionPath === null) {
-    const root = process.env.PI_HOME?.trim() || join(homedir(), ".pi");
-    const bucketDir = join(root, "agent", "sessions", encodePiSessionDir(ctx.cwd));
+    const bucketDir = piSessionsBucketDir(ctx.cwd);
     return {
       valid: false,
       reason: `pi session "${sessionId}" not found under cwd "${ctx.cwd}"\n  expected directory: ${bucketDir}\n  the session must have been created with the same working directory; pi keys session storage by encoded cwd.`,
+    };
+  }
+
+  let header: PiSessionHeader;
+  try {
+    header = readPiSessionHeader(sessionPath);
+  } catch (error) {
+    return {
+      valid: false,
+      reason: `pi session "${sessionId}" has an unreadable header: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+  if (header.cwd !== ctx.cwd) {
+    return {
+      valid: false,
+      reason: `pi session "${sessionId}" belongs to cwd "${header.cwd}", not "${ctx.cwd}"`,
     };
   }
   return { valid: true };
@@ -624,6 +650,9 @@ export async function setPiSessionName(ctx: {
     return;
   }
 
+  // Pi accepts both session ids and resolved session files on `--session`.
+  // Prefer the on-disk file when available so rename targets the exact
+  // cwd-scoped session we validated/imported.
   const renameTarget = findPiSessionFile(ctx.cwd, ctx.sessionId) ?? ctx.sessionId;
   const processHandle = await createPiProcess({
     prompt: "",

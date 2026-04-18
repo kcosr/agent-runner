@@ -191,7 +191,7 @@ test("import (run): invalid session id throws InvalidBackendSessionError before 
   assert.equal(captured.resumeSessionId, undefined, "backend.invoke was never called");
 });
 
-function writePiSession(piHome, cwd, sessionId) {
+function writePiSession(piHome, cwd, sessionId, headerCwd = cwd) {
   const bucketDir = join(piHome, "agent", "sessions", encodePiSessionDir(cwd));
   mkdirSync(bucketDir, { recursive: true });
   const path = join(bucketDir, `2026-04-17T23-00-00-000Z_${sessionId}.jsonl`);
@@ -202,7 +202,7 @@ function writePiSession(piHome, cwd, sessionId) {
       version: 3,
       id: sessionId,
       timestamp: "2026-04-17T23:00:00.000Z",
-      cwd,
+      cwd: headerCwd,
     })}\n`,
   );
   return path;
@@ -266,6 +266,38 @@ test("import (run): pi session id from a different cwd bucket throws InvalidBack
       assert.ok(err instanceof InvalidBackendSessionError);
       assert.equal(err.sessionId, "pi-session-other-cwd");
       assert.match(err.message, /not found under cwd/);
+      return true;
+    },
+  );
+});
+
+test("import (run): pi session id with a mismatched header cwd throws InvalidBackendSessionError", async () => {
+  const dir = tempDir();
+  const piHome = join(dir, ".pi-home");
+  writeAgent(dir, "pi-import-agent", PI_IMPORT_AGENT);
+  writeAssignment(dir, "import-work", IMPORT_ASSIGNMENT);
+
+  writePiSession(piHome, dir, "pi-session-wrong-header", join(dir, "different-cwd"));
+  const backend = {
+    ...piBackend,
+    async invoke() {
+      throw new Error("backend.invoke should not be called for invalid pi imports");
+    },
+  };
+
+  await assert.rejects(
+    () =>
+      withEnv({ PI_HOME: piHome }, () =>
+        runImportIn(
+          dir,
+          { backend, bootstrapBackendSessionId: "pi-session-wrong-header" },
+          "pi-import-agent",
+        ),
+      ),
+    (err) => {
+      assert.ok(err instanceof InvalidBackendSessionError);
+      assert.equal(err.sessionId, "pi-session-wrong-header");
+      assert.match(err.message, /belongs to cwd/);
       return true;
     },
   );
