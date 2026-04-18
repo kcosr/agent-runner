@@ -168,8 +168,8 @@ being frozen into the manifest:
 - Caller instructions
 
 The syntax is `{{key}}` (whitespace permitted). Always-available variables
-include `run_id`, `cwd`, `assignment_path`, and `task_runner_cmd`. See
-[variables.md](variables.md).
+include `run_id`, `cwd`, `config_dir`, `state_dir`, `assignment_name`,
+`assignment_path`, and `task_runner_cmd`. See [variables.md](variables.md).
 
 ## Inspecting definitions
 

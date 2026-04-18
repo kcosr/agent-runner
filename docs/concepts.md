@@ -83,10 +83,10 @@ task-runner maintains two separate instruction surfaces:
 - **Worker brief** (`brief`) is the worker-facing handoff. It is composed
   from agent instructions, assignment instructions, the task-runner workflow
   template, and the run message. It is frozen in the manifest and re-used on
-  every attempt. Fetch it with `task-runner brief <run-id>`.
+  every attempt. Fetch it with `task-runner run brief <run-id>`.
 - **Caller instructions** (`callerInstructions`) are assignment docs for the
   human or script invoking task-runner. They are printed to stderr on fresh
-  `run` / `init`, exposed through `status --output-format json`, and never
+  `run` / `init`, exposed through `run status --output-format json`, and never
   sent to the backend.
 
 ## Variables

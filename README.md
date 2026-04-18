@@ -4,12 +4,13 @@
 state in a manifest-canonical workspace. It supports embedded CLI
 execution, active backend invocation, passive sidecar operation, a local
 daemon, a browser dashboard, resumable runs, attachments, dependencies,
-and a first-class `brief` surface for handing a run to a worker.
+and a first-class `run brief` surface for handing a run to a worker.
 
 - Task state is canonical in `run.json`.
 - Workers use the task CLI, not workspace files.
-- `task-runner brief <run-id>` is the canonical worker handoff.
-- `status` and `brief` are run-id-only read surfaces.
+- `task-runner run brief <run-id>` is the canonical worker handoff.
+- `task-runner status` reports the current system/environment context.
+- Run-targeted read surfaces live under `task-runner run`.
 
 ## Why
 
@@ -115,8 +116,9 @@ task-runner run \
 ### Inspect a run
 
 ```bash
-task-runner status <run-id>
-task-runner brief <run-id>
+task-runner status
+task-runner run status <run-id>
+task-runner run brief <run-id>
 task-runner task list <run-id>
 task-runner task show <run-id> <task-id>
 ```
@@ -140,7 +142,7 @@ task-runner init \
   --name "Web dashboard" \
   "Design the dashboard work"
 
-task-runner brief <run-id>
+task-runner run brief <run-id>
 task-runner task set <run-id> <task-id> --status in_progress
 task-runner task append-notes <run-id> <task-id> --text "Observed ..."
 task-runner run set-backend-session <run-id> <session-id>
@@ -176,8 +178,8 @@ issue those CLI commands through `--connect`.
 | `run` | Execute a fresh run, resume, or execute-after-init |
 | `init` | Prepare a run workspace without invoking the backend |
 | `serve` | Start the local daemon (WS JSON-RPC + HTTP/SSE + web UI) |
-| `status <run-id>` | Print run state (text or JSON) |
-| `brief <run-id>` | Print the composed worker handoff |
+| `status` | Print system/environment status |
+| `run status\|brief` | Print run state or the composed worker handoff |
 | `task list\|show\|set\|append-notes\|add` | Task inspection and mutation |
 | `attachment add\|list\|download\|remove` | Attachment management |
 | `list agents\|assignments\|runs` | Enumerate definitions and runs |
@@ -191,9 +193,10 @@ See [docs/cli.md](docs/cli.md) for the full flag-by-flag reference.
 
 Key rules:
 
-- `status` and `brief` accept a run id, not a workspace path.
-- `brief` is text-only (no `--output-format`, no `--field`).
-- `status --output-format json` returns the shared `RunDetail` DTO.
+- `task-runner status` takes no run id and reports config/state/daemon info.
+- `task-runner run status` and `task-runner run brief` accept a run id, not a workspace path.
+- `run brief` is text-only (no `--output-format`, no `--field`).
+- `run status --output-format json` returns the shared `RunDetail` DTO.
 - `list runs` defaults to the caller's cwd; use `--cwd`, `--repo`, or
   `--global` to scope otherwise; `--include-archived` adds archived
   runs.

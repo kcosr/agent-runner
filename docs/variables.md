@@ -80,10 +80,15 @@ ones:
 |-----|-------|
 | `run_id` | the run's short id |
 | `cwd` | the resolved working directory |
+| `config_dir` | the resolved task-runner config root |
+| `state_dir` | the resolved task-runner state root |
+| `assignment_name` | the frozen assignment name, when the run has an assignment |
 | `assignment_path` | path to the workspace assignment seed |
 | `task_runner_cmd` | resolved CLI command for subcommand examples |
 
-These cannot be overridden by `--var`.
+These cannot be overridden by `--var`. When a run has no assignment,
+`assignment_name` is omitted, so `{{assignment_name}}` remains
+uninterpolated under the normal undefined-value rule.
 
 ## Interpolation syntax
 
@@ -139,6 +144,6 @@ task-runner run \
 
 ## Inspecting resolved variables
 
-- `task-runner status <run-id> --output-format json` includes
+- `task-runner run status <run-id> --output-format json` includes
   `runtimeVars` (with env values redacted).
 - `show assignment <name>` renders the declared var schema and defaults.

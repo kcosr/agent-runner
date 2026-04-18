@@ -473,6 +473,12 @@ test("top-level status rejects unexpected run-id positionals", () => {
   assert.match(result.stderr, /Usage: task-runner status \[--output-format text\|json\]/);
 });
 
+test("top-level status rejects --field", () => {
+  const result = runCliExpectFail(["status", "--field", "configDir"]);
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /status does not support --field/);
+});
+
 test("top-level status reports embedded environment details", () => {
   const dir = tempDir();
   const text = execFileSync("node", [CLI_PATH, "status"], {

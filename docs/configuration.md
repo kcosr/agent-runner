@@ -136,7 +136,7 @@ unaffected.
   config dir contents.
 - `task-runner list runs [--cwd <path> | --repo <name> | --global]`
   prints the resolved state dir contents.
-- `task-runner status <run-id> --output-format json` exposes the
+- `task-runner run status <run-id> --output-format json` exposes the
   `runtimeVars`, `lockedFields`, and per-run environment snapshot.
 
 ## Typical host setup

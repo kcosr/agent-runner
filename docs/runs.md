@@ -100,21 +100,23 @@ task-runner run --resume-run <run-id>
 `init` performs the same setup work but does not invoke the backend. This
 is useful for passive runs, planning flows, or delayed execution. `init`
 does not dump the worker brief to stdout — fetch it explicitly with
-`task-runner brief <run-id>`.
+`task-runner run brief <run-id>`.
 
 ## Read surfaces
 
 ```bash
-task-runner status <run-id> [--output-format json] [--field <name>]...
-task-runner brief <run-id>
+task-runner status
+task-runner run status <run-id> [--output-format json] [--field <name>]...
+task-runner run brief <run-id>
 task-runner task list <run-id>
 task-runner task show <run-id> <task-id>
 task-runner attachment list <run-id> [--cwd-scope]
 ```
 
-- `status` and `brief` are run-id-only.
-- `brief` is text-only; no `--output-format` or `--field`.
-- `status --output-format json` returns the shared `RunDetail` DTO.
+- Top-level `status` reports system/environment status and takes no run id.
+- `run status` and `run brief` are run-id-only.
+- `run brief` is text-only; no `--output-format` or `--field`.
+- `run status --output-format json` returns the shared `RunDetail` DTO.
 
 ## Mutation surfaces
 

@@ -108,7 +108,7 @@ Notable feature uses:
   summary are attached to the planning run and later discovered by
   implementation via `attachment list --cwd-scope`.
 - **Passive-backend handoff**: the implementer run is created with
-  `--backend passive` so it is externally driven via `brief`.
+  `--backend passive` so it is externally driven via `run brief`.
 
 ### `plan-review`
 
@@ -169,7 +169,7 @@ subagents for parallelism.
 
 - **Ambiguity gate** — `plan-feature` `capture_feature` task.
 - **Passive backend** — `plan-feature` creates implementer runs with
-  `--backend passive` so the caller drives them through `brief`.
+  `--backend passive` so the caller drives them through `run brief`.
 - **Locked tasks** — `plan-feature` template locks the task list so
   executors cannot silently drop or reorder tasks.
 - **Dependencies** — planning → implementation → code-review workflows
