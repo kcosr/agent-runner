@@ -142,9 +142,6 @@ export function RunDetailPanel({
   }
 
   const selectedRun = selectedRunQuery.data;
-  if (selectedRun.runId !== selectedRunId) {
-    return renderLoadingState();
-  }
   if (drawerView?.mode === "attachment") {
     const attachment =
       drawerView.attachmentOwnerRunId === selectedRun.runId

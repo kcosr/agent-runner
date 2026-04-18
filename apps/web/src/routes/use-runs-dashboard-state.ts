@@ -54,6 +54,9 @@ function useSettledDetailRunId(selectedRunId?: string) {
   const [detailRunId, setDetailRunId] = useState<string | undefined>(selectedRunId);
 
   useEffect(() => {
+    if (detailRunId === selectedRunId) {
+      return;
+    }
     if (!selectedRunId) {
       setDetailRunId(undefined);
       return;
@@ -66,7 +69,7 @@ function useSettledDetailRunId(selectedRunId?: string) {
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [selectedRunId]);
+  }, [detailRunId, selectedRunId]);
 
   return {
     detailRunId,
@@ -367,8 +370,8 @@ export function useRunsDashboardState() {
     detailStreamStaleRef.current = detailStreamStale;
   }, [detailStreamStale]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: run on selection change to clear the prior run's pending resume-dialog state
   useEffect(() => {
-    void selectedRunId;
     setResumeDialogOpen(false);
     setResumeMessageExpanded(false);
     setResumeMessageDraft("");

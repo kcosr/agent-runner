@@ -1894,7 +1894,7 @@ describe("web app", () => {
     expect(scrollTo).toHaveBeenCalledWith({ behavior: "smooth", top: 0 });
   });
 
-  it("adds top-edge padding when arrow navigation lands on a card clipped at the top", async () => {
+  it("scrolls a top-clipped card flush with the column body when arrow navigation lands on it", async () => {
     installFetchMock({
       runs: [
         makeRun({

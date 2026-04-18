@@ -269,7 +269,7 @@ export function RunsBoardPanel({
     }
 
     const activeCard = activeElement.closest("[data-run-id]");
-    const activeWithinBoard = activeCard instanceof HTMLElement && board?.contains(activeCard);
+    const activeWithinBoard = activeCard instanceof HTMLElement && board.contains(activeCard);
     const activeIsDocumentBody = activeElement === document.body;
     if (!activeWithinBoard && !activeIsDocumentBody) {
       return;
