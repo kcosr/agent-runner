@@ -26,6 +26,7 @@ export function RunsDashboardRoute() {
       const command = resolveRunsShortcutCommand(event, {
         activeBoardColumnKey: state.activeBoardColumnKey,
         boardColumns: navigableBoardColumns,
+        drawerFullscreen: state.viewState.drawerFullscreen,
         resumeDialogOpen: state.resumeDialogOpen,
         searchFocused: document.activeElement === searchInputRef.current,
         searchValue: state.viewState.search,
@@ -126,6 +127,7 @@ export function RunsDashboardRoute() {
     state.selectedRunId,
     state.triggerSelectedRunPrimaryAction,
     state.updateViewState,
+    state.viewState.drawerFullscreen,
     state.viewState.search,
   ]);
 

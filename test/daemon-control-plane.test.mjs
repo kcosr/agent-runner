@@ -878,7 +878,7 @@ test("daemon attachment HTTP routes upload, list, download, remove, and reject m
       });
 
       patchManifest(init.workspaceDir, (manifest) => {
-        manifest.attachments = Array.from({ length: 20 }, (_, index) => ({
+        manifest.attachments = Array.from({ length: 100 }, (_, index) => ({
           id: `att-${index}`,
           name: `existing-${index}.txt`,
           mimeType: "text/plain",
@@ -900,7 +900,7 @@ test("daemon attachment HTTP routes upload, list, download, remove, and reject m
       const rejectedBody = await rejected.json();
       assert.equal(rejected.status, 422);
       assert.equal(rejectedBody.error.code, "INVALID_COMMAND");
-      assert.match(rejectedBody.error.message, /already has 20 attachments/);
+      assert.match(rejectedBody.error.message, /already has 100 attachments/);
     } finally {
       await server.close();
     }

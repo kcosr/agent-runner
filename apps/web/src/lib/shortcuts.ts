@@ -28,6 +28,7 @@ export interface ShortcutEventLike {
 export interface RunsShortcutContext {
   activeBoardColumnKey: string | null;
   boardColumns: BoardColumn[];
+  drawerFullscreen: boolean;
   selectedRunPrimaryActionAvailable: boolean;
   resumeDialogOpen: boolean;
   searchFocused: boolean;
@@ -151,6 +152,18 @@ export function resolveRunsShortcutCommand(
   event: ShortcutEventLike,
   context: RunsShortcutContext,
 ): RunsShortcutCommand | null {
+  if (context.drawerFullscreen) {
+    if (normalizeEventKey(event.key) === "escape") {
+      if (context.selectedDrawerView?.mode === "attachment") {
+        return "run.closeAttachmentPreview";
+      }
+      if (context.selectedRunId) {
+        return "run.close";
+      }
+    }
+    return null;
+  }
+
   if (
     matchesShortcut(event, { ctrlKey: true, key: "f" }) ||
     matchesShortcut(event, { metaKey: true, key: "f" })

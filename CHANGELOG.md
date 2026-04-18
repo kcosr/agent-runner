@@ -94,6 +94,7 @@
 
 ### Changed
 
+- Attachment uploads now allow up to 100 attachments per run while keeping the existing 25 MiB per-attachment and 100 MiB total-per-run quotas.
 - `task-runner attachment list --cwd-scope` now shows `owner=<run-id>` in text output so humans can download peer attachments without switching to JSON, and the bundled planning/review assignments now keep `assignment-seed.md` / `assignment-summary.md` on the planning run while teaching implementer and reviewer flows to discover them through cwd-scoped attachment listing. ([#47](https://github.com/kcosr/task-runner/pull/47))
 - The web run detail drawer now requires inline confirmation before aborting or resetting a run. ([#46](https://github.com/kcosr/task-runner/pull/46))
 - The web dashboard now persists only durable board preferences (`hideEmptyColumns`, `collapseFailureStates`, `showArchived`, `sortByRecentUpdates`); transient filters, collapsed columns, drawer width/fullscreen state, and per-run drawer tabs reset on full reload instead of carrying across sessions. ([#42](https://github.com/kcosr/task-runner/pull/42))

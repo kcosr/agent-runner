@@ -109,6 +109,7 @@ describe("resolveRunsShortcutCommand", () => {
   const context = {
     activeBoardColumnKey: "running",
     boardColumns: makeBoardColumns(),
+    drawerFullscreen: false,
     resumeDialogOpen: false,
     searchFocused: false,
     searchValue: "",
@@ -229,6 +230,69 @@ describe("resolveRunsShortcutCommand", () => {
         },
       ),
     ).toBeNull();
+  });
+
+  it("blocks non-Escape dashboard shortcuts while the drawer is fullscreen", () => {
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "ArrowRight",
+          metaKey: false,
+          shiftKey: false,
+        },
+        {
+          ...context,
+          drawerFullscreen: true,
+        },
+      ),
+    ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: true,
+          key: "f",
+          metaKey: false,
+          shiftKey: false,
+        },
+        {
+          ...context,
+          drawerFullscreen: true,
+        },
+      ),
+    ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "Enter",
+          metaKey: false,
+          shiftKey: false,
+        },
+        {
+          ...context,
+          drawerFullscreen: true,
+        },
+      ),
+    ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "Escape",
+          metaKey: false,
+          shiftKey: false,
+        },
+        {
+          ...context,
+          drawerFullscreen: true,
+        },
+      ),
+    ).toBe("run.close");
   });
 
   it("does not emit run.primaryAction when the selected run action is unavailable", () => {

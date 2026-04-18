@@ -1703,6 +1703,114 @@ describe("web app", () => {
     expect(screen.getByRole("button", { name: /running dashboard/i })).not.toHaveFocus();
   });
 
+  it("suppresses board and search shortcuts while the detail drawer is fullscreen", async () => {
+    let resumeBody: { overrides?: { message?: string } } | undefined;
+    installFetchMock(
+      {
+        runs: [
+          makeRun({
+            runId: "initialized-fullscreen",
+            assignmentName: "Initialized fullscreen",
+            name: "Initialized fullscreen",
+            status: "initialized",
+            effectiveStatus: "initialized",
+            activeTask: null,
+          }),
+          makeRun({
+            runId: "neighbor-fullscreen",
+            assignmentName: "Neighbor fullscreen",
+            name: "Neighbor fullscreen",
+          }),
+        ],
+        details: {
+          "initialized-fullscreen": makeDetail({
+            runId: "initialized-fullscreen",
+            status: "initialized",
+            effectiveStatus: "initialized",
+            isLive: false,
+            backendSessionId: null,
+            name: "Initialized fullscreen",
+            assignment: {
+              name: "Initialized fullscreen",
+              sourcePath: "/tmp/fullscreen-a.md",
+              workspacePath: "/tmp/fullscreen-b.md",
+            },
+            tasks: [
+              {
+                id: "setup",
+                title: "Setup",
+                body: "Prepare the run",
+                status: "pending",
+                notes: "",
+              },
+            ],
+            capabilities: {
+              canArchive: true,
+              canUnarchive: false,
+              canResume: true,
+              taskMutation: {
+                canAdd: false,
+                canEditNotes: false,
+                canSetStatus: false,
+              },
+            },
+          }),
+          "neighbor-fullscreen": makeDetail({
+            runId: "neighbor-fullscreen",
+            assignment: {
+              name: "Neighbor fullscreen",
+              sourcePath: "/tmp/fullscreen-c.md",
+              workspacePath: "/tmp/fullscreen-d.md",
+            },
+            name: "Neighbor fullscreen",
+          }),
+        },
+      },
+      {
+        handleRequest: async (url, init) => {
+          if (url.endsWith("/api/runs/initialized-fullscreen/resume")) {
+            resumeBody =
+              typeof init?.body === "string"
+                ? (JSON.parse(init.body) as { overrides?: { message?: string } })
+                : undefined;
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await user.click(await findRunCard("Initialized fullscreen"));
+    await user.click(screen.getByRole("button", { name: "Expand drawer to full width" }));
+
+    expect(screen.getByRole("button", { name: "Exit full-width drawer" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    const searchInput = screen.getByPlaceholderText("Search runs");
+    expect(searchInput).not.toHaveFocus();
+
+    await user.keyboard("{Control>}{f}{/Control}");
+    expect(searchInput).not.toHaveFocus();
+
+    await user.keyboard("{ArrowRight}");
+    expect(screen.getByRole("button", { name: /initialized fullscreen/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: /neighbor fullscreen/i })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+
+    await user.keyboard("{Enter}");
+    expect(screen.queryByRole("dialog", { name: "Resume run" })).not.toBeInTheDocument();
+    expect(resumeBody).toBeUndefined();
+  });
+
   it("scrolls an offscreen target column into view during arrow-key navigation", async () => {
     installFetchMock({
       runs: [
