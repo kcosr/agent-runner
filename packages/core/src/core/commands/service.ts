@@ -417,7 +417,7 @@ async function propagateRunNameChange(manifest: RunManifest): Promise<void> {
   }
   if (manifest.backend === "pi" && manifest.backendSessionId !== null) {
     await setPiSessionName({
-      sessionPath: manifest.backendSessionId,
+      sessionId: manifest.backendSessionId,
       cwd: manifest.cwd,
       env: process.env as Record<string, string>,
       name: manifest.name,

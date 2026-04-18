@@ -24,8 +24,9 @@
 ### Added
 
 - Added first-class `pi` backend support via Pi RPC over stdio, including
-  session-path validation against the frozen run `cwd`, run-name propagation,
-  and automatic cancellation of unexpected extension UI prompts.
+  cwd-scoped session-id validation/import, run-name propagation, and automatic
+  cancellation of unsupported extension UI prompts while leaving extensions,
+  skills, and prompt templates enabled.
 - Added `task-runner attachment list --cwd-scope` for exact same-cwd peer attachment discovery, and split the web run-detail Attachments area into `Run` and `Group` tabs so peer attachments can be previewed and downloaded without changing per-run ownership. ([#47](https://github.com/kcosr/task-runner/pull/47))
 - Added `task-runner run set-backend-session <id|path> <session-id>` and `task-runner run clear-backend-session <id|path>` for passive runs, with daemon HTTP/RPC parity plus inline web detail-drawer editing for passive and archived-passive backend session ids. ([#45](https://github.com/kcosr/task-runner/pull/45))
 - Added `scripts/migrate-manifests-v8.mjs` to backfill persisted `repo` capture for existing `schemaVersion: 7` run manifests, including legacy state roots passed via `--root` such as `~/.local/state/agent-runner`, with repeated `--repo <name>` filters for migrating only selected repo buckets. ([#43](https://github.com/kcosr/task-runner/pull/43))

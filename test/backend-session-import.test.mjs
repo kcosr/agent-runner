@@ -7,11 +7,15 @@ import {
   claudeSessionFilePath,
   encodeClaudeProjectDir,
 } from "../packages/core/dist/backends/claude.js";
-import { piBackend } from "../packages/core/dist/backends/pi.js";
+import { encodePiSessionDir, piBackend } from "../packages/core/dist/backends/pi.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js";
 import { InvalidBackendSessionError, runAgent } from "../packages/core/dist/core/run/run-loop.js";
-import { setTaskStatusesForPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
+import {
+  setTaskStatusesForPrompt,
+  withEnv,
+  withSharedRuntimeEnv,
+} from "./helpers/runtime-paths.mjs";
 
 // ─── claude cwd-encoding helper ─────────────────────────────────────────────
 
@@ -187,25 +191,29 @@ test("import (run): invalid session id throws InvalidBackendSessionError before 
   assert.equal(captured.resumeSessionId, undefined, "backend.invoke was never called");
 });
 
-function writePiSession(path, cwd) {
+function writePiSession(piHome, cwd, sessionId) {
+  const bucketDir = join(piHome, "agent", "sessions", encodePiSessionDir(cwd));
+  mkdirSync(bucketDir, { recursive: true });
+  const path = join(bucketDir, `2026-04-17T23-00-00-000Z_${sessionId}.jsonl`);
   writeFileSync(
     path,
     `${JSON.stringify({
       type: "session",
       version: 3,
-      id: "pi-session-1",
+      id: sessionId,
       timestamp: "2026-04-17T23:00:00.000Z",
       cwd,
     })}\n`,
   );
+  return path;
 }
 
-test("import (run): pi session path is validated before workspace creation", async () => {
+test("import (run): pi session id is validated in cwd-scoped Pi storage before workspace creation", async () => {
   const dir = tempDir();
+  const piHome = join(dir, ".pi-home");
   writeAgent(dir, "pi-import-agent", PI_IMPORT_AGENT);
   writeAssignment(dir, "import-work", IMPORT_ASSIGNMENT);
 
-  const missingPath = join(dir, "missing-session.jsonl");
   const backend = {
     ...piBackend,
     async invoke() {
@@ -214,23 +222,30 @@ test("import (run): pi session path is validated before workspace creation", asy
   };
 
   await assert.rejects(
-    () => runImportIn(dir, { backend, bootstrapBackendSessionId: missingPath }, "pi-import-agent"),
+    () =>
+      withEnv({ PI_HOME: piHome }, () =>
+        runImportIn(
+          dir,
+          { backend, bootstrapBackendSessionId: "missing-session" },
+          "pi-import-agent",
+        ),
+      ),
     (err) => {
       assert.ok(err instanceof InvalidBackendSessionError);
-      assert.equal(err.sessionId, missingPath);
-      assert.match(err.message, /does not exist/);
+      assert.equal(err.sessionId, "missing-session");
+      assert.match(err.message, /not found under cwd/);
       return true;
     },
   );
 });
 
-test("import (run): pi session cwd mismatch throws InvalidBackendSessionError", async () => {
+test("import (run): pi session id from a different cwd bucket throws InvalidBackendSessionError", async () => {
   const dir = tempDir();
+  const piHome = join(dir, ".pi-home");
   writeAgent(dir, "pi-import-agent", PI_IMPORT_AGENT);
   writeAssignment(dir, "import-work", IMPORT_ASSIGNMENT);
 
-  const sessionPath = join(dir, "pi-session.jsonl");
-  writePiSession(sessionPath, join(dir, "different-cwd"));
+  writePiSession(piHome, join(dir, "different-cwd"), "pi-session-other-cwd");
   const backend = {
     ...piBackend,
     async invoke() {
@@ -239,23 +254,31 @@ test("import (run): pi session cwd mismatch throws InvalidBackendSessionError", 
   };
 
   await assert.rejects(
-    () => runImportIn(dir, { backend, bootstrapBackendSessionId: sessionPath }, "pi-import-agent"),
+    () =>
+      withEnv({ PI_HOME: piHome }, () =>
+        runImportIn(
+          dir,
+          { backend, bootstrapBackendSessionId: "pi-session-other-cwd" },
+          "pi-import-agent",
+        ),
+      ),
     (err) => {
       assert.ok(err instanceof InvalidBackendSessionError);
-      assert.equal(err.sessionId, sessionPath);
-      assert.match(err.message, /was created under cwd/);
+      assert.equal(err.sessionId, "pi-session-other-cwd");
+      assert.match(err.message, /not found under cwd/);
       return true;
     },
   );
 });
 
-test("import (init+resume): pi execute-after-init reuses the persisted session path", async () => {
+test("import (init+resume): pi execute-after-init reuses the persisted session id", async () => {
   const dir = tempDir();
+  const piHome = join(dir, ".pi-home");
+  const sessionId = "pi-session-1";
   writeAgent(dir, "pi-import-agent", PI_IMPORT_AGENT);
   writeAssignment(dir, "import-work", IMPORT_ASSIGNMENT);
 
-  const sessionPath = join(dir, "pi-session.jsonl");
-  writePiSession(sessionPath, dir);
+  writePiSession(piHome, dir, sessionId);
 
   const captured = {};
   const backend = {
@@ -268,7 +291,7 @@ test("import (init+resume): pi execute-after-init reuses the persisted session p
         signal: null,
         timedOut: false,
         aborted: false,
-        sessionId: ctx.resumeSessionId ?? sessionPath,
+        sessionId: ctx.resumeSessionId ?? sessionId,
         transcript: "done",
         rawStdout: "",
         rawStderr: "",
@@ -276,36 +299,40 @@ test("import (init+resume): pi execute-after-init reuses the persisted session p
     },
   };
 
-  const init = await runImportIn(
-    dir,
-    {
-      backend,
-      bootstrapBackendSessionId: sessionPath,
-      initialize: true,
-    },
-    "pi-import-agent",
+  const init = await withEnv({ PI_HOME: piHome }, () =>
+    runImportIn(
+      dir,
+      {
+        backend,
+        bootstrapBackendSessionId: sessionId,
+        initialize: true,
+      },
+      "pi-import-agent",
+    ),
   );
-  assert.equal(init.manifest.backendSessionId, sessionPath);
+  assert.equal(init.manifest.backendSessionId, sessionId);
   assert.equal(captured.resumeSessionId, undefined);
 
   const target = await withSharedRuntimeEnv(dir, async () => resolveResumeTarget(init.runId, dir));
-  await withSharedRuntimeEnv(dir, async () => {
-    const loaded = loadAgentConfig("pi-import-agent", dir);
-    const originalCwd = process.cwd();
-    process.chdir(dir);
-    try {
-      const outcome = await runAgent({
-        loaded,
-        cliVars: {},
-        backend,
-        resume: target,
-      });
-      assert.equal(captured.resumeSessionId, sessionPath);
-      assert.equal(outcome.manifest.backendSessionId, sessionPath);
-    } finally {
-      process.chdir(originalCwd);
-    }
-  });
+  await withEnv({ PI_HOME: piHome }, () =>
+    withSharedRuntimeEnv(dir, async () => {
+      const loaded = loadAgentConfig("pi-import-agent", dir);
+      const originalCwd = process.cwd();
+      process.chdir(dir);
+      try {
+        const outcome = await runAgent({
+          loaded,
+          cliVars: {},
+          backend,
+          resume: target,
+        });
+        assert.equal(captured.resumeSessionId, sessionId);
+        assert.equal(outcome.manifest.backendSessionId, sessionId);
+      } finally {
+        process.chdir(originalCwd);
+      }
+    }),
+  );
 });
 
 test("import (init): valid session id persists into the initialized manifest", async () => {

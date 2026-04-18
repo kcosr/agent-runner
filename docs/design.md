@@ -65,7 +65,7 @@ The canonical record is `run.json`. Important persisted fields:
 - `repo`
 - `cwd`
 - `backendSessionId` as a backend-native string handle; Pi stores the session
-  file path here and resumes it against the frozen `cwd`
+  id here and resumes it against the frozen `cwd`
 - `finalTasks`
 - `brief`
 - `callerInstructions`

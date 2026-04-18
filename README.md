@@ -314,6 +314,11 @@ Common environment variables:
 - `TASK_RUNNER_CODEX_WS_URL`
 - `TASK_RUNNER_MAX_CALL_DEPTH`
 
+Pi resumes task-runner-owned runs from the frozen run `cwd` using the persisted
+Pi session id (`backendSessionId`). Bootstrap `--backend-session-id` import is
+validated against the cwd-scoped Pi session storage under `PI_HOME` or
+`~/.pi`.
+
 ## Development
 
 Repo checks:

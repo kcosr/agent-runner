@@ -1,9 +1,15 @@
 import { strict as assert } from "node:assert";
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { buildPiArgs, piBackend, readPiSessionHeader } from "../packages/core/dist/backends/pi.js";
+import {
+  buildPiArgs,
+  encodePiSessionDir,
+  findPiSessionFile,
+  piBackend,
+  readPiSessionHeader,
+} from "../packages/core/dist/backends/pi.js";
 import { withEnv } from "./helpers/runtime-paths.mjs";
 
 function tempDir() {
@@ -160,28 +166,43 @@ function failAfter(ms, message) {
   return new Promise((_, reject) => setTimeout(() => reject(new Error(message)), ms));
 }
 
-test("buildPiArgs wires rpc mode, disabled resources, thinking, and session path", () => {
+test("encodePiSessionDir preserves dots and wraps cwd buckets with sentinels", () => {
+  assert.equal(encodePiSessionDir("/home/kevin/assistant"), "--home-kevin-assistant--");
+  assert.equal(encodePiSessionDir("/home/kevin/.agents"), "--home-kevin-.agents--");
+});
+
+test("buildPiArgs wires rpc mode, thinking, and session id resume", () => {
   assert.deepEqual(
     buildPiArgs({
       model: "openai/gpt-5.4",
       effort: "max",
-      resumeSessionId: "/tmp/pi-session.jsonl",
+      resumeSessionId: "pi-session-1",
     }),
     [
       "--mode",
       "rpc",
-      "--no-extensions",
-      "--no-skills",
-      "--no-prompt-templates",
       "--no-themes",
       "--model",
       "openai/gpt-5.4",
       "--thinking",
       "xhigh",
       "--session",
-      "/tmp/pi-session.jsonl",
+      "pi-session-1",
     ],
   );
+});
+
+test("findPiSessionFile locates a session id inside the cwd-scoped Pi bucket", async () => {
+  const dir = tempDir();
+  const piHome = join(dir, ".pi-home");
+  const bucketDir = join(piHome, "agent", "sessions", encodePiSessionDir(dir));
+  const sessionPath = join(bucketDir, "2026-04-18T01-22-57-578Z_pi-session-1.jsonl");
+  mkdirSync(bucketDir, { recursive: true });
+  writeFileSync(sessionPath, `${JSON.stringify({ type: "session", cwd: dir })}\n`);
+
+  await withEnv({ PI_HOME: piHome }, () => {
+    assert.equal(findPiSessionFile(dir, "pi-session-1"), sessionPath);
+  });
 });
 
 test("readPiSessionHeader parses the session cwd from the JSONL header", () => {
@@ -250,7 +271,7 @@ test("pi backend launches in rpc mode, captures streamed text, and persists tran
       },
       model: "openai/gpt-5.4",
       effort: "high",
-      resumeSessionId: "/tmp/pi-prev-session.jsonl",
+      resumeSessionId: "pi-prev-session",
       name: "Pi invoke name",
       timeoutSec: 10,
       emit: (event) => events.push(event),
@@ -260,20 +281,17 @@ test("pi backend launches in rpc mode, captures streamed text, and persists tran
   assert.deepEqual(JSON.parse(readFileSync(argsPath, "utf8")), [
     "--mode",
     "rpc",
-    "--no-extensions",
-    "--no-skills",
-    "--no-prompt-templates",
     "--no-themes",
     "--model",
     "openai/gpt-5.4",
     "--thinking",
     "high",
     "--session",
-    "/tmp/pi-prev-session.jsonl",
+    "pi-prev-session",
   ]);
   assert.equal(readFileSync(cwdPath, "utf8"), dir);
   assert.deepEqual(JSON.parse(readFileSync(renameCallsPath, "utf8")), ["Pi invoke name"]);
-  assert.equal(result.sessionId, join(dir, "session.jsonl"));
+  assert.equal(result.sessionId, "pi-session-1");
   assert.equal(result.transcript, "Hello world.\n\nNext message.");
   assert.deepEqual(
     events.filter((event) => event.type === "agent_message_delta").map((event) => event.text),

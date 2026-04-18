@@ -1,5 +1,7 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type {
   Backend,
   BackendInvokeContext,
@@ -15,14 +17,7 @@ import {
   streamBoundarySeparator,
 } from "./shared.js";
 
-const PI_FORCE_DISABLE_ARGS = [
-  "--mode",
-  "rpc",
-  "--no-extensions",
-  "--no-skills",
-  "--no-prompt-templates",
-  "--no-themes",
-] as const;
+const PI_FIXED_ARGS = ["--mode", "rpc", "--no-themes"] as const;
 const SHUTDOWN_GRACE_MS = 1_000;
 const KILL_GRACE_MS = 5_000;
 const AUTO_CANCEL_EXTENSION_UI_METHODS = new Set(["select", "confirm", "input", "editor"]);
@@ -94,7 +89,7 @@ function mapEffortToPi(effort: EffortLevel): string | null {
 export function buildPiArgs(
   ctx: Pick<BackendInvokeContext, "effort" | "model" | "resumeSessionId">,
 ): string[] {
-  const args: string[] = [...PI_FORCE_DISABLE_ARGS];
+  const args: string[] = [...PI_FIXED_ARGS];
   if (ctx.model) {
     args.push("--model", ctx.model);
   }
@@ -140,33 +135,48 @@ export function readPiSessionHeader(sessionPath: string): PiSessionHeader {
   return parsePiSessionHeader(sessionPath);
 }
 
+/**
+ * Pi stores cwd-scoped sessions under `agent/sessions/<encoded-cwd>/`
+ * using leading/trailing `--` sentinels and `/ -> -` path folding while
+ * leaving dots intact. Observed examples on disk:
+ * `/home/kevin/assistant` -> `--home-kevin-assistant--`
+ * `/home/kevin/.agents` -> `--home-kevin-.agents--`
+ */
+export function encodePiSessionDir(cwd: string): string {
+  return `--${cwd.replaceAll("/", "-").replace(/^-+/, "")}--`;
+}
+
+export function findPiSessionFile(cwd: string, sessionId: string): string | null {
+  const root = process.env.PI_HOME?.trim() || join(homedir(), ".pi");
+  const bucketDir = join(root, "agent", "sessions", encodePiSessionDir(cwd));
+  if (!existsSync(bucketDir)) {
+    return null;
+  }
+
+  for (const entry of readdirSync(bucketDir, { withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    if (entry.name === `${sessionId}.jsonl` || entry.name.endsWith(`_${sessionId}.jsonl`)) {
+      return join(bucketDir, entry.name);
+    }
+  }
+  return null;
+}
+
 async function validatePiSession(ctx: ValidateSessionContext): Promise<ValidateSessionResult> {
-  const sessionPath = ctx.sessionId.trim();
-  if (sessionPath.length === 0) {
+  const sessionId = ctx.sessionId.trim();
+  if (sessionId.length === 0) {
     return {
       valid: false,
-      reason: "pi session path cannot be empty",
+      reason: "pi session id cannot be empty",
     };
   }
-  if (!existsSync(sessionPath)) {
+  const sessionPath = findPiSessionFile(ctx.cwd, sessionId);
+  if (sessionPath === null) {
+    const root = process.env.PI_HOME?.trim() || join(homedir(), ".pi");
+    const bucketDir = join(root, "agent", "sessions", encodePiSessionDir(ctx.cwd));
     return {
       valid: false,
-      reason: `pi session file "${sessionPath}" does not exist`,
-    };
-  }
-  let header: PiSessionHeader;
-  try {
-    header = parsePiSessionHeader(sessionPath);
-  } catch (error) {
-    return {
-      valid: false,
-      reason: `pi session file "${sessionPath}" is invalid: ${error instanceof Error ? error.message : String(error)}`,
-    };
-  }
-  if (header.cwd !== ctx.cwd) {
-    return {
-      valid: false,
-      reason: `pi session "${sessionPath}" was created under cwd "${header.cwd}",\n  but this run's cwd is "${ctx.cwd}".`,
+      reason: `pi session "${sessionId}" not found under cwd "${ctx.cwd}"\n  expected directory: ${bucketDir}\n  the session must have been created with the same working directory; pi keys session storage by encoded cwd.`,
     };
   }
   return { valid: true };
@@ -605,7 +615,7 @@ function createPiProcess(ctx: BackendInvokeContext): Promise<{
 }
 
 export async function setPiSessionName(ctx: {
-  sessionPath: string;
+  sessionId: string;
   cwd: string;
   env?: Record<string, string>;
   name: string | null;
@@ -614,12 +624,13 @@ export async function setPiSessionName(ctx: {
     return;
   }
 
+  const renameTarget = findPiSessionFile(ctx.cwd, ctx.sessionId) ?? ctx.sessionId;
   const processHandle = await createPiProcess({
     prompt: "",
     cwd: ctx.cwd,
     env: ctx.env ?? (process.env as Record<string, string>),
     timeoutSec: 60,
-    resumeSessionId: ctx.sessionPath,
+    resumeSessionId: renameTarget,
     emit: () => {},
   });
 
@@ -651,8 +662,8 @@ export const piBackend: Backend = {
       });
       const stateData = isRecord(stateResponse.data) ? stateResponse.data : {};
       const sessionId =
-        typeof stateData.sessionFile === "string" && stateData.sessionFile.length > 0
-          ? stateData.sessionFile
+        typeof stateData.sessionId === "string" && stateData.sessionId.length > 0
+          ? stateData.sessionId
           : null;
 
       if (ctx.name) {
