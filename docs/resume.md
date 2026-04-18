@@ -1,0 +1,134 @@
+# Resume
+
+Resume continues an existing run from its frozen manifest state.
+task-runner does *not* re-read the source agent or assignment files on
+resume — everything the backend needs is in `run.json`.
+
+## Command
+
+```bash
+task-runner run --resume-run <run-id-or-path>
+```
+
+`--resume-run` accepts either a run id or a workspace path. When present,
+several flags are rejected because their inputs are locked in at creation
+time (see [Forbidden flags](#forbidden-flags)).
+
+## When to resume
+
+Resume is how you:
+
+- execute a run you earlier created with `task-runner init`
+- re-run a run that exited with incomplete tasks
+- follow up with a continuation message
+- append new tasks to an in-flight workflow
+
+## Forbidden flags
+
+On resume, the following flags are rejected:
+
+- `--agent` — the agent is frozen in the run.
+- `--assignment` — the assignment is frozen; use `--add-task` to append
+  new work.
+- `--backend` — backend identity is tied to the session.
+- `--backend-session-id` — the run already carries its own session id.
+- `--cwd` — sessions are bound to the cwd they were created in.
+- `--name` — cannot be changed on resume; use `run set-name` instead.
+- `--var` — runtime vars are frozen at first write.
+
+For initialized runs, execute-after-init additionally rejects `--model`,
+`--effort`, `--timeout-sec`, `--max-retries`, `--unrestricted`,
+`--add-task`, and positional messages — the run already composed its
+brief.
+
+## Input requirements
+
+For non-initialized (previously-run) runs, resume requires at least one of:
+
+- an explicit follow-up message (positional arg)
+- newly added tasks via `--add-task` (repeatable)
+- incomplete tasks remaining in the manifest
+
+If all tasks are already `completed` and no follow-up message or new tasks
+are supplied, resume errors rather than re-sending a stale prompt.
+
+If the run has incomplete tasks and no explicit message, task-runner
+injects an implicit continue message:
+
+> Continue working through the remaining task list items.
+
+## Archived runs
+
+Non-passive archived runs must be unarchived before resume:
+
+```bash
+task-runner run unarchive <run-id>
+task-runner run --resume-run <run-id>
+```
+
+## Passive runs
+
+Passive runs are externally driven; `run --resume-run` is rejected for
+them. Drive them through the task CLI instead:
+
+```bash
+task-runner brief <run-id>
+task-runner task set <run-id> <task-id> --status in_progress
+task-runner task append-notes <run-id> <task-id> --text "Observed ..."
+task-runner task set <run-id> <task-id> --status completed
+```
+
+Passive runs also accept `run set-backend-session` and
+`run clear-backend-session` for external session tracking.
+
+## Dependencies
+
+Resume cannot start execution of a run whose dependencies have not all
+reached `success`. Resolve the upstream runs first, or remove the
+dependency with `run remove-dep`. See [dependencies.md](dependencies.md).
+
+## Prompt composition on resume
+
+On resume, the brief sent to the backend is composed as follows:
+
+1. If this is the first attempt with tasks (tasks were absent and are now
+   present), the worker workflow template is prepended.
+2. If new tasks were added since the last attempt, an added-tasks reminder
+   is prepended instead.
+3. The follow-up message is appended, or the implicit continue message is
+   used if incomplete tasks remain.
+
+For execute-after-init (running an `initialized` run), the stored
+`manifest.brief` is reused verbatim.
+
+## Retry nudges
+
+Within a single `run` invocation, task-runner may retry the backend up to
+`maxAttempts` times. If tasks remain incomplete at the end of an attempt,
+the retry prompt points the worker back at the task CLI and identifies the
+incomplete tasks. This is not a resume — it is a retry inside the same
+session.
+
+## Reset vs resume
+
+`run reset` is not a form of resume. It clears attempt/session history and
+restores the initialized seed so the run is executed from scratch on the
+next `run --resume-run` or fresh `run`. Reset does not re-read source
+definitions — it uses `manifest.resetSeed` captured at run creation.
+
+## Daemon and backend sessions
+
+The backend session id (`manifest.backendSessionId`) is the resume handle
+the backend itself uses — Claude session id, Codex thread id, Pi session
+id, etc. task-runner passes it to the backend on resume and validates it
+when possible:
+
+- **Claude** — session storage encoded by cwd; validated on-disk.
+- **Codex** — `thread/read` RPC validates the thread exists and cwd
+  matches.
+- **Cursor** — validation deferred to first invocation.
+- **Pi** — session file must exist under `PI_HOME` / `~/.pi` with a
+  matching `cwd` header.
+
+If a backend reports the session as gone, task-runner surfaces the failure
+rather than silently restarting.

@@ -22,13 +22,6 @@
     "lineWidth": 100
   },
   "files": {
-    "ignore": [
-      "dist/",
-      "node_modules/",
-      "coverage/",
-      ".task-runner/",
-      "apps/web/mockups/run-dashboard.css",
-      "apps/web/mockups/run-dashboard.html"
-    ]
+    "ignore": ["dist/", "node_modules/", "coverage/", ".task-runner/"]
   }
 }
