@@ -1,53 +1,67 @@
 # task-runner Design
 
+This is the canonical design document. It describes the end-state model,
+schema, lifecycle rules, and repo layout that the implementation and the
+other docs agree on.
+
+For a friendlier tour of the same concepts, start with
+[concepts.md](concepts.md).
+
 ## Purpose
 
-`task-runner` is a manifest-canonical CLI for running agents against a structured
-task list. The system is designed around a small number of explicit concepts:
+`task-runner` is a manifest-canonical CLI for running agents against a
+structured task list. The system is designed around a small number of
+explicit concepts:
 
 - runs are persisted in `run.json`
 - task state is canonical in the manifest
 - workers interact through the task CLI
 - `brief` is the canonical worker handoff
-- caller-facing documentation stays separate from worker-facing instructions
+- caller-facing documentation stays separate from worker-facing
+  instructions
 
-The current manifest generation is schema version `8`. Older manifest shapes are
-not silently upgraded or dual-read at runtime.
+The current manifest schema is version `8`. Older manifest shapes are not
+silently upgraded or dual-read at runtime.
 
-## Non-Goals
+## Non-goals
 
 - a remote multi-user control plane
 - workspace-file task editing as a first-class workflow
 - backward-compatibility shims for removed manifest or CLI contracts
 - automatic proof that a worker really performed a task
 
-## End-State Model
+## End-state model
 
 ### Agent
 
-An agent definition provides backend/runtime configuration and role instructions:
+An agent definition provides backend/runtime configuration and role
+instructions:
 
-- backend
-- model
-- effort
-- timeout
-- unrestricted
-- locked fields
-- role instructions
+- `backend`
+- `model`
+- `effort`
+- `timeoutSec`
+- `unrestricted`
+- `lockedFields`
+- role instructions (markdown body)
+
+Agents are parsed from `agent.md` files in the config tree or direct
+paths; see [agents-and-assignments.md](agents-and-assignments.md).
 
 ### Assignment
 
 An assignment definition provides reusable work:
 
-- cwd
-- vars schema
-- task list
-- optional default message
-- optional caller instructions
-- assignment instructions
+- `cwd`
+- `vars` schema
+- `tasks`
+- optional default `message`
+- optional `callerInstructions`
+- assignment instructions (markdown body)
+- `maxRetries`, `lockedFields`
 
-Assignments remain markdown definitions (`assignment.md`) in the config tree or
-direct paths supplied by the caller. They are inputs to run creation, not a live
+Assignments are markdown definitions in the config tree or direct paths
+supplied by the caller. They are inputs to run creation, not a live
 workspace surface.
 
 ### Run
@@ -61,39 +75,39 @@ ${TASK_RUNNER_STATE_DIR}/runs/<repo-name>/<run-id>/
 The canonical record is `run.json`. Important persisted fields:
 
 - frozen agent metadata
-- frozen assignment metadata
-- `repo`
-- `cwd`
-- `backendSessionId` as a backend-native string handle; Pi stores the session
-  id here and resumes it against the frozen `cwd`
-- `finalTasks`
-- `brief`
+- frozen assignment metadata (or `null` for chat-style runs)
+- `repo`, `cwd`
+- `backend`, `model`, `effort`, `timeoutSec`, `unrestricted`, `maxAttempts`
+- `lockedFields` (union of agent and assignment locks)
+- `status`, `exitCode`
+- `startedAt`, `endedAt`, `archivedAt`
+- `finalTasks` (canonical task state)
+- `tasksCompleted`, `tasksTotal`
+- `brief` (composed worker handoff)
 - `callerInstructions`
+- `backendSessionId` (backend-native resume handle; Pi, Codex, Claude,
+  etc. each store their own flavor here)
 - `dependencyRunIds`
 - attachment metadata
-- attempt history
-- session history
-- reset seed
+- attempt and session history
+- `runtimeVars` (env-sourced values redacted)
+- `resetSeed` (snapshot used by `run reset`)
+- `execution` (host mode and controller)
 
-If the run started from an assignment file, task-runner also stores:
+If the run started from an assignment file, task-runner also stores
+`assignment-seed.md` as an immutable audit snapshot.
 
-```text
-assignment-seed.md
-```
-
-That file is an immutable audit snapshot only.
-
-## Brief And Caller Instructions
+## Brief and caller instructions
 
 task-runner maintains two separate instruction surfaces.
 
-### Worker Brief
+### Worker brief
 
 `brief` is the worker-facing handoff. It is composed from:
 
-1. agent instructions
+1. agent role instructions
 2. assignment instructions
-3. task-runner's worker workflow template
+3. task-runner's worker workflow template (when tasks exist)
 4. the run message
 
 The workflow template teaches the worker to use:
@@ -112,7 +126,7 @@ task-runner brief <run-id>
 
 `brief` is text-only. It is not projected through `status --field ...`.
 
-### Caller Instructions
+### Caller instructions
 
 `callerInstructions` are assignment docs for the human or script using
 task-runner. They are:
@@ -124,7 +138,7 @@ task-runner. They are:
 
 This split keeps operator workflow text out of worker prompts.
 
-## Task State Model
+## Task state model
 
 Task state is canonical in `manifest.finalTasks` for all runs.
 
@@ -135,46 +149,52 @@ Statuses:
 - `completed`
 - `blocked`
 
-There is one task workflow. The system no longer branches between multiple task
-interaction modes.
+There is one task workflow. The system does not branch between multiple
+task interaction modes.
 
-Mutation rules:
+Mutation rules (non-passive):
 
 - initialized runs allow `task set`, `task append-notes`, and `task add`
-- running non-passive runs allow `task set` and `task append-notes`, but not
+  (unless `tasks` is locked)
+- running runs allow `task set` and `task append-notes`, but not
   `task add`
-- terminal non-passive runs allow notes edits, not status changes
-- passive runs are driven externally through the task CLI
+- terminal runs allow notes edits, not status changes
+
+Passive runs are driven externally through the task CLI. Their effective
+status is derived from the task set (all completed → `success`; any
+blocked with the rest completed or blocked → `blocked`; otherwise
+`initialized`).
 
 ## Lifecycle
 
-### Fresh Run
+### Fresh run
 
 `task-runner run`:
 
 1. resolves agent and assignment
-2. resolves cwd from `--cwd` -> assignment `cwd` -> caller cwd
+2. resolves cwd: `--cwd` → assignment `cwd` → caller cwd
 3. resolves vars
 4. enforces locked fields
 5. captures `repo` from the resolved cwd and creates the run workspace
 6. freezes the initial manifest
 7. composes and stores `brief`
-8. either invokes the backend or, for passive runs, leaves the run initialized
+8. invokes the backend, or leaves the run initialized if the backend is
+   `passive`
 
 ### Init
 
-`task-runner init` performs the same setup work without invoking the backend.
-
-This is important for:
+`task-runner init` performs the same setup work without invoking the
+backend. This is important for:
 
 - passive runs
 - delayed execution
-- planning flows where the caller wants to inspect the run before executing it
+- planning flows where the caller wants to inspect the run before
+  executing it
 
-`init` no longer dumps the worker handoff body to stdout. Operators fetch it
-explicitly with `task-runner brief <run-id>`.
+`init` no longer dumps the worker handoff body to stdout. Operators
+fetch it explicitly with `task-runner brief <run-id>`.
 
-### Execute-After-Init
+### Execute-after-init
 
 For non-passive initialized runs:
 
@@ -182,36 +202,43 @@ For non-passive initialized runs:
 task-runner run --resume-run <run-id>
 ```
 
-The stored `manifest.brief` is reused as the execution handoff.
+The stored `manifest.brief` is reused verbatim as the execution handoff.
 
 ### Resume
 
-Resume is manifest-based. Source agent and assignment files are not re-read.
+Resume is manifest-based. Source agent and assignment files are not
+re-read.
 
 Important rules:
 
-- `--assignment` is forbidden on resume
-- `--var` is forbidden on resume
-- incomplete-task resumes may omit a follow-up message
+- `--agent`, `--assignment`, `--backend`, `--backend-session-id`,
+  `--cwd`, `--name`, and `--var` are forbidden on resume
+- incomplete-task resumes may omit a follow-up message (an implicit
+  continue message is used)
+- resumes of otherwise-complete runs must supply a follow-up message
+  or `--add-task`
 - archived runs must be unarchived first
 - passive runs are not executed through `run --resume-run`
+- dependencies gate execution: all declared dependency runs must be in
+  `success`
+
+See [resume.md](resume.md).
 
 ### Reset
 
-`task-runner run reset <id|path>` restores the initialized-state seed stored in
-the manifest for non-running runs. Reset does not re-read current source
+`run reset <id|path>` restores the initialized-state seed stored in the
+manifest for non-running runs. Reset does not re-read current source
 definitions.
 
-### Delete Archived Runs
+### Delete archived runs
 
-`task-runner run delete <id|path>` permanently removes an archived,
-non-running run workspace. Delete is a hot-cut lifecycle mutation: only
-archived runs are eligible, and the workspace is removed rather than moved to
-trash or soft-deleted.
+`run delete <id|path>` permanently removes an archived, non-running run
+workspace. Only archived runs are eligible, and the workspace is removed
+rather than moved to trash.
 
-## Public Command Contract
+## Public command contract
 
-### Read Surfaces
+### Read surfaces
 
 - `task-runner status <run-id>`
 - `task-runner brief <run-id>`
@@ -219,26 +246,29 @@ trash or soft-deleted.
 - `task-runner task show <run-id> <task-id>`
 - `task-runner attachment list <run-id> [--cwd-scope]`
 
-Important rule:
+Rules:
 
-- `status` and `brief` are run-id-only read surfaces
-- `attachment list --cwd-scope` uses the target run's persisted `cwd` as an exact-match scope key; it does not infer groups from the caller cwd, repo bucket, or path prefixes
+- `status` and `brief` are run-id-only.
+- `attachment list --cwd-scope` uses the target run's persisted `cwd` as
+  an exact-match scope key. It does not infer groups from caller cwd,
+  repo buckets, or path prefixes.
 
-### Mutation Surfaces
+### Mutation surfaces
 
-- `task-runner task set`
-- `task-runner task append-notes`
-- `task-runner task add`
+- `task-runner task set|append-notes|add`
 - `task-runner attachment add|remove`
-- `task-runner run reset|archive|unarchive|delete|set-name|set-backend-session|clear-backend-session`
+- `task-runner run reset|archive|unarchive|delete|set-name|`
+  `set-backend-session|clear-backend-session`
 - `task-runner run add-dep|remove-dep|clear-deps`
 
-`run set-backend-session` / `run clear-backend-session` are passive-only
-metadata mutations. They update `manifest.backendSessionId` without changing
-task state, lifecycle status, attempts, archive state, or dependency
-projections.
+`run set-backend-session` / `run clear-backend-session` are
+passive-only metadata mutations. They update `manifest.backendSessionId`
+without changing task state, lifecycle status, attempts, archive state,
+or dependency projections.
 
-### Daemon Surface
+Dependency mutations are only allowed on `initialized` runs.
+
+### Daemon surface
 
 `task-runner serve` hosts:
 
@@ -249,43 +279,46 @@ projections.
 CLI commands can route through the daemon with `--connect` or
 `TASK_RUNNER_CONNECT`.
 
-Live subscriptions are split by responsibility instead of sharing one mixed
-event bus:
+Live subscriptions are split by responsibility instead of sharing one
+mixed event bus:
 
-- global summary stream: `/api/events/run-summaries` (`summary_upsert` and `summary_removed`)
-- per-run detail stream: `/api/runs/:runId/events/detail`
-- per-run timeline history query: `/api/runs/:runId/timeline`
-- per-run timeline stream: `/api/runs/:runId/events/timeline`
+- global summary stream: `GET /api/events/run-summaries` (`summary_upsert`
+  and `summary_removed`)
+- per-run detail stream: `GET /api/runs/:runId/events/detail`
+- per-run timeline history query: `GET /api/runs/:runId/timeline`
+- per-run timeline stream: `GET /api/runs/:runId/events/timeline`
 
 The WebSocket subscription contract mirrors that split:
-
-Shared run capabilities remain the canonical UX gate for lifecycle actions.
-`RunCapabilities` includes `canReset` and `canDelete`, and browser/daemon
-clients should use those booleans directly instead of reproducing lifecycle
-state checks locally.
-Passive backend-session editing is an explicit detail-surface mutation, not a
-summary mutation: the daemon publishes a fresh `RunDetail` after set/clear, but
-does not fan out summary or dependent-run updates because `backendSessionId`
-does not participate in `RunSummary`.
 
 - `events.subscribe { channel: "run_summary" }`
 - `events.subscribe { channel: "run_detail", runId }`
 - `events.subscribe { channel: "run_timeline", runId }`
 
-Notifications are likewise explicit:
+Notifications:
 
-- `run.summary` carries either a `summary_upsert` with a fresh `RunSummary` or a `summary_removed` with a `runId`
+- `run.summary` carries a `summary_upsert` with a fresh `RunSummary` or a
+  `summary_removed` with a `runId`
 - `run.detail` carries a fresh `RunDetail`
-- `run.timeline` carries one `RunTimelineEnvelope` (`runId`, `cursor`, `event`)
+- `run.timeline` carries one `RunTimelineEnvelope { runId, cursor, event }`
 
-This keeps board/detail projections manifest-canonical while preserving the
-execution timeline as a separate per-run surface. `RunSummary` and `RunDetail`
-both expose derived `activeTask` data so live consumers do not need to re-scan
-task arrays to render the current in-progress task label. Timeline consumers
-subscribe first, fetch `/api/runs/:runId/timeline`, then apply buffered live
-envelopes where `cursor > history.lastCursor`.
+Shared run capabilities remain the canonical UX gate for lifecycle
+actions. `RunCapabilities` includes `canArchive`, `canUnarchive`,
+`canReset`, `canDelete`, `canResume`, `canAbort`, and the `taskMutation`
+sub-booleans. Browser and daemon clients should use those booleans
+directly instead of reproducing lifecycle state checks locally.
 
-## Workspace Layout
+Passive backend-session editing is an explicit detail-surface mutation,
+not a summary mutation: the daemon publishes a fresh `RunDetail` after
+set/clear, but does not fan out summary or dependent-run updates because
+`backendSessionId` does not participate in `RunSummary`.
+
+`RunSummary` and `RunDetail` both expose derived `activeTask` data so
+live consumers do not need to re-scan task arrays to render the current
+in-progress task label. Timeline consumers subscribe first, fetch
+`/api/runs/:runId/timeline`, then apply buffered live envelopes where
+`cursor > history.lastCursor`.
+
+## Workspace layout
 
 Typical workspace:
 
@@ -301,26 +334,36 @@ ${TASK_RUNNER_STATE_DIR}/runs/<repo-name>/<run-id>/
 
 Notes:
 
-- `assignment-seed.md` exists only when the run started from an assignment file
-- attempt logs are append-only audit records
-- attachment metadata lives in the manifest; attachment bytes live under
-  `attachments/`
-- cwd-scoped attachment grouping is derived at read time only; ownership and storage remain per-run, and web `Group` rows stay preview/download-only
+- `assignment-seed.md` exists only when the run started from an assignment
+  file.
+- Attempt logs are append-only audit records.
+- Attachment metadata lives in the manifest; attachment bytes live under
+  `attachments/`.
+- cwd-scoped attachment grouping is derived at read time only; ownership
+  and storage remain per-run, and web `Group` rows stay preview /
+  download-only.
 
-## Prompt And Retry Behavior
+## Prompt and retry behavior
 
 On first execution, the backend receives the composed `brief`.
 
-If tasks remain incomplete, task-runner composes a retry nudge that:
+If tasks remain incomplete at the end of an attempt, task-runner composes
+a retry nudge that:
 
 - points the worker back at the task CLI
 - identifies incomplete tasks
 - preserves the run id as the operating handle
 
-Added tasks on resume also trigger a reminder that new work was appended and
+Added tasks on resume trigger a reminder that new work was appended and
 should be reviewed through the task CLI.
 
-## Repo Layout
+## Recursion guard
+
+`TASK_RUNNER_MAX_CALL_DEPTH` (default `1`) bounds the depth of nested
+`task-runner` invocations, propagated via `TASK_RUNNER_CALL_DEPTH` on
+each child process. Exceeding the cap raises `RecursionDepthError`.
+
+## Repo layout
 
 High-signal code paths:
 
@@ -333,10 +376,11 @@ High-signal code paths:
 - `packages/core/src/core/run/workspace-state.ts`
 - `packages/core/src/core/commands/service.ts`
 - `packages/core/src/contracts/`
+- `packages/core/src/backends/`
 
-Bundled assignments live under `assignments/`.
+Bundled agents and assignments live under `agents/` and `assignments/`.
 
-## Development Checks
+## Development checks
 
 Standard verification:
 
