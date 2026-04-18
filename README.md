@@ -1,17 +1,15 @@
 # task-runner
 
-`task-runner` drives an agent through a structured task list and keeps
-run state in a manifest-canonical workspace. It supports embedded CLI
-execution, a local daemon, a browser dashboard, resumable runs,
-attachments, dependencies, and a first-class `brief` surface for handing
-a run to a worker.
+`task-runner` drives agents through structured task lists and keeps run
+state in a manifest-canonical workspace. It supports embedded CLI
+execution, active backend invocation, passive sidecar operation, a local
+daemon, a browser dashboard, resumable runs, attachments, dependencies,
+and a first-class `brief` surface for handing a run to a worker.
 
 - Task state is canonical in `run.json`.
 - Workers use the task CLI, not workspace files.
 - `task-runner brief <run-id>` is the canonical worker handoff.
 - `status` and `brief` are run-id-only read surfaces.
-- Fresh runs created from an assignment capture `assignment-seed.md` for
-  audit, but do not generate a live workspace `assignment.md`.
 
 ## Why
 
@@ -36,6 +34,37 @@ It is also a useful primitive for orchestration — an outer agent can
 compose an assignment, hand it to `task-runner`, and get back a
 structured success/failure without parsing free-form chat output.
 
+You can use `task-runner` in two main modes:
+
+- **Passive / sidecar mode** — initialize or inspect runs, then drive the
+  work from your existing interactive coding tool while updating task
+  state through the task CLI. This is useful when you want task
+  tracking, briefs, attachments, and durable run state without handing
+  execution over to task-runner.
+- **Active backend mode** — execute the run through a supported backend
+  (`claude`, `codex`, `cursor-agent`, `pi`). In this mode task-runner
+  performs the run/retry loop itself and validates whether tasks were
+  actually marked complete before the run is treated as done.
+
+Today the built-in validation is task-state based: did the worker
+actually complete the checklist it was given? A future extension surface
+is likely to add deterministic hooks that can inspect the work directly
+(for example `git status`, tests, linters, or custom scripts).
+
+## What task-runner is not
+
+`task-runner` is not a polished chat-first UI for interacting with
+agents. It streams backend output and you can follow up on runs that are
+not currently active, but the product center is durable run state and
+structured execution — not chat bubbles, rich tool-call rendering, or a
+full conversational workspace.
+
+In practice that means it is best used as either:
+
+- a sidecar for your existing interactive coding agents, or
+- a runner for prepared/background tasks that need a durable checklist
+  and audit trail.
+
 ## Install
 
 Requirements:
@@ -47,11 +76,14 @@ Requirements:
   - `cursor-agent`
   - `pi`
 
+### Option 1: local build / linked development install
+
 Build from the repo root:
 
 ```bash
 npm install
 npm run build
+npm link
 ```
 
 The built CLI entrypoint is `node apps/cli/dist/cli.js`. The workspace
@@ -59,6 +91,15 @@ also exposes:
 
 ```bash
 npm run task-runner -- <args>
+```
+
+### Option 2: package-style invocation
+
+Once task-runner is published as a package, the intended no-install path
+is:
+
+```bash
+npx task-runner <args>
 ```
 
 ## Quickstart
@@ -112,6 +153,21 @@ task-runner task set <run-id> <task-id> --status completed
 task-runner serve
 # Open the printed HTTP base URL in a browser.
 ```
+
+`task-runner serve` starts the local daemon. The web UI talks to that
+same daemon and is not a standalone app.
+
+CLI commands can either:
+
+- run **embedded** against the shared filesystem state, or
+- route through the daemon with `--connect <ws-url>` (or
+  `TASK_RUNNER_CONNECT`).
+
+Both modes operate on the same persisted runs. The important difference
+is that connected mode lets the daemon observe and broadcast changes in
+real time, which is how the browser UI stays live as commands mutate
+runs. If you want the web dashboard to reflect CLI changes immediately,
+issue those CLI commands through `--connect`.
 
 ## Command index
 
@@ -236,9 +292,9 @@ implemented yet — the list is here so you can see where things are
 heading and flag anything that conflicts with how you're using
 task-runner today.
 
-- **More backends** — Gemini and an in-process SDK client (or similar)
-  so callers can embed a backend directly instead of always shelling
-  out to a CLI or RPC server.
+- **More backends** — Gemini, ACP-style integrations, and an in-process
+  SDK client (or similar) so callers can embed a backend directly
+  instead of always shelling out to a CLI or RPC server.
 - **Pluggable storage backend** — today the run manifest and workspace
   live on the filesystem. A sqlite or postgres backend would make
   larger run populations, richer queries, and multi-host scenarios
