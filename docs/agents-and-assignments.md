@@ -53,27 +53,6 @@ is trimmed, interpolated against the run's resolved variables, and frozen
 into `manifest.agent.instructions` at run creation. Resume never re-reads
 the source file.
 
-### Locked fields
-
-`lockedFields` is a list of fields that CLI overrides cannot change at
-fresh-run time. The lock set is the union of the agent's and assignment's
-`lockedFields` and is frozen into `manifest.lockedFields`.
-
-Supported lockable fields:
-
-- `cwd`
-- `backend`
-- `model`
-- `effort`
-- `instructions`
-- `message`
-- `timeoutSec`
-- `unrestricted`
-- `maxRetries`
-- `tasks`
-
-Violations raise `LockedFieldError` with the current value shown.
-
 ## Assignment definition
 
 An assignment file is markdown with a YAML frontmatter block followed by the
@@ -118,6 +97,36 @@ brief at run creation.
 
 Assignments are markdown definitions, not a live workspace surface. Task
 state is canonical in the run manifest — not in the assignment file.
+
+## Locked fields
+
+Both agents and assignments can declare `lockedFields`. The two sets are
+merged and frozen into `manifest.lockedFields` at run creation. A locked
+field rejects CLI overrides of the final resolved value at fresh run,
+regardless of which definition authored that value.
+
+The set of fields that can be locked is shared between the two schemas:
+
+| Field | Typically authored by |
+|-------|-----------------------|
+| `backend` | agent |
+| `model` | agent |
+| `effort` | agent |
+| `instructions` | agent (role) and assignment (work) |
+| `timeoutSec` | agent |
+| `unrestricted` | agent |
+| `cwd` | assignment |
+| `message` | assignment |
+| `maxRetries` | assignment |
+| `tasks` | assignment |
+
+Either side can lock any field. In practice you usually lock what your
+definition owns — an agent locks `model` / `effort` / `unrestricted`; an
+assignment locks `tasks` / `cwd` / `message`. A locked `tasks` set on an
+assignment, for example, prevents `--add-task` CLI overrides and prevents
+the runtime from dropping or reordering the list.
+
+Violations raise `LockedFieldError` with the current value shown.
 
 ## cwd resolution
 
