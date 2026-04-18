@@ -3,11 +3,13 @@ import { claudeBackend } from "./claude.js";
 import { codexBackend } from "./codex.js";
 import { cursorBackend } from "./cursor.js";
 import { passiveBackend } from "./passive.js";
+import { piBackend } from "./pi.js";
 
 const BACKENDS: Record<string, Backend> = {
   claude: claudeBackend,
   codex: codexBackend,
   cursor: cursorBackend,
+  pi: piBackend,
   passive: passiveBackend,
 };
 

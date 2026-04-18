@@ -1,5 +1,6 @@
 import { strict as assert } from "node:assert";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -13,6 +14,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { WebSocketServer } from "ws";
 import { getRunTimelineHistory } from "../packages/core/dist/app/service.js";
+import { encodePiSessionDir } from "../packages/core/dist/backends/pi.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import {
   CommandError,
@@ -88,6 +90,57 @@ Locked service test assignment.
 
 function tempDir() {
   return mkdtempSync(join(tmpdir(), "task-runner-command-services-"));
+}
+
+function writeFakePiRenameAgent(baseDir) {
+  const path = join(baseDir, "fake-pi-rename.mjs");
+  writeFileSync(
+    path,
+    `#!/usr/bin/env node
+import { appendFileSync } from "node:fs";
+import { createInterface } from "node:readline";
+
+const args = process.argv.slice(2);
+const sessionFlagIndex = args.indexOf("--session");
+const sessionPath = sessionFlagIndex >= 0 ? args[sessionFlagIndex + 1] : null;
+
+function send(message) {
+  process.stdout.write(JSON.stringify(message) + "\\n");
+}
+
+const rl = createInterface({ input: process.stdin });
+rl.on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.type !== "set_session_name") {
+    return;
+  }
+  if (sessionPath) {
+    appendFileSync(
+      sessionPath,
+      JSON.stringify({
+        type: "session_info",
+        id: "session-info-1",
+        parentId: null,
+        timestamp: "2026-04-17T12:02:00.000Z",
+        name: message.name,
+      }) + "\\n",
+    );
+  }
+  send({
+    id: message.id,
+    type: "response",
+    command: "set_session_name",
+    success: true,
+  });
+});
+
+rl.on("close", () => {
+  process.exit(0);
+});
+`,
+  );
+  chmodSync(path, 0o755);
+  return path;
 }
 
 function writeAgent(baseDir, name, body) {
@@ -1131,6 +1184,62 @@ test("command services: setRunName does not hang on codex post-open transport er
   } finally {
     await codexServer.close();
   }
+});
+
+test("command services: setRunName propagates pi session renames into the session file", async () => {
+  const dir = tempDir();
+  const piHome = join(dir, ".pi-home");
+  const sessionId = "pi-session-rename";
+  const command = writeFakePiRenameAgent(dir);
+  const bucketDir = join(piHome, "agent", "sessions", encodePiSessionDir(dir));
+  mkdirSync(bucketDir, { recursive: true });
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+  const sessionPath = join(bucketDir, `2026-04-17T12-00-00-000Z_${sessionId}.jsonl`);
+  writeFileSync(
+    sessionPath,
+    `${JSON.stringify({
+      type: "session",
+      version: 3,
+      id: sessionId,
+      timestamp: "2026-04-17T12:00:00.000Z",
+      cwd: dir,
+    })}\n${JSON.stringify({
+      type: "message",
+      id: "assistant-msg-1",
+      parentId: null,
+      timestamp: "2026-04-17T12:01:00.000Z",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "Existing answer" }],
+      },
+    })}\n`,
+  );
+
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.backend = "pi";
+    manifest.backendSessionId = sessionId;
+    manifest.cwd = dir;
+  });
+
+  await withEnv({ PI_HOME: piHome, TASK_RUNNER_PI_BIN: command }, () =>
+    withSharedRuntimeEnv(dir, async () => {
+      const renamed = await setRunName(outcome.runId, { name: "  Pi rename  " });
+      assert.deepEqual(renamed, {
+        runId: outcome.runId,
+        name: "Pi rename",
+        changed: true,
+      });
+    }),
+  );
+
+  const sessionLines = readFileSync(sessionPath, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  const infoEntry = sessionLines.find((entry) => entry.type === "session_info");
+  assert.ok(infoEntry);
+  assert.equal(infoEntry.name, "Pi rename");
 });
 
 test("command services: archiveRun and unarchiveRun are idempotent and reject running runs", async () => {

@@ -23,6 +23,7 @@ Requirements:
   - `claude`
   - `codex` or a Codex app-server
   - `cursor-agent`
+  - `pi`
 
 Build from the repo root:
 
@@ -309,8 +310,14 @@ Common environment variables:
 - `TASK_RUNNER_CMD`
 - `TASK_RUNNER_CLAUDE_BIN`
 - `TASK_RUNNER_CURSOR_BIN`
+- `TASK_RUNNER_PI_BIN`
 - `TASK_RUNNER_CODEX_WS_URL`
 - `TASK_RUNNER_MAX_CALL_DEPTH`
+
+Pi resumes task-runner-owned runs from the frozen run `cwd` using the persisted
+Pi session id (`backendSessionId`). Bootstrap `--backend-session-id` import is
+validated against the cwd-scoped Pi session storage under `PI_HOME` or
+`~/.pi`.
 
 ## Development
 

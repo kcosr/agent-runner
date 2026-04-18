@@ -2,6 +2,7 @@ import { copyFileSync, existsSync, readFileSync, rmSync, statSync } from "node:f
 import { basename, dirname, join, resolve } from "node:path";
 import { type TaskState, VALID_STATUSES, isValidStatus } from "../../assignment/model.js";
 import { setCodexThreadName } from "../../backends/codex.js";
+import { setPiSessionName } from "../../backends/pi.js";
 import {
   type DefinitionEntry,
   type DefinitionKind,
@@ -406,15 +407,22 @@ function validateAttachmentSourcePath(sourcePath: string): void {
 }
 
 async function propagateRunNameChange(manifest: RunManifest): Promise<void> {
-  if (manifest.backend !== "codex" || manifest.backendSessionId === null) {
-    return;
+  if (manifest.backend === "codex" && manifest.backendSessionId !== null) {
+    await setCodexThreadName({
+      threadId: manifest.backendSessionId,
+      cwd: manifest.cwd,
+      env: process.env as Record<string, string>,
+      name: manifest.name,
+    });
   }
-  await setCodexThreadName({
-    threadId: manifest.backendSessionId,
-    cwd: manifest.cwd,
-    env: process.env as Record<string, string>,
-    name: manifest.name,
-  });
+  if (manifest.backend === "pi" && manifest.backendSessionId !== null) {
+    await setPiSessionName({
+      sessionId: manifest.backendSessionId,
+      cwd: manifest.cwd,
+      env: process.env as Record<string, string>,
+      name: manifest.name,
+    });
+  }
 }
 
 export function readStatus(target: string): StatusCommandResult {
