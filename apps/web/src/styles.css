@@ -491,6 +491,63 @@ body {
   padding: 22px;
 }
 
+.settings-shortcut-keys {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-shortcut-key-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--background);
+  color: var(--muted-foreground);
+}
+
+.settings-shortcut-key-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.settings-shortcut-key-groups {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.settings-shortcut-key-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-shortcut-key-group--secondary {
+  opacity: 0.78;
+}
+
+.settings-shortcut-keycap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 55%, var(--card));
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--border) 88%, transparent);
+  color: var(--foreground);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+}
+
 @media (max-width: 900px) {
   .settings-shell {
     grid-template-columns: 1fr;
@@ -534,6 +591,10 @@ body {
   .settings-row__actions {
     width: 100%;
     justify-content: space-between;
+  }
+
+  .settings-shortcut-key-groups {
+    justify-content: flex-start;
   }
 }
 
@@ -1854,8 +1915,13 @@ body {
   letter-spacing: -0.01em;
 }
 
-.attachment-preview-back-icon {
+.attachment-preview-back-icon,
+.attachment-preview-chevron {
   transform: rotate(90deg);
+}
+
+.attachment-preview-chevron--right {
+  transform: rotate(-90deg);
 }
 
 .attachment-preview-meta-inline {

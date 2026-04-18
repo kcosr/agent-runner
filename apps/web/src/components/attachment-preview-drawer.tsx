@@ -122,36 +122,6 @@ export function AttachmentPreviewDrawer({
           >
             <ChevronIcon aria-hidden="true" className="attachment-preview-back-icon" />
           </button>
-          <div className="attachment-preview-nav">
-            <button
-              aria-label={
-                previousAttachmentName
-                  ? `Previous attachment: ${previousAttachmentName}`
-                  : "Previous attachment"
-              }
-              className="icon-btn"
-              disabled={!onPreviousAttachment}
-              onClick={onPreviousAttachment}
-              type="button"
-            >
-              <ChevronIcon aria-hidden="true" className="attachment-preview-back-icon" />
-            </button>
-            <button
-              aria-label={
-                nextAttachmentName ? `Next attachment: ${nextAttachmentName}` : "Next attachment"
-              }
-              className="icon-btn"
-              disabled={!onNextAttachment}
-              onClick={onNextAttachment}
-              type="button"
-            >
-              <ChevronIcon
-                aria-hidden="true"
-                className="attachment-preview-back-icon"
-                style={{ transform: "rotate(180deg)" }}
-              />
-            </button>
-          </div>
           <div className="attachment-preview-head">
             <div className="attachment-preview-title-row">
               <span className="attachment-preview-run-id">{runId}</span>
@@ -171,6 +141,38 @@ export function AttachmentPreviewDrawer({
             ) : null}
           </div>
           <div className="drawer-actions">
+            <div className="attachment-preview-nav">
+              <button
+                aria-label={
+                  previousAttachmentName
+                    ? `Previous attachment: ${previousAttachmentName}`
+                    : "Previous attachment"
+                }
+                className="icon-btn"
+                disabled={!onPreviousAttachment}
+                onClick={onPreviousAttachment}
+                type="button"
+              >
+                <ChevronIcon
+                  aria-hidden="true"
+                  className="attachment-preview-chevron attachment-preview-chevron--left"
+                />
+              </button>
+              <button
+                aria-label={
+                  nextAttachmentName ? `Next attachment: ${nextAttachmentName}` : "Next attachment"
+                }
+                className="icon-btn"
+                disabled={!onNextAttachment}
+                onClick={onNextAttachment}
+                type="button"
+              >
+                <ChevronIcon
+                  aria-hidden="true"
+                  className="attachment-preview-chevron attachment-preview-chevron--right"
+                />
+              </button>
+            </div>
             {attachment ? (
               <button
                 className="btn"

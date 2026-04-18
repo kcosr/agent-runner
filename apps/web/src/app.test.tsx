@@ -2199,9 +2199,9 @@ describe("web app", () => {
 
     await user.click(screen.getByRole("button", { name: /Keybindings/ }));
     expect(await screen.findByRole("heading", { name: "Keybindings" })).toBeInTheDocument();
-    expect(
-      screen.getByText("Configurable keybindings will be added in a later change."),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Dashboard shortcuts" })).toBeInTheDocument();
+    expect(screen.getByText("Navigate runs")).toBeInTheDocument();
+    expect(screen.getByLabelText("Shortcut: Ctrl + F")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Runs" }));
 
