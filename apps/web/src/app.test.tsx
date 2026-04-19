@@ -1736,6 +1736,39 @@ describe("web app", () => {
     expect(screen.getByRole("combobox", { name: "Repo" })).toHaveFocus();
   });
 
+  it("closes and reopens Filters after opening with Ctrl+Shift+F", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    const runCard = await findRunCard("Build dashboard");
+    runCard.focus();
+    expect(runCard).toHaveFocus();
+
+    await user.keyboard("{Control>}{Shift>}f{/Shift}{/Control}");
+
+    expect(await screen.findByRole("dialog", { name: "Filters" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Repo" })).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Filters" })).not.toBeInTheDocument();
+    });
+
+    const filtersTrigger = screen.getByRole("button", { name: "Filters" });
+    expect(filtersTrigger).toHaveFocus();
+
+    await user.keyboard("{Control>}{Shift>}f{/Shift}{/Control}");
+
+    expect(await screen.findByRole("dialog", { name: "Filters" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Repo" })).toHaveFocus();
+  });
+
   it("applies exact-match structured filters and keeps options stable while filters are active", async () => {
     installFetchMock({
       runs: [

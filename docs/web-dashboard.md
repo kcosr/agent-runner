@@ -30,10 +30,17 @@ those plus the active run id.
 
 A three-pane layout:
 
-- **Left** — filters, repo selector, preference toggles.
+- **Left** — search, grouped Filters control, preference toggles.
 - **Center** — kanban board grouped by run status.
 - **Right** — resizable detail drawer (hidden by default until you select
   a run).
+
+The grouped **Filters** control opens an anchored popover on desktop and a
+sheet-style overlay on narrow/mobile layouts. It applies exact-match
+structured filters for repo, agent, and backend, while free-text search
+remains separate. Structured filter state persists across reloads, and the
+repo/agent/backend badges on run cards act as shortcuts that apply, replace,
+or clear those exact-match filters.
 
 ### Board
 
@@ -135,6 +142,7 @@ The dashboard's shortcut system is customizable from
 | `Esc` (attachment preview) | Back to attachments |
 | `Enter` | Primary action for the selected card (Resume, etc.) |
 | `↑` / `↓` / `←` / `→` | Move the board selection |
+| `Ctrl+Shift+F` | Open Filters panel |
 
 Shortcuts are suppressed while typing in inputs or when a modal dialog
 is open.
@@ -147,6 +155,7 @@ Preferences are persisted to `localStorage` and include:
 - Collapse failure states into a single column.
 - Sort by recent updates.
 - Show archived runs.
+- Structured filters (repo, agent, backend).
 - Visible focus indicators.
 - Detail drawer width.
 

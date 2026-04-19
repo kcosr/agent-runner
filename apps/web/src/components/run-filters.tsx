@@ -50,6 +50,7 @@ export function RunFilters({
   const [filtersOpen, setFiltersOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const firstFilterRef = useRef<HTMLSelectElement | null>(null);
+  const lastHandledOpenFiltersRequestVersionRef = useRef(0);
   const titleId = useId();
   const panelId = useId();
   const hasActiveStructuredFilter = hasActiveDashboardStructuredFilters(
@@ -68,6 +69,12 @@ export function RunFilters({
     if (openFiltersRequestVersion === undefined || openFiltersRequestVersion === 0) {
       return;
     }
+
+    if (openFiltersRequestVersion <= lastHandledOpenFiltersRequestVersionRef.current) {
+      return;
+    }
+
+    lastHandledOpenFiltersRequestVersionRef.current = openFiltersRequestVersion;
 
     if (filtersOpen) {
       firstFilterRef.current?.focus();
