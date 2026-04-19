@@ -78,12 +78,17 @@ Both can be overridden on the CLI via `--listen` (on `serve`) and
 |----------|--------|
 | `TASK_RUNNER_CLAUDE_BIN` | Claude CLI binary (default `claude`) |
 | `TASK_RUNNER_CODEX_BIN` | Codex stdio binary (default `codex`) |
-| `TASK_RUNNER_CODEX_WS_URL` | If set, Codex uses WebSocket transport |
+| `TASK_RUNNER_CODEX_WS_URL` | Fresh Codex runs use this websocket URL when no explicit `backendSpecific.codex.transport` was authored; daemon-connected CLI calls forward it only as a Codex-specific structured override |
 | `TASK_RUNNER_CURSOR_BIN` | Cursor CLI binary (default `cursor-agent`) |
 | `TASK_RUNNER_PI_BIN` | Pi CLI binary (default `pi`) |
 | `PI_HOME` | Pi session storage root (default `~/.pi`) |
 
 See [backends.md](backends.md).
+
+`TASK_RUNNER_CODEX_WS_URL` is not a generic daemon env passthrough knob.
+Only Codex reads it, and only during fresh-run transport resolution.
+Malformed values are rejected unless they are absolute `ws://` or
+`wss://` URLs.
 
 ### Recursion guard
 

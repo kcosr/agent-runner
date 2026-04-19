@@ -33,6 +33,14 @@ lockedFields:
 Your role: walk the checklist for {{cwd}}.
 `;
 
+const CODEX_AGENT = `---
+schemaVersion: 1
+name: canonical-codex
+backend: codex
+---
+Your role: walk the checklist for {{cwd}}.
+`;
+
 const BASIC_ASSIGNMENT = `---
 schemaVersion: 1
 name: canonical-work
@@ -72,7 +80,7 @@ function writeAssignment(baseDir, name, body) {
 }
 
 function mockBackend(handler) {
-  return { id: "mock", invoke: handler };
+  return { id: "claude", invoke: handler };
 }
 
 function okBackend() {
@@ -264,6 +272,45 @@ test("loadedAgentFromManifest reconstructs LoadedAgent from frozen fields", asyn
   assert.deepEqual(loaded.config.lockedFields, ["model"]);
   assert.match(loaded.instructions, /walk the checklist/);
   assert.equal(loaded.sourcePath, join(dir, "agents", "canonical-claude", "agent.md"));
+});
+
+test("loadedAgentFromManifest reconstructs frozen backendSpecific transport", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "canonical-codex", CODEX_AGENT);
+  writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
+  const outcome = await freshRun(dir, {
+    agentName: "canonical-codex",
+    backend: {
+      id: "codex",
+      async invoke(ctx) {
+        assert.deepEqual(ctx.backendSpecific, {
+          codex: {
+            transport: {
+              type: "stdio",
+            },
+          },
+        });
+        return {
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+          sessionId: null,
+          transcript: "done",
+          rawStdout: "",
+          rawStderr: "",
+        };
+      },
+    },
+  });
+
+  const loaded = loadedAgentFromManifest(outcome.manifest);
+  assert.deepEqual(loaded.config.backendSpecific, {
+    codex: {
+      transport: {
+        type: "stdio",
+      },
+    },
+  });
 });
 
 test("resume does not re-read the agent source file", async () => {

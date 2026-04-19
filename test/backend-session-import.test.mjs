@@ -60,6 +60,15 @@ model: openai/gpt-5.4
 Agent.
 `;
 
+const CODEX_IMPORT_AGENT = `---
+schemaVersion: 1
+name: codex-import-agent
+backend: codex
+model: openai/gpt-5.4
+---
+Agent.
+`;
+
 const IMPORT_ASSIGNMENT = `---
 schemaVersion: 1
 name: import-work
@@ -126,6 +135,7 @@ async function runImportIn(baseDir, opts, agentName = "import-agent") {
         backend: opts.backend,
         bootstrapBackendSessionId: opts.bootstrapBackendSessionId,
         initialize: opts.initialize ?? false,
+        execution: opts.execution,
         overrides: opts.overrides,
         stderr: () => {},
         stdout: () => {},
@@ -189,6 +199,72 @@ test("import (run): invalid session id throws InvalidBackendSessionError before 
     },
   );
   assert.equal(captured.resumeSessionId, undefined, "backend.invoke was never called");
+});
+
+test("import (run): codex bootstrap validation receives daemon-forwarded transport instead of daemon env", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "codex-import-agent", CODEX_IMPORT_AGENT);
+  writeAssignment(dir, "import-work", IMPORT_ASSIGNMENT);
+
+  const captured = {};
+  let validateCalls = 0;
+  const backend = {
+    ...importableBackend({
+      captured,
+      validate: async (vctx) => {
+        validateCalls++;
+        assert.deepEqual(vctx.backendSpecific, {
+          codex: {
+            transport: {
+              type: "ws",
+              url: "ws://client.example/socket",
+            },
+          },
+        });
+        return { valid: true };
+      },
+    }),
+    id: "codex",
+  };
+
+  const outcome = await withEnv({ TASK_RUNNER_CODEX_WS_URL: "ws://daemon.example/socket" }, () =>
+    runImportIn(
+      dir,
+      {
+        backend,
+        bootstrapBackendSessionId: "imported-codex-thread",
+        overrides: {
+          backendSpecific: {
+            codex: {
+              transport: {
+                type: "ws",
+                url: "ws://client.example/socket",
+              },
+            },
+          },
+        },
+        execution: {
+          hostMode: "daemon",
+          controller: {
+            kind: "daemon",
+            daemonInstanceId: "daemon-test",
+          },
+        },
+      },
+      "codex-import-agent",
+    ),
+  );
+
+  assert.equal(validateCalls, 1);
+  assert.equal(captured.resumeSessionId, "imported-codex-thread");
+  assert.deepEqual(outcome.manifest.backendSpecific, {
+    codex: {
+      transport: {
+        type: "ws",
+        url: "ws://client.example/socket",
+      },
+    },
+  });
 });
 
 function writePiSession(piHome, cwd, sessionId, headerCwd = cwd) {

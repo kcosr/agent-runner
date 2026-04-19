@@ -199,7 +199,7 @@ async function initRun(baseDir, assignmentName = "svc-work", agentName = "svc-ag
         loadedAssignment,
         cliVars: {},
         backend: {
-          id: "mock",
+          id: loaded.config.backend,
           async invoke() {
             throw new Error("backend should not be invoked during init");
           },
@@ -1077,25 +1077,31 @@ test("command services: setRunName propagates codex thread rename and clear valu
   patchManifest(outcome.workspaceDir, (manifest) => {
     manifest.backend = "codex";
     manifest.backendSessionId = "thr_rename";
+    manifest.backendSpecific = {
+      codex: {
+        transport: {
+          type: "ws",
+          url: codexServer.url,
+        },
+      },
+    };
     manifest.cwd = dir;
   });
 
   try {
     await withSharedRuntimeEnv(dir, async () => {
-      await withEnv({ TASK_RUNNER_CODEX_WS_URL: codexServer.url }, async () => {
-        const renamed = await setRunName(outcome.runId, { name: "  Codex rename  " });
-        assert.deepEqual(renamed, {
-          runId: outcome.runId,
-          name: "Codex rename",
-          changed: true,
-        });
+      const renamed = await setRunName(outcome.runId, { name: "  Codex rename  " });
+      assert.deepEqual(renamed, {
+        runId: outcome.runId,
+        name: "Codex rename",
+        changed: true,
+      });
 
-        const cleared = await setRunName(outcome.runId, { name: null });
-        assert.deepEqual(cleared, {
-          runId: outcome.runId,
-          name: null,
-          changed: true,
-        });
+      const cleared = await setRunName(outcome.runId, { name: null });
+      assert.deepEqual(cleared, {
+        runId: outcome.runId,
+        name: null,
+        changed: true,
       });
     });
 
@@ -1117,18 +1123,24 @@ test("command services: setRunName keeps manifest update when codex propagation 
   patchManifest(outcome.workspaceDir, (manifest) => {
     manifest.backend = "codex";
     manifest.backendSessionId = "thr_rename";
+    manifest.backendSpecific = {
+      codex: {
+        transport: {
+          type: "ws",
+          url: codexServer.url,
+        },
+      },
+    };
     manifest.cwd = dir;
   });
 
   try {
     await withSharedRuntimeEnv(dir, async () => {
-      await withEnv({ TASK_RUNNER_CODEX_WS_URL: codexServer.url }, async () => {
-        const renamed = await setRunName(outcome.runId, { name: "Still persisted" });
-        assert.deepEqual(renamed, {
-          runId: outcome.runId,
-          name: "Still persisted",
-          changed: true,
-        });
+      const renamed = await setRunName(outcome.runId, { name: "Still persisted" });
+      assert.deepEqual(renamed, {
+        runId: outcome.runId,
+        name: "Still persisted",
+        changed: true,
       });
     });
 
@@ -1152,26 +1164,32 @@ test("command services: setRunName does not hang on codex post-open transport er
   patchManifest(outcome.workspaceDir, (manifest) => {
     manifest.backend = "codex";
     manifest.backendSessionId = "thr_rename";
+    manifest.backendSpecific = {
+      codex: {
+        transport: {
+          type: "ws",
+          url: codexServer.url,
+        },
+      },
+    };
     manifest.cwd = dir;
   });
 
   try {
     await withSharedRuntimeEnv(dir, async () => {
-      await withEnv({ TASK_RUNNER_CODEX_WS_URL: codexServer.url }, async () => {
-        const renamed = await Promise.race([
-          setRunName(outcome.runId, { name: "Post-open failure" }),
-          new Promise((_, reject) =>
-            setTimeout(
-              () => reject(new Error("setRunName timed out after codex transport error")),
-              2_000,
-            ),
+      const renamed = await Promise.race([
+        setRunName(outcome.runId, { name: "Post-open failure" }),
+        new Promise((_, reject) =>
+          setTimeout(
+            () => reject(new Error("setRunName timed out after codex transport error")),
+            2_000,
           ),
-        ]);
-        assert.deepEqual(renamed, {
-          runId: outcome.runId,
-          name: "Post-open failure",
-          changed: true,
-        });
+        ),
+      ]);
+      assert.deepEqual(renamed, {
+        runId: outcome.runId,
+        name: "Post-open failure",
+        changed: true,
       });
     });
 

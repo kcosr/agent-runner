@@ -42,9 +42,23 @@ model: gpt-5.4              # optional backend-specific id
 effort: high                # optional: off | minimal | low | medium | high | xhigh | max
 timeoutSec: 3600            # optional positive integer (default 3600)
 unrestricted: true          # optional boolean (default false)
+backendSpecific:            # optional backend-specific runtime config
+  codex:
+    transport:
+      type: ws
+      url: ws://127.0.0.1:4773/
 lockedFields: []            # optional list of lockable fields
 ---
 ```
+
+Only Codex currently defines `backendSpecific`. Its transport contract is
+exactly one of:
+
+- `{ type: "stdio" }`
+- `{ type: "ws", url: "<absolute ws:// or wss:// URL>" }`
+
+Other backends do not accept `backendSpecific`, and this pass does not
+add generic backend-specific env passthrough.
 
 ### Body
 
@@ -138,6 +152,20 @@ Fresh-run cwd precedence:
 
 The resolved path is used to derive the `repo` bucket (via the enclosing
 `.git` common dir) and to bind backend sessions to the cwd.
+
+## Codex transport resolution
+
+When `backend: codex`, the resolved transport is frozen at fresh-run or
+init time and then reused on resume:
+
+1. Agent frontmatter `backendSpecific.codex.transport`
+2. Connected/daemon-only request override
+   `overrides.backendSpecific.codex.transport`
+3. `TASK_RUNNER_CODEX_WS_URL`
+4. `{ type: "stdio" }`
+
+Once frozen into the manifest, later env drift does not change the run's
+Codex transport.
 
 ## Prompt composition
 

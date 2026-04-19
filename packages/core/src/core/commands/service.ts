@@ -490,6 +490,7 @@ async function propagateRunNameChange(manifest: RunManifest): Promise<void> {
       threadId: manifest.backendSessionId,
       cwd: manifest.cwd,
       env: process.env as Record<string, string>,
+      backendSpecific: manifest.backendSpecific,
       name: manifest.name,
     });
   }

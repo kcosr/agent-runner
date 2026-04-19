@@ -179,6 +179,11 @@ real time, which is how the browser UI stays live as commands mutate
 runs. If you want the web dashboard to reflect CLI changes immediately,
 issue those CLI commands through `--connect`.
 
+For Codex runs, embedded and connected mode both resolve an explicit
+transport intent. Connected mode does not forward arbitrary env vars, but
+it does synthesize a Codex-only websocket override from the caller's
+local `TASK_RUNNER_CODEX_WS_URL` when that env var is set.
+
 ## Command index
 
 | Command | Purpose |
@@ -255,7 +260,7 @@ The rest are focused topic pages:
 | `TASK_RUNNER_LISTEN` | Daemon listen URL |
 | `TASK_RUNNER_CLAUDE_BIN` | Claude CLI binary |
 | `TASK_RUNNER_CODEX_BIN` | Codex stdio binary |
-| `TASK_RUNNER_CODEX_WS_URL` | WebSocket URL for a running Codex app-server |
+| `TASK_RUNNER_CODEX_WS_URL` | Default websocket transport for fresh Codex runs when no explicit `backendSpecific.codex.transport` was authored |
 | `TASK_RUNNER_CURSOR_BIN` | Cursor CLI binary |
 | `TASK_RUNNER_PI_BIN` | Pi CLI binary |
 | `PI_HOME` | Pi session storage root (default `~/.pi`) |

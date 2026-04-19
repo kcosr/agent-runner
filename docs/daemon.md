@@ -54,6 +54,18 @@ runs in one of two modes:
 Connected mode is how multiple terminals can share state and how the web
 UI and CLI stay in sync. `run --detach` only works in connected mode.
 
+Codex transport selection stays explicit in connected mode:
+
+- the client does not forward arbitrary env vars to the daemon
+- if the client has `TASK_RUNNER_CODEX_WS_URL` set, `run`, `init`, and
+  `resume` synthesize
+  `overrides.backendSpecific.codex.transport = { type: "ws", url }`
+- malformed Codex transport overrides are rejected at the daemon request
+  boundary before any run is created
+
+That special case exists only for Codex transport selection. No other
+backend gets daemon-side env passthrough from the client.
+
 ## HTTP API
 
 All routes are under `/api/`.

@@ -34,6 +34,13 @@
 
 ### Changed
 
+- Codex transport selection now uses the explicit
+  `backendSpecific.codex.transport` contract, with fresh-run precedence of
+  agent frontmatter → daemon request override → `TASK_RUNNER_CODEX_WS_URL`
+  → stdio default. Runs and reset seeds now freeze the resolved Codex
+  transport so resume ignores later client/daemon env drift. This change
+  is Codex-only and does not add generic env passthrough for other
+  backends. ([#55](https://github.com/kcosr/task-runner/pull/55))
 - Changed the web run detail drawer summary to promote `Ended` and `Exit code`, widen long metadata rows to use the full summary width, and remove the separate `Timing` tab. ([#54](https://github.com/kcosr/task-runner/pull/54))
 - Changed web dashboard Escape behavior so a fullscreen detail drawer exits fullscreen first, and only closes on a subsequent Escape. ([#50](https://github.com/kcosr/task-runner/pull/50))
 - Added first-class `pi` backend support via Pi RPC over stdio, including

@@ -10,7 +10,15 @@ import {
 import { resolveTaskRunnerCommand } from "../../task-runner-command.js";
 import { normalizeOptionalRunName } from "../../util/run-name.js";
 import { shortId } from "../../util/short-id.js";
-import type { Backend, BackendEvent, BackendId, BackendInvokeResult } from "../backends/types.js";
+import { cloneBackendSpecificConfig, isWsOrWssUrl } from "../backends/types.js";
+import type {
+  Backend,
+  BackendEvent,
+  BackendId,
+  BackendInvokeResult,
+  BackendSpecificConfig,
+  CodexTransportConfig,
+} from "../backends/types.js";
 import { interpolate } from "../config/interpolate.js";
 import type { LoadedAgent, LoadedAssignment } from "../config/loaded.js";
 import type { LockableField, VarDef } from "../config/schema.js";
@@ -67,6 +75,7 @@ export interface RunOverrides {
   backend?: BackendId;
   model?: string;
   effort?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+  backendSpecific?: BackendSpecificConfig;
   message?: string;
   name?: string;
   timeoutSec?: number;
@@ -390,6 +399,84 @@ function resolveFreshRunCwd(
     return resolveConfiguredCwd(assignment.config.cwd, resolutionBase);
   }
   return resolutionBase;
+}
+
+function codexTransportFromEnv(): CodexTransportConfig | undefined {
+  const wsUrl = process.env.TASK_RUNNER_CODEX_WS_URL?.trim();
+  if (!wsUrl) {
+    return undefined;
+  }
+  if (!isWsOrWssUrl(wsUrl)) {
+    throw new Error("TASK_RUNNER_CODEX_WS_URL must be an absolute ws:// or wss:// URL");
+  }
+  return {
+    type: "ws",
+    url: wsUrl,
+  };
+}
+
+function resolveFreshBackendSpecific(
+  backendId: BackendId,
+  agentConfig: LoadedAgent["config"],
+  overrides: RunOverrides | undefined,
+  execution: RunExecution,
+): BackendSpecificConfig | undefined {
+  if (backendId !== "codex") {
+    return undefined;
+  }
+
+  const authoredTransport = agentConfig.backendSpecific?.codex?.transport;
+  if (authoredTransport) {
+    return {
+      codex: {
+        transport: { ...authoredTransport },
+      },
+    };
+  }
+
+  const overrideTransport =
+    execution.hostMode === "daemon" ? overrides?.backendSpecific?.codex?.transport : undefined;
+  if (overrideTransport) {
+    return {
+      codex: {
+        transport: { ...overrideTransport },
+      },
+    };
+  }
+
+  const envTransport = codexTransportFromEnv();
+  if (envTransport) {
+    return {
+      codex: {
+        transport: envTransport,
+      },
+    };
+  }
+
+  return {
+    codex: {
+      transport: {
+        type: "stdio",
+      },
+    },
+  };
+}
+
+function resolveManifestBackendSpecific(manifest: RunManifest): BackendSpecificConfig | undefined {
+  if (manifest.backend !== "codex") {
+    return cloneBackendSpecificConfig(manifest.backendSpecific);
+  }
+  const transport = manifest.backendSpecific?.codex?.transport;
+  if (!transport) {
+    throw new ResumeError(
+      `cannot resume run ${manifest.runId} — frozen manifest has no resolved codex transport`,
+    );
+  }
+  return {
+    codex: {
+      transport: { ...transport },
+    },
+  };
 }
 
 function emitCallerInstructions(
@@ -748,12 +835,16 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     ? resume.manifest.cwd
     : resolveFreshRunCwd(loadedAssignment, overrides, opts.callerCwd);
   const repo = resume ? resume.manifest.repo : deriveRepoKey(cwd);
+  const effectiveBackendId = backend.id;
   // When --backend overrides the agent's backend, the agent's `model`
   // is also dropped (since model strings are backend-specific). Pass
   // --model alongside --backend to set one for the new backend.
   const backendOverridden = overrides?.backend !== undefined;
   const model = overrides?.model ?? (backendOverridden ? undefined : agentConfig.model);
   const effort = overrides?.effort ?? agentConfig.effort;
+  const backendSpecific = resume
+    ? resolveManifestBackendSpecific(resume.manifest)
+    : resolveFreshBackendSpecific(effectiveBackendId, agentConfig, overrides, execution);
   const message = overrides?.message ?? assignmentConfig?.message ?? null;
   const timeoutSec = overrides?.timeoutSec ?? agentConfig.timeoutSec;
   const unrestricted = overrides?.unrestricted ?? agentConfig.unrestricted;
@@ -797,6 +888,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       sessionId: opts.bootstrapBackendSessionId,
       cwd,
       env: process.env as Record<string, string>,
+      backendSpecific: cloneBackendSpecificConfig(backendSpecific),
     });
     if (!result.valid) {
       throw new InvalidBackendSessionError(opts.bootstrapBackendSessionId, result.reason);
@@ -1024,9 +1116,10 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
             workspacePath: assignmentPath,
           }
         : null,
-      backend: overrides?.backend ?? agentConfig.backend,
+      backend: effectiveBackendId,
       model: model ?? null,
       effort: effort ?? null,
+      backendSpecific: cloneBackendSpecificConfig(backendSpecific),
       message,
       name,
       unrestricted,
@@ -1057,6 +1150,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       resetSeed: buildRunResetSeed({
         model: model ?? null,
         effort: effort ?? null,
+        backendSpecific: cloneBackendSpecificConfig(backendSpecific),
         name,
         dependencyRunIds: [],
         unrestricted,
@@ -1409,6 +1503,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         },
         model,
         effort,
+        backendSpecific,
         unrestricted,
         timeoutSec,
         resumeSessionId: sessionId ?? undefined,

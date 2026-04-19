@@ -177,6 +177,66 @@ body
     assert.equal(loaded.config.name, "notasks");
   }));
 
+test("loadAgentConfig accepts backendSpecific.codex.transport in agent frontmatter", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    writeAgent(
+      configDir,
+      "codex-transport",
+      `---
+schemaVersion: 1
+name: codex-transport
+backend: codex
+backendSpecific:
+  codex:
+    transport:
+      type: ws
+      url: ws://127.0.0.1:4773/
+---
+body
+`,
+    );
+
+    const loaded = loadAgentConfig("codex-transport", rootDir);
+    assert.deepEqual(loaded.config.backendSpecific, {
+      codex: {
+        transport: {
+          type: "ws",
+          url: "ws://127.0.0.1:4773/",
+        },
+      },
+    });
+  }));
+
+test("loadAgentConfig rejects invalid backendSpecific.codex.transport values", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    writeAgent(
+      configDir,
+      "bad-transport",
+      `---
+schemaVersion: 1
+name: bad-transport
+backend: codex
+backendSpecific:
+  codex:
+    transport:
+      type: ws
+      url: https://example.com/not-ws
+      extra: true
+---
+body
+`,
+    );
+
+    assert.throws(
+      () => loadAgentConfig("bad-transport", rootDir),
+      (err) => {
+        assert.ok(err instanceof AgentConfigError);
+        assert.match(err.message, /backendSpecific\.codex\.transport/);
+        return true;
+      },
+    );
+  }));
+
 test("loadAgentConfig throws AgentNotFoundError for missing agent and lists config-root path", () =>
   withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
     assert.throws(

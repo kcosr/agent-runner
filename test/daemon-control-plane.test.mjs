@@ -73,7 +73,7 @@ async function initRun(baseDir, agentName = "daemon-agent") {
         loadedAssignment,
         cliVars: {},
         backend: {
-          id: "mock",
+          id: loaded.config.backend,
           async invoke() {
             throw new Error("backend should not be invoked during init");
           },
@@ -3006,6 +3006,39 @@ test("daemon HTTP init uses the remote caller cwd when the agent omits cwd", asy
   }
 });
 
+test("daemon HTTP init rejects malformed backendSpecific codex transport overrides", async () => {
+  const dir = tempDir();
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  const daemon = await startCliDaemon(dir, listenUrl);
+  try {
+    const response = await httpJson(httpBaseUrl, "/api/runs/init", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        cliVars: {},
+        overrides: {
+          backendSpecific: {
+            codex: {
+              transport: {
+                type: "ws",
+                url: "https://example.com/not-ws",
+                extra: true,
+              },
+            },
+          },
+        },
+      }),
+    });
+    assert.equal(response.status, 400);
+    assert.equal(response.body.error.code, "INVALID_REQUEST");
+    assert.match(response.body.error.message, /overrides\.backendSpecific\.codex\.transport/);
+  } finally {
+    await daemon.stop();
+  }
+});
+
 test("daemon init uses the remote caller cwd when the agent omits cwd", async () => {
   const daemonDir = tempDir();
   writeAgent(daemonDir, "daemon-agent", AGENT);
@@ -3036,6 +3069,42 @@ test("daemon init uses the remote caller cwd when the agent omits cwd", async ()
     assert.equal(run.execution.controller.kind, "daemon");
     assert.match(run.execution.controller.daemonInstanceId, /^daemon-/);
   } finally {
+    await daemon.stop();
+  }
+});
+
+test("daemon RPC start rejects malformed backendSpecific codex transport overrides", async () => {
+  const dir = tempDir();
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const daemon = await startCliDaemon(dir, listenUrl);
+  const client = await DaemonClient.connect(listenUrl);
+  try {
+    await assert.rejects(
+      client.call("runs.start", {
+        cliVars: {},
+        overrides: {
+          backendSpecific: {
+            codex: {
+              transport: {
+                type: "stdio",
+                url: "ws://127.0.0.1:4773/",
+              },
+            },
+          },
+        },
+      }),
+      (err) => {
+        assert.ok(err instanceof DaemonRpcError);
+        assert.match(
+          err.message,
+          /overrides\.backendSpecific\.codex\.transport\.url is not supported/,
+        );
+        return true;
+      },
+    );
+  } finally {
+    await client.close();
     await daemon.stop();
   }
 });
@@ -3109,6 +3178,64 @@ test("daemon-target CLI detaches fresh runs without subscribing for events", asy
   }
 });
 
+test("daemon-target CLI forwards local TASK_RUNNER_CODEX_WS_URL as a structured start override", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const wsServer = new WebSocketServer({ host: "127.0.0.1", port });
+  const requests = [];
+  if (wsServer.address() === null) {
+    await new Promise((resolve) => wsServer.once("listening", resolve));
+  }
+
+  wsServer.on("connection", (ws) => {
+    ws.on("message", (payload) => {
+      const request = JSON.parse(payload.toString());
+      requests.push(request);
+      ws.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: request.id,
+          result: { runId: "detached-start-run" },
+        }),
+      );
+    });
+  });
+
+  try {
+    const result = await runCliAsync(
+      [
+        "run",
+        "--connect",
+        listenUrl,
+        "--detach",
+        "--agent",
+        "daemon-agent",
+        "--assignment",
+        "daemon-work",
+      ],
+      {
+        env: {
+          TASK_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/",
+        },
+      },
+    );
+    assert.equal(result.code, 0);
+    assert.deepEqual(requests[0].params.overrides.backendSpecific, {
+      codex: {
+        transport: {
+          type: "ws",
+          url: "ws://127.0.0.1:4773/",
+        },
+      },
+    });
+  } finally {
+    for (const client of wsServer.clients) {
+      client.terminate();
+    }
+    await new Promise((resolve) => wsServer.close(() => resolve()));
+  }
+});
+
 test("daemon-target CLI detaches resume runs and supports json output", async () => {
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
@@ -3169,6 +3296,117 @@ test("daemon-target CLI detaches resume runs and supports json output", async ()
       ["runs.resume"],
     );
     assert.equal(requests[0].params.target, "abc123");
+  } finally {
+    for (const client of wsServer.clients) {
+      client.terminate();
+    }
+    await new Promise((resolve) => wsServer.close(() => resolve()));
+  }
+});
+
+test("daemon-target CLI forwards local TASK_RUNNER_CODEX_WS_URL as a structured resume override", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const wsServer = new WebSocketServer({ host: "127.0.0.1", port });
+  const requests = [];
+  if (wsServer.address() === null) {
+    await new Promise((resolve) => wsServer.once("listening", resolve));
+  }
+
+  wsServer.on("connection", (ws) => {
+    ws.on("message", (payload) => {
+      const request = JSON.parse(payload.toString());
+      requests.push(request);
+      ws.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: request.id,
+          result: { runId: "detached-resume-run" },
+        }),
+      );
+    });
+  });
+
+  try {
+    const result = await runCliAsync(
+      [
+        "run",
+        "--connect",
+        listenUrl,
+        "--detach",
+        "--resume-run",
+        "abc123",
+        "--output-format",
+        "json",
+      ],
+      {
+        env: {
+          TASK_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/",
+        },
+      },
+    );
+    assert.equal(result.code, 0);
+    assert.deepEqual(requests[0].params.overrides.backendSpecific, {
+      codex: {
+        transport: {
+          type: "ws",
+          url: "ws://127.0.0.1:4773/",
+        },
+      },
+    });
+  } finally {
+    for (const client of wsServer.clients) {
+      client.terminate();
+    }
+    await new Promise((resolve) => wsServer.close(() => resolve()));
+  }
+});
+
+test("daemon-target CLI forwards local TASK_RUNNER_CODEX_WS_URL as a structured init override", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const wsServer = new WebSocketServer({ host: "127.0.0.1", port });
+  const requests = [];
+  if (wsServer.address() === null) {
+    await new Promise((resolve) => wsServer.once("listening", resolve));
+  }
+
+  wsServer.on("connection", (ws) => {
+    ws.on("message", (payload) => {
+      const request = JSON.parse(payload.toString());
+      requests.push(request);
+      ws.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: request.id,
+          result: {
+            run: {
+              runId: "init-run",
+            },
+          },
+        }),
+      );
+    });
+  });
+
+  try {
+    const result = await runCliAsync(
+      ["init", "--connect", listenUrl, "--agent", "daemon-agent", "--output-format", "json"],
+      {
+        env: {
+          TASK_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/",
+        },
+      },
+    );
+    assert.equal(result.code, 0);
+    assert.deepEqual(requests[0].params.overrides.backendSpecific, {
+      codex: {
+        transport: {
+          type: "ws",
+          url: "ws://127.0.0.1:4773/",
+        },
+      },
+    });
   } finally {
     for (const client of wsServer.clients) {
       client.terminate();

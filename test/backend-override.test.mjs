@@ -100,7 +100,7 @@ async function runIn(baseDir, agentName, overrides) {
         loaded,
         loadedAssignment,
         cliVars: {},
-        backend: okBackend("mock-codex"),
+        backend: okBackend(overrides?.backend ?? loaded.config.backend),
         overrides,
         stderr: () => {},
         stdout: () => {},

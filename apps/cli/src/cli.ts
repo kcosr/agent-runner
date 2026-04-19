@@ -2,6 +2,7 @@
 import { existsSync, statSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import {
+  type RunCommandOverrides,
   addDependency,
   addRunAttachmentFromFile,
   appendNotes,
@@ -43,6 +44,7 @@ import {
   resolveTaskRunnerConfigDir,
   resolveTaskRunnerStateDir,
 } from "@task-runner/core/config/runtime-paths.js";
+import type { BackendSpecificConfig } from "@task-runner/core/core/backends/types.js";
 import {
   CommandError,
   type RunListFilter,
@@ -292,6 +294,28 @@ function resolvedOverrides(parsed: ParsedArgs) {
   return {
     ...overridesFromParsedArgs(parsed),
     cwd: parsed.cwd ? resolveInputPath(parsed.cwd, process.cwd()) : undefined,
+  };
+}
+
+function synthesizeClientBackendSpecificOverride(): BackendSpecificConfig | undefined {
+  const codexWsUrl = process.env.TASK_RUNNER_CODEX_WS_URL;
+  if (!codexWsUrl) {
+    return undefined;
+  }
+  return {
+    codex: {
+      transport: {
+        type: "ws",
+        url: codexWsUrl,
+      },
+    },
+  };
+}
+
+function resolvedDaemonOverrides(parsed: ParsedArgs): RunCommandOverrides {
+  return {
+    ...resolvedOverrides(parsed),
+    backendSpecific: synthesizeClientBackendSpecificOverride(),
   };
 }
 
@@ -751,7 +775,7 @@ async function startOrResumeDaemonRun(
   return parsed.resumeRun
     ? await client.call<{ runId: string }>("runs.resume", {
         target: normalizeTarget(parsed.resumeRun) ?? parsed.resumeRun,
-        overrides: resolvedOverrides(parsed),
+        overrides: resolvedDaemonOverrides(parsed),
       })
     : await client.call<{ runId: string }>("runs.start", {
         agent: normalizeTarget(parsed.agent),
@@ -760,7 +784,7 @@ async function startOrResumeDaemonRun(
         callerCwd: process.cwd(),
         backendSessionId: parsed.backendSessionId,
         cliVars: parsed.vars,
-        overrides: resolvedOverrides(parsed),
+        overrides: resolvedDaemonOverrides(parsed),
       });
 }
 
@@ -1667,7 +1691,7 @@ async function runExecuteCommandDaemon(parsed: ParsedArgs, connectUrl: string): 
         callerCwd: process.cwd(),
         backendSessionId: parsed.backendSessionId,
         cliVars: parsed.vars,
-        overrides: resolvedOverrides(parsed),
+        overrides: resolvedDaemonOverrides(parsed),
       });
       if (isJson) {
         writeJson(result.run);

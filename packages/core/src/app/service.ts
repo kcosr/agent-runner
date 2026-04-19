@@ -20,7 +20,7 @@ import type {
   RunTaskSummary,
 } from "../contracts/runs.js";
 import { toRunDetail } from "../contracts/runs.js";
-import type { BackendId } from "../core/backends/types.js";
+import type { BackendId, BackendSpecificConfig } from "../core/backends/types.js";
 import {
   type RunListFilter,
   addAttachmentFromFile,
@@ -69,6 +69,7 @@ export interface RunCommandOverrides {
   backend?: BackendId;
   model?: string;
   effort?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+  backendSpecific?: BackendSpecificConfig;
   message?: string;
   name?: string;
   timeoutSec?: number;

@@ -68,7 +68,7 @@ async function initRun(baseDir, agentName = "run-mgmt-agent") {
         loadedAssignment,
         cliVars: {},
         backend: {
-          id: "mock",
+          id: loaded.config.backend,
           async invoke() {
             throw new Error("backend should not be invoked during init");
           },
