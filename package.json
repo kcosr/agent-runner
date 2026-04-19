@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "Workspace root for the task-runner monorepo.",
+  "license": "MIT",
   "workspaces": ["packages/*", "apps/*"],
   "scripts": {
     "setup": "npm install",
