@@ -133,6 +133,13 @@ function daemonExecution(daemonInstanceId: string) {
   };
 }
 
+function daemonMutationContext(daemonInstanceId: string) {
+  return {
+    hostMode: "daemon" as const,
+    controllerInstanceId: daemonInstanceId,
+  };
+}
+
 function deriveDaemonAbortCapability(
   runId: string,
   status: RunStatus,
@@ -298,6 +305,7 @@ export async function serveDaemon(
   const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
   const startedAt = new Date().toISOString();
   const daemonInstanceId = `daemon-${shortId()}`;
+  const mutationAuditContext = daemonMutationContext(daemonInstanceId);
   const version = packageVersion();
   const summarySubscriptions = new Map<string, SummarySubscriptionRecord>();
   const detailSubscriptions = new Map<string, DetailSubscriptionRecord>();
@@ -838,19 +846,25 @@ export async function serveDaemon(
       publishRunProjections(run.runId);
       return run;
     },
-    archive: (target) => withPublishedMutation(target, () => app.archive(target)),
-    unarchive: (target) => withPublishedMutation(target, () => app.unarchive(target)),
+    archive: (target) =>
+      withPublishedMutation(target, () => app.archive(target, mutationAuditContext)),
+    unarchive: (target) =>
+      withPublishedMutation(target, () => app.unarchive(target, mutationAuditContext)),
     deleteArchivedRun: (target) => {
       const result = app.deleteArchivedRun(target);
       publishRunDeletion(result.runId);
       return result;
     },
     renameRun: (target, input) =>
-      withPublishedMutationAsync(target, () => app.renameRun(target, input)),
+      withPublishedMutationAsync(target, () => app.renameRun(target, input, mutationAuditContext)),
     updateRunBackendSession: (target, input) =>
-      withPublishedDetailMutation(target, () => app.updateRunBackendSession(target, input)),
+      withPublishedDetailMutation(target, () =>
+        app.updateRunBackendSession(target, input, mutationAuditContext),
+      ),
     clearBackendSession: (target) =>
-      withPublishedDetailMutation(target, () => app.clearBackendSession(target)),
+      withPublishedDetailMutation(target, () =>
+        app.clearBackendSession(target, mutationAuditContext),
+      ),
     addDependency: (target, dependencyRunId) =>
       withPublishedMutation(target, () => app.addDependency(target, dependencyRunId)),
     removeDependency: (target, dependencyRunId) =>
@@ -861,13 +875,17 @@ export async function serveDaemon(
       withPublishedMutationAsync(target, () => app.addRunAttachmentFromStream(target, input)),
     removeRunAttachment: (target, attachmentId) =>
       withPublishedMutation(target, () => app.removeRunAttachment(target, attachmentId)),
-    reset: (target) => withPublishedMutation(target, () => app.reset(target)),
+    reset: (target) => withPublishedMutation(target, () => app.reset(target, mutationAuditContext)),
     updateTask: (target, taskId, updates) =>
-      withPublishedMutation(target, () => app.updateTask(target, taskId, updates)),
+      withPublishedMutation(target, () =>
+        app.updateTask(target, taskId, updates, mutationAuditContext),
+      ),
     appendNotes: (target, taskId, text) =>
-      withPublishedMutation(target, () => app.appendNotes(target, taskId, text)),
+      withPublishedMutation(target, () =>
+        app.appendNotes(target, taskId, text, mutationAuditContext),
+      ),
     createTask: (target, input) =>
-      withPublishedMutation(target, () => app.createTask(target, input)),
+      withPublishedMutation(target, () => app.createTask(target, input, mutationAuditContext)),
     daemonInfo: {
       daemonInstanceId,
       pid: process.pid,

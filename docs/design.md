@@ -95,7 +95,10 @@ The canonical record is `run.json`. Important persisted fields:
 - `execution` (host mode and controller)
 
 If the run started from an assignment file, task-runner also stores
-`assignment-seed.md` as an immutable audit snapshot.
+`assignment-seed.md` as an immutable audit snapshot. Runs may also gain a
+`run-events.jsonl` file over time: it is append-only diagnostic history for
+major lifecycle/task mutations, survives `run reset`, and is never used to
+reconstruct canonical state.
 
 ## Brief and caller instructions
 

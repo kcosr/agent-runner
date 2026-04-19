@@ -1,4 +1,5 @@
 import {
+  appendFileSync,
   closeSync,
   fsyncSync,
   mkdirSync,
@@ -48,6 +49,42 @@ export function writeTextFileAtomic(path: string, contents: string): void {
       unlinkSync(tmpPath);
     } catch {
       // ignore cleanup failures
+    }
+    throw err;
+  }
+}
+
+export function appendTextFileDurable(path: string, contents: string): void {
+  const dir = dirname(path);
+  mkdirSync(dir, { recursive: true });
+
+  let fd: number | null = null;
+  let dirFd: number | null = null;
+
+  try {
+    fd = openSync(path, "a", 0o600);
+    appendFileSync(fd, contents, "utf8");
+    fsyncSync(fd);
+    closeSync(fd);
+    fd = null;
+    dirFd = openSync(dir, "r");
+    fsyncSync(dirFd);
+    closeSync(dirFd);
+    dirFd = null;
+  } catch (err) {
+    if (fd !== null) {
+      try {
+        closeSync(fd);
+      } catch {
+        // ignore close failures during cleanup
+      }
+    }
+    if (dirFd !== null) {
+      try {
+        closeSync(dirFd);
+      } catch {
+        // ignore close failures during cleanup
+      }
     }
     throw err;
   }

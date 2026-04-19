@@ -40,6 +40,17 @@ import {
   hasIncompleteTasks,
   missingResumeInputMessage,
 } from "./resume-policy.js";
+import {
+  appendRunAbortedEvent,
+  appendRunAttemptRecordedEvent,
+  appendRunBackendSessionUpdatedEvent,
+  appendRunCreatedEvent,
+  appendRunFinishedEvent,
+  appendRunResumeRejectedEvent,
+  appendRunRetryingEvent,
+  appendRunStartedEvent,
+  lifecycleRunEventContext,
+} from "./run-events.js";
 import type { RunCompletionStatus, RunCompletionSummary } from "./status.js";
 
 export { RecursionDepthError } from "./recursion-guard.js";
@@ -1066,6 +1077,26 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     copyFileSync(loadedAssignment.sourcePath, `${workspaceDir}/assignment-seed.md`);
   }
 
+  const lifecycleContext = lifecycleRunEventContext(execution);
+  const appendRunCreatedAudit = (targetManifest: RunManifest): void => {
+    appendRunCreatedEvent({
+      manifest: targetManifest,
+      context: lifecycleContext,
+      agentName: agentConfig.name,
+      assignmentName: loadedAssignment?.config.name ?? null,
+      passive: agentConfig.backend === "passive",
+    });
+    if (targetManifest.backendSessionId !== null) {
+      appendRunBackendSessionUpdatedEvent({
+        manifest: targetManifest,
+        context: lifecycleContext,
+        previousBackendSessionId: null,
+        nextBackendSessionId: targetManifest.backendSessionId,
+        reason: "bootstrap_import",
+      });
+    }
+  };
+
   // `init` stops here: persist the prepared workspace + manifest and
   // return a terminal "initialized" outcome. No session is created; the
   // caller will follow up with `task-runner run --resume-run <id>` —
@@ -1074,6 +1105,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     syncManifestTaskState(manifest, tasks);
     writeManifest(workspaceDir, manifest);
     const isPassive = agentConfig.backend === "passive";
+    appendRunCreatedAudit(manifest);
     emitEvent({
       type: "run_initialized",
       runId,
@@ -1169,11 +1201,18 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         firstAttempt: null,
         lastAttempt: null,
         maxAttempts,
-        backendSessionIdAtStart: isResume ? latest.backendSessionId : null,
+        backendSessionIdAtStart: latest.backendSessionId,
         backendSessionIdAtEnd: null,
       };
       manifest.sessions.push(sessionRecord);
       writeManifest(workspaceDir, manifest);
+      appendRunStartedEvent({
+        manifest,
+        context: lifecycleContext,
+        sessionIndex,
+        backendSessionIdAtStart: sessionRecord.backendSessionIdAtStart,
+        resumed: priorSessionCount > 0,
+      });
     });
   } else {
     syncManifestTaskState(manifest, tasks);
@@ -1188,12 +1227,20 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       firstAttempt: null,
       lastAttempt: null,
       maxAttempts,
-      backendSessionIdAtStart: null,
+      backendSessionIdAtStart: opts.bootstrapBackendSessionId ?? null,
       backendSessionIdAtEnd: null,
     };
     manifest.sessions.push(sessionRecord);
     refreshManifestAttachments(manifest);
     writeManifest(workspaceDir, manifest);
+    appendRunCreatedAudit(manifest);
+    appendRunStartedEvent({
+      manifest,
+      context: lifecycleContext,
+      sessionIndex,
+      backendSessionIdAtStart: sessionRecord.backendSessionIdAtStart,
+      resumed: false,
+    });
   }
 
   emitEvent({
@@ -1231,6 +1278,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const attemptTranscripts: string[] = [];
   let terminal: { status: RunCompletionStatus; exitCode: number } | null = null;
   let thrownError: unknown = null;
+  let sawRunAbort = false;
+  let sawResumeRejected = false;
   let pendingAttempt: {
     attempt: number;
     startedAt: string;
@@ -1251,6 +1300,12 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     rawStdout: string;
     rawStderr: string;
     invalidStatuses: AttemptRecord["invalidStatuses"];
+    backendSessionUpdate?:
+      | {
+          previousBackendSessionId: string | null;
+          nextBackendSessionId: string | null;
+        }
+      | undefined;
   }): void => {
     const logPath = writeAttemptLog(workspaceDir, {
       schemaVersion: 1,
@@ -1292,6 +1347,28 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
       tryRefreshMutableManifestName(manifest);
       writeManifest(workspaceDir, manifest);
+      appendRunAttemptRecordedEvent({
+        manifest,
+        context: lifecycleContext,
+        sessionIndex,
+        attempt: record.attempt,
+        exitCode: record.exitCode,
+        signal: record.signal,
+        timedOut: record.timedOut,
+        backendSessionIdAtStart: record.sessionIdAtStart,
+        backendSessionIdCaptured: record.sessionIdCaptured,
+      });
+      if (record.backendSessionUpdate) {
+        appendRunBackendSessionUpdatedEvent({
+          manifest,
+          context: lifecycleContext,
+          previousBackendSessionId: record.backendSessionUpdate.previousBackendSessionId,
+          nextBackendSessionId: record.backendSessionUpdate.nextBackendSessionId,
+          reason: "backend_capture",
+          sessionIndex,
+          attempt: record.attempt,
+        });
+      }
     });
   };
 
@@ -1345,10 +1422,23 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
       const invokedWithResume = sessionIdAtStart !== null;
       const resumeRejected = invokedWithResume && resumeFailureDetector(invokeResult);
+      const previousBackendSessionId = manifest.backendSessionId;
+      let backendSessionUpdate:
+        | {
+            previousBackendSessionId: string | null;
+            nextBackendSessionId: string | null;
+          }
+        | undefined;
 
       if (!resumeRejected && invokeResult.sessionId) {
         sessionId = invokeResult.sessionId;
         manifest.backendSessionId = invokeResult.sessionId;
+        if (previousBackendSessionId !== invokeResult.sessionId) {
+          backendSessionUpdate = {
+            previousBackendSessionId,
+            nextBackendSessionId: invokeResult.sessionId,
+          };
+        }
       }
 
       const mergeInfo = {
@@ -1370,17 +1460,20 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         rawStdout: invokeResult.rawStdout,
         rawStderr: invokeResult.rawStderr,
         invalidStatuses: mergeInfo.invalidStatuses,
+        backendSessionUpdate,
       });
       pendingAttempt = null;
 
       if (invokeResult.aborted) {
         terminal = { status: "aborted", exitCode: 130 };
+        sawRunAbort = true;
         emitEvent({ type: "run_aborted" });
         break;
       }
 
       if (resumeRejected) {
         terminal = { status: "error", exitCode: 4 };
+        sawResumeRejected = true;
         emitEvent({ type: "resume_rejected" });
         break;
       }
@@ -1420,6 +1513,13 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         incompleteCount,
         invalidStatusCount: mergeInfo.invalidStatuses.length,
       });
+      appendRunRetryingEvent({
+        manifest,
+        context: lifecycleContext,
+        sessionIndex,
+        incompleteCount,
+        invalidStatusCount: mergeInfo.invalidStatuses.length,
+      });
 
       currentPrompt = buildNudgeMessage(tasks, mergeInfo.invalidStatuses, runId);
     }
@@ -1442,9 +1542,11 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
           rawStderr: formatUnhandledAttemptError(error),
           invalidStatuses: [],
         });
-      } catch {
-        // Best-effort: never let attempt-log persistence mask the original error
-        // or block terminalization of the run manifest.
+      } catch (persistError) {
+        thrownError = new AggregateError(
+          [error, persistError],
+          "task-runner: failed to persist the final attempt record",
+        );
       }
       pendingAttempt = null;
     }
@@ -1475,6 +1577,29 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     manifest.endedAt = endedAt;
     tryRefreshMutableManifestName(manifest);
     writeManifest(workspaceDir, manifest);
+    if (sawRunAbort) {
+      appendRunAbortedEvent({
+        manifest,
+        context: lifecycleContext,
+        sessionIndex,
+      });
+    }
+    if (sawResumeRejected) {
+      appendRunResumeRejectedEvent({
+        manifest,
+        context: lifecycleContext,
+        sessionIndex,
+      });
+    }
+    appendRunFinishedEvent({
+      manifest,
+      context: lifecycleContext,
+      terminalStatus: terminal.status as Exclude<RunCompletionStatus, "initialized">,
+      exitCode: terminal.exitCode,
+      tasksCompleted: manifest.tasksCompleted,
+      tasksTotal: manifest.tasksTotal,
+      sessionIndex,
+    });
   });
 
   const summary: RunCompletionSummary = {
