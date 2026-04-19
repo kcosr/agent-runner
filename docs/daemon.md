@@ -89,6 +89,8 @@ All routes are under `/api/`.
 | `POST` | `/api/runs/:runId/reset` | Reset to initialized |
 | `DELETE` | `/api/runs/:runId` | Delete (archived only) |
 | `POST` | `/api/runs/:runId/name` | Set display name (`null` to clear) |
+| `POST` | `/api/runs/:runId/note` | Set note (`string` or `null` to clear) |
+| `POST` | `/api/runs/:runId/pinned` | Set pinned state (`boolean`) |
 | `POST` | `/api/runs/:runId/backend-session` | Set `backendSessionId` (passive only) |
 | `POST` | `/api/runs/:runId/backend-session/clear` | Clear `backendSessionId` (passive only) |
 | `POST` | `/api/runs/:runId/dependencies` | Add a dependency |
@@ -163,7 +165,7 @@ Error codes:
 - `runs.list`, `runs.get`, `runs.brief`, `runs.timelineHistory`
 - `runs.init`, `runs.start`, `runs.resume`, `runs.abort`
 - `runs.archive`, `runs.unarchive`, `runs.reset`, `runs.delete`
-- `runs.setName`
+- `runs.setName`, `runs.setNote`, `runs.setPinned`
 - `runs.setBackendSession`, `runs.clearBackendSession`
 - `runs.addDependency`, `runs.removeDependency`, `runs.clearDependencies`
 
@@ -201,7 +203,9 @@ HTTP SSE route and WebSocket notification method.
   ```
 
 Drives board cards. The global summary stream is projection-only — it
-never carries transcript deltas.
+never carries transcript deltas. `RunSummary` now includes persisted
+`pinned` and derived `notePresent` so cards and filters can react
+without fetching full detail.
 
 ### Per-run detail
 
@@ -211,8 +215,9 @@ never carries transcript deltas.
 - Event carries a full `RunDetail` snapshot.
 
 Drives the detail drawer. Passive backend-session edits are detail
-mutations: the daemon publishes a fresh `RunDetail` on set/clear but
-does not fan out summary or dependent-run updates.
+mutations: the daemon publishes a fresh `RunDetail` on set/clear. Note
+and pin mutations publish both detail and summary updates so the board
+and the selected drawer stay synchronized.
 
 ### Per-run timeline
 
@@ -239,10 +244,10 @@ The contracts shared between CLI, daemon, and web are in
 `packages/core/src/contracts/`:
 
 - `RunSummary` — board projection, includes `dependencyState`,
-  `activeTask`, and `capabilities`.
+  `activeTask`, `pinned`, `notePresent`, and `capabilities`.
 - `RunDetail` — drawer projection: tasks, dependencies, dependents,
   attachments, locked fields, runtime vars, session history, backend
-  session.
+  session, full `note`, and `pinned`.
 - `RunCapabilities` — lifecycle gates: `canArchive`, `canUnarchive`,
   `canReset`, `canDelete`, `canResume`, `canAbort` (+ `abortReason`),
   and `taskMutation` sub-booleans.

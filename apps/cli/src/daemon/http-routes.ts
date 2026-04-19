@@ -13,6 +13,8 @@ import type { DaemonOperations } from "./operations.js";
 import type {
   RunSetBackendSessionParams,
   RunSetNameParams,
+  RunSetNoteParams,
+  RunSetPinnedParams,
   RunsListParams,
   RunsStartParams,
 } from "./protocol.js";
@@ -26,6 +28,8 @@ import {
   parseBooleanQueryValue,
   parseRunSetBackendSessionParams,
   parseRunSetNameParams,
+  parseRunSetNoteParams,
+  parseRunSetPinnedParams,
   parseStartRunParams,
   requiredHeaderString,
   requiredRunIdString,
@@ -163,6 +167,31 @@ const routes: RouteDefinition[] = [
           name: body.name,
         }),
       );
+    },
+  },
+  {
+    method: "POST",
+    pattern: ["api", "runs", ":runId", "note"],
+    handler: async (req, res, ctx, params) => {
+      const body = await parseRunSetNoteBody(req, routeParam(params, "runId"));
+      sendJson(
+        res,
+        200,
+        ctx.operations.setRunNote(body.target, {
+          note: body.note,
+        }),
+      );
+    },
+  },
+  {
+    method: "POST",
+    pattern: ["api", "runs", ":runId", "pinned"],
+    handler: async (req, res, ctx, params) => {
+      const body = await parseRunSetPinnedBody(req, routeParam(params, "runId"));
+      const result = ctx.operations.setRunPinned(body.target, {
+        pinned: body.pinned,
+      });
+      sendJson(res, 200, result);
     },
   },
   {
@@ -445,6 +474,19 @@ async function parseResumeRunBody(req: IncomingMessage): Promise<ResumeRunBody> 
 async function parseRunSetNameBody(req: IncomingMessage, runId: string): Promise<RunSetNameParams> {
   const body = asRecord(await readJsonBody(req), "request body");
   return parseRunSetNameParams({ ...body, target: runId }, "request body");
+}
+
+async function parseRunSetNoteBody(req: IncomingMessage, runId: string): Promise<RunSetNoteParams> {
+  const body = asRecord(await readJsonBody(req), "request body");
+  return parseRunSetNoteParams({ ...body, target: runId }, "request body");
+}
+
+async function parseRunSetPinnedBody(
+  req: IncomingMessage,
+  runId: string,
+): Promise<RunSetPinnedParams> {
+  const body = asRecord(await readJsonBody(req), "request body");
+  return parseRunSetPinnedParams({ ...body, target: runId }, "request body");
 }
 
 async function parseRunSetBackendSessionBody(

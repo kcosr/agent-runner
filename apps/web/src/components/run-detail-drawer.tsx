@@ -31,10 +31,12 @@ import {
   DownloadIcon,
   ExpandIcon,
   PencilIcon,
+  PinIcon,
   StopIcon,
   TrashIcon,
 } from "./icons.js";
 import { MarkdownContent } from "./markdown.js";
+import { RunNoteEditor } from "./run-note-editor.js";
 import { RunTaskList } from "./run-task-list.js";
 import { StatusBadge } from "./status-badge.js";
 
@@ -236,7 +238,9 @@ export function RunDetailDrawer({
   onResumeMessageDraftChange,
   onResumeMessageExpandedChange,
   onSelectAttachmentTab,
+  onSetNote,
   onSetBackendSession,
+  onSetPinned,
   onSelectSection,
   onSubmitResume,
   onTriggerPrimaryAction,
@@ -277,7 +281,9 @@ export function RunDetailDrawer({
   onResumeMessageDraftChange: (value: string) => void;
   onResumeMessageExpandedChange: (expanded: boolean) => void;
   onSelectAttachmentTab: (attachmentTab: AttachmentTab) => void;
+  onSetNote: (note: string | null) => Promise<void>;
   onSetBackendSession: (backendSessionId: string) => Promise<void>;
+  onSetPinned: (pinned: boolean) => Promise<void>;
   onSelectSection: (section: DrawerDetailSection) => void;
   onSubmitResume: () => Promise<void>;
   onTriggerPrimaryAction: () => Promise<void>;
@@ -327,6 +333,8 @@ export function RunDetailDrawer({
   const resumeRequiresMessage = !hasIncompleteTasks;
   const showResumeMessageField = resumeRequiresMessage || resumeMessageExpanded;
   const renamePending = actionPending === "rename";
+  const notePending = actionPending === "note";
+  const pinPending = actionPending === "pin";
   const backendSessionPending = actionPending === "backend-session";
   const resetPending = actionPending === "reset";
   const abortPending = actionPending === "abort";
@@ -1000,6 +1008,17 @@ export function RunDetailDrawer({
               )
             ) : null}
             <button
+              aria-label={run.pinned ? "Unpin run" : "Pin run"}
+              aria-pressed={run.pinned}
+              className="icon-btn"
+              disabled={pinPending}
+              onClick={() => void onSetPinned(!run.pinned)}
+              title={run.pinned ? "Unpin run" : "Pin run"}
+              type="button"
+            >
+              <PinIcon aria-hidden="true" />
+            </button>
+            <button
               aria-label="Copy run id"
               className="icon-btn"
               onClick={() => onCopy(run.runId, "run id")}
@@ -1215,6 +1234,14 @@ export function RunDetailDrawer({
               ) : null}
             </button>
             <button
+              aria-selected={activeSection === "notes"}
+              className={activeSection === "notes" ? "tab active" : "tab"}
+              onClick={() => onSelectSection("notes")}
+              type="button"
+            >
+              Notes
+            </button>
+            <button
               aria-selected={activeSection === "attachments"}
               className={activeSection === "attachments" ? "tab active" : "tab"}
               onClick={() => onSelectSection("attachments")}
@@ -1254,6 +1281,21 @@ export function RunDetailDrawer({
           {activeSection === "tasks" ? (
             <section aria-label="Tasks" className="drawer-panel drawer-panel--tasks">
               <RunTaskList tasks={run.tasks} />
+            </section>
+          ) : null}
+
+          {activeSection === "notes" ? (
+            <section aria-label="Notes" className="drawer-panel drawer-panel--notes">
+              <div className="drawer-panel-card drawer-panel-card--notes">
+                <RunNoteEditor
+                  emptyPreviewMessage="No note recorded yet."
+                  initialMode="preview"
+                  note={run.note}
+                  onSave={onSetNote}
+                  pending={notePending}
+                  textareaLabel={`Run note for ${visibleName}`}
+                />
+              </div>
             </section>
           ) : null}
 

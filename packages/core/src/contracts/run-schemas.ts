@@ -21,6 +21,8 @@ import type {
   RunDependencyState,
   RunDetail,
   RunNameResult,
+  RunNoteResult,
+  RunPinnedResult,
   RunStatus,
   RunSummary,
   RunTaskMutationCapabilities,
@@ -133,6 +135,8 @@ export const runSummarySchema: z.ZodType<RunSummary> = z.object({
   status: runStatusSchema,
   effectiveStatus: runStatusSchema,
   archivedAt: z.string().nullable(),
+  pinned: z.boolean(),
+  notePresent: z.boolean(),
   agentName: z.string(),
   name: z.string().nullable(),
   assignmentName: z.string().nullable(),
@@ -174,6 +178,8 @@ export const runDetailSchema: z.ZodType<RunDetail> = z.object({
   model: z.string().nullable(),
   effort: z.string().nullable(),
   name: z.string().nullable(),
+  note: z.string().nullable(),
+  pinned: z.boolean(),
   backendSessionId: z.string().nullable(),
   cwd: z.string(),
   unrestricted: z.boolean(),
@@ -210,6 +216,18 @@ export const runArchiveResultSchema: z.ZodType<RunArchiveResult> = z.object({
 export const runNameResultSchema: z.ZodType<RunNameResult> = z.object({
   runId: z.string(),
   name: z.string().nullable(),
+  changed: z.boolean(),
+});
+
+export const runNoteResultSchema: z.ZodType<RunNoteResult> = z.object({
+  runId: z.string(),
+  note: z.string().nullable(),
+  changed: z.boolean(),
+});
+
+export const runPinnedResultSchema: z.ZodType<RunPinnedResult> = z.object({
+  runId: z.string(),
+  pinned: z.boolean(),
   changed: z.boolean(),
 });
 

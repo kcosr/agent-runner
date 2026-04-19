@@ -106,6 +106,15 @@ export function AttachmentIcon(props: IconProps) {
   );
 }
 
+export function PinIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M12 17v5" />
+      <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
+    </IconBase>
+  );
+}
+
 export function MoreIcon(props: IconProps) {
   return (
     <IconBase {...props}>
@@ -148,6 +157,20 @@ export function PencilIcon(props: IconProps) {
     <IconBase {...props}>
       <path d="M12 20h9" />
       <path d="m16.5 3.5 4 4L8 20l-5 1 1-5Z" />
+    </IconBase>
+  );
+}
+
+export function NotepadTextIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M8 2v4" />
+      <path d="M12 2v4" />
+      <path d="M16 2v4" />
+      <rect width="16" height="18" x="4" y="4" rx="2" />
+      <path d="M8 10h6" />
+      <path d="M8 14h8" />
+      <path d="M8 18h5" />
     </IconBase>
   );
 }

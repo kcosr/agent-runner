@@ -35,6 +35,11 @@ const BOARD_PREFERENCE_ROWS: PreferenceRowDefinition[] = [
     description: "Include archived runs in the board and counts until you hide them again.",
   },
   {
+    key: "showPinnedOnly",
+    title: "Show pinned runs only",
+    description: "Keep only pinned runs visible on the board until you turn the filter back off.",
+  },
+  {
     key: "sortByRecentUpdates",
     title: "Sort by recent updates",
     description:

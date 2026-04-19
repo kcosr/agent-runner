@@ -1,6 +1,7 @@
 import type { RunStatus, RunSummary } from "@task-runner/core/contracts/runs.js";
 import type { KeyboardEvent, MouseEvent } from "react";
 import type { DashboardStructuredFilters } from "../lib/settings.js";
+import type { RunActionPending } from "../routes/use-runs-dashboard-state.js";
 import { ChevronIcon } from "./icons.js";
 import { RunCard, type RunCardMotion } from "./run-card.js";
 
@@ -13,22 +14,33 @@ export interface BoardColumn {
 }
 
 export function RunColumn({
+  actionPending,
   bodyRef,
   collapsed,
   column,
   columnRef,
   motionsByRunId,
+  openSelectedRunNoteRequest,
+  onSetNote,
+  onSetPinned,
   selectedRunId,
   onToggleCollapse,
   onSelectRun,
   onStructuredFilterToggle,
   structuredFilters,
 }: {
+  actionPending?: RunActionPending;
   bodyRef?: (node: HTMLElement | null) => void;
   collapsed: boolean;
   column: BoardColumn;
   columnRef?: (node: HTMLElement | null) => void;
   motionsByRunId: Record<string, RunCardMotion>;
+  openSelectedRunNoteRequest: {
+    runId: string;
+    version: number;
+  } | null;
+  onSetNote: (runId: string, note: string | null) => Promise<void>;
+  onSetPinned: (runId: string, pinned: boolean) => Promise<void>;
   selectedRunId?: string;
   onToggleCollapse: () => void;
   onSelectRun: (runId: string) => void;
@@ -107,8 +119,12 @@ export function RunColumn({
       <div className="col-body" id={bodyId} ref={bodyRef}>
         {column.runs.map((run) => (
           <RunCard
+            actionPending={actionPending}
             key={run.runId}
             motion={motionsByRunId[run.runId]}
+            openNoteDialogRequest={openSelectedRunNoteRequest}
+            onSetNote={(note) => onSetNote(run.runId, note)}
+            onSetPinned={(pinned) => onSetPinned(run.runId, pinned)}
             onSelect={() => onSelectRun(run.runId)}
             onStructuredFilterToggle={onStructuredFilterToggle}
             run={run}

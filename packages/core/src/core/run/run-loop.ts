@@ -365,18 +365,22 @@ function normalizeRunName(value: string | undefined): string | null {
   }
 }
 
-function refreshMutableManifestName(manifest: RunManifest): void {
+function refreshMutableManifestMetadata(manifest: RunManifest): void {
   const latest = resolveResumeTarget(manifest.workspaceDir).manifest;
   manifest.name = latest.name;
+  manifest.note = latest.note;
+  manifest.pinned = latest.pinned;
   manifest.resetSeed.name = latest.resetSeed.name;
+  manifest.resetSeed.note = latest.resetSeed.note;
+  manifest.resetSeed.pinned = latest.resetSeed.pinned;
   manifest.attachments = latest.attachments.map((attachment) => ({ ...attachment }));
 }
 
-function tryRefreshMutableManifestName(manifest: RunManifest): void {
+function tryRefreshMutableManifestMetadata(manifest: RunManifest): void {
   try {
-    refreshMutableManifestName(manifest);
+    refreshMutableManifestMetadata(manifest);
   } catch {
-    // Mutable name refresh is best-effort; keep the in-memory name if
+    // Mutable metadata refresh is best-effort; keep the in-memory fields if
     // the manifest cannot be re-read transiently.
   }
 }
@@ -1122,6 +1126,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       backendSpecific: cloneBackendSpecificConfig(backendSpecific),
       message,
       name,
+      note: null,
+      pinned: false,
       unrestricted,
       cwd,
       lockedFields: frozenLockedFields,
@@ -1152,6 +1158,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         effort: effort ?? null,
         backendSpecific: cloneBackendSpecificConfig(backendSpecific),
         name,
+        note: null,
+        pinned: false,
         dependencyRunIds: [],
         unrestricted,
         timeoutSec,
@@ -1440,7 +1448,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       }
       sessionRecord.lastAttempt = record.attempt;
 
-      tryRefreshMutableManifestName(manifest);
+      tryRefreshMutableManifestMetadata(manifest);
       writeManifest(workspaceDir, manifest);
       pendingAttempt = null;
       appendRunAttemptRecordedEvent({
@@ -1470,7 +1478,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
   try {
     while (sessionAttempts < maxAttempts && !terminal) {
-      tryRefreshMutableManifestName(manifest);
+      tryRefreshMutableManifestMetadata(manifest);
       name = manifest.name;
       sessionAttempts++;
       const globalAttemptNumber = priorAttemptCount + sessionAttempts;
@@ -1670,7 +1678,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     manifest.status = terminal.status;
     manifest.exitCode = terminal.exitCode;
     manifest.endedAt = endedAt;
-    tryRefreshMutableManifestName(manifest);
+    tryRefreshMutableManifestMetadata(manifest);
     writeManifest(workspaceDir, manifest);
     if (sawRunAbort) {
       appendRunAbortedEvent({

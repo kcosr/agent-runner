@@ -13,6 +13,10 @@ import { useRunsDashboardState } from "./use-runs-dashboard-state.js";
 export function RunsDashboardRoute() {
   const state = useRunsDashboardState();
   const [toggleFiltersVersion, setToggleFiltersVersion] = useState(0);
+  const [openSelectedRunNoteRequest, setOpenSelectedRunNoteRequest] = useState<{
+    runId: string;
+    version: number;
+  } | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const latestStateRef = useRef(state);
   const navigableBoardColumns = state.boardColumns.filter(
@@ -34,11 +38,13 @@ export function RunsDashboardRoute() {
       const drawerFullscreen =
         currentState.viewState.drawerFullscreen ||
         document.querySelector(".drawer--fullscreen") !== null;
+      const modalOpen = document.querySelector(".note-modal[open]") !== null;
 
       const command = resolveRunsShortcutCommand(event, {
         activeBoardColumnKey: currentState.activeBoardColumnKey,
         boardColumns: currentBoardColumns,
         drawerFullscreen,
+        modalOpen,
         resumeDialogOpen: currentState.resumeDialogOpen,
         searchFocused: document.activeElement === searchInputRef.current,
         searchValue: currentState.viewState.search,
@@ -100,6 +106,60 @@ export function RunsDashboardRoute() {
       if (command === "run.primaryAction") {
         event.preventDefault();
         void currentState.triggerSelectedRunPrimaryAction();
+        return;
+      }
+
+      if (command === "run.openNote") {
+        if (!currentState.selectedRunId || currentState.actionPending !== undefined) {
+          return;
+        }
+        event.preventDefault();
+        const selectedRunId = currentState.selectedRunId;
+        setOpenSelectedRunNoteRequest((current) => ({
+          runId: selectedRunId,
+          version: (current?.version ?? 0) + 1,
+        }));
+        return;
+      }
+
+      if (command === "run.togglePinned") {
+        if (!currentState.selectedRunId || currentState.actionPending !== undefined) {
+          return;
+        }
+        const selectedRun =
+          currentState.runs.find((run) => run.runId === currentState.selectedRunId) ??
+          currentState.selectedRunQuery.data;
+        if (!selectedRun) {
+          return;
+        }
+        event.preventDefault();
+        void currentState.runActions.setPinned(selectedRun.runId, !selectedRun.pinned);
+        return;
+      }
+
+      if (command === "run.toggleArchived") {
+        if (!currentState.selectedRunId || currentState.actionPending !== undefined) {
+          return;
+        }
+        const selectedRun =
+          currentState.runs.find((run) => run.runId === currentState.selectedRunId) ??
+          currentState.selectedRunQuery.data;
+        if (!selectedRun) {
+          return;
+        }
+        if (selectedRun.archivedAt) {
+          if (!selectedRun.capabilities.canUnarchive) {
+            return;
+          }
+          event.preventDefault();
+          currentState.runActions.unarchive(selectedRun.runId);
+          return;
+        }
+        if (!selectedRun.capabilities.canArchive) {
+          return;
+        }
+        event.preventDefault();
+        currentState.runActions.archive(selectedRun.runId);
         return;
       }
 
@@ -178,13 +238,17 @@ export function RunsDashboardRoute() {
     <AppShell
       primary={
         <RunsBoardPanel
+          actionPending={state.actionPending}
           activeBoardColumnKey={state.activeBoardColumnKey}
           boardColumns={state.boardColumns}
           collapsedColumnKeys={state.collapsedColumnKeys}
           hasActiveStructuredFilters={state.hasActiveStructuredFilters}
+          openSelectedRunNoteRequest={openSelectedRunNoteRequest}
           onExpandColumn={state.columnActions.expand}
           onActiveBoardColumnKeyChange={state.setActiveBoardColumnKey}
           onResetFilters={state.resetBoardFilters}
+          onSetNote={state.runActions.setNote}
+          onSetPinned={state.runActions.setPinned}
           onSelectRun={state.openRun}
           onStructuredFilterToggle={state.toggleStructuredFilter}
           onToggleColumnCollapse={state.columnActions.toggleCollapse}
@@ -225,7 +289,9 @@ export function RunsDashboardRoute() {
           onRename={state.runActions.rename}
           onResumeMessageDraftChange={state.setResumeMessageDraft}
           onResumeMessageExpandedChange={state.setResumeMessageExpanded}
+          onSetNote={state.runActions.setNote}
           onSetBackendSession={state.runActions.setBackendSession}
+          onSetPinned={state.runActions.setPinned}
           onSelectDetailSection={state.updateSelectedRunDetailSection}
           onSubmitResume={state.submitSelectedRunResume}
           onTriggerPrimaryAction={state.triggerSelectedRunPrimaryAction}

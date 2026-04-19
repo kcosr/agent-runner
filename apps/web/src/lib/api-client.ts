@@ -14,6 +14,8 @@ import {
   runDependenciesResultSchema,
   runDetailSchema,
   runNameResultSchema,
+  runNoteResultSchema,
+  runPinnedResultSchema,
   runSummarySchema,
   runTimelineHistorySchema,
 } from "@task-runner/core/contracts/run-schemas.js";
@@ -24,6 +26,8 @@ import type {
   RunDependenciesResult,
   RunDetail,
   RunNameResult,
+  RunNoteResult,
+  RunPinnedResult,
   RunSummary,
 } from "@task-runner/core/contracts/runs.js";
 import { z } from "zod";
@@ -178,6 +182,32 @@ async function readNameResult(response: Response, label: string): Promise<RunNam
     response.status,
     "result",
     runNameResultSchema,
+    label,
+  );
+}
+
+async function readNoteResult(response: Response, label: string): Promise<RunNoteResult> {
+  if (!response.ok) {
+    return await readError(response);
+  }
+  return parseField(
+    await parseResponseJson(response, label),
+    response.status,
+    "result",
+    runNoteResultSchema,
+    label,
+  );
+}
+
+async function readPinnedResult(response: Response, label: string): Promise<RunPinnedResult> {
+  if (!response.ok) {
+    return await readError(response);
+  }
+  return parseField(
+    await parseResponseJson(response, label),
+    response.status,
+    "result",
+    runPinnedResultSchema,
     label,
   );
 }
@@ -503,6 +533,34 @@ export function createApiClient(config: AppRuntimeConfig) {
         },
       );
       return await readNameResult(response, "Rename run");
+    },
+    async setRunNote(runId: string, note: string | null): Promise<RunNoteResult> {
+      const response = await fetch(
+        joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/note`),
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json",
+          },
+          body: JSON.stringify({ note }),
+        },
+      );
+      return await readNoteResult(response, "Set run note");
+    },
+    async setRunPinned(runId: string, pinned: boolean): Promise<RunPinnedResult> {
+      const response = await fetch(
+        joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/pinned`),
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json",
+          },
+          body: JSON.stringify({ pinned }),
+        },
+      );
+      return await readPinnedResult(response, "Set run pinned");
     },
     async setBackendSession(
       runId: string,

@@ -30,6 +30,8 @@ import {
   type RunDependenciesResult,
   type RunDetail,
   type RunNameResult,
+  type RunNoteResult,
+  type RunPinnedResult,
   type RunSummary,
   type RunTaskMutationCapabilities,
   canArchiveRun,
@@ -42,6 +44,8 @@ import {
   toRunDependenciesResult,
   toRunDetail,
   toRunNameResult,
+  toRunNoteResult,
+  toRunPinnedResult,
   toRunSummary,
 } from "../../contracts/runs.js";
 import { resolveTaskRunnerCommand } from "../../task-runner-command.js";
@@ -70,6 +74,7 @@ import {
   type RunManifest,
   RunNotFoundError,
   type TaskSnapshot,
+  findRunManifestsById,
   listRunManifests,
   resolveResumeTarget,
   writeManifest,
@@ -100,6 +105,7 @@ import {
 } from "../run/workspace-state.js";
 
 export type StatusCommandResult = RunDetail;
+export type SummaryCommandResult = RunSummary;
 export type BriefCommandResult = string;
 
 export interface DefinitionListResult {
@@ -127,7 +133,9 @@ export type {
   RunBackendSessionResult,
   RunDeleteResult,
   RunDependenciesResult,
+  RunNoteResult,
   RunNameResult,
+  RunPinnedResult,
 } from "../../contracts/runs.js";
 
 export type RunListResult = RunListEntry[];
@@ -229,7 +237,7 @@ function resolveRun(target: string): ReturnType<typeof resolveResumeTarget> {
       throw error;
     }
 
-    const matches = listRunManifests().filter((entry) => entry.manifest.runId === target);
+    const matches = findRunManifestsById(target);
     if (matches.length === 0) {
       throw error;
     }
@@ -288,7 +296,7 @@ function withDependencyMutationLock<T>(fn: () => T): T {
   return withGlobalStateLock("run-dependencies", fn);
 }
 
-function refreshRunSnapshotAfterTaskStateSettles(
+export function refreshRunSnapshotAfterTaskStateSettles(
   resolved: ReturnType<typeof resolveResumeTarget>,
 ): void {
   withTaskStateLock(resolved.workspaceDir, () => {
@@ -466,6 +474,11 @@ function validateRunName(name: string): string {
   }
 }
 
+function normalizeRunNote(note: string | null): string | null {
+  const trimmed = note?.trim() ?? "";
+  return trimmed.length === 0 ? null : note;
+}
+
 function validateBackendSessionId(sessionId: string): string {
   const trimmed = sessionId.trim();
   if (trimmed.length === 0) {
@@ -533,6 +546,30 @@ export function readStatus(target: string): StatusCommandResult {
   });
 }
 
+export function readRunSummary(target: string): SummaryCommandResult {
+  const resolved = resolveRun(target);
+  refreshRunSnapshotAfterTaskStateSettles(resolved);
+  const satisfiedRunIds = new Set<string>();
+  for (const dependencyRunId of resolved.manifest.dependencyRunIds) {
+    const dependencyMatches = findRunManifestsById(dependencyRunId);
+    if (dependencyMatches.some((entry) => entry.manifest.status === "success")) {
+      satisfiedRunIds.add(dependencyRunId);
+    }
+  }
+  const dependencyState = deriveDependencyStateFromSatisfiedRunIds(
+    resolved.manifest,
+    satisfiedRunIds,
+  );
+  return toRunSummary(
+    {
+      workspaceDir: resolved.workspaceDir,
+      manifest: resolved.manifest,
+    },
+    undefined,
+    dependencyState,
+  );
+}
+
 export function readBrief(target: string): BriefCommandResult {
   const resolved = resolveRun(target);
   refreshRunSnapshotAfterTaskStateSettles(resolved);
@@ -577,17 +614,20 @@ export function listRuns(filter: RunListFilter = {}): RunListResult {
       .filter((entry) => entry.manifest.status === "success")
       .map((entry) => entry.manifest.runId),
   );
-  return projectedEntries
-    .filter((entry) => matchesRunListScope(entry.manifest, filter.scope))
-    .map((entry) =>
-      toRunSummary(
-        entry,
-        undefined,
-        deriveDependencyStateFromSatisfiedRunIds(entry.manifest, successfulRunIds),
-      ),
-    )
-    .filter((entry) => includeArchived || entry.archivedAt === null)
-    .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  const scopedEntries = projectedEntries.filter((entry) =>
+    matchesRunListScope(entry.manifest, filter.scope),
+  );
+  const summaries = scopedEntries.map((entry) =>
+    toRunSummary(
+      entry,
+      undefined,
+      deriveDependencyStateFromSatisfiedRunIds(entry.manifest, successfulRunIds),
+    ),
+  );
+  const visibleSummaries = summaries.filter(
+    (entry) => includeArchived || entry.archivedAt === null,
+  );
+  return visibleSummaries.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
 }
 
 export function showDefinition(
@@ -744,6 +784,49 @@ export async function setRunName(
   }
 
   return toRunNameResult({
+    manifest: resolved.manifest,
+    changed,
+  });
+}
+
+export function setRunNote(target: string, input: { note: string | null }): RunNoteResult {
+  const resolved = resolveRun(target);
+  let changed = false;
+
+  withTaskStateLock(resolved.workspaceDir, () => {
+    resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
+    const nextNote = normalizeRunNote(input.note);
+    if (resolved.manifest.note === nextNote) {
+      return;
+    }
+    resolved.manifest.note = nextNote;
+    resolved.manifest.resetSeed.note = nextNote;
+    writeManifest(resolved.workspaceDir, resolved.manifest);
+    changed = true;
+  });
+
+  return toRunNoteResult({
+    manifest: resolved.manifest,
+    changed,
+  });
+}
+
+export function setRunPinned(target: string, input: { pinned: boolean }): RunPinnedResult {
+  const resolved = resolveRun(target);
+  let changed = false;
+
+  withTaskStateLock(resolved.workspaceDir, () => {
+    resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
+    if (resolved.manifest.pinned === input.pinned) {
+      return;
+    }
+    resolved.manifest.pinned = input.pinned;
+    resolved.manifest.resetSeed.pinned = input.pinned;
+    writeManifest(resolved.workspaceDir, resolved.manifest);
+    changed = true;
+  });
+
+  return toRunPinnedResult({
     manifest: resolved.manifest,
     changed,
   });

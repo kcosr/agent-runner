@@ -94,6 +94,8 @@ describe("api client", () => {
                   status: "initialized",
                   effectiveStatus: "running",
                   archivedAt: null,
+                  notePresent: true,
+                  pinned: true,
                   agentName: "implementer",
                   name: "Build dashboard",
                   assignmentName: "Build dashboard",
@@ -148,6 +150,8 @@ describe("api client", () => {
         runId: "run-1",
         status: "initialized",
         effectiveStatus: "running",
+        notePresent: true,
+        pinned: true,
         dependencyState: {
           ready: false,
           total: 2,
@@ -178,6 +182,8 @@ describe("api client", () => {
               model: "gpt-5.4",
               effort: "high",
               name: "Build dashboard",
+              note: null,
+              pinned: false,
               backendSessionId: null,
               cwd: "/tmp/task-runner",
               unrestricted: false,
@@ -263,6 +269,8 @@ describe("api client", () => {
                 model: "gpt-5.4",
                 effort: "high",
                 name: "Build dashboard",
+                note: null,
+                pinned: false,
                 backendSessionId: null,
                 cwd: "/tmp/task-runner",
                 unrestricted: false,
@@ -378,6 +386,8 @@ describe("api client", () => {
               model: "gpt-5.4",
               effort: "high",
               name: "Build dashboard",
+              note: "Reset seed note",
+              pinned: true,
               backendSessionId: null,
               cwd: "/tmp/task-runner",
               unrestricted: false,
@@ -430,6 +440,8 @@ describe("api client", () => {
     await expect(api.resetRun("run-1")).resolves.toMatchObject({
       runId: "run-1",
       status: "initialized",
+      note: "Reset seed note",
+      pinned: true,
     });
 
     expect(fetchMock).toHaveBeenCalledWith("/api/runs/run-1/reset", {
@@ -451,6 +463,76 @@ describe("api client", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/runs/run-1", {
       method: "DELETE",
       headers: { accept: "application/json" },
+    });
+  });
+
+  it("posts note mutation requests and parses the result payload", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            result: {
+              runId: "run-1",
+              note: "# Follow-up\n\nKeep the pinned card flow.",
+              changed: true,
+            },
+          }),
+          { status: 200 },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createApiClient(config);
+
+    await expect(
+      api.setRunNote("run-1", "# Follow-up\n\nKeep the pinned card flow."),
+    ).resolves.toEqual({
+      runId: "run-1",
+      note: "# Follow-up\n\nKeep the pinned card flow.",
+      changed: true,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/runs/run-1/note", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json",
+      },
+      body: JSON.stringify({ note: "# Follow-up\n\nKeep the pinned card flow." }),
+    });
+  });
+
+  it("posts pin mutation requests and parses the result payload", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            result: {
+              runId: "run-1",
+              pinned: true,
+              changed: true,
+            },
+          }),
+          { status: 200 },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createApiClient(config);
+
+    await expect(api.setRunPinned("run-1", true)).resolves.toEqual({
+      runId: "run-1",
+      pinned: true,
+      changed: true,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/runs/run-1/pinned", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json",
+      },
+      body: JSON.stringify({ pinned: true }),
     });
   });
 

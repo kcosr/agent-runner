@@ -9,6 +9,8 @@ import { trimRunName } from "@task-runner/core/util/run-name.js";
 import type {
   RunSetBackendSessionParams,
   RunSetNameParams,
+  RunSetNoteParams,
+  RunSetPinnedParams,
   RunsListParams,
   RunsStartParams,
 } from "./protocol.js";
@@ -109,6 +111,21 @@ export function requiredNullableRunName(value: unknown, label: string): string |
   } catch {
     throw new RequestValidationError(`${label} cannot be empty`);
   }
+}
+
+export function requiredNullableString(value: unknown, label: string): string | null {
+  if (value === null) {
+    return null;
+  }
+  return requiredString(value, label);
+}
+
+export function requiredBoolean(value: unknown, label: string): boolean {
+  const bool = optionalBoolean(value, label);
+  if (bool === undefined) {
+    throw new RequestValidationError(`${label} is required`);
+  }
+  return bool;
 }
 
 export function stringRecord(value: unknown, label: string): Record<string, string> {
@@ -332,6 +349,22 @@ export function parseRunSetNameParams(value: unknown, label: string): RunSetName
   return {
     target: requiredString(record.target, `${label}.target`),
     name: requiredNullableRunName(record.name, `${label}.name`),
+  };
+}
+
+export function parseRunSetNoteParams(value: unknown, label: string): RunSetNoteParams {
+  const record = asRecord(value, label);
+  return {
+    target: requiredString(record.target, `${label}.target`),
+    note: requiredNullableString(record.note, `${label}.note`),
+  };
+}
+
+export function parseRunSetPinnedParams(value: unknown, label: string): RunSetPinnedParams {
+  const record = asRecord(value, label);
+  return {
+    target: requiredString(record.target, `${label}.target`),
+    pinned: requiredBoolean(record.pinned, `${label}.pinned`),
   };
 }
 

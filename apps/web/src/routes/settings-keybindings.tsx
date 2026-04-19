@@ -51,6 +51,21 @@ const SHORTCUT_SECTIONS: readonly ShortcutSection[] = [
         title: "Run primary action",
       },
       {
+        description: "Open the selected run's note modal from the board.",
+        keys: ["N"],
+        title: "Open run note",
+      },
+      {
+        description: "Pin or unpin the selected run.",
+        keys: ["P"],
+        title: "Toggle pin",
+      },
+      {
+        description: "Archive the selected run, or restore it when already archived.",
+        keys: ["A"],
+        title: "Toggle archive",
+      },
+      {
         description:
           "Toggle the selected detail drawer or attachment preview between normal and fullscreen widths.",
         keys: ["F"],

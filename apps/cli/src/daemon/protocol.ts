@@ -16,6 +16,8 @@ import type {
   RunDependenciesResult,
   RunDetail,
   RunNameResult,
+  RunNoteResult,
+  RunPinnedResult,
   RunSummary,
   RunTaskSummary,
 } from "@task-runner/core/contracts/runs.js";
@@ -69,6 +71,14 @@ export interface RunTargetParams {
 
 export interface RunSetNameParams extends RunTargetParams {
   name: string | null;
+}
+
+export interface RunSetNoteParams extends RunTargetParams {
+  note: string | null;
+}
+
+export interface RunSetPinnedParams extends RunTargetParams {
+  pinned: boolean;
 }
 
 export interface RunSetBackendSessionParams extends RunTargetParams {
@@ -207,6 +217,14 @@ export interface RunArchiveRpcResult {
 
 export interface RunSetNameRpcResult {
   result: RunNameResult;
+}
+
+export interface RunSetNoteRpcResult {
+  result: RunNoteResult;
+}
+
+export interface RunSetPinnedRpcResult {
+  result: RunPinnedResult;
 }
 
 export interface RunBackendSessionRpcResult {

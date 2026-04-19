@@ -28,6 +28,8 @@ export interface RunSummary {
   status: RunStatus;
   effectiveStatus: RunStatus;
   archivedAt: string | null;
+  pinned: boolean;
+  notePresent: boolean;
   agentName: string;
   name: string | null;
   assignmentName: string | null;
@@ -102,6 +104,8 @@ export interface RunDetail {
   model: string | null;
   effort: string | null;
   name: string | null;
+  note: string | null;
+  pinned: boolean;
   backendSessionId: string | null;
   cwd: string;
   unrestricted: boolean;
@@ -138,6 +142,18 @@ export interface RunArchiveResult {
 export interface RunNameResult {
   runId: string;
   name: string | null;
+  changed: boolean;
+}
+
+export interface RunNoteResult {
+  runId: string;
+  note: string | null;
+  changed: boolean;
+}
+
+export interface RunPinnedResult {
+  runId: string;
+  pinned: boolean;
   changed: boolean;
 }
 
@@ -274,6 +290,8 @@ export function toRunSummary(
     status: entry.manifest.status,
     effectiveStatus: deriveEffectiveStatus(entry.manifest),
     archivedAt: entry.manifest.archivedAt,
+    pinned: entry.manifest.pinned,
+    notePresent: entry.manifest.note !== null,
     agentName: entry.manifest.agent.name,
     name: entry.manifest.name,
     assignmentName: entry.manifest.assignment?.name ?? null,
@@ -338,6 +356,8 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
     model: manifest.model,
     effort: manifest.effort,
     name: manifest.name,
+    note: manifest.note,
+    pinned: manifest.pinned,
     backendSessionId: manifest.backendSessionId,
     cwd: manifest.cwd,
     unrestricted: manifest.unrestricted,
@@ -385,6 +405,28 @@ export function toRunNameResult(result: {
   return {
     runId: result.manifest.runId,
     name: result.manifest.name,
+    changed: result.changed,
+  };
+}
+
+export function toRunNoteResult(result: {
+  manifest: RunManifest;
+  changed: boolean;
+}): RunNoteResult {
+  return {
+    runId: result.manifest.runId,
+    note: result.manifest.note,
+    changed: result.changed,
+  };
+}
+
+export function toRunPinnedResult(result: {
+  manifest: RunManifest;
+  changed: boolean;
+}): RunPinnedResult {
+  return {
+    runId: result.manifest.runId,
+    pinned: result.manifest.pinned,
     changed: result.changed,
   };
 }

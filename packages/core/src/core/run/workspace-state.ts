@@ -1,11 +1,11 @@
-import { mkdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { TaskState } from "../../assignment/model.js";
 import { resolveRunsRoot } from "../../config/runtime-paths.js";
 import {
   type RunManifest,
   applyRunResetSeed,
-  manifestPath,
+  readManifest,
   snapshotTasks,
   writeManifest,
 } from "./manifest.js";
@@ -132,7 +132,7 @@ export function withGlobalStateLock<T>(
 }
 
 function readManifestSnapshot(workspaceDir: string): RunManifest {
-  return JSON.parse(readFileSync(manifestPath(workspaceDir), "utf8")) as RunManifest;
+  return readManifest(workspaceDir);
 }
 
 function orderedTasks(tasks: Map<string, TaskState>): TaskState[] {
@@ -167,6 +167,12 @@ export function refreshManifestAttachments(manifest: RunManifest): void {
 
 export function refreshManifestTaskState(manifest: RunManifest): Map<string, TaskState> {
   const latest = readManifestSnapshot(manifest.workspaceDir);
+  manifest.name = latest.name;
+  manifest.note = latest.note;
+  manifest.pinned = latest.pinned;
+  manifest.resetSeed.name = latest.resetSeed.name;
+  manifest.resetSeed.note = latest.resetSeed.note;
+  manifest.resetSeed.pinned = latest.resetSeed.pinned;
   manifest.brief = latest.brief;
   manifest.finalTasks = latest.finalTasks;
   manifest.tasksCompleted = latest.tasksCompleted;

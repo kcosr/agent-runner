@@ -42,6 +42,10 @@ remains separate. Structured filter state persists across reloads, and the
 repo/agent/backend badges on run cards act as shortcuts that apply, replace,
 or clear those exact-match filters.
 
+Dashboard preferences also persist `showPinnedOnly`. The toolbar and
+Settings > General expose the same toggle, and both stay synchronized
+through the shared preferences store.
+
 ### Board
 
 The board groups runs into status columns (pending, running, terminal
@@ -52,10 +56,20 @@ Each card shows:
 
 - Run name (or assignment name if unnamed).
 - Status badge and task progress (e.g. `3 / 7`).
+- Pin toggle plus note affordance.
 - Dependency readiness icon (warning if unsatisfied).
 - Attachment count.
 - Active task label when the run is running (from the derived
   `activeTask` projection on `RunSummary`/`RunDetail`).
+
+Pinned runs sort first within their current status column while still
+using the active column comparator inside the pinned and unpinned
+buckets. Pinning does not move a run across columns.
+
+The note affordance opens a rendered-markdown preview on desktop
+hover/focus when a note exists, and clicking/tapping opens the shared
+note editor. Desktop defaults that editor to **Edit** mode; touch-style
+layouts default to **Preview** mode first.
 
 Above the board, a **jump strip** exposes only the currently rendered
 non-empty columns and scrolls them into view when the board overflows
@@ -77,6 +91,9 @@ timeline stream (`RunTimelineEnvelope`). The drawer surfaces:
   `Workspace`, and passive `Backend session` rows with inline copy/edit
   affordances. Completed runs also surface `Ended` and `Exit code`
   directly in the summary.
+- Notes tab: rendered markdown by default, explicit Preview/Edit toggle,
+  save/cancel flow, and the same shared note mutation used by the card
+  editor.
 - Tasks tab: expandable task rows with inline notes and status editing,
   gated by `taskMutation` capabilities.
 - Attachments tab: **Run** and **Group** sub-tabs. Group is read-only and
@@ -155,6 +172,7 @@ Preferences are persisted to `localStorage` and include:
 - Collapse failure states into a single column.
 - Sort by recent updates.
 - Show archived runs.
+- Show pinned runs only.
 - Structured filters (repo, agent, backend).
 - Visible focus indicators.
 - Detail drawer width.

@@ -143,6 +143,28 @@ test("renderRunStatus prints the persisted run summary", async () => {
   assert.match(text, /- t2 — Second \[completed\]/);
 });
 
+test("renderRunStatus shows note and pin metadata without printing the note body", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "status-agent", STATUS_AGENT);
+  writeAssignment(dir, "status-work", STATUS_ASSIGNMENT);
+  const outcome = await runFresh(dir);
+
+  const text = renderRunStatus(
+    toRunDetail({
+      manifest: {
+        ...outcome.manifest,
+        note: "# Internal note\n\nDo not print this body.",
+        pinned: true,
+      },
+      isLive: false,
+    }),
+  );
+
+  assert.match(text, /Pinned: yes/);
+  assert.match(text, /Note: present/);
+  assert.doesNotMatch(text, /Do not print this body/);
+});
+
 test("deriveEffectiveStatus marks passive runs with in-progress tasks as running", async () => {
   const dir = tempDir();
   writeAgent(dir, "status-agent", STATUS_AGENT);
