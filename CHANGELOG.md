@@ -24,6 +24,8 @@
 
 ### Added
 
+- Added an MIT `LICENSE` file and set `license: "MIT"` on the root and
+  workspace package manifests. ([#60](https://github.com/kcosr/task-runner/pull/60))
 - Added persistent per-run note and pin metadata across the shared
   manifest/DTO surfaces, including `task-runner run set-note`,
   `run clear-note`, `run pin`, and `run unpin`, with daemon HTTP/RPC
