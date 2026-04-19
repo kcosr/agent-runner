@@ -17,7 +17,9 @@ import {
   getRun,
   getRunBrief,
   getRunList,
+  getRunListWithOptions,
   getRunTimelineHistory,
+  getRunWithOptions,
   getTask,
   getTaskList,
   initRun,
@@ -84,6 +86,26 @@ import {
   requiredRunIdString,
   requiredString,
 } from "./request-parsing.js";
+
+function formatTraceDurationMs(startedAt: bigint): string {
+  return (Number(process.hrtime.bigint() - startedAt) / 1_000_000).toFixed(3);
+}
+
+function formatTraceFields(fields: Record<string, unknown>): string {
+  return Object.entries(fields)
+    .filter(([, value]) => value !== undefined)
+    .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
+    .join(" ");
+}
+
+function logPinTrace(stage: string, fields: Record<string, unknown> = {}): void {
+  const wallTime = new Date().toISOString();
+  const monotonicNs = process.hrtime.bigint().toString();
+  const serializedFields = formatTraceFields(fields);
+  console.log(
+    `[pin-trace] ts=${wallTime} monotonicNs=${monotonicNs} stage=${stage}${serializedFields ? ` ${serializedFields}` : ""}`,
+  );
+}
 
 interface SummarySubscriptionRecord {
   id: string;
@@ -353,17 +375,107 @@ export async function serveDaemon(
     ...handlers,
   };
 
-  const getDaemonRun = (target: string): RunDetail =>
-    withDaemonDetailProjection(app.getRun(target), activeRuns);
-  const getDaemonRunList = (opts?: Parameters<typeof app.getRunList>[0]): RunSummary[] =>
-    app.getRunList(opts).map((run) => withDaemonAbortCapability(run, activeRuns));
+  const getDaemonRun = (
+    target: string,
+    options: {
+      traceLabel?: string;
+    } = {},
+  ): RunDetail => {
+    const coreStartedAt = process.hrtime.bigint();
+    const run =
+      options.traceLabel === undefined || app.getRun !== getRun
+        ? app.getRun(target)
+        : getRunWithOptions(target, { traceLabel: options.traceLabel });
+    if (options.traceLabel) {
+      logPinTrace("daemon.getDaemonRun.coreDetail.complete", {
+        traceLabel: options.traceLabel,
+        target,
+        durationMs: formatTraceDurationMs(coreStartedAt),
+      });
+    }
+    const overlayStartedAt = process.hrtime.bigint();
+    const projected = withDaemonDetailProjection(run, activeRuns);
+    if (options.traceLabel) {
+      logPinTrace("daemon.getDaemonRun.overlay.complete", {
+        traceLabel: options.traceLabel,
+        runId: projected.runId,
+        durationMs: formatTraceDurationMs(overlayStartedAt),
+      });
+    }
+    return projected;
+  };
+  const getDaemonRunList = (
+    opts?: Parameters<typeof app.getRunList>[0],
+    options: {
+      traceLabel?: string;
+    } = {},
+  ): RunSummary[] => {
+    const coreStartedAt = process.hrtime.bigint();
+    const runs =
+      options.traceLabel === undefined || app.getRunList !== getRunList
+        ? app.getRunList(opts)
+        : getRunListWithOptions(opts, { traceLabel: options.traceLabel });
+    if (options.traceLabel) {
+      logPinTrace("daemon.getDaemonRunList.coreList.complete", {
+        traceLabel: options.traceLabel,
+        count: runs.length,
+        durationMs: formatTraceDurationMs(coreStartedAt),
+      });
+    }
+    const overlayStartedAt = process.hrtime.bigint();
+    const projectedRuns = runs.map((run: RunSummary) => withDaemonAbortCapability(run, activeRuns));
+    if (options.traceLabel) {
+      logPinTrace("daemon.getDaemonRunList.overlay.complete", {
+        traceLabel: options.traceLabel,
+        count: projectedRuns.length,
+        durationMs: formatTraceDurationMs(overlayStartedAt),
+      });
+    }
+    return projectedRuns;
+  };
 
-  const getProjectedSummary = (runId: string): RunSummary | null =>
-    getDaemonRunList({ includeArchived: true }).find((run) => run.runId === runId) ?? null;
+  const getProjectedSummary = (
+    runId: string,
+    options: {
+      traceLabel?: string;
+    } = {},
+  ): RunSummary | null => {
+    const runListStartedAt = process.hrtime.bigint();
+    const runs = getDaemonRunList(
+      { includeArchived: true },
+      {
+        traceLabel: options.traceLabel,
+      },
+    );
+    if (options.traceLabel) {
+      logPinTrace("daemon.getProjectedSummary.runList.complete", {
+        traceLabel: options.traceLabel,
+        runId,
+        count: runs.length,
+        durationMs: formatTraceDurationMs(runListStartedAt),
+      });
+    }
+    const findStartedAt = process.hrtime.bigint();
+    const summary = runs.find((run) => run.runId === runId) ?? null;
+    if (options.traceLabel) {
+      logPinTrace("daemon.getProjectedSummary.find.complete", {
+        traceLabel: options.traceLabel,
+        runId,
+        found: summary !== null,
+        durationMs: formatTraceDurationMs(findStartedAt),
+      });
+    }
+    return summary;
+  };
 
-  const getProjectedDetail = (runId: string): RunDetail | null => {
+  const getProjectedDetail = (
+    runId: string,
+    options: {
+      traceLabel?: string;
+    } = {},
+  ): RunDetail | null => {
     try {
-      return getDaemonRun(runId);
+      return getDaemonRun(runId, options);
     } catch (err) {
       if (err instanceof RunNotFoundError) {
         return null;
@@ -540,16 +652,55 @@ export async function serveDaemon(
     options: {
       publishDependentSummaries?: boolean;
       publishDependentDetails?: boolean;
+      traceLabel?: string;
     } = {},
   ): void => {
-    const summary = getProjectedSummary(runId);
+    const trace =
+      options.traceLabel === undefined
+        ? null
+        : (stage: string, fields: Record<string, unknown> = {}) => {
+            logPinTrace(`daemon.publishRunProjections.${stage}`, {
+              traceLabel: options.traceLabel,
+              runId,
+              ...fields,
+            });
+          };
+
+    trace?.("start", {
+      publishDependentSummaries: options.publishDependentSummaries ?? false,
+      publishDependentDetails: options.publishDependentDetails ?? false,
+    });
+
+    const summaryProjectionStartedAt = process.hrtime.bigint();
+    const summary = getProjectedSummary(runId, {
+      traceLabel: options.traceLabel ? `${options.traceLabel}.summary` : undefined,
+    });
+    trace?.("summaryProjection.complete", {
+      found: summary !== null,
+      durationMs: formatTraceDurationMs(summaryProjectionStartedAt),
+    });
     if (summary) {
+      const summaryPublishStartedAt = process.hrtime.bigint();
       publishSummary(summary);
+      trace?.("summaryPublish.complete", {
+        durationMs: formatTraceDurationMs(summaryPublishStartedAt),
+      });
     }
 
-    const detail = getProjectedDetail(runId);
+    const detailProjectionStartedAt = process.hrtime.bigint();
+    const detail = getProjectedDetail(runId, {
+      traceLabel: options.traceLabel ? `${options.traceLabel}.detail` : undefined,
+    });
+    trace?.("detailProjection.complete", {
+      found: detail !== null,
+      durationMs: formatTraceDurationMs(detailProjectionStartedAt),
+    });
     if (detail) {
+      const detailPublishStartedAt = process.hrtime.bigint();
       publishDetail(detail);
+      trace?.("detailPublish.complete", {
+        durationMs: formatTraceDurationMs(detailPublishStartedAt),
+      });
       const active = activeRuns.get(runId);
       if (active) {
         active.detail = detail;
@@ -557,33 +708,73 @@ export async function serveDaemon(
     }
 
     if (!options.publishDependentSummaries && !options.publishDependentDetails) {
+      trace?.("complete", {
+        dependentRunCount: 0,
+      });
       return;
     }
 
-    for (const dependentRunId of dependentRunIds(runId)) {
+    const dependentRunIdsStartedAt = process.hrtime.bigint();
+    const dependents = dependentRunIds(runId);
+    trace?.("dependentsResolved.complete", {
+      dependentRunCount: dependents.length,
+      durationMs: formatTraceDurationMs(dependentRunIdsStartedAt),
+    });
+
+    for (const dependentRunId of dependents) {
       if (options.publishDependentSummaries) {
+        const dependentSummaryProjectionStartedAt = process.hrtime.bigint();
         const dependentSummary = getProjectedSummary(dependentRunId);
+        trace?.("dependentSummaryProjection.complete", {
+          dependentRunId,
+          found: dependentSummary !== null,
+          durationMs: formatTraceDurationMs(dependentSummaryProjectionStartedAt),
+        });
         if (dependentSummary) {
+          const dependentSummaryPublishStartedAt = process.hrtime.bigint();
           publishSummary(dependentSummary);
+          trace?.("dependentSummaryPublish.complete", {
+            dependentRunId,
+            durationMs: formatTraceDurationMs(dependentSummaryPublishStartedAt),
+          });
         }
       }
       if (options.publishDependentDetails) {
+        const dependentDetailProjectionStartedAt = process.hrtime.bigint();
         const dependentDetail = getProjectedDetail(dependentRunId);
+        trace?.("dependentDetailProjection.complete", {
+          dependentRunId,
+          found: dependentDetail !== null,
+          durationMs: formatTraceDurationMs(dependentDetailProjectionStartedAt),
+        });
         if (dependentDetail) {
+          const dependentDetailPublishStartedAt = process.hrtime.bigint();
           publishDetail(dependentDetail);
+          trace?.("dependentDetailPublish.complete", {
+            dependentRunId,
+            durationMs: formatTraceDurationMs(dependentDetailPublishStartedAt),
+          });
         }
       }
     }
+
+    trace?.("complete", {
+      dependentRunCount: dependents.length,
+    });
   };
 
   const publishMutationResult = (
     runId: string,
     previous: RunDetail | null,
     current: RunDetail | null,
+    options: {
+      traceLabel?: string;
+    } = {},
   ): void => {
     publishRunProjections(runId, {
       publishDependentSummaries: shouldPublishDependentSummaries(previous, current),
       publishDependentDetails: shouldPublishDependentDetails(previous, current),
+      traceLabel: options.traceLabel,
     });
   };
 
@@ -865,8 +1056,64 @@ export async function serveDaemon(
       withPublishedMutationAsync(target, () => app.renameRun(target, input, mutationAuditContext)),
     updateRunNote: (target, input) =>
       withPublishedMutation(target, () => app.updateRunNote(target, input)),
-    updateRunPinned: (target, input) =>
-      withPublishedMutation(target, () => app.updateRunPinned(target, input)),
+    updateRunPinned: (target, input) => {
+      const startedAt = process.hrtime.bigint();
+      logPinTrace("daemon.updateRunPinned.start", {
+        target,
+        pinned: input.pinned,
+      });
+      try {
+        const previousDetailStartedAt = process.hrtime.bigint();
+        const previous = getProjectedDetail(target);
+        logPinTrace("daemon.updateRunPinned.previousDetail.complete", {
+          target,
+          found: previous !== null,
+          durationMs: formatTraceDurationMs(previousDetailStartedAt),
+        });
+
+        const mutationStartedAt = process.hrtime.bigint();
+        const result = app.updateRunPinned(target, input);
+        logPinTrace("daemon.updateRunPinned.coreMutation.complete", {
+          runId: result.runId,
+          pinned: result.pinned,
+          changed: result.changed,
+          durationMs: formatTraceDurationMs(mutationStartedAt),
+        });
+
+        const currentDetailStartedAt = process.hrtime.bigint();
+        const current = getProjectedDetail(target);
+        logPinTrace("daemon.updateRunPinned.currentDetail.complete", {
+          runId: result.runId,
+          found: current !== null,
+          durationMs: formatTraceDurationMs(currentDetailStartedAt),
+        });
+
+        const publishStartedAt = process.hrtime.bigint();
+        publishMutationResult(target, previous, current, {
+          traceLabel: "pin",
+        });
+        logPinTrace("daemon.updateRunPinned.publish.complete", {
+          runId: result.runId,
+          durationMs: formatTraceDurationMs(publishStartedAt),
+        });
+
+        logPinTrace("daemon.updateRunPinned.complete", {
+          runId: result.runId,
+          pinned: result.pinned,
+          changed: result.changed,
+          totalMs: formatTraceDurationMs(startedAt),
+        });
+        return result;
+      } catch (error) {
+        logPinTrace("daemon.updateRunPinned.error", {
+          target,
+          pinned: input.pinned,
+          totalMs: formatTraceDurationMs(startedAt),
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
+    },
     updateRunBackendSession: (target, input) =>
       withPublishedDetailMutation(target, () =>
         app.updateRunBackendSession(target, input, mutationAuditContext),

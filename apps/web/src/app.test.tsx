@@ -3105,7 +3105,7 @@ describe("web app", () => {
       }),
     );
 
-    expect(screen.getByRole("button", { name: "Preview" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "View" })).toHaveAttribute("aria-pressed", "true");
     expect(await screen.findByText("Touch-first note")).toBeInTheDocument();
     expect(
       screen.queryByRole("textbox", { name: /run note for build dashboard/i }),

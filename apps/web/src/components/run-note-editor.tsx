@@ -154,7 +154,7 @@ export function RunNoteEditor({
             onClick={() => setMode("preview")}
             type="button"
           >
-            Preview
+            View
           </button>
           <button
             aria-pressed={mode === "edit"}
@@ -193,17 +193,18 @@ export function RunNoteEditor({
 
       {mode === "edit" ? (
         <div className="note-editor__actions">
-          <p className="note-editor__hint">Cmd/Ctrl+Enter to save</p>
+          <button className="btn" disabled={pending} onClick={handleCancel} type="button">
+            Cancel
+          </button>
           <button
+            aria-keyshortcuts="Meta+Enter Ctrl+Enter"
             className="btn btn-primary"
             disabled={pending}
             onClick={() => void handleSave()}
+            title="Save note (Cmd/Ctrl+Enter)"
             type="button"
           >
             {pending ? "Saving..." : "Save"}
-          </button>
-          <button className="btn" disabled={pending} onClick={handleCancel} type="button">
-            Cancel
           </button>
         </div>
       ) : null}
