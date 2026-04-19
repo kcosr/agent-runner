@@ -35,6 +35,8 @@
 
 ### Changed
 
+- `assignments/plan-feature/` now ends the first planning pass blocked on `create_implementer_run_after_approval`, requiring caller review of the attached draft/summary artifacts and resume of the same planning run before the implementer run is created.
+- Generated `plan-feature` implementation workflows now end with `push_branch_and_create_pr`, and delayed implementer runs follow backend-accurate handoff guidance: inspect with `task-runner run brief <run-id>`, then execute with `task-runner run --resume-run <run-id>` unless the caller explicitly chose a passive backend.
 - Codex transport selection now uses the explicit
   `backendSpecific.codex.transport` contract, with fresh-run precedence of
   agent frontmatter → daemon request override → `TASK_RUNNER_CODEX_WS_URL`

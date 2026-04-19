@@ -107,8 +107,12 @@ Notable feature uses:
 - **Attachment coupling**: approved draft (`assignment-seed.md`) and
   summary are attached to the planning run and later discovered by
   implementation via `attachment list --cwd-scope`.
-- **Passive-backend handoff**: the implementer run is created with
-  `--backend passive` so it is externally driven via `run brief`.
+- **Approval-gated handoff**: the planner ends blocked on
+  `create_implementer_run_after_approval`, the caller reviews the
+  attached draft/summary artifacts, then resumes the same planning run
+  to create the implementer run. The resulting run is typically
+  inspected with `run brief` and executed with `run --resume-run`; only
+  explicit passive-backend overrides stay brief-driven.
 
 ### `plan-review`
 
@@ -159,7 +163,7 @@ subagents for parallelism.
 | Agent | Typical assignment | Notes |
 |-------|-------------------|-------|
 | `planner` | `plan-feature` | Produces an executable plan and a summary; uses nested `plan-review`. |
-| `implementer` | generated plan assignment | Created with `--backend passive` by `plan-feature`, then driven externally. |
+| `implementer` | generated plan assignment | Created by `plan-feature` after caller approval; inspect with `run brief`, execute with `run --resume-run` unless the caller explicitly chose a passive backend. |
 | `code-reviewer` | `plan-review` or `code-review` | Nested review surfaces (both assignments). |
 | `doc-reviewer` | `doc-review` | Review-only, writes no files. |
 | any | `repo-orientation` / `familiarize` | Quick or deep onboarding before other work. |
@@ -168,8 +172,11 @@ subagents for parallelism.
 ## Special features in use
 
 - **Ambiguity gate** — `plan-feature` `capture_feature` task.
-- **Passive backend** — `plan-feature` creates implementer runs with
-  `--backend passive` so the caller drives them through `run brief`.
+- **Approval-gated delayed creation** — `plan-feature` blocks on
+  `create_implementer_run_after_approval`, then resumes the same
+  planning run to create the implementer run after caller approval.
+  By default the caller inspects that run with `run brief` and executes
+  it with `run --resume-run`.
 - **Locked tasks** — `plan-feature` template locks the task list so
   executors cannot silently drop or reorder tasks.
 - **Dependencies** — planning → implementation → code-review workflows
