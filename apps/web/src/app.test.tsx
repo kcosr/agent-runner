@@ -3240,7 +3240,9 @@ describe("web app", () => {
     const callsAfterSave = fetchMock.mock.calls
       .slice(callsBeforeSave)
       .map(([input]) => (typeof input === "string" ? input : input.toString()));
-    expect(callsAfterSave).toEqual(["/api/runs/run-1/note"]);
+    expect(callsAfterSave.filter((url) => url === "/api/runs/run-1/note")).toEqual([
+      "/api/runs/run-1/note",
+    ]);
   });
 
   it("defaults the card note dialog to preview mode for touch-style pointers", async () => {
@@ -6658,7 +6660,8 @@ describe("web app", () => {
     await renderApp();
 
     await user.click(await findRunCard("Attachment run"));
-    await user.click(await screen.findByRole("button", { name: /^Attachments\b/i }));
+    expect(await screen.findByRole("button", { name: /^Attachments 2$/i })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^Attachments 2$/i }));
 
     await user.click(screen.getByRole("button", { name: /^Preview notes\.md$/ }));
     expect(await screen.findByRole("heading", { name: "Notes" })).toBeInTheDocument();
@@ -6873,7 +6876,7 @@ describe("web app", () => {
     anchorClick.mockRestore();
   });
 
-  it("shows Run and Group attachment tabs and uses ownerRunId for peer preview/download", async () => {
+  it("shows combined attachments with a source run id and uses ownerRunId for peer preview/download", async () => {
     const fetchMock = installFetchMock(
       {
         runs: [makeRun({ runId: "run-1", name: "Attachment run" })],
@@ -6936,19 +6939,20 @@ describe("web app", () => {
     await user.click(await findRunCard("Attachment run"));
     await user.click(await screen.findByRole("button", { name: /^Attachments\b/i }));
 
-    expect(screen.getByRole("tab", { name: "Run" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByRole("tab", { name: "Run" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Group" })).not.toBeInTheDocument();
     expect(screen.getByText("run-notes.md")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("tab", { name: "Group" }));
     expect(await screen.findByText("peer-notes.md")).toBeInTheDocument();
-    expect(screen.queryByText("run-notes.md")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Upload attachment file")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Upload attachment file")).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /^Remove peer-notes\.md$/ }),
     ).not.toBeInTheDocument();
 
     const peerRow = screen.getByText("peer-notes.md").closest("li");
     expect(peerRow).not.toBeNull();
+    expect(
+      within(peerRow as HTMLLIElement).getByRole("button", { name: "Open source run run-2" }),
+    ).toHaveTextContent("run-2");
     await user.click(within(peerRow as HTMLLIElement).getByRole("button", { name: /^Download / }));
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith("/api/runs/run-2/attachments/att-peer/content"),
@@ -6965,5 +6969,61 @@ describe("web app", () => {
     expect(anchorClick).toHaveBeenCalledTimes(2);
 
     anchorClick.mockRestore();
+  });
+
+  it("switches to the source run when clicking a peer attachment run id", async () => {
+    installFetchMock(
+      {
+        runs: [
+          makeRun({ runId: "run-1", name: "Attachment run" }),
+          makeRun({ runId: "run-2", name: "Peer run" }),
+        ],
+        details: {
+          "run-1": makeDetail({
+            runId: "run-1",
+            name: "Attachment run",
+            attachments: [makeAttachment({ id: "att-run", name: "run-notes.md" })],
+          }),
+          "run-2": makeDetail({
+            runId: "run-2",
+            name: "Peer run",
+            attachments: [makeAttachment({ id: "att-peer", name: "peer-notes.md" })],
+          }),
+        },
+      },
+      {
+        handleRequest: (url) => {
+          if (/\/api\/runs\/run-1\/attachments\?cwdScope=true$/.test(url)) {
+            return new Response(
+              JSON.stringify({
+                attachments: [
+                  {
+                    ...makeAttachment({ id: "att-run", name: "run-notes.md" }),
+                    ownerRunId: "run-1",
+                  },
+                  {
+                    ...makeAttachment({ id: "att-peer", name: "peer-notes.md" }),
+                    ownerRunId: "run-2",
+                  },
+                ],
+              }),
+              { status: 200 },
+            );
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await user.click(await findRunCard("Attachment run"));
+    await user.click(await screen.findByRole("button", { name: /^Attachments\b/i }));
+    await user.click(screen.getByRole("button", { name: "Open source run run-2" }));
+
+    expect(await screen.findByText("Peer run")).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: /^Attachments\b/i }));
+    expect(screen.getByText("peer-notes.md")).toBeInTheDocument();
   });
 });

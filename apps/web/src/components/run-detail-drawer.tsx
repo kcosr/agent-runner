@@ -14,7 +14,7 @@ import {
 } from "react";
 import { formatBytes, formatTimestamp, formatTimestampWithRelative } from "../lib/format.js";
 import type { RunTimelineState } from "../lib/run-timeline.js";
-import type { AttachmentTab, DrawerDetailSection } from "../lib/settings.js";
+import type { DrawerDetailSection } from "../lib/settings.js";
 import { isEditableEventTarget } from "../lib/shortcuts.js";
 import { useDrawerResize } from "../lib/use-drawer-resize.js";
 import { useHorizontalWheelGuard } from "../lib/use-horizontal-wheel-guard.js";
@@ -168,6 +168,7 @@ function scrollElementToBottom(element: HTMLElement) {
 interface AttachmentRowEntry {
   attachment: RunAttachment | AttachmentListEntry;
   ownerRunId: string;
+  source: "run" | "group";
 }
 
 function InlineConfirmActions({
@@ -230,6 +231,7 @@ export function RunDetailDrawer({
   onDownloadAttachment,
   onOpenResumeDialog,
   onOpenAttachmentPreview,
+  onSelectRun,
   onClearBackendSession,
   onRemoveDependency,
   onRemoveAttachment,
@@ -237,14 +239,12 @@ export function RunDetailDrawer({
   onRename,
   onResumeMessageDraftChange,
   onResumeMessageExpandedChange,
-  onSelectAttachmentTab,
   onSetNote,
   onSetBackendSession,
   onSetPinned,
   onSelectSection,
   onSubmitResume,
   onTriggerPrimaryAction,
-  selectedAttachmentTab,
   timelineState,
   onUnarchive,
   onUploadAttachment,
@@ -268,11 +268,8 @@ export function RunDetailDrawer({
   groupAttachmentsQuery: UseQueryResult<AttachmentListEntry[], Error>;
   onDownloadAttachment: (ownerRunId: string, attachmentId: string, name: string) => Promise<void>;
   onOpenResumeDialog: () => void;
-  onOpenAttachmentPreview: (
-    attachmentOwnerRunId: string,
-    attachmentId: string,
-    attachmentTab: AttachmentTab,
-  ) => void;
+  onOpenAttachmentPreview: (attachmentOwnerRunId: string, attachmentId: string) => void;
+  onSelectRun: (runId: string) => void;
   onClearBackendSession: () => Promise<void>;
   onRemoveDependency: (dependencyRunId: string) => Promise<void>;
   onRemoveAttachment: (attachmentId: string) => Promise<void>;
@@ -280,7 +277,6 @@ export function RunDetailDrawer({
   onRename: (name: string | null) => Promise<void>;
   onResumeMessageDraftChange: (value: string) => void;
   onResumeMessageExpandedChange: (expanded: boolean) => void;
-  onSelectAttachmentTab: (attachmentTab: AttachmentTab) => void;
   onSetNote: (note: string | null) => Promise<void>;
   onSetBackendSession: (backendSessionId: string) => Promise<void>;
   onSetPinned: (pinned: boolean) => Promise<void>;
@@ -290,7 +286,6 @@ export function RunDetailDrawer({
   resumeDialogOpen: boolean;
   resumeMessageDraft: string;
   resumeMessageExpanded: boolean;
-  selectedAttachmentTab: AttachmentTab;
   timelineState: RunTimelineState;
   onUnarchive: () => void;
   onUploadAttachment: (file: File) => Promise<void>;
@@ -365,6 +360,19 @@ export function RunDetailDrawer({
     (sum, attachment) => sum + attachment.size,
     0,
   );
+  const combinedAttachments: AttachmentRowEntry[] = [
+    ...run.attachments.map((attachment) => ({
+      attachment,
+      ownerRunId: run.runId,
+      source: "run" as const,
+    })),
+    ...groupAttachments.map((attachment) => ({
+      attachment,
+      ownerRunId: attachment.ownerRunId,
+      source: "group" as const,
+    })),
+  ];
+  const combinedAttachmentSize = totalAttachmentSize + groupAttachmentSize;
   const configuredDependencyIds = new Set(run.dependencies.map((dependency) => dependency.runId));
   const eligibleDependencyCandidates = dependencyCandidateRuns.filter(
     (candidate) => candidate.runId !== run.runId && !configuredDependencyIds.has(candidate.runId),
@@ -751,51 +759,57 @@ export function RunDetailDrawer({
     }
   }
 
-  function renderAttachmentRows(
-    entries: AttachmentRowEntry[],
-    options: { allowRemove: boolean; attachmentTab: AttachmentTab },
-  ) {
+  function renderAttachmentRows(entries: AttachmentRowEntry[]) {
     return (
       <ul aria-label="Attachment list" className="dependency-list">
-        {entries.map(({ attachment, ownerRunId }) => {
+        {entries.map(({ attachment, ownerRunId, source }) => {
           const previewable = isPreviewableAttachment(attachment);
           const rowClassName = previewable
             ? "dependency-row dependency-row--interactive"
             : "dependency-row";
-          const attachmentSummary = (
-            <span className="dependency-copy">
-              <span className="dependency-name">{attachment.name}</span>
-              <span className="dependency-meta">
-                <span className="dependency-meta-id attachment-row-mime">
-                  {attachment.mimeType}
-                </span>
-                <span aria-hidden="true" className="attachment-row-mime">
-                  ·
-                </span>
-                <span>{formatBytes(attachment.size)}</span>
-                <span aria-hidden="true">·</span>
-                <span>{formatTimestamp(attachment.addedAt)}</span>
-              </span>
-            </span>
-          );
+          const allowRemove = source === "run";
 
           return (
             <li className={rowClassName} key={`${ownerRunId}:${attachment.id}`}>
-              {previewable ? (
-                <button
-                  aria-label={`Preview ${attachment.name}`}
-                  className="attachment-row-trigger"
-                  onClick={() =>
-                    onOpenAttachmentPreview(ownerRunId, attachment.id, options.attachmentTab)
-                  }
-                  type="button"
-                >
-                  {attachmentSummary}
-                </button>
-              ) : (
-                attachmentSummary
-              )}
+              <div className="dependency-copy">
+                <span className="attachment-title-row">
+                  {previewable ? (
+                    <button
+                      aria-label={`Preview ${attachment.name}`}
+                      className="attachment-name-trigger"
+                      onClick={() => onOpenAttachmentPreview(ownerRunId, attachment.id)}
+                      type="button"
+                    >
+                      <span className="dependency-name">{attachment.name}</span>
+                    </button>
+                  ) : (
+                    <span className="dependency-name">{attachment.name}</span>
+                  )}
+                </span>
+                <span className="dependency-meta">
+                  <span className="dependency-meta-id attachment-row-mime">
+                    {attachment.mimeType}
+                  </span>
+                  <span aria-hidden="true" className="attachment-row-mime">
+                    ·
+                  </span>
+                  <span>{formatBytes(attachment.size)}</span>
+                  <span aria-hidden="true">·</span>
+                  <span>{formatTimestamp(attachment.addedAt)}</span>
+                </span>
+              </div>
               <div className="dependency-actions">
+                {source === "group" ? (
+                  <button
+                    aria-label={`Open source run ${ownerRunId}`}
+                    className="attachment-source-run run-id"
+                    onClick={() => onSelectRun(ownerRunId)}
+                    title={`Open ${ownerRunId}`}
+                    type="button"
+                  >
+                    {ownerRunId}
+                  </button>
+                ) : null}
                 <button
                   aria-label={`Download ${attachment.name}`}
                   className="icon-btn"
@@ -808,7 +822,7 @@ export function RunDetailDrawer({
                 >
                   <DownloadIcon aria-hidden="true" />
                 </button>
-                {options.allowRemove ? (
+                {allowRemove ? (
                   confirmingAttachmentId === attachment.id ? (
                     <>
                       <button
@@ -1268,8 +1282,8 @@ export function RunDetailDrawer({
               type="button"
             >
               Attachments
-              {run.attachments.length > 0 ? (
-                <span className="tab-count"> {run.attachments.length}</span>
+              {combinedAttachments.length > 0 ? (
+                <span className="tab-count"> {combinedAttachments.length}</span>
               ) : null}
             </button>
             <button
@@ -1324,66 +1338,33 @@ export function RunDetailDrawer({
               <div className="drawer-panel-card dependency-panel">
                 <div className="dependency-summary">
                   <span>
-                    {selectedAttachmentTab === "run"
-                      ? run.attachments.length === 0
-                        ? "No attachments yet."
-                        : `${run.attachments.length} attachment${run.attachments.length === 1 ? "" : "s"} · ${formatBytes(totalAttachmentSize)}`
-                      : groupAttachments.length === 0
-                        ? "No peer attachments for runs with this exact cwd."
-                        : `${groupAttachments.length} peer attachment${groupAttachments.length === 1 ? "" : "s"} · ${formatBytes(groupAttachmentSize)}`}
+                    {combinedAttachments.length === 0
+                      ? groupAttachmentsQuery.isPending
+                        ? "No run attachments yet. Loading group attachments..."
+                        : "No attachments yet."
+                      : `${combinedAttachments.length} attachment${combinedAttachments.length === 1 ? "" : "s"} · ${formatBytes(combinedAttachmentSize)}`}
                   </span>
-                  {selectedAttachmentTab === "run" ? (
-                    <>
-                      <input
-                        aria-label="Upload attachment file"
-                        className="sr-only"
-                        onChange={handleAttachmentInputChange}
-                        ref={attachmentInputRef}
-                        type="file"
-                      />
-                      <button
-                        className="btn"
-                        disabled={actionsLocked}
-                        onClick={() => attachmentInputRef.current?.click()}
-                        type="button"
-                      >
-                        {uploadAttachmentPending ? "Uploading..." : "Upload"}
-                      </button>
-                    </>
-                  ) : null}
+                  <>
+                    <input
+                      aria-label="Upload attachment file"
+                      className="sr-only"
+                      onChange={handleAttachmentInputChange}
+                      ref={attachmentInputRef}
+                      type="file"
+                    />
+                    <button
+                      className="btn"
+                      disabled={actionsLocked}
+                      onClick={() => attachmentInputRef.current?.click()}
+                      type="button"
+                    >
+                      {uploadAttachmentPending ? "Uploading..." : "Upload"}
+                    </button>
+                  </>
                 </div>
 
-                <nav aria-label="Attachment scope" className="tabs" role="tablist">
-                  <button
-                    aria-selected={selectedAttachmentTab === "run"}
-                    className={selectedAttachmentTab === "run" ? "tab active" : "tab"}
-                    onClick={() => onSelectAttachmentTab("run")}
-                    role="tab"
-                    type="button"
-                  >
-                    Run
-                  </button>
-                  <button
-                    aria-selected={selectedAttachmentTab === "group"}
-                    className={selectedAttachmentTab === "group" ? "tab active" : "tab"}
-                    onClick={() => onSelectAttachmentTab("group")}
-                    role="tab"
-                    type="button"
-                  >
-                    Group
-                  </button>
-                </nav>
-
-                {selectedAttachmentTab === "run" ? (
-                  run.attachments.length === 0 ? null : (
-                    renderAttachmentRows(
-                      run.attachments.map((attachment) => ({
-                        attachment,
-                        ownerRunId: run.runId,
-                      })),
-                      { allowRemove: true, attachmentTab: "run" },
-                    )
-                  )
+                {combinedAttachments.length > 0 ? (
+                  renderAttachmentRows(combinedAttachments)
                 ) : groupAttachmentsQuery.isPending ? (
                   <div className="drawer-state">
                     <div className="skeleton-line skeleton-line--short" />
@@ -1401,20 +1382,18 @@ export function RunDetailDrawer({
                     <h3>Group attachments failed to load</h3>
                     <p>{groupAttachmentsQuery.error.message}</p>
                   </div>
-                ) : groupAttachments.length === 0 ? (
-                  <div className="drawer-state">
-                    <h3>No peer attachments yet</h3>
-                    <p>No other runs with this exact cwd currently have attachments.</p>
-                  </div>
                 ) : (
-                  renderAttachmentRows(
-                    groupAttachments.map((attachment) => ({
-                      attachment,
-                      ownerRunId: attachment.ownerRunId,
-                    })),
-                    { allowRemove: false, attachmentTab: "group" },
-                  )
+                  <div className="drawer-state">
+                    <h3>No attachments yet</h3>
+                    <p>No attachments are available for this run or its cwd group.</p>
+                  </div>
                 )}
+                {combinedAttachments.length > 0 && groupAttachmentsQuery.isError ? (
+                  <div className="drawer-state">
+                    <h3>Group attachments failed to load</h3>
+                    <p>{groupAttachmentsQuery.error.message}</p>
+                  </div>
+                ) : null}
               </div>
             </section>
           ) : null}

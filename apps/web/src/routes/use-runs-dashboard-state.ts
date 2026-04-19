@@ -18,7 +18,6 @@ import { compareRunsByStartedAtDesc, sortRunsWithPinnedFirst } from "../lib/run-
 import { useRunTimelineState } from "../lib/run-timeline.js";
 import { useRuntimeConfig } from "../lib/runtime-config.js";
 import {
-  type AttachmentTab,
   DEFAULT_DRAWER_VIEW,
   type DashboardStructuredFilters,
   type DrawerDetailSection,
@@ -451,8 +450,6 @@ export function useRunsDashboardState() {
     selectedRunId !== undefined
       ? (viewState.drawerViewsByRunId[selectedRunId] ?? DEFAULT_DRAWER_VIEW)
       : undefined;
-  const selectedAttachmentTab =
-    selectedDrawerView?.attachmentTab ?? DEFAULT_DRAWER_VIEW.attachmentTab;
   const selectedRunGroupAttachmentsQuery = useQuery({
     queryKey: ["attachment-list", detailRunId, "cwd-scope"],
     queryFn: async () => {
@@ -461,10 +458,7 @@ export function useRunsDashboardState() {
       }
       return await api.listAttachments(detailRunId, { cwdScope: true });
     },
-    enabled:
-      Boolean(detailRunId) &&
-      selectedDrawerView?.detailSection === "attachments" &&
-      selectedDrawerView.attachmentTab === "group",
+    enabled: Boolean(detailRunId),
     retry: false,
   });
 
@@ -1000,11 +994,7 @@ export function useRunsDashboardState() {
       void navigate({ replace: options?.replace, to: `/runs/${runId}` });
     },
     openSelectedRunResumeDialog: openResumeDialog,
-    openSelectedRunAttachmentPreview: (
-      attachmentOwnerRunId: string,
-      attachmentId: string,
-      attachmentTab: AttachmentTab,
-    ) => {
+    openSelectedRunAttachmentPreview: (attachmentOwnerRunId: string, attachmentId: string) => {
       if (!selectedRunId) {
         return;
       }
@@ -1013,7 +1003,6 @@ export function useRunsDashboardState() {
         detailSection: "attachments",
         attachmentId,
         attachmentOwnerRunId,
-        attachmentTab,
       });
     },
     preferences,
@@ -1089,7 +1078,6 @@ export function useRunsDashboardState() {
         detailSection: "attachments",
         attachmentId: null,
         attachmentOwnerRunId: null,
-        attachmentTab: selectedAttachmentTab,
       });
     },
     resetBoardFilters: () => {
@@ -1118,19 +1106,6 @@ export function useRunsDashboardState() {
         detailSection,
         attachmentId: null,
         attachmentOwnerRunId: null,
-        attachmentTab: selectedAttachmentTab,
-      });
-    },
-    updateSelectedRunAttachmentTab: (attachmentTab: AttachmentTab) => {
-      if (!selectedRunId) {
-        return;
-      }
-      setSelectedRunDrawerView(selectedRunId, {
-        mode: "detail",
-        detailSection: "attachments",
-        attachmentId: null,
-        attachmentOwnerRunId: null,
-        attachmentTab,
       });
     },
     toggleStructuredFilter: (key: keyof DashboardStructuredFilters, value: string) => {

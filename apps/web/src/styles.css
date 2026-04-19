@@ -699,6 +699,19 @@ body {
   margin-top: 16px;
 }
 
+@media (max-width: 640px) {
+  .resume-dialog-backdrop {
+    align-items: flex-start;
+    padding-top: max(40px, calc(env(safe-area-inset-top) + 32px));
+    padding-bottom: max(72px, calc(env(safe-area-inset-bottom) + 20px));
+  }
+
+  .resume-dialog {
+    max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 120px);
+    overflow-y: auto;
+  }
+}
+
 .main,
 .layout,
 .board,
@@ -1238,6 +1251,44 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.attachment-title-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.attachment-name-trigger {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.attachment-source-run {
+  flex: 0 0 auto;
+  height: 18px;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 88%, var(--card));
+  color: var(--muted-foreground);
+  text-transform: lowercase;
+}
+
+.attachment-source-run:hover {
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--border));
+}
+
+.app[data-focus-indicators="on"] .attachment-name-trigger:focus-visible,
+.app[data-focus-indicators="on"] .attachment-source-run:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 
 .dependency-meta {
