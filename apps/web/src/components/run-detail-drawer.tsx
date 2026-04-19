@@ -528,9 +528,7 @@ export function RunDetailDrawer({
       if (pendingAttemptAvailable) {
         return;
       }
-      if (timelineAttempts.length === 0) {
-        setSelectedAttempt(null);
-      }
+      setSelectedAttempt(timelineAttempts[timelineAttempts.length - 1]?.attempt ?? null);
       return;
     }
     if (selectedAttempt !== null && availableAttempts.has(selectedAttempt)) {
