@@ -34,7 +34,7 @@ interface CardRectSnapshot {
 const CARD_MOVE_DURATION_MS = 260;
 const CARD_HIGHLIGHT_DURATION_MS = 720;
 const NOTE_PREVIEW_CLOSE_DELAY_MS = 140;
-const NOTE_PREVIEW_REOPEN_SUPPRESS_MS = 400;
+const NOTE_CONTROL_REOPEN_SUPPRESS_MS = 900;
 const cardRectByRunId = new Map<string, CardRectSnapshot>();
 
 function usePrefersReducedMotion(): boolean {
@@ -92,7 +92,7 @@ export function RunCard({
   const noteControlRef = useRef<HTMLDivElement | null>(null);
   const notePreviewRef = useRef<HTMLDivElement | null>(null);
   const notePreviewCloseTimeoutRef = useRef<number | null>(null);
-  const notePreviewSuppressedUntilRef = useRef(0);
+  const noteControlSuppressedUntilRef = useRef(0);
   const prefersReducedMotion = usePrefersReducedMotion();
   const preferredNoteEditorMode = usePreferredRunNoteEditorMode();
   const previewFirstNoteMode = preferredNoteEditorMode === "preview";
@@ -152,7 +152,7 @@ export function RunCard({
     if (
       !run.notePresent ||
       previewFirstNoteMode ||
-      Date.now() < notePreviewSuppressedUntilRef.current
+      Date.now() < noteControlSuppressedUntilRef.current
     ) {
       return;
     }
@@ -192,13 +192,16 @@ export function RunCard({
   }
 
   function openNoteDialog() {
+    if (Date.now() < noteControlSuppressedUntilRef.current) {
+      return;
+    }
     clearNotePreviewCloseTimeout();
     setNotePreviewOpen(false);
     setNoteDialogOpen(true);
   }
 
   function closeNoteDialog() {
-    notePreviewSuppressedUntilRef.current = Date.now() + NOTE_PREVIEW_REOPEN_SUPPRESS_MS;
+    noteControlSuppressedUntilRef.current = Date.now() + NOTE_CONTROL_REOPEN_SUPPRESS_MS;
     clearNotePreviewCloseTimeout();
     setNotePreviewOpen(false);
     setNoteDialogOpen(false);
@@ -278,19 +281,17 @@ export function RunCard({
       const gap = 10;
       const preferredWidth = Math.min(420, Math.max(280, cardRect.width - 24));
       const width = Math.min(preferredWidth, viewportWidth - margin * 2);
-      const left = Math.min(Math.max(margin, cardRect.left), viewportWidth - width - margin);
-      const spaceAbove = noteControlRect.top - margin;
-      const spaceBelow = viewportHeight - noteControlRect.bottom - margin;
-      const placeBelow = spaceAbove < 260 && spaceBelow > spaceAbove;
-      const maxHeight = Math.max(120, Math.min(240, (placeBelow ? spaceBelow : spaceAbove) - gap));
+      const left = Math.min(
+        Math.max(margin, noteControlRect.right - width),
+        viewportWidth - width - margin,
+      );
+      const top = noteControlRect.bottom + gap;
+      const maxHeight = Math.max(48, Math.min(240, viewportHeight - top - margin));
 
       setNotePreviewStyle({
-        bottom: placeBelow ? undefined : viewportHeight - noteControlRect.top + gap,
         left,
         maxHeight,
-        top: placeBelow
-          ? Math.min(noteControlRect.bottom + gap, viewportHeight - maxHeight - margin)
-          : undefined,
+        top,
         width,
       });
     };

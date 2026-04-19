@@ -623,11 +623,11 @@ pre {
   overflow: auto;
   box-sizing: border-box;
   padding: 12px;
-  background: rgba(15, 23, 42, 0.96);
-  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(24, 24, 27, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: var(--radius-md);
-  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.24);
-  color: rgb(248, 250, 252);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.32);
+  color: rgb(245, 245, 245);
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
   z-index: 120;
@@ -635,11 +635,11 @@ pre {
 
 .card-note-preview__state {
   margin: 0;
-  color: rgb(248, 250, 252);
-  -webkit-text-fill-color: rgb(248, 250, 252);
+  color: rgb(245, 245, 245);
+  -webkit-text-fill-color: rgb(245, 245, 245);
   font-size: 12px;
   line-height: 1.5;
-  text-shadow: 0 1px 0 rgba(15, 23, 42, 0.35);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.28);
 }
 
 .card-note-preview__loading {
@@ -648,16 +648,16 @@ pre {
 }
 
 .card-note-preview__loading .skeleton-line {
-  background: rgba(148, 163, 184, 0.24);
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .card-note-preview__markdown {
   font-size: 13px;
   font-weight: 600;
   line-height: 1.5;
-  color: rgb(248, 250, 252);
-  -webkit-text-fill-color: rgb(248, 250, 252);
-  text-shadow: 0 1px 0 rgba(15, 23, 42, 0.35);
+  color: rgb(245, 245, 245);
+  -webkit-text-fill-color: rgb(245, 245, 245);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.28);
 }
 
 .card-note-preview__markdown :is(p, li, blockquote, code, strong, em, h1, h2, h3, h4, h5, h6) {
@@ -666,19 +666,21 @@ pre {
 }
 
 .card-note-preview__markdown code {
-  background: rgba(148, 163, 184, 0.2);
+  background: rgba(255, 255, 255, 0.1);
   border: 0;
   color: inherit;
   -webkit-text-fill-color: inherit;
 }
 
 .card-note-preview__markdown pre {
-  background: rgba(15, 23, 42, 0.52);
+  background: rgba(0, 0, 0, 0.22);
 }
 
 .card-note-preview__markdown a {
-  color: rgb(191, 219, 254);
-  -webkit-text-fill-color: rgb(191, 219, 254);
+  color: inherit;
+  -webkit-text-fill-color: inherit;
+  text-decoration: underline;
+  text-decoration-color: rgba(255, 255, 255, 0.32);
 }
 
 .card-progress {
