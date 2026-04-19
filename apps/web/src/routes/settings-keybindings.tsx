@@ -35,10 +35,10 @@ const SHORTCUT_SECTIONS: readonly ShortcutSection[] = [
         title: "Focus search",
       },
       {
-        description: "Open Filters and move focus into the first filter control.",
+        description: "Toggle Filters panel and move focus into the first filter control.",
         keys: ["Ctrl", "Shift", "F"],
         macKeys: ["Cmd", "Shift", "F"],
-        title: "Open Filters",
+        title: "Toggle Filters",
       },
       {
         description: "Blur the focused search field and keep the current query.",

@@ -2105,12 +2105,7 @@ body {
   }
 
   .field.search,
-  .filters-control,
   .field.select {
-    width: 100%;
-  }
-
-  .filters-trigger {
     width: 100%;
   }
 

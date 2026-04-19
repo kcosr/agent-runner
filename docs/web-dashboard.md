@@ -142,7 +142,7 @@ The dashboard's shortcut system is customizable from
 | `Esc` (attachment preview) | Back to attachments |
 | `Enter` | Primary action for the selected card (Resume, etc.) |
 | `↑` / `↓` / `←` / `→` | Move the board selection |
-| `Ctrl+Shift+F` | Open Filters panel |
+| `Ctrl+Shift+F` | Toggle Filters panel |
 
 Shortcuts are suppressed while typing in inputs or when a modal dialog
 is open.

@@ -97,6 +97,7 @@ export function computeDrawerMaxWidth(viewportWidth: number): number {
 }
 
 const PREFERENCES_STORAGE_KEY = "task-runner:web:dashboard-preferences";
+const VIEW_STATE_STORAGE_KEY = "task-runner:web:dashboard-view-state";
 
 interface DashboardPreferencesContextValue {
   preferences: DashboardPreferences;
@@ -130,6 +131,22 @@ function loadDashboardPreferences(): DashboardPreferences {
     return parseStoredDashboardPreferences(JSON.parse(raw));
   } catch {
     return DEFAULT_DASHBOARD_PREFERENCES;
+  }
+}
+
+function loadDashboardViewState(): DashboardViewState {
+  if (typeof window === "undefined") {
+    return DEFAULT_DASHBOARD_VIEW_STATE;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(VIEW_STATE_STORAGE_KEY);
+    if (!raw) {
+      return DEFAULT_DASHBOARD_VIEW_STATE;
+    }
+    return parseStoredDashboardViewState(JSON.parse(raw));
+  } catch {
+    return DEFAULT_DASHBOARD_VIEW_STATE;
   }
 }
 
@@ -186,6 +203,20 @@ function parseStoredStructuredFilterValue(value: unknown): string | null {
   return normalized.length > 0 ? normalized : null;
 }
 
+function parseStoredDashboardViewState(value: unknown): DashboardViewState {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return DEFAULT_DASHBOARD_VIEW_STATE;
+  }
+
+  const record = value as Record<string, unknown>;
+  return {
+    ...DEFAULT_DASHBOARD_VIEW_STATE,
+    collapsedColumnKeys: Array.isArray(record.collapsedColumnKeys)
+      ? record.collapsedColumnKeys.filter((key): key is string => typeof key === "string")
+      : DEFAULT_DASHBOARD_VIEW_STATE.collapsedColumnKeys,
+  };
+}
+
 export function hasActiveDashboardStructuredFilters(
   structuredFilters: DashboardStructuredFilters,
 ): boolean {
@@ -211,11 +242,20 @@ export function DashboardSettingsProvider({ children }: { children: ReactNode })
   const [preferences, setPreferences] = useState<DashboardPreferences>(() =>
     loadDashboardPreferences(),
   );
-  const [viewState, setViewState] = useState<DashboardViewState>(DEFAULT_DASHBOARD_VIEW_STATE);
+  const [viewState, setViewState] = useState<DashboardViewState>(() => loadDashboardViewState());
 
   useEffect(() => {
     window.localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(preferences));
   }, [preferences]);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      VIEW_STATE_STORAGE_KEY,
+      JSON.stringify({
+        collapsedColumnKeys: viewState.collapsedColumnKeys,
+      }),
+    );
+  }, [viewState.collapsedColumnKeys]);
 
   const preferencesValue = useMemo<DashboardPreferencesContextValue>(
     () => ({

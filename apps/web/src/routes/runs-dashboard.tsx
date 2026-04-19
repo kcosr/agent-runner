@@ -12,8 +12,7 @@ import { useRunsDashboardState } from "./use-runs-dashboard-state.js";
 
 export function RunsDashboardRoute() {
   const state = useRunsDashboardState();
-  const [openFiltersRequestVersion, setOpenFiltersRequestVersion] = useState(0);
-  const filtersTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const [toggleFiltersVersion, setToggleFiltersVersion] = useState(0);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const latestStateRef = useRef(state);
   const navigableBoardColumns = state.boardColumns.filter(
@@ -62,10 +61,9 @@ export function RunsDashboardRoute() {
         return;
       }
 
-      if (command === "ui.openFilters") {
+      if (command === "ui.toggleFilters") {
         event.preventDefault();
-        filtersTriggerRef.current?.focus();
-        setOpenFiltersRequestVersion((current) => current + 1);
+        setToggleFiltersVersion((current) => current + 1);
         return;
       }
 
@@ -247,9 +245,8 @@ export function RunsDashboardRoute() {
       toolbar={
         <RunFilters
           filterOptions={state.filterOptions}
-          filtersTriggerRef={filtersTriggerRef}
-          openFiltersRequestVersion={openFiltersRequestVersion}
           preferences={state.preferences}
+          toggleFiltersVersion={toggleFiltersVersion}
           searchInputRef={searchInputRef}
           updatePreferences={state.updatePreferences}
           updateViewState={state.updateViewState}

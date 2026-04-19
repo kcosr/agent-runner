@@ -315,20 +315,8 @@ pre {
   position: relative;
 }
 
-.filters-trigger {
-  min-width: 112px;
-  justify-content: space-between;
-  cursor: pointer;
-}
-
 .filters-trigger[data-active="true"] {
-  border-color: color-mix(in srgb, var(--accent-strong, #2563eb) 24%, var(--border));
-  background: color-mix(in srgb, var(--accent) 40%, var(--card));
-}
-
-.filters-trigger__label {
-  font-size: 13px;
-  font-weight: 600;
+  color: var(--primary);
 }
 
 .filters-backdrop {
@@ -343,9 +331,11 @@ pre {
 .filters-panel {
   position: absolute;
   top: calc(100% + 10px);
+  left: auto;
   right: 0;
+  margin: 0;
   z-index: 15;
-  width: min(22rem, calc(100vw - 32px));
+  width: min(18rem, calc(100vw - 32px));
   padding: 14px;
   border: 1px solid var(--border);
   border-radius: calc(var(--radius-lg) + 2px);
@@ -381,8 +371,24 @@ pre {
 }
 
 .filters-panel__field {
+  display: flex;
   width: 100%;
-  justify-content: space-between;
+  gap: 8px;
+}
+
+.filters-panel__field-label {
+  flex: 0 0 72px;
+  justify-content: flex-start;
+}
+
+.filters-panel__field-control {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.filters-panel__field-control select {
+  flex: 1 1 auto;
+  width: auto;
 }
 
 .icon-btn {

@@ -155,7 +155,7 @@ describe("resolveRunsShortcutCommand", () => {
         },
         context,
       ),
-    ).toBe("ui.openFilters");
+    ).toBe("ui.toggleFilters");
     expect(
       resolveRunsShortcutCommand(
         {

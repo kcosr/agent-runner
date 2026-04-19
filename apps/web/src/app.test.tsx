@@ -41,6 +41,12 @@ const DEFAULT_DASHBOARD_PREFERENCES = {
   },
 };
 
+const DEFAULT_DASHBOARD_VIEW_STATE: {
+  collapsedColumnKeys: string[];
+} = {
+  collapsedColumnKeys: [],
+};
+
 class MockEventSource {
   static instances: MockEventSource[] = [];
 
@@ -76,6 +82,16 @@ function setStoredDashboardPreferences(overrides: Partial<typeof DEFAULT_DASHBOA
     "task-runner:web:dashboard-preferences",
     JSON.stringify({
       ...DEFAULT_DASHBOARD_PREFERENCES,
+      ...overrides,
+    }),
+  );
+}
+
+function setStoredDashboardViewState(overrides: Partial<typeof DEFAULT_DASHBOARD_VIEW_STATE>) {
+  window.localStorage.setItem(
+    "task-runner:web:dashboard-view-state",
+    JSON.stringify({
+      ...DEFAULT_DASHBOARD_VIEW_STATE,
       ...overrides,
     }),
   );
@@ -881,6 +897,13 @@ function getBoardColumn(name: string) {
 function getColumnRunNames(name: string) {
   const column = getBoardColumn(name);
   return Array.from(column.querySelectorAll(".col-body .card .card-title")).map(
+    (element) => element.textContent ?? "",
+  );
+}
+
+function getBoardColumnTitles() {
+  const board = screen.getByLabelText("Run board");
+  return Array.from(board.querySelectorAll(".column h2")).map(
     (element) => element.textContent ?? "",
   );
 }
@@ -1717,7 +1740,7 @@ describe("web app", () => {
     expect(screen.getByPlaceholderText("Search runs")).toHaveFocus();
   });
 
-  it("opens Filters with Ctrl+Shift+F and focuses the first filter control", async () => {
+  it("toggles Filters open and closed with Ctrl+Shift+F", async () => {
     installFetchMock({
       runs: [makeRun()],
       details: { "run-1": makeDetail() },
@@ -1731,40 +1754,15 @@ describe("web app", () => {
     expect(runCard).toHaveFocus();
 
     await user.keyboard("{Control>}{Shift>}f{/Shift}{/Control}");
-
     expect(await screen.findByRole("dialog", { name: "Filters" })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Repo" })).toHaveFocus();
-  });
-
-  it("closes and reopens Filters after opening with Ctrl+Shift+F", async () => {
-    installFetchMock({
-      runs: [makeRun()],
-      details: { "run-1": makeDetail() },
-    });
-
-    const user = userEvent.setup();
-    await renderApp();
-
-    const runCard = await findRunCard("Build dashboard");
-    runCard.focus();
-    expect(runCard).toHaveFocus();
 
     await user.keyboard("{Control>}{Shift>}f{/Shift}{/Control}");
-
-    expect(await screen.findByRole("dialog", { name: "Filters" })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Repo" })).toHaveFocus();
-
-    await user.keyboard("{Escape}");
-
     await waitFor(() => {
       expect(screen.queryByRole("dialog", { name: "Filters" })).not.toBeInTheDocument();
     });
 
-    const filtersTrigger = screen.getByRole("button", { name: "Filters" });
-    expect(filtersTrigger).toHaveFocus();
-
     await user.keyboard("{Control>}{Shift>}f{/Shift}{/Control}");
-
     expect(await screen.findByRole("dialog", { name: "Filters" })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Repo" })).toHaveFocus();
   });
@@ -1809,7 +1807,7 @@ describe("web app", () => {
       within(screen.getByRole("combobox", { name: "Backend" }))
         .getAllByRole("option")
         .map((option) => option.textContent),
-    ).toEqual(["Any", "claude", "codex", "passive"]);
+    ).toEqual(["", "claude", "codex", "passive"]);
 
     await user.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "repo-a");
     expect(await findRunCard("Repo A Codex")).toBeInTheDocument();
@@ -1821,7 +1819,7 @@ describe("web app", () => {
       within(screen.getByRole("combobox", { name: "Backend" }))
         .getAllByRole("option")
         .map((option) => option.textContent),
-    ).toEqual(["Any", "claude", "codex", "passive"]);
+    ).toEqual(["", "claude", "codex", "passive"]);
 
     await user.selectOptions(screen.getByRole("combobox", { name: "Agent" }), "reviewer");
     expect(await findRunCard("Repo A Passive")).toBeInTheDocument();
@@ -1837,7 +1835,7 @@ describe("web app", () => {
     expect(await findRunCard("Repo A Codex")).toBeInTheDocument();
     expect(await findRunCard("Repo A Passive")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Clear all" }));
+    await user.click(screen.getByRole("button", { name: "Clear" }));
     expect(await findRunCard("Repo A Codex")).toBeInTheDocument();
     expect(await findRunCard("Repo A Passive")).toBeInTheDocument();
     expect(await findRunCard("Repo B Claude")).toBeInTheDocument();
@@ -3621,6 +3619,11 @@ describe("web app", () => {
     await waitFor(() => {
       expect(runningColumn).toHaveAttribute("data-collapsed", "true");
     });
+    expect(window.localStorage.getItem("task-runner:web:dashboard-view-state")).toBe(
+      JSON.stringify({
+        collapsedColumnKeys: ["running"],
+      }),
+    );
     expect(
       within(runningColumn).getByRole("button", { name: "Expand Running column" }),
     ).toBeInTheDocument();
@@ -3631,6 +3634,11 @@ describe("web app", () => {
     await waitFor(() => {
       expect(runningColumn).toHaveAttribute("data-collapsed", "false");
     });
+    expect(window.localStorage.getItem("task-runner:web:dashboard-view-state")).toBe(
+      JSON.stringify({
+        collapsedColumnKeys: [],
+      }),
+    );
     expect(
       within(runningColumn).getByRole("button", { name: "Collapse Running column" }),
     ).toBeInTheDocument();
@@ -3690,6 +3698,245 @@ describe("web app", () => {
     await waitFor(() => {
       expect(getBoardColumn("Failed")).toHaveAttribute("data-collapsed", "true");
     });
+  });
+
+  it("hydrates saved collapsed columns and leaves unsaved columns expanded", async () => {
+    setStoredDashboardPreferences({
+      hideEmptyColumns: false,
+    });
+    setStoredDashboardViewState({
+      collapsedColumnKeys: ["running"],
+    });
+    installFetchMock({
+      runs: [
+        makeRun(),
+        makeRun({
+          runId: "run-success",
+          assignmentName: "Done dashboard",
+          status: "success",
+        }),
+      ],
+      details: {
+        "run-1": makeDetail(),
+        "run-success": makeDetail({
+          runId: "run-success",
+          status: "success",
+        }),
+      },
+    });
+
+    await renderApp();
+    await findRunCard("Done dashboard");
+
+    expect(getBoardColumn("Running")).toHaveAttribute("data-collapsed", "true");
+    expect(getBoardColumn("Completed")).toHaveAttribute("data-collapsed", "false");
+  });
+
+  it("renders split-status columns with Completed last", async () => {
+    setStoredDashboardPreferences({
+      collapseFailureStates: false,
+      hideEmptyColumns: false,
+    });
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "run-pending",
+          activeTask: null,
+          assignmentName: "Pending dashboard",
+          name: "Pending dashboard",
+          status: "initialized",
+        }),
+        makeRun({
+          runId: "run-running",
+          assignmentName: "Running dashboard",
+          name: "Running dashboard",
+          status: "running",
+        }),
+        makeRun({
+          runId: "run-blocked",
+          activeTask: null,
+          assignmentName: "Blocked dashboard",
+          name: "Blocked dashboard",
+          status: "blocked",
+        }),
+        makeRun({
+          runId: "run-error",
+          activeTask: null,
+          assignmentName: "Broken dashboard",
+          name: "Broken dashboard",
+          status: "error",
+        }),
+        makeRun({
+          runId: "run-exhausted",
+          activeTask: null,
+          assignmentName: "Exhausted dashboard",
+          name: "Exhausted dashboard",
+          status: "exhausted",
+        }),
+        makeRun({
+          runId: "run-aborted",
+          activeTask: null,
+          assignmentName: "Aborted dashboard",
+          name: "Aborted dashboard",
+          status: "aborted",
+        }),
+        makeRun({
+          runId: "run-completed",
+          activeTask: null,
+          effectiveStatus: "success",
+          assignmentName: "Completed dashboard",
+          name: "Completed dashboard",
+          status: "success",
+        }),
+      ],
+      details: {
+        "run-pending": makeDetail({
+          runId: "run-pending",
+          activeTask: null,
+          status: "initialized",
+        }),
+        "run-running": makeDetail({
+          runId: "run-running",
+          status: "running",
+        }),
+        "run-blocked": makeDetail({
+          runId: "run-blocked",
+          activeTask: null,
+          status: "blocked",
+        }),
+        "run-error": makeDetail({
+          runId: "run-error",
+          activeTask: null,
+          status: "error",
+        }),
+        "run-exhausted": makeDetail({
+          runId: "run-exhausted",
+          activeTask: null,
+          status: "exhausted",
+        }),
+        "run-aborted": makeDetail({
+          runId: "run-aborted",
+          activeTask: null,
+          status: "aborted",
+        }),
+        "run-completed": makeDetail({
+          runId: "run-completed",
+          activeTask: null,
+          effectiveStatus: "success",
+          status: "success",
+        }),
+      },
+    });
+
+    await renderApp();
+    await findRunCard("Running dashboard");
+
+    expect(getBoardColumnTitles()).toEqual([
+      "Pending",
+      "Running",
+      "Blocked",
+      "Error",
+      "Exhausted",
+      "Aborted",
+      "Completed",
+    ]);
+  });
+
+  it("renders collapsed failure columns with Completed last", async () => {
+    setStoredDashboardPreferences({
+      collapseFailureStates: true,
+      hideEmptyColumns: false,
+    });
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "run-pending",
+          activeTask: null,
+          assignmentName: "Pending dashboard",
+          name: "Pending dashboard",
+          status: "initialized",
+        }),
+        makeRun({
+          runId: "run-running",
+          assignmentName: "Running dashboard",
+          name: "Running dashboard",
+          status: "running",
+        }),
+        makeRun({
+          runId: "run-blocked",
+          activeTask: null,
+          assignmentName: "Blocked dashboard",
+          name: "Blocked dashboard",
+          status: "blocked",
+        }),
+        makeRun({
+          runId: "run-error",
+          activeTask: null,
+          assignmentName: "Broken dashboard",
+          name: "Broken dashboard",
+          status: "error",
+        }),
+        makeRun({
+          runId: "run-aborted",
+          activeTask: null,
+          assignmentName: "Aborted dashboard",
+          name: "Aborted dashboard",
+          status: "aborted",
+        }),
+        makeRun({
+          runId: "run-completed",
+          activeTask: null,
+          effectiveStatus: "success",
+          assignmentName: "Completed dashboard",
+          name: "Completed dashboard",
+          status: "success",
+        }),
+      ],
+      details: {
+        "run-pending": makeDetail({
+          runId: "run-pending",
+          activeTask: null,
+          status: "initialized",
+        }),
+        "run-running": makeDetail({
+          runId: "run-running",
+          status: "running",
+        }),
+        "run-blocked": makeDetail({
+          runId: "run-blocked",
+          activeTask: null,
+          status: "blocked",
+        }),
+        "run-error": makeDetail({
+          runId: "run-error",
+          activeTask: null,
+          status: "error",
+        }),
+        "run-aborted": makeDetail({
+          runId: "run-aborted",
+          activeTask: null,
+          status: "aborted",
+        }),
+        "run-completed": makeDetail({
+          runId: "run-completed",
+          activeTask: null,
+          effectiveStatus: "success",
+          status: "success",
+        }),
+      },
+    });
+
+    await renderApp();
+    await findRunCard("Running dashboard");
+
+    expect(getBoardColumnTitles()).toEqual([
+      "Pending",
+      "Running",
+      "Blocked",
+      "Failed",
+      "Aborted",
+      "Completed",
+    ]);
   });
 
   it("shows jump buttons for overflowed non-empty columns and scrolls them into view", async () => {

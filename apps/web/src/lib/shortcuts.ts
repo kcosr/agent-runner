@@ -6,7 +6,7 @@ export type RunsShortcutCommand =
   | "board.moveDown"
   | "board.moveLeft"
   | "board.moveRight"
-  | "ui.openFilters"
+  | "ui.toggleFilters"
   | "ui.toggleDrawerFullscreen"
   | "ui.blurSearch"
   | "run.close"
@@ -176,7 +176,7 @@ export function resolveRunsShortcutCommand(
     matchesShortcut(event, { ctrlKey: true, key: "f", shiftKey: true }) ||
     matchesShortcut(event, { key: "f", metaKey: true, shiftKey: true })
   ) {
-    return context.typingTarget || context.resumeDialogOpen ? null : "ui.openFilters";
+    return context.typingTarget || context.resumeDialogOpen ? null : "ui.toggleFilters";
   }
 
   if (

@@ -108,7 +108,6 @@ function buildColumns(runs: RunSummary[], collapseFailureStates: boolean): Board
   const base: BoardColumn[] = [
     { key: "pending", title: "Pending", statuses: ["initialized"], runs: [] },
     { key: "running", title: "Running", statuses: ["running"], runs: [] },
-    { key: "completed", title: "Completed", statuses: ["success"], runs: [] },
   ];
 
   if (collapseFailureStates) {
@@ -122,12 +121,13 @@ function buildColumns(runs: RunSummary[], collapseFailureStates: boolean): Board
   } else {
     base.push(
       { key: "blocked", title: "Blocked", statuses: ["blocked"], runs: [] },
-      { key: "exhausted", title: "Exhausted", statuses: ["exhausted"], runs: [] },
       { key: "error", title: "Error", statuses: ["error"], runs: [] },
+      { key: "exhausted", title: "Exhausted", statuses: ["exhausted"], runs: [] },
     );
   }
 
   base.push({ key: "aborted", title: "Aborted", statuses: ["aborted"], runs: [] });
+  base.push({ key: "completed", title: "Completed", statuses: ["success"], runs: [] });
 
   return base.map((column) => ({
     ...column,
