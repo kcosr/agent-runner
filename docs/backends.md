@@ -132,13 +132,14 @@ agent that will run the task list).
   pointer to `init` and `task set`. Applies to fresh runs and
   `--resume-run` alike.
 - **`task-runner run reset` is allowed** on passive runs. It restores
-  the original initialized task set, rewrites `assignment.md`, keeps
-  the run externally driven, and clears prior task-history-derived
-  terminal state back to `initialized`.
-- **`task-runner init` prints the full bootstrap** — the composed
-  agent instructions + assignment context + CLI workflow reminder —
-  to **stdout**, so you can pipe it: `task-runner init ...
-  > /tmp/brief.txt`. Brief progress lines still go to stderr.
+  the original initialized task set, keeps the run externally driven,
+  and clears prior task-history-derived terminal state back to
+  `initialized`.
+- **`task-runner init` no longer prints the full worker handoff to
+  stdout.** Fetch it explicitly with `task-runner brief <run-id>` —
+  that's the canonical text-only surface for initialized, running,
+  and terminal runs alike, so an external driver can re-orient after
+  context compaction by calling `brief` again.
 - **`task set` / `task add` auto-finalize** the run. After every
   mutation, the manifest status is re-derived from the task map:
   - any `pending` or `in_progress` task → `initialized`
@@ -154,35 +155,29 @@ agent that will run the task list).
   this.
 - **Hidden status fields**: `task-runner status` omits the `Attempts:`
   and `Sessions:` lines for passive runs since they're always zero.
-- **Re-orient an external driver**: the composed bootstrap is
-  persisted in `manifest.pendingPrompt` and never consumed, so an
-  agent can refetch it any time with:
-
-  ```bash
-  task-runner status <run-id> --output-format json --field pendingPrompt
-  ```
 
 ### Sidecar driver loop
 
 ```bash
-# 1. Prepare the run (prints the full bootstrap to stdout)
-task-runner init \
-  --agent ./agents/passive-example/agent.md \
-  --assignment ./assignments/repo-orientation/assignment.md \
-  --var repo_path=. 2>/dev/null > /tmp/brief.txt
-
-# 2. Parse out the run id from the earlier stderr, or from JSON mode:
+# 1. Prepare the run (no backend call; prints the run id on stderr
+#    and, in --output-format json, as JSON on stdout)
 RUN=$(task-runner init \
   --agent ./agents/passive-example/agent.md \
   --assignment ./assignments/repo-orientation/assignment.md \
   --var repo_path=. --output-format json | jq -r .runId)
+
+# 2. Fetch the worker brief (hand this to the external agent)
+task-runner brief $RUN > /tmp/brief.txt
 
 # 3. Walk the task list (agent-specific logic omitted)
 task-runner task set $RUN read_conventions --status in_progress
 # ...do the work...
 task-runner task set $RUN read_conventions --status completed --notes "..."
 
-# 4. When every task is terminal, the run auto-finalizes.
+# 4. Re-fetch the brief any time — useful after context compaction.
+task-runner brief $RUN
+
+# 5. When every task is terminal, the run auto-finalizes.
 task-runner status $RUN | grep "Status: success"
 ```
 

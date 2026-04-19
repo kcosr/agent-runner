@@ -27,7 +27,8 @@ Rules:
 - The daemon keeps the JSON-RPC 2.0 WebSocket control plane for CLI
   clients.
 - The same listener also serves browser-facing HTTP endpoints under
-  `/api/...` and live run events via SSE under `/api/events/...`.
+  `/api/...` and split live SSE streams (run-summary, per-run detail,
+  per-run timeline) — see [Live event subscriptions](#live-event-subscriptions).
 - The health payload carries a stable `daemonInstanceId`, and
   daemon-projected run DTOs expose persisted `execution` provenance
   plus daemon-local abort capability (`canAbort`, `abortReason`).
@@ -39,13 +40,41 @@ Rules:
 
 - CLI uses the WebSocket JSON-RPC transport.
 - Browser/local web code should use HTTP for normal request/response
-  and SSE for live run events.
+  and SSE for live updates — see [Live event subscriptions](#live-event-subscriptions).
 - A default listener such as `ws://127.0.0.1:4773/` therefore also
   exposes HTTP at `http://127.0.0.1:4773/api/`.
 - The same host also serves the built web app and runtime config:
   `http://127.0.0.1:4773/` for the SPA and
   `http://127.0.0.1:4773/app-config.json` for the frontend config
-  payload.
+  payload. The config exposes `apiBasePath` and
+  `runSummaryEventsPath`; per-run detail and timeline paths are
+  derived from `apiBasePath` and the active run id.
+
+## Live event subscriptions
+
+Live surfaces are split by responsibility instead of sharing a single
+mixed event bus. That lets the board/detail projections stay
+manifest-canonical while keeping execution transcripts as a separate
+per-run surface.
+
+| Responsibility | HTTP SSE endpoint | WebSocket channel | Notification method | Payload |
+|---|---|---|---|---|
+| Global run-summary feed (board cards) | `GET /api/events/run-summaries` | `events.subscribe { channel: "run_summary" }` | `run.summary` | `summary_upsert` carrying a fresh `RunSummary` |
+| Selected-run detail feed (drawer / `status` consumers) | `GET /api/runs/:runId/events/detail` | `events.subscribe { channel: "run_detail", runId }` | `run.detail` | `detail_updated` carrying a fresh `RunDetail` |
+| Selected-run execution timeline (agent transcript) | `GET /api/runs/:runId/events/timeline` | `events.subscribe { channel: "run_timeline", runId }` | `run.timeline` | One `RunTimelineEvent` per message (e.g. `agent_message_delta`) |
+
+Rules:
+
+- The global summary stream is **projection-only** and does not carry
+  transcript deltas. Subscribers hydrate board cards from
+  `RunSummary` snapshots.
+- Per-run detail and timeline streams are scoped to a single run id
+  at subscribe time.
+- Both `RunSummary` and `RunDetail` expose a derived `activeTask`
+  projection so consumers can render the current in-progress task
+  label without re-scanning the task array.
+- `events.unsubscribe { subscriptionId }` tears down a WebSocket
+  subscription; closing the SSE connection is the HTTP equivalent.
 
 See [web-dashboard.md](web-dashboard.md) for the browser UI hosted on
 top of this transport.
@@ -102,17 +131,19 @@ Capabilities:
 
 - **WebSocket JSON-RPC 2.0** (CLI): `runs.start`, `runs.resume`,
   `runs.abort`, `runs.reset`, `runs.archive`, `runs.unarchive`,
-  `runs.setName`, `runs.addDependency`, `runs.removeDependency`,
-  `runs.clearDependencies`, `tasks.set`, `tasks.appendNotes`,
-  `tasks.add`, `attachments.add`, `attachments.list`,
-  `attachments.remove`, `attachments.download`, `agents.list`,
-  `assignments.list`, `agents.show`, `assignments.show`,
-  `runs.list`, `runs.get`, etc. Attachment byte transfers fall back
-  to HTTP rather than riding the WebSocket.
+  `runs.setName`, `runs.brief`, `runs.addDependency`,
+  `runs.removeDependency`, `runs.clearDependencies`, `tasks.set`,
+  `tasks.appendNotes`, `tasks.add`, `attachments.add`,
+  `attachments.list`, `attachments.remove`, `attachments.download`,
+  `agents.list`, `assignments.list`, `agents.show`,
+  `assignments.show`, `runs.list`, `runs.get`, plus
+  `events.subscribe` / `events.unsubscribe` for live updates. See
+  [Live event subscriptions](#live-event-subscriptions) for channel
+  semantics. Attachment byte transfers fall back to HTTP rather than
+  riding the WebSocket.
 - **HTTP** (`/api/...`): the same surface for browser clients, plus
-  attachment byte uploads/downloads.
-- **SSE** (`/api/events/...`): live run events subscribed by run id,
-  with the same `RunEvent` taxonomy as embedded mode.
+  attachment byte uploads/downloads and the split SSE endpoints for
+  run-summary, per-run detail, and per-run timeline streams.
 
 The authoritative protocol contracts live in
 `packages/core/src/contracts/` and the daemon routes in

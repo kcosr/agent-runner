@@ -37,7 +37,6 @@ task-runner run --resume-run <id>
 | `--add-task "<title>"` (repeatable) | Append an ad-hoc task with auto-generated id `cli-<short>`. |
 | `--cwd <path>` | Override the agent's `cwd`. **Forbidden with `--resume-run`** — backend sessions are bound to their creation cwd, so a new cwd would invalidate the captured session id. Create a fresh run if you need a different cwd. |
 | `--backend <claude\|codex\|cursor\|passive>` | Override the agent's backend. Drops the agent's `model` unless `--model` is also passed. Forbidden with `--resume-run` (the backend is locked to the session that created the run). Required when `--agent` is omitted (ad-hoc synthesis). |
-| `--task-mode <file\|cli>` | Override the assignment's task workflow mode for a fresh `run` or `init`. Forbidden with `--resume-run` because the chosen mode is frozen into the manifest at first write. |
 | `--model <id>` | Override the model. Backend-specific (`claude-sonnet-4-6`, `gpt-5.4`, etc.). |
 | `--effort <off\|minimal\|low\|medium\|high\|xhigh\|max>` | Reasoning effort. Mapped per backend; accepted but ignored by Cursor v1. |
 | `--max-retries <n>` | Override the per-run retry budget (default 3). |
@@ -165,11 +164,12 @@ task-runner run reset <run-id> --output-format json
 
 - Allowed for `initialized`, `success`, `blocked`, `exhausted`,
   `aborted`, and `error` runs.
-- Rejected while `status=running`, regardless of `taskMode`.
+- Rejected while `status=running`.
 - Works for both passive and non-passive runs.
-- Rewrites `run.json` and the workspace `assignment.md` from the
-  manifest's frozen initialized-state seed; it does **not** re-read
-  the current agent or assignment source files from disk.
+- Rewrites `run.json` from the manifest's frozen initialized-state
+  seed; it does **not** re-read the current agent or assignment source
+  files from disk and does **not** regenerate any workspace task
+  file — canonical task state lives in `run.json.finalTasks`.
 - Restores the initialized prompt/task snapshot, clears
   `backendSessionId`, zeroes session/attempt history, and removes
   stale `attempts/` artifacts so the next execution starts clean.
@@ -198,19 +198,20 @@ task-runner run unarchive <run-id> --output-format json
 
 ## `task-runner status`
 
-Read-only inspector. Resolves a run by short id (looked up in the
+Read-only inspector. Accepts a **run id only** — looked up in the
 current repo-name bucket under `${TASK_RUNNER_STATE_DIR}/runs/`, then
-`runs/unknown/`), workspace path, or direct `run.json` path.
+`runs/unknown/`. Workspace paths and direct `run.json` paths are no
+longer accepted on this command.
 
 ```bash
 # Human-readable status block + per-task checklist
-task-runner status <id>
+task-runner status <run-id>
 
 # Full run detail as JSON
-task-runner status <id> --output-format json
+task-runner status <run-id> --output-format json
 
 # Just the fields you care about
-task-runner status <id> --output-format json \
+task-runner status <run-id> --output-format json \
   --field status --field tasksCompleted --field tasksTotal
 ```
 
@@ -221,14 +222,8 @@ task-runner status <id> --output-format json \
 | `--output-format <text\|json>` | Default `text`. `json` prints the full `RunDetail` JSON contract. |
 | `--field <name>` (repeatable) | When `--output-format json`, restrict output to these top-level `RunDetail` fields. |
 
-When the resolved manifest's status is `running`, `status` behaves by
-task mode:
-
-- `taskMode=file`: parse the workspace `assignment.md` and overlay the
-  live task statuses + notes onto the output.
-- `taskMode=cli`: read canonical task state directly from
-  `run.json.finalTasks`. `assignment.md` is render-only in this mode,
-  so there is no live file overlay.
+`status` always reads canonical task state directly from
+`run.json.finalTasks` — there's no workspace file overlay to merge in.
 
 When `manifest.archivedAt` is non-null, text output includes the
 archive timestamp plus an unarchive hint, and JSON output exposes the
@@ -266,16 +261,39 @@ Resume rewrites this block to the controller that most recently ran
 the session.
 
 Capabilities reflect the current lifecycle and host-ownership rules.
-In particular, passive runs are never resumable through `run`, running
-`taskMode=cli` runs allow `task set` / `task append-notes` but not
-`task add`, terminal runs report `canAbort=false` with
-`abortReason="already_terminal"`, and nonterminal runs that are merely
-persisted rather than actively owned by the serving daemon report
-`canAbort=false` with `abortReason="not_active_in_daemon"`.
+In particular, passive runs are never resumable through `run`,
+non-passive running runs allow `task set` / `task append-notes` but
+not `task add`, terminal runs report `canAbort=false` with
+`abortReason="already_terminal"`, and nonterminal runs that are
+merely persisted rather than actively owned by the serving daemon
+report `canAbort=false` with `abortReason="not_active_in_daemon"`.
 
 In daemon mode, external live abort control is available through the
 daemon-owned run lifecycle. Embedded mode remains single-process and
 does not expose external live control.
+
+## `task-runner brief`
+
+Print the worker-facing brief for a run — the composed text the
+backend receives on first invocation, assembled from agent
+instructions, assignment instructions, task-runner's worker workflow
+template, and the caller's run message.
+
+```bash
+task-runner brief <run-id>
+```
+
+- Accepts a **run id only** (same rule as `status`; workspace paths
+  and direct `run.json` paths are not accepted).
+- Output is **text only** — there is no `--output-format json` and
+  the contents are not projected through `status --field ...`.
+- Available for `initialized`, `running`, and terminal runs.
+
+Use this to hand the run to a worker: dump the brief into a file, into
+an external agent's prompt, or paste it into an interactive session
+after a context compaction. See
+[agents-and-assignments.md#brief-and-caller-instructions](agents-and-assignments.md#brief-and-caller-instructions)
+for how `brief` differs from `callerInstructions`.
 
 ## `task-runner attachment`
 

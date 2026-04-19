@@ -7,7 +7,7 @@ task-runner run --resume-run <id>
 task-runner run --resume-run <id> "follow-up message"
 ```
 
-Picks up the prior run from its workspace, normalizes any non-completed
+Picks up the prior run from its manifest, normalizes any non-completed
 tasks back to `pending` (preserving their notes), and starts a new
 session. Under the manifest-canonical design, **the agent config is
 reconstructed from the frozen manifest** — the source `agent.md` is
@@ -22,8 +22,9 @@ cached in the session it's resuming. If no incomplete tasks remain,
 resume still requires a follow-up message or `--add-task`.
 
 `--add-task "<title>"` works alongside (or instead of) a follow-up
-message; the runner prepends a short reminder telling the agent to
-re-read the workspace `assignment.md`.
+message; the runner prepends a short reminder telling the worker that
+new tasks were appended and should be reviewed with `task-runner task
+list <run-id>`.
 
 ## What's overridable on resume
 

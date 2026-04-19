@@ -110,22 +110,6 @@ task-runner run --backend cursor --unrestricted \
 
 If you need role instructions or locks, create a real `agent.md`.
 
-## Caller instructions
-
-Assignments can carry a `callerInstructions` field with documentation
-for whoever is invoking task-runner — a human, a script, or an
-orchestrator agent — as opposed to the target agent task-runner then
-hands the assignment to. It is:
-
-- printed to stderr on fresh `run` / `init` only
-- interpolated with `{{var}}` like other body fields
-- never sent to the backend
-- always retrievable via `task-runner status <id> --output-format json
-  --field callerInstructions`
-
-The audience split — one text block for the agent, one for the caller
-— keeps each free of noise meant for the other.
-
 ## Locked fields
 
 Either an agent or an assignment can declare a `lockedFields` list. At
@@ -137,7 +121,7 @@ Lockable fields:
 
 ```
 cwd  backend  model  effort  instructions  message
-timeoutSec  unrestricted  maxRetries  tasks  taskMode
+timeoutSec  unrestricted  maxRetries  tasks
 ```
 
 Use this to distribute an agent that pins its own model
@@ -147,6 +131,41 @@ refuses to be pointed at any other backend (`lockedFields: [backend]`).
 
 For the full ownership table and edge cases see
 [`design.md`](design.md#locked-fields).
+
+## Brief and caller instructions
+
+task-runner maintains two separate instruction surfaces so each
+audience sees text aimed at it and nothing else.
+
+**`brief`** is the worker-facing handoff, composed at run creation
+from (1) the agent's role instructions, (2) the assignment's
+instructions body, (3) task-runner's worker workflow template, and
+(4) the caller's run message. The brief teaches the worker to use the
+task CLI (`task list`, `task show`, `task set`, `task append-notes`,
+`status`) against the run id. It is persisted on the manifest and
+fetched with:
+
+```bash
+task-runner brief <run-id>
+```
+
+`brief` is text-only — it is not projected through
+`status --field ...`. It's available for initialized, running, and
+terminal runs; re-fetch any time, including after a worker's context
+gets compacted away.
+
+**`callerInstructions`** is documentation for whoever is *invoking*
+task-runner (a human, a script, or an orchestrator agent), as opposed
+to the target agent being invoked. It is:
+
+- printed to stderr on fresh `run` / `init` only
+- interpolated with `{{var}}` like other body fields
+- never sent to the backend
+- always retrievable via `task-runner status <id> --output-format json
+  --field callerInstructions`
+
+The audience split — one text block for the worker, one for the
+caller — keeps each free of noise meant for the other.
 
 ## What freezes at first write
 

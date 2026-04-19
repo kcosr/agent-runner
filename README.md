@@ -56,23 +56,30 @@ the runner emits a single JSON record with the full transcript, the
 final per-task statuses, and the agent's notes.
 
 It is also a useful primitive for orchestration scenarios — an outer
-agent can compose an `assignment.md`, hand it to `task-runner`, and
-get back a structured success/failure with no parsing of free-form
-chat output.
+agent can compose an assignment, hand it to `task-runner`, and get
+back a structured success/failure with no parsing of free-form chat
+output.
 
 ## Features
 
 - **Four backends** — Claude, Cursor, Codex, and Passive (null-object
   for sidecar flows). See [docs/backends.md](docs/backends.md).
-- **Structured task tracking** with a stable id per task and a status
-  the agent updates in place. The checklist is a structured reminder
-  and audit trail, not a proof of completion — the runner trusts the
-  status the agent writes. See [docs/tasks.md](docs/tasks.md).
+- **Manifest-canonical task state** — canonical task state lives in
+  `run.json.finalTasks`, and workers read and mutate it through a
+  first-class task CLI (`task list`, `task show`, `task set`,
+  `task append-notes`, `task add`). The checklist is a structured
+  reminder and audit trail, not a proof of completion — the runner
+  trusts the status the agent writes. See [docs/tasks.md](docs/tasks.md).
+- **First-class worker `brief`** — `task-runner brief <run-id>` emits
+  the composed worker-facing handoff (agent + assignment instructions
+  + task CLI workflow + caller message). Hand it to any agent; re-fetch
+  it any time, including after context compaction. See
+  [docs/agents-and-assignments.md#brief-and-caller-instructions](docs/agents-and-assignments.md#brief-and-caller-instructions).
 - **Retries with budget**, blocked-task short-circuit, resumable runs,
   clean Ctrl+C, and external-interrupt detection (Codex). See
   [docs/resume.md](docs/resume.md).
-- **Init then execute** — `task-runner init` prepares the workspace
-  without invoking the backend, returns a run id; resume later.
+- **Init then execute** — `task-runner init` prepares a run without
+  invoking the backend, returns a run id; resume later.
 - **Dual-host local control plane** — embedded CLI mode or a long-lived
   `task-runner serve` process with WebSocket JSON-RPC, HTTP, and SSE
   transports. See [docs/daemon.md](docs/daemon.md).
@@ -137,8 +144,12 @@ task-runner run \
   --assignment ./assignments/repo-orientation/assignment.md \
   --var repo_path=/path/to/some/repo
 
-# Inspect the run after the fact (or during, with live overlay):
+# Inspect the run (during or after):
 task-runner status <run-id>
+
+# Re-fetch the worker-facing brief any time — useful after compaction
+# or when handing the run off to another agent:
+task-runner brief <run-id>
 
 # Get the full run detail as JSON:
 task-runner status <run-id> --output-format json
@@ -149,7 +160,8 @@ task-runner run --resume-run <run-id> "address the flakey test you noticed"
 
 A run produces a workspace under
 `${TASK_RUNNER_STATE_DIR:-$HOME/.local/state/task-runner}/runs/<repo-name>/<run-id>/`
-with `run.json`, `assignment.md`, `attempts/NN.json`, and any
+with `run.json`, optional `assignment-seed.md` (immutable snapshot of
+the source assignment file, for audit), `attempts/NN.json`, and any
 `attachments/`. See [docs/runs.md](docs/runs.md) for the workspace
 layout and [docs/concepts.md](docs/concepts.md) for the overall mental
 model.
@@ -159,7 +171,6 @@ Typical text output:
 ```
 task-runner: agent=example run=abc123
              source=/.../assignments/repo-orientation/assignment.md
-             assignment=/.../.local/state/task-runner/runs/<repo-name>/abc123/assignment.md
              cwd=/path/to/some/repo
 
 ── attempt 1 ──
@@ -169,7 +180,7 @@ task-runner: agent=example run=abc123
 Status: success
 Tasks completed: 3/3
 Attempts: 1/4
-Assignment file: /.../.local/state/task-runner/runs/<repo-name>/abc123/assignment.md
+Run workspace: /.../.local/state/task-runner/runs/<repo-name>/abc123/
 
 Task results:
   - read_conventions — Check repo conventions [completed]
@@ -193,7 +204,7 @@ everything lives). The rest are focused deep-dives:
 |---|---|
 | [docs/concepts.md](docs/concepts.md) | Mental model + state machine + doc index |
 | [docs/agents-and-assignments.md](docs/agents-and-assignments.md) | File formats, ad-hoc agents, caller instructions, locked fields |
-| [docs/tasks.md](docs/tasks.md) | Task model, `taskMode: file` vs `cli`, task CLI, sidecar pattern |
+| [docs/tasks.md](docs/tasks.md) | Task model, task CLI, run loop, sidecar pattern |
 | [docs/runs.md](docs/runs.md) | Workspaces, `run.json`, attempts, schema versioning, reset/archive |
 | [docs/backends.md](docs/backends.md) | Claude, Codex, Cursor, Passive adapter details |
 | [docs/resume.md](docs/resume.md) | Resume, abort, external interrupts, importing sessions |
@@ -355,12 +366,11 @@ task-runner today.
   live on the filesystem. A sqlite or postgres backend would make
   larger run populations, richer queries, and multi-host scenarios
   tractable.
-- **Live agent output streaming in the web dashboard** — `apps/web`
-  shows run status, per-task state, and the after-the-fact transcript
-  but does not yet tail the backend's live output the way the CLI
-  does.
-- **Live task updates in the web dashboard** — task status and notes
-  currently refresh on SSE run events, not on per-task granularity.
+- **Live agent output streaming in the web dashboard** — the daemon
+  already exposes a per-run **timeline** SSE stream carrying
+  `agent_message_delta` and friends, but the dashboard drawer does
+  not yet consume it (phase-1 placeholder). Wiring live transcript
+  rendering into the detail drawer is the next step.
 - **Definitions and run creation from the web dashboard** — browse and
   manage agents and assignment templates in the UI, and kick off new
   runs from there instead of dropping to the CLI.

@@ -1,71 +1,82 @@
 # Tasks and the workflow
 
-A run progresses through a small state machine; terminal states map
-1-to-1 onto process exit codes.
+Task state is **canonical in the manifest** (`run.json.finalTasks`)
+for every run. Workers read and mutate tasks through the task CLI.
+There's no "task mode" switch and no workspace markdown file for the
+agent to edit in place — task-runner drives the structured state
+through commands.
 
-When a run starts, the runner renders the assignment's task list to
-the workspace `assignment.md` as a fenced markdown document with one
-section per task. Each task section contains a `**Status:**` field and
-a `<!-- notes:start --> ... <!-- notes:end -->` block.
+## Statuses
 
-The runner injects a workflow preamble into the agent's first prompt
-that says, in essence: "for each task, set Status to `in_progress`, do
-the work, write your findings into the Notes block, set Status to
-`completed`. Use `blocked` if you can't finish; the runner will stop
-and surface that to the user instead of retrying."
+Every task carries one of four statuses:
 
-After every backend invocation, the runner re-reads the workspace
-`assignment.md`, parses out the per-task updates, and:
+- `pending`
+- `in_progress`
+- `completed`
+- `blocked`
+
+## Worker handoff
+
+When a run starts, the worker receives a **brief** — text composed from
+the agent instructions, the assignment instructions, task-runner's
+worker workflow template, and the caller's run message. The brief
+teaches the worker to use:
+
+- `task-runner task list <run-id>`
+- `task-runner task show <run-id> <task-id>`
+- `task-runner task set <run-id> <task-id> --status ...`
+- `task-runner task append-notes <run-id> <task-id> --text ...`
+- `task-runner status <run-id>`
+
+You can fetch the worker brief at any time with:
+
+```bash
+task-runner brief <run-id>
+```
+
+`brief` is text-only; it is not projected through `status --field ...`.
+See [agents-and-assignments.md#brief-and-caller-instructions](agents-and-assignments.md#brief-and-caller-instructions)
+for the composition rules and the audience split between `brief` and
+`callerInstructions`.
+
+## Run loop
+
+After every backend invocation, the runner re-reads canonical task
+state from `run.json.finalTasks` and:
 
 - If every task is `completed` → success, run ends.
 - If any task is `blocked` → blocked, run ends, exit code 2.
 - If retries are exhausted with incomplete tasks → exhausted, exit 1.
-- Otherwise → re-invoke with a nudge listing what's still pending.
+- Otherwise → re-invoke with a nudge that points the worker back at
+  the task CLI and names the incomplete tasks.
 
 Task ids are stable across invocations so retries can address
 incomplete work precisely.
 
+### Why a CLI-driven task workflow?
+
+Earlier generations of task-runner had the agent edit a workspace
+`assignment.md` in place. That approach was removed: markdown-file
+editing is wonderful for *composing* plans but a poor fit for
+*mutating* status on many small atomic units. The CLI gives each
+mutation a clean contract (`task set`, `task append-notes`, `task
+add`), lets sidecar scripts and the runner share one code path, and
+keeps `run.json.finalTasks` as a single authoritative source.
+
 ## What the checklist does and doesn't do
 
-The runner trusts the `**Status:**` string the agent writes — it does
-not independently verify that a task's work was actually done. What the
+The runner trusts the status the agent writes — it does not
+independently verify that a task's work was actually done. What the
 structure *does* buy you is that the agent cannot silently skip an
 item: every task must be explicitly accounted for (`completed`,
-`blocked`, or left `pending` and retried), and the per-task Notes block
-captures evidence you can audit after the fact.
+`blocked`, or left `pending` and retried), and the per-task Notes
+block captures evidence you can audit after the fact.
 
 If you need harder guarantees, encode them into the task body itself —
 e.g., "run `npm test` and paste the exit code into Notes," or "open
 the file at `src/foo.ts` and paste the top-level exports."
 
-## `taskMode: file` vs `taskMode: cli`
-
-Assignments default to `taskMode: file` when the field is omitted. A
-fresh `run` or `init` may override the assignment with
-`--task-mode <file|cli>`; resume reads the frozen manifest value.
-
-- **`taskMode=file`**: the agent is oriented around the workspace
-  `assignment.md` path and updates task status/notes by editing the
-  file. While a non-passive run is `running`, task CLI mutation stays
-  rejected.
-- **`taskMode=cli`**: the agent is oriented around the run id plus task
-  commands (`task list`, `task show`, `task set`, `task append-notes`,
-  `status`). `run.json.finalTasks` is the live source of truth,
-  `assignment.md` is rendered from that state for human audit, and
-  `task set` / `task append-notes` are allowed while a non-passive run
-  is `running`.
-- **`task add`** remains rejected while a non-passive run is `running`,
-  even in `taskMode=cli`. Live mutation in v1 is limited to status and
-  notes on existing tasks.
-
 ## `task-runner task` commands
-
-Mutate a run's task list **without invoking the agent**. The canonical
-use case is a *sidecar* flow: you have an agent that can't (or
-shouldn't) be invoked as a task-runner subprocess, but you still want
-it to work through a structured task list. `init` seeds the list, the
-external agent reads it via `status`, works each task, and reports
-progress back through the task CLI.
 
 The task subcommands are:
 
@@ -79,19 +90,22 @@ The task subcommands are:
 Read commands (`task list`, `task show`) always read canonical task
 state from `run.json.finalTasks`; they never invoke a backend.
 
-Mutation commands:
+### Mutation rules
 
-- Require an existing run (as id or workspace path).
-- Use a shared per-run persistence lock so `run.json` and rendered
-  `assignment.md` stay in sync.
-- `taskMode=file`: reject mutation while a non-passive run is
-  `running`.
-- `taskMode=cli`: allow `task set` and `task append-notes` while a
-  non-passive run is `running`; canonical task state lives in
-  `run.json.finalTasks` and `assignment.md` is rendered from it.
-- On terminal non-passive runs, only notes-only `task set` /
-  `task append-notes` are allowed; `task add` and status-changing
-  `task set` are rejected.
+Mutation commands use a shared per-run persistence lock so every
+writer sees a coherent `run.json` snapshot. Which mutations are
+allowed depends on the run's lifecycle state:
+
+| Run state | `task set` / `task append-notes` | `task add` |
+|---|---|---|
+| `initialized` (non-passive or passive) | ✅ | ✅ |
+| Non-passive `running` | ✅ | ❌ |
+| Non-passive terminal (`success`/`blocked`/`exhausted`/`aborted`/`error`) | Notes-only (status changes rejected) | ❌ |
+| Passive (any non-terminal state) | ✅ | ✅ |
+
+`task add` also honors the `tasks` locked field: if either the agent
+or the assignment locks `tasks`, `task add` is rejected. Generated ids
+follow the `cli-<short-id>` scheme.
 
 ### Examples
 
@@ -146,14 +160,9 @@ At least one of `--status` / `--notes` must be supplied.
 | `--body <text>` | Optional task body. Defaults to empty string. |
 | `--output-format <text\|json>` | Default `text`. `json` prints the new task snapshot. |
 
-`task add` honors the `tasks` locked field the same way `--add-task`
-does on a fresh run: if either the agent or the assignment locks
-`tasks`, the command is rejected. Generated ids follow the same
-`cli-<short-id>` scheme as `--add-task`.
-
 ## Sidecar pattern
 
-Drive an initialized run from an external agent/script without ever
+Drive an initialized run from an external agent or script without ever
 invoking a backend through task-runner:
 
 ```bash
@@ -164,25 +173,28 @@ task-runner init \
   --var repo_path=. --var range=main..HEAD
 # -> prints: task-runner: initialized agent=code-reviewer run=abc123
 
-# 2. External agent asks: "what's left to do?"
+# 2. Fetch the worker-facing brief (what the agent needs to know)
+task-runner brief abc123
+
+# 3. External agent asks: "what's left to do?"
 task-runner status abc123 --output-format json --field tasks
 
-# 3. External agent works a task and reports progress
+# 4. External agent works a task and reports progress
 task-runner task set abc123 review_accessibility --status in_progress
 # ...agent does the work...
 task-runner task set abc123 review_accessibility --status completed --notes "LGTM"
 
-# 4. Optionally add a task the script discovered along the way
+# 5. Optionally add a task the script discovered along the way
 task-runner task add abc123 --title "Follow-up: address flakey test"
 
-# 5. Loop until status JSON shows all tasks terminal.
+# 6. Loop until status JSON shows all tasks terminal.
 ```
 
-For a **non-passive backend** (claude or codex), the run stays in
-`initialized` state the whole time and is still fully resumable: if you
-later want to hand it to a subprocess agent, `task-runner run
---resume-run abc123` executes it normally. The CLI task commands and
-the subprocess execution path compose cleanly.
+For a **non-passive backend** (claude, codex, or cursor), the run
+stays in `initialized` state and is still fully resumable: when you
+want to hand it to a subprocess agent, `task-runner run --resume-run
+abc123` executes it normally. The CLI task commands and the subprocess
+execution path compose cleanly.
 
 For a **passive backend** the contract is different: task mutations
 *auto-finalize* the manifest (success / blocked / initialized is

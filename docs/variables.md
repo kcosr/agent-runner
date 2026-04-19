@@ -31,11 +31,15 @@ instructions body, the agent instructions body, and any other string
 field rendered into a user-visible prompt. In addition to user-declared
 vars, the runner injects:
 
-- `{{assignment_path}}` — absolute path to the workspace `assignment.md`
 - `{{run_id}}` — short run id
 - `{{cwd}}` — resolved absolute working directory
 - `{{task_runner_cmd}}` — resolved CLI command name for user-facing
   workflow instructions
+- `{{assignment_path}}` — absolute workspace path for the historical
+  `assignment.md` buffer. Retained for continuity; the new workspace
+  layout stores an immutable `assignment-seed.md` instead of a live
+  file, so prefer referencing the run id and the task CLI in new
+  assignment bodies.
 
 ## Related
 

@@ -20,10 +20,18 @@ tools you can run against any repo.
   documentation review. Same model/effort as code-reviewer but a
   different mindset: drift detection, example runnability,
   completeness, and proposing mermaid diagrams where they'd help.
+- **`agents/implementer/`** — plan-feature execution agent (Codex,
+  `gpt-5.4`, high effort, unrestricted). Tuned to read task bodies
+  and `Done when:` criteria end-to-end, cite file paths in task Notes,
+  and capture concrete evidence (file paths, exit codes, commit shas)
+  so a downstream reviewer has sharp inputs. `plan-feature` hard-codes
+  `--agent implementer` on the generated implementation run so every
+  plan inherits this agent by default.
 - **`agents/passive-example/`** — sidecar-only agent with
   `backend: passive` and `lockedFields: [backend]`. task-runner never
-  invokes it; callers use `init` to seed the workspace and `task set`
-  / `task add` to drive the checklist externally. See
+  invokes it; callers use `init` to seed the run and `task set` /
+  `task add` to drive the checklist externally, fetching the worker
+  handoff with `task-runner brief <run-id>`. See
   [backends.md#passive](backends.md#passive).
 
 ## Assignments
@@ -46,15 +54,16 @@ tools you can run against any repo.
   duplication, test coverage, doc drift, plan coverage, synthesis,
   approval). Takes a `range` var defaulting to `full`; pass any
   git-style spec (`unstaged`, `staged`, `last commit`, `HEAD~3..HEAD`,
-  `main..branch`) to scope the review to that range. Also accepts an
-  optional `implementation_plan` var pointing at a task-runner
-  workspace `assignment.md`; when set (typically from a
-  `plan-feature`-driven implementer run) the reviewer verifies every
-  planned task actually shipped and flags silent deferrals. The final
-  `approval` task is an explicit ship / no-ship decision: runs that
-  approve exit `success` (code 0); runs where the reviewer cannot
-  approve exit `blocked` (code 2), so scripts can gate on the terminal
-  status directly.
+  `main..branch`) to scope the review to that range. Requires an
+  `implementation_run_id` var pointing at the run id of a
+  plan-feature-driven implementer run; the reviewer reads canonical
+  task state (and any attached summary) from that run directly by id
+  rather than parsing a workspace file. The `plan_coverage` task
+  verifies that every planned task actually shipped and flags silent
+  deferrals. The final `approval` task is an explicit ship / no-ship
+  decision: runs that approve exit `success` (code 0); runs where
+  the reviewer cannot approve exit `blocked` (code 2), so scripts
+  can gate on the terminal status directly.
 - **`assignments/plan-feature/`** — meta-assignment that turns a
   free-form feature description into an executable task-runner plan.
   Takes a `repo_path` var; the feature brief comes in as the
@@ -70,12 +79,13 @@ tools you can run against any repo.
   `plan-review`, and the generated implementation plan nests
   `code-review`.
 - **`assignments/plan-review/`** — six-task draft-plan review for
-  `plan-feature`. It reads the generated draft assignment plus the
-  planner's own workspace `assignment.md`, checks contract fidelity,
-  task quality, workflow wiring, and handoff clarity, then ends with
-  an explicit `approval` gate. Runs exit `success` only when the draft
-  is ready to hand back to the caller; otherwise they exit `blocked`
-  so the planner can revise and request a delta re-review.
+  `plan-feature`. It reads the generated draft assignment plus
+  canonical task state from the planner's own run (by run id), checks
+  contract fidelity, task quality, workflow wiring, and handoff
+  clarity, then ends with an explicit `approval` gate. Runs exit
+  `success` only when the draft is ready to hand back to the caller;
+  otherwise they exit `blocked` so the planner can revise and request
+  a delta re-review.
 - **`assignments/doc-review/`** — twelve-task documentation review
   (inventory, elevator pitch, quickstart, concepts, commands/API
   accuracy, examples, completeness gaps, structure & navigation,

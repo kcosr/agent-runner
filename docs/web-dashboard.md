@@ -7,11 +7,35 @@ archive toggles, and a deep-linkable run detail drawer.
 ## Hosting model
 
 - Normal local use is same-origin: `task-runner serve` hosts the built
-  frontend plus `/api/*` and `/api/events/*` on one listener.
-- The app loads runtime config from `/app-config.json`.
-- Reads and actions go over HTTP; the UI stays fresh over SSE.
+  frontend plus `/api/*` endpoints on one listener.
+- The app loads runtime config from `/app-config.json`. The config
+  exposes `apiBasePath` and `runSummaryEventsPath`; per-run detail
+  and timeline stream paths are derived from the base path and the
+  active run id.
+- Reads and actions go over HTTP; the UI stays fresh over split SSE
+  streams — see the [daemon docs](daemon.md#live-event-subscriptions)
+  for the `run-summaries` / `runs/:id/events/detail` / timeline
+  split.
 - The web detail drawer uses the same HTTP attachment download/remove
   flows as daemon-routed CLI commands.
+
+## Live updates
+
+The dashboard consumes two of the three live streams today:
+
+- **Global run-summary stream** drives the board grid. Each
+  `summary_upsert` applies a fresh `RunSummary` to the board cache,
+  so card progress counts, attachment/dependency badges, and
+  `activeTask` labels update without refetching or invalidating
+  selected-run state.
+- **Per-run detail stream** drives the drawer. Each `detail_updated`
+  replaces the `RunDetail` in the detail cache, so task state,
+  dependency readiness, and attachment metadata refresh in place.
+
+The per-run **timeline stream** (transcript / `agent_message_delta`)
+is plumbed through the daemon but not yet consumed by the dashboard
+— the drawer shows a "live timeline deferred in phase 1" placeholder.
+Live transcript rendering in the dashboard is on the README roadmap.
 
 ## Routing
 
@@ -40,8 +64,7 @@ later change explicitly justifies divergence.
 ## Development
 
 Development uses the Vite dev server in `apps/web` with a proxy for
-`/api/*`, `/api/events/*`, and `/app-config.json` back to the local
-daemon host:
+`/api/*` and `/app-config.json` back to the local daemon host:
 
 ```bash
 # In one terminal
