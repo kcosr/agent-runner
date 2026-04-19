@@ -1297,10 +1297,10 @@ describe("web app", () => {
     expect(screen.getByRole("tab", { name: "Message" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Prompt" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Output" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 2, name: "Prepared prompt" })).toBeInTheDocument();
-
-    await user.click(screen.getByRole("tab", { name: "Message" }));
     expect(screen.getByText("Review this handoff before launch.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Prompt" }));
+    expect(screen.getByRole("heading", { level: 2, name: "Prepared prompt" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Output" }));
     expect(screen.getByText("No output yet — this run has not started.")).toBeInTheDocument();
@@ -1346,9 +1346,81 @@ describe("web app", () => {
       expect(screen.queryByRole("tab", { name: "Pending" })).not.toBeInTheDocument();
     });
     expect(screen.queryByRole("tab", { name: "Message" })).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "Output" })).toHaveAttribute("aria-selected", "true");
+    });
+    expect(screen.getByText("Waiting for live output…")).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Prompt" }));
     expect(screen.getByRole("heading", { level: 2, name: "Attempt prompt" })).toBeInTheDocument();
+  });
+
+  it("auto-selects a newly started attempt and switches to output while viewing attempts", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+      timelineHistories: {
+        "run-1": {
+          runId: "run-1",
+          lastCursor: 2,
+          attempts: [
+            {
+              attempt: 1,
+              sessionIndex: 0,
+              startedAt: "2026-04-13T05:00:00.000Z",
+              endedAt: "2026-04-13T05:02:00.000Z",
+              prompt: "Initial prompt",
+              transcript: "Attempt one output\n",
+              notices: "",
+              exitCode: 0,
+              timedOut: false,
+              live: false,
+            },
+            {
+              attempt: 2,
+              sessionIndex: 1,
+              startedAt: "2026-04-13T05:03:00.000Z",
+              endedAt: null,
+              prompt: "## Continue working",
+              transcript: "Streaming",
+              notices: "",
+              exitCode: null,
+              timedOut: false,
+              live: true,
+            },
+          ],
+        },
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+    await user.click(screen.getByRole("button", { name: "Attempts" }));
+
+    const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
+    timelineSource.emitOpen();
+
+    await user.click(screen.getByRole("tab", { name: "Prompt" }));
+    expect(screen.getByRole("heading", { level: 2, name: "Continue working" })).toBeInTheDocument();
+
+    timelineSource.emitMessage({
+      runId: "run-1",
+      cursor: 3,
+      event: {
+        type: "attempt_started",
+        attempt: 3,
+        sessionIndex: 2,
+        startedAt: "2026-04-13T05:04:00.000Z",
+        prompt: "## Third prompt",
+      },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "3" })).toHaveAttribute("aria-selected", "true");
+    });
+    expect(screen.getByRole("tab", { name: "Output" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("Waiting for live output…")).toBeInTheDocument();
   });
 
   it("separates transcript and backend notices instead of gluing them together", async () => {

@@ -301,9 +301,10 @@ export function RunDetailDrawer({
   const sectionTabsRef = useRef<HTMLElement | null>(null);
   const timelineContentScrollRef = useRef<HTMLDivElement | null>(null);
   const timelineOutputAtBottomRef = useRef(false);
+  const latestAttemptRef = useRef<number | null>(null);
   const [selectedAttempt, setSelectedAttempt] = useState<AttemptSelection>(null);
   const [timelineTab, setTimelineTab] = useState<TimelineTab>(
-    run.status === "initialized" && run.attempts === 0 ? "prompt" : "output",
+    run.status === "initialized" && run.attempts === 0 ? "message" : "output",
   );
   const [editingName, setEditingName] = useState(false);
   const [editingBackendSession, setEditingBackendSession] = useState(false);
@@ -548,6 +549,25 @@ export function RunDetailDrawer({
     }
     setSelectedAttempt(timelineAttempts[timelineAttempts.length - 1]?.attempt ?? null);
   }, [pendingAttemptAvailable, selectedAttempt, timelineAttempts]);
+
+  useEffect(() => {
+    const latestAttempt = timelineAttempts[timelineAttempts.length - 1]?.attempt ?? null;
+    if (activeSection !== "events") {
+      latestAttemptRef.current = latestAttempt;
+      return;
+    }
+    if (latestAttempt === null) {
+      latestAttemptRef.current = null;
+      return;
+    }
+    if (latestAttemptRef.current !== latestAttempt) {
+      latestAttemptRef.current = latestAttempt;
+      setSelectedAttempt(latestAttempt);
+      setTimelineTab("output");
+      return;
+    }
+    latestAttemptRef.current = latestAttempt;
+  }, [activeSection, timelineAttempts]);
 
   useEffect(() => {
     if (
