@@ -29,9 +29,11 @@
 - Added `f` as a web dashboard shortcut to toggle the visible detail drawer between normal and fullscreen widths. ([#50](https://github.com/kcosr/task-runner/pull/50))
 - Added previous/next navigation for attachment previews in the web detail drawer, including fullscreen left/right keyboard navigation while previewing attachments. ([#50](https://github.com/kcosr/task-runner/pull/50))
 - Added a populated Keybindings settings page in the web dashboard so the current shortcut set is visible in the UI with keycap styling. ([#50](https://github.com/kcosr/task-runner/pull/50))
+- Added a `Visible focus indicators` display preference in Settings > General for toggling dashboard focus-ring styling.
 
 ### Changed
 
+- Changed the web run detail drawer summary to promote `Ended` and `Exit code`, widen long metadata rows to use the full summary width, and remove the separate `Timing` tab.
 - Changed web dashboard Escape behavior so a fullscreen detail drawer exits fullscreen first, and only closes on a subsequent Escape. ([#50](https://github.com/kcosr/task-runner/pull/50))
 - Added first-class `pi` backend support via Pi RPC over stdio, including
   cwd-scoped session-id validation/import, run-name propagation, and automatic
