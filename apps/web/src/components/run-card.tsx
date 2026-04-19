@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import type { RunSummary } from "@task-runner/core/contracts/runs.js";
-import type { FocusEvent, MouseEvent } from "react";
+import type { CSSProperties, FocusEvent, MouseEvent } from "react";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { createApiClient } from "../lib/api-client.js";
 import { truncateEnd } from "../lib/format.js";
 import { queryClient, runQueryKeys } from "../lib/query.js";
@@ -16,6 +17,7 @@ import {
   PinIcon,
   RunningIcon,
 } from "./icons.js";
+import { MarkdownContent } from "./markdown.js";
 import { RunNoteEditor, usePreferredRunNoteEditorMode } from "./run-note-editor.js";
 import { StatusBadge } from "./status-badge.js";
 
@@ -31,6 +33,8 @@ interface CardRectSnapshot {
 
 const CARD_MOVE_DURATION_MS = 260;
 const CARD_HIGHLIGHT_DURATION_MS = 720;
+const NOTE_PREVIEW_CLOSE_DELAY_MS = 140;
+const NOTE_PREVIEW_REOPEN_SUPPRESS_MS = 400;
 const cardRectByRunId = new Map<string, CardRectSnapshot>();
 
 function usePrefersReducedMotion(): boolean {
@@ -86,6 +90,9 @@ export function RunCard({
 }) {
   const cardRef = useRef<HTMLElement | null>(null);
   const noteControlRef = useRef<HTMLDivElement | null>(null);
+  const notePreviewRef = useRef<HTMLDivElement | null>(null);
+  const notePreviewCloseTimeoutRef = useRef<number | null>(null);
+  const notePreviewSuppressedUntilRef = useRef(0);
   const prefersReducedMotion = usePrefersReducedMotion();
   const preferredNoteEditorMode = usePreferredRunNoteEditorMode();
   const previewFirstNoteMode = preferredNoteEditorMode === "preview";
@@ -121,6 +128,49 @@ export function RunCard({
   });
   const noteLoading = noteDetailQuery.isPending && noteDetailQuery.data === undefined;
   const note = noteDetailQuery.data?.note ?? null;
+  const [notePreviewStyle, setNotePreviewStyle] = useState<CSSProperties | null>(null);
+
+  function previewContainsTarget(target: EventTarget | null) {
+    if (!(target instanceof Node)) {
+      return false;
+    }
+    return (
+      noteControlRef.current?.contains(target) === true ||
+      notePreviewRef.current?.contains(target) === true
+    );
+  }
+
+  function clearNotePreviewCloseTimeout() {
+    if (notePreviewCloseTimeoutRef.current === null || typeof window === "undefined") {
+      return;
+    }
+    window.clearTimeout(notePreviewCloseTimeoutRef.current);
+    notePreviewCloseTimeoutRef.current = null;
+  }
+
+  function openNotePreview() {
+    if (
+      !run.notePresent ||
+      previewFirstNoteMode ||
+      Date.now() < notePreviewSuppressedUntilRef.current
+    ) {
+      return;
+    }
+    clearNotePreviewCloseTimeout();
+    setNotePreviewOpen(true);
+  }
+
+  function scheduleNotePreviewClose() {
+    if (!run.notePresent || typeof window === "undefined") {
+      setNotePreviewOpen(false);
+      return;
+    }
+    clearNotePreviewCloseTimeout();
+    notePreviewCloseTimeoutRef.current = window.setTimeout(() => {
+      notePreviewCloseTimeoutRef.current = null;
+      setNotePreviewOpen(false);
+    }, NOTE_PREVIEW_CLOSE_DELAY_MS);
+  }
 
   function handleCardClick(event: MouseEvent<HTMLButtonElement>) {
     const filterBadge =
@@ -142,11 +192,15 @@ export function RunCard({
   }
 
   function openNoteDialog() {
+    clearNotePreviewCloseTimeout();
     setNotePreviewOpen(false);
     setNoteDialogOpen(true);
   }
 
   function closeNoteDialog() {
+    notePreviewSuppressedUntilRef.current = Date.now() + NOTE_PREVIEW_REOPEN_SUPPRESS_MS;
+    clearNotePreviewCloseTimeout();
+    setNotePreviewOpen(false);
     setNoteDialogOpen(false);
   }
 
@@ -168,41 +222,87 @@ export function RunCard({
   }, [noteDialogOpen]);
 
   function handleNotePointerEnter() {
-    if (!run.notePresent || previewFirstNoteMode) {
-      return;
-    }
-    setNotePreviewOpen(true);
+    openNotePreview();
   }
 
   function handleNotePointerLeave(event: MouseEvent<HTMLDivElement>) {
     if (!run.notePresent) {
       return;
     }
-    const nextTarget = event.relatedTarget;
-    if (
-      nextTarget instanceof Node &&
-      noteControlRef.current !== null &&
-      noteControlRef.current.contains(nextTarget)
-    ) {
+    if (previewContainsTarget(event.relatedTarget)) {
       return;
     }
-    setNotePreviewOpen(false);
+    scheduleNotePreviewClose();
   }
 
   function handleNoteBlur(event: FocusEvent<HTMLDivElement>) {
     if (!run.notePresent) {
       return;
     }
-    const nextTarget = event.relatedTarget;
-    if (
-      nextTarget instanceof Node &&
-      noteControlRef.current !== null &&
-      noteControlRef.current.contains(nextTarget)
-    ) {
+    if (previewContainsTarget(event.relatedTarget)) {
       return;
     }
-    setNotePreviewOpen(false);
+    scheduleNotePreviewClose();
   }
+
+  useEffect(() => {
+    return () => {
+      if (notePreviewCloseTimeoutRef.current === null || typeof window === "undefined") {
+        return;
+      }
+      window.clearTimeout(notePreviewCloseTimeoutRef.current);
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    if (
+      !notePreviewOpen ||
+      previewFirstNoteMode ||
+      !run.notePresent ||
+      cardRef.current === null ||
+      typeof window === "undefined"
+    ) {
+      setNotePreviewStyle(null);
+      return;
+    }
+
+    const updatePreviewStyle = () => {
+      if (cardRef.current === null) {
+        return;
+      }
+      const cardRect = cardRef.current.getBoundingClientRect();
+      const noteControlRect = noteControlRef.current?.getBoundingClientRect() ?? cardRect;
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      const margin = 20;
+      const gap = 10;
+      const preferredWidth = Math.min(420, Math.max(280, cardRect.width - 24));
+      const width = Math.min(preferredWidth, viewportWidth - margin * 2);
+      const left = Math.min(Math.max(margin, cardRect.left), viewportWidth - width - margin);
+      const spaceAbove = noteControlRect.top - margin;
+      const spaceBelow = viewportHeight - noteControlRect.bottom - margin;
+      const placeBelow = spaceAbove < 260 && spaceBelow > spaceAbove;
+      const maxHeight = Math.max(120, Math.min(240, (placeBelow ? spaceBelow : spaceAbove) - gap));
+
+      setNotePreviewStyle({
+        bottom: placeBelow ? undefined : viewportHeight - noteControlRect.top + gap,
+        left,
+        maxHeight,
+        top: placeBelow
+          ? Math.min(noteControlRect.bottom + gap, viewportHeight - maxHeight - margin)
+          : undefined,
+        width,
+      });
+    };
+
+    updatePreviewStyle();
+    window.addEventListener("resize", updatePreviewStyle);
+    window.addEventListener("scroll", updatePreviewStyle, true);
+    return () => {
+      window.removeEventListener("resize", updatePreviewStyle);
+      window.removeEventListener("scroll", updatePreviewStyle, true);
+    };
+  }, [notePreviewOpen, previewFirstNoteMode, run.notePresent]);
 
   useEffect(() => {
     if (!motion) {
@@ -370,24 +470,6 @@ export function RunCard({
           >
             <NotepadTextIcon aria-hidden="true" />
           </button>
-
-          {run.notePresent && notePreviewOpen && !previewFirstNoteMode ? (
-            <div aria-label={`Note preview for ${accessibleName}`} className="card-note-preview">
-              {noteLoading ? (
-                <div aria-label="Loading note preview" className="card-note-preview__loading">
-                  <div className="skeleton-line skeleton-line--short" />
-                  <div className="skeleton-line skeleton-line--medium" />
-                  <div className="skeleton-line skeleton-line--medium" />
-                </div>
-              ) : noteDetailQuery.isError ? (
-                <p className="card-note-preview__state">{noteDetailQuery.error.message}</p>
-              ) : note ? (
-                <div className="card-note-preview__text">{note}</div>
-              ) : (
-                <p className="card-note-preview__state">No note recorded yet.</p>
-              )}
-            </div>
-          ) : null}
         </div>
         <button
           aria-label={run.pinned ? `Unpin run ${run.runId}` : `Pin run ${run.runId}`}
@@ -403,6 +485,40 @@ export function RunCard({
           <PinIcon aria-hidden="true" />
         </button>
       </div>
+
+      {run.notePresent &&
+      notePreviewOpen &&
+      !previewFirstNoteMode &&
+      notePreviewStyle &&
+      typeof document !== "undefined"
+        ? createPortal(
+            <div
+              aria-label={`Note preview for ${accessibleName}`}
+              className="card-note-preview"
+              onBlurCapture={handleNoteBlur}
+              onFocusCapture={handleNotePointerEnter}
+              onMouseEnter={handleNotePointerEnter}
+              onMouseLeave={handleNotePointerLeave}
+              ref={notePreviewRef}
+              style={notePreviewStyle}
+            >
+              {noteLoading ? (
+                <div aria-label="Loading note preview" className="card-note-preview__loading">
+                  <div className="skeleton-line skeleton-line--short" />
+                  <div className="skeleton-line skeleton-line--medium" />
+                  <div className="skeleton-line skeleton-line--medium" />
+                </div>
+              ) : noteDetailQuery.isError ? (
+                <p className="card-note-preview__state">{noteDetailQuery.error.message}</p>
+              ) : note ? (
+                <MarkdownContent className="card-note-preview__markdown" text={note} />
+              ) : (
+                <p className="card-note-preview__state">No note recorded yet.</p>
+              )}
+            </div>,
+            document.body,
+          )
+        : null}
 
       {noteDialogOpen ? (
         <dialog

@@ -1,3 +1,4 @@
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useEffect, useId, useRef, useState } from "react";
 import { MarkdownContent } from "./markdown.js";
 
@@ -129,6 +130,20 @@ export function RunNoteEditor({
     }
   }
 
+  function handleTextareaKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      handleCancel();
+      return;
+    }
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      event.stopPropagation();
+      void handleSave();
+    }
+  }
+
   return (
     <div className="note-editor">
       <div className="note-editor__toolbar">
@@ -169,6 +184,7 @@ export function RunNoteEditor({
             disabled={pending}
             id={textareaId}
             onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={handleTextareaKeyDown}
             placeholder="Write markdown notes for this run."
             value={draft}
           />
@@ -177,6 +193,7 @@ export function RunNoteEditor({
 
       {mode === "edit" ? (
         <div className="note-editor__actions">
+          <p className="note-editor__hint">Cmd/Ctrl+Enter to save</p>
           <button
             className="btn btn-primary"
             disabled={pending}

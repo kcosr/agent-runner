@@ -619,20 +619,18 @@ pre {
 }
 
 .card-note-preview {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  width: min(320px, calc(100vw - 40px));
-  max-height: 240px;
+  position: fixed;
   overflow: auto;
+  box-sizing: border-box;
   padding: 12px;
   background: rgba(15, 23, 42, 0.96);
   border: 1px solid rgba(148, 163, 184, 0.28);
   border-radius: var(--radius-md);
   box-shadow: 0 20px 40px rgba(15, 23, 42, 0.24);
   color: rgb(248, 250, 252);
-  pointer-events: none;
-  z-index: 5;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  z-index: 120;
 }
 
 .card-note-preview__state {
@@ -653,15 +651,34 @@ pre {
   background: rgba(148, 163, 184, 0.24);
 }
 
-.card-note-preview__text {
+.card-note-preview__markdown {
   font-size: 13px;
   font-weight: 600;
   line-height: 1.5;
   color: rgb(248, 250, 252);
   -webkit-text-fill-color: rgb(248, 250, 252);
   text-shadow: 0 1px 0 rgba(15, 23, 42, 0.35);
-  white-space: pre-wrap;
-  word-break: break-word;
+}
+
+.card-note-preview__markdown :is(p, li, blockquote, code, strong, em, h1, h2, h3, h4, h5, h6) {
+  color: inherit;
+  -webkit-text-fill-color: inherit;
+}
+
+.card-note-preview__markdown code {
+  background: rgba(148, 163, 184, 0.2);
+  border: 0;
+  color: inherit;
+  -webkit-text-fill-color: inherit;
+}
+
+.card-note-preview__markdown pre {
+  background: rgba(15, 23, 42, 0.52);
+}
+
+.card-note-preview__markdown a {
+  color: rgb(191, 219, 254);
+  -webkit-text-fill-color: rgb(191, 219, 254);
 }
 
 .card-progress {
@@ -927,9 +944,16 @@ pre {
 
 .note-editor__actions {
   display: flex;
+  align-items: center;
   gap: 8px;
   justify-content: flex-end;
   flex-wrap: wrap;
+}
+
+.note-editor__hint {
+  margin: 0 auto 0 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
 }
 
 .note-loading-state {
