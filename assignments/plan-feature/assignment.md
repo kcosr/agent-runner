@@ -50,15 +50,17 @@ callerInstructions: |
        itself as `assignment-seed.md` and
        `assignment-summary.md` so the caller can review them
        directly from the run.
-    5. Prepares the follow-up creation workflow for the later
-       approval step. The planner does **not** init the
-       implementer run during the initial planning pass; if the
-       caller approves and asks for creation, the planner first
-       confirms the target directory or worktree path, then runs
-       `init`. The planning artifacts stay attached to the
-       planning run; later implementer and reviewer flows can
-       discover them through cwd-scoped attachment listing when
-       they need supplemental context.
+    5. Ends the initial planning pass with a blocked approval
+       gate after `handoff`. The planner does **not** init the
+       implementer run during the initial planning pass; instead
+       it blocks the same planning run while waiting for caller
+       approval via resume. If the caller approves and asks for
+       creation, the planner first confirms the target directory
+       or worktree path, then runs `init`. The planning
+       artifacts stay attached to the planning run; later
+       implementer and reviewer flows can discover them through
+       cwd-scoped attachment listing when they need supplemental
+       context.
 
   ## After planning
 
@@ -73,22 +75,30 @@ callerInstructions: |
 
       {{task_runner_cmd}} attachment list {{run_id}}
 
-  If `assignment-summary.md` exists there, download it and
-  review it before deciding whether to create the implementer
-  run. If you approve the plan and want the implementer run
-  created, resume this same planning run and ask for creation.
-  The planner will confirm the target directory or worktree
-  path before it runs `init`.
+  The initial planning pass ends with
+  `create_implementer_run_after_approval` blocked on purpose so
+  the run stays visibly unfinished while caller approval happens
+  outside the task graph. If `assignment-summary.md` exists
+  there, download it and review it before deciding whether to
+  create the implementer run.
 
-  After the planner creates the implementer run, hand off the
-  new run id via:
+  If you approve the plan and want the implementer run created,
+  resume this same planning run with:
+
+      {{task_runner_cmd}} run --resume-run {{run_id}} \
+        "Plan approved. Create the implementer run in <confirmed-worktree-dir>."
+
+  On that resume, the planner will confirm the target directory
+  or worktree path before it runs `init`.
+
+  After the planner creates the implementer run, inspect the
+  frozen handoff with:
 
       {{task_runner_cmd}} run brief <new-run-id>
 
-  The implementer run is created with the `implementer` agent
-  on the passive backend, so execution continues through the
-  passive task workflow described in the brief rather than
-  `run --resume-run`.
+  Then execute the initialized implementer run with:
+
+      {{task_runner_cmd}} run --resume-run <new-run-id>
 
   Nested review must be allowed at both stages:
   - the planner run nests `plan-review`
@@ -859,56 +869,6 @@ tasks:
       Verify the final state with `{{task_runner_cmd}} attachment list {{run_id}}`
       and paste the command output or equivalent attachment-id
       summary into Notes.
-  - id: prepare_creation_followup
-    title: Prepare the delayed implementer-run creation flow
-    body: |
-      Prepare the exact `{{task_runner_cmd}} init` command shape
-      the planner will run **later** if the caller approves the
-      plan and asks for implementer-run creation:
-
-          {{task_runner_cmd}} init \
-            --agent implementer \
-            --backend passive \
-            --assignment <draft-path-from-draft_plan> \
-            --name <short-descriptive-name> \
-            --cwd <confirmed-worktree-dir>
-
-      **Always use `--agent implementer --backend passive`.**
-      The planner's job is to hand back an approved draft and
-      later create an implementer run that carries the shared
-      implementer instructions while keeping execution
-      externally driven through the passive workflow.
-
-      **Do not guess the target path.** If the caller later asks
-      you to create the implementer run, first confirm the
-      directory or worktree path they want. They may want a fresh
-      worktree rather than the current repo path.
-
-      **Always use a short descriptive `--name`.** It should:
-      - start with a capitalized first word
-      - target 2-4 words and about 32 characters or less
-      - omit redundant words already covered by the assignment
-        such as `Plan`, `Review`, or `Implementation`
-      - never include cwd paths, repo names, or git ranges
-      Examples: `Run naming`, `Web dashboard`, `Daemon control plane`.
-
-      Capture the command shape in this task's Notes, but do
-      **not** run it during the initial planning pass.
-
-      Also note:
-      - the approved draft path from `draft_plan`
-      - the approved summary path from `produce_summary`
-      - the draft-review run id from `review_draft`
-      - that the later `init` stdout/stderr will produce the new
-        run id
-      - that after the later `init` succeeds, the canonical
-        execution surface is the new run id plus `task-runner run brief <new-run-id>`
-      - that the planner should **not** duplicate
-        `assignment-seed.md` or `assignment-summary.md` onto the
-        new run; they remain attached to the planning run
-      - that later implementer and reviewer flows can discover
-        the planning artifacts with cwd-scoped attachment
-        listing rooted at the new run id
   - id: handoff
     title: Handoff summary
     body: |
@@ -933,10 +893,18 @@ tasks:
           trail if desired.
         - **Feature summary** (one or two sentences from
           `capture_feature`).
-        - **Follow-up workflow** from `prepare_creation_followup`:
-          the caller should resume this planning run if they
-          approve the plan and want you to create the
-          implementer run.
+        - **Follow-up workflow** from
+          `create_implementer_run_after_approval`: the caller
+          should review the planning-run attachments first, then
+          resume this same planning run if they approve the plan
+          and want you to create the implementer run. Include
+          the exact resume command:
+
+              {{task_runner_cmd}} run --resume-run {{run_id}} \
+                "Plan approved. Create the implementer run in <confirmed-worktree-dir>."
+
+          Note that the planning run intentionally remains
+          blocked until that approval resume occurs.
         - A note that `assignment-seed.md` and
           `assignment-summary.md` stay attached to the planning
           run rather than being duplicated onto the implementer
@@ -945,17 +913,14 @@ tasks:
         - A note that when resumed for creation, you will first
           confirm the target directory or worktree path before
           running `init`.
-        - **Execution handoff** — the implementer execution
-          surface is:
+        - **Execution handoff** — after you later create the
+          implementer run, inspect the handoff with:
 
               {{task_runner_cmd}} run brief <new-run-id>
 
-          Because the implementer run is created with the
-          `implementer` agent on the passive backend, do not
-          tell the caller/executing agent to use
-          `run --resume-run` here. Instruct them to use the run
-          id plus `brief` and follow the task workflow from
-          there.
+          Then execute the initialized implementer run with:
+
+              {{task_runner_cmd}} run --resume-run <new-run-id>
 
         - A note that `<new-run-id>` comes from the later `init`
           output, not from the planning run itself.
@@ -974,6 +939,80 @@ tasks:
       proceed, request creation, adjust the plan, or hand off to
       a different agent. If there is nothing to flag, say so
       plainly.
+  - id: create_implementer_run_after_approval
+    title: Create the implementer run after caller approval
+    body: |
+      This is the final gate in the planning run.
+
+      **Initial planning pass:** do **not** create the
+      implementer run yet. After `attach_artifacts` and
+      `handoff` are complete, mark this task `blocked` with
+      Notes that include:
+      - the approved draft path from `draft_plan`
+      - the approved summary path from `produce_summary`
+      - the planning-run attachments `assignment-seed.md` and
+        `assignment-summary.md`
+      - that the plan artifacts are ready, caller review
+        happens outside the task graph, and this task is
+        waiting for explicit caller approval via resume of this
+        same planning run
+      - the exact caller action: review the attached plan
+        artifacts, then resume this same planning run when
+        approved
+      - the exact resume command:
+
+            {{task_runner_cmd}} run --resume-run {{run_id}} \
+              "Plan approved. Create the implementer run in <confirmed-worktree-dir>."
+
+      - a reminder that you must confirm
+        `<confirmed-worktree-dir>` / the target worktree path
+        with the caller before running `init`
+      - a reminder that nested `{{task_runner_cmd}} run` must
+        be allowed for both this planning run's `plan-review`
+        and the later implementer run's `code-review`
+
+      This blocked state is intentional so the planning run
+      ends visibly unfinished until caller approval arrives.
+
+      **On resume after caller approval:** task-runner
+      normalizes this blocked task back to `pending`. Re-enter
+      this task, confirm the target directory or worktree path,
+      then run:
+
+          {{task_runner_cmd}} init \
+            --agent implementer \
+            --assignment <draft-path-from-draft_plan> \
+            --name <short-descriptive-name> \
+            --cwd <confirmed-worktree-dir>
+
+      Do **not** force `--backend passive`. The bundled
+      `implementer` agent freezes the backend.
+
+      **Always use a short descriptive `--name`.** It should:
+      - start with a capitalized first word
+      - target 2-4 words and about 32 characters or less
+      - omit redundant words already covered by the assignment
+        such as `Plan`, `Review`, or `Implementation`
+      - never include cwd paths, repo names, or git ranges
+      Examples: `Run naming`, `Web dashboard`, `Daemon control plane`.
+
+      Record in Notes:
+      - the exact `init` command you ran
+      - the approved draft path from `draft_plan`
+      - the approved summary path from `produce_summary`
+      - the draft-review run id from `review_draft`
+      - the confirmed target directory or worktree path
+      - the new implementer run id from the `init` output
+      - that the planner kept `assignment-seed.md` and
+        `assignment-summary.md` on the planning run instead of
+        duplicating them onto the implementer run
+      - that later implementer and reviewer flows can discover
+        the planning artifacts with cwd-scoped attachment
+        listing rooted at the new run id
+      - that the implementer handoff is inspected with
+        `{{task_runner_cmd}} run brief <new-run-id>`
+      - that the initialized implementer run executes with
+        `{{task_runner_cmd}} run --resume-run <new-run-id>`
 ---
 You are planning, not implementing. Your output is a concrete,
 executable `task-runner` assignment file — not the feature
@@ -1022,5 +1061,5 @@ delegate `capture_feature` (the ambiguity gate must live in
 your own context), `produce_contract_artifact` (the contract
 is your deliverable), `draft_plan`, `review_draft`,
 `apply_review_fixes`, `attach_artifacts`,
-`prepare_creation_followup`, or `handoff` — those need to
+`create_implementer_run_after_approval`, or `handoff` — those need to
 live in your own context.

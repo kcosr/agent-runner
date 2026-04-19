@@ -18,12 +18,14 @@ callerInstructions: |
   ## Executing the plan
 
       {{task_runner_cmd}} run brief {{run_id}}
+      {{task_runner_cmd}} run --resume-run {{run_id}}
 
-  Use the run id plus `brief` as the canonical execution
-  handoff. This implementer run is created with the
-  `implementer` agent on the passive backend, so execution is
-  externally driven through the task workflow surfaced in the
-  brief rather than `run --resume-run`.
+  Use `run brief` to inspect the canonical worker handoff, then
+  execute the initialized run with `run --resume-run`. This
+  implementer run is typically created with the shared
+  `implementer` agent, which freezes `backend: codex`, so a
+  delayed `init` produces an initialized non-passive run unless
+  the caller made some separate explicit backend choice.
 
   A same-cwd planning run may carry an attachment named
   `assignment-summary.md`. If it exists in the cwd-scoped
@@ -36,14 +38,13 @@ callerInstructions: |
   The caller environment must allow one nested review run, or
   that step will be rejected.
 
-  Any agent with shell access can execute this run through the
-  passive workflow surfaced in the brief. The run is created
-  with the shared `implementer` agent so the execution
-  contract is stable even when planning and execution happen
-  in different sessions or under different coordinators.
-  Any agent with shell access can drive the passive workflow;
-  the `implementer` agent pins the role instructions, not the
-  execution environment.
+  Any agent with shell access can execute this run by working
+  from the run id plus the frozen handoff and canonical task
+  state. The run is created with the shared `implementer`
+  agent so the execution contract is stable even when
+  planning and execution happen in different sessions or under
+  different coordinators. The `implementer` agent pins the
+  role instructions; the run id pins the execution state.
 
   ## How the reviewer sees your work
 
@@ -69,10 +70,9 @@ callerInstructions: |
 
   ## Reading the result
 
-  The final self-check task (the last task in this plan)
-  carries the synthesis of what shipped, the touched files,
-  test results, and a pointer to the review run id. Start
-  there:
+  The `self_check` task carries the synthesis of what shipped,
+  the touched files, test results, and a pointer to the review
+  run id. Start there:
 
       {{task_runner_cmd}} run status {{run_id}}
 
@@ -534,13 +534,14 @@ tasks:
       `blocked`. If anything is blocked, this task is
       blocked too — escalate to the caller rather than
       silently marking the plan successful.
-  - id: final_commit
-    title: Finalize post-review commits and confirm clean tree
+  - id: push_branch_and_create_pr
+    title: Push branch and create the PR
     body: |
       **Category**: process
 
-      Finalize git state. Everything this plan produced must
-      be committed before the run can end successfully.
+      Finalize git state, publish the reviewed branch, and make
+      sure there is exactly one PR for it before the run ends
+      successfully.
 
         1. Run `git status` and paste the output into Notes.
         2. If review fixes, docs updates, or final verification
@@ -566,30 +567,45 @@ tasks:
            be clean (nothing staged, nothing unstaged,
            nothing untracked that should have been added).
            If it isn't, go back to step 2.
-        7. Run `git log --oneline <base>..HEAD` (where
+        7. Capture the current branch name and the base / target
+           branch you are opening the PR against.
+        8. Run `git log --oneline <base>..HEAD` (where
            `<base>` is the commit this plan was planned
            against — capture it from `scaffold` notes or ask the
            caller in a blocked state if you don't know it)
            and paste the list of commits this plan produced
            into Notes.
-
-      Do **not** push. Pushing is the caller's decision and
-      often depends on branch / PR workflow that this plan
-      does not know about. Leave the commits on the local
-      branch and let the caller handle the remote.
+        9. Push the branch to the correct remote/ref and record
+           the exact push command plus result.
+        10. Create the PR with the repo's normal PR tooling
+            (typically `gh pr create`), or if a PR already
+            exists for this exact branch, record that existing
+            PR instead of opening a duplicate.
 
       Notes should contain:
-        - The final `git status` output (should say clean).
-        - The list of commit shas this plan produced.
+        - The current branch name.
+        - The base / target branch for the PR.
+        - The final `git status` output showing the tree was
+          clean before push.
         - The base commit the plan started from, for audit.
+        - The commit shas this plan produced or the exact
+          reviewed range pushed.
+        - The push command/result, including remote and pushed
+          branch ref.
+        - The PR creation command/tool used.
+        - The PR URL and PR number.
+        - If a PR already existed for that exact branch instead
+          of creating a new one, the existing PR URL/number and
+          why no duplicate was opened.
 
       If any step fails and you cannot resolve it — a
       pre-commit hook fails for a reason outside the
-      plan's scope, or the plan produced no changes at all
-      and you cannot explain why — mark this task `blocked`
-      with the failure details. Do not mark it `completed`
-      while uncommitted work remains on disk; that defeats
-      the point of the gate.
+      plan's scope, the push is rejected, PR creation fails,
+      or the plan produced no changes at all and you cannot
+      explain why — mark this task `blocked` with the failure
+      details. Do not mark it `completed` while uncommitted
+      work remains on disk or the publish step is incomplete;
+      that defeats the point of the gate.
 ---
 You are executing a feature implementation plan that was
 generated by the `plan-feature` meta-assignment. Every task

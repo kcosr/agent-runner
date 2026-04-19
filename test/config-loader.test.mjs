@@ -63,6 +63,12 @@ const BUILTIN_PLAN_FEATURE_PATH = resolvePath(
 const BUILTIN_PLAN_TEMPLATE_PATH = resolvePath(
   new URL("../assignments/plan-feature/template.md", import.meta.url).pathname,
 );
+const BUILTIN_PLAN_REVIEW_PATH = resolvePath(
+  new URL("../assignments/plan-review/assignment.md", import.meta.url).pathname,
+);
+const BUILTIN_CODE_REVIEW_PATH = resolvePath(
+  new URL("../assignments/code-review/assignment.md", import.meta.url).pathname,
+);
 const BUILTIN_IMPLEMENTER_AGENT_PATH = resolvePath(
   new URL("../agents/implementer/agent.md", import.meta.url).pathname,
 );
@@ -276,10 +282,72 @@ test("built-in plan-feature assignment uses cwd instead of repo_path for canonic
   assert.ok((loaded.config.callerInstructions ?? "").includes("--assignment plan-feature"));
 });
 
+test("built-in plan-feature assignment uses same-run approval-gated delayed creation", () => {
+  const loaded = loadAssignmentConfig(BUILTIN_PLAN_FEATURE_PATH);
+  const callerInstructions = loaded.config.callerInstructions ?? "";
+  const taskIds = loaded.config.tasks.map((task) => task.id);
+  const createTask = loaded.config.tasks.find(
+    (task) => task.id === "create_implementer_run_after_approval",
+  );
+
+  assert.equal(taskIds.at(-1), "create_implementer_run_after_approval");
+  assert.ok(taskIds.indexOf("handoff") < taskIds.indexOf("create_implementer_run_after_approval"));
+  assert.doesNotMatch(callerInstructions, /--backend passive/);
+  assert.match(callerInstructions, /run --resume-run \{\{run_id\}\}/);
+  assert.match(callerInstructions, /run --resume-run <new-run-id>/);
+  assert.ok(createTask, "expected delayed creation approval-gate task");
+  assert.match(createTask.body, /mark this task `blocked`/);
+  assert.match(createTask.body, /Do \*\*not\*\* force `--backend passive`\./);
+});
+
 test("built-in plan-feature template emits implement-prefixed assignment names", () => {
   const template = readFileSync(BUILTIN_PLAN_TEMPLATE_PATH, "utf8");
   assert.match(template, /^name: implement-<<KEBAB_FEATURE_SLUG>>$/m);
   assert.doesNotMatch(template, /^name: plan-<<KEBAB_FEATURE_SLUG>>$/m);
+});
+
+test("built-in plan-feature template uses backend-accurate execution and terminal publish workflow", () => {
+  const template = readFileSync(BUILTIN_PLAN_TEMPLATE_PATH, "utf8");
+  assert.match(template, /run --resume-run \{\{run_id\}\}/);
+  assert.match(template, /- id: push_branch_and_create_pr/);
+  assert.match(template, /- id: self_check[\s\S]*- id: push_branch_and_create_pr/);
+  assert.match(template, /PR URL and PR number/);
+  assert.doesNotMatch(template, /final_commit/);
+  assert.doesNotMatch(template, /--backend passive/);
+  assert.doesNotMatch(template, /passive workflow/);
+});
+
+test("built-in plan-review assignment expects approval-gated planner handoff and publish task", () => {
+  const loaded = loadAssignmentConfig(BUILTIN_PLAN_REVIEW_PATH);
+  const reviewTaskStructure = loaded.config.tasks.find(
+    (task) => task.id === "review_task_structure",
+  );
+  const reviewWorkflow = loaded.config.tasks.find(
+    (task) => task.id === "review_workflow_and_handoff",
+  );
+
+  assert.ok(reviewTaskStructure, "expected review_task_structure task");
+  assert.ok(reviewWorkflow, "expected review_workflow_and_handoff task");
+  assert.match(reviewTaskStructure.body, /push_branch_and_create_pr/);
+  assert.match(reviewWorkflow.body, /create_implementer_run_after_approval/);
+  assert.match(reviewWorkflow.body, /does \*\*not\*\* hard-code\s+`--backend passive`/);
+  assert.match(reviewWorkflow.body, /run --resume-run/);
+  assert.match(reviewWorkflow.body, /PR URL\/number/);
+});
+
+test("built-in code-review assignment treats publish evidence as in-band plan coverage", () => {
+  const loaded = loadAssignmentConfig(BUILTIN_CODE_REVIEW_PATH);
+  const planCoverage = loaded.config.tasks.find((task) => task.id === "plan_coverage");
+
+  assert.ok(planCoverage, "expected plan_coverage task");
+  assert.match(
+    planCoverage.body,
+    /Publish work is in-band plan\s+scope, not out-of-band caller follow-up\./,
+  );
+  assert.match(
+    planCoverage.body,
+    /Any completed publish\/process task whose Notes\s+omit the required push \/ PR evidence/,
+  );
 });
 
 test("built-in implementer agent points reviewers at the run record, not workspace assignment.md", () => {

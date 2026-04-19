@@ -522,6 +522,13 @@ tasks:
           for: exit codes for check-gate tasks, a review run
           id for internal-review tasks, a synthesis block for
           self-check tasks.
+        - If the task's deliverable is terminal publish work
+          (push / branch publication / PR creation), verify the
+          Notes include the publish evidence the task asked for:
+          branch name, base branch, clean-tree evidence before
+          push, pushed ref/remote, and PR URL/number (or the
+          existing-PR explanation). Publish work is in-band plan
+          scope, not out-of-band caller follow-up.
 
       For **hybrid tasks**, additionally:
         - Read the Notes to determine whether the task
@@ -554,6 +561,9 @@ tasks:
           not present in the diff. Cite the task id and the
           specific missing artifact (file, function, test,
           CHANGELOG entry).
+        - [HIGH] Any completed publish/process task whose Notes
+          omit the required push / PR evidence. Cite the task id
+          and the specific missing evidence.
         - [CRITICAL] Any review-application task whose Notes
           claim fixes were applied that are not reflected in
           the diff. Cite the review run id and the unaddressed
