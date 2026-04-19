@@ -24,7 +24,7 @@
 
 ### Added
 
-- Added a grouped Filters control to the web dashboard for exact-match repo, agent, and backend filtering, with clickable run-card metadata badges as filter shortcuts and a `Ctrl+Shift+F` keyboard shortcut to open the panel.
+- Added a grouped Filters control to the web dashboard for exact-match repo, agent, and backend filtering, with clickable run-card metadata badges as filter shortcuts and a `Ctrl+Shift+F` keyboard shortcut to open the panel. ([#56](https://github.com/kcosr/task-runner/pull/56))
 - Added per-run `run-events.jsonl` audit history files that append compact lifecycle, backend-session, and task-mutation records for debugging while keeping `run.json` canonical. Reset now preserves prior audit history and appends a reset event; delete removes the audit file with the workspace. ([#53](https://github.com/kcosr/task-runner/pull/53))
 - Added runner-injected interpolation vars `config_dir`, `state_dir`, and `assignment_name` for repo-owned assignments and caller instructions. ([#52](https://github.com/kcosr/task-runner/pull/52))
 - Added static web dashboard keyboard shortcuts for route-aware Escape handling, arrow-key run navigation, Ctrl+F search focus, and Enter primary actions for the selected run. ([#50](https://github.com/kcosr/task-runner/pull/50))
@@ -36,6 +36,7 @@
 ### Changed
 
 - Changed the web run detail drawer summary to promote `Ended` and `Exit code`, widen long metadata rows to use the full summary width, and remove the separate `Timing` tab. ([#54](https://github.com/kcosr/task-runner/pull/54))
+- Changed the web dashboard board so non-success terminal columns appear before `Completed`, and persisted each column's collapse state across reloads. ([#56](https://github.com/kcosr/task-runner/pull/56))
 - Changed web dashboard Escape behavior so a fullscreen detail drawer exits fullscreen first, and only closes on a subsequent Escape. ([#50](https://github.com/kcosr/task-runner/pull/50))
 - Added first-class `pi` backend support via Pi RPC over stdio, including
   cwd-scoped session-id validation/import, run-name propagation, and automatic
