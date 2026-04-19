@@ -47,17 +47,36 @@ display name. Session state is bound to the resolved cwd.
 
 ## `codex`
 
-- Two transports:
-  - WebSocket: if `TASK_RUNNER_CODEX_WS_URL` is set, the backend connects
-    to a remote Codex app-server.
-  - Stdio: otherwise it spawns `$TASK_RUNNER_CODEX_BIN` (default `codex`)
-    with `app-server [--dangerously-bypass-approvals-and-sandbox]`.
+- Transport is chosen from the resolved structured
+  `backendSpecific.codex.transport` contract:
+  - `{ type: "stdio" }` spawns `$TASK_RUNNER_CODEX_BIN` (default
+    `codex`) with `app-server
+    [--dangerously-bypass-approvals-and-sandbox]`.
+  - `{ type: "ws", url }` connects to a remote Codex app-server over an
+    absolute `ws://` or `wss://` URL.
+- Fresh-run precedence:
+  - Embedded CLI: agent frontmatter
+    `backendSpecific.codex.transport` →
+    `TASK_RUNNER_CODEX_WS_URL` →
+    stdio default.
+  - Connected / daemon-owned CLI: agent frontmatter
+    `backendSpecific.codex.transport` →
+    daemon request override
+    `overrides.backendSpecific.codex.transport` →
+    daemon process `TASK_RUNNER_CODEX_WS_URL` →
+    stdio default.
+- The connected CLI only synthesizes that daemon override for Codex, and
+  only from the caller's local `TASK_RUNNER_CODEX_WS_URL`. This does not
+  add generic env passthrough and does not affect other backends.
 - Uses JSON-RPC 2.0 with a thread/turn model:
   `thread/start`, `thread/resume`, `thread/read`, `turn/start`,
   `thread/name/set`.
 - Session handle is the thread id.
 - Resume validates the thread exists and the cwd matches exactly via
   `thread/read`.
+- The resolved transport is frozen into the manifest and reset seed at
+  fresh-run/init time. Resume and execute-after-init reuse that frozen
+  transport even if later client or daemon env changes.
 - Detects external interrupts when another client cancels the turn, and
   authentication failures via stderr markers.
 - Effort mapping: `minimal`, `low`, `medium`, `high`, `xhigh`; `max` →
@@ -117,7 +136,7 @@ without perturbing task state.
 |--------------------------------|--------|
 | `TASK_RUNNER_CLAUDE_BIN`       | Claude CLI binary (default `claude`) |
 | `TASK_RUNNER_CODEX_BIN`        | Codex stdio binary (default `codex`) |
-| `TASK_RUNNER_CODEX_WS_URL`     | If set, Codex uses WebSocket transport |
+| `TASK_RUNNER_CODEX_WS_URL`     | Fresh Codex runs use this as the default websocket transport when no explicit `backendSpecific.codex.transport` was authored |
 | `TASK_RUNNER_CURSOR_BIN`       | Cursor CLI binary (default `cursor-agent`) |
 | `TASK_RUNNER_PI_BIN`           | Pi CLI binary (default `pi`) |
 | `PI_HOME`                      | Pi session storage root (default `~/.pi`) |

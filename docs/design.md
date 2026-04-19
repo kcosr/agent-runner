@@ -42,6 +42,7 @@ instructions:
 - `effort`
 - `timeoutSec`
 - `unrestricted`
+- optional `backendSpecific` runtime config
 - `lockedFields`
 - role instructions (markdown body)
 
@@ -77,7 +78,8 @@ The canonical record is `run.json`. Important persisted fields:
 - frozen agent metadata
 - frozen assignment metadata (or `null` for chat-style runs)
 - `repo`, `cwd`
-- `backend`, `model`, `effort`, `timeoutSec`, `unrestricted`, `maxAttempts`
+- `backend`, `model`, `effort`, `backendSpecific`, `timeoutSec`,
+  `unrestricted`, `maxAttempts`
 - `lockedFields` (union of agent and assignment locks)
 - `status`, `exitCode`
 - `startedAt`, `endedAt`, `archivedAt`
@@ -180,9 +182,11 @@ blocked with the rest completed or blocked → `blocked`; otherwise
 3. resolves vars
 4. enforces locked fields
 5. captures `repo` from the resolved cwd and creates the run workspace
-6. freezes the initial manifest
-7. composes and stores `brief`
-8. invokes the backend, or leaves the run initialized if the backend is
+6. resolves backend-specific runtime config (for Codex transport:
+   frontmatter → daemon request override → env → stdio default)
+7. freezes the initial manifest
+8. composes and stores `brief`
+9. invokes the backend, or leaves the run initialized if the backend is
    `passive`
 
 ### Init
@@ -217,6 +221,9 @@ Important rules:
 
 - `--agent`, `--assignment`, `--backend`, `--backend-session-id`,
   `--cwd`, `--name`, and `--var` are forbidden on resume
+- resume reuses the frozen `manifest.backendSpecific` runtime config; it
+  does not re-resolve Codex transport from current env or new daemon
+  request overrides
 - incomplete-task resumes may omit a follow-up message (an implicit
   continue message is used)
 - resumes of otherwise-complete runs must supply a follow-up message
@@ -239,6 +246,27 @@ definitions.
 `run delete <id|path>` permanently removes an archived, non-running run
 workspace. Only archived runs are eligible, and the workspace is removed
 rather than moved to trash.
+
+## Codex transport freezing
+
+Codex is the only backend that currently uses persisted
+`backendSpecific`. The run loop resolves exactly one transport shape at
+fresh-run/init time and stores it on both `manifest.backendSpecific` and
+`manifest.resetSeed.backendSpecific`.
+
+- Embedded fresh runs resolve:
+  frontmatter `backendSpecific.codex.transport` →
+  `TASK_RUNNER_CODEX_WS_URL` →
+  `{ type: "stdio" }`
+- Connected / daemon-owned fresh runs resolve:
+  frontmatter `backendSpecific.codex.transport` →
+  daemon request override
+  `overrides.backendSpecific.codex.transport` →
+  daemon process `TASK_RUNNER_CODEX_WS_URL` →
+  `{ type: "stdio" }`
+
+This is an explicit Codex-only contract. There is no generic
+backend-specific env passthrough layer for other backends.
 
 ## Public command contract
 

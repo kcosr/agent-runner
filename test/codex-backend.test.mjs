@@ -4,6 +4,8 @@ import {
   buildCodexAppServerArgs,
   buildCodexThreadParams,
   buildCodexTurnStartPayload,
+  normalizeCodexWsUrl,
+  resolveCodexTransportConfig,
 } from "../packages/core/dist/backends/codex.js";
 
 const baseCtx = {
@@ -49,4 +51,45 @@ test("buildCodexTurnStartPayload: unrestricted restates danger-full-access polic
     approvalPolicy: "never",
     sandboxPolicy: { type: "dangerFullAccess" },
   });
+});
+
+test("resolveCodexTransportConfig: uses the explicit stdio transport", () => {
+  assert.deepEqual(
+    resolveCodexTransportConfig({
+      backendSpecific: {
+        codex: {
+          transport: { type: "stdio" },
+        },
+      },
+    }),
+    { type: "stdio" },
+  );
+});
+
+test("resolveCodexTransportConfig: normalizes explicit websocket transport", () => {
+  assert.deepEqual(
+    resolveCodexTransportConfig({
+      backendSpecific: {
+        codex: {
+          transport: { type: "ws", url: "ws://127.0.0.1:4773" },
+        },
+      },
+    }),
+    { type: "ws", url: "ws://127.0.0.1:4773/" },
+  );
+});
+
+test("resolveCodexTransportConfig: rejects missing frozen transport", () => {
+  assert.throws(
+    () => resolveCodexTransportConfig({ backendSpecific: undefined }),
+    /backendSpecific\.codex\.transport/,
+  );
+});
+
+test("normalizeCodexWsUrl: rejects malformed or non-websocket URLs before transport open", () => {
+  assert.throws(() => normalizeCodexWsUrl("relative/socket"), /absolute ws:\/\/ or wss:\/\/ URL/);
+  assert.throws(
+    () => normalizeCodexWsUrl("https://example.com/socket"),
+    /requires a ws:\/\/ or wss:\/\/ URL/,
+  );
 });

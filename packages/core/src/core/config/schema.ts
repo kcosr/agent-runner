@@ -1,5 +1,9 @@
 import { z } from "zod";
-import { BACKEND_IDS } from "../backends/types.js";
+import {
+  BACKEND_IDS,
+  type BackendSpecificConfig,
+  type CodexTransportConfig,
+} from "../backends/types.js";
 
 export const taskDefSchema = z.object({
   id: z
@@ -80,6 +84,44 @@ export const LOCKABLE_FIELDS = [
 
 export type LockableField = (typeof LOCKABLE_FIELDS)[number];
 
+function isAbsoluteCodexWsUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "ws:" || parsed.protocol === "wss:";
+  } catch {
+    return false;
+  }
+}
+
+export const codexTransportConfigSchema: z.ZodType<CodexTransportConfig> = z.union([
+  z
+    .object({
+      type: z.literal("stdio"),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("ws"),
+      url: z
+        .string()
+        .trim()
+        .min(1)
+        .refine(isAbsoluteCodexWsUrl, "url must be an absolute ws:// or wss:// URL"),
+    })
+    .strict(),
+]);
+
+export const backendSpecificConfigSchema: z.ZodType<BackendSpecificConfig> = z
+  .object({
+    codex: z
+      .object({
+        transport: codexTransportConfigSchema.optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Agent schema — identity, backend config, role instructions, locks.
 // No vars, no tasks, no message. Those live on assignments.
@@ -91,6 +133,7 @@ export const agentConfigSchema = z.object({
   backend: z.enum(BACKEND_IDS),
   model: z.string().optional(),
   effort: z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]).optional(),
+  backendSpecific: backendSpecificConfigSchema.optional(),
   timeoutSec: z.number().int().positive().default(3600),
   unrestricted: z.boolean().default(false),
   lockedFields: z.array(z.enum(LOCKABLE_FIELDS)).default([]),

@@ -9,6 +9,7 @@ import { createRunEventCapture } from "./helpers/run-events.mjs";
 import {
   setTaskStatusesForPrompt,
   updateTasksForPrompt,
+  withEnv,
   withSharedRuntimeEnv,
 } from "./helpers/runtime-paths.mjs";
 
@@ -76,6 +77,26 @@ tasks:
 Work on the repo. Plan at {{assignment_path}}.
 `;
 
+const CODEX_AGENT = `---
+schemaVersion: 1
+name: codex-agent
+backend: codex
+---
+Codex agent prompt.
+`;
+
+const CODEX_STDIO_AGENT = `---
+schemaVersion: 1
+name: codex-stdio-agent
+backend: codex
+backendSpecific:
+  codex:
+    transport:
+      type: stdio
+---
+Codex agent prompt.
+`;
+
 function tempDir() {
   return mkdtempSync(join(tmpdir(), "task-runner-run-"));
 }
@@ -103,7 +124,7 @@ function writeAgentAndAssignment(baseDir) {
 
 async function runWithMock(baseDir, mockInvoke, overrides = {}, options = {}) {
   const backend = {
-    id: "mock",
+    id: options.backendId ?? "mock",
     invoke: mockInvoke,
   };
   const capture = createRunEventCapture();
@@ -120,6 +141,7 @@ async function runWithMock(baseDir, mockInvoke, overrides = {}, options = {}) {
         backend,
         overrides,
         callerCwd: options.callerCwd,
+        execution: options.execution,
         emitEvent: capture.emitEvent,
       });
       return {
@@ -343,6 +365,196 @@ test("effort override beats the frontmatter value", async () => {
 
   assert.equal(outcome.exitCode, 0);
   assert.equal(seenEffort, "low");
+});
+
+test("codex embedded runs freeze frontmatter transport ahead of client env", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "codex-stdio-agent", CODEX_STDIO_AGENT);
+  writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
+
+  let seenBackendSpecific;
+  const { outcome } = await withEnv({ TASK_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/" }, () =>
+    runWithMock(
+      dir,
+      async (ctx) => {
+        seenBackendSpecific = ctx.backendSpecific;
+        setTaskStatusesForPrompt(ctx.prompt, {
+          t1: "completed",
+          t2: "completed",
+          t3: "completed",
+        });
+        return {
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+          sessionId: null,
+          transcript: "done",
+          rawStdout: "",
+          rawStderr: "",
+        };
+      },
+      {},
+      { agentName: "codex-stdio-agent", backendId: "codex" },
+    ),
+  );
+
+  assert.deepEqual(seenBackendSpecific, {
+    codex: {
+      transport: {
+        type: "stdio",
+      },
+    },
+  });
+  assert.deepEqual(outcome.manifest.backendSpecific, seenBackendSpecific);
+  assert.deepEqual(outcome.manifest.resetSeed.backendSpecific, seenBackendSpecific);
+});
+
+test("codex daemon runs prefer forwarded transport over daemon env", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "codex-agent", CODEX_AGENT);
+  writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
+
+  let seenBackendSpecific;
+  const { outcome } = await withEnv({ TASK_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/" }, () =>
+    runWithMock(
+      dir,
+      async (ctx) => {
+        seenBackendSpecific = ctx.backendSpecific;
+        setTaskStatusesForPrompt(ctx.prompt, {
+          t1: "completed",
+          t2: "completed",
+          t3: "completed",
+        });
+        return {
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+          sessionId: null,
+          transcript: "done",
+          rawStdout: "",
+          rawStderr: "",
+        };
+      },
+      {
+        backendSpecific: {
+          codex: {
+            transport: {
+              type: "ws",
+              url: "ws://client.example/socket",
+            },
+          },
+        },
+      },
+      {
+        agentName: "codex-agent",
+        backendId: "codex",
+        execution: {
+          hostMode: "daemon",
+          controller: {
+            kind: "daemon",
+            daemonInstanceId: "daemon-test",
+          },
+        },
+      },
+    ),
+  );
+
+  assert.deepEqual(seenBackendSpecific, {
+    codex: {
+      transport: {
+        type: "ws",
+        url: "ws://client.example/socket",
+      },
+    },
+  });
+  assert.deepEqual(outcome.manifest.backendSpecific, seenBackendSpecific);
+});
+
+test("codex connected mode mirrors embedded mode for the same websocket transport intent", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "codex-agent", CODEX_AGENT);
+  writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
+
+  const sharedTransport = {
+    codex: {
+      transport: {
+        type: "ws",
+        url: "ws://shared.example/socket",
+      },
+    },
+  };
+
+  let embeddedBackendSpecific;
+  const embedded = await withEnv(
+    { TASK_RUNNER_CODEX_WS_URL: sharedTransport.codex.transport.url },
+    () =>
+      runWithMock(
+        dir,
+        async (ctx) => {
+          embeddedBackendSpecific = ctx.backendSpecific;
+          setTaskStatusesForPrompt(ctx.prompt, {
+            t1: "completed",
+            t2: "completed",
+            t3: "completed",
+          });
+          return {
+            exitCode: 0,
+            signal: null,
+            timedOut: false,
+            sessionId: null,
+            transcript: "done",
+            rawStdout: "",
+            rawStderr: "",
+          };
+        },
+        {},
+        { agentName: "codex-agent", backendId: "codex" },
+      ),
+  );
+
+  let connectedBackendSpecific;
+  const connected = await withEnv({ TASK_RUNNER_CODEX_WS_URL: "ws://daemon.example/socket" }, () =>
+    runWithMock(
+      dir,
+      async (ctx) => {
+        connectedBackendSpecific = ctx.backendSpecific;
+        setTaskStatusesForPrompt(ctx.prompt, {
+          t1: "completed",
+          t2: "completed",
+          t3: "completed",
+        });
+        return {
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+          sessionId: null,
+          transcript: "done",
+          rawStdout: "",
+          rawStderr: "",
+        };
+      },
+      {
+        backendSpecific: sharedTransport,
+      },
+      {
+        agentName: "codex-agent",
+        backendId: "codex",
+        execution: {
+          hostMode: "daemon",
+          controller: {
+            kind: "daemon",
+            daemonInstanceId: "daemon-test",
+          },
+        },
+      },
+    ),
+  );
+
+  assert.deepEqual(embeddedBackendSpecific, sharedTransport);
+  assert.deepEqual(connectedBackendSpecific, sharedTransport);
+  assert.deepEqual(connectedBackendSpecific, embeddedBackendSpecific);
+  assert.deepEqual(embedded.outcome.manifest.backendSpecific, sharedTransport);
+  assert.deepEqual(connected.outcome.manifest.backendSpecific, sharedTransport);
 });
 
 test("happy path: mock marks all tasks completed in one attempt → exit 0", async () => {

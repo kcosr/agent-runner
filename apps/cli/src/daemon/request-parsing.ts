@@ -1,4 +1,8 @@
 import type { RunCommandOverrides } from "@task-runner/core/app/service.js";
+import type {
+  BackendSpecificConfig,
+  CodexTransportConfig,
+} from "@task-runner/core/core/backends/types.js";
 import { BACKEND_IDS } from "@task-runner/core/core/backends/types.js";
 import type { RunListScopeFilter } from "@task-runner/core/core/commands/service.js";
 import { trimRunName } from "@task-runner/core/util/run-name.js";
@@ -196,6 +200,79 @@ export function parseBooleanQueryValue(value: string | null, label: string): boo
   throw new RequestValidationError(`${label} must be "true" or "false"`);
 }
 
+function validateAbsoluteCodexWsUrl(value: string, label: string): string {
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== "ws:" && parsed.protocol !== "wss:") {
+      throw new Error();
+    }
+    return value;
+  } catch {
+    throw new RequestValidationError(`${label} must be an absolute ws:// or wss:// URL`);
+  }
+}
+
+function optionalCodexTransport(value: unknown, label: string): CodexTransportConfig | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const record = asRecord(value, label);
+  const allowedKeys = new Set(["type", "url"]);
+  for (const key of Object.keys(record)) {
+    if (!allowedKeys.has(key)) {
+      throw new RequestValidationError(`${label}.${key} is not supported`);
+    }
+  }
+
+  const type = requiredString(record.type, `${label}.type`);
+  if (type === "stdio") {
+    if (record.url !== undefined) {
+      throw new RequestValidationError(`${label}.url is not supported for stdio transport`);
+    }
+    return { type: "stdio" };
+  }
+  if (type === "ws") {
+    return {
+      type: "ws",
+      url: validateAbsoluteCodexWsUrl(
+        requiredNonEmptyString(record.url, `${label}.url`),
+        `${label}.url`,
+      ),
+    };
+  }
+  throw new RequestValidationError(`${label}.type must be one of: stdio, ws`);
+}
+
+function optionalBackendSpecific(value: unknown, label: string): BackendSpecificConfig | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const record = asRecord(value, label);
+  const allowedKeys = new Set(["codex"]);
+  for (const key of Object.keys(record)) {
+    if (!allowedKeys.has(key)) {
+      throw new RequestValidationError(`${label}.${key} is not supported`);
+    }
+  }
+
+  if (record.codex === undefined) {
+    return {};
+  }
+  const codex = asRecord(record.codex, `${label}.codex`);
+  const codexAllowedKeys = new Set(["transport"]);
+  for (const key of Object.keys(codex)) {
+    if (!codexAllowedKeys.has(key)) {
+      throw new RequestValidationError(`${label}.codex.${key} is not supported`);
+    }
+  }
+
+  return {
+    codex: {
+      transport: optionalCodexTransport(codex.transport, `${label}.codex.transport`),
+    },
+  };
+}
+
 export function optionalOverrides(value: unknown): RunCommandOverrides {
   if (value === undefined) {
     return {};
@@ -212,6 +289,7 @@ export function optionalOverrides(value: unknown): RunCommandOverrides {
     "unrestricted",
     "maxRetries",
     "addedTasks",
+    "backendSpecific",
   ]);
   for (const key of Object.keys(record)) {
     if (!allowedKeys.has(key)) {
@@ -237,6 +315,7 @@ export function optionalOverrides(value: unknown): RunCommandOverrides {
     unrestricted: optionalBoolean(record.unrestricted, "overrides.unrestricted"),
     maxRetries: optionalNonNegativeInteger(record.maxRetries, "overrides.maxRetries"),
     addedTasks: optionalStringArray(record.addedTasks, "overrides.addedTasks"),
+    backendSpecific: optionalBackendSpecific(record.backendSpecific, "overrides.backendSpecific"),
   };
 }
 

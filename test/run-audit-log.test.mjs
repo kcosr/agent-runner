@@ -94,9 +94,9 @@ function writeAuditBundle(baseDir) {
   writeAssignment(baseDir, "audit-passive-work", PASSIVE_ASSIGNMENT);
 }
 
-function mockBackend(handler) {
+function mockBackend(handler, id = "mock") {
   return {
-    id: "mock",
+    id,
     invoke: handler,
   };
 }
@@ -168,7 +168,7 @@ test("audit log is created lazily for a logless run and task updates stay compac
     assignmentName: "audit-passive-work",
     backend: mockBackend(async () => {
       throw new Error("backend should not be invoked during init");
-    }),
+    }, "passive"),
     initialize: true,
   });
 
@@ -465,7 +465,7 @@ test("command and task mutations append compact records, preserve history on res
     assignmentName: "audit-passive-work",
     backend: mockBackend(async () => {
       throw new Error("backend should not be invoked during init");
-    }),
+    }, "passive"),
     initialize: true,
   });
 
@@ -609,7 +609,7 @@ test("daemon-context task commands append one task event with daemon host metada
     assignmentName: "audit-passive-work",
     backend: mockBackend(async () => {
       throw new Error("backend should not be invoked during init");
-    }),
+    }, "passive"),
     initialize: true,
   });
 

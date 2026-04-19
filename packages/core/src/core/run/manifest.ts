@@ -11,6 +11,7 @@ import {
 } from "../../config/runtime-paths.js";
 import type { RunAttachment } from "../../contracts/attachments.js";
 import { writeTextFileAtomic } from "../../util/write-file-atomic.js";
+import { type BackendSpecificConfig, cloneBackendSpecificConfig } from "../backends/types.js";
 import type { LockableField } from "../config/schema.js";
 
 export type ManifestStatus =
@@ -60,6 +61,7 @@ export interface TaskSnapshot {
 export interface RunResetSeed {
   model: string | null;
   effort: string | null;
+  backendSpecific?: BackendSpecificConfig;
   name: string | null;
   dependencyRunIds: string[];
   unrestricted: boolean;
@@ -154,6 +156,7 @@ export interface RunManifest {
   backend: string;
   model: string | null;
   effort: string | null;
+  backendSpecific?: BackendSpecificConfig;
   message: string | null;
   name: string | null;
   unrestricted: boolean;
@@ -228,6 +231,7 @@ function cloneTaskSnapshots(tasks: Record<string, TaskSnapshot>): Record<string,
 export function buildRunResetSeed(seed: RunResetSeed): RunResetSeed {
   return {
     ...seed,
+    backendSpecific: cloneBackendSpecificConfig(seed.backendSpecific),
     dependencyRunIds: [...seed.dependencyRunIds],
     finalTasks: cloneTaskSnapshots(seed.finalTasks),
   };
@@ -237,6 +241,7 @@ export function applyRunResetSeed(manifest: RunManifest): void {
   const seed = manifest.resetSeed;
   manifest.model = seed.model;
   manifest.effort = seed.effort;
+  manifest.backendSpecific = cloneBackendSpecificConfig(seed.backendSpecific);
   manifest.name = seed.name;
   manifest.dependencyRunIds = [...seed.dependencyRunIds];
   manifest.unrestricted = seed.unrestricted;
@@ -507,6 +512,7 @@ function isRunManifest(value: unknown): value is RunManifest {
   if (!obj.runtimeVars || typeof obj.runtimeVars !== "object") return false;
   if (!obj.resetSeed || typeof obj.resetSeed !== "object") return false;
   if (!obj.execution || typeof obj.execution !== "object") return false;
+  if (!isValidPersistedBackendSpecific(obj.backendSpecific, false)) return false;
 
   // callerInstructions is string | null.
   if (obj.callerInstructions !== null && typeof obj.callerInstructions !== "string") {
@@ -516,6 +522,9 @@ function isRunManifest(value: unknown): value is RunManifest {
   const resetSeed = obj.resetSeed as Record<string, unknown>;
   if (resetSeed.model !== null && typeof resetSeed.model !== "string") return false;
   if (resetSeed.effort !== null && typeof resetSeed.effort !== "string") return false;
+  if (!isValidPersistedBackendSpecific(resetSeed.backendSpecific, false)) {
+    return false;
+  }
   if (resetSeed.name !== null && typeof resetSeed.name !== "string") return false;
   if (
     !Array.isArray(resetSeed.dependencyRunIds) ||
@@ -558,5 +567,60 @@ function isRunManifest(value: unknown): value is RunManifest {
     return execution.hostMode === "daemon" && typeof controller.daemonInstanceId === "string";
   }
 
+  return false;
+}
+
+function isValidPersistedBackendSpecific(
+  value: unknown,
+  requireCodexTransport: boolean,
+): value is BackendSpecificConfig | undefined {
+  if (value === undefined) {
+    return !requireCodexTransport;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  if (Object.keys(record).some((key) => key !== "codex")) {
+    return false;
+  }
+  if (record.codex === undefined) {
+    return !requireCodexTransport;
+  }
+  if (!record.codex || typeof record.codex !== "object" || Array.isArray(record.codex)) {
+    return false;
+  }
+  const codex = record.codex as Record<string, unknown>;
+  if (Object.keys(codex).some((key) => key !== "transport")) {
+    return false;
+  }
+  if (codex.transport === undefined) {
+    return !requireCodexTransport;
+  }
+  return isValidCodexTransport(codex.transport);
+}
+
+function isValidCodexTransport(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  if (record.type === "stdio") {
+    return Object.keys(record).length === 1;
+  }
+  if (record.type === "ws") {
+    if (Object.keys(record).some((key) => key !== "type" && key !== "url")) {
+      return false;
+    }
+    if (typeof record.url !== "string" || record.url.trim().length === 0) {
+      return false;
+    }
+    try {
+      const parsed = new URL(record.url);
+      return parsed.protocol === "ws:" || parsed.protocol === "wss:";
+    } catch {
+      return false;
+    }
+  }
   return false;
 }

@@ -87,23 +87,6 @@ function runCliExpectFail(args, opts = {}) {
   }
 }
 
-const okBackend = () => ({
-  id: "mock",
-  async invoke(ctx) {
-    setTaskStatusesForPrompt(ctx.prompt, { t1: "completed", t2: "completed" });
-    return {
-      exitCode: 0,
-      signal: null,
-      timedOut: false,
-      aborted: false,
-      sessionId: "sess-status-1",
-      transcript: "done",
-      rawStdout: "",
-      rawStderr: "",
-    };
-  },
-});
-
 async function runFresh(baseDir) {
   return withSharedRuntimeEnv(baseDir, async () => {
     const loaded = loadAgentConfig("status-agent", baseDir);
@@ -115,7 +98,22 @@ async function runFresh(baseDir) {
         loaded,
         loadedAssignment,
         cliVars: {},
-        backend: okBackend(),
+        backend: {
+          id: loaded.config.backend,
+          async invoke(ctx) {
+            setTaskStatusesForPrompt(ctx.prompt, { t1: "completed", t2: "completed" });
+            return {
+              exitCode: 0,
+              signal: null,
+              timedOut: false,
+              aborted: false,
+              sessionId: "sess-status-1",
+              transcript: "done",
+              rawStdout: "",
+              rawStderr: "",
+            };
+          },
+        },
         overrides: { name: "status test" },
         stderr: () => {},
         stdout: () => {},

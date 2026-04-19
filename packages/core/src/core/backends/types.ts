@@ -3,6 +3,31 @@ export type BackendId = (typeof BACKEND_IDS)[number];
 
 export type EffortLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
+export type CodexTransportConfig = { type: "stdio" } | { type: "ws"; url: string };
+
+export interface BackendSpecificConfig {
+  codex?: {
+    transport?: CodexTransportConfig;
+  };
+}
+
+export function cloneBackendSpecificConfig(
+  backendSpecific: BackendSpecificConfig | undefined,
+): BackendSpecificConfig | undefined {
+  if (!backendSpecific) {
+    return undefined;
+  }
+  return {
+    codex: backendSpecific.codex
+      ? {
+          transport: backendSpecific.codex.transport
+            ? { ...backendSpecific.codex.transport }
+            : undefined,
+        }
+      : undefined,
+  };
+}
+
 export type BackendEvent =
   | {
       type: "agent_message_delta";
@@ -19,6 +44,7 @@ export interface BackendInvokeContext {
   env: Record<string, string>;
   model?: string;
   effort?: EffortLevel;
+  backendSpecific?: BackendSpecificConfig;
   unrestricted?: boolean;
   timeoutSec: number;
   resumeSessionId?: string;
@@ -42,6 +68,7 @@ export interface ValidateSessionContext {
   sessionId: string;
   cwd: string;
   env?: Record<string, string>;
+  backendSpecific?: BackendSpecificConfig;
 }
 
 export type ValidateSessionResult = { valid: true } | { valid: false; reason: string };

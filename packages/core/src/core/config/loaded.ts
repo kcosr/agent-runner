@@ -1,3 +1,4 @@
+import { cloneBackendSpecificConfig } from "../backends/types.js";
 import type { RunManifest } from "../run/manifest.js";
 import type { AgentConfig, AssignmentConfig, LockableField } from "./schema.js";
 
@@ -33,6 +34,7 @@ export function loadedAgentFromManifest(manifest: RunManifest): LoadedAgent {
     backend: manifest.backend as AgentConfig["backend"],
     model: manifest.model ?? undefined,
     effort,
+    backendSpecific: cloneBackendSpecificConfig(manifest.backendSpecific),
     timeoutSec: manifest.timeoutSec,
     unrestricted: manifest.unrestricted,
     lockedFields: manifest.lockedFields,

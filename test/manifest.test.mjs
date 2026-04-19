@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
-import { updateTasksForPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
+import { updateTasksForPrompt, withEnv, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 const THREE_AGENT = `---
 schemaVersion: 1
@@ -42,6 +42,14 @@ tasks:
 Work on the repo. Plan at {{assignment_path}}.
 `;
 
+const CODEX_AGENT = `---
+schemaVersion: 1
+name: codex-agent
+backend: codex
+---
+Codex agent prompt.
+`;
+
 function tempDir() {
   return mkdtempSync(join(tmpdir(), "task-runner-manifest-"));
 }
@@ -68,7 +76,8 @@ function writeAgentAndAssignment(baseDir) {
 }
 
 async function runWithMock(baseDir, mockInvoke, overrides = {}) {
-  const backend = { id: "mock", invoke: mockInvoke };
+  const backend = { id: overrides.__backendId ?? "claude", invoke: mockInvoke };
+  const { __backendId, ...runOverrides } = overrides;
   return withSharedRuntimeEnv(baseDir, async () => {
     const loaded = loadAgentConfig("three", baseDir);
     const loadedAssignment = loadAssignmentConfig("three-work", baseDir);
@@ -80,7 +89,7 @@ async function runWithMock(baseDir, mockInvoke, overrides = {}) {
         loadedAssignment,
         cliVars: {},
         backend,
-        overrides,
+        overrides: runOverrides,
         stderr: () => {},
         stdout: () => {},
       });
@@ -135,7 +144,7 @@ test("manifest: run.json is written and matches outcome.manifest", async () => {
   assert.equal(onDisk.finalTasks.t1.notes, "first done");
   assert.equal(onDisk.finalTasks.t1.title, "First");
   assert.equal(onDisk.finalTasks.t1.body.trim(), "Do the first thing.");
-  assert.deepEqual(onDisk, outcome.manifest);
+  assert.deepEqual(onDisk, JSON.parse(JSON.stringify(outcome.manifest)));
 
   const logPath = join(outcome.workspaceDir, "attempts", "01.json");
   assert.ok(existsSync(logPath), "attempts/01.json exists");
@@ -325,4 +334,50 @@ test("manifest: captures effort override on the run metadata", async () => {
   );
 
   assert.equal(outcome.manifest.effort, "max");
+});
+
+test("manifest: codex runs persist the stdio default transport in run metadata and reset seed", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", CODEX_AGENT);
+  writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
+
+  const outcome = await withEnv({ TASK_RUNNER_CODEX_WS_URL: undefined }, () =>
+    runWithMock(
+      dir,
+      async (ctx) => {
+        updateTasksForPrompt(ctx.prompt, {
+          t1: { status: "completed" },
+          t2: { status: "completed" },
+          t3: { status: "completed" },
+        });
+        assert.deepEqual(ctx.backendSpecific, {
+          codex: {
+            transport: {
+              type: "stdio",
+            },
+          },
+        });
+        return {
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+          sessionId: null,
+          transcript: "done",
+          rawStdout: "",
+          rawStderr: "",
+        };
+      },
+      { __backendId: "codex" },
+    ),
+  );
+
+  const onDisk = JSON.parse(readFileSync(join(outcome.workspaceDir, "run.json"), "utf8"));
+  assert.deepEqual(onDisk.backendSpecific, {
+    codex: {
+      transport: {
+        type: "stdio",
+      },
+    },
+  });
+  assert.deepEqual(onDisk.resetSeed.backendSpecific, onDisk.backendSpecific);
 });
