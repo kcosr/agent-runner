@@ -42,7 +42,7 @@ function SettingsProbe() {
         onClick={() =>
           updateViewState({
             drawerWidth: 700,
-            repo: "task-runner-web",
+            search: "task-runner-web",
           })
         }
         type="button"
@@ -89,11 +89,15 @@ describe("DashboardSettingsProvider", () => {
         showArchived: false,
         sortByRecentUpdates: false,
         visibleFocusIndicators: false,
+        structuredFilters: {
+          repo: null,
+          agent: null,
+          backend: null,
+        },
       }),
     );
     expect(screen.getByTestId("view-state")).toHaveTextContent(
       JSON.stringify({
-        repo: "all",
         search: "",
         collapsedColumnKeys: [],
         drawerWidth: 540,
@@ -113,6 +117,11 @@ describe("DashboardSettingsProvider", () => {
         collapseFailureStates: false,
         sortByRecentUpdates: true,
         visibleFocusIndicators: true,
+        structuredFilters: {
+          repo: null,
+          agent: null,
+          backend: null,
+        },
         drawerWidth: 1200,
       }),
     );
@@ -136,6 +145,11 @@ describe("DashboardSettingsProvider", () => {
         showArchived: true,
         sortByRecentUpdates: true,
         visibleFocusIndicators: true,
+        structuredFilters: {
+          repo: null,
+          agent: null,
+          backend: null,
+        },
       }),
     );
     expect(screen.getByTestId("view-state")).toHaveTextContent('"drawerWidth":540');
@@ -150,7 +164,48 @@ describe("DashboardSettingsProvider", () => {
     renderSettingsProbe();
 
     expect(screen.getByTestId("preferences")).toHaveTextContent('"sortByRecentUpdates":true');
+    expect(screen.getByTestId("preferences")).toHaveTextContent(
+      '"structuredFilters":{"repo":null,"agent":null,"backend":null}',
+    );
     expect(screen.getByTestId("view-state")).toHaveTextContent('"drawerWidth":540');
+  });
+
+  it("defaults missing structured-filter categories to Any while preserving stored values", () => {
+    window.localStorage.setItem(
+      "task-runner:web:dashboard-preferences",
+      JSON.stringify({
+        structuredFilters: {
+          repo: "task-runner",
+        },
+      }),
+    );
+
+    renderSettingsProbe();
+
+    expect(screen.getByTestId("preferences")).toHaveTextContent(
+      '"structuredFilters":{"repo":"task-runner","agent":null,"backend":null}',
+    );
+  });
+
+  it("falls back to Any for malformed stored structured-filter values", () => {
+    window.localStorage.setItem(
+      "task-runner:web:dashboard-preferences",
+      JSON.stringify({
+        showArchived: true,
+        structuredFilters: {
+          repo: 42,
+          agent: "   ",
+          backend: false,
+        },
+      }),
+    );
+
+    renderSettingsProbe();
+
+    expect(screen.getByTestId("preferences")).toHaveTextContent('"showArchived":true');
+    expect(screen.getByTestId("preferences")).toHaveTextContent(
+      '"structuredFilters":{"repo":null,"agent":null,"backend":null}',
+    );
   });
 
   it("hydrates and resets visible focus indicators independently", () => {
@@ -183,10 +238,15 @@ describe("DashboardSettingsProvider", () => {
         showArchived: true,
         sortByRecentUpdates: true,
         visibleFocusIndicators: true,
+        structuredFilters: {
+          repo: null,
+          agent: null,
+          backend: null,
+        },
       }),
     );
     expect(screen.getByTestId("view-state")).toHaveTextContent('"drawerWidth":700');
-    expect(screen.getByTestId("view-state")).toHaveTextContent('"repo":"task-runner-web"');
+    expect(screen.getByTestId("view-state")).toHaveTextContent('"search":"task-runner-web"');
   });
 
   it("resets a single preference without affecting the others", () => {
@@ -202,6 +262,11 @@ describe("DashboardSettingsProvider", () => {
         showArchived: false,
         sortByRecentUpdates: false,
         visibleFocusIndicators: false,
+        structuredFilters: {
+          repo: null,
+          agent: null,
+          backend: null,
+        },
       }),
     );
   });
@@ -219,6 +284,11 @@ describe("DashboardSettingsProvider", () => {
         showArchived: false,
         sortByRecentUpdates: false,
         visibleFocusIndicators: false,
+        structuredFilters: {
+          repo: null,
+          agent: null,
+          backend: null,
+        },
       }),
     );
   });

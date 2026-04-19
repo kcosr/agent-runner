@@ -7,9 +7,22 @@ export interface DashboardPreferences {
   showArchived: boolean;
   sortByRecentUpdates: boolean;
   visibleFocusIndicators: boolean;
+  structuredFilters: DashboardStructuredFilters;
 }
 
 export type DashboardPreferenceKey = keyof DashboardPreferences;
+
+export interface DashboardStructuredFilters {
+  repo: string | null;
+  agent: string | null;
+  backend: string | null;
+}
+
+export const EMPTY_DASHBOARD_STRUCTURED_FILTERS: DashboardStructuredFilters = {
+  repo: null,
+  agent: null,
+  backend: null,
+};
 
 export type DrawerDetailSection = "tasks" | "attachments" | "dependencies" | "events";
 export type AttachmentTab = "run" | "group";
@@ -31,7 +44,6 @@ export type RunDrawerView =
     };
 
 export interface DashboardViewState {
-  repo: string;
   search: string;
   collapsedColumnKeys: string[];
   drawerWidth: number;
@@ -60,10 +72,10 @@ export const DEFAULT_DASHBOARD_PREFERENCES: DashboardPreferences = {
   showArchived: false,
   sortByRecentUpdates: false,
   visibleFocusIndicators: false,
+  structuredFilters: EMPTY_DASHBOARD_STRUCTURED_FILTERS,
 };
 
 export const DEFAULT_DASHBOARD_VIEW_STATE: DashboardViewState = {
-  repo: "all",
   search: "",
   collapsedColumnKeys: [],
   drawerWidth: DRAWER_WIDTH_DEFAULT,
@@ -148,6 +160,50 @@ function parseStoredDashboardPreferences(value: unknown): DashboardPreferences {
       typeof record.visibleFocusIndicators === "boolean"
         ? record.visibleFocusIndicators
         : DEFAULT_DASHBOARD_PREFERENCES.visibleFocusIndicators,
+    structuredFilters: parseStoredStructuredFilters(record.structuredFilters),
+  };
+}
+
+function parseStoredStructuredFilters(value: unknown): DashboardStructuredFilters {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return EMPTY_DASHBOARD_STRUCTURED_FILTERS;
+  }
+
+  const record = value as Record<string, unknown>;
+  return {
+    repo: parseStoredStructuredFilterValue(record.repo),
+    agent: parseStoredStructuredFilterValue(record.agent),
+    backend: parseStoredStructuredFilterValue(record.backend),
+  };
+}
+
+function parseStoredStructuredFilterValue(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+export function hasActiveDashboardStructuredFilters(
+  structuredFilters: DashboardStructuredFilters,
+): boolean {
+  return (
+    structuredFilters.repo !== null ||
+    structuredFilters.agent !== null ||
+    structuredFilters.backend !== null
+  );
+}
+
+export function toggleDashboardStructuredFilter(
+  structuredFilters: DashboardStructuredFilters,
+  key: keyof DashboardStructuredFilters,
+  value: string,
+): DashboardStructuredFilters {
+  return {
+    ...structuredFilters,
+    [key]: structuredFilters[key] === value ? null : value,
   };
 }
 

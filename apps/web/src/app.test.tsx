@@ -34,6 +34,11 @@ const DEFAULT_DASHBOARD_PREFERENCES = {
   showArchived: false,
   sortByRecentUpdates: false,
   visibleFocusIndicators: false,
+  structuredFilters: {
+    repo: null,
+    agent: null,
+    backend: null,
+  },
 };
 
 class MockEventSource {
@@ -826,16 +831,25 @@ async function renderApp(initialPath = "/") {
   return render(<App />);
 }
 
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 async function findRunCard(name: string | RegExp) {
   return await screen.findByRole(
     "button",
     {
-      name: typeof name === "string" ? new RegExp(name, "i") : name,
+      name: typeof name === "string" ? new RegExp(`^${escapeRegExp(name)}$`, "i") : name,
     },
     {
       timeout: 5000,
     },
   );
+}
+
+async function openFilters(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("button", { name: "Filters" }));
+  return await screen.findByRole("dialog", { name: "Filters" });
 }
 
 function findEventSource(urlSuffix: string) {
@@ -844,10 +858,6 @@ function findEventSource(urlSuffix: string) {
     throw new Error(`expected EventSource for ${urlSuffix}`);
   }
   return instance;
-}
-
-function escapeRegExp(value: string) {
-  return value.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function getCloseDetailButton() {
@@ -1707,6 +1717,251 @@ describe("web app", () => {
     expect(screen.getByPlaceholderText("Search runs")).toHaveFocus();
   });
 
+  it("opens Filters with Ctrl+Shift+F and focuses the first filter control", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    const runCard = await findRunCard("Build dashboard");
+    runCard.focus();
+    expect(runCard).toHaveFocus();
+
+    await user.keyboard("{Control>}{Shift>}f{/Shift}{/Control}");
+
+    expect(await screen.findByRole("dialog", { name: "Filters" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Repo" })).toHaveFocus();
+  });
+
+  it("applies exact-match structured filters and keeps options stable while filters are active", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "run-a-codex",
+          repo: "repo-a",
+          agentName: "implementer",
+          backend: "codex",
+          assignmentName: "Repo A Codex",
+          name: "Repo A Codex",
+        }),
+        makeRun({
+          runId: "run-a-passive",
+          repo: "repo-a",
+          agentName: "reviewer",
+          backend: "passive",
+          assignmentName: "Repo A Passive",
+          name: "Repo A Passive",
+        }),
+        makeRun({
+          runId: "run-b-claude",
+          repo: "repo-b",
+          agentName: "implementer",
+          backend: "claude",
+          assignmentName: "Repo B Claude",
+          name: "Repo B Claude",
+        }),
+      ],
+      details: {},
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await findRunCard("Repo A Codex");
+    const filtersDialog = await openFilters(user);
+
+    expect(
+      within(screen.getByRole("combobox", { name: "Backend" }))
+        .getAllByRole("option")
+        .map((option) => option.textContent),
+    ).toEqual(["Any", "claude", "codex", "passive"]);
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "repo-a");
+    expect(await findRunCard("Repo A Codex")).toBeInTheDocument();
+    expect(await findRunCard("Repo A Passive")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Repo B Claude/i })).not.toBeInTheDocument();
+
+    expect(filtersDialog).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("combobox", { name: "Backend" }))
+        .getAllByRole("option")
+        .map((option) => option.textContent),
+    ).toEqual(["Any", "claude", "codex", "passive"]);
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Agent" }), "reviewer");
+    expect(await findRunCard("Repo A Passive")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Repo A Codex/i })).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Backend" }), "claude");
+    expect(await screen.findByText("No matching runs")).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Backend" }), "");
+    expect(await findRunCard("Repo A Passive")).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Agent" }), "");
+    expect(await findRunCard("Repo A Codex")).toBeInTheDocument();
+    expect(await findRunCard("Repo A Passive")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Clear all" }));
+    expect(await findRunCard("Repo A Codex")).toBeInTheDocument();
+    expect(await findRunCard("Repo A Passive")).toBeInTheDocument();
+    expect(await findRunCard("Repo B Claude")).toBeInTheDocument();
+  });
+
+  it("persists structured filters across reloads while keeping search transient", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "run-a-codex",
+          repo: "repo-a",
+          agentName: "implementer",
+          backend: "codex",
+          assignmentName: "Repo A Codex",
+          name: "Repo A Codex",
+        }),
+        makeRun({
+          runId: "run-a-passive",
+          repo: "repo-a",
+          agentName: "reviewer",
+          backend: "passive",
+          assignmentName: "Repo A Passive",
+          name: "Repo A Passive",
+        }),
+        makeRun({
+          runId: "run-b-claude",
+          repo: "repo-b",
+          agentName: "implementer",
+          backend: "claude",
+          assignmentName: "Repo B Claude",
+          name: "Repo B Claude",
+        }),
+      ],
+      details: {},
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await findRunCard("Repo A Codex");
+
+    await openFilters(user);
+    await user.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "repo-a");
+    await user.type(screen.getByPlaceholderText("Search runs"), "Passive");
+
+    expect(await findRunCard("Repo A Passive")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Repo A Codex/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Repo B Claude/i })).not.toBeInTheDocument();
+
+    const stored = window.localStorage.getItem("task-runner:web:dashboard-preferences");
+    expect(stored ? JSON.parse(stored) : null).toMatchObject({
+      structuredFilters: {
+        repo: "repo-a",
+        agent: null,
+        backend: null,
+      },
+    });
+
+    cleanup();
+    queryClient.clear();
+
+    await renderApp();
+    await findRunCard("Repo A Codex");
+
+    expect(screen.getByPlaceholderText("Search runs")).toHaveValue("");
+    expect(await findRunCard("Repo A Codex")).toBeInTheDocument();
+    expect(await findRunCard("Repo A Passive")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Repo B Claude/i })).not.toBeInTheDocument();
+
+    await openFilters(user);
+    expect(screen.getByRole("combobox", { name: "Repo" })).toHaveValue("repo-a");
+  });
+
+  it("applies and clears structured filters from run-card badges without breaking card selection", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "run-a-codex",
+          repo: "repo-a",
+          agentName: "implementer",
+          backend: "codex",
+          assignmentName: "Repo A Codex",
+          name: "Repo A Codex",
+        }),
+        makeRun({
+          runId: "run-b-claude",
+          repo: "repo-b",
+          agentName: "reviewer",
+          backend: "claude",
+          assignmentName: "Repo B Claude",
+          name: "Repo B Claude",
+        }),
+      ],
+      details: {
+        "run-a-codex": makeDetail({
+          runId: "run-a-codex",
+          repo: "repo-a",
+          agent: {
+            name: "implementer",
+            sourcePath: null,
+          },
+          assignment: {
+            name: "Repo A Codex",
+            sourcePath: "/tmp/repo-a-codex.md",
+            workspacePath: "/tmp/repo-a-codex.md",
+          },
+          backend: "codex",
+          name: "Repo A Codex",
+        }),
+        "run-b-claude": makeDetail({
+          runId: "run-b-claude",
+          repo: "repo-b",
+          agent: {
+            name: "reviewer",
+            sourcePath: null,
+          },
+          assignment: {
+            name: "Repo B Claude",
+            sourcePath: "/tmp/repo-b-claude.md",
+            workspacePath: "/tmp/repo-b-claude.md",
+          },
+          backend: "claude",
+          name: "Repo B Claude",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    const repoACard = await findRunCard("Repo A Codex");
+    await user.click(repoACard);
+    await screen.findByLabelText("Run detail");
+
+    const selectedRepoACard = await findRunCard("Repo A Codex");
+    await user.click(within(selectedRepoACard).getByLabelText("Filter by repo repo-a"));
+    expect(screen.queryByRole("dialog", { name: "Filters" })).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: /Repo B Claude/i })).not.toBeInTheDocument();
+    });
+
+    await user.click(
+      within(await findRunCard("Repo A Codex")).getByLabelText("Filter by repo repo-a"),
+    );
+    expect(await findRunCard("Repo B Claude")).toBeInTheDocument();
+
+    const repoBCard = await findRunCard("Repo B Claude");
+    await user.click(within(repoBCard).getByLabelText("Filter by backend claude"));
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: /Repo A Codex/i })).not.toBeInTheDocument();
+    });
+
+    const filteredCard = await findRunCard("Repo B Claude");
+    await user.click(filteredCard);
+    expect(filteredCard).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByLabelText("Run detail")).toBeInTheDocument();
+  });
+
   it("navigates between selected runs with arrow keys", async () => {
     installFetchMock({
       runs: [
@@ -2352,6 +2607,7 @@ describe("web app", () => {
     expect(screen.getByRole("heading", { name: "Dashboard shortcuts" })).toBeInTheDocument();
     expect(screen.getByText("Navigate runs")).toBeInTheDocument();
     expect(screen.getByLabelText("Shortcut: Ctrl + F")).toBeInTheDocument();
+    expect(screen.getByLabelText("Shortcut: Ctrl + Shift + F")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Runs" }));
 
@@ -2446,6 +2702,11 @@ describe("web app", () => {
       showArchived: false,
       sortByRecentUpdates: false,
       visibleFocusIndicators: false,
+      structuredFilters: {
+        repo: null,
+        agent: null,
+        backend: null,
+      },
     });
 
     cleanup();
@@ -2513,7 +2774,7 @@ describe("web app", () => {
     await renderApp();
     await findRunCard("Build dashboard");
     await user.type(screen.getByPlaceholderText("Search runs"), "does-not-match");
-    expect(await screen.findByText("Filters hide every run")).toBeInTheDocument();
+    expect(await screen.findByText("No matching runs")).toBeInTheDocument();
   });
 
   it("renders unnamed runs separately from assignment metadata and searches by run name", async () => {
@@ -2891,7 +3152,7 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await screen.findByRole("button", { name: /show archived runs/i }));
-    await user.click(await screen.findByTitle("Archived passive run"));
+    await user.click(await findRunCard("Archived passive run"));
     await user.click(await screen.findByRole("button", { name: /edit backend session/i }));
 
     const input = screen.getByRole("textbox", { name: /backend session/i });
@@ -3013,6 +3274,11 @@ describe("web app", () => {
       showArchived: true,
       sortByRecentUpdates: true,
       visibleFocusIndicators: true,
+      structuredFilters: {
+        repo: null,
+        agent: null,
+        backend: null,
+      },
     });
 
     view.unmount();
@@ -3118,6 +3384,11 @@ describe("web app", () => {
       showArchived: true,
       sortByRecentUpdates: false,
       visibleFocusIndicators: false,
+      structuredFilters: {
+        repo: null,
+        agent: null,
+        backend: null,
+      },
     });
   });
 
@@ -3150,6 +3421,11 @@ describe("web app", () => {
       showArchived: true,
       sortByRecentUpdates: false,
       visibleFocusIndicators: false,
+      structuredFilters: {
+        repo: null,
+        agent: null,
+        backend: null,
+      },
     });
   });
 
@@ -3777,7 +4053,7 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await screen.findByRole("button", { name: /show archived runs/i }));
-    await user.click(await screen.findByTitle("Archived run"));
+    await user.click(await findRunCard("Archived run"));
 
     expect(await screen.findByRole("button", { name: "Delete" })).toBeInTheDocument();
 

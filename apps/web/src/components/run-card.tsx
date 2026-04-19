@@ -1,6 +1,8 @@
 import type { RunSummary } from "@task-runner/core/contracts/runs.js";
+import type { MouseEvent } from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { truncateEnd } from "../lib/format.js";
+import type { DashboardStructuredFilters } from "../lib/settings.js";
 import { AttachmentIcon, DependencyIcon, RunningIcon } from "./icons.js";
 import { StatusBadge } from "./status-badge.js";
 
@@ -52,11 +54,15 @@ export function RunCard({
   run,
   selected,
   onSelect,
+  onStructuredFilterToggle,
+  structuredFilters,
   motion,
 }: {
   run: RunSummary;
   selected: boolean;
   onSelect: () => void;
+  onStructuredFilterToggle: (key: keyof DashboardStructuredFilters, value: string) => void;
+  structuredFilters: DashboardStructuredFilters;
   motion?: RunCardMotion;
 }) {
   const cardRef = useRef<HTMLButtonElement | null>(null);
@@ -64,6 +70,7 @@ export function RunCard({
   const [activeMotionRevision, setActiveMotionRevision] = useState<number | null>(null);
   const progress =
     run.tasksTotal === 0 ? 0 : Math.round((run.tasksCompleted / run.tasksTotal) * 100);
+  const accessibleName = run.name ?? "Unnamed";
   const visibleName = truncateEnd(run.name ?? "Unnamed");
   const showDependencyIndicator = run.dependencyState.total > 0;
   const dependencyIndicatorClass =
@@ -71,6 +78,9 @@ export function RunCard({
       ? "meta-indicator meta-indicator--warning"
       : "meta-indicator meta-indicator--success";
   const showAttachmentIndicator = run.attachmentCount > 0;
+  const repoFilterActive = structuredFilters.repo === run.repo;
+  const agentFilterActive = structuredFilters.agent === run.agentName;
+  const backendFilterActive = structuredFilters.backend === run.backend;
   const cardClassName = [
     "card",
     selected ? "selected" : null,
@@ -78,6 +88,25 @@ export function RunCard({
   ]
     .filter(Boolean)
     .join(" ");
+
+  function handleCardClick(event: MouseEvent<HTMLButtonElement>) {
+    const filterBadge =
+      event.target instanceof Element
+        ? event.target.closest<HTMLElement>("[data-structured-filter-key]")
+        : null;
+    if (filterBadge) {
+      const key = filterBadge.dataset.structuredFilterKey as keyof DashboardStructuredFilters;
+      const value = filterBadge.dataset.structuredFilterValue;
+      if (value) {
+        onStructuredFilterToggle(key, value);
+      }
+      return;
+    }
+
+    if (!selected) {
+      onSelect();
+    }
+  }
 
   useEffect(() => {
     if (!motion) {
@@ -125,15 +154,16 @@ export function RunCard({
 
   return (
     <button
+      aria-label={accessibleName}
       aria-pressed={selected}
       className={cardClassName}
       data-motion-active={activeMotionRevision === motion?.revision ? "true" : undefined}
       data-motion-kind={motion?.kind}
       data-motion-revision={motion?.revision}
       data-run-id={run.runId}
-      onClick={onSelect}
+      onClick={handleCardClick}
       ref={cardRef}
-      title={run.name ?? "Unnamed"}
+      title={accessibleName}
       type="button"
     >
       <div className="card-row">
@@ -141,16 +171,40 @@ export function RunCard({
         <span className="card-row-spacer" />
         <StatusBadge status={run.effectiveStatus} />
       </div>
-      <div className="card-row card-row--title">
+      <div className="card-row">
         <span className="card-title">{visibleName}</span>
       </div>
       <div className="card-row card-row--subtitle">
         <span className="card-subtitle">{run.assignmentName ?? "Ad hoc run"}</span>
       </div>
       <div className="card-row card-meta">
-        <span className="repo-badge">{run.repo}</span>
-        <span className="meta-item">{run.agentName}</span>
-        <span className="backend-badge">{run.backend}</span>
+        <span
+          aria-label={`Filter by repo ${run.repo}`}
+          className="repo-badge meta-filter-badge meta-filter-badge--repo"
+          data-active-filter={repoFilterActive ? "true" : undefined}
+          data-structured-filter-key="repo"
+          data-structured-filter-value={run.repo}
+        >
+          {run.repo}
+        </span>
+        <span
+          aria-label={`Filter by agent ${run.agentName}`}
+          className="meta-item meta-filter-badge meta-filter-badge--agent"
+          data-active-filter={agentFilterActive ? "true" : undefined}
+          data-structured-filter-key="agent"
+          data-structured-filter-value={run.agentName}
+        >
+          {run.agentName}
+        </span>
+        <span
+          aria-label={`Filter by backend ${run.backend}`}
+          className="backend-badge meta-filter-badge meta-filter-badge--backend"
+          data-active-filter={backendFilterActive ? "true" : undefined}
+          data-structured-filter-key="backend"
+          data-structured-filter-value={run.backend}
+        >
+          {run.backend}
+        </span>
         {showDependencyIndicator ? (
           <span
             aria-label={`${run.dependencyState.satisfied} of ${run.dependencyState.total} dependencies satisfied`}

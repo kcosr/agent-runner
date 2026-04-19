@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AppShell } from "../components/app-shell.js";
 import { RunFilters } from "../components/run-filters.js";
 import {
@@ -12,6 +12,8 @@ import { useRunsDashboardState } from "./use-runs-dashboard-state.js";
 
 export function RunsDashboardRoute() {
   const state = useRunsDashboardState();
+  const [openFiltersRequestVersion, setOpenFiltersRequestVersion] = useState(0);
+  const filtersTriggerRef = useRef<HTMLButtonElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const latestStateRef = useRef(state);
   const navigableBoardColumns = state.boardColumns.filter(
@@ -57,6 +59,13 @@ export function RunsDashboardRoute() {
         event.preventDefault();
         searchInputRef.current?.focus();
         searchInputRef.current?.select();
+        return;
+      }
+
+      if (command === "ui.openFilters") {
+        event.preventDefault();
+        filtersTriggerRef.current?.focus();
+        setOpenFiltersRequestVersion((current) => current + 1);
         return;
       }
 
@@ -174,14 +183,18 @@ export function RunsDashboardRoute() {
           activeBoardColumnKey={state.activeBoardColumnKey}
           boardColumns={state.boardColumns}
           collapsedColumnKeys={state.collapsedColumnKeys}
+          hasActiveStructuredFilters={state.hasActiveStructuredFilters}
           onExpandColumn={state.columnActions.expand}
           onActiveBoardColumnKeyChange={state.setActiveBoardColumnKey}
           onResetFilters={state.resetBoardFilters}
           onSelectRun={state.openRun}
+          onStructuredFilterToggle={state.toggleStructuredFilter}
           onToggleColumnCollapse={state.columnActions.toggleCollapse}
           runs={state.runs}
           runsQuery={state.runsQuery}
+          searchValue={state.viewState.search}
           selectedRunId={state.selectedRunId}
+          structuredFilters={state.preferences.structuredFilters}
           visibleRuns={state.visibleRuns}
         />
       }
@@ -233,8 +246,10 @@ export function RunsDashboardRoute() {
       topNotices={topNotices.length > 0 ? topNotices : undefined}
       toolbar={
         <RunFilters
+          filterOptions={state.filterOptions}
+          filtersTriggerRef={filtersTriggerRef}
+          openFiltersRequestVersion={openFiltersRequestVersion}
           preferences={state.preferences}
-          repoOptions={state.repoOptions}
           searchInputRef={searchInputRef}
           updatePreferences={state.updatePreferences}
           updateViewState={state.updateViewState}

@@ -17,8 +17,12 @@ import { useRuntimeConfig } from "../lib/runtime-config.js";
 import {
   type AttachmentTab,
   DEFAULT_DRAWER_VIEW,
+  type DashboardStructuredFilters,
   type DrawerDetailSection,
+  EMPTY_DASHBOARD_STRUCTURED_FILTERS,
   type RunDrawerView,
+  hasActiveDashboardStructuredFilters,
+  toggleDashboardStructuredFilter,
   useDashboardPreferences,
   useDashboardViewState,
 } from "../lib/settings.js";
@@ -87,6 +91,17 @@ function matchesSearch(run: RunSummary, search: string): boolean {
     .join(" ")
     .toLowerCase();
   return haystack.includes(search.toLowerCase());
+}
+
+function matchesStructuredFilters(
+  run: RunSummary,
+  structuredFilters: DashboardStructuredFilters,
+): boolean {
+  return (
+    (structuredFilters.repo === null || run.repo === structuredFilters.repo) &&
+    (structuredFilters.agent === null || run.agentName === structuredFilters.agent) &&
+    (structuredFilters.backend === null || run.backend === structuredFilters.backend)
+  );
 }
 
 function buildColumns(runs: RunSummary[], collapseFailureStates: boolean): BoardColumn[] {
@@ -307,25 +322,33 @@ export function useRunsDashboardState() {
   }, [selectedRunQuery.data]);
 
   const runs = runsQuery.data ?? [];
-  const repoOptions = useMemo(
-    () =>
-      Array.from(new Set(runs.map((run) => run.repo))).sort((left, right) =>
+  const filterOptions = useMemo(
+    () => ({
+      repo: Array.from(new Set(runs.map((run) => run.repo))).sort((left, right) =>
         left.localeCompare(right),
       ),
+      agent: Array.from(new Set(runs.map((run) => run.agentName))).sort((left, right) =>
+        left.localeCompare(right),
+      ),
+      backend: Array.from(new Set(runs.map((run) => run.backend))).sort((left, right) =>
+        left.localeCompare(right),
+      ),
+    }),
     [runs],
   );
-  const visibleRuns = useMemo(
+  const structuredVisibleRuns = useMemo(
     () =>
       runs.filter((run) => {
         if (!preferences.showArchived && run.archivedAt) {
           return false;
         }
-        if (viewState.repo !== "all" && run.repo !== viewState.repo) {
-          return false;
-        }
-        return matchesSearch(run, deferredSearch);
+        return matchesStructuredFilters(run, preferences.structuredFilters);
       }),
-    [deferredSearch, preferences.showArchived, runs, viewState.repo],
+    [preferences.showArchived, preferences.structuredFilters, runs],
+  );
+  const visibleRuns = useMemo(
+    () => structuredVisibleRuns.filter((run) => matchesSearch(run, deferredSearch)),
+    [deferredSearch, structuredVisibleRuns],
   );
   const collapsedColumnKeySet = useMemo(
     () => new Set(viewState.collapsedColumnKeys),
@@ -829,7 +852,8 @@ export function useRunsDashboardState() {
       });
     },
     preferences,
-    repoOptions,
+    filterOptions,
+    hasActiveStructuredFilters: hasActiveDashboardStructuredFilters(preferences.structuredFilters),
     resumeDialogOpen,
     resumeMessageDraft,
     resumeMessageExpanded,
@@ -898,8 +922,11 @@ export function useRunsDashboardState() {
       });
     },
     resetBoardFilters: () => {
-      updateViewState({ repo: "all", search: "" });
-      updatePreferences({ showArchived: false });
+      updateViewState({ search: "" });
+      updatePreferences({
+        showArchived: false,
+        structuredFilters: EMPTY_DASHBOARD_STRUCTURED_FILTERS,
+      });
     },
     setActiveBoardColumnKey: (columnKey: string | null) => {
       if (viewState.activeBoardColumnKey === columnKey) {
@@ -932,6 +959,15 @@ export function useRunsDashboardState() {
         attachmentId: null,
         attachmentOwnerRunId: null,
         attachmentTab,
+      });
+    },
+    toggleStructuredFilter: (key: keyof DashboardStructuredFilters, value: string) => {
+      updatePreferences({
+        structuredFilters: toggleDashboardStructuredFilter(
+          preferences.structuredFilters,
+          key,
+          value,
+        ),
       });
     },
     updatePreferences,

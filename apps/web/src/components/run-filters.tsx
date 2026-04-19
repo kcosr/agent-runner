@@ -1,22 +1,118 @@
-import type { RefObject } from "react";
-import type { DashboardPreferences, DashboardViewState } from "../lib/settings.js";
-import { AlertIcon, ArchiveIcon, GridIcon, SearchIcon } from "./icons.js";
+import type { Ref, RefObject } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import type {
+  DashboardPreferences,
+  DashboardStructuredFilters,
+  DashboardViewState,
+} from "../lib/settings.js";
+import {
+  EMPTY_DASHBOARD_STRUCTURED_FILTERS,
+  hasActiveDashboardStructuredFilters,
+} from "../lib/settings.js";
+import { AlertIcon, ArchiveIcon, FilterIcon, GridIcon, SearchIcon } from "./icons.js";
+
+function assignRef<T>(ref: Ref<T> | undefined, value: T) {
+  if (!ref) {
+    return;
+  }
+
+  if (typeof ref === "function") {
+    ref(value);
+    return;
+  }
+
+  ref.current = value;
+}
 
 export function RunFilters({
   preferences,
-  repoOptions,
+  filterOptions,
+  filtersTriggerRef,
+  openFiltersRequestVersion,
   searchInputRef,
   updatePreferences,
   updateViewState,
   viewState,
 }: {
   preferences: DashboardPreferences;
-  repoOptions: string[];
+  filterOptions: {
+    repo: string[];
+    agent: string[];
+    backend: string[];
+  };
+  filtersTriggerRef?: Ref<HTMLButtonElement>;
+  openFiltersRequestVersion?: number;
   searchInputRef?: RefObject<HTMLInputElement | null>;
   updatePreferences: (updates: Partial<DashboardPreferences>) => void;
   updateViewState: (updates: Partial<DashboardViewState>) => void;
   viewState: DashboardViewState;
 }) {
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const firstFilterRef = useRef<HTMLSelectElement | null>(null);
+  const titleId = useId();
+  const panelId = useId();
+  const hasActiveStructuredFilter = hasActiveDashboardStructuredFilters(
+    preferences.structuredFilters,
+  );
+
+  useEffect(() => {
+    if (!filtersOpen) {
+      return;
+    }
+
+    firstFilterRef.current?.focus();
+  }, [filtersOpen]);
+
+  useEffect(() => {
+    if (openFiltersRequestVersion === undefined || openFiltersRequestVersion === 0) {
+      return;
+    }
+
+    if (filtersOpen) {
+      firstFilterRef.current?.focus();
+      return;
+    }
+
+    setFiltersOpen(true);
+  }, [filtersOpen, openFiltersRequestVersion]);
+
+  useEffect(() => {
+    if (!filtersOpen) {
+      return;
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape") {
+        return;
+      }
+
+      event.preventDefault();
+      setFiltersOpen(false);
+      triggerRef.current?.focus();
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [filtersOpen]);
+
+  function updateStructuredFilter(key: keyof DashboardStructuredFilters, value: string | null) {
+    updatePreferences({
+      structuredFilters: {
+        ...preferences.structuredFilters,
+        [key]: value,
+      },
+    });
+  }
+
+  function clearStructuredFilters() {
+    updatePreferences({
+      structuredFilters: EMPTY_DASHBOARD_STRUCTURED_FILTERS,
+    });
+  }
+
   return (
     <header className="topbar">
       <span className="page-title">
@@ -38,21 +134,110 @@ export function RunFilters({
           />
         </label>
 
-        <label className="field select">
-          <span className="field-label">Repo</span>
-          <select
-            aria-label="Filter by repo"
-            onChange={(event) => updateViewState({ repo: event.target.value })}
-            value={viewState.repo}
+        <div className="filters-control">
+          <button
+            aria-controls={filtersOpen ? panelId : undefined}
+            aria-expanded={filtersOpen}
+            aria-haspopup="dialog"
+            aria-label="Filters"
+            className="field filters-trigger"
+            data-active={hasActiveStructuredFilter ? "true" : undefined}
+            onClick={() => setFiltersOpen((current) => !current)}
+            ref={(node) => {
+              triggerRef.current = node;
+              assignRef(filtersTriggerRef, node);
+            }}
+            type="button"
           >
-            <option value="all">All</option>
-            {repoOptions.map((repo) => (
-              <option key={repo} value={repo}>
-                {repo}
-              </option>
-            ))}
-          </select>
-        </label>
+            <FilterIcon aria-hidden="true" />
+            <span className="filters-trigger__label">Filters</span>
+          </button>
+
+          {filtersOpen ? (
+            <>
+              <button
+                aria-label="Close filters"
+                className="filters-backdrop"
+                onClick={() => setFiltersOpen(false)}
+                type="button"
+              />
+              <dialog aria-labelledby={titleId} className="filters-panel" id={panelId} open>
+                <div className="filters-panel__header">
+                  <div>
+                    <h2 className="filters-panel__title" id={titleId}>
+                      Filters
+                    </h2>
+                    <p className="filters-panel__copy">
+                      Match exact repo, agent, and backend values from the current run list.
+                    </p>
+                  </div>
+                  <button
+                    className="btn btn--quiet"
+                    disabled={!hasActiveStructuredFilter}
+                    onClick={clearStructuredFilters}
+                    type="button"
+                  >
+                    Clear all
+                  </button>
+                </div>
+
+                <div className="filters-panel__body">
+                  <label className="field select filters-panel__field">
+                    <span className="field-label">Repo</span>
+                    <select
+                      onChange={(event) =>
+                        updateStructuredFilter("repo", event.target.value || null)
+                      }
+                      ref={firstFilterRef}
+                      value={preferences.structuredFilters.repo ?? ""}
+                    >
+                      <option value="">Any</option>
+                      {filterOptions.repo.map((repo) => (
+                        <option key={repo} value={repo}>
+                          {repo}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="field select filters-panel__field">
+                    <span className="field-label">Agent</span>
+                    <select
+                      onChange={(event) =>
+                        updateStructuredFilter("agent", event.target.value || null)
+                      }
+                      value={preferences.structuredFilters.agent ?? ""}
+                    >
+                      <option value="">Any</option>
+                      {filterOptions.agent.map((agent) => (
+                        <option key={agent} value={agent}>
+                          {agent}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="field select filters-panel__field">
+                    <span className="field-label">Backend</span>
+                    <select
+                      onChange={(event) =>
+                        updateStructuredFilter("backend", event.target.value || null)
+                      }
+                      value={preferences.structuredFilters.backend ?? ""}
+                    >
+                      <option value="">Any</option>
+                      {filterOptions.backend.map((backend) => (
+                        <option key={backend} value={backend}>
+                          {backend}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              </dialog>
+            </>
+          ) : null}
+        </div>
 
         <button
           aria-label="Hide empty columns"

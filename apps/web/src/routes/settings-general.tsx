@@ -10,9 +10,11 @@ import {
   useDashboardPreferences,
 } from "../lib/settings.js";
 
+type TogglePreferenceKey = Exclude<DashboardPreferenceKey, "structuredFilters">;
+
 interface PreferenceRowDefinition {
   description: string;
-  key: DashboardPreferenceKey;
+  key: TogglePreferenceKey;
   title: string;
 }
 

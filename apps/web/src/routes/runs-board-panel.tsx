@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { EmptyPanel } from "../components/empty-states.js";
 import type { RunCardMotion } from "../components/run-card.js";
 import { type BoardColumn, RunColumn } from "../components/run-column.js";
+import type { DashboardStructuredFilters } from "../lib/settings.js";
 import { useHorizontalWheelGuard } from "../lib/use-horizontal-wheel-guard.js";
 
 interface RunBoardPosition {
@@ -40,27 +41,35 @@ export function RunsBoardPanel({
   activeBoardColumnKey,
   boardColumns,
   collapsedColumnKeys,
+  hasActiveStructuredFilters,
   onActiveBoardColumnKeyChange,
   onExpandColumn,
   onResetFilters,
   onSelectRun,
+  onStructuredFilterToggle,
   onToggleColumnCollapse,
   runs,
   runsQuery,
+  searchValue,
   selectedRunId,
+  structuredFilters,
   visibleRuns,
 }: {
   activeBoardColumnKey: string | null;
   boardColumns: BoardColumn[];
   collapsedColumnKeys: string[];
+  hasActiveStructuredFilters: boolean;
   onActiveBoardColumnKeyChange: (columnKey: string | null) => void;
   onExpandColumn: (columnKey: string) => void;
   onResetFilters: () => void;
   onSelectRun: (runId: string) => void;
+  onStructuredFilterToggle: (key: keyof DashboardStructuredFilters, value: string) => void;
   onToggleColumnCollapse: (columnKey: string) => void;
   runs: RunSummary[];
   runsQuery: UseQueryResult<RunSummary[], Error>;
+  searchValue: string;
   selectedRunId?: string;
+  structuredFilters: DashboardStructuredFilters;
   visibleRuns: RunSummary[];
 }) {
   const boardRef = useRef<HTMLElement | null>(null);
@@ -433,6 +442,19 @@ export function RunsBoardPanel({
   }
 
   if (visibleRuns.length === 0) {
+    const hasSearch = searchValue.trim().length > 0;
+    const emptyTitle = runs.length === 0 ? "No runs yet" : "No matching runs";
+    const emptyBody =
+      runs.length === 0
+        ? "No runs are available yet. Start or initialize a run, then refresh this board."
+        : hasActiveStructuredFilters && hasSearch
+          ? "Current filters and search are hiding every run. Clear them to bring runs back into view."
+          : hasActiveStructuredFilters
+            ? "Current filters are hiding every run. Clear them to bring runs back into view."
+            : hasSearch
+              ? "Current search is hiding every run. Clear it to bring runs back into view."
+              : "Current filters are hiding every run. Clear them to bring runs back into view.";
+
     return (
       <section className="board card-empty">
         <EmptyPanel
@@ -443,12 +465,8 @@ export function RunsBoardPanel({
               </button>
             ) : undefined
           }
-          body={
-            runs.length === 0
-              ? "No runs are available yet. Start or initialize a run, then refresh this board."
-              : "Current filters are hiding all runs. Reset them to bring runs back into view."
-          }
-          title={runs.length === 0 ? "No runs yet" : "Filters hide every run"}
+          body={emptyBody}
+          title={emptyTitle}
         />
       </section>
     );
@@ -480,8 +498,10 @@ export function RunsBoardPanel({
             key={column.key}
             motionsByRunId={motionsByRunId}
             onSelectRun={onSelectRun}
+            onStructuredFilterToggle={onStructuredFilterToggle}
             onToggleCollapse={() => onToggleColumnCollapse(column.key)}
             selectedRunId={selectedRunId}
+            structuredFilters={structuredFilters}
           />
         ))}
       </section>
