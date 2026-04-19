@@ -127,6 +127,10 @@ pre {
   border-radius: var(--radius-sm);
 }
 
+.app[data-focus-indicators="off"] :focus-visible {
+  outline: none;
+}
+
 /* ─── scrollbars ─────────────────────────────────────── */
 ::-webkit-scrollbar {
   width: 6px;

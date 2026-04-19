@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { RunAttachment } from "@task-runner/core/contracts/attachments.js";
 import type { RunTimelineHistory } from "@task-runner/core/contracts/events.js";
 import type { RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
@@ -3149,6 +3151,18 @@ describe("web app", () => {
       sortByRecentUpdates: false,
       visibleFocusIndicators: false,
     });
+  });
+
+  it("keeps selected-card styling independent from focus-indicator suppression", () => {
+    const css = readFileSync(join(process.cwd(), "src", "run-dashboard.css"), "utf8");
+
+    expect(css).toContain('.app[data-focus-indicators="off"] :focus-visible');
+    expect(css).toMatch(
+      /\.app\[data-focus-indicators="off"\]\s+:focus-visible\s*\{\s*outline:\s*none;\s*\}/s,
+    );
+    expect(css).toMatch(
+      /\n\.card\.selected\s*\{\s*border-color:\s*var\(--ring\);\s*box-shadow:\s*0 0 0 1px var\(--ring\), var\(--shadow-card\);\s*\}/s,
+    );
   });
 
   it("clamps the transient drawer width to the current viewport", async () => {
