@@ -192,6 +192,7 @@ export const runDetailSchema: z.ZodType<RunDetail> = z.object({
   tasks: z.array(runTaskSummarySchema),
   activeTask: runActiveTaskSchema.nullable(),
   message: z.string().nullable(),
+  pendingPrompt: z.string().nullable(),
   callerInstructions: z.string().nullable(),
   lockedFields: z.array(z.enum(LOCKABLE_FIELDS)),
   runtimeVars: z.record(z.string(), z.unknown()),

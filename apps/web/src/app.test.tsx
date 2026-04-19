@@ -258,6 +258,7 @@ function makeDetail(
       title: "Build UI",
     },
     message: null,
+    pendingPrompt: null,
     callerInstructions: null,
     lockedFields: ["tasks"],
     runtimeVars: {},
@@ -1200,6 +1201,101 @@ describe("web app", () => {
       );
     });
     expect(scrollRegion.scrollTop).toBe(32);
+  });
+
+  it("shows a pending attempt preview before the first attempt starts", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          status: "initialized",
+          effectiveStatus: "initialized",
+          activeTask: null,
+        }),
+      ],
+      details: {
+        "run-1": makeDetail({
+          status: "initialized",
+          effectiveStatus: "initialized",
+          isLive: false,
+          activeTask: null,
+          attempts: 0,
+          sessionCount: 0,
+          message: "Review this handoff before launch.",
+          pendingPrompt: "## Prepared prompt",
+        }),
+      },
+      timelineHistories: {
+        "run-1": {
+          runId: "run-1",
+          lastCursor: 0,
+          attempts: [],
+        },
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+    await user.click(screen.getByRole("button", { name: "Attempts" }));
+
+    expect(await screen.findByRole("tab", { name: "Pending" })).toBeInTheDocument();
+    expect(screen.getByRole("tablist", { name: "Attempts" })).toBeInTheDocument();
+    expect(screen.getByRole("tablist", { name: "Attempt view" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Message" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Prompt" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Output" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Prepared prompt" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Message" }));
+    expect(screen.getByText("Review this handoff before launch.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Output" }));
+    expect(screen.getByText("No output yet — this run has not started.")).toBeInTheDocument();
+
+    const detailSource = findEventSource("/api/runs/run-1/events/detail");
+    detailSource.emitOpen();
+    detailSource.emitMessage({
+      type: "detail_updated",
+      detail: makeDetail({
+        status: "running",
+        effectiveStatus: "running",
+        isLive: true,
+        attempts: 1,
+        sessionCount: 1,
+        pendingPrompt: null,
+      }),
+    });
+
+    let timelineSource: MockEventSource | undefined;
+    await waitFor(() => {
+      timelineSource = MockEventSource.instances.find((candidate) =>
+        candidate.url.endsWith("/api/runs/run-1/events/timeline"),
+      );
+      expect(timelineSource).toBeDefined();
+    });
+    if (!timelineSource) {
+      throw new Error("expected timeline EventSource after run start");
+    }
+    timelineSource.emitOpen();
+    timelineSource.emitMessage({
+      runId: "run-1",
+      cursor: 1,
+      event: {
+        type: "attempt_started",
+        attempt: 1,
+        sessionIndex: 0,
+        startedAt: "2026-04-13T05:00:00.000Z",
+        prompt: "## Attempt prompt",
+      },
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("tab", { name: "Pending" })).not.toBeInTheDocument();
+    });
+    expect(screen.queryByRole("tab", { name: "Message" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Prompt" }));
+    expect(screen.getByRole("heading", { level: 2, name: "Attempt prompt" })).toBeInTheDocument();
   });
 
   it("separates transcript and backend notices instead of gluing them together", async () => {

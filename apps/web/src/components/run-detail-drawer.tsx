@@ -38,7 +38,8 @@ import { MarkdownContent } from "./markdown.js";
 import { RunTaskList } from "./run-task-list.js";
 import { StatusBadge } from "./status-badge.js";
 
-type TimelineTab = "prompt" | "output";
+type TimelineTab = "message" | "prompt" | "output";
+type AttemptSelection = number | "pending" | null;
 type SummaryRow = readonly [label: string, value: string];
 
 const TIMELINE_BOTTOM_THRESHOLD_PX = 24;
@@ -294,8 +295,10 @@ export function RunDetailDrawer({
   const sectionTabsRef = useRef<HTMLElement | null>(null);
   const timelineContentScrollRef = useRef<HTMLDivElement | null>(null);
   const timelineOutputAtBottomRef = useRef(false);
-  const [selectedAttempt, setSelectedAttempt] = useState<number | null>(null);
-  const [timelineTab, setTimelineTab] = useState<TimelineTab>("output");
+  const [selectedAttempt, setSelectedAttempt] = useState<AttemptSelection>(null);
+  const [timelineTab, setTimelineTab] = useState<TimelineTab>(
+    run.status === "initialized" && run.attempts === 0 ? "prompt" : "output",
+  );
   const [editingName, setEditingName] = useState(false);
   const [editingBackendSession, setEditingBackendSession] = useState(false);
   const [nameDraft, setNameDraft] = useState(run.name ?? "");
@@ -370,10 +373,17 @@ export function RunDetailDrawer({
       (candidate) => candidate.runId.toLowerCase() === normalizedDependencyDraft.toLowerCase(),
     )?.runId;
   const timelineAttempts = timelineState.history?.attempts ?? [];
+  const pendingAttemptAvailable =
+    run.status === "initialized" && run.attempts === 0 && timelineAttempts.length === 0;
   const selectedAttemptRecord =
-    timelineAttempts.find((attempt) => attempt.attempt === selectedAttempt) ??
+    (typeof selectedAttempt === "number"
+      ? timelineAttempts.find((attempt) => attempt.attempt === selectedAttempt)
+      : null) ??
     timelineAttempts[timelineAttempts.length - 1] ??
     null;
+  const selectedPendingAttempt = pendingAttemptAvailable && selectedAttemptRecord === null;
+  const effectiveTimelineTab =
+    selectedPendingAttempt || timelineTab === "prompt" ? timelineTab : "output";
   const selectedAttemptNumber = selectedAttemptRecord?.attempt ?? null;
   const selectedAttemptOutput = selectedAttemptRecord ? attemptOutput(selectedAttemptRecord) : "";
   const selectedAttemptLive = selectedAttemptRecord?.live ?? false;
@@ -514,11 +524,24 @@ export function RunDetailDrawer({
 
   useEffect(() => {
     const availableAttempts = new Set(timelineAttempts.map((attempt) => attempt.attempt));
+    if (selectedAttempt === "pending") {
+      if (pendingAttemptAvailable) {
+        return;
+      }
+      if (timelineAttempts.length === 0) {
+        setSelectedAttempt(null);
+      }
+      return;
+    }
     if (selectedAttempt !== null && availableAttempts.has(selectedAttempt)) {
       return;
     }
+    if (pendingAttemptAvailable) {
+      setSelectedAttempt("pending");
+      return;
+    }
     setSelectedAttempt(timelineAttempts[timelineAttempts.length - 1]?.attempt ?? null);
-  }, [selectedAttempt, timelineAttempts]);
+  }, [pendingAttemptAvailable, selectedAttempt, timelineAttempts]);
 
   useEffect(() => {
     if (
@@ -583,20 +606,28 @@ export function RunDetailDrawer({
   // attempt, so the live-stream follow check reflects the user's actual
   // position instead of a defaulted value.
   useEffect(() => {
-    if (activeSection !== "events" || timelineTab !== "output" || selectedAttemptNumber === null) {
+    if (
+      activeSection !== "events" ||
+      effectiveTimelineTab !== "output" ||
+      selectedAttemptNumber === null
+    ) {
       return;
     }
     const element = timelineContentScrollRef.current;
     if (element) {
       timelineOutputAtBottomRef.current = isScrolledToBottom(element);
     }
-  }, [activeSection, selectedAttemptNumber, timelineTab]);
+  }, [activeSection, effectiveTimelineTab, selectedAttemptNumber]);
 
   // While the selected attempt is live, whenever the transcript grows, keep
   // the scroll pinned to the bottom if the user was already at the bottom.
   // Do nothing on tab/attempt open — only react to actual deltas.
   useEffect(() => {
-    if (activeSection !== "events" || timelineTab !== "output" || selectedAttemptNumber === null) {
+    if (
+      activeSection !== "events" ||
+      effectiveTimelineTab !== "output" ||
+      selectedAttemptNumber === null
+    ) {
       return;
     }
     if (!selectedAttemptLive) {
@@ -615,10 +646,10 @@ export function RunDetailDrawer({
     scrollElementToBottom(element);
   }, [
     activeSection,
+    effectiveTimelineTab,
     selectedAttemptLive,
     selectedAttemptNumber,
     selectedAttemptOutput,
-    timelineTab,
   ]);
 
   async function submitDependencyAdd() {
@@ -798,7 +829,7 @@ export function RunDetailDrawer({
 
   function handleTimelineContentScroll() {
     const element = timelineContentScrollRef.current;
-    if (!element || timelineTab !== "output") {
+    if (!element || effectiveTimelineTab !== "output") {
       return;
     }
     timelineOutputAtBottomRef.current = isScrolledToBottom(element);
@@ -1504,47 +1535,76 @@ export function RunDetailDrawer({
                   <p className="muted-inline">Loading timeline history…</p>
                 ) : null}
 
-                {!timelineState.isLoading && timelineAttempts.length === 0 ? (
+                {!timelineState.isLoading &&
+                timelineAttempts.length === 0 &&
+                !selectedPendingAttempt ? (
                   <p className="muted-inline">No attempt history is available for this run yet.</p>
                 ) : null}
 
-                {selectedAttemptRecord ? (
+                {selectedAttemptRecord || selectedPendingAttempt ? (
                   <div className="timeline-attempt-panel">
                     <div className="timeline-sticky-controls">
-                      {timelineAttempts.length > 1 ? (
+                      {selectedPendingAttempt || timelineAttempts.length > 1 ? (
                         <div className="timeline-attempts">
                           <div
                             className="timeline-attempt-tabs"
                             role="tablist"
                             aria-label="Attempts"
                           >
-                            {timelineAttempts.map((attempt) => (
+                            {selectedPendingAttempt ? (
                               <button
-                                aria-selected={selectedAttemptRecord?.attempt === attempt.attempt}
-                                className={
-                                  selectedAttemptRecord?.attempt === attempt.attempt
-                                    ? "timeline-attempt-tab active"
-                                    : "timeline-attempt-tab"
-                                }
-                                key={attempt.attempt}
-                                onClick={() => setSelectedAttempt(attempt.attempt)}
+                                aria-selected={true}
+                                className="timeline-attempt-tab active"
+                                onClick={() => setSelectedAttempt("pending")}
                                 role="tab"
                                 type="button"
                               >
-                                <span>{attempt.attempt}</span>
-                                {attempt.live ? (
-                                  <span aria-hidden="true" className="timeline-live-dot" />
-                                ) : null}
+                                <span>Pending</span>
                               </button>
-                            ))}
+                            ) : (
+                              timelineAttempts.map((attempt) => (
+                                <button
+                                  aria-selected={selectedAttemptRecord?.attempt === attempt.attempt}
+                                  className={
+                                    selectedAttemptRecord?.attempt === attempt.attempt
+                                      ? "timeline-attempt-tab active"
+                                      : "timeline-attempt-tab"
+                                  }
+                                  key={attempt.attempt}
+                                  onClick={() => setSelectedAttempt(attempt.attempt)}
+                                  role="tab"
+                                  type="button"
+                                >
+                                  <span>{attempt.attempt}</span>
+                                  {attempt.live ? (
+                                    <span aria-hidden="true" className="timeline-live-dot" />
+                                  ) : null}
+                                </button>
+                              ))
+                            )}
                           </div>
                         </div>
                       ) : null}
 
                       <div className="task-tabs" role="tablist" aria-label="Attempt view">
+                        {selectedPendingAttempt ? (
+                          <button
+                            aria-selected={effectiveTimelineTab === "message"}
+                            className={
+                              effectiveTimelineTab === "message" ? "task-tab active" : "task-tab"
+                            }
+                            onClick={() => setTimelineTab("message")}
+                            role="tab"
+                            type="button"
+                          >
+                            Message
+                          </button>
+                        ) : null}
                         <button
-                          aria-selected={timelineTab === "prompt"}
-                          className={timelineTab === "prompt" ? "task-tab active" : "task-tab"}
+                          aria-selected={effectiveTimelineTab === "prompt"}
+                          className={
+                            effectiveTimelineTab === "prompt" ? "task-tab active" : "task-tab"
+                          }
                           onClick={() => setTimelineTab("prompt")}
                           role="tab"
                           type="button"
@@ -1552,8 +1612,10 @@ export function RunDetailDrawer({
                           Prompt
                         </button>
                         <button
-                          aria-selected={timelineTab === "output"}
-                          className={timelineTab === "output" ? "task-tab active" : "task-tab"}
+                          aria-selected={effectiveTimelineTab === "output"}
+                          className={
+                            effectiveTimelineTab === "output" ? "task-tab active" : "task-tab"
+                          }
                           onClick={() => setTimelineTab("output")}
                           role="tab"
                           type="button"
@@ -1568,8 +1630,29 @@ export function RunDetailDrawer({
                       onScroll={handleTimelineContentScroll}
                       ref={timelineContentScrollRef}
                     >
-                      {timelineTab === "prompt" ? (
-                        selectedAttemptRecord.prompt ? (
+                      {selectedPendingAttempt && effectiveTimelineTab === "message" ? (
+                        run.message ? (
+                          <section aria-label="Pending message">
+                            <MarkdownContent className="timeline-content" text={run.message} />
+                          </section>
+                        ) : (
+                          <p className="task-empty">No message was provided for this run.</p>
+                        )
+                      ) : effectiveTimelineTab === "prompt" ? (
+                        selectedPendingAttempt ? (
+                          run.pendingPrompt ? (
+                            <section aria-label="Pending prompt">
+                              <MarkdownContent
+                                className="timeline-content"
+                                text={run.pendingPrompt}
+                              />
+                            </section>
+                          ) : (
+                            <p className="task-empty">
+                              No prompt preview is available for this run yet.
+                            </p>
+                          )
+                        ) : selectedAttemptRecord?.prompt ? (
                           <section aria-label="Attempt prompt">
                             <MarkdownContent
                               className="timeline-content"
@@ -1579,6 +1662,8 @@ export function RunDetailDrawer({
                         ) : (
                           <p className="task-empty">This attempt did not record a prompt.</p>
                         )
+                      ) : selectedPendingAttempt ? (
+                        <p className="task-empty">No output yet — this run has not started.</p>
                       ) : selectedAttemptOutput ? (
                         <section aria-label="Attempt output">
                           <MarkdownContent
@@ -1588,7 +1673,7 @@ export function RunDetailDrawer({
                         </section>
                       ) : (
                         <p className="task-empty">
-                          {selectedAttemptRecord.live
+                          {selectedAttemptRecord?.live
                             ? "Waiting for live output…"
                             : "This attempt produced no transcript output."}
                         </p>
