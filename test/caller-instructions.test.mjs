@@ -390,6 +390,62 @@ test("ad-hoc agent + assignment with callerInstructions still prints them", asyn
   assert.doesNotMatch(brief, /Hello, caller/);
 });
 
+test("persisted run note and pin metadata stay out of briefs and backend prompts", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "caller-test", AGENT);
+  writeAssignment(dir, "caller-work", ASSIGNMENT_WITH_CALLER);
+  const { outcome } = await runFreshRun(dir, "caller-work", { initialize: true });
+
+  const manifestPath = join(outcome.workspaceDir, "run.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  manifest.note = "# Private note\n\nDo not leak into the worker prompt.";
+  manifest.pinned = true;
+  manifest.resetSeed.note = manifest.note;
+  manifest.resetSeed.pinned = true;
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+  const brief = runCli(["run", "brief", outcome.runId], { cwd: dir });
+  assert.doesNotMatch(brief, /Private note/);
+  assert.doesNotMatch(brief, /Pinned: yes/);
+
+  let capturedPrompt = "";
+  await withSharedRuntimeEnv(dir, async () => {
+    const target = resolveResumeTarget(outcome.runId, dir);
+    const loaded = loadAgentConfig("caller-test", dir);
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      await runAgent({
+        loaded,
+        cliVars: {},
+        backend: {
+          id: "mock",
+          async invoke(ctx) {
+            capturedPrompt = ctx.prompt;
+            completeAllTasksFromPrompt(ctx.prompt);
+            return {
+              exitCode: 0,
+              signal: null,
+              timedOut: false,
+              aborted: false,
+              sessionId: "sess-caller-2",
+              transcript: "done",
+              rawStdout: "",
+              rawStderr: "",
+            };
+          },
+        },
+        resume: target,
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+
+  assert.doesNotMatch(capturedPrompt, /Private note/);
+  assert.doesNotMatch(capturedPrompt, /Pinned: yes/);
+});
+
 // ────────────────────────────────────────────────────────────────
 // Status output integration
 // ────────────────────────────────────────────────────────────────

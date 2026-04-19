@@ -106,6 +106,15 @@ export function AttachmentIcon(props: IconProps) {
   );
 }
 
+export function PinIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="m15 4 5 5" />
+      <path d="M8 21v-7l-4-4 8-8 8 8-4 4h-7" />
+    </IconBase>
+  );
+}
+
 export function MoreIcon(props: IconProps) {
   return (
     <IconBase {...props}>

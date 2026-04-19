@@ -29,6 +29,8 @@ import {
   startRun,
   unarchive,
   updateRunBackendSession,
+  updateRunNote,
+  updateRunPinned,
   updateTask,
 } from "@task-runner/core/app/service.js";
 import { VALID_STATUSES } from "@task-runner/core/assignment/model.js";
@@ -75,6 +77,8 @@ import {
   optionalString,
   parseRunSetBackendSessionParams,
   parseRunSetNameParams,
+  parseRunSetNoteParams,
+  parseRunSetPinnedParams,
   parseRunsListParams,
   parseStartRunParams,
   requiredRunIdString,
@@ -330,6 +334,8 @@ export async function serveDaemon(
     unarchive,
     deleteArchivedRun,
     renameRun,
+    updateRunNote,
+    updateRunPinned,
     updateRunBackendSession,
     clearBackendSession,
     addDependency,
@@ -857,6 +863,10 @@ export async function serveDaemon(
     },
     renameRun: (target, input) =>
       withPublishedMutationAsync(target, () => app.renameRun(target, input, mutationAuditContext)),
+    updateRunNote: (target, input) =>
+      withPublishedMutation(target, () => app.updateRunNote(target, input)),
+    updateRunPinned: (target, input) =>
+      withPublishedMutation(target, () => app.updateRunPinned(target, input)),
     updateRunBackendSession: (target, input) =>
       withPublishedDetailMutation(target, () =>
         app.updateRunBackendSession(target, input, mutationAuditContext),
@@ -1128,6 +1138,32 @@ export async function serveDaemon(
               request.id,
               await operations.setRunName(parsed.target, {
                 name: parsed.name,
+              }),
+            ),
+          );
+          return;
+        }
+        case "runs.setNote": {
+          const parsed = parseRunSetNoteParams(params, "runs.setNote params");
+          sendJson(
+            ws,
+            resultResponse(
+              request.id,
+              operations.setRunNote(parsed.target, {
+                note: parsed.note,
+              }),
+            ),
+          );
+          return;
+        }
+        case "runs.setPinned": {
+          const parsed = parseRunSetPinnedParams(params, "runs.setPinned params");
+          sendJson(
+            ws,
+            resultResponse(
+              request.id,
+              operations.setRunPinned(parsed.target, {
+                pinned: parsed.pinned,
               }),
             ),
           );

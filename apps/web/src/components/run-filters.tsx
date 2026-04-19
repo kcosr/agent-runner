@@ -9,7 +9,7 @@ import {
   EMPTY_DASHBOARD_STRUCTURED_FILTERS,
   hasActiveDashboardStructuredFilters,
 } from "../lib/settings.js";
-import { AlertIcon, ArchiveIcon, FilterIcon, GridIcon, SearchIcon } from "./icons.js";
+import { AlertIcon, ArchiveIcon, FilterIcon, GridIcon, PinIcon, SearchIcon } from "./icons.js";
 
 export function RunFilters({
   preferences,
@@ -134,6 +134,7 @@ export function RunFilters({
         {preferences.showArchived ? (
           <span className="page-title-meta">including archived</span>
         ) : null}
+        {preferences.showPinnedOnly ? <span className="page-title-meta">pinned only</span> : null}
       </span>
       <span className="topbar-spacer" />
       <div className="toolbar-matrix">
@@ -289,6 +290,17 @@ export function RunFilters({
           type="button"
         >
           <AlertIcon aria-hidden="true" />
+        </button>
+
+        <button
+          aria-label="Show pinned runs only"
+          aria-pressed={preferences.showPinnedOnly}
+          className="icon-btn"
+          onClick={() => updatePreferences({ showPinnedOnly: !preferences.showPinnedOnly })}
+          title="Show pinned runs only"
+          type="button"
+        >
+          <PinIcon aria-hidden="true" />
         </button>
 
         <button

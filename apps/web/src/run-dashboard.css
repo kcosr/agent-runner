@@ -503,16 +503,14 @@ pre {
 
 /* ─── card ───────────────────────────────────────────── */
 .card {
-  display: block;
+  position: relative;
   width: 100%;
-  text-align: left;
-  padding: 12px 14px;
-  cursor: pointer;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-card);
   transition: border-color 120ms, background 120ms;
+  overflow: visible;
 }
 .card:hover {
   border-color: var(--border-strong);
@@ -526,6 +524,18 @@ pre {
 .card:focus-within {
   border-color: var(--ring);
   box-shadow: 0 0 0 1px var(--ring), var(--shadow-card);
+}
+
+.card-main {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 12px 56px 12px 14px;
+  background: transparent;
+  border: 0;
+  border-radius: inherit;
+  color: inherit;
+  cursor: pointer;
 }
 
 .card-row {
@@ -579,6 +589,54 @@ pre {
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 120px;
+}
+
+.card-actions {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.card-note-control {
+  position: relative;
+}
+
+.card-action {
+  background: color-mix(in srgb, var(--background) 90%, transparent);
+}
+
+.card-action.card-action--active {
+  border-color: var(--border-strong);
+  color: var(--foreground);
+}
+
+.card-note-preview {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: min(320px, calc(100vw - 40px));
+  max-height: 240px;
+  overflow: auto;
+  padding: 12px;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+  z-index: 5;
+}
+
+.card-note-preview__state {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.card-note-preview__markdown {
+  font-size: 12px;
 }
 
 .progress {
@@ -762,6 +820,128 @@ pre {
   border-color: color-mix(in srgb, var(--destructive) 32%, transparent);
 }
 
+.btn.btn--quiet {
+  background: transparent;
+}
+
+.btn.btn--quiet.active {
+  background: var(--accent);
+  border-color: var(--border-strong);
+}
+
+.note-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.note-editor__toolbar {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.note-editor__mode-switch {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.note-editor__preview {
+  max-height: min(360px, 52vh);
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--muted) 72%, transparent);
+}
+
+.note-editor__markdown {
+  font-size: 13px;
+}
+
+.note-editor__empty {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.note-editor__field {
+  display: block;
+}
+
+.note-editor__textarea {
+  width: 100%;
+  min-height: 220px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.note-editor__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.note-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  z-index: 40;
+}
+
+.note-dialog-backdrop__button {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(15, 23, 42, 0.28);
+}
+
+.note-dialog {
+  position: relative;
+  width: min(720px, calc(100vw - 32px));
+  max-height: calc(100dvh - 48px);
+  margin: 24px auto;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow: auto;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow-drawer);
+}
+
+.note-dialog__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.note-dialog__title {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.note-dialog__copy,
+.note-dialog__error {
+  margin: 4px 0 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
 .drawer-body {
   flex: 1;
   overflow-y: auto;
@@ -893,6 +1073,17 @@ pre {
   color: var(--muted-foreground);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
+}
+
+.drawer-panel {
+  padding: 14px 18px 24px;
+}
+
+.drawer-panel-card {
+  padding: 14px;
+  background: color-mix(in srgb, var(--muted) 64%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
 }
 
 /* ─── tasks ──────────────────────────────────────────── */

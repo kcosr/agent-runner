@@ -3,6 +3,8 @@ import { useNavigate, useParams } from "@tanstack/react-router";
 import type {
   RunDetail,
   RunNameResult,
+  RunNoteResult,
+  RunPinnedResult,
   RunStatus,
   RunSummary,
 } from "@task-runner/core/contracts/runs.js";
@@ -11,7 +13,7 @@ import type { BoardColumn } from "../components/run-column.js";
 import { createApiClient, isNotFoundError } from "../lib/api-client.js";
 import { queryClient, runQueryKeys } from "../lib/query.js";
 import { useRunEvents } from "../lib/run-events.js";
-import { compareRunsByStartedAtDesc, sortRunsByStartedAtDesc } from "../lib/run-order.js";
+import { compareRunsByStartedAtDesc, sortRunsWithPinnedFirst } from "../lib/run-order.js";
 import { useRunTimelineState } from "../lib/run-timeline.js";
 import { useRuntimeConfig } from "../lib/runtime-config.js";
 import {
@@ -43,6 +45,8 @@ export type RunActionPending =
   | "resume"
   | "abort"
   | "rename"
+  | "note"
+  | "pin"
   | "backend-session"
   | "upload-attachment"
   | "remove-attachment"
@@ -104,7 +108,11 @@ function matchesStructuredFilters(
   );
 }
 
-function buildColumns(runs: RunSummary[], collapseFailureStates: boolean): BoardColumn[] {
+function buildColumns(
+  runs: RunSummary[],
+  collapseFailureStates: boolean,
+  compareRuns: (left: RunSummary, right: RunSummary) => number,
+): BoardColumn[] {
   const base: BoardColumn[] = [
     { key: "pending", title: "Pending", statuses: ["initialized"], runs: [] },
     { key: "running", title: "Running", statuses: ["running"], runs: [] },
@@ -131,7 +139,10 @@ function buildColumns(runs: RunSummary[], collapseFailureStates: boolean): Board
 
   return base.map((column) => ({
     ...column,
-    runs: runs.filter((run) => column.statuses.includes(run.effectiveStatus)),
+    runs: sortRunsWithPinnedFirst(
+      runs.filter((run) => column.statuses.includes(run.effectiveStatus)),
+      compareRuns,
+    ),
   }));
 }
 
@@ -148,17 +159,15 @@ function compareRunsByRecentUpdate(
   return compareRunsByStartedAtDesc(left, right);
 }
 
-function sortRunsForBoard(
-  runs: RunSummary[],
+function createRunComparator(
   sortByRecentUpdates: boolean,
   recentUpdateSequenceByRunId: Record<string, number>,
-): RunSummary[] {
+) {
   if (sortByRecentUpdates) {
-    return [...runs].sort((left, right) =>
-      compareRunsByRecentUpdate(left, right, recentUpdateSequenceByRunId),
-    );
+    return (left: RunSummary, right: RunSummary) =>
+      compareRunsByRecentUpdate(left, right, recentUpdateSequenceByRunId);
   }
-  return sortRunsByStartedAtDesc(runs);
+  return compareRunsByStartedAtDesc;
 }
 
 function appendNotice(current: NoticeState[], notice: NoticeState): NoticeState[] {
@@ -219,13 +228,46 @@ function useRunActionMutation(
   });
 }
 
+function updateRunCaches(
+  runId: string,
+  update: {
+    detail?: (run: RunDetail) => RunDetail;
+    summary?: (run: RunSummary) => RunSummary;
+  },
+) {
+  const updateDetail = update.detail;
+  if (updateDetail) {
+    queryClient.setQueryData<RunDetail | undefined>(runQueryKeys.detail(runId), (current) =>
+      current ? updateDetail(current) : current,
+    );
+  }
+  const updateSummary = update.summary;
+  if (updateSummary) {
+    queryClient.setQueryData<RunSummary[] | undefined>(runQueryKeys.list(), (current) =>
+      current?.map((run) => (run.runId === runId ? updateSummary(run) : run)),
+    );
+  }
+}
+
 function updateRunNameCaches(result: RunNameResult) {
-  queryClient.setQueryData<RunDetail | undefined>(runQueryKeys.detail(result.runId), (current) =>
-    current ? { ...current, name: result.name } : current,
-  );
-  queryClient.setQueryData<RunSummary[] | undefined>(runQueryKeys.list(), (current) =>
-    current?.map((run) => (run.runId === result.runId ? { ...run, name: result.name } : run)),
-  );
+  updateRunCaches(result.runId, {
+    detail: (run) => ({ ...run, name: result.name }),
+    summary: (run) => ({ ...run, name: result.name }),
+  });
+}
+
+function updateRunNoteCaches(result: RunNoteResult) {
+  updateRunCaches(result.runId, {
+    detail: (run) => ({ ...run, note: result.note }),
+    summary: (run) => ({ ...run, notePresent: result.note !== null }),
+  });
+}
+
+function updateRunPinnedCaches(result: RunPinnedResult) {
+  updateRunCaches(result.runId, {
+    detail: (run) => ({ ...run, pinned: result.pinned }),
+    summary: (run) => ({ ...run, pinned: result.pinned }),
+  });
 }
 
 function syncRunSummaryFromDetail(detail: RunDetail) {
@@ -238,6 +280,8 @@ function syncRunSummaryFromDetail(detail: RunDetail) {
             status: detail.status,
             effectiveStatus: detail.effectiveStatus,
             archivedAt: detail.archivedAt,
+            pinned: detail.pinned,
+            notePresent: detail.note !== null,
             agentName: detail.agent.name,
             name: detail.name,
             assignmentName: detail.assignment?.name ?? null,
@@ -342,9 +386,12 @@ export function useRunsDashboardState() {
         if (!preferences.showArchived && run.archivedAt) {
           return false;
         }
+        if (preferences.showPinnedOnly && !run.pinned) {
+          return false;
+        }
         return matchesStructuredFilters(run, preferences.structuredFilters);
       }),
-    [preferences.showArchived, preferences.structuredFilters, runs],
+    [preferences.showArchived, preferences.showPinnedOnly, preferences.structuredFilters, runs],
   );
   const visibleRuns = useMemo(
     () => structuredVisibleRuns.filter((run) => matchesSearch(run, deferredSearch)),
@@ -354,18 +401,13 @@ export function useRunsDashboardState() {
     () => new Set(viewState.collapsedColumnKeys),
     [viewState.collapsedColumnKeys],
   );
+  const compareRuns = useMemo(
+    () => createRunComparator(preferences.sortByRecentUpdates, recentUpdateSequenceByRunId),
+    [preferences.sortByRecentUpdates, recentUpdateSequenceByRunId],
+  );
   const columns = useMemo(
-    () =>
-      buildColumns(
-        sortRunsForBoard(visibleRuns, preferences.sortByRecentUpdates, recentUpdateSequenceByRunId),
-        preferences.collapseFailureStates,
-      ),
-    [
-      preferences.collapseFailureStates,
-      preferences.sortByRecentUpdates,
-      recentUpdateSequenceByRunId,
-      visibleRuns,
-    ],
+    () => buildColumns(visibleRuns, preferences.collapseFailureStates, compareRuns),
+    [compareRuns, preferences.collapseFailureStates, visibleRuns],
   );
   const boardColumns = preferences.hideEmptyColumns
     ? columns.filter((column) => column.runs.length > 0)
@@ -568,6 +610,32 @@ export function useRunsDashboardState() {
       await invalidateRunQueries(runId);
     },
   });
+  const noteMutation = useMutation({
+    mutationFn: ({ note, runId }: { runId: string; note: string | null }) =>
+      api.setRunNote(runId, note),
+    onError: (error: Error) => {
+      setActionError(error.message);
+    },
+    onSuccess: async (result) => {
+      setActionError(undefined);
+      updateRunNoteCaches(result);
+      markRunTouched(result.runId);
+      await invalidateRunQueries(result.runId);
+    },
+  });
+  const pinnedMutation = useMutation({
+    mutationFn: ({ pinned, runId }: { runId: string; pinned: boolean }) =>
+      api.setRunPinned(runId, pinned),
+    onError: (error: Error) => {
+      setActionError(error.message);
+    },
+    onSuccess: async (result) => {
+      setActionError(undefined);
+      updateRunPinnedCaches(result);
+      markRunTouched(result.runId);
+      await invalidateRunQueries(result.runId);
+    },
+  });
   const backendSessionMutation = useMutation({
     mutationFn: ({
       backendSessionId,
@@ -684,21 +752,25 @@ export function useRunsDashboardState() {
               ? "abort"
               : renameMutation.isPending
                 ? "rename"
-                : backendSessionMutation.isPending
-                  ? "backend-session"
-                  : uploadAttachmentMutation.isPending
-                    ? "upload-attachment"
-                    : removeAttachmentMutation.isPending
-                      ? "remove-attachment"
-                      : downloadAttachmentMutation.isPending
-                        ? "download-attachment"
-                        : addDependencyMutation.isPending
-                          ? "add-dependency"
-                          : removeDependencyMutation.isPending
-                            ? "remove-dependency"
-                            : clearDependenciesMutation.isPending
-                              ? "clear-dependencies"
-                              : undefined;
+                : noteMutation.isPending
+                  ? "note"
+                  : pinnedMutation.isPending
+                    ? "pin"
+                    : backendSessionMutation.isPending
+                      ? "backend-session"
+                      : uploadAttachmentMutation.isPending
+                        ? "upload-attachment"
+                        : removeAttachmentMutation.isPending
+                          ? "remove-attachment"
+                          : downloadAttachmentMutation.isPending
+                            ? "download-attachment"
+                            : addDependencyMutation.isPending
+                              ? "add-dependency"
+                              : removeDependencyMutation.isPending
+                                ? "remove-dependency"
+                                : clearDependenciesMutation.isPending
+                                  ? "clear-dependencies"
+                                  : undefined;
   const selectedRunDetailReady =
     detailRunId !== undefined &&
     detailRunId === selectedRunId &&
@@ -880,6 +952,12 @@ export function useRunsDashboardState() {
       rename: async (runId: string, name: string | null) => {
         await renameMutation.mutateAsync({ runId, name });
       },
+      setNote: async (runId: string, note: string | null) => {
+        await noteMutation.mutateAsync({ runId, note });
+      },
+      setPinned: async (runId: string, pinned: boolean) => {
+        await pinnedMutation.mutateAsync({ runId, pinned });
+      },
       clearBackendSession: async (runId: string) => {
         await backendSessionMutation.mutateAsync({ runId, clear: true });
       },
@@ -925,6 +1003,7 @@ export function useRunsDashboardState() {
       updateViewState({ search: "" });
       updatePreferences({
         showArchived: false,
+        showPinnedOnly: false,
         structuredFilters: EMPTY_DASHBOARD_STRUCTURED_FILTERS,
       });
     },

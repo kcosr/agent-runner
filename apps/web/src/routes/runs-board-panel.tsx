@@ -6,10 +6,18 @@ import type { RunCardMotion } from "../components/run-card.js";
 import { type BoardColumn, RunColumn } from "../components/run-column.js";
 import type { DashboardStructuredFilters } from "../lib/settings.js";
 import { useHorizontalWheelGuard } from "../lib/use-horizontal-wheel-guard.js";
+import type { RunActionPending } from "./use-runs-dashboard-state.js";
 
 interface RunBoardPosition {
   columnKey: string;
   index: number;
+}
+
+function escapeCssAttributeValue(value: string): string {
+  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
+    return CSS.escape(value);
+  }
+  return value.replace(/["\\]/g, "\\$&");
 }
 
 function buildRunBoardPositions(boardColumns: BoardColumn[]): Record<string, RunBoardPosition> {
@@ -38,6 +46,7 @@ function haveSameCardMotions(
 }
 
 export function RunsBoardPanel({
+  actionPending,
   activeBoardColumnKey,
   boardColumns,
   collapsedColumnKeys,
@@ -45,6 +54,8 @@ export function RunsBoardPanel({
   onActiveBoardColumnKeyChange,
   onExpandColumn,
   onResetFilters,
+  onSetNote,
+  onSetPinned,
   onSelectRun,
   onStructuredFilterToggle,
   onToggleColumnCollapse,
@@ -55,6 +66,7 @@ export function RunsBoardPanel({
   structuredFilters,
   visibleRuns,
 }: {
+  actionPending?: RunActionPending;
   activeBoardColumnKey: string | null;
   boardColumns: BoardColumn[];
   collapsedColumnKeys: string[];
@@ -62,6 +74,8 @@ export function RunsBoardPanel({
   onActiveBoardColumnKeyChange: (columnKey: string | null) => void;
   onExpandColumn: (columnKey: string) => void;
   onResetFilters: () => void;
+  onSetNote: (runId: string, note: string | null) => Promise<void>;
+  onSetPinned: (runId: string, pinned: boolean) => Promise<void>;
   onSelectRun: (runId: string) => void;
   onStructuredFilterToggle: (key: keyof DashboardStructuredFilters, value: string) => void;
   onToggleColumnCollapse: (columnKey: string) => void;
@@ -284,7 +298,9 @@ export function RunsBoardPanel({
       return;
     }
 
-    const nextCard = board.querySelector(`[data-run-id="${CSS.escape(selectedRunId)}"]`);
+    const nextCard = board.querySelector(
+      `[data-run-id="${escapeCssAttributeValue(selectedRunId)}"]`,
+    );
     if (!(nextCard instanceof HTMLElement) || nextCard === activeCard) {
       return;
     }
@@ -319,7 +335,7 @@ export function RunsBoardPanel({
     }
 
     const selectedCard = selectedColumnBody.querySelector(
-      `[data-run-id="${CSS.escape(selectedRunId)}"]`,
+      `[data-run-id="${escapeCssAttributeValue(selectedRunId)}"]`,
     );
     if (!(selectedCard instanceof HTMLElement)) {
       return;
@@ -491,12 +507,15 @@ export function RunsBoardPanel({
       <section aria-label="Run board" className="board" ref={boardRef}>
         {boardColumns.map((column) => (
           <RunColumn
+            actionPending={actionPending}
             bodyRef={columnBodyRefFor(column.key)}
             collapsed={collapsedColumnKeySet.has(column.key)}
             column={column}
             columnRef={columnRefFor(column.key)}
             key={column.key}
             motionsByRunId={motionsByRunId}
+            onSetNote={onSetNote}
+            onSetPinned={onSetPinned}
             onSelectRun={onSelectRun}
             onStructuredFilterToggle={onStructuredFilterToggle}
             onToggleCollapse={() => onToggleColumnCollapse(column.key)}

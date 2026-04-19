@@ -178,6 +178,7 @@ export function RunsDashboardRoute() {
     <AppShell
       primary={
         <RunsBoardPanel
+          actionPending={state.actionPending}
           activeBoardColumnKey={state.activeBoardColumnKey}
           boardColumns={state.boardColumns}
           collapsedColumnKeys={state.collapsedColumnKeys}
@@ -185,6 +186,8 @@ export function RunsDashboardRoute() {
           onExpandColumn={state.columnActions.expand}
           onActiveBoardColumnKeyChange={state.setActiveBoardColumnKey}
           onResetFilters={state.resetBoardFilters}
+          onSetNote={state.runActions.setNote}
+          onSetPinned={state.runActions.setPinned}
           onSelectRun={state.openRun}
           onStructuredFilterToggle={state.toggleStructuredFilter}
           onToggleColumnCollapse={state.columnActions.toggleCollapse}
@@ -225,7 +228,9 @@ export function RunsDashboardRoute() {
           onRename={state.runActions.rename}
           onResumeMessageDraftChange={state.setResumeMessageDraft}
           onResumeMessageExpandedChange={state.setResumeMessageExpanded}
+          onSetNote={state.runActions.setNote}
           onSetBackendSession={state.runActions.setBackendSession}
+          onSetPinned={state.runActions.setPinned}
           onSelectDetailSection={state.updateSelectedRunDetailSection}
           onSubmitResume={state.submitSelectedRunResume}
           onTriggerPrimaryAction={state.triggerSelectedRunPrimaryAction}

@@ -5,6 +5,7 @@ export interface DashboardPreferences {
   hideEmptyColumns: boolean;
   collapseFailureStates: boolean;
   showArchived: boolean;
+  showPinnedOnly: boolean;
   sortByRecentUpdates: boolean;
   visibleFocusIndicators: boolean;
   structuredFilters: DashboardStructuredFilters;
@@ -24,7 +25,7 @@ export const EMPTY_DASHBOARD_STRUCTURED_FILTERS: DashboardStructuredFilters = {
   backend: null,
 };
 
-export type DrawerDetailSection = "tasks" | "attachments" | "dependencies" | "events";
+export type DrawerDetailSection = "tasks" | "notes" | "attachments" | "dependencies" | "events";
 export type AttachmentTab = "run" | "group";
 
 export type RunDrawerView =
@@ -70,6 +71,7 @@ export const DEFAULT_DASHBOARD_PREFERENCES: DashboardPreferences = {
   hideEmptyColumns: true,
   collapseFailureStates: true,
   showArchived: false,
+  showPinnedOnly: false,
   sortByRecentUpdates: false,
   visibleFocusIndicators: false,
   structuredFilters: EMPTY_DASHBOARD_STRUCTURED_FILTERS,
@@ -169,6 +171,10 @@ function parseStoredDashboardPreferences(value: unknown): DashboardPreferences {
       typeof record.showArchived === "boolean"
         ? record.showArchived
         : DEFAULT_DASHBOARD_PREFERENCES.showArchived,
+    showPinnedOnly:
+      typeof record.showPinnedOnly === "boolean"
+        ? record.showPinnedOnly
+        : DEFAULT_DASHBOARD_PREFERENCES.showPinnedOnly,
     sortByRecentUpdates:
       typeof record.sortByRecentUpdates === "boolean"
         ? record.sortByRecentUpdates

@@ -6,6 +6,8 @@ import {
   toRunBackendSessionResult,
   toRunDependenciesResult,
   toRunDetail,
+  toRunNoteResult,
+  toRunPinnedResult,
   toRunSummary,
 } from "../packages/core/dist/contracts/runs.js";
 
@@ -46,6 +48,8 @@ function buildManifest(overrides = {}) {
     effort: "medium",
     message: "Finish the task list.",
     name: "demo session",
+    note: null,
+    pinned: false,
     unrestricted: false,
     cwd: "/repo",
     lockedFields: ["backend"],
@@ -76,6 +80,8 @@ function buildManifest(overrides = {}) {
       model: "claude-sonnet-4-6",
       effort: "medium",
       name: "demo session",
+      note: null,
+      pinned: false,
       dependencyRunIds: [],
       unrestricted: false,
       timeoutSec: 3600,
@@ -108,6 +114,8 @@ test("run contracts: toRunSummary maps listed manifest rows to the neutral summa
     status: "success",
     effectiveStatus: "success",
     archivedAt: null,
+    notePresent: false,
+    pinned: false,
     agentName: "demo-agent",
     assignmentName: "demo-work",
     backend: "claude",
@@ -200,6 +208,8 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
     model: "claude-sonnet-4-6",
     effort: "medium",
     name: "demo session",
+    note: null,
+    pinned: false,
     backendSessionId: "sess-123",
     cwd: "/repo",
     unrestricted: false,
@@ -243,6 +253,39 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
       },
     },
     capabilities: detail.capabilities,
+  });
+});
+
+test("run contracts: note and pin metadata project through summary, detail, and mutation DTOs", () => {
+  const manifest = buildManifest();
+  manifest.note = "# Follow-up\n\nKeep the active note preview.";
+  manifest.pinned = true;
+  manifest.resetSeed.note = manifest.note;
+  manifest.resetSeed.pinned = manifest.pinned;
+
+  const summary = toRunSummary({
+    repo: "demo-repo",
+    workspaceDir: manifest.workspaceDir,
+    manifest,
+  });
+  const detail = toRunDetail({
+    manifest,
+    isLive: false,
+  });
+
+  assert.equal(summary.notePresent, true);
+  assert.equal(summary.pinned, true);
+  assert.equal(detail.note, "# Follow-up\n\nKeep the active note preview.");
+  assert.equal(detail.pinned, true);
+  assert.deepEqual(toRunNoteResult({ manifest, changed: true }), {
+    runId: "run123",
+    note: "# Follow-up\n\nKeep the active note preview.",
+    changed: true,
+  });
+  assert.deepEqual(toRunPinnedResult({ manifest, changed: true }), {
+    runId: "run123",
+    pinned: true,
+    changed: true,
   });
 });
 

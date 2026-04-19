@@ -30,6 +30,8 @@ import {
   type RunDependenciesResult,
   type RunDetail,
   type RunNameResult,
+  type RunNoteResult,
+  type RunPinnedResult,
   type RunSummary,
   type RunTaskMutationCapabilities,
   canArchiveRun,
@@ -42,6 +44,8 @@ import {
   toRunDependenciesResult,
   toRunDetail,
   toRunNameResult,
+  toRunNoteResult,
+  toRunPinnedResult,
   toRunSummary,
 } from "../../contracts/runs.js";
 import { resolveTaskRunnerCommand } from "../../task-runner-command.js";
@@ -127,7 +131,9 @@ export type {
   RunBackendSessionResult,
   RunDeleteResult,
   RunDependenciesResult,
+  RunNoteResult,
   RunNameResult,
+  RunPinnedResult,
 } from "../../contracts/runs.js";
 
 export type RunListResult = RunListEntry[];
@@ -466,6 +472,11 @@ function validateRunName(name: string): string {
   }
 }
 
+function normalizeRunNote(note: string | null): string | null {
+  const trimmed = note?.trim() ?? "";
+  return trimmed.length === 0 ? null : note;
+}
+
 function validateBackendSessionId(sessionId: string): string {
   const trimmed = sessionId.trim();
   if (trimmed.length === 0) {
@@ -744,6 +755,49 @@ export async function setRunName(
   }
 
   return toRunNameResult({
+    manifest: resolved.manifest,
+    changed,
+  });
+}
+
+export function setRunNote(target: string, input: { note: string | null }): RunNoteResult {
+  const resolved = resolveRun(target);
+  let changed = false;
+
+  withTaskStateLock(resolved.workspaceDir, () => {
+    resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
+    const nextNote = normalizeRunNote(input.note);
+    if (resolved.manifest.note === nextNote) {
+      return;
+    }
+    resolved.manifest.note = nextNote;
+    resolved.manifest.resetSeed.note = nextNote;
+    writeManifest(resolved.workspaceDir, resolved.manifest);
+    changed = true;
+  });
+
+  return toRunNoteResult({
+    manifest: resolved.manifest,
+    changed,
+  });
+}
+
+export function setRunPinned(target: string, input: { pinned: boolean }): RunPinnedResult {
+  const resolved = resolveRun(target);
+  let changed = false;
+
+  withTaskStateLock(resolved.workspaceDir, () => {
+    resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
+    if (resolved.manifest.pinned === input.pinned) {
+      return;
+    }
+    resolved.manifest.pinned = input.pinned;
+    resolved.manifest.resetSeed.pinned = input.pinned;
+    writeManifest(resolved.workspaceDir, resolved.manifest);
+    changed = true;
+  });
+
+  return toRunPinnedResult({
     manifest: resolved.manifest,
     changed,
   });

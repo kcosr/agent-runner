@@ -96,6 +96,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
       args[0] === "unarchive" ||
       args[0] === "delete" ||
       args[0] === "set-name" ||
+      args[0] === "set-note" ||
+      args[0] === "clear-note" ||
+      args[0] === "pin" ||
+      args[0] === "unpin" ||
       args[0] === "set-backend-session" ||
       args[0] === "clear-backend-session" ||
       args[0] === "add-dep" ||

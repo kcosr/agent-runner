@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { execFileSync, spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
@@ -16,6 +16,7 @@ import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import { sharedRuntimeEnv, withEnv } from "./helpers/runtime-paths.mjs";
 
 const CLI_PATH = resolvePath(new URL("../apps/cli/dist/cli.js", import.meta.url).pathname);
+const CLI_WEB_ROOT = resolvePath(new URL("../apps/cli/dist/web", import.meta.url).pathname);
 
 const AGENT = `---
 schemaVersion: 1
@@ -95,6 +96,44 @@ function patchManifest(workspaceDir, mutator) {
   const manifest = readManifest(workspaceDir);
   mutator(manifest);
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+async function withSeededFrontendDist(fn) {
+  const indexPath = join(CLI_WEB_ROOT, "index.html");
+  const assetPath = join(CLI_WEB_ROOT, "assets", "daemon-test.js");
+  const createdPaths = [];
+
+  mkdirSync(join(CLI_WEB_ROOT, "assets"), { recursive: true });
+  if (!existsSync(indexPath)) {
+    writeFileSync(
+      indexPath,
+      [
+        "<!doctype html>",
+        '<html lang="en">',
+        "  <head>",
+        '    <meta charset="utf-8" />',
+        "    <title>task-runner</title>",
+        '    <script type="module" src="/assets/daemon-test.js"></script>',
+        "  </head>",
+        '  <body><div id="root"></div></body>',
+        "</html>",
+        "",
+      ].join("\n"),
+    );
+    createdPaths.push(indexPath);
+  }
+  if (!existsSync(assetPath)) {
+    writeFileSync(assetPath, 'console.log("daemon test asset");\n');
+    createdPaths.push(assetPath);
+  }
+
+  try {
+    return await fn({ assetPath, indexPath });
+  } finally {
+    for (const path of createdPaths.reverse()) {
+      rmSync(path, { force: true });
+    }
+  }
 }
 
 async function freePort() {
@@ -476,6 +515,35 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
         changed: true,
       });
 
+      const noted = await client.call("runs.setNote", {
+        target: init.runId,
+        note: "RPC note for the shared editor",
+      });
+      assert.deepEqual(noted.result, {
+        runId: init.runId,
+        note: "RPC note for the shared editor",
+        changed: true,
+      });
+
+      const pinned = await client.call("runs.setPinned", {
+        target: init.runId,
+        pinned: true,
+      });
+      assert.deepEqual(pinned.result, {
+        runId: init.runId,
+        pinned: true,
+        changed: true,
+      });
+
+      const notedDetail = await client.call("runs.get", { target: init.runId });
+      assert.equal(notedDetail.run.note, "RPC note for the shared editor");
+      assert.equal(notedDetail.run.pinned, true);
+      const notedSummary = (await client.call("runs.list", {})).runs.find(
+        (run) => run.runId === init.runId,
+      );
+      assert.equal(notedSummary?.notePresent, true);
+      assert.equal(notedSummary?.pinned, true);
+
       const setBackendSession = await client.call("runs.setBackendSession", {
         target: passiveInit.runId,
         backendSessionId: "rpc-thread-9",
@@ -703,6 +771,41 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
         name: null,
         changed: true,
       });
+
+      const noted = await httpJson(httpBaseUrl, `/api/runs/${init.runId}/note`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ note: "HTTP note for the drawer tab" }),
+      });
+      assert.equal(noted.status, 200);
+      assert.deepEqual(noted.body.result, {
+        runId: init.runId,
+        note: "HTTP note for the drawer tab",
+        changed: true,
+      });
+
+      const pinned = await httpJson(httpBaseUrl, `/api/runs/${init.runId}/pinned`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pinned: true }),
+      });
+      assert.equal(pinned.status, 200);
+      assert.deepEqual(pinned.body.result, {
+        runId: init.runId,
+        pinned: true,
+        changed: true,
+      });
+
+      const notedDetail = await httpJson(httpBaseUrl, `/api/runs/${init.runId}`);
+      assert.equal(notedDetail.status, 200);
+      assert.equal(notedDetail.body.run.note, "HTTP note for the drawer tab");
+      assert.equal(notedDetail.body.run.pinned, true);
+      const notedSummary = await httpJson(httpBaseUrl, "/api/runs");
+      assert.equal(
+        notedSummary.body.runs.find((run) => run.runId === init.runId)?.notePresent,
+        true,
+      );
+      assert.equal(notedSummary.body.runs.find((run) => run.runId === init.runId)?.pinned, true);
 
       const setBackendSession = await httpJson(
         httpBaseUrl,
@@ -989,42 +1092,44 @@ test("daemon serve exposes app config, keeps /api precedence, and falls back to 
   const listenUrl = `ws://127.0.0.1:${port}/`;
   const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
   await withEnv(sharedRuntimeEnv(dir), async () => {
-    const server = await serveDaemon(listenUrl);
-    try {
-      const appConfig = await httpJson(httpBaseUrl, "/app-config.json");
-      assert.equal(appConfig.status, 200);
-      assert.deepEqual(appConfig.body, {
-        apiBasePath: "/api",
-        runSummaryEventsPath: "/api/events/run-summaries",
-      });
+    await withSeededFrontendDist(async () => {
+      const server = await serveDaemon(listenUrl);
+      try {
+        const appConfig = await httpJson(httpBaseUrl, "/app-config.json");
+        assert.equal(appConfig.status, 200);
+        assert.deepEqual(appConfig.body, {
+          apiBasePath: "/api",
+          runSummaryEventsPath: "/api/events/run-summaries",
+        });
 
-      const apiDetail = await httpJson(httpBaseUrl, `/api/runs/${init.runId}`);
-      assert.equal(apiDetail.status, 200);
-      assert.equal(apiDetail.body.run.runId, init.runId);
-      assert.equal(apiDetail.body.run.effectiveStatus, "initialized");
+        const apiDetail = await httpJson(httpBaseUrl, `/api/runs/${init.runId}`);
+        assert.equal(apiDetail.status, 200);
+        assert.equal(apiDetail.body.run.runId, init.runId);
+        assert.equal(apiDetail.body.run.effectiveStatus, "initialized");
 
-      const spaRoot = await fetch(new URL("/", httpBaseUrl));
-      const spaRootBody = await spaRoot.text();
-      assert.equal(spaRoot.status, 200);
-      assert.match(spaRoot.headers.get("content-type") ?? "", /text\/html/);
-      assert.match(spaRootBody, /<div id="root"><\/div>/);
+        const spaRoot = await fetch(new URL("/", httpBaseUrl));
+        const spaRootBody = await spaRoot.text();
+        assert.equal(spaRoot.status, 200);
+        assert.match(spaRoot.headers.get("content-type") ?? "", /text\/html/);
+        assert.match(spaRootBody, /<div id="root"><\/div>/);
 
-      const deepLink = await fetch(new URL(`/runs/${init.runId}`, httpBaseUrl));
-      const deepLinkBody = await deepLink.text();
-      assert.equal(deepLink.status, 200);
-      assert.match(deepLinkBody, /<div id="root"><\/div>/);
+        const deepLink = await fetch(new URL(`/runs/${init.runId}`, httpBaseUrl));
+        const deepLinkBody = await deepLink.text();
+        assert.equal(deepLink.status, 200);
+        assert.match(deepLinkBody, /<div id="root"><\/div>/);
 
-      const assetsDirectory = await fetch(new URL("/assets", httpBaseUrl));
-      const assetsDirectoryBody = await assetsDirectory.text();
-      assert.equal(assetsDirectory.status, 200);
-      assert.match(assetsDirectoryBody, /<div id="root"><\/div>/);
+        const assetsDirectory = await fetch(new URL("/assets", httpBaseUrl));
+        const assetsDirectoryBody = await assetsDirectory.text();
+        assert.equal(assetsDirectory.status, 200);
+        assert.match(assetsDirectoryBody, /<div id="root"><\/div>/);
 
-      const daemonAfterAssets = await httpJson(httpBaseUrl, "/api/daemon");
-      assert.equal(daemonAfterAssets.status, 200);
-      assert.equal(daemonAfterAssets.body.daemon.listenUrl, listenUrl);
-    } finally {
-      await server.close();
-    }
+        const daemonAfterAssets = await httpJson(httpBaseUrl, "/api/daemon");
+        assert.equal(daemonAfterAssets.status, 200);
+        assert.equal(daemonAfterAssets.body.daemon.listenUrl, listenUrl);
+      } finally {
+        await server.close();
+      }
+    });
   });
 });
 
@@ -1032,28 +1137,26 @@ test("daemon serve reads packaged web assets from the CLI dist layout", async ()
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
   const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
-  const packagedIndex = readFileSync(
-    new URL("../apps/cli/dist/web/index.html", import.meta.url),
-    "utf8",
-  );
+  await withSeededFrontendDist(async ({ indexPath }) => {
+    const packagedIndex = readFileSync(indexPath, "utf8");
+    const server = await serveDaemon(listenUrl);
+    try {
+      const response = await fetch(new URL("/", httpBaseUrl));
+      const body = await response.text();
+      assert.equal(response.status, 200);
+      assert.equal(body, packagedIndex);
 
-  const server = await serveDaemon(listenUrl);
-  try {
-    const response = await fetch(new URL("/", httpBaseUrl));
-    const body = await response.text();
-    assert.equal(response.status, 200);
-    assert.equal(body, packagedIndex);
+      const assetPath = body.match(/\/assets\/[^"]+\.(?:js|css)/)?.[0];
+      assert.ok(assetPath, "expected built asset path in served index.html");
 
-    const assetPath = body.match(/\/assets\/[^"]+\.(?:js|css)/)?.[0];
-    assert.ok(assetPath, "expected built asset path in served index.html");
-
-    const assetResponse = await fetch(new URL(assetPath, httpBaseUrl));
-    const assetBody = await assetResponse.text();
-    assert.equal(assetResponse.status, 200);
-    assert.ok(assetBody.length > 0);
-  } finally {
-    await server.close();
-  }
+      const assetResponse = await fetch(new URL(assetPath, httpBaseUrl));
+      const assetBody = await assetResponse.text();
+      assert.equal(assetResponse.status, 200);
+      assert.ok(assetBody.length > 0);
+    } finally {
+      await server.close();
+    }
+  });
 });
 
 test("daemon HTTP rejects oversized JSON request bodies", async () => {
@@ -1946,6 +2049,69 @@ test("daemon mutation-driven projection SSE events include dependent summary fan
     } finally {
       await summaries.close();
       await sourceDetails.close();
+      await server.close();
+    }
+  });
+});
+
+test("daemon note and pin mutations publish summary and detail updates", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const init = await initRun(dir);
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl);
+    const summaries = await openSse(httpBaseUrl, "/api/events/run-summaries");
+    const details = await openSse(httpBaseUrl, `/api/runs/${init.runId}/events/detail`);
+    try {
+      const noteResponse = await httpJson(httpBaseUrl, `/api/runs/${init.runId}/note`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ note: "SSE note" }),
+      });
+      assert.equal(noteResponse.status, 200);
+      assert.deepEqual(noteResponse.body.result, {
+        runId: init.runId,
+        note: "SSE note",
+        changed: true,
+      });
+
+      const noteSummary = await summaries.next();
+      const noteDetail = await details.next();
+      assert.equal(noteSummary.type, "summary_upsert");
+      assert.equal(noteSummary.summary.runId, init.runId);
+      assert.equal(noteSummary.summary.notePresent, true);
+      assert.equal(noteDetail.type, "detail_updated");
+      assert.equal(noteDetail.detail.runId, init.runId);
+      assert.equal(noteDetail.detail.note, "SSE note");
+
+      const pinResponse = await httpJson(httpBaseUrl, `/api/runs/${init.runId}/pinned`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pinned: true }),
+      });
+      assert.equal(pinResponse.status, 200);
+      assert.deepEqual(pinResponse.body.result, {
+        runId: init.runId,
+        pinned: true,
+        changed: true,
+      });
+
+      const pinSummary = await summaries.next();
+      const pinDetail = await details.next();
+      assert.equal(pinSummary.type, "summary_upsert");
+      assert.equal(pinSummary.summary.runId, init.runId);
+      assert.equal(pinSummary.summary.pinned, true);
+      assert.equal(pinDetail.type, "detail_updated");
+      assert.equal(pinDetail.detail.runId, init.runId);
+      assert.equal(pinDetail.detail.pinned, true);
+    } finally {
+      await summaries.close();
+      await details.close();
       await server.close();
     }
   });
