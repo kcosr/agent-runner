@@ -30,6 +30,16 @@ function SettingsProbe() {
       </button>
       <button
         onClick={() =>
+          updatePreferences({
+            visibleFocusIndicators: true,
+          })
+        }
+        type="button"
+      >
+        Enable visible focus indicators
+      </button>
+      <button
+        onClick={() =>
           updateViewState({
             drawerWidth: 700,
             repo: "task-runner-web",
@@ -41,6 +51,9 @@ function SettingsProbe() {
       </button>
       <button onClick={() => resetPreference("showArchived")} type="button">
         Reset archived
+      </button>
+      <button onClick={() => resetPreference("visibleFocusIndicators")} type="button">
+        Reset focus indicators
       </button>
       <button onClick={() => resetPreferences()} type="button">
         Reset all preferences
@@ -75,6 +88,7 @@ describe("DashboardSettingsProvider", () => {
         collapseFailureStates: true,
         showArchived: false,
         sortByRecentUpdates: false,
+        visibleFocusIndicators: false,
       }),
     );
     expect(screen.getByTestId("view-state")).toHaveTextContent(
@@ -98,6 +112,7 @@ describe("DashboardSettingsProvider", () => {
         hideEmptyColumns: false,
         collapseFailureStates: false,
         sortByRecentUpdates: true,
+        visibleFocusIndicators: true,
         drawerWidth: 1200,
       }),
     );
@@ -108,6 +123,7 @@ describe("DashboardSettingsProvider", () => {
         hideEmptyColumns: false,
         collapseFailureStates: false,
         sortByRecentUpdates: true,
+        visibleFocusIndicators: true,
       }),
     );
 
@@ -119,6 +135,7 @@ describe("DashboardSettingsProvider", () => {
         collapseFailureStates: false,
         showArchived: true,
         sortByRecentUpdates: true,
+        visibleFocusIndicators: true,
       }),
     );
     expect(screen.getByTestId("view-state")).toHaveTextContent('"drawerWidth":540');
@@ -136,11 +153,27 @@ describe("DashboardSettingsProvider", () => {
     expect(screen.getByTestId("view-state")).toHaveTextContent('"drawerWidth":540');
   });
 
+  it("hydrates and resets visible focus indicators independently", () => {
+    window.localStorage.setItem(
+      "task-runner:web:dashboard-preferences",
+      JSON.stringify({ visibleFocusIndicators: true }),
+    );
+
+    renderSettingsProbe();
+
+    expect(screen.getByTestId("preferences")).toHaveTextContent('"visibleFocusIndicators":true');
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset focus indicators" }));
+
+    expect(screen.getByTestId("preferences")).toHaveTextContent('"visibleFocusIndicators":false');
+  });
+
   it("persists preferences without persisting transient view-state updates", () => {
     renderSettingsProbe();
 
     fireEvent.click(screen.getByRole("button", { name: "Enable archived" }));
     fireEvent.click(screen.getByRole("button", { name: "Enable recent updates sort" }));
+    fireEvent.click(screen.getByRole("button", { name: "Enable visible focus indicators" }));
     fireEvent.click(screen.getByRole("button", { name: "Update view state" }));
 
     expect(window.localStorage.getItem("task-runner:web:dashboard-preferences")).toBe(
@@ -149,6 +182,7 @@ describe("DashboardSettingsProvider", () => {
         collapseFailureStates: true,
         showArchived: true,
         sortByRecentUpdates: true,
+        visibleFocusIndicators: true,
       }),
     );
     expect(screen.getByTestId("view-state")).toHaveTextContent('"drawerWidth":700');
@@ -167,6 +201,7 @@ describe("DashboardSettingsProvider", () => {
         collapseFailureStates: true,
         showArchived: false,
         sortByRecentUpdates: false,
+        visibleFocusIndicators: false,
       }),
     );
   });
@@ -183,6 +218,7 @@ describe("DashboardSettingsProvider", () => {
         collapseFailureStates: true,
         showArchived: false,
         sortByRecentUpdates: false,
+        visibleFocusIndicators: false,
       }),
     );
   });

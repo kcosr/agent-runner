@@ -4,15 +4,19 @@ import {
   SettingsRow,
   SettingsSection,
 } from "../components/settings/settings-layout.js";
-import { DEFAULT_DASHBOARD_PREFERENCES, useDashboardPreferences } from "../lib/settings.js";
+import {
+  DEFAULT_DASHBOARD_PREFERENCES,
+  type DashboardPreferenceKey,
+  useDashboardPreferences,
+} from "../lib/settings.js";
 
 interface PreferenceRowDefinition {
   description: string;
-  key: keyof typeof DEFAULT_DASHBOARD_PREFERENCES;
+  key: DashboardPreferenceKey;
   title: string;
 }
 
-const PREFERENCE_ROWS: PreferenceRowDefinition[] = [
+const BOARD_PREFERENCE_ROWS: PreferenceRowDefinition[] = [
   {
     key: "hideEmptyColumns",
     title: "Hide empty columns",
@@ -36,13 +40,54 @@ const PREFERENCE_ROWS: PreferenceRowDefinition[] = [
   },
 ];
 
+const DISPLAY_PREFERENCE_ROWS: PreferenceRowDefinition[] = [
+  {
+    key: "visibleFocusIndicators",
+    title: "Visible focus indicators",
+    description:
+      "Show the dashboard's current focus rings and highlight states without changing keyboard navigation or focus movement.",
+  },
+];
+
 export function SettingsGeneralRoute() {
   const { preferences, resetPreference, resetPreferences, updatePreferences } =
     useDashboardPreferences();
+  const preferenceRows = [...BOARD_PREFERENCE_ROWS, ...DISPLAY_PREFERENCE_ROWS];
 
-  const allDefaults = PREFERENCE_ROWS.every(
+  const allDefaults = preferenceRows.every(
     ({ key }) => preferences[key] === DEFAULT_DASHBOARD_PREFERENCES[key],
   );
+
+  function renderPreferenceRow({ description, key, title }: PreferenceRowDefinition) {
+    const checked = preferences[key];
+    const isDefault = checked === DEFAULT_DASHBOARD_PREFERENCES[key];
+
+    return (
+      <SettingsRow
+        action={
+          <SettingsResetButton
+            disabled={isDefault}
+            onClick={() => resetPreference(key)}
+            settingLabel={title}
+          />
+        }
+        control={
+          <label className="settings-toggle">
+            <input
+              aria-label={title}
+              checked={checked}
+              onChange={(event) => updatePreferences({ [key]: event.target.checked })}
+              type="checkbox"
+            />
+            <span>{checked ? "On" : "Off"}</span>
+          </label>
+        }
+        description={description}
+        key={key}
+        title={title}
+      />
+    );
+  }
 
   return (
     <SettingsPage
@@ -58,36 +103,13 @@ export function SettingsGeneralRoute() {
         description="Persisted dashboard preferences that shape how the runs board appears by default."
         title="Board preferences"
       >
-        {PREFERENCE_ROWS.map(({ description, key, title }) => {
-          const checked = preferences[key];
-          const isDefault = checked === DEFAULT_DASHBOARD_PREFERENCES[key];
-
-          return (
-            <SettingsRow
-              action={
-                <SettingsResetButton
-                  disabled={isDefault}
-                  onClick={() => resetPreference(key)}
-                  settingLabel={title}
-                />
-              }
-              control={
-                <label className="settings-toggle">
-                  <input
-                    aria-label={title}
-                    checked={checked}
-                    onChange={(event) => updatePreferences({ [key]: event.target.checked })}
-                    type="checkbox"
-                  />
-                  <span>{checked ? "On" : "Off"}</span>
-                </label>
-              }
-              description={description}
-              key={key}
-              title={title}
-            />
-          );
-        })}
+        {BOARD_PREFERENCE_ROWS.map(renderPreferenceRow)}
+      </SettingsSection>
+      <SettingsSection
+        description="Persisted dashboard display preferences that apply across the app shell."
+        title="Display preferences"
+      >
+        {DISPLAY_PREFERENCE_ROWS.map(renderPreferenceRow)}
       </SettingsSection>
     </SettingsPage>
   );

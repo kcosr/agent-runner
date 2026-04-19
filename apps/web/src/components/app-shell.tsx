@@ -1,5 +1,6 @@
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import type { ReactNode } from "react";
+import { useDashboardPreferences } from "../lib/settings.js";
 import { FileIcon, GridIcon, SettingsIcon } from "./icons.js";
 
 export function AppShell({
@@ -16,13 +17,14 @@ export function AppShell({
   secondary?: ReactNode;
 }) {
   const navigate = useNavigate();
+  const { preferences } = useDashboardPreferences();
   const pathname = useRouterState({
     select: (state) => state.location.pathname,
   });
   const activeSection = pathname.startsWith("/settings") ? "settings" : "runs";
 
   return (
-    <div className="app">
+    <div className="app" data-focus-indicators={preferences.visibleFocusIndicators ? "on" : "off"}>
       <div className="shell">
         <aside aria-label="Primary navigation" className="sidebar">
           <span aria-label="task-runner" className="brand-mark">

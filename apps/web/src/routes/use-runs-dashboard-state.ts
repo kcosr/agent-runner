@@ -351,6 +351,8 @@ export function useRunsDashboardState() {
     selectedRunId !== undefined
       ? (viewState.drawerViewsByRunId[selectedRunId] ?? DEFAULT_DRAWER_VIEW)
       : undefined;
+  const selectedAttachmentTab =
+    selectedDrawerView?.attachmentTab ?? DEFAULT_DRAWER_VIEW.attachmentTab;
   const selectedRunGroupAttachmentsQuery = useQuery({
     queryKey: ["attachment-list", detailRunId, "cwd-scope"],
     queryFn: async () => {
@@ -892,7 +894,7 @@ export function useRunsDashboardState() {
         detailSection: "attachments",
         attachmentId: null,
         attachmentOwnerRunId: null,
-        attachmentTab: selectedDrawerView?.attachmentTab ?? "run",
+        attachmentTab: selectedAttachmentTab,
       });
     },
     resetBoardFilters: () => {
@@ -917,7 +919,7 @@ export function useRunsDashboardState() {
         detailSection,
         attachmentId: null,
         attachmentOwnerRunId: null,
-        attachmentTab: selectedDrawerView?.attachmentTab ?? "run",
+        attachmentTab: selectedAttachmentTab,
       });
     },
     updateSelectedRunAttachmentTab: (attachmentTab: AttachmentTab) => {

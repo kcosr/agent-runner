@@ -6,11 +6,12 @@ export interface DashboardPreferences {
   collapseFailureStates: boolean;
   showArchived: boolean;
   sortByRecentUpdates: boolean;
+  visibleFocusIndicators: boolean;
 }
 
 export type DashboardPreferenceKey = keyof DashboardPreferences;
 
-export type DrawerDetailSection = "tasks" | "attachments" | "dependencies" | "timing" | "events";
+export type DrawerDetailSection = "tasks" | "attachments" | "dependencies" | "events";
 export type AttachmentTab = "run" | "group";
 
 export type RunDrawerView =
@@ -58,6 +59,7 @@ export const DEFAULT_DASHBOARD_PREFERENCES: DashboardPreferences = {
   collapseFailureStates: true,
   showArchived: false,
   sortByRecentUpdates: false,
+  visibleFocusIndicators: false,
 };
 
 export const DEFAULT_DASHBOARD_VIEW_STATE: DashboardViewState = {
@@ -142,6 +144,10 @@ function parseStoredDashboardPreferences(value: unknown): DashboardPreferences {
       typeof record.sortByRecentUpdates === "boolean"
         ? record.sortByRecentUpdates
         : DEFAULT_DASHBOARD_PREFERENCES.sortByRecentUpdates,
+    visibleFocusIndicators:
+      typeof record.visibleFocusIndicators === "boolean"
+        ? record.visibleFocusIndicators
+        : DEFAULT_DASHBOARD_PREFERENCES.visibleFocusIndicators,
   };
 }
 

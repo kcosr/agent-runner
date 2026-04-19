@@ -31,6 +31,12 @@ export function formatRelativeTimestamp(value: string | null): string {
   return formatter.format(Math.round(deltaHours / 24), "day");
 }
 
+export function formatTimestampWithRelative(value: string | null): string {
+  const absolute = formatTimestamp(value);
+  const relative = formatRelativeTimestamp(value);
+  return relative ? `${absolute} ${relative}` : absolute;
+}
+
 export function truncateMiddle(value: string, start = 20, end = 18): string {
   if (value.length <= start + end + 3) {
     return value;
