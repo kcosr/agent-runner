@@ -8,8 +8,14 @@ import { queryClient, runQueryKeys } from "../lib/query.js";
 import { useRuntimeConfig } from "../lib/runtime-config.js";
 import type { DashboardStructuredFilters } from "../lib/settings.js";
 import type { RunActionPending } from "../routes/use-runs-dashboard-state.js";
-import { AttachmentIcon, DependencyIcon, PencilIcon, PinIcon, RunningIcon } from "./icons.js";
-import { MarkdownContent } from "./markdown.js";
+import {
+  AttachmentIcon,
+  CloseIcon,
+  DependencyIcon,
+  NotepadTextIcon,
+  PinIcon,
+  RunningIcon,
+} from "./icons.js";
 import { RunNoteEditor, usePreferredRunNoteEditorMode } from "./run-note-editor.js";
 import { StatusBadge } from "./status-badge.js";
 
@@ -113,6 +119,7 @@ export function RunCard({
     enabled: shouldLoadNoteDetail,
     initialData: () => queryClient.getQueryData(runQueryKeys.detail(run.runId)),
   });
+  const noteLoading = noteDetailQuery.isPending && noteDetailQuery.data === undefined;
   const note = noteDetailQuery.data?.note ?? null;
 
   function handleCardClick(event: MouseEvent<HTMLButtonElement>) {
@@ -142,6 +149,23 @@ export function RunCard({
   function closeNoteDialog() {
     setNoteDialogOpen(false);
   }
+
+  useEffect(() => {
+    if (!noteDialogOpen || typeof window === "undefined") {
+      return;
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+      event.preventDefault();
+      setNoteDialogOpen(false);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [noteDialogOpen]);
 
   function handleNotePointerEnter() {
     if (!run.notePresent || previewFirstNoteMode) {
@@ -238,78 +262,78 @@ export function RunCard({
         title={accessibleName}
         type="button"
       >
-        <div className="card-row">
-          <span className="run-id">{run.runId}</span>
-          <span className="card-row-spacer" />
-          <StatusBadge status={run.effectiveStatus} />
-        </div>
-        <div className="card-row">
-          <span className="card-title">{visibleName}</span>
-        </div>
-        <div className="card-row card-row--subtitle">
-          <span className="card-subtitle">{run.assignmentName ?? "Ad hoc run"}</span>
-        </div>
-        <div className="card-row card-meta">
-          <span
-            aria-label={`Filter by repo ${run.repo}`}
-            className="repo-badge meta-filter-badge meta-filter-badge--repo"
-            data-active-filter={repoFilterActive ? "true" : undefined}
-            data-structured-filter-key="repo"
-            data-structured-filter-value={run.repo}
-          >
-            {run.repo}
-          </span>
-          <span
-            aria-label={`Filter by agent ${run.agentName}`}
-            className="meta-item meta-filter-badge meta-filter-badge--agent"
-            data-active-filter={agentFilterActive ? "true" : undefined}
-            data-structured-filter-key="agent"
-            data-structured-filter-value={run.agentName}
-          >
-            {run.agentName}
-          </span>
-          <span
-            aria-label={`Filter by backend ${run.backend}`}
-            className="backend-badge meta-filter-badge meta-filter-badge--backend"
-            data-active-filter={backendFilterActive ? "true" : undefined}
-            data-structured-filter-key="backend"
-            data-structured-filter-value={run.backend}
-          >
-            {run.backend}
-          </span>
-          {showDependencyIndicator ? (
-            <span
-              aria-label={`${run.dependencyState.satisfied} of ${run.dependencyState.total} dependencies satisfied`}
-              className={dependencyIndicatorClass}
-              title={`${run.dependencyState.satisfied}/${run.dependencyState.total} dependency run(s) satisfied`}
-            >
-              <DependencyIcon aria-hidden="true" />
-              {run.dependencyState.satisfied}/{run.dependencyState.total}
-            </span>
-          ) : null}
-          {showAttachmentIndicator ? (
-            <span
-              aria-label={`${run.attachmentCount} attachment${run.attachmentCount === 1 ? "" : "s"}`}
-              className="meta-indicator meta-indicator--neutral"
-              title={`${run.attachmentCount} attachment${run.attachmentCount === 1 ? "" : "s"}`}
-            >
-              <AttachmentIcon aria-hidden="true" />
-            </span>
-          ) : null}
-          {run.pinned ? (
-            <span className="meta-indicator meta-indicator--neutral">Pinned</span>
-          ) : null}
-          {run.notePresent ? (
-            <span className="meta-indicator meta-indicator--neutral">Note</span>
-          ) : null}
-        </div>
-        <div className="card-row">
-          <div className="progress" aria-label="task progress">
-            <div className="progress-bar" style={{ width: `${progress}%` }} />
+        <div className="card-header-block">
+          <div className="card-row">
+            <span className="run-id">{run.runId}</span>
+            <span className="card-row-spacer" />
+            <StatusBadge status={run.effectiveStatus} />
           </div>
-          <span className="progress-text">
-            {run.tasksCompleted} / {run.tasksTotal}
-          </span>
+          <div className="card-row">
+            <span className="card-title">{visibleName}</span>
+          </div>
+          <div className="card-row card-row--subtitle">
+            <span className="card-subtitle">{run.assignmentName ?? "Ad hoc run"}</span>
+          </div>
+          <div className="card-row card-meta">
+            <span
+              aria-label={`Filter by repo ${run.repo}`}
+              className="repo-badge meta-filter-badge meta-filter-badge--repo"
+              data-active-filter={repoFilterActive ? "true" : undefined}
+              data-structured-filter-key="repo"
+              data-structured-filter-value={run.repo}
+            >
+              {run.repo}
+            </span>
+            <span
+              aria-label={`Filter by agent ${run.agentName}`}
+              className="meta-item meta-filter-badge meta-filter-badge--agent"
+              data-active-filter={agentFilterActive ? "true" : undefined}
+              data-structured-filter-key="agent"
+              data-structured-filter-value={run.agentName}
+            >
+              {run.agentName}
+            </span>
+            <span
+              aria-label={`Filter by backend ${run.backend}`}
+              className="backend-badge meta-filter-badge meta-filter-badge--backend"
+              data-active-filter={backendFilterActive ? "true" : undefined}
+              data-structured-filter-key="backend"
+              data-structured-filter-value={run.backend}
+            >
+              {run.backend}
+            </span>
+            {showDependencyIndicator ? (
+              <span
+                aria-label={`${run.dependencyState.satisfied} of ${run.dependencyState.total} dependencies satisfied`}
+                className={dependencyIndicatorClass}
+                title={`${run.dependencyState.satisfied}/${run.dependencyState.total} dependency run(s) satisfied`}
+              >
+                <DependencyIcon aria-hidden="true" />
+                {run.dependencyState.satisfied}/{run.dependencyState.total}
+              </span>
+            ) : null}
+            {showAttachmentIndicator ? (
+              <span
+                aria-label={`${run.attachmentCount} attachment${run.attachmentCount === 1 ? "" : "s"}`}
+                className="meta-indicator meta-indicator--neutral"
+                title={`${run.attachmentCount} attachment${run.attachmentCount === 1 ? "" : "s"}`}
+              >
+                <AttachmentIcon aria-hidden="true" />
+              </span>
+            ) : null}
+          </div>
+        </div>
+        <div className="card-row">
+          <div className="card-progress">
+            <div className="card-progress__meta">
+              <span className="progress-text">
+                {run.tasksCompleted} / {run.tasksTotal}
+              </span>
+            </div>
+            <div className="progress" aria-label="task progress">
+              <div className="progress-bar" style={{ width: `${progress}%` }} />
+            </div>
+          </div>
         </div>
         {run.activeTask ? (
           <div className="card-row">
@@ -344,17 +368,21 @@ export function RunCard({
             title={run.notePresent ? "Preview or edit note" : "Add note"}
             type="button"
           >
-            <PencilIcon aria-hidden="true" />
+            <NotepadTextIcon aria-hidden="true" />
           </button>
 
           {run.notePresent && notePreviewOpen && !previewFirstNoteMode ? (
             <div aria-label={`Note preview for ${accessibleName}`} className="card-note-preview">
-              {noteDetailQuery.isPending ? (
-                <p className="card-note-preview__state">Loading note…</p>
+              {noteLoading ? (
+                <div aria-label="Loading note preview" className="card-note-preview__loading">
+                  <div className="skeleton-line skeleton-line--short" />
+                  <div className="skeleton-line skeleton-line--medium" />
+                  <div className="skeleton-line skeleton-line--medium" />
+                </div>
               ) : noteDetailQuery.isError ? (
                 <p className="card-note-preview__state">{noteDetailQuery.error.message}</p>
               ) : note ? (
-                <MarkdownContent className="card-note-preview__markdown" text={note} />
+                <div className="card-note-preview__text">{note}</div>
               ) : (
                 <p className="card-note-preview__state">No note recorded yet.</p>
               )}
@@ -377,20 +405,36 @@ export function RunCard({
       </div>
 
       {noteDialogOpen ? (
-        <dialog aria-labelledby={noteTitleId} className="note-dialog-backdrop" open>
-          <button
-            aria-label="Close note editor"
-            className="note-dialog-backdrop__button"
-            onClick={closeNoteDialog}
-            type="button"
-          />
+        <dialog
+          aria-labelledby={noteTitleId}
+          className="note-dialog-backdrop"
+          onCancel={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            closeNoteDialog();
+          }}
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              closeNoteDialog();
+            }
+          }}
+          onKeyDown={(event) => {
+            if (
+              event.target === event.currentTarget &&
+              (event.key === "Enter" || event.key === " ")
+            ) {
+              event.preventDefault();
+              closeNoteDialog();
+            }
+          }}
+          open
+        >
           <div className="note-dialog" role="document">
             <div className="note-dialog__header">
               <div>
                 <h3 className="note-dialog__title" id={noteTitleId}>
                   {accessibleName}
                 </h3>
-                <p className="note-dialog__copy">Run note</p>
               </div>
               <button
                 aria-label="Close note editor"
@@ -398,23 +442,41 @@ export function RunCard({
                 onClick={closeNoteDialog}
                 type="button"
               >
-                ×
+                <CloseIcon aria-hidden="true" />
               </button>
             </div>
             {noteDetailQuery.isError ? (
               <p className="note-dialog__error">{noteDetailQuery.error.message}</p>
             ) : null}
-            <RunNoteEditor
-              closeOnCancel={true}
-              closeOnSave={true}
-              emptyPreviewMessage="No note recorded yet."
-              initialMode={preferredNoteEditorMode}
-              note={note}
-              onClose={closeNoteDialog}
-              onSave={onSetNote}
-              pending={notePending}
-              textareaLabel={`Run note for ${accessibleName}`}
-            />
+            {noteLoading ? (
+              <div aria-label="Loading note editor" className="note-loading-state">
+                <div className="note-loading-state__toolbar">
+                  <div className="skeleton-line skeleton-line--short" />
+                </div>
+                <div className="note-loading-state__body">
+                  <div className="skeleton-line skeleton-line--short" />
+                  <div className="skeleton-line skeleton-line--medium" />
+                  <div className="skeleton-line skeleton-line--medium" />
+                  <div className="skeleton-line skeleton-line--short" />
+                </div>
+                <div className="note-loading-state__actions">
+                  <div className="skeleton-line skeleton-line--short" />
+                  <div className="skeleton-line skeleton-line--short" />
+                </div>
+              </div>
+            ) : (
+              <RunNoteEditor
+                closeOnCancel={true}
+                closeOnSave={true}
+                emptyPreviewMessage="No note recorded yet."
+                initialMode={preferredNoteEditorMode}
+                note={note}
+                onClose={closeNoteDialog}
+                onSave={onSetNote}
+                pending={notePending}
+                textareaLabel={`Run note for ${accessibleName}`}
+              />
+            )}
           </div>
         </dialog>
       ) : null}

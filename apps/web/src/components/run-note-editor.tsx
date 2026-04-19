@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { MarkdownContent } from "./markdown.js";
 
 export type RunNoteEditorMode = "preview" | "edit";
@@ -80,6 +80,7 @@ export function RunNoteEditor({
   const [draft, setDraft] = useState(note ?? "");
   const [mode, setMode] = useState<RunNoteEditorMode>(initialMode);
   const noteRef = useRef(note);
+  const textareaId = useId();
 
   useEffect(() => {
     if (noteRef.current === note) {
@@ -160,12 +161,13 @@ export function RunNoteEditor({
           )}
         </div>
       ) : (
-        <label className="note-editor__field field">
+        <label className="note-editor__field" htmlFor={textareaId}>
           <span className="sr-only">{textareaLabel}</span>
           <textarea
             aria-label={textareaLabel}
             className="note-editor__textarea"
             disabled={pending}
+            id={textareaId}
             onChange={(event) => setDraft(event.target.value)}
             placeholder="Write markdown notes for this run."
             value={draft}
