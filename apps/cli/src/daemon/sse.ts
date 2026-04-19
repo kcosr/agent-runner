@@ -1,10 +1,15 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { RunEventEnvelope } from "@task-runner/core/contracts/events.js";
 
-export function streamRunEvents(
+interface SerializedEvent<T> {
+  data: T;
+  id?: string;
+}
+
+export function streamEvents<T>(
   req: IncomingMessage,
   res: ServerResponse,
-  subscribe: (publish: (payload: RunEventEnvelope) => boolean) => () => void,
+  subscribe: (publish: (payload: T) => boolean) => () => void,
+  serialize: (payload: T) => SerializedEvent<T> = (payload) => ({ data: payload }),
 ): void {
   res.statusCode = 200;
   res.setHeader("content-type", "text/event-stream; charset=utf-8");
@@ -14,7 +19,7 @@ export function streamRunEvents(
   res.flushHeaders();
   res.write(": connected\n\n");
 
-  const unsubscribe = subscribe((payload) => writeEvent(res, payload));
+  const unsubscribe = subscribe((payload) => writeEvent(res, serialize(payload)));
   let closed = false;
   const cleanup = () => {
     if (closed) {
@@ -33,14 +38,15 @@ export function streamRunEvents(
   res.on("error", cleanup);
 }
 
-function writeEvent(res: ServerResponse, payload: RunEventEnvelope): boolean {
+function writeEvent(res: ServerResponse, payload: SerializedEvent<unknown>): boolean {
   if (res.destroyed || res.writableEnded) {
     return false;
   }
   try {
     // `ServerResponse.write()` returns false on backpressure, not just failure.
     // Keep the subscriber alive unless the stream is actually closed or throws.
-    res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    const frame = `${payload.id ? `id: ${payload.id}\n` : ""}data: ${JSON.stringify(payload.data)}\n\n`;
+    res.write(frame);
     return !res.destroyed && !res.writableEnded;
   } catch {
     return false;

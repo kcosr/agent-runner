@@ -6,7 +6,11 @@ import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
-import { assignmentPathFromPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
+import {
+  completeAllTasksFromPrompt,
+  setTaskStatusesForPrompt,
+  withSharedRuntimeEnv,
+} from "./helpers/runtime-paths.mjs";
 
 const ONE_AGENT = `---
 schemaVersion: 1
@@ -61,17 +65,6 @@ function setupOne(dir) {
   writeAssignment(dir, "one-work", ONE_ASSIGNMENT);
 }
 
-function editStatus(content, taskId, newStatus) {
-  const marker = `<!-- task-id: ${taskId} -->`;
-  const start = content.indexOf(marker);
-  if (start < 0) throw new Error(`marker not found: ${taskId}`);
-  const nextMarker = content.indexOf("<!-- task-id:", start + marker.length);
-  const end = nextMarker < 0 ? content.length : nextMarker;
-  const section = content.slice(start, end);
-  const updated = section.replace(/\*\*Status:\*\*\s*\S+/, `**Status:** ${newStatus}`);
-  return content.slice(0, start) + updated + content.slice(end);
-}
-
 function mockBackend(handler) {
   return { id: "mock", invoke: handler };
 }
@@ -113,9 +106,7 @@ test("workflow: fresh run with tasks injects the workflow template at end of bod
     assignmentName: "one-work",
     backend: mockBackend(async (ctx) => {
       seenPrompt = ctx.prompt;
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      const plan = readFileSync(absPlan, "utf8");
-      writeFileSync(absPlan, editStatus(plan, "t1", "completed"), "utf8");
+      setTaskStatusesForPrompt(ctx.prompt, { t1: "completed" });
       return {
         exitCode: 0,
         signal: null,
@@ -129,15 +120,12 @@ test("workflow: fresh run with tasks injects the workflow template at end of bod
   });
 
   assert.ok(seenPrompt.includes("You are an assistant."), "body is present");
-  assert.ok(seenPrompt.includes("Your assignment is at"), "workflow is present");
-  assert.ok(
-    seenPrompt.includes("Set the task's **Status** to `in_progress`"),
-    "workflow steps present",
-  );
-  assert.ok(seenPrompt.includes("pending"), "workflow mentions valid statuses");
+  assert.ok(seenPrompt.includes("You are working through a task list"), "workflow is present");
+  assert.ok(seenPrompt.includes("task set"), "workflow steps present");
+  assert.ok(seenPrompt.includes("task list"), "workflow mentions task commands");
   // Body should come before workflow
   const bodyIdx = seenPrompt.indexOf("You are an assistant.");
-  const workflowIdx = seenPrompt.indexOf("Your assignment is at");
+  const workflowIdx = seenPrompt.indexOf("You are working through a task list");
   assert.ok(bodyIdx < workflowIdx, "body comes before workflow");
 });
 
@@ -151,9 +139,7 @@ test("workflow: fresh run with CLI message places message below body and workflo
     overrides: { message: "focus on X right now" },
     backend: mockBackend(async (ctx) => {
       seenPrompt = ctx.prompt;
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      const plan = readFileSync(absPlan, "utf8");
-      writeFileSync(absPlan, editStatus(plan, "t1", "completed"), "utf8");
+      setTaskStatusesForPrompt(ctx.prompt, { t1: "completed" });
       return {
         exitCode: 0,
         signal: null,
@@ -168,7 +154,7 @@ test("workflow: fresh run with CLI message places message below body and workflo
 
   const msgIdx = seenPrompt.indexOf("focus on X right now");
   const bodyIdx = seenPrompt.indexOf("You are an assistant.");
-  const workflowIdx = seenPrompt.indexOf("Your assignment is at");
+  const workflowIdx = seenPrompt.indexOf("You are working through a task list");
   assert.ok(msgIdx >= 0, "message present");
   assert.ok(bodyIdx >= 0, "body present");
   assert.ok(workflowIdx >= 0, "workflow present");
@@ -199,8 +185,11 @@ test("workflow: fresh run with zero tasks does NOT inject workflow", async () =>
   assert.equal(outcome.exitCode, 0);
   assert.equal(outcome.manifest.tasksTotal, 0);
   assert.ok(seenPrompt.includes("You are a chat assistant."));
-  assert.ok(!seenPrompt.includes("Your assignment is at"), "no workflow for 0-task run");
-  assert.ok(!seenPrompt.includes("Set the task's"));
+  assert.ok(
+    !seenPrompt.includes("You are working through a task list"),
+    "no workflow for 0-task run",
+  );
+  assert.ok(!seenPrompt.includes("task set"));
 });
 
 test("workflow: resume session does NOT re-inject workflow when prior sessions had tasks", async () => {
@@ -211,9 +200,7 @@ test("workflow: resume session does NOT re-inject workflow when prior sessions h
   const first = await runIn(dir, "one", {
     assignmentName: "one-work",
     backend: mockBackend(async (ctx) => {
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      const plan = readFileSync(absPlan, "utf8");
-      writeFileSync(absPlan, editStatus(plan, "t1", "blocked"), "utf8");
+      setTaskStatusesForPrompt(ctx.prompt, { t1: "blocked" });
       return {
         exitCode: 0,
         signal: null,
@@ -229,15 +216,17 @@ test("workflow: resume session does NOT re-inject workflow when prior sessions h
   // Resume — no --add-task, just a follow-up message
   await withSharedRuntimeEnv(dir, async () => {
     const target = resolveResumeTarget(first.runId, dir);
-    const firstAssignmentPath = join(first.workspaceDir, "assignment.md");
     let seenPrompt;
     await runIn(dir, "one", {
       resume: target,
       overrides: { message: "unblocked, try again" },
       backend: mockBackend(async (ctx) => {
         seenPrompt = ctx.prompt;
-        const plan = readFileSync(firstAssignmentPath, "utf8");
-        writeFileSync(firstAssignmentPath, editStatus(plan, "t1", "completed"), "utf8");
+        const manifestPath = join(target.workspaceDir, "run.json");
+        const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+        manifest.finalTasks.t1.status = "completed";
+        manifest.tasksCompleted = 1;
+        writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
         return {
           exitCode: 0,
           signal: null,
@@ -251,7 +240,7 @@ test("workflow: resume session does NOT re-inject workflow when prior sessions h
     });
 
     assert.equal(seenPrompt, "unblocked, try again");
-    assert.ok(!seenPrompt.includes("Your assignment is at"));
+    assert.ok(!seenPrompt.includes("You are working through a task list"));
     assert.ok(!seenPrompt.includes("new task"));
   });
 });
@@ -263,9 +252,7 @@ test("workflow: resume session with --add-task (prior had tasks) appends reminde
   const first = await runIn(dir, "one", {
     assignmentName: "one-work",
     backend: mockBackend(async (ctx) => {
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      const plan = readFileSync(absPlan, "utf8");
-      writeFileSync(absPlan, editStatus(plan, "t1", "blocked"), "utf8");
+      setTaskStatusesForPrompt(ctx.prompt, { t1: "blocked" });
       return {
         exitCode: 0,
         signal: null,
@@ -280,23 +267,13 @@ test("workflow: resume session with --add-task (prior had tasks) appends reminde
 
   await withSharedRuntimeEnv(dir, async () => {
     const target = resolveResumeTarget(first.runId, dir);
-    const firstAssignmentPath = join(first.workspaceDir, "assignment.md");
     let seenPrompt;
     await runIn(dir, "one", {
       resume: target,
       overrides: { message: "also do these", addedTasks: ["new one", "new two"] },
       backend: mockBackend(async (ctx) => {
         seenPrompt = ctx.prompt;
-        let plan = readFileSync(firstAssignmentPath, "utf8");
-        plan = editStatus(plan, "t1", "completed");
-        // Find and complete the two new cli-* tasks
-        const ids = [...plan.matchAll(/<!-- task-id:\s*(cli-[A-Za-z0-9]+)\s*-->/g)].map(
-          (m) => m[1],
-        );
-        for (const id of ids) {
-          plan = editStatus(plan, id, "completed");
-        }
-        writeFileSync(firstAssignmentPath, plan, "utf8");
+        completeAllTasksFromPrompt(ctx.prompt);
         return {
           exitCode: 0,
           signal: null,
@@ -310,10 +287,13 @@ test("workflow: resume session with --add-task (prior had tasks) appends reminde
     });
 
     assert.ok(seenPrompt.includes("also do these"), "message present");
-    assert.ok(seenPrompt.includes("2 new tasks have been added"), "reminder mentions count");
-    assert.ok(!seenPrompt.includes("Set the task's"), "full workflow not re-injected");
+    assert.ok(seenPrompt.includes("2 new tasks have been added to run"), "reminder mentions count");
+    assert.ok(
+      !seenPrompt.includes("You are working through a task list"),
+      "full workflow not re-injected",
+    );
     const msgIdx = seenPrompt.indexOf("also do these");
-    const reminderIdx = seenPrompt.indexOf("2 new tasks have been added");
+    const reminderIdx = seenPrompt.indexOf("2 new tasks have been added to run");
     assert.ok(reminderIdx < msgIdx, "reminder comes before message (message last)");
   });
 });
@@ -339,7 +319,6 @@ test("workflow: resume session that introduces tasks for the first time injects 
   // Session 1 — add tasks via --add-task (first time tasks exist)
   await withSharedRuntimeEnv(dir, async () => {
     const target = resolveResumeTarget(first.runId, dir);
-    const firstAssignmentPath = join(first.workspaceDir, "assignment.md");
     let seenPrompt;
     const second = await runIn(dir, "zero", {
       resume: target,
@@ -349,14 +328,7 @@ test("workflow: resume session that introduces tasks for the first time injects 
       },
       backend: mockBackend(async (ctx) => {
         seenPrompt = ctx.prompt;
-        let plan = readFileSync(firstAssignmentPath, "utf8");
-        const ids = [...plan.matchAll(/<!-- task-id:\s*(cli-[A-Za-z0-9]+)\s*-->/g)].map(
-          (m) => m[1],
-        );
-        for (const id of ids) {
-          plan = editStatus(plan, id, "completed");
-        }
-        writeFileSync(firstAssignmentPath, plan, "utf8");
+        completeAllTasksFromPrompt(ctx.prompt);
         return {
           exitCode: 0,
           signal: null,
@@ -371,17 +343,14 @@ test("workflow: resume session that introduces tasks for the first time injects 
 
     assert.equal(second.exitCode, 0);
     assert.ok(seenPrompt.includes("now please actually do this work"), "message present");
-    assert.ok(seenPrompt.includes("Your assignment is at"), "full workflow present");
-    assert.ok(
-      seenPrompt.includes("Set the task's **Status** to `in_progress`"),
-      "workflow steps present",
-    );
+    assert.ok(seenPrompt.includes("You are working through a task list"), "full workflow present");
+    assert.ok(seenPrompt.includes("task set"), "workflow steps present");
     assert.ok(
       !seenPrompt.includes("new tasks have been added since the last session"),
       "no 'new tasks' reminder (not a prior-had-tasks case)",
     );
     const msgIdx = seenPrompt.indexOf("now please actually do this work");
-    const workflowIdx = seenPrompt.indexOf("Your assignment is at");
+    const workflowIdx = seenPrompt.indexOf("You are working through a task list");
     assert.ok(workflowIdx < msgIdx, "workflow comes before message (message last)");
   });
 });

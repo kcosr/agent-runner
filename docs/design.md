@@ -1,2483 +1,433 @@
-# task-runner — Design
+# task-runner Design
+
+This is the canonical design document. It describes the end-state model,
+schema, lifecycle rules, and repo layout that the implementation and the
+other docs agree on.
+
+For a friendlier tour of the same concepts, start with
+[concepts.md](concepts.md).
 
 ## Purpose
 
-`task-runner` is a minimal CLI that invokes an AI agent (starting with Claude)
-with a pre-seeded task list and loops until the agent has accounted for every
-task. If the agent leaves any task marked `pending` at the end of a turn, the
-runner re-invokes it up to a configurable number of retries. If the agent
-reports a task as `blocked`, the runner stops and surfaces the blocker instead
-of spinning.
+`task-runner` is a manifest-canonical CLI for running agents against a
+structured task list. The system is designed around a small number of
+explicit concepts:
 
-Task status is self-reported by the agent via the `**Status:**` field in the
-workspace `assignment.md`; the runner parses that field but does not
-independently verify that the work was actually performed. The value of the
-structure is that the agent cannot silently skip an item — every task must be
-explicitly accounted for, and the per-task Notes block captures evidence for
-after-the-fact audit. For stronger guarantees, encode verification into the
-task body (e.g., "run `npm test` and paste the exit code into Notes").
+- runs are persisted in `run.json`
+- task state is canonical in the manifest
+- workers interact through the task CLI
+- `brief` is the canonical worker handoff
+- caller-facing documentation stays separate from worker-facing
+  instructions
 
-It is a deliberate strip-down of concepts from `agent-runner`. The goal is a
-small, focused tool with a local dual-host control plane: embedded mode for
-single-process CLI use, and a local-only daemon mode for shared run ownership
-and future local clients. No web console, no public remote service, no fully
-customizable hook framework. Just: "invoke an agent with this config, drive it
-through this task list with retries, return the output."
-
-The canonical record of every run is a machine-readable manifest
-(`run.json`) written to the per-run workspace directory. Each run also
-writes an ephemeral scratch file (`assignment.md`) that the agent edits in place
-during the run; after the run ends, `assignment.md` is purely diagnostic — the
-manifest is the source of truth.
+The current manifest schema is version `8`. Older manifest shapes are not
+silently upgraded or dual-read at runtime.
 
 ## Non-goals
 
-- Interactive sessions (TTY passthrough). We do resume sessions across
-  retries, but non-interactively and only within a single run — see
-  [Session resume](#session-resume-across-retries) below.
-- Public remote daemon hosting, auth, or multi-user access control
-- Multi-agent orchestration / handles / lineage
-- Fully customizable hooks (pre-invoke, post-invoke, event masks, mutation
-  policies). `task-runner` has exactly one baked-in behavior: parse the
-  agent's self-reported task statuses after each turn and retry when any are
-  still `pending`.
-- Verification that an agent *actually* performed the work for a task. The
-  runner reads the `**Status:**` string the agent wrote; it never checks the
-  agent's claims against reality. See Purpose above.
-- Tool/MCP management
-- Web UI
+- a remote multi-user control plane
+- workspace-file task editing as a first-class workflow
+- backward-compatibility shims for removed manifest or CLI contracts
+- automatic proof that a worker really performed a task
 
-## High-level flow
+## End-state model
 
-```
-task-runner <run|init|status|task|list|show> [--connect <ws-url>] ...
-task-runner serve [--listen <ws-url>]
-   │
-   ▼
-1. Resolve host mode:
-     a. embedded: CLI calls shared app services directly
-     b. daemon: CLI connects to local JSON-RPC over WebSocket; browser-style
-        clients use HTTP + SSE on the same host, and the same
-        host serves the built web app plus `/app-config.json`
-2. Load + validate agent.md (identity, config, role instructions)
-3. If --assignment: load + validate assignment.md (vars, tasks, message)
-4. Resolve vars (CLI → env → defaults) against the assignment's schema
-5. Check locks (union of agent.lockedFields + assignment.lockedFields)
-6. Create workspace: ${TASK_RUNNER_STATE_DIR}/runs/<repo-name>/<short-id>/
-7. Build in-memory task map from the assignment's `tasks:` (+ CLI --add-task)
-8. Re-render a fresh assignment.md into the workspace; source file is never
-   touched
-9. Compose prompt: agent instructions → assignment instructions → workflow
-   → message (non-empty parts only, joined with blank lines)
-10. Loop:
-     a. Invoke backend (Claude subprocess or Codex app-server JSON-RPC)
-     b. Parse workspace assignment.md back, merge status/notes into in-memory
-     c. Snapshot into manifest + rewrite run.json
-     d. Decide: done? blocked? retry? fail?
-     e. If retry: merge missing sections, build nudge, re-invoke with
-        backend session resume
-11. Rewrite run.json with terminal state
-12. Emit typed run events; embedded CLI renders them directly, daemon mode
-    fans them out to subscribed clients over JSON-RPC notifications or SSE
-13. Exit with status code
-```
+### Agent
 
-## Run dependency model
+An agent definition provides backend/runtime configuration and role
+instructions:
 
-Runs can declare prerequisite runs by storing `dependencyRunIds` on the
-canonical manifest. The model is intentionally hot-cut and explicit:
-dependency edges are first-class persisted ids, not inferred from task
-notes, names, or assignment paths.
+- `backend`
+- `model`
+- `effort`
+- `timeoutSec`
+- `unrestricted`
+- optional `backendSpecific` runtime config
+- `lockedFields`
+- role instructions (markdown body)
 
-- Dependencies are mutable only while the target run is still
-  `initialized`.
-- `run add-dep` rejects missing runs, duplicate edges, self-edges, and
-  any edge that would introduce a cycle in the run graph.
-- `run reset` restores the frozen dependency list from the manifest's
-  reset seed; reset does not re-read source definitions.
-- Resume is blocked until every dependency run reaches canonical
-  `status=success`. Missing dependencies remain unsatisfied and keep
-  the target blocked from execution.
-- Read models expose both the direct dependencies of a run and its
-  reverse dependents, plus a summary count of satisfied vs unsatisfied
-  dependencies for list views.
+Agents are parsed from `agent.md` files in the config tree or direct
+paths; see [agents-and-assignments.md](agents-and-assignments.md).
 
-Dependency mutation is serialized through a shared lock so cycle checks
-and manifest writes see one consistent graph across concurrent CLI or
-daemon callers.
+### Assignment
 
-## Repo layout
+An assignment definition provides reusable work:
 
-```
-task-runner/
-├── package.json           # private workspace/orchestration root
-├── tsconfig.json
-├── tsconfig.base.json
-├── biome.json
-├── .husky/pre-commit
-├── .gitignore
-├── README.md
-├── docs/
-│   └── design.md          # this file
-├── apps/
-│   └── cli/
-│       ├── package.json   # executable package named task-runner
-│       ├── tsconfig.json
-│       ├── dist/          # generated CLI build output
-│       └── src/
-│           ├── cli.ts     # argv parsing, host routing, terminal entry point
-│           ├── cli/
-│           │   ├── parse-args.ts  # argv → ParsedArgs + overridesFromParsedArgs
-│           │   └── render-run.ts  # RunEvent -> stdout/stderr rendering
-│           ├── commands/
-│           │   └── render.ts      # text renderers for command results
-│           └── daemon/
-│               ├── client.ts      # daemon JSON-RPC WebSocket client
-│               ├── config.ts      # --connect / --listen host-selection helpers
-│               ├── http-errors.ts # HTTP status/error-envelope mapping
-│               ├── http-routes.ts # explicit HTTP route map over app services
-│               ├── http-serializers.ts # JSON body/response helpers
-│               ├── protocol.ts    # daemon RPC and event contract
-│               ├── request-parsing.ts # shared transport request validation helpers
-│               ├── server.ts      # local WS RPC + HTTP/SSE daemon host
-│               └── sse.ts         # browser-facing event-stream adapter
-│   └── web/
-│       ├── package.json   # same-origin run dashboard SPA
-│       ├── tsconfig.json
-│       ├── mockups/       # canonical phase-1 visual contract
-│       ├── dist/          # generated web build copied into apps/cli/dist/web for packaging
-│       └── src/
-│           ├── components/ # board, cards, filters, drawer, task list
-│           ├── lib/        # runtime config, HTTP/SSE clients, settings, query keys
-│           ├── routes/     # / and /runs/:runId dashboard routes
-│           └── main.tsx
-├── packages/
-│   └── core/
-│       ├── package.json   # shared internal package
-│       ├── tsconfig.json
-│       ├── dist/          # generated shared build output
-│       └── src/
-│           ├── app/
-│           │   └── service.ts     # shared app/service seam used by embedded CLI + daemon
-│           ├── assignment/        # task model, parser, writer, merge logic
-│           ├── backends/
-│           │   ├── registry.ts    # name → adapter lookup
-│           │   ├── claude.ts      # Claude CLI subprocess adapter
-│           │   ├── cursor.ts      # Cursor CLI subprocess adapter
-│           │   └── codex.ts       # Codex JSON-RPC adapter (stdio + ws transports)
-│           ├── config/
-│           │   ├── loader.ts      # filesystem-backed definition lookup + parsing
-│           │   └── runtime-paths.ts # config/state root helpers
-│           ├── contracts/
-│           │   └── runs.ts        # shared run DTOs
-│           ├── core/
-│           │   ├── backends/
-│           │   │   └── types.ts   # abstract Backend interface + BackendEvent stream
-│           │   ├── commands/
-│           │   │   └── service.ts # typed non-run command/query/mutation services
-│           │   ├── config/
-│           │   │   ├── schema.ts  # zod AgentConfig + AssignmentConfig schemas
-│           │   │   ├── interpolate.ts # {{var}} substitution
-│           │   │   └── loaded.ts  # LoadedAgent/LoadedAssignment + manifest/ad-hoc helpers
-│           │   └── run/
-│           │       ├── run-loop.ts    # seed → invoke → parse → retry, emit RunEvent
-│           │       ├── manifest.ts    # RunManifest types + writer for run.json
-│           │       ├── status.ts      # transport-neutral run summaries + live overlays
-│           │       ├── task-workflow.ts # injected task workflow template + reminder
-│           │       ├── nudge.ts       # retry prompt builder
-│           │       ├── recursion-guard.ts # nested task-runner safety
-│           │       └── workspace-state.ts # task-state persistence + locking
-│           ├── run-command.ts         # run/init bootstrap bridge into the core run loop
-│           ├── task-runner-command.ts # installed task-runner command discovery
-│           └── util/
-│               ├── short-id.ts        # 6-char base32 nonce
-│               └── spawn.ts           # subprocess helper (timeout, SIGINT/SIGKILL)
-├── agents/
-│   ├── example/agent.md           # reference agent — identity only
-│   ├── basic/agent.md
-│   ├── chat/agent.md              # 0-task chat agent
-│   ├── codex-example/agent.md
-│   └── codex-chat/agent.md
-├── assignments/
-│   ├── repo-orientation/assignment.md   # tasks + vars for repo tour
-│   └── repo-diagnostics/assignment.md   # tasks for quick diagnostics
-└── test/
-    ├── assignment-roundtrip.test.mjs
-    ├── config-loader.test.mjs
-    ├── manifest.test.mjs
-    ├── run-loop.test.mjs
-    ├── resume.test.mjs
-    ├── add-task.test.mjs
-    ├── auto-workflow.test.mjs
-    ├── empty-prompt.test.mjs
-    ├── locked-fields.test.mjs
-    ├── nudge.test.mjs
-    ├── claude-effort.test.mjs
-    ├── codex-effort.test.mjs
-    ├── backend-registry.test.mjs
-    └── cli-parse-args.test.mjs
-```
+- `cwd`
+- `vars` schema
+- `tasks`
+- optional default `message`
+- optional `callerInstructions`
+- assignment instructions (markdown body)
+- `maxRetries`, `lockedFields`
 
-The root package owns workspace orchestration only. `apps/cli` owns CLI
-parsing, signal handling, rendering, exit codes, and the daemon
-transport. Read-only commands (`status`, `list`, `show`, `task list/show`)
-and task mutations (`task set`, `task append-notes`, `task add`, `run reset`)
-execute through typed service functions in
-`packages/core/src/core/commands/service.ts`, with text formatting isolated in
-`apps/cli/src/commands/render.ts`.
+Assignments are markdown definitions in the config tree or direct paths
+supplied by the caller. They are inputs to run creation, not a live
+workspace surface.
 
-## Agent and assignment definitions
+### Run
 
-A run is defined by two files:
-
-- **`agent.md`** — stable identity. Backend config, role instructions,
-  locks. No tasks, no vars, no message. Used across many different
-  assignments without change.
-- **`assignment.md`** — the work. Task list, var schema, optional
-  message default, optional work-context instructions, optional locks.
-
-Both are Markdown files with YAML frontmatter, parsed with `gray-matter`
-and validated with `zod`. Types are inferred from the zod schemas so the
-two never drift.
-
-### Agent schema
-
-```yaml
----
-schemaVersion: 1                  # required, must be 1
-name: claude-worker               # required, string
-backend: claude                   # required; "claude" | "codex" | "cursor" | "passive"
-model: claude-sonnet-4-6          # optional; ignored for backend=passive
-effort: medium                    # optional; off|minimal|low|medium|high|xhigh|max
-timeoutSec: 3600                  # optional, default 3600; ignored for backend=passive
-unrestricted: false               # optional, default false
-cwd: .                            # optional, default "."
-lockedFields: [model, effort]     # optional; caller cannot override these
----
-You are a coding assistant working on `{{repo_path}}`.
-Record findings in each task's notes block.
-```
-
-**Agent fields** — identity and capability only:
-
-| Field | Purpose |
-|---|---|
-| `schemaVersion` | Future migrations |
-| `name` | Identity in errors/logs |
-| `backend` | Adapter dispatch (`claude`, `codex`, `cursor`, or `passive`) |
-| `model` | Model identifier; per-backend namespace prefix is stripped. Ignored for `passive` |
-| `effort` | Canonical effort enum; mapped per-adapter. Ignored for `passive` |
-| `timeoutSec` | Per-invocation wall clock. Ignored for `passive` (no invocation) |
-| `unrestricted` | Backend permission bypass |
-| `cwd` | Subprocess / invocation working directory |
-| `lockedFields` | Fields the caller cannot override |
-| _(body)_ | Agent's **role instructions** — renders as part of every fresh-run prompt (and into `pendingPrompt` for `passive` agents so the external driver can re-fetch it) |
-
-Agent frontmatter **does not contain** `vars`, `tasks`, `message`, or
-`maxRetries` — those are assignment-level concepts.
-
-**Reserved name.** `name: ad-hoc` is reserved for CLI-synthesized
-ad-hoc agents (see [Ad-hoc agents](#ad-hoc-agents) below).
-`loadAgentConfig` rejects any on-disk agent file that tries to claim
-this name so there can't be ambiguity between "a run created with
-`--agent ad-hoc`" and "a CLI-synthesized one".
-
-### Ad-hoc agents
-
-An **ad-hoc agent** is an `AgentConfig` synthesized on-the-fly from
-CLI overrides, used when `task-runner run` / `init` is invoked
-without `--agent`. The synthesized config has:
-
-- `name: "ad-hoc"` (hardcoded, reserved)
-- `sourcePath: null` (no file)
-- Empty role instructions body (there is no `--instructions` flag;
-  ad-hoc agents rely on assignment instructions + positional
-  `[message]` to supply context if needed)
-- `lockedFields: []` (nothing is locked — ad-hoc runs have no
-  authored contract to enforce)
-- `backend`, `model`, `effort`, `timeoutSec`, `unrestricted`, `cwd`
-  all come from the corresponding CLI flags (with schema defaults
-  applied for anything unset)
-
-**`--backend` is required** when `--agent` is omitted — the runner
-needs to know which backend to dispatch to, and there's no defensible
-default. Missing `--backend` exits with code 3 and a clear error.
-
-Ad-hoc agents pair naturally with the `passive` backend for pure
-sidecar flows:
-
-```bash
-task-runner init --backend passive --assignment repo-diagnostics \
-  --var repo_path=.
-```
-
-and with codex/claude for scripted orchestration:
-
-```bash
-task-runner run --backend codex --model gpt-5.4 --effort high \
-  --assignment code-review --var repo_path=. --var range=HEAD~3..HEAD
-```
-
-Once the manifest is written, an ad-hoc run is indistinguishable
-from a file-backed run in terms of resume/status/task semantics —
-every field needed is frozen under `manifest.agent.*` and reachable
-via the same code paths as any other manifest. No special-casing
-past the first-write synthesis.
-
-### Assignment schema
-
-```yaml
----
-schemaVersion: 1
-name: repo-orientation
-taskMode: file                       # optional, default file; file | cli
-maxRetries: 3                          # optional, default 3; retry budget per session
-vars:
-  repo_path:
-    type: string                  # string | number | boolean | enum
-    required: true                # default false
-    source: cli                   # cli | env | either
-    envName: REPO_PATH            # only when source includes env
-    default: null                 # optional fallback
-    description: Path to target repo
-    values: [a, b, c]             # only for type: enum
-message: "focus on the auth layer first"   # optional default
-lockedFields: [message]           # optional
-callerInstructions: |             # optional; printed to the CALLER,
-  Run this with --output-format   # not sent to the backend. See
-  json to get a structured        # "Caller instructions" section below.
-  report for run {{run_id}}.
-tasks:
-  - id: read_conventions          # stable semantic ID, [A-Za-z0-9._:-]+, max 128 chars
-    title: Check repo conventions # required, short label
-    body: |                       # optional, multi-line description
-      Read AGENTS.md and CLAUDE.md.
-  - id: inventory_packages
-    title: Inventory packages
----
-This is a repository orientation. Capture findings in each task's notes
-block; no code changes.
-```
-
-**Assignment fields** — the work:
-
-| Field | Purpose |
-|---|---|
-| `taskMode` | Task interaction mode: `file` keeps the assignment-file workflow, `cli` makes task CLI commands the agent-facing surface while `run.json.finalTasks` remains canonical live task state |
-| `schemaVersion` | Future migrations |
-| `name` | Identity in errors/logs |
-| `maxRetries` | Retry budget per session (int, 0–20, default 3). Caps the number of attempts the run loop makes against this assignment before giving up. |
-| `vars` | CLI/env input schema (validated at run time) |
-| `message` | Default follow-up message for the run |
-| `callerInstructions` | Optional documentation text for the **caller** of task-runner. Printed to stderr on fresh `run` and `init` (never on `--resume-run`). Never composed into the prompt sent to the backend. See [Caller instructions](#caller-instructions) below. |
-| `tasks` | Task checklist, stable IDs, max 100 per assignment |
-| `lockedFields` | Fields the caller cannot override (union with agent's) |
-| _(body)_ | Assignment's **work-context instructions** — renders after the agent body |
-
-Assignments **do not contain** `backend`, `model`, `effort`, `cwd`,
-`timeoutSec`, or `unrestricted` — those are agent-level.
-
-#### Caller instructions
-
-`callerInstructions` is an assignment-level field that exists purely
-to let the assignment author leave explanatory text for the *human
-or script invoking task-runner*. It is **never composed into the
-prompt sent to the backend** — neither the claude/codex subprocess
-prompt nor the passive bootstrap (`pendingPrompt`) contains it. The
-model / sidecar driver never sees it.
-
-**Audience split.** task-runner has two distinct audiences to brief:
-
-1. The **callee** (the AI agent doing the work): briefed via the
-   agent body, assignment body, and the workflow template. All of
-   this gets composed into the backend prompt.
-2. The **caller** (the human or script running `task-runner run` /
-   `init`): briefed via `callerInstructions`. Shown to them on
-   stderr when they first meet the assignment.
-
-**Freeze and interpolation.** `callerInstructions` is read from
-`assignmentConfig.callerInstructions` at first write, interpolated
-against the same `injectedVars` as other body fields
-(`{{run_id}}`, `{{repo_path}}`, `{{assignment_path}}`, `{{task_runner_cmd}}`, etc.), and
-frozen into `manifest.callerInstructions` as a top-level `string |
-null` field. Resume never re-reads the source assignment, so the
-frozen manifest value is the authoritative copy.
-
-**Print rule.** Shown on stderr with a visible separator:
-
-```
-── caller instructions ──
-<interpolated text>
-── end caller instructions ──
-```
-
-Printed on `task-runner init` and on fresh `task-runner run`
-(without `--resume-run`). **Not printed** on any `--resume-run`
-invocation, including execute-after-init and true resume — the
-caller already saw the instructions at init or fresh-run time, and
-reprinting on every session adds noise.
-
-**Re-fetching after the fact.** A caller who needs the instructions
-again can always read them via the JSON status inspector:
-
-```bash
-task-runner status <run-id> --output-format json --field callerInstructions
-```
-
-`status` text output deliberately does **not** reprint the field —
-it's a read-only inspector, not a UX surface.
-
-**Absent or empty field.** Assignments that don't carry
-`callerInstructions` (or that set it to an empty string) end up
-with `manifest.callerInstructions: null`, and nothing is printed.
-The field is purely opt-in.
-
-#### Run naming
-
-`run.name` is the persisted display label for the run. It is *not*
-the runner's `runId` (which stays the short slug for filesystem
-use) — it is what CLI detail surfaces, the web dashboard, Claude
-session titles, and Codex thread listings render when a run has a
-name.
-
-- **Fresh run / init**: `task-runner run` and `task-runner init`
-  accept `--name <value>`. The trimmed value must be non-empty.
-  Omitting the flag stores `manifest.name = null`.
-- **Manifest ownership**: the name is persisted as `manifest.name`
-  and mirrored into `manifest.resetSeed.name`. Assignment config no
-  longer owns run naming.
-- **Later rename**: `task-runner run set-name <id|path> <name>` (or
-  `--clear`) updates the manifest immediately. Clearing sets the
-  value back to `null`.
-- **claude**: the persisted run name is passed as `--name <value>`
-  on each invocation. Changing the run name takes effect on the
-  next Claude attempt or resume.
-- **codex**: after `thread/start` (or `thread/resume`) returns the
-  `threadId`, the runner sends `thread/name/set` with `{threadId,
-  name}` when `run.name` is non-null. `run set-name` also attempts a
-  live `thread/name/set` for existing Codex runs. Failures are
-  swallowed after the manifest update; naming is best-effort.
-- **Resume**: `--resume-run` rejects `--name`. If you need to rename
-  an existing run, use `task-runner run set-name`.
-
-### Invocation shape
-
-```bash
-task-runner run --agent <name-or-path> \
-                [--assignment <name-or-path>] \
-                [--var k=v]... \
-                [--add-task <title>]... \
-                [--model ...] [--effort ...] [other overrides] \
-                [message]
-```
-
-Fresh run with a named assignment:
-
-```bash
-task-runner run --agent claude-worker --assignment repo-orientation \
-                --var repo_path=/home/kevin/repo
-```
-
-Fresh run with an orchestrator-generated assignment file:
-
-```bash
-task-runner run --agent claude-worker \
-                --assignment /tmp/work-abc/assignment.md
-```
-
-Chat mode (no assignment, no tasks):
-
-```bash
-task-runner run --agent chat "hello"
-```
-
-### Resolution
-
-`--agent <arg>`:
-1. If `<arg>` contains `/` or starts with `./` → direct path
-2. Else look for `${TASK_RUNNER_CONFIG_DIR}/agents/<arg>/agent.md`
-3. Else → `AgentNotFoundError`
-
-`--assignment <arg>`: same pattern, `assignments/` directory and
-`assignment.md` filename.
-
-### Workspace layout
-
-The runner **copies**, never mutates, the caller's assignment file:
-
-1. Generate short ID, create `${TASK_RUNNER_STATE_DIR}/runs/<repo-name>/<short-id>/`
-2. Re-render a fresh `assignment.md` into the workspace from the parsed
-   task list. This is the runner's ephemeral scratch copy — the agent
-   edits it in place during the run.
-3. Source file (the caller's `--assignment` target) is never touched.
-4. `run.json.assignment` captures both paths so tooling can correlate:
-
-   ```json
-   "assignment": {
-     "name": "repo-orientation",
-     "sourcePath": "/tmp/work-abc/assignment.md",
-     "workspacePath": "/abs/.local/state/task-runner/runs/<repo-name>/k7m2xq/assignment.md"
-   }
-   ```
-
-## Message
-
-The `message` field is a caller-provided ask. Resolution order:
-
-1. **CLI positional argument** — `task-runner run --agent X "focus on auth"`
-2. **`message:` in assignment.md frontmatter** — default if no positional
-3. **Unset** — no message at all
-
-The resolved message goes at the **end** of the composed prompt, after
-the agent instructions, the assignment instructions, and the workflow
-template. See [Automatic task workflow](#automatic-task-workflow) for
-the full composition order.
-
-Resolved message appears at the top of `run.json` as `manifest.message`,
-and on each session record as `sessions[N].message`. The per-attempt
-`AttemptRecord.prompt` field contains the full composed text.
-
-## Locked fields
-
-Both agents and assignments can declare `lockedFields`. At run time the
-two lists are unioned; a field locked on either side rejects overrides.
-
-Valid entries:
-
-```
-cwd  backend  model  effort  instructions  message
-timeoutSec  unrestricted  maxRetries  tasks  taskMode
-```
-
-The zod schemas reject any entry outside this set at load time, so typos
-fail fast.
-
-**Who typically locks what**:
-
-| Field | Typical lock owner |
-|---|---|
-| `cwd`, `backend`, `model`, `effort`, `timeoutSec`, `unrestricted` | agent — agent-owned config, agent decides CLI override rules |
-| `instructions` | agent — refuses assignments with non-empty body |
-| `message`, `tasks`, `maxRetries`, `taskMode` | either — agent-wide prohibition OR per-assignment canonical value |
-
-**Runtime check** — early in `runAgent()`, before any work starts, the
-runner builds the union of `agentConfig.lockedFields` and
-`assignmentConfig?.lockedFields` and checks every override against it.
-On violation, throws `LockedFieldError` with the field name and current
-value. CLI catches it and exits with code 3:
-
-```
-task-runner: cannot override locked field: model
-  this run fixes it to "claude-sonnet-4-6"
-```
-
-**Semantics**:
-
-- Locking only prevents *overrides*. If the caller doesn't pass a value
-  for a locked field, the frontmatter default (from agent or assignment)
-  is used silently.
-- `lockedFields: [tasks]` means `--add-task` is rejected.
-- `lockedFields: [instructions]` on an **agent** means `--assignment`
-  values with non-empty body are rejected.
-- `lockedFields: [message]` on an **assignment** means a CLI positional
-  message is rejected (and the assignment's default message is used).
-- Locks do not cover `vars`: those have their own schema (`required`,
-  `source`) and are outside the lock mechanism.
-
-**What this replaces** — agent-runner had a richer `overridePolicy` with
-`{default: allow|deny, allow: [...], deny: [...]}`. We took the simplest
-shape that solves the real concern. A full allow/deny with a tri-state
-default is easy to add if it becomes needed.
-
-## Adding tasks from the CLI
-
-Callers can append ad-hoc tasks at invocation time using the repeatable
-`--add-task <title>` flag:
-
-```
-task-runner run --agent example \
-  --add-task "Check the logs" \
-  --add-task "Verify the backup"
-```
-
-**Semantics:**
-
-- Each `--add-task` appends one task to the end of the task list.
-- The value is the task **title** only. No body, no structured fields.
-  For structured tasks, edit the agent's `agent.md` frontmatter.
-- IDs are auto-generated as `cli-<6-char-short-id>`, collision-resistant
-  against frontmatter IDs.
-- Added tasks start as `pending`.
-- Title is validated: non-empty, max 200 characters. Violations throw
-  `InvalidAddedTaskError` (exit 3).
-
-**Interaction with fresh vs resume runs:**
-
-- **Fresh run**: added tasks are appended after the assignment's tasks
-  (if an assignment was provided) or start as the entire task list (if
-  no assignment).
-- **Resume run**: after loading `parent.finalTasks` and normalizing
-  non-completed tasks to `pending`, added tasks are appended with fresh
-  IDs. They enter the resumed session as `pending`. Note: `--assignment`
-  is forbidden on resume; only `--add-task` can extend the task list.
-
-**Zero-task runs are valid:**
-
-Chat mode is `--agent X` with no `--assignment`. The runner invokes the
-backend once with just the agent's role instructions and any positional
-message, captures the transcript, and exits `success`. The run loop's
-0-task branch bypasses retries — one attempt, success if the backend
-exited cleanly.
-
-```yaml
----
-# agents/chat/agent.md — minimal chat agent
-schemaVersion: 1
-name: chat
-backend: claude
-unrestricted: true
----
-```
-
-Invocation:
-
-```bash
-task-runner run --agent chat "what is 2 plus 2?"
-```
-
-This pattern lets `task-runner` double as a generic backend wrapper for
-one-shot Q&A, with the full manifest/session/resume machinery still
-available. A resume of a zero-task run can later introduce tasks via
-`--add-task`; see [Automatic task workflow](#automatic-task-workflow)
-for how the workflow instructions get injected on that transition.
-
-**Locked tasks:**
-
-If either the agent or the assignment has `lockedFields: [tasks]`, any
-`--add-task` from the CLI triggers `LockedFieldError` (exit 3). The run
-still works without `--add-task` — locking only prevents extension, not
-normal execution.
-
-## Automatic task workflow
-
-Agent authors do not write the "how to interact with tasks" boilerplate
-in their `agent.md` bodies. The runner injects a fixed workflow block
-automatically whenever the run has tasks:
-
-```
-Your assignment is at `{{assignment_path}}`. Read it first. Work through
-each task in order. For each task:
-
-1. Set the task's **Status** to `in_progress`.
-2. Do the work described in the task body.
-3. Record your findings in the task's **Notes** block.
-4. Set the task's **Status** to `completed`.
-
-Valid statuses are `pending`, `in_progress`, `completed`, and `blocked`.
-If you cannot complete a task, set its status to `blocked` and explain
-why in the Notes block — the runner will stop and surface the blocker
-rather than retrying.
-
-Do not delete or reorder tasks in `{{assignment_path}}`.
-```
-
-There is no opt-out toggle. The block is interpolated with the same
-`{{assignment_path}}` value used elsewhere.
-
-### Injection rules
-
-The exact behavior depends on what kind of session is starting and
-whether tasks existed before. Composition uses a parts array joined with
-blank lines, non-empty parts only:
-
-| Scenario | Prompt composition |
-|---|---|
-| Fresh, `tasks.size > 0` | `<agent instructions>` → `<assignment instructions>` → `<workflow>` → `<message>` |
-| Fresh, `tasks.size === 0` | `<agent instructions>` → `<assignment instructions>` → `<message>` |
-| Resume, prior had tasks, no `--add-task` | `<message>` only, or `<implicit continue prompt>` when message is omitted and incomplete tasks remain |
-| Resume, prior had tasks, `--add-task` used | short "new tasks" reminder → `<message>` |
-| Resume, prior had 0 tasks, this session has tasks | `<workflow>` → `<message>` |
-
-The order goes **broad to specific**: role identity first, work context
-second, mechanical task instructions third, the caller's immediate ask
-last. Matches standard prompt engineering patterns where the specific
-request comes after all the setup.
-
-On resume sessions, neither the agent's role instructions nor the
-assignment's work instructions are re-sent — the backend's cached
-conversation already has them. The workflow is only injected on the
-first session that has tasks (session 0 for runs that start with tasks;
-the later resume session for runs that started with zero and later
-added some).
-
-### New-tasks reminder
-
-When `--add-task` is used on a resume session and the prior sessions
-already had tasks, the backend has the workflow cached but doesn't know
-new tasks were just written to `assignment.md`. The runner prepends a
-short parenthetical reminder before the caller's follow-up message:
-
-```
-(task-runner: 2 new tasks have been added to your assignment since
-the last session — please re-read /abs/path/assignment.md before
-continuing.)
-
-<caller's message>
-```
-
-Just enough to make the agent re-read the file. Not the full workflow.
-If no positional message was provided (`--add-task` alone), the reminder
-becomes the entire follow-up prompt.
-
-### Empty prompt guard
-
-The four prompt parts — agent instructions, assignment instructions,
-auto-workflow, and message — are independently optional. Any
-combination works, except all four empty:
-
-| agent instr | assignment instr | tasks | message | outcome |
-|---|---|---|---|---|
-| ✓ | ✓ | ✓ | ✓ | agent + assignment + workflow + message |
-| ✓ | ✓ | ✓ |   | agent + assignment + workflow |
-| ✓ | ✓ |   | ✓ | agent + assignment + message |
-| ✓ |   |   | ✓ | agent + message |
-| ✓ |   |   |   | agent only |
-|   |   | ✓ |   | workflow only (agent reads assignment.md) |
-|   |   |   | ✓ | message only (pure Q&A) |
-|   |   |   |   | **EmptyPromptError** (exit 3) |
-
-`EmptyPromptError` is thrown before any backend invocation if the
-composed prompt would be empty. Error shape:
-
-```
-task-runner: agent has no prompt content
-  the agent has no instructions, no assignment instructions, no tasks,
-  and no `message` (assignment frontmatter or CLI positional). At
-  least one is required. Add instructions to the agent.md or
-  assignment.md body, pass a positional message, or add tasks via
-  `tasks:` in an assignment or `--add-task`.
-```
-
-The composition itself is built as a parts array: each non-empty part
-is pushed in Option B order (agent instructions, assignment
-instructions, workflow, message) and joined with a single blank line.
-This avoids stray `\n\n` sequences when any part is missing.
-
-## Agent and assignment resolution
-
-Given `--agent <name>`:
-
-1. If `<name>` contains `/` or starts with `./` → treat as a direct path
-2. Else look for `${TASK_RUNNER_CONFIG_DIR}/agents/<name>/agent.md`
-3. Else → `AGENT_NOT_FOUND`
-
-Given `--assignment <name>` (optional):
-
-1. If `<name>` contains `/` or starts with `./` → treat as a direct path
-2. Else look for `${TASK_RUNNER_CONFIG_DIR}/assignments/<name>/assignment.md`
-3. Else → `ASSIGNMENT_NOT_FOUND`
-
-The source assignment file is never mutated. On a fresh run the runner
-copies it into the workspace as `assignment.md`; that copy is the
-ephemeral buffer the agent edits. On resume the existing workspace
-copy is reused and `--assignment` is not accepted.
-
-## Variable interpolation
-
-```ts
-input.replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g, (full, key) => {
-  const value = vars[key];
-  return value === undefined ? full : String(value);
-});
-```
-
-Applied to:
-
-- The agent's instructions body.
-- The assignment's instructions body.
-- Every **task `title` and `body`** from the assignment frontmatter
-  (interpolated once at fresh-run build time, before tasks are
-  rendered to the workspace `assignment.md` and before the first
-  snapshot lands in the manifest). On resume and execute-after-init
-  the assignment isn't reloaded — tasks come from the manifest's
-  `finalTasks` snapshot, which already carries the interpolated text
-  from the original fresh-run build.
-- `cwd` and any other string field the runner renders
-  into user-visible text.
-
-`--add-task` titles are **not** interpolated — they come from the
-CLI directly, so `{{}}` sequences are preserved as-is.
-
-### Runner-injected vars
-
-In addition to user-declared vars from the CLI/env, the runner provides:
-
-- `{{assignment_path}}` — absolute path to `assignment.md` for this run
-- `{{run_id}}` — the short ID for this run
-- `{{cwd}}` — resolved absolute working directory
-- `{{task_runner_cmd}}` — resolved CLI command name for user-facing workflow instructions
-
-## Workspace layout
-
-One directory per logical run, generated by the runner on the first
-invocation and **reused** across any subsequent `--resume-run`
-invocations:
-
-```
-${TASK_RUNNER_STATE_DIR}/runs/<repo-name>/<short-id>/
-├── run.json              # canonical manifest (accumulates across sessions)
-├── assignment.md         # ephemeral scratch file the agent edits in place
-└── attempts/
-    ├── 01.json           # session 0, attempt 1
-    ├── 02.json           # session 0, attempt 2
-    ├── 03.json           # session 0, attempt 3 (e.g., ended blocked)
-    ├── 04.json           # session 1, attempt 1 (first resume)
-    ├── 05.json           # session 1, attempt 2
-    └── ...
-```
-
-`<short-id>` is a 6-character base32 nonce (e.g., `k7m2xq`), generated
-once at the initial invocation. It is the identity of the logical run —
-every resume targets the same slug, same workspace, same manifest.
-Multiple concurrent fresh runs in the same cwd get distinct short IDs
-and do not collide.
-
-Attempt numbers are **monotonic** across the entire run — session 1's
-first attempt follows session 0's last attempt, so filenames never
-collide. Each `AttemptRecord` and `AttemptLog` carries a `sessionIndex`
-field so you can filter which attempts belonged to which session.
-
-The directory is left on disk after each invocation (success or failure)
-for inspection and for future resume invocations. `run.json` is the
-thing you archive, share, or grep; `assignment.md` is a diagnostic artifact
-that shows what the markdown looked like at the end of the latest
-session; `attempts/NN.json` holds the raw, unfiltered backend output for
-each attempt (see [Attempt logs](#attempt-logs) below). The default state
-root lives outside the repo, but if callers point `TASK_RUNNER_STATE_DIR`
-inside a checkout they should ignore that directory in git.
-
-## One run, many sessions
-
-A logical run may span multiple `task-runner run` invocations. Each
-invocation is a "session" within the run:
-
-- Session 0 is the initial invocation (`task-runner run --agent ...`).
-- Each `task-runner run --resume-run <id>` invocation opens a new
-  session (session 1, 2, 3, ...) in the same workspace.
-
-Every session:
-
-- Gets its own `SessionRecord` in `manifest.sessions[]`
-- Has its own `maxAttempts` budget (the retry counter resets per session)
-- Contributes its attempts to the single flat `manifest.attemptRecords[]`
-  array with monotonic attempt numbers
-- Reads the workspace `assignment.md` to pick up mid-run status /
-  notes edits (either from the agent's own writes during the prior
-  session, or from `task set` / `task add` CLI calls made against
-  the run in between sessions)
-- Re-checks any CLI overrides it accepts against the **frozen**
-  `manifest.lockedFields` — the union of agent ∪ assignment locks
-  captured at first write
-- For resume sessions (index > 0), the first attempt's prompt is
-  **only the follow-up message** (plus the new-tasks reminder if
-  applicable). If the caller omits the message and incomplete tasks
-  remain, core synthesizes `Continue working through the remaining
-  task list items.` instead. The role instructions and workflow
-  template aren't re-rendered because the backend has them in the
-  cached conversation.
-
-**Resume under the manifest-canonical rule.** Every resume reads the
-agent definition from the frozen manifest via
-`loadedAgentFromManifest`, not from the original `agent.md`. Once
-the run is created, the source `agent.md` has **no further effect**
-on any session — it can be moved, edited, or deleted and the run is
-unaffected. Likewise for the assignment: task data lives in the
-workspace `assignment.md` and `manifest.finalTasks` exclusively, and
-the assignment's locked-field set is frozen into `manifest.lockedFields`
-at first write (so a post-init change to the assignment file cannot
-bypass or tighten a lock mid-run). The only per-run state that
-evolves between sessions is what's explicitly writable: the workspace
-`assignment.md` (task status + notes), manifest fields managed by
-the run loop (attempts, sessions, finalTasks, status/exitCode/endedAt),
-and whatever CLI overrides each resume legally applies (model,
-effort, timeoutSec, maxRetries, unrestricted — see
-[CLI shape → resume overrides](#--resume-run-idpath) for the full
-matrix).
-
-The top-level `manifest.status`, `manifest.exitCode`, and
-`manifest.endedAt` always reflect the **latest** session. Earlier
-sessions' terminal states are preserved in their individual session
-records.
-
-## Run manifest
-
-`run.json` is written at run start, rewritten after every attempt, and
-rewritten one last time when the run reaches a terminal state. It is a
-single JSON document — never JSONL, never append-only — so you can always
-`cat` or `jq` the latest version.
-
-**Manifest-canonical rule.** The manifest is the **sole source of
-truth for a run after first write**. Every field needed to resume or
-inspect a run — including the agent's role instructions, locked
-fields, and per-attempt timeout budget — is frozen into the manifest
-at first write (fresh run or `init`) and read from the manifest on
-every subsequent operation. Resume never re-reads the source
-`agent.md`. Consequences:
-
-- CLI overrides for model / effort / cwd / timeoutSec / etc. on
-  resume persist across further resumes (the new value is written
-  into the manifest, not transiently applied to the session).
-- Moving, editing, or deleting the original `agent.md` after a run
-  has started has no effect on that run.
-- Ad-hoc agents — runs created with `--agent` omitted and the agent
-  config synthesized from CLI overrides — work naturally: the
-  reserved `name: "ad-hoc"`, `sourcePath: null`, and empty role
-  instructions are written into the manifest at first write and
-  carried forward like any other agent.
-
-**Schema versioning.** `schemaVersion: 6` is the current
-manifest-canonical generation. Manifests written by earlier
-task-runner versions have `schemaVersion: 1` (pre-canonical),
-`schemaVersion: 2` (pre-reset-seed), `schemaVersion: 3`
-(pre-execution-provenance), `schemaVersion: 4` (pre-run-dependencies),
-or `schemaVersion: 5` (pre-attachments) and are **not resumable** by
-this version as-is. `resolveResumeTarget` rejects them with a clear
-error. The only supported attachment-era upgrade path is the explicit
-offline script `scripts/migrate-manifests-v6.mjs`, which adds
-`attachments: []` to v5 manifests; runtime reads do not auto-upgrade.
-
-```ts
-type ManifestStatus =
-  | "initialized"   // `init` prepared the workspace but no session has run
-  | "running"
-  | "success"
-  | "blocked"
-  | "exhausted"
-  | "aborted"       // user pressed Ctrl+C; backend was interrupted cleanly
-  | "error";
-
-interface RunManifest {
-  schemaVersion: 6;
-  runId: string;
-  agent: {
-    name: string;
-    sourcePath: string | null;     // null for ad-hoc agents (no source file)
-    instructions: string;          // frozen role-instructions body (interpolated)
-  };
-  assignment: {                    // null if the run had no --assignment
-    name: string;
-    sourcePath: string;            // source path the assignment was loaded from
-    workspacePath: string;         // copied workspace assignment.md
-  } | null;
-  backend: string;
-  execution: {
-    hostMode: "embedded" | "daemon";
-    controller:
-      | { kind: "embedded" }
-      | { kind: "daemon"; daemonInstanceId: string };
-  };
-  model: string | null;
-  effort: string | null;
-  message: string | null;          // session 0's initial message
-  name: string | null;             // persisted run display name
-  unrestricted: boolean;
-  cwd: string;
-  lockedFields: LockableField[];   // union of agent + assignment locks, frozen
-  timeoutSec: number;              // per-attempt wall clock, frozen
-  assignmentPath: string;          // workspace assignment.md (the I/O buffer)
-  workspaceDir: string;
-  runtimeVars: Record<string, unknown>;  // resolved vars used for this run
-  attachments: RunAttachment[];    // manifest-backed attachment metadata
-  startedAt: string;               // ISO-8601; session 0 start
-  endedAt: string | null;          // latest session's end, null while running
-  archivedAt: string | null;       // orthogonal archive marker for run discovery / resume gating
-  status: ManifestStatus;          // latest session's terminal state
-  exitCode: number | null;         // latest session's exit code
-  attempts: number;                // total across all sessions
-  maxAttempts: number;              // latest session's retry budget
-  tasksCompleted: number;
-  tasksTotal: number;
-  backendSessionId: string | null; // most recently captured claude session id
-  pendingPrompt: string | null;    // frozen by `init`; cleared once session 0 runs
-  callerInstructions: string | null; // assignment documentation for the CALLER (not sent to the backend); see "Caller instructions" under Assignment schema
-  resetSeed: RunResetSeed;         // frozen initialized snapshot for `run reset`
-  finalTasks: Record<string, TaskSnapshot>;
-  sessionCount: number;            // 0 for initialized-only runs, 1 for initial
-                                   // executed run, 2 after first resume, etc.
-  sessions: SessionRecord[];       // one per session, in order
-  attemptRecords: AttemptRecord[]; // flat, monotonic across all sessions
-}
-
-interface SessionRecord {
-  sessionIndex: number;                      // 0 = initial invocation
-  startedAt: string;
-  endedAt: string | null;
-  status: ManifestStatus;
-  exitCode: number | null;
-  message: string | null;                    // the prompt message for this session
-  firstAttempt: number | null;               // attemptRecords[].attempt
-  lastAttempt: number | null;
-  maxAttempts: number;
-  backendSessionIdAtStart: string | null;    // what we passed to --resume
-  backendSessionIdAtEnd: string | null;      // captured by session end
-}
-
-interface TaskSnapshot {
-  id: string;
-  title: string;
-  body: string;
-  status: TaskStatus;
-  notes: string;
-}
-
-interface RunAttachment {
-  id: string;
-  name: string;
-  mimeType: string;
-  size: number;
-  sha256: string;
-  addedAt: string;
-  relativePath: string;            // always resolves inside workspaceDir
-}
-
-interface RunResetSeed {
-  model: string | null;
-  effort: string | null;
-  name: string | null;
-  unrestricted: boolean;
-  timeoutSec: number;
-  maxAttempts: number;
-  taskMode?: "file" | "cli";
-  pendingPrompt: string;
-  finalTasks: Record<string, TaskSnapshot>;
-}
-
-interface AttemptRecord {
-  attempt: number;                  // monotonic across sessions
-  sessionIndex: number;             // which session this attempt belongs to
-  startedAt: string;
-  endedAt: string;
-  prompt: string;                   // full prompt sent to the backend
-  sessionIdAtStart: string | null;
-  sessionIdCaptured: string | null;
-  exitCode: number | null;
-  signal: string | null;
-  timedOut: boolean;
-  transcript: string | null;        // full assistant output for this attempt
-  logPath: string;                  // relative path to attempts/NN.json
-  tasksAfter: Record<string, TaskSnapshot>;
-  invalidStatuses: { taskId: string; rawValue: string }[];
-}
-```
-
-`archivedAt` is orthogonal to lifecycle `status`: it does not change a
-run from `success` to some new archive state. Instead it is a
-discovery/resume gate used by `task-runner list runs`, `run archive`,
-and `run unarchive`. Archived runs are hidden from default run
-listings and rejected by `--resume-run` until unarchived.
-
-## Run attachments
-
-Attachments are first-class manifest state. `run.json` stores
-`attachments: RunAttachment[]`, while the file bytes live under:
+A run is a frozen execution record in:
 
 ```text
-<workspaceDir>/attachments/<attachment.id>/<sanitized-file-name>
+${TASK_RUNNER_STATE_DIR}/runs/<repo-name>/<run-id>/
 ```
 
-Rules:
+The canonical record is `run.json`. Important persisted fields:
 
-- `relativePath` is workspace-relative and must resolve inside
-  `workspaceDir`.
-- Attachment metadata is canonical in the manifest; runtime code never
-  invents attachment rows from stray files on disk.
-- Default limits are 20 attachments per run, 25 MiB per file, and
-  100 MiB total attachment bytes per run.
-- Add operations stream to a temp file, hash while writing, verify
-  size/hash before the final commit, then append the new metadata row
-  under the shared per-run lock.
-- Remove operations delete both the manifest row and the stored file
-  tree under the same lock.
-- Running runs may still accept attachment add/remove operations; the
-  run loop refreshes attachment metadata from disk before manifest
-  writes so a concurrent turn cannot drop those mutations.
+- frozen agent metadata
+- frozen assignment metadata (or `null` for chat-style runs)
+- `repo`, `cwd`
+- `backend`, `model`, `effort`, `backendSpecific`, `timeoutSec`,
+  `unrestricted`, `maxAttempts`
+- `lockedFields` (union of agent and assignment locks)
+- `status`, `exitCode`
+- `startedAt`, `endedAt`, `archivedAt`
+- `finalTasks` (canonical task state)
+- `tasksCompleted`, `tasksTotal`
+- `brief` (composed worker handoff)
+- `callerInstructions`
+- `backendSessionId` (backend-native resume handle; Pi, Codex, Claude,
+  etc. each store their own flavor here)
+- `dependencyRunIds`
+- attachment metadata
+- attempt and session history
+- `runtimeVars` (env-sourced values redacted)
+- `resetSeed` (snapshot used by `run reset`)
+- `execution` (host mode and controller)
 
-Transport/read-model surface:
+If the run started from an assignment file, task-runner also stores
+`assignment-seed.md` as an immutable audit snapshot. Runs created by
+current code also include `run-events.jsonl`; pre-feature workspaces may
+still lack it. The file is append-only diagnostic history for major
+lifecycle/task mutations, survives `run reset`, and is never used to
+reconstruct canonical state.
 
-- CLI exposes `attachment add|list|remove|download`.
-- Daemon transport uses dedicated HTTP endpoints for raw upload and
-  download bytes rather than JSON-RPC payloads.
-- `RunSummary` exposes `attachmentCount`; `RunDetail` exposes
-  `attachments`.
+## Brief and caller instructions
 
-**Transcript, not summary**: `AttemptRecord.transcript` carries the full
-assistant-side text across every turn in the attempt, in order — the same
-thing the user sees streamed in text mode. It is **not** Claude's one-line
-`result.result` summary. If the assistant says useful things in
-intermediate turns and then drops them from the summary, the transcript
-preserves them; the summary does not. Raw, unfiltered backend output
-(including tool-use events, rate-limit events, and everything else claude
-emits) lives in a sidecar file at `logPath` — see
-[Attempt logs](#attempt-logs).
+task-runner maintains two separate instruction surfaces.
 
-**Task snapshots**: `finalTasks` is the authoritative state of every task
-at the end of the run. Each `AttemptRecord.tasksAfter` is a point-in-time
-snapshot after that attempt's parse/merge step. Because `tasksAfter` contains
-the full `TaskSnapshot` (including `title`, `body`, and `notes`), you can
-reconstruct a complete history of the run from the manifest alone — no need
-to look at `assignment.md`.
+### Worker brief
 
-**Reset-to-init seed**: `resetSeed` freezes the initialized-state data that
-`task-runner run reset <id>` needs to restore a run without re-reading the
-current agent or assignment source files. The seed captures the original
-`pendingPrompt`, initialized task snapshot, and reset-relevant top-level
-settings that can drift later (`model`, `effort`, `name`,
-`unrestricted`, `timeoutSec`, `maxAttempts`, `taskMode`). Reset reapplies
-that seed, clears `endedAt`, `exitCode`, `backendSessionId`, `sessions`,
-`attemptRecords`, and `attempts/`, then rewrites `assignment.md` from the
-restored task map.
+`brief` is the worker-facing handoff. It is composed from:
 
-**Session ID**: `backendSessionId` is the claude session ID captured from
-attempt 1 and used for `--resume` on subsequent attempts. The per-attempt
-`sessionIdAtStart` / `sessionIdCaptured` fields let you audit exactly what
-was passed in and what came out on each attempt (useful for diagnosing
-resume failures).
+1. agent role instructions
+2. assignment instructions
+3. task-runner's worker workflow template (when tasks exist)
+4. the run message
 
-**Passive runs.** The manifest shape is identical for `backend:
-passive` runs, but several fields have different lifecycles:
+The workflow template teaches the worker to use:
 
-- **`pendingPrompt`** is written at init time like any other run, but
-  **never cleared**. For claude/codex, `pendingPrompt` is consumed
-  (set to `null`) when execute-after-init flips the run to `running`.
-  For passive, there is no execute step, so the composed bootstrap
-  persists for the lifetime of the run and is queryable via
-  `task-runner status <id> --output-format json --field pendingPrompt`.
-- **`status` / `endedAt` / `exitCode`** are managed by
-  `applyPassiveFinalization`, not the run loop. After every successful
-  `task set` / `task add`, the function re-derives the status from the
-  task map:
-  - any `pending` or `in_progress` task → `initialized` (clears
-    `endedAt` and `exitCode` if they were set)
-  - all terminal, at least one `blocked` → `blocked`, `exitCode: 2`
-  - all `completed` → `success`, `exitCode: 0`
-  
-  `endedAt` is stamped only on an **actual transition** into a
-  terminal state. A notes-only edit on an already-finalized passive
-  run preserves the prior `endedAt` so the audit trail records the
-  real completion time, not the last time someone touched the notes.
-- **`attempts`, `maxAttempts`, `sessionCount`**, and the `sessions`
-  and `attemptRecords` arrays stay at their zero/empty values —
-  passive runs have no backend attempts and no sessions. The
-  `task-runner status` text renderer hides the `Attempts` / `Sessions`
-  lines for passive runs to avoid the noise; the JSON output still
-  carries all zero-valued fields for schema stability.
-- **`backendSessionId`** stays `null` forever — there is no backend
-  session to capture.
+- `task-runner task list <run-id>`
+- `task-runner task show <run-id> <task-id>`
+- `task-runner task set <run-id> <task-id> --status ...`
+- `task-runner task append-notes <run-id> <task-id> --text ...`
+- `task-runner run status <run-id>`
 
-### Attempt logs
+The public read surface is:
 
-Each attempt writes one sidecar file at `attempts/NN.json` (zero-padded
-two-digit index, up to attempt 21 given our `maxRetries ≤ 20` schema
-cap). The file contains the raw, unfiltered backend output for that
-attempt — for Claude, that means the full stream-json event stream — and
-is always captured, regardless of output mode.
-
-```ts
-interface AttemptLog {
-  schemaVersion: 1;
-  runId: string;         // cross-reference so a stray file is self-identifying
-  attempt: number;       // monotonic across sessions
-  sessionIndex: number;  // which session this attempt belongs to
-  startedAt: string;
-  endedAt: string;
-  stdout: string;        // full raw backend stdout
-  stderr: string;        // full raw backend stderr
-}
+```bash
+task-runner run brief <run-id>
 ```
 
-Keeping the raw output out of `run.json` keeps the manifest compact and
-easy to `jq` without wading through verbose JSON. If you need to forensically
-debug a single attempt, open the file at `AttemptRecord.logPath`. The
-`runId` field in the log file cross-references the parent manifest so a
-log file pulled in isolation can still be traced back to its run.
+`run brief` is text-only. It is not projected through `run status --field ...`.
 
-### Safety property
+### Caller instructions
 
-Session IDs written to `run.json` are **write-only, never read back**. The
-runner never loads a manifest from a prior run to recover state, and never
-uses a session ID it didn't extract during the current in-process run. A
-stray `run.json` in an old workspace dir cannot pollute a new run. If
-cross-run resume becomes desirable later, it will be an explicit opt-in
-(`--resume-run <id>`), never implicit.
+`callerInstructions` are assignment docs for the human or script using
+task-runner. They are:
+
+- interpolated at run creation time
+- printed on fresh `run` / `init`
+- available in `run status --output-format json`
+- never sent to the backend
+
+This split keeps operator workflow text out of worker prompts.
 
 ## Task state model
 
-The runner holds an in-memory `Map<taskId, TaskState>` that drives the run.
-`assignment.md` is an I/O buffer between the runner and the agent. `run.json` is
-the canonical record. The relationship:
+Task state is canonical in `manifest.finalTasks` for all runs.
 
-```
-assignment.md `tasks:`  ──►  in-memory Map  ──►  rendered to workspace assignment.md
-                                   │                      │
-                                   │                      ▼
-                                   │                agent edits
-                                   │                      │
-                                   ▼                      │
-                           snapshot into run.json   ◄─────┘
-                                (canonical)        parsed back
-```
+Statuses:
 
-```ts
-type TaskStatus = "pending" | "in_progress" | "completed" | "blocked";
+- `pending`
+- `in_progress`
+- `completed`
+- `blocked`
 
-interface TaskState {
-  id: string;           // from assignment.md, stable
-  title: string;        // from assignment.md, never updated from file
-  body: string;         // from assignment.md, never updated from file
-  status: TaskStatus;   // updated from file each round
-  notes: string;        // updated from file each round
-}
-```
+There is one task workflow. The system does not branch between multiple
+task interaction modes.
 
-## `assignment.md` format
+Mutation rules (non-passive):
 
-Written by the runner, edited by the agent. Ephemeral — the definitive
-state lives in `run.json.finalTasks`.
+- initialized runs allow `task set`, `task append-notes`, and `task add`
+  (unless `tasks` is locked)
+- running runs allow `task set` and `task append-notes`, but not
+  `task add`
+- terminal runs allow notes edits, not status changes
 
-```markdown
-# Assignment
+Passive runs are driven externally through the task CLI. Their effective
+status is derived from the task set (all completed → `success`; any
+blocked with the rest completed or blocked → `blocked`; otherwise
+`initialized`).
 
-The runner tracks your progress through this file. For each task below,
-update the **Status** and **Notes** fields as you work. Do not delete or
-reorder tasks. Valid statuses: `pending`, `in_progress`, `completed`,
-`blocked`.
+## Lifecycle
 
-If a task cannot be completed, set its status to `blocked` and explain why
-in **Notes**. The runner will stop and surface that to the user instead of
-retrying.
+### Fresh run
 
----
+`task-runner run`:
 
-<!-- task-id: read_conventions -->
-## Task 1: Check repo conventions
+1. resolves agent and assignment
+2. resolves cwd: `--cwd` → assignment `cwd` → caller cwd
+3. resolves vars
+4. enforces locked fields
+5. captures `repo` from the resolved cwd and creates the run workspace
+6. resolves backend-specific runtime config (for Codex transport:
+   frontmatter → daemon request override → env → stdio default)
+7. freezes the initial manifest
+8. composes and stores `brief`
+9. invokes the backend, or leaves the run initialized if the backend is
+   `passive`
 
-Read AGENTS.md and CLAUDE.md.
+### Init
 
-**Status:** pending
+`task-runner init` performs the same setup work without invoking the
+backend. This is important for:
 
-**Notes:**
-<!-- notes:start -->
-<!-- notes:end -->
+- passive runs
+- delayed execution
+- planning flows where the caller wants to inspect the run before
+  executing it
 
----
-```
+`init` no longer dumps the worker handoff body to stdout. Operators
+fetch it explicitly with `task-runner run brief <run-id>`.
 
-### Parser rules
+### Execute-after-init
 
-For each `<!-- task-id: X -->` marker found in the file:
+For non-passive initialized runs:
 
-- `X` unknown to the in-memory map → ignore
-- Missing `**Status:**` line → keep in-memory status unchanged
-- Status value ∉ {`pending`, `in_progress`, `completed`, `blocked`} → record
-  invalid-status error for the nudge; keep in-memory status unchanged
-- Valid status → update in-memory `status`
-- `<!-- notes:start -->` / `<!-- notes:end -->` fence missing → leave notes
-  unchanged
-- Fence present → capture the content between markers verbatim
-
-For each task ID in memory **not** found in the file:
-
-- Keep in-memory state untouched (delete-proofing)
-- Flag for restoration on next write
-
-### Merge / write policy
-
-**Initial seed**: write full file — header block + all task sections.
-
-**On retry**:
-
-1. Read current `assignment.md`. If missing/empty/unparseable → fall back to full
-   re-seed from memory.
-2. Find all `<!-- task-id: X -->` markers currently present.
-3. For each task ID in memory **not** present in the file: append a fresh
-   section at the end, using last-known status/notes from memory.
-4. Write merged content back.
-5. Don't touch sections still present, even if their status is invalid —
-   the nudge prompt tells the agent to fix it on the next turn.
-
-Effects:
-
-- Agent's notes, partial edits, and free-form scratch content survive retries
-- Deleted tasks come back (possibly at the bottom); order isn't preserved
-- Invalid statuses are communicated via the nudge, not force-rewritten
-- A nuked file re-seeds completely
-
-## Run loop decision table
-
-After each invocation (and after each attempt's manifest snapshot):
-
-| State of tasks | Action |
-|---|---|
-| all `completed`, no invalid statuses | success → finalize manifest → exit 0 |
-| any `blocked` | stop → surface blocked tasks + notes → exit 2 |
-| any `pending`/`in_progress` OR any invalid status, retries left | reinvoke with nudge |
-| any `pending`/`in_progress` OR any invalid status, retries exhausted | fail → exit 1 |
-
-### Nudge message (not configurable)
-
-Built from the in-memory map + any invalid-status errors captured during parse:
-
-```
-Some tasks in /abs/path/assignment.md are not yet completed. Please continue.
-
-Remaining tasks:
-- read_conventions (status: pending) — Check repo conventions
-- run_tests (status: in_progress) — Run the test suite
-
-Invalid status values:
-- audit_auth had status "done"; use one of the valid statuses instead.
-
-Valid statuses: pending, in_progress, completed, blocked.
-Update each task's Status to `completed` when done. If you cannot complete
-a task, set its status to `blocked` and explain in Notes — the runner will
-stop and report it instead of retrying.
+```bash
+task-runner run --resume-run <run-id>
 ```
 
-## Backend interface
+The stored `manifest.brief` is reused verbatim as the execution handoff.
 
-One small interface. Backends live under `packages/core/src/backends/` and are
-registered in `packages/core/src/backends/registry.ts`. Current backends:
-**claude** (subprocess),
-**cursor** (subprocess),
-**codex** (JSON-RPC over stdio or WebSocket), and **passive** (null-object
-for sidecar-only runs; see [Passive implementation](#passive-implementation)
-below).
+### Resume
 
-```ts
-type EffortLevel =
-  | "off"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh"
-  | "max";
+Resume is manifest-based. Source agent and assignment files are not
+re-read.
 
-type BackendEvent =
-  | { type: "agent_message_delta"; text: string }
-  | { type: "backend_notice"; text: string };
+Important rules:
 
-interface BackendInvokeContext {
-  prompt: string;
-  cwd: string;
-  env: Record<string, string>;
-  model?: string;
-  effort?: EffortLevel;
-  unrestricted?: boolean;
-  timeoutSec: number;
-  resumeSessionId?: string;
-  name?: string;
-  abortSignal?: AbortSignal;
-  emit?: (event: BackendEvent) => void;
-}
+- `--agent`, `--assignment`, `--backend`, `--backend-session-id`,
+  `--cwd`, `--name`, and `--var` are forbidden on resume
+- resume reuses the frozen `manifest.backendSpecific` runtime config; it
+  does not re-resolve Codex transport from current env or new daemon
+  request overrides
+- incomplete-task resumes may omit a follow-up message (an implicit
+  continue message is used)
+- resumes of otherwise-complete runs must supply a follow-up message
+  or `--add-task`
+- archived runs must be unarchived first
+- passive runs are not executed through `run --resume-run`
+- dependencies gate execution: all declared dependency runs must be in
+  `success`
 
-interface BackendInvokeResult {
-  exitCode: number | null;
-  signal: NodeJS.Signals | null;
-  timedOut: boolean;
-  aborted: boolean;
-  sessionId: string | null;        // extracted from output events
-  transcript: string | null;       // full assistant text across all turns
-  rawStdout: string;               // full unfiltered backend stdout
-  rawStderr: string;
-}
+See [resume.md](resume.md).
 
-interface Backend {
-  id: BackendId;
-  invoke(ctx: BackendInvokeContext): Promise<BackendInvokeResult>;
-  supportsBootstrapSessionImport?: boolean;
-}
+### Reset
+
+`run reset <id|path>` restores the initialized-state seed stored in the
+manifest for non-running runs. Reset does not re-read current source
+definitions.
+
+### Delete archived runs
+
+`run delete <id|path>` permanently removes an archived, non-running run
+workspace. Only archived runs are eligible, and the workspace is removed
+rather than moved to trash.
+
+## Codex transport freezing
+
+Codex is the only backend that currently uses persisted
+`backendSpecific`. The run loop resolves exactly one transport shape at
+fresh-run/init time and stores it on both `manifest.backendSpecific` and
+`manifest.resetSeed.backendSpecific`.
+
+- Embedded fresh runs resolve:
+  frontmatter `backendSpecific.codex.transport` →
+  `TASK_RUNNER_CODEX_WS_URL` →
+  `{ type: "stdio" }`
+- Connected / daemon-owned fresh runs resolve:
+  frontmatter `backendSpecific.codex.transport` →
+  daemon request override
+  `overrides.backendSpecific.codex.transport` →
+  daemon process `TASK_RUNNER_CODEX_WS_URL` →
+  `{ type: "stdio" }`
+
+This is an explicit Codex-only contract. There is no generic
+backend-specific env passthrough layer for other backends.
+
+## Public command contract
+
+### Read surfaces
+
+- `task-runner status`
+- `task-runner run status <run-id>`
+- `task-runner run brief <run-id>`
+- `task-runner task list <run-id>`
+- `task-runner task show <run-id> <task-id>`
+- `task-runner attachment list <run-id> [--cwd-scope]`
+
+Rules:
+
+- Top-level `status` reports system/environment status and takes no run id.
+- `run status` and `run brief` are run-id-only.
+- `attachment list --cwd-scope` uses the target run's persisted `cwd` as
+  an exact-match scope key. It does not infer groups from caller cwd,
+  repo buckets, or path prefixes.
+
+### Mutation surfaces
+
+- `task-runner task set|append-notes|add`
+- `task-runner attachment add|remove`
+- `task-runner run reset|archive|unarchive|delete|set-name|`
+  `set-backend-session|clear-backend-session`
+- `task-runner run add-dep|remove-dep|clear-deps`
+
+`run set-backend-session` / `run clear-backend-session` are
+passive-only metadata mutations. They update `manifest.backendSessionId`
+without changing task state, lifecycle status, attempts, archive state,
+or dependency projections.
+
+Dependency mutations are only allowed on `initialized` runs.
+
+### Daemon surface
+
+`task-runner serve` hosts:
+
+- WebSocket JSON-RPC for CLI clients
+- HTTP and SSE for browser clients
+- the bundled web UI
+
+CLI commands can route through the daemon with `--connect` or
+`TASK_RUNNER_CONNECT`.
+
+Live subscriptions are split by responsibility instead of sharing one
+mixed event bus:
+
+- global summary stream: `GET /api/events/run-summaries` (`summary_upsert`
+  and `summary_removed`)
+- per-run detail stream: `GET /api/runs/:runId/events/detail`
+- per-run timeline history query: `GET /api/runs/:runId/timeline`
+- per-run timeline stream: `GET /api/runs/:runId/events/timeline`
+
+The WebSocket subscription contract mirrors that split:
+
+- `events.subscribe { channel: "run_summary" }`
+- `events.subscribe { channel: "run_detail", runId }`
+- `events.subscribe { channel: "run_timeline", runId }`
+
+Notifications:
+
+- `run.summary` carries a `summary_upsert` with a fresh `RunSummary` or a
+  `summary_removed` with a `runId`
+- `run.detail` carries a fresh `RunDetail`
+- `run.timeline` carries one `RunTimelineEnvelope { runId, cursor, event }`
+
+Shared run capabilities remain the canonical UX gate for lifecycle
+actions. `RunCapabilities` includes `canArchive`, `canUnarchive`,
+`canReset`, `canDelete`, `canResume`, `canAbort`, and the `taskMutation`
+sub-booleans. Browser and daemon clients should use those booleans
+directly instead of reproducing lifecycle state checks locally.
+
+Passive backend-session editing is an explicit detail-surface mutation,
+not a summary mutation: the daemon publishes a fresh `RunDetail` after
+set/clear, but does not fan out summary or dependent-run updates because
+`backendSessionId` does not participate in `RunSummary`.
+
+`RunSummary` and `RunDetail` both expose derived `activeTask` data so
+live consumers do not need to re-scan task arrays to render the current
+in-progress task label. Timeline consumers subscribe first, fetch
+`/api/runs/:runId/timeline`, then apply buffered live envelopes where
+`cursor > history.lastCursor`.
+
+## Workspace layout
+
+Typical workspace:
+
+```text
+${TASK_RUNNER_STATE_DIR}/runs/<repo-name>/<run-id>/
+├── run.json
+├── assignment-seed.md
+├── attempts/
+│   └── 01.json
+└── attachments/
+    └── <attachment-id>/
 ```
 
-### Claude implementation
+Notes:
 
-Spawns the `claude` CLI as a subprocess. Binary resolved from
-`process.env.TASK_RUNNER_CLAUDE_BIN` or falls back to `"claude"` on `PATH`.
-
-Command shape:
-
-```
-claude --print --output-format stream-json --verbose \
-       [--model <model>] \
-       [--effort <level>] \
-       [--dangerously-skip-permissions] \
-       [--resume <session-id>] \
-       "<prompt>"
-```
-
-- **Output format**: `stream-json` (always). The adapter parses events
-  line-by-line as they arrive and extracts:
-  1. **Session ID** from `session_id`, `sessionId`, or nested `session.id`
-     on any event (the claude system init event carries it).
-  2. **Live assistant text** — text comes from two sources: the delta
-     stream (`stream_event.content_block_delta` with `delta.type ===
-     "text_delta"`) when partial messages are enabled, and the terminating
-     `assistant` event's `message.content[].text` blocks otherwise. The
-     adapter emits `agent_message_delta` for whichever source appears,
-     guarded so it never double-prints if both are present.
-  3. **Transcript** — accumulated across the whole attempt: streamed text
-     deltas if present, otherwise every `assistant` event's text content
-     concatenated in order. Captures every turn, not just the final one.
-     The `result` event's `result` field is only used as a last-resort
-     fallback if no assistant events were seen at all.
-- **Prompt** is passed as the final positional argument, not stdin.
-- **Env**: `process.env` by default. Future hook point if we add an env
-  policy.
-- **Timeout**: `setTimeout(() => child.kill("SIGINT"), timeoutMs)`, escalate
-  to SIGKILL after 5 seconds.
-- **Completion detection**: process exit. Non-zero exit code counts as a
-  failed attempt (and a failed attempt still produces a manifest entry).
-
-### Cursor implementation
-
-Spawns `cursor-agent` as a subprocess. Binary resolved from
-`process.env.TASK_RUNNER_CURSOR_BIN` or falls back to `"cursor-agent"`
-on `PATH`.
-
-Command shape:
-
-```
-cursor-agent -p --trust --output-format stream-json --stream-partial-output \
-             --workspace <cwd> \
-             [--model <model>] \
-             [--force] \
-             [--resume <session-id>] \
-             "<prompt>"
-```
-
-- **Output format**: `stream-json` with `--stream-partial-output`.
-  The adapter parses NDJSON line-by-line and extracts:
-  1. **Session ID** from the first non-empty `session_id` seen
-     anywhere in the event record.
-  2. **Live assistant text** from top-level `partial_output` records
-     only. Final full `assistant` messages and `tool_call` records are
-     ignored for terminal streaming so task-runner does not double-print.
-  3. **Transcript** from the final `result.result` string only. If the
-     process exits successfully without a valid final result record, the
-     adapter throws a backend/runtime error instead of guessing from
-     partial output.
-- **Model normalization**: strips any provider prefix
-  (`provider/foo` -> `foo`) before forwarding `--model`.
-- **Effort**: task-runner accepts the canonical `EffortLevel` surface,
-  but Cursor v1 ignores it because the public CLI has no effort flag.
-- **Permissions**: `unrestricted: true` maps to `cursor-agent --force`.
-- **Bootstrap import**: unsupported. `supportsBootstrapSessionImport`
-  is `false` because public Cursor resume ids are not safely
-  self-validating. Normal resume of task-runner-created Cursor runs
-  still works via the captured `backendSessionId`.
-
-### Codex implementation
-
-Speaks codex's JSON-RPC 2.0 app-server protocol with a pluggable transport:
-
-- **Stdio transport (default)** — spawns `codex app-server` with the binary
-  from `process.env.TASK_RUNNER_CODEX_BIN` (fallback `"codex"`), wires
-  stdin/stdout as the JSON-RPC channel. One subprocess per `invoke()`.
-- **WebSocket transport** — activated by setting
-  `process.env.TASK_RUNNER_CODEX_WS_URL` to a `ws://` or `wss://` URL.
-  The adapter connects as a client to an externally-started
-  `codex app-server --listen ws://...`, sending/receiving JSON-RPC frames
-  over the WebSocket. Nothing is spawned locally.
-
-The protocol client is transport-agnostic; selecting stdio vs ws is a
-runtime decision based on the env var. Agent.md frontmatter is unchanged
-— it just says `backend: codex`.
-
-#### Protocol flow per invoke
-
-Every `invoke()` call opens a fresh transport and runs one full lifecycle:
-
-1. **`initialize`** — handshake request with `clientInfo` and
-   `capabilities`. Client/server negotiate version and supported
-   features.
-2. **`initialized`** — bare notification (no id, no params,
-   just `{jsonrpc: "2.0", method: "initialized"}`). LSP-style handshake
-   completion. Codex expects this between the `initialize` response and
-   any subsequent request.
-3. **`thread/start`** (fresh) or **`thread/resume`** (with
-   `ctx.resumeSessionId` as `threadId`). Params include `cwd`, normalized
-   `model`, mapped `effort`, and when `unrestricted` is true,
-   `approvalPolicy: "never"`. In stdio mode the spawned CLI process is
-   also launched with
-   `--dangerously-bypass-approvals-and-sandbox` so Codex itself is not
-   sandboxing tool execution. The JSON-RPC `sandbox` field is still never
-   set — the CLI launch flag owns sandbox disablement, and codex's
-   SandboxPolicy enum has inconsistent wire formats across versions.
-4. **`turn/start`** — sends the prompt as
-   `{threadId, input: [{type: "text", text: prompt}]}`. Nothing else —
-   `model`, `effort`, and `approvalPolicy` are set once at the thread
-   level and apply for the thread's lifetime. Awaits both the response
-   and a `turn/completed` notification before returning.
-5. **Notification stream** — while the turn runs, the client receives
-   notifications:
-   - `thread/started` → capture `thread.id` as session ID
-   - `turn/started` → capture `turn.id` (needed for interrupt)
-   - `item/agentMessage/delta` → emit `agent_message_delta` with `params.delta`
-   - `item/completed` with `item.type === "agentMessage"` → capture
-     `item.text` as the definitive transcript for the turn
-   - `turn/completed` → capture `turn.status` (`completed` / `failed` /
-     `interrupted`) and any `turn.error.message`; resolves the waiting
-     promise
-   - Everything else (reasoning deltas, command execution, file change
-     deltas, etc.) is silent
-6. **Transport close** — after the turn completes (or times out), the
-   transport is closed. For stdio, this sends `SIGINT` to the subprocess
-   and escalates to `SIGKILL` after 5s. For ws, this closes the socket.
-
-#### Raw capture for the attempt log
-
-Every inbound and outbound JSON-RPC frame is tee'd into the attempt log
-(`attempts/NN.json`) via `CreateClientOptions.onRawIncoming` and
-`onRawOutgoing`. Incoming frames are prefixed with `>` and outgoing with
-`<` so the log reads as a transcript of the conversation with the
-server. This gives full forensic visibility into any failed or
-unexpected run without needing to enable debug flags.
-
-#### Timeout and cancel
-
-On timeout (`ctx.timeoutSec` elapsed before `turn/completed`), the adapter
-sends a `turn/interrupt` request with `{threadId, turnId}` (both captured
-during the turn — threadId from `thread/start` response, turnId from the
-`turn/started` notification or the `turn/start` response, whichever
-arrives first). Then closes the transport. The invoke returns with
-`timedOut: true`. If the turnId was never captured (e.g., timeout fired
-before the server produced it), the interrupt is skipped and only the
-transport close happens.
-
-#### Session ID
-
-The session ID exposed to the runner is the codex **`threadId`**. On
-cross-invocation resume (`--resume-run`), the runner passes the stored
-`threadId` back as `ctx.resumeSessionId`, and the adapter uses
-`thread/resume` instead of `thread/start`.
-
-#### What the adapter does NOT do
-
-- **`turn/steer`**: not used. Every retry attempt is a new `turn/start`
-  on the same thread. The adapter doesn't keep a long-lived connection
-  across attempts — connection is opened and closed per `invoke()`. If
-  future work wants in-session steering for efficiency, that's an
-  `openSession()` interface extension, not a codex-specific change.
-- **Multi-turn batching**: one invoke = one turn. No history caching.
-- **Interactive mode**: codex supports a TTY mode; task-runner doesn't
-  use it.
-
-#### Effort and model mapping
-
-Task-runner's canonical `EffortLevel` enum is a superset. Per-backend
-mapping tables:
-
-| canonical | claude (`--effort`) | cursor | codex (`effort` param) |
-|---|---|---|---|
-| `off` | *(omit)* | *(omit)* | *(omit)* |
-| `minimal` | `low` | *(ignored)* | `minimal` |
-| `low` | `low` | *(ignored)* | `low` |
-| `medium` | `medium` | *(ignored)* | `medium` |
-| `high` | `high` | *(ignored)* | `high` |
-| `xhigh` | `max` | *(ignored)* | `xhigh` |
-| `max` | `max` | *(ignored)* | `xhigh` |
-
-Each adapter has a small local `mapEffortTo<Backend>()` function with
-this table. The canonical enum is validated at schema load time.
-
-Model names are normalized by stripping any provider-namespace prefix
-(e.g., `openai-codex/gpt-5.4` → `gpt-5.4`, `anthropic/claude-sonnet-4-6`
-→ `claude-sonnet-4-6`). Each adapter does its own normalization.
-
-### Passive implementation
-
-A **null-object** backend used for sidecar-only runs.
-`packages/core/src/backends/passive.ts` exports a `Backend` whose
-`invoke()` throws
-`PassiveBackendNotInvokableError` unconditionally. Defense in depth —
-the CLI rejects `task-runner run` on passive agents before control
-ever reaches `invoke()` (see [`task-runner init`](#task-runner-init)
-and [`--resume-run <id|path>`](#--resume-run-idpath) for the lifecycle
-rules), so `.invoke()` should only fire if something tries to drive a
-passive backend programmatically — in which case the throw surfaces
-the contract violation loudly.
-
-The passive backend has:
-
-- `id: "passive"` for registry resolution.
-- **No `validateSessionId` method** — passive runs have no sessions
-  to validate. The `--backend-session-id` import flow doesn't apply.
-- **No effort / model / timeout handling** — these fields are
-  accepted on the agent schema but ignored at runtime because nothing
-  is ever invoked. Agents declaring `backend: passive` typically omit
-  them. The `unrestricted` flag and `cwd` are still persisted to the
-  manifest for audit / workspace-path purposes.
-
-**Who drives a passive run?** An external agent or script, through
-the task commands:
-
-- `task-runner init` writes the workspace + manifest and (for passive)
-  prints the composed bootstrap to stdout
-- `task-runner task set <run> <task-id> [--status ...] [--notes ...]`
-  updates a single task
-- `task-runner task add <run> --title "..."` appends a new task
-- `task-runner status <run>` reads progress
-
-All four commands go through the same `resolveResumeTarget` →
-manifest-load pipeline as resume. `task set` / `task add` then call
-`applyPassiveFinalization` to re-derive the manifest status from the
-task map after each mutation (see
-[Passive auto-finalization](#--resume-run-idpath)).
-
-**Prompt composition for passive init.** Passive agents use a
-distinct `PASSIVE_TASK_WORKFLOW_TEMPLATE` in place of the default
-`TASK_WORKFLOW_TEMPLATE`. The difference: the passive template
-teaches the external driver to use the CLI (`task-runner task set
-<run> <task-id> --status in_progress`) instead of editing
-`assignment.md` directly. The composed prompt — agent role
-instructions + assignment instructions + passive workflow template +
-message — is stored in `manifest.pendingPrompt` and **never cleared**
-(execute-after-init never fires for passive runs), so the driver can
-re-fetch it at any time with
-`task-runner status <run> --output-format json --field pendingPrompt`.
-
-**Locking recommendation.** A passive agent should declare
-`lockedFields: [backend]` so callers can't subvert it with
-`--backend claude` / `--backend codex` at init time and turn a
-sidecar-only agent into an executable one. The bundled
-`agents/passive-example/` does this and serves as the reference shape.
-The lock check uses the same `checkLockedFields` machinery as every
-other locked field — no passive-specific lock handling exists.
-
-## Session resume
-
-Session resume comes in two flavors that share the same underlying
-mechanism: `claude --resume <session-id>`.
-
-1. **In-run retries** — after each incomplete attempt in a session, the
-   next attempt within that same session reuses the captured session id
-   so claude keeps its context across attempts.
-2. **Cross-invocation resume** — a later `task-runner run --resume-run <id>`
-   invocation picks up an existing run and opens a new session that
-   continues from the prior one.
-
-### Why `--resume` and not `--continue`
-
-`claude --continue` resumes the **most recent** session in the user's
-Claude state directory. That is unsafe — another `task-runner` run, a
-manual `claude` invocation in another terminal, or any other process could
-have created a newer session in between our attempts, and `--continue`
-would silently pick up the wrong one.
-
-`claude --resume <session-id>` takes an **explicit** session ID. We extract
-the ID from the first attempt's output and store it on the in-memory run
-context. Each retry passes the same explicit ID. Never `--continue`, never
-"resume the last session," never implicit.
-
-### Extraction
-
-The Claude adapter scans every parsed event for (in order of preference):
-
-1. Top-level `session_id` or `sessionId` string
-2. Nested `session.id` string
-
-The first match wins. The extracted ID is stored on the in-memory run
-context, recorded into the manifest as `backendSessionId`, and passed back
-into every subsequent `backend.invoke()` call for the remainder of the run.
-
-### Failure handling
-
-There is no fallback path. Both in-run and cross-invocation resume use
-one rule: **if resume fails, the run fails**.
-
-- **In-run retry, claude rejects the session** (non-zero exit with stderr
-  matching "session not found", "no such session", or equivalent): the
-  run terminates with status `error` and exit code 4. No fallback to
-  fresh conversation. If resume ever succeeded once in the same session
-  and then fails later, we do not silently degrade — the caller sees the
-  failure and can decide what to do (usually: start a fresh run).
-- **Cross-invocation resume, manifest has `backendSessionId: null`**:
-  `--resume-run` exits 3 before starting. There is nothing to resume.
-- **Cross-invocation resume, claude rejects the inherited session** on
-  the first attempt of the resumed session: exit 4 with the same error.
-- **Session ID storage for forensics**: always written into `run.json`.
-  The runner reads it back when explicitly resuming via `--resume-run`,
-  and never otherwise. Each fresh `task-runner run` (without
-  `--resume-run`) starts with no session knowledge.
-
-### Upstream printing normalization
-
-Because we invoke claude with `--output-format stream-json`, the raw stdout
-is verbose JSON events. The user never sees that in text mode. The adapter
-classifies each event and decides what to show:
-
-| Event shape | User output |
-|---|---|
-| `stream_event.content_block_delta` with `text_delta` | the `text` field, verbatim, streamed |
-| `assistant` message with content blocks | extracted text (only if no deltas were seen) |
-| `result` (terminating event) | used for the attempt's final-message buffer, not echoed |
-| anything else (session init, tool_use, rate_limit, metadata) | silent |
-
-The raw JSON events are still captured verbatim into
-`attempts/NN.json` for forensics, regardless of output mode.
-
-## CLI shape
-
-```
-task-runner <run|init|status|task|attachment|list|show> [--connect <ws-url>] [options] [args]
-task-runner serve [--listen <ws-url>]
-
-# run / init shared flag set
-task-runner <run|init>
-               [--agent <name-or-path>]
-               [--assignment <name-or-path>]
-               [--resume-run <id|path>]         (run only)
-               [--backend-session-id <id>]      (fresh run only)
-               [--var k=v]...
-               [--add-task <title>]...
-               [--cwd <path>]
-               [--backend <claude|codex|passive>]
-               [--model <model>]
-               [--effort <level>]
-               [--max-retries <n>]
-               [--timeout-sec <n>]
-               [--unrestricted]
-               [--name <name>]
-               [--connect <ws-url>]
-               [--detach]                       (run only; daemon mode only)
-               [--output-format <text|json>]
-               [message]
-
-# serve — start the local daemon host
-task-runner serve
-               [--listen <ws-url>]
-
-# run set-name — update the persisted run display name
-task-runner run set-name <id|path> (<name> | --clear)
-               [--connect <ws-url>]
-               [--output-format <text|json>]
-
-# run reset — restore a run to initialized state
-task-runner run reset <id|path>
-               [--output-format <text|json>]
-
-# run archive / unarchive — toggle the archive marker on a non-running run
-task-runner run archive <id|path>
-               [--output-format <text|json>]
-
-task-runner run unarchive <id|path>
-               [--output-format <text|json>]
-
-# status — read-only inspector
-task-runner status <id|path>
-               [--output-format <text|json>]
-               [--field <name>]...              (json only; repeatable)
-
-# task — mutate an existing run's checklist without invoking a backend
-task-runner task set <id> <task-id>
-               [--status <pending|in_progress|completed|blocked>]
-               [--notes <text>]
-               [--output-format <text|json>]
-
-task-runner task add <id>
-               --title <text>
-               [--output-format <text|json>]
-
-# attachment — mutate run attachments without touching prompt/session state
-task-runner attachment add <id> <source-file>
-               [--name <display-name>]
-               [--mime-type <type>]
-               [--connect <ws-url>]
-               [--output-format <text|json>]
-
-task-runner attachment list <id>
-               [--connect <ws-url>]
-               [--output-format <text|json>]
-
-task-runner attachment download <id> <attachment-id> <output-path>
-               [--connect <ws-url>]
-               [--output-format <text|json>]
-
-task-runner attachment remove <id> <attachment-id>
-               [--connect <ws-url>]
-               [--output-format <text|json>]
-
-# list — enumerate available definitions or runs (read-only)
-task-runner list <agents|assignments|runs>
-               [--output-format <text|json>]
-               [--include-archived]          (runs only)
-
-# show — print details of a specific definition (read-only)
-task-runner show <agent|assignment> <name|path>
-               [--output-format <text|json>]
-```
-
-Subcommands:
-
-- **`run`** — execute an agent. Either a fresh run, a resume of an
-  already-executed run, or an execute-after-init (when `--resume-run`
-  points at a manifest with `status: "initialized"`). **Rejected on
-  passive agents** — use `init` + `task set` / `task add` instead.
-- **`serve`** — start the local daemon host. The daemon owns
-  live run execution, subscriptions, and daemon-mode aborts. CLI clients
-  opt in per-command with `--connect` / `TASK_RUNNER_CONNECT` and keep
-  using the WebSocket JSON-RPC transport; browser-style clients use the
-  daemon's HTTP endpoints plus SSE on the same listener. The
-  same host also serves the built `apps/web` bundle, returns
-  `/app-config.json` for runtime config, and falls back to `index.html`
-  for non-`/api` client routes such as `/runs/:runId`. There is no
-  silent fallback to embedded mode when the daemon is unavailable.
-
-### Browser app hosting
-
-- `apps/web` is the phase-1 run dashboard package. It is built with
-  Vite/React and consumed as static assets, not as a second server.
-- Normal local use is same-origin: `task-runner serve` owns the host,
-  serves `/api/*`, `/api/events/*`, `/app-config.json`, and the
-  built SPA from one origin.
-- The browser app uses shared machine contracts from
-  `@task-runner/core/contracts/*`; there is no web-local DTO layer or
-  CLI bridge.
-- Development uses the Vite dev server in `apps/web` with a proxy for
-  `/api/*`, `/api/events/*`, and `/app-config.json` back to the local
-  daemon host.
-- `apps/web/mockups/run-dashboard.{html,css}` is the canonical visual
-  contract for the phase-1 dashboard. The files are copied from the
-  planning draft artifacts and kept verbatim; React/UI changes should
-  stay aligned with that layout and visual language unless a later task
-  explicitly justifies divergence.
-- **`run reset`** — restore a non-running run to its initialized
-  state. The command resolves the existing workspace, rejects
-  `status: "running"`, reapplies the manifest's frozen `resetSeed`,
-  clears prior attempt/session history, deletes `attempts/`, rewrites
-  `assignment.md`, and leaves the run at `status: "initialized"`.
-  Works for passive and non-passive runs. Text output is
-  `task-runner: reset run <id> to initialized state`; JSON output is
-  `{ "runId": "<id>", "status": "initialized" }`.
-- **`run archive` / `run unarchive`** — toggle `manifest.archivedAt`
-  on an existing non-running run. The archive flag is orthogonal to
-  lifecycle `status`: task state, `endedAt`, and attempt/session
-  history remain untouched. `run archive` stamps the current
-  ISO-8601 time when first archiving; `run unarchive` clears the
-  field. Both commands are idempotent and expose a `changed` boolean
-  in JSON mode.
-- **`init`** — prepare a run without invoking the backend. Resolves
-  agent + assignment, composes the full fresh-run prompt, writes the
-  workspace (`assignment.md` with task fences, `run.json` with
-  `status: "initialized"` and a frozen `pendingPrompt`), then exits.
-  For non-passive agents, the caller picks the run up later with
-  `task-runner run --resume-run <id>`. For passive agents, the caller
-  drives the run through `task set` / `task add`; there is no
-  execute step.
-- **`status`** — read-only inspector. Resolves a run by short id or
-  workspace path, parses the manifest, and prints either a
-  human-readable status block (with task checklist and notes) or the
-  full `RunDetail` JSON contract. When the run's manifest status is `running`,
-  status reads live task state according to `taskMode`: `file` mode
-  overlays the workspace `assignment.md`, while `cli` mode reads
-  canonical task state directly from `run.json.finalTasks`. If
-  `manifest.archivedAt` is non-null, text output also prints the
-  archive timestamp and an unarchive hint.
-- **`task list`** / **`task show`** — read-only task inspectors for an
-  existing run. Both read canonical task state from
-  `run.json.finalTasks` and never invoke a backend.
-- **`task set`** / **`task append-notes`** / **`task add`** — mutate a
-  run's task list without invoking a backend. All three go through the
-  same manifest-resolve and per-run persistence lock, rewrite
-  `assignment.md` from canonical task state, and keep
-  `manifest.finalTasks` in sync. For passive runs they also re-derive
-  status via `applyPassiveFinalization`. While a non-passive run is
-  `running`, `taskMode=file` still rejects CLI mutation; `taskMode=cli`
-  allows `task set` and `task append-notes`, but `task add` remains
-  rejected in v1. `task add` respects the `tasks` locked field via the
-  same `checkLockedFields` path used by `--add-task` on fresh runs.
-- **`list`** — enumerate either available definitions from local
-  config-root locations (`${TASK_RUNNER_CONFIG_DIR}/agents/` and
-  `${TASK_RUNNER_CONFIG_DIR}/assignments/`) or known runs from
-  `${TASK_RUNNER_STATE_DIR}/runs/*/*/run.json`. `list runs` only
-  returns current-generation manifests whose `workspaceDir` and
-  `assignmentPath` still match the containing workspace, hides
-  archived runs by default, and accepts `--include-archived` to show
-  them. Strictly read-only — creates no workspace or manifest
-  artifacts.
-- **`show`** — print details of a named or path-specified definition.
-  Loads and validates the frontmatter (same code path as `--agent` /
-  `--assignment` on a fresh run) and prints config fields plus the
-  instructions body. Supports `--output-format json` for scripted
-  consumption. Strictly read-only.
-
-`--agent` is **optional**:
-
-- **With `--resume-run`**: the agent config is reconstructed from
-  the frozen manifest (`loadedAgentFromManifest`). `agent.md` is
-  never re-read. If `--agent` is also passed on resume, the CLI
-  rejects it with exit code 3 — resume always uses the manifest's
-  frozen agent snapshot.
-- **Fresh run / init with `--agent <name|path>`**: the on-disk
-  `agent.md` is loaded normally and the frozen snapshot is written
-  into the manifest on first write.
-- **Fresh run / init without `--agent`**: the agent is synthesized
-  on-the-fly as an **ad-hoc agent** (`name: "ad-hoc"`,
-  `sourcePath: null`, empty role instructions, empty locks).
-  **`--backend` is required** in this case — missing it exits with
-  code 3. See [Ad-hoc agents](#ad-hoc-agents) for the full
-  synthesis rules.
-
-`--assignment` is optional on fresh runs. When supplied, the named or
-pathed `assignment.md` is loaded, its tasks and `message` seed the run,
-and a copy is placed in the workspace as `assignment.md`. The source
-file is never mutated. When omitted, the run starts with no tasks
-unless `--add-task` is used.
-
-`--assignment` is **forbidden** with `--resume-run`. The existing
-workspace `assignment.md` is authoritative on resume; use `--add-task`
-and/or a follow-up `[message]` to extend the run.
-
-### `task-runner status`
-
-`task-runner status <id|path>` is a read-only inspector for an
-existing run. It resolves the manifest the same way `--resume-run`
-does (current repo-name bucket under `${TASK_RUNNER_STATE_DIR}/runs/<repo-name>/` and then
-`runs/unknown/`, workspace dir, or direct
-`run.json` path) and prints either a human-readable summary or the
-shared `RunDetail` JSON contract. It never invokes a backend, never writes to disk,
-never touches state.
-
-- **Default (text)**: a status block with the run id, agent,
-  assignment, backend/model, name, cwd, workspace path,
-  start/end timestamps, attempt counts, and the per-task checklist
-  with statuses and notes. If the run is archived, the block also
-  shows `Archived: <timestamp>` and an unarchive hint. Trailing hint
-  matches the run's status (resume command for terminal states,
-  execute command for initialized runs).
-- **`--output-format json`**: prints the overlaid `RunDetail` DTO as
-  pretty-printed JSON.
-- **`--field <name>` (repeatable, json mode only)**: projects to
-  the named top-level `RunDetail` fields and prints just those as a
-  JSON object. Unknown field names exit with code 3. Use this for
-  scripts that only care about, say, `status`, `tasksCompleted`, and `tasks`.
-
-#### Live overlay during a `running` attempt
-
-`run.json` is only persisted *between* attempts (see "When the
-manifest is written") so it can be stale during a long-running
-attempt. `status` therefore follows the run's task mode:
-
-- **`taskMode=file`**: read the workspace `assignment.md`, parse it
-  with the same parser the run loop uses, and overlay the live task
-  statuses + notes onto the rendered output.
-- **`taskMode=cli`**: read canonical live task state directly from
-  `run.json.finalTasks`. In this mode `assignment.md` is a rendered
-  audit artifact, not the read path.
-
-- Both paths are **read-only**. The status command never writes to
-  `run.json` or `assignment.md`.
-- Live reads only matter when `manifest.status === "running"`.
-  Terminal manifests (success / blocked / exhausted / aborted /
-  error / initialized) use the persisted snapshot.
-- Both text and JSON output reflect the selected live-read path, so a
-  script reading `--field tasksCompleted` mid-attempt sees current
-  task progress for the active mode.
-- The top-level `manifest.status` is **not** changed by the
-  live read. A run with all tasks marked complete on disk is still
-  `running` until the run loop sees that and writes the terminal
-  state itself. Status flipping is the run loop's job, not the
-  inspector's.
-- Invalid status strings in the workspace file (anything not in the
-  `TaskStatus` enum) fall back to the manifest snapshot value for that
-  task. Better to under-report progress than to surface a corrupt
-  status.
-- Missing or unparseable workspace files fall through silently to the
-  manifest snapshot in `taskMode=file`; the live overlay is best-effort.
-- Text output adds a marker line. In file mode:
-  `(task statuses above are read live from the workspace
-  assignment.md; the current attempt may still be in progress)`
-  In CLI mode:
-  `(task statuses above come from canonical run.json task state;
-  assignment.md is rendered for audit only)`
-
-### `task-runner init`
-
-`init` is `run` that stops short of invoking the backend. It:
-
-1. Resolves agent + assignment and runs the same locked-field checks,
-   var resolution, and prompt composition as a fresh run.
-2. Creates the workspace directory
-   (`${TASK_RUNNER_STATE_DIR}/runs/<repo-name>/<short-id>/`),
-   writes the task-fenced `assignment.md`, and writes `run.json` with
-   `status: "initialized"`, `sessionCount: 0`, empty `sessions` and
-   `attemptRecords`, and the composed prompt frozen in
-   `pendingPrompt`.
-3. Prints the run id and the exact resume command on stderr and exits
-   with code 0.
-
-`init` is forbidden with `--resume-run` (you cannot initialize a run
-that already exists). An `init` run does nothing that a later `run`
-can't also do on the first session — its purpose is to separate the
-*seeding* step from the *execution* step, so an orchestrator can
-prepare work for an agent and hand off a resumable run id without
-committing to running it immediately.
-
-**`taskMode=cli`.** For non-passive agents, prompt composition switches
-from `TASK_WORKFLOW_TEMPLATE` to `CLI_TASK_WORKFLOW_TEMPLATE`. The
-prompt is oriented around the run id, repo path, and task commands
-(`task list`, `task show`, `task set`, `task append-notes`, `status`);
-it does not tell the agent to open `assignment.md` as its work surface.
-While the run is active, `run.json.finalTasks` is the canonical live
-task state and `assignment.md` is rendered from that state for human
-inspection only.
-
-**Passive backend exception.** When the agent declares
-`backend: passive`, `init` still writes the workspace and the
-manifest, but there is no later execution step. The run is
-sidecar-only: callers drive it through `task set` / `task add` and
-read progress through `status`. Specifically:
-
-- The composed `pendingPrompt` uses `PASSIVE_TASK_WORKFLOW_TEMPLATE`
-  (CLI-based workflow) instead of `TASK_WORKFLOW_TEMPLATE` (file-edit
-  workflow). The frozen prompt exists as a re-orientation payload,
-  not as text that will be sent to a model.
-- The bootstrap (composed prompt) is printed to **stdout** for
-  piping; the brief progress lines stay on stderr.
-- The stderr footer hints at `task set`, not `run --resume-run`.
-- Task mutations auto-finalize the manifest (see "Passive
-  auto-finalization" below).
-
-### `--resume-run <id|path>`
-
-`--resume-run` serves two modes depending on the prior manifest's
-`status`:
-
-**Execute-after-init** (`status: "initialized"`, non-passive backend):
-
-- Starts session 0 — the first real session for this run.
-- The stored `pendingPrompt` is sent verbatim as the first attempt's
-  prompt. The agent config is reconstructed from the frozen manifest
-  via `loadedAgentFromManifest` (no re-read of the source `agent.md`
-  under the manifest-canonical design). Role instructions, locked
-  fields, backend, model, effort, timeoutSec, etc. all come from the
-  manifest.
-- **No overrides are accepted.** Init deliberately froze every
-  resolvable field at creation time, so the only valid invocation
-  is `task-runner run --resume-run <id>` — any of `message`,
-  `--add-task`, `--var`, `--agent`, `--assignment`, `--backend`,
-  `--backend-session-id`, `--cwd`, `--model`, `--effort`,
-  `--timeout-sec`, `--max-retries`, `--unrestricted`, or
-  `--name` will exit 3 with a clear error. If you need
-  different values, create a fresh run.
-- `backendSessionId` is *not* required to be non-null (init leaves it
-  `null` by definition).
-- After this call, `pendingPrompt` is cleared and `sessionCount` goes
-  to 1.
-
-**Passive-backend exception**: `task-runner run` (fresh or
-`--resume-run`) is rejected with exit code 3 when the resolved
-backend is `passive`. Execute-after-init does not apply. The stored
-`pendingPrompt` persists for the lifetime of the run as a
-re-orientation payload for the external driver, accessible via
-`task-runner status <id> --output-format json --field pendingPrompt`.
-
-**Archived-run gate**: if `manifest.archivedAt !== null`,
-`task-runner run --resume-run <id|path>` is rejected with exit code 3
-before any backend work starts. The caller must clear the archive
-marker first with `task-runner run unarchive <id|path>`.
-
-**Passive auto-finalization**: for a passive run, every successful
-`task set` / `task add` re-derives `manifest.status` from the task
-map after the mutation:
-
-- any `pending` / `in_progress` → `initialized`
-- all terminal, any `blocked`   → `blocked` (exit code 2)
-- all `completed`               → `success` (exit code 0)
-
-`endedAt` and `exitCode` are stamped only on an actual transition
-into a terminal state (so a notes-only edit on an already-finalized
-run preserves the recorded completion time). Self-healing: reopening
-a completed task on a terminal passive run transitions back to
-`initialized` and clears `endedAt` / `exitCode`.
-
-**Resume of an already-executed run** (`status` is a terminal state
-from a prior session):
-
-- `<id>` is the short slug resolved against the current repo-name bucket
-  under `${TASK_RUNNER_STATE_DIR}/runs/`, then `runs/unknown/`.
-- `<path>` can be a workspace directory or a direct path to a `run.json`
+- `assignment-seed.md` exists only when the run started from an assignment
   file.
-- A positional `[message]` is optional when the run still has
-  incomplete tasks. In that case, an empty resume synthesizes
-  `Continue working through the remaining task list items.` as the
-  entire follow-up prompt. If no incomplete tasks remain, the runner
-  still requires either a positional `[message]` or one or more
-  `--add-task` flags. `--add-task` alone is valid: the "new tasks
-  added" reminder becomes the entire follow-up prompt and tells the
-  agent to re-read the assignment file.
-- The prior manifest's `backendSessionId` must be non-null — else
-  `ResumeError` and exit 3.
-- Non-completed tasks from the prior run are normalized to `pending`
-  (with their notes preserved); completed tasks stay completed.
-- The agent config is reconstructed from the frozen manifest via
-  `loadedAgentFromManifest`. The source `agent.md` is not re-read.
-  `manifest.lockedFields` is consulted directly for override checks
-  (the assignment's lock contribution was frozen into the same
-  union at first write).
-- The first attempt of the new session sends **only the follow-up
-  message** (plus the new-tasks reminder if applicable) as its prompt.
-  If the caller omitted the message and incomplete tasks remained, the
-  implicit continue prompt is sent instead. The instructions are not
-  re-rendered, because the backend already has them in the cached
-  session from the prior run.
+- Attempt logs are append-only audit records.
+- Attachment metadata lives in the manifest; attachment bytes live under
+  `attachments/`.
+- cwd-scoped attachment grouping is derived at read time only; ownership
+  and storage remain per-run, and web `Group` rows stay preview /
+  download-only.
 
-**Resume override matrix.** All override validation for `--resume-run`
-lives in a single `validateResumeOverrides` function in
-`packages/core/src/run-command.ts` that runs right after
-`resolveResumeTarget`. The rules:
+## Prompt and retry behavior
 
-| Flag | Regular resume | Execute-after-init | Reason |
-|---|---|---|---|
-| `--agent` | rejected | rejected | Manifest is the source of truth for agent state; silently ignoring would mislead users who edit `agent.md` and expect it to take effect |
-| `--assignment` | rejected | rejected | Baked into the workspace at first write |
-| `--backend` | rejected | rejected | Backend session ids aren't portable across backends |
-| `--backend-session-id` | rejected | rejected | The resume target already carries one |
-| `--cwd` | rejected | rejected | Backend sessions are cwd-bound — a new cwd would invalidate `manifest.backendSessionId`. Create a fresh run if a different cwd is needed |
-| `--var` | rejected | rejected | Vars are resolved from the assignment once at first write and frozen into `manifest.runtimeVars`; they're not re-resolved on resume, so passing `--var` was previously a silent no-op |
-| `--model` | allowed | rejected | Per-turn setting; safe to change mid-thread. Init freezes it |
-| `--effort` | allowed | rejected | Per-turn setting. Init freezes it |
-| `--timeout-sec` | allowed | rejected | Per-attempt wall clock. Init freezes it |
-| `--max-retries` | allowed | rejected | Per-session retry budget. Init freezes it |
-| `--unrestricted` | allowed | rejected | Per-attempt spawn flag. Init freezes it |
-| `--name` | rejected | rejected | Fresh-run-only persisted run name. Rename existing runs with `task-runner run set-name` |
-| `--add-task` | allowed | rejected | Legitimate mid-run task list extension. Init froze the task list |
-| `[message]` | allowed | rejected | Optional on regular resume when incomplete tasks remain; otherwise provide `[message]` or `--add-task`. Init pre-composed the prompt |
-| `--output-format`, `--field` | allowed | allowed | Read-only; no state effect |
+On first execution, the backend receives the composed `brief`.
 
-The `allowed` overrides on regular resume are still vetted by
-`checkLockedFields` against the frozen `manifest.lockedFields` — so
-a run that locked any of them (e.g. `lockedFields: [model]`) still
-rejects the override with `LockedFieldError`.
+If tasks remain incomplete at the end of an attempt, task-runner composes
+a retry nudge that:
 
-Vars are passed via repeated `--var key=value` flags at fresh-run /
-init time only. Env-sourced vars read from `process.env[envName]`.
-The CLI validates each var against the schema before starting the
-run. On resume, `--var` is rejected (vars are frozen into
-`manifest.runtimeVars` at first write).
+- points the worker back at the task CLI
+- identifies incomplete tasks
+- preserves the run id as the operating handle
 
-## Machine-facing run contracts
+Added tasks on resume trigger a reminder that new work was appended and
+should be reviewed through the task CLI.
 
-`RunManifest` remains the internal canonical record for persisted run state,
-resume semantics, and on-disk inspection. It is **not** the intended long-term
-transport boundary for every machine consumer.
+## Recursion guard
 
-The shared machine-facing run seam lives in `src/contracts/runs.ts`. That module
-defines transport-neutral DTOs and pure mappers for CLI JSON and daemon
-responses, and it remains the seam later web clients should reuse:
+`TASK_RUNNER_MAX_CALL_DEPTH` (default `1`) bounds the depth of nested
+`task-runner` invocations, propagated via `TASK_RUNNER_CALL_DEPTH` on
+each child process. Exceeding the cap raises `RecursionDepthError`.
 
-- `RunSummary`
-- `RunDetail`
-- `RunArchiveResult`
-- `RunTaskMutationCapabilities`
-- `RunCapabilities`
+## Repo layout
 
-Rules for this seam:
+High-signal code paths:
 
-- The contract module maps **from** `RunManifest`; it does not replace it.
-- The mappers are pure and deterministic. No filesystem reads, env reads, or
-  writes.
-- `RunSummary` and `RunDetail` carry both canonical lifecycle `status`
-  and derived `effectiveStatus`, plus persisted `execution`
-  context for the latest stored session.
-- Canonical `status` remains the persisted engine lifecycle used for
-  resume/reset/archive/task-mutation semantics.
-- `effectiveStatus` is a read-model field: non-passive runs mirror
-  `status`; passive runs derive `running` when any task is
-  `in_progress`, `blocked` when every task is terminal and any task is
-  blocked, `success` when every task is completed, and `initialized`
-  otherwise.
-- New machine-facing surfaces should prefer these DTOs over binding directly to
-  raw manifest JSON unless a command explicitly documents manifest-shaped output.
-- `list runs`, archive/unarchive, daemon RPC reads, and
-  `status --output-format json` are wired through the neutral contracts.
-  `status` emits `RunDetail`, and bundled planner/reviewer workflows read
-  `tasks[]` from that DTO instead of projecting raw `finalTasks`.
-- `RunCapabilities` exposes the current CLI-backed action surface:
-  `canAbort`, `abortReason`, `canArchive`, `canUnarchive`,
-  `canResume`, plus nested task mutation booleans in
-  `RunTaskMutationCapabilities`
-  (`canSetStatus`, `canEditNotes`, `canAdd`).
-- Capabilities continue to key off canonical `status`, not
-  `effectiveStatus`.
-- `canAbort` is not inferred from persisted `status === "running"`
-  alone. Embedded projections default to `canAbort=false`; daemon
-  servers overlay `canAbort=true` only for runs they actively own, and
-  otherwise expose `abortReason="not_active_in_daemon"`.
-- Terminal runs expose `canAbort=false` with
-  `abortReason="already_terminal"`.
-- `RunSummary` and `RunDetail` both carry `capabilities`, so list/board
-  consumers do not need N+1 detail reads just to determine which actions
-  are available.
-- Daemon health/read surfaces also expose daemon identity and ownership:
-  health returns `daemonInstanceId`, and daemon-started runs persist
-  `execution.hostMode = "daemon"` plus
-  `execution.controller = { kind: "daemon", daemonInstanceId }`.
-- Daemon-mode live abort still reuses the existing `aborted` lifecycle
-  rather than introducing a second terminal-state family.
+- `apps/cli/src/cli.ts`
+- `apps/cli/src/cli/parse-args.ts`
+- `apps/cli/src/commands/render.ts`
+- `apps/cli/src/daemon/`
+- `packages/core/src/core/run/run-loop.ts`
+- `packages/core/src/core/run/manifest.ts`
+- `packages/core/src/core/run/workspace-state.ts`
+- `packages/core/src/core/commands/service.ts`
+- `packages/core/src/contracts/`
+- `packages/core/src/backends/`
 
-## Output modes
+Bundled agents and assignments live under `agents/` and `assignments/`.
 
-`runAgent` no longer writes terminal text directly. It emits typed
-`RunEvent` records (`run_initialized`, `caller_instructions`,
-`run_started`, `attempt_started`, backend events, retry notices, and
-`run_finished`), and the CLI transport renders those to terminal
-streams. `--output-format` controls how the CLI renders them:
+## Development checks
 
-### text (default)
+Standard verification:
 
-- **Stdout**: the agent's text output, verbatim, piped live during each
-  attempt. Passive `init` also writes the composed bootstrap prompt to
-  stdout so it can be piped elsewhere.
-- **Stderr**: runner chrome rendered from `RunEvent` records — startup
-  banner (agent name, run ID, assignment path, cwd), caller-instructions
-  banner, attempt dividers, retry notifications, final summary.
-
-Final summary on stderr, including per-task results with notes:
-
-```
-── summary ──
-Status: success
-Tasks completed: 3/3
-Attempts: 2/4
-Assignment file: /abs/path/.local/state/task-runner/runs/<repo-name>/k7m2xq/assignment.md
-
-Task results:
-  - read_conventions — Check repo conventions [completed]
-      2-space indent; prefer node:test; PRs squash-merge to main.
-  - audit_auth — Audit authentication flow [completed]
-      OAuth2 via middleware/auth.ts; no session tokens stored at rest.
-  - summary — Summary [completed]
-      Small monorepo for agent tooling; three packages under src/.
-
-Review /abs/path/.local/state/task-runner/runs/<repo-name>/k7m2xq/assignment.md for additional agent output.
+```bash
+npm run build
+npm run lint
+npm test
+npm run check
 ```
 
-The `Task results` section is built from the in-memory task map, so it
-always shows every declared task with its final status and any notes the
-agent wrote. The final review hint is a reminder that the assignment
-file on disk may contain content outside the structured notes fences
-(the agent sometimes edits task bodies or adds scratch paragraphs) — if
-the structured per-task notes above look thin, the file itself is worth
-a glance.
+The root `check` pipeline is:
 
-### json
-
-- **Stdout**: the full `RunManifest` as pretty-printed JSON, written once
-  at the end of the run. This is byte-identical to `run.json` on disk.
-- **Stderr**: silent. All runner chrome and live agent text are suppressed.
-
-This makes `task-runner run --agent X --output-format json > result.json`
-trivially correct — no filtering, no stream interleaving, just the manifest.
-
-The manifest is always written to `run.json` on disk regardless of output
-mode. `--output-format json` only controls whether it's also printed to
-stdout.
-
-## Exit codes
-
-| Code | Meaning |
-|---|---|
-| 0 | All tasks completed successfully |
-| 1 | Retries exhausted with tasks still incomplete |
-| 2 | One or more tasks reported as blocked |
-| 3 | Config / validation error before any run started |
-| 4 | Backend invocation error (binary not found, spawn failed, etc.) |
-| 130 | Run interrupted by the user (Ctrl+C / SIGINT) |
-
-## Importing an existing backend session
-
-`task-runner` can adopt an existing backend session (claude session
-UUID, codex thread id) instead of starting a fresh one. The flag is
-`--backend-session-id <id>` and works on `init` and on a fresh
-`run` for backends that support bootstrap import (forbidden with
-`--resume-run`, since the resume target already carries one).
-
-### Validation
-
-Before any workspace creation, `runAgent` calls
-`backend.validateSessionId(...)` — a cheap, read-only check that
-the id exists *and* was created under the same `cwd` we're about
-to operate under. On failure it throws `InvalidBackendSessionError`
-and the CLI exits with code 3.
-
-- **claude**: filesystem-only. The session is stored at
-  `~/.claude/projects/<encoded-cwd>/<id>.jsonl` where
-  `<encoded-cwd>` is the cwd path with every `/` and `.` replaced
-  by `-`. We `existsSync` that path. No subprocess, no network.
-- **codex**: opens the JSON-RPC transport (stdio or websocket),
-  completes the `initialize` + `initialized` handshake, sends one
-  `thread/read { threadId }` call, closes the transport. The
-  response carries a `Thread` whose `cwd: PathBuf` field is
-  compared to ours; mismatched cwd is a hard error even though
-  codex itself allows it on resume (mismatched cwd almost always
-  means the user is confused, and silent semantic drift is worse
-  than a hard error).
-- **cursor**: explicitly unsupported. The public `cursor-agent --resume`
-  ids are not safely self-validating, so task-runner rejects bootstrap
-  import before workspace creation instead of pretending it can verify
-  them.
-
-Backends that support bootstrap import but don't implement
-`validateSessionId` are treated as "always valid" and the first real
-invocation discovers the truth.
-
-### Wiring
-
-If validation passes, the imported id is persisted to the
-manifest's `backendSessionId` at construction time and used as the
-initial `resumeSessionId` for the very first attempt. From there
-the run flows through the existing resume path — retries, abort,
-status, and resume all work without any new code. An init that
-imported a session writes the id into the initialized manifest;
-the subsequent execute-after-init reads it back from the manifest
-and continues normally.
-
-The cwd lock is the main constraint: if you imported a claude
-session created under `/home/kevin/foo`, you must pass `--cwd
-/home/kevin/foo` (or have it as the agent's default) on the
-import call. Otherwise validation fails with a clear "expected
-file" / "cwd mismatch" message.
-
-## Recursion depth guard
-
-When an orchestrator agent itself shells out to `task-runner run` to
-spawn a child agent, the child can in turn spawn another, and so on.
-Without a guard a misbehaving agent can recurse indefinitely. Two
-env vars travel through every backend child invocation to enforce a
-hard cap:
-
-```
-TASK_RUNNER_CALL_DEPTH       — current depth (0 at the outermost call)
-TASK_RUNNER_MAX_CALL_DEPTH   — hard cap, default 1
-```
-
-On entry, `runAgent` reads the current depth from its own env. If
-`currentDepth >= maxDepth` it throws `RecursionDepthError` *before*
-creating the workspace or invoking any backend, and the CLI exits
-with code 3. When constructing the env for the backend child
-process, the runner overlays an incremented depth so a nested
-`task-runner run` spawned by that backend inherits it.
-
-- **Default cap is 1.** Only one level of nesting is allowed: a
-  user invocation (depth 0) can spawn one agent that itself runs
-  `task-runner run` (depth 1), but that nested invocation refuses
-  to spawn another. Two-level recursion has not yet shown up as a
-  real use case and almost every "agent calls agent calls agent"
-  scenario is a confused agent looping on itself.
-- Override with `TASK_RUNNER_MAX_CALL_DEPTH=N task-runner run ...`
-  if you genuinely need deeper chains.
-- Invalid / non-numeric env values fall back to defaults silently.
-  A malformed env var must never disable the cap.
-- The check is depth-first: it fires at the top of `runAgent`, so a
-  runaway recursive chain dies cheaply with no workspace, no
-  manifest, no attempt log written.
-
-## External codex interrupts
-
-Codex managed mode (especially over websocket) lets multiple clients
-attach to the same thread at once — useful for "watch what the agent
-is doing" or "step in mid-task". When another client cancels the
-turn from the side, codex emits `turn/completed` with
-`status: "interrupted"` to *all* connected clients, including
-task-runner.
-
-Without special handling, task-runner sees the interrupted status,
-counts it as "tasks not all done", and re-invokes the agent on its
-next retry — exactly the wrong thing if the user wanted to take
-over the conversation.
-
-The runner detects this case and treats it like a Ctrl+C:
-`status: "aborted"`, exit 130, no retry, fully resumable. The check
-is `state.turnStatus === "interrupted" && !timedOut && !aborted` —
-both the timeout path and the runner's own SIGINT path also produce
-`status: "interrupted"` (since the runner calls `turn/interrupt`
-itself), but in those cases the corresponding flag is already set.
-An interrupted status with neither flag set means the cancellation
-came from outside.
-
-When detected, the codex backend writes a hint to stderr telling the
-user that the turn was interrupted externally and how to resume.
-The pure detection helper `isExternalInterrupt(turnStatus,
-timedOut, aborted)` is exported from
-`packages/core/src/backends/codex.ts` and unit-tested directly.
-
-## User interrupts (Ctrl+C)
-
-The CLI installs a `SIGINT` handler that:
-
-1. **First Ctrl+C**: aborts the in-flight `backend.invoke()` via an
-   `AbortController`. Each backend handles the abort cleanly:
-   - **claude**: sends `SIGINT` to the child, then `SIGKILL` after a
-     5s grace period.
-   - **codex**: races the abort signal alongside the per-attempt
-     timeout in the turn-wait loop. On abort, sends `turn/interrupt`
-     to the codex app-server, then waits for a bounded confirmation
-     handshake.
-   For codex, the run only lands in `manifest.status = "aborted"` and
-   exits 130 once interruption is confirmed by the remote turn result.
-   If confirmation fails before the turn reaches a confirmed interrupted
-   terminal event (no turn id, RPC error, timeout, or a non-interrupted
-   terminal result), the backend emits a diagnostic that the remote
-   session may still be active. Non-interrupted terminal completion
-   keeps the completed result; other failed confirmations land as
-   `error`.
-2. **Second Ctrl+C**: bypasses the run loop entirely and force-exits
-   the process with 130. Use this if the backend is wedged and
-   doesn't respond to the interrupt within a few seconds.
-
-The `aborted` manifest status is distinct from `error` (backend
-failure, including unconfirmed remote interruption) and `exhausted`
-(out of retries). It signals "user interruption was confirmed." A
-subsequent `task-runner run --resume-run <id>` picks up exactly where
-the aborted run left off.
-
-## Milestones
-
-1. **M1 — Scaffold**: repo layout, package.json, biome/husky, tsconfig,
-   design doc, example agent.md, README.
-2. **M2 — Happy path**: config loader, assignment writer, Claude subprocess
-   backend with stream-json parsing + session ID extraction, minimal run
-   loop, manifest module, single-task happy path. Tests with a mock
-   backend.
-3. **M3 — Retry + merge + resume + manifest**: parser, merge writer, nudge
-   builder, retry loop with `--resume`, `blocked` handling, invalid-status
-   handling, session ID fallback, per-attempt manifest writes with full
-   task snapshots. Full decision table.
-4. **M4 — Output formats + polish**: `--output-format json` with manifest
-   stdout dump, final summary polish, interpolation for all runner-injected
-   vars, example agent.md demonstrating realistic usage, README quickstart.
-
-## Open questions / deferred
-
-- **Tool permissions / allowlists**: Claude CLI supports `--allowedTools`,
-  `--permission-mode`, etc. Not in scope until an agent actually needs it.
-  A middle-ground permission mode (e.g., `acceptEdits` only) would be a
-  nice alternative to the blunt `unrestricted: true` toggle.
-- **Additional backends**: Codex shipped in M5 (JSON-RPC over stdio
-  and websocket transports). Cursor shipped as a subprocess backend
-  using the public headless CLI. Passive shipped as a null-object
-  backend for sidecar-only runs. Future adapters (Gemini, Ollama, etc.)
-  can be added to `packages/core/src/backends/registry.ts` by
-  implementing the `Backend` interface — no other code should need to
-  know about them.
-- **Task ID uniqueness**: enforced via zod `refine` at load time.
-- **Max task count**: enforced at 100 in schema.
-- **Concurrent resume**: two `task-runner run --resume-run <id>`
-  processes targeting the same run would race on `run.json` and
-  `attempts/NN.json`. Unsupported; no lock file. Document as
-  caller's responsibility.
-- **Attempt log compression**: raw stream-json output can be large for
-  long runs. If disk becomes a concern we could gzip the sidecar files or
-  switch to parsed-events JSON (dropping unknown event types). Not a
-  concern at current scale.
+1. `npm run build`
+2. `npm run lint`
+3. `npm run test:node`
+4. `npm run test:web`

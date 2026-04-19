@@ -1,27 +1,42 @@
+import { useNavigate, useRouterState } from "@tanstack/react-router";
 import type { ReactNode } from "react";
+import { useDashboardPreferences } from "../lib/settings.js";
 import { FileIcon, GridIcon, SettingsIcon } from "./icons.js";
 
 export function AppShell({
   topNotices,
   bottomNotices,
   toolbar,
-  board,
-  detail,
+  primary,
+  secondary,
 }: {
   topNotices?: ReactNode;
   bottomNotices?: ReactNode;
   toolbar: ReactNode;
-  board: ReactNode;
-  detail?: ReactNode;
+  primary: ReactNode;
+  secondary?: ReactNode;
 }) {
+  const navigate = useNavigate();
+  const { preferences } = useDashboardPreferences();
+  const pathname = useRouterState({
+    select: (state) => state.location.pathname,
+  });
+  const activeSection = pathname.startsWith("/settings") ? "settings" : "runs";
+
   return (
-    <div className="app">
+    <div className="app" data-focus-indicators={preferences.visibleFocusIndicators ? "on" : "off"}>
       <div className="shell">
         <aside aria-label="Primary navigation" className="sidebar">
           <span aria-label="task-runner" className="brand-mark">
             tr
           </span>
-          <button aria-current="page" className="nav-item active" title="Runs" type="button">
+          <button
+            aria-current={activeSection === "runs" ? "page" : undefined}
+            className={activeSection === "runs" ? "nav-item active" : "nav-item"}
+            onClick={() => void navigate({ to: "/" })}
+            title="Runs"
+            type="button"
+          >
             <GridIcon aria-hidden="true" />
           </button>
           <button
@@ -34,7 +49,13 @@ export function AppShell({
             <FileIcon aria-hidden="true" />
           </button>
           <span className="nav-spacer" />
-          <button className="nav-item" title="Settings" type="button">
+          <button
+            aria-current={activeSection === "settings" ? "page" : undefined}
+            className={activeSection === "settings" ? "nav-item active" : "nav-item"}
+            onClick={() => void navigate({ to: "/settings/general" })}
+            title="Settings"
+            type="button"
+          >
             <SettingsIcon aria-hidden="true" />
           </button>
         </aside>
@@ -42,8 +63,8 @@ export function AppShell({
           {toolbar}
           {topNotices ? <div className="notice-stack">{topNotices}</div> : null}
           <main className="layout">
-            {board}
-            {detail}
+            {primary}
+            {secondary}
           </main>
           {bottomNotices ? (
             <div className="notice-stack notice-stack--bottom">{bottomNotices}</div>

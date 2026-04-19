@@ -1,22 +1,27 @@
-import { mkdirSync, readFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
-import { type MergeResult, mergeIntoFile } from "../../assignment/merge.js";
 import type { TaskState, TaskStatus } from "../../assignment/model.js";
-import { renderAssignment } from "../../assignment/writer.js";
-import { resolveRunWorkspaceDir } from "../../config/runtime-paths.js";
+import {
+  deriveRepoKey,
+  resolveRunWorkspaceDirForRepo,
+  resolveTaskRunnerConfigDir,
+  resolveTaskRunnerStateDir,
+} from "../../config/runtime-paths.js";
 import { resolveTaskRunnerCommand } from "../../task-runner-command.js";
 import { normalizeOptionalRunName } from "../../util/run-name.js";
 import { shortId } from "../../util/short-id.js";
-import { writeTextFileAtomic } from "../../util/write-file-atomic.js";
-import type { Backend, BackendEvent, BackendId, BackendInvokeResult } from "../backends/types.js";
+import { cloneBackendSpecificConfig, isWsOrWssUrl } from "../backends/types.js";
+import type {
+  Backend,
+  BackendEvent,
+  BackendId,
+  BackendInvokeResult,
+  BackendSpecificConfig,
+  CodexTransportConfig,
+} from "../backends/types.js";
 import { interpolate } from "../config/interpolate.js";
 import type { LoadedAgent, LoadedAssignment } from "../config/loaded.js";
-import {
-  type LockableField,
-  type TaskMode,
-  type VarDef,
-  normalizeTaskMode,
-} from "../config/schema.js";
+import type { LockableField, VarDef } from "../config/schema.js";
 import {
   type AttemptRecord,
   type ResolvedResumeTarget,
@@ -43,21 +48,25 @@ import {
   hasIncompleteTasks,
   missingResumeInputMessage,
 } from "./resume-policy.js";
+import {
+  appendRunAbortedEvent,
+  appendRunAttemptRecordedEvent,
+  appendRunBackendSessionUpdatedEvent,
+  appendRunCreatedEvent,
+  appendRunFinishedEvent,
+  appendRunResumeRejectedEvent,
+  appendRunRetryingEvent,
+  appendRunStartedEvent,
+  lifecycleRunEventContext,
+} from "./run-events.js";
 import type { RunCompletionStatus, RunCompletionSummary } from "./status.js";
 
 export { RecursionDepthError } from "./recursion-guard.js";
+import { WORKER_BRIEF_TEMPLATE, buildAddedTasksReminder } from "./task-workflow.js";
 import {
-  CLI_TASK_WORKFLOW_TEMPLATE,
-  PASSIVE_TASK_WORKFLOW_TEMPLATE,
-  TASK_WORKFLOW_TEMPLATE,
-  buildAddedTasksReminder,
-} from "./task-workflow.js";
-import {
-  mergeWorkspaceAssignmentIntoTaskMap,
   refreshManifestAttachments,
   refreshManifestTaskState,
   syncManifestTaskState,
-  taskModeFromManifest,
   withTaskStateLock,
 } from "./workspace-state.js";
 
@@ -66,7 +75,7 @@ export interface RunOverrides {
   backend?: BackendId;
   model?: string;
   effort?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
-  taskMode?: TaskMode;
+  backendSpecific?: BackendSpecificConfig;
   message?: string;
   name?: string;
   timeoutSec?: number;
@@ -121,7 +130,7 @@ export type RunEvent =
       name: string | null;
       cwd: string;
       passive: boolean;
-      pendingPrompt: string;
+      brief: string;
     }
   | {
       type: "caller_instructions";
@@ -140,6 +149,9 @@ export type RunEvent =
   | {
       type: "attempt_started";
       attempt: number;
+      sessionIndex: number;
+      startedAt: string;
+      prompt: string;
     }
   | BackendEvent
   | {
@@ -232,11 +244,10 @@ function checkLockedFields(
   if (locked.size === 0) return;
 
   const overrideEntries: [LockableField, unknown, unknown][] = [
-    ["cwd", overrides?.cwd, agentConfig.cwd],
+    ["cwd", overrides?.cwd, assignmentConfig?.cwd],
     ["backend", overrides?.backend, agentConfig.backend],
     ["model", overrides?.model, agentConfig.model],
     ["effort", overrides?.effort, agentConfig.effort],
-    ["taskMode", overrides?.taskMode, assignmentConfig?.taskMode ?? "file"],
     ["message", overrides?.message, assignmentConfig?.message],
     ["timeoutSec", overrides?.timeoutSec, agentConfig.timeoutSec],
     ["unrestricted", overrides?.unrestricted, agentConfig.unrestricted],
@@ -276,7 +287,6 @@ function checkLockedFieldsFromManifest(
     ["backend", overrides?.backend, manifest.backend],
     ["model", overrides?.model, manifest.model],
     ["effort", overrides?.effort, manifest.effort],
-    ["taskMode", overrides?.taskMode, manifest.taskMode ?? "file"],
     ["message", overrides?.message, manifest.message],
     ["timeoutSec", overrides?.timeoutSec, manifest.timeoutSec],
     ["unrestricted", overrides?.unrestricted, manifest.unrestricted],
@@ -291,6 +301,46 @@ function checkLockedFieldsFromManifest(
       throw new LockedFieldError(key, currentValue);
     }
   }
+}
+
+function buildResumeSessionManifest(
+  base: RunManifest,
+  initialPrompt: string,
+  overrides: {
+    model: string | null;
+    effort: RunManifest["effort"];
+    name: string | null;
+    unrestricted: boolean;
+    cwd: string;
+    timeoutSec: number;
+    assignmentPath: string;
+    workspaceDir: string;
+    maxAttempts: number;
+    execution: RunExecution;
+    sessionCount: number;
+  },
+): RunManifest {
+  return {
+    ...base,
+    model: overrides.model,
+    effort: overrides.effort,
+    brief: initialPrompt,
+    name: overrides.name,
+    unrestricted: overrides.unrestricted,
+    cwd: overrides.cwd,
+    timeoutSec: overrides.timeoutSec,
+    assignmentPath: overrides.assignmentPath,
+    workspaceDir: overrides.workspaceDir,
+    endedAt: null,
+    status: "running",
+    exitCode: null,
+    maxAttempts: overrides.maxAttempts,
+    execution: overrides.execution,
+    finalTasks: {},
+    tasksCompleted: 0,
+    tasksTotal: 0,
+    sessionCount: overrides.sessionCount,
+  };
 }
 
 const MAX_TITLE_LENGTH = 200;
@@ -315,18 +365,22 @@ function normalizeRunName(value: string | undefined): string | null {
   }
 }
 
-function refreshMutableManifestName(manifest: RunManifest): void {
+function refreshMutableManifestMetadata(manifest: RunManifest): void {
   const latest = resolveResumeTarget(manifest.workspaceDir).manifest;
   manifest.name = latest.name;
+  manifest.note = latest.note;
+  manifest.pinned = latest.pinned;
   manifest.resetSeed.name = latest.resetSeed.name;
+  manifest.resetSeed.note = latest.resetSeed.note;
+  manifest.resetSeed.pinned = latest.resetSeed.pinned;
   manifest.attachments = latest.attachments.map((attachment) => ({ ...attachment }));
 }
 
-function tryRefreshMutableManifestName(manifest: RunManifest): void {
+function tryRefreshMutableManifestMetadata(manifest: RunManifest): void {
   try {
-    refreshMutableManifestName(manifest);
+    refreshMutableManifestMetadata(manifest);
   } catch {
-    // Mutable name refresh is best-effort; keep the in-memory name if
+    // Mutable metadata refresh is best-effort; keep the in-memory fields if
     // the manifest cannot be re-read transiently.
   }
 }
@@ -337,7 +391,7 @@ function resolveConfiguredCwd(input: string | undefined, fallback: string): stri
 }
 
 function resolveFreshRunCwd(
-  loaded: LoadedAgent,
+  assignment: LoadedAssignment | undefined,
   overrides: RunOverrides | undefined,
   callerCwd: string | undefined,
 ): string {
@@ -345,10 +399,88 @@ function resolveFreshRunCwd(
   if (overrides?.cwd !== undefined) {
     return resolveConfiguredCwd(overrides.cwd, resolutionBase);
   }
-  if (loaded.cwdSource === "explicit") {
-    return resolveConfiguredCwd(loaded.config.cwd, resolutionBase);
+  if (assignment?.config.cwd !== undefined) {
+    return resolveConfiguredCwd(assignment.config.cwd, resolutionBase);
   }
   return resolutionBase;
+}
+
+function codexTransportFromEnv(): CodexTransportConfig | undefined {
+  const wsUrl = process.env.TASK_RUNNER_CODEX_WS_URL?.trim();
+  if (!wsUrl) {
+    return undefined;
+  }
+  if (!isWsOrWssUrl(wsUrl)) {
+    throw new Error("TASK_RUNNER_CODEX_WS_URL must be an absolute ws:// or wss:// URL");
+  }
+  return {
+    type: "ws",
+    url: wsUrl,
+  };
+}
+
+function resolveFreshBackendSpecific(
+  backendId: BackendId,
+  agentConfig: LoadedAgent["config"],
+  overrides: RunOverrides | undefined,
+  execution: RunExecution,
+): BackendSpecificConfig | undefined {
+  if (backendId !== "codex") {
+    return undefined;
+  }
+
+  const authoredTransport = agentConfig.backendSpecific?.codex?.transport;
+  if (authoredTransport) {
+    return {
+      codex: {
+        transport: { ...authoredTransport },
+      },
+    };
+  }
+
+  const overrideTransport =
+    execution.hostMode === "daemon" ? overrides?.backendSpecific?.codex?.transport : undefined;
+  if (overrideTransport) {
+    return {
+      codex: {
+        transport: { ...overrideTransport },
+      },
+    };
+  }
+
+  const envTransport = codexTransportFromEnv();
+  if (envTransport) {
+    return {
+      codex: {
+        transport: envTransport,
+      },
+    };
+  }
+
+  return {
+    codex: {
+      transport: {
+        type: "stdio",
+      },
+    },
+  };
+}
+
+function resolveManifestBackendSpecific(manifest: RunManifest): BackendSpecificConfig | undefined {
+  if (manifest.backend !== "codex") {
+    return cloneBackendSpecificConfig(manifest.backendSpecific);
+  }
+  const transport = manifest.backendSpecific?.codex?.transport;
+  if (!transport) {
+    throw new ResumeError(
+      `cannot resume run ${manifest.runId} — frozen manifest has no resolved codex transport`,
+    );
+  }
+  return {
+    codex: {
+      transport: { ...transport },
+    },
+  };
 }
 
 function emitCallerInstructions(
@@ -497,8 +629,35 @@ function countBy(tasks: Map<string, TaskState>, predicate: (t: TaskState) => boo
   return n;
 }
 
+function formatUnhandledAttemptError(error: unknown): string {
+  if (error instanceof Error) {
+    if (typeof error.stack === "string" && error.stack.length > 0) {
+      return error.stack;
+    }
+    return error.message;
+  }
+  return String(error);
+}
+
 function normalizeResumeStatus(status: TaskStatus): TaskStatus {
   return status === "completed" ? "completed" : "pending";
+}
+
+function normalizeTerminalTaskStatus(status: TaskStatus): TaskStatus {
+  return status === "in_progress" ? "pending" : status;
+}
+
+function normalizeInactiveNonPassiveTasks(
+  backendId: string,
+  tasks: Map<string, TaskState>,
+): Map<string, TaskState> {
+  if (backendId === "passive") {
+    return tasks;
+  }
+  for (const task of tasks.values()) {
+    task.status = normalizeTerminalTaskStatus(task.status);
+  }
+  return tasks;
 }
 
 function rebuildTasksFromAssignmentAndSnapshot(
@@ -676,17 +835,21 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     checkLockedFieldsFromManifest(resume.manifest, overrides, addedTitles);
   }
 
-  const cwd = resume ? resume.manifest.cwd : resolveFreshRunCwd(loaded, overrides, opts.callerCwd);
+  const cwd = resume
+    ? resume.manifest.cwd
+    : resolveFreshRunCwd(loadedAssignment, overrides, opts.callerCwd);
+  const repo = resume ? resume.manifest.repo : deriveRepoKey(cwd);
+  const effectiveBackendId = backend.id;
   // When --backend overrides the agent's backend, the agent's `model`
   // is also dropped (since model strings are backend-specific). Pass
   // --model alongside --backend to set one for the new backend.
   const backendOverridden = overrides?.backend !== undefined;
   const model = overrides?.model ?? (backendOverridden ? undefined : agentConfig.model);
   const effort = overrides?.effort ?? agentConfig.effort;
+  const backendSpecific = resume
+    ? resolveManifestBackendSpecific(resume.manifest)
+    : resolveFreshBackendSpecific(effectiveBackendId, agentConfig, overrides, execution);
   const message = overrides?.message ?? assignmentConfig?.message ?? null;
-  const taskMode = normalizeTaskMode(
-    overrides?.taskMode ?? assignmentConfig?.taskMode ?? resume?.manifest.taskMode ?? null,
-  );
   const timeoutSec = overrides?.timeoutSec ?? agentConfig.timeoutSec;
   const unrestricted = overrides?.unrestricted ?? agentConfig.unrestricted;
   // maxRetries lives on the assignment. In chat mode (no assignment
@@ -729,6 +892,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       sessionId: opts.bootstrapBackendSessionId,
       cwd,
       env: process.env as Record<string, string>,
+      backendSpecific: cloneBackendSpecificConfig(backendSpecific),
     });
     if (!result.valid) {
       throw new InvalidBackendSessionError(opts.bootstrapBackendSessionId, result.reason);
@@ -753,9 +917,10 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const reusingWorkspace = (isResume && resume) || (priorInitialized && resume);
   const runId = reusingWorkspace && resume ? resume.manifest.runId : shortId();
   const workspaceDir =
-    reusingWorkspace && resume ? resume.workspaceDir : resolveRunWorkspaceDir(cwd, runId);
+    reusingWorkspace && resume ? resume.workspaceDir : resolveRunWorkspaceDirForRepo(repo, runId);
   mkdirSync(workspaceDir, { recursive: true });
   const assignmentPath = workspaceAssignmentPath(workspaceDir);
+  const assignmentName = loadedAssignment?.config.name ?? resume?.manifest.assignment?.name;
 
   // `injectedVars` has to be built *before* the task-map rebuild so
   // that fresh-run task titles and bodies get `{{var}}` references
@@ -766,7 +931,10 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     assignment_path: assignmentPath,
     run_id: runId,
     cwd,
+    config_dir: resolveTaskRunnerConfigDir(),
+    state_dir: resolveTaskRunnerStateDir(),
     task_runner_cmd: resolveTaskRunnerCommand(),
+    ...(assignmentName !== undefined ? { assignment_name: assignmentName } : {}),
   };
 
   const priorHadTasks = Boolean(
@@ -817,7 +985,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   let name =
     overrideName ?? ((isResume || priorInitialized) && resume ? resume.manifest.name : null);
 
-  // Prompt composition (Option B: broad → specific → mechanics → ask).
+  // Worker handoff composition (Option B: broad → specific → mechanics → ask).
   //
   // Fresh run parts (non-empty only, joined with `\n\n`):
   //   1. agent instructions (role)
@@ -829,26 +997,24 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   //   1. workflow (only if firstTimeTasksAppear) OR new-tasks reminder
   //   2. message, or an implicit continue prompt when unfinished tasks remain
   //
-  // Execute-after-init: reuse the stored pendingPrompt verbatim.
+  // Execute-after-init: reuse the stored brief verbatim.
   //
   // Both message-last. Fresh runs error if parts is empty.
   let initialPrompt: string;
   if (priorInitialized && resume) {
-    const stored = resume.manifest.pendingPrompt ?? "";
+    const stored = resume.manifest.brief;
     if (stored.length === 0) {
       throw new ResumeError(
-        `cannot resume initialized run ${resume.manifest.runId} — manifest has no pendingPrompt`,
+        `cannot resume initialized run ${resume.manifest.runId} — manifest has no brief`,
       );
     }
     initialPrompt = stored;
   } else if (isResume) {
     const parts: string[] = [];
     if (firstTimeTasksAppear) {
-      const workflowTemplate =
-        taskMode === "cli" ? CLI_TASK_WORKFLOW_TEMPLATE : TASK_WORKFLOW_TEMPLATE;
-      parts.push(interpolate(workflowTemplate, injectedVars));
+      parts.push(interpolate(WORKER_BRIEF_TEMPLATE, injectedVars));
     } else if (resumeAddedNewTasks) {
-      parts.push(buildAddedTasksReminder(addedTitles.length, assignmentPath, { runId, taskMode }));
+      parts.push(buildAddedTasksReminder(addedTitles.length, runId));
     }
     if (trimmedMessage.length > 0) {
       parts.push(trimmedMessage);
@@ -857,19 +1023,6 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     }
     initialPrompt = parts.join("\n\n");
   } else {
-    // Passive agents compose the same prompt structure as regular
-    // agents but with the CLI-based workflow template (drive the
-    // checklist via `task-runner task set` instead of editing the
-    // assignment file). The composed prompt is stored in
-    // `pendingPrompt` for the sidecar driver to read via
-    // `status --field pendingPrompt`; it is never sent to a backend
-    // because `task-runner run` is rejected on passive agents.
-    const workflowTemplate =
-      agentConfig.backend === "passive"
-        ? PASSIVE_TASK_WORKFLOW_TEMPLATE
-        : taskMode === "cli"
-          ? CLI_TASK_WORKFLOW_TEMPLATE
-          : TASK_WORKFLOW_TEMPLATE;
     const parts: string[] = [];
     if (agentInstructions.length > 0) {
       parts.push(interpolate(agentInstructions, injectedVars));
@@ -878,7 +1031,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       parts.push(interpolate(assignmentInstructions, injectedVars));
     }
     if (hasTasks) {
-      parts.push(interpolate(workflowTemplate, injectedVars));
+      parts.push(interpolate(WORKER_BRIEF_TEMPLATE, injectedVars));
     }
     if (trimmedMessage.length > 0) {
       parts.push(trimmedMessage);
@@ -897,48 +1050,31 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
   let manifest: RunManifest;
   if (isResume && resume) {
-    // On resume, the new manifest spreads the prior one and then
-    // overrides only the fields that can legitimately change across
-    // sessions. `agent.instructions`, `lockedFields`, and
-    // `agent.sourcePath` are frozen at first write and preserved by
-    // the spread. `timeoutSec` is persisted so a `--timeout-sec`
-    // override on resume stays in effect for the next resume too,
-    // matching the model/effort behavior.
-    manifest = {
-      ...resume.manifest,
+    manifest = buildResumeSessionManifest(resume.manifest, initialPrompt, {
       model: model ?? null,
       effort: effort ?? null,
-      taskMode,
       name,
       unrestricted,
       cwd,
       timeoutSec,
       assignmentPath,
       workspaceDir,
-      endedAt: null,
-      status: "running",
-      exitCode: null,
       maxAttempts,
       execution,
-      finalTasks: {},
-      tasksCompleted: 0,
-      tasksTotal: 0,
       sessionCount: priorSessionCount + 1,
-    };
+    });
   } else if (priorInitialized && resume) {
     // Execute-after-init: the manifest was persisted by `init`. Flip it
-    // to "running", promote sessionCount to 1, and clear pendingPrompt
-    // (it has now been consumed by this first real session).
+    // to "running", promote sessionCount to 1, and preserve the brief.
     manifest = {
       ...resume.manifest,
-      taskMode,
+      brief: initialPrompt,
       name,
       endedAt: null,
       status: "running",
       exitCode: null,
       sessionCount: 1,
       execution,
-      pendingPrompt: null,
     };
   } else {
     // Freeze the union of agent + assignment lockedFields into the
@@ -964,8 +1100,9 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     const frozenCallerInstructions =
       rawCallerInstructions.length > 0 ? interpolate(rawCallerInstructions, injectedVars) : null;
     manifest = {
-      schemaVersion: 6,
+      schemaVersion: 8,
       runId,
+      repo,
       agent: {
         name: agentConfig.name,
         sourcePath: loaded.sourcePath,
@@ -983,18 +1120,20 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
             workspacePath: assignmentPath,
           }
         : null,
-      backend: overrides?.backend ?? agentConfig.backend,
+      backend: effectiveBackendId,
       model: model ?? null,
       effort: effort ?? null,
+      backendSpecific: cloneBackendSpecificConfig(backendSpecific),
       message,
       name,
+      note: null,
+      pinned: false,
       unrestricted,
       cwd,
       lockedFields: frozenLockedFields,
       timeoutSec,
       assignmentPath,
       workspaceDir,
-      taskMode,
       startedAt: now,
       endedAt: null,
       archivedAt: null,
@@ -1012,18 +1151,20 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       backendSessionId: opts.bootstrapBackendSessionId ?? null,
       runtimeVars: persistedRuntimeVars,
       execution,
-      pendingPrompt: isInitialize ? initialPrompt : null,
+      brief: initialPrompt,
       callerInstructions: frozenCallerInstructions,
       resetSeed: buildRunResetSeed({
         model: model ?? null,
         effort: effort ?? null,
+        backendSpecific: cloneBackendSpecificConfig(backendSpecific),
         name,
+        note: null,
+        pinned: false,
         dependencyRunIds: [],
         unrestricted,
         timeoutSec,
         maxAttempts,
-        taskMode,
-        pendingPrompt: initialPrompt,
+        brief: initialPrompt,
         finalTasks: snapshotTasks(tasks),
       }),
       attachments: [],
@@ -1034,15 +1175,39 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     };
   }
 
+  if (!reusingWorkspace && loadedAssignment?.sourcePath) {
+    copyFileSync(loadedAssignment.sourcePath, `${workspaceDir}/assignment-seed.md`);
+  }
+
+  const lifecycleContext = lifecycleRunEventContext(execution);
+  const appendRunCreatedAudit = (targetManifest: RunManifest): void => {
+    appendRunCreatedEvent({
+      manifest: targetManifest,
+      context: lifecycleContext,
+      agentName: agentConfig.name,
+      assignmentName: loadedAssignment?.config.name ?? null,
+      passive: agentConfig.backend === "passive",
+    });
+    if (targetManifest.backendSessionId !== null) {
+      appendRunBackendSessionUpdatedEvent({
+        manifest: targetManifest,
+        context: lifecycleContext,
+        previousBackendSessionId: null,
+        nextBackendSessionId: targetManifest.backendSessionId,
+        reason: "bootstrap_import",
+      });
+    }
+  };
+
   // `init` stops here: persist the prepared workspace + manifest and
   // return a terminal "initialized" outcome. No session is created; the
   // caller will follow up with `task-runner run --resume-run <id>` —
   // or, for passive agents, with `task-runner task set` / `task add`.
   if (isInitialize) {
-    writeTextFileAtomic(assignmentPath, renderAssignment(Array.from(tasks.values())));
     syncManifestTaskState(manifest, tasks);
     writeManifest(workspaceDir, manifest);
     const isPassive = agentConfig.backend === "passive";
+    appendRunCreatedAudit(manifest);
     emitEvent({
       type: "run_initialized",
       runId,
@@ -1052,7 +1217,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       name,
       cwd,
       passive: isPassive,
-      pendingPrompt: initialPrompt,
+      brief: initialPrompt,
     });
     emitCallerInstructions(manifest.callerInstructions, emitEvent);
     return {
@@ -1099,44 +1264,34 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       }
 
       if (isResume) {
-        manifest = {
-          ...latest,
+        manifest = buildResumeSessionManifest(latest, initialPrompt, {
           model: model ?? null,
           effort: effort ?? null,
-          taskMode,
           name,
           unrestricted,
           cwd,
           timeoutSec,
           assignmentPath,
           workspaceDir,
-          endedAt: null,
-          status: "running",
-          exitCode: null,
           maxAttempts,
           execution,
-          finalTasks: {},
-          tasksCompleted: 0,
-          tasksTotal: 0,
           sessionCount: priorSessionCount + 1,
-        };
+        });
       } else {
         manifest = {
           ...latest,
-          taskMode,
+          brief: initialPrompt,
           name,
           endedAt: null,
           status: "running",
           exitCode: null,
           sessionCount: 1,
           execution,
-          pendingPrompt: null,
         };
       }
 
       syncManifestTaskState(manifest, tasks);
       refreshManifestAttachments(manifest);
-      writeTextFileAtomic(assignmentPath, renderAssignment(Array.from(tasks.values())));
       sessionRecord = {
         sessionIndex,
         startedAt: now,
@@ -1144,17 +1299,24 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         status: "running",
         exitCode: null,
         message: priorInitialized ? latest.message : message,
+        brief: initialPrompt,
         firstAttempt: null,
         lastAttempt: null,
         maxAttempts,
-        backendSessionIdAtStart: isResume ? latest.backendSessionId : null,
+        backendSessionIdAtStart: latest.backendSessionId,
         backendSessionIdAtEnd: null,
       };
       manifest.sessions.push(sessionRecord);
       writeManifest(workspaceDir, manifest);
+      appendRunStartedEvent({
+        manifest,
+        context: lifecycleContext,
+        sessionIndex,
+        backendSessionIdAtStart: sessionRecord.backendSessionIdAtStart,
+        resumed: priorSessionCount > 0,
+      });
     });
   } else {
-    writeTextFileAtomic(assignmentPath, renderAssignment(Array.from(tasks.values())));
     syncManifestTaskState(manifest, tasks);
     sessionRecord = {
       sessionIndex,
@@ -1163,15 +1325,24 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       status: "running",
       exitCode: null,
       message: message,
+      brief: initialPrompt,
       firstAttempt: null,
       lastAttempt: null,
       maxAttempts,
-      backendSessionIdAtStart: null,
+      backendSessionIdAtStart: opts.bootstrapBackendSessionId ?? null,
       backendSessionIdAtEnd: null,
     };
     manifest.sessions.push(sessionRecord);
     refreshManifestAttachments(manifest);
     writeManifest(workspaceDir, manifest);
+    appendRunCreatedAudit(manifest);
+    appendRunStartedEvent({
+      manifest,
+      context: lifecycleContext,
+      sessionIndex,
+      backendSessionIdAtStart: sessionRecord.backendSessionIdAtStart,
+      resumed: false,
+    });
   }
 
   emitEvent({
@@ -1207,87 +1378,181 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     null;
   let currentPrompt = initialPrompt;
   const attemptTranscripts: string[] = [];
-  let terminal: { status: RunCompletionStatus; exitCode: number } | null = null;
-
-  while (sessionAttempts < maxAttempts && !terminal) {
-    tryRefreshMutableManifestName(manifest);
-    name = manifest.name;
-    sessionAttempts++;
-    const globalAttemptNumber = priorAttemptCount + sessionAttempts;
-    emitEvent({ type: "attempt_started", attempt: globalAttemptNumber });
-
-    const sessionIdAtStart = sessionId;
-    const attemptStartedAt = new Date().toISOString();
-
-    const invokeResult = await backend.invoke({
-      prompt: currentPrompt,
-      cwd,
-      env: {
-        ...(process.env as Record<string, string>),
-        // Increment recursion depth so a nested `task-runner run` spawned
-        // by this backend can detect it. Always last so it overrides any
-        // stale value the parent inherited.
-        ...buildChildRecursionEnv(recursionState),
-      },
-      model,
-      effort,
-      unrestricted,
-      timeoutSec,
-      resumeSessionId: sessionId ?? undefined,
-      name: name ?? undefined,
-      abortSignal: opts.abortSignal,
-      emit: emitEvent,
-    });
-    const attemptEndedAt = new Date().toISOString();
-
-    if (invokeResult.transcript) {
-      attemptTranscripts.push(invokeResult.transcript);
-    }
-
-    const invokedWithResume = sessionIdAtStart !== null;
-    const resumeRejected = invokedWithResume && resumeFailureDetector(invokeResult);
-
-    if (!resumeRejected && invokeResult.sessionId) {
-      sessionId = invokeResult.sessionId;
-      manifest.backendSessionId = invokeResult.sessionId;
-    }
-
+  type TerminalStatus = Exclude<RunCompletionStatus, "initialized">;
+  let terminal: { status: TerminalStatus; exitCode: number } | null = null;
+  let thrownError: unknown = null;
+  let sawRunAbort = false;
+  let sawResumeRejected = false;
+  let pendingAttempt: {
+    attempt: number;
+    startedAt: string;
+    prompt: string;
+    sessionIdAtStart: string | null;
+  } | null = null;
+  const persistAttemptRecord = (record: {
+    attempt: number;
+    startedAt: string;
+    endedAt: string;
+    prompt: string;
+    sessionIdAtStart: string | null;
+    sessionIdCaptured: string | null;
+    exitCode: number | null;
+    signal: NodeJS.Signals | null;
+    timedOut: boolean;
+    transcript: string | null;
+    rawStdout: string;
+    rawStderr: string;
+    invalidStatuses: AttemptRecord["invalidStatuses"];
+    backendSessionUpdate?:
+      | {
+          previousBackendSessionId: string | null;
+          nextBackendSessionId: string | null;
+        }
+      | undefined;
+  }): void => {
     const logPath = writeAttemptLog(workspaceDir, {
       schemaVersion: 1,
       runId,
-      attempt: globalAttemptNumber,
+      attempt: record.attempt,
       sessionIndex,
-      startedAt: attemptStartedAt,
-      endedAt: attemptEndedAt,
-      stdout: invokeResult.rawStdout,
-      stderr: invokeResult.rawStderr,
+      startedAt: record.startedAt,
+      endedAt: record.endedAt,
+      stdout: record.rawStdout,
+      stderr: record.rawStderr,
     });
-    let rawAssignment = "";
-    let mergeInfo: MergeResult = {
-      invalidStatuses: [],
-      missingFromFile: [],
-      unknownInFile: [],
-    };
     withTaskStateLock(workspaceDir, () => {
-      if (taskModeFromManifest(manifest) === "cli") {
-        tasks = refreshManifestTaskState(manifest);
-        rawAssignment = renderAssignment(Array.from(tasks.values()));
-        mergeInfo = {
-          invalidStatuses: [],
-          missingFromFile: [],
-          unknownInFile: [],
-        };
-      } else {
-        const merged = mergeWorkspaceAssignmentIntoTaskMap(manifest, tasks);
-        rawAssignment = merged.rawAssignment;
-        mergeInfo = merged.mergeInfo;
-      }
-
+      tasks = refreshManifestTaskState(manifest);
       syncManifestTaskState(manifest, tasks);
       refreshManifestAttachments(manifest);
       const attemptRecord: AttemptRecord = {
+        attempt: record.attempt,
+        sessionIndex,
+        startedAt: record.startedAt,
+        endedAt: record.endedAt,
+        prompt: record.prompt,
+        sessionIdAtStart: record.sessionIdAtStart,
+        sessionIdCaptured: record.sessionIdCaptured,
+        exitCode: record.exitCode,
+        signal: record.signal,
+        timedOut: record.timedOut,
+        transcript: record.transcript,
+        logPath,
+        tasksAfter: manifest.finalTasks,
+        invalidStatuses: record.invalidStatuses,
+      };
+      manifest.attemptRecords.push(attemptRecord);
+      manifest.attempts = manifest.attemptRecords.length;
+
+      if (sessionRecord.firstAttempt === null) {
+        sessionRecord.firstAttempt = record.attempt;
+      }
+      sessionRecord.lastAttempt = record.attempt;
+
+      tryRefreshMutableManifestMetadata(manifest);
+      writeManifest(workspaceDir, manifest);
+      pendingAttempt = null;
+      appendRunAttemptRecordedEvent({
+        manifest,
+        context: lifecycleContext,
+        sessionIndex,
+        attempt: record.attempt,
+        exitCode: record.exitCode,
+        signal: record.signal,
+        timedOut: record.timedOut,
+        backendSessionIdAtStart: record.sessionIdAtStart,
+        backendSessionIdCaptured: record.sessionIdCaptured,
+      });
+      if (record.backendSessionUpdate) {
+        appendRunBackendSessionUpdatedEvent({
+          manifest,
+          context: lifecycleContext,
+          previousBackendSessionId: record.backendSessionUpdate.previousBackendSessionId,
+          nextBackendSessionId: record.backendSessionUpdate.nextBackendSessionId,
+          reason: "backend_capture",
+          sessionIndex,
+          attempt: record.attempt,
+        });
+      }
+    });
+  };
+
+  try {
+    while (sessionAttempts < maxAttempts && !terminal) {
+      tryRefreshMutableManifestMetadata(manifest);
+      name = manifest.name;
+      sessionAttempts++;
+      const globalAttemptNumber = priorAttemptCount + sessionAttempts;
+      const attemptStartedAt = new Date().toISOString();
+      emitEvent({
+        type: "attempt_started",
         attempt: globalAttemptNumber,
         sessionIndex,
+        startedAt: attemptStartedAt,
+        prompt: currentPrompt,
+      });
+
+      const sessionIdAtStart = sessionId;
+      pendingAttempt = {
+        attempt: globalAttemptNumber,
+        startedAt: attemptStartedAt,
+        prompt: currentPrompt,
+        sessionIdAtStart,
+      };
+
+      const invokeResult = await backend.invoke({
+        prompt: currentPrompt,
+        cwd,
+        env: {
+          ...(process.env as Record<string, string>),
+          // Increment recursion depth so a nested `task-runner run` spawned
+          // by this backend can detect it. Always last so it overrides any
+          // stale value the parent inherited.
+          ...buildChildRecursionEnv(recursionState),
+        },
+        model,
+        effort,
+        backendSpecific,
+        unrestricted,
+        timeoutSec,
+        resumeSessionId: sessionId ?? undefined,
+        name: name ?? undefined,
+        abortSignal: opts.abortSignal,
+        emit: emitEvent,
+      });
+      const attemptEndedAt = new Date().toISOString();
+
+      if (invokeResult.transcript) {
+        attemptTranscripts.push(invokeResult.transcript);
+      }
+
+      const invokedWithResume = sessionIdAtStart !== null;
+      const resumeRejected = invokedWithResume && resumeFailureDetector(invokeResult);
+      const previousBackendSessionId = manifest.backendSessionId;
+      let backendSessionUpdate:
+        | {
+            previousBackendSessionId: string | null;
+            nextBackendSessionId: string | null;
+          }
+        | undefined;
+
+      if (!resumeRejected && invokeResult.sessionId) {
+        sessionId = invokeResult.sessionId;
+        manifest.backendSessionId = invokeResult.sessionId;
+        if (previousBackendSessionId !== invokeResult.sessionId) {
+          backendSessionUpdate = {
+            previousBackendSessionId,
+            nextBackendSessionId: invokeResult.sessionId,
+          };
+        }
+      }
+
+      const mergeInfo = {
+        invalidStatuses: [],
+        missingFromFile: [],
+        unknownInFile: [],
+      };
+      persistAttemptRecord({
+        attempt: globalAttemptNumber,
         startedAt: attemptStartedAt,
         endedAt: attemptEndedAt,
         prompt: currentPrompt,
@@ -1297,81 +1562,98 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         signal: invokeResult.signal,
         timedOut: invokeResult.timedOut,
         transcript: invokeResult.transcript,
-        logPath,
-        tasksAfter: manifest.finalTasks,
+        rawStdout: invokeResult.rawStdout,
+        rawStderr: invokeResult.rawStderr,
         invalidStatuses: mergeInfo.invalidStatuses,
-      };
-      manifest.attemptRecords.push(attemptRecord);
-      manifest.attempts = manifest.attemptRecords.length;
-
-      if (sessionRecord.firstAttempt === null) {
-        sessionRecord.firstAttempt = globalAttemptNumber;
+        backendSessionUpdate,
+      });
+      if (invokeResult.aborted) {
+        terminal = { status: "aborted", exitCode: 130 };
+        sawRunAbort = true;
+        emitEvent({ type: "run_aborted" });
+        break;
       }
-      sessionRecord.lastAttempt = globalAttemptNumber;
 
-      tryRefreshMutableManifestName(manifest);
-      writeManifest(workspaceDir, manifest);
-    });
-
-    if (invokeResult.aborted) {
-      terminal = { status: "aborted", exitCode: 130 };
-      emitEvent({ type: "run_aborted" });
-      break;
-    }
-
-    if (resumeRejected) {
-      terminal = { status: "error", exitCode: 4 };
-      emitEvent({ type: "resume_rejected" });
-      break;
-    }
-
-    // Zero-task runs have no enforcement loop — the success criterion is
-    // just "backend invocation succeeded". One attempt, check the backend
-    // result, done.
-    if (tasks.size === 0) {
-      if (invokeResult.exitCode === 0 && !invokeResult.timedOut) {
-        terminal = { status: "success", exitCode: 0 };
-      } else {
+      if (resumeRejected) {
         terminal = { status: "error", exitCode: 4 };
+        sawResumeRejected = true;
+        emitEvent({ type: "resume_rejected" });
+        break;
       }
-      break;
-    }
 
-    const allCompleted = countBy(tasks, (t) => t.status === "completed") === tasks.size;
-    const noInvalid = mergeInfo.invalidStatuses.length === 0;
-    const blockedCount = countBy(tasks, (t) => t.status === "blocked");
-
-    if (allCompleted && noInvalid) {
-      terminal = { status: "success", exitCode: 0 };
-      break;
-    }
-    if (blockedCount > 0) {
-      terminal = { status: "blocked", exitCode: 2 };
-      break;
-    }
-    if (sessionAttempts >= maxAttempts) {
-      terminal = { status: "exhausted", exitCode: 1 };
-      break;
-    }
-
-    if (taskModeFromManifest(manifest) === "file") {
-      const merged = mergeIntoFile(rawAssignment, tasks);
-      if (merged !== rawAssignment) {
-        writeTextFileAtomic(assignmentPath, merged);
+      // Zero-task runs have no enforcement loop — the success criterion is
+      // just "backend invocation succeeded". One attempt, check the backend
+      // result, done.
+      if (tasks.size === 0) {
+        if (invokeResult.exitCode === 0 && !invokeResult.timedOut) {
+          terminal = { status: "success", exitCode: 0 };
+        } else {
+          terminal = { status: "error", exitCode: 4 };
+        }
+        break;
       }
+
+      const allCompleted = countBy(tasks, (t) => t.status === "completed") === tasks.size;
+      const noInvalid = mergeInfo.invalidStatuses.length === 0;
+      const blockedCount = countBy(tasks, (t) => t.status === "blocked");
+
+      if (allCompleted && noInvalid) {
+        terminal = { status: "success", exitCode: 0 };
+        break;
+      }
+      if (blockedCount > 0) {
+        terminal = { status: "blocked", exitCode: 2 };
+        break;
+      }
+      if (sessionAttempts >= maxAttempts) {
+        terminal = { status: "exhausted", exitCode: 1 };
+        break;
+      }
+
+      const incompleteCount = countBy(tasks, (t) => t.status !== "completed");
+      emitEvent({
+        type: "retrying",
+        incompleteCount,
+        invalidStatusCount: mergeInfo.invalidStatuses.length,
+      });
+      appendRunRetryingEvent({
+        manifest,
+        context: lifecycleContext,
+        sessionIndex,
+        incompleteCount,
+        invalidStatusCount: mergeInfo.invalidStatuses.length,
+      });
+
+      currentPrompt = buildNudgeMessage(tasks, mergeInfo.invalidStatuses, runId);
     }
-
-    const incompleteCount = countBy(tasks, (t) => t.status !== "completed");
-    emitEvent({
-      type: "retrying",
-      incompleteCount,
-      invalidStatusCount: mergeInfo.invalidStatuses.length,
-    });
-
-    currentPrompt = buildNudgeMessage(tasks, mergeInfo.invalidStatuses, assignmentPath, {
-      runId,
-      taskMode: taskModeFromManifest(manifest),
-    });
+  } catch (error) {
+    thrownError = error;
+    if (pendingAttempt) {
+      try {
+        persistAttemptRecord({
+          attempt: pendingAttempt.attempt,
+          startedAt: pendingAttempt.startedAt,
+          endedAt: new Date().toISOString(),
+          prompt: pendingAttempt.prompt,
+          sessionIdAtStart: pendingAttempt.sessionIdAtStart,
+          sessionIdCaptured: null,
+          exitCode: null,
+          signal: null,
+          timedOut: false,
+          transcript: null,
+          rawStdout: "",
+          rawStderr: formatUnhandledAttemptError(error),
+          invalidStatuses: [],
+        });
+      } catch (persistError) {
+        thrownError = new AggregateError(
+          [error, persistError],
+          "task-runner: failed to persist the final attempt record",
+        );
+      }
+      pendingAttempt = null;
+    }
+    terminal = { status: "error", exitCode: 4 };
   }
 
   if (!terminal) {
@@ -1382,10 +1664,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   let tasksCompleted = 0;
   const endedAt = new Date().toISOString();
   withTaskStateLock(workspaceDir, () => {
-    if (taskModeFromManifest(manifest) === "cli") {
-      tasks = refreshManifestTaskState(manifest);
-    }
-
+    tasks = refreshManifestTaskState(manifest);
+    tasks = normalizeInactiveNonPassiveTasks(manifest.backend, tasks);
     orderedTasks = syncManifestTaskState(manifest, tasks);
     tasksCompleted = manifest.tasksCompleted;
     refreshManifestAttachments(manifest);
@@ -1398,8 +1678,31 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     manifest.status = terminal.status;
     manifest.exitCode = terminal.exitCode;
     manifest.endedAt = endedAt;
-    tryRefreshMutableManifestName(manifest);
+    tryRefreshMutableManifestMetadata(manifest);
     writeManifest(workspaceDir, manifest);
+    if (sawRunAbort) {
+      appendRunAbortedEvent({
+        manifest,
+        context: lifecycleContext,
+        sessionIndex,
+      });
+    }
+    if (sawResumeRejected) {
+      appendRunResumeRejectedEvent({
+        manifest,
+        context: lifecycleContext,
+        sessionIndex,
+      });
+    }
+    appendRunFinishedEvent({
+      manifest,
+      context: lifecycleContext,
+      terminalStatus: terminal.status,
+      exitCode: terminal.exitCode,
+      tasksCompleted: manifest.tasksCompleted,
+      tasksTotal: manifest.tasksTotal,
+      sessionIndex,
+    });
   });
 
   const summary: RunCompletionSummary = {
@@ -1413,6 +1716,10 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     runId,
   };
   emitEvent({ type: "run_finished", summary });
+
+  if (thrownError) {
+    throw thrownError;
+  }
 
   return {
     summary,

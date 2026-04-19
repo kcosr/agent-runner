@@ -1,45 +1,64 @@
+import { readFileSync } from "node:fs";
+import { join, resolve, sep } from "node:path";
 import type { DefinitionEntry } from "../config/loader.js";
 import type {
+  AttachmentListEntry,
+  AttachmentListOptions,
   RunAttachment,
   RunAttachmentDownloadResult,
   RunAttachmentRemoveResult,
 } from "../contracts/attachments.js";
+import type { RunTimelineAttempt, RunTimelineHistory } from "../contracts/events.js";
 import type {
   RunArchiveResult,
+  RunBackendSessionResult,
+  RunDeleteResult,
   RunDependenciesResult,
   RunDetail,
   RunNameResult,
+  RunNoteResult,
+  RunPinnedResult,
   RunSummary,
   RunTaskSummary,
 } from "../contracts/runs.js";
 import { toRunDetail } from "../contracts/runs.js";
-import type { BackendId } from "../core/backends/types.js";
+import type { BackendId, BackendSpecificConfig } from "../core/backends/types.js";
 import {
+  type RunListFilter,
   addAttachmentFromFile,
   addAttachmentFromStream,
   addRunDependency,
   addTask,
   appendTaskNotes,
   archiveRun,
+  clearRunBackendSession,
   clearRunDependencies,
+  deleteRun,
   downloadAttachment,
   listAttachments,
   listDefinitions,
   listRuns,
   listTasks,
   readAttachment,
+  readBrief,
+  readRunSummary,
   readStatus,
   removeAttachment,
   removeRunDependency,
   resetRun,
+  setRunBackendSession,
   setRunName,
+  setRunNote,
+  setRunPinned,
   setTask,
   showDefinition,
   showTask,
   unarchiveRun,
 } from "../core/commands/service.js";
-import type { AgentConfig, AssignmentConfig, TaskMode } from "../core/config/schema.js";
-import type { RunExecution } from "../core/run/manifest.js";
+import type { AgentConfig, AssignmentConfig } from "../core/config/schema.js";
+import type { AttemptLog, AttemptRecord } from "../core/run/manifest.js";
+import { type RunExecution, resolveResumeTarget } from "../core/run/manifest.js";
+import type { RunEventOrigin } from "../core/run/run-events.js";
 import type { RunEvent, RunOutcome } from "../core/run/run-loop.js";
 import { executeRunCommand } from "../run-command.js";
 
@@ -55,7 +74,7 @@ export interface RunCommandOverrides {
   backend?: BackendId;
   model?: string;
   effort?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
-  taskMode?: TaskMode;
+  backendSpecific?: BackendSpecificConfig;
   message?: string;
   name?: string;
   timeoutSec?: number;
@@ -85,6 +104,10 @@ export interface ResumeRunRequest {
   emitEvent?: (event: RunEvent) => void;
 }
 
+// Optional host/controller provenance for mutation calls that should be
+// reflected in per-run diagnostic audit records.
+export interface MutationAuditContext extends RunEventOrigin {}
+
 function toDefinitionDetail(result: ReturnType<typeof showDefinition>): DefinitionDetail {
   return {
     kind: result.kind,
@@ -94,12 +117,82 @@ function toDefinitionDetail(result: ReturnType<typeof showDefinition>): Definiti
   };
 }
 
+function readAttemptLogForRecord(
+  runId: string,
+  workspaceDir: string,
+  record: AttemptRecord,
+): AttemptLog {
+  try {
+    const workspaceRoot = resolve(workspaceDir);
+    const absoluteLogPath = resolve(workspaceRoot, record.logPath);
+    if (
+      absoluteLogPath !== workspaceRoot &&
+      !absoluteLogPath.startsWith(`${workspaceRoot}${sep}`)
+    ) {
+      throw new Error("attempt log path escapes workspace");
+    }
+    const raw = readFileSync(absoluteLogPath, "utf8");
+    return JSON.parse(raw) as AttemptLog;
+  } catch {
+    return {
+      schemaVersion: 1,
+      runId,
+      attempt: record.attempt,
+      sessionIndex: record.sessionIndex,
+      startedAt: record.startedAt,
+      endedAt: record.endedAt,
+      stdout: "",
+      stderr: "",
+    };
+  }
+}
+
+function toRunTimelineAttempt(
+  runId: string,
+  workspaceDir: string,
+  record: AttemptRecord,
+): RunTimelineAttempt {
+  const log = readAttemptLogForRecord(runId, workspaceDir, record);
+  return {
+    attempt: record.attempt,
+    sessionIndex: record.sessionIndex,
+    startedAt: record.startedAt,
+    endedAt: record.endedAt,
+    prompt: record.prompt,
+    transcript: record.transcript ?? "",
+    notices: log.stderr,
+    exitCode: record.exitCode,
+    timedOut: record.timedOut,
+    live: false,
+  };
+}
+
 export function getRun(target: string): RunDetail {
   return readStatus(target);
 }
 
-export function getRunList(opts: { includeArchived?: boolean } = {}): RunSummary[] {
-  return listRuns(opts);
+export function getRunSummary(target: string): RunSummary {
+  return readRunSummary(target);
+}
+
+export function getRunTimelineHistory(target: string): RunTimelineHistory {
+  const detail = getRun(target);
+  const resolved = resolveResumeTarget(detail.workspaceDir);
+  return {
+    runId: resolved.manifest.runId,
+    attempts: resolved.manifest.attemptRecords.map((record) =>
+      toRunTimelineAttempt(resolved.manifest.runId, resolved.workspaceDir, record),
+    ),
+    lastCursor: 0,
+  };
+}
+
+export function getRunBrief(target: string): string {
+  return readBrief(target);
+}
+
+export function getRunList(filter: RunListFilter = {}): RunSummary[] {
+  return listRuns(filter);
 }
 
 export function getTaskList(target: string): RunTaskSummary[] {
@@ -123,8 +216,11 @@ export function getTask(target: string, taskId: string): RunTaskSummary {
   };
 }
 
-export function getAttachmentList(target: string): RunAttachment[] {
-  return listAttachments(target).attachments;
+export function getAttachmentList(
+  target: string,
+  options: AttachmentListOptions = {},
+): AttachmentListEntry[] {
+  return listAttachments(target, options).attachments;
 }
 
 export function getAttachment(
@@ -153,20 +249,51 @@ export function getDefinition(
   return toDefinitionDetail(showDefinition(kind, target, cwd));
 }
 
-export function archive(target: string): RunArchiveResult {
-  return archiveRun(target);
+export function archive(target: string, auditContext?: MutationAuditContext): RunArchiveResult {
+  return archiveRun(target, auditContext);
 }
 
-export function unarchive(target: string): RunArchiveResult {
-  return unarchiveRun(target);
+export function unarchive(target: string, auditContext?: MutationAuditContext): RunArchiveResult {
+  return unarchiveRun(target, auditContext);
 }
 
-export function reset(target: string): RunDetail {
-  return toRunDetail({ manifest: resetRun(target).manifest, isLive: false });
+export function reset(target: string, auditContext?: MutationAuditContext): RunDetail {
+  return toRunDetail({ manifest: resetRun(target, auditContext).manifest, isLive: false });
 }
 
-export function renameRun(target: string, input: { name: string | null }): Promise<RunNameResult> {
-  return setRunName(target, input);
+export function deleteArchivedRun(target: string): RunDeleteResult {
+  return deleteRun(target);
+}
+
+export function renameRun(
+  target: string,
+  input: { name: string | null },
+  auditContext?: MutationAuditContext,
+): Promise<RunNameResult> {
+  return setRunName(target, input, auditContext);
+}
+
+export function updateRunNote(target: string, input: { note: string | null }): RunNoteResult {
+  return setRunNote(target, input);
+}
+
+export function updateRunPinned(target: string, input: { pinned: boolean }): RunPinnedResult {
+  return setRunPinned(target, input);
+}
+
+export function updateRunBackendSession(
+  target: string,
+  input: { backendSessionId: string },
+  auditContext?: MutationAuditContext,
+): RunBackendSessionResult {
+  return setRunBackendSession(target, input, auditContext);
+}
+
+export function clearBackendSession(
+  target: string,
+  auditContext?: MutationAuditContext,
+): RunBackendSessionResult {
+  return clearRunBackendSession(target, auditContext);
 }
 
 export function addDependency(target: string, dependencyRunId: string): RunDependenciesResult {
@@ -214,19 +341,26 @@ export function updateTask(
   target: string,
   taskId: string,
   update: { status?: string; notes?: string },
+  auditContext?: MutationAuditContext,
 ): RunTaskSummary {
-  return getTaskFromMutation(setTask(target, taskId, update).task);
+  return getTaskFromMutation(setTask(target, taskId, update, auditContext).task);
 }
 
-export function appendNotes(target: string, taskId: string, text: string): RunTaskSummary {
-  return getTaskFromMutation(appendTaskNotes(target, taskId, text).task);
+export function appendNotes(
+  target: string,
+  taskId: string,
+  text: string,
+  auditContext?: MutationAuditContext,
+): RunTaskSummary {
+  return getTaskFromMutation(appendTaskNotes(target, taskId, text, auditContext).task);
 }
 
 export function createTask(
   target: string,
   input: { title: string; body?: string },
+  auditContext?: MutationAuditContext,
 ): RunTaskSummary {
-  return getTaskFromMutation(addTask(target, input).task);
+  return getTaskFromMutation(addTask(target, input, auditContext).task);
 }
 
 function getTaskFromMutation(task: ReturnType<typeof showTask>["task"]): RunTaskSummary {

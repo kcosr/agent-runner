@@ -38,3 +38,41 @@ export function streamBoundarySeparator(prior: string, delta: string): string {
   const needed = Math.max(0, 2 - trailing - leading);
   return "\n".repeat(needed);
 }
+
+function normalizeTranscriptText(text: string | null | undefined): string | null {
+  if (typeof text !== "string") return null;
+  const normalized = text.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+export function composePersistedTranscript(
+  streamedText: string,
+  finalText: string | null,
+): string | null {
+  const streamed = normalizeTranscriptText(streamedText);
+  const finalTranscript = normalizeTranscriptText(finalText);
+
+  if (streamed === null) return finalTranscript;
+  if (finalTranscript === null) return streamed;
+  if (streamed === finalTranscript) return streamed;
+  return `${streamed}\n\n---\n\n${finalTranscript}`;
+}
+
+/**
+ * Some backends can finish with a transcript even when they never emitted
+ * incremental text deltas. In that case, surface the whole transcript once
+ * as a terminal fallback so live timeline consumers don't stay blank until
+ * they refetch persisted history.
+ */
+export function silentTranscriptFallback(
+  streamedText: string,
+  transcript: string | null,
+): string | null {
+  if (streamedText.trim().length > 0) {
+    return null;
+  }
+  if (!transcript || transcript.trim().length === 0) {
+    return null;
+  }
+  return transcript;
+}

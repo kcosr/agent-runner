@@ -30,17 +30,20 @@ timeoutSec: 1800
 lockedFields:
   - model
 ---
-Your role: walk the checklist for {{repo_path}}.
+Your role: walk the checklist for {{cwd}}.
+`;
+
+const CODEX_AGENT = `---
+schemaVersion: 1
+name: canonical-codex
+backend: codex
+---
+Your role: walk the checklist for {{cwd}}.
 `;
 
 const BASIC_ASSIGNMENT = `---
 schemaVersion: 1
 name: canonical-work
-vars:
-  repo_path:
-    type: string
-    required: true
-    source: cli
 tasks:
   - id: t1
     title: First
@@ -77,7 +80,7 @@ function writeAssignment(baseDir, name, body) {
 }
 
 function mockBackend(handler) {
-  return { id: "mock", invoke: handler };
+  return { id: "claude", invoke: handler };
 }
 
 function okBackend() {
@@ -103,10 +106,11 @@ async function freshRun(baseDir, opts = {}) {
       return await runAgent({
         loaded,
         loadedAssignment,
-        cliVars: opts.vars ?? { repo_path: "/tmp/canon" },
+        cliVars: opts.vars ?? {},
         backend: opts.backend ?? okBackend(),
         initialize: opts.initialize ?? false,
         overrides: opts.overrides,
+        callerCwd: opts.callerCwd ?? baseDir,
         stderr: () => {},
         stdout: () => {},
       });
@@ -124,6 +128,8 @@ function runCli(args, opts = {}) {
       ...process.env,
       TASK_RUNNER_CONFIG_DIR: opts.cwd ?? process.cwd(),
       TASK_RUNNER_STATE_DIR: opts.cwd ?? process.cwd(),
+      TASK_RUNNER_CONNECT: undefined,
+      TASK_RUNNER_LISTEN: undefined,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -133,16 +139,17 @@ function readManifest(workspaceDir) {
   return JSON.parse(readFileSync(join(workspaceDir, "run.json"), "utf8"));
 }
 
-test("manifest schemaVersion is 6", async () => {
+test("manifest schemaVersion is 8 and captures repo", async () => {
   const dir = tempDir();
   writeAgent(dir, "canonical-claude", CLAUDE_AGENT);
   writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
   const outcome = await freshRun(dir, { initialize: true });
-  assert.equal(outcome.manifest.schemaVersion, 6);
+  assert.equal(outcome.manifest.schemaVersion, 8);
+  assert.equal(outcome.manifest.repo, "unknown");
   assert.equal(outcome.manifest.archivedAt, null);
 });
 
-test("resolveResumeTarget treats missing archivedAt on schemaVersion 6 manifests as unarchived", async () => {
+test("resolveResumeTarget treats missing archivedAt on current manifests as unarchived", async () => {
   const dir = tempDir();
   writeAgent(dir, "canonical-claude", CLAUDE_AGENT);
   writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
@@ -164,7 +171,7 @@ test("first write freezes agent.instructions, lockedFields, and timeoutSec", asy
   const outcome = await freshRun(dir, { initialize: true });
 
   assert.ok(outcome.manifest.agent.instructions, "instructions populated");
-  assert.match(outcome.manifest.agent.instructions, /walk the checklist for \/tmp\/canon/);
+  assert.match(outcome.manifest.agent.instructions, new RegExp(`walk the checklist for ${dir}`));
   assert.equal(outcome.manifest.timeoutSec, 1800, "agent timeoutSec frozen");
   assert.deepEqual(outcome.manifest.lockedFields, ["model"]);
   assert.equal(
@@ -178,10 +185,7 @@ test("ad-hoc agent: init without --agent synthesizes name='ad-hoc', null sourceP
   // No agent file — only the assignment exists.
   writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
 
-  runCli(
-    ["init", "--backend", "passive", "--assignment", "canonical-work", "--var", "repo_path=."],
-    { cwd: dir },
-  );
+  runCli(["init", "--backend", "passive", "--assignment", "canonical-work"], { cwd: dir });
   const runIds = readdirSync(join(dir, "runs", "unknown"));
   assert.equal(runIds.length, 1, "one run created");
   const runId = runIds[0];
@@ -200,20 +204,18 @@ test("ad-hoc agent: --agent omitted without --backend errors with exit 3", async
   writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
 
   try {
-    execFileSync(
-      "node",
-      [CLI_PATH, "init", "--assignment", "canonical-work", "--var", "repo_path=."],
-      {
-        cwd: dir,
-        encoding: "utf8",
-        env: {
-          ...process.env,
-          TASK_RUNNER_CONFIG_DIR: dir,
-          TASK_RUNNER_STATE_DIR: dir,
-        },
-        stdio: ["ignore", "pipe", "pipe"],
+    execFileSync("node", [CLI_PATH, "init", "--assignment", "canonical-work"], {
+      cwd: dir,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        TASK_RUNNER_CONFIG_DIR: dir,
+        TASK_RUNNER_STATE_DIR: dir,
+        TASK_RUNNER_CONNECT: undefined,
+        TASK_RUNNER_LISTEN: undefined,
       },
-    );
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     throw new Error("expected CLI to fail");
   } catch (err) {
     assert.equal(err.status, 3);
@@ -227,7 +229,6 @@ test("ad-hoc agent: CLI overrides flow into the synthesized config", async () =>
     effort: "high",
     timeoutSec: 900,
     unrestricted: true,
-    cwd: "/opt/work",
   });
   assert.equal(loaded.config.name, "ad-hoc");
   assert.equal(loaded.sourcePath, null);
@@ -237,8 +238,6 @@ test("ad-hoc agent: CLI overrides flow into the synthesized config", async () =>
   assert.equal(loaded.config.effort, "high");
   assert.equal(loaded.config.timeoutSec, 900);
   assert.equal(loaded.config.unrestricted, true);
-  assert.equal(loaded.config.cwd, "/opt/work");
-  assert.equal(loaded.cwdSource, "explicit");
   assert.deepEqual(loaded.config.lockedFields, []);
 });
 
@@ -271,9 +270,47 @@ test("loadedAgentFromManifest reconstructs LoadedAgent from frozen fields", asyn
   assert.equal(loaded.config.effort, "low");
   assert.equal(loaded.config.timeoutSec, 1800);
   assert.deepEqual(loaded.config.lockedFields, ["model"]);
-  assert.equal(loaded.cwdSource, "explicit");
   assert.match(loaded.instructions, /walk the checklist/);
   assert.equal(loaded.sourcePath, join(dir, "agents", "canonical-claude", "agent.md"));
+});
+
+test("loadedAgentFromManifest reconstructs frozen backendSpecific transport", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "canonical-codex", CODEX_AGENT);
+  writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
+  const outcome = await freshRun(dir, {
+    agentName: "canonical-codex",
+    backend: {
+      id: "codex",
+      async invoke(ctx) {
+        assert.deepEqual(ctx.backendSpecific, {
+          codex: {
+            transport: {
+              type: "stdio",
+            },
+          },
+        });
+        return {
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+          sessionId: null,
+          transcript: "done",
+          rawStdout: "",
+          rawStderr: "",
+        };
+      },
+    },
+  });
+
+  const loaded = loadedAgentFromManifest(outcome.manifest);
+  assert.deepEqual(loaded.config.backendSpecific, {
+    codex: {
+      transport: {
+        type: "stdio",
+      },
+    },
+  });
 });
 
 test("resume does not re-read the agent source file", async () => {
@@ -351,7 +388,7 @@ test("schemaVersion mismatch: resume rejects a v1 manifest with a clear error", 
     tasksTotal: 0,
     backendSessionId: "sess-old",
     runtimeVars: {},
-    pendingPrompt: null,
+    brief: null,
     finalTasks: {},
     sessionCount: 1,
     sessions: [],
@@ -364,7 +401,7 @@ test("schemaVersion mismatch: resume rejects a v1 manifest with a clear error", 
       () => resolveResumeTarget("stale01", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 1/);
-        assert.match(err.message, /requires schemaVersion 6/);
+        assert.match(err.message, /requires schemaVersion 8/);
         return true;
       },
     );
@@ -401,7 +438,7 @@ test("schemaVersion mismatch: resume rejects a v2 manifest with a clear error", 
     tasksTotal: 0,
     backendSessionId: "sess-old",
     runtimeVars: {},
-    pendingPrompt: null,
+    brief: null,
     callerInstructions: null,
     finalTasks: {},
     sessionCount: 1,
@@ -415,7 +452,59 @@ test("schemaVersion mismatch: resume rejects a v2 manifest with a clear error", 
       () => resolveResumeTarget("stale02", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 2/);
-        assert.match(err.message, /requires schemaVersion 6/);
+        assert.match(err.message, /requires schemaVersion 8/);
+        return true;
+      },
+    );
+  });
+});
+
+test("schemaVersion mismatch: resume rejects a v7 manifest with a clear error", async () => {
+  const dir = tempDir();
+  const workspaceDir = join(dir, "runs", "unknown", "stale07");
+  mkdirSync(workspaceDir, { recursive: true });
+  const v7Manifest = {
+    schemaVersion: 7,
+    runId: "stale07",
+    agent: { name: "old", sourcePath: "/tmp/agent.md", instructions: "" },
+    assignment: null,
+    backend: "claude",
+    model: null,
+    effort: null,
+    message: null,
+    name: null,
+    unrestricted: false,
+    cwd: dir,
+    lockedFields: [],
+    timeoutSec: 3600,
+    assignmentPath: join(workspaceDir, "assignment.md"),
+    workspaceDir,
+    startedAt: "2024-01-01T00:00:00Z",
+    endedAt: null,
+    status: "success",
+    exitCode: 0,
+    attempts: 1,
+    maxAttempts: 4,
+    tasksCompleted: 0,
+    tasksTotal: 0,
+    backendSessionId: "sess-old",
+    runtimeVars: {},
+    brief: null,
+    callerInstructions: null,
+    finalTasks: {},
+    sessionCount: 1,
+    sessions: [],
+    attemptRecords: [],
+    archivedAt: null,
+  };
+  writeFileSync(join(workspaceDir, "run.json"), `${JSON.stringify(v7Manifest, null, 2)}\n`);
+
+  await withSharedRuntimeEnv(dir, async () => {
+    assert.throws(
+      () => resolveResumeTarget("stale07", dir),
+      (err) => {
+        assert.match(err.message, /schemaVersion 7/);
+        assert.match(err.message, /requires schemaVersion 8/);
         return true;
       },
     );

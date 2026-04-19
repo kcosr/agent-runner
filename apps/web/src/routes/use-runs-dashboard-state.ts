@@ -1,8 +1,11 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import type {
+  RunArchiveResult,
   RunDetail,
   RunNameResult,
+  RunNoteResult,
+  RunPinnedResult,
   RunStatus,
   RunSummary,
 } from "@task-runner/core/contracts/runs.js";
@@ -11,8 +14,21 @@ import type { BoardColumn } from "../components/run-column.js";
 import { createApiClient, isNotFoundError } from "../lib/api-client.js";
 import { queryClient, runQueryKeys } from "../lib/query.js";
 import { useRunEvents } from "../lib/run-events.js";
+import { compareRunsByStartedAtDesc, sortRunsWithPinnedFirst } from "../lib/run-order.js";
+import { useRunTimelineState } from "../lib/run-timeline.js";
 import { useRuntimeConfig } from "../lib/runtime-config.js";
-import { useBoardSettings } from "../lib/settings.js";
+import {
+  DEFAULT_DRAWER_VIEW,
+  type DashboardStructuredFilters,
+  type DrawerDetailSection,
+  EMPTY_DASHBOARD_STRUCTURED_FILTERS,
+  type RunDrawerView,
+  hasActiveDashboardStructuredFilters,
+  toggleDashboardStructuredFilter,
+  useDashboardPreferences,
+  useDashboardViewState,
+} from "../lib/settings.js";
+import { subscribeToRunDetailEvents } from "../lib/sse.js";
 
 export interface NoticeState {
   id: string;
@@ -24,9 +40,14 @@ export interface NoticeState {
 export type RunActionPending =
   | "archive"
   | "unarchive"
+  | "reset"
+  | "delete"
   | "resume"
   | "abort"
   | "rename"
+  | "note"
+  | "pin"
+  | "backend-session"
   | "upload-attachment"
   | "remove-attachment"
   | "download-attachment"
@@ -35,6 +56,34 @@ export type RunActionPending =
   | "clear-dependencies";
 
 const FAILURE_STATUSES: RunStatus[] = ["exhausted", "error"];
+const DETAIL_LOAD_DELAY_MS = 120;
+
+function useSettledDetailRunId(selectedRunId?: string) {
+  const [detailRunId, setDetailRunId] = useState<string | undefined>(selectedRunId);
+
+  useEffect(() => {
+    if (detailRunId === selectedRunId) {
+      return;
+    }
+    if (!selectedRunId) {
+      setDetailRunId(undefined);
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setDetailRunId(selectedRunId);
+    }, DETAIL_LOAD_DELAY_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [detailRunId, selectedRunId]);
+
+  return {
+    detailRunId,
+    detailSettling: detailRunId !== selectedRunId,
+  };
+}
 
 function matchesSearch(run: RunSummary, search: string): boolean {
   if (!search) {
@@ -48,11 +97,25 @@ function matchesSearch(run: RunSummary, search: string): boolean {
   return haystack.includes(search.toLowerCase());
 }
 
-function buildColumns(runs: RunSummary[], collapseFailureStates: boolean): BoardColumn[] {
+function matchesStructuredFilters(
+  run: RunSummary,
+  structuredFilters: DashboardStructuredFilters,
+): boolean {
+  return (
+    (structuredFilters.repo === null || run.repo === structuredFilters.repo) &&
+    (structuredFilters.agent === null || run.agentName === structuredFilters.agent) &&
+    (structuredFilters.backend === null || run.backend === structuredFilters.backend)
+  );
+}
+
+function buildColumns(
+  runs: RunSummary[],
+  collapseFailureStates: boolean,
+  compareRuns: (left: RunSummary, right: RunSummary) => number,
+): BoardColumn[] {
   const base: BoardColumn[] = [
     { key: "pending", title: "Pending", statuses: ["initialized"], runs: [] },
     { key: "running", title: "Running", statuses: ["running"], runs: [] },
-    { key: "completed", title: "Completed", statuses: ["success"], runs: [] },
   ];
 
   if (collapseFailureStates) {
@@ -66,25 +129,45 @@ function buildColumns(runs: RunSummary[], collapseFailureStates: boolean): Board
   } else {
     base.push(
       { key: "blocked", title: "Blocked", statuses: ["blocked"], runs: [] },
-      { key: "exhausted", title: "Exhausted", statuses: ["exhausted"], runs: [] },
       { key: "error", title: "Error", statuses: ["error"], runs: [] },
+      { key: "exhausted", title: "Exhausted", statuses: ["exhausted"], runs: [] },
     );
   }
 
   base.push({ key: "aborted", title: "Aborted", statuses: ["aborted"], runs: [] });
+  base.push({ key: "completed", title: "Completed", statuses: ["success"], runs: [] });
 
   return base.map((column) => ({
     ...column,
-    runs: runs.filter((run) => column.statuses.includes(run.effectiveStatus)),
+    runs: sortRunsWithPinnedFirst(
+      runs.filter((run) => column.statuses.includes(run.effectiveStatus)),
+      compareRuns,
+    ),
   }));
 }
 
-function selectedRunActiveTask(detail: RunDetail | undefined): string | undefined {
-  if (!detail) {
-    return undefined;
+function compareRunsByRecentUpdate(
+  left: RunSummary,
+  right: RunSummary,
+  recentUpdateSequenceByRunId: Record<string, number>,
+): number {
+  const leftSequence = recentUpdateSequenceByRunId[left.runId] ?? 0;
+  const rightSequence = recentUpdateSequenceByRunId[right.runId] ?? 0;
+  if (leftSequence !== rightSequence) {
+    return rightSequence - leftSequence;
   }
-  const inProgress = detail.tasks.filter((task) => task.status === "in_progress");
-  return inProgress.length === 1 ? inProgress.at(0)?.id : undefined;
+  return compareRunsByStartedAtDesc(left, right);
+}
+
+function createRunComparator(
+  sortByRecentUpdates: boolean,
+  recentUpdateSequenceByRunId: Record<string, number>,
+) {
+  if (sortByRecentUpdates) {
+    return (left: RunSummary, right: RunSummary) =>
+      compareRunsByRecentUpdate(left, right, recentUpdateSequenceByRunId);
+  }
+  return compareRunsByStartedAtDesc;
 }
 
 function appendNotice(current: NoticeState[], notice: NoticeState): NoticeState[] {
@@ -129,7 +212,7 @@ function useRunActionMutation(
   action: (runId: string) => Promise<unknown>,
   setActionError: (message: string | undefined) => void,
   options: {
-    onSuccess?: () => void;
+    onSuccess?: (runId: string) => void;
   } = {},
 ) {
   return useMutation({
@@ -140,17 +223,105 @@ function useRunActionMutation(
     onSuccess: async (_result, runId) => {
       setActionError(undefined);
       await invalidateRunQueries(runId);
-      options.onSuccess?.();
+      options.onSuccess?.(runId);
     },
   });
 }
 
+function updateRunCaches(
+  runId: string,
+  update: {
+    detail?: (run: RunDetail) => RunDetail;
+    summary?: (run: RunSummary) => RunSummary;
+  },
+) {
+  const updateDetail = update.detail;
+  if (updateDetail) {
+    queryClient.setQueryData<RunDetail | undefined>(runQueryKeys.detail(runId), (current) =>
+      current ? updateDetail(current) : current,
+    );
+  }
+  const updateSummary = update.summary;
+  if (updateSummary) {
+    queryClient.setQueryData<RunSummary[] | undefined>(runQueryKeys.list(), (current) =>
+      current?.map((run) => (run.runId === runId ? updateSummary(run) : run)),
+    );
+  }
+}
+
 function updateRunNameCaches(result: RunNameResult) {
-  queryClient.setQueryData<RunDetail | undefined>(runQueryKeys.detail(result.runId), (current) =>
-    current ? { ...current, name: result.name } : current,
-  );
+  updateRunCaches(result.runId, {
+    detail: (run) => ({ ...run, name: result.name }),
+    summary: (run) => ({ ...run, name: result.name }),
+  });
+}
+
+function updateRunNoteCaches(result: RunNoteResult) {
+  updateRunCaches(result.runId, {
+    detail: (run) => ({ ...run, note: result.note }),
+    summary: (run) => ({ ...run, notePresent: result.note !== null }),
+  });
+}
+
+function updateRunPinnedCaches(result: RunPinnedResult) {
+  updateRunCaches(result.runId, {
+    detail: (run) => ({ ...run, pinned: result.pinned }),
+    summary: (run) => ({ ...run, pinned: result.pinned }),
+  });
+}
+
+function updateRunArchivedCaches(result: RunArchiveResult) {
+  updateRunCaches(result.runId, {
+    detail: (run) => ({
+      ...run,
+      archivedAt: result.archivedAt,
+      capabilities: {
+        ...run.capabilities,
+        canArchive: result.archivedAt === null && run.status !== "running",
+        canUnarchive: result.archivedAt !== null && run.status !== "running",
+      },
+    }),
+    summary: (run) => ({
+      ...run,
+      archivedAt: result.archivedAt,
+      capabilities: {
+        ...run.capabilities,
+        canArchive: result.archivedAt === null && run.status !== "running",
+        canUnarchive: result.archivedAt !== null && run.status !== "running",
+      },
+    }),
+  });
+}
+
+function syncRunSummaryFromDetail(detail: RunDetail) {
   queryClient.setQueryData<RunSummary[] | undefined>(runQueryKeys.list(), (current) =>
-    current?.map((run) => (run.runId === result.runId ? { ...run, name: result.name } : run)),
+    current?.map((run) =>
+      run.runId === detail.runId
+        ? {
+            ...run,
+            repo: detail.repo,
+            status: detail.status,
+            effectiveStatus: detail.effectiveStatus,
+            archivedAt: detail.archivedAt,
+            pinned: detail.pinned,
+            notePresent: detail.note !== null,
+            agentName: detail.agent.name,
+            name: detail.name,
+            assignmentName: detail.assignment?.name ?? null,
+            backend: detail.backend,
+            model: detail.model,
+            cwd: detail.cwd,
+            startedAt: detail.startedAt,
+            endedAt: detail.endedAt,
+            tasksCompleted: detail.tasksCompleted,
+            tasksTotal: detail.tasksTotal,
+            attachmentCount: detail.attachments.length,
+            activeTask: detail.activeTask,
+            execution: detail.execution,
+            capabilities: detail.capabilities,
+          }
+        : run,
+    ),
   );
 }
 
@@ -161,18 +332,44 @@ async function invalidateRunQueries(runId: string) {
   ]);
 }
 
+async function invalidateRunDetailQuery(runId: string) {
+  await queryClient.invalidateQueries({ queryKey: runQueryKeys.detail(runId) });
+}
+
+function shouldInvalidateSimpleRunMutation(
+  runId: string,
+  options: {
+    detailRunId?: string;
+    summaryStreamStale: boolean;
+    detailStreamStale: boolean;
+  },
+): boolean {
+  return options.summaryStreamStale || (options.detailRunId === runId && options.detailStreamStale);
+}
+
 export function useRunsDashboardState() {
   const config = useRuntimeConfig();
   const api = useMemo(() => createApiClient(config), [config]);
-  const { settings, updateSettings } = useBoardSettings();
-  const { streamStale } = useRunEvents();
-  const deferredSearch = useDeferredValue(settings.search);
+  const { preferences, updatePreferences } = useDashboardPreferences();
+  const { viewState, updateViewState } = useDashboardViewState();
+  const {
+    markRunTouched,
+    recentUpdateSequenceByRunId,
+    streamStale: summaryStreamStale,
+  } = useRunEvents();
+  const deferredSearch = useDeferredValue(viewState.search);
   const navigate = useNavigate();
   const runRouteParams = useParams({ strict: false });
   const selectedRunId = "runId" in runRouteParams ? runRouteParams.runId : undefined;
   const [notices, setNotices] = useState<NoticeState[]>([]);
   const [actionError, setActionError] = useState<string>();
+  const [detailStreamStale, setDetailStreamStale] = useState(false);
+  const { detailRunId, detailSettling } = useSettledDetailRunId(selectedRunId);
+  const [resumeDialogOpen, setResumeDialogOpen] = useState(false);
+  const [resumeMessageExpanded, setResumeMessageExpanded] = useState(false);
+  const [resumeMessageDraft, setResumeMessageDraft] = useState("");
   const noticeTimersRef = useRef(new Map<string, number>());
+  const detailStreamStaleRef = useRef(detailStreamStale);
 
   const runsQuery = useQuery({
     queryKey: runQueryKeys.list(),
@@ -180,49 +377,101 @@ export function useRunsDashboardState() {
   });
 
   const selectedRunQuery = useQuery({
-    queryKey: selectedRunId ? runQueryKeys.detail(selectedRunId) : runQueryKeys.detail("__none__"),
-    queryFn: async () => {
-      if (!selectedRunId) {
+    queryKey: detailRunId ? runQueryKeys.detail(detailRunId) : runQueryKeys.detail("__none__"),
+    queryFn: async ({ signal }) => {
+      if (!detailRunId) {
         throw new Error("Selected run id is required");
       }
-      return await api.getRun(selectedRunId);
+      return await api.getRun(detailRunId, { signal });
     },
-    enabled: Boolean(selectedRunId),
+    enabled: Boolean(detailRunId),
+  });
+  const timelineState = useRunTimelineState({
+    config,
+    runId: detailRunId,
+    runIsLive: detailRunId === selectedRunId && selectedRunQuery.data?.isLive === true,
   });
 
+  useEffect(() => {
+    if (!selectedRunQuery.data) {
+      return;
+    }
+    syncRunSummaryFromDetail(selectedRunQuery.data);
+  }, [selectedRunQuery.data]);
+
   const runs = runsQuery.data ?? [];
-  const repoOptions = useMemo(
-    () =>
-      Array.from(new Set(runs.map((run) => run.repo))).sort((left, right) =>
+  const filterOptions = useMemo(
+    () => ({
+      repo: Array.from(new Set(runs.map((run) => run.repo))).sort((left, right) =>
         left.localeCompare(right),
       ),
+      agent: Array.from(new Set(runs.map((run) => run.agentName))).sort((left, right) =>
+        left.localeCompare(right),
+      ),
+      backend: Array.from(new Set(runs.map((run) => run.backend))).sort((left, right) =>
+        left.localeCompare(right),
+      ),
+    }),
     [runs],
   );
-  const visibleRuns = useMemo(
+  const structuredVisibleRuns = useMemo(
     () =>
       runs.filter((run) => {
-        if (!settings.showArchived && run.archivedAt) {
+        if (!preferences.showArchived && run.archivedAt) {
           return false;
         }
-        if (settings.repo !== "all" && run.repo !== settings.repo) {
+        if (preferences.showPinnedOnly && !run.pinned) {
           return false;
         }
-        return matchesSearch(run, deferredSearch);
+        return matchesStructuredFilters(run, preferences.structuredFilters);
       }),
-    [deferredSearch, runs, settings.repo, settings.showArchived],
+    [preferences.showArchived, preferences.showPinnedOnly, preferences.structuredFilters, runs],
+  );
+  const visibleRuns = useMemo(
+    () => structuredVisibleRuns.filter((run) => matchesSearch(run, deferredSearch)),
+    [deferredSearch, structuredVisibleRuns],
   );
   const collapsedColumnKeySet = useMemo(
-    () => new Set(settings.collapsedColumnKeys),
-    [settings.collapsedColumnKeys],
+    () => new Set(viewState.collapsedColumnKeys),
+    [viewState.collapsedColumnKeys],
+  );
+  const compareRuns = useMemo(
+    () => createRunComparator(preferences.sortByRecentUpdates, recentUpdateSequenceByRunId),
+    [preferences.sortByRecentUpdates, recentUpdateSequenceByRunId],
   );
   const columns = useMemo(
-    () => buildColumns(visibleRuns, settings.collapseFailureStates),
-    [settings.collapseFailureStates, visibleRuns],
+    () => buildColumns(visibleRuns, preferences.collapseFailureStates, compareRuns),
+    [compareRuns, preferences.collapseFailureStates, visibleRuns],
   );
-  const boardColumns = settings.hideEmptyColumns
+  const boardColumns = preferences.hideEmptyColumns
     ? columns.filter((column) => column.runs.length > 0)
     : columns;
-  const activeTask = selectedRunActiveTask(selectedRunQuery.data);
+  const selectedDrawerView =
+    selectedRunId !== undefined
+      ? (viewState.drawerViewsByRunId[selectedRunId] ?? DEFAULT_DRAWER_VIEW)
+      : undefined;
+  const selectedRunGroupAttachmentsQuery = useQuery({
+    queryKey: ["attachment-list", detailRunId, "cwd-scope"],
+    queryFn: async () => {
+      if (!detailRunId) {
+        throw new Error("Selected run id is required");
+      }
+      return await api.listAttachments(detailRunId, { cwdScope: true });
+    },
+    enabled: Boolean(detailRunId),
+    retry: false,
+  });
+
+  useEffect(() => {
+    detailStreamStaleRef.current = detailStreamStale;
+  }, [detailStreamStale]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: run on selection change to clear the prior run's pending resume-dialog state
+  useEffect(() => {
+    setResumeDialogOpen(false);
+    setResumeMessageExpanded(false);
+    setResumeMessageDraft("");
+  }, [selectedRunId]);
 
   useEffect(() => {
     for (const notice of notices) {
@@ -257,63 +506,160 @@ export function useRunsDashboardState() {
   );
 
   useEffect(() => {
-    if (!selectedRunId) {
-      return;
-    }
-
-    if (runsQuery.data && !runsQuery.data.some((run) => run.runId === selectedRunId)) {
-      setNotices((current) =>
-        appendNotice(current, {
-          id: `missing-${selectedRunId}`,
-          message: `Run ${selectedRunId} is no longer available. The detail view was closed.`,
-          tone: "warning",
-        }),
-      );
-      void navigate({ to: "/" });
+    if (!detailRunId || detailRunId !== selectedRunId) {
       return;
     }
 
     if (selectedRunQuery.error && isNotFoundError(selectedRunQuery.error)) {
       setNotices((current) =>
         appendNotice(current, {
-          id: `deleted-${selectedRunId}`,
-          message: `Run ${selectedRunId} was deleted while selected.`,
+          id: `deleted-${detailRunId}`,
+          message: `Run ${detailRunId} was deleted while selected.`,
           tone: "warning",
         }),
       );
       void navigate({ to: "/" });
     }
-  }, [navigate, runsQuery.data, selectedRunId, selectedRunQuery.error]);
+  }, [detailRunId, navigate, selectedRunId, selectedRunQuery.error]);
 
   useEffect(() => {
-    if (!selectedRunId) {
+    if (!detailRunId) {
+      detailStreamStaleRef.current = false;
+      setDetailStreamStale(false);
       return;
     }
+    const runId = detailRunId;
 
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key !== "Escape") {
-        return;
-      }
-      setActionError(undefined);
-      void navigate({ to: "/" });
+    let disposed = false;
+
+    async function refreshActiveQueries() {
+      await Promise.all([
+        queryClient.refetchQueries(
+          { queryKey: runQueryKeys.list(), type: "active" },
+          { throwOnError: true },
+        ),
+        queryClient.refetchQueries(
+          { queryKey: runQueryKeys.detail(runId), type: "active" },
+          { throwOnError: true },
+        ),
+      ]);
     }
 
-    window.addEventListener("keydown", handleKeyDown);
+    const unsubscribe = subscribeToRunDetailEvents(config, runId, {
+      onOpen: () => {
+        if (!detailStreamStaleRef.current) {
+          return;
+        }
+        void refreshActiveQueries()
+          .then(() => {
+            if (disposed) {
+              return;
+            }
+            detailStreamStaleRef.current = false;
+            setDetailStreamStale(false);
+          })
+          .catch(() => {
+            // Keep the stale banner visible until a reconnect can revalidate successfully.
+          });
+      },
+      onEvent: (payload) => {
+        if (detailStreamStaleRef.current) {
+          detailStreamStaleRef.current = false;
+          setDetailStreamStale(false);
+        }
+        markRunTouched(payload.detail.runId);
+        syncRunSummaryFromDetail(payload.detail);
+        queryClient.setQueryData(runQueryKeys.detail(runId), payload.detail);
+      },
+      onStaleChange: (stale) => {
+        if (!stale) {
+          return;
+        }
+        detailStreamStaleRef.current = true;
+        setDetailStreamStale(true);
+      },
+    });
+
     return () => {
-      window.removeEventListener("keydown", handleKeyDown);
+      disposed = true;
+      unsubscribe();
     };
-  }, [navigate, selectedRunId]);
+  }, [config, detailRunId, markRunTouched]);
 
   const closeRun = () => {
     void navigate({ to: "/" });
   };
 
-  const archiveMutation = useRunActionMutation(api.archiveRun, setActionError, {
-    onSuccess: closeRun,
+  const archiveMutation = useMutation({
+    mutationFn: (runId: string) => api.archiveRun(runId),
+    onError: (error: Error) => {
+      setActionError(error.message);
+    },
+    onSuccess: async (result) => {
+      setActionError(undefined);
+      updateRunArchivedCaches(result);
+      markRunTouched(result.runId);
+      if (
+        shouldInvalidateSimpleRunMutation(result.runId, {
+          detailRunId,
+          summaryStreamStale,
+          detailStreamStale: detailStreamStaleRef.current,
+        })
+      ) {
+        await invalidateRunQueries(result.runId);
+      }
+    },
   });
-  const unarchiveMutation = useRunActionMutation(api.unarchiveRun, setActionError);
-  const resumeMutation = useRunActionMutation(api.resumeRun, setActionError);
-  const abortMutation = useRunActionMutation(api.abortRun, setActionError);
+  const unarchiveMutation = useMutation({
+    mutationFn: (runId: string) => api.unarchiveRun(runId),
+    onError: (error: Error) => {
+      setActionError(error.message);
+    },
+    onSuccess: async (result) => {
+      setActionError(undefined);
+      updateRunArchivedCaches(result);
+      markRunTouched(result.runId);
+      if (
+        shouldInvalidateSimpleRunMutation(result.runId, {
+          detailRunId,
+          summaryStreamStale,
+          detailStreamStale: detailStreamStaleRef.current,
+        })
+      ) {
+        await invalidateRunQueries(result.runId);
+      }
+    },
+  });
+  const resetMutation = useRunActionMutation(api.resetRun, setActionError, {
+    onSuccess: markRunTouched,
+  });
+  const deleteMutation = useMutation({
+    mutationFn: (runId: string) => api.deleteRun(runId),
+    onError: (error: Error) => {
+      setActionError(error.message);
+    },
+    onSuccess: async (result) => {
+      setActionError(undefined);
+      queryClient.removeQueries({ queryKey: runQueryKeys.detail(result.runId) });
+      await invalidateRunQueries(result.runId);
+      closeRun();
+    },
+  });
+  const resumeMutation = useMutation({
+    mutationFn: ({ message, runId }: { runId: string; message?: string }) =>
+      api.resumeRun(runId, message),
+    onError: (error: Error) => {
+      setActionError(error.message);
+    },
+    onSuccess: async (_result, { runId }) => {
+      setActionError(undefined);
+      markRunTouched(runId);
+      await invalidateRunQueries(runId);
+    },
+  });
+  const abortMutation = useRunActionMutation(api.abortRun, setActionError, {
+    onSuccess: markRunTouched,
+  });
   const renameMutation = useMutation({
     mutationFn: ({ name, runId }: { runId: string; name: string | null }) =>
       api.setRunName(runId, name),
@@ -323,7 +669,77 @@ export function useRunsDashboardState() {
     onSuccess: async (result, { runId }) => {
       setActionError(undefined);
       updateRunNameCaches(result);
-      await invalidateRunQueries(runId);
+      markRunTouched(runId);
+      if (
+        shouldInvalidateSimpleRunMutation(runId, {
+          detailRunId,
+          summaryStreamStale,
+          detailStreamStale: detailStreamStaleRef.current,
+        })
+      ) {
+        await invalidateRunQueries(runId);
+      }
+    },
+  });
+  const noteMutation = useMutation({
+    mutationFn: ({ note, runId }: { runId: string; note: string | null }) =>
+      api.setRunNote(runId, note),
+    onError: (error: Error) => {
+      setActionError(error.message);
+    },
+    onSuccess: async (result) => {
+      setActionError(undefined);
+      updateRunNoteCaches(result);
+      markRunTouched(result.runId);
+      if (
+        shouldInvalidateSimpleRunMutation(result.runId, {
+          detailRunId,
+          summaryStreamStale,
+          detailStreamStale: detailStreamStaleRef.current,
+        })
+      ) {
+        await invalidateRunQueries(result.runId);
+      }
+    },
+  });
+  const pinnedMutation = useMutation({
+    mutationFn: ({ pinned, runId }: { runId: string; pinned: boolean }) =>
+      api.setRunPinned(runId, pinned),
+    onError: (error: Error) => {
+      setActionError(error.message);
+    },
+    onSuccess: async (result) => {
+      setActionError(undefined);
+      updateRunPinnedCaches(result);
+      markRunTouched(result.runId);
+      if (
+        shouldInvalidateSimpleRunMutation(result.runId, {
+          detailRunId,
+          summaryStreamStale,
+          detailStreamStale: detailStreamStaleRef.current,
+        })
+      ) {
+        await invalidateRunQueries(result.runId);
+      }
+    },
+  });
+  const backendSessionMutation = useMutation({
+    mutationFn: ({
+      backendSessionId,
+      clear,
+      runId,
+    }: {
+      runId: string;
+      backendSessionId?: string;
+      clear?: boolean;
+    }) =>
+      clear ? api.clearBackendSession(runId) : api.setBackendSession(runId, backendSessionId ?? ""),
+    onError: (error: Error) => {
+      setActionError(error.message);
+    },
+    onSuccess: async (result) => {
+      setActionError(undefined);
+      await invalidateRunDetailQuery(result.runId);
     },
   });
   const addDependencyMutation = useMutation({
@@ -334,6 +750,7 @@ export function useRunsDashboardState() {
     },
     onSuccess: async (result) => {
       setActionError(undefined);
+      markRunTouched(result.runId);
       await invalidateRunQueries(result.runId);
     },
   });
@@ -345,6 +762,7 @@ export function useRunsDashboardState() {
     },
     onSuccess: async (result) => {
       setActionError(undefined);
+      markRunTouched(result.runId);
       await invalidateRunQueries(result.runId);
     },
   });
@@ -355,6 +773,7 @@ export function useRunsDashboardState() {
     },
     onSuccess: async (result) => {
       setActionError(undefined);
+      markRunTouched(result.runId);
       await invalidateRunQueries(result.runId);
     },
   });
@@ -366,6 +785,7 @@ export function useRunsDashboardState() {
     },
     onSuccess: async (_result, { runId }) => {
       setActionError(undefined);
+      markRunTouched(runId);
       await invalidateRunQueries(runId);
     },
   });
@@ -377,6 +797,7 @@ export function useRunsDashboardState() {
     },
     onSuccess: async (result) => {
       setActionError(undefined);
+      markRunTouched(result.runId);
       await invalidateRunQueries(result.runId);
     },
   });
@@ -408,25 +829,53 @@ export function useRunsDashboardState() {
     ? "archive"
     : unarchiveMutation.isPending
       ? "unarchive"
-      : resumeMutation.isPending
-        ? "resume"
-        : abortMutation.isPending
-          ? "abort"
-          : renameMutation.isPending
-            ? "rename"
-            : uploadAttachmentMutation.isPending
-              ? "upload-attachment"
-              : removeAttachmentMutation.isPending
-                ? "remove-attachment"
-                : downloadAttachmentMutation.isPending
-                  ? "download-attachment"
-                  : addDependencyMutation.isPending
-                    ? "add-dependency"
-                    : removeDependencyMutation.isPending
-                      ? "remove-dependency"
-                      : clearDependenciesMutation.isPending
-                        ? "clear-dependencies"
-                        : undefined;
+      : resetMutation.isPending
+        ? "reset"
+        : deleteMutation.isPending
+          ? "delete"
+          : resumeMutation.isPending
+            ? "resume"
+            : abortMutation.isPending
+              ? "abort"
+              : renameMutation.isPending
+                ? "rename"
+                : noteMutation.isPending
+                  ? "note"
+                  : pinnedMutation.isPending
+                    ? "pin"
+                    : backendSessionMutation.isPending
+                      ? "backend-session"
+                      : uploadAttachmentMutation.isPending
+                        ? "upload-attachment"
+                        : removeAttachmentMutation.isPending
+                          ? "remove-attachment"
+                          : downloadAttachmentMutation.isPending
+                            ? "download-attachment"
+                            : addDependencyMutation.isPending
+                              ? "add-dependency"
+                              : removeDependencyMutation.isPending
+                                ? "remove-dependency"
+                                : clearDependenciesMutation.isPending
+                                  ? "clear-dependencies"
+                                  : undefined;
+  const selectedRunDetailReady =
+    detailRunId !== undefined &&
+    detailRunId === selectedRunId &&
+    selectedRunQuery.data?.runId === detailRunId;
+  const selectedRunDetail = selectedRunDetailReady ? selectedRunQuery.data : undefined;
+  const selectedRunCanResume = selectedRunDetail?.capabilities.canResume === true;
+  const selectedRunPrimaryActionAvailable = selectedRunCanResume && actionPending === undefined;
+  const selectedRunStartable = selectedRunCanResume && selectedRunDetail?.status === "initialized";
+  const selectedRunHasIncompleteTasks =
+    selectedRunDetail?.tasks.some((task) => task.status !== "completed") ?? true;
+  const selectedRunResumeRequiresMessage = selectedRunCanResume && !selectedRunHasIncompleteTasks;
+  const trimmedResumeMessage = resumeMessageDraft.trim();
+
+  function resetResumeDialogState() {
+    setResumeDialogOpen(false);
+    setResumeMessageExpanded(false);
+    setResumeMessageDraft("");
+  }
 
   function setColumnCollapsed(columnKey: string, collapsed: boolean) {
     const isCollapsed = collapsedColumnKeySet.has(columnKey);
@@ -434,18 +883,80 @@ export function useRunsDashboardState() {
       return;
     }
 
-    updateSettings({
+    updateViewState({
       collapsedColumnKeys: collapsed
-        ? [...settings.collapsedColumnKeys, columnKey]
-        : settings.collapsedColumnKeys.filter((key) => key !== columnKey),
+        ? [...viewState.collapsedColumnKeys, columnKey]
+        : viewState.collapsedColumnKeys.filter((key) => key !== columnKey),
     });
+  }
+
+  function setSelectedRunDrawerView(runId: string, drawerView: RunDrawerView) {
+    updateViewState((current) => ({
+      drawerViewsByRunId: {
+        ...current.drawerViewsByRunId,
+        [runId]: drawerView,
+      },
+    }));
+  }
+
+  function closeResumeDialog() {
+    if (actionPending === "resume") {
+      return;
+    }
+    resetResumeDialogState();
+  }
+
+  function openResumeDialog() {
+    if (!selectedRunCanResume || actionPending !== undefined) {
+      return;
+    }
+    setResumeMessageExpanded(selectedRunResumeRequiresMessage);
+    setResumeDialogOpen(true);
+  }
+
+  async function submitSelectedRunResume() {
+    if (
+      !selectedRunId ||
+      !selectedRunCanResume ||
+      actionPending === "resume" ||
+      (selectedRunResumeRequiresMessage && trimmedResumeMessage.length === 0)
+    ) {
+      return;
+    }
+    try {
+      await resumeMutation.mutateAsync({
+        runId: selectedRunId,
+        message: trimmedResumeMessage.length > 0 ? trimmedResumeMessage : undefined,
+      });
+      setActionError(undefined);
+      resetResumeDialogState();
+    } catch {
+      // actionError is surfaced by the shared mutation handler.
+    }
+  }
+
+  async function triggerSelectedRunPrimaryAction() {
+    if (!selectedRunId || !selectedRunCanResume || actionPending !== undefined) {
+      return;
+    }
+    if (!selectedRunStartable) {
+      openResumeDialog();
+      return;
+    }
+    try {
+      await resumeMutation.mutateAsync({ runId: selectedRunId });
+      setActionError(undefined);
+    } catch {
+      // actionError is surfaced by the shared mutation handler.
+    }
   }
 
   return {
     actionError,
+    activeBoardColumnKey: viewState.activeBoardColumnKey,
     actionPending,
     boardColumns,
-    collapsedColumnKeys: settings.collapsedColumnKeys,
+    collapsedColumnKeys: viewState.collapsedColumnKeys,
     closeRun,
     columnActions: {
       expand: (columnKey: string) => {
@@ -478,11 +989,28 @@ export function useRunsDashboardState() {
       setNotices((current) => current.filter((notice) => notice.id !== id));
     },
     notices,
-    openRun: (runId: string) => {
+    openRun: (runId: string, options?: { replace?: boolean }) => {
       setActionError(undefined);
-      void navigate({ to: `/runs/${runId}` });
+      void navigate({ replace: options?.replace, to: `/runs/${runId}` });
     },
-    repoOptions,
+    openSelectedRunResumeDialog: openResumeDialog,
+    openSelectedRunAttachmentPreview: (attachmentOwnerRunId: string, attachmentId: string) => {
+      if (!selectedRunId) {
+        return;
+      }
+      setSelectedRunDrawerView(selectedRunId, {
+        mode: "attachment",
+        detailSection: "attachments",
+        attachmentId,
+        attachmentOwnerRunId,
+      });
+    },
+    preferences,
+    filterOptions,
+    hasActiveStructuredFilters: hasActiveDashboardStructuredFilters(preferences.structuredFilters),
+    resumeDialogOpen,
+    resumeMessageDraft,
+    resumeMessageExpanded,
     runActions: {
       abort: (runId: string) => abortMutation.mutate(runId),
       addDependency: async (runId: string, dependencyRunId: string) => {
@@ -492,6 +1020,7 @@ export function useRunsDashboardState() {
       clearDependencies: async (runId: string) => {
         await clearDependenciesMutation.mutateAsync(runId);
       },
+      delete: (runId: string) => deleteMutation.mutate(runId),
       downloadAttachment: async (runId: string, attachmentId: string, name: string) => {
         await downloadAttachmentMutation.mutateAsync({ runId, attachmentId, name });
       },
@@ -501,10 +1030,25 @@ export function useRunsDashboardState() {
       removeAttachment: async (runId: string, attachmentId: string) => {
         await removeAttachmentMutation.mutateAsync({ runId, attachmentId });
       },
+      reset: (runId: string) => resetMutation.mutate(runId),
       rename: async (runId: string, name: string | null) => {
         await renameMutation.mutateAsync({ runId, name });
       },
-      resume: (runId: string) => resumeMutation.mutate(runId),
+      setNote: async (runId: string, note: string | null) => {
+        await noteMutation.mutateAsync({ runId, note });
+      },
+      setPinned: async (runId: string, pinned: boolean) => {
+        await pinnedMutation.mutateAsync({ runId, pinned });
+      },
+      clearBackendSession: async (runId: string) => {
+        await backendSessionMutation.mutateAsync({ runId, clear: true });
+      },
+      resume: async (runId: string, message?: string) => {
+        await resumeMutation.mutateAsync({ runId, message });
+      },
+      setBackendSession: async (runId: string, backendSessionId: string) => {
+        await backendSessionMutation.mutateAsync({ runId, backendSessionId });
+      },
       uploadAttachment: async (runId: string, file: File) => {
         await uploadAttachmentMutation.mutateAsync({ runId, file });
       },
@@ -512,12 +1056,71 @@ export function useRunsDashboardState() {
     },
     runs,
     runsQuery,
-    selectedRunActiveTask: activeTask,
+    detailSettling,
     selectedRunId,
+    selectedDrawerView,
+    selectedRunGroupAttachmentsQuery,
+    selectedRunCanResume,
+    selectedRunPrimaryActionAvailable,
     selectedRunQuery,
-    settings,
-    streamStale,
-    updateSettings,
+    setResumeMessageDraft,
+    setResumeMessageExpanded,
+    streamStale: summaryStreamStale || detailStreamStale || timelineState.stale,
+    submitSelectedRunResume,
+    timelineState,
+    triggerSelectedRunPrimaryAction,
+    returnSelectedRunToAttachments: () => {
+      if (!selectedRunId) {
+        return;
+      }
+      setSelectedRunDrawerView(selectedRunId, {
+        mode: "detail",
+        detailSection: "attachments",
+        attachmentId: null,
+        attachmentOwnerRunId: null,
+      });
+    },
+    resetBoardFilters: () => {
+      updateViewState({ search: "" });
+      updatePreferences({
+        showArchived: false,
+        showPinnedOnly: false,
+        structuredFilters: EMPTY_DASHBOARD_STRUCTURED_FILTERS,
+      });
+    },
+    setActiveBoardColumnKey: (columnKey: string | null) => {
+      if (viewState.activeBoardColumnKey === columnKey) {
+        return;
+      }
+      updateViewState({ activeBoardColumnKey: columnKey });
+    },
+    toggleDrawerFullscreen: () => {
+      updateViewState({ drawerFullscreen: !viewState.drawerFullscreen });
+    },
+    updateSelectedRunDetailSection: (detailSection: DrawerDetailSection) => {
+      if (!selectedRunId) {
+        return;
+      }
+      setSelectedRunDrawerView(selectedRunId, {
+        mode: "detail",
+        detailSection,
+        attachmentId: null,
+        attachmentOwnerRunId: null,
+      });
+    },
+    toggleStructuredFilter: (key: keyof DashboardStructuredFilters, value: string) => {
+      updatePreferences({
+        structuredFilters: toggleDashboardStructuredFilter(
+          preferences.structuredFilters,
+          key,
+          value,
+        ),
+      });
+    },
+    updatePreferences,
+    updateViewState,
     visibleRuns,
+    viewState,
+    closeSelectedRunResumeDialog: closeResumeDialog,
   };
 }

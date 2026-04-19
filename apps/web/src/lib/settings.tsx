@@ -1,19 +1,86 @@
 import type { ReactNode } from "react";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 
-export interface BoardSettings {
-  repo: string;
-  showArchived: boolean;
+export interface DashboardPreferences {
   hideEmptyColumns: boolean;
   collapseFailureStates: boolean;
-  collapsedColumnKeys: string[];
-  search: string;
-  drawerWidth: number;
+  showArchived: boolean;
+  showPinnedOnly: boolean;
+  sortByRecentUpdates: boolean;
+  visibleFocusIndicators: boolean;
+  structuredFilters: DashboardStructuredFilters;
 }
 
+export type DashboardPreferenceKey = keyof DashboardPreferences;
+
+export interface DashboardStructuredFilters {
+  repo: string | null;
+  agent: string | null;
+  backend: string | null;
+}
+
+export const EMPTY_DASHBOARD_STRUCTURED_FILTERS: DashboardStructuredFilters = {
+  repo: null,
+  agent: null,
+  backend: null,
+};
+
+export type DrawerDetailSection = "tasks" | "notes" | "attachments" | "dependencies" | "events";
+
+export type RunDrawerView =
+  | {
+      mode: "detail";
+      detailSection: DrawerDetailSection;
+      attachmentId: null;
+      attachmentOwnerRunId: null;
+    }
+  | {
+      mode: "attachment";
+      detailSection: "attachments";
+      attachmentId: string;
+      attachmentOwnerRunId: string;
+    };
+
+export interface DashboardViewState {
+  search: string;
+  collapsedColumnKeys: string[];
+  drawerWidth: number;
+  drawerFullscreen: boolean;
+  drawerViewsByRunId: Record<string, RunDrawerView>;
+  activeBoardColumnKey: string | null;
+}
+
+export const DEFAULT_DRAWER_VIEW: RunDrawerView = {
+  mode: "detail",
+  detailSection: "tasks",
+  attachmentId: null,
+  attachmentOwnerRunId: null,
+};
+
 export const DRAWER_WIDTH_MIN = 360;
-export const DRAWER_WIDTH_MAX = 1200;
+export const DRAWER_WIDTH_MAX = 2400;
 export const DRAWER_WIDTH_DEFAULT = 540;
+export const DRAWER_SIDEBAR_ALLOWANCE = 56;
+export const DRAWER_BOARD_MIN = 280;
+
+export const DEFAULT_DASHBOARD_PREFERENCES: DashboardPreferences = {
+  hideEmptyColumns: true,
+  collapseFailureStates: true,
+  showArchived: false,
+  showPinnedOnly: false,
+  sortByRecentUpdates: false,
+  visibleFocusIndicators: false,
+  structuredFilters: EMPTY_DASHBOARD_STRUCTURED_FILTERS,
+};
+
+export const DEFAULT_DASHBOARD_VIEW_STATE: DashboardViewState = {
+  search: "",
+  collapsedColumnKeys: [],
+  drawerWidth: DRAWER_WIDTH_DEFAULT,
+  drawerFullscreen: false,
+  drawerViewsByRunId: {},
+  activeBoardColumnKey: null,
+};
 
 export function clampDrawerWidth(value: number): number {
   if (!Number.isFinite(value)) {
@@ -22,98 +89,229 @@ export function clampDrawerWidth(value: number): number {
   return Math.min(DRAWER_WIDTH_MAX, Math.max(DRAWER_WIDTH_MIN, Math.round(value)));
 }
 
-const STORAGE_KEY = "task-runner:web:board-settings";
-
-const DEFAULT_SETTINGS: BoardSettings = {
-  repo: "all",
-  showArchived: false,
-  hideEmptyColumns: true,
-  collapseFailureStates: true,
-  collapsedColumnKeys: [],
-  search: "",
-  drawerWidth: DRAWER_WIDTH_DEFAULT,
-};
-
-interface BoardSettingsContextValue {
-  settings: BoardSettings;
-  updateSettings: (updates: Partial<BoardSettings>) => void;
+export function computeDrawerMaxWidth(viewportWidth: number): number {
+  const available = viewportWidth - DRAWER_SIDEBAR_ALLOWANCE - DRAWER_BOARD_MIN;
+  return Math.min(DRAWER_WIDTH_MAX, Math.max(DRAWER_WIDTH_MIN, Math.round(available)));
 }
 
-const BoardSettingsContext = createContext<BoardSettingsContextValue | null>(null);
+const PREFERENCES_STORAGE_KEY = "task-runner:web:dashboard-preferences";
+const VIEW_STATE_STORAGE_KEY = "task-runner:web:dashboard-view-state";
 
-function loadSettings(): BoardSettings {
+interface DashboardPreferencesContextValue {
+  preferences: DashboardPreferences;
+  updatePreferences: (updates: Partial<DashboardPreferences>) => void;
+  resetPreferences: () => void;
+  resetPreference: (key: DashboardPreferenceKey) => void;
+}
+
+interface DashboardViewStateContextValue {
+  viewState: DashboardViewState;
+  updateViewState: (
+    updates:
+      | Partial<DashboardViewState>
+      | ((current: DashboardViewState) => Partial<DashboardViewState>),
+  ) => void;
+}
+
+const DashboardPreferencesContext = createContext<DashboardPreferencesContextValue | null>(null);
+const DashboardViewStateContext = createContext<DashboardViewStateContextValue | null>(null);
+
+function loadDashboardPreferences(): DashboardPreferences {
   if (typeof window === "undefined") {
-    return DEFAULT_SETTINGS;
+    return DEFAULT_DASHBOARD_PREFERENCES;
   }
 
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = window.localStorage.getItem(PREFERENCES_STORAGE_KEY);
     if (!raw) {
-      return DEFAULT_SETTINGS;
+      return DEFAULT_DASHBOARD_PREFERENCES;
     }
-    const parsed = JSON.parse(raw);
-    return parseStoredSettings(parsed);
+    return parseStoredDashboardPreferences(JSON.parse(raw));
   } catch {
-    return DEFAULT_SETTINGS;
+    return DEFAULT_DASHBOARD_PREFERENCES;
   }
 }
 
-function parseStringArray(value: unknown): string[] {
-  return Array.isArray(value) && value.every((entry) => typeof entry === "string") ? value : [];
+function loadDashboardViewState(): DashboardViewState {
+  if (typeof window === "undefined") {
+    return DEFAULT_DASHBOARD_VIEW_STATE;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(VIEW_STATE_STORAGE_KEY);
+    if (!raw) {
+      return DEFAULT_DASHBOARD_VIEW_STATE;
+    }
+    return parseStoredDashboardViewState(JSON.parse(raw));
+  } catch {
+    return DEFAULT_DASHBOARD_VIEW_STATE;
+  }
 }
 
-function parseStoredSettings(value: unknown): BoardSettings {
+function parseStoredDashboardPreferences(value: unknown): DashboardPreferences {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return DEFAULT_SETTINGS;
+    return DEFAULT_DASHBOARD_PREFERENCES;
   }
 
   const record = value as Record<string, unknown>;
   return {
-    repo: typeof record.repo === "string" ? record.repo : DEFAULT_SETTINGS.repo,
-    showArchived:
-      typeof record.showArchived === "boolean"
-        ? record.showArchived
-        : DEFAULT_SETTINGS.showArchived,
     hideEmptyColumns:
       typeof record.hideEmptyColumns === "boolean"
         ? record.hideEmptyColumns
-        : DEFAULT_SETTINGS.hideEmptyColumns,
+        : DEFAULT_DASHBOARD_PREFERENCES.hideEmptyColumns,
     collapseFailureStates:
       typeof record.collapseFailureStates === "boolean"
         ? record.collapseFailureStates
-        : DEFAULT_SETTINGS.collapseFailureStates,
-    collapsedColumnKeys: parseStringArray(record.collapsedColumnKeys),
-    search: typeof record.search === "string" ? record.search : DEFAULT_SETTINGS.search,
-    drawerWidth: clampDrawerWidth(
-      typeof record.drawerWidth === "number" ? record.drawerWidth : DEFAULT_SETTINGS.drawerWidth,
-    ),
+        : DEFAULT_DASHBOARD_PREFERENCES.collapseFailureStates,
+    showArchived:
+      typeof record.showArchived === "boolean"
+        ? record.showArchived
+        : DEFAULT_DASHBOARD_PREFERENCES.showArchived,
+    showPinnedOnly:
+      typeof record.showPinnedOnly === "boolean"
+        ? record.showPinnedOnly
+        : DEFAULT_DASHBOARD_PREFERENCES.showPinnedOnly,
+    sortByRecentUpdates:
+      typeof record.sortByRecentUpdates === "boolean"
+        ? record.sortByRecentUpdates
+        : DEFAULT_DASHBOARD_PREFERENCES.sortByRecentUpdates,
+    visibleFocusIndicators:
+      typeof record.visibleFocusIndicators === "boolean"
+        ? record.visibleFocusIndicators
+        : DEFAULT_DASHBOARD_PREFERENCES.visibleFocusIndicators,
+    structuredFilters: parseStoredStructuredFilters(record.structuredFilters),
   };
 }
 
-export function BoardSettingsProvider({ children }: { children: ReactNode }) {
-  const [settings, setSettings] = useState<BoardSettings>(() => loadSettings());
+function parseStoredStructuredFilters(value: unknown): DashboardStructuredFilters {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return EMPTY_DASHBOARD_STRUCTURED_FILTERS;
+  }
 
-  useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
-  }, [settings]);
-
-  const value = useMemo<BoardSettingsContextValue>(
-    () => ({
-      settings,
-      updateSettings: (updates) => {
-        setSettings((current) => ({ ...current, ...updates }));
-      },
-    }),
-    [settings],
-  );
-
-  return <BoardSettingsContext.Provider value={value}>{children}</BoardSettingsContext.Provider>;
+  const record = value as Record<string, unknown>;
+  return {
+    repo: parseStoredStructuredFilterValue(record.repo),
+    agent: parseStoredStructuredFilterValue(record.agent),
+    backend: parseStoredStructuredFilterValue(record.backend),
+  };
 }
 
-export function useBoardSettings() {
-  const context = useContext(BoardSettingsContext);
+function parseStoredStructuredFilterValue(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function parseStoredDashboardViewState(value: unknown): DashboardViewState {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return DEFAULT_DASHBOARD_VIEW_STATE;
+  }
+
+  const record = value as Record<string, unknown>;
+  return {
+    ...DEFAULT_DASHBOARD_VIEW_STATE,
+    collapsedColumnKeys: Array.isArray(record.collapsedColumnKeys)
+      ? record.collapsedColumnKeys.filter((key): key is string => typeof key === "string")
+      : DEFAULT_DASHBOARD_VIEW_STATE.collapsedColumnKeys,
+  };
+}
+
+export function hasActiveDashboardStructuredFilters(
+  structuredFilters: DashboardStructuredFilters,
+): boolean {
+  return (
+    structuredFilters.repo !== null ||
+    structuredFilters.agent !== null ||
+    structuredFilters.backend !== null
+  );
+}
+
+export function toggleDashboardStructuredFilter(
+  structuredFilters: DashboardStructuredFilters,
+  key: keyof DashboardStructuredFilters,
+  value: string,
+): DashboardStructuredFilters {
+  return {
+    ...structuredFilters,
+    [key]: structuredFilters[key] === value ? null : value,
+  };
+}
+
+export function DashboardSettingsProvider({ children }: { children: ReactNode }) {
+  const [preferences, setPreferences] = useState<DashboardPreferences>(() =>
+    loadDashboardPreferences(),
+  );
+  const [viewState, setViewState] = useState<DashboardViewState>(() => loadDashboardViewState());
+
+  useEffect(() => {
+    window.localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(preferences));
+  }, [preferences]);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      VIEW_STATE_STORAGE_KEY,
+      JSON.stringify({
+        collapsedColumnKeys: viewState.collapsedColumnKeys,
+      }),
+    );
+  }, [viewState.collapsedColumnKeys]);
+
+  const preferencesValue = useMemo<DashboardPreferencesContextValue>(
+    () => ({
+      preferences,
+      updatePreferences: (updates) => {
+        setPreferences((current) => ({ ...current, ...updates }));
+      },
+      resetPreferences: () => {
+        setPreferences(DEFAULT_DASHBOARD_PREFERENCES);
+      },
+      resetPreference: (key) => {
+        setPreferences((current) => ({
+          ...current,
+          [key]: DEFAULT_DASHBOARD_PREFERENCES[key],
+        }));
+      },
+    }),
+    [preferences],
+  );
+
+  const viewStateValue = useMemo<DashboardViewStateContextValue>(
+    () => ({
+      viewState,
+      updateViewState: (updates) => {
+        setViewState((current) => ({
+          ...current,
+          ...(typeof updates === "function" ? updates(current) : updates),
+        }));
+      },
+    }),
+    [viewState],
+  );
+
+  return (
+    <DashboardPreferencesContext.Provider value={preferencesValue}>
+      <DashboardViewStateContext.Provider value={viewStateValue}>
+        {children}
+      </DashboardViewStateContext.Provider>
+    </DashboardPreferencesContext.Provider>
+  );
+}
+
+export function useDashboardPreferences() {
+  const context = useContext(DashboardPreferencesContext);
   if (!context) {
-    throw new Error("Board settings context is unavailable");
+    throw new Error("Dashboard preferences context is unavailable");
+  }
+  return context;
+}
+
+export function useDashboardViewState() {
+  const context = useContext(DashboardViewStateContext);
+  if (!context) {
+    throw new Error("Dashboard view state context is unavailable");
   }
   return context;
 }

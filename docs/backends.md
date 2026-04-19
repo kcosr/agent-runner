@@ -1,186 +1,162 @@
 # Backends
 
-task-runner ships with four backends. Each is an adapter over a
-different agent runtime; the run loop only sees the common backend
-interface (`invoke`, `validateSessionId`, interrupt semantics).
+A backend is the runtime that executes the worker. task-runner ships with
+five backends; each owns its own CLI/RPC shape, session handle, and cwd
+binding semantics.
 
-| Backend | Wraps | Session id source | Bootstrap import |
-|---|---|---|---|
-| [`claude`](#claude) | `claude --print --output-format stream-json` | Claude system init event | ✅ (JSONL file stat) |
-| [`codex`](#codex) | codex JSON-RPC app-server (stdio or WS) | Codex thread id | ✅ (`thread/read` + cwd match) |
-| [`cursor`](#cursor) | `cursor-agent -p --output-format stream-json` | First non-empty `session_id` output | ❌ (ids not self-validating) |
-| [`passive`](#passive) | nothing — null object | N/A | N/A |
+| Backend   | Binary / Transport                   | Session handle        |
+|-----------|--------------------------------------|-----------------------|
+| `claude`  | `claude` CLI (`--print`, streaming)  | session UUID on disk  |
+| `codex`   | `codex app-server` (stdio or WS)     | thread id             |
+| `cursor`  | `cursor-agent` CLI                   | session id (deferred) |
+| `pi`      | `pi` CLI (`--mode rpc`)              | session id + cwd hdr  |
+| `passive` | none                                 | free-form string      |
 
-## Claude
+## Selection
 
-Wraps the `claude` CLI in `--print --output-format stream-json` mode.
-Streams partial assistant text to stdout, captures the session id from
-the system init event, persists it for resume, and uses `--resume <id>`
-to continue.
+A backend is chosen by (in order of precedence):
 
-Set `TASK_RUNNER_CLAUDE_BIN` to use a custom binary.
+1. `--backend <id>` on the CLI (ad-hoc agent synthesis).
+2. `agent.backend` in the agent frontmatter.
 
-## Codex
+Valid backend ids: `claude`, `codex`, `cursor`, `pi`, `passive`.
 
-Speaks the codex JSON-RPC app-server protocol in managed mode. Default
-transport is stdio (spawns the `codex` CLI as a subprocess); set
-`TASK_RUNNER_CODEX_WS_URL=ws://host:port` to connect to a running
-app-server over WebSocket instead.
+## Common env and overrides
 
-Codex over WebSocket has a useful property: multiple clients can attach
-to the same thread, so you can connect with the codex CLI in another
-terminal and watch or even interact while task-runner is driving the
-agent.
+All non-passive backends accept per-agent:
 
-If you cancel the turn from another client mid-attempt, task-runner
-notices the external interrupt and stops cleanly with status `aborted`
-instead of retrying — see [resume.md#external-interrupt-codex-only](resume.md#external-interrupt-codex-only).
+- `model` — backend-specific model id (optional)
+- `effort` — mapped per backend (see below)
+- `timeoutSec` — per-attempt wall-clock budget
+- `unrestricted` — pass a safety bypass flag to the underlying CLI
 
-The runner sends `thread/start` (or `thread/resume`) at session start,
-optionally `thread/name/set` if the run has a persisted `name`, then
-`turn/start` for each attempt and `turn/interrupt` on timeout, abort,
-or external Ctrl+C.
+Every backend receives a `cwd`, a resume session id (when present), and a
+display name. Session state is bound to the resolved cwd.
 
-## Cursor
+## `claude`
 
-Wraps `cursor-agent` in public headless print mode:
+- Binary: `$TASK_RUNNER_CLAUDE_BIN` or `claude`.
+- Args: `--print --output-format stream-json --verbose
+  [--model ...] [--effort ...] [--dangerously-skip-permissions]
+  [--name ...] [--resume <session-id>] <prompt>`
+- Session id captured from JSON stream events.
+- Sessions are stored under Claude's project directory encoded from the
+  cwd (`/` and `.` → `-`). Resume is validated against that on-disk path.
+- Effort mapping: `off` → no flag; `minimal` / `low` → `low`; `medium`,
+  `high`, `max` map to themselves; `xhigh` → `max`.
 
-```bash
-cursor-agent -p --trust --output-format stream-json --stream-partial-output \
-  --workspace <cwd> [--model <id>] [--force] [--resume <session-id>] "<prompt>"
-```
+## `codex`
 
-- Streams only `partial_output` deltas to the terminal as
-  `agent_message_delta`.
-- Captures the first non-empty `session_id` from any output record and
-  persists it for normal task-runner resume.
-- Uses the final `result.result` string as the canonical attempt
-  transcript; successful runs without that field are treated as backend
-  errors instead of guessing from partial output.
-- Strips any provider prefix from `--model` before forwarding it
-  (for example `provider/foo` → `foo`).
-- Accepts task-runner's `--effort` surface but ignores it for Cursor
-  v1 because the public CLI does not expose an effort flag.
-- Maps `--unrestricted` to `cursor-agent --force`.
-- Does **not** support bootstrap `--backend-session-id` import; only
-  task-runner-created Cursor runs with a captured session id can be
-  resumed.
+- Transport is chosen from the resolved structured
+  `backendSpecific.codex.transport` contract:
+  - `{ type: "stdio" }` spawns `$TASK_RUNNER_CODEX_BIN` (default
+    `codex`) with `app-server
+    [--dangerously-bypass-approvals-and-sandbox]`.
+  - `{ type: "ws", url }` connects to a remote Codex app-server over an
+    absolute `ws://` or `wss://` URL.
+- Fresh-run precedence:
+  - Embedded CLI: agent frontmatter
+    `backendSpecific.codex.transport` →
+    `TASK_RUNNER_CODEX_WS_URL` →
+    stdio default.
+  - Connected / daemon-owned CLI: agent frontmatter
+    `backendSpecific.codex.transport` →
+    daemon request override
+    `overrides.backendSpecific.codex.transport` →
+    daemon process `TASK_RUNNER_CODEX_WS_URL` →
+    stdio default.
+- The connected CLI only synthesizes that daemon override for Codex, and
+  only from the caller's local `TASK_RUNNER_CODEX_WS_URL`. This does not
+  add generic env passthrough and does not affect other backends.
+- Uses JSON-RPC 2.0 with a thread/turn model:
+  `thread/start`, `thread/resume`, `thread/read`, `turn/start`,
+  `thread/name/set`.
+- Session handle is the thread id.
+- Resume validates the thread exists and the cwd matches exactly via
+  `thread/read`.
+- The resolved transport is frozen into the manifest and reset seed at
+  fresh-run/init time. Resume and execute-after-init reuse that frozen
+  transport even if later client or daemon env changes.
+- Detects external interrupts when another client cancels the turn, and
+  authentication failures via stderr markers.
+- Effort mapping: `minimal`, `low`, `medium`, `high`, `xhigh`; `max` →
+  `xhigh`.
 
-Set `TASK_RUNNER_CURSOR_BIN` to use a custom Cursor binary.
+## `cursor`
 
-## Passive
+- Binary: `$TASK_RUNNER_CURSOR_BIN` or `cursor-agent`.
+- Args: `-p --trust --output-format stream-json --stream-partial-output
+  --workspace <cwd> [--model ...] [--force] [--resume <session-id>]
+  <prompt>`
+- Session id extracted from JSON stream events.
+- No effort support.
+- No session-on-disk validation; resume validity is determined on first
+  invocation.
 
-A null-object backend for runs that task-runner will never execute.
-The agent doing the work is something else entirely — your IDE's
-inline assistant (Cursor, Windsurf, Copilot), an interactive Claude
-Code or Codex session, a one-off script, or any other tool you'd
-already be using. task-runner contributes only the structured task
-list and the manifest that backs it; the actual reasoning and code
-edits happen wherever you normally do them.
+## `pi`
 
-### When to choose passive
+- Binary: `$TASK_RUNNER_PI_BIN` or `pi`.
+- Args: `--mode rpc --no-themes [--model ...] [--thinking <effort>]
+  [--session <session-id>]`
+- RPC commands: `get_state`, `set_session_name`, `prompt`. Events:
+  `message_start`, `message_update`, `message_end`, `agent_end`,
+  `extension_ui_request`, `extension_error`.
+- Session storage: under `PI_HOME` (or `~/.pi`) at
+  `agent/sessions/<cwd-encoded>/<session-id>.jsonl`. The cwd encoding
+  replaces `/` with `-` and wraps the whole path in `--...--` sentinels.
+- Resume requires the session file to exist and its header `cwd` to match
+  the current run cwd exactly. Mismatches are rejected.
+- When bootstrap-importing an existing session via
+  `--backend-session-id`, the same cwd validation applies.
+- Effort mapping: each level maps through `--thinking off|minimal|low|
+  medium|high|xhigh`.
+- Unsupported extension UI prompts from Pi are automatically cancelled
+  so they do not stall the run; installed extensions remain usable.
 
-Passive mode is the right pick whenever you want to **stay in the
-agent tool you already use** while still getting the structured
-delivery contract task-runner provides. It is the inverse of the
-**fire-and-wait** pattern (`task-runner run --backend
-claude/codex/cursor`, hand off a self-contained job and wait for the
-runner to drive the agent end-to-end). Here, *you* stay in the
-driver's seat and task-runner is the structured state alongside.
+## `passive`
 
-Good fits:
+The passive backend is a null-object backend. It never invokes an
+external process. Passive runs can be initialized (`task-runner init`) or
+driven by an outer tool, and all task state is mutated through the task
+CLI. Calling `run --resume-run` on a passive run is rejected.
 
-- **Your IDE assistant or interactive coding agent is the primary
-  driver.** Keep working in Cursor / Claude Code / Codex exactly as
-  you do today; the passive task-runner manifest sits alongside as
-  the durable checklist the agent reads and updates between turns.
-  No new tool to learn, no interruption to your loop.
-- **The task list needs to survive context compaction.** Long
-  interactive sessions hit compaction, and "what was I supposed to
-  deliver?" is exactly the kind of detail that gets summarized away.
-  A passive task-runner manifest is the stable answer — the agent
-  can re-read it via `task-runner status` or `task list` after any
-  compaction and pick the plan back up exactly where it was.
-- **You want a delivery contract without enforcement.** Unlike
-  `task-runner run`, passive mode does not loop, retry, or nudge.
-  The list is a reminder and an audit trail, not a programmatic
-  gate. If the agent skips a task it stays `pending` and you handle
-  it next session.
-- **You want to compose with active backends mid-session.** A passive
-  driver session can still spawn active runs as subagents — e.g.,
-  the interactive agent fires off `task-runner run --backend codex
-  --assignment code-review/...` for a focused review pass, waits for
-  it, and folds the result back into its own session.
-
-Declare a passive agent like any other:
-
-```yaml
----
-schemaVersion: 1
-name: my-passive-agent
-backend: passive
-lockedFields:
-  - backend
----
-Role instructions for the external driver (a human reader or the
-agent that will run the task list).
-```
-
-### Passive-specific behavior
-
-- **`task-runner run` is rejected** on passive agents with a clear
-  pointer to `init` and `task set`. Applies to fresh runs and
-  `--resume-run` alike.
-- **`task-runner run reset` is allowed** on passive runs. It restores
-  the original initialized task set, keeps the run externally driven,
-  and clears prior task-history-derived terminal state back to
-  `initialized`.
-- **`task-runner init` no longer prints the full worker handoff to
-  stdout.** Fetch it explicitly with `task-runner brief <run-id>` —
-  that's the canonical text-only surface for initialized, running,
-  and terminal runs alike, so an external driver can re-orient after
-  context compaction by calling `brief` again.
-- **`task set` / `task add` auto-finalize** the run. After every
-  mutation, the manifest status is re-derived from the task map:
-  - any `pending` or `in_progress` task → `initialized`
-  - all terminal, at least one `blocked` → `blocked` (exit code 2)
-  - all `completed` → `success` (exit code 0)
-
-  Self-healing: reopening a completed task or adding a new one on a
-  `success` run flips the status back to `initialized`.
-- **Locking `backend`** in the agent's `lockedFields` is strongly
-  recommended. It prevents callers from overriding the backend at
-  `init` time (e.g. `--backend claude`) and turning a passive agent
-  into an executable one. The bundled `agents/passive-example/` does
-  this.
-- **Hidden status fields**: `task-runner status` omits the `Attempts:`
-  and `Sessions:` lines for passive runs since they're always zero.
-
-### Sidecar driver loop
+Passive-only metadata mutations:
 
 ```bash
-# 1. Prepare the run (no backend call; prints the run id on stderr
-#    and, in --output-format json, as JSON on stdout)
-RUN=$(task-runner init \
-  --agent ./agents/passive-example/agent.md \
-  --assignment ./assignments/repo-orientation/assignment.md \
-  --var repo_path=. --output-format json | jq -r .runId)
-
-# 2. Fetch the worker brief (hand this to the external agent)
-task-runner brief $RUN > /tmp/brief.txt
-
-# 3. Walk the task list (agent-specific logic omitted)
-task-runner task set $RUN read_conventions --status in_progress
-# ...do the work...
-task-runner task set $RUN read_conventions --status completed --notes "..."
-
-# 4. Re-fetch the brief any time — useful after context compaction.
-task-runner brief $RUN
-
-# 5. When every task is terminal, the run auto-finalizes.
-task-runner status $RUN | grep "Status: success"
+task-runner run set-backend-session <id> <session-id>
+task-runner run clear-backend-session <id>
 ```
 
-See [tasks.md#sidecar-pattern](tasks.md#sidecar-pattern) for the
-generic (non-passive) sidecar pattern that also works with claude or
-codex backends.
+These let an external driver record the session id it is tracking
+without perturbing task state.
+
+## Environment variables
+
+| Variable                       | Effect |
+|--------------------------------|--------|
+| `TASK_RUNNER_CLAUDE_BIN`       | Claude CLI binary (default `claude`) |
+| `TASK_RUNNER_CODEX_BIN`        | Codex stdio binary (default `codex`) |
+| `TASK_RUNNER_CODEX_WS_URL`     | Fresh Codex runs use this as the default websocket transport when no explicit `backendSpecific.codex.transport` was authored |
+| `TASK_RUNNER_CURSOR_BIN`       | Cursor CLI binary (default `cursor-agent`) |
+| `TASK_RUNNER_PI_BIN`           | Pi CLI binary (default `pi`) |
+| `PI_HOME`                      | Pi session storage root (default `~/.pi`) |
+
+See [configuration.md](configuration.md) for the full env var catalog.
+
+## Recursion guard
+
+Backends that themselves can invoke `task-runner` (e.g. Claude in an agent
+loop) could in principle recurse indefinitely. task-runner enforces a
+`TASK_RUNNER_MAX_CALL_DEPTH` (default `1`) via a child env var
+`TASK_RUNNER_CALL_DEPTH` that is incremented on each nested invocation.
+Deeper recursion is rejected with a `RecursionDepthError`. See
+[configuration.md](configuration.md#recursion-guard).
+
+## Picking a backend
+
+- Use `passive` whenever the work is driven externally (outer agent,
+  manual operator, external orchestrator). You still get full manifest,
+  attachments, dependencies, and audit trail.
+- Use `claude`, `codex`, `cursor`, or `pi` for interactive backend
+  invocation. Pick the backend that corresponds to the CLI/app-server you
+  have installed and authenticated.

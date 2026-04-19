@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { execFileSync, spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
@@ -10,12 +10,13 @@ import WebSocket, { WebSocketServer } from "ws";
 import { DaemonClient, DaemonRpcError } from "../apps/cli/dist/daemon/client.js";
 import { deriveHttpBaseUrl } from "../apps/cli/dist/daemon/config.js";
 import { serveDaemon } from "../apps/cli/dist/daemon/server.js";
-import { streamRunEvents } from "../apps/cli/dist/daemon/sse.js";
+import { streamEvents } from "../apps/cli/dist/daemon/sse.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import { sharedRuntimeEnv, withEnv } from "./helpers/runtime-paths.mjs";
 
 const CLI_PATH = resolvePath(new URL("../apps/cli/dist/cli.js", import.meta.url).pathname);
+const CLI_WEB_ROOT = resolvePath(new URL("../apps/cli/dist/web", import.meta.url).pathname);
 
 const AGENT = `---
 schemaVersion: 1
@@ -24,6 +25,14 @@ backend: claude
 model: claude-sonnet-4-6
 ---
 Daemon agent.
+`;
+
+const PASSIVE_AGENT = `---
+schemaVersion: 1
+name: passive-daemon-agent
+backend: passive
+---
+Passive daemon agent.
 `;
 
 const ASSIGNMENT = `---
@@ -53,9 +62,9 @@ function writeAssignment(baseDir, name, body) {
   writeFileSync(join(dir, "assignment.md"), body);
 }
 
-async function initRun(baseDir) {
+async function initRun(baseDir, agentName = "daemon-agent") {
   return withEnv(sharedRuntimeEnv(baseDir), async () => {
-    const loaded = loadAgentConfig("daemon-agent", baseDir);
+    const loaded = loadAgentConfig(agentName, baseDir);
     const loadedAssignment = loadAssignmentConfig("daemon-work", baseDir);
     const originalCwd = process.cwd();
     process.chdir(baseDir);
@@ -65,7 +74,7 @@ async function initRun(baseDir) {
         loadedAssignment,
         cliVars: {},
         backend: {
-          id: "mock",
+          id: loaded.config.backend,
           async invoke() {
             throw new Error("backend should not be invoked during init");
           },
@@ -87,6 +96,44 @@ function patchManifest(workspaceDir, mutator) {
   const manifest = readManifest(workspaceDir);
   mutator(manifest);
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+async function withSeededFrontendDist(fn) {
+  const indexPath = join(CLI_WEB_ROOT, "index.html");
+  const assetPath = join(CLI_WEB_ROOT, "assets", "daemon-test.js");
+  const createdPaths = [];
+
+  mkdirSync(join(CLI_WEB_ROOT, "assets"), { recursive: true });
+  if (!existsSync(indexPath)) {
+    writeFileSync(
+      indexPath,
+      [
+        "<!doctype html>",
+        '<html lang="en">',
+        "  <head>",
+        '    <meta charset="utf-8" />',
+        "    <title>task-runner</title>",
+        '    <script type="module" src="/assets/daemon-test.js"></script>',
+        "  </head>",
+        '  <body><div id="root"></div></body>',
+        "</html>",
+        "",
+      ].join("\n"),
+    );
+    createdPaths.push(indexPath);
+  }
+  if (!existsSync(assetPath)) {
+    writeFileSync(assetPath, 'console.log("daemon test asset");\n');
+    createdPaths.push(assetPath);
+  }
+
+  try {
+    return await fn({ assetPath, indexPath });
+  } finally {
+    for (const path of createdPaths.reverse()) {
+      rmSync(path, { force: true });
+    }
+  }
 }
 
 async function freePort() {
@@ -183,6 +230,51 @@ async function openSse(baseUrl, path) {
       } catch {
         // Connection teardown may surface as a stream read error instead of EOF.
       }
+    },
+  };
+}
+
+async function openSseFrames(baseUrl, path) {
+  const controller = new AbortController();
+  const response = await fetch(new URL(path, baseUrl), {
+    headers: { accept: "text/event-stream" },
+    signal: controller.signal,
+  });
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type") ?? "", /text\/event-stream/);
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  return {
+    async next() {
+      while (true) {
+        const boundary = buffer.indexOf("\n\n");
+        if (boundary !== -1) {
+          const frame = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          const idLine = frame.split("\n").find((line) => line.startsWith("id: "));
+          const dataLine = frame.split("\n").find((line) => line.startsWith("data: "));
+          if (!dataLine) {
+            continue;
+          }
+          return {
+            id: idLine ? idLine.slice(4) : null,
+            data: JSON.parse(dataLine.slice(6)),
+          };
+        }
+
+        const { done, value } = await reader.read();
+        if (done) {
+          throw new Error("SSE stream ended before next frame");
+        }
+        buffer += decoder.decode(value, { stream: true });
+      }
+    },
+    async close() {
+      controller.abort();
+      await reader.cancel().catch(() => undefined);
     },
   };
 }
@@ -295,8 +387,15 @@ async function startCliDaemon(baseDir, listenUrl) {
 test("daemon rpc mirrors shared run and definition DTOs", async () => {
   const dir = tempDir();
   writeAgent(dir, "daemon-agent", AGENT);
+  writeAgent(dir, "passive-daemon-agent", PASSIVE_AGENT);
   writeAssignment(dir, "daemon-work", ASSIGNMENT);
   const init = await initRun(dir);
+  const passiveInit = await initRun(dir, "passive-daemon-agent");
+  const otherCwd = join(dir, "other-cwd");
+  mkdirSync(otherCwd, { recursive: true });
+  patchManifest(init.workspaceDir, (manifest) => {
+    manifest.cwd = otherCwd;
+  });
 
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
@@ -309,14 +408,31 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
       assert.match(info.daemonInstanceId, /^daemon-/);
 
       const runs = await client.call("runs.list", {});
-      assert.equal(runs.runs[0].runId, init.runId);
-      assert.deepEqual(runs.runs[0].execution, {
+      assert.ok(runs.runs.some((run) => run.runId === init.runId));
+      assert.ok(runs.runs.some((run) => run.runId === passiveInit.runId));
+
+      const cwdScoped = await client.call("runs.list", {
+        scope: { kind: "cwd", cwd: otherCwd },
+      });
+      assert.deepEqual(
+        cwdScoped.runs.map((run) => run.runId),
+        [init.runId],
+      );
+
+      const globalScoped = await client.call("runs.list", {
+        scope: { kind: "global" },
+      });
+      assert.ok(globalScoped.runs.some((run) => run.runId === init.runId));
+      assert.ok(globalScoped.runs.some((run) => run.runId === passiveInit.runId));
+      assert.deepEqual(runs.runs.find((run) => run.runId === init.runId)?.execution, {
         hostMode: "embedded",
         controller: { kind: "embedded" },
       });
-      assert.deepEqual(runs.runs[0].capabilities, {
+      assert.deepEqual(runs.runs.find((run) => run.runId === init.runId)?.capabilities, {
         canArchive: true,
         canUnarchive: false,
+        canReset: true,
+        canDelete: false,
         canResume: true,
         canAbort: false,
         abortReason: "not_active_in_daemon",
@@ -326,7 +442,7 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
           canAdd: true,
         },
       });
-      assert.deepEqual(runs.runs[0].dependencyState, {
+      assert.deepEqual(runs.runs.find((run) => run.runId === init.runId)?.dependencyState, {
         ready: true,
         total: 0,
         satisfied: 0,
@@ -399,6 +515,54 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
         changed: true,
       });
 
+      const noted = await client.call("runs.setNote", {
+        target: init.runId,
+        note: "RPC note for the shared editor",
+      });
+      assert.deepEqual(noted.result, {
+        runId: init.runId,
+        note: "RPC note for the shared editor",
+        changed: true,
+      });
+
+      const pinned = await client.call("runs.setPinned", {
+        target: init.runId,
+        pinned: true,
+      });
+      assert.deepEqual(pinned.result, {
+        runId: init.runId,
+        pinned: true,
+        changed: true,
+      });
+
+      const notedDetail = await client.call("runs.get", { target: init.runId });
+      assert.equal(notedDetail.run.note, "RPC note for the shared editor");
+      assert.equal(notedDetail.run.pinned, true);
+      const notedSummary = (await client.call("runs.list", {})).runs.find(
+        (run) => run.runId === init.runId,
+      );
+      assert.equal(notedSummary?.notePresent, true);
+      assert.equal(notedSummary?.pinned, true);
+
+      const setBackendSession = await client.call("runs.setBackendSession", {
+        target: passiveInit.runId,
+        backendSessionId: "rpc-thread-9",
+      });
+      assert.deepEqual(setBackendSession.result, {
+        runId: passiveInit.runId,
+        backendSessionId: "rpc-thread-9",
+        changed: true,
+      });
+
+      const clearedBackendSession = await client.call("runs.clearBackendSession", {
+        target: passiveInit.runId,
+      });
+      assert.deepEqual(clearedBackendSession.result, {
+        runId: passiveInit.runId,
+        backendSessionId: null,
+        changed: true,
+      });
+
       const tasks = await client.call("tasks.list", { target: init.runId });
       assert.equal(tasks.tasks.length, 1);
       assert.equal(tasks.tasks[0].id, "t1");
@@ -424,11 +588,75 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
   });
 });
 
-test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async () => {
+test("connected cli sends caller cwd scope while daemon and http defaults remain global", async () => {
   const dir = tempDir();
   writeAgent(dir, "daemon-agent", AGENT);
   writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const first = await initRun(dir);
+  const otherCwd = join(dir, "other-cwd");
+  mkdirSync(otherCwd, { recursive: true });
+  const second = await initRun(dir);
+
+  patchManifest(first.workspaceDir, (manifest) => {
+    manifest.startedAt = "2026-04-12T10:00:00.000Z";
+  });
+  patchManifest(second.workspaceDir, (manifest) => {
+    manifest.startedAt = "2026-04-12T11:00:00.000Z";
+    manifest.cwd = otherCwd;
+  });
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const daemon = await startCliDaemon(dir, listenUrl);
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  try {
+    const defaultHttp = await httpJson(httpBaseUrl, "/api/runs");
+    assert.equal(defaultHttp.status, 200);
+    assert.deepEqual(
+      defaultHttp.body.runs.map((run) => run.runId),
+      [second.runId, first.runId],
+    );
+
+    const scopedHttp = await httpJson(httpBaseUrl, `/api/runs?cwd=${encodeURIComponent(otherCwd)}`);
+    assert.equal(scopedHttp.status, 200);
+    assert.deepEqual(
+      scopedHttp.body.runs.map((run) => run.runId),
+      [second.runId],
+    );
+
+    const cliDefault = runCli(["list", "runs", "--connect", listenUrl], { cwd: dir });
+    assert.equal(
+      cliDefault.trim(),
+      `${first.runId} [initialized] name=<unnamed> 0/1 repo=unknown agent=daemon-agent assignment=daemon-work`,
+    );
+    assert.doesNotMatch(cliDefault, new RegExp(second.runId));
+
+    const cliScoped = runCli(["list", "runs", "--connect", listenUrl], { cwd: otherCwd });
+    assert.match(cliScoped, new RegExp(`^${second.runId} \\[initialized\\]`, "m"));
+    assert.doesNotMatch(cliScoped, new RegExp(first.runId));
+
+    const cliGlobal = runCli(["list", "runs", "--global", "--connect", listenUrl], {
+      cwd: dir,
+    });
+    assert.match(cliGlobal, new RegExp(`^${second.runId} \\[initialized\\]`, "m"));
+    assert.match(cliGlobal, new RegExp(`^${first.runId} \\[initialized\\]`, "m"));
+
+    const statusText = runCli(["run", "status", second.runId, "--connect", listenUrl], {
+      cwd: dir,
+    });
+    assert.match(statusText, new RegExp(`── run ${second.runId} ──`));
+  } finally {
+    await daemon.stop();
+  }
+});
+
+test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAgent(dir, "passive-daemon-agent", PASSIVE_AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
   const init = await initRun(dir);
+  const passiveInit = await initRun(dir, "passive-daemon-agent");
 
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
@@ -443,21 +671,22 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
 
       const runs = await httpJson(httpBaseUrl, "/api/runs");
       assert.equal(runs.status, 200);
-      assert.equal(runs.body.runs[0].runId, init.runId);
-      assert.equal(runs.body.runs[0].status, "initialized");
-      assert.equal(runs.body.runs[0].effectiveStatus, "initialized");
-      assert.deepEqual(runs.body.runs[0].dependencyState, {
+      const initSummary = runs.body.runs.find((run) => run.runId === init.runId);
+      assert.equal(initSummary?.runId, init.runId);
+      assert.equal(initSummary?.status, "initialized");
+      assert.equal(initSummary?.effectiveStatus, "initialized");
+      assert.deepEqual(initSummary?.dependencyState, {
         ready: true,
         total: 0,
         satisfied: 0,
         unsatisfied: 0,
       });
-      assert.deepEqual(runs.body.runs[0].execution, {
+      assert.deepEqual(initSummary?.execution, {
         hostMode: "embedded",
         controller: { kind: "embedded" },
       });
-      assert.equal(runs.body.runs[0].capabilities.canAbort, false);
-      assert.equal(runs.body.runs[0].capabilities.abortReason, "not_active_in_daemon");
+      assert.equal(initSummary?.capabilities.canAbort, false);
+      assert.equal(initSummary?.capabilities.abortReason, "not_active_in_daemon");
 
       const detail = await httpJson(httpBaseUrl, `/api/runs/${init.runId}`);
       assert.equal(detail.status, 200);
@@ -542,6 +771,83 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
         name: null,
         changed: true,
       });
+
+      const noted = await httpJson(httpBaseUrl, `/api/runs/${init.runId}/note`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ note: "HTTP note for the drawer tab" }),
+      });
+      assert.equal(noted.status, 200);
+      assert.deepEqual(noted.body.result, {
+        runId: init.runId,
+        note: "HTTP note for the drawer tab",
+        changed: true,
+      });
+
+      const pinned = await httpJson(httpBaseUrl, `/api/runs/${init.runId}/pinned`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pinned: true }),
+      });
+      assert.equal(pinned.status, 200);
+      assert.deepEqual(pinned.body.result, {
+        runId: init.runId,
+        pinned: true,
+        changed: true,
+      });
+
+      const notedDetail = await httpJson(httpBaseUrl, `/api/runs/${init.runId}`);
+      assert.equal(notedDetail.status, 200);
+      assert.equal(notedDetail.body.run.note, "HTTP note for the drawer tab");
+      assert.equal(notedDetail.body.run.pinned, true);
+      const notedSummary = await httpJson(httpBaseUrl, "/api/runs");
+      assert.equal(
+        notedSummary.body.runs.find((run) => run.runId === init.runId)?.notePresent,
+        true,
+      );
+      assert.equal(notedSummary.body.runs.find((run) => run.runId === init.runId)?.pinned, true);
+
+      const setBackendSession = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${passiveInit.runId}/backend-session`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ backendSessionId: "http-thread-5" }),
+        },
+      );
+      assert.equal(setBackendSession.status, 200);
+      assert.deepEqual(setBackendSession.body.result, {
+        runId: passiveInit.runId,
+        backendSessionId: "http-thread-5",
+        changed: true,
+      });
+
+      const clearedBackendSession = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${passiveInit.runId}/backend-session/clear`,
+        {
+          method: "POST",
+        },
+      );
+      assert.equal(clearedBackendSession.status, 200);
+      assert.deepEqual(clearedBackendSession.body.result, {
+        runId: passiveInit.runId,
+        backendSessionId: null,
+        changed: true,
+      });
+
+      const invalidBackendSessionRequest = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${passiveInit.runId}/backend-session`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ backendSessionId: "   " }),
+        },
+      );
+      assert.equal(invalidBackendSessionRequest.status, 400);
+      assert.equal(invalidBackendSessionRequest.body.error.code, "INVALID_REQUEST");
 
       const tasks = await httpJson(httpBaseUrl, `/api/runs/${init.runId}/tasks`);
       assert.equal(tasks.status, 200);
@@ -648,6 +954,7 @@ test("daemon attachment HTTP routes upload, list, download, remove, and reject m
       assert.equal(listed.status, 200);
       assert.equal(listed.body.attachments.length, 1);
       assert.equal(listed.body.attachments[0].id, attachmentId);
+      assert.equal(listed.body.attachments[0].ownerRunId, init.runId);
 
       const content = await fetch(
         new URL(`/api/runs/${init.runId}/attachments/${attachmentId}/content`, httpBaseUrl),
@@ -676,7 +983,7 @@ test("daemon attachment HTTP routes upload, list, download, remove, and reject m
       });
 
       patchManifest(init.workspaceDir, (manifest) => {
-        manifest.attachments = Array.from({ length: 20 }, (_, index) => ({
+        manifest.attachments = Array.from({ length: 100 }, (_, index) => ({
           id: `att-${index}`,
           name: `existing-${index}.txt`,
           mimeType: "text/plain",
@@ -698,7 +1005,77 @@ test("daemon attachment HTTP routes upload, list, download, remove, and reject m
       const rejectedBody = await rejected.json();
       assert.equal(rejected.status, 422);
       assert.equal(rejectedBody.error.code, "INVALID_COMMAND");
-      assert.match(rejectedBody.error.message, /already has 20 attachments/);
+      assert.match(rejectedBody.error.message, /already has 100 attachments/);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+test("daemon attachment HTTP routes scope cwd listings and reject invalid cwdScope query values", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const target = await initRun(dir);
+  const peer = await initRun(dir);
+  const different = await initRun(dir);
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  patchManifest(different.workspaceDir, (manifest) => {
+    manifest.cwd = join(dir, "other-cwd");
+  });
+
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl);
+    try {
+      for (const [runId, name] of [
+        [target.runId, "target.txt"],
+        [peer.runId, "peer.txt"],
+        [different.runId, "different.txt"],
+      ]) {
+        const response = await fetch(new URL(`/api/runs/${runId}/attachments`, httpBaseUrl), {
+          method: "POST",
+          headers: {
+            "content-type": "text/plain",
+            "x-task-runner-attachment-name": name,
+          },
+          body: Buffer.from(`${name}\n`),
+        });
+        assert.equal(response.status, 200);
+      }
+
+      const scoped = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${target.runId}/attachments?cwdScope=true`,
+      );
+      assert.equal(scoped.status, 200);
+      assert.deepEqual(
+        new Set(scoped.body.attachments.map((attachment) => attachment.ownerRunId)),
+        new Set([target.runId, peer.runId]),
+      );
+      assert.equal(
+        scoped.body.attachments.some((attachment) => attachment.ownerRunId === different.runId),
+        false,
+      );
+
+      const unscoped = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${target.runId}/attachments?cwdScope=false`,
+      );
+      assert.equal(unscoped.status, 200);
+      assert.deepEqual(
+        unscoped.body.attachments.map((attachment) => attachment.ownerRunId),
+        [target.runId],
+      );
+
+      const invalid = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${target.runId}/attachments?cwdScope=maybe`,
+      );
+      assert.equal(invalid.status, 400);
+      assert.equal(invalid.body.error.code, "INVALID_REQUEST");
+      assert.match(invalid.body.error.message, /cwdScope must be "true" or "false"/);
     } finally {
       await server.close();
     }
@@ -715,42 +1092,44 @@ test("daemon serve exposes app config, keeps /api precedence, and falls back to 
   const listenUrl = `ws://127.0.0.1:${port}/`;
   const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
   await withEnv(sharedRuntimeEnv(dir), async () => {
-    const server = await serveDaemon(listenUrl);
-    try {
-      const appConfig = await httpJson(httpBaseUrl, "/app-config.json");
-      assert.equal(appConfig.status, 200);
-      assert.deepEqual(appConfig.body, {
-        apiBasePath: "/api",
-        runEventsPath: "/api/events/runs",
-      });
+    await withSeededFrontendDist(async () => {
+      const server = await serveDaemon(listenUrl);
+      try {
+        const appConfig = await httpJson(httpBaseUrl, "/app-config.json");
+        assert.equal(appConfig.status, 200);
+        assert.deepEqual(appConfig.body, {
+          apiBasePath: "/api",
+          runSummaryEventsPath: "/api/events/run-summaries",
+        });
 
-      const apiDetail = await httpJson(httpBaseUrl, `/api/runs/${init.runId}`);
-      assert.equal(apiDetail.status, 200);
-      assert.equal(apiDetail.body.run.runId, init.runId);
-      assert.equal(apiDetail.body.run.effectiveStatus, "initialized");
+        const apiDetail = await httpJson(httpBaseUrl, `/api/runs/${init.runId}`);
+        assert.equal(apiDetail.status, 200);
+        assert.equal(apiDetail.body.run.runId, init.runId);
+        assert.equal(apiDetail.body.run.effectiveStatus, "initialized");
 
-      const spaRoot = await fetch(new URL("/", httpBaseUrl));
-      const spaRootBody = await spaRoot.text();
-      assert.equal(spaRoot.status, 200);
-      assert.match(spaRoot.headers.get("content-type") ?? "", /text\/html/);
-      assert.match(spaRootBody, /<div id="root"><\/div>/);
+        const spaRoot = await fetch(new URL("/", httpBaseUrl));
+        const spaRootBody = await spaRoot.text();
+        assert.equal(spaRoot.status, 200);
+        assert.match(spaRoot.headers.get("content-type") ?? "", /text\/html/);
+        assert.match(spaRootBody, /<div id="root"><\/div>/);
 
-      const deepLink = await fetch(new URL(`/runs/${init.runId}`, httpBaseUrl));
-      const deepLinkBody = await deepLink.text();
-      assert.equal(deepLink.status, 200);
-      assert.match(deepLinkBody, /<div id="root"><\/div>/);
+        const deepLink = await fetch(new URL(`/runs/${init.runId}`, httpBaseUrl));
+        const deepLinkBody = await deepLink.text();
+        assert.equal(deepLink.status, 200);
+        assert.match(deepLinkBody, /<div id="root"><\/div>/);
 
-      const assetsDirectory = await fetch(new URL("/assets", httpBaseUrl));
-      const assetsDirectoryBody = await assetsDirectory.text();
-      assert.equal(assetsDirectory.status, 200);
-      assert.match(assetsDirectoryBody, /<div id="root"><\/div>/);
+        const assetsDirectory = await fetch(new URL("/assets", httpBaseUrl));
+        const assetsDirectoryBody = await assetsDirectory.text();
+        assert.equal(assetsDirectory.status, 200);
+        assert.match(assetsDirectoryBody, /<div id="root"><\/div>/);
 
-      const daemonAfterAssets = await httpJson(httpBaseUrl, "/api/daemon");
-      assert.equal(daemonAfterAssets.status, 200);
-      assert.equal(daemonAfterAssets.body.daemon.listenUrl, listenUrl);
-    } finally {
-      await server.close();
-    }
+        const daemonAfterAssets = await httpJson(httpBaseUrl, "/api/daemon");
+        assert.equal(daemonAfterAssets.status, 200);
+        assert.equal(daemonAfterAssets.body.daemon.listenUrl, listenUrl);
+      } finally {
+        await server.close();
+      }
+    });
   });
 });
 
@@ -758,28 +1137,26 @@ test("daemon serve reads packaged web assets from the CLI dist layout", async ()
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
   const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
-  const packagedIndex = readFileSync(
-    new URL("../apps/cli/dist/web/index.html", import.meta.url),
-    "utf8",
-  );
+  await withSeededFrontendDist(async ({ indexPath }) => {
+    const packagedIndex = readFileSync(indexPath, "utf8");
+    const server = await serveDaemon(listenUrl);
+    try {
+      const response = await fetch(new URL("/", httpBaseUrl));
+      const body = await response.text();
+      assert.equal(response.status, 200);
+      assert.equal(body, packagedIndex);
 
-  const server = await serveDaemon(listenUrl);
-  try {
-    const response = await fetch(new URL("/", httpBaseUrl));
-    const body = await response.text();
-    assert.equal(response.status, 200);
-    assert.equal(body, packagedIndex);
+      const assetPath = body.match(/\/assets\/[^"]+\.(?:js|css)/)?.[0];
+      assert.ok(assetPath, "expected built asset path in served index.html");
 
-    const assetPath = body.match(/\/assets\/[^"]+\.(?:js|css)/)?.[0];
-    assert.ok(assetPath, "expected built asset path in served index.html");
-
-    const assetResponse = await fetch(new URL(assetPath, httpBaseUrl));
-    const assetBody = await assetResponse.text();
-    assert.equal(assetResponse.status, 200);
-    assert.ok(assetBody.length > 0);
-  } finally {
-    await server.close();
-  }
+      const assetResponse = await fetch(new URL(assetPath, httpBaseUrl));
+      const assetBody = await assetResponse.text();
+      assert.equal(assetResponse.status, 200);
+      assert.ok(assetBody.length > 0);
+    } finally {
+      await server.close();
+    }
+  });
 });
 
 test("daemon HTTP rejects oversized JSON request bodies", async () => {
@@ -897,7 +1274,6 @@ test("daemon run projections expose explicit abort capability from local ownersh
         name: "Daemon-owned run",
         backendSessionId: "thread-1",
         cwd: "/tmp/fake",
-        taskMode: "file",
         unrestricted: false,
         timeoutSec: 3600,
         startedAt: "2026-04-13T05:00:00.000Z",
@@ -908,6 +1284,7 @@ test("daemon run projections expose explicit abort capability from local ownersh
         sessionCount: 1,
         tasksCompleted: 0,
         tasksTotal: 1,
+        activeTask: null,
         tasks: [
           {
             id: "t1",
@@ -919,7 +1296,6 @@ test("daemon run projections expose explicit abort capability from local ownersh
         ],
         message: null,
         callerInstructions: null,
-        pendingPrompt: null,
         lockedFields: [],
         runtimeVars: {},
         execution: {
@@ -961,6 +1337,14 @@ test("daemon run projections expose explicit abort capability from local ownersh
           endedAt: null,
           tasksCompleted: 0,
           tasksTotal: 1,
+          attachmentCount: 0,
+          dependencyState: {
+            ready: true,
+            total: 0,
+            satisfied: 0,
+            unsatisfied: 0,
+          },
+          activeTask: null,
           execution: {
             hostMode: "daemon",
             controller: {
@@ -1057,10 +1441,284 @@ test("daemon run projections expose explicit abort capability from local ownersh
   }
 });
 
+test("daemon projects active run detail as live while it owns the run", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  const runId = "daemon-live-detail";
+  let status = "initialized";
+
+  const server = await serveDaemon(listenUrl, {
+    getRun() {
+      return {
+        runId,
+        repo: "task-runner",
+        status,
+        effectiveStatus: status,
+        archivedAt: null,
+        isLive: false,
+        workspaceDir: "/tmp/fake",
+        assignmentPath: "/tmp/fake/assignment.md",
+        agent: {
+          name: "daemon-agent",
+          sourcePath: null,
+        },
+        assignment: {
+          name: "daemon-work",
+          sourcePath: "/tmp/fake/source.md",
+          workspacePath: "/tmp/fake/assignment.md",
+        },
+        backend: "codex",
+        model: "gpt-5.4",
+        effort: "high",
+        name: "Daemon live detail",
+        backendSessionId: "thread-1",
+        cwd: "/tmp/fake",
+        unrestricted: false,
+        timeoutSec: 3600,
+        startedAt: "2026-04-13T05:00:00.000Z",
+        endedAt: null,
+        exitCode: null,
+        attempts: 1,
+        maxAttempts: 1,
+        sessionCount: 1,
+        tasksCompleted: 0,
+        tasksTotal: 1,
+        activeTask: null,
+        attachments: [],
+        dependencies: [],
+        dependents: [],
+        tasks: [
+          {
+            id: "t1",
+            title: "First",
+            body: "",
+            status: "pending",
+            notes: "",
+          },
+        ],
+        message: null,
+        callerInstructions: null,
+        lockedFields: [],
+        runtimeVars: {},
+        execution: {
+          hostMode: "daemon",
+          controller: {
+            kind: "daemon",
+            daemonInstanceId: "daemon-placeholder",
+          },
+        },
+        capabilities: {
+          canArchive: false,
+          canUnarchive: false,
+          canResume: false,
+          canAbort: false,
+          abortReason: "not_active_in_daemon",
+          taskMutation: {
+            canSetStatus: false,
+            canEditNotes: false,
+            canAdd: false,
+          },
+        },
+      };
+    },
+    getRunList() {
+      return [
+        {
+          runId,
+          repo: "task-runner",
+          status,
+          effectiveStatus: status,
+          archivedAt: null,
+          agentName: "daemon-agent",
+          name: "Daemon live detail",
+          assignmentName: "daemon-work",
+          backend: "codex",
+          model: "gpt-5.4",
+          cwd: "/tmp/fake",
+          startedAt: "2026-04-13T05:00:00.000Z",
+          endedAt: null,
+          tasksCompleted: 0,
+          tasksTotal: 1,
+          attachmentCount: 0,
+          dependencyState: {
+            ready: true,
+            total: 0,
+            satisfied: 0,
+            unsatisfied: 0,
+          },
+          activeTask: null,
+          execution: {
+            hostMode: "daemon",
+            controller: {
+              kind: "daemon",
+              daemonInstanceId: "daemon-placeholder",
+            },
+          },
+          capabilities: {
+            canArchive: false,
+            canUnarchive: false,
+            canResume: false,
+            canAbort: false,
+            abortReason: "not_active_in_daemon",
+            taskMutation: {
+              canSetStatus: false,
+              canEditNotes: false,
+              canAdd: false,
+            },
+          },
+        },
+      ];
+    },
+    async startRun({ emitEvent, abortSignal }) {
+      status = "running";
+      emitEvent({
+        type: "run_started",
+        runId,
+        agentName: "daemon-agent",
+        assignmentSourcePath: null,
+        assignmentPath: "/tmp/fake/assignment.md",
+        name: "Daemon live detail",
+        cwd: process.cwd(),
+        sessionIndex: 0,
+      });
+      await new Promise((resolve) => {
+        abortSignal.addEventListener(
+          "abort",
+          () => {
+            status = "aborted";
+            emitEvent({ type: "run_aborted" });
+            emitEvent({
+              type: "run_finished",
+              summary: {
+                status: "aborted",
+                attempts: 1,
+                maxAttempts: 1,
+                tasksCompleted: 0,
+                tasksTotal: 1,
+                assignmentPath: "/tmp/fake/assignment.md",
+                tasks: [],
+                runId,
+              },
+            });
+            resolve();
+          },
+          { once: true },
+        );
+      });
+      return { runId };
+    },
+  });
+
+  try {
+    const started = await httpJson(httpBaseUrl, "/api/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ cliVars: {}, overrides: {} }),
+    });
+    assert.equal(started.status, 200);
+    assert.equal(started.body.runId, runId);
+
+    const detail = await httpJson(httpBaseUrl, `/api/runs/${runId}`);
+    assert.equal(detail.status, 200);
+    assert.equal(detail.body.run.status, "running");
+    assert.equal(detail.body.run.isLive, true);
+    assert.equal(detail.body.run.capabilities.canAbort, true);
+    assert.equal(detail.body.run.capabilities.abortReason, undefined);
+
+    const aborted = await httpJson(httpBaseUrl, `/api/runs/${runId}/abort`, { method: "POST" });
+    assert.equal(aborted.status, 200);
+    assert.equal(aborted.body.accepted, true);
+
+    let settled = null;
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      const response = await httpJson(httpBaseUrl, `/api/runs/${runId}`);
+      assert.equal(response.status, 200);
+      if (response.body.run.status === "aborted" && response.body.run.isLive === false) {
+        settled = response.body.run;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+
+    assert.ok(settled, "expected the daemon to publish a settled aborted projection");
+    assert.equal(settled.capabilities.canAbort, false);
+    assert.equal(settled.capabilities.abortReason, "already_terminal");
+  } finally {
+    await server.close();
+  }
+});
+
 test("daemon subscriptions fan out run events and abort active runs", async () => {
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
+  let status = "running";
   const server = await serveDaemon(listenUrl, {
+    getRun() {
+      return {
+        runId: "daemon-live-run",
+        repo: "task-runner",
+        status,
+        effectiveStatus: status,
+        archivedAt: null,
+        isLive: status === "running",
+        workspaceDir: "/tmp/fake",
+        assignmentPath: "/tmp/fake/assignment.md",
+        agent: {
+          name: "daemon-agent",
+          sourcePath: null,
+        },
+        assignment: {
+          name: "daemon-work",
+          sourcePath: "/tmp/fake/source.md",
+          workspacePath: "/tmp/fake/assignment.md",
+        },
+        backend: "codex",
+        model: "gpt-5.4",
+        effort: "high",
+        name: "daemon test",
+        backendSessionId: "thread-1",
+        cwd: "/tmp/fake",
+        unrestricted: false,
+        timeoutSec: 3600,
+        startedAt: "2026-04-13T05:00:00.000Z",
+        endedAt: status === "aborted" ? "2026-04-13T05:05:00.000Z" : null,
+        exitCode: status === "aborted" ? 130 : null,
+        attempts: 1,
+        maxAttempts: 1,
+        sessionCount: 1,
+        tasksCompleted: 0,
+        tasksTotal: 0,
+        attachments: [],
+        dependencies: [],
+        dependents: [],
+        tasks: [],
+        activeTask: null,
+        message: null,
+        callerInstructions: null,
+        lockedFields: [],
+        runtimeVars: {},
+        execution: {
+          hostMode: "daemon",
+          controller: {
+            kind: "daemon",
+            daemonInstanceId: "daemon-placeholder",
+          },
+        },
+        capabilities: {
+          canArchive: false,
+          canUnarchive: false,
+          canResume: false,
+          canAbort: status === "running",
+          abortReason: status === "running" ? undefined : "already_terminal",
+          taskMutation: {
+            canSetStatus: false,
+            canEditNotes: false,
+            canAdd: false,
+          },
+        },
+      };
+    },
     async startRun({ emitEvent, abortSignal }) {
       const runId = "daemon-live-run";
       const summary = {
@@ -1088,6 +1746,7 @@ test("daemon subscriptions fan out run events and abort active runs", async () =
         abortSignal.addEventListener(
           "abort",
           () => {
+            status = "aborted";
             emitEvent({ type: "run_aborted" });
             emitEvent({ type: "run_finished", summary });
             resolve();
@@ -1104,11 +1763,18 @@ test("daemon subscriptions fan out run events and abort active runs", async () =
   const seenA = [];
   const seenB = [];
   try {
-    await clientA.subscribe({}, (msg) => seenA.push(msg.event.type));
-    await clientB.subscribe({}, (msg) => seenB.push(msg.event.type));
-
     const started = await clientA.call("runs.start", { cliVars: {}, overrides: {} });
     assert.equal(started.runId, "daemon-live-run");
+    await clientA.subscribe({ channel: "run_timeline", runId: started.runId }, (msg) => {
+      if (msg.method === "run.timeline") {
+        seenA.push(msg.event.type);
+      }
+    });
+    await clientB.subscribe({ channel: "run_timeline", runId: started.runId }, (msg) => {
+      if (msg.method === "run.timeline") {
+        seenB.push(msg.event.type);
+      }
+    });
 
     await clientB.call("runs.abort", { target: started.runId });
 
@@ -1123,13 +1789,612 @@ test("daemon subscriptions fan out run events and abort active runs", async () =
   }
 });
 
-test("daemon SSE streams reuse run event fan-out for all-runs and per-run subscriptions", async () => {
+test("daemon republishes summary and detail projections when a run retries", async () => {
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
   const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  const runId = "daemon-retrying-run";
+  let tasksCompleted = 0;
+  let activeTask = { id: "t1", title: "First task" };
+  let status = "initialized";
+
   const server = await serveDaemon(listenUrl, {
+    getRun() {
+      return {
+        runId,
+        repo: "task-runner",
+        status,
+        effectiveStatus: status,
+        archivedAt: null,
+        isLive: status === "running",
+        workspaceDir: "/tmp/fake",
+        assignmentPath: "/tmp/fake/assignment.md",
+        agent: {
+          name: "daemon-agent",
+          sourcePath: null,
+        },
+        assignment: {
+          name: "daemon-work",
+          sourcePath: "/tmp/fake/source.md",
+          workspacePath: "/tmp/fake/assignment.md",
+        },
+        backend: "codex",
+        model: "gpt-5.4",
+        effort: "high",
+        name: "daemon retrying test",
+        backendSessionId: "thread-1",
+        cwd: "/tmp/fake",
+        unrestricted: false,
+        timeoutSec: 3600,
+        startedAt: "2026-04-13T05:00:00.000Z",
+        endedAt: status === "success" ? "2026-04-13T05:05:00.000Z" : null,
+        exitCode: status === "success" ? 0 : null,
+        attempts: status === "success" ? 2 : 1,
+        maxAttempts: 2,
+        sessionCount: 1,
+        tasksCompleted,
+        tasksTotal: 2,
+        attachments: [],
+        dependencies: [],
+        dependents: [],
+        tasks: [],
+        activeTask,
+        message: null,
+        callerInstructions: null,
+        lockedFields: [],
+        runtimeVars: {},
+        execution: {
+          hostMode: "daemon",
+          controller: {
+            kind: "daemon",
+            daemonInstanceId: "daemon-placeholder",
+          },
+        },
+        capabilities: {
+          canArchive: false,
+          canUnarchive: false,
+          canResume: false,
+          canAbort: status === "running",
+          abortReason: status === "running" ? undefined : "already_terminal",
+          taskMutation: {
+            canSetStatus: false,
+            canEditNotes: false,
+            canAdd: false,
+          },
+        },
+      };
+    },
+    getRunList() {
+      return [
+        {
+          runId,
+          repo: "task-runner",
+          status,
+          effectiveStatus: status,
+          archivedAt: null,
+          agentName: "daemon-agent",
+          name: "daemon retrying test",
+          assignmentName: "daemon-work",
+          backend: "codex",
+          model: "gpt-5.4",
+          cwd: "/tmp/fake",
+          startedAt: "2026-04-13T05:00:00.000Z",
+          endedAt: status === "success" ? "2026-04-13T05:05:00.000Z" : null,
+          tasksCompleted,
+          tasksTotal: 2,
+          attachmentCount: 0,
+          dependencyState: {
+            ready: true,
+            total: 0,
+            satisfied: 0,
+            unsatisfied: 0,
+          },
+          activeTask,
+          execution: {
+            hostMode: "daemon",
+            controller: {
+              kind: "daemon",
+              daemonInstanceId: "daemon-placeholder",
+            },
+          },
+          capabilities: {
+            canArchive: false,
+            canUnarchive: false,
+            canResume: false,
+            canAbort: status === "running",
+            abortReason: status === "running" ? undefined : "already_terminal",
+            taskMutation: {
+              canSetStatus: false,
+              canEditNotes: false,
+              canAdd: false,
+            },
+          },
+        },
+      ];
+    },
+    async startRun({ emitEvent }) {
+      status = "running";
+      emitEvent({
+        type: "run_started",
+        runId,
+        agentName: "daemon-agent",
+        assignmentSourcePath: null,
+        assignmentPath: "/tmp/fake/assignment.md",
+        name: "daemon retrying test",
+        cwd: process.cwd(),
+        sessionIndex: null,
+      });
+      emitEvent({
+        type: "attempt_started",
+        attempt: 1,
+        sessionIndex: 0,
+        startedAt: "2026-04-13T05:00:01.000Z",
+        prompt: "Attempt one",
+      });
+      tasksCompleted = 1;
+      activeTask = { id: "t2", title: "Second task" };
+      emitEvent({
+        type: "retrying",
+        incompleteCount: 1,
+        invalidStatusCount: 0,
+      });
+      status = "success";
+      tasksCompleted = 2;
+      activeTask = null;
+      emitEvent({
+        type: "run_finished",
+        summary: {
+          status: "success",
+          attempts: 2,
+          maxAttempts: 2,
+          tasksCompleted: 2,
+          tasksTotal: 2,
+          assignmentPath: "/tmp/fake/assignment.md",
+          tasks: [],
+          runId,
+        },
+      });
+      return { runId };
+    },
+  });
+
+  const summaries = await openSse(httpBaseUrl, "/api/events/run-summaries");
+  const details = await openSse(httpBaseUrl, `/api/runs/${runId}/events/detail`);
+  try {
+    const started = await httpJson(httpBaseUrl, "/api/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ cliVars: {}, overrides: {} }),
+    });
+    assert.equal(started.status, 200);
+    assert.equal(started.body.runId, runId);
+
+    const startedSummary = await summaries.next();
+    const startedDetail = await details.next();
+    const retriedSummary = await summaries.next();
+    const retriedDetail = await details.next();
+
+    assert.equal(startedSummary.type, "summary_upsert");
+    assert.equal(startedSummary.summary.status, "running");
+    assert.equal(startedSummary.summary.tasksCompleted, 0);
+    assert.deepEqual(startedSummary.summary.activeTask, { id: "t1", title: "First task" });
+
+    assert.equal(startedDetail.type, "detail_updated");
+    assert.equal(startedDetail.detail.status, "running");
+    assert.equal(startedDetail.detail.tasksCompleted, 0);
+    assert.deepEqual(startedDetail.detail.activeTask, { id: "t1", title: "First task" });
+
+    assert.equal(retriedSummary.type, "summary_upsert");
+    assert.equal(retriedSummary.summary.status, "running");
+    assert.equal(retriedSummary.summary.tasksCompleted, 1);
+    assert.deepEqual(retriedSummary.summary.activeTask, { id: "t2", title: "Second task" });
+
+    assert.equal(retriedDetail.type, "detail_updated");
+    assert.equal(retriedDetail.detail.status, "running");
+    assert.equal(retriedDetail.detail.tasksCompleted, 1);
+    assert.deepEqual(retriedDetail.detail.activeTask, { id: "t2", title: "Second task" });
+  } finally {
+    await summaries.close();
+    await details.close();
+    await server.close();
+  }
+});
+
+test("daemon mutation-driven projection SSE events include dependent summary fanout", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "passive-daemon-agent", PASSIVE_AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const source = await initRun(dir, "passive-daemon-agent");
+  const dependent = await initRun(dir, "passive-daemon-agent");
+  patchManifest(dependent.workspaceDir, (manifest) => {
+    manifest.dependencyRunIds = [source.runId];
+  });
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl);
+    const summaries = await openSse(httpBaseUrl, "/api/events/run-summaries");
+    const sourceDetails = await openSse(httpBaseUrl, `/api/runs/${source.runId}/events/detail`);
+    try {
+      const response = await httpJson(httpBaseUrl, `/api/runs/${source.runId}/tasks/t1`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ status: "completed" }),
+      });
+      assert.equal(response.status, 200);
+      assert.equal(response.body.task.status, "completed");
+
+      const sourceSummary = await summaries.next();
+      const sourceDetailEvent = await sourceDetails.next();
+      const dependentSummary = await summaries.next();
+
+      assert.equal(sourceSummary.type, "summary_upsert");
+      assert.equal(sourceSummary.summary.runId, source.runId);
+      assert.equal(sourceSummary.summary.effectiveStatus, "success");
+
+      assert.equal(sourceDetailEvent.type, "detail_updated");
+      assert.equal(sourceDetailEvent.detail.runId, source.runId);
+      assert.equal(sourceDetailEvent.detail.effectiveStatus, "success");
+
+      assert.equal(dependentSummary.type, "summary_upsert");
+      assert.equal(dependentSummary.summary.runId, dependent.runId);
+      assert.deepEqual(dependentSummary.summary.dependencyState, {
+        ready: true,
+        total: 1,
+        satisfied: 1,
+        unsatisfied: 0,
+      });
+    } finally {
+      await summaries.close();
+      await sourceDetails.close();
+      await server.close();
+    }
+  });
+});
+
+test("daemon note and pin mutations publish summary and detail updates", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const init = await initRun(dir);
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl, {
+      getRunList() {
+        throw new Error("unexpected getRunList call during note/pin mutation publish");
+      },
+    });
+    const summaries = await openSse(httpBaseUrl, "/api/events/run-summaries");
+    const details = await openSse(httpBaseUrl, `/api/runs/${init.runId}/events/detail`);
+    try {
+      const noteResponse = await httpJson(httpBaseUrl, `/api/runs/${init.runId}/note`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ note: "SSE note" }),
+      });
+      assert.equal(noteResponse.status, 200);
+      assert.deepEqual(noteResponse.body.result, {
+        runId: init.runId,
+        note: "SSE note",
+        changed: true,
+      });
+
+      const noteSummary = await summaries.next();
+      const noteDetail = await details.next();
+      assert.equal(noteSummary.type, "summary_upsert");
+      assert.equal(noteSummary.summary.runId, init.runId);
+      assert.equal(noteSummary.summary.notePresent, true);
+      assert.equal(noteDetail.type, "detail_updated");
+      assert.equal(noteDetail.detail.runId, init.runId);
+      assert.equal(noteDetail.detail.note, "SSE note");
+
+      const pinResponse = await httpJson(httpBaseUrl, `/api/runs/${init.runId}/pinned`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pinned: true }),
+      });
+      assert.equal(pinResponse.status, 200);
+      assert.deepEqual(pinResponse.body.result, {
+        runId: init.runId,
+        pinned: true,
+        changed: true,
+      });
+
+      const pinSummary = await summaries.next();
+      const pinDetail = await details.next();
+      assert.equal(pinSummary.type, "summary_upsert");
+      assert.equal(pinSummary.summary.runId, init.runId);
+      assert.equal(pinSummary.summary.pinned, true);
+      assert.equal(pinDetail.type, "detail_updated");
+      assert.equal(pinDetail.detail.runId, init.runId);
+      assert.equal(pinDetail.detail.pinned, true);
+    } finally {
+      await summaries.close();
+      await details.close();
+      await server.close();
+    }
+  });
+});
+
+test("daemon websocket validates events.subscribe channel and runId rules", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const server = await serveDaemon(listenUrl);
+  const ws = await openRawWebSocket(listenUrl);
+  try {
+    ws.send(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "events.subscribe",
+        params: { channel: "bogus" },
+      }),
+    );
+    const invalidChannel = await nextRawMessage(ws);
+    assert.equal(
+      invalidChannel.error.message,
+      'channel must be one of "run_summary", "run_detail", or "run_timeline"',
+    );
+
+    ws.send(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "events.subscribe",
+        params: { channel: "run_summary", runId: "run-123" },
+      }),
+    );
+    const summaryWithRunId = await nextRawMessage(ws);
+    assert.equal(summaryWithRunId.error.message, "runId must be omitted for channel run_summary");
+
+    ws.send(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 3,
+        method: "events.subscribe",
+        params: { channel: "run_detail" },
+      }),
+    );
+    const missingRunId = await nextRawMessage(ws);
+    assert.equal(missingRunId.error.message, "runId is required");
+  } finally {
+    ws.terminate();
+    await server.close();
+  }
+});
+
+test("daemon client ignores malformed subscription notifications and still delivers valid ones", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const wsServer = new WebSocketServer({ host: "127.0.0.1", port });
+  const received = [];
+
+  wsServer.on("connection", (ws) => {
+    ws.on("message", (payload) => {
+      const request = JSON.parse(payload.toString());
+      if (request.method !== "events.subscribe") {
+        return;
+      }
+
+      ws.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: request.id,
+          result: { subscriptionId: "sub-1" },
+        }),
+      );
+      ws.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          method: "run.timeline",
+          params: {
+            runId: "daemon-client-run",
+            event: { type: "run_started" },
+          },
+        }),
+      );
+      ws.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          method: "run.summary",
+          params: {
+            subscriptionId: "sub-1",
+            summary: {},
+          },
+        }),
+      );
+      ws.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          method: "run.detail",
+          params: {
+            subscriptionId: "sub-1",
+            runId: "daemon-client-run",
+            detail: { runId: "daemon-client-run" },
+          },
+        }),
+      );
+      ws.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          method: "run.timeline",
+          params: {
+            subscriptionId: "sub-1",
+            runId: "daemon-client-run",
+            cursor: 1,
+            event: { type: "run_started" },
+          },
+        }),
+      );
+    });
+  });
+
+  const client = await DaemonClient.connect(listenUrl);
+  try {
+    await client.subscribe({ channel: "run_timeline", runId: "daemon-client-run" }, (msg) => {
+      received.push(msg);
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    assert.deepEqual(received, [
+      {
+        method: "run.timeline",
+        subscriptionId: "sub-1",
+        runId: "daemon-client-run",
+        cursor: 1,
+        event: { type: "run_started" },
+      },
+    ]);
+  } finally {
+    await client.close();
+    for (const socket of wsServer.clients) {
+      socket.terminate();
+    }
+    await new Promise((resolve) => wsServer.close(() => resolve()));
+  }
+});
+
+test("daemon SSE streams split summary, detail, and timeline subscriptions", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  const runId = "daemon-sse-run";
+  let status = "initialized";
+  let activeTask = null;
+  const server = await serveDaemon(listenUrl, {
+    getRun() {
+      return {
+        runId,
+        repo: "task-runner",
+        status,
+        effectiveStatus: status,
+        archivedAt: null,
+        isLive: status === "running",
+        workspaceDir: "/tmp/fake",
+        assignmentPath: "/tmp/fake/assignment.md",
+        agent: {
+          name: "daemon-agent",
+          sourcePath: null,
+        },
+        assignment: {
+          name: "daemon-work",
+          sourcePath: "/tmp/fake/source.md",
+          workspacePath: "/tmp/fake/assignment.md",
+        },
+        backend: "codex",
+        model: "gpt-5.4",
+        effort: "high",
+        name: "daemon sse",
+        backendSessionId: "thread-1",
+        cwd: "/tmp/fake",
+        unrestricted: false,
+        timeoutSec: 3600,
+        startedAt: "2026-04-13T05:00:00.000Z",
+        endedAt: status === "aborted" ? "2026-04-13T05:05:00.000Z" : null,
+        exitCode: status === "aborted" ? 130 : null,
+        attempts: 1,
+        maxAttempts: 1,
+        sessionCount: 1,
+        tasksCompleted: 0,
+        tasksTotal: 1,
+        attachments: [],
+        dependencies: [],
+        dependents: [],
+        tasks: [
+          {
+            id: "t1",
+            title: "First",
+            body: "",
+            status: activeTask ? "in_progress" : "pending",
+            notes: "",
+          },
+        ],
+        activeTask,
+        message: null,
+        callerInstructions: null,
+        lockedFields: [],
+        runtimeVars: {},
+        execution: {
+          hostMode: "daemon",
+          controller: {
+            kind: "daemon",
+            daemonInstanceId: "daemon-placeholder",
+          },
+        },
+        capabilities: {
+          canArchive: false,
+          canUnarchive: false,
+          canResume: false,
+          canAbort: status === "running",
+          abortReason: status === "running" ? undefined : "not_active_in_daemon",
+          taskMutation: {
+            canSetStatus: false,
+            canEditNotes: false,
+            canAdd: false,
+          },
+        },
+      };
+    },
+    getRunList() {
+      return [
+        {
+          runId,
+          repo: "task-runner",
+          status,
+          effectiveStatus: status,
+          archivedAt: null,
+          agentName: "daemon-agent",
+          name: "daemon sse",
+          assignmentName: "daemon-work",
+          backend: "codex",
+          model: "gpt-5.4",
+          cwd: "/tmp/fake",
+          startedAt: "2026-04-13T05:00:00.000Z",
+          endedAt: status === "aborted" ? "2026-04-13T05:05:00.000Z" : null,
+          tasksCompleted: 0,
+          tasksTotal: 1,
+          attachmentCount: 0,
+          dependencyState: {
+            ready: true,
+            total: 0,
+            satisfied: 0,
+            unsatisfied: 0,
+          },
+          activeTask,
+          execution: {
+            hostMode: "daemon",
+            controller: {
+              kind: "daemon",
+              daemonInstanceId: "daemon-placeholder",
+            },
+          },
+          capabilities: {
+            canArchive: false,
+            canUnarchive: false,
+            canResume: false,
+            canAbort: status === "running",
+            abortReason: status === "running" ? undefined : "not_active_in_daemon",
+            taskMutation: {
+              canSetStatus: false,
+              canEditNotes: false,
+              canAdd: false,
+            },
+          },
+        },
+      ];
+    },
     async startRun({ emitEvent, abortSignal }) {
-      const runId = "daemon-sse-run";
+      status = "running";
+      activeTask = {
+        id: "t1",
+        title: "First",
+      };
       emitEvent({
         type: "run_started",
         runId,
@@ -1140,11 +2405,19 @@ test("daemon SSE streams reuse run event fan-out for all-runs and per-run subscr
         cwd: process.cwd(),
         sessionIndex: null,
       });
-      emitEvent({ type: "attempt_started", attempt: 1 });
+      emitEvent({
+        type: "attempt_started",
+        attempt: 1,
+        sessionIndex: 0,
+        startedAt: "2026-04-13T05:00:01.000Z",
+        prompt: "SSE prompt",
+      });
       await new Promise((resolve) => {
         abortSignal.addEventListener(
           "abort",
           () => {
+            status = "aborted";
+            activeTask = null;
             emitEvent({ type: "run_aborted" });
             emitEvent({
               type: "run_finished",
@@ -1168,8 +2441,9 @@ test("daemon SSE streams reuse run event fan-out for all-runs and per-run subscr
     },
   });
 
-  const allRuns = await openSse(httpBaseUrl, "/api/events/runs");
-  const oneRun = await openSse(httpBaseUrl, "/api/events/runs/daemon-sse-run");
+  const allRuns = await openSse(httpBaseUrl, "/api/events/run-summaries");
+  const oneRun = await openSse(httpBaseUrl, `/api/runs/${runId}/events/detail`);
+  const timeline = await openSse(httpBaseUrl, `/api/runs/${runId}/events/timeline`);
   try {
     const started = await httpJson(httpBaseUrl, "/api/runs", {
       method: "POST",
@@ -1177,44 +2451,300 @@ test("daemon SSE streams reuse run event fan-out for all-runs and per-run subscr
       body: JSON.stringify({ cliVars: {}, overrides: {} }),
     });
     assert.equal(started.status, 200);
-    assert.equal(started.body.runId, "daemon-sse-run");
+    assert.equal(started.body.runId, runId);
 
     const allStarted = await allRuns.next();
     const oneStarted = await oneRun.next();
-    assert.equal(allStarted.runId, "daemon-sse-run");
-    assert.equal(allStarted.event.type, "run_started");
-    assert.equal(oneStarted.runId, "daemon-sse-run");
-    assert.equal(oneStarted.event.type, "run_started");
+    assert.equal(allStarted.type, "summary_upsert");
+    assert.equal(allStarted.summary.runId, runId);
+    assert.equal(allStarted.summary.status, "running");
+    assert.equal(oneStarted.type, "detail_updated");
+    assert.equal(oneStarted.detail.runId, runId);
+    assert.equal(oneStarted.detail.status, "running");
+    assert.equal((await timeline.next()).event.type, "run_started");
+    assert.equal((await timeline.next()).event.type, "attempt_started");
 
-    const allAttempt = await allRuns.next();
-    const oneAttempt = await oneRun.next();
-    assert.equal(allAttempt.event.type, "attempt_started");
-    assert.equal(oneAttempt.event.type, "attempt_started");
-
-    const aborted = await httpJson(httpBaseUrl, "/api/runs/daemon-sse-run/abort", {
-      method: "POST",
-    });
+    const aborted = await httpJson(httpBaseUrl, `/api/runs/${runId}/abort`, { method: "POST" });
     assert.equal(aborted.status, 200);
     assert.equal(aborted.body.accepted, true);
 
-    assert.equal((await allRuns.next()).event.type, "run_aborted");
-    assert.equal((await oneRun.next()).event.type, "run_aborted");
-    assert.equal((await allRuns.next()).event.type, "run_finished");
-    assert.equal((await oneRun.next()).event.type, "run_finished");
+    const allFinished = await allRuns.next();
+    const oneFinished = await oneRun.next();
+    assert.equal(allFinished.type, "summary_upsert");
+    assert.equal(allFinished.summary.status, "aborted");
+    assert.equal(oneFinished.type, "detail_updated");
+    assert.equal(oneFinished.detail.status, "aborted");
+    assert.equal((await timeline.next()).event.type, "run_aborted");
+    assert.equal((await timeline.next()).event.type, "run_finished");
   } finally {
     await allRuns.close();
     await oneRun.close();
+    await timeline.close();
     await server.close();
   }
 });
 
-test("streamRunEvents keeps SSE subscribers active when writes report backpressure", () => {
+test("daemon serves timeline history and cursored timeline replay over HTTP and websocket", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  const runId = "daemon-timeline-history";
+  let status = "initialized";
+  let activeTask = null;
+
+  const baseHistory = {
+    runId,
+    attempts: [
+      {
+        attempt: 1,
+        sessionIndex: 0,
+        startedAt: "2026-04-13T05:00:00.000Z",
+        endedAt: "2026-04-13T05:02:00.000Z",
+        prompt: "Initial prompt",
+        transcript: "Completed output\n",
+        notices: "Completed notice\n",
+        exitCode: 0,
+        timedOut: false,
+        live: false,
+      },
+    ],
+    lastCursor: 0,
+  };
+
+  const server = await serveDaemon(listenUrl, {
+    getRunTimelineHistory() {
+      return baseHistory;
+    },
+    getRun() {
+      return {
+        runId,
+        repo: "task-runner",
+        status,
+        effectiveStatus: status,
+        archivedAt: null,
+        isLive: status === "running",
+        workspaceDir: "/tmp/fake",
+        assignmentPath: "/tmp/fake/assignment.md",
+        agent: {
+          name: "daemon-agent",
+          sourcePath: null,
+        },
+        assignment: {
+          name: "daemon-work",
+          sourcePath: "/tmp/fake/source.md",
+          workspacePath: "/tmp/fake/assignment.md",
+        },
+        backend: "codex",
+        model: "gpt-5.4",
+        effort: "high",
+        name: "daemon timeline history",
+        backendSessionId: null,
+        cwd: "/tmp/fake",
+        unrestricted: false,
+        timeoutSec: 60,
+        startedAt: "2026-04-13T05:00:00.000Z",
+        endedAt: null,
+        exitCode: null,
+        attempts: 1,
+        maxAttempts: 3,
+        sessionCount: 1,
+        tasksCompleted: 1,
+        tasksTotal: 1,
+        attachments: [],
+        dependencies: [],
+        dependents: [],
+        tasks: [],
+        activeTask,
+        message: null,
+        callerInstructions: null,
+        lockedFields: [],
+        runtimeVars: {},
+        execution: {
+          hostMode: "daemon",
+          controller: {
+            kind: "daemon",
+            daemonInstanceId: "daemon-placeholder",
+          },
+        },
+        capabilities: {
+          canArchive: false,
+          canUnarchive: false,
+          canResume: false,
+          canAbort: status === "running",
+          abortReason: status === "running" ? undefined : "not_active_in_daemon",
+          taskMutation: {
+            canSetStatus: false,
+            canEditNotes: false,
+            canAdd: false,
+          },
+        },
+      };
+    },
+    getRunList() {
+      return [
+        {
+          runId,
+          repo: "task-runner",
+          status,
+          effectiveStatus: status,
+          archivedAt: null,
+          agentName: "daemon-agent",
+          name: "daemon timeline history",
+          assignmentName: "daemon-work",
+          backend: "codex",
+          model: "gpt-5.4",
+          cwd: "/tmp/fake",
+          startedAt: "2026-04-13T05:00:00.000Z",
+          endedAt: null,
+          tasksCompleted: 1,
+          tasksTotal: 1,
+          attachmentCount: 0,
+          dependencyState: {
+            ready: true,
+            total: 0,
+            satisfied: 0,
+            unsatisfied: 0,
+          },
+          activeTask,
+          execution: {
+            hostMode: "daemon",
+            controller: {
+              kind: "daemon",
+              daemonInstanceId: "daemon-placeholder",
+            },
+          },
+          capabilities: {
+            canArchive: false,
+            canUnarchive: false,
+            canResume: false,
+            canAbort: status === "running",
+            abortReason: status === "running" ? undefined : "not_active_in_daemon",
+            taskMutation: {
+              canSetStatus: false,
+              canEditNotes: false,
+              canAdd: false,
+            },
+          },
+        },
+      ];
+    },
+    async startRun({ emitEvent, abortSignal }) {
+      status = "running";
+      activeTask = { id: "t1", title: "First" };
+      emitEvent({
+        type: "run_started",
+        runId,
+        agentName: "daemon-agent",
+        assignmentSourcePath: null,
+        assignmentPath: "/tmp/fake/assignment.md",
+        name: "daemon timeline history",
+        cwd: process.cwd(),
+        sessionIndex: 1,
+      });
+      emitEvent({
+        type: "attempt_started",
+        attempt: 2,
+        sessionIndex: 1,
+        startedAt: "2026-04-13T05:03:00.000Z",
+        prompt: "Resume prompt",
+      });
+      emitEvent({ type: "agent_message_delta", text: "Live output" });
+      emitEvent({ type: "backend_notice", text: "\nLive notice\n" });
+      await new Promise((resolve) => {
+        abortSignal.addEventListener(
+          "abort",
+          () => {
+            status = "aborted";
+            activeTask = null;
+            emitEvent({ type: "run_aborted" });
+            emitEvent({
+              type: "run_finished",
+              summary: {
+                status: "aborted",
+                attempts: 2,
+                maxAttempts: 3,
+                tasksCompleted: 1,
+                tasksTotal: 1,
+                assignmentPath: "/tmp/fake/assignment.md",
+                tasks: [],
+                runId,
+              },
+            });
+            resolve();
+          },
+          { once: true },
+        );
+      });
+      return { runId };
+    },
+  });
+
+  const started = await httpJson(httpBaseUrl, "/api/runs", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ cliVars: {}, overrides: {} }),
+  });
+  assert.equal(started.status, 200);
+  assert.equal(started.body.runId, runId);
+
+  const historyResponse = await httpJson(httpBaseUrl, `/api/runs/${runId}/timeline`);
+  assert.equal(historyResponse.status, 200);
+  assert.equal(historyResponse.body.history.lastCursor, 4);
+  assert.equal(historyResponse.body.history.attempts.length, 2);
+  assert.equal(historyResponse.body.history.attempts.filter((attempt) => attempt.live).length, 1);
+  assert.equal(historyResponse.body.history.attempts[1].prompt, "Resume prompt");
+  assert.equal(historyResponse.body.history.attempts[1].transcript, "Live output");
+  assert.equal(historyResponse.body.history.attempts[1].notices, "\nLive notice\n");
+
+  const sse = await openSseFrames(httpBaseUrl, `/api/runs/${runId}/events/timeline`);
+  const client = await DaemonClient.connect(listenUrl);
+
+  try {
+    const wsEvents = [];
+    await client.subscribe({ channel: "run_timeline", runId }, (msg) => {
+      if (msg.method === "run.timeline") {
+        wsEvents.push(msg);
+      }
+    });
+
+    const wsHistory = await client.call("runs.timelineHistory", { target: runId });
+    assert.equal(wsHistory.history.lastCursor, 4);
+    assert.equal(wsHistory.history.attempts[1].live, true);
+
+    const firstFrame = await sse.next();
+    assert.equal(firstFrame.id, "1");
+    assert.equal(firstFrame.data.cursor, 1);
+    assert.equal(firstFrame.data.event.type, "run_started");
+
+    const secondFrame = await sse.next();
+    assert.equal(secondFrame.id, "2");
+    assert.equal(secondFrame.data.event.type, "attempt_started");
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    assert.equal(wsEvents[0]?.cursor, 1);
+    assert.equal(wsEvents[0]?.event.type, "run_started");
+    assert.equal(wsEvents[1]?.cursor, 2);
+    assert.equal(wsEvents[1]?.event.type, "attempt_started");
+    assert.equal(wsEvents[2]?.cursor, 3);
+    assert.equal(wsEvents[3]?.cursor, 4);
+
+    const aborted = await httpJson(httpBaseUrl, `/api/runs/${runId}/abort`, { method: "POST" });
+    assert.equal(aborted.status, 200);
+    assert.equal(aborted.body.accepted, true);
+  } finally {
+    await client.close();
+    await sse.close();
+    await server.close();
+  }
+});
+
+test("streamEvents keeps SSE subscribers active when writes report backpressure", () => {
   const req = new EventEmitter();
   const res = new FakeSseResponse([true, false]);
   let unsubscribeCount = 0;
   let publish = null;
 
-  streamRunEvents(req, res, (next) => {
+  streamEvents(req, res, (next) => {
     publish = next;
     return () => {
       unsubscribeCount += 1;
@@ -1224,8 +2754,8 @@ test("streamRunEvents keeps SSE subscribers active when writes report backpressu
   assert.equal(typeof publish, "function");
   assert.equal(
     publish({
-      runId: "backpressure-run",
-      event: { type: "attempt_started", attempt: 1 },
+      type: "summary_upsert",
+      summary: { runId: "backpressure-run" },
     }),
     true,
   );
@@ -1297,7 +2827,7 @@ test("daemon close terminates active SSE streams promptly", async () => {
   const listenUrl = `ws://127.0.0.1:${port}/`;
   const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
   const server = await serveDaemon(listenUrl);
-  const events = await openSse(httpBaseUrl, "/api/events/runs");
+  const events = await openSse(httpBaseUrl, "/api/events/run-summaries");
   try {
     await Promise.race([
       (async () => {
@@ -1361,9 +2891,9 @@ test("daemon validates override payloads before calling shared services", async 
       () =>
         client.call("runs.start", {
           cliVars: {},
-          overrides: { taskMode: "bogus" },
+          overrides: { bogus: "value" },
         }),
-      /overrides\.taskMode must be one of: file, cli/,
+      /overrides\.bogus is not supported/,
     );
     await assert.rejects(
       () =>
@@ -1477,13 +3007,15 @@ test("daemon HTTP run start keeps callerCwd separate from overrides.cwd", async 
 test("serve and --connect route CLI commands remotely and fail clearly when no daemon is available", async () => {
   const dir = tempDir();
   writeAgent(dir, "daemon-agent", AGENT);
+  writeAgent(dir, "passive-daemon-agent", PASSIVE_AGENT);
   writeAssignment(dir, "daemon-work", ASSIGNMENT);
   const init = await initRun(dir);
+  const passiveInit = await initRun(dir, "passive-daemon-agent");
 
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
 
-  const unavailable = runCliExpectFail(["status", init.runId, "--connect", listenUrl], {
+  const unavailable = runCliExpectFail(["status", "--connect", listenUrl], {
     cwd: dir,
   });
   assert.equal(unavailable.status, 3);
@@ -1495,6 +3027,32 @@ test("serve and --connect route CLI commands remotely and fail clearly when no d
     const agentsText = runCli(["list", "agents", "--connect", listenUrl], { cwd: dir });
     assert.match(agentsText, /daemon-agent/);
 
+    const systemStatus = runCli(["status", "--connect", listenUrl], { cwd: dir });
+    assert.match(systemStatus, /Host mode: daemon/);
+    assert.match(
+      systemStatus,
+      new RegExp(`Connect URL: ${listenUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
+    );
+    assert.match(systemStatus, /Daemon: connected/);
+    assert.match(
+      systemStatus,
+      new RegExp(`Daemon listen URL: ${listenUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
+    );
+
+    const systemStatusJson = JSON.parse(
+      runCli(["status", "--connect", listenUrl, "--output-format", "json"], { cwd: dir }),
+    );
+    assert.equal(systemStatusJson.hostMode, "daemon");
+    assert.equal(systemStatusJson.connectUrl, listenUrl);
+    assert.deepEqual(Object.keys(systemStatusJson.daemon).sort(), [
+      "daemonInstanceId",
+      "listenUrl",
+      "pid",
+      "startedAt",
+      "version",
+    ]);
+    assert.equal(systemStatusJson.daemon.listenUrl, listenUrl);
+
     const renameText = runCli(
       ["run", "set-name", init.runId, "Remote CLI name", "--connect", listenUrl],
       {
@@ -1503,7 +3061,16 @@ test("serve and --connect route CLI commands remotely and fail clearly when no d
     );
     assert.match(renameText, new RegExp(`set name for run ${init.runId} to "Remote CLI name"`));
 
-    const statusViaEnv = runCli(["status", init.runId], {
+    const backendSessionText = runCli(
+      ["run", "set-backend-session", passiveInit.runId, "remote-thread-7", "--connect", listenUrl],
+      { cwd: dir },
+    );
+    assert.match(
+      backendSessionText,
+      new RegExp(`set backend session for run ${passiveInit.runId} to "remote-thread-7"`),
+    );
+
+    const statusViaEnv = runCli(["run", "status", init.runId], {
       cwd: dir,
       env: { TASK_RUNNER_CONNECT: listenUrl },
     });
@@ -1545,7 +3112,7 @@ test("serve exposes HTTP/SSE alongside the existing WebSocket RPC transport", as
     assert.equal(status.status, 200);
     assert.equal(status.body.run.runId, init.runId);
 
-    const events = await openSse(httpBaseUrl, `/api/events/runs/${init.runId}`);
+    const events = await openSse(httpBaseUrl, "/api/events/run-summaries");
     await events.close();
   } finally {
     await daemon.stop();
@@ -1609,6 +3176,39 @@ test("daemon HTTP init uses the remote caller cwd when the agent omits cwd", asy
   }
 });
 
+test("daemon HTTP init rejects malformed backendSpecific codex transport overrides", async () => {
+  const dir = tempDir();
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  const daemon = await startCliDaemon(dir, listenUrl);
+  try {
+    const response = await httpJson(httpBaseUrl, "/api/runs/init", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        cliVars: {},
+        overrides: {
+          backendSpecific: {
+            codex: {
+              transport: {
+                type: "ws",
+                url: "https://example.com/not-ws",
+                extra: true,
+              },
+            },
+          },
+        },
+      }),
+    });
+    assert.equal(response.status, 400);
+    assert.equal(response.body.error.code, "INVALID_REQUEST");
+    assert.match(response.body.error.message, /overrides\.backendSpecific\.codex\.transport/);
+  } finally {
+    await daemon.stop();
+  }
+});
+
 test("daemon init uses the remote caller cwd when the agent omits cwd", async () => {
   const daemonDir = tempDir();
   writeAgent(daemonDir, "daemon-agent", AGENT);
@@ -1639,6 +3239,42 @@ test("daemon init uses the remote caller cwd when the agent omits cwd", async ()
     assert.equal(run.execution.controller.kind, "daemon");
     assert.match(run.execution.controller.daemonInstanceId, /^daemon-/);
   } finally {
+    await daemon.stop();
+  }
+});
+
+test("daemon RPC start rejects malformed backendSpecific codex transport overrides", async () => {
+  const dir = tempDir();
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const daemon = await startCliDaemon(dir, listenUrl);
+  const client = await DaemonClient.connect(listenUrl);
+  try {
+    await assert.rejects(
+      client.call("runs.start", {
+        cliVars: {},
+        overrides: {
+          backendSpecific: {
+            codex: {
+              transport: {
+                type: "stdio",
+                url: "ws://127.0.0.1:4773/",
+              },
+            },
+          },
+        },
+      }),
+      (err) => {
+        assert.ok(err instanceof DaemonRpcError);
+        assert.match(
+          err.message,
+          /overrides\.backendSpecific\.codex\.transport\.url is not supported/,
+        );
+        return true;
+      },
+    );
+  } finally {
+    await client.close();
     await daemon.stop();
   }
 });
@@ -1698,12 +3334,70 @@ test("daemon-target CLI detaches fresh runs without subscribing for events", asy
       result.stdout,
       "task-runner: detached run detached-start-run\n" +
         'Resume later with: task-runner run --resume-run detached-start-run "..."\n' +
-        "Check status with: task-runner status detached-start-run\n",
+        "Check status with: task-runner run status detached-start-run\n",
     );
     assert.deepEqual(
       requests.map((request) => request.method),
       ["runs.start"],
     );
+  } finally {
+    for (const client of wsServer.clients) {
+      client.terminate();
+    }
+    await new Promise((resolve) => wsServer.close(() => resolve()));
+  }
+});
+
+test("daemon-target CLI forwards local TASK_RUNNER_CODEX_WS_URL as a structured start override", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const wsServer = new WebSocketServer({ host: "127.0.0.1", port });
+  const requests = [];
+  if (wsServer.address() === null) {
+    await new Promise((resolve) => wsServer.once("listening", resolve));
+  }
+
+  wsServer.on("connection", (ws) => {
+    ws.on("message", (payload) => {
+      const request = JSON.parse(payload.toString());
+      requests.push(request);
+      ws.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: request.id,
+          result: { runId: "detached-start-run" },
+        }),
+      );
+    });
+  });
+
+  try {
+    const result = await runCliAsync(
+      [
+        "run",
+        "--connect",
+        listenUrl,
+        "--detach",
+        "--agent",
+        "daemon-agent",
+        "--assignment",
+        "daemon-work",
+      ],
+      {
+        env: {
+          TASK_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/",
+        },
+      },
+    );
+    assert.equal(result.code, 0);
+    assert.deepEqual(requests[0].params.overrides.backendSpecific, {
+      codex: {
+        transport: {
+          type: "ws",
+          url: "ws://127.0.0.1:4773/",
+        },
+      },
+    });
   } finally {
     for (const client of wsServer.clients) {
       client.terminate();
@@ -1780,6 +3474,117 @@ test("daemon-target CLI detaches resume runs and supports json output", async ()
   }
 });
 
+test("daemon-target CLI forwards local TASK_RUNNER_CODEX_WS_URL as a structured resume override", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const wsServer = new WebSocketServer({ host: "127.0.0.1", port });
+  const requests = [];
+  if (wsServer.address() === null) {
+    await new Promise((resolve) => wsServer.once("listening", resolve));
+  }
+
+  wsServer.on("connection", (ws) => {
+    ws.on("message", (payload) => {
+      const request = JSON.parse(payload.toString());
+      requests.push(request);
+      ws.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: request.id,
+          result: { runId: "detached-resume-run" },
+        }),
+      );
+    });
+  });
+
+  try {
+    const result = await runCliAsync(
+      [
+        "run",
+        "--connect",
+        listenUrl,
+        "--detach",
+        "--resume-run",
+        "abc123",
+        "--output-format",
+        "json",
+      ],
+      {
+        env: {
+          TASK_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/",
+        },
+      },
+    );
+    assert.equal(result.code, 0);
+    assert.deepEqual(requests[0].params.overrides.backendSpecific, {
+      codex: {
+        transport: {
+          type: "ws",
+          url: "ws://127.0.0.1:4773/",
+        },
+      },
+    });
+  } finally {
+    for (const client of wsServer.clients) {
+      client.terminate();
+    }
+    await new Promise((resolve) => wsServer.close(() => resolve()));
+  }
+});
+
+test("daemon-target CLI forwards local TASK_RUNNER_CODEX_WS_URL as a structured init override", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const wsServer = new WebSocketServer({ host: "127.0.0.1", port });
+  const requests = [];
+  if (wsServer.address() === null) {
+    await new Promise((resolve) => wsServer.once("listening", resolve));
+  }
+
+  wsServer.on("connection", (ws) => {
+    ws.on("message", (payload) => {
+      const request = JSON.parse(payload.toString());
+      requests.push(request);
+      ws.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: request.id,
+          result: {
+            run: {
+              runId: "init-run",
+            },
+          },
+        }),
+      );
+    });
+  });
+
+  try {
+    const result = await runCliAsync(
+      ["init", "--connect", listenUrl, "--agent", "daemon-agent", "--output-format", "json"],
+      {
+        env: {
+          TASK_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/",
+        },
+      },
+    );
+    assert.equal(result.code, 0);
+    assert.deepEqual(requests[0].params.overrides.backendSpecific, {
+      codex: {
+        transport: {
+          type: "ws",
+          url: "ws://127.0.0.1:4773/",
+        },
+      },
+    });
+  } finally {
+    for (const client of wsServer.clients) {
+      client.terminate();
+    }
+    await new Promise((resolve) => wsServer.close(() => resolve()));
+  }
+});
+
 test("daemon-target CLI rejects --detach without daemon mode", () => {
   const failure = runCliExpectFail(["run", "--detach"]);
   assert.equal(failure.status, 3);
@@ -1818,7 +3623,20 @@ test("daemon-target CLI surfaces Ctrl+C cancel failures instead of exiting as a 
   wsServer.on("connection", (ws) => {
     ws.on("message", (payload) => {
       const request = JSON.parse(payload.toString());
+      if (request.method === "runs.start") {
+        startHandled = true;
+        ws.send(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: request.id,
+            result: { runId: "daemon-cli-run" },
+          }),
+        );
+        return;
+      }
       if (request.method === "events.subscribe") {
+        assert.equal(request.params.channel, "run_timeline");
+        assert.equal(request.params.runId, "daemon-cli-run");
         ws.send(
           JSON.stringify({
             jsonrpc: "2.0",
@@ -1826,14 +3644,10 @@ test("daemon-target CLI surfaces Ctrl+C cancel failures instead of exiting as a 
             result: { subscriptionId },
           }),
         );
-        return;
-      }
-      if (request.method === "runs.start") {
-        startHandled = true;
         ws.send(
           JSON.stringify({
             jsonrpc: "2.0",
-            method: "run.event",
+            method: "run.timeline",
             params: {
               subscriptionId,
               runId: "daemon-cli-run",
@@ -1848,13 +3662,6 @@ test("daemon-target CLI surfaces Ctrl+C cancel failures instead of exiting as a 
                 sessionIndex: 1,
               },
             },
-          }),
-        );
-        ws.send(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            id: request.id,
-            result: { runId: "daemon-cli-run" },
           }),
         );
         return;
@@ -1951,7 +3758,20 @@ test("daemon-target CLI force-exits on a second Ctrl+C while daemon cancel is st
   wsServer.on("connection", (ws) => {
     ws.on("message", (payload) => {
       const request = JSON.parse(payload.toString());
+      if (request.method === "runs.start") {
+        startHandled = true;
+        ws.send(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: request.id,
+            result: { runId: "daemon-cli-run" },
+          }),
+        );
+        return;
+      }
       if (request.method === "events.subscribe") {
+        assert.equal(request.params.channel, "run_timeline");
+        assert.equal(request.params.runId, "daemon-cli-run");
         ws.send(
           JSON.stringify({
             jsonrpc: "2.0",
@@ -1959,14 +3779,10 @@ test("daemon-target CLI force-exits on a second Ctrl+C while daemon cancel is st
             result: { subscriptionId },
           }),
         );
-        return;
-      }
-      if (request.method === "runs.start") {
-        startHandled = true;
         ws.send(
           JSON.stringify({
             jsonrpc: "2.0",
-            method: "run.event",
+            method: "run.timeline",
             params: {
               subscriptionId,
               runId: "daemon-cli-run",
@@ -1981,13 +3797,6 @@ test("daemon-target CLI force-exits on a second Ctrl+C while daemon cancel is st
                 sessionIndex: 1,
               },
             },
-          }),
-        );
-        ws.send(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            id: request.id,
-            result: { runId: "daemon-cli-run" },
           }),
         );
         return;

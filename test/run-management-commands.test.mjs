@@ -19,6 +19,14 @@ model: claude-sonnet-4-6
 Agent.
 `;
 
+const PASSIVE_AGENT = `---
+schemaVersion: 1
+name: run-mgmt-passive-agent
+backend: passive
+---
+Passive agent.
+`;
+
 const ASSIGNMENT = `---
 schemaVersion: 1
 name: run-mgmt-work
@@ -48,9 +56,9 @@ function writeAssignment(baseDir, name, body) {
   writeFileSync(join(dir, "assignment.md"), body);
 }
 
-async function initRun(baseDir) {
+async function initRun(baseDir, agentName = "run-mgmt-agent") {
   return withSharedRuntimeEnv(baseDir, async () => {
-    const loaded = loadAgentConfig("run-mgmt-agent", baseDir);
+    const loaded = loadAgentConfig(agentName, baseDir);
     const loadedAssignment = loadAssignmentConfig("run-mgmt-work", baseDir);
     const originalCwd = process.cwd();
     process.chdir(baseDir);
@@ -60,7 +68,7 @@ async function initRun(baseDir) {
         loadedAssignment,
         cliVars: {},
         backend: {
-          id: "mock",
+          id: loaded.config.backend,
           async invoke() {
             throw new Error("backend should not be invoked during init");
           },
@@ -114,10 +122,12 @@ function patchManifest(workspaceDir, mutator) {
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
-test("list runs enumerates current-generation runs across buckets and filters archived by default", async () => {
+test("list runs scopes to cwd by default and supports explicit cwd, repo, global, and archived filters", async () => {
   const dir = tempDir();
   writeAgent(dir, "run-mgmt-agent", AGENT);
   writeAssignment(dir, "run-mgmt-work", ASSIGNMENT);
+  const otherCwd = join(dir, "other-cwd");
+  mkdirSync(otherCwd, { recursive: true });
 
   const first = await initRun(dir);
   const second = await initRun(dir);
@@ -128,12 +138,15 @@ test("list runs enumerates current-generation runs across buckets and filters ar
   });
   patchManifest(second.workspaceDir, (manifest) => {
     manifest.startedAt = "2026-04-12T11:00:00.000Z";
+    manifest.cwd = otherCwd;
   });
 
   const otherWorkspaceDir = join(dir, "runs", "other-repo", "oth123");
   mkdirSync(otherWorkspaceDir, { recursive: true });
   const otherManifest = readManifest(second.workspaceDir);
   otherManifest.runId = "oth123";
+  otherManifest.repo = "other-repo";
+  otherManifest.cwd = join(dir, "other-repo-cwd");
   otherManifest.workspaceDir = otherWorkspaceDir;
   otherManifest.assignmentPath = join(otherWorkspaceDir, "assignment.md");
   otherManifest.startedAt = "2026-04-12T09:00:00.000Z";
@@ -144,13 +157,8 @@ test("list runs enumerates current-generation runs across buckets and filters ar
   mkdirSync(join(dir, "runs", "broken", "bad111"), { recursive: true });
   writeFileSync(join(dir, "runs", "broken", "bad111", "run.json"), "{ bad json\n");
 
-  const text = runCli(["list", "runs"], { cwd: dir });
-  assert.doesNotMatch(text, new RegExp(first.runId));
-  assert.match(
-    text,
-    new RegExp(`^${second.runId} \\[initialized\\] name=<unnamed> 0/2 repo=unknown`, "m"),
-  );
-  assert.match(text, /^oth123 \[initialized\] name=<unnamed> 0\/2 repo=other-repo/m);
+  const defaultText = runCli(["list", "runs"], { cwd: dir });
+  assert.equal(defaultText.trim(), "No runs found.");
 
   const includeArchived = runCli(["list", "runs", "--include-archived"], { cwd: dir });
   assert.match(
@@ -159,10 +167,35 @@ test("list runs enumerates current-generation runs across buckets and filters ar
       `${first.runId} \\[initialized\\] name=<unnamed> 0/2 .* archived=2026-04-12T12:00:00.000Z`,
     ),
   );
+  assert.doesNotMatch(includeArchived, new RegExp(second.runId));
 
-  const jsonOut = runCli(["list", "runs", "--include-archived", "--output-format", "json"], {
-    cwd: dir,
-  });
+  const explicitCwd = runCli(["list", "runs", "--cwd", otherCwd], { cwd: dir });
+  assert.match(
+    explicitCwd,
+    new RegExp(`^${second.runId} \\[initialized\\] name=<unnamed> 0/2 repo=unknown`, "m"),
+  );
+  assert.doesNotMatch(explicitCwd, /^oth123 /m);
+
+  const repoScoped = runCli(["list", "runs", "--repo", "other-repo"], { cwd: dir });
+  assert.equal(
+    repoScoped.trim(),
+    "oth123 [initialized] name=<unnamed> 0/2 repo=other-repo agent=run-mgmt-agent assignment=run-mgmt-work",
+  );
+
+  const globalText = runCli(["list", "runs", "--global"], { cwd: dir });
+  assert.doesNotMatch(globalText, new RegExp(first.runId));
+  assert.match(
+    globalText,
+    new RegExp(`^${second.runId} \\[initialized\\] name=<unnamed> 0/2 repo=unknown`, "m"),
+  );
+  assert.match(globalText, /^oth123 \[initialized\] name=<unnamed> 0\/2 repo=other-repo/m);
+
+  const jsonOut = runCli(
+    ["list", "runs", "--global", "--include-archived", "--output-format", "json"],
+    {
+      cwd: dir,
+    },
+  );
   const parsed = JSON.parse(jsonOut);
   assert.deepEqual(
     parsed.map((run) => run.runId),
@@ -180,6 +213,8 @@ test("list runs enumerates current-generation runs across buckets and filters ar
   assert.deepEqual(parsed[0].capabilities, {
     canArchive: true,
     canUnarchive: false,
+    canReset: true,
+    canDelete: false,
     canAbort: false,
     abortReason: "not_active_in_daemon",
     canResume: true,
@@ -192,6 +227,8 @@ test("list runs enumerates current-generation runs across buckets and filters ar
   assert.deepEqual(parsed[1].capabilities, {
     canArchive: false,
     canUnarchive: true,
+    canReset: true,
+    canDelete: true,
     canAbort: false,
     abortReason: "not_active_in_daemon",
     canResume: false,
@@ -207,6 +244,15 @@ test("list runs enumerates current-generation runs across buckets and filters ar
     satisfied: 0,
     unsatisfied: 0,
   });
+});
+
+test("list runs rejects conflicting scope flags with exit code 3", () => {
+  const dir = tempDir();
+  const failure = runCliExpectFail(["list", "runs", "--cwd", dir, "--repo", "task-runner"], {
+    cwd: dir,
+  });
+  assert.equal(failure.status, 3);
+  assert.match(failure.stderr, /list runs accepts only one of --cwd, --repo, or --global/);
 });
 
 test("run archive and run unarchive expose idempotent text and json results", async () => {
@@ -242,6 +288,7 @@ test("run archive and run unarchive expose idempotent text and json results", as
 test("run set-name updates, clears, and preserves reset seed", async () => {
   const dir = tempDir();
   writeAgent(dir, "run-mgmt-agent", AGENT);
+  writeAgent(dir, "run-mgmt-passive-agent", PASSIVE_AGENT);
   writeAssignment(dir, "run-mgmt-work", ASSIGNMENT);
   const outcome = await initRun(dir);
 
@@ -283,6 +330,7 @@ test("run set-name updates, clears, and preserves reset seed", async () => {
 test("run set-name validates required args and empty names", async () => {
   const dir = tempDir();
   writeAgent(dir, "run-mgmt-agent", AGENT);
+  writeAgent(dir, "run-mgmt-passive-agent", PASSIVE_AGENT);
   writeAssignment(dir, "run-mgmt-work", ASSIGNMENT);
   const outcome = await initRun(dir);
 
@@ -299,6 +347,73 @@ test("run set-name validates required args and empty names", async () => {
   });
   assert.equal(result.status, 3);
   assert.match(result.stderr, /run set-name: <name> cannot be empty/);
+});
+
+test("run set-backend-session and clear-backend-session mutate passive metadata only", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "run-mgmt-agent", AGENT);
+  writeAgent(dir, "run-mgmt-passive-agent", PASSIVE_AGENT);
+  writeAssignment(dir, "run-mgmt-work", ASSIGNMENT);
+  const passiveRun = await initRun(dir, "run-mgmt-passive-agent");
+  const nonPassiveRun = await initRun(dir);
+
+  patchManifest(passiveRun.workspaceDir, (manifest) => {
+    manifest.status = "blocked";
+    manifest.archivedAt = "2026-04-17T12:00:00.000Z";
+  });
+
+  const setText = runCli(["run", "set-backend-session", passiveRun.runId, "thread-42"], {
+    cwd: dir,
+  });
+  assert.match(setText, /set backend session for run .*"thread-42"/);
+  let manifest = readManifest(passiveRun.workspaceDir);
+  assert.equal(manifest.backendSessionId, "thread-42");
+  assert.equal(manifest.status, "blocked");
+  assert.equal(manifest.archivedAt, "2026-04-17T12:00:00.000Z");
+
+  const setAgainJson = runCli(
+    ["run", "set-backend-session", passiveRun.runId, " thread-42 ", "--output-format", "json"],
+    { cwd: dir },
+  );
+  assert.deepEqual(JSON.parse(setAgainJson), {
+    runId: passiveRun.runId,
+    backendSessionId: "thread-42",
+    changed: false,
+  });
+
+  const clearText = runCli(["run", "clear-backend-session", passiveRun.runId], { cwd: dir });
+  assert.match(clearText, /cleared backend session for run/);
+  manifest = readManifest(passiveRun.workspaceDir);
+  assert.equal(manifest.backendSessionId, null);
+  assert.equal(manifest.status, "blocked");
+
+  const clearAgainJson = runCli(
+    ["run", "clear-backend-session", passiveRun.runId, "--output-format", "json"],
+    { cwd: dir },
+  );
+  assert.deepEqual(JSON.parse(clearAgainJson), {
+    runId: passiveRun.runId,
+    backendSessionId: null,
+    changed: false,
+  });
+
+  let result = runCliExpectFail(["run", "set-backend-session"], { cwd: dir });
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /run set-backend-session requires <id-or-path> <session-id>/);
+
+  result = runCliExpectFail(["run", "set-backend-session", passiveRun.runId, "   "], { cwd: dir });
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /run set-backend-session: <session-id> cannot be empty/);
+
+  result = runCliExpectFail(["run", "clear-backend-session"], { cwd: dir });
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /run clear-backend-session requires <id-or-path>/);
+
+  result = runCliExpectFail(["run", "set-backend-session", nonPassiveRun.runId, "thread-9"], {
+    cwd: dir,
+  });
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /only allowed for passive runs/);
 });
 
 test("run add-dep, remove-dep, and clear-deps expose text/json results and persist manifest state", async () => {

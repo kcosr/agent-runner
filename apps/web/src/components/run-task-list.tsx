@@ -111,6 +111,7 @@ export function RunTaskList({ tasks }: { tasks: RunTaskSummary[] }) {
                     Instructions
                   </button>
                   <button
+                    aria-label="Task notes"
                     aria-selected={activeTab === "notes"}
                     className={activeTab === "notes" ? "task-tab active" : "task-tab"}
                     onClick={() => selectTab(task.id, "notes")}

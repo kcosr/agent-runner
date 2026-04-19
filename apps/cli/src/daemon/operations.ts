@@ -3,14 +3,19 @@ import type {
   addRunAttachmentFromStream,
   appendNotes,
   archive,
+  clearBackendSession,
   clearDependencies,
   createTask,
+  deleteArchivedRun,
   getAttachment,
   getAttachmentList,
   getDefinition,
   getDefinitionList,
   getRun,
+  getRunBrief,
   getRunList,
+  getRunSummary,
+  getRunTimelineHistory,
   getTask,
   getTaskList,
   initRun,
@@ -21,6 +26,9 @@ import type {
   resumeRun,
   startRun,
   unarchive,
+  updateRunBackendSession,
+  updateRunNote,
+  updateRunPinned,
   updateTask,
 } from "@task-runner/core/app/service.js";
 import type {
@@ -33,7 +41,10 @@ import type {
 
 export interface DaemonHandlers {
   getRun: typeof getRun;
+  getRunBrief: typeof getRunBrief;
   getRunList: typeof getRunList;
+  getRunSummary: typeof getRunSummary;
+  getRunTimelineHistory: typeof getRunTimelineHistory;
   getTask: typeof getTask;
   getTaskList: typeof getTaskList;
   getDefinition: typeof getDefinition;
@@ -42,7 +53,12 @@ export interface DaemonHandlers {
   getAttachmentList: typeof getAttachmentList;
   archive: typeof archive;
   unarchive: typeof unarchive;
+  deleteArchivedRun: typeof deleteArchivedRun;
   renameRun: typeof renameRun;
+  updateRunNote: typeof updateRunNote;
+  updateRunPinned: typeof updateRunPinned;
+  updateRunBackendSession: typeof updateRunBackendSession;
+  clearBackendSession: typeof clearBackendSession;
   addDependency: typeof addDependency;
   removeDependency: typeof removeDependency;
   clearDependencies: typeof clearDependencies;
@@ -71,13 +87,17 @@ export function createDaemonOperations(ctx: DaemonOperationContext) {
     },
     listRuns(params: RunsListParams = {}) {
       return {
-        runs: ctx.getRunList({
-          includeArchived: params.includeArchived === true,
-        }),
+        runs: ctx.getRunList(params),
       };
     },
     getRun(target: string) {
       return { run: ctx.getRun(target) };
+    },
+    getRunTimelineHistory(target: string) {
+      return { history: ctx.getRunTimelineHistory(target) };
+    },
+    getRunBrief(target: string) {
+      return { brief: ctx.getRunBrief(target) };
     },
     initRun(request: RunsStartParams) {
       return ctx.initRun(request).then((run) => ({ run }));
@@ -94,8 +114,23 @@ export function createDaemonOperations(ctx: DaemonOperationContext) {
     unarchiveRun(target: string) {
       return { result: ctx.unarchive(target) };
     },
+    deleteRun(target: string) {
+      return { result: ctx.deleteArchivedRun(target) };
+    },
     async setRunName(target: string, input: Parameters<typeof renameRun>[1]) {
       return { result: await ctx.renameRun(target, input) };
+    },
+    setRunNote(target: string, input: Parameters<typeof updateRunNote>[1]) {
+      return { result: ctx.updateRunNote(target, input) };
+    },
+    setRunPinned(target: string, input: Parameters<typeof updateRunPinned>[1]) {
+      return { result: ctx.updateRunPinned(target, input) };
+    },
+    setRunBackendSession(target: string, input: Parameters<typeof updateRunBackendSession>[1]) {
+      return { result: ctx.updateRunBackendSession(target, input) };
+    },
+    clearBackendSession(target: string) {
+      return { result: ctx.clearBackendSession(target) };
     },
     addDependency(target: string, dependencyRunId: string) {
       return { result: ctx.addDependency(target, dependencyRunId) };
@@ -106,8 +141,8 @@ export function createDaemonOperations(ctx: DaemonOperationContext) {
     clearDependencies(target: string) {
       return { result: ctx.clearDependencies(target) };
     },
-    listAttachments(target: string) {
-      return { attachments: ctx.getAttachmentList(target) };
+    listAttachments(target: string, options?: { cwdScope?: boolean }) {
+      return { attachments: ctx.getAttachmentList(target, options) };
     },
     async addAttachment(target: string, input: Parameters<typeof addRunAttachmentFromStream>[1]) {
       return { attachment: await ctx.addRunAttachmentFromStream(target, input) };

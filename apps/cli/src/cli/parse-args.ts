@@ -1,5 +1,4 @@
 import { BACKEND_IDS, type BackendId } from "@task-runner/core/core/backends/types.js";
-import { TASK_MODES, type TaskMode } from "@task-runner/core/core/config/schema.js";
 import { trimRunName } from "@task-runner/core/util/run-name.js";
 
 export type OutputFormat = "text" | "json";
@@ -18,7 +17,6 @@ export interface ParsedArgs {
   backend?: BackendId;
   model?: string;
   effort?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
-  taskMode?: TaskMode;
   timeoutSec?: number;
   unrestricted?: boolean;
   maxRetries?: number;
@@ -26,6 +24,7 @@ export interface ParsedArgs {
   clear?: boolean;
   detach?: boolean;
   outputFormat: OutputFormat;
+  outputFormatExplicit: boolean;
   message?: string;
   positionals: string[];
   addedTasks: string[];
@@ -37,9 +36,12 @@ export interface ParsedArgs {
   taskBody?: string;
   attachmentName?: string;
   attachmentMimeType?: string;
+  cwdScope?: boolean;
   connect?: string;
   listen?: string;
   includeArchived?: boolean;
+  repo?: string;
+  global?: boolean;
   showHelp: boolean;
 }
 
@@ -52,6 +54,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     command: "",
     vars: {},
     outputFormat: "text",
+    outputFormatExplicit: false,
     positionals: [],
     addedTasks: [],
     fields: [],
@@ -86,10 +89,19 @@ export function parseArgs(argv: string[]): ParsedArgs {
     }
   } else if (
     result.command === "run" &&
-    (args[0] === "reset" ||
+    (args[0] === "status" ||
+      args[0] === "brief" ||
+      args[0] === "reset" ||
       args[0] === "archive" ||
       args[0] === "unarchive" ||
+      args[0] === "delete" ||
       args[0] === "set-name" ||
+      args[0] === "set-note" ||
+      args[0] === "clear-note" ||
+      args[0] === "pin" ||
+      args[0] === "unpin" ||
+      args[0] === "set-backend-session" ||
+      args[0] === "clear-backend-session" ||
       args[0] === "add-dep" ||
       args[0] === "remove-dep" ||
       args[0] === "clear-deps")
@@ -136,6 +148,12 @@ export function parseArgs(argv: string[]): ParsedArgs {
       const next = args.shift();
       if (next === undefined) throw new Error("--cwd requires a value");
       result.cwd = next;
+    } else if (arg === "--repo") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--repo requires a value");
+      result.repo = next;
+    } else if (arg === "--global") {
+      result.global = true;
     } else if (arg === "--backend") {
       const next = args.shift();
       if (next === undefined) throw new Error("--backend requires a value");
@@ -154,13 +172,6 @@ export function parseArgs(argv: string[]): ParsedArgs {
         throw new Error(`--effort must be one of: ${EFFORT_VALUES.join(", ")}`);
       }
       result.effort = next as (typeof EFFORT_VALUES)[number];
-    } else if (arg === "--task-mode") {
-      const next = args.shift();
-      if (next === undefined) throw new Error("--task-mode requires a value");
-      if (!(TASK_MODES as readonly string[]).includes(next)) {
-        throw new Error(`--task-mode must be one of: ${TASK_MODES.join(", ")}`);
-      }
-      result.taskMode = next as TaskMode;
     } else if (arg === "--timeout-sec") {
       const next = args.shift();
       if (next === undefined) throw new Error("--timeout-sec requires a number");
@@ -197,6 +208,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
       if (next === undefined) throw new Error("--mime-type requires a value");
       if (next.trim().length === 0) throw new Error("--mime-type cannot be empty");
       result.attachmentMimeType = next;
+    } else if (arg === "--cwd-scope") {
+      result.cwdScope = true;
     } else if (arg === "--clear") {
       result.clear = true;
     } else if (arg === "--detach") {
@@ -232,6 +245,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       if (!(OUTPUT_FORMATS as readonly string[]).includes(next)) {
         throw new Error(`--output-format must be one of: ${OUTPUT_FORMATS.join(", ")}`);
       }
+      result.outputFormatExplicit = true;
       result.outputFormat = next as OutputFormat;
     } else if (arg === "--connect") {
       const next = args.shift();
@@ -267,7 +281,6 @@ export function overridesFromParsedArgs(parsed: ParsedArgs) {
     backend: parsed.backend,
     model: parsed.model,
     effort: parsed.effort,
-    taskMode: parsed.taskMode,
     message: parsed.message,
     name: parsed.name,
     timeoutSec: parsed.timeoutSec,

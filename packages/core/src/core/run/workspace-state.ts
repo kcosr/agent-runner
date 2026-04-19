@@ -1,18 +1,12 @@
-import { mkdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { type MergeOptions, type MergeResult, mergeUpdates } from "../../assignment/merge.js";
 import type { TaskState } from "../../assignment/model.js";
-import { parseAssignment } from "../../assignment/parser.js";
-import { renderAssignment } from "../../assignment/writer.js";
 import { resolveRunsRoot } from "../../config/runtime-paths.js";
-import { writeTextFileAtomic } from "../../util/write-file-atomic.js";
-import { normalizeTaskMode } from "../config/schema.js";
 import {
   type RunManifest,
   applyRunResetSeed,
-  manifestPath,
+  readManifest,
   snapshotTasks,
-  workspaceAssignmentPath,
   writeManifest,
 } from "./manifest.js";
 
@@ -28,10 +22,6 @@ function sleep(ms: number): void {
 
 function sleepAsync(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-export function taskModeFromManifest(manifest: Pick<RunManifest, "taskMode">): "file" | "cli" {
-  return normalizeTaskMode(manifest.taskMode);
 }
 
 function taskLockPath(workspaceDir: string): string {
@@ -142,7 +132,7 @@ export function withGlobalStateLock<T>(
 }
 
 function readManifestSnapshot(workspaceDir: string): RunManifest {
-  return JSON.parse(readFileSync(manifestPath(workspaceDir), "utf8")) as RunManifest;
+  return readManifest(workspaceDir);
 }
 
 function orderedTasks(tasks: Map<string, TaskState>): TaskState[] {
@@ -177,7 +167,13 @@ export function refreshManifestAttachments(manifest: RunManifest): void {
 
 export function refreshManifestTaskState(manifest: RunManifest): Map<string, TaskState> {
   const latest = readManifestSnapshot(manifest.workspaceDir);
-  manifest.taskMode = latest.taskMode;
+  manifest.name = latest.name;
+  manifest.note = latest.note;
+  manifest.pinned = latest.pinned;
+  manifest.resetSeed.name = latest.resetSeed.name;
+  manifest.resetSeed.note = latest.resetSeed.note;
+  manifest.resetSeed.pinned = latest.resetSeed.pinned;
+  manifest.brief = latest.brief;
   manifest.finalTasks = latest.finalTasks;
   manifest.tasksCompleted = latest.tasksCompleted;
   manifest.tasksTotal = latest.tasksTotal;
@@ -195,65 +191,8 @@ export function syncManifestTaskState(
   return ordered;
 }
 
-function ensureWorkspaceAssignmentText(
-  workspaceDir: string,
-  tasks: Map<string, TaskState>,
-): string {
-  const assignmentPath = workspaceAssignmentPath(workspaceDir);
-  let rawAssignment = "";
-  try {
-    rawAssignment = readFileSync(assignmentPath, "utf8");
-  } catch {
-    // fall back to a freshly rendered assignment below
-  }
-
-  if (rawAssignment.trim().length > 0) {
-    return rawAssignment;
-  }
-
-  const rendered = renderAssignment(orderedTasks(tasks));
-  writeTextFileAtomic(assignmentPath, rendered);
-  return rendered;
-}
-
-export interface WorkspaceMergeResult {
-  rawAssignment: string;
-  mergeInfo: MergeResult;
-}
-
-export function mergeWorkspaceAssignmentIntoTaskMap(
-  manifest: RunManifest,
-  tasks: Map<string, TaskState>,
-  mergeOptions: MergeOptions = {},
-): WorkspaceMergeResult {
-  if (taskModeFromManifest(manifest) === "cli") {
-    return {
-      rawAssignment: renderAssignment(orderedTasks(tasks)),
-      mergeInfo: {
-        invalidStatuses: [],
-        missingFromFile: [],
-        unknownInFile: [],
-      },
-    };
-  }
-
-  const rawAssignment = ensureWorkspaceAssignmentText(manifest.workspaceDir, tasks);
-  const updates = parseAssignment(rawAssignment);
-  return {
-    rawAssignment,
-    mergeInfo: mergeUpdates(tasks, updates, mergeOptions),
-  };
-}
-
-export function loadWorkspaceTaskMap(
-  manifest: RunManifest,
-  mergeOptions: MergeOptions = {},
-): Map<string, TaskState> {
-  const tasks = taskMapFromManifestSnapshot(manifest);
-  if (taskModeFromManifest(manifest) === "file") {
-    mergeWorkspaceAssignmentIntoTaskMap(manifest, tasks, mergeOptions);
-  }
-  return tasks;
+export function loadWorkspaceTaskMap(manifest: RunManifest): Map<string, TaskState> {
+  return taskMapFromManifestSnapshot(manifest);
 }
 
 export function persistWorkspaceTaskState(
@@ -261,14 +200,15 @@ export function persistWorkspaceTaskState(
   tasks: Map<string, TaskState>,
   opts: {
     beforeManifestWrite?: (ordered: TaskState[], manifest: RunManifest) => void;
+    afterManifestWrite?: (ordered: TaskState[], manifest: RunManifest) => void;
     alreadyLocked?: boolean;
   } = {},
 ): TaskState[] {
   const persist = (): TaskState[] => {
     const ordered = syncManifestTaskState(manifest, tasks);
-    writeTextFileAtomic(workspaceAssignmentPath(manifest.workspaceDir), renderAssignment(ordered));
     opts.beforeManifestWrite?.(ordered, manifest);
     writeManifest(manifest.workspaceDir, manifest);
+    opts.afterManifestWrite?.(ordered, manifest);
     return ordered;
   };
 
@@ -279,7 +219,16 @@ export function persistWorkspaceTaskState(
   return withTaskStateLock(manifest.workspaceDir, persist);
 }
 
-export function resetWorkspaceRun(workspaceDir: string): RunManifest {
+export function resetWorkspaceRun(
+  workspaceDir: string,
+  opts: {
+    afterManifestWrite?: (
+      manifest: RunManifest,
+      previousStatus: RunManifest["status"],
+      previousBackendSessionId: string | null,
+    ) => void;
+  } = {},
+): RunManifest {
   return withTaskStateLock(workspaceDir, () => {
     const manifest = readManifestSnapshot(workspaceDir);
     if (manifest.status === "running") {
@@ -288,10 +237,15 @@ export function resetWorkspaceRun(workspaceDir: string): RunManifest {
       );
     }
 
+    const previousStatus = manifest.status;
+    const previousBackendSessionId = manifest.backendSessionId;
     applyRunResetSeed(manifest);
     rmSync(join(workspaceDir, "attempts"), { recursive: true, force: true });
     persistWorkspaceTaskState(manifest, taskMapFromManifestSnapshot(manifest), {
       alreadyLocked: true,
+      afterManifestWrite: () => {
+        opts.afterManifestWrite?.(manifest, previousStatus, previousBackendSessionId);
+      },
     });
     return manifest;
   });

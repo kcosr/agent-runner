@@ -6,7 +6,12 @@ import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import { createRunEventCapture } from "./helpers/run-events.mjs";
-import { assignmentPathFromPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
+import {
+  setTaskStatusesForPrompt,
+  updateTasksForPrompt,
+  withEnv,
+  withSharedRuntimeEnv,
+} from "./helpers/runtime-paths.mjs";
 
 const THREE_AGENT = `---
 schemaVersion: 1
@@ -18,26 +23,40 @@ effort: high
 Agent prompt.
 `;
 
-const EXPLICIT_DOT_AGENT = `---
+const EXPLICIT_DOT_ASSIGNMENT = `---
 schemaVersion: 1
-name: three-dot
-backend: claude
-model: claude-sonnet-4-6
-effort: high
+name: three-dot-work
 cwd: .
+tasks:
+  - id: t1
+    title: First
+    body: Do the first thing.
+  - id: t2
+    title: Second
+    body: Do the second thing.
+  - id: t3
+    title: Third
+    body: Do the third thing.
 ---
-Agent prompt.
+Work on the repo. Plan at {{assignment_path}}.
 `;
 
-const EXPLICIT_RELATIVE_AGENT = `---
+const EXPLICIT_RELATIVE_ASSIGNMENT = `---
 schemaVersion: 1
-name: three-relative
-backend: claude
-model: claude-sonnet-4-6
-effort: high
+name: three-relative-work
 cwd: nested/worktree
+tasks:
+  - id: t1
+    title: First
+    body: Do the first thing.
+  - id: t2
+    title: Second
+    body: Do the second thing.
+  - id: t3
+    title: Third
+    body: Do the third thing.
 ---
-Agent prompt.
+Work on the repo. Plan at {{assignment_path}}.
 `;
 
 const THREE_ASSIGNMENT = `---
@@ -56,6 +75,26 @@ tasks:
     body: Do the third thing.
 ---
 Work on the repo. Plan at {{assignment_path}}.
+`;
+
+const CODEX_AGENT = `---
+schemaVersion: 1
+name: codex-agent
+backend: codex
+---
+Codex agent prompt.
+`;
+
+const CODEX_STDIO_AGENT = `---
+schemaVersion: 1
+name: codex-stdio-agent
+backend: codex
+backendSpecific:
+  codex:
+    transport:
+      type: stdio
+---
+Codex agent prompt.
 `;
 
 function tempDir() {
@@ -83,20 +122,9 @@ function writeAgentAndAssignment(baseDir) {
   writeAssignment(baseDir, "three-work", THREE_ASSIGNMENT);
 }
 
-function editStatus(content, taskId, newStatus) {
-  const marker = `<!-- task-id: ${taskId} -->`;
-  const start = content.indexOf(marker);
-  if (start < 0) throw new Error(`marker not found: ${taskId}`);
-  const nextMarker = content.indexOf("<!-- task-id:", start + marker.length);
-  const end = nextMarker < 0 ? content.length : nextMarker;
-  const section = content.slice(start, end);
-  const updated = section.replace(/\*\*Status:\*\*\s*\S+/, `**Status:** ${newStatus}`);
-  return content.slice(0, start) + updated + content.slice(end);
-}
-
 async function runWithMock(baseDir, mockInvoke, overrides = {}, options = {}) {
   const backend = {
-    id: "mock",
+    id: options.backendId ?? "mock",
     invoke: mockInvoke,
   };
   const capture = createRunEventCapture();
@@ -113,6 +141,7 @@ async function runWithMock(baseDir, mockInvoke, overrides = {}, options = {}) {
         backend,
         overrides,
         callerCwd: options.callerCwd,
+        execution: options.execution,
         emitEvent: capture.emitEvent,
       });
       return {
@@ -126,7 +155,7 @@ async function runWithMock(baseDir, mockInvoke, overrides = {}, options = {}) {
   });
 }
 
-test("fresh runs use callerCwd when the agent omits cwd", async () => {
+test("fresh runs use callerCwd when the assignment omits cwd", async () => {
   const dir = tempDir();
   writeAgentAndAssignment(dir);
   const callerDir = join(dir, "client-root");
@@ -137,12 +166,11 @@ test("fresh runs use callerCwd when the agent omits cwd", async () => {
     dir,
     async (ctx) => {
       seenCwd = ctx.cwd;
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      let plan = readFileSync(absPlan, "utf8");
-      for (const id of ["t1", "t2", "t3"]) {
-        plan = editStatus(plan, id, "completed");
-      }
-      writeFileSync(absPlan, plan, "utf8");
+      setTaskStatusesForPrompt(ctx.prompt, {
+        t1: "completed",
+        t2: "completed",
+        t3: "completed",
+      });
       return {
         exitCode: 0,
         signal: null,
@@ -160,10 +188,10 @@ test("fresh runs use callerCwd when the agent omits cwd", async () => {
   assert.equal(seenCwd, callerDir);
 });
 
-test("explicit agent cwd resolves relative to callerCwd", async () => {
+test("explicit assignment cwd resolves relative to callerCwd", async () => {
   const dir = tempDir();
-  writeAgent(dir, "three-relative", EXPLICIT_RELATIVE_AGENT);
-  writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
+  writeAgent(dir, "three", THREE_AGENT);
+  writeAssignment(dir, "three-relative-work", EXPLICIT_RELATIVE_ASSIGNMENT);
   const callerDir = join(dir, "client-root");
   mkdirSync(join(callerDir, "nested", "worktree"), { recursive: true });
 
@@ -172,12 +200,11 @@ test("explicit agent cwd resolves relative to callerCwd", async () => {
     dir,
     async (ctx) => {
       seenCwd = ctx.cwd;
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      let plan = readFileSync(absPlan, "utf8");
-      for (const id of ["t1", "t2", "t3"]) {
-        plan = editStatus(plan, id, "completed");
-      }
-      writeFileSync(absPlan, plan, "utf8");
+      setTaskStatusesForPrompt(ctx.prompt, {
+        t1: "completed",
+        t2: "completed",
+        t3: "completed",
+      });
       return {
         exitCode: 0,
         signal: null,
@@ -189,16 +216,16 @@ test("explicit agent cwd resolves relative to callerCwd", async () => {
       };
     },
     {},
-    { agentName: "three-relative", callerCwd: callerDir },
+    { assignmentName: "three-relative-work", callerCwd: callerDir },
   );
 
   assert.equal(seenCwd, join(callerDir, "nested", "worktree"));
 });
 
-test("explicit --cwd override beats agent cwd and callerCwd", async () => {
+test("explicit --cwd override beats assignment cwd and callerCwd", async () => {
   const dir = tempDir();
-  writeAgent(dir, "three-dot", EXPLICIT_DOT_AGENT);
-  writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
+  writeAgent(dir, "three", THREE_AGENT);
+  writeAssignment(dir, "three-dot-work", EXPLICIT_DOT_ASSIGNMENT);
   const callerDir = join(dir, "client-root");
   mkdirSync(join(callerDir, "override-root"), { recursive: true });
 
@@ -207,12 +234,11 @@ test("explicit --cwd override beats agent cwd and callerCwd", async () => {
     dir,
     async (ctx) => {
       seenCwd = ctx.cwd;
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      let plan = readFileSync(absPlan, "utf8");
-      for (const id of ["t1", "t2", "t3"]) {
-        plan = editStatus(plan, id, "completed");
-      }
-      writeFileSync(absPlan, plan, "utf8");
+      setTaskStatusesForPrompt(ctx.prompt, {
+        t1: "completed",
+        t2: "completed",
+        t3: "completed",
+      });
       return {
         exitCode: 0,
         signal: null,
@@ -224,7 +250,7 @@ test("explicit --cwd override beats agent cwd and callerCwd", async () => {
       };
     },
     { cwd: "override-root" },
-    { agentName: "three-dot", callerCwd: callerDir },
+    { assignmentName: "three-dot-work", callerCwd: callerDir },
   );
 
   assert.equal(seenCwd, join(callerDir, "override-root"));
@@ -237,12 +263,11 @@ test("effort level from frontmatter is forwarded to backend", async () => {
   let seenEffort;
   const { outcome } = await runWithMock(dir, async (ctx) => {
     seenEffort = ctx.effort;
-    const absPlan = assignmentPathFromPrompt(ctx.prompt);
-    let plan = readFileSync(absPlan, "utf8");
-    plan = editStatus(plan, "t1", "completed");
-    plan = editStatus(plan, "t2", "completed");
-    plan = editStatus(plan, "t3", "completed");
-    writeFileSync(absPlan, plan, "utf8");
+    setTaskStatusesForPrompt(ctx.prompt, {
+      t1: "completed",
+      t2: "completed",
+      t3: "completed",
+    });
     return {
       exitCode: 0,
       signal: null,
@@ -258,6 +283,59 @@ test("effort level from frontmatter is forwarded to backend", async () => {
   assert.equal(seenEffort, "high");
 });
 
+test("attempt_started events include prompt and session metadata for timeline consumers", async () => {
+  const dir = tempDir();
+  writeAgentAndAssignment(dir);
+
+  const events = [];
+  let seenPrompt;
+  await withSharedRuntimeEnv(dir, async () => {
+    const loaded = loadAgentConfig("three", dir);
+    const loadedAssignment = loadAssignmentConfig("three-work", dir);
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      await runAgent({
+        loaded,
+        loadedAssignment,
+        cliVars: {},
+        backend: {
+          id: "mock",
+          async invoke(ctx) {
+            seenPrompt = ctx.prompt;
+            setTaskStatusesForPrompt(ctx.prompt, {
+              t1: "completed",
+              t2: "completed",
+              t3: "completed",
+            });
+            return {
+              exitCode: 0,
+              signal: null,
+              timedOut: false,
+              sessionId: null,
+              transcript: "done",
+              rawStdout: "",
+              rawStderr: "",
+            };
+          },
+        },
+        emitEvent: (event) => {
+          events.push(event);
+        },
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+
+  const attemptStarted = events.find((event) => event.type === "attempt_started");
+  assert.ok(attemptStarted, "expected attempt_started event");
+  assert.equal(attemptStarted.attempt, 1);
+  assert.equal(attemptStarted.sessionIndex, 0);
+  assert.equal(attemptStarted.prompt, seenPrompt);
+  assert.match(attemptStarted.startedAt, /^\d{4}-\d{2}-\d{2}T/);
+});
+
 test("effort override beats the frontmatter value", async () => {
   const dir = tempDir();
   writeAgentAndAssignment(dir);
@@ -267,12 +345,11 @@ test("effort override beats the frontmatter value", async () => {
     dir,
     async (ctx) => {
       seenEffort = ctx.effort;
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      let plan = readFileSync(absPlan, "utf8");
-      plan = editStatus(plan, "t1", "completed");
-      plan = editStatus(plan, "t2", "completed");
-      plan = editStatus(plan, "t3", "completed");
-      writeFileSync(absPlan, plan, "utf8");
+      setTaskStatusesForPrompt(ctx.prompt, {
+        t1: "completed",
+        t2: "completed",
+        t3: "completed",
+      });
       return {
         exitCode: 0,
         signal: null,
@@ -290,6 +367,227 @@ test("effort override beats the frontmatter value", async () => {
   assert.equal(seenEffort, "low");
 });
 
+test("codex embedded runs freeze frontmatter transport ahead of client env", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "codex-stdio-agent", CODEX_STDIO_AGENT);
+  writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
+
+  let seenBackendSpecific;
+  const { outcome } = await withEnv({ TASK_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/" }, () =>
+    runWithMock(
+      dir,
+      async (ctx) => {
+        seenBackendSpecific = ctx.backendSpecific;
+        setTaskStatusesForPrompt(ctx.prompt, {
+          t1: "completed",
+          t2: "completed",
+          t3: "completed",
+        });
+        return {
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+          sessionId: null,
+          transcript: "done",
+          rawStdout: "",
+          rawStderr: "",
+        };
+      },
+      {},
+      { agentName: "codex-stdio-agent", backendId: "codex" },
+    ),
+  );
+
+  assert.deepEqual(seenBackendSpecific, {
+    codex: {
+      transport: {
+        type: "stdio",
+      },
+    },
+  });
+  assert.deepEqual(outcome.manifest.backendSpecific, seenBackendSpecific);
+  assert.deepEqual(outcome.manifest.resetSeed.backendSpecific, seenBackendSpecific);
+});
+
+test("codex daemon runs prefer forwarded transport over daemon env", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "codex-agent", CODEX_AGENT);
+  writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
+
+  let seenBackendSpecific;
+  const { outcome } = await withEnv({ TASK_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/" }, () =>
+    runWithMock(
+      dir,
+      async (ctx) => {
+        seenBackendSpecific = ctx.backendSpecific;
+        setTaskStatusesForPrompt(ctx.prompt, {
+          t1: "completed",
+          t2: "completed",
+          t3: "completed",
+        });
+        return {
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+          sessionId: null,
+          transcript: "done",
+          rawStdout: "",
+          rawStderr: "",
+        };
+      },
+      {
+        backendSpecific: {
+          codex: {
+            transport: {
+              type: "ws",
+              url: "ws://client.example/socket",
+            },
+          },
+        },
+      },
+      {
+        agentName: "codex-agent",
+        backendId: "codex",
+        execution: {
+          hostMode: "daemon",
+          controller: {
+            kind: "daemon",
+            daemonInstanceId: "daemon-test",
+          },
+        },
+      },
+    ),
+  );
+
+  assert.deepEqual(seenBackendSpecific, {
+    codex: {
+      transport: {
+        type: "ws",
+        url: "ws://client.example/socket",
+      },
+    },
+  });
+  assert.deepEqual(outcome.manifest.backendSpecific, seenBackendSpecific);
+});
+
+test("codex embedded runs reject malformed TASK_RUNNER_CODEX_WS_URL before freezing transport", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "codex-agent", CODEX_AGENT);
+  writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
+
+  let invoked = false;
+  await assert.rejects(
+    withEnv({ TASK_RUNNER_CODEX_WS_URL: "https://example.com/socket" }, () =>
+      runWithMock(
+        dir,
+        async () => {
+          invoked = true;
+          return {
+            exitCode: 0,
+            signal: null,
+            timedOut: false,
+            sessionId: null,
+            transcript: "done",
+            rawStdout: "",
+            rawStderr: "",
+          };
+        },
+        {},
+        { agentName: "codex-agent", backendId: "codex" },
+      ),
+    ),
+    /TASK_RUNNER_CODEX_WS_URL must be an absolute ws:\/\/ or wss:\/\/ URL/,
+  );
+  assert.equal(invoked, false);
+});
+
+test("codex connected mode mirrors embedded mode for the same websocket transport intent", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "codex-agent", CODEX_AGENT);
+  writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
+
+  const sharedTransport = {
+    codex: {
+      transport: {
+        type: "ws",
+        url: "ws://shared.example/socket",
+      },
+    },
+  };
+
+  let embeddedBackendSpecific;
+  const embedded = await withEnv(
+    { TASK_RUNNER_CODEX_WS_URL: sharedTransport.codex.transport.url },
+    () =>
+      runWithMock(
+        dir,
+        async (ctx) => {
+          embeddedBackendSpecific = ctx.backendSpecific;
+          setTaskStatusesForPrompt(ctx.prompt, {
+            t1: "completed",
+            t2: "completed",
+            t3: "completed",
+          });
+          return {
+            exitCode: 0,
+            signal: null,
+            timedOut: false,
+            sessionId: null,
+            transcript: "done",
+            rawStdout: "",
+            rawStderr: "",
+          };
+        },
+        {},
+        { agentName: "codex-agent", backendId: "codex" },
+      ),
+  );
+
+  let connectedBackendSpecific;
+  const connected = await withEnv({ TASK_RUNNER_CODEX_WS_URL: "ws://daemon.example/socket" }, () =>
+    runWithMock(
+      dir,
+      async (ctx) => {
+        connectedBackendSpecific = ctx.backendSpecific;
+        setTaskStatusesForPrompt(ctx.prompt, {
+          t1: "completed",
+          t2: "completed",
+          t3: "completed",
+        });
+        return {
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+          sessionId: null,
+          transcript: "done",
+          rawStdout: "",
+          rawStderr: "",
+        };
+      },
+      {
+        backendSpecific: sharedTransport,
+      },
+      {
+        agentName: "codex-agent",
+        backendId: "codex",
+        execution: {
+          hostMode: "daemon",
+          controller: {
+            kind: "daemon",
+            daemonInstanceId: "daemon-test",
+          },
+        },
+      },
+    ),
+  );
+
+  assert.deepEqual(embeddedBackendSpecific, sharedTransport);
+  assert.deepEqual(connectedBackendSpecific, sharedTransport);
+  assert.deepEqual(connectedBackendSpecific, embeddedBackendSpecific);
+  assert.deepEqual(embedded.outcome.manifest.backendSpecific, sharedTransport);
+  assert.deepEqual(connected.outcome.manifest.backendSpecific, sharedTransport);
+});
+
 test("happy path: mock marks all tasks completed in one attempt → exit 0", async () => {
   const dir = tempDir();
   writeAgentAndAssignment(dir);
@@ -297,12 +595,11 @@ test("happy path: mock marks all tasks completed in one attempt → exit 0", asy
   let invocations = 0;
   const { outcome, stdout, stderr } = await runWithMock(dir, async (ctx) => {
     invocations++;
-    const plan = readFileSync(assignmentPathFromPrompt(ctx.prompt), "utf8");
-    let updated = plan;
-    for (const id of ["t1", "t2", "t3"]) {
-      updated = editStatus(updated, id, "completed");
-    }
-    writeFileSync(assignmentPathFromPrompt(ctx.prompt), updated, "utf8");
+    setTaskStatusesForPrompt(ctx.prompt, {
+      t1: "completed",
+      t2: "completed",
+      t3: "completed",
+    });
     return {
       exitCode: 0,
       signal: null,
@@ -322,7 +619,6 @@ test("happy path: mock marks all tasks completed in one attempt → exit 0", asy
   assert.ok(stderr.includes("── attempt 1 ──"), "divider on stderr");
   assert.ok(!stdout.includes("── attempt 1 ──"), "divider not on stdout");
   assert.ok(stderr.includes("Task results:"), "summary shows task results section");
-  assert.ok(stderr.includes("Review "), "summary shows plan file review hint");
 });
 
 test("retry path: first attempt leaves one incomplete, second completes → exit 0", async () => {
@@ -334,18 +630,11 @@ test("retry path: first attempt leaves one incomplete, second completes → exit
   const { outcome } = await runWithMock(dir, async (ctx) => {
     invocations++;
     lastPrompt = ctx.prompt;
-    const absPlan = assignmentPathFromPrompt(ctx.prompt);
-
-    const plan = readFileSync(absPlan, "utf8");
-    let updated = plan;
     if (invocations === 1) {
-      updated = editStatus(updated, "t1", "completed");
-      updated = editStatus(updated, "t2", "completed");
-      // leave t3 pending
+      setTaskStatusesForPrompt(ctx.prompt, { t1: "completed", t2: "completed" });
     } else {
-      updated = editStatus(updated, "t3", "completed");
+      setTaskStatusesForPrompt(ctx.prompt, { t3: "completed" });
     }
-    writeFileSync(absPlan, updated, "utf8");
     return {
       exitCode: 0,
       signal: null,
@@ -372,12 +661,10 @@ test("blocked path: marking one task blocked → exit 2, no further retries", as
   let invocations = 0;
   const { outcome } = await runWithMock(dir, async (ctx) => {
     invocations++;
-    const absPlan = assignmentPathFromPrompt(ctx.prompt);
-    let plan = readFileSync(absPlan, "utf8");
-    plan = editStatus(plan, "t1", "completed");
-    plan = editStatus(plan, "t2", "blocked");
-    // leave t3 pending
-    writeFileSync(absPlan, plan, "utf8");
+    updateTasksForPrompt(ctx.prompt, {
+      t1: { status: "completed" },
+      t2: { status: "blocked" },
+    });
     return {
       exitCode: 0,
       signal: null,
@@ -430,16 +717,15 @@ test("session resume: first attempt session ID passed on retry", async () => {
   const { outcome } = await runWithMock(dir, async (ctx) => {
     invocations++;
     seenResumeIds.push(ctx.resumeSessionId ?? null);
-    const absPlan = assignmentPathFromPrompt(ctx.prompt);
-    let plan = readFileSync(absPlan, "utf8");
     if (invocations === 1) {
-      plan = editStatus(plan, "t1", "completed");
+      setTaskStatusesForPrompt(ctx.prompt, { t1: "completed" });
     } else {
-      plan = editStatus(plan, "t1", "completed");
-      plan = editStatus(plan, "t2", "completed");
-      plan = editStatus(plan, "t3", "completed");
+      setTaskStatusesForPrompt(ctx.prompt, {
+        t1: "completed",
+        t2: "completed",
+        t3: "completed",
+      });
     }
-    writeFileSync(absPlan, plan, "utf8");
     return {
       exitCode: 0,
       signal: null,
@@ -468,9 +754,7 @@ test("in-run resume rejection stops the run with an error", async () => {
       // attempt 1 succeeds but leaves tasks incomplete; attempt 2 is the retry
       // that carries --resume; the mock pretends claude rejects that session
       if (invocations === 1) {
-        const absPlan = assignmentPathFromPrompt(ctx.prompt);
-        const plan = readFileSync(absPlan, "utf8");
-        writeFileSync(absPlan, editStatus(plan, "t1", "completed"), "utf8");
+        setTaskStatusesForPrompt(ctx.prompt, { t1: "completed" });
         return {
           exitCode: 0,
           signal: null,

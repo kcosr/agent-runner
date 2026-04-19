@@ -1,12 +1,6 @@
 ---
 schemaVersion: 1
 name: repo-orientation
-vars:
-  repo_path:
-    type: string
-    required: true
-    source: cli
-    description: Absolute path to the repository to inspect.
 tasks:
   - id: read_conventions
     title: Check repo conventions
@@ -25,4 +19,4 @@ tasks:
       Write a short summary of what this repo does and how it is organized,
       in the Notes field of this task.
 ---
-You are working on the repository at `{{repo_path}}`.
+You are working on the repository at `{{cwd}}`.

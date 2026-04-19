@@ -113,16 +113,16 @@ export function resolveRepoRunsDir(
   return resolveRunsBucketDir(deriveRepoKey(cwd), env);
 }
 
-export function resolveUnknownRunsDir(env: NodeJS.ProcessEnv = process.env): string {
-  return resolveRunsBucketDir(UNKNOWN_REPO_KEY, env);
-}
-
-export function resolveRunWorkspaceDir(
-  cwd: string,
+export function resolveRunWorkspaceDirForRepo(
+  repo: string,
   runId: string,
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  return join(resolveRepoRunsDir(cwd, env), runId);
+  return join(resolveRunsBucketDir(repo, env), runId);
+}
+
+export function resolveUnknownRunsDir(env: NodeJS.ProcessEnv = process.env): string {
+  return resolveRunsBucketDir(UNKNOWN_REPO_KEY, env);
 }
 
 export function resolveInputPath(arg: string, cwd: string): string {

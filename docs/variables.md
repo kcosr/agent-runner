@@ -1,50 +1,149 @@
-# Variables and interpolation
+# Variables
 
-Assignments declare typed input variables in frontmatter:
+Assignments declare typed variables that are resolved at run creation,
+frozen into the manifest, and interpolated into agent instructions,
+assignment instructions, task titles, task bodies, and caller instructions.
+
+## Declaring variables
+
+Variables are declared on the assignment under `vars`:
 
 ```yaml
+---
+schemaVersion: 1
+name: code-review
 vars:
-  repo_path:
-    type: string                # string | number | boolean | enum
-    required: true              # default false
-    source: cli                 # cli | env | either
-    envName: REPO_PATH          # only when source includes env
-    default: null               # optional fallback
-    description: Path to target repo
-    values: [a, b, c]           # only for type: enum
+  range:
+    type: string
+    source: cli
+    default: full
+    description: Git range to review (e.g. main..HEAD)
+  implementation_run_id:
+    type: string
+    source: cli
+    required: true
+  log_level:
+    type: enum
+    values: [debug, info, warn]
+    source: either
+    envName: LOG_LEVEL
+    default: info
+tasks: [...]
+---
 ```
 
-Vars are passed via repeated `--var key=value` flags (or read from
-`process.env[envName]` if the source allows it). They're validated
-at run start; missing required vars or type mismatches exit with
-code 3 before any backend is invoked.
+### Schema
 
-Vars are resolved once at first write and frozen into the run manifest.
-`--var` is therefore rejected on `--resume-run`: a resume re-uses the
-frozen values rather than re-resolving them. If you need different
-values, create a fresh run.
+```ts
+{
+  type?: "string" | "number" | "boolean" | "enum"   // default: "string"
+  required?: boolean                                 // default: false
+  source?: "cli" | "env" | "either"                  // default: "cli"
+  envName?: string                                   // default: same as key
+  default?: unknown                                  // must match type
+  description?: string
+  values?: string[]                                  // required for enum
+}
+```
 
-## Interpolation
+## Resolution at run creation
 
-Interpolation uses `{{key}}` syntax and is applied to the assignment
-instructions body, the agent instructions body, and any other string
-field rendered into a user-visible prompt. In addition to user-declared
-vars, the runner injects:
+For each declared variable, task-runner resolves a value in the following
+order:
 
-- `{{run_id}}` — short run id
-- `{{cwd}}` — resolved absolute working directory
-- `{{task_runner_cmd}}` — resolved CLI command name for user-facing
-  workflow instructions
-- `{{assignment_path}}` — absolute workspace path for the historical
-  `assignment.md` buffer. Retained for continuity; the new workspace
-  layout stores an immutable `assignment-seed.md` instead of a live
-  file, so prefer referencing the run id and the task CLI in new
-  assignment bodies.
+1. If `source` is `cli` or `either` and `--var key=value` was provided on
+   the CLI, use the CLI value.
+2. Otherwise, if `source` is `env` or `either` and an env var named
+   `envName` (or the var key, if `envName` is absent) is set, use the env
+   value.
+3. Otherwise, if `default` is defined, use it.
+4. Otherwise, if `required: true`, the run errors at creation.
+5. Otherwise, the variable is omitted from the resolved var set.
 
-## Related
+## Type coercion
 
-Locked fields (which caller-provided overrides are rejected on a given
-run) are documented alongside the agent/assignment frontmatter schema
-in [agents-and-assignments.md#locked-fields](agents-and-assignments.md#locked-fields).
-Vars themselves are never lockable; the individual *scalar* fields
-you might substitute them into (`model`, `cwd`, `message`, etc.) are.
+- `string` — pass-through.
+- `number` — parsed via `Number(value)`; rejects `NaN`.
+- `boolean` — accepts `"true"` / `"1"` as true, `"false"` / `"0"` as
+  false; anything else errors.
+- `enum` — must be one of the declared `values`.
+
+CLI values come in as strings and are coerced; env values are coerced the
+same way. `default` must already match the declared type.
+
+## Injected variables
+
+task-runner always provides these variables in addition to the declared
+ones:
+
+| Key | Value |
+|-----|-------|
+| `run_id` | the run's short id |
+| `cwd` | the resolved working directory |
+| `config_dir` | the resolved task-runner config root |
+| `state_dir` | the resolved task-runner state root |
+| `assignment_name` | the frozen assignment name, when the run has an assignment |
+| `assignment_path` | path to the workspace assignment seed |
+| `task_runner_cmd` | resolved CLI command for subcommand examples |
+
+These cannot be overridden by `--var`. When a run has no assignment,
+`assignment_name` is omitted, so `{{assignment_name}}` remains
+uninterpolated under the normal undefined-value rule.
+
+## Interpolation syntax
+
+References use `{{key}}` with optional whitespace. The matching pattern is
+`/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g`. Undefined or `null` values leave the
+token unchanged.
+
+Interpolation is applied to:
+
+- Agent role instructions
+- Assignment instructions
+- Task titles and bodies
+- Caller instructions
+
+Values are stringified with `String(value)` before substitution.
+
+## Persistence and redaction
+
+Resolved variables are frozen into `manifest.runtimeVars`. Env-sourced
+values are redacted to avoid persisting secrets:
+
+```json
+"runtimeVars": {
+  "range": "main..HEAD",
+  "log_level": {
+    "redacted": true,
+    "source": "env",
+    "envName": "LOG_LEVEL"
+  }
+}
+```
+
+CLI- and default-sourced values persist their concrete value.
+
+## Resume and variables
+
+Variables are resolved once at run creation and frozen. Resume rejects
+`--var` flags — use dependencies, new tasks, or follow-up messages to pass
+new information. See [resume.md](resume.md).
+
+## CLI usage
+
+```bash
+task-runner run \
+  --agent implementer \
+  --assignment code-review \
+  --var range=main..HEAD \
+  --var implementation_run_id=abc123
+```
+
+`--var` is repeatable. Values are split on the first `=`, so
+`--var message=key=value` yields `message=key=value`.
+
+## Inspecting resolved variables
+
+- `task-runner run status <run-id> --output-format json` includes
+  `runtimeVars` (with env values redacted).
+- `show assignment <name>` renders the declared var schema and defaults.

@@ -1,10 +1,19 @@
+import type { RunTimelineEvent } from "@task-runner/core/contracts/events.js";
+import {
+  runDetailSchema,
+  runSummarySchema,
+  runTimelineEventSchema,
+} from "@task-runner/core/contracts/run-schemas.js";
 import WebSocket from "ws";
+import { z } from "zod";
 import type {
   EventsSubscribeParams,
   JsonRpcNotification,
   JsonRpcRequest,
   JsonRpcResponse,
-  RunEventNotificationParams,
+  RunDetailNotificationParams,
+  RunSummaryNotificationParams,
+  RunTimelineNotificationParams,
 } from "./protocol.js";
 
 export class DaemonConnectionError extends Error {
@@ -37,10 +46,97 @@ type PendingCall = {
   reject: (error: unknown) => void;
 };
 
+export type DaemonSubscriptionNotification =
+  | ({ method: "run.summary" } & RunSummaryNotificationParams)
+  | ({ method: "run.detail" } & RunDetailNotificationParams)
+  | ({ method: "run.timeline" } & RunTimelineNotificationParams);
+
+const runSummaryNotificationSchema = z
+  .object({
+    method: z.literal("run.summary"),
+  })
+  .and(
+    z.discriminatedUnion("type", [
+      z.object({
+        subscriptionId: z.string(),
+        type: z.literal("summary_upsert"),
+        summary: runSummarySchema,
+      }),
+      z.object({
+        subscriptionId: z.string(),
+        type: z.literal("summary_removed"),
+        runId: z.string(),
+      }),
+    ]),
+  );
+
+const runDetailNotificationSchema = z.object({
+  method: z.literal("run.detail"),
+  subscriptionId: z.string(),
+  runId: z.string(),
+  detail: runDetailSchema,
+});
+
+const runTimelineNotificationSchema = z.object({
+  method: z.literal("run.timeline"),
+  subscriptionId: z.string(),
+  runId: z.string(),
+  cursor: z.number().int().positive(),
+  event: runTimelineEventSchema,
+});
+
+const runSummaryNotificationResultSchema: z.ZodType<DaemonSubscriptionNotification> =
+  runSummaryNotificationSchema;
+const runDetailNotificationResultSchema: z.ZodType<DaemonSubscriptionNotification> =
+  runDetailNotificationSchema;
+const runTimelineNotificationResultSchema = runTimelineNotificationSchema.transform(
+  (value): DaemonSubscriptionNotification => ({
+    method: "run.timeline",
+    subscriptionId: value.subscriptionId,
+    runId: value.runId,
+    cursor: value.cursor,
+    event: value.event as RunTimelineEvent,
+  }),
+);
+
+function parseSubscriptionNotification(
+  parsed: JsonRpcNotification,
+): DaemonSubscriptionNotification | null {
+  switch (parsed.method) {
+    case "run.summary": {
+      const result = runSummaryNotificationResultSchema.safeParse({
+        method: parsed.method,
+        ...(parsed.params as object),
+      });
+      return result.success ? result.data : null;
+    }
+    case "run.detail": {
+      const result = runDetailNotificationResultSchema.safeParse({
+        method: parsed.method,
+        ...(parsed.params as object),
+      });
+      return result.success ? result.data : null;
+    }
+    case "run.timeline": {
+      const result = runTimelineNotificationResultSchema.safeParse({
+        method: parsed.method,
+        ...(parsed.params as object),
+      });
+      return result.success ? result.data : null;
+    }
+    default:
+      return null;
+  }
+}
+
 export class DaemonClient {
   private nextId = 1;
   private readonly pending = new Map<string, PendingCall>();
-  private readonly subscriptions = new Map<string, (params: RunEventNotificationParams) => void>();
+  private readonly subscriptions = new Map<
+    string,
+    (params: DaemonSubscriptionNotification) => void
+  >();
+  private readonly queuedNotifications = new Map<string, DaemonSubscriptionNotification[]>();
 
   private constructor(
     private readonly ws: WebSocket,
@@ -92,15 +188,23 @@ export class DaemonClient {
 
   async subscribe(
     params: EventsSubscribeParams,
-    onEvent: (params: RunEventNotificationParams) => void,
+    onEvent: (params: DaemonSubscriptionNotification) => void,
   ): Promise<string> {
     const result = await this.call<{ subscriptionId: string }>("events.subscribe", params);
     this.subscriptions.set(result.subscriptionId, onEvent);
+    const queued = this.queuedNotifications.get(result.subscriptionId);
+    if (queued) {
+      this.queuedNotifications.delete(result.subscriptionId);
+      for (const notification of queued) {
+        onEvent(notification);
+      }
+    }
     return result.subscriptionId;
   }
 
   async unsubscribe(subscriptionId: string): Promise<void> {
     this.subscriptions.delete(subscriptionId);
+    this.queuedNotifications.delete(subscriptionId);
     await this.call("events.unsubscribe", { subscriptionId });
   }
 
@@ -138,14 +242,18 @@ export class DaemonClient {
       return;
     }
 
-    if (parsed.method !== "run.event") {
+    const params = parseSubscriptionNotification(parsed);
+    if (!params) {
       return;
     }
-    const params = parsed.params as RunEventNotificationParams;
     const handler = this.subscriptions.get(params.subscriptionId);
     if (handler) {
       handler(params);
+      return;
     }
+    const queued = this.queuedNotifications.get(params.subscriptionId) ?? [];
+    queued.push(params);
+    this.queuedNotifications.set(params.subscriptionId, queued);
   }
 
   private failPending(error: Error): void {

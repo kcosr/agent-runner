@@ -3,8 +3,11 @@ import { test } from "node:test";
 import {
   deriveRunCapabilities,
   toRunArchiveResult,
+  toRunBackendSessionResult,
   toRunDependenciesResult,
   toRunDetail,
+  toRunNoteResult,
+  toRunPinnedResult,
   toRunSummary,
 } from "../packages/core/dist/contracts/runs.js";
 
@@ -27,8 +30,9 @@ function buildManifest(overrides = {}) {
   };
 
   return {
-    schemaVersion: 6,
+    schemaVersion: 8,
     runId: "run123",
+    repo: "demo-repo",
     agent: {
       name: "demo-agent",
       sourcePath: "/repo/agents/demo/agent.md",
@@ -44,13 +48,14 @@ function buildManifest(overrides = {}) {
     effort: "medium",
     message: "Finish the task list.",
     name: "demo session",
+    note: null,
+    pinned: false,
     unrestricted: false,
     cwd: "/repo",
     lockedFields: ["backend"],
     timeoutSec: 3600,
     assignmentPath: "/state/runs/demo/run123/assignment.md",
     workspaceDir: "/state/runs/demo/run123",
-    taskMode: undefined,
     startedAt: "2026-04-12T10:00:00.000Z",
     endedAt: null,
     archivedAt: null,
@@ -62,25 +67,27 @@ function buildManifest(overrides = {}) {
     tasksCompleted: Object.values(finalTasks).filter((task) => task.status === "completed").length,
     tasksTotal: Object.keys(finalTasks).length,
     backendSessionId: null,
-    runtimeVars: { repo_path: "." },
+    runtimeVars: {},
     execution: {
       hostMode: "embedded",
       controller: {
         kind: "embedded",
       },
     },
-    pendingPrompt: "Prompt body",
+    brief: "Prepared handoff prompt.",
     callerInstructions: "Caller docs",
     attachments: [],
     resetSeed: {
       model: "claude-sonnet-4-6",
       effort: "medium",
       name: "demo session",
+      note: null,
+      pinned: false,
       dependencyRunIds: [],
       unrestricted: false,
       timeoutSec: 3600,
       maxAttempts: 2,
-      pendingPrompt: "Prompt body",
+      brief: "Prepared handoff prompt.",
       finalTasks,
     },
     finalTasks,
@@ -109,6 +116,8 @@ test("run contracts: toRunSummary maps listed manifest rows to the neutral summa
     status: "success",
     effectiveStatus: "success",
     archivedAt: null,
+    notePresent: false,
+    pinned: false,
     agentName: "demo-agent",
     assignmentName: "demo-work",
     backend: "claude",
@@ -126,6 +135,7 @@ test("run contracts: toRunSummary maps listed manifest rows to the neutral summa
       satisfied: 0,
       unsatisfied: 0,
     },
+    activeTask: null,
     execution: {
       hostMode: "embedded",
       controller: {
@@ -135,6 +145,8 @@ test("run contracts: toRunSummary maps listed manifest rows to the neutral summa
     capabilities: {
       canArchive: true,
       canUnarchive: false,
+      canReset: true,
+      canDelete: false,
       canResume: true,
       canAbort: false,
       abortReason: "already_terminal",
@@ -164,6 +176,8 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
   assert.deepEqual(detail.capabilities, {
     canArchive: true,
     canUnarchive: false,
+    canReset: true,
+    canDelete: false,
     canResume: true,
     canAbort: false,
     abortReason: "already_terminal",
@@ -176,7 +190,7 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
   assert.equal("canMutateTasks" in detail.capabilities, false);
   assert.deepEqual(detail, {
     runId: "run123",
-    repo: "unknown",
+    repo: "demo-repo",
     status: "success",
     effectiveStatus: "success",
     archivedAt: null,
@@ -196,9 +210,10 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
     model: "claude-sonnet-4-6",
     effort: "medium",
     name: "demo session",
+    note: null,
+    pinned: false,
     backendSessionId: "sess-123",
     cwd: "/repo",
-    taskMode: "file",
     unrestricted: false,
     timeoutSec: 3600,
     startedAt: "2026-04-12T10:00:00.000Z",
@@ -228,11 +243,12 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
         notes: "",
       },
     ],
+    activeTask: null,
     message: "Finish the task list.",
+    pendingPrompt: null,
     callerInstructions: "Caller docs",
-    pendingPrompt: "Prompt body",
     lockedFields: ["backend"],
-    runtimeVars: { repo_path: "." },
+    runtimeVars: {},
     execution: {
       hostMode: "embedded",
       controller: {
@@ -240,6 +256,48 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
       },
     },
     capabilities: detail.capabilities,
+  });
+});
+
+test("run contracts: toRunDetail exposes pendingPrompt for initialized zero-attempt runs", () => {
+  const detail = toRunDetail({
+    manifest: buildManifest(),
+    isLive: false,
+  });
+
+  assert.equal(detail.pendingPrompt, "Prepared handoff prompt.");
+});
+
+test("run contracts: note and pin metadata project through summary, detail, and mutation DTOs", () => {
+  const manifest = buildManifest();
+  manifest.note = "# Follow-up\n\nKeep the active note preview.";
+  manifest.pinned = true;
+  manifest.resetSeed.note = manifest.note;
+  manifest.resetSeed.pinned = manifest.pinned;
+
+  const summary = toRunSummary({
+    repo: "demo-repo",
+    workspaceDir: manifest.workspaceDir,
+    manifest,
+  });
+  const detail = toRunDetail({
+    manifest,
+    isLive: false,
+  });
+
+  assert.equal(summary.notePresent, true);
+  assert.equal(summary.pinned, true);
+  assert.equal(detail.note, "# Follow-up\n\nKeep the active note preview.");
+  assert.equal(detail.pinned, true);
+  assert.deepEqual(toRunNoteResult({ manifest, changed: true }), {
+    runId: "run123",
+    note: "# Follow-up\n\nKeep the active note preview.",
+    changed: true,
+  });
+  assert.deepEqual(toRunPinnedResult({ manifest, changed: true }), {
+    runId: "run123",
+    pinned: true,
+    changed: true,
   });
 });
 
@@ -329,11 +387,125 @@ test("run contracts: dependency summary/detail projection resolves readiness and
   ]);
 });
 
+test("run contracts: activeTask is derived only when exactly one task is in progress", () => {
+  const manifest = buildManifest({
+    finalTasks: {
+      t1: {
+        id: "t1",
+        title: "First",
+        body: "Do the first thing.",
+        status: "completed",
+        notes: "Done.",
+      },
+      t2: {
+        id: "t2",
+        title: "Second",
+        body: "Do the second thing.",
+        status: "in_progress",
+        notes: "",
+      },
+    },
+    tasksCompleted: 1,
+    tasksTotal: 2,
+  });
+
+  const summary = toRunSummary({
+    repo: "demo-repo",
+    workspaceDir: manifest.workspaceDir,
+    manifest,
+  });
+  const detail = toRunDetail({
+    manifest,
+    isLive: true,
+  });
+
+  assert.deepEqual(summary.activeTask, {
+    id: "t2",
+    title: "Second",
+  });
+  assert.deepEqual(detail.activeTask, {
+    id: "t2",
+    title: "Second",
+  });
+
+  const noActiveManifest = buildManifest({
+    finalTasks: {
+      t1: {
+        id: "t1",
+        title: "First",
+        body: "Do the first thing.",
+        status: "completed",
+        notes: "Done.",
+      },
+      t2: {
+        id: "t2",
+        title: "Second",
+        body: "Do the second thing.",
+        status: "pending",
+        notes: "",
+      },
+    },
+  });
+  assert.equal(
+    toRunSummary({
+      repo: "demo-repo",
+      workspaceDir: noActiveManifest.workspaceDir,
+      manifest: noActiveManifest,
+    }).activeTask,
+    null,
+  );
+  assert.equal(
+    toRunDetail({
+      manifest: noActiveManifest,
+      isLive: true,
+    }).activeTask,
+    null,
+  );
+
+  const ambiguousActiveManifest = buildManifest({
+    finalTasks: {
+      t1: {
+        id: "t1",
+        title: "First",
+        body: "Do the first thing.",
+        status: "in_progress",
+        notes: "",
+      },
+      t2: {
+        id: "t2",
+        title: "Second",
+        body: "Do the second thing.",
+        status: "in_progress",
+        notes: "",
+      },
+    },
+    tasksCompleted: 0,
+    tasksTotal: 2,
+  });
+  assert.equal(
+    toRunSummary({
+      repo: "demo-repo",
+      workspaceDir: ambiguousActiveManifest.workspaceDir,
+      manifest: ambiguousActiveManifest,
+    }).activeTask,
+    null,
+  );
+  assert.equal(
+    toRunDetail({
+      manifest: ambiguousActiveManifest,
+      isLive: true,
+    }).activeTask,
+    null,
+  );
+});
+
 test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mutation semantics", () => {
   const initialized = deriveRunCapabilities(buildManifest());
   assert.deepEqual(initialized, {
     canArchive: true,
     canUnarchive: false,
+    canReset: true,
+    canDelete: false,
     canResume: true,
     canAbort: false,
     abortReason: "not_active_in_daemon",
@@ -356,6 +528,8 @@ test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mu
   assert.deepEqual(archived, {
     canArchive: false,
     canUnarchive: true,
+    canReset: true,
+    canDelete: true,
     canResume: false,
     canAbort: false,
     abortReason: "already_terminal",
@@ -366,34 +540,24 @@ test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mu
     },
   });
 
-  const runningFileMode = deriveRunCapabilities(
+  const running = deriveRunCapabilities(
     buildManifest({
       status: "running",
     }),
   );
-  assert.deepEqual(runningFileMode, {
+  assert.deepEqual(running, {
     canArchive: false,
     canUnarchive: false,
+    canReset: false,
+    canDelete: false,
     canResume: false,
     canAbort: false,
     abortReason: "not_active_in_daemon",
     taskMutation: {
-      canSetStatus: false,
-      canEditNotes: false,
+      canSetStatus: true,
+      canEditNotes: true,
       canAdd: false,
     },
-  });
-
-  const runningCliMode = deriveRunCapabilities(
-    buildManifest({
-      status: "running",
-      taskMode: "cli",
-    }),
-  );
-  assert.deepEqual(runningCliMode.taskMutation, {
-    canSetStatus: true,
-    canEditNotes: true,
-    canAdd: false,
   });
 
   const passive = deriveRunCapabilities(
@@ -459,6 +623,8 @@ test("run contracts: passive summaries and details derive effectiveStatus from t
   assert.deepEqual(detail.capabilities, {
     canArchive: true,
     canUnarchive: false,
+    canReset: true,
+    canDelete: false,
     canResume: false,
     canAbort: false,
     abortReason: "not_active_in_daemon",
@@ -503,6 +669,24 @@ test("run contracts: toRunDependenciesResult maps manifest-plus-change to the de
     {
       runId: "run123",
       dependencyRunIds: ["run456"],
+      changed: true,
+    },
+  );
+});
+
+test("run contracts: toRunBackendSessionResult maps manifest-plus-change to the backend session DTO", () => {
+  const manifest = buildManifest({
+    backendSessionId: "thread-42",
+  });
+
+  assert.deepEqual(
+    toRunBackendSessionResult({
+      manifest,
+      changed: true,
+    }),
+    {
+      runId: "run123",
+      backendSessionId: "thread-42",
       changed: true,
     },
   );

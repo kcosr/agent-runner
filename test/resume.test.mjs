@@ -8,7 +8,13 @@ import { readStatus } from "../packages/core/dist/core/commands/service.js";
 import { ResumeError, resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import { createRunEventCapture } from "./helpers/run-events.mjs";
-import { assignmentPathFromPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
+import {
+  completeAllTasksFromPrompt,
+  setTaskStatusesForPrompt,
+  updateTasksForPrompt,
+  withEnv,
+  withSharedRuntimeEnv,
+} from "./helpers/runtime-paths.mjs";
 
 const THREE_AGENT = `---
 schemaVersion: 1
@@ -37,6 +43,14 @@ tasks:
 Work on the repo. Plan at {{assignment_path}}.
 `;
 
+const CODEX_AGENT = `---
+schemaVersion: 1
+name: three
+backend: codex
+---
+Agent prompt.
+`;
+
 function tempDir() {
   return mkdtempSync(join(tmpdir(), "task-runner-resume-"));
 }
@@ -62,28 +76,11 @@ function writeAgentAndAssignment(baseDir) {
   writeAssignment(baseDir, "three-work", THREE_ASSIGNMENT);
 }
 
-function editStatus(content, taskId, newStatus) {
-  const marker = `<!-- task-id: ${taskId} -->`;
-  const start = content.indexOf(marker);
-  if (start < 0) throw new Error(`marker not found: ${taskId}`);
-  const nextMarker = content.indexOf("<!-- task-id:", start + marker.length);
-  const end = nextMarker < 0 ? content.length : nextMarker;
-  const section = content.slice(start, end);
-  const updated = section.replace(/\*\*Status:\*\*\s*\S+/, `**Status:** ${newStatus}`);
-  return content.slice(0, start) + updated + content.slice(end);
-}
-
-function editNotes(content, taskId, notesText) {
-  const marker = `<!-- task-id: ${taskId} -->`;
-  const start = content.indexOf(marker);
-  const nextMarker = content.indexOf("<!-- task-id:", start + marker.length);
-  const end = nextMarker < 0 ? content.length : nextMarker;
-  const section = content.slice(start, end);
-  const updated = section.replace(
-    /<!-- notes:start -->[\s\S]*?<!-- notes:end -->/,
-    `<!-- notes:start -->\n${notesText}\n<!-- notes:end -->`,
-  );
-  return content.slice(0, start) + updated + content.slice(end);
+function patchManifest(workspaceDir, mutator) {
+  const manifestPath = join(workspaceDir, "run.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  mutator(manifest);
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 function mockBackend(handler) {
@@ -120,12 +117,10 @@ test("resume: happy path — original blocks, resume completes, same workspace",
   // Session 0 — blocks on t2
   const first = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      let plan = readFileSync(absPlan, "utf8");
-      plan = editStatus(plan, "t1", "completed");
-      plan = editStatus(plan, "t2", "blocked");
-      plan = editNotes(plan, "t2", "db is down");
-      writeFileSync(absPlan, plan, "utf8");
+      updateTasksForPrompt(ctx.prompt, {
+        t1: { status: "completed" },
+        t2: { status: "blocked", notes: "db is down" },
+      });
       return {
         exitCode: 0,
         signal: null,
@@ -146,17 +141,17 @@ test("resume: happy path — original blocks, resume completes, same workspace",
   assert.equal(first.manifest.backendSessionId, "sess-original");
 
   // Resume — fix everything. Plan path is known from the first run.
-  const firstPlanPath = join(first.workspaceDir, "assignment.md");
   const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.runId, dir));
   const second = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
       // Should receive the inherited session id and only the follow-up message
       assert.equal(ctx.resumeSessionId, "sess-original");
       assert.equal(ctx.prompt, "db is back up");
-      let plan = readFileSync(firstPlanPath, "utf8");
-      plan = editStatus(plan, "t2", "completed");
-      plan = editStatus(plan, "t3", "completed");
-      writeFileSync(firstPlanPath, plan, "utf8");
+      patchManifest(first.workspaceDir, (manifest) => {
+        manifest.finalTasks.t2.status = "completed";
+        manifest.finalTasks.t3.status = "completed";
+        manifest.tasksCompleted = 3;
+      });
       return {
         exitCode: 0,
         signal: null,
@@ -208,15 +203,15 @@ test("resume: attempt numbers are monotonic across sessions", async () => {
   assert.equal(first.manifest.attemptRecords.at(-1).attempt, 3);
 
   // Resume — succeed on first attempt
-  const firstPlanPath = join(first.workspaceDir, "assignment.md");
   const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.runId, dir));
   const second = await runIn(dir, {
     backend: mockBackend(async (_ctx) => {
-      let plan = readFileSync(firstPlanPath, "utf8");
-      for (const id of ["t1", "t2", "t3"]) {
-        plan = editStatus(plan, id, "completed");
-      }
-      writeFileSync(firstPlanPath, plan, "utf8");
+      patchManifest(first.workspaceDir, (manifest) => {
+        manifest.finalTasks.t1.status = "completed";
+        manifest.finalTasks.t2.status = "completed";
+        manifest.finalTasks.t3.status = "completed";
+        manifest.tasksCompleted = 3;
+      });
       return {
         exitCode: 0,
         signal: null,
@@ -286,16 +281,86 @@ test("resume: archived runs are rejected until unarchived", async () => {
   );
 });
 
+test("resume: codex runs reuse the frozen transport instead of current env", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", CODEX_AGENT);
+  writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
+
+  const initialTransport = {
+    codex: {
+      transport: {
+        type: "ws",
+        url: "ws://initial.example/socket",
+      },
+    },
+  };
+
+  const first = await withEnv(
+    { TASK_RUNNER_CODEX_WS_URL: initialTransport.codex.transport.url },
+    () =>
+      runIn(dir, {
+        backend: {
+          id: "codex",
+          invoke: async (ctx) => {
+            assert.deepEqual(ctx.backendSpecific, initialTransport);
+            updateTasksForPrompt(ctx.prompt, {
+              t1: { status: "blocked", notes: "waiting on dependency" },
+            });
+            return {
+              exitCode: 0,
+              signal: null,
+              timedOut: false,
+              sessionId: "thr-codex",
+              transcript: "blocked",
+              rawStdout: "",
+              rawStderr: "",
+            };
+          },
+        },
+      }),
+  );
+
+  const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.runId, dir));
+  const second = await withEnv({ TASK_RUNNER_CODEX_WS_URL: "ws://changed.example/socket" }, () =>
+    runIn(dir, {
+      backend: {
+        id: "codex",
+        invoke: async (ctx) => {
+          assert.equal(ctx.resumeSessionId, "thr-codex");
+          assert.deepEqual(ctx.backendSpecific, initialTransport);
+          patchManifest(first.workspaceDir, (manifest) => {
+            manifest.finalTasks.t1.status = "completed";
+            manifest.finalTasks.t2.status = "completed";
+            manifest.finalTasks.t3.status = "completed";
+            manifest.tasksCompleted = 3;
+          });
+          return {
+            exitCode: 0,
+            signal: null,
+            timedOut: false,
+            sessionId: "thr-codex",
+            transcript: "done",
+            rawStdout: "",
+            rawStderr: "",
+          };
+        },
+      },
+      overrides: { message: "dependency is back" },
+      resume: target,
+    }),
+  );
+
+  assert.deepEqual(second.manifest.backendSpecific, initialTransport);
+  assert.deepEqual(second.manifest.resetSeed.backendSpecific, initialTransport);
+});
+
 test("resume: rejects a target already marked running", async () => {
   const dir = tempDir();
   writeAgentAndAssignment(dir);
 
   const first = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      let plan = readFileSync(absPlan, "utf8");
-      plan = editStatus(plan, "t1", "completed");
-      writeFileSync(absPlan, plan, "utf8");
+      setTaskStatusesForPrompt(ctx.prompt, { t1: "completed" });
       return {
         exitCode: 0,
         signal: null,
@@ -364,16 +429,9 @@ test("resume: start refreshes the latest initialized task state before claiming 
   initializedManifest.tasksCompleted = 1;
   writeFileSync(initializedManifestPath, `${JSON.stringify(initializedManifest, null, 2)}\n`);
 
-  let initializedPlan = readFileSync(initialized.assignmentPath, "utf8");
-  initializedPlan = editStatus(initializedPlan, "t1", "completed");
-  writeFileSync(initialized.assignmentPath, initializedPlan, "utf8");
-
   const resumed = await runIn(dir, {
-    backend: mockBackend(async () => {
-      let plan = readFileSync(initialized.assignmentPath, "utf8");
-      plan = editStatus(plan, "t2", "completed");
-      plan = editStatus(plan, "t3", "completed");
-      writeFileSync(initialized.assignmentPath, plan, "utf8");
+    backend: mockBackend(async (ctx) => {
+      setTaskStatusesForPrompt(ctx.prompt, { t2: "completed", t3: "completed" });
       return {
         exitCode: 0,
         signal: null,
@@ -400,13 +458,10 @@ test("resume: non-completed tasks normalized to pending, notes preserved", async
 
   const first = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      let plan = readFileSync(absPlan, "utf8");
-      plan = editStatus(plan, "t1", "completed");
-      plan = editNotes(plan, "t1", "first done");
-      plan = editStatus(plan, "t2", "blocked");
-      plan = editNotes(plan, "t2", "blocked because X");
-      writeFileSync(absPlan, plan, "utf8");
+      updateTasksForPrompt(ctx.prompt, {
+        t1: { status: "completed", notes: "first done" },
+        t2: { status: "blocked", notes: "blocked because X" },
+      });
       return {
         exitCode: 0,
         signal: null,
@@ -421,30 +476,19 @@ test("resume: non-completed tasks normalized to pending, notes preserved", async
   assert.equal(first.manifest.status, "blocked");
 
   // Resume — inspect the in-memory state after normalization by reading tasks.md
-  const firstPlanPath = join(first.workspaceDir, "assignment.md");
   const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.runId, dir));
   const second = await runIn(dir, {
     backend: mockBackend(async (_ctx) => {
-      const plan = readFileSync(firstPlanPath, "utf8");
-
-      // t1 stays completed
-      assert.ok(plan.includes("<!-- task-id: t1 -->"));
-      const t1Section = plan.slice(plan.indexOf("<!-- task-id: t1 -->"));
-      assert.ok(t1Section.includes("**Status:** completed"), "t1 stays completed");
-      assert.ok(t1Section.includes("first done"), "t1 notes preserved");
-
-      // t2 normalized to pending but notes still there
-      const t2Section = plan.slice(
-        plan.indexOf("<!-- task-id: t2 -->"),
-        plan.indexOf("<!-- task-id: t3 -->"),
-      );
-      assert.ok(t2Section.includes("**Status:** pending"), "t2 normalized from blocked to pending");
-      assert.ok(t2Section.includes("blocked because X"), "t2 notes preserved");
-
-      let updated = plan;
-      updated = editStatus(updated, "t2", "completed");
-      updated = editStatus(updated, "t3", "completed");
-      writeFileSync(firstPlanPath, updated, "utf8");
+      const manifest = JSON.parse(readFileSync(join(first.workspaceDir, "run.json"), "utf8"));
+      assert.equal(manifest.finalTasks.t1.status, "completed");
+      assert.equal(manifest.finalTasks.t1.notes, "first done");
+      assert.equal(manifest.finalTasks.t2.status, "pending");
+      assert.equal(manifest.finalTasks.t2.notes, "blocked because X");
+      patchManifest(first.workspaceDir, (next) => {
+        next.finalTasks.t2.status = "completed";
+        next.finalTasks.t3.status = "completed";
+        next.tasksCompleted = 3;
+      });
 
       return {
         exitCode: 0,
@@ -472,12 +516,7 @@ test("resume: --add-task alone (no message) is allowed on resume", async () => {
 
   const first = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      let plan = readFileSync(absPlan, "utf8");
-      for (const id of ["t1", "t2", "t3"]) {
-        plan = editStatus(plan, id, "completed");
-      }
-      writeFileSync(absPlan, plan, "utf8");
+      completeAllTasksFromPrompt(ctx.prompt);
       return {
         exitCode: 0,
         signal: null,
@@ -492,17 +531,11 @@ test("resume: --add-task alone (no message) is allowed on resume", async () => {
   assert.equal(first.exitCode, 0);
 
   const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.runId, dir));
-  const firstPlanPath = join(first.workspaceDir, "assignment.md");
   let seenPrompt;
   const second = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
       seenPrompt = ctx.prompt;
-      let plan = readFileSync(firstPlanPath, "utf8");
-      const ids = [...plan.matchAll(/<!-- task-id:\s*(cli-[A-Za-z0-9]+)\s*-->/g)].map((m) => m[1]);
-      for (const id of ids) {
-        plan = editStatus(plan, id, "completed");
-      }
-      writeFileSync(firstPlanPath, plan, "utf8");
+      completeAllTasksFromPrompt(ctx.prompt);
       return {
         exitCode: 0,
         signal: null,
@@ -530,10 +563,7 @@ test("resume: unfinished tasks can resume with an implicit continue prompt", asy
 
   const first = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      let plan = readFileSync(absPlan, "utf8");
-      plan = editStatus(plan, "t1", "blocked");
-      writeFileSync(absPlan, plan, "utf8");
+      setTaskStatusesForPrompt(ctx.prompt, { t1: "blocked" });
       return {
         exitCode: 0,
         signal: null,
@@ -547,15 +577,15 @@ test("resume: unfinished tasks can resume with an implicit continue prompt", asy
   });
 
   const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.runId, dir));
-  const firstPlanPath = join(first.workspaceDir, "assignment.md");
   const second = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
       assert.equal(ctx.prompt, "Continue working through the remaining task list items.");
-      let plan = readFileSync(firstPlanPath, "utf8");
-      plan = editStatus(plan, "t1", "completed");
-      plan = editStatus(plan, "t2", "completed");
-      plan = editStatus(plan, "t3", "completed");
-      writeFileSync(firstPlanPath, plan, "utf8");
+      patchManifest(first.workspaceDir, (manifest) => {
+        manifest.finalTasks.t1.status = "completed";
+        manifest.finalTasks.t2.status = "completed";
+        manifest.finalTasks.t3.status = "completed";
+        manifest.tasksCompleted = 3;
+      });
       return {
         exitCode: 0,
         signal: null,
@@ -581,12 +611,7 @@ test("resume: missing both message and --add-task is still a hard error once all
 
   const first = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      let plan = readFileSync(absPlan, "utf8");
-      for (const id of ["t1", "t2", "t3"]) {
-        plan = editStatus(plan, id, "completed");
-      }
-      writeFileSync(absPlan, plan, "utf8");
+      completeAllTasksFromPrompt(ctx.prompt);
       return {
         exitCode: 0,
         signal: null,
@@ -622,10 +647,7 @@ test("resume: missing backend session id is a hard error", async () => {
 
   const first = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      let plan = readFileSync(absPlan, "utf8");
-      plan = editStatus(plan, "t1", "blocked");
-      writeFileSync(absPlan, plan, "utf8");
+      setTaskStatusesForPrompt(ctx.prompt, { t1: "blocked" });
       return {
         exitCode: 0,
         signal: null,
@@ -665,10 +687,7 @@ test("resume: claude rejecting the resume on first attempt fails hard", async ()
 
   const first = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      let plan = readFileSync(absPlan, "utf8");
-      plan = editStatus(plan, "t1", "blocked");
-      writeFileSync(absPlan, plan, "utf8");
+      setTaskStatusesForPrompt(ctx.prompt, { t1: "blocked" });
       return {
         exitCode: 0,
         signal: null,
@@ -708,10 +727,7 @@ test("resume: resolveResumeTarget finds the workspace by slug in cwd", async () 
 
   const first = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      let plan = readFileSync(absPlan, "utf8");
-      for (const id of ["t1", "t2", "t3"]) plan = editStatus(plan, id, "completed");
-      writeFileSync(absPlan, plan, "utf8");
+      completeAllTasksFromPrompt(ctx.prompt);
       return {
         exitCode: 0,
         signal: null,
@@ -750,10 +766,7 @@ test("resume: runAgent rejects overrides.cwd (backend sessions are cwd-bound)", 
   // Session 0 — complete happy path so we have a resumable terminal run.
   const first = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      let plan = readFileSync(absPlan, "utf8");
-      for (const id of ["t1", "t2", "t3"]) plan = editStatus(plan, id, "completed");
-      writeFileSync(absPlan, plan, "utf8");
+      completeAllTasksFromPrompt(ctx.prompt);
       return {
         exitCode: 0,
         signal: null,
@@ -793,10 +806,7 @@ test("resume: runAgent rejects cliVars non-empty on resume", async () => {
 
   const first = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      let plan = readFileSync(absPlan, "utf8");
-      for (const id of ["t1", "t2", "t3"]) plan = editStatus(plan, id, "completed");
-      writeFileSync(absPlan, plan, "utf8");
+      completeAllTasksFromPrompt(ctx.prompt);
       return {
         exitCode: 0,
         signal: null,
@@ -859,10 +869,7 @@ test("resume: text summary includes the resume-run hint with the run id", async 
         loadedAssignment,
         cliVars: {},
         backend: mockBackend(async (ctx) => {
-          const absPlan = assignmentPathFromPrompt(ctx.prompt);
-          let plan = readFileSync(absPlan, "utf8");
-          for (const id of ["t1", "t2", "t3"]) plan = editStatus(plan, id, "completed");
-          writeFileSync(absPlan, plan, "utf8");
+          completeAllTasksFromPrompt(ctx.prompt);
           return {
             exitCode: 0,
             signal: null,

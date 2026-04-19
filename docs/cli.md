@@ -1,392 +1,302 @@
-# CLI reference
+# CLI Reference
 
-Host selection:
+This is the complete `task-runner` command reference. For conceptual
+context, see [concepts.md](concepts.md) and [runs.md](runs.md).
 
-- Without `--connect` / `TASK_RUNNER_CONNECT`, commands run in
-  **embedded mode** and call the shared app services in-process.
-- With `--connect <ws-url>` or `TASK_RUNNER_CONNECT=<ws-url>`, the CLI
-  runs in **daemon mode** and routes the entire command through the
-  local daemon API. If nothing is listening there, the command fails
-  with exit code `3`; it does not silently fall back to embedded mode.
+All commands accept `--help` / `-h`.
 
-See [daemon.md](daemon.md) for the full daemon contract.
+## Command index
 
-## `task-runner run`
+| Command | Purpose |
+|---------|---------|
+| `run` | Execute a fresh run, resume an existing run, or execute-after-init |
+| `init` | Prepare a run workspace without invoking the backend |
+| `serve` | Start the local daemon / control plane |
+| `status` | Print system/environment status |
+| `run status\|brief` | Print run state or the composed worker handoff |
+| `task list\|show\|set\|append-notes\|add` | Task state inspection and mutation |
+| `attachment add\|list\|download\|remove` | Attachment management |
+| `list agents\|assignments\|runs` | Enumerate definitions and runs |
+| `show agent\|assignment` | Render a single definition |
+| `run reset\|archive\|unarchive\|delete` | Lifecycle mutations |
+| `run set-name\|set-backend-session\|clear-backend-session` | Metadata mutations |
+| `run add-dep\|remove-dep\|clear-deps` | Dependency graph mutations |
 
-Execute an agent. Three modes, distinguished by which flags you pass:
+## Global flags
+
+| Flag | Applies to | Effect |
+|------|-----------|--------|
+| `--help`, `-h` | any | Print command help |
+| `--connect <ws-url>` | client commands | Route command through a daemon (also `TASK_RUNNER_CONNECT`) |
+| `--output-format text\|json` | most commands | Output format (default `text`) |
+
+Commands reject flags they do not consume — unknown flag combinations
+error out rather than being silently ignored.
+
+## `run`
+
+Execute a run. With no subcommand it creates a fresh run, resumes an
+existing run (`--resume-run`), or executes an initialized run
+(`--resume-run`). See [resume.md](resume.md) for the rules.
 
 ```bash
-# Fresh run
-task-runner run --agent <name> [--assignment <name>] [options] [message]
-
-# Resume an existing run (follow-up message optional when incomplete tasks remain)
-task-runner run --resume-run <id> [options] [message]
-
-# Execute a previously initialized run (see `init` below)
-task-runner run --resume-run <id>
+task-runner run \
+  [--agent <name|path>] \
+  [--assignment <name|path>] \
+  [--cwd <path>] \
+  [--backend <id>] \
+  [--model <id>] \
+  [--effort <level>] \
+  [--timeout-sec <n>] \
+  [--max-retries <n>] \
+  [--unrestricted] \
+  [--name <name>] \
+  [--var <key>=<value> ...] \
+  [--add-task <title> ...] \
+  [--backend-session-id <id>] \
+  [--resume-run <id|path>] \
+  [--detach] \
+  [<message tokens...>]
 ```
 
-### Common options
+Flags:
 
-| Flag | Purpose |
-|---|---|
-| `--agent <name\|path>` | Agent name or direct path. **Optional on fresh runs** — when omitted, task-runner synthesizes an ad-hoc agent from CLI overrides (in that case `--backend` is required). **Forbidden with `--resume-run`** — the agent is reconstructed from the frozen manifest, not re-read from disk. |
-| `--assignment <name\|path>` | Assignment name or direct path. Optional on fresh runs. Forbidden on resume. |
-| `--resume-run <id\|path>` | Continue an existing run by short id, workspace path, or direct `run.json` path. Archived runs must be unarchived first. See [resume.md](resume.md) for the full resume-override policy. |
-| `--var key=value` (repeatable) | Set an input variable. Validated against the assignment's `vars` schema. **Forbidden with `--resume-run`** — vars are resolved once at first write and frozen into the manifest; they aren't re-resolved on resume. |
-| `--add-task "<title>"` (repeatable) | Append an ad-hoc task with auto-generated id `cli-<short>`. |
-| `--cwd <path>` | Override the agent's `cwd`. **Forbidden with `--resume-run`** — backend sessions are bound to their creation cwd, so a new cwd would invalidate the captured session id. Create a fresh run if you need a different cwd. |
-| `--backend <claude\|codex\|cursor\|passive>` | Override the agent's backend. Drops the agent's `model` unless `--model` is also passed. Forbidden with `--resume-run` (the backend is locked to the session that created the run). Required when `--agent` is omitted (ad-hoc synthesis). |
-| `--model <id>` | Override the model. Backend-specific (`claude-sonnet-4-6`, `gpt-5.4`, etc.). |
-| `--effort <off\|minimal\|low\|medium\|high\|xhigh\|max>` | Reasoning effort. Mapped per backend; accepted but ignored by Cursor v1. |
-| `--max-retries <n>` | Override the per-run retry budget (default 3). |
-| `--timeout-sec <n>` | Override the per-attempt timeout (default 3600). |
-| `--unrestricted` | Bypass the backend's approval prompts. Cursor maps this to `cursor-agent --force`. |
-| `--name <name>` | Set the fresh run's persisted display name (`run.name`). Omitted means unnamed. Forbidden with `--resume-run`. |
-| `--backend-session-id <id>` | Adopt an existing backend session id (claude UUID, codex thread id). Validated before workspace creation. Cursor does not support bootstrap import and rejects this flag. Forbidden with `--resume-run` (the resume target already carries one). |
-| `--connect <ws-url>` | Route the command through the local daemon instead of embedded mode. Also honored from `TASK_RUNNER_CONNECT`. |
-| `--detach` | **Daemon mode only.** Dispatch the daemon-owned run and exit immediately after the daemon accepts it. Valid only on plain `task-runner run`; rejected in embedded mode, on `init`, and on grouped `run` subcommands. |
-| `--output-format <text\|json>` | Default `text`. `json` writes the final manifest-shaped run record to stdout once at end of run. |
+- `--agent <name|path>` — bare name resolved under the config dir, or a
+  direct path to `agent.md`.
+- `--assignment <name|path>` — same resolution as `--agent`. Optional; a
+  run without an assignment is a "chat" run with no tasks.
+- `--cwd <path>` — override the run cwd. Fresh-run precedence is
+  `--cwd` → assignment `cwd` → caller cwd.
+- `--backend <id>` — override the agent's backend. Valid ids:
+  `claude`, `codex`, `cursor`, `pi`, `passive`.
+- `--model <id>` — override the agent's model.
+- `--effort <level>` — one of `off`, `minimal`, `low`, `medium`, `high`,
+  `xhigh`, `max`.
+- `--timeout-sec <n>` — positive integer per-attempt wall-clock budget.
+- `--max-retries <n>` — non-negative integer; `maxAttempts = retries + 1`.
+- `--unrestricted` — pass the backend's safety-bypass flag.
+- `--name <name>` — set the persisted display name.
+- `--var <key>=<value>` — repeatable. Split on the first `=`. Forbidden
+  on resume.
+- `--add-task <title>` — repeatable. Append a task to the run's list.
+  Allowed on resume (non-passive runs); forbidden on execute-after-init.
+- `--backend-session-id <id>` — bootstrap-import an existing backend
+  session. Forbidden on resume.
+- `--resume-run <id|path>` — continue an existing run. Many flags are
+  forbidden in combination with this; see [resume.md](resume.md).
+- `--detach` — daemon mode only; dispatch the run and exit after the
+  daemon accepts it.
 
-### Detached daemon dispatch
+Positional args are joined with spaces into the message body.
 
-- `task-runner run --detach ...` and `task-runner run --detach --resume-run <id>`
-  send `runs.start` / `runs.resume` to the daemon and return immediately
-  after the daemon responds with a `runId`.
-- Detached mode does **not** wait for `run_finished`, does not stream
-  run events, and does not change any manifest/session semantics.
-- Attached behavior remains the default. If you omit `--detach`, a
-  daemon-connected `run` keeps the existing blocking/event-streaming
-  behavior.
+## `init`
 
-Detached success output:
-
-```text
-task-runner: detached run abc123
-Resume later with: task-runner run --resume-run abc123 "..."
-Check status with: task-runner status abc123
-```
-
-```json
-{
-  "runId": "abc123",
-  "detached": true
-}
-```
-
-### Resume overrides
-
-On `--resume-run`, the "legitimate mid-run" overrides — `--model`,
-`--effort`, `--timeout-sec`, `--max-retries`, `--unrestricted` — are
-still accepted (and still vetted against the frozen
-`manifest.lockedFields`). **Execute-after-init** (resuming a run whose
-prior status was `initialized`) rejects **every** override. See
-[resume.md](resume.md) for the full matrix.
-
-## `task-runner init`
-
-Prepare a run *without* invoking the backend. Same flags as `run`, but
-stops after writing the workspace, manifest (`status: "initialized"`),
-and the frozen prompt. Returns the run id; resume later with
-`task-runner run --resume-run <id>`.
+Same inputs as `run` (except no `--detach`, `--max-retries`,
+`--timeout-sec`), but the backend is never invoked. Used for passive
+runs or to inspect a run before executing it.
 
 ```bash
 task-runner init \
-  --agent ./agents/example/agent.md \
-  --assignment ./assignments/repo-orientation/assignment.md \
-  --var repo_path=/some/repo
-# task-runner: initialized agent=example run=abc123
-#              ...
-#              resume with: task-runner run --resume-run abc123
+  --agent <name|path> \
+  --assignment <name|path> \
+  [--cwd <path>] [--backend <id>] [--model <id>] [--effort <level>] \
+  [--unrestricted] [--name <name>] [--var key=value ...] \
+  [--add-task <title> ...] [--backend-session-id <id>] \
+  [<message tokens...>]
 ```
 
-Useful when an outer process wants a resumable handle before committing
-to execution, or wants to inspect the prepared workspace before kicking
-off the actual work.
+`init` does not dump the worker brief to stdout — fetch it with
+`task-runner run brief <run-id>`.
 
-`init` does not accept `--detach`; detached dispatch is only for
-daemon-connected `run`.
+## `serve`
 
-## `task-runner serve`
-
-Start the local daemon host. See [daemon.md](daemon.md) for the
-architecture, transports, and web-dashboard hosting.
+Start the daemon. Hosts WebSocket JSON-RPC, HTTP, and the bundled web UI.
 
 ```bash
-task-runner serve
-task-runner serve --listen ws://127.0.0.1:4773/
+task-runner serve [--listen <ws-url>]
 ```
 
-## `task-runner run add-dep / remove-dep / clear-deps`
+- `--listen <ws-url>` — defaults to `ws://127.0.0.1:4773/` (or
+  `TASK_RUNNER_LISTEN`).
+- Rejects `--connect`.
 
-Manage prerequisite runs for an initialized run. See
-[dependencies.md](dependencies.md) for semantics.
+See [daemon.md](daemon.md).
+
+## `status`
+
+Print the current task-runner system/environment context for this
+invocation.
 
 ```bash
-task-runner run add-dep <run-id> <dependency-run-id>
-task-runner run remove-dep <run-id> <dependency-run-id>
-task-runner run clear-deps <run-id>
-task-runner run add-dep <run-id> <dependency-run-id> --output-format json
+task-runner status [--output-format text|json]
 ```
 
-## `task-runner run set-name`
+- Takes no positional arguments.
+- Text output prints the resolved config dir, state dir, host mode,
+  connect URL, and daemon connectivity state.
+- JSON output returns `{ configDir, stateDir, hostMode, connectUrl, daemon }`.
+- `--field` is not supported.
 
-Update the persisted display name for an existing run without otherwise
-changing run state.
+## `run status <run-id>`
+
+Print the run's current state.
 
 ```bash
-task-runner run set-name <run-id> "Review auth hot cut"
-task-runner run set-name <run-id> --clear
-task-runner run set-name <run-id> --output-format json --clear
+task-runner run status <run-id> [--output-format json] [--field <name> ...]
 ```
 
-- Allowed for existing runs in embedded mode or daemon mode via
-  `--connect`.
-- `<name>` is required unless `--clear` is present. Trimmed names must
-  be non-empty.
-- Updates `manifest.name` immediately and mirrors the value into the
-  persisted reset seed so later `run reset` keeps the renamed value.
-- Codex best-effort attempts a live thread-title rename when the run
-  already has a backend session id. Claude picks up the changed name on
-  the next invocation.
-- Idempotent: setting the same name again or clearing an already
-  unnamed run succeeds with `changed: false` in JSON mode.
+- Run-id-only. Paths are not accepted.
+- `--output-format json` returns the shared `RunDetail` DTO.
+- `--field <name>` — repeatable. Projects top-level JSON fields.
+- JSON detail now includes `note` and `pinned`.
+- Text output may show `Pinned: yes` and `Note: present`, but it never
+  prints the note markdown body.
 
-## `task-runner run reset`
+## `run brief <run-id>`
 
-Restore an existing non-running run to the same initialized state it
-had immediately after `task-runner init` or first-write on a fresh run.
+Print the composed worker handoff for a run. Text-only — does not support
+`--output-format` or `--field`. Run-id-only.
 
 ```bash
-task-runner run reset <run-id>
-task-runner run reset <run-id> --output-format json
+task-runner run brief <run-id>
 ```
 
-- Allowed for `initialized`, `success`, `blocked`, `exhausted`,
-  `aborted`, and `error` runs.
-- Rejected while `status=running`.
-- Works for both passive and non-passive runs.
-- Rewrites `run.json` from the manifest's frozen initialized-state
-  seed; it does **not** re-read the current agent or assignment source
-  files from disk and does **not** regenerate any workspace task
-  file — canonical task state lives in `run.json.finalTasks`.
-- Restores the initialized prompt/task snapshot, clears
-  `backendSessionId`, zeroes session/attempt history, and removes
-  stale `attempts/` artifacts so the next execution starts clean.
+## `task`
 
-## `task-runner run archive / unarchive`
-
-Archive toggles are orthogonal to `status`: they keep the run's current
-lifecycle state but add or clear `manifest.archivedAt`. By default
-`task-runner list runs` hides archived runs, and
-`task-runner run --resume-run <id>` rejects them until unarchived.
-
-```bash
-task-runner run archive <run-id>
-task-runner run archive <run-id> --output-format json
-
-task-runner run unarchive <run-id>
-task-runner run unarchive <run-id> --output-format json
-```
-
-- Allowed for any non-running run.
-- Rejected while `status=running`.
-- Idempotent: archiving an already archived run and unarchiving an
-  unarchived run both succeed with `changed: false` in JSON mode.
-- `status`, `endedAt`, task state, and attempt/session history are
-  preserved; only `archivedAt` changes.
-
-## `task-runner status`
-
-Read-only inspector. Accepts a **run id only** — looked up in the
-current repo-name bucket under `${TASK_RUNNER_STATE_DIR}/runs/`, then
-`runs/unknown/`. Workspace paths and direct `run.json` paths are no
-longer accepted on this command.
-
-```bash
-# Human-readable status block + per-task checklist
-task-runner status <run-id>
-
-# Full run detail as JSON
-task-runner status <run-id> --output-format json
-
-# Just the fields you care about
-task-runner status <run-id> --output-format json \
-  --field status --field tasksCompleted --field tasksTotal
-```
-
-### Options
-
-| Flag | Purpose |
-|---|---|
-| `--output-format <text\|json>` | Default `text`. `json` prints the full `RunDetail` JSON contract. |
-| `--field <name>` (repeatable) | When `--output-format json`, restrict output to these top-level `RunDetail` fields. |
-
-`status` always reads canonical task state directly from
-`run.json.finalTasks` — there's no workspace file overlay to merge in.
-
-When `manifest.archivedAt` is non-null, text output includes the
-archive timestamp plus an unarchive hint, and JSON output exposes the
-same top-level `archivedAt` field.
-
-`RunDetail` carries both the canonical lifecycle `status` and a derived
-`effectiveStatus`. Text output uses `effectiveStatus` for the primary
-`Status:` line and shows `Lifecycle status:` when the two diverge. For
-passive runs, `effectiveStatus` becomes `running` when any task is
-`in_progress`, while the canonical manifest status stays `initialized`
-until the task set reaches a terminal state.
-
-Attachment metadata is part of the same JSON contract: `RunDetail`
-includes `attachments`, `list runs --output-format json` exposes
-`attachmentCount`, text `status` shows the attachment count, and the
-web detail drawer uses the same data for its attachment tab.
-
-The JSON `RunDetail` contract also carries a machine-facing `execution`
-block plus a machine-facing `capabilities` block:
-
-- `execution.hostMode`
-- `execution.controller.kind`
-- `execution.controller.daemonInstanceId` when the controller is daemon-owned
-- `canAbort`, `abortReason`
-- `canArchive`, `canUnarchive`, `canResume`
-- `taskMutation.canSetStatus`
-- `taskMutation.canEditNotes`
-- `taskMutation.canAdd`
-
-`execution` is the persisted execution context for the latest stored
-session: embedded runs record
-`{ hostMode: "embedded", controller: { kind: "embedded" } }`, while
-daemon-run sessions record daemon ownership and the daemon instance id.
-Resume rewrites this block to the controller that most recently ran
-the session.
-
-Capabilities reflect the current lifecycle and host-ownership rules.
-In particular, passive runs are never resumable through `run`,
-non-passive running runs allow `task set` / `task append-notes` but
-not `task add`, terminal runs report `canAbort=false` with
-`abortReason="already_terminal"`, and nonterminal runs that are
-merely persisted rather than actively owned by the serving daemon
-report `canAbort=false` with `abortReason="not_active_in_daemon"`.
-
-In daemon mode, external live abort control is available through the
-daemon-owned run lifecycle. Embedded mode remains single-process and
-does not expose external live control.
-
-## `task-runner brief`
-
-Print the worker-facing brief for a run — the composed text the
-backend receives on first invocation, assembled from agent
-instructions, assignment instructions, task-runner's worker workflow
-template, and the caller's run message.
-
-```bash
-task-runner brief <run-id>
-```
-
-- Accepts a **run id only** (same rule as `status`; workspace paths
-  and direct `run.json` paths are not accepted).
-- Output is **text only** — there is no `--output-format json` and
-  the contents are not projected through `status --field ...`.
-- Available for `initialized`, `running`, and terminal runs.
-
-Use this to hand the run to a worker: dump the brief into a file, into
-an external agent's prompt, or paste it into an interactive session
-after a context compaction. See
-[agents-and-assignments.md#brief-and-caller-instructions](agents-and-assignments.md#brief-and-caller-instructions)
-for how `brief` differs from `callerInstructions`.
-
-## `task-runner attachment`
-
-See [attachments.md](attachments.md) for the full attachment surface.
-
-```bash
-task-runner attachment add <run-id|path> <source-file>
-task-runner attachment list <run-id|path>
-task-runner attachment download <run-id|path> <attachment-id> <output-path>
-task-runner attachment remove <run-id|path> <attachment-id>
-```
-
-## `task-runner task` commands
-
-See [tasks.md](tasks.md) for the full task-mutation surface and the
-sidecar pattern.
+Canonical task state commands. All subcommands accept `--connect` and
+`--output-format`.
 
 ```bash
 task-runner task list <run-id>
 task-runner task show <run-id> <task-id>
-task-runner task set <run-id> <task-id> --status in_progress
-task-runner task append-notes <run-id> <task-id> --text "note"
-task-runner task add <run-id> --title "Follow-up" --body "..."
+
+task-runner task set <run-id> <task-id> \
+  [--status pending|in_progress|completed|blocked] \
+  [--notes <text>]
+
+task-runner task append-notes <run-id> <task-id> --text <text>
+
+task-runner task add <run-id> --title <title> [--body <body>]
 ```
 
-## `task-runner list`
+Mutation rules depend on run state and backend type; see
+[tasks.md](tasks.md).
 
-Enumerate available agent or assignment definitions, or known runs.
-Definition discovery is config-root only; run discovery scans
-`${TASK_RUNNER_STATE_DIR}/runs/*/*/run.json` and returns
-current-generation manifests whose recorded workspace paths still
-match the containing directory. `list` is read-only in all modes.
+## `attachment`
 
 ```bash
-# List all agents
+task-runner attachment add <run-id|path> <source-file> \
+  [--name <text>] [--mime-type <type>]
+
+task-runner attachment list <run-id|path> [--cwd-scope]
+
+task-runner attachment download <run-id|path> <attachment-id> <output-path>
+
+task-runner attachment remove <run-id|path> <attachment-id>
+```
+
+See [attachments.md](attachments.md).
+
+## `list`
+
+```bash
 task-runner list agents
-
-# List all assignments (JSON output)
-task-runner list assignments --output-format json
-
-# List non-archived runs
-task-runner list runs
-
-# Include archived runs in the inventory
-task-runner list runs --include-archived --output-format json
+task-runner list assignments
+task-runner list runs \
+  [--cwd <path> | --repo <name> | --global] \
+  [--include-archived]
 ```
 
-### Options
+- `list runs` defaults to the caller's exact cwd.
+- `--cwd <path>` filters by exact persisted cwd.
+- `--repo <name>` filters by repo bucket.
+- `--global` disables cwd scoping.
+- `--include-archived` adds archived runs.
 
-| Flag | Purpose |
-|---|---|
-| `--output-format <text\|json>` | Default `text`. Definition JSON returns `{ name, path, root }[]`; run JSON returns `RunListEntry[]` including `runId`, `status`, `archivedAt`, repo/agent/assignment names, cwd, timestamps, task counts, and `capabilities` so list/board consumers can render available actions without extra `status` reads. |
-| `--include-archived` | `list runs` only. Include runs whose `archivedAt` is non-null. |
-
-## `task-runner show`
-
-Print details of a specific agent or assignment definition. Accepts a
-bare name resolved from the config root or a direct file path.
-Read-only.
+## `show`
 
 ```bash
-task-runner show agent ./agents/example/agent.md
-task-runner show assignment ./assignments/repo-orientation/assignment.md \
-  --output-format json
+task-runner show agent <name|path>
+task-runner show assignment <name|path>
 ```
 
-### Options
+Renders the parsed frontmatter, declared vars (for assignments), and
+task list.
 
-| Flag | Purpose |
-|---|---|
-| `--output-format <text\|json>` | Default `text`. `json` returns `{ config, instructions, sourcePath }`. |
+## `run` groupings
 
-## Output modes
+### Lifecycle
 
-### `--output-format text` (default)
+```bash
+task-runner run reset     <id|path>
+task-runner run archive   <id|path>
+task-runner run unarchive <id|path>
+task-runner run delete    <id|path>    # archived only
+```
 
-- **stdout**: the agent's text, streamed live during each attempt. For
-  passive `init`, the composed bootstrap prompt is also written here
-  so it can be piped elsewhere.
-- **stderr**: runner chrome rendered from typed events at the CLI edge
-  — startup banner, caller-instructions banner, attempt dividers,
-  retry notifications, and the final summary block with per-task
-  results and notes.
+### Metadata
 
-### `--output-format json`
+```bash
+task-runner run set-name <id|path> <name>
+task-runner run set-name <id|path> --clear
+task-runner run set-note <id|path> <markdown>
+task-runner run clear-note <id|path>
+task-runner run pin <id|path>
+task-runner run unpin <id|path>
+task-runner run set-backend-session   <id|path> <session-id>   # passive only
+task-runner run clear-backend-session <id|path>                # passive only
+```
 
-- **stdout**: the full `RunManifest` as pretty-printed JSON, written
-  once at the end of the run. Byte-identical to `run.json` on disk.
-- **stderr**: silent.
+- `run set-note` trims only for empty/whitespace detection; a
+  whitespace-only value clears the note.
+- `run clear-note` clears the note without a second positional.
+- `run pin` / `run unpin` toggle persisted pin metadata without moving a
+  run across status columns.
+- Metadata mutations accept `--output-format text|json` and `--connect`.
+- Note text is never echoed back in text output; use JSON or the web UI
+  to inspect the full stored note.
 
-Makes `task-runner run --agent X --output-format json > result.json`
-trivially correct — no filtering, no stream interleaving.
+### Dependencies
 
-The manifest is always written to `run.json` regardless of output
-mode; `--output-format json` only controls whether it's also printed
-to stdout.
+```bash
+task-runner run add-dep    <id> <dependency-run-id>
+task-runner run remove-dep <id> <dependency-run-id>
+task-runner run clear-deps <id>
+```
+
+Dependency mutations are only allowed on `initialized` runs. See
+[dependencies.md](dependencies.md).
+
+## Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success (all tasks completed, or initialized run) |
+| `1` | Retries exhausted with incomplete tasks |
+| `2` | One or more tasks reported blocked |
+| `3` | Validation, config, or daemon connectivity error |
+| `4` | Backend or runtime failure |
+| `130` | User cancellation / confirmed interrupt |
+
+## Environment variables
+
+Recognized by the CLI:
+
+- `TASK_RUNNER_CONFIG_DIR`, `TASK_RUNNER_STATE_DIR`
+- `TASK_RUNNER_LISTEN`, `TASK_RUNNER_CONNECT`
+- `TASK_RUNNER_CLAUDE_BIN`, `TASK_RUNNER_CODEX_BIN`,
+  `TASK_RUNNER_CODEX_WS_URL`, `TASK_RUNNER_CURSOR_BIN`,
+  `TASK_RUNNER_PI_BIN`, `PI_HOME`
+- `TASK_RUNNER_CALL_DEPTH`, `TASK_RUNNER_MAX_CALL_DEPTH`
+
+See [configuration.md](configuration.md).
+
+## Daemon vs embedded
+
+Every client command (except `serve`) can run embedded (no daemon) or
+route through a daemon with `--connect <ws-url>` or
+`TASK_RUNNER_CONNECT`. Daemon-routed commands use the same WebSocket
+JSON-RPC surface that the web dashboard uses.
+
+`run --detach` is daemon-only: the CLI dispatches the run and exits
+after the daemon accepts it.

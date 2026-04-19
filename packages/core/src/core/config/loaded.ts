@@ -1,3 +1,4 @@
+import { cloneBackendSpecificConfig } from "../backends/types.js";
 import type { RunManifest } from "../run/manifest.js";
 import type { AgentConfig, AssignmentConfig, LockableField } from "./schema.js";
 
@@ -6,12 +7,9 @@ import type { AgentConfig, AssignmentConfig, LockableField } from "./schema.js";
 // can't collide with a synthesized one.
 export const AD_HOC_AGENT_NAME = "ad-hoc";
 
-export type AgentCwdSource = "explicit" | "default";
-
 export interface LoadedAgent {
   config: AgentConfig;
   instructions: string;
-  cwdSource: AgentCwdSource;
   // null for ad-hoc agents synthesized from CLI overrides and for
   // agents reconstructed from a resumed manifest (since resume never
   // re-reads the source file under the manifest-canonical design).
@@ -36,15 +34,14 @@ export function loadedAgentFromManifest(manifest: RunManifest): LoadedAgent {
     backend: manifest.backend as AgentConfig["backend"],
     model: manifest.model ?? undefined,
     effort,
+    backendSpecific: cloneBackendSpecificConfig(manifest.backendSpecific),
     timeoutSec: manifest.timeoutSec,
     unrestricted: manifest.unrestricted,
-    cwd: manifest.cwd,
     lockedFields: manifest.lockedFields,
   };
   return {
     config,
     instructions: manifest.agent.instructions,
-    cwdSource: "explicit",
     sourcePath: manifest.agent.sourcePath,
   };
 }
@@ -59,7 +56,6 @@ export interface AdHocAgentInputs {
   effort?: AgentConfig["effort"];
   timeoutSec?: number;
   unrestricted?: boolean;
-  cwd?: string;
 }
 
 export function synthesizeAdHocAgent(inputs: AdHocAgentInputs): LoadedAgent {
@@ -71,13 +67,11 @@ export function synthesizeAdHocAgent(inputs: AdHocAgentInputs): LoadedAgent {
     effort: inputs.effort,
     timeoutSec: inputs.timeoutSec ?? 3600,
     unrestricted: inputs.unrestricted ?? false,
-    cwd: inputs.cwd ?? ".",
     lockedFields: [] as LockableField[],
   };
   return {
     config,
     instructions: "",
-    cwdSource: inputs.cwd === undefined ? "default" : "explicit",
     sourcePath: null,
   };
 }

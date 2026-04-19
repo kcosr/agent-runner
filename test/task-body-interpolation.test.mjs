@@ -1,11 +1,15 @@
 import { strict as assert } from "node:assert";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { VarResolutionError, runAgent } from "../packages/core/dist/core/run/run-loop.js";
-import { assignmentPathFromPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
+import {
+  readManifestForPrompt,
+  updateTasksForPrompt,
+  withSharedRuntimeEnv,
+} from "./helpers/runtime-paths.mjs";
 
 const INTERP_AGENT = `---
 schemaVersion: 1
@@ -39,13 +43,18 @@ tasks:
     title: Second task
     body: |
       Also record the run id {{run_id}} and assignment path
-      {{assignment_path}} so the notes are self-contained.
+      {{assignment_path}}. Assignment name: {{assignment_name}}.
+      Config dir: {{config_dir}}. State dir: {{state_dir}}.
 ---
 Work on {{repo_path}}.
 `;
 
 function tempDir() {
   return mkdtempSync(join(tmpdir(), "task-runner-interp-"));
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function writeAgent(baseDir, name, body) {
@@ -60,25 +69,16 @@ function writeAssignment(baseDir, name, body) {
   writeFileSync(join(dir, "assignment.md"), body);
 }
 
-function editStatus(content, taskId, newStatus) {
-  const marker = `<!-- task-id: ${taskId} -->`;
-  const start = content.indexOf(marker);
-  const nextMarker = content.indexOf("<!-- task-id:", start + marker.length);
-  const end = nextMarker < 0 ? content.length : nextMarker;
-  const section = content.slice(start, end);
-  const updated = section.replace(/\*\*Status:\*\*\s*\S+/, `**Status:** ${newStatus}`);
-  return content.slice(0, start) + updated + content.slice(end);
-}
-
 function ackBackend(onAssignmentPath) {
   return {
     id: "mock",
     async invoke(ctx) {
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      onAssignmentPath(absPlan);
-      let plan = readFileSync(absPlan, "utf8");
-      for (const id of ["t1", "t2"]) plan = editStatus(plan, id, "completed");
-      writeFileSync(absPlan, plan, "utf8");
+      const manifest = readManifestForPrompt(ctx.prompt);
+      onAssignmentPath(manifest.assignmentPath);
+      updateTasksForPrompt(ctx.prompt, {
+        t1: { status: "completed" },
+        t2: { status: "completed" },
+      });
       return {
         exitCode: 0,
         signal: null,
@@ -133,10 +133,13 @@ test("task title and body interpolate {{var}} refs from assignment vars", async 
   assert.match(t1.body, /Scope is\s+`unstaged`\./);
   assert.doesNotMatch(t1.body, /\{\{/);
 
-  // Runner-injected vars (run_id, assignment_path) also interpolate.
+  // Runner-injected vars also interpolate.
   const t2 = outcome.manifest.finalTasks.t2;
   assert.match(t2.body, new RegExp(`run id ${outcome.runId}`));
   assert.ok(t2.body.includes(outcome.assignmentPath));
+  assert.match(t2.body, /Assignment name: interp-work\./);
+  assert.match(t2.body, new RegExp(`Config dir: ${escapeRegExp(dir)}\\.`));
+  assert.match(t2.body, new RegExp(`State dir: ${escapeRegExp(dir)}\\.`));
   assert.doesNotMatch(t2.body, /\{\{/);
 });
 
@@ -152,16 +155,18 @@ test("task body var uses the assignment's default when no CLI value", async () =
   assert.match(t1.body, /Scope is\s+`full`\./);
 });
 
-test("workspace assignment.md on disk contains interpolated task bodies", async () => {
+test("workspace assignment.md is not generated for interpolated task bodies", async () => {
   const dir = tempDir();
   writeAgent(dir, "interp", INTERP_AGENT);
   writeAssignment(dir, "interp-work", INTERP_ASSIGNMENT);
 
   const outcome = await runIn(dir, { repo_path: "/tmp/fake-repo", scope: "staged" });
-  const plan = readFileSync(join(outcome.workspaceDir, "assignment.md"), "utf8");
-  assert.match(plan, /Work against the repository at `\/tmp\/fake-repo`/);
-  assert.match(plan, /Scope is\s+`staged`/);
-  assert.doesNotMatch(plan, /\{\{/);
+  assert.equal(existsSync(join(outcome.workspaceDir, "assignment.md")), false);
+  assert.match(
+    outcome.manifest.finalTasks.t1.body,
+    /Work against the repository at `\/tmp\/fake-repo`/,
+  );
+  assert.match(outcome.manifest.finalTasks.t1.body, /Scope is\s+`staged`/);
 });
 
 test("unknown CLI vars are rejected when the assignment declares a schema", async () => {

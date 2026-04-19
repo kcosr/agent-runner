@@ -1,6 +1,4 @@
-import { deriveRepoKey } from "../config/runtime-paths.js";
-import { normalizeTaskMode } from "../core/config/schema.js";
-import type { LockableField, TaskMode } from "../core/config/schema.js";
+import type { LockableField } from "../core/config/schema.js";
 import {
   type RunDependencyDetail,
   type RunDependencyState,
@@ -19,12 +17,19 @@ import type { RunAttachment } from "./attachments.js";
 export type RunStatus = ManifestStatus;
 export type { RunDependencyDetail, RunDependencyState } from "../core/run/dependencies.js";
 
+export interface RunActiveTask {
+  id: string;
+  title: string;
+}
+
 export interface RunSummary {
   runId: string;
   repo: string;
   status: RunStatus;
   effectiveStatus: RunStatus;
   archivedAt: string | null;
+  pinned: boolean;
+  notePresent: boolean;
   agentName: string;
   name: string | null;
   assignmentName: string | null;
@@ -37,6 +42,7 @@ export interface RunSummary {
   tasksTotal: number;
   attachmentCount: number;
   dependencyState: RunDependencyState;
+  activeTask: RunActiveTask | null;
   execution: RunExecution;
   capabilities: RunCapabilities;
 }
@@ -60,6 +66,8 @@ export type RunAbortReason = "already_terminal" | "not_active_in_daemon";
 export interface RunCapabilities {
   canArchive: boolean;
   canUnarchive: boolean;
+  canReset: boolean;
+  canDelete: boolean;
   canResume: boolean;
   canAbort: boolean;
   abortReason?: RunAbortReason;
@@ -96,9 +104,10 @@ export interface RunDetail {
   model: string | null;
   effort: string | null;
   name: string | null;
+  note: string | null;
+  pinned: boolean;
   backendSessionId: string | null;
   cwd: string;
-  taskMode: TaskMode;
   unrestricted: boolean;
   timeoutSec: number;
   startedAt: string;
@@ -113,9 +122,10 @@ export interface RunDetail {
   dependencies: RunDependencyDetail[];
   dependents: RunDependencyDetail[];
   tasks: RunTaskSummary[];
+  activeTask: RunActiveTask | null;
   message: string | null;
-  callerInstructions: string | null;
   pendingPrompt: string | null;
+  callerInstructions: string | null;
   lockedFields: LockableField[];
   runtimeVars: Record<string, unknown>;
   execution: RunExecution;
@@ -135,10 +145,32 @@ export interface RunNameResult {
   changed: boolean;
 }
 
+export interface RunNoteResult {
+  runId: string;
+  note: string | null;
+  changed: boolean;
+}
+
+export interface RunPinnedResult {
+  runId: string;
+  pinned: boolean;
+  changed: boolean;
+}
+
+export interface RunBackendSessionResult {
+  runId: string;
+  backendSessionId: string | null;
+  changed: boolean;
+}
+
 export interface RunDependenciesResult {
   runId: string;
   dependencyRunIds: string[];
   changed: boolean;
+}
+
+export interface RunDeleteResult {
+  runId: string;
 }
 
 export type { RunAttachment, RunAttachmentRemoveResult } from "./attachments.js";
@@ -157,12 +189,44 @@ function toRunTaskSummary(task: TaskSnapshot): RunTaskSummary {
   };
 }
 
+function deriveActiveTask(tasks: Record<string, TaskSnapshot>): RunActiveTask | null {
+  const inProgress = Object.values(tasks).filter((task) => task.status === "in_progress");
+  if (inProgress.length !== 1) {
+    return null;
+  }
+  const [task] = inProgress;
+  if (!task) {
+    return null;
+  }
+
+  return {
+    id: task.id,
+    title: task.title,
+  };
+}
+
 function isArchived(manifest: RunManifest): boolean {
   return manifest.archivedAt !== null;
 }
 
 function isRunning(manifest: RunManifest): boolean {
   return manifest.status === "running";
+}
+
+export function canArchiveRun(manifest: RunManifest): boolean {
+  return !isRunning(manifest) && !isArchived(manifest);
+}
+
+export function canUnarchiveRun(manifest: RunManifest): boolean {
+  return !isRunning(manifest) && isArchived(manifest);
+}
+
+export function canResetRun(manifest: RunManifest): boolean {
+  return !isRunning(manifest);
+}
+
+export function canDeleteRun(manifest: RunManifest): boolean {
+  return !isRunning(manifest) && isArchived(manifest);
 }
 
 export function isTerminalStatus(status: RunStatus): boolean {
@@ -194,10 +258,9 @@ export function deriveTaskMutationCapabilities(manifest: RunManifest): RunTaskMu
         canAdd: !tasksLocked,
       };
     case "running": {
-      const canMutateRunningTasks = normalizeTaskMode(manifest.taskMode) === "cli";
       return {
-        canSetStatus: canMutateRunningTasks,
-        canEditNotes: canMutateRunningTasks,
+        canSetStatus: true,
+        canEditNotes: true,
         canAdd: false,
       };
     }
@@ -223,10 +286,12 @@ export function toRunSummary(
 ): RunSummary {
   return {
     runId: entry.manifest.runId,
-    repo: entry.repo,
+    repo: entry.manifest.repo,
     status: entry.manifest.status,
     effectiveStatus: deriveEffectiveStatus(entry.manifest),
     archivedAt: entry.manifest.archivedAt,
+    pinned: entry.manifest.pinned,
+    notePresent: entry.manifest.note !== null,
     agentName: entry.manifest.agent.name,
     name: entry.manifest.name,
     assignmentName: entry.manifest.assignment?.name ?? null,
@@ -239,6 +304,7 @@ export function toRunSummary(
     tasksTotal: entry.manifest.tasksTotal,
     attachmentCount: entry.manifest.attachments.length,
     dependencyState: dependencyState ?? deriveDependencyState(entry.manifest, relatedManifests),
+    activeTask: deriveActiveTask(entry.manifest.finalTasks),
     execution: entry.manifest.execution,
     capabilities: deriveRunCapabilities(entry.manifest),
   };
@@ -247,8 +313,10 @@ export function toRunSummary(
 export function deriveRunCapabilities(manifest: RunManifest): RunCapabilities {
   const canAbort = false;
   return {
-    canArchive: !isRunning(manifest) && !isArchived(manifest),
-    canUnarchive: !isRunning(manifest) && isArchived(manifest),
+    canArchive: canArchiveRun(manifest),
+    canUnarchive: canUnarchiveRun(manifest),
+    canReset: canResetRun(manifest),
+    canDelete: canDeleteRun(manifest),
     canResume: !isRunning(manifest) && !isArchived(manifest) && manifest.backend !== "passive",
     canAbort,
     abortReason: canAbort
@@ -266,7 +334,7 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
     result.relatedManifests ?? new Map<string, RunManifest>([[manifest.runId, manifest]]);
   return {
     runId: manifest.runId,
-    repo: deriveRepoKey(manifest.cwd),
+    repo: manifest.repo,
     status: manifest.status,
     effectiveStatus: deriveEffectiveStatus(manifest),
     archivedAt: manifest.archivedAt,
@@ -288,9 +356,10 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
     model: manifest.model,
     effort: manifest.effort,
     name: manifest.name,
+    note: manifest.note,
+    pinned: manifest.pinned,
     backendSessionId: manifest.backendSessionId,
     cwd: manifest.cwd,
-    taskMode: normalizeTaskMode(manifest.taskMode),
     unrestricted: manifest.unrestricted,
     timeoutSec: manifest.timeoutSec,
     startedAt: manifest.startedAt,
@@ -305,9 +374,11 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
     dependencies: result.dependencies ?? resolveDependencies(manifest, relatedManifests),
     dependents: result.dependents ?? resolveDependents(manifest, relatedManifests),
     tasks: Object.values(manifest.finalTasks).map(toRunTaskSummary),
+    activeTask: deriveActiveTask(manifest.finalTasks),
     message: manifest.message,
+    pendingPrompt:
+      manifest.status === "initialized" && manifest.attempts === 0 ? manifest.brief : null,
     callerInstructions: manifest.callerInstructions,
-    pendingPrompt: manifest.pendingPrompt,
     lockedFields: [...manifest.lockedFields],
     runtimeVars: { ...manifest.runtimeVars },
     execution: manifest.execution,
@@ -334,6 +405,39 @@ export function toRunNameResult(result: {
   return {
     runId: result.manifest.runId,
     name: result.manifest.name,
+    changed: result.changed,
+  };
+}
+
+export function toRunNoteResult(result: {
+  manifest: RunManifest;
+  changed: boolean;
+}): RunNoteResult {
+  return {
+    runId: result.manifest.runId,
+    note: result.manifest.note,
+    changed: result.changed,
+  };
+}
+
+export function toRunPinnedResult(result: {
+  manifest: RunManifest;
+  changed: boolean;
+}): RunPinnedResult {
+  return {
+    runId: result.manifest.runId,
+    pinned: result.manifest.pinned,
+    changed: result.changed,
+  };
+}
+
+export function toRunBackendSessionResult(result: {
+  manifest: RunManifest;
+  changed: boolean;
+}): RunBackendSessionResult {
+  return {
+    runId: result.manifest.runId,
+    backendSessionId: result.manifest.backendSessionId,
     changed: result.changed,
   };
 }

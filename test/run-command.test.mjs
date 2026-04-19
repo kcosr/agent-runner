@@ -69,7 +69,7 @@ test("executeRunCommand allows empty resume preflight when incomplete tasks rema
     manifest.status = "blocked";
     manifest.endedAt = "2026-04-13T00:00:00.000Z";
     manifest.exitCode = 2;
-    manifest.pendingPrompt = null;
+    manifest.brief = "Resume the remaining task.";
     manifest.finalTasks = {
       t1: {
         id: "t1",

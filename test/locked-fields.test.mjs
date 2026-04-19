@@ -1,11 +1,11 @@
 import { strict as assert } from "node:assert";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { LockedFieldError, runAgent } from "../packages/core/dist/core/run/run-loop.js";
-import { assignmentPathFromPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
+import { setTaskStatusesForPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 // ─── locked model agent + its one-task assignment ───────────────────────────
 const LOCKED_MODEL_AGENT = `---
@@ -75,19 +75,6 @@ tasks:
 Work on the repo. Plan at {{assignment_path}}.
 `;
 
-const LOCKED_TASK_MODE_ASSIGNMENT = `---
-schemaVersion: 1
-name: locked-taskmode-work
-taskMode: file
-lockedFields: [taskMode]
-maxRetries: 1
-tasks:
-  - id: t1
-    title: First
----
-Work on the repo. Plan at {{assignment_path}}.
-`;
-
 function tempDir() {
   return mkdtempSync(join(tmpdir(), "task-runner-locked-"));
 }
@@ -108,24 +95,10 @@ function writeAssignment(baseDir, name, body) {
   return path;
 }
 
-function editStatus(content, taskId, newStatus) {
-  const marker = `<!-- task-id: ${taskId} -->`;
-  const start = content.indexOf(marker);
-  const nextMarker = content.indexOf("<!-- task-id:", start + marker.length);
-  const end = nextMarker < 0 ? content.length : nextMarker;
-  const section = content.slice(start, end);
-  const updated = section.replace(/\*\*Status:\*\*\s*\S+/, `**Status:** ${newStatus}`);
-  return content.slice(0, start) + updated + content.slice(end);
-}
-
 const okBackend = () => ({
   id: "mock",
   async invoke(ctx) {
-    const absPlan = assignmentPathFromPrompt(ctx.prompt);
-    if (absPlan) {
-      const plan = readFileSync(absPlan, "utf8");
-      writeFileSync(absPlan, editStatus(plan, "t1", "completed"), "utf8");
-    }
+    setTaskStatusesForPrompt(ctx.prompt, { t1: "completed" });
     return {
       exitCode: 0,
       signal: null,
@@ -175,11 +148,6 @@ function setupWithMsg(dir) {
 function setupLockedMsg(dir) {
   writeAgent(dir, "locked-msg", LOCKED_MSG_AGENT);
   writeAssignment(dir, "locked-msg-work", LOCKED_MSG_ASSIGNMENT);
-}
-
-function setupLockedTaskMode(dir) {
-  writeAgent(dir, "with-msg", WITH_MSG_AGENT);
-  writeAssignment(dir, "locked-taskmode-work", LOCKED_TASK_MODE_ASSIGNMENT);
 }
 
 test("locked: overriding a locked field throws LockedFieldError", async () => {
@@ -301,19 +269,4 @@ test("message: locked message still uses the assignment default when caller stay
   setupLockedMsg(dir);
   const outcome = await runIn(dir, "locked-msg", undefined, "locked-msg-work");
   assert.equal(outcome.manifest.message, "fixed message");
-});
-
-test("taskMode: locked taskMode rejects CLI override", async () => {
-  const dir = tempDir();
-  setupLockedTaskMode(dir);
-  await assert.rejects(
-    () => runIn(dir, "with-msg", { taskMode: "cli" }, "locked-taskmode-work"),
-    (err) => {
-      assert.ok(err instanceof LockedFieldError);
-      assert.equal(err.field, "taskMode");
-      assert.ok(err.message.includes("taskMode"));
-      assert.ok(err.message.includes('"file"'));
-      return true;
-    },
-  );
 });

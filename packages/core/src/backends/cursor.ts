@@ -1,6 +1,12 @@
 import type { Backend, BackendInvokeContext, BackendInvokeResult } from "../core/backends/types.js";
 import { runProcess } from "../util/spawn.js";
-import { isRecord, normalizeBackendModel, streamBoundarySeparator } from "./shared.js";
+import {
+  composePersistedTranscript,
+  isRecord,
+  normalizeBackendModel,
+  silentTranscriptFallback,
+  streamBoundarySeparator,
+} from "./shared.js";
 
 function findSessionId(value: unknown): string | null {
   if (Array.isArray(value)) {
@@ -185,13 +191,22 @@ export const cursorBackend: Backend = {
       );
     }
 
+    const transcript =
+      result.exitCode === 0
+        ? composePersistedTranscript(state.streamedText, state.resultText)
+        : state.resultText;
+    const fallbackDelta = silentTranscriptFallback(state.streamedText, transcript);
+    if (fallbackDelta) {
+      ctx.emit?.({ type: "agent_message_delta", text: fallbackDelta });
+    }
+
     return {
       exitCode: result.exitCode,
       signal: result.signal,
       timedOut: result.timedOut,
       aborted: result.aborted,
       sessionId: state.sessionId,
-      transcript: state.resultText,
+      transcript,
       rawStdout: result.stdoutText,
       rawStderr: result.stderrText,
     };

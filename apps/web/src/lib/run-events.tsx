@@ -1,25 +1,56 @@
 import type { AppRuntimeConfig } from "@task-runner/core/contracts/app-config.js";
-import type { RunEventEnvelope } from "@task-runner/core/contracts/events.js";
-import { type ReactNode, createContext, useContext, useEffect, useRef, useState } from "react";
+import type { RunSummaryStreamEvent } from "@task-runner/core/contracts/events.js";
+import type { RunSummary } from "@task-runner/core/contracts/runs.js";
+import {
+  type ReactNode,
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { queryClient, runQueryKeys } from "./query.js";
-import { subscribeToRunEvents } from "./sse.js";
+import { sortRunsByStartedAtDesc } from "./run-order.js";
+import { subscribeToRunSummaryEvents } from "./sse.js";
 
 interface RunEventsState {
   streamStale: boolean;
+  recentUpdateSequenceByRunId: Record<string, number>;
+  markRunTouched: (runId: string) => void;
 }
 
-const RunEventsContext = createContext<RunEventsState>({ streamStale: false });
+const RunEventsContext = createContext<RunEventsState>({
+  streamStale: false,
+  recentUpdateSequenceByRunId: {},
+  markRunTouched: () => {},
+});
 
-const REFRESH_DELAY_MS = 150;
-const REFRESH_EVENT_TYPES = new Set<RunEventEnvelope["event"]["type"]>([
-  "run_initialized",
-  "run_started",
-  "attempt_started",
-  "retrying",
-  "run_aborted",
-  "resume_rejected",
-  "run_finished",
-]);
+function upsertSummary(
+  current: RunSummary[] | undefined,
+  incoming: RunSummary,
+): RunSummary[] | undefined {
+  if (!current) {
+    return current;
+  }
+  const existingIndex = current.findIndex((run) => run.runId === incoming.runId);
+  if (existingIndex === -1) {
+    return sortRunsByStartedAtDesc([...current, incoming]);
+  }
+  const next = [...current];
+  next[existingIndex] = incoming;
+  return next;
+}
+
+function applySummaryEvent(
+  current: RunSummary[] | undefined,
+  event: RunSummaryStreamEvent,
+): RunSummary[] | undefined {
+  if (event.type === "summary_upsert") {
+    return upsertSummary(current, event.summary);
+  }
+  return current?.filter((run) => run.runId !== event.runId);
+}
 
 export function RunEventsProvider({
   children,
@@ -29,7 +60,19 @@ export function RunEventsProvider({
   config: AppRuntimeConfig;
 }) {
   const [streamStale, setStreamStale] = useState(false);
+  const [recentUpdateSequenceByRunId, setRecentUpdateSequenceByRunId] = useState<
+    Record<string, number>
+  >({});
   const streamStaleRef = useRef(streamStale);
+  const nextRecentUpdateSequenceRef = useRef(0);
+
+  const markRunTouched = useCallback((runId: string) => {
+    setRecentUpdateSequenceByRunId((current) => {
+      const nextSequence = nextRecentUpdateSequenceRef.current + 1;
+      nextRecentUpdateSequenceRef.current = nextSequence;
+      return { ...current, [runId]: nextSequence };
+    });
+  }, []);
 
   useEffect(() => {
     streamStaleRef.current = streamStale;
@@ -37,39 +80,6 @@ export function RunEventsProvider({
 
   useEffect(() => {
     let disposed = false;
-    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
-    let refreshAllDetails = false;
-    const refreshRunIds = new Set<string>();
-
-    function scheduleRefresh(options: { runId?: string; allDetails?: boolean }) {
-      if (options.allDetails) {
-        refreshAllDetails = true;
-        refreshRunIds.clear();
-      } else if (!refreshAllDetails && options.runId) {
-        refreshRunIds.add(options.runId);
-      }
-      if (refreshTimer !== null) {
-        return;
-      }
-      refreshTimer = setTimeout(() => {
-        const runIds = Array.from(refreshRunIds);
-        const shouldRefreshAllDetails = refreshAllDetails;
-        refreshTimer = null;
-        refreshAllDetails = false;
-        refreshRunIds.clear();
-        if (disposed) {
-          return;
-        }
-        void queryClient.invalidateQueries({ queryKey: runQueryKeys.list() });
-        if (shouldRefreshAllDetails) {
-          void queryClient.invalidateQueries({ queryKey: [...runQueryKeys.all, "detail"] });
-          return;
-        }
-        for (const runId of runIds) {
-          void queryClient.invalidateQueries({ queryKey: runQueryKeys.detail(runId) });
-        }
-      }, REFRESH_DELAY_MS);
-    }
 
     async function refreshActiveQueries() {
       await Promise.all([
@@ -84,7 +94,7 @@ export function RunEventsProvider({
       ]);
     }
 
-    const unsubscribe = subscribeToRunEvents(config, {
+    const unsubscribe = subscribeToRunSummaryEvents(config, {
       onOpen: () => {
         if (!streamStaleRef.current) {
           return;
@@ -106,9 +116,12 @@ export function RunEventsProvider({
           streamStaleRef.current = false;
           setStreamStale(false);
         }
-        if (REFRESH_EVENT_TYPES.has(payload.event.type)) {
-          scheduleRefresh({ runId: payload.runId });
+        if (payload.type === "summary_upsert") {
+          markRunTouched(payload.summary.runId);
         }
+        queryClient.setQueryData<RunSummary[] | undefined>(runQueryKeys.list(), (current) =>
+          applySummaryEvent(current, payload),
+        );
       },
       onStaleChange: (stale) => {
         if (!stale) {
@@ -116,20 +129,20 @@ export function RunEventsProvider({
         }
         streamStaleRef.current = true;
         setStreamStale(true);
-        scheduleRefresh({ allDetails: true });
       },
     });
 
     return () => {
       disposed = true;
       unsubscribe();
-      if (refreshTimer !== null) {
-        clearTimeout(refreshTimer);
-      }
     };
-  }, [config]);
+  }, [config, markRunTouched]);
 
-  return <RunEventsContext.Provider value={{ streamStale }}>{children}</RunEventsContext.Provider>;
+  return (
+    <RunEventsContext.Provider value={{ streamStale, recentUpdateSequenceByRunId, markRunTouched }}>
+      {children}
+    </RunEventsContext.Provider>
+  );
 }
 
 export function useRunEvents(): RunEventsState {

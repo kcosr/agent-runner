@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
@@ -9,7 +9,7 @@ import { resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js"
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import { createRunEventCapture } from "./helpers/run-events.mjs";
 import {
-  assignmentPathFromPrompt,
+  completeAllTasksFromPrompt,
   sharedRuntimeEnv,
   withSharedRuntimeEnv,
 } from "./helpers/runtime-paths.mjs";
@@ -40,7 +40,7 @@ schemaVersion: 1
 name: caller-work
 callerInstructions: |
   Hello, caller. Your run id is {{run_id}} and you're working on
-  {{repo_path}}. Use {{task_runner_cmd}} status {{run_id}} to
+  {{repo_path}}. Use {{task_runner_cmd}} run status {{run_id}} to
   inspect the run, and pass --output-format json for structured
   data.
 vars:
@@ -97,12 +97,7 @@ function mockBackend() {
       // Complete all tasks so the run terminates success without
       // retries, keeping these tests fast.
       try {
-        const abs = assignmentPathFromPrompt(ctx.prompt);
-        if (abs) {
-          let plan = readFileSync(abs, "utf8");
-          plan = plan.replace(/\*\*Status:\*\* pending/g, "**Status:** completed");
-          writeFileSync(abs, plan);
-        }
+        completeAllTasksFromPrompt(ctx.prompt);
       } catch {
         // ignore
       }
@@ -264,7 +259,7 @@ test("passive init prints callerInstructions alongside the passive bootstrap", a
   const dir = tempDir();
   writeAgent(dir, "caller-test-passive", PASSIVE_AGENT);
   writeAssignment(dir, "caller-work", ASSIGNMENT_WITH_CALLER);
-  const { stderr, stdout } = await runFreshRun(dir, "caller-work", {
+  const { outcome, stderr, stdout } = await runFreshRun(dir, "caller-work", {
     agentName: "caller-test-passive",
     initialize: true,
   });
@@ -272,10 +267,12 @@ test("passive init prints callerInstructions alongside the passive bootstrap", a
   // Caller instructions on stderr
   assert.match(stderr, /── caller instructions ──/);
   assert.match(stderr, /Hello, caller/);
-  // Passive bootstrap (composed pendingPrompt) on stdout — contains
-  // the PASSIVE_TASK_WORKFLOW_TEMPLATE instead of caller instructions
-  assert.match(stdout, /task-runner task set/);
-  // And does NOT mix in the caller-instructions text
+  // Passive bootstrap is now stored on the manifest/brief surface
+  // instead of being dumped inline during init.
+  assert.match(outcome.manifest.brief, /task-runner task set/);
+  assert.match(outcome.manifest.brief, new RegExp(outcome.runId));
+  // Stdout remains reserved for command output, not caller docs.
+  assert.equal(stdout, "");
   assert.doesNotMatch(stdout, /Hello, caller/);
 });
 
@@ -383,39 +380,99 @@ test("ad-hoc agent + assignment with callerInstructions still prints them", asyn
     },
   );
   assert.equal(spawn.status, 0);
-  assert.match(spawn.stdout, /task-runner task set/);
-  assert.doesNotMatch(spawn.stdout, /Hello, caller/);
   assert.match(spawn.stderr, /── caller instructions ──/);
   assert.match(spawn.stderr, /Hello, caller/);
+  assert.doesNotMatch(spawn.stdout, /Hello, caller/);
+
+  const [runId] = readdirSync(join(dir, "runs", "unknown"));
+  const brief = runCli(["run", "brief", runId], { cwd: dir });
+  assert.match(brief, /task-runner task set/);
+  assert.doesNotMatch(brief, /Hello, caller/);
+});
+
+test("persisted run note and pin metadata stay out of briefs and backend prompts", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "caller-test", AGENT);
+  writeAssignment(dir, "caller-work", ASSIGNMENT_WITH_CALLER);
+  const { outcome } = await runFreshRun(dir, "caller-work", { initialize: true });
+
+  const manifestPath = join(outcome.workspaceDir, "run.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  manifest.note = "# Private note\n\nDo not leak into the worker prompt.";
+  manifest.pinned = true;
+  manifest.resetSeed.note = manifest.note;
+  manifest.resetSeed.pinned = true;
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+  const brief = runCli(["run", "brief", outcome.runId], { cwd: dir });
+  assert.doesNotMatch(brief, /Private note/);
+  assert.doesNotMatch(brief, /Pinned: yes/);
+
+  let capturedPrompt = "";
+  await withSharedRuntimeEnv(dir, async () => {
+    const target = resolveResumeTarget(outcome.runId, dir);
+    const loaded = loadAgentConfig("caller-test", dir);
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      await runAgent({
+        loaded,
+        cliVars: {},
+        backend: {
+          id: "mock",
+          async invoke(ctx) {
+            capturedPrompt = ctx.prompt;
+            completeAllTasksFromPrompt(ctx.prompt);
+            return {
+              exitCode: 0,
+              signal: null,
+              timedOut: false,
+              aborted: false,
+              sessionId: "sess-caller-2",
+              transcript: "done",
+              rawStdout: "",
+              rawStderr: "",
+            };
+          },
+        },
+        resume: target,
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+
+  assert.doesNotMatch(capturedPrompt, /Private note/);
+  assert.doesNotMatch(capturedPrompt, /Pinned: yes/);
 });
 
 // ────────────────────────────────────────────────────────────────
 // Status output integration
 // ────────────────────────────────────────────────────────────────
 
-test("status --output-format json includes callerInstructions", async () => {
+test("run status --output-format json includes callerInstructions", async () => {
   const dir = tempDir();
   writeAgent(dir, "caller-test", AGENT);
   writeAssignment(dir, "caller-work", ASSIGNMENT_WITH_CALLER);
   const { outcome } = await runFreshRun(dir, "caller-work", { initialize: true });
   const out = runCli(
-    ["status", outcome.runId, "--output-format", "json", "--field", "callerInstructions"],
+    ["run", "status", outcome.runId, "--output-format", "json", "--field", "callerInstructions"],
     { cwd: dir },
   );
   const parsed = JSON.parse(out);
   assert.ok(parsed.callerInstructions);
   assert.match(parsed.callerInstructions, /Hello, caller/);
   assert.match(parsed.callerInstructions, new RegExp(outcome.runId));
-  assert.match(parsed.callerInstructions, /task-runner status/);
+  assert.match(parsed.callerInstructions, /task-runner run status/);
 });
 
-test("status text output does NOT reprint callerInstructions", async () => {
+test("run status text output does NOT reprint callerInstructions", async () => {
   const dir = tempDir();
   writeAgent(dir, "caller-test", AGENT);
   writeAssignment(dir, "caller-work", ASSIGNMENT_WITH_CALLER);
   const { outcome } = await runFreshRun(dir, "caller-work", { initialize: true });
 
-  const text = runCli(["status", outcome.runId], { cwd: dir });
+  const text = runCli(["run", "status", outcome.runId], { cwd: dir });
   // status text output is a read-only inspector and should stay
   // terse — the caller read the instructions on the first write
   // and can re-fetch via --output-format json if needed.

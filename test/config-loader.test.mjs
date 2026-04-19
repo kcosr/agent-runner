@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
 import {
   AgentConfigError,
@@ -57,6 +57,16 @@ function writeAssignment(baseDir, name, body) {
   return path;
 }
 
+const BUILTIN_PLAN_FEATURE_PATH = resolvePath(
+  new URL("../assignments/plan-feature/assignment.md", import.meta.url).pathname,
+);
+const BUILTIN_PLAN_TEMPLATE_PATH = resolvePath(
+  new URL("../assignments/plan-feature/template.md", import.meta.url).pathname,
+);
+const BUILTIN_IMPLEMENTER_AGENT_PATH = resolvePath(
+  new URL("../agents/implementer/agent.md", import.meta.url).pathname,
+);
+
 test("loadAgentConfig parses a minimal agent.md from TASK_RUNNER_CONFIG_DIR", () =>
   withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
     writeAgent(configDir, "demo", MINIMAL_AGENT);
@@ -66,29 +76,49 @@ test("loadAgentConfig parses a minimal agent.md from TASK_RUNNER_CONFIG_DIR", ()
     assert.equal(loaded.config.backend, "claude");
     assert.equal(loaded.config.timeoutSec, 3600);
     assert.equal(loaded.config.unrestricted, false);
-    assert.equal(loaded.cwdSource, "default");
     assert.ok(!("maxRetries" in loaded.config), "maxRetries moved to assignment schema");
     assert.ok(loaded.instructions.includes("You are an assistant."));
   }));
 
-test("loadAgentConfig preserves whether cwd was authored explicitly", () =>
+test("loadAssignmentConfig loads authored cwd from assignment frontmatter", () =>
   withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
-    writeAgent(
+    writeAssignment(
       configDir,
       "explicit-cwd",
       `---
 schemaVersion: 1
 name: explicit-cwd
-backend: claude
 cwd: .
+tasks:
+  - id: t1
+    title: First
 ---
 body
 `,
     );
 
-    const loaded = loadAgentConfig("explicit-cwd", rootDir);
+    const loaded = loadAssignmentConfig("explicit-cwd", rootDir);
     assert.equal(loaded.config.cwd, ".");
-    assert.equal(loaded.cwdSource, "explicit");
+  }));
+
+test("loadAssignmentConfig rejects empty authored cwd after trimming", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    writeAssignment(
+      configDir,
+      "blank-cwd",
+      `---
+schemaVersion: 1
+name: blank-cwd
+cwd: "   "
+tasks:
+  - id: t1
+    title: First
+---
+body
+`,
+    );
+
+    assert.throws(() => loadAssignmentConfig("blank-cwd", rootDir), AssignmentConfigError);
   }));
 
 test("loadAgentConfig throws AgentConfigError on bad frontmatter", () =>
@@ -147,6 +177,66 @@ body
     assert.equal(loaded.config.name, "notasks");
   }));
 
+test("loadAgentConfig accepts backendSpecific.codex.transport in agent frontmatter", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    writeAgent(
+      configDir,
+      "codex-transport",
+      `---
+schemaVersion: 1
+name: codex-transport
+backend: codex
+backendSpecific:
+  codex:
+    transport:
+      type: ws
+      url: ws://127.0.0.1:4773/
+---
+body
+`,
+    );
+
+    const loaded = loadAgentConfig("codex-transport", rootDir);
+    assert.deepEqual(loaded.config.backendSpecific, {
+      codex: {
+        transport: {
+          type: "ws",
+          url: "ws://127.0.0.1:4773/",
+        },
+      },
+    });
+  }));
+
+test("loadAgentConfig rejects invalid backendSpecific.codex.transport values", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    writeAgent(
+      configDir,
+      "bad-transport",
+      `---
+schemaVersion: 1
+name: bad-transport
+backend: codex
+backendSpecific:
+  codex:
+    transport:
+      type: ws
+      url: https://example.com/not-ws
+      extra: true
+---
+body
+`,
+    );
+
+    assert.throws(
+      () => loadAgentConfig("bad-transport", rootDir),
+      (err) => {
+        assert.ok(err instanceof AgentConfigError);
+        assert.match(err.message, /backendSpecific\.codex\.transport/);
+        return true;
+      },
+    );
+  }));
+
 test("loadAgentConfig throws AgentNotFoundError for missing agent and lists config-root path", () =>
   withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
     assert.throws(
@@ -178,6 +268,25 @@ test("loadAssignmentConfig parses a minimal assignment.md from TASK_RUNNER_CONFI
     assert.equal(loaded.config.maxRetries, 3, "maxRetries defaults to 3 on assignment");
     assert.ok(loaded.instructions.includes("{{assignment_path}}"));
   }));
+
+test("built-in plan-feature assignment uses cwd instead of repo_path for canonical repo context", () => {
+  const loaded = loadAssignmentConfig(BUILTIN_PLAN_FEATURE_PATH);
+  assert.equal(loaded.config.vars.repo_path, undefined);
+  assert.match(loaded.instructions, /`{{cwd}}`/);
+  assert.ok((loaded.config.callerInstructions ?? "").includes("--assignment plan-feature"));
+});
+
+test("built-in plan-feature template emits implement-prefixed assignment names", () => {
+  const template = readFileSync(BUILTIN_PLAN_TEMPLATE_PATH, "utf8");
+  assert.match(template, /^name: implement-<<KEBAB_FEATURE_SLUG>>$/m);
+  assert.doesNotMatch(template, /^name: plan-<<KEBAB_FEATURE_SLUG>>$/m);
+});
+
+test("built-in implementer agent points reviewers at the run record, not workspace assignment.md", () => {
+  const loaded = loadAgentConfig(BUILTIN_IMPLEMENTER_AGENT_PATH);
+  assert.match(loaded.instructions, /reading the run record after the fact/i);
+  assert.doesNotMatch(loaded.instructions, /workspace `assignment\.md`/i);
+});
 
 test("loadAssignmentConfig throws AssignmentNotFoundError for missing assignment and lists config-root path", () =>
   withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {

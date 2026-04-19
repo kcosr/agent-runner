@@ -15,7 +15,7 @@ import { pipeline } from "node:stream/promises";
 import type { RunAttachment } from "../../contracts/attachments.js";
 import type { RunManifest } from "./manifest.js";
 
-export const MAX_ATTACHMENTS_PER_RUN = 20;
+export const MAX_ATTACHMENTS_PER_RUN = 100;
 export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 export const MAX_TOTAL_ATTACHMENT_BYTES = 100 * 1024 * 1024;
 

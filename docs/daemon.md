@@ -1,162 +1,268 @@
-# Daemon and control plane
+# Daemon
 
-task-runner runs in one of two host modes:
+`task-runner serve` starts a local control plane. It exposes:
 
-- **Embedded mode** — the foreground CLI process owns execution and
-  calls the shared app services in-process. This is the default when
-  you don't pass `--connect` or set `TASK_RUNNER_CONNECT`.
-- **Daemon mode** — a long-lived local `task-runner serve` process
-  owns live-run execution, event streaming, and external abort
-  control. CLI commands route through WebSocket JSON-RPC; browser
-  clients use HTTP + SSE on the same listener.
+- **WebSocket JSON-RPC** for CLI clients (via `--connect` /
+  `TASK_RUNNER_CONNECT`) and for the bundled web UI.
+- **HTTP API** for browser clients and scripting.
+- **Server-Sent Events (SSE)** for live summary, detail, and timeline
+  projections.
+- **Static assets** for the bundled web dashboard out of the same port.
 
-The daemon is local-only and exists to stabilize run control and future
-local clients, not to become a remote multi-user service.
+The daemon is local infrastructure, not a multi-user remote service: no
+auth, no CORS, bind to `127.0.0.1` by default.
 
 ## Starting the daemon
 
 ```bash
-task-runner serve
-task-runner serve --listen ws://127.0.0.1:4773/
+task-runner serve [--listen <ws-url>]
 ```
 
-Rules:
+- `--listen <ws-url>` — defaults to `ws://127.0.0.1:4773/` (or
+  `TASK_RUNNER_LISTEN`).
+- Prints `serving on <ws-url>` and `http api on <http-base-url>/api/`.
+- HTTP base URL is derived from the listen URL by substituting `ws` →
+  `http`.
+- Graceful shutdown on `SIGINT` (exit 130) and `SIGTERM` (exit 0).
 
-- `--listen` overrides `TASK_RUNNER_LISTEN`; both fall back to
-  `ws://127.0.0.1:4773/`.
-- The daemon keeps the JSON-RPC 2.0 WebSocket control plane for CLI
-  clients.
-- The same listener also serves browser-facing HTTP endpoints under
-  `/api/...` and split live SSE streams (run-summary, per-run detail,
-  per-run timeline) — see [Live event subscriptions](#live-event-subscriptions).
-- The health payload carries a stable `daemonInstanceId`, and
-  daemon-projected run DTOs expose persisted `execution` provenance
-  plus daemon-local abort capability (`canAbort`, `abortReason`).
-- Run-scoped commands, `list runs`, and definition read commands opt
-  into daemon mode with `--connect <ws-url>` or `TASK_RUNNER_CONNECT`.
-- External live abort control exists only in daemon mode.
+On startup the daemon mints a short `daemonInstanceId` and exposes it via
+`GET /api/daemon`:
 
-## Transport split
-
-- CLI uses the WebSocket JSON-RPC transport.
-- Browser/local web code should use HTTP for normal request/response
-  and SSE for live updates — see [Live event subscriptions](#live-event-subscriptions).
-- A default listener such as `ws://127.0.0.1:4773/` therefore also
-  exposes HTTP at `http://127.0.0.1:4773/api/`.
-- The same host also serves the built web app and runtime config:
-  `http://127.0.0.1:4773/` for the SPA and
-  `http://127.0.0.1:4773/app-config.json` for the frontend config
-  payload. The config exposes `apiBasePath` and
-  `runSummaryEventsPath`; per-run detail and timeline paths are
-  derived from `apiBasePath` and the active run id.
-
-## Live event subscriptions
-
-Live surfaces are split by responsibility instead of sharing a single
-mixed event bus. That lets the board/detail projections stay
-manifest-canonical while keeping execution transcripts as a separate
-per-run surface.
-
-| Responsibility | HTTP SSE endpoint | WebSocket channel | Notification method | Payload |
-|---|---|---|---|---|
-| Global run-summary feed (board cards) | `GET /api/events/run-summaries` | `events.subscribe { channel: "run_summary" }` | `run.summary` | `summary_upsert` carrying a fresh `RunSummary` |
-| Selected-run detail feed (drawer / `status` consumers) | `GET /api/runs/:runId/events/detail` | `events.subscribe { channel: "run_detail", runId }` | `run.detail` | `detail_updated` carrying a fresh `RunDetail` |
-| Selected-run execution timeline (agent transcript) | `GET /api/runs/:runId/events/timeline` | `events.subscribe { channel: "run_timeline", runId }` | `run.timeline` | One `RunTimelineEvent` per message (e.g. `agent_message_delta`) |
-
-Rules:
-
-- The global summary stream is **projection-only** and does not carry
-  transcript deltas. Subscribers hydrate board cards from
-  `RunSummary` snapshots.
-- Per-run detail and timeline streams are scoped to a single run id
-  at subscribe time.
-- Both `RunSummary` and `RunDetail` expose a derived `activeTask`
-  projection so consumers can render the current in-progress task
-  label without re-scanning the task array.
-- `events.unsubscribe { subscriptionId }` tears down a WebSocket
-  subscription; closing the SSE connection is the HTTP equivalent.
-
-See [web-dashboard.md](web-dashboard.md) for the browser UI hosted on
-top of this transport.
-
-## Connecting CLI clients
-
-```bash
-# Per-command
-task-runner run --connect ws://127.0.0.1:4773/ --agent ... --assignment ...
-
-# Process-wide
-export TASK_RUNNER_CONNECT=ws://127.0.0.1:4773/
-task-runner run --agent ... --assignment ...
+```json
+{
+  "daemon": {
+    "daemonInstanceId": "daemon-<shortid>",
+    "pid": 12345,
+    "listenUrl": "ws://127.0.0.1:4773/",
+    "version": "0.1.0",
+    "startedAt": "2026-04-18T10:35:00.000Z"
+  }
+}
 ```
 
-If nothing is listening at `--connect` / `TASK_RUNNER_CONNECT`, the
-command fails with exit code `3`; it does not silently fall back to
-embedded mode.
+## CLI clients: embedded vs connected
 
-## Detached dispatch
+Any client command (e.g. `run`, `list`, `task set`, `attachment add`)
+runs in one of two modes:
 
-`task-runner run --detach ...` and `task-runner run --detach
---resume-run <id>` send `runs.start` / `runs.resume` to the daemon and
-return immediately after the daemon responds with a `runId`. Detached
-mode does **not** wait for `run_finished`, does not stream run events,
-and does not change any manifest/session semantics.
+- **Embedded** — no `--connect`, no `TASK_RUNNER_CONNECT`. The CLI
+  executes the command directly in-process.
+- **Connected** — `--connect <ws-url>` (or `TASK_RUNNER_CONNECT` env).
+  The CLI opens a WebSocket, makes JSON-RPC calls, and prints the
+  response.
 
-Attached behavior (stream events until run_finished) remains the
-default — omit `--detach` and a daemon-connected `run` blocks and
-streams normally.
+Connected mode is how multiple terminals can share state and how the web
+UI and CLI stay in sync. `run --detach` only works in connected mode.
 
-## Execution provenance
+Codex transport selection stays explicit in connected mode:
 
-`RunDetail.execution` records the persisted execution context for the
-latest stored session:
+- the client does not forward arbitrary env vars to the daemon
+- if the client has `TASK_RUNNER_CODEX_WS_URL` set, `run`, `init`, and
+  `resume` synthesize
+  `overrides.backendSpecific.codex.transport = { type: "ws", url }`
+- malformed Codex transport overrides are rejected at the daemon request
+  boundary before any run is created
 
-- Embedded runs record `{ hostMode: "embedded", controller: { kind: "embedded" } }`.
-- Daemon-run sessions record daemon ownership and the daemon instance id.
+That special case exists only for Codex transport selection. No other
+backend gets daemon-side env passthrough from the client.
 
-Resume rewrites this block to the controller that most recently ran
-the session, so `status` and the web dashboard always reflect who owns
-the live session (if any).
+## HTTP API
 
-Capabilities:
+All routes are under `/api/`.
 
-- `canAbort` / `abortReason` — daemon-owned active runs are the only
-  runs that accept external abort.
-- Terminal runs: `canAbort=false`, `abortReason="already_terminal"`.
-- Nonterminal runs that are merely persisted rather than actively
-  owned by the serving daemon: `canAbort=false`,
-  `abortReason="not_active_in_daemon"`.
+### Daemon
 
-## Protocol surfaces
+- `GET /api/daemon` → `{ daemon: DaemonInfo }`
 
-- **WebSocket JSON-RPC 2.0** (CLI): `runs.start`, `runs.resume`,
-  `runs.abort`, `runs.reset`, `runs.archive`, `runs.unarchive`,
-  `runs.setName`, `runs.brief`, `runs.addDependency`,
-  `runs.removeDependency`, `runs.clearDependencies`, `tasks.set`,
-  `tasks.appendNotes`, `tasks.add`, `attachments.add`,
-  `attachments.list`, `attachments.remove`, `attachments.download`,
-  `agents.list`, `assignments.list`, `agents.show`,
-  `assignments.show`, `runs.list`, `runs.get`, plus
-  `events.subscribe` / `events.unsubscribe` for live updates. See
-  [Live event subscriptions](#live-event-subscriptions) for channel
-  semantics. Attachment byte transfers fall back to HTTP rather than
-  riding the WebSocket.
-- **HTTP** (`/api/...`): the same surface for browser clients, plus
-  attachment byte uploads/downloads and the split SSE endpoints for
-  run-summary, per-run detail, and per-run timeline streams.
+### Runs
 
-The authoritative protocol contracts live in
-`packages/core/src/contracts/` and the daemon routes in
-`apps/cli/src/daemon/`.
+| Method | Path | Effect |
+|--------|------|--------|
+| `GET` | `/api/runs` | List runs. Query: `includeArchived`, `cwd`, `repo`, `global` |
+| `GET` | `/api/runs/:runId` | Full `RunDetail` |
+| `POST` | `/api/runs/init` | Initialize a run |
+| `POST` | `/api/runs` | Start a run |
+| `POST` | `/api/runs/:runId/resume` | Resume an initialized/terminal run |
+| `POST` | `/api/runs/:runId/abort` | Abort an active run |
+| `POST` | `/api/runs/:runId/archive` | Archive |
+| `POST` | `/api/runs/:runId/unarchive` | Unarchive |
+| `POST` | `/api/runs/:runId/reset` | Reset to initialized |
+| `DELETE` | `/api/runs/:runId` | Delete (archived only) |
+| `POST` | `/api/runs/:runId/name` | Set display name (`null` to clear) |
+| `POST` | `/api/runs/:runId/note` | Set note (`string` or `null` to clear) |
+| `POST` | `/api/runs/:runId/pinned` | Set pinned state (`boolean`) |
+| `POST` | `/api/runs/:runId/backend-session` | Set `backendSessionId` (passive only) |
+| `POST` | `/api/runs/:runId/backend-session/clear` | Clear `backendSessionId` (passive only) |
+| `POST` | `/api/runs/:runId/dependencies` | Add a dependency |
+| `DELETE` | `/api/runs/:runId/dependencies/:depRunId` | Remove a dependency |
+| `POST` | `/api/runs/:runId/dependencies/clear` | Clear all dependencies |
 
-## Health
+### Tasks
 
-A basic health endpoint returns the daemon instance id:
+| Method | Path | Effect |
+|--------|------|--------|
+| `GET` | `/api/runs/:runId/tasks` | List tasks |
+| `GET` | `/api/runs/:runId/tasks/:taskId` | Single task |
+| `PATCH` | `/api/runs/:runId/tasks/:taskId` | Update status and/or notes |
+| `POST` | `/api/runs/:runId/tasks/:taskId/append-notes` | Append to notes |
+| `POST` | `/api/runs/:runId/tasks` | Add a task |
 
-```bash
-curl http://127.0.0.1:4773/api/health
+### Attachments
+
+| Method | Path | Effect |
+|--------|------|--------|
+| `GET` | `/api/runs/:runId/attachments` | List. Query: `cwdScope=true` for cwd-scoped group view |
+| `POST` | `/api/runs/:runId/attachments` | Upload; requires `x-task-runner-attachment-name` header |
+| `DELETE` | `/api/runs/:runId/attachments/:attachmentId` | Delete |
+| `GET` | `/api/runs/:runId/attachments/:attachmentId/content` | Download; sets `content-disposition`, `x-task-runner-attachment-id`, `x-task-runner-sha256` |
+
+### Streams
+
+| Path | Stream |
+|------|--------|
+| `GET /api/events/run-summaries` | Global summary SSE |
+| `GET /api/runs/:runId/events/detail` | Per-run detail SSE |
+| `GET /api/runs/:runId/timeline` | Per-run timeline history (JSON, plus `lastCursor`) |
+| `GET /api/runs/:runId/events/timeline` | Per-run timeline SSE (live envelopes with SSE `id: <cursor>`) |
+
+### App config
+
+- `GET /app-config.json` → `{ apiBasePath, runSummaryEventsPath }`
+
+The web UI fetches this before initialization. Per-run detail and
+timeline paths are derived from `apiBasePath` and the active run id.
+
+## WebSocket JSON-RPC
+
+Messages are JSON-RPC 2.0.
+
+```jsonc
+// Request
+{ "jsonrpc": "2.0", "id": 7, "method": "runs.list", "params": {} }
+// Response
+{ "jsonrpc": "2.0", "id": 7, "result": { "runs": [...] } }
+// Notification (server → client)
+{ "jsonrpc": "2.0", "method": "run.detail", "params": {...} }
 ```
 
-Restarting `task-runner serve` generates a new `daemonInstanceId`, so
-clients can distinguish the "same daemon still up" case from "a
-different daemon took over this port".
+Error codes:
+
+- `-32700` parse error
+- `-32600` invalid request
+- `-32601` method not found
+- `-32003` known control-plane error (validation, conflict, not found,
+  locked field)
+- `-32004` unexpected runtime error
+
+### Methods
+
+**Daemon**
+
+- `daemon.info`
+
+**Runs**
+
+- `runs.list`, `runs.get`, `runs.brief`, `runs.timelineHistory`
+- `runs.init`, `runs.start`, `runs.resume`, `runs.abort`
+- `runs.archive`, `runs.unarchive`, `runs.reset`, `runs.delete`
+- `runs.setName`, `runs.setNote`, `runs.setPinned`
+- `runs.setBackendSession`, `runs.clearBackendSession`
+- `runs.addDependency`, `runs.removeDependency`, `runs.clearDependencies`
+
+**Tasks**
+
+- `tasks.list`, `tasks.get`, `tasks.set`, `tasks.appendNotes`, `tasks.add`
+
+**Definitions**
+
+- `agents.list`, `agents.get`
+- `assignments.list`, `assignments.get`
+
+**Subscriptions**
+
+- `events.subscribe { channel, runId? }` — returns `{ subscriptionId }`
+- `events.unsubscribe { subscriptionId }`
+
+Valid `channel` values: `"run_summary"`, `"run_detail"`,
+`"run_timeline"`. Detail and timeline require a `runId`.
+
+## Event projections
+
+Live state is split into three independent channels; each has a matching
+HTTP SSE route and WebSocket notification method.
+
+### Global summary
+
+- HTTP: `GET /api/events/run-summaries`
+- WS channel: `run_summary`
+- WS notification method: `run.summary`
+- Event shapes:
+  ```ts
+  { type: "summary_upsert", summary: RunSummary }
+  { type: "summary_removed", runId: string }
+  ```
+
+Drives board cards. The global summary stream is projection-only — it
+never carries transcript deltas. `RunSummary` now includes persisted
+`pinned` and derived `notePresent` so cards and filters can react
+without fetching full detail.
+
+### Per-run detail
+
+- HTTP: `GET /api/runs/:runId/events/detail`
+- WS channel: `run_detail`
+- WS notification method: `run.detail`
+- Event carries a full `RunDetail` snapshot.
+
+Drives the detail drawer. Passive backend-session edits are detail
+mutations: the daemon publishes a fresh `RunDetail` on set/clear. Note
+and pin mutations publish both detail and summary updates so the board
+and the selected drawer stay synchronized.
+
+### Per-run timeline
+
+- History (bootstrap): `GET /api/runs/:runId/timeline` →
+  `RunTimelineHistory { attempts[], lastCursor }`
+- Live SSE: `GET /api/runs/:runId/events/timeline` — envelopes framed
+  with `id: <cursor>` for reconnection.
+- WS channel: `run_timeline`
+- WS notification method: `run.timeline`
+- Event shape: `RunTimelineEnvelope { runId, cursor, event }`
+
+Cursor is a monotonic opaque sequence number. The bootstrap flow is:
+
+1. Subscribe to `run_timeline`.
+2. Fetch the history once.
+3. Apply buffered live envelopes where `cursor > history.lastCursor`.
+
+The daemon retains a short in-memory window of recent timeline events so
+late subscribers can catch up during and shortly after a run completes.
+
+## Shared DTOs
+
+The contracts shared between CLI, daemon, and web are in
+`packages/core/src/contracts/`:
+
+- `RunSummary` — board projection, includes `dependencyState`,
+  `activeTask`, `pinned`, `notePresent`, and `capabilities`.
+- `RunDetail` — drawer projection: tasks, dependencies, dependents,
+  attachments, locked fields, runtime vars, session history, backend
+  session, full `note`, and `pinned`.
+- `RunCapabilities` — lifecycle gates: `canArchive`, `canUnarchive`,
+  `canReset`, `canDelete`, `canResume`, `canAbort` (+ `abortReason`),
+  and `taskMutation` sub-booleans.
+- `RunTimelineHistory` / `RunTimelineEnvelope` — per-run execution
+  timeline.
+
+Clients should use capability booleans directly rather than
+reimplementing lifecycle checks locally.
+
+## Security model
+
+- Local-only: bind to `127.0.0.1` by default.
+- No authentication. Assumes a trusted local machine.
+- No CORS headers. Single-origin; the daemon itself serves the web UI.
+- Input validation via Zod schemas. Known control-plane errors return
+  HTTP 422; unknown errors return 500.
+- Cancellation via `SIGINT` / `SIGTERM`; in-flight runs are aborted
+  gracefully.

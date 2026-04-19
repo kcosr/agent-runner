@@ -1,7 +1,19 @@
 import type { RunCommandOverrides } from "@task-runner/core/app/service.js";
-import { BACKEND_IDS } from "@task-runner/core/core/backends/types.js";
+import type {
+  BackendSpecificConfig,
+  CodexTransportConfig,
+} from "@task-runner/core/core/backends/types.js";
+import { BACKEND_IDS, isWsOrWssUrl } from "@task-runner/core/core/backends/types.js";
+import type { RunListScopeFilter } from "@task-runner/core/core/commands/service.js";
 import { trimRunName } from "@task-runner/core/util/run-name.js";
-import type { RunSetNameParams, RunsStartParams } from "./protocol.js";
+import type {
+  RunSetBackendSessionParams,
+  RunSetNameParams,
+  RunSetNoteParams,
+  RunSetPinnedParams,
+  RunsListParams,
+  RunsStartParams,
+} from "./protocol.js";
 
 export class RequestValidationError extends Error {
   constructor(message: string) {
@@ -42,6 +54,14 @@ export function requiredString(value: unknown, label: string): string {
   const stringValue = optionalString(value, label);
   if (stringValue === undefined) {
     throw new RequestValidationError(`${label} is required`);
+  }
+  return stringValue;
+}
+
+export function requiredNonEmptyString(value: unknown, label: string): string {
+  const stringValue = requiredString(value, label);
+  if (stringValue.trim().length === 0) {
+    throw new RequestValidationError(`${label} cannot be empty`);
   }
   return stringValue;
 }
@@ -91,6 +111,21 @@ export function requiredNullableRunName(value: unknown, label: string): string |
   } catch {
     throw new RequestValidationError(`${label} cannot be empty`);
   }
+}
+
+export function requiredNullableString(value: unknown, label: string): string | null {
+  if (value === null) {
+    return null;
+  }
+  return requiredString(value, label);
+}
+
+export function requiredBoolean(value: unknown, label: string): boolean {
+  const bool = optionalBoolean(value, label);
+  if (bool === undefined) {
+    throw new RequestValidationError(`${label} is required`);
+  }
+  return bool;
 }
 
 export function stringRecord(value: unknown, label: string): Record<string, string> {
@@ -182,6 +217,74 @@ export function parseBooleanQueryValue(value: string | null, label: string): boo
   throw new RequestValidationError(`${label} must be "true" or "false"`);
 }
 
+function validateAbsoluteCodexWsUrl(value: string, label: string): string {
+  if (!isWsOrWssUrl(value)) {
+    throw new RequestValidationError(`${label} must be an absolute ws:// or wss:// URL`);
+  }
+  return value;
+}
+
+function optionalCodexTransport(value: unknown, label: string): CodexTransportConfig | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const record = asRecord(value, label);
+  const allowedKeys = new Set(["type", "url"]);
+  for (const key of Object.keys(record)) {
+    if (!allowedKeys.has(key)) {
+      throw new RequestValidationError(`${label}.${key} is not supported`);
+    }
+  }
+
+  const type = requiredString(record.type, `${label}.type`);
+  if (type === "stdio") {
+    if (record.url !== undefined) {
+      throw new RequestValidationError(`${label}.url is not supported for stdio transport`);
+    }
+    return { type: "stdio" };
+  }
+  if (type === "ws") {
+    return {
+      type: "ws",
+      url: validateAbsoluteCodexWsUrl(
+        requiredNonEmptyString(record.url, `${label}.url`),
+        `${label}.url`,
+      ),
+    };
+  }
+  throw new RequestValidationError(`${label}.type must be one of: stdio, ws`);
+}
+
+function optionalBackendSpecific(value: unknown, label: string): BackendSpecificConfig | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const record = asRecord(value, label);
+  const allowedKeys = new Set(["codex"]);
+  for (const key of Object.keys(record)) {
+    if (!allowedKeys.has(key)) {
+      throw new RequestValidationError(`${label}.${key} is not supported`);
+    }
+  }
+
+  if (record.codex === undefined) {
+    return {};
+  }
+  const codex = asRecord(record.codex, `${label}.codex`);
+  const codexAllowedKeys = new Set(["transport"]);
+  for (const key of Object.keys(codex)) {
+    if (!codexAllowedKeys.has(key)) {
+      throw new RequestValidationError(`${label}.codex.${key} is not supported`);
+    }
+  }
+
+  return {
+    codex: {
+      transport: optionalCodexTransport(codex.transport, `${label}.codex.transport`),
+    },
+  };
+}
+
 export function optionalOverrides(value: unknown): RunCommandOverrides {
   if (value === undefined) {
     return {};
@@ -192,13 +295,13 @@ export function optionalOverrides(value: unknown): RunCommandOverrides {
     "backend",
     "model",
     "effort",
-    "taskMode",
     "message",
     "name",
     "timeoutSec",
     "unrestricted",
     "maxRetries",
     "addedTasks",
+    "backendSpecific",
   ]);
   for (const key of Object.keys(record)) {
     if (!allowedKeys.has(key)) {
@@ -218,13 +321,13 @@ export function optionalOverrides(value: unknown): RunCommandOverrides {
       "xhigh",
       "max",
     ]),
-    taskMode: optionalEnum(record.taskMode, "overrides.taskMode", ["file", "cli"]),
     message: optionalString(record.message, "overrides.message"),
     name: optionalNonEmptyString(record.name, "overrides.name"),
     timeoutSec: optionalPositiveInteger(record.timeoutSec, "overrides.timeoutSec"),
     unrestricted: optionalBoolean(record.unrestricted, "overrides.unrestricted"),
     maxRetries: optionalNonNegativeInteger(record.maxRetries, "overrides.maxRetries"),
     addedTasks: optionalStringArray(record.addedTasks, "overrides.addedTasks"),
+    backendSpecific: optionalBackendSpecific(record.backendSpecific, "overrides.backendSpecific"),
   };
 }
 
@@ -246,5 +349,64 @@ export function parseRunSetNameParams(value: unknown, label: string): RunSetName
   return {
     target: requiredString(record.target, `${label}.target`),
     name: requiredNullableRunName(record.name, `${label}.name`),
+  };
+}
+
+export function parseRunSetNoteParams(value: unknown, label: string): RunSetNoteParams {
+  const record = asRecord(value, label);
+  return {
+    target: requiredString(record.target, `${label}.target`),
+    note: requiredNullableString(record.note, `${label}.note`),
+  };
+}
+
+export function parseRunSetPinnedParams(value: unknown, label: string): RunSetPinnedParams {
+  const record = asRecord(value, label);
+  return {
+    target: requiredString(record.target, `${label}.target`),
+    pinned: requiredBoolean(record.pinned, `${label}.pinned`),
+  };
+}
+
+export function parseRunSetBackendSessionParams(
+  value: unknown,
+  label: string,
+): RunSetBackendSessionParams {
+  const record = asRecord(value, label);
+  return {
+    target: requiredString(record.target, `${label}.target`),
+    backendSessionId: requiredNonEmptyString(record.backendSessionId, `${label}.backendSessionId`),
+  };
+}
+
+export function parseRunListScope(value: unknown, label: string): RunListScopeFilter | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const record = asRecord(value, label);
+  const kind = optionalEnum(record.kind, `${label}.kind`, ["cwd", "repo", "global"]);
+  if (kind === undefined) {
+    throw new RequestValidationError(`${label}.kind is required`);
+  }
+  if (kind === "cwd") {
+    return {
+      kind,
+      cwd: requiredString(record.cwd, `${label}.cwd`),
+    };
+  }
+  if (kind === "repo") {
+    return {
+      kind,
+      repo: requiredString(record.repo, `${label}.repo`),
+    };
+  }
+  return { kind };
+}
+
+export function parseRunsListParams(value: unknown, label: string): RunsListParams {
+  const record = asRecord(value, label);
+  return {
+    includeArchived: optionalBoolean(record.includeArchived, `${label}.includeArchived`),
+    scope: parseRunListScope(record.scope, `${label}.scope`),
   };
 }

@@ -1,52 +1,124 @@
 # Attachments
 
-Runs can carry immutable file blobs alongside the manifest — screenshots,
-logs, build artifacts, or anything else the caller wants to bind to a
-run. Canonical bytes live inside the run workspace; `run.json` persists
-only attachment metadata and workspace-relative paths.
+Attachments are files stored with a run. Metadata lives in the manifest;
+bytes live under the run workspace. Attachments are immutable once stored:
+name and MIME type are captured at add time, and content integrity is
+verified against a SHA-256 digest.
+
+## Storage
+
+Metadata is in `manifest.attachments` as an array of `RunAttachment`:
+
+```ts
+{
+  id: string                // "att-<shortid>"
+  name: string              // validated, sanitized filename
+  mimeType: string          // resolved from extension or override
+  size: number              // bytes
+  sha256: string            // hex digest
+  addedAt: string           // ISO 8601 timestamp
+  relativePath: string      // "attachments/<id>/<filename>"
+}
+```
+
+Files live at:
+
+```text
+<workspace>/attachments/<attachment-id>/<filename>
+```
 
 ## Limits
 
-- 20 attachments per run
-- 25 MiB per file
-- 100 MiB total bytes per run
+- Max file size: **25 MiB**
+- Max attachments per run: **20**
+- Max total size per run: **100 MiB**
 
-## CLI surface
+Additions that would violate any of these are rejected before the file is
+written.
+
+## Filename validation and sanitization
+
+Incoming names are validated and sanitized:
+
+- Control characters are rejected.
+- `/` and `\` are rejected in the provided name, and replaced with `-`
+  during sanitization of the on-disk filename.
+- Names cannot be `.` or `..`.
+- Leading `.` sequences are stripped from the on-disk filename.
+
+MIME type is resolved from the filename extension with a fallback of
+`application/octet-stream`. `--mime-type` on add lets you override it.
+
+## CLI
+
+### Add
 
 ```bash
-task-runner attachment add <run-id|path> <source-file>
-task-runner attachment add <run-id> ./build.zip --name artifacts.zip --mime-type application/zip
-task-runner attachment list <run-id|path>
-task-runner attachment download <run-id|path> <attachment-id> <output-path>
-task-runner attachment remove <run-id|path> <attachment-id>
+task-runner attachment add <run-id> <path> \
+  [--name "override-name.txt"] \
+  [--mime-type "text/plain"]
 ```
 
-These commands work for initialized, running, terminal, and archived
-runs. Attachments do not mutate the prompt or backend session state.
+The file is streamed to the workspace; size and SHA-256 are computed
+during the stream.
 
-### Options
+### List
 
-| Flag | Purpose |
-|---|---|
-| `--name <text>` | `attachment add` only. Optional display name; defaults to the source basename. |
-| `--mime-type <type>` | `attachment add` only. Optional MIME override; otherwise task-runner derives from filename extension and falls back to `application/octet-stream`. |
-| `--connect <ws-url>` | Route through the daemon. Attachment bytes use the daemon's HTTP attachment endpoints rather than WebSocket JSON-RPC payloads. |
-| `--output-format <text\|json>` | Default `text`. `json` returns the created attachment row, the attachment array, the remove result, or the download result including `outputPath`. |
-
-Downloads are intentionally conservative: task-runner never overwrites
-an existing destination file, and a path ending in `/` is treated as a
-directory that must already exist.
-
-## Metadata in `RunDetail`
-
-`RunDetail` includes an `attachments` array and `list runs
---output-format json` exposes `attachmentCount`. Text `status` shows
-the attachment count, and the web detail drawer uses the same HTTP
-download/remove flows as daemon-routed CLI commands.
-
-## Storage layout
-
+```bash
+task-runner attachment list <run-id>
+task-runner attachment list <run-id> --cwd-scope
 ```
-${TASK_RUNNER_STATE_DIR}/runs/<repo-name>/<run-id>/attachments/
-└── <attachment-id>/<sanitized-name>
+
+Without `--cwd-scope`, only the target run's attachments are listed.
+
+With `--cwd-scope`, the target run is still the anchor, but the result
+also includes attachments from *peer runs* whose persisted `cwd` exactly
+matches the target run's `cwd`. JSON rows include `ownerRunId` so you can
+tell which run owns each file. The scope key is an exact-match on the
+persisted `cwd` — it is not inferred from the caller cwd, repo bucket, or
+path prefixes.
+
+### Download
+
+```bash
+task-runner attachment download <run-id> <attachment-id> <output-path>
 ```
+
+If `<output-path>` ends with `/`, it is treated as a directory and the
+filename is derived from the attachment. Otherwise it is treated as an
+exact file path. The command errors if the destination already exists or
+the parent directory is missing.
+
+### Remove
+
+```bash
+task-runner attachment remove <run-id> <attachment-id>
+```
+
+Removes the file and its per-attachment directory, then removes the empty
+`attachments/` directory if it was the last one. Manifest metadata is
+updated by filtering out the removed entry.
+
+## Web dashboard
+
+The detail drawer's Attachments panel has two tabs:
+
+- **Run** — attachments owned by the selected run. Supports upload,
+  download, in-app preview for `text/markdown` and `text/plain`
+  (fenced `mermaid` blocks render inline), and delete.
+- **Group** — attachments from peer runs with the same persisted `cwd`.
+  Read-only: preview and download only. The backing surface is the same
+  `attachment list --cwd-scope` query, and each row carries `ownerRunId`.
+
+## Common patterns
+
+- **Seed context**: drop a file into the run before resume (e.g. a diff, a
+  report, a summary).
+- **Handoff between runs**: attach artifacts to a planning run so an
+  implementation run with the same `cwd` can discover them via
+  `--cwd-scope`.
+- **Audit trail**: attach the exact generated draft so the manifest
+  captures byte-for-byte what was handed to the next stage.
+
+See [examples.md](examples.md) for how the bundled `plan-feature`
+assignment uses attachments as a handoff surface.

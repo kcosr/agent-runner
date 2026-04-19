@@ -151,9 +151,9 @@ test("passive agent: init creates manifest with backend=passive, status=initiali
   assert.equal(outcome.manifest.tasksCompleted, 0);
   assert.equal(outcome.exitCode, 0);
 
-  // pendingPrompt should contain the PASSIVE workflow template
-  const prompt = outcome.manifest.pendingPrompt ?? "";
-  assert.ok(prompt.length > 0, "pendingPrompt populated");
+  // brief should contain the PASSIVE workflow template
+  const prompt = outcome.manifest.brief ?? "";
+  assert.ok(prompt.length > 0, "brief populated");
   assert.match(prompt, /task-runner task set/, "prompt uses CLI workflow template");
   assert.match(prompt, new RegExp(outcome.runId), "prompt interpolates run id");
 });
@@ -180,9 +180,8 @@ test("passive agent: init output — bootstrap on stdout, progress on stderr", a
   // Progress lines on stderr
   assert.match(res.stderr, /initialized passive agent=passive-agent/);
   assert.match(res.stderr, /drive with: task-runner task set/);
-  // Bootstrap on stdout — contains the CLI workflow instructions
-  assert.match(res.stdout, /task-runner task set/);
-  assert.match(res.stdout, /claim it/i);
+  // Stdout is empty; callers re-orient with `task-runner run brief <run-id>`.
+  assert.equal(res.stdout, "");
 });
 
 test("passive agent: `run` is rejected with a clear error", async () => {
@@ -268,7 +267,7 @@ test("passive reset: success run returns to initialized with original tasks", as
   assert.equal(manifest.endedAt, null);
   assert.equal(manifest.finalTasks.t1.status, "pending");
   assert.equal(manifest.finalTasks.t2.status, "pending");
-  assert.equal(manifest.pendingPrompt, manifest.resetSeed.pendingPrompt);
+  assert.equal(manifest.brief, manifest.resetSeed.brief);
 });
 
 test("passive reset: blocked run returns to initialized with notes cleared", async () => {
@@ -394,7 +393,7 @@ test("passive status: Attempts and Sessions lines are hidden", async () => {
   writeAssignment(dir, "two-task", TWO_TASK_ASSIGNMENT);
   const outcome = await initPassive(dir);
 
-  const text = runCli(["status", outcome.runId], { cwd: dir });
+  const text = runCli(["run", "status", outcome.runId], { cwd: dir });
   assert.doesNotMatch(text, /Attempts:/);
   assert.doesNotMatch(text, /Sessions:/);
   assert.match(text, /Status: initialized/);
@@ -406,7 +405,7 @@ test("passive status: initialized footer points at task set, not run", async () 
   writeAssignment(dir, "two-task", TWO_TASK_ASSIGNMENT);
   const outcome = await initPassive(dir);
 
-  const text = runCli(["status", outcome.runId], { cwd: dir });
+  const text = runCli(["run", "status", outcome.runId], { cwd: dir });
   assert.match(text, /Drive this run externally:/);
   assert.match(
     text,
@@ -423,7 +422,7 @@ test("passive status and list surfaces use effectiveStatus while capabilities st
 
   runCli(["task", "set", outcome.runId, "t1", "--status", "in_progress"], { cwd: dir });
 
-  const statusText = runCli(["status", outcome.runId], { cwd: dir });
+  const statusText = runCli(["run", "status", outcome.runId], { cwd: dir });
   assert.match(statusText, /Status: running/);
   assert.match(statusText, /Lifecycle status: initialized/);
   assert.match(statusText, /Drive this run externally:/);
@@ -434,6 +433,7 @@ test("passive status and list surfaces use effectiveStatus while capabilities st
   const projected = JSON.parse(
     runCli(
       [
+        "run",
         "status",
         outcome.runId,
         "--output-format",
@@ -462,7 +462,7 @@ test("passive status and list surfaces keep partial completed progress running b
 
   runCli(["task", "set", outcome.runId, "t1", "--status", "completed"], { cwd: dir });
 
-  const statusText = runCli(["status", outcome.runId], { cwd: dir });
+  const statusText = runCli(["run", "status", outcome.runId], { cwd: dir });
   assert.match(statusText, /Status: running/);
   assert.match(statusText, /Lifecycle status: initialized/);
   assert.match(statusText, /Tasks completed: 1\/2/);
@@ -473,6 +473,7 @@ test("passive status and list surfaces keep partial completed progress running b
   const projected = JSON.parse(
     runCli(
       [
+        "run",
         "status",
         outcome.runId,
         "--output-format",
@@ -500,7 +501,7 @@ test("passive status json exposes passive task-mutation capabilities and no resu
   const outcome = await initPassive(dir);
 
   const projected = JSON.parse(
-    runCli(["status", outcome.runId, "--output-format", "json", "--field", "capabilities"], {
+    runCli(["run", "status", outcome.runId, "--output-format", "json", "--field", "capabilities"], {
       cwd: dir,
     }),
   );
@@ -508,6 +509,8 @@ test("passive status json exposes passive task-mutation capabilities and no resu
   assert.deepEqual(projected.capabilities, {
     canArchive: true,
     canUnarchive: false,
+    canReset: true,
+    canDelete: false,
     canAbort: false,
     abortReason: "not_active_in_daemon",
     canResume: false,
@@ -579,31 +582,12 @@ test("passive finalized run: notes-only task set preserves endedAt and exitCode"
   );
 });
 
-test("passive re-orient: status --field pendingPrompt returns the bootstrap text", async () => {
+test("passive re-orient: run brief command returns the bootstrap text", async () => {
   const dir = tempDir();
   writeAgent(dir, "passive-agent", PASSIVE_AGENT);
   writeAssignment(dir, "two-task", TWO_TASK_ASSIGNMENT);
   const outcome = await initPassive(dir);
 
-  const out = runCli(
-    ["status", outcome.runId, "--output-format", "json", "--field", "pendingPrompt"],
-    { cwd: dir },
-  );
-  const parsed = JSON.parse(out);
-  assert.ok(parsed.pendingPrompt);
-  assert.match(parsed.pendingPrompt, /task-runner task set/);
-});
-
-test("bundled passive-example agent is loadable and passes schema", async () => {
-  await withSharedRuntimeEnv(process.cwd(), async () => {
-    const loaded = loadAgentConfig(
-      "/home/kevin/worktrees/task-runner/agents/passive-example/agent.md",
-    );
-    assert.equal(loaded.config.backend, "passive");
-    assert.equal(loaded.config.name, "passive-example");
-    assert.ok(
-      loaded.config.lockedFields.includes("backend"),
-      "bundled passive-example locks backend",
-    );
-  });
+  const out = runCli(["run", "brief", outcome.runId], { cwd: dir });
+  assert.match(out, /task-runner task set/);
 });

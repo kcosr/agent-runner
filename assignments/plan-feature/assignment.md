@@ -1,14 +1,7 @@
 ---
 schemaVersion: 1
 name: plan-feature
-taskMode: cli
 maxRetries: 4
-vars:
-  repo_path:
-    type: string
-    required: true
-    source: cli
-    description: Absolute path to the repository the feature will be added to.
 callerInstructions: |
   This assignment turns a free-form feature description into an
   executable task-runner plan. The feature summary and any
@@ -21,16 +14,16 @@ callerInstructions: |
       {{task_runner_cmd}} run \
         --agent <your-planner-agent> \
         --assignment plan-feature \
-        --var repo_path=/abs/path/to/target/repo \
         "$(cat /tmp/feature-brief.md)"
 
-  Any general-purpose agent works (for example `example`). The
-  planner doesn't need special role instructions — the detail
-  lives in this assignment's task bodies. It does need shell
-  access (`unrestricted: true`) so it can inspect the repo and
-  validate the generated draft assignment. The caller
-  environment must allow one nested `task-runner run`, because
-  the planner runs `plan-review` before handing the draft back.
+  Use the bundled `planner` agent or another unrestricted
+  general-purpose agent. The planner doesn't need special role
+  instructions beyond what this assignment provides, but it
+  does need shell access (`unrestricted: true`) so it can
+  inspect the repo and validate the generated draft
+  assignment. The caller environment must allow one nested
+  `task-runner run`, because the planner runs `plan-review`
+  before handing the draft back.
 
   ## What the planner does
 
@@ -38,9 +31,9 @@ callerInstructions: |
        impact surface, checks for reusable existing code, and
        maps out risks and tests.
     2. Copies the reference template from
-       `${TASK_RUNNER_CONFIG_DIR}/assignments/plan-feature/template.md`
+       `{{config_dir}}/assignments/plan-feature/template.md`
        into
-       `${TASK_RUNNER_STATE_DIR}/drafts/<repo-name>/plan-<slug>-<shortid>.md`,
+       `{{state_dir}}/drafts/<repo-name>/plan-<slug>-<shortid>.md`,
        adjusts the task list to fit the feature, and fills in
        every `<<PLACEHOLDER>>` with concrete steps. The
        template's task list is a starting shape; the planner
@@ -48,8 +41,8 @@ callerInstructions: |
        `lockedFields: [tasks]` line stays in the frontmatter.
     3. Runs the bundled `plan-review` assignment against the
        draft, passing both the draft path and the planner's own
-       workspace `assignment.md` so the reviewer can validate
-       the draft against the planning evidence. The planner
+       run id so the reviewer can validate the draft against
+       the planning evidence. The planner
        applies fixes and reruns the draft review until it is
        approved.
     4. Produces a human-facing summary next to the approved
@@ -62,16 +55,18 @@ callerInstructions: |
        implementer run during the initial planning pass; if the
        caller approves and asks for creation, the planner first
        confirms the target directory or worktree path, then runs
-       `init` and attaches the same two artifacts to the new
-       implementer run.
+       `init`. The planning artifacts stay attached to the
+       planning run; later implementer and reviewer flows can
+       discover them through cwd-scoped attachment listing when
+       they need supplemental context.
 
   ## After planning
 
   Pull the handoff summary and attachment info from the
   `handoff` task's notes block:
 
-      {{task_runner_cmd}} status {{run_id}}
-      {{task_runner_cmd}} status {{run_id}} --output-format json \
+      {{task_runner_cmd}} run status {{run_id}}
+      {{task_runner_cmd}} run status {{run_id}} --output-format json \
         --field tasks
 
   Review the planning-run attachments first:
@@ -85,9 +80,15 @@ callerInstructions: |
   The planner will confirm the target directory or worktree
   path before it runs `init`.
 
-  After the planner creates the implementer run, execute it:
+  After the planner creates the implementer run, hand off the
+  new run id via:
 
-      {{task_runner_cmd}} run --resume-run <new-run-id>
+      {{task_runner_cmd}} run brief <new-run-id>
+
+  The implementer run is created with the `implementer` agent
+  on the passive backend, so execution continues through the
+  passive task workflow described in the brief rather than
+  `run --resume-run`.
 
   Nested review must be allowed at both stages:
   - the planner run nests `plan-review`
@@ -103,19 +104,20 @@ callerInstructions: |
 
   ## What happens to the draft file
 
-  The draft under `${TASK_RUNNER_STATE_DIR}/drafts/<repo-name>/`
+  The draft under `{{state_dir}}/drafts/<repo-name>/`
   remains the planner's source artifact, and the planning run
   also carries it as `assignment-seed.md` plus the human-facing
   `assignment-summary.md` attachment. Once a later `init`
-  succeeds, the canonical execution artifact becomes the
-  workspace `assignment.md` inside the new run directory. Edits
-  to the draft file after init have no effect on the run.
+  succeeds, the canonical execution artifact becomes the new
+  implementer run id plus its canonical task state in
+  `run.json`. Edits to the draft file after init have no
+  effect on the run.
 tasks:
   - id: orient
     title: Target repo orientation and conventions
     body: |
       Read the high-signal entry points for the repository at
-      `{{repo_path}}`:
+      `{{cwd}}`:
         - AGENTS.md, CLAUDE.md, CONTRIBUTING.md at the repo
           root
         - README.md
@@ -469,12 +471,12 @@ tasks:
       Locate the reference template. It lives alongside this
       assignment's source file in one of:
         - `{{cwd}}/assignments/plan-feature/template.md`
-        - `${TASK_RUNNER_CONFIG_DIR}/assignments/plan-feature/template.md`
+        - `{{config_dir}}/assignments/plan-feature/template.md`
         - under the task-runner install root
 
       Copy it to a new draft file at:
 
-          ${TASK_RUNNER_STATE_DIR}/drafts/<repo-name>/plan-<slug>-<shortid>.md
+          {{state_dir}}/drafts/<repo-name>/plan-<slug>-<shortid>.md
 
       Create the repo-name drafts directory if it does not
       exist. `<repo-name>` is the basename of task-runner's
@@ -548,7 +550,7 @@ tasks:
         - Keep a dedicated internal-review task that
           launches `{{task_runner_cmd}} run --agent code-reviewer
           --assignment code-review --var
-          implementation_plan={{assignment_path}} ...` so
+          implementation_run_id={{run_id}} ...` so
           the reviewer sees the full plan context.
         - Keep a dedicated fresh-eyes simplification task
           that runs *before* the internal review — the
@@ -585,11 +587,15 @@ tasks:
           plan's first task — paste a 3-5 sentence summary
           of the feature from your `capture_feature` notes (what it is,
           why, in-scope, out-of-scope). The reviewer reads
-          this via `implementation_plan` to know what it is
+          this via `implementation_run_id` to know what it is
           verifying.
         - `<<PLACEHOLDER_FEATURE_CONTRACT>>` in the same
           task — paste the entire contract artifact from
-          your `produce_contract_artifact` notes, verbatim, inside a fenced block.
+          your `produce_contract_artifact` notes verbatim as
+          standard markdown sections. Do not wrap the whole
+          contract in one outer fenced block; use fenced
+          blocks only for code/schema/query snippets that
+          are part of the contract itself.
           The reviewer cross-checks the final implementation
           against this contract: every listed flag,
           every listed exit code, every listed sample
@@ -604,7 +610,7 @@ tasks:
 
       Also fill `<<PLACEHOLDER_PLANNING_RUN_ID>>` with this
       run's id ({{run_id}}) so the implementer can pull
-      additional planning context via `{{task_runner_cmd}} status`
+      additional planning context via `{{task_runner_cmd}} run status`
       if needed.
 
       Validate frontmatter parses by eye before moving on:
@@ -617,7 +623,9 @@ tasks:
       Before launching the draft review, finalize the planning
       evidence the reviewer depends on:
 
-        1. Open this run's workspace `assignment.md` and scan
+        1. Inspect this run's task state with
+           `{{task_runner_cmd}} run status {{run_id}} --output-format json --field tasks`
+           and scan every task above this one.
            every task above this one.
         2. Every prior task must have status `completed`.
            If a prior task is still `in_progress`, `pending`,
@@ -625,7 +633,8 @@ tasks:
         3. Every prior task must have a non-empty Notes block
            with concrete evidence: repo file paths, commands,
            contract details, reusable code references, and
-           risks. The draft reviewer uses this workspace as
+           risks. The draft reviewer uses this run's canonical
+           task state as
            ground truth for the feature brief, contract, and
            assumptions.
         4. Do not launch the draft reviewer against a half-
@@ -640,15 +649,15 @@ tasks:
             --agent code-reviewer \
             --assignment plan-review \
             --name <short-descriptive-name> \
-            --var repo_path={{repo_path}} \
+            --cwd {{cwd}} \
             --var plan_draft=<draft-path-from-draft_plan> \
-            --var planning_workspace={{assignment_path}}
+            --var planning_run_id={{run_id}}
 
       The reviewer reads both artifacts:
         - `plan_draft` is the exact draft the caller will init.
-        - `planning_workspace` is this planner run's own
-          workspace assignment, which contains the captured
-          brief, contract, risks, and assumptions.
+        - `planning_run_id` is this planner run's own run id,
+          which exposes the captured brief, contract, risks,
+          and assumptions through canonical task state.
 
       Set `--name` to the same short topic label you expect the
       caller to use for the eventual implementer run:
@@ -663,7 +672,7 @@ tasks:
       in this task's Notes immediately after launch. Once the
       review finishes, check its terminal status first:
 
-          {{task_runner_cmd}} status <review-run-id> --output-format json \
+          {{task_runner_cmd}} run status <review-run-id> --output-format json \
             --field status
 
       The `plan-review` assignment ends with an `approval`
@@ -673,10 +682,10 @@ tasks:
 
       Pull the reviewer's synthesis and approval decision:
 
-          {{task_runner_cmd}} status <review-run-id> --output-format json \
+          {{task_runner_cmd}} run status <review-run-id> --output-format json \
             --field tasks | jq -r '.tasks[] | select(.id=="synthesis") | .notes'
 
-          {{task_runner_cmd}} status <review-run-id> --output-format json \
+          {{task_runner_cmd}} run status <review-run-id> --output-format json \
             --field tasks | jq -r '.tasks[] | select(.id=="approval") | .notes'
 
       Paste the reviewer's synthesis and `approval` decision
@@ -713,7 +722,7 @@ tasks:
       re-walk. Iterate until the review run's terminal status
       is `success`:
 
-          {{task_runner_cmd}} status <review-run-id> --output-format json \
+          {{task_runner_cmd}} run status <review-run-id> --output-format json \
             --field status
 
       If it still returns `blocked`, read the updated
@@ -746,12 +755,12 @@ tasks:
       Locate the summary reference template. It lives alongside
       this assignment's source file in one of:
         - `{{cwd}}/assignments/plan-feature/summary-template.md`
-        - `${TASK_RUNNER_CONFIG_DIR}/assignments/plan-feature/summary-template.md`
+        - `{{config_dir}}/assignments/plan-feature/summary-template.md`
         - under the task-runner install root
 
       Copy it to a new summary file next to the approved draft:
 
-          ${TASK_RUNNER_STATE_DIR}/drafts/<repo-name>/plan-<slug>-<shortid>.summary.md
+          {{state_dir}}/drafts/<repo-name>/plan-<slug>-<shortid>.summary.md
 
       Reuse the **exact** `<repo-name>`, `<slug>`, and `<shortid>`
       from the draft path captured in `draft_plan` so the two
@@ -858,16 +867,17 @@ tasks:
       plan and asks for implementer-run creation:
 
           {{task_runner_cmd}} init \
+            --agent implementer \
             --backend passive \
             --assignment <draft-path-from-draft_plan> \
             --name <short-descriptive-name> \
-            --var repo_path=<confirmed-worktree-dir>
+            --cwd <confirmed-worktree-dir>
 
-      **Always use `--backend passive`.** The planner's job is
-      to hand back an approved draft and later create the run
-      workspace without freezing a specific implementer
-      agent into the manifest. The caller will resume the
-      run with whatever execution agent they want later.
+      **Always use `--agent implementer --backend passive`.**
+      The planner's job is to hand back an approved draft and
+      later create an implementer run that carries the shared
+      implementer instructions while keeping execution
+      externally driven through the passive workflow.
 
       **Do not guess the target path.** If the caller later asks
       you to create the implementer run, first confirm the
@@ -885,12 +895,6 @@ tasks:
       Capture the command shape in this task's Notes, but do
       **not** run it during the initial planning pass.
 
-      Also capture the exact attachment-add commands the planner
-      should run immediately after the later `init` succeeds:
-
-          {{task_runner_cmd}} attachment add <new-run-id> <draft-path> --name assignment-seed.md
-          {{task_runner_cmd}} attachment add <new-run-id> <summary-path> --name assignment-summary.md
-
       Also note:
       - the approved draft path from `draft_plan`
       - the approved summary path from `produce_summary`
@@ -898,9 +902,13 @@ tasks:
       - that the later `init` stdout/stderr will produce the new
         run id
       - that after the later `init` succeeds, the canonical
-        artifact becomes the new run workspace `assignment.md`
-      - that the planner should attach the same two artifacts to
-        the new run immediately after creation
+        execution surface is the new run id plus `task-runner run brief <new-run-id>`
+      - that the planner should **not** duplicate
+        `assignment-seed.md` or `assignment-summary.md` onto the
+        new run; they remain attached to the planning run
+      - that later implementer and reviewer flows can discover
+        the planning artifacts with cwd-scoped attachment
+        listing rooted at the new run id
   - id: handoff
     title: Handoff summary
     body: |
@@ -929,14 +937,25 @@ tasks:
           the caller should resume this planning run if they
           approve the plan and want you to create the
           implementer run.
+        - A note that `assignment-seed.md` and
+          `assignment-summary.md` stay attached to the planning
+          run rather than being duplicated onto the implementer
+          run. Later implementer and reviewer flows should
+          discover them through cwd-scoped attachment listing.
         - A note that when resumed for creation, you will first
           confirm the target directory or worktree path before
           running `init`.
-        - **Exact command shape** the caller will run *after the
-          planner creates the implementer run* to execute the
-          plan:
+        - **Execution handoff** — the implementer execution
+          surface is:
 
-              {{task_runner_cmd}} run --resume-run <new-run-id>
+              {{task_runner_cmd}} run brief <new-run-id>
+
+          Because the implementer run is created with the
+          `implementer` agent on the passive backend, do not
+          tell the caller/executing agent to use
+          `run --resume-run` here. Instruct them to use the run
+          id plus `brief` and follow the task workflow from
+          there.
 
         - A note that `<new-run-id>` comes from the later `init`
           output, not from the planning run itself.
@@ -951,7 +970,7 @@ tasks:
           that deserve a pre-execution sanity check.
 
       Keep this block tight. The caller will read it via
-      `{{task_runner_cmd}} status {{run_id}}` and decide to
+      `{{task_runner_cmd}} run status {{run_id}}` and decide to
       proceed, request creation, adjust the plan, or hand off to
       a different agent. If there is nothing to flag, say so
       plainly.
@@ -964,12 +983,12 @@ The feature you are planning for was handed to you as the user
 message that started this run. Read it before you start `orient`.
 Do not fabricate scope.
 
-Work on the repository at `{{repo_path}}`. You may read any
+Work on the repository at `{{cwd}}`. You may read any
 file under that repo freely. Do not modify any file under
-`{{repo_path}}` — the only files you should write are:
-  - Your own workspace plan at `{{assignment_path}}`.
+`{{cwd}}` — the only files you should write are:
+  - This run's canonical task state via the task CLI.
   - The draft plan file you create in `draft_plan` under
-    `${TASK_RUNNER_STATE_DIR}/drafts/<repo-name>/`.
+    `{{state_dir}}/drafts/<repo-name>/`.
 
 Work the tasks in order. Earlier tasks build context the
 later ones depend on. The draft plan in `draft_plan` should cite

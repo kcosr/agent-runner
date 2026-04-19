@@ -2,10 +2,11 @@ import { z } from "zod";
 
 export interface AppRuntimeConfig {
   apiBasePath: string;
-  runEventsPath: string;
+  // Global board-projection SSE path. Per-run detail/timeline paths are derived from apiBasePath.
+  runSummaryEventsPath: string;
 }
 
 export const appRuntimeConfigSchema: z.ZodType<AppRuntimeConfig> = z.object({
   apiBasePath: z.string(),
-  runEventsPath: z.string(),
+  runSummaryEventsPath: z.string(),
 });

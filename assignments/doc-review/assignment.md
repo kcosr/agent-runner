@@ -1,19 +1,12 @@
 ---
 schemaVersion: 1
 name: doc-review
-taskMode: cli
-vars:
-  repo_path:
-    type: string
-    required: true
-    source: cli
-    description: Absolute path to the repository whose docs you want reviewed.
 tasks:
   - id: inventory
     title: Inventory the documentation surface
     body: |
       First, find every documentation file in the repository at
-      `{{repo_path}}`. A "doc file" includes:
+      `{{cwd}}`. A "doc file" includes:
         - README(.md, .rst, .txt, or similar) at the repo root
           and in subdirectories
         - Anything under docs/, doc/, documentation/, guides/
@@ -308,10 +301,10 @@ tasks:
           single place to find them
 ---
 You are reviewing the documentation of the repository at
-`{{repo_path}}`. Treat that path as the root for everything you
-read. Do not modify any file inside that repo — the only file
-you should write is your workspace plan at
-`{{assignment_path}}`.
+`{{cwd}}`. Treat that path as the root for everything you
+read. Do not modify any file inside that repo. Track your
+review tasks and notes through the task CLI for this run; do not
+write a workspace plan file.
 
 Work the tasks in order. Earlier tasks inventory and frame the
 review; later tasks build on that context; the synthesis task

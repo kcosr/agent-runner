@@ -7,10 +7,15 @@ import {
   claudeSessionFilePath,
   encodeClaudeProjectDir,
 } from "../packages/core/dist/backends/claude.js";
+import { encodePiSessionDir, piBackend } from "../packages/core/dist/backends/pi.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js";
 import { InvalidBackendSessionError, runAgent } from "../packages/core/dist/core/run/run-loop.js";
-import { assignmentPathFromPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
+import {
+  setTaskStatusesForPrompt,
+  withEnv,
+  withSharedRuntimeEnv,
+} from "./helpers/runtime-paths.mjs";
 
 // ─── claude cwd-encoding helper ─────────────────────────────────────────────
 
@@ -46,6 +51,24 @@ model: provider/gpt-5.4
 Agent.
 `;
 
+const PI_IMPORT_AGENT = `---
+schemaVersion: 1
+name: pi-import-agent
+backend: pi
+model: openai/gpt-5.4
+---
+Agent.
+`;
+
+const CODEX_IMPORT_AGENT = `---
+schemaVersion: 1
+name: codex-import-agent
+backend: codex
+model: openai/gpt-5.4
+---
+Agent.
+`;
+
 const IMPORT_ASSIGNMENT = `---
 schemaVersion: 1
 name: import-work
@@ -73,16 +96,6 @@ function writeAssignment(baseDir, name, body) {
   writeFileSync(join(dir, "assignment.md"), body);
 }
 
-function editStatus(content, taskId, newStatus) {
-  const marker = `<!-- task-id: ${taskId} -->`;
-  const start = content.indexOf(marker);
-  const nextMarker = content.indexOf("<!-- task-id:", start + marker.length);
-  const end = nextMarker < 0 ? content.length : nextMarker;
-  const section = content.slice(start, end);
-  const updated = section.replace(/\*\*Status:\*\*\s*\S+/, `**Status:** ${newStatus}`);
-  return content.slice(0, start) + updated + content.slice(end);
-}
-
 /**
  * A backend mock with an explicit `validateSessionId` and a capture
  * surface so the test can assert what the runner forwarded.
@@ -93,9 +106,7 @@ function importableBackend({ validate, captured }) {
     validateSessionId: validate,
     async invoke(ctx) {
       captured.resumeSessionId = ctx.resumeSessionId;
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      const plan = readFileSync(absPlan, "utf8");
-      writeFileSync(absPlan, editStatus(plan, "t1", "completed"), "utf8");
+      setTaskStatusesForPrompt(ctx.prompt, { t1: "completed" });
       return {
         exitCode: 0,
         signal: null,
@@ -124,6 +135,7 @@ async function runImportIn(baseDir, opts, agentName = "import-agent") {
         backend: opts.backend,
         bootstrapBackendSessionId: opts.bootstrapBackendSessionId,
         initialize: opts.initialize ?? false,
+        execution: opts.execution,
         overrides: opts.overrides,
         stderr: () => {},
         stdout: () => {},
@@ -187,6 +199,248 @@ test("import (run): invalid session id throws InvalidBackendSessionError before 
     },
   );
   assert.equal(captured.resumeSessionId, undefined, "backend.invoke was never called");
+});
+
+test("import (run): codex bootstrap validation receives daemon-forwarded transport instead of daemon env", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "codex-import-agent", CODEX_IMPORT_AGENT);
+  writeAssignment(dir, "import-work", IMPORT_ASSIGNMENT);
+
+  const captured = {};
+  let validateCalls = 0;
+  const backend = {
+    ...importableBackend({
+      captured,
+      validate: async (vctx) => {
+        validateCalls++;
+        assert.deepEqual(vctx.backendSpecific, {
+          codex: {
+            transport: {
+              type: "ws",
+              url: "ws://client.example/socket",
+            },
+          },
+        });
+        return { valid: true };
+      },
+    }),
+    id: "codex",
+  };
+
+  const outcome = await withEnv({ TASK_RUNNER_CODEX_WS_URL: "ws://daemon.example/socket" }, () =>
+    runImportIn(
+      dir,
+      {
+        backend,
+        bootstrapBackendSessionId: "imported-codex-thread",
+        overrides: {
+          backendSpecific: {
+            codex: {
+              transport: {
+                type: "ws",
+                url: "ws://client.example/socket",
+              },
+            },
+          },
+        },
+        execution: {
+          hostMode: "daemon",
+          controller: {
+            kind: "daemon",
+            daemonInstanceId: "daemon-test",
+          },
+        },
+      },
+      "codex-import-agent",
+    ),
+  );
+
+  assert.equal(validateCalls, 1);
+  assert.equal(captured.resumeSessionId, "imported-codex-thread");
+  assert.deepEqual(outcome.manifest.backendSpecific, {
+    codex: {
+      transport: {
+        type: "ws",
+        url: "ws://client.example/socket",
+      },
+    },
+  });
+});
+
+function writePiSession(piHome, cwd, sessionId, headerCwd = cwd) {
+  const bucketDir = join(piHome, "agent", "sessions", encodePiSessionDir(cwd));
+  mkdirSync(bucketDir, { recursive: true });
+  const path = join(bucketDir, `2026-04-17T23-00-00-000Z_${sessionId}.jsonl`);
+  writeFileSync(
+    path,
+    `${JSON.stringify({
+      type: "session",
+      version: 3,
+      id: sessionId,
+      timestamp: "2026-04-17T23:00:00.000Z",
+      cwd: headerCwd,
+    })}\n`,
+  );
+  return path;
+}
+
+test("import (run): pi session id is validated in cwd-scoped Pi storage before workspace creation", async () => {
+  const dir = tempDir();
+  const piHome = join(dir, ".pi-home");
+  writeAgent(dir, "pi-import-agent", PI_IMPORT_AGENT);
+  writeAssignment(dir, "import-work", IMPORT_ASSIGNMENT);
+
+  const backend = {
+    ...piBackend,
+    async invoke() {
+      throw new Error("backend.invoke should not be called for invalid pi imports");
+    },
+  };
+
+  await assert.rejects(
+    () =>
+      withEnv({ PI_HOME: piHome }, () =>
+        runImportIn(
+          dir,
+          { backend, bootstrapBackendSessionId: "missing-session" },
+          "pi-import-agent",
+        ),
+      ),
+    (err) => {
+      assert.ok(err instanceof InvalidBackendSessionError);
+      assert.equal(err.sessionId, "missing-session");
+      assert.match(err.message, /not found under cwd/);
+      return true;
+    },
+  );
+});
+
+test("import (run): pi session id from a different cwd bucket throws InvalidBackendSessionError", async () => {
+  const dir = tempDir();
+  const piHome = join(dir, ".pi-home");
+  writeAgent(dir, "pi-import-agent", PI_IMPORT_AGENT);
+  writeAssignment(dir, "import-work", IMPORT_ASSIGNMENT);
+
+  writePiSession(piHome, join(dir, "different-cwd"), "pi-session-other-cwd");
+  const backend = {
+    ...piBackend,
+    async invoke() {
+      throw new Error("backend.invoke should not be called for invalid pi imports");
+    },
+  };
+
+  await assert.rejects(
+    () =>
+      withEnv({ PI_HOME: piHome }, () =>
+        runImportIn(
+          dir,
+          { backend, bootstrapBackendSessionId: "pi-session-other-cwd" },
+          "pi-import-agent",
+        ),
+      ),
+    (err) => {
+      assert.ok(err instanceof InvalidBackendSessionError);
+      assert.equal(err.sessionId, "pi-session-other-cwd");
+      assert.match(err.message, /not found under cwd/);
+      return true;
+    },
+  );
+});
+
+test("import (run): pi session id with a mismatched header cwd throws InvalidBackendSessionError", async () => {
+  const dir = tempDir();
+  const piHome = join(dir, ".pi-home");
+  writeAgent(dir, "pi-import-agent", PI_IMPORT_AGENT);
+  writeAssignment(dir, "import-work", IMPORT_ASSIGNMENT);
+
+  writePiSession(piHome, dir, "pi-session-wrong-header", join(dir, "different-cwd"));
+  const backend = {
+    ...piBackend,
+    async invoke() {
+      throw new Error("backend.invoke should not be called for invalid pi imports");
+    },
+  };
+
+  await assert.rejects(
+    () =>
+      withEnv({ PI_HOME: piHome }, () =>
+        runImportIn(
+          dir,
+          { backend, bootstrapBackendSessionId: "pi-session-wrong-header" },
+          "pi-import-agent",
+        ),
+      ),
+    (err) => {
+      assert.ok(err instanceof InvalidBackendSessionError);
+      assert.equal(err.sessionId, "pi-session-wrong-header");
+      assert.match(err.message, /belongs to cwd/);
+      return true;
+    },
+  );
+});
+
+test("import (init+resume): pi execute-after-init reuses the persisted session id", async () => {
+  const dir = tempDir();
+  const piHome = join(dir, ".pi-home");
+  const sessionId = "pi-session-1";
+  writeAgent(dir, "pi-import-agent", PI_IMPORT_AGENT);
+  writeAssignment(dir, "import-work", IMPORT_ASSIGNMENT);
+
+  writePiSession(piHome, dir, sessionId);
+
+  const captured = {};
+  const backend = {
+    ...piBackend,
+    async invoke(ctx) {
+      captured.resumeSessionId = ctx.resumeSessionId;
+      setTaskStatusesForPrompt(ctx.prompt, { t1: "completed" });
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        aborted: false,
+        sessionId: ctx.resumeSessionId ?? sessionId,
+        transcript: "done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    },
+  };
+
+  const init = await withEnv({ PI_HOME: piHome }, () =>
+    runImportIn(
+      dir,
+      {
+        backend,
+        bootstrapBackendSessionId: sessionId,
+        initialize: true,
+      },
+      "pi-import-agent",
+    ),
+  );
+  assert.equal(init.manifest.backendSessionId, sessionId);
+  assert.equal(captured.resumeSessionId, undefined);
+
+  const target = await withSharedRuntimeEnv(dir, async () => resolveResumeTarget(init.runId, dir));
+  await withEnv({ PI_HOME: piHome }, () =>
+    withSharedRuntimeEnv(dir, async () => {
+      const loaded = loadAgentConfig("pi-import-agent", dir);
+      const originalCwd = process.cwd();
+      process.chdir(dir);
+      try {
+        const outcome = await runAgent({
+          loaded,
+          cliVars: {},
+          backend,
+          resume: target,
+        });
+        assert.equal(captured.resumeSessionId, sessionId);
+        assert.equal(outcome.manifest.backendSessionId, sessionId);
+      } finally {
+        process.chdir(originalCwd);
+      }
+    }),
+  );
 });
 
 test("import (init): valid session id persists into the initialized manifest", async () => {
@@ -305,9 +559,7 @@ test("import: backends without validateSessionId are treated as 'always valid'",
     // No validateSessionId at all.
     async invoke(ctx) {
       captured.resumeSessionId = ctx.resumeSessionId;
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      const plan = readFileSync(absPlan, "utf8");
-      writeFileSync(absPlan, editStatus(plan, "t1", "completed"), "utf8");
+      setTaskStatusesForPrompt(ctx.prompt, { t1: "completed" });
       return {
         exitCode: 0,
         signal: null,
@@ -372,9 +624,7 @@ test("import: task-runner-created cursor runs reuse the captured backend session
         supportsBootstrapSessionImport: false,
         async invoke(ctx) {
           firstCalls.push(ctx.resumeSessionId ?? null);
-          const absPlan = assignmentPathFromPrompt(ctx.prompt);
-          const plan = readFileSync(absPlan, "utf8");
-          writeFileSync(absPlan, editStatus(plan, "t1", "completed"), "utf8");
+          setTaskStatusesForPrompt(ctx.prompt, { t1: "completed" });
           return {
             exitCode: 0,
             signal: null,
@@ -409,12 +659,11 @@ test("import: task-runner-created cursor runs reuse the captured backend session
           supportsBootstrapSessionImport: false,
           async invoke(ctx) {
             secondCalls.push(ctx.resumeSessionId ?? null);
-            const plan = readFileSync(target.manifest.assignmentPath, "utf8");
-            writeFileSync(
-              target.manifest.assignmentPath,
-              editStatus(plan, "t1", "completed"),
-              "utf8",
-            );
+            const manifestPath = join(target.workspaceDir, "run.json");
+            const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+            manifest.finalTasks.t1.status = "completed";
+            manifest.tasksCompleted = 1;
+            writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
             return {
               exitCode: 0,
               signal: null,

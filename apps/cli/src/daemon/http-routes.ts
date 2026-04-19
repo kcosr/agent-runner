@@ -2,11 +2,22 @@ import { readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { RunCommandOverrides } from "@task-runner/core/app/service.js";
 import { VALID_STATUSES } from "@task-runner/core/assignment/model.js";
-import type { RunEventEnvelope } from "@task-runner/core/contracts/events.js";
+import type {
+  RunDetailStreamEvent,
+  RunSummaryStreamEvent,
+  RunTimelineEnvelope,
+} from "@task-runner/core/contracts/events.js";
 import { HttpError } from "./http-errors.js";
 import { readJsonBody, sendBuffer, sendError, sendJson } from "./http-serializers.js";
 import type { DaemonOperations } from "./operations.js";
-import type { RunSetNameParams, RunsStartParams } from "./protocol.js";
+import type {
+  RunSetBackendSessionParams,
+  RunSetNameParams,
+  RunSetNoteParams,
+  RunSetPinnedParams,
+  RunsListParams,
+  RunsStartParams,
+} from "./protocol.js";
 import {
   RequestValidationError,
   asRecord,
@@ -15,13 +26,16 @@ import {
   optionalOverrides,
   optionalString,
   parseBooleanQueryValue,
+  parseRunSetBackendSessionParams,
   parseRunSetNameParams,
+  parseRunSetNoteParams,
+  parseRunSetPinnedParams,
   parseStartRunParams,
   requiredHeaderString,
   requiredRunIdString,
   requiredString,
 } from "./request-parsing.js";
-import { streamRunEvents } from "./sse.js";
+import { streamEvents } from "./sse.js";
 
 interface ResumeRunBody {
   overrides: RunCommandOverrides;
@@ -30,9 +44,14 @@ interface ResumeRunBody {
 interface RouteContext {
   operations: DaemonOperations;
   httpBaseUrl: string;
-  subscribeRunEvents(
-    runId: string | undefined,
-    publish: (payload: RunEventEnvelope) => boolean,
+  subscribeRunSummaries(publish: (payload: RunSummaryStreamEvent) => boolean): () => void;
+  subscribeRunDetail(
+    runId: string,
+    publish: (payload: RunDetailStreamEvent) => boolean,
+  ): () => void;
+  subscribeRunTimeline(
+    runId: string,
+    publish: (payload: RunTimelineEnvelope) => boolean,
   ): () => void;
 }
 
@@ -62,16 +81,7 @@ const routes: RouteDefinition[] = [
     method: "GET",
     pattern: ["api", "runs"],
     handler: (_req, res, ctx, _params, url) => {
-      sendJson(
-        res,
-        200,
-        ctx.operations.listRuns({
-          includeArchived: parseBooleanQueryValue(
-            url.searchParams.get("includeArchived"),
-            "includeArchived",
-          ),
-        }),
-      );
+      sendJson(res, 200, ctx.operations.listRuns(parseRunListQuery(url)));
     },
   },
   {
@@ -79,6 +89,13 @@ const routes: RouteDefinition[] = [
     pattern: ["api", "runs", ":runId"],
     handler: (_req, res, ctx, params) => {
       sendJson(res, 200, ctx.operations.getRun(routeParam(params, "runId")));
+    },
+  },
+  {
+    method: "GET",
+    pattern: ["api", "runs", ":runId", "timeline"],
+    handler: (_req, res, ctx, params) => {
+      sendJson(res, 200, ctx.operations.getRunTimelineHistory(routeParam(params, "runId")));
     },
   },
   {
@@ -126,6 +143,20 @@ const routes: RouteDefinition[] = [
   },
   {
     method: "POST",
+    pattern: ["api", "runs", ":runId", "reset"],
+    handler: (_req, res, ctx, params) => {
+      sendJson(res, 200, ctx.operations.resetRun(routeParam(params, "runId")));
+    },
+  },
+  {
+    method: "DELETE",
+    pattern: ["api", "runs", ":runId"],
+    handler: (_req, res, ctx, params) => {
+      sendJson(res, 200, ctx.operations.deleteRun(routeParam(params, "runId")));
+    },
+  },
+  {
+    method: "POST",
     pattern: ["api", "runs", ":runId", "name"],
     handler: async (req, res, ctx, params) => {
       const body = await parseRunSetNameBody(req, routeParam(params, "runId"));
@@ -136,6 +167,52 @@ const routes: RouteDefinition[] = [
           name: body.name,
         }),
       );
+    },
+  },
+  {
+    method: "POST",
+    pattern: ["api", "runs", ":runId", "note"],
+    handler: async (req, res, ctx, params) => {
+      const body = await parseRunSetNoteBody(req, routeParam(params, "runId"));
+      sendJson(
+        res,
+        200,
+        ctx.operations.setRunNote(body.target, {
+          note: body.note,
+        }),
+      );
+    },
+  },
+  {
+    method: "POST",
+    pattern: ["api", "runs", ":runId", "pinned"],
+    handler: async (req, res, ctx, params) => {
+      const body = await parseRunSetPinnedBody(req, routeParam(params, "runId"));
+      const result = ctx.operations.setRunPinned(body.target, {
+        pinned: body.pinned,
+      });
+      sendJson(res, 200, result);
+    },
+  },
+  {
+    method: "POST",
+    pattern: ["api", "runs", ":runId", "backend-session"],
+    handler: async (req, res, ctx, params) => {
+      const body = await parseRunSetBackendSessionBody(req, routeParam(params, "runId"));
+      sendJson(
+        res,
+        200,
+        ctx.operations.setRunBackendSession(body.target, {
+          backendSessionId: body.backendSessionId,
+        }),
+      );
+    },
+  },
+  {
+    method: "POST",
+    pattern: ["api", "runs", ":runId", "backend-session", "clear"],
+    handler: (_req, res, ctx, params) => {
+      sendJson(res, 200, ctx.operations.clearBackendSession(routeParam(params, "runId")));
     },
   },
   {
@@ -184,8 +261,14 @@ const routes: RouteDefinition[] = [
   {
     method: "GET",
     pattern: ["api", "runs", ":runId", "attachments"],
-    handler: (_req, res, ctx, params) => {
-      sendJson(res, 200, ctx.operations.listAttachments(routeParam(params, "runId")));
+    handler: (_req, res, ctx, params, url) => {
+      sendJson(
+        res,
+        200,
+        ctx.operations.listAttachments(routeParam(params, "runId"), {
+          cwdScope: parseBooleanQueryValue(url.searchParams.get("cwdScope"), "cwdScope"),
+        }),
+      );
     },
   },
   {
@@ -310,17 +393,34 @@ const routes: RouteDefinition[] = [
   },
   {
     method: "GET",
-    pattern: ["api", "events", "runs"],
+    pattern: ["api", "events", "run-summaries"],
     handler: (req, res, ctx) => {
-      streamRunEvents(req, res, (publish) => ctx.subscribeRunEvents(undefined, publish));
+      streamEvents(req, res, (publish) => ctx.subscribeRunSummaries(publish));
     },
   },
   {
     method: "GET",
-    pattern: ["api", "events", "runs", ":runId"],
+    pattern: ["api", "runs", ":runId", "events", "detail"],
     handler: (req, res, ctx, params) => {
-      streamRunEvents(req, res, (publish) =>
-        ctx.subscribeRunEvents(routeParam(params, "runId"), publish),
+      const runId = routeParam(params, "runId");
+      ctx.operations.getRun(runId);
+      streamEvents(req, res, (publish) => ctx.subscribeRunDetail(runId, publish));
+    },
+  },
+  {
+    method: "GET",
+    pattern: ["api", "runs", ":runId", "events", "timeline"],
+    handler: (req, res, ctx, params) => {
+      const runId = routeParam(params, "runId");
+      ctx.operations.getRun(runId);
+      streamEvents(
+        req,
+        res,
+        (publish) => ctx.subscribeRunTimeline(runId, publish),
+        (payload: RunTimelineEnvelope) => ({
+          id: String(payload.cursor),
+          data: payload,
+        }),
       );
     },
   },
@@ -376,6 +476,27 @@ async function parseRunSetNameBody(req: IncomingMessage, runId: string): Promise
   return parseRunSetNameParams({ ...body, target: runId }, "request body");
 }
 
+async function parseRunSetNoteBody(req: IncomingMessage, runId: string): Promise<RunSetNoteParams> {
+  const body = asRecord(await readJsonBody(req), "request body");
+  return parseRunSetNoteParams({ ...body, target: runId }, "request body");
+}
+
+async function parseRunSetPinnedBody(
+  req: IncomingMessage,
+  runId: string,
+): Promise<RunSetPinnedParams> {
+  const body = asRecord(await readJsonBody(req), "request body");
+  return parseRunSetPinnedParams({ ...body, target: runId }, "request body");
+}
+
+async function parseRunSetBackendSessionBody(
+  req: IncomingMessage,
+  runId: string,
+): Promise<RunSetBackendSessionParams> {
+  const body = asRecord(await readJsonBody(req), "request body");
+  return parseRunSetBackendSessionParams({ ...body, target: runId }, "request body");
+}
+
 function splitPath(pathname: string): string[] {
   return pathname.split("/").filter((segment) => segment.length > 0);
 }
@@ -410,4 +531,44 @@ function routeParam(params: Record<string, string>, key: string): string {
     throw new HttpError(404, "NOT_FOUND", "resource not found");
   }
   return value;
+}
+
+function parseRunListQuery(url: URL): RunsListParams {
+  const includeArchived = parseBooleanQueryValue(
+    url.searchParams.get("includeArchived"),
+    "includeArchived",
+  );
+  const cwd = url.searchParams.get("cwd");
+  const repo = url.searchParams.get("repo");
+  const global = parseBooleanQueryValue(url.searchParams.get("global"), "global");
+  const scopeCount = Number(cwd !== null) + Number(repo !== null) + Number(global === true);
+
+  if (scopeCount > 1) {
+    throw new RequestValidationError("runs.list accepts only one of cwd, repo, or global=true");
+  }
+  if (cwd !== null) {
+    return {
+      includeArchived,
+      scope: {
+        kind: "cwd",
+        cwd,
+      },
+    };
+  }
+  if (repo !== null) {
+    return {
+      includeArchived,
+      scope: {
+        kind: "repo",
+        repo,
+      },
+    };
+  }
+  if (global === true) {
+    return {
+      includeArchived,
+      scope: { kind: "global" },
+    };
+  }
+  return { includeArchived };
 }

@@ -73,20 +73,6 @@ test("overridesFromParsedArgs: addedTasks is undefined when empty (so locked-fie
   assert.equal(overrides.addedTasks, undefined);
 });
 
-test("parseArgs: --task-mode accepts file and cli", () => {
-  const cliParsed = parseArgs(argv("run", "--agent", "x", "--task-mode", "cli"));
-  const fileParsed = parseArgs(argv("run", "--agent", "x", "--task-mode", "file"));
-  assert.equal(cliParsed.taskMode, "cli");
-  assert.equal(fileParsed.taskMode, "file");
-});
-
-test("parseArgs: --task-mode rejects unknown values", () => {
-  assert.throws(
-    () => parseArgs(argv("run", "--agent", "x", "--task-mode", "live")),
-    /--task-mode must be one of: file, cli/,
-  );
-});
-
 test("parseArgs: --backend accepts cursor", () => {
   const parsed = parseArgs(argv("run", "--agent", "x", "--backend", "cursor"));
   assert.equal(parsed.backend, "cursor");
@@ -113,10 +99,25 @@ test("parseArgs: list with --output-format json", () => {
   assert.equal(parsed.outputFormat, "json");
 });
 
-test("parseArgs: --connect is captured on routed commands", () => {
-  const parsed = parseArgs(argv("status", "abc123", "--connect", "ws://127.0.0.1:4773/"));
+test("parseArgs: top-level status captures --connect without a run id", () => {
+  const parsed = parseArgs(argv("status", "--connect", "ws://127.0.0.1:4773/"));
   assert.equal(parsed.command, "status");
   assert.equal(parsed.connect, "ws://127.0.0.1:4773/");
+});
+
+test("parseArgs: run status parses as a grouped run subcommand", () => {
+  const parsed = parseArgs(argv("run", "status", "abc123", "--field", "tasks"));
+  assert.equal(parsed.command, "run");
+  assert.equal(parsed.subcommand, "status");
+  assert.deepEqual(parsed.positionals, ["abc123"]);
+  assert.deepEqual(parsed.fields, ["tasks"]);
+});
+
+test("parseArgs: run brief parses as a grouped run subcommand", () => {
+  const parsed = parseArgs(argv("run", "brief", "abc123"));
+  assert.equal(parsed.command, "run");
+  assert.equal(parsed.subcommand, "brief");
+  assert.deepEqual(parsed.positionals, ["abc123"]);
 });
 
 test("parseArgs: serve captures --listen", () => {
@@ -131,6 +132,27 @@ test("parseArgs: list runs captures --include-archived", () => {
   assert.equal(parsed.subcommand, "runs");
   assert.equal(parsed.includeArchived, true);
   assert.equal(parsed.outputFormat, "json");
+});
+
+test("parseArgs: list runs captures --cwd scope", () => {
+  const parsed = parseArgs(argv("list", "runs", "--cwd", "../other"));
+  assert.equal(parsed.command, "list");
+  assert.equal(parsed.subcommand, "runs");
+  assert.equal(parsed.cwd, "../other");
+});
+
+test("parseArgs: list runs captures --repo scope", () => {
+  const parsed = parseArgs(argv("list", "runs", "--repo", "assistant"));
+  assert.equal(parsed.command, "list");
+  assert.equal(parsed.subcommand, "runs");
+  assert.equal(parsed.repo, "assistant");
+});
+
+test("parseArgs: list runs captures --global scope", () => {
+  const parsed = parseArgs(argv("list", "runs", "--global"));
+  assert.equal(parsed.command, "list");
+  assert.equal(parsed.subcommand, "runs");
+  assert.equal(parsed.global, true);
 });
 
 test("parseArgs: list with no kind still parses (validation in handler)", () => {
@@ -239,6 +261,53 @@ test("parseArgs: run set-name parses grouped subcommand positionals and --clear"
   assert.equal(parsed.outputFormat, "json");
 });
 
+test("parseArgs: run set-backend-session parses grouped subcommand positionals", () => {
+  const parsed = parseArgs(
+    argv("run", "set-backend-session", "abc123", "thread-42", "--output-format", "json"),
+  );
+  assert.equal(parsed.command, "run");
+  assert.equal(parsed.subcommand, "set-backend-session");
+  assert.deepEqual(parsed.positionals, ["abc123", "thread-42"]);
+  assert.equal(parsed.outputFormat, "json");
+});
+
+test("parseArgs: run clear-backend-session parses as a grouped run subcommand", () => {
+  const parsed = parseArgs(argv("run", "clear-backend-session", "abc123"));
+  assert.equal(parsed.command, "run");
+  assert.equal(parsed.subcommand, "clear-backend-session");
+  assert.deepEqual(parsed.positionals, ["abc123"]);
+});
+
+test("parseArgs: run set-note parses grouped subcommand positionals and note text", () => {
+  const parsed = parseArgs(
+    argv("run", "set-note", "abc123", "Keep the pinned filter on", "--output-format", "json"),
+  );
+  assert.equal(parsed.command, "run");
+  assert.equal(parsed.subcommand, "set-note");
+  assert.deepEqual(parsed.positionals, ["abc123", "Keep the pinned filter on"]);
+  assert.equal(parsed.outputFormat, "json");
+});
+
+test("parseArgs: run clear-note parses as a grouped run subcommand", () => {
+  const parsed = parseArgs(argv("run", "clear-note", "abc123"));
+  assert.equal(parsed.command, "run");
+  assert.equal(parsed.subcommand, "clear-note");
+  assert.deepEqual(parsed.positionals, ["abc123"]);
+});
+
+test("parseArgs: run pin and run unpin parse as grouped run subcommands", () => {
+  const pin = parseArgs(argv("run", "pin", "abc123", "--output-format", "json"));
+  assert.equal(pin.command, "run");
+  assert.equal(pin.subcommand, "pin");
+  assert.deepEqual(pin.positionals, ["abc123"]);
+  assert.equal(pin.outputFormat, "json");
+
+  const unpin = parseArgs(argv("run", "unpin", "abc123"));
+  assert.equal(unpin.command, "run");
+  assert.equal(unpin.subcommand, "unpin");
+  assert.deepEqual(unpin.positionals, ["abc123"]);
+});
+
 test("parseArgs: --name is captured for fresh run overrides", () => {
   const parsed = parseArgs(argv("run", "--agent", "x", "--name", "release prep"));
   assert.equal(parsed.name, "release prep");
@@ -260,8 +329,6 @@ test("overridesFromParsedArgs: all other overrides plumbed through", () => {
       "claude-opus-4-6",
       "--effort",
       "max",
-      "--task-mode",
-      "cli",
       "--timeout-sec",
       "60",
       "--max-retries",
@@ -273,7 +340,6 @@ test("overridesFromParsedArgs: all other overrides plumbed through", () => {
   const overrides = overridesFromParsedArgs(parsed);
   assert.equal(overrides.model, "claude-opus-4-6");
   assert.equal(overrides.effort, "max");
-  assert.equal(overrides.taskMode, "cli");
   assert.equal(overrides.timeoutSec, 60);
   assert.equal(overrides.maxRetries, 5);
   assert.equal(overrides.unrestricted, true);

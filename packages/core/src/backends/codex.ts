@@ -4,12 +4,21 @@ import type {
   Backend,
   BackendInvokeContext,
   BackendInvokeResult,
+  BackendSpecificConfig,
+  CodexTransportConfig,
   EffortLevel,
   ValidateSessionContext,
   ValidateSessionResult,
 } from "../core/backends/types.js";
+import { isWsOrWssUrl } from "../core/backends/types.js";
 import { resolveTaskRunnerCommand } from "../task-runner-command.js";
-import { isRecord, normalizeBackendModel, streamBoundarySeparator } from "./shared.js";
+import {
+  composePersistedTranscript,
+  isRecord,
+  normalizeBackendModel,
+  silentTranscriptFallback,
+  streamBoundarySeparator,
+} from "./shared.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Effort and model helpers
@@ -217,7 +226,7 @@ function openStdioTransport(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// WebSocket transport — connects to TASK_RUNNER_CODEX_WS_URL
+// WebSocket transport
 // ─────────────────────────────────────────────────────────────────────────────
 
 function openWsTransport(url: string): Promise<Transport> {
@@ -710,10 +719,41 @@ const CODEX_AUTH_FAILURE_MARKERS = [
   "token expired",
 ] as const;
 
+function cloneCodexTransportConfig(transport: CodexTransportConfig): CodexTransportConfig {
+  return transport.type === "ws" ? { type: "ws", url: transport.url } : { type: "stdio" };
+}
+
+export function normalizeCodexWsUrl(url: string): string {
+  if (!isWsOrWssUrl(url)) {
+    throw new Error(
+      `codex websocket transport requires an absolute ws:// or wss:// URL, received "${url}"`,
+    );
+  }
+  return new URL(url).toString();
+}
+
+export function resolveCodexTransportConfig(ctx: {
+  backendSpecific?: BackendSpecificConfig;
+}): CodexTransportConfig {
+  const transport = ctx.backendSpecific?.codex?.transport;
+  if (!transport) {
+    throw new Error(
+      "codex backend requires backendSpecific.codex.transport to be resolved before invocation",
+    );
+  }
+  if (transport.type === "ws") {
+    return {
+      type: "ws",
+      url: normalizeCodexWsUrl(transport.url),
+    };
+  }
+  return cloneCodexTransportConfig(transport);
+}
+
 async function openTransport(ctx: BackendInvokeContext): Promise<Transport> {
-  const wsUrl = process.env.TASK_RUNNER_CODEX_WS_URL;
-  if (wsUrl && wsUrl.length > 0) {
-    return openWsTransport(wsUrl);
+  const transport = resolveCodexTransportConfig(ctx);
+  if (transport.type === "ws") {
+    return openWsTransport(transport.url);
   }
   return openStdioTransport(ctx.cwd, ctx.env, ctx.unrestricted ?? false);
 }
@@ -783,6 +823,7 @@ async function validateCodexSession(ctx: ValidateSessionContext): Promise<Valida
       prompt: "",
       cwd: ctx.cwd,
       env: ctx.env ?? (process.env as Record<string, string>),
+      backendSpecific: ctx.backendSpecific,
       timeoutSec: 60,
     });
     client = createClient(transport);
@@ -829,6 +870,7 @@ export async function setCodexThreadName(ctx: {
   threadId: string;
   cwd: string;
   env?: Record<string, string>;
+  backendSpecific?: BackendSpecificConfig;
   name: string | null;
 }): Promise<void> {
   let transport: Transport | undefined;
@@ -838,6 +880,7 @@ export async function setCodexThreadName(ctx: {
       prompt: "",
       cwd: ctx.cwd,
       env: ctx.env ?? (process.env as Record<string, string>),
+      backendSpecific: ctx.backendSpecific,
       timeoutSec: 60,
     });
     client = createClient(transport);
@@ -1077,7 +1120,11 @@ export const codexBackend: Backend = {
     }
 
     const stderrAccumulated = client?.stderr ?? "";
-    const transcript = state.completedText.trim() || state.streamedText.trim() || null;
+    const transcript = composePersistedTranscript(state.streamedText, state.completedText);
+    const fallbackDelta = silentTranscriptFallback(state.streamedText, transcript);
+    if (fallbackDelta) {
+      ctx.emit?.({ type: "agent_message_delta", text: fallbackDelta });
+    }
 
     const exitCode = (() => {
       if (timedOut || aborted) return 1;

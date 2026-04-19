@@ -7,7 +7,7 @@ import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/con
 import { ResumeError, resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import { resetWorkspaceRun } from "../packages/core/dist/core/run/workspace-state.js";
-import { withEnv } from "./helpers/runtime-paths.mjs";
+import { completeAllTasksFromPrompt, withEnv } from "./helpers/runtime-paths.mjs";
 
 const TWO_AGENT = `---
 schemaVersion: 1
@@ -22,12 +22,8 @@ const TWO_ASSIGNMENT = `---
 schemaVersion: 1
 name: two-work
 maxRetries: 2
+cwd: repo-root
 message: the-ask
-vars:
-  repo_path:
-    type: string
-    required: true
-    source: cli
 tasks:
   - id: t1
     title: First
@@ -36,7 +32,7 @@ tasks:
     title: Second
     body: Do the second thing.
 ---
-Work on {{repo_path}}. Plan at {{assignment_path}}.
+Work on {{cwd}}. Plan at {{assignment_path}}.
 `;
 
 function tempDir() {
@@ -64,17 +60,6 @@ function writeAgentAndAssignment(baseDir) {
   writeAssignment(baseDir, "two-work", TWO_ASSIGNMENT);
 }
 
-function editStatus(content, taskId, newStatus) {
-  const marker = `<!-- task-id: ${taskId} -->`;
-  const start = content.indexOf(marker);
-  if (start < 0) throw new Error(`marker not found: ${taskId}`);
-  const nextMarker = content.indexOf("<!-- task-id:", start + marker.length);
-  const end = nextMarker < 0 ? content.length : nextMarker;
-  const section = content.slice(start, end);
-  const updated = section.replace(/\*\*Status:\*\*\s*\S+/, `**Status:** ${newStatus}`);
-  return content.slice(0, start) + updated + content.slice(end);
-}
-
 function mockBackend(handler) {
   return { id: "mock", invoke: handler };
 }
@@ -99,11 +84,12 @@ async function initIn(baseDir, { cliVars, overrides } = {}) {
       return await runAgent({
         loaded,
         loadedAssignment,
-        cliVars: cliVars ?? { repo_path: "/tmp/fake-repo" },
+        cliVars: cliVars ?? {},
         backend: mockBackend(async () => {
           throw new Error("backend should not be invoked during init");
         }),
         initialize: true,
+        callerCwd: baseDir,
         overrides,
         stderr: () => {},
         stdout: () => {},
@@ -135,7 +121,7 @@ async function executeAfterInit(baseDir, runId, backend) {
   });
 }
 
-test("init: persists workspace, assignment.md, and manifest without invoking the backend", async () => {
+test("init: persists workspace seed and manifest without invoking the backend", async () => {
   const dir = tempDir();
   writeAgentAndAssignment(dir);
 
@@ -149,19 +135,18 @@ test("init: persists workspace, assignment.md, and manifest without invoking the
   assert.equal(outcome.manifest.attemptRecords.length, 0);
   assert.equal(outcome.manifest.backendSessionId, null);
   assert.equal(outcome.manifest.tasksTotal, 2);
-  assert.equal(outcome.manifest.runtimeVars.repo_path, "/tmp/fake-repo");
+  assert.deepEqual(outcome.manifest.runtimeVars, {});
+  assert.equal(outcome.manifest.cwd, join(dir, "repo-root"));
+  assert.equal(outcome.manifest.repo, "unknown");
 
-  // Assignment file exists and has task fences
-  assert.ok(existsSync(outcome.assignmentPath), "workspace assignment.md exists");
-  const planText = readFileSync(outcome.assignmentPath, "utf8");
-  assert.ok(planText.includes("<!-- task-id: t1 -->"));
-  assert.ok(planText.includes("<!-- task-id: t2 -->"));
+  assert.ok(!existsSync(outcome.assignmentPath), "workspace assignment.md is not generated");
+  assert.ok(existsSync(join(outcome.workspaceDir, "assignment-seed.md")), "workspace seed exists");
 
-  // pendingPrompt is stored verbatim
-  assert.ok(outcome.manifest.pendingPrompt, "pendingPrompt is set");
-  assert.ok(outcome.manifest.pendingPrompt.includes("Agent role instructions."));
-  assert.ok(outcome.manifest.pendingPrompt.includes("Work on /tmp/fake-repo."));
-  assert.ok(outcome.manifest.pendingPrompt.endsWith("the-ask"));
+  // brief is stored verbatim
+  assert.ok(outcome.manifest.brief, "brief is set");
+  assert.ok(outcome.manifest.brief.includes("Agent role instructions."));
+  assert.ok(outcome.manifest.brief.includes(`Work on ${join(dir, "repo-root")}.`));
+  assert.ok(outcome.manifest.brief.endsWith("the-ask"));
 });
 
 test("init: rejects --resume-run", async () => {
@@ -181,7 +166,7 @@ test("init: rejects --resume-run", async () => {
         await runAgent({
           loaded,
           loadedAssignment,
-          cliVars: { repo_path: "/tmp/other" },
+          cliVars: {},
           backend: mockBackend(async () => ({
             exitCode: 0,
             signal: null,
@@ -193,6 +178,7 @@ test("init: rejects --resume-run", async () => {
           })),
           initialize: true,
           resume: target,
+          callerCwd: dir,
           stderr: () => {},
           stdout: () => {},
         });
@@ -203,7 +189,7 @@ test("init: rejects --resume-run", async () => {
   }, ResumeError);
 });
 
-test("execute-after-init: uses stored pendingPrompt verbatim", async () => {
+test("execute-after-init: uses stored brief verbatim", async () => {
   const dir = tempDir();
   writeAgentAndAssignment(dir);
 
@@ -217,10 +203,7 @@ test("execute-after-init: uses stored pendingPrompt verbatim", async () => {
     mockBackend(async (ctx) => {
       seenPrompt = ctx.prompt;
       seenResumeSessionId = ctx.resumeSessionId;
-      let plan = readFileSync(init.assignmentPath, "utf8");
-      plan = editStatus(plan, "t1", "completed");
-      plan = editStatus(plan, "t2", "completed");
-      writeFileSync(init.assignmentPath, plan, "utf8");
+      completeAllTasksFromPrompt(ctx.prompt);
       return {
         exitCode: 0,
         signal: null,
@@ -242,10 +225,10 @@ test("execute-after-init: uses stored pendingPrompt verbatim", async () => {
   assert.equal(second.manifest.sessions.length, 1);
   assert.equal(second.manifest.sessions[0].sessionIndex, 0);
   assert.equal(second.manifest.sessions[0].backendSessionIdAtStart, null);
-  assert.equal(second.manifest.pendingPrompt, null, "pendingPrompt cleared after execute");
+  assert.equal(second.manifest.brief, init.manifest.brief, "brief persists after execute");
 
-  // The prompt sent to the backend is the stored pendingPrompt verbatim.
-  assert.equal(seenPrompt, init.manifest.pendingPrompt);
+  // The prompt sent to the backend is the stored brief verbatim.
+  assert.equal(seenPrompt, init.manifest.brief);
   // No backend session id to resume from — session 0 starts fresh.
   assert.equal(seenResumeSessionId, undefined);
 });
@@ -258,11 +241,8 @@ test("execute-after-init: reset seed survives execution and restores initialized
   await executeAfterInit(
     dir,
     init.runId,
-    mockBackend(async () => {
-      let plan = readFileSync(init.assignmentPath, "utf8");
-      plan = editStatus(plan, "t1", "completed");
-      plan = editStatus(plan, "t2", "completed");
-      writeFileSync(init.assignmentPath, plan, "utf8");
+    mockBackend(async (ctx) => {
+      completeAllTasksFromPrompt(ctx.prompt);
       return {
         exitCode: 0,
         signal: null,
@@ -276,16 +256,16 @@ test("execute-after-init: reset seed survives execution and restores initialized
   );
 
   const afterExec = JSON.parse(readFileSync(join(init.workspaceDir, "run.json"), "utf8"));
-  assert.equal(afterExec.pendingPrompt, null);
+  assert.equal(afterExec.brief, init.manifest.brief);
   assert.equal(afterExec.finalTasks.t1.status, "completed");
-  assert.equal(afterExec.resetSeed.pendingPrompt, init.manifest.pendingPrompt);
+  assert.equal(afterExec.resetSeed.brief, init.manifest.brief);
   assert.equal(afterExec.resetSeed.finalTasks.t1.status, "pending");
   assert.equal(afterExec.resetSeed.finalTasks.t2.status, "pending");
   assert.ok(existsSync(join(init.workspaceDir, "attempts", "01.json")));
 
   const reset = resetWorkspaceRun(init.workspaceDir);
   assert.equal(reset.status, "initialized");
-  assert.equal(reset.pendingPrompt, init.manifest.pendingPrompt);
+  assert.equal(reset.brief, init.manifest.brief);
   assert.equal(reset.finalTasks.t1.status, "pending");
   assert.equal(reset.finalTasks.t2.status, "pending");
   assert.equal(reset.sessionCount, 0);
@@ -295,15 +275,15 @@ test("execute-after-init: reset seed survives execution and restores initialized
   assert.equal(existsSync(join(init.workspaceDir, "attempts")), false);
 });
 
-test("execute-after-init: missing pendingPrompt is a hard error", async () => {
+test("execute-after-init: missing brief is a hard error", async () => {
   const dir = tempDir();
   writeAgentAndAssignment(dir);
 
   const init = await initIn(dir);
-  // Corrupt the manifest to drop pendingPrompt
+  // Corrupt the manifest to drop brief
   const manifestPath = join(init.workspaceDir, "run.json");
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-  manifest.pendingPrompt = null;
+  manifest.brief = null;
   writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 
   await assert.rejects(

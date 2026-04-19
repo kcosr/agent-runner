@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -15,7 +15,7 @@ import {
 } from "../packages/core/dist/core/run/recursion-guard.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import {
-  assignmentPathFromPrompt,
+  setTaskStatusesForPrompt,
   withEnv,
   withSharedRuntimeEnv,
 } from "./helpers/runtime-paths.mjs";
@@ -122,26 +122,12 @@ function writeAssignment(baseDir, name, body) {
   writeFileSync(join(dir, "assignment.md"), body);
 }
 
-function editStatus(content, taskId, newStatus) {
-  const marker = `<!-- task-id: ${taskId} -->`;
-  const start = content.indexOf(marker);
-  const nextMarker = content.indexOf("<!-- task-id:", start + marker.length);
-  const end = nextMarker < 0 ? content.length : nextMarker;
-  const section = content.slice(start, end);
-  const updated = section.replace(/\*\*Status:\*\*\s*\S+/, `**Status:** ${newStatus}`);
-  return content.slice(0, start) + updated + content.slice(end);
-}
-
 function captureBackend(captured) {
   return {
     id: "mock",
     async invoke(ctx) {
       captured.env = ctx.env;
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      if (absPlan) {
-        const plan = readFileSync(absPlan, "utf8");
-        writeFileSync(absPlan, editStatus(plan, "t1", "completed"), "utf8");
-      }
+      setTaskStatusesForPrompt(ctx.prompt, { t1: "completed" });
       return {
         exitCode: 0,
         signal: null,

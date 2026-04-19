@@ -1,133 +1,198 @@
-# Bundled examples
+# Examples
 
-The repo ships with a handful of agent and assignment definitions under
-`agents/` and `assignments/` that double as references and as useful
-tools you can run against any repo.
+This repo ships a small library of reusable agents and assignments under
+`agents/` and `assignments/`. Every one is a plain markdown file you can
+copy, read, or pass directly via `--agent` / `--assignment`.
 
-## Agents
+## Bundled agents
 
-- **`agents/example/`** — repo orientation assistant (Claude).
-- **`agents/basic/`** — minimal Claude agent with no special setup.
-- **`agents/chat/`** — 0-task Claude "chat mode" agent. Requires a
-  positional message — with no agent body, no assignment, and no
-  tasks, there's nothing else to prompt with.
-- **`agents/codex-example/`** — Codex equivalent of `example`.
-- **`agents/codex-chat/`** — 0-task Codex chat mode agent.
-- **`agents/code-reviewer/`** — senior staff engineer tuned for deep
-  code review (Codex `gpt-5.3-codex`, high effort, unrestricted,
-  severity-tagged findings with file:line citations).
-- **`agents/doc-reviewer/`** — senior technical writer tuned for
-  documentation review. Same model/effort as code-reviewer but a
-  different mindset: drift detection, example runnability,
-  completeness, and proposing mermaid diagrams where they'd help.
-- **`agents/implementer/`** — plan-feature execution agent (Codex,
-  `gpt-5.4`, high effort, unrestricted). Tuned to read task bodies
-  and `Done when:` criteria end-to-end, cite file paths in task Notes,
-  and capture concrete evidence (file paths, exit codes, commit shas)
-  so a downstream reviewer has sharp inputs. `plan-feature` hard-codes
-  `--agent implementer` on the generated implementation run so every
-  plan inherits this agent by default.
-- **`agents/passive-example/`** — sidecar-only agent with
-  `backend: passive` and `lockedFields: [backend]`. task-runner never
-  invokes it; callers use `init` to seed the run and `task set` /
-  `task add` to drive the checklist externally, fetching the worker
-  handoff with `task-runner brief <run-id>`. See
-  [backends.md#passive](backends.md#passive).
+### `implementer`
 
-## Assignments
+- Path: `agents/implementer/agent.md`
+- Backend: `codex` (model `gpt-5.4`, `effort: high`, `unrestricted: true`)
 
-- **`assignments/repo-orientation/`** — three-task tour for getting
-  oriented in any repo. Takes a `repo_path` var.
-- **`assignments/repo-diagnostics/`** — two simple shell tasks (`pwd`,
-  `date`) used as a smoke test.
-- **`assignments/familiarize/`** — eight-task deep onboarding: read
-  the primary docs, run `codemap --budget 15000` for a compact code
-  map, inventory the directory structure, identify entry points,
-  sketch the subsystem map, capture conventions, list known unknowns,
-  and run a self-check summary. Designed to be the *first* step of a
-  conversation: run this once, then follow up in the same session with
-  `--resume-run <id> "your real task"` and the agent already has the
-  repo loaded.
-- **`assignments/code-review/`** — fourteen-task deep code review
-  (orientation, architecture, concurrency, error handling, state
-  machine, resources, security, types/schema, simplification &
-  duplication, test coverage, doc drift, plan coverage, synthesis,
-  approval). Takes a `range` var defaulting to `full`; pass any
-  git-style spec (`unstaged`, `staged`, `last commit`, `HEAD~3..HEAD`,
-  `main..branch`) to scope the review to that range. Requires an
-  `implementation_run_id` var pointing at the run id of a
-  plan-feature-driven implementer run; the reviewer reads canonical
-  task state (and any attached summary) from that run directly by id
-  rather than parsing a workspace file. The `plan_coverage` task
-  verifies that every planned task actually shipped and flags silent
-  deferrals. The final `approval` task is an explicit ship / no-ship
-  decision: runs that approve exit `success` (code 0); runs where
-  the reviewer cannot approve exit `blocked` (code 2), so scripts
-  can gate on the terminal status directly.
-- **`assignments/plan-feature/`** — meta-assignment that turns a
-  free-form feature description into an executable task-runner plan.
-  Takes a `repo_path` var; the feature brief comes in as the
-  positional message body so it is not length-limited. The planner
-  surveys conventions, impact, reuse opportunities, and risks; copies
-  a template from the configured task-runner config root into the
-  repo-name drafts area under `${TASK_RUNNER_STATE_DIR}/drafts/`;
-  fills in every placeholder with concrete file-level detail; runs a
-  nested `plan-review` pass against the draft and planning workspace;
-  then hands the caller the exact `task-runner init ...` command to
-  run. Both the planner run and the generated implementation run
-  require `TASK_RUNNER_MAX_CALL_DEPTH=2`: the planner nests
-  `plan-review`, and the generated implementation plan nests
-  `code-review`.
-- **`assignments/plan-review/`** — six-task draft-plan review for
-  `plan-feature`. It reads the generated draft assignment plus
-  canonical task state from the planner's own run (by run id), checks
-  contract fidelity, task quality, workflow wiring, and handoff
-  clarity, then ends with an explicit `approval` gate. Runs exit
-  `success` only when the draft is ready to hand back to the caller;
-  otherwise they exit `blocked` so the planner can revise and request
-  a delta re-review.
-- **`assignments/doc-review/`** — twelve-task documentation review
-  (inventory, elevator pitch, quickstart, concepts, commands/API
-  accuracy, examples, completeness gaps, structure & navigation,
-  mermaid diagram proposals, voice consistency, accessibility,
-  synthesis). Takes a `repo_path` var, works on any project
-  (language-agnostic).
+Senior staff engineer persona. Reads code deeply, cites file paths and
+line numbers, follows repo conventions, and prefers first-attempt
+lint/build/test-passing changes. Records concrete evidence in task notes
+and marks infeasible tasks as `blocked` rather than silently adapting.
 
-## Running them
+### `planner`
+
+- Path: `agents/planner/agent.md`
+- Backend: `codex` (`unrestricted: true`)
+
+Gathers feature requirements, identifies ambiguity along contract
+dimensions (CLI, API, schema, UI, refactoring), scans for reusable code,
+and produces concrete plans with ordered tasks, dependencies, risks, and
+validation steps. Designed to drive the `plan-feature` assignment.
+
+### `code-reviewer`
+
+- Path: `agents/code-reviewer/agent.md`
+- Backend: `claude` (model `claude-opus-4-6`, `effort: high`,
+  `unrestricted: true`)
+
+Review-only persona. Produces severity-tagged findings
+(`[SEVERITY] file:line — title`) with observation, rationale, and
+suggested fix. Calibrates severity, treats duplication and simplification
+as first-class findings, and never edits files.
+
+### `doc-reviewer`
+
+- Path: `agents/doc-reviewer/agent.md`
+- Backend: `codex` (model `gpt-5.3-codex`, `effort: high`,
+  `unrestricted: true`)
+
+Documentation reviewer. Reads as a skeptical new contributor. Flags
+drift, non-runnable examples, and code/doc mismatches; promotes
+actively-misleading claims to `CRITICAL`. Proposes ready-to-paste
+mermaid blocks only where they genuinely help.
+
+### `test`
+
+- Path: `agents/test/agent.md`
+- Backend: `codex` (`unrestricted: true`)
+
+Minimal validation agent used for smoke-checking the runtime.
+
+## Bundled assignments
+
+### `repo-orientation`
+
+- Path: `assignments/repo-orientation/assignment.md`
+
+Lightweight onboarding: check repo conventions (AGENTS.md, CLAUDE.md,
+testing/PR conventions), inventory top-level packages, and produce a
+short summary. Good pairing with `implementer` or `planner` when
+starting work in an unfamiliar repo.
+
+### `familiarize`
+
+- Path: `assignments/familiarize/assignment.md`
+
+Deep orientation pass designed as preparation work — the notes are
+scratch space for the agent, not a user-facing deliverable. Runs
+codemap (if installed), inventories directory structure, maps
+subsystems, captures conventions, and explicitly lists unknowns. Ends
+with a self-check gate.
+
+### `test`
+
+- Path: `assignments/test/assignment.md`
+
+Minimal smoke assignment: runs `date` and `pwd`. Useful for validating
+installation, wiring, or a new agent/backend combination.
+
+### `plan-feature`
+
+- Path: `assignments/plan-feature/assignment.md`
+- `maxRetries: 4`, `lockedFields: [tasks]`
+
+Meta-assignment that converts a free-form feature brief into an
+executable task-runner plan. The driver agent orients, captures the
+feature, checks contract dimensions (with an ambiguity gate), surveys
+impact, scans for duplication, assesses risks, produces a contract
+artifact, drafts a plan from a template, runs a nested `plan-review`,
+applies fixes until approval, produces a human-facing summary, attaches
+both artifacts to the planning run, and prepares a delayed implementer
+run creation flow.
+
+Notable feature uses:
+
+- **Ambiguity gate**: `capture_feature` blocks the run with targeted
+  questions when contract dimensions are unresolved.
+- **Locked task list** prevents silent deferrals.
+- **Nested reviews** via `plan-review` invoked as a child `task-runner
+  run`.
+- **Attachment coupling**: approved draft (`assignment-seed.md`) and
+  summary are attached to the planning run and later discovered by
+  implementation via `attachment list --cwd-scope`.
+- **Passive-backend handoff**: the implementer run is created with
+  `--backend passive` so it is externally driven via `run brief`.
+
+### `plan-review`
+
+- Path: `assignments/plan-review/assignment.md`
+- Vars:
+  - `plan_draft` (string, required) — absolute path to the draft
+    assignment file being reviewed.
+  - `planning_run_id` (string, required) — canonical run id whose task
+    notes carry the brief, contract, assumptions, and evidence.
+
+Nested review assignment for `plan-feature`. Checks contract fidelity,
+task graph structure, task-id/verifiability, and workflow wiring.
+Produces a synthesis and an explicit approval decision in the
+`approval` task — exit code 0 signals approval, exit code 2 signals
+blocked. On resume, performs a delta-focused re-review rather than a
+full re-walk.
+
+### `code-review`
+
+- Path: `assignments/code-review/assignment.md`
+- Vars:
+  - `range` (string, optional, default `full`) — git range to review
+    (`full`, `unstaged`, `staged`, `last commit`, `HEAD~N..HEAD`,
+    `main..<branch>`, etc.).
+  - `implementation_run_id` (string, required) — implementation run
+    whose task state the reviewer cross-checks.
+
+Structured 14-dimension review with an explicit ship / no-ship
+decision. Covers architecture, concurrency, error handling, state
+machine, resources, security, type safety, simplification/duplication,
+test coverage, documentation accuracy, and plan coverage. Produces a
+top-findings synthesis and an approval task whose exit code carries the
+decision. On resume, performs a delta re-review over the prior findings
+and recent changes rather than a full re-walk.
+
+### `doc-review`
+
+- Path: `assignments/doc-review/assignment.md`
+
+Documentation review across inventory, elevator pitch, quickstart
+runnability, conceptual clarity, commands/flags accuracy, examples,
+completeness, structure, diagrams, voice, and accessibility. Produces a
+top-findings synthesis. Can delegate independent dimensions to
+subagents for parallelism.
+
+## Common pairings
+
+| Agent | Typical assignment | Notes |
+|-------|-------------------|-------|
+| `planner` | `plan-feature` | Produces an executable plan and a summary; uses nested `plan-review`. |
+| `implementer` | generated plan assignment | Created with `--backend passive` by `plan-feature`, then driven externally. |
+| `code-reviewer` | `plan-review` or `code-review` | Nested review surfaces (both assignments). |
+| `doc-reviewer` | `doc-review` | Review-only, writes no files. |
+| any | `repo-orientation` / `familiarize` | Quick or deep onboarding before other work. |
+| any | `test` | Smoke-check for installation or a new agent/backend combination. |
+
+## Special features in use
+
+- **Ambiguity gate** — `plan-feature` `capture_feature` task.
+- **Passive backend** — `plan-feature` creates implementer runs with
+  `--backend passive` so the caller drives them through `run brief`.
+- **Locked tasks** — `plan-feature` template locks the task list so
+  executors cannot silently drop or reorder tasks.
+- **Dependencies** — planning → implementation → code-review workflows
+  link runs with `run add-dep`.
+- **Attachments as handoff** — planning artifacts attached to the
+  planning run and later discovered via `attachment list --cwd-scope`.
+- **Multiple delta re-reviews** — `plan-review` and `code-review` both
+  switch into delta mode on resume.
+- **Subagent delegation** — `plan-feature`, `code-review`, `doc-review`,
+  `familiarize` allow independent tasks to be parallelized while
+  synthesis tasks stay in the main context.
+
+## Using a bundled definition
 
 ```bash
-# Load a repo into an agent's context first, then drive it
-# conversationally after familiarization finishes.
 task-runner run \
-  --agent ./agents/code-reviewer/agent.md \
-  --assignment ./assignments/familiarize/assignment.md \
-  --var repo_path=/home/you/path/to/some/project
-# ... familiarization tasks complete ...
-task-runner run --resume-run <id> "now review the auth layer for security issues"
+  --agent ./agents/implementer/agent.md \
+  --assignment ./assignments/repo-orientation/assignment.md
+```
 
-# Full code review of this repo
-task-runner run \
-  --agent ./agents/code-reviewer/agent.md \
-  --assignment ./assignments/code-review/assignment.md \
-  --var repo_path=/home/you/path/to/task-runner
+Or with bare names if you've installed them under
+`${TASK_RUNNER_CONFIG_DIR}`:
 
-# Review just the unstaged changes
-task-runner run \
-  --agent ./agents/code-reviewer/agent.md \
-  --assignment ./assignments/code-review/assignment.md \
-  --var repo_path=/home/you/path/to/task-runner \
-  --var range=unstaged
-
-# Review the last commit
-task-runner run \
-  --agent ./agents/code-reviewer/agent.md \
-  --assignment ./assignments/code-review/assignment.md \
-  --var repo_path=/home/you/path/to/task-runner \
-  --var "range=last commit"
-
-# Full documentation review
-task-runner run \
-  --agent ./agents/doc-reviewer/agent.md \
-  --assignment ./assignments/doc-review/assignment.md \
-  --var repo_path=/home/you/path/to/some/project
+```bash
+task-runner run --agent implementer --assignment repo-orientation
 ```

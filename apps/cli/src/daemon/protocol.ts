@@ -1,18 +1,29 @@
 import type { DefinitionDetail, RunCommandOverrides } from "@task-runner/core/app/service.js";
 import type { DefinitionEntry } from "@task-runner/core/config/loader.js";
 import type {
+  AttachmentListEntry,
   RunAttachment,
   RunAttachmentRemoveResult,
 } from "@task-runner/core/contracts/attachments.js";
 import type {
+  RunTimelineEnvelope,
+  RunTimelineEvent,
+  RunTimelineHistory,
+} from "@task-runner/core/contracts/events.js";
+import type {
   RunArchiveResult,
+  RunBackendSessionResult,
   RunDependenciesResult,
   RunDetail,
   RunNameResult,
+  RunNoteResult,
+  RunPinnedResult,
   RunSummary,
   RunTaskSummary,
 } from "@task-runner/core/contracts/runs.js";
-import type { RunEvent } from "@task-runner/core/core/run/run-loop.js";
+import type { RunListFilter } from "@task-runner/core/core/commands/service.js";
+
+export type RunEventChannel = "run_summary" | "run_detail" | "run_timeline";
 
 export const DEFAULT_DAEMON_URL = "ws://127.0.0.1:4773/";
 export const TASK_RUNNER_LISTEN_ENV = "TASK_RUNNER_LISTEN";
@@ -52,9 +63,7 @@ export interface DaemonInfo {
   startedAt: string;
 }
 
-export interface RunsListParams {
-  includeArchived?: boolean;
-}
+export type RunsListParams = RunListFilter;
 
 export interface RunTargetParams {
   target: string;
@@ -62,6 +71,18 @@ export interface RunTargetParams {
 
 export interface RunSetNameParams extends RunTargetParams {
   name: string | null;
+}
+
+export interface RunSetNoteParams extends RunTargetParams {
+  note: string | null;
+}
+
+export interface RunSetPinnedParams extends RunTargetParams {
+  pinned: boolean;
+}
+
+export interface RunSetBackendSessionParams extends RunTargetParams {
+  backendSessionId: string;
 }
 
 export interface RunDependencyParams extends RunTargetParams {
@@ -106,7 +127,10 @@ export interface RunsResumeParams {
   overrides: RunCommandOverrides;
 }
 
+export interface RunsTimelineHistoryParams extends RunTargetParams {}
+
 export interface EventsSubscribeParams {
+  channel: RunEventChannel;
   runId?: string;
 }
 
@@ -122,10 +146,29 @@ export interface EventsUnsubscribeResult {
   unsubscribed: true;
 }
 
-export interface RunEventNotificationParams {
+export type RunSummaryNotificationParams =
+  | {
+      subscriptionId: string;
+      type: "summary_upsert";
+      summary: RunSummary;
+    }
+  | {
+      subscriptionId: string;
+      type: "summary_removed";
+      runId: string;
+    };
+
+export interface RunDetailNotificationParams {
   subscriptionId: string;
   runId: string;
-  event: RunEvent;
+  detail: RunDetail;
+}
+
+export interface RunTimelineNotificationParams {
+  subscriptionId: string;
+  runId: string;
+  cursor: number;
+  event: RunTimelineEvent;
 }
 
 export interface RunsListResult {
@@ -134,6 +177,14 @@ export interface RunsListResult {
 
 export interface RunResult {
   run: RunDetail;
+}
+
+export interface RunBriefResult {
+  brief: string;
+}
+
+export interface RunsTimelineHistoryResult {
+  history: RunTimelineHistory;
 }
 
 export interface TasksListResult {
@@ -168,6 +219,18 @@ export interface RunSetNameRpcResult {
   result: RunNameResult;
 }
 
+export interface RunSetNoteRpcResult {
+  result: RunNoteResult;
+}
+
+export interface RunSetPinnedRpcResult {
+  result: RunPinnedResult;
+}
+
+export interface RunBackendSessionRpcResult {
+  result: RunBackendSessionResult;
+}
+
 export interface RunDependenciesRpcResult {
   result: RunDependenciesResult;
 }
@@ -177,7 +240,7 @@ export interface RunsStartResult {
 }
 
 export interface AttachmentsListResult {
-  attachments: RunAttachment[];
+  attachments: AttachmentListEntry[];
 }
 
 export interface AttachmentResult {
@@ -187,3 +250,7 @@ export interface AttachmentResult {
 export interface AttachmentRemoveHttpResult {
   result: RunAttachmentRemoveResult;
 }
+
+export type RunTimelineNotification = RunTimelineEnvelope & {
+  subscriptionId: string;
+};

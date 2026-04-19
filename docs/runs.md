@@ -1,91 +1,237 @@
-# Runs, workspaces, and the manifest
+# Runs
 
-Each run gets a workspace directory at
-`${TASK_RUNNER_STATE_DIR}/runs/<repo-name>/<run-id>/`:
+A run is the persisted execution instance created from one agent and
+(optionally) one assignment. Every run has a short id and lives under:
 
 ```text
-${TASK_RUNNER_STATE_DIR}/runs/<repo-name>/<run-id>/
-├── run.json
-├── assignment-seed.md        # only when the run started from an assignment file
+${TASK_RUNNER_STATE_DIR}/runs/<repo>/<run-id>/
+```
+
+## Run workspace layout
+
+```text
+<workspace>/
+├── run.json               # canonical manifest (schema version 8)
+├── run-events.jsonl       # append-only diagnostic audit history (pre-feature runs may lack it)
+├── assignment-seed.md     # only when the run started from an assignment file
 ├── attempts/
+│   ├── 00.json
 │   └── 01.json
 └── attachments/
     └── <attachment-id>/
+        └── <file>
 ```
 
-- **`run.json`** — the canonical record, written at run start,
-  rewritten after every attempt, and one final time on terminal
-  state. A single JSON document — never JSONL, never append-only —
-  so you can `cat` or `jq` it at any moment. Contains the agent
-  identity *and* a frozen snapshot of the agent's role instructions,
-  locked fields, and timeout budget, plus the assignment metadata,
-  the composed worker `brief`, every attempt record, the canonical
-  task snapshots, the resolved vars, caller instructions, dependency
-  and attachment metadata, and the captured backend session id.
-- **`assignment-seed.md`** — an **immutable** snapshot of the source
-  assignment file at run-start time. Present only when the run was
-  created from an assignment file; audit/debug only. The worker does
-  not edit this file; canonical task state lives in `run.json`.
-- **`attempts/NN.json`** — raw per-attempt logs (stdout, stderr,
-  start/end timestamps), one per backend invocation.
-- **`attachments/<attachment-id>/<sanitized-name>`** — canonical file
-  storage for run attachments. Bytes live here; `run.json` persists
-  attachment metadata and workspace-relative paths. See
-  [attachments.md](attachments.md).
+`assignment-seed.md` is an immutable audit snapshot of the assignment at
+run-creation time. It is *not* a work surface — task state is canonical in
+`run.json.finalTasks`. Runs created by current code also include
+`run-events.jsonl`; pre-feature workspaces may still lack it. The file is
+diagnostic only: it records compact lifecycle/task provenance but is never
+replayed to derive current run state.
 
-## The manifest is canonical
+## Manifest (`run.json`)
 
-The manifest is the load-bearing piece: **it is the canonical source
-of truth for a run after first write**. Every other CLI command
-(`status`, `brief`, `task list` / `show` / `set` / `add`,
-`run --resume-run`) reads from the manifest and **never re-reads the
-agent's source file on resume**. Moving, editing, or deleting
-`agent.md` or the source assignment file after a run has started has
-no effect on that run — it lives off the frozen snapshot in
-`run.json`. This is also what makes ad-hoc agents possible: once the
-manifest is written, the agent had no source file to begin with and
-the run doesn't care.
+The manifest is the source of truth. Important fields:
 
-`run.json` carries the composed worker brief under `manifest.brief`.
-Operators fetch that text with `task-runner brief <run-id>` rather
-than reading the JSON field directly. See
-[agents-and-assignments.md#brief-and-caller-instructions](agents-and-assignments.md#brief-and-caller-instructions).
+| Field | Purpose |
+|-------|---------|
+| `schemaVersion` | currently `8`; older manifests are not silently upgraded |
+| `runId`, `repo`, `cwd` | identity and scope |
+| `agent` | frozen `{ name, sourcePath, instructions }` |
+| `assignment` | frozen `{ name, sourcePath, workspacePath }` or `null` |
+| `backend`, `model`, `effort` | resolved runtime config |
+| `timeoutSec`, `maxAttempts`, `unrestricted` | per-attempt limits |
+| `lockedFields` | union of agent + assignment locks, frozen |
+| `message` | default run message (from CLI positional or assignment) |
+| `name` | user-provided display name (mutable via `run set-name`) |
+| `note` | optional markdown note for humans (mutable via `run set-note`) |
+| `pinned` | persisted board-order hint for summaries and the web dashboard |
+| `status` | current lifecycle state |
+| `startedAt`, `endedAt` | ISO 8601 timestamps |
+| `archivedAt` | ISO timestamp when archived, else `null` |
+| `exitCode` | final exit code or `null` |
+| `finalTasks` | canonical task state |
+| `tasksCompleted`, `tasksTotal` | derived counts |
+| `brief` | composed worker handoff, frozen |
+| `callerInstructions` | operator-facing docs, never sent to backend |
+| `backendSessionId` | backend-native resume handle |
+| `dependencyRunIds` | upstream runs that must succeed before execution |
+| `attachments` | metadata for files under `attachments/` |
+| `attempts`, `attemptRecords` | per-attempt execution log |
+| `sessionCount`, `sessions` | session-level summaries |
+| `runtimeVars` | resolved vars (env-sourced values redacted) |
+| `resetSeed` | snapshot used by `run reset` |
+| `execution` | `{ hostMode: "embedded" \| "daemon", controller }`; for daemon runs, `controller.daemonInstanceId` links back to the daemon instance |
 
-## Schema versioning
+## Lifecycle states
 
-Manifest schema is versioned — the current generation is
-`schemaVersion: 7`. Runtime reads are a **hot cut**: manifests at
-earlier schema versions are not silently upgraded and cannot be
-resumed. Create a fresh run (`task-runner init` / `run`) instead.
-There is no migration script from schema 6 to schema 7.
+- `initialized` — created by `init`, awaiting first execution
+- `running` — actively executing
+- `success` — all tasks completed
+- `blocked` — at least one task reported blocked
+- `exhausted` — max attempts reached with incomplete tasks
+- `aborted` — user or system cancellation
+- `error` — backend or runtime failure
 
-For the full schema and the rationale, see [`design.md`](design.md).
+Passive runs derive their status from the task set rather than attempt
+execution (see [tasks.md](tasks.md)).
 
-## Attempts and retries
+## Creating a run
 
-Every backend invocation writes an `attempts/NN.json` record with
-captured stdout/stderr and timing. The run loop uses the assignment's
-`maxRetries` (default `3`, overridable per run) as its retry budget.
-Retries only happen when the agent left some tasks `pending`; a
-`blocked` task short-circuits the loop immediately.
+### Fresh run
 
-## Resetting and archiving
+```bash
+task-runner run \
+  --agent ./agents/implementer/agent.md \
+  --assignment ./assignments/repo-orientation/assignment.md \
+  "Optional message to the worker"
+```
 
-- `task-runner run reset <id>` restores the initialized-state seed
-  stored in the manifest, clears the captured backend session id, and
-  removes stale `attempts/` artifacts. Reset does not re-read current
-  source definitions, and the run no longer regenerates a live
-  workspace task file — canonical task state lives in
-  `run.json.finalTasks` either way. Works for any non-running run.
-- `task-runner run archive <id>` toggles a run-level archive marker
-  (`manifest.archivedAt`) without changing the lifecycle `status`.
-  Archived runs are hidden from default `list runs` and rejected by
-  `--resume-run` until unarchived.
+Fresh `run` resolves agent and assignment, resolves cwd
+(`--cwd` → assignment `cwd` → caller cwd), resolves variables, enforces
+locked fields, creates the workspace, freezes the manifest, composes the
+brief, and invokes the backend — except for passive runs, which stop after
+initialization.
 
-See [cli.md](cli.md) for the full set of run-subcommand options.
+### Init, then execute later
 
-## Run dependencies
+```bash
+task-runner init \
+  --agent ./agents/implementer/agent.md \
+  --assignment ./assignments/repo-orientation/assignment.md
 
-Initialized runs can declare prerequisite run ids that must reach
-`status=success` before resume is allowed. See
-[dependencies.md](dependencies.md).
+task-runner run --resume-run <run-id>
+```
+
+`init` performs the same setup work but does not invoke the backend. This
+is useful for passive runs, planning flows, or delayed execution. `init`
+does not dump the worker brief to stdout — fetch it explicitly with
+`task-runner run brief <run-id>`.
+
+## Read surfaces
+
+```bash
+task-runner status
+task-runner run status <run-id> [--output-format json] [--field <name>]...
+task-runner run brief <run-id>
+task-runner task list <run-id>
+task-runner task show <run-id> <task-id>
+task-runner attachment list <run-id> [--cwd-scope]
+```
+
+- Top-level `status` reports system/environment status and takes no run id.
+- `run status` and `run brief` are run-id-only.
+- `run brief` is text-only; no `--output-format` or `--field`.
+- `run status --output-format json` returns the shared `RunDetail` DTO.
+- `RunDetail` includes full `note` plus `pinned`; `RunSummary` includes
+  `notePresent` plus `pinned`.
+- Text `run status` may show `Pinned: yes` and `Note: present`, but does
+  not print the note body.
+- Run notes stay in run metadata only; they are not appended to `brief`,
+  `callerInstructions`, or backend prompts automatically.
+
+## Mutation surfaces
+
+```bash
+task-runner run reset <id>
+task-runner run archive <id>
+task-runner run unarchive <id>
+task-runner run delete <id>                # archived runs only
+task-runner run set-name <id> <name>
+task-runner run set-name <id> --clear
+task-runner run set-note <id> <markdown>
+task-runner run clear-note <id>
+task-runner run pin <id>
+task-runner run unpin <id>
+task-runner run set-backend-session <id> <session-id>   # passive only
+task-runner run clear-backend-session <id>              # passive only
+task-runner run add-dep <id> <dep-run-id>
+task-runner run remove-dep <id> <dep-run-id>
+task-runner run clear-deps <id>
+```
+
+### Reset
+
+`run reset` restores the initialized-state seed from `manifest.resetSeed`
+(model, effort, name, dependencies, timeoutSec, maxAttempts, brief, final
+task snapshot). Attempt and session history, endedAt, exitCode, and the
+live status are cleared. Existing `run-events.jsonl` history is preserved
+and reset appends one more diagnostic record instead of truncating the file.
+Only non-running runs can be reset.
+
+### Archive, unarchive, delete
+
+- `run archive` sets `archivedAt` on a non-running run.
+- `run unarchive` clears `archivedAt`.
+- `run delete` permanently removes the workspace. Only archived,
+  non-running runs are deletable. The workspace is removed, not moved to
+  trash, so any `run-events.jsonl` file disappears with the rest of the run.
+
+### set-name
+
+Update or clear the human-facing display name. Use `--clear` to remove it.
+Does not change run state or task state.
+
+### set-note / clear-note
+
+Persist or clear a markdown note on the run. Whitespace-only note writes
+clear the field. Text output never prints the note body; it only reports
+whether the mutation changed state.
+
+### pin / unpin
+
+Persist or clear the run's `pinned` flag. Pinning is metadata only: it
+does not change lifecycle state, task state, archive state, or
+dependency readiness.
+
+### set-backend-session / clear-backend-session
+
+Passive-only metadata mutations. Update `manifest.backendSessionId` without
+changing task state, lifecycle status, attempts, archive state, or
+dependency projections.
+
+### Dependencies
+
+`add-dep`, `remove-dep`, and `clear-deps` are only allowed on initialized
+runs. See [dependencies.md](dependencies.md).
+
+## Listing runs
+
+```bash
+task-runner list runs
+task-runner list runs --cwd <path>
+task-runner list runs --repo <name>
+task-runner list runs --global
+task-runner list runs --include-archived
+```
+
+By default, `list runs` scopes to the caller's exact cwd. `--repo <name>`
+scopes to an exact repo bucket. `--global` lists across all buckets.
+`--include-archived` adds archived runs to any of the above.
+
+## Execution modes
+
+Every run persists an `execution` record:
+
+- `hostMode: "embedded"` — ran in the CLI process
+- `hostMode: "daemon"` — ran inside `task-runner serve`, with
+  `controller.daemonInstanceId` linking back to that daemon instance
+
+See [daemon.md](daemon.md) for how the daemon adopts and publishes runs.
+
+## Capabilities
+
+The daemon and CLI expose a `RunCapabilities` boolean block on each run so
+clients do not reimplement lifecycle gates:
+
+- `canArchive`, `canUnarchive`, `canReset`, `canDelete`, `canResume`,
+  `canAbort`
+- `taskMutation.canSetStatus`, `taskMutation.canEditNotes`,
+  `taskMutation.canAdd`
+
+When `canAbort` is `false`, the `abortReason` field explains why
+(`"already_terminal"` or `"not_active_in_daemon"`).
+
+## Resume
+
+Resume is its own topic — see [resume.md](resume.md).

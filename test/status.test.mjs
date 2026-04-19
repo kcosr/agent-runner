@@ -4,13 +4,12 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
-import { renderRunStatus } from "../apps/cli/dist/commands/render.js";
-import { parseAssignment } from "../packages/core/dist/assignment/parser.js";
+import { renderRunStatus, renderSystemStatus } from "../apps/cli/dist/commands/render.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { toRunDetail } from "../packages/core/dist/contracts/runs.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
-import { applyLiveOverlay, deriveEffectiveStatus } from "../packages/core/dist/core/run/status.js";
-import { assignmentPathFromPrompt, sharedRuntimeEnv, withEnv } from "./helpers/runtime-paths.mjs";
+import { deriveEffectiveStatus } from "../packages/core/dist/core/run/status.js";
+import { setTaskStatusesForPrompt, sharedRuntimeEnv, withEnv } from "./helpers/runtime-paths.mjs";
 
 function patchManifest(workspaceDir, mutator) {
   const manifestPath = join(workspaceDir, "run.json");
@@ -59,25 +58,6 @@ function writeAssignment(baseDir, name, body) {
   writeFileSync(join(dir, "assignment.md"), body);
 }
 
-function editStatus(content, taskId, newStatus) {
-  const marker = `<!-- task-id: ${taskId} -->`;
-  const start = content.indexOf(marker);
-  const nextMarker = content.indexOf("<!-- task-id:", start + marker.length);
-  const end = nextMarker < 0 ? content.length : nextMarker;
-  const section = content.slice(start, end);
-  const updated = section.replace(/\*\*Status:\*\*\s*\S+/, `**Status:** ${newStatus}`);
-  return content.slice(0, start) + updated + content.slice(end);
-}
-
-function liveOverlay(rawAssignment) {
-  return new Map(
-    parseAssignment(rawAssignment).map((update) => [
-      update.taskId,
-      { status: update.status, notes: update.notes },
-    ]),
-  );
-}
-
 function withSharedRuntimeEnv(baseDir, fn) {
   return withEnv(
     {
@@ -107,27 +87,6 @@ function runCliExpectFail(args, opts = {}) {
   }
 }
 
-const okBackend = () => ({
-  id: "mock",
-  async invoke(ctx) {
-    const planPath = assignmentPathFromPrompt(ctx.prompt);
-    let plan = readFileSync(planPath, "utf8");
-    plan = editStatus(plan, "t1", "completed");
-    plan = editStatus(plan, "t2", "completed");
-    writeFileSync(planPath, plan, "utf8");
-    return {
-      exitCode: 0,
-      signal: null,
-      timedOut: false,
-      aborted: false,
-      sessionId: "sess-status-1",
-      transcript: "done",
-      rawStdout: "",
-      rawStderr: "",
-    };
-  },
-});
-
 async function runFresh(baseDir) {
   return withSharedRuntimeEnv(baseDir, async () => {
     const loaded = loadAgentConfig("status-agent", baseDir);
@@ -139,7 +98,22 @@ async function runFresh(baseDir) {
         loaded,
         loadedAssignment,
         cliVars: {},
-        backend: okBackend(),
+        backend: {
+          id: loaded.config.backend,
+          async invoke(ctx) {
+            setTaskStatusesForPrompt(ctx.prompt, { t1: "completed", t2: "completed" });
+            return {
+              exitCode: 0,
+              signal: null,
+              timedOut: false,
+              aborted: false,
+              sessionId: "sess-status-1",
+              transcript: "done",
+              rawStdout: "",
+              rawStderr: "",
+            };
+          },
+        },
         overrides: { name: "status test" },
         stderr: () => {},
         stdout: () => {},
@@ -163,11 +137,32 @@ test("renderRunStatus prints the persisted run summary", async () => {
   assert.match(text, /Backend: claude \(claude-sonnet-4-6\)/);
   assert.match(text, /Name: status test/);
   assert.match(text, new RegExp(`Workspace: ${outcome.workspaceDir}`));
-  assert.match(text, new RegExp(`Assignment file: ${outcome.assignmentPath}`));
   assert.match(text, /Sessions: 1/);
   assert.match(text, /Tasks completed: 2\/2/);
   assert.match(text, /- t1 — First \[completed\]/);
   assert.match(text, /- t2 — Second \[completed\]/);
+});
+
+test("renderRunStatus shows note and pin metadata without printing the note body", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "status-agent", STATUS_AGENT);
+  writeAssignment(dir, "status-work", STATUS_ASSIGNMENT);
+  const outcome = await runFresh(dir);
+
+  const text = renderRunStatus(
+    toRunDetail({
+      manifest: {
+        ...outcome.manifest,
+        note: "# Internal note\n\nDo not print this body.",
+        pinned: true,
+      },
+      isLive: false,
+    }),
+  );
+
+  assert.match(text, /Pinned: yes/);
+  assert.match(text, /Note: present/);
+  assert.doesNotMatch(text, /Do not print this body/);
 });
 
 test("deriveEffectiveStatus marks passive runs with in-progress tasks as running", async () => {
@@ -268,58 +263,7 @@ test("deriveEffectiveStatus preserves passive terminal error statuses", () => {
   }
 });
 
-test("applyLiveOverlay updates tasksCompleted and finalTasks while manifest.status is running", async () => {
-  const dir = tempDir();
-  writeAgent(dir, "status-agent", STATUS_AGENT);
-  writeAssignment(dir, "status-work", STATUS_ASSIGNMENT);
-  const outcome = await runFresh(dir);
-
-  patchManifest(outcome.workspaceDir, (manifest) => {
-    manifest.status = "running";
-    manifest.exitCode = null;
-    manifest.endedAt = null;
-    manifest.tasksCompleted = 0;
-    manifest.finalTasks.t1.status = "pending";
-    manifest.finalTasks.t2.status = "pending";
-  });
-
-  const planPath = join(outcome.workspaceDir, "assignment.md");
-  let plan = readFileSync(planPath, "utf8");
-  plan = editStatus(plan, "t1", "completed");
-  plan = editStatus(plan, "t2", "in_progress");
-  writeFileSync(planPath, plan, "utf8");
-
-  const overlaid = applyLiveOverlay(outcome.manifest, liveOverlay(plan));
-
-  assert.equal(overlaid.status, "success", "overlay does not mutate the original manifest status");
-  assert.equal(overlaid.tasksCompleted, 1);
-  assert.equal(overlaid.finalTasks.t1.status, "completed");
-  assert.equal(overlaid.finalTasks.t2.status, "in_progress");
-});
-
-test("applyLiveOverlay falls back to the manifest snapshot for invalid live statuses", async () => {
-  const dir = tempDir();
-  writeAgent(dir, "status-agent", STATUS_AGENT);
-  writeAssignment(dir, "status-work", STATUS_ASSIGNMENT);
-  const outcome = await runFresh(dir);
-
-  patchManifest(outcome.workspaceDir, (manifest) => {
-    manifest.status = "running";
-    manifest.exitCode = null;
-    manifest.endedAt = null;
-    manifest.finalTasks.t1.status = "pending";
-  });
-
-  const planPath = join(outcome.workspaceDir, "assignment.md");
-  let plan = readFileSync(planPath, "utf8");
-  plan = editStatus(plan, "t1", "in-progress");
-  writeFileSync(planPath, plan, "utf8");
-
-  const overlaid = applyLiveOverlay(outcome.manifest, liveOverlay(plan));
-  assert.equal(overlaid.finalTasks.t1.status, "completed");
-});
-
-test("renderRunStatus shows the live-overlay note for running runs", async () => {
+test("renderRunStatus shows the canonical-state note for running runs", async () => {
   const dir = tempDir();
   writeAgent(dir, "status-agent", STATUS_AGENT);
   writeAssignment(dir, "status-work", STATUS_ASSIGNMENT);
@@ -336,7 +280,7 @@ test("renderRunStatus shows the live-overlay note for running runs", async () =>
   });
 
   const text = renderRunStatus(runningDetail);
-  assert.match(text, /read live from the workspace assignment\.md/);
+  assert.match(text, /canonical run\.json task state/);
 });
 
 test("renderRunStatus shows effective status separately from lifecycle status", async () => {
@@ -370,6 +314,43 @@ test("renderRunStatus shows effective status separately from lifecycle status", 
   assert.match(text, /Status: running/);
   assert.match(text, /Lifecycle status: initialized/);
   assert.match(text, /Drive this run externally:/);
+  assert.match(text, /task-runner run brief/);
+});
+
+test("renderSystemStatus prints embedded-mode environment details", () => {
+  const text = renderSystemStatus({
+    configDir: "/tmp/config",
+    stateDir: "/tmp/state",
+    hostMode: "embedded",
+    connectUrl: null,
+    daemon: null,
+  });
+
+  assert.equal(
+    text,
+    "Config dir: /tmp/config\nState dir: /tmp/state\nHost mode: embedded\nConnect URL: none\nDaemon: not connected\n",
+  );
+});
+
+test("renderSystemStatus prints connected daemon details", () => {
+  const text = renderSystemStatus({
+    configDir: "/tmp/config",
+    stateDir: "/tmp/state",
+    hostMode: "daemon",
+    connectUrl: "ws://127.0.0.1:4773/",
+    daemon: {
+      daemonInstanceId: "daemon-ab12cd",
+      pid: 424242,
+      listenUrl: "ws://127.0.0.1:4773/",
+      version: "0.1.0",
+      startedAt: "2026-04-18T19:43:54.599Z",
+    },
+  });
+
+  assert.match(text, /Host mode: daemon/);
+  assert.match(text, /Connect URL: ws:\/\/127\.0\.0\.1:4773\//);
+  assert.match(text, /Daemon: connected/);
+  assert.match(text, /Daemon listen URL: ws:\/\/127\.0\.0\.1:4773\//);
 });
 
 test("renderRunStatus shows archive metadata and the unarchive hint", async () => {
@@ -391,7 +372,7 @@ test("renderRunStatus shows archive metadata and the unarchive hint", async () =
   assert.match(text, /task-runner run unarchive/);
 });
 
-test("status CLI reports unreadable manifest snapshots as clean unexpected failures", async () => {
+test("run status CLI reports unreadable manifest snapshots as clean unexpected failures", async () => {
   const dir = tempDir();
   writeAgent(dir, "status-agent", STATUS_AGENT);
   writeAssignment(dir, "status-work", STATUS_ASSIGNMENT);
@@ -401,7 +382,7 @@ test("status CLI reports unreadable manifest snapshots as clean unexpected failu
   chmodSync(runJsonPath, 0o000);
 
   try {
-    const result = runCliExpectFail(["status", outcome.runId], { cwd: dir });
+    const result = runCliExpectFail(["run", "status", outcome.runId], { cwd: dir });
     assert.equal(result.status, 4);
     assert.match(result.stderr, /task-runner:/);
   } finally {
@@ -409,7 +390,7 @@ test("status CLI reports unreadable manifest snapshots as clean unexpected failu
   }
 });
 
-test("status --field projects RunDetail fields and rejects removed manifest-only keys", async () => {
+test("run status --field projects RunDetail fields and rejects removed manifest-only keys", async () => {
   const dir = tempDir();
   writeAgent(dir, "status-agent", STATUS_AGENT);
   writeAssignment(dir, "status-work", STATUS_ASSIGNMENT);
@@ -418,7 +399,7 @@ test("status --field projects RunDetail fields and rejects removed manifest-only
   const projected = JSON.parse(
     execFileSync(
       "node",
-      [CLI_PATH, "status", outcome.runId, "--output-format", "json", "--field", "tasks"],
+      [CLI_PATH, "run", "status", outcome.runId, "--output-format", "json", "--field", "tasks"],
       {
         cwd: dir,
         env: { ...process.env, ...sharedRuntimeEnv(dir) },
@@ -432,7 +413,16 @@ test("status --field projects RunDetail fields and rejects removed manifest-only
   const effectiveStatus = JSON.parse(
     execFileSync(
       "node",
-      [CLI_PATH, "status", outcome.runId, "--output-format", "json", "--field", "effectiveStatus"],
+      [
+        CLI_PATH,
+        "run",
+        "status",
+        outcome.runId,
+        "--output-format",
+        "json",
+        "--field",
+        "effectiveStatus",
+      ],
       {
         cwd: dir,
         env: { ...process.env, ...sharedRuntimeEnv(dir) },
@@ -444,14 +434,14 @@ test("status --field projects RunDetail fields and rejects removed manifest-only
   assert.equal(effectiveStatus.effectiveStatus, "success");
 
   const failed = runCliExpectFail(
-    ["status", outcome.runId, "--output-format", "json", "--field", "finalTasks"],
+    ["run", "status", outcome.runId, "--output-format", "json", "--field", "finalTasks"],
     { cwd: dir },
   );
   assert.equal(failed.status, 3);
   assert.match(failed.stderr, /unknown status field\(s\): finalTasks/);
 });
 
-test("status --field capabilities exposes the current run capability contract", async () => {
+test("run status --field capabilities exposes the current run capability contract", async () => {
   const dir = tempDir();
   writeAgent(dir, "status-agent", STATUS_AGENT);
   writeAssignment(dir, "status-work", STATUS_ASSIGNMENT);
@@ -460,7 +450,16 @@ test("status --field capabilities exposes the current run capability contract", 
   const projected = JSON.parse(
     execFileSync(
       "node",
-      [CLI_PATH, "status", outcome.runId, "--output-format", "json", "--field", "capabilities"],
+      [
+        CLI_PATH,
+        "run",
+        "status",
+        outcome.runId,
+        "--output-format",
+        "json",
+        "--field",
+        "capabilities",
+      ],
       {
         cwd: dir,
         env: { ...process.env, ...sharedRuntimeEnv(dir) },
@@ -473,6 +472,8 @@ test("status --field capabilities exposes the current run capability contract", 
   assert.deepEqual(projected.capabilities, {
     canArchive: true,
     canUnarchive: false,
+    canReset: true,
+    canDelete: false,
     canResume: true,
     canAbort: false,
     abortReason: "already_terminal",
@@ -483,4 +484,51 @@ test("status --field capabilities exposes the current run capability contract", 
     },
   });
   assert.equal("canMutateTasks" in projected.capabilities, false);
+});
+
+test("top-level status rejects unexpected run-id positionals", () => {
+  const result = runCliExpectFail(["status", "abc123"]);
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /status takes no positional arguments/);
+  assert.match(result.stderr, /Usage: task-runner status \[--output-format text\|json\]/);
+});
+
+test("top-level status rejects --field", () => {
+  const result = runCliExpectFail(["status", "--field", "configDir"]);
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /status does not support --field/);
+});
+
+test("top-level status reports embedded environment details", () => {
+  const dir = tempDir();
+  const text = execFileSync("node", [CLI_PATH, "status"], {
+    cwd: dir,
+    env: { ...process.env, ...sharedRuntimeEnv(dir) },
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  assert.match(text, new RegExp(`Config dir: ${dir}`));
+  assert.match(text, new RegExp(`State dir: ${dir}`));
+  assert.match(text, /Host mode: embedded/);
+  assert.match(text, /Connect URL: none/);
+  assert.match(text, /Daemon: not connected/);
+});
+
+test("top-level status --output-format json reports embedded environment details", () => {
+  const dir = tempDir();
+  const parsed = JSON.parse(
+    execFileSync("node", [CLI_PATH, "status", "--output-format", "json"], {
+      cwd: dir,
+      env: { ...process.env, ...sharedRuntimeEnv(dir) },
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    }),
+  );
+
+  assert.equal(parsed.configDir, dir);
+  assert.equal(parsed.stateDir, dir);
+  assert.equal(parsed.hostMode, "embedded");
+  assert.equal(parsed.connectUrl, null);
+  assert.equal(parsed.daemon, null);
 });

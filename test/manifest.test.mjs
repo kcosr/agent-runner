@@ -1,11 +1,18 @@
 import { strict as assert } from "node:assert";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
-import { assignmentPathFromPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
+import { updateTasksForPrompt, withEnv, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 const THREE_AGENT = `---
 schemaVersion: 1
@@ -35,6 +42,14 @@ tasks:
 Work on the repo. Plan at {{assignment_path}}.
 `;
 
+const CODEX_AGENT = `---
+schemaVersion: 1
+name: codex-agent
+backend: codex
+---
+Codex agent prompt.
+`;
+
 function tempDir() {
   return mkdtempSync(join(tmpdir(), "task-runner-manifest-"));
 }
@@ -60,31 +75,9 @@ function writeAgentAndAssignment(baseDir) {
   writeAssignment(baseDir, "three-work", THREE_ASSIGNMENT);
 }
 
-function editStatus(content, taskId, newStatus) {
-  const marker = `<!-- task-id: ${taskId} -->`;
-  const start = content.indexOf(marker);
-  const nextMarker = content.indexOf("<!-- task-id:", start + marker.length);
-  const end = nextMarker < 0 ? content.length : nextMarker;
-  const section = content.slice(start, end);
-  const updated = section.replace(/\*\*Status:\*\*\s*\S+/, `**Status:** ${newStatus}`);
-  return content.slice(0, start) + updated + content.slice(end);
-}
-
-function editNotes(content, taskId, notesText) {
-  const marker = `<!-- task-id: ${taskId} -->`;
-  const start = content.indexOf(marker);
-  const nextMarker = content.indexOf("<!-- task-id:", start + marker.length);
-  const end = nextMarker < 0 ? content.length : nextMarker;
-  const section = content.slice(start, end);
-  const updated = section.replace(
-    /<!-- notes:start -->[\s\S]*?<!-- notes:end -->/,
-    `<!-- notes:start -->\n${notesText}\n<!-- notes:end -->`,
-  );
-  return content.slice(0, start) + updated + content.slice(end);
-}
-
 async function runWithMock(baseDir, mockInvoke, overrides = {}) {
-  const backend = { id: "mock", invoke: mockInvoke };
+  const backend = { id: overrides.__backendId ?? "claude", invoke: mockInvoke };
+  const { __backendId, ...runOverrides } = overrides;
   return withSharedRuntimeEnv(baseDir, async () => {
     const loaded = loadAgentConfig("three", baseDir);
     const loadedAssignment = loadAssignmentConfig("three-work", baseDir);
@@ -96,7 +89,7 @@ async function runWithMock(baseDir, mockInvoke, overrides = {}) {
         loadedAssignment,
         cliVars: {},
         backend,
-        overrides,
+        overrides: runOverrides,
         stderr: () => {},
         stdout: () => {},
       });
@@ -112,13 +105,11 @@ test("manifest: run.json is written and matches outcome.manifest", async () => {
   writeAgentAndAssignment(dir);
 
   const outcome = await runWithMock(dir, async (ctx) => {
-    const absPlan = assignmentPathFromPrompt(ctx.prompt);
-    let plan = readFileSync(absPlan, "utf8");
-    for (const id of ["t1", "t2", "t3"]) {
-      plan = editStatus(plan, id, "completed");
-    }
-    plan = editNotes(plan, "t1", "first done");
-    writeFileSync(absPlan, plan, "utf8");
+    updateTasksForPrompt(ctx.prompt, {
+      t1: { status: "completed", notes: "first done" },
+      t2: { status: "completed" },
+      t3: { status: "completed" },
+    });
     return {
       exitCode: 0,
       signal: null,
@@ -153,7 +144,7 @@ test("manifest: run.json is written and matches outcome.manifest", async () => {
   assert.equal(onDisk.finalTasks.t1.notes, "first done");
   assert.equal(onDisk.finalTasks.t1.title, "First");
   assert.equal(onDisk.finalTasks.t1.body.trim(), "Do the first thing.");
-  assert.deepEqual(onDisk, outcome.manifest);
+  assert.deepEqual(onDisk, JSON.parse(JSON.stringify(outcome.manifest)));
 
   const logPath = join(outcome.workspaceDir, "attempts", "01.json");
   assert.ok(existsSync(logPath), "attempts/01.json exists");
@@ -172,15 +163,14 @@ test("manifest: attempt records snapshot state after each attempt", async () => 
   let call = 0;
   const outcome = await runWithMock(dir, async (ctx) => {
     call++;
-    const absPlan = assignmentPathFromPrompt(ctx.prompt);
-    let plan = readFileSync(absPlan, "utf8");
     if (call === 1) {
-      plan = editStatus(plan, "t1", "completed");
+      updateTasksForPrompt(ctx.prompt, { t1: { status: "completed" } });
     } else {
-      plan = editStatus(plan, "t2", "completed");
-      plan = editStatus(plan, "t3", "completed");
+      updateTasksForPrompt(ctx.prompt, {
+        t2: { status: "completed" },
+        t3: { status: "completed" },
+      });
     }
-    writeFileSync(absPlan, plan, "utf8");
     return {
       exitCode: 0,
       signal: null,
@@ -223,12 +213,10 @@ test("manifest: blocked run records status and captures final state", async () =
   writeAgentAndAssignment(dir);
 
   const outcome = await runWithMock(dir, async (ctx) => {
-    const absPlan = assignmentPathFromPrompt(ctx.prompt);
-    let plan = readFileSync(absPlan, "utf8");
-    plan = editStatus(plan, "t1", "completed");
-    plan = editStatus(plan, "t2", "blocked");
-    plan = editNotes(plan, "t2", "could not reach the server");
-    writeFileSync(absPlan, plan, "utf8");
+    updateTasksForPrompt(ctx.prompt, {
+      t1: { status: "in_progress", notes: "still investigating" },
+      t2: { status: "blocked", notes: "could not reach the server" },
+    });
     return {
       exitCode: 0,
       signal: null,
@@ -242,8 +230,11 @@ test("manifest: blocked run records status and captures final state", async () =
 
   assert.equal(outcome.manifest.status, "blocked");
   assert.equal(outcome.manifest.exitCode, 2);
+  assert.equal(outcome.manifest.finalTasks.t1.status, "pending");
+  assert.equal(outcome.manifest.finalTasks.t1.notes, "still investigating");
   assert.equal(outcome.manifest.finalTasks.t2.status, "blocked");
   assert.equal(outcome.manifest.finalTasks.t2.notes, "could not reach the server");
+  assert.equal(outcome.manifest.attemptRecords[0]?.tasksAfter.t1.status, "in_progress");
 });
 
 test("manifest: exhausted run records all attempts", async () => {
@@ -251,8 +242,11 @@ test("manifest: exhausted run records all attempts", async () => {
   writeAgentAndAssignment(dir);
 
   let call = 0;
-  const outcome = await runWithMock(dir, async () => {
+  const outcome = await runWithMock(dir, async (ctx) => {
     call++;
+    updateTasksForPrompt(ctx.prompt, {
+      t1: { status: "in_progress", notes: `attempt ${call} in flight` },
+    });
     return {
       exitCode: 0,
       signal: null,
@@ -269,6 +263,49 @@ test("manifest: exhausted run records all attempts", async () => {
   assert.equal(outcome.manifest.attempts, 3);
   assert.equal(outcome.manifest.attemptRecords.length, 3);
   assert.equal(outcome.manifest.tasksCompleted, 0);
+  assert.equal(outcome.manifest.finalTasks.t1.status, "pending");
+  assert.equal(outcome.manifest.finalTasks.t1.notes, "attempt 3 in flight");
+  assert.equal(outcome.manifest.attemptRecords[2]?.tasksAfter.t1.status, "in_progress");
+});
+
+test("manifest: thrown backend launch errors still settle the run as error", async () => {
+  const dir = tempDir();
+  writeAgentAndAssignment(dir);
+
+  await assert.rejects(
+    async () => {
+      await runWithMock(dir, async () => {
+        const err = new Error("spawn claude ENOENT");
+        err.code = "ENOENT";
+        throw err;
+      });
+    },
+    (error) => {
+      assert.equal(error.message, "spawn claude ENOENT");
+      assert.equal(error.code, "ENOENT");
+      return true;
+    },
+  );
+
+  const runsRoot = join(dir, "runs");
+  const [repoDir] = readdirSync(runsRoot);
+  const [runDir] = readdirSync(join(runsRoot, repoDir));
+  const workspaceDir = join(runsRoot, repoDir, runDir);
+  const manifestPath = join(workspaceDir, "run.json");
+  const onDisk = JSON.parse(readFileSync(manifestPath, "utf8"));
+
+  assert.equal(onDisk.status, "error");
+  assert.equal(onDisk.exitCode, 4);
+  assert.match(onDisk.endedAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(onDisk.attempts, 1);
+  assert.equal(onDisk.attemptRecords.length, 1);
+  assert.equal(onDisk.sessions[0].status, "error");
+  assert.equal(onDisk.sessions[0].firstAttempt, 1);
+  assert.equal(onDisk.sessions[0].lastAttempt, 1);
+
+  const log = JSON.parse(readFileSync(join(workspaceDir, "attempts", "01.json"), "utf8"));
+  assert.equal(log.stdout, "");
+  assert.match(log.stderr, /spawn claude ENOENT/);
 });
 
 test("manifest: captures effort override on the run metadata", async () => {
@@ -278,12 +315,11 @@ test("manifest: captures effort override on the run metadata", async () => {
   const outcome = await runWithMock(
     dir,
     async (ctx) => {
-      const absPlan = assignmentPathFromPrompt(ctx.prompt);
-      let plan = readFileSync(absPlan, "utf8");
-      for (const id of ["t1", "t2", "t3"]) {
-        plan = editStatus(plan, id, "completed");
-      }
-      writeFileSync(absPlan, plan, "utf8");
+      updateTasksForPrompt(ctx.prompt, {
+        t1: { status: "completed" },
+        t2: { status: "completed" },
+        t3: { status: "completed" },
+      });
       return {
         exitCode: 0,
         signal: null,
@@ -300,44 +336,48 @@ test("manifest: captures effort override on the run metadata", async () => {
   assert.equal(outcome.manifest.effort, "max");
 });
 
-test("manifest: invalid statuses are recorded on the attempt record", async () => {
+test("manifest: codex runs persist the stdio default transport in run metadata and reset seed", async () => {
   const dir = tempDir();
-  writeAgentAndAssignment(dir);
+  writeAgent(dir, "three", CODEX_AGENT);
+  writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
 
-  let call = 0;
-  const outcome = await runWithMock(dir, async (ctx) => {
-    call++;
-    const absPlan = assignmentPathFromPrompt(ctx.prompt);
-    let plan = readFileSync(absPlan, "utf8");
-    if (call === 1) {
-      // write an invalid status on t1, real completed on t2/t3
-      plan = plan.replace(/(<!-- task-id: t1 -->[\s\S]*?\*\*Status:\*\*) pending/, "$1 done");
-      plan = editStatus(plan, "t2", "completed");
-      plan = editStatus(plan, "t3", "completed");
-    } else {
-      // correct it
-      plan = editStatus(plan, "t1", "completed");
-      plan = editStatus(plan, "t2", "completed");
-      plan = editStatus(plan, "t3", "completed");
-    }
-    writeFileSync(absPlan, plan, "utf8");
-    return {
-      exitCode: 0,
-      signal: null,
-      timedOut: false,
-      sessionId: null,
-      transcript: `attempt ${call}`,
-      rawStdout: "",
-      rawStderr: "",
-    };
+  const outcome = await withEnv({ TASK_RUNNER_CODEX_WS_URL: undefined }, () =>
+    runWithMock(
+      dir,
+      async (ctx) => {
+        updateTasksForPrompt(ctx.prompt, {
+          t1: { status: "completed" },
+          t2: { status: "completed" },
+          t3: { status: "completed" },
+        });
+        assert.deepEqual(ctx.backendSpecific, {
+          codex: {
+            transport: {
+              type: "stdio",
+            },
+          },
+        });
+        return {
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+          sessionId: null,
+          transcript: "done",
+          rawStdout: "",
+          rawStderr: "",
+        };
+      },
+      { __backendId: "codex" },
+    ),
+  );
+
+  const onDisk = JSON.parse(readFileSync(join(outcome.workspaceDir, "run.json"), "utf8"));
+  assert.deepEqual(onDisk.backendSpecific, {
+    codex: {
+      transport: {
+        type: "stdio",
+      },
+    },
   });
-
-  assert.equal(outcome.exitCode, 0);
-  const first = outcome.manifest.attemptRecords[0];
-  assert.equal(first.invalidStatuses.length, 1);
-  assert.equal(first.invalidStatuses[0].taskId, "t1");
-  assert.equal(first.invalidStatuses[0].rawValue, "done");
-
-  const second = outcome.manifest.attemptRecords[1];
-  assert.equal(second.invalidStatuses.length, 0);
+  assert.deepEqual(onDisk.resetSeed.backendSpecific, onDisk.backendSpecific);
 });

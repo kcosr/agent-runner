@@ -1,12 +1,10 @@
 import { z } from "zod";
-import { BACKEND_IDS } from "../backends/types.js";
-
-export const TASK_MODES = ["file", "cli"] as const;
-export type TaskMode = (typeof TASK_MODES)[number];
-
-export function normalizeTaskMode(taskMode: TaskMode | undefined | null): TaskMode {
-  return taskMode === "cli" ? "cli" : "file";
-}
+import {
+  BACKEND_IDS,
+  type BackendSpecificConfig,
+  type CodexTransportConfig,
+  isWsOrWssUrl,
+} from "../backends/types.js";
 
 export const taskDefSchema = z.object({
   id: z
@@ -77,7 +75,6 @@ export const LOCKABLE_FIELDS = [
   "backend",
   "model",
   "effort",
-  "taskMode",
   "instructions",
   "message",
   "timeoutSec",
@@ -87,6 +84,35 @@ export const LOCKABLE_FIELDS = [
 ] as const;
 
 export type LockableField = (typeof LOCKABLE_FIELDS)[number];
+
+export const codexTransportConfigSchema: z.ZodType<CodexTransportConfig> = z.union([
+  z
+    .object({
+      type: z.literal("stdio"),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("ws"),
+      url: z
+        .string()
+        .trim()
+        .min(1)
+        .refine(isWsOrWssUrl, "url must be an absolute ws:// or wss:// URL"),
+    })
+    .strict(),
+]);
+
+export const backendSpecificConfigSchema: z.ZodType<BackendSpecificConfig> = z
+  .object({
+    codex: z
+      .object({
+        transport: codexTransportConfigSchema.optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Agent schema — identity, backend config, role instructions, locks.
@@ -99,9 +125,9 @@ export const agentConfigSchema = z.object({
   backend: z.enum(BACKEND_IDS),
   model: z.string().optional(),
   effort: z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]).optional(),
+  backendSpecific: backendSpecificConfigSchema.optional(),
   timeoutSec: z.number().int().positive().default(3600),
   unrestricted: z.boolean().default(false),
-  cwd: z.string().default("."),
   lockedFields: z.array(z.enum(LOCKABLE_FIELDS)).default([]),
 });
 
@@ -117,7 +143,7 @@ export const assignmentConfigSchema = z
   .object({
     schemaVersion: z.literal(1),
     name: z.string().min(1),
-    taskMode: z.enum(TASK_MODES).default("file"),
+    cwd: z.string().trim().min(1).optional(),
     message: z.string().optional(),
     maxRetries: z.number().int().min(0).max(20).default(3),
     // Documentation surface for the human / script invoking
@@ -125,6 +151,7 @@ export const assignmentConfigSchema = z
     // Printed to stderr on fresh `run` and `init` (never on
     // --resume-run). Interpolated against runtime vars and the
     // runner-injected vars ({{run_id}}, {{assignment_path}},
+    // {{assignment_name}}, {{config_dir}}, {{state_dir}},
     // {{task_runner_cmd}}, etc.).
     // Frozen into `manifest.callerInstructions` at first write so
     // `status --output-format json --field callerInstructions` can

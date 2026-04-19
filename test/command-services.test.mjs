@@ -1,9 +1,20 @@
 import { strict as assert } from "node:assert";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { WebSocketServer } from "ws";
+import { getRunTimelineHistory } from "../packages/core/dist/app/service.js";
+import { encodePiSessionDir } from "../packages/core/dist/backends/pi.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import {
   CommandError,
@@ -12,6 +23,7 @@ import {
   addTask,
   appendTaskNotes,
   archiveRun,
+  clearRunBackendSession,
   clearRunDependencies,
   downloadAttachment,
   listAttachments,
@@ -21,7 +33,10 @@ import {
   readStatus,
   removeAttachment,
   removeRunDependency,
+  setRunBackendSession,
   setRunName,
+  setRunNote,
+  setRunPinned,
   setTask,
   showDefinition,
   showTask,
@@ -37,6 +52,14 @@ backend: claude
 model: claude-sonnet-4-6
 ---
 Service test agent.
+`;
+
+const PASSIVE_AGENT = `---
+schemaVersion: 1
+name: svc-passive-agent
+backend: passive
+---
+Passive service test agent.
 `;
 
 const ASSIGNMENT = `---
@@ -71,6 +94,57 @@ function tempDir() {
   return mkdtempSync(join(tmpdir(), "task-runner-command-services-"));
 }
 
+function writeFakePiRenameAgent(baseDir) {
+  const path = join(baseDir, "fake-pi-rename.mjs");
+  writeFileSync(
+    path,
+    `#!/usr/bin/env node
+import { appendFileSync } from "node:fs";
+import { createInterface } from "node:readline";
+
+const args = process.argv.slice(2);
+const sessionFlagIndex = args.indexOf("--session");
+const sessionPath = sessionFlagIndex >= 0 ? args[sessionFlagIndex + 1] : null;
+
+function send(message) {
+  process.stdout.write(JSON.stringify(message) + "\\n");
+}
+
+const rl = createInterface({ input: process.stdin });
+rl.on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.type !== "set_session_name") {
+    return;
+  }
+  if (sessionPath) {
+    appendFileSync(
+      sessionPath,
+      JSON.stringify({
+        type: "session_info",
+        id: "session-info-1",
+        parentId: null,
+        timestamp: "2026-04-17T12:02:00.000Z",
+        name: message.name,
+      }) + "\\n",
+    );
+  }
+  send({
+    id: message.id,
+    type: "response",
+    command: "set_session_name",
+    success: true,
+  });
+});
+
+rl.on("close", () => {
+  process.exit(0);
+});
+`,
+  );
+  chmodSync(path, 0o755);
+  return path;
+}
+
 function writeAgent(baseDir, name, body) {
   const dir = join(baseDir, "agents", name);
   mkdirSync(dir, { recursive: true });
@@ -85,6 +159,7 @@ function writeAssignment(baseDir, name, body) {
 
 function writeBundle(baseDir, assignmentBody = ASSIGNMENT, assignmentName = "svc-work") {
   writeAgent(baseDir, "svc-agent", AGENT);
+  writeAgent(baseDir, "svc-passive-agent", PASSIVE_AGENT);
   writeAssignment(baseDir, assignmentName, assignmentBody);
 }
 
@@ -99,22 +174,24 @@ function patchManifest(workspaceDir, mutator) {
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
-function editTaskStatus(content, taskId, status) {
-  const marker = `<!-- task-id: ${taskId} -->`;
-  const start = content.indexOf(marker);
-  const nextMarker = content.indexOf("<!-- task-id:", start + marker.length);
-  const end = nextMarker < 0 ? content.length : nextMarker;
-  const section = content.slice(start, end);
-  return (
-    content.slice(0, start) +
-    section.replace(/\*\*Status:\*\*\s*\S+/, `**Status:** ${status}`) +
-    content.slice(end)
-  );
+function moveRunToRepoBucket(baseDir, workspaceDir, repo) {
+  const nextWorkspaceDir = join(baseDir, "runs", repo, readManifest(workspaceDir).runId);
+  mkdirSync(join(baseDir, "runs", repo), { recursive: true });
+  renameSync(workspaceDir, nextWorkspaceDir);
+  patchManifest(nextWorkspaceDir, (manifest) => {
+    manifest.repo = repo;
+    manifest.workspaceDir = nextWorkspaceDir;
+    manifest.assignmentPath = join(nextWorkspaceDir, "assignment.md");
+    if (manifest.assignment) {
+      manifest.assignment.workspacePath = join(nextWorkspaceDir, "assignment.md");
+    }
+  });
+  return nextWorkspaceDir;
 }
 
-async function initRun(baseDir, assignmentName = "svc-work") {
+async function initRun(baseDir, assignmentName = "svc-work", agentName = "svc-agent") {
   return withSharedRuntimeEnv(baseDir, async () => {
-    const loaded = loadAgentConfig("svc-agent", baseDir);
+    const loaded = loadAgentConfig(agentName, baseDir);
     const loadedAssignment = loadAssignmentConfig(assignmentName, baseDir);
     const originalCwd = process.cwd();
     process.chdir(baseDir);
@@ -124,7 +201,7 @@ async function initRun(baseDir, assignmentName = "svc-work") {
         loadedAssignment,
         cliVars: {},
         backend: {
-          id: "mock",
+          id: loaded.config.backend,
           async invoke() {
             throw new Error("backend should not be invoked during init");
           },
@@ -136,6 +213,135 @@ async function initRun(baseDir, assignmentName = "svc-work") {
     }
   });
 }
+
+test("command services: passive backend session mutations update only metadata and reject non-passive runs", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const passiveRun = await initRun(dir, "svc-work", "svc-passive-agent");
+  const nonPassiveRun = await initRun(dir);
+
+  patchManifest(passiveRun.workspaceDir, (manifest) => {
+    manifest.status = "success";
+    manifest.archivedAt = "2026-04-17T10:00:00.000Z";
+    manifest.endedAt = "2026-04-17T09:59:00.000Z";
+    manifest.exitCode = 0;
+    manifest.attempts = 2;
+    manifest.sessionCount = 1;
+    manifest.backendSessionId = "thread-original";
+    manifest.sessions = [
+      {
+        sessionIndex: 0,
+        startedAt: "2026-04-17T09:00:00.000Z",
+        endedAt: "2026-04-17T09:30:00.000Z",
+        status: "success",
+        exitCode: 0,
+        message: "seed message",
+        brief: "seed brief",
+        firstAttempt: 1,
+        lastAttempt: 2,
+        maxAttempts: 3,
+        backendSessionIdAtStart: null,
+        backendSessionIdAtEnd: "thread-original",
+      },
+    ];
+    manifest.attemptRecords = [
+      {
+        attempt: 1,
+        sessionIndex: 0,
+        startedAt: "2026-04-17T09:00:00.000Z",
+        endedAt: "2026-04-17T09:10:00.000Z",
+        prompt: "prompt 1",
+        sessionIdAtStart: null,
+        sessionIdCaptured: "thread-original",
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        transcript: "transcript 1",
+        logPath: "attempts/01.json",
+        tasksAfter: manifest.finalTasks,
+        invalidStatuses: [],
+      },
+    ];
+  });
+
+  const before = readManifest(passiveRun.workspaceDir);
+  const preservedBefore = {
+    status: before.status,
+    archivedAt: before.archivedAt,
+    endedAt: before.endedAt,
+    exitCode: before.exitCode,
+    attempts: before.attempts,
+    sessionCount: before.sessionCount,
+    sessions: before.sessions,
+    attemptRecords: before.attemptRecords,
+    finalTasks: before.finalTasks,
+    tasksCompleted: before.tasksCompleted,
+    tasksTotal: before.tasksTotal,
+    resetSeed: before.resetSeed,
+  };
+
+  await withSharedRuntimeEnv(dir, async () => {
+    assert.deepEqual(setRunBackendSession(passiveRun.runId, { backendSessionId: "thread-42" }), {
+      runId: passiveRun.runId,
+      backendSessionId: "thread-42",
+      changed: true,
+    });
+    assert.deepEqual(setRunBackendSession(passiveRun.runId, { backendSessionId: " thread-42 " }), {
+      runId: passiveRun.runId,
+      backendSessionId: "thread-42",
+      changed: false,
+    });
+    assert.deepEqual(clearRunBackendSession(passiveRun.runId), {
+      runId: passiveRun.runId,
+      backendSessionId: null,
+      changed: true,
+    });
+    assert.deepEqual(clearRunBackendSession(passiveRun.runId), {
+      runId: passiveRun.runId,
+      backendSessionId: null,
+      changed: false,
+    });
+
+    assert.throws(
+      () => setRunBackendSession(nonPassiveRun.runId, { backendSessionId: "thread-9" }),
+      (err) =>
+        err instanceof CommandError &&
+        /post-creation backend session mutation is only allowed for passive runs/.test(err.message),
+    );
+    assert.throws(
+      () => clearRunBackendSession(nonPassiveRun.runId),
+      (err) =>
+        err instanceof CommandError &&
+        /post-creation backend session mutation is only allowed for passive runs/.test(err.message),
+    );
+    assert.throws(
+      () => setRunBackendSession(passiveRun.runId, { backendSessionId: "   " }),
+      (err) =>
+        err instanceof CommandError &&
+        /run set-backend-session: <session-id> cannot be empty/.test(err.message),
+    );
+  });
+
+  const after = readManifest(passiveRun.workspaceDir);
+  assert.equal(after.backendSessionId, null);
+  assert.deepEqual(
+    {
+      status: after.status,
+      archivedAt: after.archivedAt,
+      endedAt: after.endedAt,
+      exitCode: after.exitCode,
+      attempts: after.attempts,
+      sessionCount: after.sessionCount,
+      sessions: after.sessions,
+      attemptRecords: after.attemptRecords,
+      finalTasks: after.finalTasks,
+      tasksCompleted: after.tasksCompleted,
+      tasksTotal: after.tasksTotal,
+      resetSeed: after.resetSeed,
+    },
+    preservedBefore,
+  );
+});
 
 async function startCodexRenameServer(options = {}) {
   const renameCalls = [];
@@ -192,6 +398,81 @@ async function startCodexRenameServer(options = {}) {
   };
 }
 
+test("command services: getRunTimelineHistory degrades missing, corrupt, or escaping attempt logs", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+  const attemptsDir = join(outcome.workspaceDir, "attempts");
+  mkdirSync(attemptsDir, { recursive: true });
+  writeFileSync(join(attemptsDir, "02.json"), "{\n");
+
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.attemptRecords = [
+      {
+        attempt: 1,
+        sessionIndex: 0,
+        startedAt: "2026-04-15T01:00:00.000Z",
+        endedAt: "2026-04-15T01:01:00.000Z",
+        prompt: "Attempt one",
+        sessionIdAtStart: null,
+        sessionIdCaptured: null,
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        transcript: "First output",
+        logPath: "attempts/01.json",
+        tasksAfter: manifest.finalTasks,
+        invalidStatuses: [],
+      },
+      {
+        attempt: 2,
+        sessionIndex: 0,
+        startedAt: "2026-04-15T01:02:00.000Z",
+        endedAt: "2026-04-15T01:03:00.000Z",
+        prompt: "Attempt two",
+        sessionIdAtStart: null,
+        sessionIdCaptured: null,
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        transcript: "Second output",
+        logPath: "attempts/02.json",
+        tasksAfter: manifest.finalTasks,
+        invalidStatuses: [],
+      },
+      {
+        attempt: 3,
+        sessionIndex: 0,
+        startedAt: "2026-04-15T01:04:00.000Z",
+        endedAt: "2026-04-15T01:05:00.000Z",
+        prompt: "Attempt three",
+        sessionIdAtStart: null,
+        sessionIdCaptured: null,
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        transcript: "Third output",
+        logPath: "../outside.json",
+        tasksAfter: manifest.finalTasks,
+        invalidStatuses: [],
+      },
+    ];
+    manifest.attempts = manifest.attemptRecords.length;
+  });
+
+  await withSharedRuntimeEnv(dir, async () => {
+    const history = getRunTimelineHistory(outcome.runId);
+    assert.equal(history.runId, outcome.runId);
+    assert.equal(history.attempts.length, 3);
+    assert.equal(history.attempts[0]?.transcript, "First output");
+    assert.equal(history.attempts[0]?.notices, "");
+    assert.equal(history.attempts[1]?.transcript, "Second output");
+    assert.equal(history.attempts[1]?.notices, "");
+    assert.equal(history.attempts[2]?.transcript, "Third output");
+    assert.equal(history.attempts[2]?.notices, "");
+  });
+});
+
 test("command services: listDefinitions and showDefinition return typed config results", async () => {
   const dir = tempDir();
   writeBundle(dir);
@@ -211,7 +492,7 @@ test("command services: listDefinitions and showDefinition return typed config r
   });
 });
 
-test("command services: readStatus applies the live workspace overlay for running file-mode runs", async () => {
+test("command services: readStatus reads canonical task state for running runs", async () => {
   const dir = tempDir();
   writeBundle(dir);
   const outcome = await initRun(dir);
@@ -224,34 +505,80 @@ test("command services: readStatus applies the live workspace overlay for runnin
     manifest.finalTasks.t2.status = "pending";
     manifest.tasksCompleted = 0;
   });
-
-  let assignmentText = readFileSync(outcome.assignmentPath, "utf8");
-  assignmentText = editTaskStatus(assignmentText, "t1", "completed");
-  assignmentText = editTaskStatus(assignmentText, "t2", "in_progress");
-  writeFileSync(outcome.assignmentPath, assignmentText);
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.finalTasks.t1.status = "completed";
+    manifest.finalTasks.t2.status = "in_progress";
+    manifest.tasksCompleted = 1;
+  });
 
   await withSharedRuntimeEnv(dir, async () => {
     const result = readStatus(outcome.runId);
-    assert.equal(result.isLive, true);
+    assert.equal(result.isLive, false);
     assert.equal(result.tasks[0].status, "completed");
     assert.equal(result.tasks[1].status, "in_progress");
     assert.equal(result.tasksCompleted, 1);
     assert.deepEqual(result.capabilities, {
       canArchive: false,
       canUnarchive: false,
+      canReset: false,
+      canDelete: false,
       canResume: false,
       canAbort: false,
       abortReason: "not_active_in_daemon",
       taskMutation: {
-        canSetStatus: false,
-        canEditNotes: false,
+        canSetStatus: true,
+        canEditNotes: true,
         canAdd: false,
       },
     });
   });
 });
 
-test("command services: listRuns applies the live workspace overlay for running file-mode summaries", async () => {
+test("command services: readStatus and timeline history resolve bare run ids across repo buckets", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+  const relocatedWorkspaceDir = moveRunToRepoBucket(dir, outcome.workspaceDir, "assistant");
+
+  patchManifest(relocatedWorkspaceDir, (manifest) => {
+    manifest.status = "running";
+    manifest.exitCode = null;
+    manifest.endedAt = null;
+    manifest.attemptRecords = [
+      {
+        attempt: 1,
+        sessionIndex: 0,
+        startedAt: "2026-04-15T01:00:00.000Z",
+        endedAt: "2026-04-15T01:01:00.000Z",
+        prompt: "Attempt one",
+        sessionIdAtStart: null,
+        sessionIdCaptured: null,
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        transcript: "First output",
+        logPath: "attempts/01.json",
+        tasksAfter: manifest.finalTasks,
+        invalidStatuses: [],
+      },
+    ];
+    manifest.attempts = 1;
+  });
+
+  await withSharedRuntimeEnv(dir, async () => {
+    const status = readStatus(outcome.runId);
+    const history = getRunTimelineHistory(outcome.runId);
+
+    assert.equal(status.runId, outcome.runId);
+    assert.equal(status.repo, "assistant");
+    assert.equal(status.workspaceDir, relocatedWorkspaceDir);
+    assert.equal(history.runId, outcome.runId);
+    assert.equal(history.attempts.length, 1);
+    assert.equal(history.attempts[0]?.transcript, "First output");
+  });
+});
+
+test("command services: listRuns reflects canonical task state for running summaries", async () => {
   const dir = tempDir();
   writeBundle(dir);
   const outcome = await initRun(dir);
@@ -264,11 +591,11 @@ test("command services: listRuns applies the live workspace overlay for running 
     manifest.finalTasks.t2.status = "pending";
     manifest.tasksCompleted = 0;
   });
-
-  let assignmentText = readFileSync(outcome.assignmentPath, "utf8");
-  assignmentText = editTaskStatus(assignmentText, "t1", "completed");
-  assignmentText = editTaskStatus(assignmentText, "t2", "in_progress");
-  writeFileSync(outcome.assignmentPath, assignmentText);
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.finalTasks.t1.status = "completed";
+    manifest.finalTasks.t2.status = "in_progress";
+    manifest.tasksCompleted = 1;
+  });
 
   await withSharedRuntimeEnv(dir, async () => {
     const run = listRuns({ includeArchived: true }).find((entry) => entry.runId === outcome.runId);
@@ -286,7 +613,7 @@ test("command services: listRuns applies the live workspace overlay for running 
   });
 });
 
-test("command services: listRuns keeps persisted progress for terminal and non-file-mode runs", async () => {
+test("command services: listRuns keeps persisted progress for terminal and running runs", async () => {
   const dir = tempDir();
   writeBundle(dir);
   const terminal = await initRun(dir);
@@ -302,18 +629,10 @@ test("command services: listRuns keeps persisted progress for terminal and non-f
     manifest.status = "running";
     manifest.exitCode = null;
     manifest.endedAt = null;
-    manifest.taskMode = "cli";
     manifest.finalTasks.t1.status = "pending";
     manifest.finalTasks.t2.status = "pending";
     manifest.tasksCompleted = 0;
   });
-
-  for (const outcome of [terminal, nonFile]) {
-    let assignmentText = readFileSync(outcome.assignmentPath, "utf8");
-    assignmentText = editTaskStatus(assignmentText, "t1", "completed");
-    assignmentText = editTaskStatus(assignmentText, "t2", "in_progress");
-    writeFileSync(outcome.assignmentPath, assignmentText);
-  }
 
   await withSharedRuntimeEnv(dir, async () => {
     const runs = listRuns({ includeArchived: true });
@@ -327,7 +646,7 @@ test("command services: listRuns keeps persisted progress for terminal and non-f
   });
 });
 
-test("command services: listRuns falls back to persisted progress when live assignment reads fail", async () => {
+test("command services: listRuns tolerates missing workspace assignment artifacts", async () => {
   const dir = tempDir();
   writeBundle(dir);
   const outcome = await initRun(dir);
@@ -340,7 +659,7 @@ test("command services: listRuns falls back to persisted progress when live assi
     manifest.finalTasks.t2.status = "pending";
     manifest.tasksCompleted = 0;
   });
-  rmSync(outcome.assignmentPath);
+  assert.equal(existsSync(outcome.assignmentPath), false);
 
   await withSharedRuntimeEnv(dir, async () => {
     const run = listRuns({ includeArchived: true }).find((entry) => entry.runId === outcome.runId);
@@ -544,11 +863,13 @@ test("command services: locked task lists reject addTask with CommandError", asy
   });
 });
 
-test("command services: listRuns returns newest-first rows and filters archived unless requested", async () => {
+test("command services: listRuns supports exact cwd scope, repo scope, and unscoped newest-first results", async () => {
   const dir = tempDir();
   writeBundle(dir);
   const first = await initRun(dir);
   const second = await initRun(dir);
+  const otherCwd = join(dir, "other-cwd");
+  mkdirSync(otherCwd, { recursive: true });
 
   patchManifest(first.workspaceDir, (manifest) => {
     manifest.startedAt = "2026-04-12T10:00:00.000Z";
@@ -556,12 +877,15 @@ test("command services: listRuns returns newest-first rows and filters archived 
   });
   patchManifest(second.workspaceDir, (manifest) => {
     manifest.startedAt = "2026-04-12T11:00:00.000Z";
+    manifest.cwd = otherCwd;
   });
 
   const otherWorkspaceDir = join(dir, "runs", "other-repo", "oth123");
   mkdirSync(otherWorkspaceDir, { recursive: true });
   const otherManifest = readManifest(second.workspaceDir);
   otherManifest.runId = "oth123";
+  otherManifest.repo = "other-repo";
+  otherManifest.cwd = join(dir, "other-repo-cwd");
   otherManifest.workspaceDir = otherWorkspaceDir;
   otherManifest.assignmentPath = join(otherWorkspaceDir, "assignment.md");
   otherManifest.startedAt = "2026-04-12T09:00:00.000Z";
@@ -573,13 +897,47 @@ test("command services: listRuns returns newest-first rows and filters archived 
   writeFileSync(join(dir, "runs", "broken-repo", "bad999", "run.json"), "{not json\n");
 
   await withSharedRuntimeEnv(dir, async () => {
-    const visible = listRuns();
+    const visible = listRuns({
+      includeArchived: true,
+      scope: {
+        kind: "cwd",
+        cwd: dir,
+      },
+    });
     assert.deepEqual(
       visible.map((run) => run.runId),
+      [first.runId],
+    );
+
+    const exactOtherCwd = listRuns({
+      scope: {
+        kind: "cwd",
+        cwd: otherCwd,
+      },
+    });
+    assert.deepEqual(
+      exactOtherCwd.map((run) => run.runId),
+      [second.runId],
+    );
+
+    const repoScoped = listRuns({
+      scope: {
+        kind: "repo",
+        repo: "other-repo",
+      },
+    });
+    assert.deepEqual(
+      repoScoped.map((run) => run.runId),
+      ["oth123"],
+    );
+
+    const globalVisible = listRuns();
+    assert.deepEqual(
+      globalVisible.map((run) => run.runId),
       [second.runId, "oth123"],
     );
-    assert.equal(visible[0].repo, "unknown");
-    assert.equal(visible[1].repo, "other-repo");
+    assert.equal(globalVisible[0].repo, "unknown");
+    assert.equal(globalVisible[1].repo, "other-repo");
 
     const allRuns = listRuns({ includeArchived: true });
     assert.deepEqual(
@@ -590,6 +948,8 @@ test("command services: listRuns returns newest-first rows and filters archived 
     assert.deepEqual(allRuns[0].capabilities, {
       canArchive: true,
       canUnarchive: false,
+      canReset: true,
+      canDelete: false,
       canResume: true,
       canAbort: false,
       abortReason: "not_active_in_daemon",
@@ -608,6 +968,8 @@ test("command services: listRuns returns newest-first rows and filters archived 
     assert.deepEqual(allRuns[1].capabilities, {
       canArchive: false,
       canUnarchive: true,
+      canReset: true,
+      canDelete: true,
       canResume: false,
       canAbort: false,
       abortReason: "not_active_in_daemon",
@@ -654,6 +1016,7 @@ test("command services: archived runs allow attachment add/list/download/remove 
     const listed = listAttachments(outcome.runId);
     assert.equal(listed.attachments.length, 1);
     assert.equal(listed.attachments[0].id, added.attachment.id);
+    assert.equal(listed.attachments[0].ownerRunId, outcome.runId);
 
     const downloaded = downloadAttachment(outcome.runId, added.attachment.id, downloadsDir);
     assert.equal(readFileSync(downloaded.outputPath, "utf8"), "hello attachments\n");
@@ -666,6 +1029,47 @@ test("command services: archived runs allow attachment add/list/download/remove 
   });
 });
 
+test("command services: attachment list cwd scope includes exact same-cwd peers only", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const target = await initRun(dir);
+  const peer = await initRun(dir);
+  const different = await initRun(dir);
+  const targetFile = join(dir, "target.txt");
+  const peerFile = join(dir, "peer.txt");
+  const differentFile = join(dir, "different.txt");
+  writeFileSync(targetFile, "target\n");
+  writeFileSync(peerFile, "peer\n");
+  writeFileSync(differentFile, "different\n");
+
+  patchManifest(different.workspaceDir, (manifest) => {
+    manifest.cwd = join(dir, "other-cwd");
+  });
+
+  await withSharedRuntimeEnv(dir, async () => {
+    await addAttachmentFromFile(target.runId, { sourcePath: targetFile });
+    await addAttachmentFromFile(peer.runId, { sourcePath: peerFile });
+    await addAttachmentFromFile(different.runId, { sourcePath: differentFile });
+
+    const runOnly = listAttachments(target.runId);
+    assert.deepEqual(
+      runOnly.attachments.map((attachment) => attachment.ownerRunId),
+      [target.runId],
+    );
+
+    const scoped = listAttachments(target.runId, { cwdScope: true });
+    assert.equal(scoped.attachments.length, 2);
+    assert.deepEqual(
+      new Set(scoped.attachments.map((attachment) => attachment.ownerRunId)),
+      new Set([target.runId, peer.runId]),
+    );
+    assert.equal(
+      scoped.attachments.some((attachment) => attachment.ownerRunId === different.runId),
+      false,
+    );
+  });
+});
+
 test("command services: setRunName propagates codex thread rename and clear values", async () => {
   const dir = tempDir();
   writeBundle(dir);
@@ -675,25 +1079,31 @@ test("command services: setRunName propagates codex thread rename and clear valu
   patchManifest(outcome.workspaceDir, (manifest) => {
     manifest.backend = "codex";
     manifest.backendSessionId = "thr_rename";
+    manifest.backendSpecific = {
+      codex: {
+        transport: {
+          type: "ws",
+          url: codexServer.url,
+        },
+      },
+    };
     manifest.cwd = dir;
   });
 
   try {
     await withSharedRuntimeEnv(dir, async () => {
-      await withEnv({ TASK_RUNNER_CODEX_WS_URL: codexServer.url }, async () => {
-        const renamed = await setRunName(outcome.runId, { name: "  Codex rename  " });
-        assert.deepEqual(renamed, {
-          runId: outcome.runId,
-          name: "Codex rename",
-          changed: true,
-        });
+      const renamed = await setRunName(outcome.runId, { name: "  Codex rename  " });
+      assert.deepEqual(renamed, {
+        runId: outcome.runId,
+        name: "Codex rename",
+        changed: true,
+      });
 
-        const cleared = await setRunName(outcome.runId, { name: null });
-        assert.deepEqual(cleared, {
-          runId: outcome.runId,
-          name: null,
-          changed: true,
-        });
+      const cleared = await setRunName(outcome.runId, { name: null });
+      assert.deepEqual(cleared, {
+        runId: outcome.runId,
+        name: null,
+        changed: true,
       });
     });
 
@@ -706,6 +1116,55 @@ test("command services: setRunName propagates codex thread rename and clear valu
   }
 });
 
+test("command services: setRunNote and setRunPinned are idempotent and preserve reset seed metadata", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+
+  await withSharedRuntimeEnv(dir, async () => {
+    const noted = setRunNote(outcome.runId, { note: "# Follow-up\n\nKeep the review sharp." });
+    assert.deepEqual(noted, {
+      runId: outcome.runId,
+      note: "# Follow-up\n\nKeep the review sharp.",
+      changed: true,
+    });
+
+    const notedAgain = setRunNote(outcome.runId, { note: "# Follow-up\n\nKeep the review sharp." });
+    assert.deepEqual(notedAgain, {
+      runId: outcome.runId,
+      note: "# Follow-up\n\nKeep the review sharp.",
+      changed: false,
+    });
+
+    const pinned = setRunPinned(outcome.runId, { pinned: true });
+    assert.deepEqual(pinned, {
+      runId: outcome.runId,
+      pinned: true,
+      changed: true,
+    });
+
+    const pinnedAgain = setRunPinned(outcome.runId, { pinned: true });
+    assert.deepEqual(pinnedAgain, {
+      runId: outcome.runId,
+      pinned: true,
+      changed: false,
+    });
+
+    const cleared = setRunNote(outcome.runId, { note: "   " });
+    assert.deepEqual(cleared, {
+      runId: outcome.runId,
+      note: null,
+      changed: true,
+    });
+  });
+
+  const manifest = readManifest(outcome.workspaceDir);
+  assert.equal(manifest.note, null);
+  assert.equal(manifest.resetSeed.note, null);
+  assert.equal(manifest.pinned, true);
+  assert.equal(manifest.resetSeed.pinned, true);
+});
+
 test("command services: setRunName keeps manifest update when codex propagation fails", async () => {
   const dir = tempDir();
   writeBundle(dir);
@@ -715,18 +1174,24 @@ test("command services: setRunName keeps manifest update when codex propagation 
   patchManifest(outcome.workspaceDir, (manifest) => {
     manifest.backend = "codex";
     manifest.backendSessionId = "thr_rename";
+    manifest.backendSpecific = {
+      codex: {
+        transport: {
+          type: "ws",
+          url: codexServer.url,
+        },
+      },
+    };
     manifest.cwd = dir;
   });
 
   try {
     await withSharedRuntimeEnv(dir, async () => {
-      await withEnv({ TASK_RUNNER_CODEX_WS_URL: codexServer.url }, async () => {
-        const renamed = await setRunName(outcome.runId, { name: "Still persisted" });
-        assert.deepEqual(renamed, {
-          runId: outcome.runId,
-          name: "Still persisted",
-          changed: true,
-        });
+      const renamed = await setRunName(outcome.runId, { name: "Still persisted" });
+      assert.deepEqual(renamed, {
+        runId: outcome.runId,
+        name: "Still persisted",
+        changed: true,
       });
     });
 
@@ -750,26 +1215,32 @@ test("command services: setRunName does not hang on codex post-open transport er
   patchManifest(outcome.workspaceDir, (manifest) => {
     manifest.backend = "codex";
     manifest.backendSessionId = "thr_rename";
+    manifest.backendSpecific = {
+      codex: {
+        transport: {
+          type: "ws",
+          url: codexServer.url,
+        },
+      },
+    };
     manifest.cwd = dir;
   });
 
   try {
     await withSharedRuntimeEnv(dir, async () => {
-      await withEnv({ TASK_RUNNER_CODEX_WS_URL: codexServer.url }, async () => {
-        const renamed = await Promise.race([
-          setRunName(outcome.runId, { name: "Post-open failure" }),
-          new Promise((_, reject) =>
-            setTimeout(
-              () => reject(new Error("setRunName timed out after codex transport error")),
-              2_000,
-            ),
+      const renamed = await Promise.race([
+        setRunName(outcome.runId, { name: "Post-open failure" }),
+        new Promise((_, reject) =>
+          setTimeout(
+            () => reject(new Error("setRunName timed out after codex transport error")),
+            2_000,
           ),
-        ]);
-        assert.deepEqual(renamed, {
-          runId: outcome.runId,
-          name: "Post-open failure",
-          changed: true,
-        });
+        ),
+      ]);
+      assert.deepEqual(renamed, {
+        runId: outcome.runId,
+        name: "Post-open failure",
+        changed: true,
       });
     });
 
@@ -782,6 +1253,62 @@ test("command services: setRunName does not hang on codex post-open transport er
   } finally {
     await codexServer.close();
   }
+});
+
+test("command services: setRunName propagates pi session renames into the session file", async () => {
+  const dir = tempDir();
+  const piHome = join(dir, ".pi-home");
+  const sessionId = "pi-session-rename";
+  const command = writeFakePiRenameAgent(dir);
+  const bucketDir = join(piHome, "agent", "sessions", encodePiSessionDir(dir));
+  mkdirSync(bucketDir, { recursive: true });
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+  const sessionPath = join(bucketDir, `2026-04-17T12-00-00-000Z_${sessionId}.jsonl`);
+  writeFileSync(
+    sessionPath,
+    `${JSON.stringify({
+      type: "session",
+      version: 3,
+      id: sessionId,
+      timestamp: "2026-04-17T12:00:00.000Z",
+      cwd: dir,
+    })}\n${JSON.stringify({
+      type: "message",
+      id: "assistant-msg-1",
+      parentId: null,
+      timestamp: "2026-04-17T12:01:00.000Z",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "Existing answer" }],
+      },
+    })}\n`,
+  );
+
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.backend = "pi";
+    manifest.backendSessionId = sessionId;
+    manifest.cwd = dir;
+  });
+
+  await withEnv({ PI_HOME: piHome, TASK_RUNNER_PI_BIN: command }, () =>
+    withSharedRuntimeEnv(dir, async () => {
+      const renamed = await setRunName(outcome.runId, { name: "  Pi rename  " });
+      assert.deepEqual(renamed, {
+        runId: outcome.runId,
+        name: "Pi rename",
+        changed: true,
+      });
+    }),
+  );
+
+  const sessionLines = readFileSync(sessionPath, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  const infoEntry = sessionLines.find((entry) => entry.type === "session_info");
+  assert.ok(infoEntry);
+  assert.equal(infoEntry.name, "Pi rename");
 });
 
 test("command services: archiveRun and unarchiveRun are idempotent and reject running runs", async () => {

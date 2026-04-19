@@ -1,21 +1,33 @@
 import type { AppRuntimeConfig } from "@task-runner/core/contracts/app-config.js";
 import type {
+  AttachmentListEntry,
   RunAttachment,
   RunAttachmentRemoveResult,
 } from "@task-runner/core/contracts/attachments.js";
+import type { RunTimelineHistory } from "@task-runner/core/contracts/events.js";
 import {
+  attachmentListEntrySchema,
   runArchiveResultSchema,
   runAttachmentSchema,
+  runBackendSessionResultSchema,
+  runDeleteResultSchema,
   runDependenciesResultSchema,
   runDetailSchema,
   runNameResultSchema,
+  runNoteResultSchema,
+  runPinnedResultSchema,
   runSummarySchema,
+  runTimelineHistorySchema,
 } from "@task-runner/core/contracts/run-schemas.js";
 import type {
   RunArchiveResult,
+  RunBackendSessionResult,
+  RunDeleteResult,
   RunDependenciesResult,
   RunDetail,
   RunNameResult,
+  RunNoteResult,
+  RunPinnedResult,
   RunSummary,
 } from "@task-runner/core/contracts/runs.js";
 import { z } from "zod";
@@ -30,6 +42,15 @@ export class ApiError extends Error {
     super(message);
     this.name = "ApiError";
   }
+}
+
+export interface AttachmentContentResult {
+  mediaType: string | null;
+  text: string;
+}
+
+interface RequestOptions {
+  signal?: AbortSignal;
 }
 
 interface ErrorEnvelope {
@@ -126,6 +147,19 @@ async function readRun(response: Response): Promise<RunDetail> {
   );
 }
 
+async function readRunTimelineHistory(response: Response): Promise<RunTimelineHistory> {
+  if (!response.ok) {
+    return await readError(response);
+  }
+  return parseField(
+    await parseResponseJson(response, "Run timeline history"),
+    response.status,
+    "history",
+    runTimelineHistorySchema,
+    "Run timeline history",
+  );
+}
+
 async function readArchiveResult(response: Response, label: string): Promise<RunArchiveResult> {
   if (!response.ok) {
     return await readError(response);
@@ -152,6 +186,61 @@ async function readNameResult(response: Response, label: string): Promise<RunNam
   );
 }
 
+async function readNoteResult(response: Response, label: string): Promise<RunNoteResult> {
+  if (!response.ok) {
+    return await readError(response);
+  }
+  return parseField(
+    await parseResponseJson(response, label),
+    response.status,
+    "result",
+    runNoteResultSchema,
+    label,
+  );
+}
+
+async function readPinnedResult(response: Response, label: string): Promise<RunPinnedResult> {
+  if (!response.ok) {
+    return await readError(response);
+  }
+  return parseField(
+    await parseResponseJson(response, label),
+    response.status,
+    "result",
+    runPinnedResultSchema,
+    label,
+  );
+}
+
+async function readBackendSessionResult(
+  response: Response,
+  label: string,
+): Promise<RunBackendSessionResult> {
+  if (!response.ok) {
+    return await readError(response);
+  }
+  return parseField(
+    await parseResponseJson(response, label),
+    response.status,
+    "result",
+    runBackendSessionResultSchema,
+    label,
+  );
+}
+
+async function readDeleteResult(response: Response, label: string): Promise<RunDeleteResult> {
+  if (!response.ok) {
+    return await readError(response);
+  }
+  return parseField(
+    await parseResponseJson(response, label),
+    response.status,
+    "result",
+    runDeleteResultSchema,
+    label,
+  );
+}
+
 async function readDependenciesResult(
   response: Response,
   label: string,
@@ -168,7 +257,7 @@ async function readDependenciesResult(
   );
 }
 
-async function readAttachmentList(response: Response): Promise<RunAttachment[]> {
+async function readAttachmentList(response: Response): Promise<AttachmentListEntry[]> {
   if (!response.ok) {
     return await readError(response);
   }
@@ -176,7 +265,7 @@ async function readAttachmentList(response: Response): Promise<RunAttachment[]> 
     await parseResponseJson(response, "Attachment list"),
     response.status,
     "attachments",
-    z.array(runAttachmentSchema),
+    z.array(attachmentListEntrySchema),
     "Attachment list",
   );
 }
@@ -245,6 +334,11 @@ function joinPath(basePath: string, path: string): string {
   return `${basePath.replace(/\/$/, "")}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
+function normalizeResponseMediaType(value: string | null): string | null {
+  const mediaType = value?.split(";")[0]?.trim().toLowerCase();
+  return mediaType && mediaType.length > 0 ? mediaType : null;
+}
+
 export function createApiClient(config: AppRuntimeConfig) {
   return {
     async listRuns(): Promise<RunSummary[]> {
@@ -253,18 +347,42 @@ export function createApiClient(config: AppRuntimeConfig) {
       });
       return await readRuns(response);
     },
-    async getRun(runId: string): Promise<RunDetail> {
+    async getRun(runId: string, options: RequestOptions = {}): Promise<RunDetail> {
       const response = await fetch(
         joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}`),
         {
           headers: { accept: "application/json" },
+          signal: options.signal,
         },
       );
       return await readRun(response);
     },
-    async listAttachments(runId: string): Promise<RunAttachment[]> {
+    async getRunTimelineHistory(
+      runId: string,
+      options: RequestOptions = {},
+    ): Promise<RunTimelineHistory> {
       const response = await fetch(
-        joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/attachments`),
+        joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/timeline`),
+        {
+          headers: { accept: "application/json" },
+          signal: options.signal,
+        },
+      );
+      return await readRunTimelineHistory(response);
+    },
+    async listAttachments(
+      runId: string,
+      options: { cwdScope?: boolean } = {},
+    ): Promise<AttachmentListEntry[]> {
+      const params = new URLSearchParams();
+      if (options.cwdScope !== undefined) {
+        params.set("cwdScope", String(options.cwdScope));
+      }
+      const response = await fetch(
+        joinPath(
+          config.apiBasePath,
+          `/runs/${encodeURIComponent(runId)}/attachments${params.size > 0 ? `?${params.toString()}` : ""}`,
+        ),
         {
           headers: { accept: "application/json" },
         },
@@ -317,6 +435,24 @@ export function createApiClient(config: AppRuntimeConfig) {
       }
       return await response.blob();
     },
+    async readAttachmentText(
+      runId: string,
+      attachmentId: string,
+    ): Promise<AttachmentContentResult> {
+      const response = await fetch(
+        joinPath(
+          config.apiBasePath,
+          `/runs/${encodeURIComponent(runId)}/attachments/${encodeURIComponent(attachmentId)}/content`,
+        ),
+      );
+      if (!response.ok) {
+        return await readError(response);
+      }
+      return {
+        mediaType: normalizeResponseMediaType(response.headers.get("content-type")),
+        text: await response.text(),
+      };
+    },
     async archiveRun(runId: string): Promise<RunArchiveResult> {
       const response = await fetch(
         joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/archive`),
@@ -337,7 +473,28 @@ export function createApiClient(config: AppRuntimeConfig) {
       );
       return await readArchiveResult(response, "Unarchive run");
     },
-    async resumeRun(runId: string): Promise<void> {
+    async resetRun(runId: string): Promise<RunDetail> {
+      const response = await fetch(
+        joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/reset`),
+        {
+          method: "POST",
+          headers: { accept: "application/json" },
+        },
+      );
+      return await readRun(response);
+    },
+    async deleteRun(runId: string): Promise<RunDeleteResult> {
+      const response = await fetch(
+        joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}`),
+        {
+          method: "DELETE",
+          headers: { accept: "application/json" },
+        },
+      );
+      return await readDeleteResult(response, "Delete run");
+    },
+    async resumeRun(runId: string, message?: string): Promise<void> {
+      const normalizedMessage = message?.trim().length ? message : undefined;
       const response = await fetch(
         joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/resume`),
         {
@@ -346,7 +503,9 @@ export function createApiClient(config: AppRuntimeConfig) {
             "content-type": "application/json",
             accept: "application/json",
           },
-          body: JSON.stringify({ overrides: {} }),
+          body: JSON.stringify({
+            overrides: normalizedMessage ? { message: normalizedMessage } : {},
+          }),
         },
       );
       await readRunIdResult(response, "Resume run");
@@ -374,6 +533,61 @@ export function createApiClient(config: AppRuntimeConfig) {
         },
       );
       return await readNameResult(response, "Rename run");
+    },
+    async setRunNote(runId: string, note: string | null): Promise<RunNoteResult> {
+      const response = await fetch(
+        joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/note`),
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json",
+          },
+          body: JSON.stringify({ note }),
+        },
+      );
+      return await readNoteResult(response, "Set run note");
+    },
+    async setRunPinned(runId: string, pinned: boolean): Promise<RunPinnedResult> {
+      const response = await fetch(
+        joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/pinned`),
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json",
+          },
+          body: JSON.stringify({ pinned }),
+        },
+      );
+      return await readPinnedResult(response, "Set run pinned");
+    },
+    async setBackendSession(
+      runId: string,
+      backendSessionId: string,
+    ): Promise<RunBackendSessionResult> {
+      const response = await fetch(
+        joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/backend-session`),
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json",
+          },
+          body: JSON.stringify({ backendSessionId }),
+        },
+      );
+      return await readBackendSessionResult(response, "Set backend session");
+    },
+    async clearBackendSession(runId: string): Promise<RunBackendSessionResult> {
+      const response = await fetch(
+        joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/backend-session/clear`),
+        {
+          method: "POST",
+          headers: { accept: "application/json" },
+        },
+      );
+      return await readBackendSessionResult(response, "Clear backend session");
     },
     async addDependency(runId: string, dependencyRunId: string): Promise<RunDependenciesResult> {
       const response = await fetch(

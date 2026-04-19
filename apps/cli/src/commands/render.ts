@@ -1,22 +1,38 @@
 import type {
+  AttachmentListEntry,
   RunAttachment,
   RunAttachmentDownloadResult,
   RunAttachmentRemoveResult,
 } from "@task-runner/core/contracts/attachments.js";
-import type { RunDetail } from "@task-runner/core/contracts/runs.js";
+import type {
+  RunBackendSessionResult,
+  RunDetail,
+  RunNoteResult,
+  RunPinnedResult,
+} from "@task-runner/core/contracts/runs.js";
 import type {
   DefinitionDetailsResult,
   DefinitionListResult,
   RunArchiveResult,
+  RunDeleteResult,
   RunDependenciesResult,
   RunListResult,
   RunResetResult,
-  StatusCommandResult,
   TaskDetailsResult,
   TaskListResult,
   TaskMutationResult,
 } from "@task-runner/core/core/commands/service.js";
 import { resolveTaskRunnerCommand } from "@task-runner/core/task-runner-command.js";
+import type { HostMode } from "../daemon/config.js";
+import type { DaemonInfo } from "../daemon/protocol.js";
+
+export interface SystemStatusResult {
+  configDir: string;
+  stateDir: string;
+  hostMode: HostMode;
+  connectUrl: string | null;
+  daemon: DaemonInfo | null;
+}
 
 export function renderRunStatus(detail: RunDetail): string {
   const taskRunnerCmd = resolveTaskRunnerCommand();
@@ -35,12 +51,18 @@ export function renderRunStatus(detail: RunDetail): string {
   }
   lines.push(`Backend: ${detail.backend}${detail.model ? ` (${detail.model})` : ""}`);
   lines.push(`Name: ${detail.name ?? "Unnamed"}`);
+  if (detail.pinned) {
+    lines.push("Pinned: yes");
+  }
+  if (detail.note !== null) {
+    lines.push("Note: present");
+  }
   if (detail.backendSessionId) {
     lines.push(`Backend session: ${detail.backendSessionId}`);
   }
+  lines.push(`Repo: ${detail.repo}`);
   lines.push(`Cwd: ${detail.cwd}`);
   lines.push(`Workspace: ${detail.workspaceDir}`);
-  lines.push(`Assignment file: ${detail.assignmentPath}`);
   lines.push(`Started: ${detail.startedAt}`);
   if (detail.endedAt) {
     lines.push(`Ended: ${detail.endedAt}`);
@@ -100,17 +122,7 @@ export function renderRunStatus(detail: RunDetail): string {
 
   if (detail.status === "running") {
     lines.push("");
-    if (detail.taskMode === "cli") {
-      lines.push(
-        "(task statuses above come from canonical run.json task state; assignment.md is rendered for audit only)",
-      );
-    } else if (detail.isLive) {
-      lines.push(
-        "(task statuses above are read live from the workspace assignment.md; the current attempt may still be in progress)",
-      );
-    } else {
-      lines.push("(run is still in progress; status reflects the most recent persisted attempt)");
-    }
+    lines.push("(task statuses above come from canonical run.json task state)");
   } else if (isArchived) {
     lines.push("");
     lines.push("Run is archived. Unarchive it before resuming:");
@@ -119,14 +131,12 @@ export function renderRunStatus(detail: RunDetail): string {
     lines.push("");
     if (isPassive) {
       lines.push("Drive this run externally:");
+      lines.push(`  ${taskRunnerCmd} run brief ${detail.runId}`);
       lines.push(`  ${taskRunnerCmd} task set ${detail.runId} <task-id> --status in_progress`);
-      lines.push(
-        `  ${taskRunnerCmd} task set ${detail.runId} <task-id> --status completed --notes "..."`,
-      );
-      lines.push('  For multi-line notes, prefer a quoted heredoc and pass --notes "$notes".');
     } else {
       lines.push("To execute this run:");
       lines.push(`  ${taskRunnerCmd} run --resume-run ${detail.runId}`);
+      lines.push(`  ${taskRunnerCmd} run brief ${detail.runId}`);
     }
   } else if (
     detail.status === "blocked" ||
@@ -142,6 +152,22 @@ export function renderRunStatus(detail: RunDetail): string {
       lines.push("To resume this run:");
       lines.push(`  ${taskRunnerCmd} run --resume-run ${detail.runId} "..."`);
     }
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+export function renderSystemStatus(result: SystemStatusResult): string {
+  const lines = [
+    `Config dir: ${result.configDir}`,
+    `State dir: ${result.stateDir}`,
+    `Host mode: ${result.hostMode}`,
+    `Connect URL: ${result.connectUrl ?? "none"}`,
+    `Daemon: ${result.daemon ? "connected" : "not connected"}`,
+  ];
+
+  if (result.daemon) {
+    lines.push(`Daemon listen URL: ${result.daemon.listenUrl}`);
   }
 
   return `${lines.join("\n")}\n`;
@@ -164,7 +190,6 @@ export function renderDefinitionDetails(result: DefinitionDetailsResult): string
     if (loaded.config.effort) lines.push(`  effort:       ${loaded.config.effort}`);
     lines.push(`  timeoutSec:   ${loaded.config.timeoutSec}`);
     lines.push(`  unrestricted: ${loaded.config.unrestricted}`);
-    lines.push(`  cwd:          ${loaded.config.cwd}`);
     if (loaded.config.lockedFields.length > 0) {
       lines.push(`  lockedFields: ${loaded.config.lockedFields.join(", ")}`);
     }
@@ -179,6 +204,9 @@ export function renderDefinitionDetails(result: DefinitionDetailsResult): string
   const { loaded } = result;
   const lines: string[] = [];
   lines.push(`Assignment: ${loaded.config.name}`);
+  if (loaded.config.cwd !== undefined) {
+    lines.push(`  cwd:          ${loaded.config.cwd}`);
+  }
   lines.push(`  maxRetries:   ${loaded.config.maxRetries}`);
   if (loaded.config.tasks.length > 0) {
     lines.push(`  tasks:        ${loaded.config.tasks.length}`);
@@ -231,6 +259,10 @@ export function renderRunUnarchive(result: RunArchiveResult): string {
   return `task-runner: unarchived run ${result.runId}\n`;
 }
 
+export function renderRunDelete(result: RunDeleteResult): string {
+  return `task-runner: deleted archived run ${result.runId}\n`;
+}
+
 export function renderRunSetName(result: {
   runId: string;
   name: string | null;
@@ -244,6 +276,43 @@ export function renderRunSetName(result: {
   return result.changed
     ? `task-runner: set name for run ${result.runId} to "${result.name}"\n`
     : `task-runner: run ${result.runId} already has name "${result.name}"\n`;
+}
+
+export function renderRunSetNote(result: RunNoteResult): string {
+  if (result.note === null) {
+    return result.changed
+      ? `task-runner: cleared note for run ${result.runId}\n`
+      : `task-runner: run ${result.runId} already has no note\n`;
+  }
+  return result.changed
+    ? `task-runner: set note for run ${result.runId} to present\n`
+    : `task-runner: run ${result.runId} already has note present\n`;
+}
+
+export function renderRunSetPinned(result: RunPinnedResult): string {
+  if (result.pinned) {
+    return result.changed
+      ? `task-runner: pinned run ${result.runId}\n`
+      : `task-runner: run ${result.runId} is already pinned\n`;
+  }
+  return result.changed
+    ? `task-runner: unpinned run ${result.runId}\n`
+    : `task-runner: run ${result.runId} is already unpinned\n`;
+}
+
+export function renderRunSetBackendSession(result: RunBackendSessionResult): string {
+  if (result.backendSessionId === null) {
+    throw new Error("renderRunSetBackendSession requires a non-null backendSessionId");
+  }
+  return result.changed
+    ? `task-runner: set backend session for run ${result.runId} to "${result.backendSessionId}"\n`
+    : `task-runner: run ${result.runId} already has backend session "${result.backendSessionId}"\n`;
+}
+
+export function renderRunClearBackendSession(result: RunBackendSessionResult): string {
+  return result.changed
+    ? `task-runner: cleared backend session for run ${result.runId}\n`
+    : `task-runner: run ${result.runId} already has no backend session\n`;
 }
 
 export function renderRunAddDependency(
@@ -265,10 +334,6 @@ export function renderRunClearDependencies(result: RunDependenciesResult): strin
     return `task-runner: run ${result.runId} already has no dependencies\n`;
   }
   return `task-runner: cleared dependencies for run ${result.runId}\n`;
-}
-
-export function renderStatus(result: StatusCommandResult): string {
-  return renderRunStatus(result);
 }
 
 export function renderTaskList(result: TaskListResult): string {
@@ -301,15 +366,18 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1).replace(/\.0$/, "")} MB`;
 }
 
-export function renderAttachmentList(attachments: RunAttachment[]): string {
+export function renderAttachmentList(
+  attachments: AttachmentListEntry[],
+  options: { showOwnerRunId?: boolean } = {},
+): string {
   if (attachments.length === 0) {
     return "No attachments.\n";
   }
   return `${attachments
-    .map(
-      (attachment) =>
-        `${attachment.id}  ${attachment.name}  ${attachment.mimeType}  ${formatBytes(attachment.size)}  ${attachment.addedAt}`,
-    )
+    .map((attachment) => {
+      const owner = options.showOwnerRunId ? `  owner=${attachment.ownerRunId}` : "";
+      return `${attachment.id}  ${attachment.name}  ${attachment.mimeType}  ${formatBytes(attachment.size)}  ${attachment.addedAt}${owner}`;
+    })
     .join("\n")}\n`;
 }
 

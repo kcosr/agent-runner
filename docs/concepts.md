@@ -1,135 +1,138 @@
 # Concepts
 
-The mental model behind task-runner, in one page. For detailed
-references on any piece, follow the links.
+`task-runner` drives an agent through a structured list of tasks and persists
+the run state in a manifest-canonical workspace. This page gives a tour of the
+core concepts. Each concept has its own detailed doc — follow the links when
+you need specifics.
 
-## The moving parts
+## The model in one paragraph
 
-- **[Agent](agents-and-assignments.md)** — the *identity* (backend,
-  model, effort, role instructions, locked fields). Reusable across
-  many work packages.
-- **[Assignment](agents-and-assignments.md)** — the *work* (task list,
-  input variables, optional default message). Reusable across many
-  agents.
-- **[Run](runs.md)** — a specific agent × assignment × variable
-  binding, executed through the run loop, persisted as a manifest on
-  disk.
-- **[Backend](backends.md)** — the adapter that turns the run loop's
-  abstract "invoke the agent" call into concrete subprocess or RPC
-  traffic. Claude, Codex, Cursor, or Passive.
-- **[Brief](agents-and-assignments.md#brief-and-caller-instructions)**
-  — the composed worker-facing handoff for a run (agent instructions
-  + assignment instructions + task-runner's worker workflow template
-  + caller message). Stored in the manifest and fetched with
-  `task-runner brief <run-id>`.
-- **[Caller instructions](agents-and-assignments.md#caller-instructions)**
-  — operator-facing docs on the assignment; never sent to the
-  backend.
+An **agent** supplies backend, model, and role instructions. An **assignment**
+supplies a reusable task list and work context. A **run** is the persisted
+execution instance created from one agent and (optionally) one assignment. A
+run exposes two distinct instruction surfaces: the **worker brief** that is
+sent to the backend and the **caller instructions** that are printed for the
+human or script invoking the CLI. Task state is canonical in `run.json` and
+workers mutate it through the `task-runner task ...` CLI.
 
-A run is the composition of an agent and an assignment with the
-variables resolved. `--agent` and `--assignment` are both optional;
-omit them for ad-hoc runs or chat-mode runs.
+## Agents
 
-## Run lifecycle
+An agent is a markdown file with YAML frontmatter. The frontmatter declares
+`backend`, `model`, `effort`, `timeoutSec`, `unrestricted`, and
+`lockedFields`. The body is the agent's role instructions.
 
-```mermaid
-stateDiagram-v2
-    [*] --> initialized: task-runner init
-    [*] --> running: task-runner run
-    initialized --> running: run --resume-run <id>
-    running --> running: retry (tasks still pending)
-    running --> success: all tasks completed (exit 0)
-    running --> exhausted: retries out, tasks incomplete (exit 1)
-    running --> blocked: any task blocked (exit 2)
-    running --> aborted: Ctrl+C or external interrupt (exit 130)
-    running --> error: backend invocation failure (exit 4)
-    aborted --> running: run --resume-run <id>
-    success --> [*]
-    exhausted --> [*]
-    blocked --> [*]
-    error --> [*]
+Bundled examples live under `agents/`. See
+[agents-and-assignments.md](agents-and-assignments.md) for the full schema.
+
+## Assignments
+
+An assignment is a markdown file with YAML frontmatter that describes the
+work: `cwd`, `vars`, `message`, `maxRetries`, `callerInstructions`, `tasks`,
+and `lockedFields`. The body is the assignment instructions sent to the
+worker.
+
+Assignments are source definitions. They can be named definitions under
+`${TASK_RUNNER_CONFIG_DIR}/assignments/<name>/assignment.md` or direct paths.
+They are not a live workspace surface — task state lives in the manifest, not
+in a workspace markdown file.
+
+See [agents-and-assignments.md](agents-and-assignments.md).
+
+## Runs
+
+A run is a frozen execution record at:
+
+```text
+${TASK_RUNNER_STATE_DIR}/runs/<repo>/<run-id>/
 ```
 
-Terminal states map 1-to-1 onto process exit codes — see the README's
-exit-code table.
+The canonical record is `run.json`. If the run was created from an assignment
+file, an immutable `assignment-seed.md` snapshot is also stored for audit.
 
-## What one attempt looks like
+Lifecycle states:
 
-```mermaid
-sequenceDiagram
-    participant User
-    participant CLI as task-runner run
-    participant Runner as run-loop
-    participant Manifest as run.json
-    participant Backend as Backend adapter
-    participant Agent as Agent process
-    User->>CLI: --agent X --assignment Y
-    CLI->>Runner: runAgent(opts)
-    Runner->>Manifest: freeze manifest (brief, tasks, caller instructions)
-    Runner->>Manifest: status=running
-    loop until done or retries exhausted
-        Runner->>Backend: invoke(brief or nudge, sessionId)
-        Backend->>Agent: spawn / JSON-RPC
-        Agent->>Manifest: task set / task append-notes (via task CLI)
-        Agent-->>Backend: turn complete
-        Backend-->>Runner: result + new sessionId
-        Runner->>Manifest: read finalTasks
-        alt all tasks completed
-            Runner->>Manifest: status=success
-        else tasks blocked
-            Runner->>Manifest: status=blocked
-        else incomplete, retries left
-            Runner->>Runner: build nudge pointing at task CLI
-        else retries exhausted
-            Runner->>Manifest: status=exhausted
-        end
-    end
-    Runner-->>CLI: RunOutcome
-    CLI-->>User: summary + exit code
+- `initialized` — created by `init`, awaiting execution
+- `running` — actively executing
+- `success` | `blocked` | `exhausted` | `aborted` | `error` — terminal states
+
+Runs can be archived, reset, or deleted (archived-only). See
+[runs.md](runs.md) and [resume.md](resume.md).
+
+## Tasks
+
+Tasks are the canonical unit of work. Each has `id`, `title`, `body`,
+`status`, and `notes`. Statuses are `pending`, `in_progress`, `completed`,
+and `blocked`.
+
+Workers drive tasks through the CLI:
+
+```bash
+task-runner task list <run-id>
+task-runner task show <run-id> <task-id>
+task-runner task set <run-id> <task-id> --status in_progress
+task-runner task append-notes <run-id> <task-id> --text "..."
 ```
 
-Canonical task state lives in `run.json.finalTasks`. The agent mutates
-it through the `task` CLI (`task set`, `task append-notes`,
-`task add`), never by editing a workspace markdown file. See
-[runs.md](runs.md) for manifest details and the workspace layout, and
-[tasks.md](tasks.md) for the task model and task-CLI workflow.
+Mutation rules depend on run lifecycle state and whether the backend is
+passive. See [tasks.md](tasks.md).
 
-## Where everything lives
+## Brief and caller instructions
 
-Each run has a workspace at
-`${TASK_RUNNER_STATE_DIR}/runs/<repo-name>/<run-id>/`:
+task-runner maintains two separate instruction surfaces:
 
-- **`run.json`** — the canonical manifest, written after every
-  attempt and on terminal state. Holds the agent identity, the frozen
-  role instructions and locks, the composed worker `brief`, the
-  canonical task snapshots, caller instructions, dependency and
-  attachment metadata, and every attempt record.
-- **`assignment-seed.md`** — an immutable snapshot of the source
-  assignment file at run-start time, **only** when the run started
-  from an assignment file. Audit/debug only; nothing in the system
-  reads it back at runtime.
-- **`attempts/NN.json`** — raw per-attempt logs.
-- **`attachments/<id>/<name>`** — file blobs bound to the run.
+- **Worker brief** (`brief`) is the worker-facing handoff. It is composed
+  from agent instructions, assignment instructions, the task-runner workflow
+  template, and the run message. It is frozen in the manifest and re-used on
+  every attempt. Fetch it with `task-runner run brief <run-id>`.
+- **Caller instructions** (`callerInstructions`) are assignment docs for the
+  human or script invoking task-runner. They are printed to stderr on fresh
+  `run` / `init`, exposed through `run status --output-format json`, and never
+  sent to the backend.
 
-The manifest is the load-bearing piece: it is the canonical source of
-truth for a run after first write. Moving, editing, or deleting the
-source `agent.md` / `assignment.md` after a run has started has no
-effect on that run — it lives off the frozen snapshot in `run.json`.
-See [runs.md](runs.md) for the schema-version policy (currently
-`schemaVersion: 7`, a hot cut from earlier generations).
+## Variables
 
-## Host modes
+Assignments can declare typed variables with `cli` / `env` / `either`
+sources. Values are resolved at run creation and frozen in
+`manifest.runtimeVars` (env-sourced vars are redacted). `{{var}}` references
+are interpolated into titles, bodies, and instructions.
 
-- **Embedded mode** — the foreground CLI process owns execution.
-- **Daemon mode** — `task-runner serve` owns live runs; CLI commands
-  route through WebSocket JSON-RPC with `--connect /
-  TASK_RUNNER_CONNECT`, while browser clients use HTTP + SSE on the
-  same listener.
+See [variables.md](variables.md).
 
-See [daemon.md](daemon.md) for the full control-plane contract.
+## Backends
 
----
+A backend is the runtime that actually executes the worker:
 
-The inline links above cover the per-topic deep dives. For the full
-index of docs, see the [Documentation table in the
-README](../README.md#documentation).
+- `claude`
+- `codex` (stdio or WebSocket app-server)
+- `cursor` (`cursor-agent`)
+- `pi`
+- `passive` — no backend invocation; the run is driven externally through
+  the task CLI
+
+See [backends.md](backends.md).
+
+## Attachments and dependencies
+
+Runs can carry **attachments** (files stored under the run workspace with
+SHA-256 integrity). `attachment list --cwd-scope` groups attachments across
+peer runs with the same persisted `cwd`. See
+[attachments.md](attachments.md).
+
+Runs can declare **dependencies** on other runs. Dependencies are metadata
+on initialized runs; execution is gated until all dependencies reach
+`success`. See [dependencies.md](dependencies.md).
+
+## Daemon and web dashboard
+
+`task-runner serve` hosts a local control plane: WebSocket JSON-RPC for CLI
+clients, HTTP + SSE for browser clients, and the bundled web dashboard from
+`apps/web`. The CLI can route through the daemon with `--connect` or
+`TASK_RUNNER_CONNECT`. See [daemon.md](daemon.md) and
+[web-dashboard.md](web-dashboard.md).
+
+## Where to go next
+
+- [design.md](design.md) — canonical design, schema, lifecycle, repo layout
+- [cli.md](cli.md) — full command/flag reference
+- [configuration.md](configuration.md) — env vars, state roots, XDG
+- [examples.md](examples.md) — bundled agents and assignments

@@ -10,7 +10,13 @@ import type {
   ValidateSessionResult,
 } from "../core/backends/types.js";
 import { runProcess } from "../util/spawn.js";
-import { isRecord, normalizeBackendModel, streamBoundarySeparator } from "./shared.js";
+import {
+  composePersistedTranscript,
+  isRecord,
+  normalizeBackendModel,
+  silentTranscriptFallback,
+  streamBoundarySeparator,
+} from "./shared.js";
 
 /**
  * Claude encodes the working directory of a session into the
@@ -256,11 +262,13 @@ export const claudeBackend: Backend = {
     });
     flush(state);
 
-    const transcript =
-      state.streamedText.trim() ||
-      state.assistantEventText.trim() ||
-      state.resultText.trim() ||
-      null;
+    const finalText = state.assistantEventText.trim() || state.resultText.trim() || null;
+    const transcript = composePersistedTranscript(state.streamedText, finalText);
+
+    const fallbackDelta = silentTranscriptFallback(state.streamedText, transcript);
+    if (fallbackDelta) {
+      ctx.emit?.({ type: "agent_message_delta", text: fallbackDelta });
+    }
 
     return {
       exitCode: result.exitCode,

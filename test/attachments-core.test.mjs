@@ -65,7 +65,7 @@ test("stageAttachmentFromFile enforces attachment count and file size limits", a
     ),
     (error) => {
       assert(error instanceof AttachmentPolicyError);
-      assert.match(error.message, /already has 20 attachments/);
+      assert.match(error.message, /already has 100 attachments/);
       return true;
     },
   );

@@ -1,4 +1,4 @@
-import { type Dirent, existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
+import { type Dirent, existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { InvalidStatusReport, TaskState, TaskStatus } from "../../assignment/model.js";
 import {
@@ -11,7 +11,12 @@ import {
 } from "../../config/runtime-paths.js";
 import type { RunAttachment } from "../../contracts/attachments.js";
 import { writeTextFileAtomic } from "../../util/write-file-atomic.js";
-import type { LockableField, TaskMode } from "../config/schema.js";
+import {
+  type BackendSpecificConfig,
+  cloneBackendSpecificConfig,
+  isWsOrWssUrl,
+} from "../backends/types.js";
+import type { LockableField } from "../config/schema.js";
 
 export type ManifestStatus =
   | "initialized"
@@ -60,13 +65,15 @@ export interface TaskSnapshot {
 export interface RunResetSeed {
   model: string | null;
   effort: string | null;
+  backendSpecific?: BackendSpecificConfig;
   name: string | null;
+  note: string | null;
+  pinned: boolean;
   dependencyRunIds: string[];
   unrestricted: boolean;
   timeoutSec: number;
   maxAttempts: number;
-  taskMode?: TaskMode;
-  pendingPrompt: string;
+  brief: string;
   finalTasks: Record<string, TaskSnapshot>;
 }
 
@@ -94,6 +101,7 @@ export interface SessionRecord {
   status: ManifestStatus;
   exitCode: number | null;
   message: string | null;
+  brief: string;
   firstAttempt: number | null;
   lastAttempt: number | null;
   maxAttempts: number;
@@ -130,15 +138,15 @@ export interface AssignmentInfo {
 // `timeoutSec` are all captured at init / fresh-run time and preserved
 // across all subsequent sessions.
 //
-// schemaVersion: 6 is the current manifest-canonical generation. Manifests written
-// by earlier task-runner versions (v1 pre-canonical, v2 pre-reset-seed, v3
-// pre-execution-provenance, v4 pre-run-dependencies, v5 pre-attachments) are not
-// resumable by this version — `isRunManifest` rejects them and
+// schemaVersion: 8 is the current manifest-canonical generation. Manifests written
+// by earlier task-runner versions are not resumable by this version —
+// `isRunManifest` rejects them and
 // `resolveResumeTarget` surfaces a clear error telling the caller to
 // create a fresh run.
 export interface RunManifest {
-  schemaVersion: 6;
+  schemaVersion: 8;
   runId: string;
+  repo: string;
   agent: {
     name: string;
     // null for ad-hoc agents (synthesized from CLI overrides with no
@@ -154,8 +162,11 @@ export interface RunManifest {
   backend: string;
   model: string | null;
   effort: string | null;
+  backendSpecific?: BackendSpecificConfig;
   message: string | null;
   name: string | null;
+  note: string | null;
+  pinned: boolean;
   unrestricted: boolean;
   cwd: string;
   // Union of the agent's and assignment's lockedFields at first write.
@@ -167,7 +178,6 @@ export interface RunManifest {
   timeoutSec: number;
   assignmentPath: string;
   workspaceDir: string;
-  taskMode?: TaskMode;
   startedAt: string;
   endedAt: string | null;
   archivedAt: string | null;
@@ -181,7 +191,7 @@ export interface RunManifest {
   backendSessionId: string | null;
   runtimeVars: Record<string, unknown>;
   execution: RunExecution;
-  pendingPrompt: string | null;
+  brief: string;
   // Assignment-level documentation surface for the caller of
   // task-runner (the human or script invoking `run` / `init`).
   // Frozen at first write from `assignmentConfig.callerInstructions`
@@ -189,7 +199,7 @@ export interface RunManifest {
   // injectedVars as other body fields. `null` when no assignment
   // was supplied or the assignment didn't carry the field.
   //
-  // Unlike `pendingPrompt`, this text is **never** sent to the
+  // Unlike `brief`, this text is **never** sent to the
   // backend — it's strictly for the caller, printed to stderr on
   // fresh `run` and `init` and always included in
   // `status --output-format json` for later retrieval.
@@ -229,6 +239,7 @@ function cloneTaskSnapshots(tasks: Record<string, TaskSnapshot>): Record<string,
 export function buildRunResetSeed(seed: RunResetSeed): RunResetSeed {
   return {
     ...seed,
+    backendSpecific: cloneBackendSpecificConfig(seed.backendSpecific),
     dependencyRunIds: [...seed.dependencyRunIds],
     finalTasks: cloneTaskSnapshots(seed.finalTasks),
   };
@@ -238,18 +249,20 @@ export function applyRunResetSeed(manifest: RunManifest): void {
   const seed = manifest.resetSeed;
   manifest.model = seed.model;
   manifest.effort = seed.effort;
+  manifest.backendSpecific = cloneBackendSpecificConfig(seed.backendSpecific);
   manifest.name = seed.name;
+  manifest.note = seed.note;
+  manifest.pinned = seed.pinned;
   manifest.dependencyRunIds = [...seed.dependencyRunIds];
   manifest.unrestricted = seed.unrestricted;
   manifest.timeoutSec = seed.timeoutSec;
   manifest.maxAttempts = seed.maxAttempts;
-  manifest.taskMode = seed.taskMode;
   manifest.endedAt = null;
   manifest.status = "initialized";
   manifest.exitCode = null;
   manifest.attempts = 0;
   manifest.backendSessionId = null;
-  manifest.pendingPrompt = seed.pendingPrompt;
+  manifest.brief = seed.brief;
   manifest.finalTasks = cloneTaskSnapshots(seed.finalTasks);
   manifest.tasksCompleted = Object.values(manifest.finalTasks).filter(
     (task) => task.status === "completed",
@@ -295,15 +308,27 @@ export interface ResolvedResumeTarget {
 }
 
 export interface ListedRunManifest {
-  repo: string;
   workspaceDir: string;
   manifest: RunManifest;
 }
 
-function normalizeRunManifest(parsed: RunManifest & { archivedAt?: string | null }): RunManifest {
+function normalizeRunManifest(
+  parsed: RunManifest & {
+    archivedAt?: string | null;
+    note?: string | null;
+    pinned?: boolean;
+  },
+): RunManifest {
   return {
     ...parsed,
     archivedAt: parsed.archivedAt ?? null,
+    note: parsed.note ?? null,
+    pinned: parsed.pinned ?? false,
+    resetSeed: {
+      ...parsed.resetSeed,
+      note: parsed.resetSeed.note ?? parsed.note ?? null,
+      pinned: parsed.resetSeed.pinned ?? parsed.pinned ?? false,
+    },
   };
 }
 
@@ -324,11 +349,11 @@ function readManifestCandidate(candidate: string): RunManifest {
     typeof parsed === "object" &&
     "schemaVersion" in parsed &&
     typeof (parsed as { schemaVersion: unknown }).schemaVersion === "number" &&
-    (parsed as { schemaVersion: number }).schemaVersion !== 6
+    (parsed as { schemaVersion: number }).schemaVersion !== 8
   ) {
     const version = (parsed as { schemaVersion: number }).schemaVersion;
     throw new ResumeError(
-      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 6. Manifests from earlier versions cannot be resumed — create a fresh run (task-runner init / run).`,
+      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 8. Manifests from earlier versions cannot be resumed — create a fresh run (task-runner init / run).`,
     );
   }
   if (!isRunManifest(parsed)) {
@@ -386,6 +411,10 @@ export function resolveResumeTarget(
   );
 }
 
+export function readManifest(workspaceDir: string): RunManifest {
+  return readManifestCandidate(manifestPath(workspaceDir));
+}
+
 export function listRunManifests(env: NodeJS.ProcessEnv = process.env): ListedRunManifest[] {
   const root = resolveRunsRoot(env);
   if (!existsSync(root)) {
@@ -415,7 +444,7 @@ export function listRunManifests(env: NodeJS.ProcessEnv = process.env): ListedRu
         ) {
           continue;
         }
-        runs.push({ repo: bucket.name, workspaceDir, manifest });
+        runs.push({ workspaceDir, manifest });
       } catch (err) {
         // Unsupported or corrupt manifests are skipped for discovery,
         // but unexpected failures should still surface.
@@ -428,6 +457,48 @@ export function listRunManifests(env: NodeJS.ProcessEnv = process.env): ListedRu
   }
 
   return runs;
+}
+
+export function findRunManifestsById(
+  runId: string,
+  env: NodeJS.ProcessEnv = process.env,
+): ListedRunManifest[] {
+  const root = resolveRunsRoot(env);
+  if (!existsSync(root)) {
+    return [];
+  }
+
+  const matches: ListedRunManifest[] = [];
+  for (const bucket of readdirSync(root, { withFileTypes: true })) {
+    if (!bucket.isDirectory()) {
+      continue;
+    }
+    const workspaceDir = join(resolveRunsBucketDir(bucket.name, env), runId);
+    if (!existsSync(workspaceDir) || !statSync(workspaceDir).isDirectory()) {
+      continue;
+    }
+    const candidate = manifestPath(workspaceDir);
+    if (!existsSync(candidate)) {
+      continue;
+    }
+    try {
+      const manifest = readManifestCandidate(candidate);
+      if (
+        manifest.workspaceDir !== workspaceDir ||
+        manifest.assignmentPath !== workspaceAssignmentPath(workspaceDir)
+      ) {
+        continue;
+      }
+      matches.push({ workspaceDir, manifest });
+    } catch (err) {
+      if (err instanceof ResumeError) {
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  return matches;
 }
 
 // Structural validation for a run.json candidate. Shallow checks
@@ -444,12 +515,15 @@ export function listRunManifests(env: NodeJS.ProcessEnv = process.env): ListedRu
 function isRunManifest(value: unknown): value is RunManifest {
   if (!value || typeof value !== "object") return false;
   const obj = value as Record<string, unknown>;
-  if (obj.schemaVersion !== 6) return false;
+  if (obj.schemaVersion !== 8) return false;
   if (typeof obj.runId !== "string") return false;
+  if (typeof obj.repo !== "string") return false;
 
   // Top-level scalars required by downstream consumers.
   if (typeof obj.backend !== "string") return false;
   if (obj.name !== null && typeof obj.name !== "string") return false;
+  if (obj.note !== undefined && obj.note !== null && typeof obj.note !== "string") return false;
+  if (obj.pinned !== undefined && typeof obj.pinned !== "boolean") return false;
   if (typeof obj.cwd !== "string") return false;
   if (typeof obj.assignmentPath !== "string") return false;
   if (typeof obj.workspaceDir !== "string") return false;
@@ -475,7 +549,7 @@ function isRunManifest(value: unknown): value is RunManifest {
   if (typeof obj.tasksCompleted !== "number") return false;
   if (typeof obj.tasksTotal !== "number") return false;
   if (typeof obj.sessionCount !== "number") return false;
-  if (obj.taskMode !== undefined && obj.taskMode !== "file" && obj.taskMode !== "cli") return false;
+  if (typeof obj.brief !== "string") return false;
 
   // Arrays.
   if (!Array.isArray(obj.attemptRecords)) return false;
@@ -509,6 +583,7 @@ function isRunManifest(value: unknown): value is RunManifest {
   if (!obj.runtimeVars || typeof obj.runtimeVars !== "object") return false;
   if (!obj.resetSeed || typeof obj.resetSeed !== "object") return false;
   if (!obj.execution || typeof obj.execution !== "object") return false;
+  if (!isValidPersistedBackendSpecific(obj.backendSpecific, false)) return false;
 
   // callerInstructions is string | null.
   if (obj.callerInstructions !== null && typeof obj.callerInstructions !== "string") {
@@ -518,7 +593,18 @@ function isRunManifest(value: unknown): value is RunManifest {
   const resetSeed = obj.resetSeed as Record<string, unknown>;
   if (resetSeed.model !== null && typeof resetSeed.model !== "string") return false;
   if (resetSeed.effort !== null && typeof resetSeed.effort !== "string") return false;
+  if (!isValidPersistedBackendSpecific(resetSeed.backendSpecific, false)) {
+    return false;
+  }
   if (resetSeed.name !== null && typeof resetSeed.name !== "string") return false;
+  if (
+    resetSeed.note !== undefined &&
+    resetSeed.note !== null &&
+    typeof resetSeed.note !== "string"
+  ) {
+    return false;
+  }
+  if (resetSeed.pinned !== undefined && typeof resetSeed.pinned !== "boolean") return false;
   if (
     !Array.isArray(resetSeed.dependencyRunIds) ||
     !resetSeed.dependencyRunIds.every((runId) => typeof runId === "string")
@@ -528,14 +614,7 @@ function isRunManifest(value: unknown): value is RunManifest {
   if (typeof resetSeed.unrestricted !== "boolean") return false;
   if (typeof resetSeed.timeoutSec !== "number") return false;
   if (typeof resetSeed.maxAttempts !== "number") return false;
-  if (typeof resetSeed.pendingPrompt !== "string") return false;
-  if (
-    resetSeed.taskMode !== undefined &&
-    resetSeed.taskMode !== "file" &&
-    resetSeed.taskMode !== "cli"
-  ) {
-    return false;
-  }
+  if (typeof resetSeed.brief !== "string") return false;
   if (!resetSeed.finalTasks || typeof resetSeed.finalTasks !== "object") return false;
 
   // Nested agent record.
@@ -550,6 +629,16 @@ function isRunManifest(value: unknown): value is RunManifest {
   if (execution.hostMode !== "embedded" && execution.hostMode !== "daemon") return false;
   if (!execution.controller || typeof execution.controller !== "object") return false;
   const controller = execution.controller as Record<string, unknown>;
+  if (
+    obj.sessions.some((session) => {
+      if (!session || typeof session !== "object") {
+        return true;
+      }
+      return typeof (session as Record<string, unknown>).brief !== "string";
+    })
+  ) {
+    return false;
+  }
   if (controller.kind === "embedded") {
     return execution.hostMode === "embedded";
   }
@@ -557,5 +646,55 @@ function isRunManifest(value: unknown): value is RunManifest {
     return execution.hostMode === "daemon" && typeof controller.daemonInstanceId === "string";
   }
 
+  return false;
+}
+
+function isValidPersistedBackendSpecific(
+  value: unknown,
+  requireCodexTransport: boolean,
+): value is BackendSpecificConfig | undefined {
+  if (value === undefined) {
+    return !requireCodexTransport;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  if (Object.keys(record).some((key) => key !== "codex")) {
+    return false;
+  }
+  if (record.codex === undefined) {
+    return !requireCodexTransport;
+  }
+  if (!record.codex || typeof record.codex !== "object" || Array.isArray(record.codex)) {
+    return false;
+  }
+  const codex = record.codex as Record<string, unknown>;
+  if (Object.keys(codex).some((key) => key !== "transport")) {
+    return false;
+  }
+  if (codex.transport === undefined) {
+    return !requireCodexTransport;
+  }
+  return isValidCodexTransport(codex.transport);
+}
+
+function isValidCodexTransport(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  if (record.type === "stdio") {
+    return Object.keys(record).length === 1;
+  }
+  if (record.type === "ws") {
+    if (Object.keys(record).some((key) => key !== "type" && key !== "url")) {
+      return false;
+    }
+    if (typeof record.url !== "string" || record.url.trim().length === 0) {
+      return false;
+    }
+    return isWsOrWssUrl(record.url);
+  }
   return false;
 }
