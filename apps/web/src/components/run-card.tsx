@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import type { RunSummary } from "@task-runner/core/contracts/runs.js";
 import type { CSSProperties, FocusEvent, MouseEvent } from "react";
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { createApiClient } from "../lib/api-client.js";
 import { truncateEnd } from "../lib/format.js";
@@ -71,6 +71,7 @@ export function RunCard({
   actionPending,
   run,
   selected,
+  openNoteDialogRequest,
   onSelect,
   onSetNote,
   onSetPinned,
@@ -81,6 +82,10 @@ export function RunCard({
   actionPending?: RunActionPending;
   run: RunSummary;
   selected: boolean;
+  openNoteDialogRequest?: {
+    runId: string;
+    version: number;
+  } | null;
   onSelect: () => void;
   onSetNote: (note: string | null) => Promise<void>;
   onSetPinned: (pinned: boolean) => Promise<void>;
@@ -93,6 +98,7 @@ export function RunCard({
   const notePreviewRef = useRef<HTMLDivElement | null>(null);
   const notePreviewCloseTimeoutRef = useRef<number | null>(null);
   const noteControlSuppressedUntilRef = useRef(0);
+  const lastHandledOpenNoteDialogRequestVersionRef = useRef<number | undefined>(undefined);
   const prefersReducedMotion = usePrefersReducedMotion();
   const preferredNoteEditorMode = usePreferredRunNoteEditorMode();
   const previewFirstNoteMode = preferredNoteEditorMode === "preview";
@@ -140,13 +146,13 @@ export function RunCard({
     );
   }
 
-  function clearNotePreviewCloseTimeout() {
+  const clearNotePreviewCloseTimeout = useCallback(() => {
     if (notePreviewCloseTimeoutRef.current === null || typeof window === "undefined") {
       return;
     }
     window.clearTimeout(notePreviewCloseTimeoutRef.current);
     notePreviewCloseTimeoutRef.current = null;
-  }
+  }, []);
 
   function openNotePreview() {
     if (
@@ -191,21 +197,21 @@ export function RunCard({
     }
   }
 
-  function openNoteDialog() {
+  const openNoteDialog = useCallback(() => {
     if (Date.now() < noteControlSuppressedUntilRef.current) {
       return;
     }
     clearNotePreviewCloseTimeout();
     setNotePreviewOpen(false);
     setNoteDialogOpen(true);
-  }
+  }, [clearNotePreviewCloseTimeout]);
 
-  function closeNoteDialog() {
+  const closeNoteDialog = useCallback(() => {
     noteControlSuppressedUntilRef.current = Date.now() + NOTE_CONTROL_REOPEN_SUPPRESS_MS;
     clearNotePreviewCloseTimeout();
     setNotePreviewOpen(false);
     setNoteDialogOpen(false);
-  }
+  }, [clearNotePreviewCloseTimeout]);
 
   useEffect(() => {
     if (!noteDialogOpen || typeof window === "undefined") {
@@ -216,13 +222,29 @@ export function RunCard({
         return;
       }
       event.preventDefault();
-      setNoteDialogOpen(false);
+      closeNoteDialog();
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [noteDialogOpen]);
+  }, [closeNoteDialog, noteDialogOpen]);
+
+  useEffect(() => {
+    if (
+      openNoteDialogRequest === null ||
+      openNoteDialogRequest === undefined ||
+      openNoteDialogRequest.runId !== run.runId ||
+      openNoteDialogRequest.version === lastHandledOpenNoteDialogRequestVersionRef.current
+    ) {
+      return;
+    }
+    lastHandledOpenNoteDialogRequestVersionRef.current = openNoteDialogRequest.version;
+    if (!selected) {
+      return;
+    }
+    openNoteDialog();
+  }, [openNoteDialog, openNoteDialogRequest, run.runId, selected]);
 
   function handleNotePointerEnter() {
     openNotePreview();
@@ -583,6 +605,7 @@ export function RunCard({
               </div>
             ) : (
               <RunNoteEditor
+                autoFocusEditor={true}
                 closeOnCancel={true}
                 closeOnSave={true}
                 emptyPreviewMessage="No note recorded yet."

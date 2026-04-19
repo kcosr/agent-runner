@@ -1,4 +1,4 @@
-import { type Dirent, existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
+import { type Dirent, existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { InvalidStatusReport, TaskState, TaskStatus } from "../../assignment/model.js";
 import {
@@ -457,6 +457,48 @@ export function listRunManifests(env: NodeJS.ProcessEnv = process.env): ListedRu
   }
 
   return runs;
+}
+
+export function findRunManifestsById(
+  runId: string,
+  env: NodeJS.ProcessEnv = process.env,
+): ListedRunManifest[] {
+  const root = resolveRunsRoot(env);
+  if (!existsSync(root)) {
+    return [];
+  }
+
+  const matches: ListedRunManifest[] = [];
+  for (const bucket of readdirSync(root, { withFileTypes: true })) {
+    if (!bucket.isDirectory()) {
+      continue;
+    }
+    const workspaceDir = join(resolveRunsBucketDir(bucket.name, env), runId);
+    if (!existsSync(workspaceDir) || !statSync(workspaceDir).isDirectory()) {
+      continue;
+    }
+    const candidate = manifestPath(workspaceDir);
+    if (!existsSync(candidate)) {
+      continue;
+    }
+    try {
+      const manifest = readManifestCandidate(candidate);
+      if (
+        manifest.workspaceDir !== workspaceDir ||
+        manifest.assignmentPath !== workspaceAssignmentPath(workspaceDir)
+      ) {
+        continue;
+      }
+      matches.push({ workspaceDir, manifest });
+    } catch (err) {
+      if (err instanceof ResumeError) {
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  return matches;
 }
 
 // Structural validation for a run.json candidate. Shallow checks

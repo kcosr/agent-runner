@@ -37,26 +37,6 @@ import {
 } from "./request-parsing.js";
 import { streamEvents } from "./sse.js";
 
-function formatTraceDurationMs(startedAt: bigint): string {
-  return (Number(process.hrtime.bigint() - startedAt) / 1_000_000).toFixed(3);
-}
-
-function formatTraceFields(fields: Record<string, unknown>): string {
-  return Object.entries(fields)
-    .filter(([, value]) => value !== undefined)
-    .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
-    .join(" ");
-}
-
-function logPinTrace(stage: string, fields: Record<string, unknown> = {}): void {
-  const wallTime = new Date().toISOString();
-  const monotonicNs = process.hrtime.bigint().toString();
-  const serializedFields = formatTraceFields(fields);
-  console.log(
-    `[pin-trace] ts=${wallTime} monotonicNs=${monotonicNs} stage=${stage}${serializedFields ? ` ${serializedFields}` : ""}`,
-  );
-}
-
 interface ResumeRunBody {
   overrides: RunCommandOverrides;
 }
@@ -207,34 +187,11 @@ const routes: RouteDefinition[] = [
     method: "POST",
     pattern: ["api", "runs", ":runId", "pinned"],
     handler: async (req, res, ctx, params) => {
-      const startedAt = process.hrtime.bigint();
-      logPinTrace("http.setRunPinned.start", {
-        method: req.method,
-        path: req.url,
-        routeRunId: routeParam(params, "runId"),
-      });
       const body = await parseRunSetPinnedBody(req, routeParam(params, "runId"));
-      logPinTrace("http.setRunPinned.bodyParsed", {
-        target: body.target,
-        pinned: body.pinned,
-        durationMs: formatTraceDurationMs(startedAt),
-      });
-      const operationStartedAt = process.hrtime.bigint();
       const result = ctx.operations.setRunPinned(body.target, {
         pinned: body.pinned,
       });
-      logPinTrace("http.setRunPinned.operation.complete", {
-        target: body.target,
-        pinned: body.pinned,
-        changed: result.result.changed,
-        durationMs: formatTraceDurationMs(operationStartedAt),
-      });
       sendJson(res, 200, result);
-      logPinTrace("http.setRunPinned.responseSent", {
-        target: body.target,
-        pinned: body.pinned,
-        totalMs: formatTraceDurationMs(startedAt),
-      });
     },
   },
   {

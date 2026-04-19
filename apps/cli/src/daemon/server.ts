@@ -17,9 +17,8 @@ import {
   getRun,
   getRunBrief,
   getRunList,
-  getRunListWithOptions,
+  getRunSummary,
   getRunTimelineHistory,
-  getRunWithOptions,
   getTask,
   getTaskList,
   initRun,
@@ -36,6 +35,7 @@ import {
   updateTask,
 } from "@task-runner/core/app/service.js";
 import { VALID_STATUSES } from "@task-runner/core/assignment/model.js";
+import { isPathArg } from "@task-runner/core/config/runtime-paths.js";
 import type {
   RunDetailStreamEvent,
   RunSummaryStreamEvent,
@@ -51,10 +51,25 @@ import type {
   RunStatus,
   RunSummary,
 } from "@task-runner/core/contracts/runs.js";
-import { isTerminalStatus } from "@task-runner/core/contracts/runs.js";
-import { ConflictError } from "@task-runner/core/core/commands/service.js";
-import { RunNotFoundError, listRunManifests } from "@task-runner/core/core/run/manifest.js";
+import { isTerminalStatus, toRunDetail } from "@task-runner/core/contracts/runs.js";
+import {
+  ConflictError,
+  refreshRunSnapshotAfterTaskStateSettles,
+} from "@task-runner/core/core/commands/service.js";
+import {
+  resolveDependencies,
+  resolveDependentsFromManifests,
+} from "@task-runner/core/core/run/dependencies.js";
+import {
+  type ListedRunManifest,
+  type RunManifest,
+  RunNotFoundError,
+  findRunManifestsById,
+  listRunManifests,
+  resolveResumeTarget,
+} from "@task-runner/core/core/run/manifest.js";
 import type { RunEvent } from "@task-runner/core/core/run/run-loop.js";
+import { withTaskStateLock } from "@task-runner/core/core/run/workspace-state.js";
 import { shortId } from "@task-runner/core/util/short-id.js";
 import { WebSocket, WebSocketServer } from "ws";
 import { deriveAppRuntimeConfig, deriveHttpBaseUrl, listenSocketConfig } from "./config.js";
@@ -86,26 +101,6 @@ import {
   requiredRunIdString,
   requiredString,
 } from "./request-parsing.js";
-
-function formatTraceDurationMs(startedAt: bigint): string {
-  return (Number(process.hrtime.bigint() - startedAt) / 1_000_000).toFixed(3);
-}
-
-function formatTraceFields(fields: Record<string, unknown>): string {
-  return Object.entries(fields)
-    .filter(([, value]) => value !== undefined)
-    .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
-    .join(" ");
-}
-
-function logPinTrace(stage: string, fields: Record<string, unknown> = {}): void {
-  const wallTime = new Date().toISOString();
-  const monotonicNs = process.hrtime.bigint().toString();
-  const serializedFields = formatTraceFields(fields);
-  console.log(
-    `[pin-trace] ts=${wallTime} monotonicNs=${monotonicNs} stage=${stage}${serializedFields ? ` ${serializedFields}` : ""}`,
-  );
-}
 
 interface SummarySubscriptionRecord {
   id: string;
@@ -337,6 +332,9 @@ export async function serveDaemon(
   const detailSubscriptions = new Map<string, DetailSubscriptionRecord>();
   const timelineSubscriptions = new Map<string, TimelineSubscriptionRecord>();
   const activeRuns = new Map<string, ActiveRunRecord>();
+  const manifestEntriesByRunId = new Map<string, ListedRunManifest>();
+  const dependentRunIdsByRunId = new Map<string, Set<string>>();
+  let manifestIndexInitialized = false;
   const recentTimelineBuffers = new Map<string, RecentTimelineRecord>();
   const sockets = new Set<Socket>();
   const wsClients = new Set<WebSocket>();
@@ -345,6 +343,7 @@ export async function serveDaemon(
     getRun,
     getRunBrief,
     getRunList,
+    getRunSummary,
     getRunTimelineHistory,
     getAttachment,
     getAttachmentList,
@@ -375,107 +374,168 @@ export async function serveDaemon(
     ...handlers,
   };
 
-  const getDaemonRun = (
-    target: string,
-    options: {
-      traceLabel?: string;
-    } = {},
-  ): RunDetail => {
-    const coreStartedAt = process.hrtime.bigint();
-    const run =
-      options.traceLabel === undefined || app.getRun !== getRun
-        ? app.getRun(target)
-        : getRunWithOptions(target, { traceLabel: options.traceLabel });
-    if (options.traceLabel) {
-      logPinTrace("daemon.getDaemonRun.coreDetail.complete", {
-        traceLabel: options.traceLabel,
-        target,
-        durationMs: formatTraceDurationMs(coreStartedAt),
-      });
+  const removeManifestIndexEntry = (runId: string): void => {
+    const existing = manifestEntriesByRunId.get(runId);
+    if (existing) {
+      for (const dependencyRunId of existing.manifest.dependencyRunIds) {
+        const dependents = dependentRunIdsByRunId.get(dependencyRunId);
+        if (!dependents) {
+          continue;
+        }
+        dependents.delete(runId);
+        if (dependents.size === 0) {
+          dependentRunIdsByRunId.delete(dependencyRunId);
+        }
+      }
     }
-    const overlayStartedAt = process.hrtime.bigint();
-    const projected = withDaemonDetailProjection(run, activeRuns);
-    if (options.traceLabel) {
-      logPinTrace("daemon.getDaemonRun.overlay.complete", {
-        traceLabel: options.traceLabel,
-        runId: projected.runId,
-        durationMs: formatTraceDurationMs(overlayStartedAt),
-      });
-    }
-    return projected;
-  };
-  const getDaemonRunList = (
-    opts?: Parameters<typeof app.getRunList>[0],
-    options: {
-      traceLabel?: string;
-    } = {},
-  ): RunSummary[] => {
-    const coreStartedAt = process.hrtime.bigint();
-    const runs =
-      options.traceLabel === undefined || app.getRunList !== getRunList
-        ? app.getRunList(opts)
-        : getRunListWithOptions(opts, { traceLabel: options.traceLabel });
-    if (options.traceLabel) {
-      logPinTrace("daemon.getDaemonRunList.coreList.complete", {
-        traceLabel: options.traceLabel,
-        count: runs.length,
-        durationMs: formatTraceDurationMs(coreStartedAt),
-      });
-    }
-    const overlayStartedAt = process.hrtime.bigint();
-    const projectedRuns = runs.map((run: RunSummary) => withDaemonAbortCapability(run, activeRuns));
-    if (options.traceLabel) {
-      logPinTrace("daemon.getDaemonRunList.overlay.complete", {
-        traceLabel: options.traceLabel,
-        count: projectedRuns.length,
-        durationMs: formatTraceDurationMs(overlayStartedAt),
-      });
-    }
-    return projectedRuns;
+    manifestEntriesByRunId.delete(runId);
   };
 
-  const getProjectedSummary = (
-    runId: string,
-    options: {
-      traceLabel?: string;
-    } = {},
-  ): RunSummary | null => {
-    const runListStartedAt = process.hrtime.bigint();
-    const runs = getDaemonRunList(
-      { includeArchived: true },
-      {
-        traceLabel: options.traceLabel,
-      },
-    );
-    if (options.traceLabel) {
-      logPinTrace("daemon.getProjectedSummary.runList.complete", {
-        traceLabel: options.traceLabel,
-        runId,
-        count: runs.length,
-        durationMs: formatTraceDurationMs(runListStartedAt),
-      });
+  const rememberManifestIndexEntry = (entry: ListedRunManifest): void => {
+    removeManifestIndexEntry(entry.manifest.runId);
+    manifestEntriesByRunId.set(entry.manifest.runId, entry);
+    for (const dependencyRunId of entry.manifest.dependencyRunIds) {
+      const dependents = dependentRunIdsByRunId.get(dependencyRunId) ?? new Set<string>();
+      dependents.add(entry.manifest.runId);
+      dependentRunIdsByRunId.set(dependencyRunId, dependents);
     }
-    const findStartedAt = process.hrtime.bigint();
-    const summary = runs.find((run) => run.runId === runId) ?? null;
-    if (options.traceLabel) {
-      logPinTrace("daemon.getProjectedSummary.find.complete", {
-        traceLabel: options.traceLabel,
-        runId,
-        found: summary !== null,
-        durationMs: formatTraceDurationMs(findStartedAt),
-      });
-    }
-    return summary;
   };
 
-  const getProjectedDetail = (
-    runId: string,
-    options: {
-      traceLabel?: string;
-    } = {},
-  ): RunDetail | null => {
+  const rebuildManifestIndex = (): void => {
+    const entries = listRunManifests();
+    manifestEntriesByRunId.clear();
+    dependentRunIdsByRunId.clear();
+    for (const entry of entries) {
+      rememberManifestIndexEntry(entry);
+    }
+    manifestIndexInitialized = true;
+  };
+
+  const ensureManifestIndex = (): void => {
+    if (manifestIndexInitialized) {
+      return;
+    }
+    rebuildManifestIndex();
+  };
+
+  const resolveManifestTarget = (target: string): ListedRunManifest => {
     try {
-      return getDaemonRun(runId, options);
+      const resolved = resolveResumeTarget(target);
+      return {
+        workspaceDir: resolved.workspaceDir,
+        manifest: resolved.manifest,
+      };
+    } catch (error) {
+      if (!(error instanceof RunNotFoundError) || isPathArg(target)) {
+        throw error;
+      }
+      const matches = findRunManifestsById(target);
+      if (matches.length === 0) {
+        throw error;
+      }
+      if (matches.length > 1) {
+        throw new ConflictError(
+          `run id "${target}" is ambiguous across repo buckets; use a workspace path instead (${matches.map((entry) => entry.workspaceDir).join(", ")})`,
+        );
+      }
+      const [match] = matches;
+      if (!match) {
+        throw error;
+      }
+      return match;
+    }
+  };
+
+  const refreshManifestIndexEntry = (target: string): ListedRunManifest => {
+    ensureManifestIndex();
+    const entry = resolveManifestTarget(target);
+    refreshRunSnapshotAfterTaskStateSettles(entry);
+    rememberManifestIndexEntry(entry);
+    return entry;
+  };
+
+  const refreshManifestByRunId = (runId: string): RunManifest | undefined => {
+    try {
+      return refreshManifestIndexEntry(runId).manifest;
+    } catch (error) {
+      if (error instanceof RunNotFoundError) {
+        return undefined;
+      }
+      throw error;
+    }
+  };
+
+  const getDaemonRun = (target: string): RunDetail => {
+    let run: RunDetail;
+    if (app.getRun !== getRun) {
+      run = app.getRun(target);
+    } else {
+      const entry = refreshManifestIndexEntry(target);
+      const relatedManifests = new Map<string, RunManifest>([
+        [entry.manifest.runId, entry.manifest],
+      ]);
+      for (const dependencyRunId of entry.manifest.dependencyRunIds) {
+        const dependencyManifest = refreshManifestByRunId(dependencyRunId);
+        if (dependencyManifest) {
+          relatedManifests.set(dependencyRunId, dependencyManifest);
+        }
+      }
+      const dependentRunIds = [
+        ...(dependentRunIdsByRunId.get(entry.manifest.runId) ?? new Set<string>()),
+      ];
+      const dependentManifests: RunManifest[] = [];
+      for (const dependentRunId of dependentRunIds) {
+        const dependentManifest = refreshManifestByRunId(dependentRunId);
+        if (dependentManifest) {
+          dependentManifests.push(dependentManifest);
+          relatedManifests.set(dependentRunId, dependentManifest);
+        }
+      }
+      run = toRunDetail({
+        manifest: entry.manifest,
+        isLive: false,
+        dependencies: resolveDependencies(entry.manifest, relatedManifests),
+        dependents: resolveDependentsFromManifests(entry.manifest.runId, dependentManifests),
+        relatedManifests,
+      });
+    }
+    return withDaemonDetailProjection(run, activeRuns);
+  };
+  const getDaemonRunList = (opts?: Parameters<typeof app.getRunList>[0]): RunSummary[] =>
+    app.getRunList(opts).map((run: RunSummary) => withDaemonAbortCapability(run, activeRuns));
+
+  const getDaemonRunSummary = (target: string): RunSummary => {
+    if (app.getRunSummary !== getRunSummary) {
+      return withDaemonAbortCapability(app.getRunSummary(target), activeRuns);
+    }
+    try {
+      return withDaemonAbortCapability(app.getRunSummary(target), activeRuns);
+    } catch (error) {
+      if (!(error instanceof RunNotFoundError) || app.getRunList === getRunList) {
+        throw error;
+      }
+      const summary = app.getRunList({ includeArchived: true }).find((run) => run.runId === target);
+      if (!summary) {
+        throw error;
+      }
+      return withDaemonAbortCapability(summary, activeRuns);
+    }
+  };
+
+  const getProjectedSummary = (runId: string): RunSummary | null => {
+    try {
+      return getDaemonRunSummary(runId);
+    } catch (err) {
+      if (err instanceof RunNotFoundError) {
+        return null;
+      }
+      throw err;
+    }
+  };
+
+  const getProjectedDetail = (runId: string): RunDetail | null => {
+    try {
+      return getDaemonRun(runId);
     } catch (err) {
       if (err instanceof RunNotFoundError) {
         return null;
@@ -560,11 +620,9 @@ export async function serveDaemon(
     }
   };
 
-  const dependentRunIds = (runId: string): string[] =>
-    listRunManifests()
-      .map((entry) => entry.manifest)
-      .filter((manifest) => manifest.runId !== runId && manifest.dependencyRunIds.includes(runId))
-      .map((manifest) => manifest.runId);
+  const dependentRunIds = (runId: string): string[] => [
+    ...(dependentRunIdsByRunId.get(runId) ?? new Set<string>()),
+  ];
 
   const shouldPublishDependentSummaries = (
     previous: RunDetail | null,
@@ -650,57 +708,20 @@ export async function serveDaemon(
   const publishRunProjections = (
     runId: string,
     options: {
+      summary?: RunSummary | null;
+      detail?: RunDetail | null;
       publishDependentSummaries?: boolean;
       publishDependentDetails?: boolean;
-      traceLabel?: string;
     } = {},
   ): void => {
-    const trace =
-      options.traceLabel === undefined
-        ? null
-        : (stage: string, fields: Record<string, unknown> = {}) => {
-            logPinTrace(`daemon.publishRunProjections.${stage}`, {
-              traceLabel: options.traceLabel,
-              runId,
-              ...fields,
-            });
-          };
-
-    trace?.("start", {
-      publishDependentSummaries: options.publishDependentSummaries ?? false,
-      publishDependentDetails: options.publishDependentDetails ?? false,
-    });
-
-    const summaryProjectionStartedAt = process.hrtime.bigint();
-    const summary = getProjectedSummary(runId, {
-      traceLabel: options.traceLabel ? `${options.traceLabel}.summary` : undefined,
-    });
-    trace?.("summaryProjection.complete", {
-      found: summary !== null,
-      durationMs: formatTraceDurationMs(summaryProjectionStartedAt),
-    });
+    const summary = options.summary === undefined ? getProjectedSummary(runId) : options.summary;
     if (summary) {
-      const summaryPublishStartedAt = process.hrtime.bigint();
       publishSummary(summary);
-      trace?.("summaryPublish.complete", {
-        durationMs: formatTraceDurationMs(summaryPublishStartedAt),
-      });
     }
 
-    const detailProjectionStartedAt = process.hrtime.bigint();
-    const detail = getProjectedDetail(runId, {
-      traceLabel: options.traceLabel ? `${options.traceLabel}.detail` : undefined,
-    });
-    trace?.("detailProjection.complete", {
-      found: detail !== null,
-      durationMs: formatTraceDurationMs(detailProjectionStartedAt),
-    });
+    const detail = options.detail === undefined ? getProjectedDetail(runId) : options.detail;
     if (detail) {
-      const detailPublishStartedAt = process.hrtime.bigint();
       publishDetail(detail);
-      trace?.("detailPublish.complete", {
-        durationMs: formatTraceDurationMs(detailPublishStartedAt),
-      });
       const active = activeRuns.get(runId);
       if (active) {
         active.detail = detail;
@@ -708,79 +729,50 @@ export async function serveDaemon(
     }
 
     if (!options.publishDependentSummaries && !options.publishDependentDetails) {
-      trace?.("complete", {
-        dependentRunCount: 0,
-      });
       return;
     }
 
-    const dependentRunIdsStartedAt = process.hrtime.bigint();
     const dependents = dependentRunIds(runId);
-    trace?.("dependentsResolved.complete", {
-      dependentRunCount: dependents.length,
-      durationMs: formatTraceDurationMs(dependentRunIdsStartedAt),
-    });
 
     for (const dependentRunId of dependents) {
       if (options.publishDependentSummaries) {
-        const dependentSummaryProjectionStartedAt = process.hrtime.bigint();
         const dependentSummary = getProjectedSummary(dependentRunId);
-        trace?.("dependentSummaryProjection.complete", {
-          dependentRunId,
-          found: dependentSummary !== null,
-          durationMs: formatTraceDurationMs(dependentSummaryProjectionStartedAt),
-        });
         if (dependentSummary) {
-          const dependentSummaryPublishStartedAt = process.hrtime.bigint();
           publishSummary(dependentSummary);
-          trace?.("dependentSummaryPublish.complete", {
-            dependentRunId,
-            durationMs: formatTraceDurationMs(dependentSummaryPublishStartedAt),
-          });
         }
       }
       if (options.publishDependentDetails) {
-        const dependentDetailProjectionStartedAt = process.hrtime.bigint();
         const dependentDetail = getProjectedDetail(dependentRunId);
-        trace?.("dependentDetailProjection.complete", {
-          dependentRunId,
-          found: dependentDetail !== null,
-          durationMs: formatTraceDurationMs(dependentDetailProjectionStartedAt),
-        });
         if (dependentDetail) {
-          const dependentDetailPublishStartedAt = process.hrtime.bigint();
           publishDetail(dependentDetail);
-          trace?.("dependentDetailPublish.complete", {
-            dependentRunId,
-            durationMs: formatTraceDurationMs(dependentDetailPublishStartedAt),
-          });
         }
       }
     }
-
-    trace?.("complete", {
-      dependentRunCount: dependents.length,
-    });
   };
 
   const publishMutationResult = (
     runId: string,
-    previous: RunDetail | null,
-    current: RunDetail | null,
     options: {
-      traceLabel?: string;
+      summary?: RunSummary | null;
+      detail?: RunDetail | null;
+      publishDependentSummaries?: boolean;
+      publishDependentDetails?: boolean;
     } = {},
   ): void => {
     publishRunProjections(runId, {
-      publishDependentSummaries: shouldPublishDependentSummaries(previous, current),
-      publishDependentDetails: shouldPublishDependentDetails(previous, current),
-      traceLabel: options.traceLabel,
+      summary: options.summary,
+      detail: options.detail,
+      publishDependentSummaries: options.publishDependentSummaries ?? false,
+      publishDependentDetails: options.publishDependentDetails ?? false,
     });
   };
 
   const publishRunDeletion = (runId: string): void => {
+    const dependents = dependentRunIds(runId);
+    removeManifestIndexEntry(runId);
+    dependentRunIdsByRunId.delete(runId);
     publishSummaryRemoval(runId);
-    for (const dependentRunId of dependentRunIds(runId)) {
+    for (const dependentRunId of dependents) {
       const dependentSummary = getProjectedSummary(dependentRunId);
       if (dependentSummary) {
         publishSummary(dependentSummary);
@@ -792,20 +784,43 @@ export async function serveDaemon(
     }
   };
 
-  const withPublishedMutation = <T>(runId: string, mutate: () => T): T => {
-    const previous = getProjectedDetail(runId);
+  const withPublishedMutation = <T>(
+    runId: string,
+    mutate: () => T,
+    options: {
+      inferDependentFanout?: boolean;
+    } = {},
+  ): T => {
+    const previous = options.inferDependentFanout ? getProjectedDetail(runId) : null;
     const result = mutate();
-    publishMutationResult(runId, previous, getProjectedDetail(runId));
+    const current = getProjectedDetail(runId);
+    const summary = getProjectedSummary(runId);
+    publishMutationResult(runId, {
+      summary,
+      detail: current,
+      publishDependentSummaries: shouldPublishDependentSummaries(previous, current),
+      publishDependentDetails: shouldPublishDependentDetails(previous, current),
+    });
     return result;
   };
 
   const withPublishedMutationAsync = async <T>(
     runId: string,
     mutate: () => Promise<T>,
+    options: {
+      inferDependentFanout?: boolean;
+    } = {},
   ): Promise<T> => {
-    const previous = getProjectedDetail(runId);
+    const previous = options.inferDependentFanout ? getProjectedDetail(runId) : null;
     const result = await mutate();
-    publishMutationResult(runId, previous, getProjectedDetail(runId));
+    const current = getProjectedDetail(runId);
+    const summary = getProjectedSummary(runId);
+    publishMutationResult(runId, {
+      summary,
+      detail: current,
+      publishDependentSummaries: shouldPublishDependentSummaries(previous, current),
+      publishDependentDetails: shouldPublishDependentDetails(previous, current),
+    });
     return result;
   };
 
@@ -980,7 +995,12 @@ export async function serveDaemon(
         ) {
           const previous = activeRuns.get(resolvedRunId)?.detail ?? null;
           const current = getProjectedDetail(resolvedRunId);
-          publishMutationResult(resolvedRunId, previous, current);
+          publishMutationResult(resolvedRunId, {
+            summary: getProjectedSummary(resolvedRunId),
+            detail: current,
+            publishDependentSummaries: shouldPublishDependentSummaries(previous, current),
+            publishDependentDetails: shouldPublishDependentDetails(previous, current),
+          });
         }
       }
     }, abortController.signal)
@@ -1011,7 +1031,13 @@ export async function serveDaemon(
           }
           activeRuns.delete(runId);
           lastTimelineCursorByRun.delete(runId);
-          publishMutationResult(runId, previous, getProjectedDetail(runId));
+          const current = getProjectedDetail(runId);
+          publishMutationResult(runId, {
+            summary: getProjectedSummary(runId),
+            detail: current,
+            publishDependentSummaries: shouldPublishDependentSummaries(previous, current),
+            publishDependentDetails: shouldPublishDependentDetails(previous, current),
+          });
         }
         resolveDone?.();
       });
@@ -1044,76 +1070,26 @@ export async function serveDaemon(
       return run;
     },
     archive: (target) =>
-      withPublishedMutation(target, () => app.archive(target, mutationAuditContext)),
+      withPublishedMutation(target, () => app.archive(target, mutationAuditContext), {
+        inferDependentFanout: true,
+      }),
     unarchive: (target) =>
-      withPublishedMutation(target, () => app.unarchive(target, mutationAuditContext)),
+      withPublishedMutation(target, () => app.unarchive(target, mutationAuditContext), {
+        inferDependentFanout: true,
+      }),
     deleteArchivedRun: (target) => {
       const result = app.deleteArchivedRun(target);
       publishRunDeletion(result.runId);
       return result;
     },
     renameRun: (target, input) =>
-      withPublishedMutationAsync(target, () => app.renameRun(target, input, mutationAuditContext)),
+      withPublishedMutationAsync(target, () => app.renameRun(target, input, mutationAuditContext), {
+        inferDependentFanout: true,
+      }),
     updateRunNote: (target, input) =>
       withPublishedMutation(target, () => app.updateRunNote(target, input)),
-    updateRunPinned: (target, input) => {
-      const startedAt = process.hrtime.bigint();
-      logPinTrace("daemon.updateRunPinned.start", {
-        target,
-        pinned: input.pinned,
-      });
-      try {
-        const previousDetailStartedAt = process.hrtime.bigint();
-        const previous = getProjectedDetail(target);
-        logPinTrace("daemon.updateRunPinned.previousDetail.complete", {
-          target,
-          found: previous !== null,
-          durationMs: formatTraceDurationMs(previousDetailStartedAt),
-        });
-
-        const mutationStartedAt = process.hrtime.bigint();
-        const result = app.updateRunPinned(target, input);
-        logPinTrace("daemon.updateRunPinned.coreMutation.complete", {
-          runId: result.runId,
-          pinned: result.pinned,
-          changed: result.changed,
-          durationMs: formatTraceDurationMs(mutationStartedAt),
-        });
-
-        const currentDetailStartedAt = process.hrtime.bigint();
-        const current = getProjectedDetail(target);
-        logPinTrace("daemon.updateRunPinned.currentDetail.complete", {
-          runId: result.runId,
-          found: current !== null,
-          durationMs: formatTraceDurationMs(currentDetailStartedAt),
-        });
-
-        const publishStartedAt = process.hrtime.bigint();
-        publishMutationResult(target, previous, current, {
-          traceLabel: "pin",
-        });
-        logPinTrace("daemon.updateRunPinned.publish.complete", {
-          runId: result.runId,
-          durationMs: formatTraceDurationMs(publishStartedAt),
-        });
-
-        logPinTrace("daemon.updateRunPinned.complete", {
-          runId: result.runId,
-          pinned: result.pinned,
-          changed: result.changed,
-          totalMs: formatTraceDurationMs(startedAt),
-        });
-        return result;
-      } catch (error) {
-        logPinTrace("daemon.updateRunPinned.error", {
-          target,
-          pinned: input.pinned,
-          totalMs: formatTraceDurationMs(startedAt),
-          error: error instanceof Error ? error.message : String(error),
-        });
-        throw error;
-      }
-    },
+    updateRunPinned: (target, input) =>
+      withPublishedMutation(target, () => app.updateRunPinned(target, input)),
     updateRunBackendSession: (target, input) =>
       withPublishedDetailMutation(target, () =>
         app.updateRunBackendSession(target, input, mutationAuditContext),
@@ -1132,17 +1108,26 @@ export async function serveDaemon(
       withPublishedMutationAsync(target, () => app.addRunAttachmentFromStream(target, input)),
     removeRunAttachment: (target, attachmentId) =>
       withPublishedMutation(target, () => app.removeRunAttachment(target, attachmentId)),
-    reset: (target) => withPublishedMutation(target, () => app.reset(target, mutationAuditContext)),
+    reset: (target) =>
+      withPublishedMutation(target, () => app.reset(target, mutationAuditContext), {
+        inferDependentFanout: true,
+      }),
     updateTask: (target, taskId, updates) =>
-      withPublishedMutation(target, () =>
-        app.updateTask(target, taskId, updates, mutationAuditContext),
+      withPublishedMutation(
+        target,
+        () => app.updateTask(target, taskId, updates, mutationAuditContext),
+        {
+          inferDependentFanout: true,
+        },
       ),
     appendNotes: (target, taskId, text) =>
       withPublishedMutation(target, () =>
         app.appendNotes(target, taskId, text, mutationAuditContext),
       ),
     createTask: (target, input) =>
-      withPublishedMutation(target, () => app.createTask(target, input, mutationAuditContext)),
+      withPublishedMutation(target, () => app.createTask(target, input, mutationAuditContext), {
+        inferDependentFanout: true,
+      }),
     daemonInfo: {
       daemonInstanceId,
       pid: process.pid,

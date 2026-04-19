@@ -1,6 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import type {
+  RunArchiveResult,
   RunDetail,
   RunNameResult,
   RunNoteResult,
@@ -270,6 +271,29 @@ function updateRunPinnedCaches(result: RunPinnedResult) {
   });
 }
 
+function updateRunArchivedCaches(result: RunArchiveResult) {
+  updateRunCaches(result.runId, {
+    detail: (run) => ({
+      ...run,
+      archivedAt: result.archivedAt,
+      capabilities: {
+        ...run.capabilities,
+        canArchive: result.archivedAt === null && run.status !== "running",
+        canUnarchive: result.archivedAt !== null && run.status !== "running",
+      },
+    }),
+    summary: (run) => ({
+      ...run,
+      archivedAt: result.archivedAt,
+      capabilities: {
+        ...run.capabilities,
+        canArchive: result.archivedAt === null && run.status !== "running",
+        canUnarchive: result.archivedAt !== null && run.status !== "running",
+      },
+    }),
+  });
+}
+
 function syncRunSummaryFromDetail(detail: RunDetail) {
   queryClient.setQueryData<RunSummary[] | undefined>(runQueryKeys.list(), (current) =>
     current?.map((run) =>
@@ -311,6 +335,17 @@ async function invalidateRunQueries(runId: string) {
 
 async function invalidateRunDetailQuery(runId: string) {
   await queryClient.invalidateQueries({ queryKey: runQueryKeys.detail(runId) });
+}
+
+function shouldInvalidateSimpleRunMutation(
+  runId: string,
+  options: {
+    detailRunId?: string;
+    summaryStreamStale: boolean;
+    detailStreamStale: boolean;
+  },
+): boolean {
+  return options.summaryStreamStale || (options.detailRunId === runId && options.detailStreamStale);
 }
 
 export function useRunsDashboardState() {
@@ -561,11 +596,45 @@ export function useRunsDashboardState() {
     void navigate({ to: "/" });
   };
 
-  const archiveMutation = useRunActionMutation(api.archiveRun, setActionError, {
-    onSuccess: markRunTouched,
+  const archiveMutation = useMutation({
+    mutationFn: (runId: string) => api.archiveRun(runId),
+    onError: (error: Error) => {
+      setActionError(error.message);
+    },
+    onSuccess: async (result) => {
+      setActionError(undefined);
+      updateRunArchivedCaches(result);
+      markRunTouched(result.runId);
+      if (
+        shouldInvalidateSimpleRunMutation(result.runId, {
+          detailRunId,
+          summaryStreamStale,
+          detailStreamStale: detailStreamStaleRef.current,
+        })
+      ) {
+        await invalidateRunQueries(result.runId);
+      }
+    },
   });
-  const unarchiveMutation = useRunActionMutation(api.unarchiveRun, setActionError, {
-    onSuccess: markRunTouched,
+  const unarchiveMutation = useMutation({
+    mutationFn: (runId: string) => api.unarchiveRun(runId),
+    onError: (error: Error) => {
+      setActionError(error.message);
+    },
+    onSuccess: async (result) => {
+      setActionError(undefined);
+      updateRunArchivedCaches(result);
+      markRunTouched(result.runId);
+      if (
+        shouldInvalidateSimpleRunMutation(result.runId, {
+          detailRunId,
+          summaryStreamStale,
+          detailStreamStale: detailStreamStaleRef.current,
+        })
+      ) {
+        await invalidateRunQueries(result.runId);
+      }
+    },
   });
   const resetMutation = useRunActionMutation(api.resetRun, setActionError, {
     onSuccess: markRunTouched,
@@ -607,7 +676,15 @@ export function useRunsDashboardState() {
       setActionError(undefined);
       updateRunNameCaches(result);
       markRunTouched(runId);
-      await invalidateRunQueries(runId);
+      if (
+        shouldInvalidateSimpleRunMutation(runId, {
+          detailRunId,
+          summaryStreamStale,
+          detailStreamStale: detailStreamStaleRef.current,
+        })
+      ) {
+        await invalidateRunQueries(runId);
+      }
     },
   });
   const noteMutation = useMutation({
@@ -620,7 +697,15 @@ export function useRunsDashboardState() {
       setActionError(undefined);
       updateRunNoteCaches(result);
       markRunTouched(result.runId);
-      await invalidateRunQueries(result.runId);
+      if (
+        shouldInvalidateSimpleRunMutation(result.runId, {
+          detailRunId,
+          summaryStreamStale,
+          detailStreamStale: detailStreamStaleRef.current,
+        })
+      ) {
+        await invalidateRunQueries(result.runId);
+      }
     },
   });
   const pinnedMutation = useMutation({
@@ -633,7 +718,15 @@ export function useRunsDashboardState() {
       setActionError(undefined);
       updateRunPinnedCaches(result);
       markRunTouched(result.runId);
-      await invalidateRunQueries(result.runId);
+      if (
+        shouldInvalidateSimpleRunMutation(result.runId, {
+          detailRunId,
+          summaryStreamStale,
+          detailStreamStale: detailStreamStaleRef.current,
+        })
+      ) {
+        await invalidateRunQueries(result.runId);
+      }
     },
   });
   const backendSessionMutation = useMutation({

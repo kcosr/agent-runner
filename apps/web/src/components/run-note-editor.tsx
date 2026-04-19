@@ -58,6 +58,7 @@ export function usePreferredRunNoteEditorMode(): RunNoteEditorMode {
 }
 
 export function RunNoteEditor({
+  autoFocusEditor = false,
   closeOnCancel = false,
   closeOnSave = false,
   emptyPreviewMessage,
@@ -68,6 +69,7 @@ export function RunNoteEditor({
   pending,
   textareaLabel,
 }: {
+  autoFocusEditor?: boolean;
   closeOnCancel?: boolean;
   closeOnSave?: boolean;
   emptyPreviewMessage: string;
@@ -81,6 +83,7 @@ export function RunNoteEditor({
   const [draft, setDraft] = useState(note ?? "");
   const [mode, setMode] = useState<RunNoteEditorMode>(initialMode);
   const noteRef = useRef(note);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const textareaId = useId();
 
   useEffect(() => {
@@ -91,6 +94,19 @@ export function RunNoteEditor({
     setDraft(note ?? "");
     setMode(initialMode);
   }, [initialMode, note]);
+
+  useEffect(() => {
+    if (!autoFocusEditor || mode !== "edit" || pending) {
+      return;
+    }
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      return;
+    }
+    textarea.focus({ preventScroll: true });
+    const selectionStart = textarea.value.length;
+    textarea.setSelectionRange(selectionStart, selectionStart);
+  }, [autoFocusEditor, mode, pending]);
 
   function handleCancel() {
     if (pending) {
@@ -186,6 +202,7 @@ export function RunNoteEditor({
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={handleTextareaKeyDown}
             placeholder="Write markdown notes for this run."
+            ref={textareaRef}
             value={draft}
           />
         </label>

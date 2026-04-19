@@ -74,6 +74,7 @@ import {
   type RunManifest,
   RunNotFoundError,
   type TaskSnapshot,
+  findRunManifestsById,
   listRunManifests,
   resolveResumeTarget,
   writeManifest,
@@ -104,6 +105,7 @@ import {
 } from "../run/workspace-state.js";
 
 export type StatusCommandResult = RunDetail;
+export type SummaryCommandResult = RunSummary;
 export type BriefCommandResult = string;
 
 export interface DefinitionListResult {
@@ -168,30 +170,6 @@ export interface TaskDetailsResult {
 export interface TaskMutationResult {
   manifest: RunManifest;
   task: TaskSnapshot;
-}
-
-interface ProjectionTraceOptions {
-  traceLabel?: string;
-}
-
-function formatTraceDurationMs(startedAt: bigint): string {
-  return (Number(process.hrtime.bigint() - startedAt) / 1_000_000).toFixed(3);
-}
-
-function formatTraceFields(fields: Record<string, unknown>): string {
-  return Object.entries(fields)
-    .filter(([, value]) => value !== undefined)
-    .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
-    .join(" ");
-}
-
-function logPinTrace(stage: string, fields: Record<string, unknown> = {}): void {
-  const wallTime = new Date().toISOString();
-  const monotonicNs = process.hrtime.bigint().toString();
-  const serializedFields = formatTraceFields(fields);
-  console.log(
-    `[pin-trace] ts=${wallTime} monotonicNs=${monotonicNs} stage=${stage}${serializedFields ? ` ${serializedFields}` : ""}`,
-  );
 }
 
 export interface AttachmentListResult {
@@ -259,7 +237,7 @@ function resolveRun(target: string): ReturnType<typeof resolveResumeTarget> {
       throw error;
     }
 
-    const matches = listRunManifests().filter((entry) => entry.manifest.runId === target);
+    const matches = findRunManifestsById(target);
     if (matches.length === 0) {
       throw error;
     }
@@ -318,7 +296,7 @@ function withDependencyMutationLock<T>(fn: () => T): T {
   return withGlobalStateLock("run-dependencies", fn);
 }
 
-function refreshRunSnapshotAfterTaskStateSettles(
+export function refreshRunSnapshotAfterTaskStateSettles(
   resolved: ReturnType<typeof resolveResumeTarget>,
 ): void {
   withTaskStateLock(resolved.workspaceDir, () => {
@@ -540,57 +518,14 @@ async function propagateRunNameChange(manifest: RunManifest): Promise<void> {
 }
 
 export function readStatus(target: string): StatusCommandResult {
-  return readStatusWithOptions(target);
-}
-
-export function readStatusWithOptions(
-  target: string,
-  options: ProjectionTraceOptions = {},
-): StatusCommandResult {
-  const startedAt = process.hrtime.bigint();
-  if (options.traceLabel) {
-    logPinTrace("core.readStatus.start", {
-      traceLabel: options.traceLabel,
-      target,
-    });
-  }
-  const resolveStartedAt = process.hrtime.bigint();
   const resolved = resolveRun(target);
-  if (options.traceLabel) {
-    logPinTrace("core.readStatus.resolveRun.complete", {
-      traceLabel: options.traceLabel,
-      target,
-      runId: resolved.manifest.runId,
-      durationMs: formatTraceDurationMs(resolveStartedAt),
-    });
-  }
-  const refreshStartedAt = process.hrtime.bigint();
   refreshRunSnapshotAfterTaskStateSettles(resolved);
-  if (options.traceLabel) {
-    logPinTrace("core.readStatus.refreshSnapshot.complete", {
-      traceLabel: options.traceLabel,
-      runId: resolved.manifest.runId,
-      durationMs: formatTraceDurationMs(refreshStartedAt),
-    });
-  }
 
   const manifestView = resolved.manifest;
   const dependencyGraph = new Map<string, RunManifest>([[manifestView.runId, manifestView]]);
   const dependents: RunManifest[] = [];
 
-  const manifestsStartedAt = process.hrtime.bigint();
-  const entries = listRunManifests();
-  if (options.traceLabel) {
-    logPinTrace("core.readStatus.listRunManifests.complete", {
-      traceLabel: options.traceLabel,
-      runId: manifestView.runId,
-      entryCount: entries.length,
-      durationMs: formatTraceDurationMs(manifestsStartedAt),
-    });
-  }
-
-  const scanStartedAt = process.hrtime.bigint();
-  for (const entry of entries) {
+  for (const entry of listRunManifests()) {
     const candidate = entry.manifest.runId === manifestView.runId ? manifestView : entry.manifest;
     if (manifestView.dependencyRunIds.includes(candidate.runId)) {
       dependencyGraph.set(candidate.runId, candidate);
@@ -602,58 +537,37 @@ export function readStatusWithOptions(
       dependents.push(candidate);
     }
   }
-  if (options.traceLabel) {
-    logPinTrace("core.readStatus.dependencyScan.complete", {
-      traceLabel: options.traceLabel,
-      runId: manifestView.runId,
-      dependencyCount: dependencyGraph.size - 1,
-      dependentCount: dependents.length,
-      durationMs: formatTraceDurationMs(scanStartedAt),
-    });
-  }
 
-  const resolveDependenciesStartedAt = process.hrtime.bigint();
-  const dependencies = resolveDependencies(manifestView, dependencyGraph);
-  if (options.traceLabel) {
-    logPinTrace("core.readStatus.resolveDependencies.complete", {
-      traceLabel: options.traceLabel,
-      runId: manifestView.runId,
-      dependencyCount: dependencies.length,
-      durationMs: formatTraceDurationMs(resolveDependenciesStartedAt),
-    });
-  }
-
-  const resolveDependentsStartedAt = process.hrtime.bigint();
-  const projectedDependents = resolveDependentsFromManifests(manifestView.runId, dependents);
-  if (options.traceLabel) {
-    logPinTrace("core.readStatus.resolveDependents.complete", {
-      traceLabel: options.traceLabel,
-      runId: manifestView.runId,
-      dependentCount: projectedDependents.length,
-      durationMs: formatTraceDurationMs(resolveDependentsStartedAt),
-    });
-  }
-
-  const detailStartedAt = process.hrtime.bigint();
-  const detail = toRunDetail({
+  return toRunDetail({
     manifest: manifestView,
     isLive: false,
-    dependencies,
-    dependents: projectedDependents,
+    dependencies: resolveDependencies(manifestView, dependencyGraph),
+    dependents: resolveDependentsFromManifests(manifestView.runId, dependents),
   });
-  if (options.traceLabel) {
-    logPinTrace("core.readStatus.toRunDetail.complete", {
-      traceLabel: options.traceLabel,
-      runId: manifestView.runId,
-      durationMs: formatTraceDurationMs(detailStartedAt),
-    });
-    logPinTrace("core.readStatus.complete", {
-      traceLabel: options.traceLabel,
-      runId: manifestView.runId,
-      totalMs: formatTraceDurationMs(startedAt),
-    });
+}
+
+export function readRunSummary(target: string): SummaryCommandResult {
+  const resolved = resolveRun(target);
+  refreshRunSnapshotAfterTaskStateSettles(resolved);
+  const satisfiedRunIds = new Set<string>();
+  for (const dependencyRunId of resolved.manifest.dependencyRunIds) {
+    const dependencyMatches = findRunManifestsById(dependencyRunId);
+    if (dependencyMatches.some((entry) => entry.manifest.status === "success")) {
+      satisfiedRunIds.add(dependencyRunId);
+    }
   }
-  return detail;
+  const dependencyState = deriveDependencyStateFromSatisfiedRunIds(
+    resolved.manifest,
+    satisfiedRunIds,
+  );
+  return toRunSummary(
+    {
+      workspaceDir: resolved.workspaceDir,
+      manifest: resolved.manifest,
+    },
+    undefined,
+    dependencyState,
+  );
 }
 
 export function readBrief(target: string): BriefCommandResult {
@@ -689,68 +603,20 @@ function matchesRunListScope(
 }
 
 export function listRuns(filter: RunListFilter = {}): RunListResult {
-  return listRunsWithOptions(filter);
-}
-
-export function listRunsWithOptions(
-  filter: RunListFilter = {},
-  options: ProjectionTraceOptions = {},
-): RunListResult {
-  const startedAt = process.hrtime.bigint();
   const includeArchived = filter.includeArchived === true;
-  if (options.traceLabel) {
-    logPinTrace("core.listRuns.start", {
-      traceLabel: options.traceLabel,
-      includeArchived,
-      scope: filter.scope?.kind ?? "global",
-    });
-  }
-  const manifestsStartedAt = process.hrtime.bigint();
   const entries = listRunManifests();
-  if (options.traceLabel) {
-    logPinTrace("core.listRuns.listRunManifests.complete", {
-      traceLabel: options.traceLabel,
-      entryCount: entries.length,
-      durationMs: formatTraceDurationMs(manifestsStartedAt),
-    });
-  }
-  const cloneStartedAt = process.hrtime.bigint();
   const projectedEntries = entries.map((entry) => ({
     ...entry,
     manifest: entry.manifest,
   }));
-  if (options.traceLabel) {
-    logPinTrace("core.listRuns.projectEntries.complete", {
-      traceLabel: options.traceLabel,
-      entryCount: projectedEntries.length,
-      durationMs: formatTraceDurationMs(cloneStartedAt),
-    });
-  }
-  const successfulRunIdsStartedAt = process.hrtime.bigint();
   const successfulRunIds = new Set(
     projectedEntries
       .filter((entry) => entry.manifest.status === "success")
       .map((entry) => entry.manifest.runId),
   );
-  if (options.traceLabel) {
-    logPinTrace("core.listRuns.successfulRunIds.complete", {
-      traceLabel: options.traceLabel,
-      count: successfulRunIds.size,
-      durationMs: formatTraceDurationMs(successfulRunIdsStartedAt),
-    });
-  }
-  const scopedEntriesStartedAt = process.hrtime.bigint();
   const scopedEntries = projectedEntries.filter((entry) =>
     matchesRunListScope(entry.manifest, filter.scope),
   );
-  if (options.traceLabel) {
-    logPinTrace("core.listRuns.scopeFilter.complete", {
-      traceLabel: options.traceLabel,
-      count: scopedEntries.length,
-      durationMs: formatTraceDurationMs(scopedEntriesStartedAt),
-    });
-  }
-  const summaryProjectionStartedAt = process.hrtime.bigint();
   const summaries = scopedEntries.map((entry) =>
     toRunSummary(
       entry,
@@ -758,39 +624,10 @@ export function listRunsWithOptions(
       deriveDependencyStateFromSatisfiedRunIds(entry.manifest, successfulRunIds),
     ),
   );
-  if (options.traceLabel) {
-    logPinTrace("core.listRuns.toRunSummary.complete", {
-      traceLabel: options.traceLabel,
-      count: summaries.length,
-      durationMs: formatTraceDurationMs(summaryProjectionStartedAt),
-    });
-  }
-  const archivedFilterStartedAt = process.hrtime.bigint();
   const visibleSummaries = summaries.filter(
     (entry) => includeArchived || entry.archivedAt === null,
   );
-  if (options.traceLabel) {
-    logPinTrace("core.listRuns.archiveFilter.complete", {
-      traceLabel: options.traceLabel,
-      count: visibleSummaries.length,
-      durationMs: formatTraceDurationMs(archivedFilterStartedAt),
-    });
-  }
-  const sortStartedAt = process.hrtime.bigint();
-  const sortedSummaries = visibleSummaries.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
-  if (options.traceLabel) {
-    logPinTrace("core.listRuns.sort.complete", {
-      traceLabel: options.traceLabel,
-      count: sortedSummaries.length,
-      durationMs: formatTraceDurationMs(sortStartedAt),
-    });
-    logPinTrace("core.listRuns.complete", {
-      traceLabel: options.traceLabel,
-      count: sortedSummaries.length,
-      totalMs: formatTraceDurationMs(startedAt),
-    });
-  }
-  return sortedSummaries;
+  return visibleSummaries.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
 }
 
 export function showDefinition(
@@ -975,77 +812,24 @@ export function setRunNote(target: string, input: { note: string | null }): RunN
 }
 
 export function setRunPinned(target: string, input: { pinned: boolean }): RunPinnedResult {
-  const startedAt = process.hrtime.bigint();
-  logPinTrace("core.setRunPinned.start", {
-    target,
-    pinned: input.pinned,
+  const resolved = resolveRun(target);
+  let changed = false;
+
+  withTaskStateLock(resolved.workspaceDir, () => {
+    resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
+    if (resolved.manifest.pinned === input.pinned) {
+      return;
+    }
+    resolved.manifest.pinned = input.pinned;
+    resolved.manifest.resetSeed.pinned = input.pinned;
+    writeManifest(resolved.workspaceDir, resolved.manifest);
+    changed = true;
   });
 
-  try {
-    const resolveStartedAt = process.hrtime.bigint();
-    const resolved = resolveRun(target);
-    logPinTrace("core.setRunPinned.resolveRun.complete", {
-      target,
-      runId: resolved.manifest.runId,
-      workspaceDir: resolved.workspaceDir,
-      durationMs: formatTraceDurationMs(resolveStartedAt),
-    });
-    let changed = false;
-
-    const lockStartedAt = process.hrtime.bigint();
-    withTaskStateLock(resolved.workspaceDir, () => {
-      logPinTrace("core.setRunPinned.lock.acquired", {
-        runId: resolved.manifest.runId,
-        workspaceDir: resolved.workspaceDir,
-        waitMs: formatTraceDurationMs(lockStartedAt),
-      });
-
-      const reloadStartedAt = process.hrtime.bigint();
-      resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
-      logPinTrace("core.setRunPinned.reload.complete", {
-        runId: resolved.manifest.runId,
-        pinned: resolved.manifest.pinned,
-        durationMs: formatTraceDurationMs(reloadStartedAt),
-      });
-      if (resolved.manifest.pinned === input.pinned) {
-        logPinTrace("core.setRunPinned.noop", {
-          runId: resolved.manifest.runId,
-          pinned: input.pinned,
-        });
-        return;
-      }
-      resolved.manifest.pinned = input.pinned;
-      resolved.manifest.resetSeed.pinned = input.pinned;
-      const writeStartedAt = process.hrtime.bigint();
-      writeManifest(resolved.workspaceDir, resolved.manifest);
-      logPinTrace("core.setRunPinned.writeManifest.complete", {
-        runId: resolved.manifest.runId,
-        pinned: input.pinned,
-        durationMs: formatTraceDurationMs(writeStartedAt),
-      });
-      changed = true;
-    });
-
-    const result = toRunPinnedResult({
-      manifest: resolved.manifest,
-      changed,
-    });
-    logPinTrace("core.setRunPinned.complete", {
-      runId: result.runId,
-      pinned: result.pinned,
-      changed: result.changed,
-      totalMs: formatTraceDurationMs(startedAt),
-    });
-    return result;
-  } catch (error) {
-    logPinTrace("core.setRunPinned.error", {
-      target,
-      pinned: input.pinned,
-      totalMs: formatTraceDurationMs(startedAt),
-      error: error instanceof Error ? error.message : String(error),
-    });
-    throw error;
-  }
+  return toRunPinnedResult({
+    manifest: resolved.manifest,
+    changed,
+  });
 }
 
 function requirePassiveBackendSessionMutation(manifest: RunManifest, verb: "set" | "clear"): void {

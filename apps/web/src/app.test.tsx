@@ -3002,6 +3002,7 @@ describe("web app", () => {
     const input = screen.getByRole("textbox", { name: /run name/i });
     await user.clear(input);
     await user.type(input, "Dashboard polish");
+    const callsBeforeSave = fetchMock.mock.calls.length;
     await user.click(screen.getByRole("button", { name: /^save$/i }));
 
     await waitFor(() =>
@@ -3015,6 +3016,10 @@ describe("web app", () => {
         body: JSON.stringify({ name: "Dashboard polish" }),
       }),
     );
+    const callsAfterSave = fetchMock.mock.calls
+      .slice(callsBeforeSave)
+      .map(([input]) => (typeof input === "string" ? input : input.toString()));
+    expect(callsAfterSave).toEqual(["/api/runs/run-1/name"]);
   });
 
   it("previews and edits run notes from the card, then reuses the same note state in the drawer", async () => {
@@ -3046,8 +3051,10 @@ describe("web app", () => {
     const noteInput = await screen.findByRole("textbox", {
       name: /run note for build dashboard/i,
     });
+    expect(noteInput).toHaveFocus();
     await user.clear(noteInput);
     await user.type(noteInput, "# Dashboard polish{enter}{enter}Saved from card");
+    const callsBeforeSave = fetchMock.mock.calls.length;
     await user.click(screen.getByRole("button", { name: /^save$/i }));
 
     await user.click(card);
@@ -3062,6 +3069,10 @@ describe("web app", () => {
         body: JSON.stringify({ note: "# Dashboard polish\n\nSaved from card" }),
       }),
     );
+    const callsAfterSave = fetchMock.mock.calls
+      .slice(callsBeforeSave)
+      .map(([input]) => (typeof input === "string" ? input : input.toString()));
+    expect(callsAfterSave).toEqual(["/api/runs/run-1/note"]);
   });
 
   it("defaults the card note dialog to preview mode for touch-style pointers", async () => {
@@ -3581,6 +3592,139 @@ describe("web app", () => {
 
     await user.click(screen.getByRole("button", { name: "Settings" }));
     expect(screen.getByRole("checkbox", { name: "Show pinned runs only" })).toBeChecked();
+  });
+
+  it("pins a selected run without forcing list and detail refetches while streams are healthy", async () => {
+    const fetchMock = installFetchMock({
+      runs: [makeRun({ assignmentName: "Build dashboard" })],
+      details: {
+        "run-1": makeDetail({
+          assignment: {
+            name: "Build dashboard",
+            sourcePath: "/tmp/a.md",
+            workspacePath: "/tmp/b.md",
+          },
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+
+    const callsBefore = fetchMock.mock.calls.length;
+    await user.click(await screen.findByRole("button", { name: "Pin run" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Unpin run" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      ),
+    );
+
+    const callsAfter = fetchMock.mock.calls
+      .slice(callsBefore)
+      .map(([input]) => (typeof input === "string" ? input : input.toString()));
+    expect(callsAfter).toEqual(["/api/runs/run-1/pinned"]);
+  });
+
+  it("opens the selected run note modal with n and toggles pin with p", async () => {
+    const fetchMock = installFetchMock({
+      runs: [makeRun({ assignmentName: "Build dashboard" })],
+      details: {
+        "run-1": makeDetail({
+          assignment: {
+            name: "Build dashboard",
+            sourcePath: "/tmp/a.md",
+            workspacePath: "/tmp/b.md",
+          },
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+
+    await user.keyboard("n");
+    const noteInput = await screen.findByRole("textbox", {
+      name: /run note for build dashboard/i,
+    });
+    expect(noteInput).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("textbox", { name: /run note for build dashboard/i }),
+      ).not.toBeInTheDocument(),
+    );
+
+    const callsBeforePin = fetchMock.mock.calls.length;
+    await user.keyboard("p");
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Unpin run" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      ),
+    );
+
+    const callsAfterPin = fetchMock.mock.calls
+      .slice(callsBeforePin)
+      .map(([input]) => (typeof input === "string" ? input : input.toString()));
+    expect(callsAfterPin).toEqual(["/api/runs/run-1/pinned"]);
+  });
+
+  it("toggles archive for the selected run with a", async () => {
+    const fetchMock = installFetchMock({
+      runs: [
+        makeRun({
+          assignmentName: "Archive ready",
+          capabilities: {
+            canArchive: true,
+            canReset: false,
+            canResume: false,
+          },
+          status: "success",
+        }),
+      ],
+      details: {
+        "run-1": makeDetail({
+          assignment: {
+            name: "Archive ready",
+            sourcePath: "/tmp/archive-a.md",
+            workspacePath: "/tmp/archive-b.md",
+          },
+          capabilities: {
+            canArchive: true,
+            canReset: false,
+            canResume: false,
+          },
+          status: "success",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Archive ready"));
+
+    const callsBeforeArchive = fetchMock.mock.calls.length;
+    await user.keyboard("a");
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/runs/run-1/archive",
+        expect.objectContaining({
+          method: "POST",
+        }),
+      ),
+    );
+
+    const callsAfterArchive = fetchMock.mock.calls
+      .slice(callsBeforeArchive)
+      .map(([input]) => (typeof input === "string" ? input : input.toString()));
+    expect(callsAfterArchive).toEqual(["/api/runs/run-1/archive"]);
   });
 
   it("restores the in-scope dashboard preferences to defaults from settings", async () => {

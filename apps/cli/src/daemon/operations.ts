@@ -14,6 +14,7 @@ import type {
   getRun,
   getRunBrief,
   getRunList,
+  getRunSummary,
   getRunTimelineHistory,
   getTask,
   getTaskList,
@@ -42,6 +43,7 @@ export interface DaemonHandlers {
   getRun: typeof getRun;
   getRunBrief: typeof getRunBrief;
   getRunList: typeof getRunList;
+  getRunSummary: typeof getRunSummary;
   getRunTimelineHistory: typeof getRunTimelineHistory;
   getTask: typeof getTask;
   getTaskList: typeof getTaskList;

@@ -20,6 +20,7 @@ export function RunColumn({
   column,
   columnRef,
   motionsByRunId,
+  openSelectedRunNoteRequest,
   onSetNote,
   onSetPinned,
   selectedRunId,
@@ -34,6 +35,10 @@ export function RunColumn({
   column: BoardColumn;
   columnRef?: (node: HTMLElement | null) => void;
   motionsByRunId: Record<string, RunCardMotion>;
+  openSelectedRunNoteRequest: {
+    runId: string;
+    version: number;
+  } | null;
   onSetNote: (runId: string, note: string | null) => Promise<void>;
   onSetPinned: (runId: string, pinned: boolean) => Promise<void>;
   selectedRunId?: string;
@@ -117,6 +122,7 @@ export function RunColumn({
             actionPending={actionPending}
             key={run.runId}
             motion={motionsByRunId[run.runId]}
+            openNoteDialogRequest={openSelectedRunNoteRequest}
             onSetNote={(note) => onSetNote(run.runId, note)}
             onSetPinned={(pinned) => onSetPinned(run.runId, pinned)}
             onSelect={() => onSelectRun(run.runId)}

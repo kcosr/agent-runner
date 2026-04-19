@@ -38,12 +38,11 @@ import {
   listAttachments,
   listDefinitions,
   listRuns,
-  listRunsWithOptions,
   listTasks,
   readAttachment,
   readBrief,
+  readRunSummary,
   readStatus,
-  readStatusWithOptions,
   removeAttachment,
   removeRunDependency,
   resetRun,
@@ -172,13 +171,8 @@ export function getRun(target: string): RunDetail {
   return readStatus(target);
 }
 
-export function getRunWithOptions(
-  target: string,
-  options: {
-    traceLabel?: string;
-  } = {},
-): RunDetail {
-  return readStatusWithOptions(target, options);
+export function getRunSummary(target: string): RunSummary {
+  return readRunSummary(target);
 }
 
 export function getRunTimelineHistory(target: string): RunTimelineHistory {
@@ -199,15 +193,6 @@ export function getRunBrief(target: string): string {
 
 export function getRunList(filter: RunListFilter = {}): RunSummary[] {
   return listRuns(filter);
-}
-
-export function getRunListWithOptions(
-  filter: RunListFilter = {},
-  options: {
-    traceLabel?: string;
-  } = {},
-): RunSummary[] {
-  return listRunsWithOptions(filter, options);
 }
 
 export function getTaskList(target: string): RunTaskSummary[] {

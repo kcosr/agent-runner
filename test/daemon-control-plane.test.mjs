@@ -2064,7 +2064,11 @@ test("daemon note and pin mutations publish summary and detail updates", async (
   const listenUrl = `ws://127.0.0.1:${port}/`;
   const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
   await withEnv(sharedRuntimeEnv(dir), async () => {
-    const server = await serveDaemon(listenUrl);
+    const server = await serveDaemon(listenUrl, {
+      getRunList() {
+        throw new Error("unexpected getRunList call during note/pin mutation publish");
+      },
+    });
     const summaries = await openSse(httpBaseUrl, "/api/events/run-summaries");
     const details = await openSse(httpBaseUrl, `/api/runs/${init.runId}/events/detail`);
     try {
