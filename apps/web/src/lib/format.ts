@@ -37,13 +37,6 @@ export function formatTimestampWithRelative(value: string | null): string {
   return relative ? `${absolute} ${relative}` : absolute;
 }
 
-export function truncateMiddle(value: string, start = 20, end = 18): string {
-  if (value.length <= start + end + 3) {
-    return value;
-  }
-  return `${value.slice(0, start)}...${value.slice(-end)}`;
-}
-
 export function truncateEnd(value: string, max = 44): string {
   if (value.length <= max) {
     return value;
