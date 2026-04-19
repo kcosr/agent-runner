@@ -10,6 +10,7 @@ import type {
   ValidateSessionContext,
   ValidateSessionResult,
 } from "../core/backends/types.js";
+import { isWsOrWssUrl } from "../core/backends/types.js";
 import { resolveTaskRunnerCommand } from "../task-runner-command.js";
 import {
   composePersistedTranscript,
@@ -723,18 +724,12 @@ function cloneCodexTransportConfig(transport: CodexTransportConfig): CodexTransp
 }
 
 export function normalizeCodexWsUrl(url: string): string {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
+  if (!isWsOrWssUrl(url)) {
     throw new Error(
       `codex websocket transport requires an absolute ws:// or wss:// URL, received "${url}"`,
     );
   }
-  if (parsed.protocol !== "ws:" && parsed.protocol !== "wss:") {
-    throw new Error(`codex websocket transport requires a ws:// or wss:// URL, received "${url}"`);
-  }
-  return parsed.toString();
+  return new URL(url).toString();
 }
 
 export function resolveCodexTransportConfig(ctx: {

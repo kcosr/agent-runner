@@ -11,7 +11,11 @@ import {
 } from "../../config/runtime-paths.js";
 import type { RunAttachment } from "../../contracts/attachments.js";
 import { writeTextFileAtomic } from "../../util/write-file-atomic.js";
-import { type BackendSpecificConfig, cloneBackendSpecificConfig } from "../backends/types.js";
+import {
+  type BackendSpecificConfig,
+  cloneBackendSpecificConfig,
+  isWsOrWssUrl,
+} from "../backends/types.js";
 import type { LockableField } from "../config/schema.js";
 
 export type ManifestStatus =
@@ -615,12 +619,7 @@ function isValidCodexTransport(value: unknown): boolean {
     if (typeof record.url !== "string" || record.url.trim().length === 0) {
       return false;
     }
-    try {
-      const parsed = new URL(record.url);
-      return parsed.protocol === "ws:" || parsed.protocol === "wss:";
-    } catch {
-      return false;
-    }
+    return isWsOrWssUrl(record.url);
   }
   return false;
 }

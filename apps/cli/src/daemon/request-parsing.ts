@@ -3,7 +3,7 @@ import type {
   BackendSpecificConfig,
   CodexTransportConfig,
 } from "@task-runner/core/core/backends/types.js";
-import { BACKEND_IDS } from "@task-runner/core/core/backends/types.js";
+import { BACKEND_IDS, isWsOrWssUrl } from "@task-runner/core/core/backends/types.js";
 import type { RunListScopeFilter } from "@task-runner/core/core/commands/service.js";
 import { trimRunName } from "@task-runner/core/util/run-name.js";
 import type {
@@ -201,15 +201,10 @@ export function parseBooleanQueryValue(value: string | null, label: string): boo
 }
 
 function validateAbsoluteCodexWsUrl(value: string, label: string): string {
-  try {
-    const parsed = new URL(value);
-    if (parsed.protocol !== "ws:" && parsed.protocol !== "wss:") {
-      throw new Error();
-    }
-    return value;
-  } catch {
+  if (!isWsOrWssUrl(value)) {
     throw new RequestValidationError(`${label} must be an absolute ws:// or wss:// URL`);
   }
+  return value;
 }
 
 function optionalCodexTransport(value: unknown, label: string): CodexTransportConfig | undefined {

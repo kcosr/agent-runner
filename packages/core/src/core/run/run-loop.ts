@@ -10,7 +10,7 @@ import {
 import { resolveTaskRunnerCommand } from "../../task-runner-command.js";
 import { normalizeOptionalRunName } from "../../util/run-name.js";
 import { shortId } from "../../util/short-id.js";
-import { cloneBackendSpecificConfig } from "../backends/types.js";
+import { cloneBackendSpecificConfig, isWsOrWssUrl } from "../backends/types.js";
 import type {
   Backend,
   BackendEvent,
@@ -402,9 +402,12 @@ function resolveFreshRunCwd(
 }
 
 function codexTransportFromEnv(): CodexTransportConfig | undefined {
-  const wsUrl = process.env.TASK_RUNNER_CODEX_WS_URL;
+  const wsUrl = process.env.TASK_RUNNER_CODEX_WS_URL?.trim();
   if (!wsUrl) {
     return undefined;
+  }
+  if (!isWsOrWssUrl(wsUrl)) {
+    throw new Error("TASK_RUNNER_CODEX_WS_URL must be an absolute ws:// or wss:// URL");
   }
   return {
     type: "ws",

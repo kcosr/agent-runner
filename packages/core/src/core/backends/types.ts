@@ -11,6 +11,15 @@ export interface BackendSpecificConfig {
   };
 }
 
+export function isWsOrWssUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "ws:" || parsed.protocol === "wss:";
+  } catch {
+    return false;
+  }
+}
+
 export function cloneBackendSpecificConfig(
   backendSpecific: BackendSpecificConfig | undefined,
 ): BackendSpecificConfig | undefined {

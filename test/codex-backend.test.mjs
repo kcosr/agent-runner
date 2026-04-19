@@ -90,6 +90,6 @@ test("normalizeCodexWsUrl: rejects malformed or non-websocket URLs before transp
   assert.throws(() => normalizeCodexWsUrl("relative/socket"), /absolute ws:\/\/ or wss:\/\/ URL/);
   assert.throws(
     () => normalizeCodexWsUrl("https://example.com/socket"),
-    /requires a ws:\/\/ or wss:\/\/ URL/,
+    /absolute ws:\/\/ or wss:\/\/ URL/,
   );
 });

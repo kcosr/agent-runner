@@ -470,6 +470,37 @@ test("codex daemon runs prefer forwarded transport over daemon env", async () =>
   assert.deepEqual(outcome.manifest.backendSpecific, seenBackendSpecific);
 });
 
+test("codex embedded runs reject malformed TASK_RUNNER_CODEX_WS_URL before freezing transport", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "codex-agent", CODEX_AGENT);
+  writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
+
+  let invoked = false;
+  await assert.rejects(
+    withEnv({ TASK_RUNNER_CODEX_WS_URL: "https://example.com/socket" }, () =>
+      runWithMock(
+        dir,
+        async () => {
+          invoked = true;
+          return {
+            exitCode: 0,
+            signal: null,
+            timedOut: false,
+            sessionId: null,
+            transcript: "done",
+            rawStdout: "",
+            rawStderr: "",
+          };
+        },
+        {},
+        { agentName: "codex-agent", backendId: "codex" },
+      ),
+    ),
+    /TASK_RUNNER_CODEX_WS_URL must be an absolute ws:\/\/ or wss:\/\/ URL/,
+  );
+  assert.equal(invoked, false);
+});
+
 test("codex connected mode mirrors embedded mode for the same websocket transport intent", async () => {
   const dir = tempDir();
   writeAgent(dir, "codex-agent", CODEX_AGENT);

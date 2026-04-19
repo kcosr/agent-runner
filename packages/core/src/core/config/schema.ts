@@ -3,6 +3,7 @@ import {
   BACKEND_IDS,
   type BackendSpecificConfig,
   type CodexTransportConfig,
+  isWsOrWssUrl,
 } from "../backends/types.js";
 
 export const taskDefSchema = z.object({
@@ -84,15 +85,6 @@ export const LOCKABLE_FIELDS = [
 
 export type LockableField = (typeof LOCKABLE_FIELDS)[number];
 
-function isAbsoluteCodexWsUrl(value: string): boolean {
-  try {
-    const parsed = new URL(value);
-    return parsed.protocol === "ws:" || parsed.protocol === "wss:";
-  } catch {
-    return false;
-  }
-}
-
 export const codexTransportConfigSchema: z.ZodType<CodexTransportConfig> = z.union([
   z
     .object({
@@ -106,7 +98,7 @@ export const codexTransportConfigSchema: z.ZodType<CodexTransportConfig> = z.uni
         .string()
         .trim()
         .min(1)
-        .refine(isAbsoluteCodexWsUrl, "url must be an absolute ws:// or wss:// URL"),
+        .refine(isWsOrWssUrl, "url must be an absolute ws:// or wss:// URL"),
     })
     .strict(),
 ]);
