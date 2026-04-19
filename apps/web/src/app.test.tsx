@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { RunAttachment } from "@task-runner/core/contracts/attachments.js";
 import type { RunTimelineHistory } from "@task-runner/core/contracts/events.js";
 import type { RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
@@ -31,6 +33,7 @@ const DEFAULT_DASHBOARD_PREFERENCES = {
   collapseFailureStates: true,
   showArchived: false,
   sortByRecentUpdates: false,
+  visibleFocusIndicators: false,
 };
 
 class MockEventSource {
@@ -1412,6 +1415,100 @@ describe("web app", () => {
     expect(within(detail).queryByRole("button", { name: "Abort" })).not.toBeInTheDocument();
   });
 
+  it("shows ended and exit code in the summary for completed runs and removes the Timing tab", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          status: "success",
+          endedAt: "2026-04-13T05:05:00.000Z",
+          activeTask: null,
+          capabilities: {
+            canAbort: false,
+            canResume: false,
+          },
+        }),
+      ],
+      details: {
+        "run-1": makeDetail({
+          status: "success",
+          endedAt: "2026-04-13T05:05:00.000Z",
+          exitCode: 0,
+          activeTask: null,
+          capabilities: {
+            canAbort: false,
+            canResume: false,
+          },
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+
+    const summary = await screen.findByLabelText("Run summary");
+    expect(within(summary).getByText("Ended")).toBeInTheDocument();
+    expect(within(summary).getByText("Exit code")).toBeInTheDocument();
+    expect(within(summary).getByText("0")).toBeInTheDocument();
+    expect(within(summary).getByRole("button", { name: /copy cwd path/i })).toBeInTheDocument();
+    expect(
+      within(summary).getByRole("button", { name: /copy workspace path/i }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Timing" })).not.toBeInTheDocument();
+  });
+
+  it("omits ended and exit code from the summary for live runs", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+
+    const summary = await screen.findByLabelText("Run summary");
+    expect(within(summary).queryByText("Ended")).not.toBeInTheDocument();
+    expect(within(summary).queryByText("Exit code")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Timing" })).not.toBeInTheDocument();
+  });
+
+  it("shows ended without exit code when a run ended without an exit code", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          status: "success",
+          endedAt: "2026-04-13T05:05:00.000Z",
+          activeTask: null,
+          capabilities: {
+            canAbort: false,
+            canResume: false,
+          },
+        }),
+      ],
+      details: {
+        "run-1": makeDetail({
+          status: "success",
+          endedAt: "2026-04-13T05:05:00.000Z",
+          exitCode: null,
+          activeTask: null,
+          capabilities: {
+            canAbort: false,
+            canResume: false,
+          },
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+
+    const summary = await screen.findByLabelText("Run summary");
+    expect(within(summary).getByText("Ended")).toBeInTheDocument();
+    expect(within(summary).queryByText("Exit code")).not.toBeInTheDocument();
+  });
+
   it("shows dependency and attachment indicators on run cards", async () => {
     installFetchMock({
       runs: [
@@ -2348,6 +2445,7 @@ describe("web app", () => {
       collapseFailureStates: true,
       showArchived: false,
       sortByRecentUpdates: false,
+      visibleFocusIndicators: false,
     });
 
     cleanup();
@@ -2611,6 +2709,7 @@ describe("web app", () => {
     await renderApp();
 
     await user.click(await findRunCard("Passive run"));
+    expect(screen.queryByRole("button", { name: "Timing" })).not.toBeInTheDocument();
     expect(await screen.findByText("Not set")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /edit backend session/i })).toBeInTheDocument();
 
@@ -2890,13 +2989,22 @@ describe("web app", () => {
     });
     const showArchived = screen.getByRole("checkbox", { name: "Show archived runs" });
     const sortByRecentUpdates = screen.getByRole("checkbox", { name: "Sort by recent updates" });
+    const visibleFocusIndicators = screen.getByRole("checkbox", {
+      name: "Visible focus indicators",
+    });
+    const appShell = document.querySelector(".app");
+    expect(appShell).toHaveAttribute("data-focus-indicators", "off");
     expect(hideEmptyColumns).not.toBeChecked();
     expect(collapseFailureStates).not.toBeChecked();
     expect(showArchived).toBeChecked();
     expect(sortByRecentUpdates).not.toBeChecked();
+    expect(visibleFocusIndicators).not.toBeChecked();
 
     await user.click(sortByRecentUpdates);
+    await user.click(visibleFocusIndicators);
     expect(sortByRecentUpdates).toBeChecked();
+    expect(visibleFocusIndicators).toBeChecked();
+    expect(appShell).toHaveAttribute("data-focus-indicators", "on");
 
     const stored = window.localStorage.getItem("task-runner:web:dashboard-preferences");
     expect(stored ? JSON.parse(stored) : null).toEqual({
@@ -2904,6 +3012,7 @@ describe("web app", () => {
       collapseFailureStates: false,
       showArchived: true,
       sortByRecentUpdates: true,
+      visibleFocusIndicators: true,
     });
 
     view.unmount();
@@ -2914,6 +3023,8 @@ describe("web app", () => {
     expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Show archived runs" })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "Sort by recent updates" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Visible focus indicators" })).toBeChecked();
+    expect(document.querySelector(".app")).toHaveAttribute("data-focus-indicators", "on");
 
     await user.click(screen.getByRole("button", { name: "Runs" }));
     expect(await screen.findByRole("button", { name: /archived dashboard/i })).toBeInTheDocument();
@@ -2958,6 +3069,8 @@ describe("web app", () => {
     await user.click(screen.getByRole("checkbox", { name: "Collapse failure states" }));
     await user.click(screen.getByRole("checkbox", { name: "Show archived runs" }));
     await user.click(screen.getByRole("checkbox", { name: "Sort by recent updates" }));
+    await user.click(screen.getByRole("checkbox", { name: "Visible focus indicators" }));
+    expect(document.querySelector(".app")).toHaveAttribute("data-focus-indicators", "on");
 
     await user.click(screen.getByRole("button", { name: "Restore defaults" }));
 
@@ -2965,6 +3078,8 @@ describe("web app", () => {
     expect(screen.getByRole("checkbox", { name: "Collapse failure states" })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "Show archived runs" })).not.toBeChecked();
     expect(screen.getByRole("checkbox", { name: "Sort by recent updates" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Visible focus indicators" })).not.toBeChecked();
+    expect(document.querySelector(".app")).toHaveAttribute("data-focus-indicators", "off");
     expect(screen.getByRole("button", { name: "Restore defaults" })).toBeDisabled();
 
     await user.click(screen.getByRole("button", { name: "Runs" }));
@@ -3002,7 +3117,52 @@ describe("web app", () => {
       collapseFailureStates: true,
       showArchived: true,
       sortByRecentUpdates: false,
+      visibleFocusIndicators: false,
     });
+  });
+
+  it("resets visible focus indicators without affecting the other settings", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    const user = userEvent.setup();
+    await renderApp("/settings/general");
+    await screen.findByRole("heading", { name: "General" });
+
+    await user.click(screen.getByRole("checkbox", { name: "Show archived runs" }));
+    await user.click(screen.getByRole("checkbox", { name: "Visible focus indicators" }));
+    expect(document.querySelector(".app")).toHaveAttribute("data-focus-indicators", "on");
+
+    await user.click(
+      screen.getByRole("button", { name: "Reset Visible focus indicators to default" }),
+    );
+
+    expect(screen.getByRole("checkbox", { name: "Show archived runs" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Visible focus indicators" })).not.toBeChecked();
+    expect(document.querySelector(".app")).toHaveAttribute("data-focus-indicators", "off");
+
+    const stored = window.localStorage.getItem("task-runner:web:dashboard-preferences");
+    expect(stored ? JSON.parse(stored) : null).toEqual({
+      hideEmptyColumns: true,
+      collapseFailureStates: true,
+      showArchived: true,
+      sortByRecentUpdates: false,
+      visibleFocusIndicators: false,
+    });
+  });
+
+  it("keeps selected-card styling independent from focus-indicator suppression", () => {
+    const css = readFileSync(join(process.cwd(), "src", "run-dashboard.css"), "utf8");
+
+    expect(css).toContain('.app[data-focus-indicators="off"] :focus-visible');
+    expect(css).toMatch(
+      /\.app\[data-focus-indicators="off"\]\s+:focus-visible\s*\{\s*outline:\s*none;\s*\}/s,
+    );
+    expect(css).toMatch(
+      /\n\.card\.selected\s*\{\s*border-color:\s*var\(--ring\);\s*box-shadow:\s*0 0 0 1px var\(--ring\), var\(--shadow-card\);\s*\}/s,
+    );
   });
 
   it("clamps the transient drawer width to the current viewport", async () => {
@@ -3044,6 +3204,7 @@ describe("web app", () => {
         hideEmptyColumns: "no",
         showArchived: "sure",
         sortByRecentUpdates: "yes",
+        visibleFocusIndicators: "sure",
       }),
     );
 

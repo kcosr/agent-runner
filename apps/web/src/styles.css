@@ -225,10 +225,10 @@ body {
   height: 14px;
 }
 
-.btn:focus-visible,
-.nav-item:focus-visible,
-.settings-sidebar-nav__item:focus-visible,
-.settings-toggle input:focus-visible {
+.app[data-focus-indicators="on"] .btn:focus-visible,
+.app[data-focus-indicators="on"] .nav-item:focus-visible,
+.app[data-focus-indicators="on"] .settings-sidebar-nav__item:focus-visible,
+.app[data-focus-indicators="on"] .settings-toggle input:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
@@ -651,7 +651,7 @@ body {
   border-color: color-mix(in srgb, var(--accent) 36%, var(--border));
 }
 
-.resume-dialog__disclosure-toggle:focus-visible {
+.app[data-focus-indicators="on"] .resume-dialog__disclosure-toggle:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
   outline-offset: 2px;
 }
@@ -859,7 +859,7 @@ body {
     cursor: pointer;
   }
 
-  .column[data-collapsed="true"]:focus-visible {
+  .app[data-focus-indicators="on"] .column[data-collapsed="true"]:focus-visible {
     outline: 2px solid var(--ring);
     outline-offset: 2px;
   }
@@ -950,11 +950,6 @@ body {
 
 .drawer-panel--tasks > .tasks {
   min-width: 0;
-}
-
-.drawer-panel--timing {
-  display: grid;
-  gap: 12px;
 }
 
 .drawer-panel--dependencies {
@@ -1216,7 +1211,7 @@ body {
   cursor: pointer;
 }
 
-.attachment-row-trigger:focus-visible {
+.app[data-focus-indicators="on"] .attachment-row-trigger:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: -1px;
 }
@@ -1321,7 +1316,7 @@ body {
   background: var(--accent);
 }
 
-.task-header:focus-visible {
+.app[data-focus-indicators="on"] .task-header:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: -2px;
 }
@@ -1623,33 +1618,6 @@ body {
   height: auto;
 }
 
-.timing-grid {
-  display: grid;
-  gap: 10px;
-}
-
-.timing-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 8px;
-}
-
-.timing-row:last-child {
-  border-bottom: 0;
-  padding-bottom: 0;
-}
-
-.timing-label {
-  color: var(--muted-foreground);
-}
-
-.timing-value {
-  font-family: var(--mono);
-  text-align: right;
-}
-
 .toolbar-matrix {
   display: flex;
   align-items: center;
@@ -1842,6 +1810,10 @@ body {
 
 .drawer-title-edit {
   width: 100%;
+}
+
+.meta-edit-row {
+  flex-wrap: wrap;
 }
 
 .drawer-title-field {

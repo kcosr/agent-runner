@@ -66,6 +66,10 @@ timeline stream (`RunTimelineEnvelope`). The drawer surfaces:
   action buttons, and a full-width toggle (desktop only) that expands
   the drawer to fill the main content area while keeping the top bar
   and left sidebar interactive.
+- Summary metadata: top-level run metadata plus full-width `CWD`,
+  `Workspace`, and passive `Backend session` rows with inline copy/edit
+  affordances. Completed runs also surface `Ended` and `Exit code`
+  directly in the summary.
 - Tasks tab: expandable task rows with inline notes and status editing,
   gated by `taskMutation` capabilities.
 - Attachments tab: **Run** and **Group** sub-tabs. Group is read-only and
@@ -76,8 +80,8 @@ timeline stream (`RunTimelineEnvelope`). The drawer surfaces:
   handle) and supports the same full-width toggle as the detail drawer.
   See [attachments.md](attachments.md).
 - Dependencies tab: upstream and downstream runs (`RunDependencyDetail`).
-- Timing tab: attempt and session history.
-- Events tab: live terminal/transcript view from the timeline stream.
+- Attempts tab: attempt history plus prompt/output/timeline detail for
+  non-passive runs from the timeline stream.
 
 ## Live projections
 
@@ -87,7 +91,7 @@ The dashboard consumes three independent streams:
 |--------|--------|----------|
 | `run_summary` | `/api/events/run-summaries` | Board cards |
 | `run_detail` | `/api/runs/:runId/events/detail` | Drawer header, tabs |
-| `run_timeline` | `/api/runs/:runId/events/timeline` (+ `/timeline` history) | Events tab |
+| `run_timeline` | `/api/runs/:runId/events/timeline` (+ `/timeline` history) | Attempts tab |
 
 The timeline stream uses a monotonically increasing cursor for ordering
 and reconnect safety. The detail drawer delays its initial fetch by a
@@ -143,6 +147,7 @@ Preferences are persisted to `localStorage` and include:
 - Collapse failure states into a single column.
 - Sort by recent updates.
 - Show archived runs.
+- Visible focus indicators.
 - Detail drawer width.
 
 ## Development

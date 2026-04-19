@@ -121,10 +121,14 @@ pre {
   font-family: var(--mono);
 }
 
-:focus-visible {
+.app[data-focus-indicators="on"] :focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 1px;
   border-radius: var(--radius-sm);
+}
+
+.app[data-focus-indicators="off"] :focus-visible {
+  outline: none;
 }
 
 /* ─── scrollbars ─────────────────────────────────────── */
@@ -709,17 +713,38 @@ pre {
 .meta-value {
   color: var(--foreground);
   font-size: 13px;
+  min-width: 0;
   word-break: break-word;
+}
+
+.meta-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  min-width: 0;
 }
+
+.meta-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.meta-value--truncate {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  word-break: normal;
+}
+
 .meta-value.mono {
   font-family: var(--mono);
   font-size: 11.5px;
   color: var(--muted-foreground);
 }
-.meta-value .copy {
+.meta-row .copy {
   display: inline-flex;
   width: 20px;
   height: 20px;
@@ -731,11 +756,11 @@ pre {
   color: var(--muted-foreground);
   flex-shrink: 0;
 }
-.meta-value .copy:hover {
+.meta-row .copy:hover {
   background: var(--accent);
   color: var(--foreground);
 }
-.meta-value .copy svg {
+.meta-row .copy svg {
   width: 11px;
   height: 11px;
 }

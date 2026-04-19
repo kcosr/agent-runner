@@ -7,16 +7,12 @@ import type { RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js"
 import {
   type ChangeEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
   useEffect,
   useRef,
   useState,
 } from "react";
-import {
-  formatBytes,
-  formatRelativeTimestamp,
-  formatTimestamp,
-  truncateMiddle,
-} from "../lib/format.js";
+import { formatBytes, formatTimestamp, formatTimestampWithRelative } from "../lib/format.js";
 import type { RunTimelineState } from "../lib/run-timeline.js";
 import type { AttachmentTab, DrawerDetailSection } from "../lib/settings.js";
 import { isEditableEventTarget } from "../lib/shortcuts.js";
@@ -43,6 +39,7 @@ import { RunTaskList } from "./run-task-list.js";
 import { StatusBadge } from "./status-badge.js";
 
 type TimelineTab = "prompt" | "output";
+type SummaryRow = readonly [label: string, value: string];
 
 const TIMELINE_BOTTOM_THRESHOLD_PX = 24;
 
@@ -86,21 +83,45 @@ function matchesDependencyCandidate(run: RunSummary, search: string) {
 }
 
 function summaryRows(run: RunDetail) {
-  const rows = [
+  const rows: SummaryRow[] = [
     ["Repo", run.repo],
     ["Assignment", run.assignment?.name ?? "Ad hoc"],
     ["Agent", run.agent.name],
     ["Backend", [run.backend, run.model, run.effort].filter(Boolean).join(" · ") || run.backend],
-    ["Started", `${formatTimestamp(run.startedAt)} ${formatRelativeTimestamp(run.startedAt)}`],
-    ["Attempts", `${run.attempts} / ${run.maxAttempts}`],
-    ["Sessions", String(run.sessionCount)],
-  ] as const;
+  ];
 
   if (run.effectiveStatus !== run.status) {
-    return [...rows.slice(0, 4), ["Lifecycle status", run.status], ...rows.slice(4)] as const;
+    rows.push(["Lifecycle status", run.status]);
   }
 
+  rows.push(["Started", formatTimestampWithRelative(run.startedAt)]);
+  if (run.endedAt !== null) {
+    rows.push(["Ended", formatTimestampWithRelative(run.endedAt)]);
+  }
+  if (run.endedAt !== null && run.exitCode !== null) {
+    rows.push(["Exit code", String(run.exitCode)]);
+  }
+  rows.push(
+    ["Attempts", `${run.attempts} / ${run.maxAttempts}`],
+    ["Sessions", String(run.sessionCount)],
+  );
+
   return rows;
+}
+
+function SummaryLongRow({
+  children,
+  label,
+}: {
+  children: ReactNode;
+  label: string;
+}) {
+  return (
+    <div className="meta-cell full">
+      <span className="meta-label">{label}</span>
+      <div className="meta-row">{children}</div>
+    </div>
+  );
 }
 
 function attemptOutput(attempt: {
@@ -1033,10 +1054,11 @@ export function RunDetailDrawer({
                 <span className="meta-value">{value}</span>
               </div>
             ))}
-            <div className="meta-cell full">
-              <span className="meta-label">CWD</span>
-              <span className="meta-value mono">
-                {truncateMiddle(run.cwd)}
+            <SummaryLongRow label="CWD">
+              <span className="meta-value meta-value--truncate mono" title={run.cwd}>
+                {run.cwd}
+              </span>
+              <div className="meta-actions">
                 <button
                   aria-label="Copy cwd path"
                   className="copy"
@@ -1045,12 +1067,13 @@ export function RunDetailDrawer({
                 >
                   <CopyIcon aria-hidden="true" />
                 </button>
+              </div>
+            </SummaryLongRow>
+            <SummaryLongRow label="Workspace">
+              <span className="meta-value meta-value--truncate mono" title={run.workspaceDir}>
+                {run.workspaceDir}
               </span>
-            </div>
-            <div className="meta-cell full">
-              <span className="meta-label">Workspace</span>
-              <span className="meta-value mono">
-                {truncateMiddle(run.workspaceDir)}
+              <div className="meta-actions">
                 <button
                   aria-label="Copy workspace path"
                   className="copy"
@@ -1059,13 +1082,12 @@ export function RunDetailDrawer({
                 >
                   <CopyIcon aria-hidden="true" />
                 </button>
-              </span>
-            </div>
+              </div>
+            </SummaryLongRow>
             {isPassiveRun || backendSessionId ? (
-              <div className="meta-cell full">
-                <span className="meta-label">Backend session</span>
+              <SummaryLongRow label="Backend session">
                 {editingBackendSession ? (
-                  <div className="drawer-title-edit">
+                  <div className="drawer-title-edit meta-edit-row">
                     <label className="field drawer-title-field">
                       <input
                         aria-label="Backend session"
@@ -1105,33 +1127,40 @@ export function RunDetailDrawer({
                     </button>
                   </div>
                 ) : (
-                  <span className="meta-value mono">
-                    {backendSessionId ? truncateMiddle(backendSessionId) : "Not set"}
-                    {backendSessionId ? (
-                      <button
-                        aria-label="Copy backend session id"
-                        className="copy"
-                        onClick={() => onCopy(backendSessionId, "backend session id")}
-                        type="button"
-                      >
-                        <CopyIcon aria-hidden="true" />
-                      </button>
-                    ) : null}
-                    {canEditBackendSession ? (
-                      <button
-                        aria-label="Edit backend session"
-                        className="icon-btn icon-btn--small drawer-title-edit-trigger"
-                        disabled={actionsLocked}
-                        onClick={startBackendSessionEdit}
-                        title="Edit backend session"
-                        type="button"
-                      >
-                        <PencilIcon aria-hidden="true" />
-                      </button>
-                    ) : null}
-                  </span>
+                  <>
+                    <span
+                      className="meta-value meta-value--truncate mono"
+                      title={backendSessionId ?? undefined}
+                    >
+                      {backendSessionId ?? "Not set"}
+                    </span>
+                    <div className="meta-actions">
+                      {backendSessionId ? (
+                        <button
+                          aria-label="Copy backend session id"
+                          className="copy"
+                          onClick={() => onCopy(backendSessionId, "backend session id")}
+                          type="button"
+                        >
+                          <CopyIcon aria-hidden="true" />
+                        </button>
+                      ) : null}
+                      {canEditBackendSession ? (
+                        <button
+                          aria-label="Edit backend session"
+                          className="icon-btn icon-btn--small drawer-title-edit-trigger"
+                          disabled={actionsLocked}
+                          onClick={startBackendSessionEdit}
+                          title="Edit backend session"
+                          type="button"
+                        >
+                          <PencilIcon aria-hidden="true" />
+                        </button>
+                      ) : null}
+                    </div>
+                  </>
                 )}
-              </div>
+              </SummaryLongRow>
             ) : null}
           </section>
 
@@ -1180,14 +1209,6 @@ export function RunDetailDrawer({
                   {satisfiedDependencies}/{run.dependencies.length}
                 </span>
               ) : null}
-            </button>
-            <button
-              aria-selected={activeSection === "timing"}
-              className={activeSection === "timing" ? "tab active" : "tab"}
-              onClick={() => onSelectSection("timing")}
-              type="button"
-            >
-              Timing
             </button>
             {isPassiveRun ? null : (
               <button
@@ -1460,33 +1481,6 @@ export function RunDetailDrawer({
                     </ul>
                   </div>
                 ) : null}
-              </div>
-            </section>
-          ) : null}
-
-          {activeSection === "timing" ? (
-            <section aria-label="Timing" className="drawer-panel drawer-panel--timing">
-              <div className="drawer-panel-card">
-                <div className="timing-grid">
-                  <div className="timing-row">
-                    <span className="timing-label">Started</span>
-                    <span className="timing-value">{formatTimestamp(run.startedAt)}</span>
-                  </div>
-                  <div className="timing-row">
-                    <span className="timing-label">Ended</span>
-                    <span className="timing-value">{formatTimestamp(run.endedAt)}</span>
-                  </div>
-                  <div className="timing-row">
-                    <span className="timing-label">Exit code</span>
-                    <span className="timing-value">
-                      {run.exitCode === null ? "Not available" : String(run.exitCode)}
-                    </span>
-                  </div>
-                  <div className="timing-row">
-                    <span className="timing-label">CWD</span>
-                    <span className="timing-value">{truncateMiddle(run.cwd)}</span>
-                  </div>
-                </div>
               </div>
             </section>
           ) : null}
