@@ -768,36 +768,39 @@ export function RunDetailDrawer({
             ? "dependency-row dependency-row--interactive"
             : "dependency-row";
           const allowRemove = source === "run";
+          const attachmentCopy = (
+            <span className="dependency-copy">
+              <span className="attachment-title-row">
+                <span className="dependency-name">{attachment.name}</span>
+              </span>
+              <span className="dependency-meta">
+                <span className="dependency-meta-id attachment-row-mime">
+                  {attachment.mimeType}
+                </span>
+                <span aria-hidden="true" className="attachment-row-mime">
+                  ·
+                </span>
+                <span>{formatBytes(attachment.size)}</span>
+                <span aria-hidden="true">·</span>
+                <span>{formatTimestamp(attachment.addedAt)}</span>
+              </span>
+            </span>
+          );
 
           return (
             <li className={rowClassName} key={`${ownerRunId}:${attachment.id}`}>
-              <div className="dependency-copy">
-                <span className="attachment-title-row">
-                  {previewable ? (
-                    <button
-                      aria-label={`Preview ${attachment.name}`}
-                      className="attachment-name-trigger"
-                      onClick={() => onOpenAttachmentPreview(ownerRunId, attachment.id)}
-                      type="button"
-                    >
-                      <span className="dependency-name">{attachment.name}</span>
-                    </button>
-                  ) : (
-                    <span className="dependency-name">{attachment.name}</span>
-                  )}
-                </span>
-                <span className="dependency-meta">
-                  <span className="dependency-meta-id attachment-row-mime">
-                    {attachment.mimeType}
-                  </span>
-                  <span aria-hidden="true" className="attachment-row-mime">
-                    ·
-                  </span>
-                  <span>{formatBytes(attachment.size)}</span>
-                  <span aria-hidden="true">·</span>
-                  <span>{formatTimestamp(attachment.addedAt)}</span>
-                </span>
-              </div>
+              {previewable ? (
+                <button
+                  aria-label={`Preview ${attachment.name}`}
+                  className="attachment-row-trigger"
+                  onClick={() => onOpenAttachmentPreview(ownerRunId, attachment.id)}
+                  type="button"
+                >
+                  {attachmentCopy}
+                </button>
+              ) : (
+                attachmentCopy
+              )}
               <div className="dependency-actions">
                 {source === "group" ? (
                   <button

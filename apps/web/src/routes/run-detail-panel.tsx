@@ -28,6 +28,7 @@ export function RunDetailPanel({
   onDownloadAttachment,
   onOpenResumeDialog,
   onOpenAttachmentPreview,
+  onReplaceAttachmentPreview,
   onSelectRun,
   onClearBackendSession,
   onRemoveDependency,
@@ -71,6 +72,7 @@ export function RunDetailPanel({
   onDownloadAttachment: (runId: string, attachmentId: string, name: string) => Promise<void>;
   onOpenResumeDialog: () => void;
   onOpenAttachmentPreview: (attachmentOwnerRunId: string, attachmentId: string) => void;
+  onReplaceAttachmentPreview: (attachmentOwnerRunId: string, attachmentId: string) => void;
   onSelectRun: (runId: string) => void;
   onClearBackendSession: (runId: string) => Promise<void>;
   onRemoveDependency: (runId: string, dependencyRunId: string) => Promise<void>;
@@ -194,13 +196,14 @@ export function RunDetailPanel({
         }
         onNextAttachment={
           nextAttachment
-            ? () => onOpenAttachmentPreview(nextAttachment.ownerRunId, nextAttachment.attachment.id)
+            ? () =>
+                onReplaceAttachmentPreview(nextAttachment.ownerRunId, nextAttachment.attachment.id)
             : undefined
         }
         onPreviousAttachment={
           previousAttachment
             ? () =>
-                onOpenAttachmentPreview(
+                onReplaceAttachmentPreview(
                   previousAttachment.ownerRunId,
                   previousAttachment.attachment.id,
                 )
