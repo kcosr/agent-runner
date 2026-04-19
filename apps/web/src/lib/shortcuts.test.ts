@@ -110,6 +110,7 @@ describe("resolveRunsShortcutCommand", () => {
     activeBoardColumnKey: "running",
     boardColumns: makeBoardColumns(),
     drawerFullscreen: false,
+    modalOpen: false,
     resumeDialogOpen: false,
     searchFocused: false,
     searchValue: "",
@@ -168,6 +169,42 @@ describe("resolveRunsShortcutCommand", () => {
         context,
       ),
     ).toBe("ui.toggleDrawerFullscreen");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "n",
+          metaKey: false,
+          shiftKey: false,
+        },
+        context,
+      ),
+    ).toBe("run.openNote");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "p",
+          metaKey: false,
+          shiftKey: false,
+        },
+        context,
+      ),
+    ).toBe("run.togglePinned");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "a",
+          metaKey: false,
+          shiftKey: false,
+        },
+        context,
+      ),
+    ).toBe("run.toggleArchived");
   });
 
   it("prioritizes search clearing before route close on Escape", () => {
@@ -244,6 +281,36 @@ describe("resolveRunsShortcutCommand", () => {
         {
           altKey: false,
           ctrlKey: false,
+          key: "p",
+          metaKey: false,
+          shiftKey: false,
+        },
+        {
+          ...context,
+          drawerFullscreen: true,
+        },
+      ),
+    ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "n",
+          metaKey: false,
+          shiftKey: false,
+        },
+        {
+          ...context,
+          typingTarget: true,
+        },
+      ),
+    ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
           key: "ArrowRight",
           metaKey: false,
           shiftKey: false,
@@ -281,6 +348,36 @@ describe("resolveRunsShortcutCommand", () => {
         {
           ...context,
           resumeDialogOpen: true,
+        },
+      ),
+    ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "p",
+          metaKey: false,
+          shiftKey: false,
+        },
+        {
+          ...context,
+          resumeDialogOpen: true,
+        },
+      ),
+    ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "n",
+          metaKey: false,
+          shiftKey: false,
+        },
+        {
+          ...context,
+          modalOpen: true,
         },
       ),
     ).toBeNull();

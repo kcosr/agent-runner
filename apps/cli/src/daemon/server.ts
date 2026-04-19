@@ -17,6 +17,7 @@ import {
   getRun,
   getRunBrief,
   getRunList,
+  getRunSummary,
   getRunTimelineHistory,
   getTask,
   getTaskList,
@@ -29,9 +30,12 @@ import {
   startRun,
   unarchive,
   updateRunBackendSession,
+  updateRunNote,
+  updateRunPinned,
   updateTask,
 } from "@task-runner/core/app/service.js";
 import { VALID_STATUSES } from "@task-runner/core/assignment/model.js";
+import { isPathArg } from "@task-runner/core/config/runtime-paths.js";
 import type {
   RunDetailStreamEvent,
   RunSummaryStreamEvent,
@@ -47,10 +51,25 @@ import type {
   RunStatus,
   RunSummary,
 } from "@task-runner/core/contracts/runs.js";
-import { isTerminalStatus } from "@task-runner/core/contracts/runs.js";
-import { ConflictError } from "@task-runner/core/core/commands/service.js";
-import { RunNotFoundError, listRunManifests } from "@task-runner/core/core/run/manifest.js";
+import { isTerminalStatus, toRunDetail } from "@task-runner/core/contracts/runs.js";
+import {
+  ConflictError,
+  refreshRunSnapshotAfterTaskStateSettles,
+} from "@task-runner/core/core/commands/service.js";
+import {
+  resolveDependencies,
+  resolveDependentsFromManifests,
+} from "@task-runner/core/core/run/dependencies.js";
+import {
+  type ListedRunManifest,
+  type RunManifest,
+  RunNotFoundError,
+  findRunManifestsById,
+  listRunManifests,
+  resolveResumeTarget,
+} from "@task-runner/core/core/run/manifest.js";
 import type { RunEvent } from "@task-runner/core/core/run/run-loop.js";
+import { withTaskStateLock } from "@task-runner/core/core/run/workspace-state.js";
 import { shortId } from "@task-runner/core/util/short-id.js";
 import { WebSocket, WebSocketServer } from "ws";
 import { deriveAppRuntimeConfig, deriveHttpBaseUrl, listenSocketConfig } from "./config.js";
@@ -75,6 +94,8 @@ import {
   optionalString,
   parseRunSetBackendSessionParams,
   parseRunSetNameParams,
+  parseRunSetNoteParams,
+  parseRunSetPinnedParams,
   parseRunsListParams,
   parseStartRunParams,
   requiredRunIdString,
@@ -311,6 +332,9 @@ export async function serveDaemon(
   const detailSubscriptions = new Map<string, DetailSubscriptionRecord>();
   const timelineSubscriptions = new Map<string, TimelineSubscriptionRecord>();
   const activeRuns = new Map<string, ActiveRunRecord>();
+  const manifestEntriesByRunId = new Map<string, ListedRunManifest>();
+  const dependentRunIdsByRunId = new Map<string, Set<string>>();
+  let manifestIndexInitialized = false;
   const recentTimelineBuffers = new Map<string, RecentTimelineRecord>();
   const sockets = new Set<Socket>();
   const wsClients = new Set<WebSocket>();
@@ -319,6 +343,7 @@ export async function serveDaemon(
     getRun,
     getRunBrief,
     getRunList,
+    getRunSummary,
     getRunTimelineHistory,
     getAttachment,
     getAttachmentList,
@@ -330,6 +355,8 @@ export async function serveDaemon(
     unarchive,
     deleteArchivedRun,
     renameRun,
+    updateRunNote,
+    updateRunPinned,
     updateRunBackendSession,
     clearBackendSession,
     addDependency,
@@ -347,13 +374,164 @@ export async function serveDaemon(
     ...handlers,
   };
 
-  const getDaemonRun = (target: string): RunDetail =>
-    withDaemonDetailProjection(app.getRun(target), activeRuns);
-  const getDaemonRunList = (opts?: Parameters<typeof app.getRunList>[0]): RunSummary[] =>
-    app.getRunList(opts).map((run) => withDaemonAbortCapability(run, activeRuns));
+  const removeManifestIndexEntry = (runId: string): void => {
+    const existing = manifestEntriesByRunId.get(runId);
+    if (existing) {
+      for (const dependencyRunId of existing.manifest.dependencyRunIds) {
+        const dependents = dependentRunIdsByRunId.get(dependencyRunId);
+        if (!dependents) {
+          continue;
+        }
+        dependents.delete(runId);
+        if (dependents.size === 0) {
+          dependentRunIdsByRunId.delete(dependencyRunId);
+        }
+      }
+    }
+    manifestEntriesByRunId.delete(runId);
+  };
 
-  const getProjectedSummary = (runId: string): RunSummary | null =>
-    getDaemonRunList({ includeArchived: true }).find((run) => run.runId === runId) ?? null;
+  const rememberManifestIndexEntry = (entry: ListedRunManifest): void => {
+    removeManifestIndexEntry(entry.manifest.runId);
+    manifestEntriesByRunId.set(entry.manifest.runId, entry);
+    for (const dependencyRunId of entry.manifest.dependencyRunIds) {
+      const dependents = dependentRunIdsByRunId.get(dependencyRunId) ?? new Set<string>();
+      dependents.add(entry.manifest.runId);
+      dependentRunIdsByRunId.set(dependencyRunId, dependents);
+    }
+  };
+
+  const rebuildManifestIndex = (): void => {
+    const entries = listRunManifests();
+    manifestEntriesByRunId.clear();
+    dependentRunIdsByRunId.clear();
+    for (const entry of entries) {
+      rememberManifestIndexEntry(entry);
+    }
+    manifestIndexInitialized = true;
+  };
+
+  const ensureManifestIndex = (): void => {
+    if (manifestIndexInitialized) {
+      return;
+    }
+    rebuildManifestIndex();
+  };
+
+  const resolveManifestTarget = (target: string): ListedRunManifest => {
+    try {
+      const resolved = resolveResumeTarget(target);
+      return {
+        workspaceDir: resolved.workspaceDir,
+        manifest: resolved.manifest,
+      };
+    } catch (error) {
+      if (!(error instanceof RunNotFoundError) || isPathArg(target)) {
+        throw error;
+      }
+      const matches = findRunManifestsById(target);
+      if (matches.length === 0) {
+        throw error;
+      }
+      if (matches.length > 1) {
+        throw new ConflictError(
+          `run id "${target}" is ambiguous across repo buckets; use a workspace path instead (${matches.map((entry) => entry.workspaceDir).join(", ")})`,
+        );
+      }
+      const [match] = matches;
+      if (!match) {
+        throw error;
+      }
+      return match;
+    }
+  };
+
+  const refreshManifestIndexEntry = (target: string): ListedRunManifest => {
+    ensureManifestIndex();
+    const entry = resolveManifestTarget(target);
+    refreshRunSnapshotAfterTaskStateSettles(entry);
+    rememberManifestIndexEntry(entry);
+    return entry;
+  };
+
+  const refreshManifestByRunId = (runId: string): RunManifest | undefined => {
+    try {
+      return refreshManifestIndexEntry(runId).manifest;
+    } catch (error) {
+      if (error instanceof RunNotFoundError) {
+        return undefined;
+      }
+      throw error;
+    }
+  };
+
+  const getDaemonRun = (target: string): RunDetail => {
+    let run: RunDetail;
+    if (app.getRun !== getRun) {
+      run = app.getRun(target);
+    } else {
+      const entry = refreshManifestIndexEntry(target);
+      const relatedManifests = new Map<string, RunManifest>([
+        [entry.manifest.runId, entry.manifest],
+      ]);
+      for (const dependencyRunId of entry.manifest.dependencyRunIds) {
+        const dependencyManifest = refreshManifestByRunId(dependencyRunId);
+        if (dependencyManifest) {
+          relatedManifests.set(dependencyRunId, dependencyManifest);
+        }
+      }
+      const dependentRunIds = [
+        ...(dependentRunIdsByRunId.get(entry.manifest.runId) ?? new Set<string>()),
+      ];
+      const dependentManifests: RunManifest[] = [];
+      for (const dependentRunId of dependentRunIds) {
+        const dependentManifest = refreshManifestByRunId(dependentRunId);
+        if (dependentManifest) {
+          dependentManifests.push(dependentManifest);
+          relatedManifests.set(dependentRunId, dependentManifest);
+        }
+      }
+      run = toRunDetail({
+        manifest: entry.manifest,
+        isLive: false,
+        dependencies: resolveDependencies(entry.manifest, relatedManifests),
+        dependents: resolveDependentsFromManifests(entry.manifest.runId, dependentManifests),
+        relatedManifests,
+      });
+    }
+    return withDaemonDetailProjection(run, activeRuns);
+  };
+  const getDaemonRunList = (opts?: Parameters<typeof app.getRunList>[0]): RunSummary[] =>
+    app.getRunList(opts).map((run: RunSummary) => withDaemonAbortCapability(run, activeRuns));
+
+  const getDaemonRunSummary = (target: string): RunSummary => {
+    if (app.getRunSummary !== getRunSummary) {
+      return withDaemonAbortCapability(app.getRunSummary(target), activeRuns);
+    }
+    try {
+      return withDaemonAbortCapability(app.getRunSummary(target), activeRuns);
+    } catch (error) {
+      if (!(error instanceof RunNotFoundError) || app.getRunList === getRunList) {
+        throw error;
+      }
+      const summary = app.getRunList({ includeArchived: true }).find((run) => run.runId === target);
+      if (!summary) {
+        throw error;
+      }
+      return withDaemonAbortCapability(summary, activeRuns);
+    }
+  };
+
+  const getProjectedSummary = (runId: string): RunSummary | null => {
+    try {
+      return getDaemonRunSummary(runId);
+    } catch (err) {
+      if (err instanceof RunNotFoundError) {
+        return null;
+      }
+      throw err;
+    }
+  };
 
   const getProjectedDetail = (runId: string): RunDetail | null => {
     try {
@@ -442,11 +620,9 @@ export async function serveDaemon(
     }
   };
 
-  const dependentRunIds = (runId: string): string[] =>
-    listRunManifests()
-      .map((entry) => entry.manifest)
-      .filter((manifest) => manifest.runId !== runId && manifest.dependencyRunIds.includes(runId))
-      .map((manifest) => manifest.runId);
+  const dependentRunIds = (runId: string): string[] => [
+    ...(dependentRunIdsByRunId.get(runId) ?? new Set<string>()),
+  ];
 
   const shouldPublishDependentSummaries = (
     previous: RunDetail | null,
@@ -532,16 +708,18 @@ export async function serveDaemon(
   const publishRunProjections = (
     runId: string,
     options: {
+      summary?: RunSummary | null;
+      detail?: RunDetail | null;
       publishDependentSummaries?: boolean;
       publishDependentDetails?: boolean;
     } = {},
   ): void => {
-    const summary = getProjectedSummary(runId);
+    const summary = options.summary === undefined ? getProjectedSummary(runId) : options.summary;
     if (summary) {
       publishSummary(summary);
     }
 
-    const detail = getProjectedDetail(runId);
+    const detail = options.detail === undefined ? getProjectedDetail(runId) : options.detail;
     if (detail) {
       publishDetail(detail);
       const active = activeRuns.get(runId);
@@ -554,7 +732,9 @@ export async function serveDaemon(
       return;
     }
 
-    for (const dependentRunId of dependentRunIds(runId)) {
+    const dependents = dependentRunIds(runId);
+
+    for (const dependentRunId of dependents) {
       if (options.publishDependentSummaries) {
         const dependentSummary = getProjectedSummary(dependentRunId);
         if (dependentSummary) {
@@ -572,18 +752,27 @@ export async function serveDaemon(
 
   const publishMutationResult = (
     runId: string,
-    previous: RunDetail | null,
-    current: RunDetail | null,
+    options: {
+      summary?: RunSummary | null;
+      detail?: RunDetail | null;
+      publishDependentSummaries?: boolean;
+      publishDependentDetails?: boolean;
+    } = {},
   ): void => {
     publishRunProjections(runId, {
-      publishDependentSummaries: shouldPublishDependentSummaries(previous, current),
-      publishDependentDetails: shouldPublishDependentDetails(previous, current),
+      summary: options.summary,
+      detail: options.detail,
+      publishDependentSummaries: options.publishDependentSummaries ?? false,
+      publishDependentDetails: options.publishDependentDetails ?? false,
     });
   };
 
   const publishRunDeletion = (runId: string): void => {
+    const dependents = dependentRunIds(runId);
+    removeManifestIndexEntry(runId);
+    dependentRunIdsByRunId.delete(runId);
     publishSummaryRemoval(runId);
-    for (const dependentRunId of dependentRunIds(runId)) {
+    for (const dependentRunId of dependents) {
       const dependentSummary = getProjectedSummary(dependentRunId);
       if (dependentSummary) {
         publishSummary(dependentSummary);
@@ -595,20 +784,43 @@ export async function serveDaemon(
     }
   };
 
-  const withPublishedMutation = <T>(runId: string, mutate: () => T): T => {
-    const previous = getProjectedDetail(runId);
+  const withPublishedMutation = <T>(
+    runId: string,
+    mutate: () => T,
+    options: {
+      inferDependentFanout?: boolean;
+    } = {},
+  ): T => {
+    const previous = options.inferDependentFanout ? getProjectedDetail(runId) : null;
     const result = mutate();
-    publishMutationResult(runId, previous, getProjectedDetail(runId));
+    const current = getProjectedDetail(runId);
+    const summary = getProjectedSummary(runId);
+    publishMutationResult(runId, {
+      summary,
+      detail: current,
+      publishDependentSummaries: shouldPublishDependentSummaries(previous, current),
+      publishDependentDetails: shouldPublishDependentDetails(previous, current),
+    });
     return result;
   };
 
   const withPublishedMutationAsync = async <T>(
     runId: string,
     mutate: () => Promise<T>,
+    options: {
+      inferDependentFanout?: boolean;
+    } = {},
   ): Promise<T> => {
-    const previous = getProjectedDetail(runId);
+    const previous = options.inferDependentFanout ? getProjectedDetail(runId) : null;
     const result = await mutate();
-    publishMutationResult(runId, previous, getProjectedDetail(runId));
+    const current = getProjectedDetail(runId);
+    const summary = getProjectedSummary(runId);
+    publishMutationResult(runId, {
+      summary,
+      detail: current,
+      publishDependentSummaries: shouldPublishDependentSummaries(previous, current),
+      publishDependentDetails: shouldPublishDependentDetails(previous, current),
+    });
     return result;
   };
 
@@ -783,7 +995,12 @@ export async function serveDaemon(
         ) {
           const previous = activeRuns.get(resolvedRunId)?.detail ?? null;
           const current = getProjectedDetail(resolvedRunId);
-          publishMutationResult(resolvedRunId, previous, current);
+          publishMutationResult(resolvedRunId, {
+            summary: getProjectedSummary(resolvedRunId),
+            detail: current,
+            publishDependentSummaries: shouldPublishDependentSummaries(previous, current),
+            publishDependentDetails: shouldPublishDependentDetails(previous, current),
+          });
         }
       }
     }, abortController.signal)
@@ -814,7 +1031,13 @@ export async function serveDaemon(
           }
           activeRuns.delete(runId);
           lastTimelineCursorByRun.delete(runId);
-          publishMutationResult(runId, previous, getProjectedDetail(runId));
+          const current = getProjectedDetail(runId);
+          publishMutationResult(runId, {
+            summary: getProjectedSummary(runId),
+            detail: current,
+            publishDependentSummaries: shouldPublishDependentSummaries(previous, current),
+            publishDependentDetails: shouldPublishDependentDetails(previous, current),
+          });
         }
         resolveDone?.();
       });
@@ -847,16 +1070,26 @@ export async function serveDaemon(
       return run;
     },
     archive: (target) =>
-      withPublishedMutation(target, () => app.archive(target, mutationAuditContext)),
+      withPublishedMutation(target, () => app.archive(target, mutationAuditContext), {
+        inferDependentFanout: true,
+      }),
     unarchive: (target) =>
-      withPublishedMutation(target, () => app.unarchive(target, mutationAuditContext)),
+      withPublishedMutation(target, () => app.unarchive(target, mutationAuditContext), {
+        inferDependentFanout: true,
+      }),
     deleteArchivedRun: (target) => {
       const result = app.deleteArchivedRun(target);
       publishRunDeletion(result.runId);
       return result;
     },
     renameRun: (target, input) =>
-      withPublishedMutationAsync(target, () => app.renameRun(target, input, mutationAuditContext)),
+      withPublishedMutationAsync(target, () => app.renameRun(target, input, mutationAuditContext), {
+        inferDependentFanout: true,
+      }),
+    updateRunNote: (target, input) =>
+      withPublishedMutation(target, () => app.updateRunNote(target, input)),
+    updateRunPinned: (target, input) =>
+      withPublishedMutation(target, () => app.updateRunPinned(target, input)),
     updateRunBackendSession: (target, input) =>
       withPublishedDetailMutation(target, () =>
         app.updateRunBackendSession(target, input, mutationAuditContext),
@@ -875,17 +1108,26 @@ export async function serveDaemon(
       withPublishedMutationAsync(target, () => app.addRunAttachmentFromStream(target, input)),
     removeRunAttachment: (target, attachmentId) =>
       withPublishedMutation(target, () => app.removeRunAttachment(target, attachmentId)),
-    reset: (target) => withPublishedMutation(target, () => app.reset(target, mutationAuditContext)),
+    reset: (target) =>
+      withPublishedMutation(target, () => app.reset(target, mutationAuditContext), {
+        inferDependentFanout: true,
+      }),
     updateTask: (target, taskId, updates) =>
-      withPublishedMutation(target, () =>
-        app.updateTask(target, taskId, updates, mutationAuditContext),
+      withPublishedMutation(
+        target,
+        () => app.updateTask(target, taskId, updates, mutationAuditContext),
+        {
+          inferDependentFanout: true,
+        },
       ),
     appendNotes: (target, taskId, text) =>
       withPublishedMutation(target, () =>
         app.appendNotes(target, taskId, text, mutationAuditContext),
       ),
     createTask: (target, input) =>
-      withPublishedMutation(target, () => app.createTask(target, input, mutationAuditContext)),
+      withPublishedMutation(target, () => app.createTask(target, input, mutationAuditContext), {
+        inferDependentFanout: true,
+      }),
     daemonInfo: {
       daemonInstanceId,
       pid: process.pid,
@@ -1128,6 +1370,32 @@ export async function serveDaemon(
               request.id,
               await operations.setRunName(parsed.target, {
                 name: parsed.name,
+              }),
+            ),
+          );
+          return;
+        }
+        case "runs.setNote": {
+          const parsed = parseRunSetNoteParams(params, "runs.setNote params");
+          sendJson(
+            ws,
+            resultResponse(
+              request.id,
+              operations.setRunNote(parsed.target, {
+                note: parsed.note,
+              }),
+            ),
+          );
+          return;
+        }
+        case "runs.setPinned": {
+          const parsed = parseRunSetPinnedParams(params, "runs.setPinned params");
+          sendJson(
+            ws,
+            resultResponse(
+              request.id,
+              operations.setRunPinned(parsed.target, {
+                pinned: parsed.pinned,
               }),
             ),
           );

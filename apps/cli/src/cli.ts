@@ -29,6 +29,8 @@ import {
   startRun,
   unarchive,
   updateRunBackendSession,
+  updateRunNote,
+  updateRunPinned,
   updateTask,
 } from "@task-runner/core/app/service.js";
 import {
@@ -85,6 +87,8 @@ import {
   renderRunRemoveDependency,
   renderRunSetBackendSession,
   renderRunSetName,
+  renderRunSetNote,
+  renderRunSetPinned,
   renderRunStatus,
   renderRunUnarchive,
   renderSystemStatus,
@@ -115,6 +119,12 @@ Commands:
   run unarchive <id|path> Clear a run's archive marker.
   run delete <id|path>    Delete an archived run workspace.
   run set-name <id|path>  Update or clear a run's persisted display name.
+  run set-note <id|path> <text>
+                          Persist a run note (empty/whitespace clears it).
+  run clear-note <id|path>
+                          Clear a run's persisted note.
+  run pin <id|path>       Mark a run as pinned.
+  run unpin <id|path>     Clear a run's pinned marker.
   run set-backend-session <id|path> <session-id>
                           Persist a passive run backend session reference.
   run clear-backend-session <id|path>
@@ -1232,6 +1242,120 @@ async function runSetNameCommand(parsed: ParsedArgs, connectUrl?: string): Promi
   }
 }
 
+async function runNoteCommand(
+  parsed: ParsedArgs,
+  connectUrl: string | undefined,
+  verb: "set-note" | "clear-note",
+): Promise<never> {
+  const [runArg, noteArg, extra] = parsed.positionals;
+  const target = normalizeTarget(runArg);
+  if (!target) {
+    process.stderr.write(
+      `task-runner: run ${verb} requires <id-or-path>${verb === "set-note" ? " <text>" : ""}\n`,
+    );
+    process.exit(3);
+  }
+
+  if (verb === "set-note") {
+    if (noteArg === undefined) {
+      process.stderr.write("task-runner: run set-note requires <id-or-path> <text>\n");
+      process.exit(3);
+    }
+    if (extra !== undefined) {
+      process.stderr.write(
+        `task-runner: run set-note takes exactly two positionals (<id-or-path> <text>); got extra "${extra}"\n`,
+      );
+      process.exit(3);
+    }
+  } else if (noteArg !== undefined) {
+    process.stderr.write(
+      `task-runner: run clear-note takes exactly one positional (<id-or-path>); got extra "${noteArg}"\n`,
+    );
+    process.exit(3);
+  }
+
+  const unsupported = unsupportedFlagsForGroupedCommand(parsed);
+  if (unsupported.length > 0) {
+    process.stderr.write(
+      `task-runner: run ${verb} only supports <id-or-path>${verb === "set-note" ? ", <text>" : ""}, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+    );
+    process.exit(3);
+  }
+
+  try {
+    const note = verb === "set-note" ? (noteArg ?? null) : null;
+    const result =
+      connectUrl === undefined
+        ? updateRunNote(target, { note })
+        : await withDaemonClient(connectUrl, (client) =>
+            client
+              .call<{ result: ReturnType<typeof updateRunNote> }>("runs.setNote", {
+                target,
+                note,
+              })
+              .then((response) => response.result),
+          );
+    if (parsed.outputFormat === "json") {
+      writeJson(result);
+    } else {
+      process.stdout.write(renderRunSetNote(result));
+    }
+    process.exit(0);
+  } catch (err) {
+    exitCommandFailure(err, connectUrl);
+  }
+}
+
+async function runPinnedCommand(
+  parsed: ParsedArgs,
+  connectUrl: string | undefined,
+  verb: "pin" | "unpin",
+): Promise<never> {
+  const [runArg, extra] = parsed.positionals;
+  const target = normalizeTarget(runArg);
+  if (!target) {
+    process.stderr.write(`task-runner: run ${verb} requires <id-or-path>\n`);
+    process.exit(3);
+  }
+  if (extra !== undefined) {
+    process.stderr.write(
+      `task-runner: run ${verb} takes exactly one positional (<id-or-path>); got extra "${extra}"\n`,
+    );
+    process.exit(3);
+  }
+
+  const unsupported = unsupportedFlagsForGroupedCommand(parsed);
+  if (unsupported.length > 0) {
+    process.stderr.write(
+      `task-runner: run ${verb} only supports <id-or-path>, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+    );
+    process.exit(3);
+  }
+
+  try {
+    const pinned = verb === "pin";
+    const result =
+      connectUrl === undefined
+        ? updateRunPinned(target, { pinned })
+        : await withDaemonClient(connectUrl, (client) =>
+            client
+              .call<{ result: ReturnType<typeof updateRunPinned> }>("runs.setPinned", {
+                target,
+                pinned,
+              })
+              .then((response) => response.result),
+          );
+    if (parsed.outputFormat === "json") {
+      writeJson(result);
+    } else {
+      process.stdout.write(renderRunSetPinned(result));
+    }
+    process.exit(0);
+  } catch (err) {
+    exitCommandFailure(err, connectUrl);
+  }
+}
+
 async function runBackendSessionCommand(
   parsed: ParsedArgs,
   connectUrl: string | undefined,
@@ -1900,6 +2024,18 @@ async function main(): Promise<void> {
     }
     if (parsed.subcommand === "set-name") {
       await runSetNameCommand(parsed, connectUrl);
+    }
+    if (parsed.subcommand === "set-note") {
+      await runNoteCommand(parsed, connectUrl, "set-note");
+    }
+    if (parsed.subcommand === "clear-note") {
+      await runNoteCommand(parsed, connectUrl, "clear-note");
+    }
+    if (parsed.subcommand === "pin") {
+      await runPinnedCommand(parsed, connectUrl, "pin");
+    }
+    if (parsed.subcommand === "unpin") {
+      await runPinnedCommand(parsed, connectUrl, "unpin");
     }
     if (parsed.subcommand === "set-backend-session") {
       await runBackendSessionCommand(parsed, connectUrl, "set-backend-session");

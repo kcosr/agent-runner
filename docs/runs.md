@@ -44,6 +44,8 @@ The manifest is the source of truth. Important fields:
 | `lockedFields` | union of agent + assignment locks, frozen |
 | `message` | default run message (from CLI positional or assignment) |
 | `name` | user-provided display name (mutable via `run set-name`) |
+| `note` | optional markdown note for humans (mutable via `run set-note`) |
+| `pinned` | persisted board-order hint for summaries and the web dashboard |
 | `status` | current lifecycle state |
 | `startedAt`, `endedAt` | ISO 8601 timestamps |
 | `archivedAt` | ISO timestamp when archived, else `null` |
@@ -121,6 +123,12 @@ task-runner attachment list <run-id> [--cwd-scope]
 - `run status` and `run brief` are run-id-only.
 - `run brief` is text-only; no `--output-format` or `--field`.
 - `run status --output-format json` returns the shared `RunDetail` DTO.
+- `RunDetail` includes full `note` plus `pinned`; `RunSummary` includes
+  `notePresent` plus `pinned`.
+- Text `run status` may show `Pinned: yes` and `Note: present`, but does
+  not print the note body.
+- Run notes stay in run metadata only; they are not appended to `brief`,
+  `callerInstructions`, or backend prompts automatically.
 
 ## Mutation surfaces
 
@@ -131,6 +139,10 @@ task-runner run unarchive <id>
 task-runner run delete <id>                # archived runs only
 task-runner run set-name <id> <name>
 task-runner run set-name <id> --clear
+task-runner run set-note <id> <markdown>
+task-runner run clear-note <id>
+task-runner run pin <id>
+task-runner run unpin <id>
 task-runner run set-backend-session <id> <session-id>   # passive only
 task-runner run clear-backend-session <id>              # passive only
 task-runner run add-dep <id> <dep-run-id>
@@ -159,6 +171,18 @@ Only non-running runs can be reset.
 
 Update or clear the human-facing display name. Use `--clear` to remove it.
 Does not change run state or task state.
+
+### set-note / clear-note
+
+Persist or clear a markdown note on the run. Whitespace-only note writes
+clear the field. Text output never prints the note body; it only reports
+whether the mutation changed state.
+
+### pin / unpin
+
+Persist or clear the run's `pinned` flag. Pinning is metadata only: it
+does not change lifecycle state, task state, archive state, or
+dependency readiness.
 
 ### set-backend-session / clear-backend-session
 

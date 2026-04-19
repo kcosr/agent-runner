@@ -31,6 +31,16 @@ function SettingsProbe() {
       <button
         onClick={() =>
           updatePreferences({
+            showPinnedOnly: true,
+          })
+        }
+        type="button"
+      >
+        Enable pinned only
+      </button>
+      <button
+        onClick={() =>
+          updatePreferences({
             visibleFocusIndicators: true,
           })
         }
@@ -97,6 +107,7 @@ describe("DashboardSettingsProvider", () => {
         hideEmptyColumns: true,
         collapseFailureStates: true,
         showArchived: false,
+        showPinnedOnly: false,
         sortByRecentUpdates: false,
         visibleFocusIndicators: false,
         structuredFilters: {
@@ -153,6 +164,7 @@ describe("DashboardSettingsProvider", () => {
         hideEmptyColumns: false,
         collapseFailureStates: false,
         showArchived: true,
+        showPinnedOnly: false,
         sortByRecentUpdates: true,
         visibleFocusIndicators: true,
         structuredFilters: {
@@ -251,6 +263,7 @@ describe("DashboardSettingsProvider", () => {
     renderSettingsProbe();
 
     fireEvent.click(screen.getByRole("button", { name: "Enable archived" }));
+    fireEvent.click(screen.getByRole("button", { name: "Enable pinned only" }));
     fireEvent.click(screen.getByRole("button", { name: "Enable recent updates sort" }));
     fireEvent.click(screen.getByRole("button", { name: "Enable visible focus indicators" }));
     fireEvent.click(screen.getByRole("button", { name: "Update view state" }));
@@ -261,6 +274,7 @@ describe("DashboardSettingsProvider", () => {
         hideEmptyColumns: true,
         collapseFailureStates: true,
         showArchived: true,
+        showPinnedOnly: true,
         sortByRecentUpdates: true,
         visibleFocusIndicators: true,
         structuredFilters: {
@@ -290,6 +304,7 @@ describe("DashboardSettingsProvider", () => {
         hideEmptyColumns: true,
         collapseFailureStates: true,
         showArchived: false,
+        showPinnedOnly: false,
         sortByRecentUpdates: false,
         visibleFocusIndicators: false,
         structuredFilters: {
@@ -312,6 +327,7 @@ describe("DashboardSettingsProvider", () => {
         hideEmptyColumns: true,
         collapseFailureStates: true,
         showArchived: false,
+        showPinnedOnly: false,
         sortByRecentUpdates: false,
         visibleFocusIndicators: false,
         structuredFilters: {

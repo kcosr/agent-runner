@@ -14,6 +14,7 @@ import type {
   getRun,
   getRunBrief,
   getRunList,
+  getRunSummary,
   getRunTimelineHistory,
   getTask,
   getTaskList,
@@ -26,6 +27,8 @@ import type {
   startRun,
   unarchive,
   updateRunBackendSession,
+  updateRunNote,
+  updateRunPinned,
   updateTask,
 } from "@task-runner/core/app/service.js";
 import type {
@@ -40,6 +43,7 @@ export interface DaemonHandlers {
   getRun: typeof getRun;
   getRunBrief: typeof getRunBrief;
   getRunList: typeof getRunList;
+  getRunSummary: typeof getRunSummary;
   getRunTimelineHistory: typeof getRunTimelineHistory;
   getTask: typeof getTask;
   getTaskList: typeof getTaskList;
@@ -51,6 +55,8 @@ export interface DaemonHandlers {
   unarchive: typeof unarchive;
   deleteArchivedRun: typeof deleteArchivedRun;
   renameRun: typeof renameRun;
+  updateRunNote: typeof updateRunNote;
+  updateRunPinned: typeof updateRunPinned;
   updateRunBackendSession: typeof updateRunBackendSession;
   clearBackendSession: typeof clearBackendSession;
   addDependency: typeof addDependency;
@@ -113,6 +119,12 @@ export function createDaemonOperations(ctx: DaemonOperationContext) {
     },
     async setRunName(target: string, input: Parameters<typeof renameRun>[1]) {
       return { result: await ctx.renameRun(target, input) };
+    },
+    setRunNote(target: string, input: Parameters<typeof updateRunNote>[1]) {
+      return { result: ctx.updateRunNote(target, input) };
+    },
+    setRunPinned(target: string, input: Parameters<typeof updateRunPinned>[1]) {
+      return { result: ctx.updateRunPinned(target, input) };
     },
     setRunBackendSession(target: string, input: Parameters<typeof updateRunBackendSession>[1]) {
       return { result: ctx.updateRunBackendSession(target, input) };

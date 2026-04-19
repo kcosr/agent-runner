@@ -24,6 +24,13 @@
 
 ### Added
 
+- Added persistent per-run note and pin metadata across the shared
+  manifest/DTO surfaces, including `task-runner run set-note`,
+  `run clear-note`, `run pin`, and `run unpin`, with daemon HTTP/RPC
+  parity and JSON detail/list projections for `note`, `notePresent`, and
+  `pinned`. ([#58](https://github.com/kcosr/task-runner/pull/58))
+- Added `N`, `P`, and `A` as web dashboard shortcuts for opening the
+  selected run's note, toggling pin, and toggling archive. ([#58](https://github.com/kcosr/task-runner/pull/58))
 - Added a grouped Filters control to the web dashboard for exact-match repo, agent, and backend filtering, with clickable run-card metadata badges as filter shortcuts and a `Ctrl+Shift+F` keyboard shortcut to open the panel. ([#56](https://github.com/kcosr/task-runner/pull/56))
 - Added per-run `run-events.jsonl` audit history files that append compact lifecycle, backend-session, and task-mutation records for debugging while keeping `run.json` canonical. Reset now preserves prior audit history and appends a reset event; delete removes the audit file with the workspace. ([#53](https://github.com/kcosr/task-runner/pull/53))
 - Added runner-injected interpolation vars `config_dir`, `state_dir`, and `assignment_name` for repo-owned assignments and caller instructions. ([#52](https://github.com/kcosr/task-runner/pull/52))
@@ -35,6 +42,15 @@
 
 ### Changed
 
+- Changed the web dashboard so pinned runs sort first within each status
+  column, cards and the detail drawer share the same note editor/mutation
+  flow, and the persisted preferences now include a pinned-only filter. ([#58](https://github.com/kcosr/task-runner/pull/58))
+- Changed run status text output to surface compact note/pin indicators
+  without printing note markdown bodies, and kept run notes out of worker
+  brief/prompt composition by default. ([#58](https://github.com/kcosr/task-runner/pull/58))
+- Changed daemon summary/detail publication and healthy-stream web
+  mutations to avoid full run-list/detail recomputation and refetches for
+  simple note/pin/rename/archive updates. ([#58](https://github.com/kcosr/task-runner/pull/58))
 - Codex transport selection now uses the explicit
   `backendSpecific.codex.transport` contract, with fresh-run precedence of
   agent frontmatter → daemon request override → `TASK_RUNNER_CODEX_WS_URL`

@@ -503,16 +503,14 @@ pre {
 
 /* ─── card ───────────────────────────────────────────── */
 .card {
-  display: block;
+  position: relative;
   width: 100%;
-  text-align: left;
-  padding: 12px 14px;
-  cursor: pointer;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-card);
   transition: border-color 120ms, background 120ms;
+  overflow: visible;
 }
 .card:hover {
   border-color: var(--border-strong);
@@ -526,6 +524,23 @@ pre {
 .card:focus-within {
   border-color: var(--ring);
   box-shadow: 0 0 0 1px var(--ring), var(--shadow-card);
+}
+
+.card-main {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+  padding: 12px 14px;
+  background: transparent;
+  border: 0;
+  border-radius: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.card-header-block {
+  padding-right: 84px;
 }
 
 .card-row {
@@ -581,8 +596,108 @@ pre {
   max-width: 120px;
 }
 
+.card-actions {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.card-note-control {
+  position: relative;
+}
+
+.card-action {
+  background: color-mix(in srgb, var(--background) 90%, transparent);
+}
+
+.card-action.card-action--active {
+  border-color: var(--border-strong);
+  color: var(--foreground);
+}
+
+.card-note-preview {
+  position: fixed;
+  overflow: auto;
+  box-sizing: border-box;
+  padding: 12px;
+  background: rgba(24, 24, 27, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-md);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.32);
+  color: rgb(245, 245, 245);
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  z-index: 120;
+}
+
+.card-note-preview__state {
+  margin: 0;
+  color: rgb(245, 245, 245);
+  -webkit-text-fill-color: rgb(245, 245, 245);
+  font-size: 12px;
+  line-height: 1.5;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.28);
+}
+
+.card-note-preview__loading {
+  display: grid;
+  gap: 10px;
+}
+
+.card-note-preview__loading .skeleton-line {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.card-note-preview__markdown {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: rgb(245, 245, 245);
+  -webkit-text-fill-color: rgb(245, 245, 245);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.28);
+}
+
+.card-note-preview__markdown :is(p, li, blockquote, code, strong, em, h1, h2, h3, h4, h5, h6) {
+  color: inherit;
+  -webkit-text-fill-color: inherit;
+}
+
+.card-note-preview__markdown code {
+  background: rgba(255, 255, 255, 0.1);
+  border: 0;
+  color: inherit;
+  -webkit-text-fill-color: inherit;
+}
+
+.card-note-preview__markdown pre {
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.card-note-preview__markdown a {
+  color: inherit;
+  -webkit-text-fill-color: inherit;
+  text-decoration: underline;
+  text-decoration-color: rgba(255, 255, 255, 0.32);
+}
+
+.card-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+
+.card-progress__meta {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .progress {
-  flex: 1;
+  width: 100%;
   height: 4px;
   background: var(--muted);
   border-radius: 999px;
@@ -762,6 +877,187 @@ pre {
   border-color: color-mix(in srgb, var(--destructive) 32%, transparent);
 }
 
+.btn.btn--quiet {
+  background: transparent;
+}
+
+.btn.btn--quiet.active {
+  background: var(--accent);
+  border-color: var(--border-strong);
+}
+
+.note-editor__toolbar {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.note-editor {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  min-width: 0;
+}
+
+.note-editor__mode-switch {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.note-editor__preview {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--muted) 72%, transparent);
+}
+
+.note-editor__markdown {
+  font-size: 13px;
+}
+
+.note-editor__empty {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.note-editor__field {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.note-editor__textarea {
+  display: block;
+  box-sizing: border-box;
+  flex: 1 1 auto;
+  height: 100%;
+  width: 100%;
+  min-height: 180px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+  line-height: 1.6;
+  resize: none;
+}
+
+.note-editor__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.note-loading-state {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+}
+
+.note-loading-state__toolbar {
+  display: flex;
+}
+
+.note-loading-state__body {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 12px;
+  padding: 14px;
+  min-height: 180px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--muted) 72%, transparent);
+  align-content: start;
+  overflow-y: auto;
+}
+
+.note-loading-state__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.note-loading-state__actions .skeleton-line {
+  width: 72px;
+}
+
+.note-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 100vw;
+  min-width: 100vw;
+  height: 100vh;
+  min-height: 100vh;
+  height: 100dvh;
+  min-height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 24px;
+  border: 0;
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.note-dialog {
+  width: min(44rem, 100%);
+  max-height: min(calc(100dvh - 48px), 42rem);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow: hidden;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: 0 28px 64px rgba(0, 0, 0, 0.16);
+}
+
+.note-dialog__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.note-dialog__title {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.note-dialog__copy,
+.note-dialog__error {
+  margin: 4px 0 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.drawer-panel-card--notes {
+  display: flex;
+  flex-direction: column;
+  /* Match the attempts panel offset until the shared drawer height math is centralized. */
+  max-height: calc(var(--drawer-body-height, 100dvh) - var(--drawer-tabs-height, 0px) + 13px);
+  min-height: 0;
+}
+
 .drawer-body {
   flex: 1;
   overflow-y: auto;
@@ -893,6 +1189,17 @@ pre {
   color: var(--muted-foreground);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
+}
+
+.drawer-panel {
+  padding: 14px 18px 24px;
+}
+
+.drawer-panel-card {
+  padding: 14px;
+  background: color-mix(in srgb, var(--muted) 64%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
 }
 
 /* ─── tasks ──────────────────────────────────────────── */

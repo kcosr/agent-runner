@@ -35,6 +35,8 @@ import {
   removeRunDependency,
   setRunBackendSession,
   setRunName,
+  setRunNote,
+  setRunPinned,
   setTask,
   showDefinition,
   showTask,
@@ -1112,6 +1114,55 @@ test("command services: setRunName propagates codex thread rename and clear valu
   } finally {
     await codexServer.close();
   }
+});
+
+test("command services: setRunNote and setRunPinned are idempotent and preserve reset seed metadata", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+
+  await withSharedRuntimeEnv(dir, async () => {
+    const noted = setRunNote(outcome.runId, { note: "# Follow-up\n\nKeep the review sharp." });
+    assert.deepEqual(noted, {
+      runId: outcome.runId,
+      note: "# Follow-up\n\nKeep the review sharp.",
+      changed: true,
+    });
+
+    const notedAgain = setRunNote(outcome.runId, { note: "# Follow-up\n\nKeep the review sharp." });
+    assert.deepEqual(notedAgain, {
+      runId: outcome.runId,
+      note: "# Follow-up\n\nKeep the review sharp.",
+      changed: false,
+    });
+
+    const pinned = setRunPinned(outcome.runId, { pinned: true });
+    assert.deepEqual(pinned, {
+      runId: outcome.runId,
+      pinned: true,
+      changed: true,
+    });
+
+    const pinnedAgain = setRunPinned(outcome.runId, { pinned: true });
+    assert.deepEqual(pinnedAgain, {
+      runId: outcome.runId,
+      pinned: true,
+      changed: false,
+    });
+
+    const cleared = setRunNote(outcome.runId, { note: "   " });
+    assert.deepEqual(cleared, {
+      runId: outcome.runId,
+      note: null,
+      changed: true,
+    });
+  });
+
+  const manifest = readManifest(outcome.workspaceDir);
+  assert.equal(manifest.note, null);
+  assert.equal(manifest.resetSeed.note, null);
+  assert.equal(manifest.pinned, true);
+  assert.equal(manifest.resetSeed.pinned, true);
 });
 
 test("command services: setRunName keeps manifest update when codex propagation fails", async () => {

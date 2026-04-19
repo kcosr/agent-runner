@@ -6,6 +6,9 @@ export type RunsShortcutCommand =
   | "board.moveDown"
   | "board.moveLeft"
   | "board.moveRight"
+  | "run.openNote"
+  | "run.toggleArchived"
+  | "run.togglePinned"
   | "ui.toggleFilters"
   | "ui.toggleDrawerFullscreen"
   | "ui.blurSearch"
@@ -31,6 +34,7 @@ export interface RunsShortcutContext {
   activeBoardColumnKey: string | null;
   boardColumns: BoardColumn[];
   drawerFullscreen: boolean;
+  modalOpen: boolean;
   selectedRunPrimaryActionAvailable: boolean;
   resumeDialogOpen: boolean;
   searchFocused: boolean;
@@ -214,6 +218,10 @@ export function resolveRunsShortcutCommand(
     return null;
   }
 
+  if (context.modalOpen) {
+    return null;
+  }
+
   if (matchesShortcut(event, { key: "arrowup" })) {
     return "board.moveUp";
   }
@@ -232,6 +240,15 @@ export function resolveRunsShortcutCommand(
     context.selectedRunPrimaryActionAvailable
   ) {
     return "run.primaryAction";
+  }
+  if (matchesShortcut(event, { key: "n" }) && context.selectedRunId) {
+    return "run.openNote";
+  }
+  if (matchesShortcut(event, { key: "p" }) && context.selectedRunId) {
+    return "run.togglePinned";
+  }
+  if (matchesShortcut(event, { key: "a" }) && context.selectedRunId) {
+    return "run.toggleArchived";
   }
 
   return null;

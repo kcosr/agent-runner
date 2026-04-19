@@ -148,6 +148,9 @@ task-runner run status <run-id> [--output-format json] [--field <name> ...]
 - Run-id-only. Paths are not accepted.
 - `--output-format json` returns the shared `RunDetail` DTO.
 - `--field <name>` — repeatable. Projects top-level JSON fields.
+- JSON detail now includes `note` and `pinned`.
+- Text output may show `Pinned: yes` and `Note: present`, but it never
+  prints the note markdown body.
 
 ## `run brief <run-id>`
 
@@ -236,9 +239,22 @@ task-runner run delete    <id|path>    # archived only
 ```bash
 task-runner run set-name <id|path> <name>
 task-runner run set-name <id|path> --clear
+task-runner run set-note <id|path> <markdown>
+task-runner run clear-note <id|path>
+task-runner run pin <id|path>
+task-runner run unpin <id|path>
 task-runner run set-backend-session   <id|path> <session-id>   # passive only
 task-runner run clear-backend-session <id|path>                # passive only
 ```
+
+- `run set-note` trims only for empty/whitespace detection; a
+  whitespace-only value clears the note.
+- `run clear-note` clears the note without a second positional.
+- `run pin` / `run unpin` toggle persisted pin metadata without moving a
+  run across status columns.
+- Metadata mutations accept `--output-format text|json` and `--connect`.
+- Note text is never echoed back in text output; use JSON or the web UI
+  to inspect the full stored note.
 
 ### Dependencies
 

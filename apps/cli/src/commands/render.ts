@@ -4,7 +4,12 @@ import type {
   RunAttachmentDownloadResult,
   RunAttachmentRemoveResult,
 } from "@task-runner/core/contracts/attachments.js";
-import type { RunBackendSessionResult, RunDetail } from "@task-runner/core/contracts/runs.js";
+import type {
+  RunBackendSessionResult,
+  RunDetail,
+  RunNoteResult,
+  RunPinnedResult,
+} from "@task-runner/core/contracts/runs.js";
 import type {
   DefinitionDetailsResult,
   DefinitionListResult,
@@ -46,6 +51,12 @@ export function renderRunStatus(detail: RunDetail): string {
   }
   lines.push(`Backend: ${detail.backend}${detail.model ? ` (${detail.model})` : ""}`);
   lines.push(`Name: ${detail.name ?? "Unnamed"}`);
+  if (detail.pinned) {
+    lines.push("Pinned: yes");
+  }
+  if (detail.note !== null) {
+    lines.push("Note: present");
+  }
   if (detail.backendSessionId) {
     lines.push(`Backend session: ${detail.backendSessionId}`);
   }
@@ -265,6 +276,28 @@ export function renderRunSetName(result: {
   return result.changed
     ? `task-runner: set name for run ${result.runId} to "${result.name}"\n`
     : `task-runner: run ${result.runId} already has name "${result.name}"\n`;
+}
+
+export function renderRunSetNote(result: RunNoteResult): string {
+  if (result.note === null) {
+    return result.changed
+      ? `task-runner: cleared note for run ${result.runId}\n`
+      : `task-runner: run ${result.runId} already has no note\n`;
+  }
+  return result.changed
+    ? `task-runner: set note for run ${result.runId} to present\n`
+    : `task-runner: run ${result.runId} already has note present\n`;
+}
+
+export function renderRunSetPinned(result: RunPinnedResult): string {
+  if (result.pinned) {
+    return result.changed
+      ? `task-runner: pinned run ${result.runId}\n`
+      : `task-runner: run ${result.runId} is already pinned\n`;
+  }
+  return result.changed
+    ? `task-runner: unpinned run ${result.runId}\n`
+    : `task-runner: run ${result.runId} is already unpinned\n`;
 }
 
 export function renderRunSetBackendSession(result: RunBackendSessionResult): string {

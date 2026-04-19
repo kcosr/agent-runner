@@ -36,7 +36,9 @@ export function RunDetailPanel({
   onRename,
   onResumeMessageDraftChange,
   onResumeMessageExpandedChange,
+  onSetNote,
   onSetBackendSession,
+  onSetPinned,
   onSelectDetailSection,
   onSubmitResume,
   onTriggerPrimaryAction,
@@ -81,7 +83,9 @@ export function RunDetailPanel({
   onRename: (runId: string, name: string | null) => Promise<void>;
   onResumeMessageDraftChange: (value: string) => void;
   onResumeMessageExpandedChange: (expanded: boolean) => void;
+  onSetNote: (runId: string, note: string | null) => Promise<void>;
   onSetBackendSession: (runId: string, backendSessionId: string) => Promise<void>;
+  onSetPinned: (runId: string, pinned: boolean) => Promise<void>;
   onSelectDetailSection: (section: DrawerDetailSection) => void;
   onSubmitResume: () => Promise<void>;
   onTriggerPrimaryAction: () => Promise<void>;
@@ -246,9 +250,11 @@ export function RunDetailPanel({
       onResumeMessageDraftChange={onResumeMessageDraftChange}
       onResumeMessageExpandedChange={onResumeMessageExpandedChange}
       onSelectAttachmentTab={onSelectAttachmentTab}
+      onSetNote={(note) => onSetNote(selectedRun.runId, note)}
       onSetBackendSession={(backendSessionId) =>
         onSetBackendSession(selectedRun.runId, backendSessionId)
       }
+      onSetPinned={(pinned) => onSetPinned(selectedRun.runId, pinned)}
       onSelectSection={onSelectDetailSection}
       onSubmitResume={onSubmitResume}
       onTriggerPrimaryAction={onTriggerPrimaryAction}

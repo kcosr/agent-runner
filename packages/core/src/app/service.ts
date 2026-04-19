@@ -16,6 +16,8 @@ import type {
   RunDependenciesResult,
   RunDetail,
   RunNameResult,
+  RunNoteResult,
+  RunPinnedResult,
   RunSummary,
   RunTaskSummary,
 } from "../contracts/runs.js";
@@ -39,12 +41,15 @@ import {
   listTasks,
   readAttachment,
   readBrief,
+  readRunSummary,
   readStatus,
   removeAttachment,
   removeRunDependency,
   resetRun,
   setRunBackendSession,
   setRunName,
+  setRunNote,
+  setRunPinned,
   setTask,
   showDefinition,
   showTask,
@@ -166,6 +171,10 @@ export function getRun(target: string): RunDetail {
   return readStatus(target);
 }
 
+export function getRunSummary(target: string): RunSummary {
+  return readRunSummary(target);
+}
+
 export function getRunTimelineHistory(target: string): RunTimelineHistory {
   const detail = getRun(target);
   const resolved = resolveResumeTarget(detail.workspaceDir);
@@ -262,6 +271,14 @@ export function renameRun(
   auditContext?: MutationAuditContext,
 ): Promise<RunNameResult> {
   return setRunName(target, input, auditContext);
+}
+
+export function updateRunNote(target: string, input: { note: string | null }): RunNoteResult {
+  return setRunNote(target, input);
+}
+
+export function updateRunPinned(target: string, input: { pinned: boolean }): RunPinnedResult {
+  return setRunPinned(target, input);
 }
 
 export function updateRunBackendSession(

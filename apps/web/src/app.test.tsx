@@ -32,6 +32,7 @@ const DEFAULT_DASHBOARD_PREFERENCES = {
   hideEmptyColumns: true,
   collapseFailureStates: true,
   showArchived: false,
+  showPinnedOnly: false,
   sortByRecentUpdates: false,
   visibleFocusIndicators: false,
   structuredFilters: {
@@ -119,6 +120,8 @@ function makeRun(
     status: "running",
     effectiveStatus: "running",
     archivedAt: null,
+    pinned: false,
+    notePresent: false,
     agentName: "implementer",
     assignmentName: "Build dashboard",
     backend: "codex",
@@ -206,6 +209,8 @@ function makeDetail(
     status: "running",
     effectiveStatus: "running",
     archivedAt: null,
+    note: null,
+    pinned: false,
     isLive: true,
     workspaceDir: "/tmp/task-runner/.state/run-1",
     assignmentPath: "/tmp/task-runner/assignment.md",
@@ -404,6 +409,8 @@ function installFetchMock(
             status: detail.status,
             effectiveStatus: detail.effectiveStatus,
             archivedAt: detail.archivedAt,
+            pinned: detail.pinned,
+            notePresent: detail.note !== null,
             agentName: detail.agent.name,
             name: detail.name,
             assignmentName: detail.assignment?.name ?? null,
@@ -695,6 +702,48 @@ function installFetchMock(
       state.details[runId] = { ...detail, name };
       state.runs = state.runs.map((run) => (run.runId === runId ? { ...run, name } : run));
       return new Response(JSON.stringify({ result: { runId, name, changed } }), { status: 200 });
+    }
+
+    const noteMatch = /\/api\/runs\/([^/]+)\/note$/.exec(url);
+    if (noteMatch && init?.method === "POST") {
+      const runId = decodeURIComponent(noteMatch[1] ?? "");
+      const body =
+        typeof init.body === "string" && init.body.length > 0
+          ? (JSON.parse(init.body) as { note?: string | null })
+          : {};
+      const note = body.note ?? null;
+      const detail = state.details[runId];
+      if (!detail) {
+        return new Response(JSON.stringify({ error: { message: "missing", code: "not_found" } }), {
+          status: 404,
+        });
+      }
+      const changed = detail.note !== note;
+      state.details[runId] = { ...detail, note };
+      state.runs = state.runs.map((run) =>
+        run.runId === runId ? { ...run, notePresent: note !== null } : run,
+      );
+      return new Response(JSON.stringify({ result: { runId, note, changed } }), { status: 200 });
+    }
+
+    const pinnedMatch = /\/api\/runs\/([^/]+)\/pinned$/.exec(url);
+    if (pinnedMatch && init?.method === "POST") {
+      const runId = decodeURIComponent(pinnedMatch[1] ?? "");
+      const body =
+        typeof init.body === "string" && init.body.length > 0
+          ? (JSON.parse(init.body) as { pinned?: boolean })
+          : {};
+      const pinned = body.pinned === true;
+      const detail = state.details[runId];
+      if (!detail) {
+        return new Response(JSON.stringify({ error: { message: "missing", code: "not_found" } }), {
+          status: 404,
+        });
+      }
+      const changed = detail.pinned !== pinned;
+      state.details[runId] = { ...detail, pinned };
+      state.runs = state.runs.map((run) => (run.runId === runId ? { ...run, pinned } : run));
+      return new Response(JSON.stringify({ result: { runId, pinned, changed } }), { status: 200 });
     }
 
     const backendSessionMatch = /\/api\/runs\/([^/]+)\/backend-session$/.exec(url);
@@ -1051,6 +1100,10 @@ describe("web app", () => {
     initializeMermaid.mockClear();
     renderMermaid.mockClear();
     vi.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
+    vi.stubGlobal("scrollTo", vi.fn());
+    vi.stubGlobal("CSS", {
+      escape: (value: string) => value.replace(/["\\]/g, "\\$&"),
+    } satisfies Pick<typeof CSS, "escape">);
   });
 
   afterEach(async () => {
@@ -1634,10 +1687,10 @@ describe("web app", () => {
     expect(await screen.findByText("Ship the web UI")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /build ui/i, expanded: true })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Instructions" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Notes" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Task notes" })).toBeInTheDocument();
 
     expect(screen.queryByText("working")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Notes" }));
+    await user.click(screen.getByRole("button", { name: "Task notes" }));
     expect(await screen.findByText("working")).toBeInTheDocument();
     expect(screen.queryByText("Ship the web UI")).not.toBeInTheDocument();
 
@@ -2731,6 +2784,7 @@ describe("web app", () => {
       hideEmptyColumns: true,
       collapseFailureStates: true,
       showArchived: false,
+      showPinnedOnly: false,
       sortByRecentUpdates: false,
       visibleFocusIndicators: false,
       structuredFilters: {
@@ -2779,7 +2833,7 @@ describe("web app", () => {
     expect(bulletOne).toBeInTheDocument();
     expect(bulletOne.tagName).toBe("LI");
 
-    await user.click(screen.getByRole("button", { name: "Notes" }));
+    await user.click(screen.getByRole("button", { name: "Task notes" }));
     expect(await screen.findByText("npm run check")).toBeInTheDocument();
     expect(screen.getByText("npm run check").tagName).toBe("CODE");
   });
@@ -2948,6 +3002,7 @@ describe("web app", () => {
     const input = screen.getByRole("textbox", { name: /run name/i });
     await user.clear(input);
     await user.type(input, "Dashboard polish");
+    const callsBeforeSave = fetchMock.mock.calls.length;
     await user.click(screen.getByRole("button", { name: /^save$/i }));
 
     await waitFor(() =>
@@ -2961,6 +3016,111 @@ describe("web app", () => {
         body: JSON.stringify({ name: "Dashboard polish" }),
       }),
     );
+    const callsAfterSave = fetchMock.mock.calls
+      .slice(callsBeforeSave)
+      .map(([input]) => (typeof input === "string" ? input : input.toString()));
+    expect(callsAfterSave).toEqual(["/api/runs/run-1/name"]);
+  });
+
+  it("previews and edits run notes from the card, then reuses the same note state in the drawer", async () => {
+    const fetchMock = installFetchMock({
+      runs: [makeRun({ notePresent: true })],
+      details: {
+        "run-1": makeDetail({
+          note: "Initial note preview",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    const card = await findRunCard("Build dashboard");
+    const cardContainer = card.closest(".card");
+    if (!cardContainer) {
+      throw new Error("expected card container");
+    }
+
+    const noteButton = within(cardContainer as HTMLElement).getByRole("button", {
+      name: /preview or edit note for run run-1/i,
+    });
+    await user.hover(noteButton);
+    expect(await screen.findByText("Initial note preview")).toBeInTheDocument();
+
+    await user.click(noteButton);
+    const noteInput = await screen.findByRole("textbox", {
+      name: /run note for build dashboard/i,
+    });
+    expect(noteInput).toHaveFocus();
+    await user.clear(noteInput);
+    await user.type(noteInput, "# Dashboard polish{enter}{enter}Saved from card");
+    const callsBeforeSave = fetchMock.mock.calls.length;
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+
+    await user.click(card);
+    await user.click(screen.getByRole("button", { name: "Notes" }));
+
+    expect(await screen.findByText("Dashboard polish")).toBeInTheDocument();
+    expect(screen.getByText("Saved from card")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs/run-1/note",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ note: "# Dashboard polish\n\nSaved from card" }),
+      }),
+    );
+    const callsAfterSave = fetchMock.mock.calls
+      .slice(callsBeforeSave)
+      .map(([input]) => (typeof input === "string" ? input : input.toString()));
+    expect(callsAfterSave).toEqual(["/api/runs/run-1/note"]);
+  });
+
+  it("defaults the card note dialog to preview mode for touch-style pointers", async () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn().mockImplementation((query: string) => ({
+        addEventListener: vi.fn(),
+        addListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+        matches:
+          query === "(hover: none)" ||
+          query === "(pointer: coarse)" ||
+          query === "(prefers-reduced-motion: reduce)",
+        media: query,
+        onchange: null,
+        removeEventListener: vi.fn(),
+        removeListener: vi.fn(),
+      })),
+    );
+    installFetchMock({
+      runs: [makeRun({ notePresent: true })],
+      details: {
+        "run-1": makeDetail({
+          note: "Touch-first note",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    const card = await findRunCard("Build dashboard");
+    const cardContainer = card.closest(".card");
+    if (!cardContainer) {
+      throw new Error("expected card container");
+    }
+
+    await user.click(
+      within(cardContainer as HTMLElement).getByRole("button", {
+        name: /preview or edit note for run run-1/i,
+      }),
+    );
+
+    expect(screen.getByRole("button", { name: "View" })).toHaveAttribute("aria-pressed", "true");
+    expect(await screen.findByText("Touch-first note")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("textbox", { name: /run note for build dashboard/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("shows backend-session editing only for passive runs and preserves the row when empty", async () => {
@@ -3257,7 +3417,7 @@ describe("web app", () => {
     const user = userEvent.setup();
     const view = await renderApp();
     await findRunCard("Build dashboard");
-    expect(screen.queryByRole("button", { name: /archived dashboard/i })).not.toBeInTheDocument();
+    expect(screen.queryByTitle("Archived dashboard")).not.toBeInTheDocument();
     expect(getBoardColumn("Failed")).toBeInTheDocument();
     expect(getBoardColumn("Blocked")).toBeInTheDocument();
     expect(
@@ -3267,7 +3427,7 @@ describe("web app", () => {
     await user.click(screen.getByRole("button", { name: /show archived runs/i }));
     await user.click(screen.getByRole("button", { name: /hide empty columns/i }));
     await user.click(screen.getByRole("button", { name: /collapse failure states/i }));
-    expect(await screen.findByRole("button", { name: /archived dashboard/i })).toBeInTheDocument();
+    expect(await screen.findByTitle("Archived dashboard")).toBeInTheDocument();
     expect(getBoardColumn("Blocked")).toBeInTheDocument();
     expect(getBoardColumn("Error")).toBeInTheDocument();
     expect(getBoardColumn("Aborted")).toBeInTheDocument();
@@ -3280,6 +3440,7 @@ describe("web app", () => {
       name: "Collapse failure states",
     });
     const showArchived = screen.getByRole("checkbox", { name: "Show archived runs" });
+    const showPinnedOnly = screen.getByRole("checkbox", { name: "Show pinned runs only" });
     const sortByRecentUpdates = screen.getByRole("checkbox", { name: "Sort by recent updates" });
     const visibleFocusIndicators = screen.getByRole("checkbox", {
       name: "Visible focus indicators",
@@ -3289,6 +3450,7 @@ describe("web app", () => {
     expect(hideEmptyColumns).not.toBeChecked();
     expect(collapseFailureStates).not.toBeChecked();
     expect(showArchived).toBeChecked();
+    expect(showPinnedOnly).not.toBeChecked();
     expect(sortByRecentUpdates).not.toBeChecked();
     expect(visibleFocusIndicators).not.toBeChecked();
 
@@ -3303,6 +3465,7 @@ describe("web app", () => {
       hideEmptyColumns: false,
       collapseFailureStates: false,
       showArchived: true,
+      showPinnedOnly: false,
       sortByRecentUpdates: true,
       visibleFocusIndicators: true,
       structuredFilters: {
@@ -3324,9 +3487,244 @@ describe("web app", () => {
     expect(document.querySelector(".app")).toHaveAttribute("data-focus-indicators", "on");
 
     await user.click(screen.getByRole("button", { name: "Runs" }));
-    expect(await screen.findByRole("button", { name: /archived dashboard/i })).toBeInTheDocument();
+    expect(await screen.findByTitle("Archived dashboard")).toBeInTheDocument();
     expect(getBoardColumn("Error")).toBeInTheDocument();
     expect(getBoardColumn("Aborted")).toBeInTheDocument();
+  });
+
+  it("sorts pinned runs first within each status column and persists the pinned-only filter", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "running-pinned",
+          assignmentName: "Pinned running",
+          name: "Pinned running",
+          pinned: true,
+          startedAt: "2026-04-13T05:00:00.000Z",
+        }),
+        makeRun({
+          runId: "running-newest",
+          assignmentName: "Newest running",
+          name: "Newest running",
+          startedAt: "2026-04-13T05:05:00.000Z",
+        }),
+        makeRun({
+          runId: "completed-pinned",
+          assignmentName: "Pinned completed",
+          name: "Pinned completed",
+          pinned: true,
+          startedAt: "2026-04-13T04:50:00.000Z",
+          status: "success",
+        }),
+        makeRun({
+          runId: "completed-newest",
+          assignmentName: "Newest completed",
+          name: "Newest completed",
+          startedAt: "2026-04-13T05:10:00.000Z",
+          status: "success",
+        }),
+      ],
+      details: {
+        "running-pinned": makeDetail({
+          runId: "running-pinned",
+          name: "Pinned running",
+          pinned: true,
+          assignment: {
+            name: "Pinned running",
+            sourcePath: "/tmp/pinned-running.md",
+            workspacePath: "/tmp/pinned-running-workspace.md",
+          },
+          startedAt: "2026-04-13T05:00:00.000Z",
+        }),
+        "running-newest": makeDetail({
+          runId: "running-newest",
+          name: "Newest running",
+          assignment: {
+            name: "Newest running",
+            sourcePath: "/tmp/newest-running.md",
+            workspacePath: "/tmp/newest-running-workspace.md",
+          },
+          startedAt: "2026-04-13T05:05:00.000Z",
+        }),
+        "completed-pinned": makeDetail({
+          runId: "completed-pinned",
+          name: "Pinned completed",
+          pinned: true,
+          assignment: {
+            name: "Pinned completed",
+            sourcePath: "/tmp/pinned-completed.md",
+            workspacePath: "/tmp/pinned-completed-workspace.md",
+          },
+          startedAt: "2026-04-13T04:50:00.000Z",
+          status: "success",
+        }),
+        "completed-newest": makeDetail({
+          runId: "completed-newest",
+          name: "Newest completed",
+          assignment: {
+            name: "Newest completed",
+            sourcePath: "/tmp/newest-completed.md",
+            workspacePath: "/tmp/newest-completed-workspace.md",
+          },
+          startedAt: "2026-04-13T05:10:00.000Z",
+          status: "success",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await findRunCard("Pinned running");
+
+    expect(getColumnRunNames("Running")).toEqual(["Pinned running", "Newest running"]);
+    expect(getColumnRunNames("Completed")).toEqual(["Pinned completed", "Newest completed"]);
+
+    await user.click(screen.getByRole("button", { name: /show pinned runs only/i }));
+    expect(await findRunCard("Pinned running")).toBeInTheDocument();
+    expect(await findRunCard("Pinned completed")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /newest running/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /newest completed/i })).not.toBeInTheDocument();
+
+    const stored = window.localStorage.getItem("task-runner:web:dashboard-preferences");
+    expect(stored ? JSON.parse(stored) : null).toMatchObject({
+      showPinnedOnly: true,
+    });
+
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    expect(screen.getByRole("checkbox", { name: "Show pinned runs only" })).toBeChecked();
+  });
+
+  it("pins a selected run without forcing list and detail refetches while streams are healthy", async () => {
+    const fetchMock = installFetchMock({
+      runs: [makeRun({ assignmentName: "Build dashboard" })],
+      details: {
+        "run-1": makeDetail({
+          assignment: {
+            name: "Build dashboard",
+            sourcePath: "/tmp/a.md",
+            workspacePath: "/tmp/b.md",
+          },
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+
+    const callsBefore = fetchMock.mock.calls.length;
+    await user.click(await screen.findByRole("button", { name: "Pin run" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Unpin run" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      ),
+    );
+
+    const callsAfter = fetchMock.mock.calls
+      .slice(callsBefore)
+      .map(([input]) => (typeof input === "string" ? input : input.toString()));
+    expect(callsAfter).toEqual(["/api/runs/run-1/pinned"]);
+  });
+
+  it("opens the selected run note modal with n and toggles pin with p", async () => {
+    const fetchMock = installFetchMock({
+      runs: [makeRun({ assignmentName: "Build dashboard" })],
+      details: {
+        "run-1": makeDetail({
+          assignment: {
+            name: "Build dashboard",
+            sourcePath: "/tmp/a.md",
+            workspacePath: "/tmp/b.md",
+          },
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+
+    await user.keyboard("n");
+    const noteInput = await screen.findByRole("textbox", {
+      name: /run note for build dashboard/i,
+    });
+    expect(noteInput).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("textbox", { name: /run note for build dashboard/i }),
+      ).not.toBeInTheDocument(),
+    );
+
+    const callsBeforePin = fetchMock.mock.calls.length;
+    await user.keyboard("p");
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Unpin run" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      ),
+    );
+
+    const callsAfterPin = fetchMock.mock.calls
+      .slice(callsBeforePin)
+      .map(([input]) => (typeof input === "string" ? input : input.toString()));
+    expect(callsAfterPin).toEqual(["/api/runs/run-1/pinned"]);
+  });
+
+  it("toggles archive for the selected run with a", async () => {
+    const fetchMock = installFetchMock({
+      runs: [
+        makeRun({
+          assignmentName: "Archive ready",
+          capabilities: {
+            canArchive: true,
+            canReset: false,
+            canResume: false,
+          },
+          status: "success",
+        }),
+      ],
+      details: {
+        "run-1": makeDetail({
+          assignment: {
+            name: "Archive ready",
+            sourcePath: "/tmp/archive-a.md",
+            workspacePath: "/tmp/archive-b.md",
+          },
+          capabilities: {
+            canArchive: true,
+            canReset: false,
+            canResume: false,
+          },
+          status: "success",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Archive ready"));
+
+    const callsBeforeArchive = fetchMock.mock.calls.length;
+    await user.keyboard("a");
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/runs/run-1/archive",
+        expect.objectContaining({
+          method: "POST",
+        }),
+      ),
+    );
+
+    const callsAfterArchive = fetchMock.mock.calls
+      .slice(callsBeforeArchive)
+      .map(([input]) => (typeof input === "string" ? input : input.toString()));
+    expect(callsAfterArchive).toEqual(["/api/runs/run-1/archive"]);
   });
 
   it("restores the in-scope dashboard preferences to defaults from settings", async () => {
@@ -3382,7 +3780,7 @@ describe("web app", () => {
     await user.click(screen.getByRole("button", { name: "Runs" }));
 
     expect(await screen.findByPlaceholderText("Search runs")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /archived dashboard/i })).not.toBeInTheDocument();
+    expect(screen.queryByTitle("Archived dashboard")).not.toBeInTheDocument();
     expect(getBoardColumn("Failed")).toBeInTheDocument();
     expect(
       screen.queryByRole("heading", { name: /^Aborted(?: \(\d+\))?$/ }),
@@ -3413,6 +3811,7 @@ describe("web app", () => {
       hideEmptyColumns: true,
       collapseFailureStates: true,
       showArchived: true,
+      showPinnedOnly: false,
       sortByRecentUpdates: false,
       visibleFocusIndicators: false,
       structuredFilters: {
@@ -3450,6 +3849,7 @@ describe("web app", () => {
       hideEmptyColumns: true,
       collapseFailureStates: true,
       showArchived: true,
+      showPinnedOnly: false,
       sortByRecentUpdates: false,
       visibleFocusIndicators: false,
       structuredFilters: {
@@ -3556,7 +3956,7 @@ describe("web app", () => {
     await renderApp();
     await findRunCard("Build dashboard");
 
-    expect(screen.queryByRole("button", { name: /archived dashboard/i })).not.toBeInTheDocument();
+    expect(screen.queryByTitle("Archived dashboard")).not.toBeInTheDocument();
     expect(getBoardColumn("Failed")).toBeInTheDocument();
     expect(getBoardColumn("Blocked")).toBeInTheDocument();
 

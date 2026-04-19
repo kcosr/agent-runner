@@ -1,4 +1,4 @@
-import { type Dirent, existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
+import { type Dirent, existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { InvalidStatusReport, TaskState, TaskStatus } from "../../assignment/model.js";
 import {
@@ -67,6 +67,8 @@ export interface RunResetSeed {
   effort: string | null;
   backendSpecific?: BackendSpecificConfig;
   name: string | null;
+  note: string | null;
+  pinned: boolean;
   dependencyRunIds: string[];
   unrestricted: boolean;
   timeoutSec: number;
@@ -163,6 +165,8 @@ export interface RunManifest {
   backendSpecific?: BackendSpecificConfig;
   message: string | null;
   name: string | null;
+  note: string | null;
+  pinned: boolean;
   unrestricted: boolean;
   cwd: string;
   // Union of the agent's and assignment's lockedFields at first write.
@@ -247,6 +251,8 @@ export function applyRunResetSeed(manifest: RunManifest): void {
   manifest.effort = seed.effort;
   manifest.backendSpecific = cloneBackendSpecificConfig(seed.backendSpecific);
   manifest.name = seed.name;
+  manifest.note = seed.note;
+  manifest.pinned = seed.pinned;
   manifest.dependencyRunIds = [...seed.dependencyRunIds];
   manifest.unrestricted = seed.unrestricted;
   manifest.timeoutSec = seed.timeoutSec;
@@ -306,10 +312,23 @@ export interface ListedRunManifest {
   manifest: RunManifest;
 }
 
-function normalizeRunManifest(parsed: RunManifest & { archivedAt?: string | null }): RunManifest {
+function normalizeRunManifest(
+  parsed: RunManifest & {
+    archivedAt?: string | null;
+    note?: string | null;
+    pinned?: boolean;
+  },
+): RunManifest {
   return {
     ...parsed,
     archivedAt: parsed.archivedAt ?? null,
+    note: parsed.note ?? null,
+    pinned: parsed.pinned ?? false,
+    resetSeed: {
+      ...parsed.resetSeed,
+      note: parsed.resetSeed.note ?? parsed.note ?? null,
+      pinned: parsed.resetSeed.pinned ?? parsed.pinned ?? false,
+    },
   };
 }
 
@@ -392,6 +411,10 @@ export function resolveResumeTarget(
   );
 }
 
+export function readManifest(workspaceDir: string): RunManifest {
+  return readManifestCandidate(manifestPath(workspaceDir));
+}
+
 export function listRunManifests(env: NodeJS.ProcessEnv = process.env): ListedRunManifest[] {
   const root = resolveRunsRoot(env);
   if (!existsSync(root)) {
@@ -436,6 +459,48 @@ export function listRunManifests(env: NodeJS.ProcessEnv = process.env): ListedRu
   return runs;
 }
 
+export function findRunManifestsById(
+  runId: string,
+  env: NodeJS.ProcessEnv = process.env,
+): ListedRunManifest[] {
+  const root = resolveRunsRoot(env);
+  if (!existsSync(root)) {
+    return [];
+  }
+
+  const matches: ListedRunManifest[] = [];
+  for (const bucket of readdirSync(root, { withFileTypes: true })) {
+    if (!bucket.isDirectory()) {
+      continue;
+    }
+    const workspaceDir = join(resolveRunsBucketDir(bucket.name, env), runId);
+    if (!existsSync(workspaceDir) || !statSync(workspaceDir).isDirectory()) {
+      continue;
+    }
+    const candidate = manifestPath(workspaceDir);
+    if (!existsSync(candidate)) {
+      continue;
+    }
+    try {
+      const manifest = readManifestCandidate(candidate);
+      if (
+        manifest.workspaceDir !== workspaceDir ||
+        manifest.assignmentPath !== workspaceAssignmentPath(workspaceDir)
+      ) {
+        continue;
+      }
+      matches.push({ workspaceDir, manifest });
+    } catch (err) {
+      if (err instanceof ResumeError) {
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  return matches;
+}
+
 // Structural validation for a run.json candidate. Shallow checks
 // deliberately — we confirm that every field `resolveResumeTarget`
 // consumers immediately dereference is present with the expected
@@ -457,6 +522,8 @@ function isRunManifest(value: unknown): value is RunManifest {
   // Top-level scalars required by downstream consumers.
   if (typeof obj.backend !== "string") return false;
   if (obj.name !== null && typeof obj.name !== "string") return false;
+  if (obj.note !== undefined && obj.note !== null && typeof obj.note !== "string") return false;
+  if (obj.pinned !== undefined && typeof obj.pinned !== "boolean") return false;
   if (typeof obj.cwd !== "string") return false;
   if (typeof obj.assignmentPath !== "string") return false;
   if (typeof obj.workspaceDir !== "string") return false;
@@ -530,6 +597,14 @@ function isRunManifest(value: unknown): value is RunManifest {
     return false;
   }
   if (resetSeed.name !== null && typeof resetSeed.name !== "string") return false;
+  if (
+    resetSeed.note !== undefined &&
+    resetSeed.note !== null &&
+    typeof resetSeed.note !== "string"
+  ) {
+    return false;
+  }
+  if (resetSeed.pinned !== undefined && typeof resetSeed.pinned !== "boolean") return false;
   if (
     !Array.isArray(resetSeed.dependencyRunIds) ||
     !resetSeed.dependencyRunIds.every((runId) => typeof runId === "string")
