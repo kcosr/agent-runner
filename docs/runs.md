@@ -12,7 +12,7 @@ ${TASK_RUNNER_STATE_DIR}/runs/<repo>/<run-id>/
 ```text
 <workspace>/
 ├── run.json               # canonical manifest (schema version 8)
-├── run-events.jsonl       # optional append-only diagnostic audit history
+├── run-events.jsonl       # append-only diagnostic audit history (pre-feature runs may lack it)
 ├── assignment-seed.md     # only when the run started from an assignment file
 ├── attempts/
 │   ├── 00.json
@@ -24,9 +24,10 @@ ${TASK_RUNNER_STATE_DIR}/runs/<repo>/<run-id>/
 
 `assignment-seed.md` is an immutable audit snapshot of the assignment at
 run-creation time. It is *not* a work surface — task state is canonical in
-`run.json.finalTasks`. When present, `run-events.jsonl` is also diagnostic
-only: it records compact lifecycle/task provenance but is never replayed to
-derive current run state.
+`run.json.finalTasks`. Runs created by current code also include
+`run-events.jsonl`; pre-feature workspaces may still lack it. The file is
+diagnostic only: it records compact lifecycle/task provenance but is never
+replayed to derive current run state.
 
 ## Manifest (`run.json`)
 

@@ -17,6 +17,7 @@ import { resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js"
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import {
   completeAllTasksFromPrompt,
+  runIdFromPrompt,
   sharedRuntimeEnv,
   updateTasksForPrompt,
   withSharedRuntimeEnv,
@@ -330,6 +331,57 @@ test("fresh run and later resume append backend capture and resumed-session audi
   assert.equal(readAuditRaw(second.workspaceDir).includes("fixed transcript"), false);
 });
 
+test("retrying events are recorded before a successful second attempt", async () => {
+  const dir = tempDir();
+  writeAuditBundle(dir);
+  let invocationCount = 0;
+
+  const outcome = await runIn(dir, {
+    agentName: "audit-active",
+    assignmentName: "audit-active-work",
+    backend: mockBackend(async (ctx) => {
+      invocationCount += 1;
+      if (invocationCount === 1) {
+        updateTasksForPrompt(
+          ctx.prompt,
+          {
+            t1: { status: "completed" },
+          },
+          dir,
+        );
+      } else {
+        completeAllTasksFromPrompt(ctx.prompt, dir);
+      }
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "retry-thread",
+        transcript: "",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    }),
+  });
+
+  const records = readAuditRecords(outcome.workspaceDir);
+  assert.deepEqual(
+    records.map((record) => record.eventType),
+    [
+      "run.created",
+      "run.started",
+      "run.attempt_recorded",
+      "run.backend_session_updated",
+      "run.retrying",
+      "run.attempt_recorded",
+      "run.finished",
+    ],
+  );
+  assert.equal(records[4].sessionIndex, 0);
+  assert.equal(records[4].incompleteCount, 1);
+  assert.equal(records[4].invalidStatusCount, 0);
+});
+
 test("resume rejection and abort append dedicated audit records before run.finished", async () => {
   const dir = tempDir();
   writeAuditBundle(dir);
@@ -459,12 +511,49 @@ test("command and task mutations append compact records, preserve history on res
   assert.equal(eventTypes[finishedIndex - 1], "task.updated");
   assert.equal(records[finishedIndex - 1].command, "set");
   assert.equal(records[finishedIndex].source, "system");
+  assert.equal(records[finishedIndex].terminalStatus, "blocked");
   assert.equal(records[finishedIndex].sessionIndex, undefined);
   assert.equal(records[finishedIndex].attempt, undefined);
 
   runCli(["run", "archive", init.runId], { cwd: dir });
   runCli(["run", "delete", init.runId], { cwd: dir });
   assert.equal(existsSync(init.workspaceDir), false);
+});
+
+test("audit append failure after attempt persistence does not duplicate the attempt record", async () => {
+  const dir = tempDir();
+  writeAuditBundle(dir);
+  let workspaceDir = "";
+
+  await assert.rejects(
+    runIn(dir, {
+      agentName: "audit-active",
+      assignmentName: "audit-active-work",
+      backend: mockBackend(async (ctx) => {
+        completeAllTasksFromPrompt(ctx.prompt, dir);
+        workspaceDir = withSharedRuntimeEnv(dir, () => {
+          const resolved = resolveResumeTarget(runIdFromPrompt(ctx.prompt));
+          return resolved.workspaceDir;
+        });
+        unlinkSync(readAuditPath(workspaceDir));
+        mkdirSync(readAuditPath(workspaceDir));
+        return {
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+          sessionId: "broken-audit-thread",
+          transcript: "",
+          rawStdout: "",
+          rawStderr: "",
+        };
+      }),
+    }),
+  );
+
+  const manifest = JSON.parse(readFileSync(join(workspaceDir, "run.json"), "utf8"));
+  assert.equal(manifest.attemptRecords.length, 1);
+  assert.equal(manifest.attempts, 1);
+  assert.equal(manifest.attemptRecords[0].exitCode, 0);
 });
 
 test("daemon execution records controller metadata on lifecycle events", async () => {

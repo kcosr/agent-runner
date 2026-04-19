@@ -75,6 +75,7 @@ import {
   writeManifest,
 } from "../run/manifest.js";
 import {
+  EMBEDDED_RUN_EVENT_ORIGIN,
   type RunEventOrigin,
   appendRunArchivedEvent,
   appendRunBackendSessionUpdatedEvent,
@@ -179,8 +180,6 @@ export interface AttachmentReadResult {
   absolutePath: string;
 }
 
-type MutationAuditOrigin = RunEventOrigin;
-
 type TaskMutationAuditEvent =
   | {
       type: "task.updated";
@@ -196,10 +195,6 @@ type TaskMutationAuditEvent =
       taskId: string;
       taskTitle: string;
     };
-
-const EMBEDDED_MUTATION_AUDIT_ORIGIN: MutationAuditOrigin = {
-  hostMode: "embedded",
-};
 
 export class CommandError extends Error {
   constructor(message: string) {
@@ -382,7 +377,7 @@ function applyPassiveFinalization(manifest: RunManifest, ordered: TaskState[]): 
 function persistTaskMap(
   resolved: ReturnType<typeof resolveResumeTarget>,
   tasks: Map<string, TaskState>,
-  auditOrigin: MutationAuditOrigin,
+  auditOrigin: RunEventOrigin,
   auditEvent: TaskMutationAuditEvent | null,
 ): void {
   const statusBeforePersist = resolved.manifest.status;
@@ -436,7 +431,7 @@ function persistTaskMap(
 
 function updateTaskMap(
   resolved: ReturnType<typeof resolveResumeTarget>,
-  auditOrigin: MutationAuditOrigin,
+  auditOrigin: RunEventOrigin,
   updater: (tasks: Map<string, TaskState>) => TaskMutationAuditEvent | null,
 ): void {
   withTaskStateLock(resolved.workspaceDir, () => {
@@ -613,7 +608,7 @@ export function showDefinition(
 
 export function resetRun(
   target: string,
-  auditOrigin: MutationAuditOrigin = EMBEDDED_MUTATION_AUDIT_ORIGIN,
+  auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
 ): RunResetResult {
   const resolved = resolveRun(target);
   requireResettableRun(resolved.manifest);
@@ -642,7 +637,7 @@ export function resetRun(
 function setRunArchived(
   target: string,
   archived: boolean,
-  auditOrigin: MutationAuditOrigin = EMBEDDED_MUTATION_AUDIT_ORIGIN,
+  auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
 ): RunArchiveResult {
   const resolved = resolveRun(target);
   let changed = false;
@@ -690,14 +685,14 @@ function setRunArchived(
 
 export function archiveRun(
   target: string,
-  auditOrigin: MutationAuditOrigin = EMBEDDED_MUTATION_AUDIT_ORIGIN,
+  auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
 ): RunArchiveResult {
   return setRunArchived(target, true, auditOrigin);
 }
 
 export function unarchiveRun(
   target: string,
-  auditOrigin: MutationAuditOrigin = EMBEDDED_MUTATION_AUDIT_ORIGIN,
+  auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
 ): RunArchiveResult {
   return setRunArchived(target, false, auditOrigin);
 }
@@ -715,7 +710,7 @@ export function deleteRun(target: string): RunDeleteResult {
 export async function setRunName(
   target: string,
   input: { name: string | null },
-  auditOrigin: MutationAuditOrigin = EMBEDDED_MUTATION_AUDIT_ORIGIN,
+  auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
 ): Promise<RunNameResult> {
   const resolved = resolveRun(target);
   let changed = false;
@@ -765,7 +760,7 @@ function requirePassiveBackendSessionMutation(manifest: RunManifest, verb: "set"
 export function setRunBackendSession(
   target: string,
   input: { backendSessionId: string },
-  auditOrigin: MutationAuditOrigin = EMBEDDED_MUTATION_AUDIT_ORIGIN,
+  auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
 ): RunBackendSessionResult {
   const resolved = resolveRun(target);
   let changed = false;
@@ -798,7 +793,7 @@ export function setRunBackendSession(
 
 export function clearRunBackendSession(
   target: string,
-  auditOrigin: MutationAuditOrigin = EMBEDDED_MUTATION_AUDIT_ORIGIN,
+  auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
 ): RunBackendSessionResult {
   const resolved = resolveRun(target);
   let changed = false;
@@ -1132,7 +1127,7 @@ export function setTask(
   target: string,
   taskId: string,
   update: { status?: string; notes?: string },
-  auditOrigin: MutationAuditOrigin = EMBEDDED_MUTATION_AUDIT_ORIGIN,
+  auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
 ): TaskMutationResult {
   if (update.status === undefined && update.notes === undefined) {
     throw new CommandError("task set requires at least one of --status / --notes");
@@ -1193,7 +1188,7 @@ export function appendTaskNotes(
   target: string,
   taskId: string,
   text: string,
-  auditOrigin: MutationAuditOrigin = EMBEDDED_MUTATION_AUDIT_ORIGIN,
+  auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
 ): TaskMutationResult {
   const appendText = text.trim();
   if (appendText.length === 0) {
@@ -1227,7 +1222,7 @@ export function appendTaskNotes(
 export function addTask(
   target: string,
   input: { title: string; body?: string },
-  auditOrigin: MutationAuditOrigin = EMBEDDED_MUTATION_AUDIT_ORIGIN,
+  auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
 ): TaskMutationResult {
   const title = validateTaskTitle(input.title);
   const resolved = resolveRun(target);

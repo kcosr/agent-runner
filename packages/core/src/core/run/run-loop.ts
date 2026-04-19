@@ -1276,7 +1276,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     null;
   let currentPrompt = initialPrompt;
   const attemptTranscripts: string[] = [];
-  let terminal: { status: RunCompletionStatus; exitCode: number } | null = null;
+  type TerminalStatus = Exclude<RunCompletionStatus, "initialized">;
+  let terminal: { status: TerminalStatus; exitCode: number } | null = null;
   let thrownError: unknown = null;
   let sawRunAbort = false;
   let sawResumeRejected = false;
@@ -1347,6 +1348,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
       tryRefreshMutableManifestName(manifest);
       writeManifest(workspaceDir, manifest);
+      pendingAttempt = null;
       appendRunAttemptRecordedEvent({
         manifest,
         context: lifecycleContext,
@@ -1462,8 +1464,6 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         invalidStatuses: mergeInfo.invalidStatuses,
         backendSessionUpdate,
       });
-      pendingAttempt = null;
-
       if (invokeResult.aborted) {
         terminal = { status: "aborted", exitCode: 130 };
         sawRunAbort = true;
@@ -1594,7 +1594,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     appendRunFinishedEvent({
       manifest,
       context: lifecycleContext,
-      terminalStatus: terminal.status as Exclude<RunCompletionStatus, "initialized">,
+      terminalStatus: terminal.status,
       exitCode: terminal.exitCode,
       tasksCompleted: manifest.tasksCompleted,
       tasksTotal: manifest.tasksTotal,

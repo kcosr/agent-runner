@@ -7,7 +7,7 @@ daemon, a browser dashboard, resumable runs, attachments, dependencies,
 and a first-class `run brief` surface for handing a run to a worker.
 
 - Task state is canonical in `run.json`.
-- `run-events.jsonl` is a per-run diagnostic audit trail when present; it is append-only history, not canonical state.
+- `run-events.jsonl` is a per-run diagnostic audit trail for runs created by current code; it is append-only history, not canonical state.
 - Workers use the task CLI, not workspace files.
 - `task-runner run brief <run-id>` is the canonical worker handoff.
 - `task-runner status` reports the current system/environment context.
@@ -33,10 +33,11 @@ the runner emits a structured record with the per-task final
 statuses and the agent's notes.
 
 When you need to debug how a run got from one lifecycle/task state to
-another, the workspace may also contain `run-events.jsonl`: a compact
-append-only audit trail for major lifecycle and task-mutation events.
-It is diagnostic only; `run.json` remains the source of truth and there
-is no separate CLI or API read surface for the file in this first pass.
+another, runs created by current code include `run-events.jsonl`: a
+compact append-only audit trail for major lifecycle and task-mutation
+events. Pre-feature workspaces may still lack the file. It is
+diagnostic only; `run.json` remains the source of truth and there is no
+separate CLI or API read surface for the file in this first pass.
 
 It is also a useful primitive for orchestration — an outer agent can
 compose an assignment, hand it to `task-runner`, and get back a

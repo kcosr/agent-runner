@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import type { TaskStatus } from "../../assignment/model.js";
 import { appendTextFileDurable } from "../../util/write-file-atomic.js";
 import type {
   ManifestStatus,
@@ -57,7 +58,7 @@ interface RunEventBaseRecord {
   attempt?: number;
 }
 
-const EMBEDDED_RUN_EVENT_ORIGIN: RunEventOrigin = {
+export const EMBEDDED_RUN_EVENT_ORIGIN: RunEventOrigin = {
   hostMode: "embedded",
 };
 
@@ -75,51 +76,49 @@ export function runEventOriginFromExecution(execution: RunExecution): RunEventOr
   return EMBEDDED_RUN_EVENT_ORIGIN;
 }
 
-export function lifecycleRunEventContext(execution: RunExecution): RunEventWriteContext {
-  const origin = runEventOriginFromExecution(execution);
+function makeRunEventContext(
+  source: RunEventRecordSource,
+  origin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
+): RunEventWriteContext {
   return {
     ...origin,
-    source: origin.hostMode === "daemon" ? "daemon" : "system",
+    source,
   };
+}
+
+export function lifecycleRunEventContext(execution: RunExecution): RunEventWriteContext {
+  const origin = runEventOriginFromExecution(execution);
+  return makeRunEventContext(origin.hostMode === "daemon" ? "daemon" : "system", origin);
 }
 
 export function commandRunEventContext(
   origin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
 ): RunEventWriteContext {
-  return {
-    ...origin,
-    source: origin.hostMode === "daemon" ? "daemon" : "cli",
-  };
+  return makeRunEventContext(origin.hostMode === "daemon" ? "daemon" : "cli", origin);
 }
 
 export function systemRunEventContext(
   origin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
 ): RunEventWriteContext {
-  return {
-    ...origin,
-    source: "system",
-  };
+  return makeRunEventContext("system", origin);
 }
 
 export function taskCommandRunEventContext(
   origin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
 ): RunEventWriteContext {
-  return {
-    ...origin,
-    source: "task_command",
-  };
+  return makeRunEventContext("task_command", origin);
 }
 
-function appendRunEvent<Fields extends Record<string, unknown>>(params: {
+function appendRunEvent(params: {
   workspaceDir: string;
   runId: string;
   eventType: RunEventType;
   context: RunEventWriteContext;
   sessionIndex?: number;
   attempt?: number;
-  fields?: Fields;
+  fields?: Record<string, unknown>;
 }): void {
-  const record: RunEventBaseRecord & Fields = {
+  const record: RunEventBaseRecord & Record<string, unknown> = {
     schemaVersion: RUN_EVENT_SCHEMA_VERSION,
     recordedAt: new Date().toISOString(),
     runId: params.runId,
@@ -131,7 +130,7 @@ function appendRunEvent<Fields extends Record<string, unknown>>(params: {
       : {}),
     ...(params.sessionIndex !== undefined ? { sessionIndex: params.sessionIndex } : {}),
     ...(params.attempt !== undefined ? { attempt: params.attempt } : {}),
-    ...(params.fields ?? ({} as Fields)),
+    ...(params.fields ?? {}),
   };
   appendTextFileDurable(runEventsPath(params.workspaceDir), `${JSON.stringify(record)}\n`);
 }
@@ -392,8 +391,8 @@ export function appendTaskUpdatedEvent(params: {
   taskId: string;
   taskTitle: string;
   command: "set" | "append_notes";
-  statusBefore?: string;
-  statusAfter?: string;
+  statusBefore?: TaskStatus;
+  statusAfter?: TaskStatus;
   notesChanged: boolean;
 }): void {
   appendRunEvent({
