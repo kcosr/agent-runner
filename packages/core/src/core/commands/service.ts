@@ -1,6 +1,11 @@
 import { copyFileSync, existsSync, readFileSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
-import { type TaskState, VALID_STATUSES, isValidStatus } from "../../assignment/model.js";
+import {
+  type TaskState,
+  type TaskStatus,
+  VALID_STATUSES,
+  isValidStatus,
+} from "../../assignment/model.js";
 import { setCodexThreadName } from "../../backends/codex.js";
 import { setPiSessionName } from "../../backends/pi.js";
 import {
@@ -69,6 +74,21 @@ import {
   resolveResumeTarget,
   writeManifest,
 } from "../run/manifest.js";
+import {
+  EMBEDDED_RUN_EVENT_ORIGIN,
+  type RunEventOrigin,
+  appendRunArchivedEvent,
+  appendRunBackendSessionUpdatedEvent,
+  appendRunFinishedEvent,
+  appendRunRenamedEvent,
+  appendRunResetEvent,
+  appendRunUnarchivedEvent,
+  appendTaskAddedEvent,
+  appendTaskUpdatedEvent,
+  commandRunEventContext,
+  systemRunEventContext,
+  taskCommandRunEventContext,
+} from "../run/run-events.js";
 import { derivePassiveTerminalStatus } from "../run/status.js";
 import {
   loadWorkspaceTaskMap,
@@ -159,6 +179,22 @@ export interface AttachmentReadResult {
   attachment: RunAttachment;
   absolutePath: string;
 }
+
+type TaskMutationAuditEvent =
+  | {
+      type: "task.updated";
+      taskId: string;
+      taskTitle: string;
+      command: "set" | "append_notes";
+      statusBefore?: TaskStatus;
+      statusAfter?: TaskStatus;
+      notesChanged: boolean;
+    }
+  | {
+      type: "task.added";
+      taskId: string;
+      taskTitle: string;
+    };
 
 export class CommandError extends Error {
   constructor(message: string) {
@@ -341,11 +377,52 @@ function applyPassiveFinalization(manifest: RunManifest, ordered: TaskState[]): 
 function persistTaskMap(
   resolved: ReturnType<typeof resolveResumeTarget>,
   tasks: Map<string, TaskState>,
+  auditOrigin: RunEventOrigin,
+  auditEvent: TaskMutationAuditEvent | null,
 ): void {
+  const statusBeforePersist = resolved.manifest.status;
   persistWorkspaceTaskState(resolved.manifest, tasks, {
     beforeManifestWrite: (ordered, manifest) => {
       if (manifest.backend === "passive") {
         applyPassiveFinalization(manifest, ordered);
+      }
+    },
+    afterManifestWrite: (_ordered, manifest) => {
+      if (auditEvent) {
+        const taskCommandContext = taskCommandRunEventContext(auditOrigin);
+        if (auditEvent.type === "task.added") {
+          appendTaskAddedEvent({
+            manifest,
+            context: taskCommandContext,
+            taskId: auditEvent.taskId,
+            taskTitle: auditEvent.taskTitle,
+          });
+        } else {
+          appendTaskUpdatedEvent({
+            manifest,
+            context: taskCommandContext,
+            taskId: auditEvent.taskId,
+            taskTitle: auditEvent.taskTitle,
+            command: auditEvent.command,
+            statusBefore: auditEvent.statusBefore,
+            statusAfter: auditEvent.statusAfter,
+            notesChanged: auditEvent.notesChanged,
+          });
+        }
+      }
+      if (
+        manifest.backend === "passive" &&
+        statusBeforePersist === "initialized" &&
+        (manifest.status === "success" || manifest.status === "blocked")
+      ) {
+        appendRunFinishedEvent({
+          manifest,
+          context: systemRunEventContext(auditOrigin),
+          terminalStatus: manifest.status,
+          exitCode: manifest.exitCode,
+          tasksCompleted: manifest.tasksCompleted,
+          tasksTotal: manifest.tasksTotal,
+        });
       }
     },
     alreadyLocked: true,
@@ -354,13 +431,14 @@ function persistTaskMap(
 
 function updateTaskMap(
   resolved: ReturnType<typeof resolveResumeTarget>,
-  updater: (tasks: Map<string, TaskState>) => void,
+  auditOrigin: RunEventOrigin,
+  updater: (tasks: Map<string, TaskState>) => TaskMutationAuditEvent | null,
 ): void {
   withTaskStateLock(resolved.workspaceDir, () => {
     resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
     const tasks = loadWorkspaceTaskMap(resolved.manifest);
-    updater(tasks);
-    persistTaskMap(resolved, tasks);
+    const auditEvent = updater(tasks);
+    persistTaskMap(resolved, tasks, auditOrigin, auditEvent);
   });
 }
 
@@ -528,15 +606,39 @@ export function showDefinition(
   };
 }
 
-export function resetRun(target: string): RunResetResult {
+export function resetRun(
+  target: string,
+  auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
+): RunResetResult {
   const resolved = resolveRun(target);
   requireResettableRun(resolved.manifest);
   return {
-    manifest: resetWorkspaceRun(resolved.workspaceDir),
+    manifest: resetWorkspaceRun(resolved.workspaceDir, {
+      afterManifestWrite: (manifest, previousStatus, previousBackendSessionId) => {
+        if (previousBackendSessionId !== null) {
+          appendRunBackendSessionUpdatedEvent({
+            manifest,
+            context: systemRunEventContext(auditOrigin),
+            previousBackendSessionId,
+            nextBackendSessionId: null,
+            reason: "reset_clear",
+          });
+        }
+        appendRunResetEvent({
+          manifest,
+          context: systemRunEventContext(auditOrigin),
+          previousStatus,
+        });
+      },
+    }),
   };
 }
 
-function setRunArchived(target: string, archived: boolean): RunArchiveResult {
+function setRunArchived(
+  target: string,
+  archived: boolean,
+  auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
+): RunArchiveResult {
   const resolved = resolveRun(target);
   let changed = false;
 
@@ -562,6 +664,17 @@ function setRunArchived(target: string, archived: boolean): RunArchiveResult {
     }
 
     writeManifest(resolved.workspaceDir, resolved.manifest);
+    if (archived) {
+      appendRunArchivedEvent({
+        manifest: resolved.manifest,
+        context: commandRunEventContext(auditOrigin),
+      });
+    } else {
+      appendRunUnarchivedEvent({
+        manifest: resolved.manifest,
+        context: commandRunEventContext(auditOrigin),
+      });
+    }
   });
 
   return toRunArchiveResult({
@@ -570,12 +683,18 @@ function setRunArchived(target: string, archived: boolean): RunArchiveResult {
   });
 }
 
-export function archiveRun(target: string): RunArchiveResult {
-  return setRunArchived(target, true);
+export function archiveRun(
+  target: string,
+  auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
+): RunArchiveResult {
+  return setRunArchived(target, true, auditOrigin);
 }
 
-export function unarchiveRun(target: string): RunArchiveResult {
-  return setRunArchived(target, false);
+export function unarchiveRun(
+  target: string,
+  auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
+): RunArchiveResult {
+  return setRunArchived(target, false, auditOrigin);
 }
 
 export function deleteRun(target: string): RunDeleteResult {
@@ -591,6 +710,7 @@ export function deleteRun(target: string): RunDeleteResult {
 export async function setRunName(
   target: string,
   input: { name: string | null },
+  auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
 ): Promise<RunNameResult> {
   const resolved = resolveRun(target);
   let changed = false;
@@ -601,9 +721,16 @@ export async function setRunName(
     if (resolved.manifest.name === nextName) {
       return;
     }
+    const previousName = resolved.manifest.name;
     resolved.manifest.name = nextName;
     resolved.manifest.resetSeed.name = nextName;
     writeManifest(resolved.workspaceDir, resolved.manifest);
+    appendRunRenamedEvent({
+      manifest: resolved.manifest,
+      context: commandRunEventContext(auditOrigin),
+      previousName,
+      nextName,
+    });
     changed = true;
   });
 
@@ -633,6 +760,7 @@ function requirePassiveBackendSessionMutation(manifest: RunManifest, verb: "set"
 export function setRunBackendSession(
   target: string,
   input: { backendSessionId: string },
+  auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
 ): RunBackendSessionResult {
   const resolved = resolveRun(target);
   let changed = false;
@@ -644,8 +772,16 @@ export function setRunBackendSession(
     if (resolved.manifest.backendSessionId === nextBackendSessionId) {
       return;
     }
+    const previousBackendSessionId = resolved.manifest.backendSessionId;
     resolved.manifest.backendSessionId = nextBackendSessionId;
     writeManifest(resolved.workspaceDir, resolved.manifest);
+    appendRunBackendSessionUpdatedEvent({
+      manifest: resolved.manifest,
+      context: commandRunEventContext(auditOrigin),
+      previousBackendSessionId,
+      nextBackendSessionId,
+      reason: "passive_set",
+    });
     changed = true;
   });
 
@@ -655,7 +791,10 @@ export function setRunBackendSession(
   });
 }
 
-export function clearRunBackendSession(target: string): RunBackendSessionResult {
+export function clearRunBackendSession(
+  target: string,
+  auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
+): RunBackendSessionResult {
   const resolved = resolveRun(target);
   let changed = false;
 
@@ -665,8 +804,16 @@ export function clearRunBackendSession(target: string): RunBackendSessionResult 
     if (resolved.manifest.backendSessionId === null) {
       return;
     }
+    const previousBackendSessionId = resolved.manifest.backendSessionId;
     resolved.manifest.backendSessionId = null;
     writeManifest(resolved.workspaceDir, resolved.manifest);
+    appendRunBackendSessionUpdatedEvent({
+      manifest: resolved.manifest,
+      context: commandRunEventContext(auditOrigin),
+      previousBackendSessionId,
+      nextBackendSessionId: null,
+      reason: "passive_clear",
+    });
     changed = true;
   });
 
@@ -980,6 +1127,7 @@ export function setTask(
   target: string,
   taskId: string,
   update: { status?: string; notes?: string },
+  auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
 ): TaskMutationResult {
   if (update.status === undefined && update.notes === undefined) {
     throw new CommandError("task set requires at least one of --status / --notes");
@@ -993,11 +1141,13 @@ export function setTask(
   const resolved = resolveRun(target);
   const capabilities = requireTaskMutationAllowed(resolved.manifest, "set");
 
-  updateTaskMap(resolved, (tasks) => {
+  updateTaskMap(resolved, auditOrigin, (tasks) => {
     const task = tasks.get(taskId);
     if (!task) {
       throw new TaskNotFoundError(resolved.manifest.runId, taskId);
     }
+    const statusBefore = task.status;
+    const notesBefore = task.notes;
     if (
       update.status !== undefined &&
       update.status !== task.status &&
@@ -1013,6 +1163,19 @@ export function setTask(
     if (update.notes !== undefined) {
       task.notes = update.notes;
     }
+    const statusChanged = statusBefore !== task.status;
+    const notesChanged = notesBefore !== task.notes;
+    if (!statusChanged && !notesChanged) {
+      return null;
+    }
+    return {
+      type: "task.updated",
+      taskId: task.id,
+      taskTitle: task.title,
+      command: "set",
+      ...(statusChanged ? { statusBefore, statusAfter: task.status } : {}),
+      notesChanged,
+    };
   });
 
   return {
@@ -1021,21 +1184,33 @@ export function setTask(
   };
 }
 
-export function appendTaskNotes(target: string, taskId: string, text: string): TaskMutationResult {
+export function appendTaskNotes(
+  target: string,
+  taskId: string,
+  text: string,
+  auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
+): TaskMutationResult {
   const appendText = text.trim();
   if (appendText.length === 0) {
     throw new CommandError("task append-notes: --text cannot be empty");
   }
 
   const resolved = resolveRun(target);
-  const capabilities = requireTaskMutationAllowed(resolved.manifest, "append-notes");
+  requireTaskMutationAllowed(resolved.manifest, "append-notes");
 
-  updateTaskMap(resolved, (tasks) => {
+  updateTaskMap(resolved, auditOrigin, (tasks) => {
     const task = tasks.get(taskId);
     if (!task) {
       throw new TaskNotFoundError(resolved.manifest.runId, taskId);
     }
     task.notes = task.notes.length === 0 ? appendText : `${task.notes}\n${appendText}`;
+    return {
+      type: "task.updated",
+      taskId: task.id,
+      taskTitle: task.title,
+      command: "append_notes",
+      notesChanged: true,
+    };
   });
 
   return {
@@ -1047,13 +1222,14 @@ export function appendTaskNotes(target: string, taskId: string, text: string): T
 export function addTask(
   target: string,
   input: { title: string; body?: string },
+  auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
 ): TaskMutationResult {
   const title = validateTaskTitle(input.title);
   const resolved = resolveRun(target);
   requireTaskMutationAllowed(resolved.manifest, "add");
 
   let taskId = "";
-  updateTaskMap(resolved, (tasks) => {
+  updateTaskMap(resolved, auditOrigin, (tasks) => {
     do {
       taskId = `cli-${shortId()}`;
     } while (tasks.has(taskId));
@@ -1064,6 +1240,11 @@ export function addTask(
       status: "pending",
       notes: "",
     });
+    return {
+      type: "task.added",
+      taskId,
+      taskTitle: title,
+    };
   });
 
   return {

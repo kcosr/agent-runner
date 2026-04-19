@@ -53,6 +53,7 @@ import {
 import type { AgentConfig, AssignmentConfig } from "../core/config/schema.js";
 import type { AttemptLog, AttemptRecord } from "../core/run/manifest.js";
 import { type RunExecution, resolveResumeTarget } from "../core/run/manifest.js";
+import type { RunEventOrigin } from "../core/run/run-events.js";
 import type { RunEvent, RunOutcome } from "../core/run/run-loop.js";
 import { executeRunCommand } from "../run-command.js";
 
@@ -96,6 +97,10 @@ export interface ResumeRunRequest {
   abortSignal?: AbortSignal;
   emitEvent?: (event: RunEvent) => void;
 }
+
+// Optional host/controller provenance for mutation calls that should be
+// reflected in per-run diagnostic audit records.
+export interface MutationAuditContext extends RunEventOrigin {}
 
 function toDefinitionDetail(result: ReturnType<typeof showDefinition>): DefinitionDetail {
   return {
@@ -234,35 +239,43 @@ export function getDefinition(
   return toDefinitionDetail(showDefinition(kind, target, cwd));
 }
 
-export function archive(target: string): RunArchiveResult {
-  return archiveRun(target);
+export function archive(target: string, auditContext?: MutationAuditContext): RunArchiveResult {
+  return archiveRun(target, auditContext);
 }
 
-export function unarchive(target: string): RunArchiveResult {
-  return unarchiveRun(target);
+export function unarchive(target: string, auditContext?: MutationAuditContext): RunArchiveResult {
+  return unarchiveRun(target, auditContext);
 }
 
-export function reset(target: string): RunDetail {
-  return toRunDetail({ manifest: resetRun(target).manifest, isLive: false });
+export function reset(target: string, auditContext?: MutationAuditContext): RunDetail {
+  return toRunDetail({ manifest: resetRun(target, auditContext).manifest, isLive: false });
 }
 
 export function deleteArchivedRun(target: string): RunDeleteResult {
   return deleteRun(target);
 }
 
-export function renameRun(target: string, input: { name: string | null }): Promise<RunNameResult> {
-  return setRunName(target, input);
+export function renameRun(
+  target: string,
+  input: { name: string | null },
+  auditContext?: MutationAuditContext,
+): Promise<RunNameResult> {
+  return setRunName(target, input, auditContext);
 }
 
 export function updateRunBackendSession(
   target: string,
   input: { backendSessionId: string },
+  auditContext?: MutationAuditContext,
 ): RunBackendSessionResult {
-  return setRunBackendSession(target, input);
+  return setRunBackendSession(target, input, auditContext);
 }
 
-export function clearBackendSession(target: string): RunBackendSessionResult {
-  return clearRunBackendSession(target);
+export function clearBackendSession(
+  target: string,
+  auditContext?: MutationAuditContext,
+): RunBackendSessionResult {
+  return clearRunBackendSession(target, auditContext);
 }
 
 export function addDependency(target: string, dependencyRunId: string): RunDependenciesResult {
@@ -310,19 +323,26 @@ export function updateTask(
   target: string,
   taskId: string,
   update: { status?: string; notes?: string },
+  auditContext?: MutationAuditContext,
 ): RunTaskSummary {
-  return getTaskFromMutation(setTask(target, taskId, update).task);
+  return getTaskFromMutation(setTask(target, taskId, update, auditContext).task);
 }
 
-export function appendNotes(target: string, taskId: string, text: string): RunTaskSummary {
-  return getTaskFromMutation(appendTaskNotes(target, taskId, text).task);
+export function appendNotes(
+  target: string,
+  taskId: string,
+  text: string,
+  auditContext?: MutationAuditContext,
+): RunTaskSummary {
+  return getTaskFromMutation(appendTaskNotes(target, taskId, text, auditContext).task);
 }
 
 export function createTask(
   target: string,
   input: { title: string; body?: string },
+  auditContext?: MutationAuditContext,
 ): RunTaskSummary {
-  return getTaskFromMutation(addTask(target, input).task);
+  return getTaskFromMutation(addTask(target, input, auditContext).task);
 }
 
 function getTaskFromMutation(task: ReturnType<typeof showTask>["task"]): RunTaskSummary {

@@ -24,6 +24,7 @@
 
 ### Added
 
+- Added per-run `run-events.jsonl` audit history files that append compact lifecycle, backend-session, and task-mutation records for debugging while keeping `run.json` canonical. Reset now preserves prior audit history and appends a reset event; delete removes the audit file with the workspace. ([#53](https://github.com/kcosr/task-runner/pull/53))
 - Added runner-injected interpolation vars `config_dir`, `state_dir`, and `assignment_name` for repo-owned assignments and caller instructions. ([#52](https://github.com/kcosr/task-runner/pull/52))
 - Added static web dashboard keyboard shortcuts for route-aware Escape handling, arrow-key run navigation, Ctrl+F search focus, and Enter primary actions for the selected run. ([#50](https://github.com/kcosr/task-runner/pull/50))
 - Added `f` as a web dashboard shortcut to toggle the visible detail drawer between normal and fullscreen widths. ([#50](https://github.com/kcosr/task-runner/pull/50))

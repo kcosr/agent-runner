@@ -194,6 +194,7 @@ export function persistWorkspaceTaskState(
   tasks: Map<string, TaskState>,
   opts: {
     beforeManifestWrite?: (ordered: TaskState[], manifest: RunManifest) => void;
+    afterManifestWrite?: (ordered: TaskState[], manifest: RunManifest) => void;
     alreadyLocked?: boolean;
   } = {},
 ): TaskState[] {
@@ -201,6 +202,7 @@ export function persistWorkspaceTaskState(
     const ordered = syncManifestTaskState(manifest, tasks);
     opts.beforeManifestWrite?.(ordered, manifest);
     writeManifest(manifest.workspaceDir, manifest);
+    opts.afterManifestWrite?.(ordered, manifest);
     return ordered;
   };
 
@@ -211,7 +213,16 @@ export function persistWorkspaceTaskState(
   return withTaskStateLock(manifest.workspaceDir, persist);
 }
 
-export function resetWorkspaceRun(workspaceDir: string): RunManifest {
+export function resetWorkspaceRun(
+  workspaceDir: string,
+  opts: {
+    afterManifestWrite?: (
+      manifest: RunManifest,
+      previousStatus: RunManifest["status"],
+      previousBackendSessionId: string | null,
+    ) => void;
+  } = {},
+): RunManifest {
   return withTaskStateLock(workspaceDir, () => {
     const manifest = readManifestSnapshot(workspaceDir);
     if (manifest.status === "running") {
@@ -220,10 +231,15 @@ export function resetWorkspaceRun(workspaceDir: string): RunManifest {
       );
     }
 
+    const previousStatus = manifest.status;
+    const previousBackendSessionId = manifest.backendSessionId;
     applyRunResetSeed(manifest);
     rmSync(join(workspaceDir, "attempts"), { recursive: true, force: true });
     persistWorkspaceTaskState(manifest, taskMapFromManifestSnapshot(manifest), {
       alreadyLocked: true,
+      afterManifestWrite: () => {
+        opts.afterManifestWrite?.(manifest, previousStatus, previousBackendSessionId);
+      },
     });
     return manifest;
   });
