@@ -35,7 +35,7 @@ export function RunFilters({
   const [filtersOpen, setFiltersOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const firstFilterRef = useRef<HTMLSelectElement | null>(null);
-  const lastHandledToggleVersionRef = useRef(0);
+  const lastHandledToggleVersionRef = useRef(toggleFiltersVersion ?? 0);
   const titleId = useId();
   const panelId = useId();
   const hasActiveStructuredFilter = hasActiveDashboardStructuredFilters(
