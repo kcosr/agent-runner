@@ -199,6 +199,8 @@ local `TASK_RUNNER_CODEX_WS_URL` when that env var is set.
 | `show agent\|assignment` | Render a single definition |
 | `run reset\|archive\|unarchive\|delete` | Lifecycle mutations |
 | `run set-name` | Set/clear persisted display name |
+| `run set-note\|clear-note` | Set/clear persisted human note metadata |
+| `run pin\|unpin` | Set/clear persisted pin metadata |
 | `run set-backend-session\|clear-backend-session` | Passive-only session metadata |
 | `run add-dep\|remove-dep\|clear-deps` | Dependency graph mutations |
 
@@ -209,7 +211,9 @@ Key rules:
 - `task-runner status` takes no run id and reports config/state/daemon info.
 - `task-runner run status` and `task-runner run brief` accept a run id, not a workspace path.
 - `run brief` is text-only (no `--output-format`, no `--field`).
-- `run status --output-format json` returns the shared `RunDetail` DTO.
+- `run status --output-format json` returns the shared `RunDetail` DTO, including full `note` text plus `pinned`.
+- Text `run status` surfaces note/pin metadata compactly (`Pinned: yes`, `Note: present`) and never prints the note body.
+- Run notes are human metadata only: they persist on the run but are not auto-injected into worker briefs or backend prompts.
 - `list runs` defaults to the caller's cwd; use `--cwd`, `--repo`, or
   `--global` to scope otherwise; `--include-archived` adds archived
   runs.
