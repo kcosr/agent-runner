@@ -29,11 +29,11 @@
 - Added `f` as a web dashboard shortcut to toggle the visible detail drawer between normal and fullscreen widths. ([#50](https://github.com/kcosr/task-runner/pull/50))
 - Added previous/next navigation for attachment previews in the web detail drawer, including fullscreen left/right keyboard navigation while previewing attachments. ([#50](https://github.com/kcosr/task-runner/pull/50))
 - Added a populated Keybindings settings page in the web dashboard so the current shortcut set is visible in the UI with keycap styling. ([#50](https://github.com/kcosr/task-runner/pull/50))
-- Added a `Visible focus indicators` display preference in Settings > General for toggling dashboard focus-ring styling.
+- Added a `Visible focus indicators` display preference in Settings > General for toggling dashboard focus-ring styling. ([#54](https://github.com/kcosr/task-runner/pull/54))
 
 ### Changed
 
-- Changed the web run detail drawer summary to promote `Ended` and `Exit code`, widen long metadata rows to use the full summary width, and remove the separate `Timing` tab.
+- Changed the web run detail drawer summary to promote `Ended` and `Exit code`, widen long metadata rows to use the full summary width, and remove the separate `Timing` tab. ([#54](https://github.com/kcosr/task-runner/pull/54))
 - Changed web dashboard Escape behavior so a fullscreen detail drawer exits fullscreen first, and only closes on a subsequent Escape. ([#50](https://github.com/kcosr/task-runner/pull/50))
 - Added first-class `pi` backend support via Pi RPC over stdio, including
   cwd-scoped session-id validation/import, run-name propagation, and automatic
@@ -176,6 +176,7 @@
 
 ### Fixed
 
+- Fixed the web dashboard so disabling visible focus indicators suppresses fullscreen drawer `:focus-visible` outlines without removing the selected-card highlight. ([#54](https://github.com/kcosr/task-runner/pull/54))
 - Fixed embedded and daemon-managed runs so thrown backend launch failures such as `ENOENT` still settle `run.json` to terminal `error` and write an attempt log, instead of leaving the run stuck in `running`. ([#48](https://github.com/kcosr/task-runner/pull/48))
 - Fixed shared run detail and timeline lookup so bare run ids can resolve across repo buckets after v8 manifest migration, preventing dashboard/sidebar fetches from failing when the selected run lives outside the daemon's local repo bucket. ([#43](https://github.com/kcosr/task-runner/pull/43))
 - Fixed the Attempts drawer to preserve loaded timeline history when a live run settles instead of flashing back through a loading state. ([#42](https://github.com/kcosr/task-runner/pull/42))
