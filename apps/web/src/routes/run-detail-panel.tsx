@@ -6,7 +6,7 @@ import { AttachmentPreviewDrawer } from "../components/attachment-preview-drawer
 import { RunDetailDrawer } from "../components/run-detail-drawer.js";
 import { isNotFoundError } from "../lib/api-client.js";
 import type { RunTimelineState } from "../lib/run-timeline.js";
-import type { AttachmentTab, DrawerDetailSection, RunDrawerView } from "../lib/settings.js";
+import type { DrawerDetailSection, RunDrawerView } from "../lib/settings.js";
 import type { RunActionPending } from "./use-runs-dashboard-state.js";
 
 export function RunDetailPanel({
@@ -28,7 +28,7 @@ export function RunDetailPanel({
   onDownloadAttachment,
   onOpenResumeDialog,
   onOpenAttachmentPreview,
-  onSelectAttachmentTab,
+  onSelectRun,
   onClearBackendSession,
   onRemoveDependency,
   onRemoveAttachment,
@@ -70,12 +70,8 @@ export function RunDetailPanel({
   onDelete: (runId: string) => void;
   onDownloadAttachment: (runId: string, attachmentId: string, name: string) => Promise<void>;
   onOpenResumeDialog: () => void;
-  onOpenAttachmentPreview: (
-    attachmentOwnerRunId: string,
-    attachmentId: string,
-    attachmentTab: AttachmentTab,
-  ) => void;
-  onSelectAttachmentTab: (attachmentTab: AttachmentTab) => void;
+  onOpenAttachmentPreview: (attachmentOwnerRunId: string, attachmentId: string) => void;
+  onSelectRun: (runId: string) => void;
   onClearBackendSession: (runId: string) => Promise<void>;
   onRemoveDependency: (runId: string, dependencyRunId: string) => Promise<void>;
   onRemoveAttachment: (runId: string, attachmentId: string) => Promise<void>;
@@ -146,17 +142,21 @@ export function RunDetailPanel({
   }
 
   const selectedRun = selectedRunQuery.data;
+  const groupAttachments =
+    selectedRunGroupAttachmentsQuery.data?.filter(
+      (attachment) => attachment.ownerRunId !== selectedRun.runId,
+    ) ?? [];
+  const attachmentEntries = [
+    ...selectedRun.attachments.map((candidate) => ({
+      attachment: candidate,
+      ownerRunId: selectedRun.runId,
+    })),
+    ...groupAttachments.map((candidate) => ({
+      attachment: candidate,
+      ownerRunId: candidate.ownerRunId,
+    })),
+  ];
   if (drawerView?.mode === "attachment") {
-    const attachmentEntries =
-      drawerView.attachmentTab === "run"
-        ? selectedRun.attachments.map((candidate) => ({
-            attachment: candidate,
-            ownerRunId: selectedRun.runId,
-          }))
-        : (selectedRunGroupAttachmentsQuery.data ?? []).map((candidate) => ({
-            attachment: candidate,
-            ownerRunId: candidate.ownerRunId,
-          }));
     const currentAttachmentIndex = attachmentEntries.findIndex(
       ({ attachment, ownerRunId }) =>
         attachment.id === drawerView.attachmentId && ownerRunId === drawerView.attachmentOwnerRunId,
@@ -194,12 +194,7 @@ export function RunDetailPanel({
         }
         onNextAttachment={
           nextAttachment
-            ? () =>
-                onOpenAttachmentPreview(
-                  nextAttachment.ownerRunId,
-                  nextAttachment.attachment.id,
-                  drawerView.attachmentTab,
-                )
+            ? () => onOpenAttachmentPreview(nextAttachment.ownerRunId, nextAttachment.attachment.id)
             : undefined
         }
         onPreviousAttachment={
@@ -208,7 +203,6 @@ export function RunDetailPanel({
                 onOpenAttachmentPreview(
                   previousAttachment.ownerRunId,
                   previousAttachment.attachment.id,
-                  drawerView.attachmentTab,
                 )
             : undefined
         }
@@ -240,6 +234,7 @@ export function RunDetailPanel({
       }
       onOpenResumeDialog={onOpenResumeDialog}
       onOpenAttachmentPreview={onOpenAttachmentPreview}
+      onSelectRun={onSelectRun}
       onClearBackendSession={() => onClearBackendSession(selectedRun.runId)}
       onRemoveDependency={(dependencyRunId) =>
         onRemoveDependency(selectedRun.runId, dependencyRunId)
@@ -249,7 +244,6 @@ export function RunDetailPanel({
       onRename={(name) => onRename(selectedRun.runId, name)}
       onResumeMessageDraftChange={onResumeMessageDraftChange}
       onResumeMessageExpandedChange={onResumeMessageExpandedChange}
-      onSelectAttachmentTab={onSelectAttachmentTab}
       onSetNote={(note) => onSetNote(selectedRun.runId, note)}
       onSetBackendSession={(backendSessionId) =>
         onSetBackendSession(selectedRun.runId, backendSessionId)
@@ -264,7 +258,6 @@ export function RunDetailPanel({
       resumeDialogOpen={resumeDialogOpen}
       resumeMessageDraft={resumeMessageDraft}
       resumeMessageExpanded={resumeMessageExpanded}
-      selectedAttachmentTab={drawerView?.attachmentTab ?? "run"}
       run={selectedRun}
     />
   );

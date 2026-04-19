@@ -131,6 +131,7 @@
 
 ### Changed
 
+- The web run detail drawer now shows a `Pending` attempt preview for initialized zero-attempt runs, defaults that pending state to `Message`, follows newly started attempts into `Output`, and consolidates peer attachments into one list with clickable source run ids plus combined attachment counts. ([#59](https://github.com/kcosr/task-runner/pull/59))
 - Restructured the docs set into focused per-topic pages, refreshed `README.md` positioning and usage guidance, and moved the web dashboard mockup CSS into `apps/web/src/` while dropping the legacy mockup HTML/README reference. ([#51](https://github.com/kcosr/task-runner/pull/51))
 - Attachment uploads now allow up to 100 attachments per run while keeping the existing 25 MiB per-attachment and 100 MiB total-per-run quotas. ([#50](https://github.com/kcosr/task-runner/pull/50))
 - `task-runner attachment list --cwd-scope` now shows `owner=<run-id>` in text output so humans can download peer attachments without switching to JSON, and the bundled planning/review assignments now keep `assignment-seed.md` / `assignment-summary.md` on the planning run while teaching implementer and reviewer flows to discover them through cwd-scoped attachment listing. ([#47](https://github.com/kcosr/task-runner/pull/47))

@@ -26,7 +26,6 @@ export const EMPTY_DASHBOARD_STRUCTURED_FILTERS: DashboardStructuredFilters = {
 };
 
 export type DrawerDetailSection = "tasks" | "notes" | "attachments" | "dependencies" | "events";
-export type AttachmentTab = "run" | "group";
 
 export type RunDrawerView =
   | {
@@ -34,14 +33,12 @@ export type RunDrawerView =
       detailSection: DrawerDetailSection;
       attachmentId: null;
       attachmentOwnerRunId: null;
-      attachmentTab: AttachmentTab;
     }
   | {
       mode: "attachment";
       detailSection: "attachments";
       attachmentId: string;
       attachmentOwnerRunId: string;
-      attachmentTab: AttachmentTab;
     };
 
 export interface DashboardViewState {
@@ -58,7 +55,6 @@ export const DEFAULT_DRAWER_VIEW: RunDrawerView = {
   detailSection: "tasks",
   attachmentId: null,
   attachmentOwnerRunId: null,
-  attachmentTab: "run",
 };
 
 export const DRAWER_WIDTH_MIN = 360;

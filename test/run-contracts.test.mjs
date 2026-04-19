@@ -74,6 +74,7 @@ function buildManifest(overrides = {}) {
         kind: "embedded",
       },
     },
+    brief: "Prepared handoff prompt.",
     callerInstructions: "Caller docs",
     attachments: [],
     resetSeed: {
@@ -86,6 +87,7 @@ function buildManifest(overrides = {}) {
       unrestricted: false,
       timeoutSec: 3600,
       maxAttempts: 2,
+      brief: "Prepared handoff prompt.",
       finalTasks,
     },
     finalTasks,
@@ -243,6 +245,7 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
     ],
     activeTask: null,
     message: "Finish the task list.",
+    pendingPrompt: null,
     callerInstructions: "Caller docs",
     lockedFields: ["backend"],
     runtimeVars: {},
@@ -254,6 +257,15 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
     },
     capabilities: detail.capabilities,
   });
+});
+
+test("run contracts: toRunDetail exposes pendingPrompt for initialized zero-attempt runs", () => {
+  const detail = toRunDetail({
+    manifest: buildManifest(),
+    isLive: false,
+  });
+
+  assert.equal(detail.pendingPrompt, "Prepared handoff prompt.");
 });
 
 test("run contracts: note and pin metadata project through summary, detail, and mutation DTOs", () => {

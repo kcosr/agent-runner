@@ -281,7 +281,7 @@ export function RunsDashboardRoute() {
           onDownloadAttachment={state.runActions.downloadAttachment}
           onOpenResumeDialog={state.openSelectedRunResumeDialog}
           onOpenAttachmentPreview={state.openSelectedRunAttachmentPreview}
-          onSelectAttachmentTab={state.updateSelectedRunAttachmentTab}
+          onSelectRun={state.openRun}
           onClearBackendSession={state.runActions.clearBackendSession}
           onRemoveDependency={state.runActions.removeDependency}
           onRemoveAttachment={state.runActions.removeAttachment}

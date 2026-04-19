@@ -124,6 +124,7 @@ export interface RunDetail {
   tasks: RunTaskSummary[];
   activeTask: RunActiveTask | null;
   message: string | null;
+  pendingPrompt: string | null;
   callerInstructions: string | null;
   lockedFields: LockableField[];
   runtimeVars: Record<string, unknown>;
@@ -375,6 +376,8 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
     tasks: Object.values(manifest.finalTasks).map(toRunTaskSummary),
     activeTask: deriveActiveTask(manifest.finalTasks),
     message: manifest.message,
+    pendingPrompt:
+      manifest.status === "initialized" && manifest.attempts === 0 ? manifest.brief : null,
     callerInstructions: manifest.callerInstructions,
     lockedFields: [...manifest.lockedFields],
     runtimeVars: { ...manifest.runtimeVars },

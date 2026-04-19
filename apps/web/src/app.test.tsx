@@ -263,6 +263,7 @@ function makeDetail(
       title: "Build UI",
     },
     message: null,
+    pendingPrompt: null,
     callerInstructions: null,
     lockedFields: ["tasks"],
     runtimeVars: {},
@@ -1253,6 +1254,173 @@ describe("web app", () => {
       );
     });
     expect(scrollRegion.scrollTop).toBe(32);
+  });
+
+  it("shows a pending attempt preview before the first attempt starts", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          status: "initialized",
+          effectiveStatus: "initialized",
+          activeTask: null,
+        }),
+      ],
+      details: {
+        "run-1": makeDetail({
+          status: "initialized",
+          effectiveStatus: "initialized",
+          isLive: false,
+          activeTask: null,
+          attempts: 0,
+          sessionCount: 0,
+          message: "Review this handoff before launch.",
+          pendingPrompt: "## Prepared prompt",
+        }),
+      },
+      timelineHistories: {
+        "run-1": {
+          runId: "run-1",
+          lastCursor: 0,
+          attempts: [],
+        },
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+    await user.click(screen.getByRole("button", { name: "Attempts" }));
+
+    expect(await screen.findByRole("tab", { name: "Pending" })).toBeInTheDocument();
+    expect(screen.getByRole("tablist", { name: "Attempts" })).toBeInTheDocument();
+    expect(screen.getByRole("tablist", { name: "Attempt view" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Message" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Prompt" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Output" })).toBeInTheDocument();
+    expect(screen.getByText("Review this handoff before launch.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Prompt" }));
+    expect(screen.getByRole("heading", { level: 2, name: "Prepared prompt" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Output" }));
+    expect(screen.getByText("No output yet — this run has not started.")).toBeInTheDocument();
+
+    const detailSource = findEventSource("/api/runs/run-1/events/detail");
+    detailSource.emitOpen();
+    detailSource.emitMessage({
+      type: "detail_updated",
+      detail: makeDetail({
+        status: "running",
+        effectiveStatus: "running",
+        isLive: true,
+        attempts: 1,
+        sessionCount: 1,
+        pendingPrompt: null,
+      }),
+    });
+
+    let timelineSource: MockEventSource | undefined;
+    await waitFor(() => {
+      timelineSource = MockEventSource.instances.find((candidate) =>
+        candidate.url.endsWith("/api/runs/run-1/events/timeline"),
+      );
+      expect(timelineSource).toBeDefined();
+    });
+    if (!timelineSource) {
+      throw new Error("expected timeline EventSource after run start");
+    }
+    timelineSource.emitOpen();
+    timelineSource.emitMessage({
+      runId: "run-1",
+      cursor: 1,
+      event: {
+        type: "attempt_started",
+        attempt: 1,
+        sessionIndex: 0,
+        startedAt: "2026-04-13T05:00:00.000Z",
+        prompt: "## Attempt prompt",
+      },
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("tab", { name: "Pending" })).not.toBeInTheDocument();
+    });
+    expect(screen.queryByRole("tab", { name: "Message" })).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "Output" })).toHaveAttribute("aria-selected", "true");
+    });
+    expect(screen.getByText("Waiting for live output…")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Prompt" }));
+    expect(screen.getByRole("heading", { level: 2, name: "Attempt prompt" })).toBeInTheDocument();
+  });
+
+  it("auto-selects a newly started attempt and switches to output while viewing attempts", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+      timelineHistories: {
+        "run-1": {
+          runId: "run-1",
+          lastCursor: 2,
+          attempts: [
+            {
+              attempt: 1,
+              sessionIndex: 0,
+              startedAt: "2026-04-13T05:00:00.000Z",
+              endedAt: "2026-04-13T05:02:00.000Z",
+              prompt: "Initial prompt",
+              transcript: "Attempt one output\n",
+              notices: "",
+              exitCode: 0,
+              timedOut: false,
+              live: false,
+            },
+            {
+              attempt: 2,
+              sessionIndex: 1,
+              startedAt: "2026-04-13T05:03:00.000Z",
+              endedAt: null,
+              prompt: "## Continue working",
+              transcript: "Streaming",
+              notices: "",
+              exitCode: null,
+              timedOut: false,
+              live: true,
+            },
+          ],
+        },
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+    await user.click(screen.getByRole("button", { name: "Attempts" }));
+
+    const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
+    timelineSource.emitOpen();
+
+    await user.click(screen.getByRole("tab", { name: "Prompt" }));
+    expect(screen.getByRole("heading", { level: 2, name: "Continue working" })).toBeInTheDocument();
+
+    timelineSource.emitMessage({
+      runId: "run-1",
+      cursor: 3,
+      event: {
+        type: "attempt_started",
+        attempt: 3,
+        sessionIndex: 2,
+        startedAt: "2026-04-13T05:04:00.000Z",
+        prompt: "## Third prompt",
+      },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "3" })).toHaveAttribute("aria-selected", "true");
+    });
+    expect(screen.getByRole("tab", { name: "Output" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("Waiting for live output…")).toBeInTheDocument();
   });
 
   it("separates transcript and backend notices instead of gluing them together", async () => {
@@ -3072,7 +3240,9 @@ describe("web app", () => {
     const callsAfterSave = fetchMock.mock.calls
       .slice(callsBeforeSave)
       .map(([input]) => (typeof input === "string" ? input : input.toString()));
-    expect(callsAfterSave).toEqual(["/api/runs/run-1/note"]);
+    expect(callsAfterSave.filter((url) => url === "/api/runs/run-1/note")).toEqual([
+      "/api/runs/run-1/note",
+    ]);
   });
 
   it("defaults the card note dialog to preview mode for touch-style pointers", async () => {
@@ -6490,7 +6660,8 @@ describe("web app", () => {
     await renderApp();
 
     await user.click(await findRunCard("Attachment run"));
-    await user.click(await screen.findByRole("button", { name: /^Attachments\b/i }));
+    expect(await screen.findByRole("button", { name: /^Attachments 2$/i })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^Attachments 2$/i }));
 
     await user.click(screen.getByRole("button", { name: /^Preview notes\.md$/ }));
     expect(await screen.findByRole("heading", { name: "Notes" })).toBeInTheDocument();
@@ -6705,7 +6876,7 @@ describe("web app", () => {
     anchorClick.mockRestore();
   });
 
-  it("shows Run and Group attachment tabs and uses ownerRunId for peer preview/download", async () => {
+  it("shows combined attachments with a source run id and uses ownerRunId for peer preview/download", async () => {
     const fetchMock = installFetchMock(
       {
         runs: [makeRun({ runId: "run-1", name: "Attachment run" })],
@@ -6768,19 +6939,20 @@ describe("web app", () => {
     await user.click(await findRunCard("Attachment run"));
     await user.click(await screen.findByRole("button", { name: /^Attachments\b/i }));
 
-    expect(screen.getByRole("tab", { name: "Run" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByRole("tab", { name: "Run" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Group" })).not.toBeInTheDocument();
     expect(screen.getByText("run-notes.md")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("tab", { name: "Group" }));
     expect(await screen.findByText("peer-notes.md")).toBeInTheDocument();
-    expect(screen.queryByText("run-notes.md")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Upload attachment file")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Upload attachment file")).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /^Remove peer-notes\.md$/ }),
     ).not.toBeInTheDocument();
 
     const peerRow = screen.getByText("peer-notes.md").closest("li");
     expect(peerRow).not.toBeNull();
+    expect(
+      within(peerRow as HTMLLIElement).getByRole("button", { name: "Open source run run-2" }),
+    ).toHaveTextContent("run-2");
     await user.click(within(peerRow as HTMLLIElement).getByRole("button", { name: /^Download / }));
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith("/api/runs/run-2/attachments/att-peer/content"),
@@ -6797,5 +6969,61 @@ describe("web app", () => {
     expect(anchorClick).toHaveBeenCalledTimes(2);
 
     anchorClick.mockRestore();
+  });
+
+  it("switches to the source run when clicking a peer attachment run id", async () => {
+    installFetchMock(
+      {
+        runs: [
+          makeRun({ runId: "run-1", name: "Attachment run" }),
+          makeRun({ runId: "run-2", name: "Peer run" }),
+        ],
+        details: {
+          "run-1": makeDetail({
+            runId: "run-1",
+            name: "Attachment run",
+            attachments: [makeAttachment({ id: "att-run", name: "run-notes.md" })],
+          }),
+          "run-2": makeDetail({
+            runId: "run-2",
+            name: "Peer run",
+            attachments: [makeAttachment({ id: "att-peer", name: "peer-notes.md" })],
+          }),
+        },
+      },
+      {
+        handleRequest: (url) => {
+          if (/\/api\/runs\/run-1\/attachments\?cwdScope=true$/.test(url)) {
+            return new Response(
+              JSON.stringify({
+                attachments: [
+                  {
+                    ...makeAttachment({ id: "att-run", name: "run-notes.md" }),
+                    ownerRunId: "run-1",
+                  },
+                  {
+                    ...makeAttachment({ id: "att-peer", name: "peer-notes.md" }),
+                    ownerRunId: "run-2",
+                  },
+                ],
+              }),
+              { status: 200 },
+            );
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await user.click(await findRunCard("Attachment run"));
+    await user.click(await screen.findByRole("button", { name: /^Attachments\b/i }));
+    await user.click(screen.getByRole("button", { name: "Open source run run-2" }));
+
+    expect(await screen.findByText("Peer run")).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: /^Attachments\b/i }));
+    expect(screen.getByText("peer-notes.md")).toBeInTheDocument();
   });
 });

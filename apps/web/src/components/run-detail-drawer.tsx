@@ -14,7 +14,7 @@ import {
 } from "react";
 import { formatBytes, formatTimestamp, formatTimestampWithRelative } from "../lib/format.js";
 import type { RunTimelineState } from "../lib/run-timeline.js";
-import type { AttachmentTab, DrawerDetailSection } from "../lib/settings.js";
+import type { DrawerDetailSection } from "../lib/settings.js";
 import { isEditableEventTarget } from "../lib/shortcuts.js";
 import { useDrawerResize } from "../lib/use-drawer-resize.js";
 import { useHorizontalWheelGuard } from "../lib/use-horizontal-wheel-guard.js";
@@ -40,7 +40,8 @@ import { RunNoteEditor } from "./run-note-editor.js";
 import { RunTaskList } from "./run-task-list.js";
 import { StatusBadge } from "./status-badge.js";
 
-type TimelineTab = "prompt" | "output";
+type TimelineTab = "message" | "prompt" | "output";
+type AttemptSelection = number | "pending" | null;
 type SummaryRow = readonly [label: string, value: string];
 
 const TIMELINE_BOTTOM_THRESHOLD_PX = 24;
@@ -167,6 +168,7 @@ function scrollElementToBottom(element: HTMLElement) {
 interface AttachmentRowEntry {
   attachment: RunAttachment | AttachmentListEntry;
   ownerRunId: string;
+  source: "run" | "group";
 }
 
 function InlineConfirmActions({
@@ -229,6 +231,7 @@ export function RunDetailDrawer({
   onDownloadAttachment,
   onOpenResumeDialog,
   onOpenAttachmentPreview,
+  onSelectRun,
   onClearBackendSession,
   onRemoveDependency,
   onRemoveAttachment,
@@ -236,14 +239,12 @@ export function RunDetailDrawer({
   onRename,
   onResumeMessageDraftChange,
   onResumeMessageExpandedChange,
-  onSelectAttachmentTab,
   onSetNote,
   onSetBackendSession,
   onSetPinned,
   onSelectSection,
   onSubmitResume,
   onTriggerPrimaryAction,
-  selectedAttachmentTab,
   timelineState,
   onUnarchive,
   onUploadAttachment,
@@ -267,11 +268,8 @@ export function RunDetailDrawer({
   groupAttachmentsQuery: UseQueryResult<AttachmentListEntry[], Error>;
   onDownloadAttachment: (ownerRunId: string, attachmentId: string, name: string) => Promise<void>;
   onOpenResumeDialog: () => void;
-  onOpenAttachmentPreview: (
-    attachmentOwnerRunId: string,
-    attachmentId: string,
-    attachmentTab: AttachmentTab,
-  ) => void;
+  onOpenAttachmentPreview: (attachmentOwnerRunId: string, attachmentId: string) => void;
+  onSelectRun: (runId: string) => void;
   onClearBackendSession: () => Promise<void>;
   onRemoveDependency: (dependencyRunId: string) => Promise<void>;
   onRemoveAttachment: (attachmentId: string) => Promise<void>;
@@ -279,7 +277,6 @@ export function RunDetailDrawer({
   onRename: (name: string | null) => Promise<void>;
   onResumeMessageDraftChange: (value: string) => void;
   onResumeMessageExpandedChange: (expanded: boolean) => void;
-  onSelectAttachmentTab: (attachmentTab: AttachmentTab) => void;
   onSetNote: (note: string | null) => Promise<void>;
   onSetBackendSession: (backendSessionId: string) => Promise<void>;
   onSetPinned: (pinned: boolean) => Promise<void>;
@@ -289,7 +286,6 @@ export function RunDetailDrawer({
   resumeDialogOpen: boolean;
   resumeMessageDraft: string;
   resumeMessageExpanded: boolean;
-  selectedAttachmentTab: AttachmentTab;
   timelineState: RunTimelineState;
   onUnarchive: () => void;
   onUploadAttachment: (file: File) => Promise<void>;
@@ -300,8 +296,11 @@ export function RunDetailDrawer({
   const sectionTabsRef = useRef<HTMLElement | null>(null);
   const timelineContentScrollRef = useRef<HTMLDivElement | null>(null);
   const timelineOutputAtBottomRef = useRef(false);
-  const [selectedAttempt, setSelectedAttempt] = useState<number | null>(null);
-  const [timelineTab, setTimelineTab] = useState<TimelineTab>("output");
+  const latestAttemptRef = useRef<number | null>(null);
+  const [selectedAttempt, setSelectedAttempt] = useState<AttemptSelection>(null);
+  const [timelineTab, setTimelineTab] = useState<TimelineTab>(
+    run.status === "initialized" && run.attempts === 0 ? "message" : "output",
+  );
   const [editingName, setEditingName] = useState(false);
   const [editingBackendSession, setEditingBackendSession] = useState(false);
   const [nameDraft, setNameDraft] = useState(run.name ?? "");
@@ -361,6 +360,19 @@ export function RunDetailDrawer({
     (sum, attachment) => sum + attachment.size,
     0,
   );
+  const combinedAttachments: AttachmentRowEntry[] = [
+    ...run.attachments.map((attachment) => ({
+      attachment,
+      ownerRunId: run.runId,
+      source: "run" as const,
+    })),
+    ...groupAttachments.map((attachment) => ({
+      attachment,
+      ownerRunId: attachment.ownerRunId,
+      source: "group" as const,
+    })),
+  ];
+  const combinedAttachmentSize = totalAttachmentSize + groupAttachmentSize;
   const configuredDependencyIds = new Set(run.dependencies.map((dependency) => dependency.runId));
   const eligibleDependencyCandidates = dependencyCandidateRuns.filter(
     (candidate) => candidate.runId !== run.runId && !configuredDependencyIds.has(candidate.runId),
@@ -378,10 +390,17 @@ export function RunDetailDrawer({
       (candidate) => candidate.runId.toLowerCase() === normalizedDependencyDraft.toLowerCase(),
     )?.runId;
   const timelineAttempts = timelineState.history?.attempts ?? [];
+  const pendingAttemptAvailable =
+    run.status === "initialized" && run.attempts === 0 && timelineAttempts.length === 0;
   const selectedAttemptRecord =
-    timelineAttempts.find((attempt) => attempt.attempt === selectedAttempt) ??
+    (typeof selectedAttempt === "number"
+      ? timelineAttempts.find((attempt) => attempt.attempt === selectedAttempt)
+      : null) ??
     timelineAttempts[timelineAttempts.length - 1] ??
     null;
+  const selectedPendingAttempt = pendingAttemptAvailable && selectedAttemptRecord === null;
+  const effectiveTimelineTab =
+    selectedPendingAttempt || timelineTab === "prompt" ? timelineTab : "output";
   const selectedAttemptNumber = selectedAttemptRecord?.attempt ?? null;
   const selectedAttemptOutput = selectedAttemptRecord ? attemptOutput(selectedAttemptRecord) : "";
   const selectedAttemptLive = selectedAttemptRecord?.live ?? false;
@@ -522,11 +541,41 @@ export function RunDetailDrawer({
 
   useEffect(() => {
     const availableAttempts = new Set(timelineAttempts.map((attempt) => attempt.attempt));
+    if (selectedAttempt === "pending") {
+      if (pendingAttemptAvailable) {
+        return;
+      }
+      setSelectedAttempt(timelineAttempts[timelineAttempts.length - 1]?.attempt ?? null);
+      return;
+    }
     if (selectedAttempt !== null && availableAttempts.has(selectedAttempt)) {
       return;
     }
+    if (pendingAttemptAvailable) {
+      setSelectedAttempt("pending");
+      return;
+    }
     setSelectedAttempt(timelineAttempts[timelineAttempts.length - 1]?.attempt ?? null);
-  }, [selectedAttempt, timelineAttempts]);
+  }, [pendingAttemptAvailable, selectedAttempt, timelineAttempts]);
+
+  useEffect(() => {
+    const latestAttempt = timelineAttempts[timelineAttempts.length - 1]?.attempt ?? null;
+    if (activeSection !== "events") {
+      latestAttemptRef.current = latestAttempt;
+      return;
+    }
+    if (latestAttempt === null) {
+      latestAttemptRef.current = null;
+      return;
+    }
+    if (latestAttemptRef.current !== latestAttempt) {
+      latestAttemptRef.current = latestAttempt;
+      setSelectedAttempt(latestAttempt);
+      setTimelineTab("output");
+      return;
+    }
+    latestAttemptRef.current = latestAttempt;
+  }, [activeSection, timelineAttempts]);
 
   useEffect(() => {
     if (
@@ -591,20 +640,28 @@ export function RunDetailDrawer({
   // attempt, so the live-stream follow check reflects the user's actual
   // position instead of a defaulted value.
   useEffect(() => {
-    if (activeSection !== "events" || timelineTab !== "output" || selectedAttemptNumber === null) {
+    if (
+      activeSection !== "events" ||
+      effectiveTimelineTab !== "output" ||
+      selectedAttemptNumber === null
+    ) {
       return;
     }
     const element = timelineContentScrollRef.current;
     if (element) {
       timelineOutputAtBottomRef.current = isScrolledToBottom(element);
     }
-  }, [activeSection, selectedAttemptNumber, timelineTab]);
+  }, [activeSection, effectiveTimelineTab, selectedAttemptNumber]);
 
   // While the selected attempt is live, whenever the transcript grows, keep
   // the scroll pinned to the bottom if the user was already at the bottom.
   // Do nothing on tab/attempt open — only react to actual deltas.
   useEffect(() => {
-    if (activeSection !== "events" || timelineTab !== "output" || selectedAttemptNumber === null) {
+    if (
+      activeSection !== "events" ||
+      effectiveTimelineTab !== "output" ||
+      selectedAttemptNumber === null
+    ) {
       return;
     }
     if (!selectedAttemptLive) {
@@ -623,10 +680,10 @@ export function RunDetailDrawer({
     scrollElementToBottom(element);
   }, [
     activeSection,
+    effectiveTimelineTab,
     selectedAttemptLive,
     selectedAttemptNumber,
     selectedAttemptOutput,
-    timelineTab,
   ]);
 
   async function submitDependencyAdd() {
@@ -702,51 +759,57 @@ export function RunDetailDrawer({
     }
   }
 
-  function renderAttachmentRows(
-    entries: AttachmentRowEntry[],
-    options: { allowRemove: boolean; attachmentTab: AttachmentTab },
-  ) {
+  function renderAttachmentRows(entries: AttachmentRowEntry[]) {
     return (
       <ul aria-label="Attachment list" className="dependency-list">
-        {entries.map(({ attachment, ownerRunId }) => {
+        {entries.map(({ attachment, ownerRunId, source }) => {
           const previewable = isPreviewableAttachment(attachment);
           const rowClassName = previewable
             ? "dependency-row dependency-row--interactive"
             : "dependency-row";
-          const attachmentSummary = (
-            <span className="dependency-copy">
-              <span className="dependency-name">{attachment.name}</span>
-              <span className="dependency-meta">
-                <span className="dependency-meta-id attachment-row-mime">
-                  {attachment.mimeType}
-                </span>
-                <span aria-hidden="true" className="attachment-row-mime">
-                  ·
-                </span>
-                <span>{formatBytes(attachment.size)}</span>
-                <span aria-hidden="true">·</span>
-                <span>{formatTimestamp(attachment.addedAt)}</span>
-              </span>
-            </span>
-          );
+          const allowRemove = source === "run";
 
           return (
             <li className={rowClassName} key={`${ownerRunId}:${attachment.id}`}>
-              {previewable ? (
-                <button
-                  aria-label={`Preview ${attachment.name}`}
-                  className="attachment-row-trigger"
-                  onClick={() =>
-                    onOpenAttachmentPreview(ownerRunId, attachment.id, options.attachmentTab)
-                  }
-                  type="button"
-                >
-                  {attachmentSummary}
-                </button>
-              ) : (
-                attachmentSummary
-              )}
+              <div className="dependency-copy">
+                <span className="attachment-title-row">
+                  {previewable ? (
+                    <button
+                      aria-label={`Preview ${attachment.name}`}
+                      className="attachment-name-trigger"
+                      onClick={() => onOpenAttachmentPreview(ownerRunId, attachment.id)}
+                      type="button"
+                    >
+                      <span className="dependency-name">{attachment.name}</span>
+                    </button>
+                  ) : (
+                    <span className="dependency-name">{attachment.name}</span>
+                  )}
+                </span>
+                <span className="dependency-meta">
+                  <span className="dependency-meta-id attachment-row-mime">
+                    {attachment.mimeType}
+                  </span>
+                  <span aria-hidden="true" className="attachment-row-mime">
+                    ·
+                  </span>
+                  <span>{formatBytes(attachment.size)}</span>
+                  <span aria-hidden="true">·</span>
+                  <span>{formatTimestamp(attachment.addedAt)}</span>
+                </span>
+              </div>
               <div className="dependency-actions">
+                {source === "group" ? (
+                  <button
+                    aria-label={`Open source run ${ownerRunId}`}
+                    className="attachment-source-run run-id"
+                    onClick={() => onSelectRun(ownerRunId)}
+                    title={`Open ${ownerRunId}`}
+                    type="button"
+                  >
+                    {ownerRunId}
+                  </button>
+                ) : null}
                 <button
                   aria-label={`Download ${attachment.name}`}
                   className="icon-btn"
@@ -759,7 +822,7 @@ export function RunDetailDrawer({
                 >
                   <DownloadIcon aria-hidden="true" />
                 </button>
-                {options.allowRemove ? (
+                {allowRemove ? (
                   confirmingAttachmentId === attachment.id ? (
                     <>
                       <button
@@ -806,7 +869,7 @@ export function RunDetailDrawer({
 
   function handleTimelineContentScroll() {
     const element = timelineContentScrollRef.current;
-    if (!element || timelineTab !== "output") {
+    if (!element || effectiveTimelineTab !== "output") {
       return;
     }
     timelineOutputAtBottomRef.current = isScrolledToBottom(element);
@@ -1219,8 +1282,8 @@ export function RunDetailDrawer({
               type="button"
             >
               Attachments
-              {run.attachments.length > 0 ? (
-                <span className="tab-count"> {run.attachments.length}</span>
+              {combinedAttachments.length > 0 ? (
+                <span className="tab-count"> {combinedAttachments.length}</span>
               ) : null}
             </button>
             <button
@@ -1275,66 +1338,33 @@ export function RunDetailDrawer({
               <div className="drawer-panel-card dependency-panel">
                 <div className="dependency-summary">
                   <span>
-                    {selectedAttachmentTab === "run"
-                      ? run.attachments.length === 0
-                        ? "No attachments yet."
-                        : `${run.attachments.length} attachment${run.attachments.length === 1 ? "" : "s"} · ${formatBytes(totalAttachmentSize)}`
-                      : groupAttachments.length === 0
-                        ? "No peer attachments for runs with this exact cwd."
-                        : `${groupAttachments.length} peer attachment${groupAttachments.length === 1 ? "" : "s"} · ${formatBytes(groupAttachmentSize)}`}
+                    {combinedAttachments.length === 0
+                      ? groupAttachmentsQuery.isPending
+                        ? "No run attachments yet. Loading group attachments..."
+                        : "No attachments yet."
+                      : `${combinedAttachments.length} attachment${combinedAttachments.length === 1 ? "" : "s"} · ${formatBytes(combinedAttachmentSize)}`}
                   </span>
-                  {selectedAttachmentTab === "run" ? (
-                    <>
-                      <input
-                        aria-label="Upload attachment file"
-                        className="sr-only"
-                        onChange={handleAttachmentInputChange}
-                        ref={attachmentInputRef}
-                        type="file"
-                      />
-                      <button
-                        className="btn"
-                        disabled={actionsLocked}
-                        onClick={() => attachmentInputRef.current?.click()}
-                        type="button"
-                      >
-                        {uploadAttachmentPending ? "Uploading..." : "Upload"}
-                      </button>
-                    </>
-                  ) : null}
+                  <>
+                    <input
+                      aria-label="Upload attachment file"
+                      className="sr-only"
+                      onChange={handleAttachmentInputChange}
+                      ref={attachmentInputRef}
+                      type="file"
+                    />
+                    <button
+                      className="btn"
+                      disabled={actionsLocked}
+                      onClick={() => attachmentInputRef.current?.click()}
+                      type="button"
+                    >
+                      {uploadAttachmentPending ? "Uploading..." : "Upload"}
+                    </button>
+                  </>
                 </div>
 
-                <nav aria-label="Attachment scope" className="tabs" role="tablist">
-                  <button
-                    aria-selected={selectedAttachmentTab === "run"}
-                    className={selectedAttachmentTab === "run" ? "tab active" : "tab"}
-                    onClick={() => onSelectAttachmentTab("run")}
-                    role="tab"
-                    type="button"
-                  >
-                    Run
-                  </button>
-                  <button
-                    aria-selected={selectedAttachmentTab === "group"}
-                    className={selectedAttachmentTab === "group" ? "tab active" : "tab"}
-                    onClick={() => onSelectAttachmentTab("group")}
-                    role="tab"
-                    type="button"
-                  >
-                    Group
-                  </button>
-                </nav>
-
-                {selectedAttachmentTab === "run" ? (
-                  run.attachments.length === 0 ? null : (
-                    renderAttachmentRows(
-                      run.attachments.map((attachment) => ({
-                        attachment,
-                        ownerRunId: run.runId,
-                      })),
-                      { allowRemove: true, attachmentTab: "run" },
-                    )
-                  )
+                {combinedAttachments.length > 0 ? (
+                  renderAttachmentRows(combinedAttachments)
                 ) : groupAttachmentsQuery.isPending ? (
                   <div className="drawer-state">
                     <div className="skeleton-line skeleton-line--short" />
@@ -1352,20 +1382,18 @@ export function RunDetailDrawer({
                     <h3>Group attachments failed to load</h3>
                     <p>{groupAttachmentsQuery.error.message}</p>
                   </div>
-                ) : groupAttachments.length === 0 ? (
-                  <div className="drawer-state">
-                    <h3>No peer attachments yet</h3>
-                    <p>No other runs with this exact cwd currently have attachments.</p>
-                  </div>
                 ) : (
-                  renderAttachmentRows(
-                    groupAttachments.map((attachment) => ({
-                      attachment,
-                      ownerRunId: attachment.ownerRunId,
-                    })),
-                    { allowRemove: false, attachmentTab: "group" },
-                  )
+                  <div className="drawer-state">
+                    <h3>No attachments yet</h3>
+                    <p>No attachments are available for this run or its cwd group.</p>
+                  </div>
                 )}
+                {combinedAttachments.length > 0 && groupAttachmentsQuery.isError ? (
+                  <div className="drawer-state">
+                    <h3>Group attachments failed to load</h3>
+                    <p>{groupAttachmentsQuery.error.message}</p>
+                  </div>
+                ) : null}
               </div>
             </section>
           ) : null}
@@ -1546,47 +1574,76 @@ export function RunDetailDrawer({
                   <p className="muted-inline">Loading timeline history…</p>
                 ) : null}
 
-                {!timelineState.isLoading && timelineAttempts.length === 0 ? (
+                {!timelineState.isLoading &&
+                timelineAttempts.length === 0 &&
+                !selectedPendingAttempt ? (
                   <p className="muted-inline">No attempt history is available for this run yet.</p>
                 ) : null}
 
-                {selectedAttemptRecord ? (
+                {selectedAttemptRecord || selectedPendingAttempt ? (
                   <div className="timeline-attempt-panel">
                     <div className="timeline-sticky-controls">
-                      {timelineAttempts.length > 1 ? (
+                      {selectedPendingAttempt || timelineAttempts.length > 1 ? (
                         <div className="timeline-attempts">
                           <div
                             className="timeline-attempt-tabs"
                             role="tablist"
                             aria-label="Attempts"
                           >
-                            {timelineAttempts.map((attempt) => (
+                            {selectedPendingAttempt ? (
                               <button
-                                aria-selected={selectedAttemptRecord?.attempt === attempt.attempt}
-                                className={
-                                  selectedAttemptRecord?.attempt === attempt.attempt
-                                    ? "timeline-attempt-tab active"
-                                    : "timeline-attempt-tab"
-                                }
-                                key={attempt.attempt}
-                                onClick={() => setSelectedAttempt(attempt.attempt)}
+                                aria-selected={true}
+                                className="timeline-attempt-tab active"
+                                onClick={() => setSelectedAttempt("pending")}
                                 role="tab"
                                 type="button"
                               >
-                                <span>{attempt.attempt}</span>
-                                {attempt.live ? (
-                                  <span aria-hidden="true" className="timeline-live-dot" />
-                                ) : null}
+                                <span>Pending</span>
                               </button>
-                            ))}
+                            ) : (
+                              timelineAttempts.map((attempt) => (
+                                <button
+                                  aria-selected={selectedAttemptRecord?.attempt === attempt.attempt}
+                                  className={
+                                    selectedAttemptRecord?.attempt === attempt.attempt
+                                      ? "timeline-attempt-tab active"
+                                      : "timeline-attempt-tab"
+                                  }
+                                  key={attempt.attempt}
+                                  onClick={() => setSelectedAttempt(attempt.attempt)}
+                                  role="tab"
+                                  type="button"
+                                >
+                                  <span>{attempt.attempt}</span>
+                                  {attempt.live ? (
+                                    <span aria-hidden="true" className="timeline-live-dot" />
+                                  ) : null}
+                                </button>
+                              ))
+                            )}
                           </div>
                         </div>
                       ) : null}
 
                       <div className="task-tabs" role="tablist" aria-label="Attempt view">
+                        {selectedPendingAttempt ? (
+                          <button
+                            aria-selected={effectiveTimelineTab === "message"}
+                            className={
+                              effectiveTimelineTab === "message" ? "task-tab active" : "task-tab"
+                            }
+                            onClick={() => setTimelineTab("message")}
+                            role="tab"
+                            type="button"
+                          >
+                            Message
+                          </button>
+                        ) : null}
                         <button
-                          aria-selected={timelineTab === "prompt"}
-                          className={timelineTab === "prompt" ? "task-tab active" : "task-tab"}
+                          aria-selected={effectiveTimelineTab === "prompt"}
+                          className={
+                            effectiveTimelineTab === "prompt" ? "task-tab active" : "task-tab"
+                          }
                           onClick={() => setTimelineTab("prompt")}
                           role="tab"
                           type="button"
@@ -1594,8 +1651,10 @@ export function RunDetailDrawer({
                           Prompt
                         </button>
                         <button
-                          aria-selected={timelineTab === "output"}
-                          className={timelineTab === "output" ? "task-tab active" : "task-tab"}
+                          aria-selected={effectiveTimelineTab === "output"}
+                          className={
+                            effectiveTimelineTab === "output" ? "task-tab active" : "task-tab"
+                          }
                           onClick={() => setTimelineTab("output")}
                           role="tab"
                           type="button"
@@ -1610,8 +1669,29 @@ export function RunDetailDrawer({
                       onScroll={handleTimelineContentScroll}
                       ref={timelineContentScrollRef}
                     >
-                      {timelineTab === "prompt" ? (
-                        selectedAttemptRecord.prompt ? (
+                      {selectedPendingAttempt && effectiveTimelineTab === "message" ? (
+                        run.message ? (
+                          <section aria-label="Pending message">
+                            <MarkdownContent className="timeline-content" text={run.message} />
+                          </section>
+                        ) : (
+                          <p className="task-empty">No message was provided for this run.</p>
+                        )
+                      ) : effectiveTimelineTab === "prompt" ? (
+                        selectedPendingAttempt ? (
+                          run.pendingPrompt ? (
+                            <section aria-label="Pending prompt">
+                              <MarkdownContent
+                                className="timeline-content"
+                                text={run.pendingPrompt}
+                              />
+                            </section>
+                          ) : (
+                            <p className="task-empty">
+                              No prompt preview is available for this run yet.
+                            </p>
+                          )
+                        ) : selectedAttemptRecord?.prompt ? (
                           <section aria-label="Attempt prompt">
                             <MarkdownContent
                               className="timeline-content"
@@ -1621,6 +1701,8 @@ export function RunDetailDrawer({
                         ) : (
                           <p className="task-empty">This attempt did not record a prompt.</p>
                         )
+                      ) : selectedPendingAttempt ? (
+                        <p className="task-empty">No output yet — this run has not started.</p>
                       ) : selectedAttemptOutput ? (
                         <section aria-label="Attempt output">
                           <MarkdownContent
@@ -1630,7 +1712,7 @@ export function RunDetailDrawer({
                         </section>
                       ) : (
                         <p className="task-empty">
-                          {selectedAttemptRecord.live
+                          {selectedAttemptRecord?.live
                             ? "Waiting for live output…"
                             : "This attempt produced no transcript output."}
                         </p>
