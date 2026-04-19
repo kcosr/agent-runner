@@ -1,5 +1,6 @@
 import type { RunStatus, RunSummary } from "@task-runner/core/contracts/runs.js";
 import type { KeyboardEvent, MouseEvent } from "react";
+import type { DashboardStructuredFilters } from "../lib/settings.js";
 import { ChevronIcon } from "./icons.js";
 import { RunCard, type RunCardMotion } from "./run-card.js";
 
@@ -20,6 +21,8 @@ export function RunColumn({
   selectedRunId,
   onToggleCollapse,
   onSelectRun,
+  onStructuredFilterToggle,
+  structuredFilters,
 }: {
   bodyRef?: (node: HTMLElement | null) => void;
   collapsed: boolean;
@@ -29,6 +32,8 @@ export function RunColumn({
   selectedRunId?: string;
   onToggleCollapse: () => void;
   onSelectRun: (runId: string) => void;
+  onStructuredFilterToggle: (key: keyof DashboardStructuredFilters, value: string) => void;
+  structuredFilters: DashboardStructuredFilters;
 }) {
   const bodyId = `col-body-${column.key}`;
   const collapseLabel = `Collapse ${column.title} column`;
@@ -105,8 +110,10 @@ export function RunColumn({
             key={run.runId}
             motion={motionsByRunId[run.runId]}
             onSelect={() => onSelectRun(run.runId)}
+            onStructuredFilterToggle={onStructuredFilterToggle}
             run={run}
             selected={run.runId === selectedRunId}
+            structuredFilters={structuredFilters}
           />
         ))}
       </div>

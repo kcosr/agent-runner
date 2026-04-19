@@ -311,6 +311,86 @@ pre {
   flex-shrink: 0;
 }
 
+.filters-control {
+  position: relative;
+}
+
+.filters-trigger[data-active="true"] {
+  color: var(--primary);
+}
+
+.filters-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 14;
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.filters-panel {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: auto;
+  right: 0;
+  margin: 0;
+  z-index: 15;
+  width: min(18rem, calc(100vw - 32px));
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius-lg) + 2px);
+  background: var(--card);
+  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.14);
+}
+
+.filters-panel__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.filters-panel__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.filters-panel__copy {
+  margin: 4px 0 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.filters-panel__body {
+  display: grid;
+  gap: 10px;
+}
+
+.filters-panel__field {
+  display: flex;
+  width: 100%;
+  gap: 8px;
+}
+
+.filters-panel__field-label {
+  flex: 0 0 72px;
+  justify-content: flex-start;
+}
+
+.filters-panel__field-control {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.filters-panel__field-control select {
+  flex: 1 1 auto;
+  width: auto;
+}
+
 .icon-btn {
   display: inline-flex;
   width: 30px;
@@ -427,6 +507,7 @@ pre {
   width: 100%;
   text-align: left;
   padding: 12px 14px;
+  cursor: pointer;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -438,6 +519,11 @@ pre {
   background: color-mix(in srgb, var(--card) 92%, var(--foreground));
 }
 .card.selected {
+  border-color: var(--ring);
+  box-shadow: 0 0 0 1px var(--ring), var(--shadow-card);
+}
+
+.card:focus-within {
   border-color: var(--ring);
   box-shadow: 0 0 0 1px var(--ring), var(--shadow-card);
 }
@@ -935,6 +1021,23 @@ pre {
   }
   .field.select .field-label {
     display: none;
+  }
+  .filters-panel__field .field-label {
+    display: inline;
+  }
+  .filters-backdrop {
+    background: rgba(15, 23, 42, 0.24);
+  }
+  .filters-panel {
+    position: fixed;
+    right: 16px;
+    left: 16px;
+    bottom: 16px;
+    top: auto;
+    width: auto;
+    max-height: min(28rem, calc(100dvh - 32px));
+    overflow-y: auto;
+    border-radius: 20px;
   }
 
   .layout {

@@ -56,6 +56,16 @@ export function SearchIcon(props: IconProps) {
   );
 }
 
+export function FilterIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M4 6h16" />
+      <path d="M7 12h10" />
+      <path d="M10 18h4" />
+    </IconBase>
+  );
+}
+
 export function ArchiveIcon(props: IconProps) {
   return (
     <IconBase {...props}>

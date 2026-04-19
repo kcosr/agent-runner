@@ -6,6 +6,7 @@ export type RunsShortcutCommand =
   | "board.moveDown"
   | "board.moveLeft"
   | "board.moveRight"
+  | "ui.toggleFilters"
   | "ui.toggleDrawerFullscreen"
   | "ui.blurSearch"
   | "run.close"
@@ -169,6 +170,13 @@ export function resolveRunsShortcutCommand(
       }
     }
     return null;
+  }
+
+  if (
+    matchesShortcut(event, { ctrlKey: true, key: "f", shiftKey: true }) ||
+    matchesShortcut(event, { key: "f", metaKey: true, shiftKey: true })
+  ) {
+    return context.typingTarget || context.resumeDialogOpen ? null : "ui.toggleFilters";
   }
 
   if (

@@ -215,6 +215,14 @@ body {
   background: var(--accent);
 }
 
+.btn--quiet {
+  background: transparent;
+}
+
+.btn--quiet:hover {
+  background: var(--accent);
+}
+
 .btn:disabled {
   cursor: wait;
   opacity: 0.7;
@@ -226,6 +234,7 @@ body {
 }
 
 .app[data-focus-indicators="on"] .btn:focus-visible,
+.app[data-focus-indicators="on"] .meta-filter-badge:focus-visible,
 .app[data-focus-indicators="on"] .nav-item:focus-visible,
 .app[data-focus-indicators="on"] .settings-sidebar-nav__item:focus-visible,
 .app[data-focus-indicators="on"] .settings-toggle input:focus-visible {
@@ -1637,6 +1646,38 @@ body {
   animation: card-flash-motion 260ms ease-out;
 }
 
+.meta-filter-badge {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 120ms, border-color 120ms, color 120ms;
+}
+
+.meta-filter-badge:hover {
+  border-color: color-mix(in srgb, var(--border) 92%, var(--foreground));
+  color: var(--foreground);
+}
+
+.meta-filter-badge[data-active-filter="true"] {
+  border-color: color-mix(in srgb, var(--accent-strong, #2563eb) 24%, var(--border));
+  background: color-mix(in srgb, var(--accent) 60%, transparent);
+  color: color-mix(in srgb, var(--foreground) 88%, var(--accent-strong, #2563eb));
+}
+
 .repo-badge {
   display: inline-flex;
   align-items: center;
@@ -1652,6 +1693,10 @@ body {
 .card-meta .repo-badge,
 .card-meta .backend-badge {
   max-width: 7rem;
+}
+
+.meta-filter-badge--repo {
+  background: var(--secondary);
 }
 
 .meta-indicator {
@@ -1968,6 +2013,10 @@ body {
   font-size: 11px;
 }
 
+.meta-filter-badge--backend {
+  border-color: var(--border);
+}
+
 .copy {
   display: inline-flex;
   align-items: center;
@@ -2058,6 +2107,12 @@ body {
   .field.search,
   .field.select {
     width: 100%;
+  }
+
+  .filters-panel {
+    right: 12px;
+    left: 12px;
+    bottom: 12px;
   }
 
   .notice-stack {

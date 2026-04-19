@@ -148,6 +148,18 @@ describe("resolveRunsShortcutCommand", () => {
       resolveRunsShortcutCommand(
         {
           altKey: false,
+          ctrlKey: true,
+          key: "f",
+          metaKey: false,
+          shiftKey: true,
+        },
+        context,
+      ),
+    ).toBe("ui.toggleFilters");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
           ctrlKey: false,
           key: "f",
           metaKey: false,
@@ -212,6 +224,21 @@ describe("resolveRunsShortcutCommand", () => {
   });
 
   it("blocks board commands while typing or when a resume dialog is open", () => {
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: true,
+          key: "f",
+          metaKey: false,
+          shiftKey: true,
+        },
+        {
+          ...context,
+          typingTarget: true,
+        },
+      ),
+    ).toBeNull();
     expect(
       resolveRunsShortcutCommand(
         {
@@ -290,6 +317,21 @@ describe("resolveRunsShortcutCommand", () => {
         },
       ),
     ).toBe("ui.toggleDrawerFullscreen");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: true,
+          key: "f",
+          metaKey: false,
+          shiftKey: true,
+        },
+        {
+          ...context,
+          drawerFullscreen: true,
+        },
+      ),
+    ).toBeNull();
     expect(
       resolveRunsShortcutCommand(
         {

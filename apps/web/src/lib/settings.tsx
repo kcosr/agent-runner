@@ -7,9 +7,22 @@ export interface DashboardPreferences {
   showArchived: boolean;
   sortByRecentUpdates: boolean;
   visibleFocusIndicators: boolean;
+  structuredFilters: DashboardStructuredFilters;
 }
 
 export type DashboardPreferenceKey = keyof DashboardPreferences;
+
+export interface DashboardStructuredFilters {
+  repo: string | null;
+  agent: string | null;
+  backend: string | null;
+}
+
+export const EMPTY_DASHBOARD_STRUCTURED_FILTERS: DashboardStructuredFilters = {
+  repo: null,
+  agent: null,
+  backend: null,
+};
 
 export type DrawerDetailSection = "tasks" | "attachments" | "dependencies" | "events";
 export type AttachmentTab = "run" | "group";
@@ -31,7 +44,6 @@ export type RunDrawerView =
     };
 
 export interface DashboardViewState {
-  repo: string;
   search: string;
   collapsedColumnKeys: string[];
   drawerWidth: number;
@@ -60,10 +72,10 @@ export const DEFAULT_DASHBOARD_PREFERENCES: DashboardPreferences = {
   showArchived: false,
   sortByRecentUpdates: false,
   visibleFocusIndicators: false,
+  structuredFilters: EMPTY_DASHBOARD_STRUCTURED_FILTERS,
 };
 
 export const DEFAULT_DASHBOARD_VIEW_STATE: DashboardViewState = {
-  repo: "all",
   search: "",
   collapsedColumnKeys: [],
   drawerWidth: DRAWER_WIDTH_DEFAULT,
@@ -85,6 +97,7 @@ export function computeDrawerMaxWidth(viewportWidth: number): number {
 }
 
 const PREFERENCES_STORAGE_KEY = "task-runner:web:dashboard-preferences";
+const VIEW_STATE_STORAGE_KEY = "task-runner:web:dashboard-view-state";
 
 interface DashboardPreferencesContextValue {
   preferences: DashboardPreferences;
@@ -121,6 +134,22 @@ function loadDashboardPreferences(): DashboardPreferences {
   }
 }
 
+function loadDashboardViewState(): DashboardViewState {
+  if (typeof window === "undefined") {
+    return DEFAULT_DASHBOARD_VIEW_STATE;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(VIEW_STATE_STORAGE_KEY);
+    if (!raw) {
+      return DEFAULT_DASHBOARD_VIEW_STATE;
+    }
+    return parseStoredDashboardViewState(JSON.parse(raw));
+  } catch {
+    return DEFAULT_DASHBOARD_VIEW_STATE;
+  }
+}
+
 function parseStoredDashboardPreferences(value: unknown): DashboardPreferences {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return DEFAULT_DASHBOARD_PREFERENCES;
@@ -148,6 +177,64 @@ function parseStoredDashboardPreferences(value: unknown): DashboardPreferences {
       typeof record.visibleFocusIndicators === "boolean"
         ? record.visibleFocusIndicators
         : DEFAULT_DASHBOARD_PREFERENCES.visibleFocusIndicators,
+    structuredFilters: parseStoredStructuredFilters(record.structuredFilters),
+  };
+}
+
+function parseStoredStructuredFilters(value: unknown): DashboardStructuredFilters {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return EMPTY_DASHBOARD_STRUCTURED_FILTERS;
+  }
+
+  const record = value as Record<string, unknown>;
+  return {
+    repo: parseStoredStructuredFilterValue(record.repo),
+    agent: parseStoredStructuredFilterValue(record.agent),
+    backend: parseStoredStructuredFilterValue(record.backend),
+  };
+}
+
+function parseStoredStructuredFilterValue(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function parseStoredDashboardViewState(value: unknown): DashboardViewState {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return DEFAULT_DASHBOARD_VIEW_STATE;
+  }
+
+  const record = value as Record<string, unknown>;
+  return {
+    ...DEFAULT_DASHBOARD_VIEW_STATE,
+    collapsedColumnKeys: Array.isArray(record.collapsedColumnKeys)
+      ? record.collapsedColumnKeys.filter((key): key is string => typeof key === "string")
+      : DEFAULT_DASHBOARD_VIEW_STATE.collapsedColumnKeys,
+  };
+}
+
+export function hasActiveDashboardStructuredFilters(
+  structuredFilters: DashboardStructuredFilters,
+): boolean {
+  return (
+    structuredFilters.repo !== null ||
+    structuredFilters.agent !== null ||
+    structuredFilters.backend !== null
+  );
+}
+
+export function toggleDashboardStructuredFilter(
+  structuredFilters: DashboardStructuredFilters,
+  key: keyof DashboardStructuredFilters,
+  value: string,
+): DashboardStructuredFilters {
+  return {
+    ...structuredFilters,
+    [key]: structuredFilters[key] === value ? null : value,
   };
 }
 
@@ -155,11 +242,20 @@ export function DashboardSettingsProvider({ children }: { children: ReactNode })
   const [preferences, setPreferences] = useState<DashboardPreferences>(() =>
     loadDashboardPreferences(),
   );
-  const [viewState, setViewState] = useState<DashboardViewState>(DEFAULT_DASHBOARD_VIEW_STATE);
+  const [viewState, setViewState] = useState<DashboardViewState>(() => loadDashboardViewState());
 
   useEffect(() => {
     window.localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(preferences));
   }, [preferences]);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      VIEW_STATE_STORAGE_KEY,
+      JSON.stringify({
+        collapsedColumnKeys: viewState.collapsedColumnKeys,
+      }),
+    );
+  }, [viewState.collapsedColumnKeys]);
 
   const preferencesValue = useMemo<DashboardPreferencesContextValue>(
     () => ({

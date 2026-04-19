@@ -42,12 +42,22 @@ function SettingsProbe() {
         onClick={() =>
           updateViewState({
             drawerWidth: 700,
-            repo: "task-runner-web",
+            search: "task-runner-web",
           })
         }
         type="button"
       >
         Update view state
+      </button>
+      <button
+        onClick={() =>
+          updateViewState({
+            collapsedColumnKeys: ["running"],
+          })
+        }
+        type="button"
+      >
+        Collapse running
       </button>
       <button onClick={() => resetPreference("showArchived")} type="button">
         Reset archived
@@ -79,7 +89,7 @@ describe("DashboardSettingsProvider", () => {
     cleanup();
   });
 
-  it("boots with default persisted preferences and transient view state", () => {
+  it("boots with default persisted preferences and default collapsed-column view state", () => {
     renderSettingsProbe();
 
     expect(screen.getByTestId("preferences")).toHaveTextContent(
@@ -89,11 +99,15 @@ describe("DashboardSettingsProvider", () => {
         showArchived: false,
         sortByRecentUpdates: false,
         visibleFocusIndicators: false,
+        structuredFilters: {
+          repo: null,
+          agent: null,
+          backend: null,
+        },
       }),
     );
     expect(screen.getByTestId("view-state")).toHaveTextContent(
       JSON.stringify({
-        repo: "all",
         search: "",
         collapsedColumnKeys: [],
         drawerWidth: 540,
@@ -113,6 +127,11 @@ describe("DashboardSettingsProvider", () => {
         collapseFailureStates: false,
         sortByRecentUpdates: true,
         visibleFocusIndicators: true,
+        structuredFilters: {
+          repo: null,
+          agent: null,
+          backend: null,
+        },
         drawerWidth: 1200,
       }),
     );
@@ -136,12 +155,17 @@ describe("DashboardSettingsProvider", () => {
         showArchived: true,
         sortByRecentUpdates: true,
         visibleFocusIndicators: true,
+        structuredFilters: {
+          repo: null,
+          agent: null,
+          backend: null,
+        },
       }),
     );
     expect(screen.getByTestId("view-state")).toHaveTextContent('"drawerWidth":540');
   });
 
-  it("hydrates the persisted recent-updates preference while keeping view-state fields transient", () => {
+  it("hydrates the persisted recent-updates preference while keeping unsaved view-state fields transient", () => {
     window.localStorage.setItem(
       "task-runner:web:dashboard-preferences",
       JSON.stringify({ sortByRecentUpdates: true }),
@@ -150,7 +174,62 @@ describe("DashboardSettingsProvider", () => {
     renderSettingsProbe();
 
     expect(screen.getByTestId("preferences")).toHaveTextContent('"sortByRecentUpdates":true');
+    expect(screen.getByTestId("preferences")).toHaveTextContent(
+      '"structuredFilters":{"repo":null,"agent":null,"backend":null}',
+    );
     expect(screen.getByTestId("view-state")).toHaveTextContent('"drawerWidth":540');
+  });
+
+  it("hydrates persisted collapsed column keys while defaulting unsaved columns to expanded", () => {
+    window.localStorage.setItem(
+      "task-runner:web:dashboard-view-state",
+      JSON.stringify({ collapsedColumnKeys: ["running", "failed"] }),
+    );
+
+    renderSettingsProbe();
+
+    expect(screen.getByTestId("view-state")).toHaveTextContent(
+      '"collapsedColumnKeys":["running","failed"]',
+    );
+    expect(screen.getByTestId("view-state")).toHaveTextContent('"drawerWidth":540');
+  });
+
+  it("defaults missing structured-filter categories to Any while preserving stored values", () => {
+    window.localStorage.setItem(
+      "task-runner:web:dashboard-preferences",
+      JSON.stringify({
+        structuredFilters: {
+          repo: "task-runner",
+        },
+      }),
+    );
+
+    renderSettingsProbe();
+
+    expect(screen.getByTestId("preferences")).toHaveTextContent(
+      '"structuredFilters":{"repo":"task-runner","agent":null,"backend":null}',
+    );
+  });
+
+  it("falls back to Any for malformed stored structured-filter values", () => {
+    window.localStorage.setItem(
+      "task-runner:web:dashboard-preferences",
+      JSON.stringify({
+        showArchived: true,
+        structuredFilters: {
+          repo: 42,
+          agent: "   ",
+          backend: false,
+        },
+      }),
+    );
+
+    renderSettingsProbe();
+
+    expect(screen.getByTestId("preferences")).toHaveTextContent('"showArchived":true');
+    expect(screen.getByTestId("preferences")).toHaveTextContent(
+      '"structuredFilters":{"repo":null,"agent":null,"backend":null}',
+    );
   });
 
   it("hydrates and resets visible focus indicators independently", () => {
@@ -168,13 +247,14 @@ describe("DashboardSettingsProvider", () => {
     expect(screen.getByTestId("preferences")).toHaveTextContent('"visibleFocusIndicators":false');
   });
 
-  it("persists preferences without persisting transient view-state updates", () => {
+  it("persists preferences and collapsed column keys without persisting transient view-state updates", () => {
     renderSettingsProbe();
 
     fireEvent.click(screen.getByRole("button", { name: "Enable archived" }));
     fireEvent.click(screen.getByRole("button", { name: "Enable recent updates sort" }));
     fireEvent.click(screen.getByRole("button", { name: "Enable visible focus indicators" }));
     fireEvent.click(screen.getByRole("button", { name: "Update view state" }));
+    fireEvent.click(screen.getByRole("button", { name: "Collapse running" }));
 
     expect(window.localStorage.getItem("task-runner:web:dashboard-preferences")).toBe(
       JSON.stringify({
@@ -183,10 +263,20 @@ describe("DashboardSettingsProvider", () => {
         showArchived: true,
         sortByRecentUpdates: true,
         visibleFocusIndicators: true,
+        structuredFilters: {
+          repo: null,
+          agent: null,
+          backend: null,
+        },
       }),
     );
     expect(screen.getByTestId("view-state")).toHaveTextContent('"drawerWidth":700');
-    expect(screen.getByTestId("view-state")).toHaveTextContent('"repo":"task-runner-web"');
+    expect(screen.getByTestId("view-state")).toHaveTextContent('"search":"task-runner-web"');
+    expect(window.localStorage.getItem("task-runner:web:dashboard-view-state")).toBe(
+      JSON.stringify({
+        collapsedColumnKeys: ["running"],
+      }),
+    );
   });
 
   it("resets a single preference without affecting the others", () => {
@@ -202,6 +292,11 @@ describe("DashboardSettingsProvider", () => {
         showArchived: false,
         sortByRecentUpdates: false,
         visibleFocusIndicators: false,
+        structuredFilters: {
+          repo: null,
+          agent: null,
+          backend: null,
+        },
       }),
     );
   });
@@ -219,6 +314,11 @@ describe("DashboardSettingsProvider", () => {
         showArchived: false,
         sortByRecentUpdates: false,
         visibleFocusIndicators: false,
+        structuredFilters: {
+          repo: null,
+          agent: null,
+          backend: null,
+        },
       }),
     );
   });
