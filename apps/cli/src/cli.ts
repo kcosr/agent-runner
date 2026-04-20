@@ -96,7 +96,8 @@ import {
   renderTaskList,
 } from "./commands/render.js";
 import { DaemonClient, DaemonConnectionError, DaemonRpcError } from "./daemon/client.js";
-import { resolveHostMode, resolveListenUrl } from "./daemon/config.js";
+import { type ResolvedHostMode, resolveHostMode, resolveListenUrl } from "./daemon/config.js";
+import { type SshTunnelHandle, SshTunnelSetupError, openSshTunnel } from "./daemon/connect-host.js";
 import {
   daemonAddAttachment,
   daemonDownloadAttachment,
@@ -170,6 +171,12 @@ Task command options:
 Host selection:
   --connect <ws-url>      Route the command through the daemon host.
                           Also honored from TASK_RUNNER_CONNECT.
+  --connect-host <host>   Create an invocation-scoped SSH local forward
+                          before connecting to the daemon. Also honored
+                          from TASK_RUNNER_CONNECT_HOST.
+  --connect-local-port    Override the local loopback port used for the
+                          SSH forward. Also honored from
+                          TASK_RUNNER_CONNECT_LOCAL_PORT.
   --listen <ws-url>       (serve only) Listen URL for the daemon host.
                           Also honored from TASK_RUNNER_LISTEN. The same
                           listener serves HTTP/SSE under /api/.
@@ -220,9 +227,11 @@ function daemonUnavailableHint(connectUrl: string): string {
   return `task-runner: cannot connect to daemon at ${connectUrl}\nHint: task-runner serve --listen ${connectUrl}\n`;
 }
 
+type DaemonConnectContext = Extract<ResolvedHostMode, { mode: "daemon" }>;
+
 function exitCommandFailure(err: unknown, connectUrl?: string): never {
   if (err instanceof DaemonConnectionError) {
-    process.stderr.write(daemonUnavailableHint(err.url));
+    process.stderr.write(daemonUnavailableHint(connectUrl ?? err.url));
     process.exit(3);
   }
 
@@ -234,6 +243,7 @@ function exitCommandFailure(err: unknown, connectUrl?: string): never {
   if (
     isCommandError(err) ||
     err instanceof AttachmentError ||
+    err instanceof SshTunnelSetupError ||
     err instanceof AgentNotFoundError ||
     err instanceof AgentConfigError ||
     err instanceof AssignmentNotFoundError ||
@@ -377,10 +387,10 @@ function terminalExitCode(status: string): number {
 }
 
 async function withDaemonClient<T>(
-  connectUrl: string,
+  connect: DaemonConnectContext,
   fn: (client: DaemonClient) => Promise<T>,
 ): Promise<T> {
-  const client = await DaemonClient.connect(connectUrl);
+  const client = await DaemonClient.connect(connect.effectiveConnectUrl);
   try {
     return await fn(client);
   } finally {
@@ -391,6 +401,14 @@ async function withDaemonClient<T>(
 async function runServe(parsed: ParsedArgs): Promise<never> {
   if (parsed.connect !== undefined) {
     process.stderr.write("task-runner: serve does not accept --connect\n");
+    process.exit(3);
+  }
+  if (parsed.connectHost !== undefined) {
+    process.stderr.write("task-runner: serve does not accept --connect-host\n");
+    process.exit(3);
+  }
+  if (parsed.connectLocalPort !== undefined) {
+    process.stderr.write("task-runner: serve does not accept --connect-local-port\n");
     process.exit(3);
   }
   if (parsed.positionals.length > 0) {
@@ -421,7 +439,7 @@ async function runServe(parsed: ParsedArgs): Promise<never> {
   return await new Promise<never>(() => {});
 }
 
-async function runSystemStatus(parsed: ParsedArgs, connectUrl?: string): Promise<never> {
+async function runSystemStatus(parsed: ParsedArgs, connect?: DaemonConnectContext): Promise<never> {
   try {
     if (parsed.fields.length > 0) {
       throw new CommandError("status does not support --field");
@@ -433,7 +451,7 @@ async function runSystemStatus(parsed: ParsedArgs, connectUrl?: string): Promise
     }
 
     const result =
-      connectUrl === undefined
+      connect === undefined
         ? {
             configDir: resolveTaskRunnerConfigDir(),
             stateDir: resolveTaskRunnerStateDir(),
@@ -441,12 +459,12 @@ async function runSystemStatus(parsed: ParsedArgs, connectUrl?: string): Promise
             connectUrl: null,
             daemon: null,
           }
-        : await withDaemonClient(connectUrl, (client) =>
+        : await withDaemonClient(connect, (client) =>
             client.call<DaemonInfo>("daemon.info").then((daemon) => ({
               configDir: resolveTaskRunnerConfigDir(),
               stateDir: resolveTaskRunnerStateDir(),
               hostMode: "daemon" as const,
-              connectUrl,
+              connectUrl: connect.connectUrl,
               daemon,
             })),
           );
@@ -458,11 +476,11 @@ async function runSystemStatus(parsed: ParsedArgs, connectUrl?: string): Promise
     }
     process.exit(0);
   } catch (err) {
-    exitCommandFailure(err, connectUrl);
+    exitCommandFailure(err, connect?.connectUrl);
   }
 }
 
-async function runRunStatus(parsed: ParsedArgs, connectUrl?: string): Promise<never> {
+async function runRunStatus(parsed: ParsedArgs, connect?: DaemonConnectContext): Promise<never> {
   try {
     const unsupported = unsupportedFlagsForGroupedCommand(parsed, { allowFields: true });
     if (unsupported.length > 0) {
@@ -486,9 +504,9 @@ async function runRunStatus(parsed: ParsedArgs, connectUrl?: string): Promise<ne
       process.exit(3);
     }
     const result =
-      connectUrl === undefined
+      connect === undefined
         ? getRun(target)
-        : await withDaemonClient(connectUrl, (client) =>
+        : await withDaemonClient(connect, (client) =>
             client
               .call<{ run: ReturnType<typeof getRun> }>("runs.get", { target })
               .then((r) => r.run),
@@ -503,11 +521,11 @@ async function runRunStatus(parsed: ParsedArgs, connectUrl?: string): Promise<ne
     }
     process.exit(0);
   } catch (err) {
-    exitCommandFailure(err, connectUrl);
+    exitCommandFailure(err, connect?.connectUrl);
   }
 }
 
-async function runRunBrief(parsed: ParsedArgs, connectUrl?: string): Promise<never> {
+async function runRunBrief(parsed: ParsedArgs, connect?: DaemonConnectContext): Promise<never> {
   try {
     if (parsed.outputFormatExplicit) {
       throw new CommandError("run brief does not support --output-format");
@@ -535,19 +553,19 @@ async function runRunBrief(parsed: ParsedArgs, connectUrl?: string): Promise<nev
       process.exit(3);
     }
     const brief =
-      connectUrl === undefined
+      connect === undefined
         ? getRunBrief(target)
-        : await withDaemonClient(connectUrl, (client) =>
+        : await withDaemonClient(connect, (client) =>
             client.call<{ brief: string }>("runs.brief", { target }).then((r) => r.brief),
           );
     process.stdout.write(`${brief}\n`);
     process.exit(0);
   } catch (err) {
-    exitCommandFailure(err, connectUrl);
+    exitCommandFailure(err, connect?.connectUrl);
   }
 }
 
-async function runListCommand(parsed: ParsedArgs, connectUrl?: string): Promise<never> {
+async function runListCommand(parsed: ParsedArgs, connect?: DaemonConnectContext): Promise<never> {
   const kindArg = parsed.subcommand;
   if (kindArg !== "agents" && kindArg !== "assignments" && kindArg !== "runs") {
     process.stderr.write(
@@ -579,9 +597,9 @@ async function runListCommand(parsed: ParsedArgs, connectUrl?: string): Promise<
       }
       const filter = resolveRunListFilter(parsed);
       const result =
-        connectUrl === undefined
+        connect === undefined
           ? getRunList(filter)
-          : await withDaemonClient(connectUrl, (client) =>
+          : await withDaemonClient(connect, (client) =>
               client
                 .call<{ runs: ReturnType<typeof getRunList> }>("runs.list", filter)
                 .then((r) => r.runs),
@@ -602,9 +620,9 @@ async function runListCommand(parsed: ParsedArgs, connectUrl?: string): Promise<
       process.exit(3);
     }
     const result =
-      connectUrl === undefined
+      connect === undefined
         ? getDefinitionList(kindArg === "agents" ? "agent" : "assignment")
-        : await withDaemonClient(connectUrl, (client) =>
+        : await withDaemonClient(connect, (client) =>
             client
               .call<{
                 agents?: ReturnType<typeof getDefinitionList>;
@@ -624,11 +642,11 @@ async function runListCommand(parsed: ParsedArgs, connectUrl?: string): Promise<
     }
     process.exit(0);
   } catch (err) {
-    exitCommandFailure(err, connectUrl);
+    exitCommandFailure(err, connect?.connectUrl);
   }
 }
 
-async function runShowCommand(parsed: ParsedArgs, connectUrl?: string): Promise<never> {
+async function runShowCommand(parsed: ParsedArgs, connect?: DaemonConnectContext): Promise<never> {
   const kindArg = parsed.subcommand;
   if (kindArg !== "agent" && kindArg !== "assignment") {
     process.stderr.write(
@@ -651,9 +669,9 @@ async function runShowCommand(parsed: ParsedArgs, connectUrl?: string): Promise<
 
   try {
     const result =
-      connectUrl === undefined
+      connect === undefined
         ? getDefinition(kindArg, target, process.cwd())
-        : await withDaemonClient(connectUrl, (client) =>
+        : await withDaemonClient(connect, (client) =>
             client
               .call<{
                 agent?: ReturnType<typeof getDefinition>;
@@ -686,7 +704,7 @@ async function runShowCommand(parsed: ParsedArgs, connectUrl?: string): Promise<
     }
     process.exit(0);
   } catch (err) {
-    exitCommandFailure(err, connectUrl);
+    exitCommandFailure(err, connect?.connectUrl);
   }
 }
 
@@ -798,18 +816,18 @@ async function startOrResumeDaemonRun(
       });
 }
 
-async function runTaskCommand(parsed: ParsedArgs, connectUrl?: string): Promise<never> {
+async function runTaskCommand(parsed: ParsedArgs, connect?: DaemonConnectContext): Promise<never> {
   switch (parsed.subcommand) {
     case "list":
-      return runTaskList(parsed, connectUrl);
+      return runTaskList(parsed, connect);
     case "show":
-      return runTaskShow(parsed, connectUrl);
+      return runTaskShow(parsed, connect);
     case "set":
-      return runTaskSet(parsed, connectUrl);
+      return runTaskSet(parsed, connect);
     case "append-notes":
-      return runTaskAppendNotes(parsed, connectUrl);
+      return runTaskAppendNotes(parsed, connect);
     case "add":
-      return runTaskAdd(parsed, connectUrl);
+      return runTaskAdd(parsed, connect);
     default:
       process.stderr.write(
         `task-runner: task command requires a subcommand: list | show | set | append-notes | add (got "${parsed.subcommand ?? ""}")\n`,
@@ -831,19 +849,22 @@ function validateAttachmentSourceFile(sourceArg: string): string {
 
 async function resolveAttachmentTargetForDaemon(
   target: string,
-  connectUrl: string,
+  connect: DaemonConnectContext,
 ): Promise<string> {
   if (!isPathArg(target)) {
     return target;
   }
-  return await withDaemonClient(connectUrl, (client) =>
+  return await withDaemonClient(connect, (client) =>
     client
       .call<{ run: ReturnType<typeof getRun> }>("runs.get", { target })
       .then((result) => result.run.runId),
   );
 }
 
-async function runAttachmentCommand(parsed: ParsedArgs, connectUrl?: string): Promise<never> {
+async function runAttachmentCommand(
+  parsed: ParsedArgs,
+  connect?: DaemonConnectContext,
+): Promise<never> {
   switch (parsed.subcommand) {
     case "list": {
       const [runArg, extra] = parsed.positionals;
@@ -868,11 +889,11 @@ async function runAttachmentCommand(parsed: ParsedArgs, connectUrl?: string): Pr
 
       try {
         const attachments =
-          connectUrl === undefined
+          connect === undefined
             ? getAttachmentList(target, { cwdScope: parsed.cwdScope })
             : await daemonListAttachments(
-                connectUrl,
-                await resolveAttachmentTargetForDaemon(target, connectUrl),
+                connect.effectiveConnectUrl,
+                await resolveAttachmentTargetForDaemon(target, connect),
                 { cwdScope: parsed.cwdScope },
               );
         if (parsed.outputFormat === "json") {
@@ -884,7 +905,7 @@ async function runAttachmentCommand(parsed: ParsedArgs, connectUrl?: string): Pr
         }
         return process.exit(0);
       } catch (err) {
-        return exitCommandFailure(err, connectUrl);
+        return exitCommandFailure(err, connect?.connectUrl);
       }
     }
     case "add": {
@@ -916,34 +937,28 @@ async function runAttachmentCommand(parsed: ParsedArgs, connectUrl?: string): Pr
       try {
         const sourcePath = validateAttachmentSourceFile(sourceArg);
         const name = parsed.attachmentName ?? basename(sourcePath);
+        const daemonRunId =
+          connect === undefined ? target : await resolveAttachmentTargetForDaemon(target, connect);
         const attachment =
-          connectUrl === undefined
+          connect === undefined
             ? await addRunAttachmentFromFile(target, {
                 sourcePath,
                 name: parsed.attachmentName,
                 mimeType: parsed.attachmentMimeType,
               })
-            : await daemonAddAttachment(
-                connectUrl,
-                await resolveAttachmentTargetForDaemon(target, connectUrl),
-                {
-                  sourcePath,
-                  name,
-                  mimeType: parsed.attachmentMimeType,
-                },
-              );
+            : await daemonAddAttachment(connect.effectiveConnectUrl, daemonRunId, {
+                sourcePath,
+                name,
+                mimeType: parsed.attachmentMimeType,
+              });
         if (parsed.outputFormat === "json") {
           writeJson(attachment);
         } else {
-          const runId =
-            connectUrl === undefined
-              ? target
-              : await resolveAttachmentTargetForDaemon(target, connectUrl);
-          process.stdout.write(renderAttachmentAdded(runId, attachment));
+          process.stdout.write(renderAttachmentAdded(daemonRunId, attachment));
         }
         return process.exit(0);
       } catch (err) {
-        return exitCommandFailure(err, connectUrl);
+        return exitCommandFailure(err, connect?.connectUrl);
       }
     }
     case "remove": {
@@ -971,11 +986,11 @@ async function runAttachmentCommand(parsed: ParsedArgs, connectUrl?: string): Pr
 
       try {
         const result =
-          connectUrl === undefined
+          connect === undefined
             ? removeRunAttachment(target, attachmentId)
             : await daemonRemoveAttachment(
-                connectUrl,
-                await resolveAttachmentTargetForDaemon(target, connectUrl),
+                connect.effectiveConnectUrl,
+                await resolveAttachmentTargetForDaemon(target, connect),
                 attachmentId,
               );
         if (parsed.outputFormat === "json") {
@@ -985,7 +1000,7 @@ async function runAttachmentCommand(parsed: ParsedArgs, connectUrl?: string): Pr
         }
         return process.exit(0);
       } catch (err) {
-        return exitCommandFailure(err, connectUrl);
+        return exitCommandFailure(err, connect?.connectUrl);
       }
     }
     case "download": {
@@ -1013,19 +1028,24 @@ async function runAttachmentCommand(parsed: ParsedArgs, connectUrl?: string): Pr
 
       try {
         const result =
-          connectUrl === undefined
+          connect === undefined
             ? downloadRunAttachment(target, attachmentId, outputPath)
             : await (async () => {
-                const runId = await resolveAttachmentTargetForDaemon(target, connectUrl);
-                const attachment = (await daemonListAttachments(connectUrl, runId)).find(
-                  (candidate) => candidate.id === attachmentId,
-                );
+                const runId = await resolveAttachmentTargetForDaemon(target, connect);
+                const attachment = (
+                  await daemonListAttachments(connect.effectiveConnectUrl, runId)
+                ).find((candidate) => candidate.id === attachmentId);
                 if (!attachment) {
                   throw new AttachmentError(
                     `attachment "${attachmentId}" not found in run ${runId}`,
                   );
                 }
-                return await daemonDownloadAttachment(connectUrl, runId, attachment, outputPath);
+                return await daemonDownloadAttachment(
+                  connect.effectiveConnectUrl,
+                  runId,
+                  attachment,
+                  outputPath,
+                );
               })();
         if (parsed.outputFormat === "json") {
           writeJson(result);
@@ -1034,7 +1054,7 @@ async function runAttachmentCommand(parsed: ParsedArgs, connectUrl?: string): Pr
         }
         return process.exit(0);
       } catch (err) {
-        return exitCommandFailure(err, connectUrl);
+        return exitCommandFailure(err, connect?.connectUrl);
       }
     }
     default:
@@ -1045,7 +1065,7 @@ async function runAttachmentCommand(parsed: ParsedArgs, connectUrl?: string): Pr
   }
 }
 
-async function runResetCommand(parsed: ParsedArgs, connectUrl?: string): Promise<never> {
+async function runResetCommand(parsed: ParsedArgs, connect?: DaemonConnectContext): Promise<never> {
   const [runArg, extra] = parsed.positionals;
   const target = normalizeTarget(runArg);
   if (!target) {
@@ -1068,9 +1088,9 @@ async function runResetCommand(parsed: ParsedArgs, connectUrl?: string): Promise
 
   try {
     const result =
-      connectUrl === undefined
+      connect === undefined
         ? reset(target)
-        : await withDaemonClient(connectUrl, (client) =>
+        : await withDaemonClient(connect, (client) =>
             client
               .call<{ run: ReturnType<typeof reset> }>("runs.reset", { target })
               .then((r) => r.run),
@@ -1082,11 +1102,14 @@ async function runResetCommand(parsed: ParsedArgs, connectUrl?: string): Promise
     }
     process.exit(0);
   } catch (err) {
-    exitCommandFailure(err, connectUrl);
+    exitCommandFailure(err, connect?.connectUrl);
   }
 }
 
-async function runDeleteCommand(parsed: ParsedArgs, connectUrl?: string): Promise<never> {
+async function runDeleteCommand(
+  parsed: ParsedArgs,
+  connect?: DaemonConnectContext,
+): Promise<never> {
   const [runArg, extra] = parsed.positionals;
   const target = normalizeTarget(runArg);
   if (!target) {
@@ -1109,9 +1132,9 @@ async function runDeleteCommand(parsed: ParsedArgs, connectUrl?: string): Promis
 
   try {
     const result =
-      connectUrl === undefined
+      connect === undefined
         ? deleteArchivedRun(target)
-        : await withDaemonClient(connectUrl, (client) =>
+        : await withDaemonClient(connect, (client) =>
             client
               .call<{ result: ReturnType<typeof deleteArchivedRun> }>("runs.delete", { target })
               .then((r) => r.result),
@@ -1123,13 +1146,13 @@ async function runDeleteCommand(parsed: ParsedArgs, connectUrl?: string): Promis
     }
     process.exit(0);
   } catch (err) {
-    exitCommandFailure(err, connectUrl);
+    exitCommandFailure(err, connect?.connectUrl);
   }
 }
 
 async function runArchiveToggleCommand(
   parsed: ParsedArgs,
-  connectUrl: string | undefined,
+  connect: DaemonConnectContext | undefined,
   verb: "archive" | "unarchive",
 ): Promise<never> {
   const [runArg, extra] = parsed.positionals;
@@ -1154,11 +1177,11 @@ async function runArchiveToggleCommand(
 
   try {
     const result =
-      connectUrl === undefined
+      connect === undefined
         ? verb === "archive"
           ? archive(target)
           : unarchive(target)
-        : await withDaemonClient(connectUrl, (client) =>
+        : await withDaemonClient(connect, (client) =>
             client
               .call<{ result: ReturnType<typeof archive> }>(
                 verb === "archive" ? "runs.archive" : "runs.unarchive",
@@ -1175,11 +1198,14 @@ async function runArchiveToggleCommand(
     }
     process.exit(0);
   } catch (err) {
-    exitCommandFailure(err, connectUrl);
+    exitCommandFailure(err, connect?.connectUrl);
   }
 }
 
-async function runSetNameCommand(parsed: ParsedArgs, connectUrl?: string): Promise<never> {
+async function runSetNameCommand(
+  parsed: ParsedArgs,
+  connect?: DaemonConnectContext,
+): Promise<never> {
   const [runArg, nameArg, extra] = parsed.positionals;
   const target = normalizeTarget(runArg);
   if (!target) {
@@ -1221,9 +1247,9 @@ async function runSetNameCommand(parsed: ParsedArgs, connectUrl?: string): Promi
 
   try {
     const result =
-      connectUrl === undefined
+      connect === undefined
         ? await renameRun(target, { name: nextName })
-        : await withDaemonClient(connectUrl, (client) =>
+        : await withDaemonClient(connect, (client) =>
             client
               .call<{ result: Awaited<ReturnType<typeof renameRun>> }>("runs.setName", {
                 target,
@@ -1238,13 +1264,13 @@ async function runSetNameCommand(parsed: ParsedArgs, connectUrl?: string): Promi
     }
     process.exit(0);
   } catch (err) {
-    exitCommandFailure(err, connectUrl);
+    exitCommandFailure(err, connect?.connectUrl);
   }
 }
 
 async function runNoteCommand(
   parsed: ParsedArgs,
-  connectUrl: string | undefined,
+  connect: DaemonConnectContext | undefined,
   verb: "set-note" | "clear-note",
 ): Promise<never> {
   const [runArg, noteArg, extra] = parsed.positionals;
@@ -1285,9 +1311,9 @@ async function runNoteCommand(
   try {
     const note = verb === "set-note" ? (noteArg ?? null) : null;
     const result =
-      connectUrl === undefined
+      connect === undefined
         ? updateRunNote(target, { note })
-        : await withDaemonClient(connectUrl, (client) =>
+        : await withDaemonClient(connect, (client) =>
             client
               .call<{ result: ReturnType<typeof updateRunNote> }>("runs.setNote", {
                 target,
@@ -1302,13 +1328,13 @@ async function runNoteCommand(
     }
     process.exit(0);
   } catch (err) {
-    exitCommandFailure(err, connectUrl);
+    exitCommandFailure(err, connect?.connectUrl);
   }
 }
 
 async function runPinnedCommand(
   parsed: ParsedArgs,
-  connectUrl: string | undefined,
+  connect: DaemonConnectContext | undefined,
   verb: "pin" | "unpin",
 ): Promise<never> {
   const [runArg, extra] = parsed.positionals;
@@ -1335,9 +1361,9 @@ async function runPinnedCommand(
   try {
     const pinned = verb === "pin";
     const result =
-      connectUrl === undefined
+      connect === undefined
         ? updateRunPinned(target, { pinned })
-        : await withDaemonClient(connectUrl, (client) =>
+        : await withDaemonClient(connect, (client) =>
             client
               .call<{ result: ReturnType<typeof updateRunPinned> }>("runs.setPinned", {
                 target,
@@ -1352,13 +1378,13 @@ async function runPinnedCommand(
     }
     process.exit(0);
   } catch (err) {
-    exitCommandFailure(err, connectUrl);
+    exitCommandFailure(err, connect?.connectUrl);
   }
 }
 
 async function runBackendSessionCommand(
   parsed: ParsedArgs,
-  connectUrl: string | undefined,
+  connect: DaemonConnectContext | undefined,
   verb: "set-backend-session" | "clear-backend-session",
 ): Promise<never> {
   const [runArg, backendSessionArg, extra] = parsed.positionals;
@@ -1410,9 +1436,9 @@ async function runBackendSessionCommand(
         throw new Error("task-runner: internal error: missing backend session id");
       }
       result =
-        connectUrl === undefined
+        connect === undefined
           ? updateRunBackendSession(target, { backendSessionId })
-          : await withDaemonClient(connectUrl, (client) =>
+          : await withDaemonClient(connect, (client) =>
               client
                 .call<{ result: ReturnType<typeof updateRunBackendSession> }>(
                   "runs.setBackendSession",
@@ -1425,9 +1451,9 @@ async function runBackendSessionCommand(
             );
     } else {
       result =
-        connectUrl === undefined
+        connect === undefined
           ? clearBackendSession(target)
-          : await withDaemonClient(connectUrl, (client) =>
+          : await withDaemonClient(connect, (client) =>
               client
                 .call<{ result: ReturnType<typeof clearBackendSession> }>(
                   "runs.clearBackendSession",
@@ -1447,13 +1473,13 @@ async function runBackendSessionCommand(
     }
     process.exit(0);
   } catch (err) {
-    exitCommandFailure(err, connectUrl);
+    exitCommandFailure(err, connect?.connectUrl);
   }
 }
 
 async function runDependencyCommand(
   parsed: ParsedArgs,
-  connectUrl: string | undefined,
+  connect: DaemonConnectContext | undefined,
   verb: "add-dep" | "remove-dep" | "clear-deps",
 ): Promise<never> {
   const [runArg, dependencyArg, extra] = parsed.positionals;
@@ -1499,13 +1525,13 @@ async function runDependencyCommand(
     const params =
       verb === "clear-deps" ? { target } : { target, dependencyRunId: dependencyArg as string };
     const result =
-      connectUrl === undefined
+      connect === undefined
         ? method === "runs.addDependency"
           ? addDependency(target, dependencyArg as string)
           : method === "runs.removeDependency"
             ? removeDependency(target, dependencyArg as string)
             : clearDependencies(target)
-        : await withDaemonClient(connectUrl, (client) =>
+        : await withDaemonClient(connect, (client) =>
             client
               .call<{
                 result:
@@ -1526,11 +1552,11 @@ async function runDependencyCommand(
     }
     process.exit(0);
   } catch (err) {
-    exitCommandFailure(err, connectUrl);
+    exitCommandFailure(err, connect?.connectUrl);
   }
 }
 
-async function runTaskList(parsed: ParsedArgs, connectUrl?: string): Promise<never> {
+async function runTaskList(parsed: ParsedArgs, connect?: DaemonConnectContext): Promise<never> {
   const [runArg, extra] = parsed.positionals;
   const target = normalizeTarget(runArg);
   if (!target) {
@@ -1546,9 +1572,9 @@ async function runTaskList(parsed: ParsedArgs, connectUrl?: string): Promise<nev
 
   try {
     const tasks =
-      connectUrl === undefined
+      connect === undefined
         ? getTaskList(target)
-        : await withDaemonClient(connectUrl, (client) =>
+        : await withDaemonClient(connect, (client) =>
             client
               .call<{ tasks: ReturnType<typeof getTaskList> }>("tasks.list", { target })
               .then((r) => r.tasks),
@@ -1560,11 +1586,11 @@ async function runTaskList(parsed: ParsedArgs, connectUrl?: string): Promise<nev
     }
     process.exit(0);
   } catch (err) {
-    exitCommandFailure(err, connectUrl);
+    exitCommandFailure(err, connect?.connectUrl);
   }
 }
 
-async function runTaskShow(parsed: ParsedArgs, connectUrl?: string): Promise<never> {
+async function runTaskShow(parsed: ParsedArgs, connect?: DaemonConnectContext): Promise<never> {
   const [runArg, taskId, extra] = parsed.positionals;
   const target = normalizeTarget(runArg);
   if (!target || !taskId) {
@@ -1580,9 +1606,9 @@ async function runTaskShow(parsed: ParsedArgs, connectUrl?: string): Promise<nev
 
   try {
     const task =
-      connectUrl === undefined
+      connect === undefined
         ? getTask(target, taskId)
-        : await withDaemonClient(connectUrl, (client) =>
+        : await withDaemonClient(connect, (client) =>
             client
               .call<{ task: ReturnType<typeof getTask> }>("tasks.get", { target, taskId })
               .then((r) => r.task),
@@ -1594,11 +1620,11 @@ async function runTaskShow(parsed: ParsedArgs, connectUrl?: string): Promise<nev
     }
     process.exit(0);
   } catch (err) {
-    exitCommandFailure(err, connectUrl);
+    exitCommandFailure(err, connect?.connectUrl);
   }
 }
 
-async function runTaskSet(parsed: ParsedArgs, connectUrl?: string): Promise<never> {
+async function runTaskSet(parsed: ParsedArgs, connect?: DaemonConnectContext): Promise<never> {
   const [runArg, taskId] = parsed.positionals;
   const target = normalizeTarget(runArg);
   if (!target || !taskId) {
@@ -1608,12 +1634,12 @@ async function runTaskSet(parsed: ParsedArgs, connectUrl?: string): Promise<neve
 
   try {
     const task =
-      connectUrl === undefined
+      connect === undefined
         ? updateTask(target, taskId, {
             status: parsed.taskStatus,
             notes: parsed.taskNotes,
           })
-        : await withDaemonClient(connectUrl, (client) =>
+        : await withDaemonClient(connect, (client) =>
             client
               .call<{ task: ReturnType<typeof updateTask> }>("tasks.set", {
                 target,
@@ -1632,11 +1658,14 @@ async function runTaskSet(parsed: ParsedArgs, connectUrl?: string): Promise<neve
     }
     process.exit(0);
   } catch (err) {
-    exitCommandFailure(err, connectUrl);
+    exitCommandFailure(err, connect?.connectUrl);
   }
 }
 
-async function runTaskAppendNotes(parsed: ParsedArgs, connectUrl?: string): Promise<never> {
+async function runTaskAppendNotes(
+  parsed: ParsedArgs,
+  connect?: DaemonConnectContext,
+): Promise<never> {
   const [runArg, taskId] = parsed.positionals;
   const target = normalizeTarget(runArg);
   if (!target || !taskId) {
@@ -1650,9 +1679,9 @@ async function runTaskAppendNotes(parsed: ParsedArgs, connectUrl?: string): Prom
 
   try {
     const task =
-      connectUrl === undefined
+      connect === undefined
         ? appendNotes(target, taskId, parsed.taskAppendText)
-        : await withDaemonClient(connectUrl, (client) =>
+        : await withDaemonClient(connect, (client) =>
             client
               .call<{ task: ReturnType<typeof appendNotes> }>("tasks.appendNotes", {
                 target,
@@ -1670,11 +1699,11 @@ async function runTaskAppendNotes(parsed: ParsedArgs, connectUrl?: string): Prom
     }
     process.exit(0);
   } catch (err) {
-    exitCommandFailure(err, connectUrl);
+    exitCommandFailure(err, connect?.connectUrl);
   }
 }
 
-async function runTaskAdd(parsed: ParsedArgs, connectUrl?: string): Promise<never> {
+async function runTaskAdd(parsed: ParsedArgs, connect?: DaemonConnectContext): Promise<never> {
   const [runArg, extra] = parsed.positionals;
   const target = normalizeTarget(runArg);
   if (!target) {
@@ -1694,9 +1723,9 @@ async function runTaskAdd(parsed: ParsedArgs, connectUrl?: string): Promise<neve
 
   try {
     const task =
-      connectUrl === undefined
+      connect === undefined
         ? createTask(target, { title: parsed.taskTitle, body: parsed.taskBody })
-        : await withDaemonClient(connectUrl, (client) =>
+        : await withDaemonClient(connect, (client) =>
             client
               .call<{ task: ReturnType<typeof createTask> }>("tasks.add", {
                 target,
@@ -1712,7 +1741,7 @@ async function runTaskAdd(parsed: ParsedArgs, connectUrl?: string): Promise<neve
     }
     process.exit(0);
   } catch (err) {
-    exitCommandFailure(err, connectUrl);
+    exitCommandFailure(err, connect?.connectUrl);
   }
 }
 
@@ -1802,11 +1831,14 @@ async function runExecuteCommandEmbedded(parsed: ParsedArgs): Promise<never> {
   }
 }
 
-async function runExecuteCommandDaemon(parsed: ParsedArgs, connectUrl: string): Promise<never> {
+async function runExecuteCommandDaemon(
+  parsed: ParsedArgs,
+  connect: DaemonConnectContext,
+): Promise<never> {
   const isInitCommand = parsed.command === "init";
   const isJson = parsed.outputFormat === "json";
 
-  await withDaemonClient(connectUrl, async (client) => {
+  await withDaemonClient(connect, async (client) => {
     if (isInitCommand) {
       const result = await client.call<{ run: ReturnType<typeof getRun> }>("runs.init", {
         agent: normalizeTarget(parsed.agent),
@@ -1985,8 +2017,17 @@ async function main(): Promise<void> {
   }
 
   let connectUrl: string | undefined;
+  let daemonConnect: DaemonConnectContext | undefined;
   try {
-    connectUrl = resolveHostMode(parsed.connect).connectUrl;
+    const resolvedHostMode = resolveHostMode(
+      parsed.connect,
+      parsed.connectHost,
+      parsed.connectLocalPort,
+    );
+    if (resolvedHostMode.mode === "daemon") {
+      connectUrl = resolvedHostMode.connectUrl;
+      daemonConnect = resolvedHostMode;
+    }
   } catch (err) {
     process.stderr.write(`task-runner: ${errorMessage(err)}\n`);
     process.exit(3);
@@ -1999,75 +2040,84 @@ async function main(): Promise<void> {
     process.exit(3);
   }
 
+  let sshTunnel: SshTunnelHandle | undefined;
+  if (daemonConnect?.connectHost) {
+    try {
+      sshTunnel = await openSshTunnel(daemonConnect.connectHost);
+    } catch (err) {
+      exitCommandFailure(err, daemonConnect.connectUrl);
+    }
+  }
+
   if (parsed.command === "status") {
-    await runSystemStatus(parsed, connectUrl);
+    await runSystemStatus(parsed, daemonConnect);
   }
 
   if (parsed.command === "run") {
     if (parsed.subcommand === "status") {
-      await runRunStatus(parsed, connectUrl);
+      await runRunStatus(parsed, daemonConnect);
     }
     if (parsed.subcommand === "brief") {
-      await runRunBrief(parsed, connectUrl);
+      await runRunBrief(parsed, daemonConnect);
     }
     if (parsed.subcommand === "reset") {
-      await runResetCommand(parsed, connectUrl);
+      await runResetCommand(parsed, daemonConnect);
     }
     if (parsed.subcommand === "archive") {
-      await runArchiveToggleCommand(parsed, connectUrl, "archive");
+      await runArchiveToggleCommand(parsed, daemonConnect, "archive");
     }
     if (parsed.subcommand === "unarchive") {
-      await runArchiveToggleCommand(parsed, connectUrl, "unarchive");
+      await runArchiveToggleCommand(parsed, daemonConnect, "unarchive");
     }
     if (parsed.subcommand === "delete") {
-      await runDeleteCommand(parsed, connectUrl);
+      await runDeleteCommand(parsed, daemonConnect);
     }
     if (parsed.subcommand === "set-name") {
-      await runSetNameCommand(parsed, connectUrl);
+      await runSetNameCommand(parsed, daemonConnect);
     }
     if (parsed.subcommand === "set-note") {
-      await runNoteCommand(parsed, connectUrl, "set-note");
+      await runNoteCommand(parsed, daemonConnect, "set-note");
     }
     if (parsed.subcommand === "clear-note") {
-      await runNoteCommand(parsed, connectUrl, "clear-note");
+      await runNoteCommand(parsed, daemonConnect, "clear-note");
     }
     if (parsed.subcommand === "pin") {
-      await runPinnedCommand(parsed, connectUrl, "pin");
+      await runPinnedCommand(parsed, daemonConnect, "pin");
     }
     if (parsed.subcommand === "unpin") {
-      await runPinnedCommand(parsed, connectUrl, "unpin");
+      await runPinnedCommand(parsed, daemonConnect, "unpin");
     }
     if (parsed.subcommand === "set-backend-session") {
-      await runBackendSessionCommand(parsed, connectUrl, "set-backend-session");
+      await runBackendSessionCommand(parsed, daemonConnect, "set-backend-session");
     }
     if (parsed.subcommand === "clear-backend-session") {
-      await runBackendSessionCommand(parsed, connectUrl, "clear-backend-session");
+      await runBackendSessionCommand(parsed, daemonConnect, "clear-backend-session");
     }
     if (parsed.subcommand === "add-dep") {
-      await runDependencyCommand(parsed, connectUrl, "add-dep");
+      await runDependencyCommand(parsed, daemonConnect, "add-dep");
     }
     if (parsed.subcommand === "remove-dep") {
-      await runDependencyCommand(parsed, connectUrl, "remove-dep");
+      await runDependencyCommand(parsed, daemonConnect, "remove-dep");
     }
     if (parsed.subcommand === "clear-deps") {
-      await runDependencyCommand(parsed, connectUrl, "clear-deps");
+      await runDependencyCommand(parsed, daemonConnect, "clear-deps");
     }
   }
 
   if (parsed.command === "task") {
-    await runTaskCommand(parsed, connectUrl);
+    await runTaskCommand(parsed, daemonConnect);
   }
 
   if (parsed.command === "attachment") {
-    await runAttachmentCommand(parsed, connectUrl);
+    await runAttachmentCommand(parsed, daemonConnect);
   }
 
   if (parsed.command === "list") {
-    await runListCommand(parsed, connectUrl);
+    await runListCommand(parsed, daemonConnect);
   }
 
   if (parsed.command === "show") {
-    await runShowCommand(parsed, connectUrl);
+    await runShowCommand(parsed, daemonConnect);
   }
 
   if (parsed.command !== "run" && parsed.command !== "init") {
@@ -2076,10 +2126,14 @@ async function main(): Promise<void> {
     process.exit(3);
   }
 
-  if (connectUrl) {
-    await runExecuteCommandDaemon(parsed, connectUrl);
+  if (daemonConnect) {
+    await runExecuteCommandDaemon(parsed, daemonConnect);
   } else {
     await runExecuteCommandEmbedded(parsed);
+  }
+
+  if (sshTunnel) {
+    await sshTunnel.close();
   }
 }
 

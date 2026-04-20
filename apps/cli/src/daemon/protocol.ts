@@ -28,6 +28,8 @@ export type RunEventChannel = "run_summary" | "run_detail" | "run_timeline";
 export const DEFAULT_DAEMON_URL = "ws://127.0.0.1:4773/";
 export const TASK_RUNNER_LISTEN_ENV = "TASK_RUNNER_LISTEN";
 export const TASK_RUNNER_CONNECT_ENV = "TASK_RUNNER_CONNECT";
+export const TASK_RUNNER_CONNECT_HOST_ENV = "TASK_RUNNER_CONNECT_HOST";
+export const TASK_RUNNER_CONNECT_LOCAL_PORT_ENV = "TASK_RUNNER_CONNECT_LOCAL_PORT";
 export const RPC_ERROR_COMMAND = -32003;
 export const RPC_ERROR_RUNTIME = -32004;
 

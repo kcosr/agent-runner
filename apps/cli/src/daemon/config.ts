@@ -1,7 +1,30 @@
 import type { AppRuntimeConfig } from "@task-runner/core/contracts/app-config.js";
-import { DEFAULT_DAEMON_URL, TASK_RUNNER_CONNECT_ENV, TASK_RUNNER_LISTEN_ENV } from "./protocol.js";
+import {
+  DEFAULT_DAEMON_URL,
+  TASK_RUNNER_CONNECT_ENV,
+  TASK_RUNNER_CONNECT_HOST_ENV,
+  TASK_RUNNER_CONNECT_LOCAL_PORT_ENV,
+  TASK_RUNNER_LISTEN_ENV,
+} from "./protocol.js";
 
 export type HostMode = "embedded" | "daemon";
+export interface DaemonConnectHostConfig {
+  host: string;
+  localPort: number;
+  targetHost: string;
+  targetPort: number;
+}
+
+export type ResolvedHostMode =
+  | {
+      mode: "embedded";
+    }
+  | {
+      mode: "daemon";
+      connectUrl: string;
+      effectiveConnectUrl: string;
+      connectHost?: DaemonConnectHostConfig;
+    };
 
 function nonEmpty(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
@@ -40,12 +63,66 @@ export function resolveConnectUrl(
   return raw ? parseDaemonUrl(raw, "--connect").toString() : undefined;
 }
 
+function parseConnectLocalPort(raw: string): number {
+  if (!/^\d+$/.test(raw)) {
+    throw new Error("--connect-local-port must be an integer between 1 and 65535");
+  }
+  const port = Number(raw);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error("--connect-local-port must be an integer between 1 and 65535");
+  }
+  return port;
+}
+
+function deriveEffectiveConnectUrl(connectUrl: string, localPort: number): string {
+  const parsed = new URL(connectUrl);
+  parsed.hostname = "127.0.0.1";
+  parsed.port = String(localPort);
+  return parsed.toString();
+}
+
 export function resolveHostMode(
   connectFlag?: string,
+  connectHostFlag?: string,
+  connectLocalPortFlag?: string,
   env: NodeJS.ProcessEnv = process.env,
-): { mode: HostMode; connectUrl?: string } {
+): ResolvedHostMode {
   const connectUrl = resolveConnectUrl(connectFlag, env);
-  return connectUrl ? { mode: "daemon", connectUrl } : { mode: "embedded" };
+  const connectHost = nonEmpty(connectHostFlag) ?? nonEmpty(env[TASK_RUNNER_CONNECT_HOST_ENV]);
+  const connectLocalPortRaw =
+    nonEmpty(connectLocalPortFlag) ?? nonEmpty(env[TASK_RUNNER_CONNECT_LOCAL_PORT_ENV]);
+
+  if (connectHost && !connectUrl) {
+    throw new Error("--connect-host requires --connect or TASK_RUNNER_CONNECT");
+  }
+  if (connectLocalPortRaw && !connectHost) {
+    throw new Error("--connect-local-port requires --connect-host or TASK_RUNNER_CONNECT_HOST");
+  }
+  if (!connectUrl) {
+    return { mode: "embedded" };
+  }
+  if (!connectHost) {
+    return {
+      mode: "daemon",
+      connectUrl,
+      effectiveConnectUrl: connectUrl,
+    };
+  }
+
+  const parsed = new URL(connectUrl);
+  const targetPort = Number(parsed.port);
+  const localPort = connectLocalPortRaw ? parseConnectLocalPort(connectLocalPortRaw) : targetPort;
+  return {
+    mode: "daemon",
+    connectUrl,
+    effectiveConnectUrl: deriveEffectiveConnectUrl(connectUrl, localPort),
+    connectHost: {
+      host: connectHost,
+      localPort,
+      targetHost: parsed.hostname,
+      targetPort,
+    },
+  };
 }
 
 export function listenSocketConfig(listenUrl: string): {

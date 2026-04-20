@@ -105,6 +105,27 @@ test("parseArgs: top-level status captures --connect without a run id", () => {
   assert.equal(parsed.connect, "ws://127.0.0.1:4773/");
 });
 
+test("parseArgs: captures --connect-host and --connect-local-port", () => {
+  const parsed = parseArgs(
+    argv(
+      "status",
+      "--connect",
+      "ws://127.0.0.1:4773/",
+      "--connect-host",
+      "prod-box",
+      "--connect-local-port",
+      "5773",
+    ),
+  );
+  assert.equal(parsed.connectHost, "prod-box");
+  assert.equal(parsed.connectLocalPort, "5773");
+});
+
+test("parseArgs: --connect-host and --connect-local-port require values", () => {
+  assert.throws(() => parseArgs(argv("status", "--connect-host")), /requires a value/);
+  assert.throws(() => parseArgs(argv("status", "--connect-local-port")), /requires a value/);
+});
+
 test("parseArgs: run status parses as a grouped run subcommand", () => {
   const parsed = parseArgs(argv("run", "status", "abc123", "--field", "tasks"));
   assert.equal(parsed.command, "run");
