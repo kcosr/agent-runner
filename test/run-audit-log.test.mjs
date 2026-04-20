@@ -87,6 +87,12 @@ function writeAssignment(baseDir, name, body) {
   writeFileSync(join(dir, "assignment.md"), body);
 }
 
+function writeNamedHook(baseDir, name, body) {
+  const dir = join(baseDir, "hooks", name);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "hook.ts"), body);
+}
+
 function writeAuditBundle(baseDir) {
   writeAgent(baseDir, "audit-active", ACTIVE_AGENT);
   writeAgent(baseDir, "audit-passive", PASSIVE_AGENT);
@@ -251,6 +257,136 @@ test("execute-after-init appends ordered created/started/attempt/finished record
   assert.equal(raw.includes("secret transcript"), false);
   assert.equal(raw.includes("stdout-secret"), false);
   assert.equal(raw.includes("stderr-secret"), false);
+});
+
+test("hook executions append compact run.hook_recorded records for prepare and attempt phases", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "audit-active", ACTIVE_AGENT);
+  writeAssignment(
+    dir,
+    "audit-active-work",
+    `---
+schemaVersion: 1
+name: audit-active-work
+maxRetries: 1
+hooks:
+  prepare:
+    - name: audit-prepare
+  beforeAttempt:
+    - name: audit-before
+  afterAttempt:
+    - name: audit-after
+tasks:
+  - id: t1
+    title: First
+---
+Audit active assignment.
+`,
+  );
+  writeNamedHook(
+    dir,
+    "audit-prepare",
+    `export default {
+  name: "audit-prepare",
+  prepare() {
+    return {
+      action: "continue",
+      mutate: { note: "prepared-for-audit" },
+    };
+  },
+};
+`,
+  );
+  writeNamedHook(
+    dir,
+    "audit-before",
+    `export default {
+  name: "audit-before",
+  beforeAttempt() {
+    return { action: "continue" };
+  },
+};
+`,
+  );
+  writeNamedHook(
+    dir,
+    "audit-after",
+    `export default {
+  name: "audit-after",
+  afterAttempt() {
+    return { action: "continue" };
+  },
+};
+`,
+  );
+
+  const outcome = await runIn(dir, {
+    agentName: "audit-active",
+    assignmentName: "audit-active-work",
+    backend: mockBackend(async (ctx) => {
+      completeAllTasksFromPrompt(ctx.prompt, dir);
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "hook-audit-thread",
+        transcript: "",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    }),
+  });
+
+  const hookEvents = readAuditRecords(outcome.workspaceDir).filter(
+    (record) => record.eventType === "run.hook_recorded",
+  );
+  assert.equal(hookEvents.length, 3);
+  assert.deepEqual(
+    hookEvents.map((record) => ({
+      phase: record.phase,
+      hookId: record.hookId,
+      outcome: record.outcome,
+      sessionIndex: record.sessionIndex ?? null,
+      attempt: record.attempt ?? null,
+      taskId: record.taskId ?? null,
+      summary: record.summary ?? null,
+    })),
+    [
+      {
+        phase: "prepare",
+        hookId: "prepare:0:audit-prepare",
+        outcome: "continue",
+        sessionIndex: null,
+        attempt: null,
+        taskId: null,
+        summary: null,
+      },
+      {
+        phase: "beforeAttempt",
+        hookId: "beforeAttempt:0:audit-before",
+        outcome: "continue",
+        sessionIndex: 0,
+        attempt: 1,
+        taskId: null,
+        summary: null,
+      },
+      {
+        phase: "afterAttempt",
+        hookId: "afterAttempt:0:audit-after",
+        outcome: "continue",
+        sessionIndex: 0,
+        attempt: 1,
+        taskId: null,
+        summary: null,
+      },
+    ],
+  );
+  for (const record of hookEvents) {
+    assert.equal(typeof record.startedAt, "string");
+    assert.equal(typeof record.endedAt, "string");
+    assert.equal(record.source, "system");
+    assert.equal(record.hostMode, "embedded");
+  }
 });
 
 test("fresh run and later resume append backend capture and resumed-session audit records", async () => {
@@ -520,6 +656,77 @@ test("command and task mutations append compact records, preserve history on res
   assert.equal(existsSync(init.workspaceDir), false);
 });
 
+test("task-transition hooks append compact run.hook_recorded records with task ids", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "audit-passive", PASSIVE_AGENT);
+  writeAssignment(
+    dir,
+    "audit-passive-work",
+    `---
+schemaVersion: 1
+name: audit-passive-work
+hooks:
+  taskTransition:
+    - name: audit-task-transition
+tasks:
+  - id: t1
+    title: First
+    body: Do thing one.
+---
+Audit passive assignment.
+`,
+  );
+  writeNamedHook(
+    dir,
+    "audit-task-transition",
+    `export default {
+  name: "audit-task-transition",
+  taskTransition() {
+    return { accept: true };
+  },
+};
+`,
+  );
+
+  const init = await runIn(dir, {
+    agentName: "audit-passive",
+    assignmentName: "audit-passive-work",
+    backend: mockBackend(async () => {
+      throw new Error("backend should not be invoked during init");
+    }, "passive"),
+    initialize: true,
+  });
+
+  runCli(["task", "set", init.runId, "t1", "--status", "in_progress"], { cwd: dir });
+
+  const hookEvents = readAuditRecords(init.workspaceDir).filter(
+    (record) => record.eventType === "run.hook_recorded",
+  );
+  assert.equal(hookEvents.length, 1);
+  assert.deepEqual(
+    {
+      phase: hookEvents[0].phase,
+      hookId: hookEvents[0].hookId,
+      outcome: hookEvents[0].outcome,
+      sessionIndex: hookEvents[0].sessionIndex ?? null,
+      attempt: hookEvents[0].attempt ?? null,
+      taskId: hookEvents[0].taskId ?? null,
+      summary: hookEvents[0].summary ?? null,
+      source: hookEvents[0].source,
+    },
+    {
+      phase: "taskTransition",
+      hookId: "taskTransition:0:audit-task-transition",
+      outcome: "accepted",
+      sessionIndex: null,
+      attempt: null,
+      taskId: "t1",
+      summary: null,
+      source: "task_command",
+    },
+  );
+});
+
 test("audit append failure after attempt persistence does not duplicate the attempt record", async () => {
   const dir = tempDir();
   writeAuditBundle(dir);
@@ -613,8 +820,8 @@ test("daemon-context task commands append one task event with daemon host metada
     initialize: true,
   });
 
-  withSharedRuntimeEnv(dir, () => {
-    updateTaskViaApp(
+  await withSharedRuntimeEnv(dir, async () => {
+    await updateTaskViaApp(
       init.runId,
       "t1",
       { status: "in_progress" },

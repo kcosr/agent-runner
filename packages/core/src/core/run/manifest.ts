@@ -17,6 +17,7 @@ import {
   isWsOrWssUrl,
 } from "../backends/types.js";
 import type { LockableField } from "../config/schema.js";
+import type { HookAuditRecord, ResolvedHookDescriptor } from "../hooks/types.js";
 
 export type ManifestStatus =
   | "initialized"
@@ -63,9 +64,13 @@ export interface TaskSnapshot {
 }
 
 export interface RunResetSeed {
+  backend: string;
   model: string | null;
   effort: string | null;
   backendSpecific?: BackendSpecificConfig;
+  cwd: string;
+  lockedFields: LockableField[];
+  message: string | null;
   name: string | null;
   note: string | null;
   pinned: boolean;
@@ -74,6 +79,9 @@ export interface RunResetSeed {
   timeoutSec: number;
   maxAttempts: number;
   brief: string;
+  runtimeVars: Record<string, unknown>;
+  hookState: Record<string, unknown>;
+  attachments: RunAttachment[];
   finalTasks: Record<string, TaskSnapshot>;
 }
 
@@ -138,13 +146,13 @@ export interface AssignmentInfo {
 // `timeoutSec` are all captured at init / fresh-run time and preserved
 // across all subsequent sessions.
 //
-// schemaVersion: 8 is the current manifest-canonical generation. Manifests written
+// schemaVersion: 9 is the current manifest-canonical generation. Manifests written
 // by earlier task-runner versions are not resumable by this version —
 // `isRunManifest` rejects them and
 // `resolveResumeTarget` surfaces a clear error telling the caller to
 // create a fresh run.
 export interface RunManifest {
-  schemaVersion: 8;
+  schemaVersion: 9;
   runId: string;
   repo: string;
   agent: {
@@ -192,6 +200,9 @@ export interface RunManifest {
   runtimeVars: Record<string, unknown>;
   execution: RunExecution;
   brief: string;
+  resolvedHooks: ResolvedHookDescriptor[];
+  hookState: Record<string, unknown>;
+  hookAudits: HookAuditRecord[];
   // Assignment-level documentation surface for the caller of
   // task-runner (the human or script invoking `run` / `init`).
   // Frozen at first write from `assignmentConfig.callerInstructions`
@@ -240,16 +251,24 @@ export function buildRunResetSeed(seed: RunResetSeed): RunResetSeed {
   return {
     ...seed,
     backendSpecific: cloneBackendSpecificConfig(seed.backendSpecific),
+    lockedFields: [...seed.lockedFields],
     dependencyRunIds: [...seed.dependencyRunIds],
+    runtimeVars: { ...seed.runtimeVars },
+    hookState: { ...seed.hookState },
+    attachments: seed.attachments.map((attachment) => ({ ...attachment })),
     finalTasks: cloneTaskSnapshots(seed.finalTasks),
   };
 }
 
 export function applyRunResetSeed(manifest: RunManifest): void {
   const seed = manifest.resetSeed;
+  manifest.backend = seed.backend;
   manifest.model = seed.model;
   manifest.effort = seed.effort;
   manifest.backendSpecific = cloneBackendSpecificConfig(seed.backendSpecific);
+  manifest.cwd = seed.cwd;
+  manifest.lockedFields = [...seed.lockedFields];
+  manifest.message = seed.message;
   manifest.name = seed.name;
   manifest.note = seed.note;
   manifest.pinned = seed.pinned;
@@ -263,6 +282,9 @@ export function applyRunResetSeed(manifest: RunManifest): void {
   manifest.attempts = 0;
   manifest.backendSessionId = null;
   manifest.brief = seed.brief;
+  manifest.runtimeVars = { ...seed.runtimeVars };
+  manifest.hookState = { ...seed.hookState };
+  manifest.attachments = seed.attachments.map((attachment) => ({ ...attachment }));
   manifest.finalTasks = cloneTaskSnapshots(seed.finalTasks);
   manifest.tasksCompleted = Object.values(manifest.finalTasks).filter(
     (task) => task.status === "completed",
@@ -349,11 +371,11 @@ function readManifestCandidate(candidate: string): RunManifest {
     typeof parsed === "object" &&
     "schemaVersion" in parsed &&
     typeof (parsed as { schemaVersion: unknown }).schemaVersion === "number" &&
-    (parsed as { schemaVersion: number }).schemaVersion !== 8
+    (parsed as { schemaVersion: number }).schemaVersion !== 9
   ) {
     const version = (parsed as { schemaVersion: number }).schemaVersion;
     throw new ResumeError(
-      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 8. Manifests from earlier versions cannot be resumed — create a fresh run (task-runner init / run).`,
+      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 9. Manifests from earlier versions cannot be resumed — create a fresh run (task-runner init / run).`,
     );
   }
   if (!isRunManifest(parsed)) {
@@ -515,7 +537,7 @@ export function findRunManifestsById(
 function isRunManifest(value: unknown): value is RunManifest {
   if (!value || typeof value !== "object") return false;
   const obj = value as Record<string, unknown>;
-  if (obj.schemaVersion !== 8) return false;
+  if (obj.schemaVersion !== 9) return false;
   if (typeof obj.runId !== "string") return false;
   if (typeof obj.repo !== "string") return false;
 
@@ -550,6 +572,8 @@ function isRunManifest(value: unknown): value is RunManifest {
   if (typeof obj.tasksTotal !== "number") return false;
   if (typeof obj.sessionCount !== "number") return false;
   if (typeof obj.brief !== "string") return false;
+  if (!Array.isArray(obj.resolvedHooks)) return false;
+  if (!Array.isArray(obj.hookAudits)) return false;
 
   // Arrays.
   if (!Array.isArray(obj.attemptRecords)) return false;
@@ -581,6 +605,7 @@ function isRunManifest(value: unknown): value is RunManifest {
   // so these need explicit null rejection.
   if (!obj.finalTasks || typeof obj.finalTasks !== "object") return false;
   if (!obj.runtimeVars || typeof obj.runtimeVars !== "object") return false;
+  if (!obj.hookState || typeof obj.hookState !== "object") return false;
   if (!obj.resetSeed || typeof obj.resetSeed !== "object") return false;
   if (!obj.execution || typeof obj.execution !== "object") return false;
   if (!isValidPersistedBackendSpecific(obj.backendSpecific, false)) return false;
@@ -591,11 +616,15 @@ function isRunManifest(value: unknown): value is RunManifest {
   }
 
   const resetSeed = obj.resetSeed as Record<string, unknown>;
+  if (typeof resetSeed.backend !== "string") return false;
   if (resetSeed.model !== null && typeof resetSeed.model !== "string") return false;
   if (resetSeed.effort !== null && typeof resetSeed.effort !== "string") return false;
   if (!isValidPersistedBackendSpecific(resetSeed.backendSpecific, false)) {
     return false;
   }
+  if (typeof resetSeed.cwd !== "string") return false;
+  if (!Array.isArray(resetSeed.lockedFields)) return false;
+  if (resetSeed.message !== null && typeof resetSeed.message !== "string") return false;
   if (resetSeed.name !== null && typeof resetSeed.name !== "string") return false;
   if (
     resetSeed.note !== undefined &&
@@ -615,6 +644,9 @@ function isRunManifest(value: unknown): value is RunManifest {
   if (typeof resetSeed.timeoutSec !== "number") return false;
   if (typeof resetSeed.maxAttempts !== "number") return false;
   if (typeof resetSeed.brief !== "string") return false;
+  if (!resetSeed.runtimeVars || typeof resetSeed.runtimeVars !== "object") return false;
+  if (!resetSeed.hookState || typeof resetSeed.hookState !== "object") return false;
+  if (!Array.isArray(resetSeed.attachments)) return false;
   if (!resetSeed.finalTasks || typeof resetSeed.finalTasks !== "object") return false;
 
   // Nested agent record.

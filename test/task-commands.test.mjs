@@ -63,6 +63,12 @@ function writeAssignment(baseDir, name, body) {
   writeFileSync(join(dir, "assignment.md"), body);
 }
 
+function writeAssignmentHook(baseDir, assignmentName, relativePath, body) {
+  const dir = join(baseDir, "assignments", assignmentName, "hooks");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, relativePath), body);
+}
+
 function writeBundle(baseDir, assignmentBody = ASSIGNMENT, assignmentName = "task-cmd-work") {
   writeAgent(baseDir, "task-cmd-agent", AGENT);
   writeAssignment(baseDir, assignmentName, assignmentBody);
@@ -267,6 +273,68 @@ test("task set: allowed while manifest status=running", async () => {
       canAdd: false,
     },
   });
+});
+
+test("task set: taskTransition path hook rejects completion, rolls back task state, and applies note mutation", async () => {
+  const dir = tempDir();
+  writeBundle(
+    dir,
+    `---
+schemaVersion: 1
+name: task-cmd-work
+maxRetries: 1
+hooks:
+  taskTransition:
+    - path: ./hooks/guard.mts
+      when:
+        toStatus: ["completed"]
+tasks:
+  - id: t1
+    title: First
+    body: Do thing one.
+---
+Work.
+`,
+  );
+  writeAssignmentHook(
+    dir,
+    "task-cmd-work",
+    "guard.mts",
+    `export default {
+  name: "guard",
+  taskTransition(ctx) {
+    if (ctx.transition.to.notes.includes("OK")) {
+      return { accept: true };
+    }
+    return {
+      accept: false,
+      reason: "notes must include OK",
+      mutate: { note: "completion blocked" },
+    };
+  },
+};
+`,
+  );
+  const outcome = await initRun(dir);
+
+  const rejected = runCliExpectFail(
+    ["task", "set", outcome.runId, "t1", "--status", "completed", "--notes", "not yet"],
+    { cwd: dir },
+  );
+  assert.equal(rejected.status, 3);
+  assert.match(rejected.stderr, /notes must include OK/);
+
+  let manifest = readManifest(outcome.workspaceDir);
+  assert.equal(manifest.finalTasks.t1.status, "pending");
+  assert.equal(manifest.finalTasks.t1.notes, "");
+  assert.equal(manifest.note, "completion blocked");
+
+  runCli(["task", "set", outcome.runId, "t1", "--status", "completed", "--notes", "OK to ship"], {
+    cwd: dir,
+  });
+  manifest = readManifest(outcome.workspaceDir);
+  assert.equal(manifest.finalTasks.t1.status, "completed");
+  assert.equal(manifest.finalTasks.t1.notes, "OK to ship");
 });
 
 test("task set: preserves existing manifest task state when CLI touches a different task", async () => {

@@ -18,6 +18,7 @@ export type RunEventType =
   | "run.started"
   | "run.resumed"
   | "run.backend_session_updated"
+  | "run.hook_recorded"
   | "run.attempt_recorded"
   | "run.retrying"
   | "run.finished"
@@ -229,6 +230,42 @@ export function appendRunAttemptRecordedEvent(params: {
       timedOut: params.timedOut,
       backendSessionIdAtStart: params.backendSessionIdAtStart,
       backendSessionIdCaptured: params.backendSessionIdCaptured,
+    },
+  });
+}
+
+export function appendRunHookRecordedEvent(params: {
+  manifest: Pick<RunManifest, "workspaceDir" | "runId">;
+  context: RunEventWriteContext;
+  phase: string;
+  hookId: string;
+  outcome: string;
+  startedAt: string;
+  endedAt: string;
+  sessionIndex?: number | null;
+  attempt?: number | null;
+  taskId?: string | null;
+  summary?: string | null;
+}): void {
+  appendRunEvent({
+    workspaceDir: params.manifest.workspaceDir,
+    runId: params.manifest.runId,
+    eventType: "run.hook_recorded",
+    context: params.context,
+    ...(params.sessionIndex !== null && params.sessionIndex !== undefined
+      ? { sessionIndex: params.sessionIndex }
+      : {}),
+    ...(params.attempt !== null && params.attempt !== undefined ? { attempt: params.attempt } : {}),
+    fields: {
+      phase: params.phase,
+      hookId: params.hookId,
+      outcome: params.outcome,
+      startedAt: params.startedAt,
+      endedAt: params.endedAt,
+      ...(params.taskId !== null && params.taskId !== undefined ? { taskId: params.taskId } : {}),
+      ...(params.summary !== null && params.summary !== undefined
+        ? { summary: params.summary }
+        : {}),
     },
   });
 }

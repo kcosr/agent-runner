@@ -56,9 +56,10 @@ You can use `task-runner` in two main modes:
   actually marked complete before the run is treated as done.
 
 Today the built-in validation is task-state based: did the worker
-actually complete the checklist it was given? A future extension surface
-is likely to add deterministic hooks that can inspect the work directly
-(for example `git status`, tests, linters, or custom scripts).
+actually complete the checklist it was given? Assignments can also
+declare deterministic hooks that run at prepare time, around attempts,
+or during task transitions to block, re-invoke, mutate run metadata, or
+stage attachments before the run continues.
 
 ## What task-runner is not
 
@@ -166,6 +167,46 @@ task-runner serve
 
 `task-runner serve` starts the local daemon. The web UI talks to that
 same daemon and is not a standalone app.
+
+### Hooked assignment
+
+```yaml
+---
+schemaVersion: 1
+name: repo-work
+vars:
+  worktree_path:
+    type: string
+    required: true
+    requiredAt: prepare
+hooks:
+  prepare:
+    - builtin: git-worktree
+      with:
+        repo: "{{cwd}}"
+        from: main
+        branch: review-worktree
+        path: "{{cwd}}/.worktrees/review-worktree"
+    - builtin: git-sync-base
+      with:
+        repo: "{{cwd}}/.worktrees/review-worktree"
+        baseRef: origin/main
+  beforeAttempt:
+    - builtin: command
+      when:
+        sessionIndex: [0]
+      with:
+        mode: status
+        command: npm
+        args: ["test", "--", "smoke"]
+---
+Work on the repo.
+```
+
+Named hooks resolve from `${TASK_RUNNER_CONFIG_DIR}/hooks/<hook-name>/hook.(ts|mts|js|mjs)`.
+Assignment-local path hooks resolve relative to the authored
+`assignment.md`. Raw `.ts` / `.mts` hooks load directly through the core
+runtime's `jiti` loader, so hook authors do not need to precompile them.
 
 CLI commands can either:
 
@@ -337,12 +378,6 @@ task-runner today.
   gates resume. A future step is to automatically start a dependent
   run when all its prerequisites reach `status=success`. See
   [docs/dependencies.md](docs/dependencies.md).
-- **Run lifecycle hooks with re-invocation** — a pluggable pre-run /
-  post-run hook surface. This generalizes the one built-in validation
-  task-runner ships with today (did the agent mark every task
-  completed?): hooks could run arbitrary checks — tests, linters,
-  custom scripts — and re-invoke the agent when they fail, even if
-  the task checklist claims the work is done.
 - **Improved run provenance tracking** — today manifests record which
   host/controller executed the latest session (`execution.hostMode`,
   `execution.controller.daemonInstanceId`). A richer audit trail —

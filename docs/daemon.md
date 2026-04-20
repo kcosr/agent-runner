@@ -94,7 +94,7 @@ All routes are under `/api/`.
 | Method | Path | Effect |
 |--------|------|--------|
 | `GET` | `/api/runs` | List runs. Query: `includeArchived`, `cwd`, `repo`, `global` |
-| `GET` | `/api/runs/:runId` | Full `RunDetail` |
+| `GET` | `/api/runs/:runId` | Full `RunDetail` (including frozen hook descriptors/state/audits when present) |
 | `POST` | `/api/runs/init` | Initialize a run |
 | `POST` | `/api/runs` | Start a run |
 | `POST` | `/api/runs/:runId/resume` | Resume an initialized/terminal run |
@@ -219,8 +219,8 @@ HTTP SSE route and WebSocket notification method.
 
 Drives board cards. The global summary stream is projection-only — it
 never carries transcript deltas. `RunSummary` now includes persisted
-`pinned` and derived `notePresent` so cards and filters can react
-without fetching full detail.
+`pinned`, derived `notePresent`, and `hookCount` so cards and filters
+can react without fetching full detail.
 
 ### Per-run detail
 
@@ -233,6 +233,12 @@ Drives the detail drawer. Passive backend-session edits are detail
 mutations: the daemon publishes a fresh `RunDetail` on set/clear. Note
 and pin mutations publish both detail and summary updates so the board
 and the selected drawer stay synchronized.
+
+`RunDetail` now carries hook data inside the existing payload:
+
+- `resolvedHooks`
+- `hookState`
+- `hookAudits`
 
 ### Per-run timeline
 
@@ -252,6 +258,10 @@ Cursor is a monotonic opaque sequence number. The bootstrap flow is:
 
 The daemon retains a short in-memory window of recent timeline events so
 late subscribers can catch up during and shortly after a run completes.
+Hook executions do not mint new event names. Hook-driven task, note,
+pin, and attachment mutations surface through the same summary/detail
+channels above, while attempt lifecycle hooks still appear through the
+normal timeline envelopes.
 
 ## Shared DTOs
 
@@ -259,10 +269,12 @@ The contracts shared between CLI, daemon, and web are in
 `packages/core/src/contracts/`:
 
 - `RunSummary` — board projection, includes `dependencyState`,
-  `activeTask`, `pinned`, `notePresent`, and `capabilities`.
+  `activeTask`, `pinned`, `notePresent`, `hookCount`, and
+  `capabilities`.
 - `RunDetail` — drawer projection: tasks, dependencies, dependents,
   attachments, locked fields, runtime vars, session history, backend
-  session, full `note`, and `pinned`.
+  session, full `note`, `pinned`, `resolvedHooks`, `hookState`, and
+  `hookAudits`.
 - `RunCapabilities` — lifecycle gates: `canArchive`, `canUnarchive`,
   `canReset`, `canDelete`, `canResume`, `canAbort` (+ `abortReason`),
   and `taskMutation` sub-booleans.

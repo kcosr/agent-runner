@@ -125,6 +125,13 @@ quickly; a "settling" indicator appears until the first snapshot lands.
 If the summary stream drops, the board shows a stale banner with a
 retry button. Reconnects reconcile through the cached query state.
 
+Hook-visible state follows the same summary/detail channels. The board
+can observe `RunSummary.hookCount`, and the drawer's backing `RunDetail`
+includes `resolvedHooks`, `hookState`, and `hookAudits`, but the current
+UI does not render a dedicated hook panel. Hook-driven task, note, pin,
+and attachment mutations still appear live because they reuse the
+existing summary/detail/timeline caches.
+
 ## Capability-gated actions
 
 Every action button consults the run's `RunCapabilities`:

@@ -342,8 +342,10 @@ export function updateTask(
   taskId: string,
   update: { status?: string; notes?: string },
   auditContext?: MutationAuditContext,
-): RunTaskSummary {
-  return getTaskFromMutation(setTask(target, taskId, update, auditContext).task);
+): Promise<RunTaskSummary> {
+  return setTask(target, taskId, update, auditContext).then((result) =>
+    getTaskFromMutation(result.task),
+  );
 }
 
 export function appendNotes(
@@ -351,16 +353,18 @@ export function appendNotes(
   taskId: string,
   text: string,
   auditContext?: MutationAuditContext,
-): RunTaskSummary {
-  return getTaskFromMutation(appendTaskNotes(target, taskId, text, auditContext).task);
+): Promise<RunTaskSummary> {
+  return appendTaskNotes(target, taskId, text, auditContext).then((result) =>
+    getTaskFromMutation(result.task),
+  );
 }
 
 export function createTask(
   target: string,
   input: { title: string; body?: string },
   auditContext?: MutationAuditContext,
-): RunTaskSummary {
-  return getTaskFromMutation(addTask(target, input, auditContext).task);
+): Promise<RunTaskSummary> {
+  return addTask(target, input, auditContext).then((result) => getTaskFromMutation(result.task));
 }
 
 function getTaskFromMutation(task: ReturnType<typeof showTask>["task"]): RunTaskSummary {

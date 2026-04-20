@@ -7,6 +7,7 @@ export const TASK_RUNNER_STATE_DIR_ENV = "TASK_RUNNER_STATE_DIR";
 export const UNKNOWN_REPO_KEY = "unknown";
 
 type DefinitionKind = "agent" | "assignment";
+const HOOK_FILENAME_CANDIDATES = ["hook.ts", "hook.mts", "hook.js", "hook.mjs"] as const;
 
 function nonEmpty(value: string | undefined): string | undefined {
   return value && value.length > 0 ? value : undefined;
@@ -64,6 +65,18 @@ export function resolveDefinitionRoot(
 ): string {
   const { dirName } = definitionLayout(kind);
   return join(resolveTaskRunnerConfigDir(env), dirName);
+}
+
+export function resolveHooksRoot(env: NodeJS.ProcessEnv = process.env): string {
+  return join(resolveTaskRunnerConfigDir(env), "hooks");
+}
+
+export function hookFilenameCandidates(): readonly string[] {
+  return HOOK_FILENAME_CANDIDATES;
+}
+
+export function resolveNamedHookDir(id: string, env: NodeJS.ProcessEnv = process.env): string {
+  return join(resolveHooksRoot(env), id);
 }
 
 export function slugifyRepoKey(path: string): string {

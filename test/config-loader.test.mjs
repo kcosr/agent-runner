@@ -284,6 +284,60 @@ Assignment body for \${BODY_TARGET}.
     ),
   ));
 
+test("loadAssignmentConfig accepts hooks and vars.requiredAt", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    writeAssignment(
+      configDir,
+      "hooked-work",
+      `---
+schemaVersion: 1
+name: hooked-work
+vars:
+  worktree_path:
+    type: string
+    required: true
+    requiredAt: prepare
+hooks:
+  prepare:
+    - name: named-prepare
+      with:
+        path: "{{cwd}}/prepared"
+  taskTransition:
+    - path: ./hooks/guard.mts
+      when:
+        toStatus: ["completed"]
+---
+body
+`,
+    );
+
+    const loaded = loadAssignmentConfig("hooked-work", rootDir);
+    assert.equal(loaded.config.vars.worktree_path.requiredAt, "prepare");
+    assert.equal(loaded.config.hooks.prepare.length, 1);
+    assert.equal(loaded.config.hooks.prepare[0].name, "named-prepare");
+    assert.equal(loaded.config.hooks.taskTransition[0].path, "./hooks/guard.mts");
+  }));
+
+test("loadAssignmentConfig rejects hook entries without exactly one source selector", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    writeAssignment(
+      configDir,
+      "bad-hook-work",
+      `---
+schemaVersion: 1
+name: bad-hook-work
+hooks:
+  prepare:
+    - builtin: command
+      name: duplicate
+---
+body
+`,
+    );
+
+    assert.throws(() => loadAssignmentConfig("bad-hook-work", rootDir), AssignmentConfigError);
+  }));
+
 for (const { name, expression, envValue, expected } of [
   {
     name: "exact env field uses the current value when set",

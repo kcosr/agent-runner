@@ -1,6 +1,7 @@
 import { copyFileSync, mkdirSync, readFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import type { TaskState, TaskStatus } from "../../assignment/model.js";
+import { resolveBackend } from "../../backends/registry.js";
 import {
   deriveRepoKey,
   resolveRunWorkspaceDirForRepo,
@@ -22,6 +23,8 @@ import type {
 import { interpolate } from "../config/interpolate.js";
 import type { LoadedAgent, LoadedAssignment } from "../config/loaded.js";
 import type { LockableField, VarDef } from "../config/schema.js";
+import { resolveAssignmentHooks } from "../hooks/loader.js";
+import { createHookExecutionState, runAttemptHooks, runPrepareHooks } from "../hooks/runtime.js";
 import {
   type AttemptRecord,
   type ResolvedResumeTarget,
@@ -68,6 +71,7 @@ import {
   refreshManifestTaskState,
   syncManifestTaskState,
   withTaskStateLock,
+  withTaskStateLockAsync,
 } from "./workspace-state.js";
 
 export interface RunOverrides {
@@ -598,7 +602,7 @@ function resolveVars(
       source = "default";
     }
     if (value === undefined) {
-      if (def.required) {
+      if (def.required && def.requiredAt !== "prepare") {
         throw new VarResolutionError(`missing required var: ${key}`);
       }
       continue;
@@ -610,6 +614,28 @@ function resolveVars(
   return { values, sources };
 }
 
+function validateRequiredVars(
+  varsSchema: Record<string, VarDef>,
+  values: Record<string, unknown>,
+  requiredAt: "initial" | "prepare",
+): void {
+  for (const [key, def] of Object.entries(varsSchema)) {
+    if (!def.required || def.requiredAt !== requiredAt) {
+      continue;
+    }
+    if (values[key] === undefined) {
+      throw new VarResolutionError(`missing required ${requiredAt} var: ${key}`);
+    }
+  }
+}
+
+function resolveRuntimeBackend(backendId: string, fallback: Backend): Backend {
+  if (backendId === fallback.id) {
+    return fallback;
+  }
+  return resolveBackend(backendId);
+}
+
 function defaultResumeFailureDetector(result: BackendInvokeResult): boolean {
   if (result.exitCode === 0 || result.exitCode === null) return false;
   const stderr = result.rawStderr.toLowerCase();
@@ -619,6 +645,32 @@ function defaultResumeFailureDetector(result: BackendInvokeResult): boolean {
     stderr.includes("could not find session") ||
     stderr.includes("unknown session")
   );
+}
+
+function buildFreshInitialPrompt(
+  agentInstructions: string,
+  assignmentInstructions: string,
+  hasTasks: boolean,
+  message: string,
+  injectedVars: Record<string, unknown>,
+): string {
+  const parts: string[] = [];
+  if (agentInstructions.length > 0) {
+    parts.push(interpolate(agentInstructions, injectedVars));
+  }
+  if (assignmentInstructions.length > 0) {
+    parts.push(interpolate(assignmentInstructions, injectedVars));
+  }
+  if (hasTasks) {
+    parts.push(interpolate(WORKER_BRIEF_TEMPLATE, injectedVars));
+  }
+  if (message.length > 0) {
+    parts.push(message);
+  }
+  if (parts.length === 0) {
+    throw new EmptyPromptError();
+  }
+  return parts.join("\n\n");
 }
 
 function countBy(tasks: Map<string, TaskState>, predicate: (t: TaskState) => boolean): number {
@@ -835,23 +887,24 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     checkLockedFieldsFromManifest(resume.manifest, overrides, addedTitles);
   }
 
-  const cwd = resume
+  let cwd = resume
     ? resume.manifest.cwd
     : resolveFreshRunCwd(loadedAssignment, overrides, opts.callerCwd);
-  const repo = resume ? resume.manifest.repo : deriveRepoKey(cwd);
-  const effectiveBackendId = backend.id;
+  let repo = resume ? resume.manifest.repo : deriveRepoKey(cwd);
+  let effectiveBackendId = backend.id;
+  let currentBackend = backend;
   // When --backend overrides the agent's backend, the agent's `model`
   // is also dropped (since model strings are backend-specific). Pass
   // --model alongside --backend to set one for the new backend.
   const backendOverridden = overrides?.backend !== undefined;
-  const model = overrides?.model ?? (backendOverridden ? undefined : agentConfig.model);
-  const effort = overrides?.effort ?? agentConfig.effort;
+  let model = overrides?.model ?? (backendOverridden ? undefined : agentConfig.model);
+  let effort = overrides?.effort ?? agentConfig.effort;
   const backendSpecific = resume
     ? resolveManifestBackendSpecific(resume.manifest)
     : resolveFreshBackendSpecific(effectiveBackendId, agentConfig, overrides, execution);
   const message = overrides?.message ?? assignmentConfig?.message ?? null;
-  const timeoutSec = overrides?.timeoutSec ?? agentConfig.timeoutSec;
-  const unrestricted = overrides?.unrestricted ?? agentConfig.unrestricted;
+  let timeoutSec = overrides?.timeoutSec ?? agentConfig.timeoutSec;
+  let unrestricted = overrides?.unrestricted ?? agentConfig.unrestricted;
   // maxRetries lives on the assignment. In chat mode (no assignment
   // loaded), fall back to a hard default of 3 to match the assignment
   // schema's own default.
@@ -874,7 +927,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
   if (
     opts.bootstrapBackendSessionId !== undefined &&
-    backend.supportsBootstrapSessionImport === false
+    currentBackend.supportsBootstrapSessionImport === false
   ) {
     throw new InvalidBackendSessionError(
       opts.bootstrapBackendSessionId,
@@ -887,8 +940,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   // creation. Skipped silently for backends that don't implement
   // `validateSessionId`. We pass the resolved cwd because both
   // backends key session storage by it.
-  if (opts.bootstrapBackendSessionId !== undefined && backend.validateSessionId) {
-    const result = await backend.validateSessionId({
+  if (opts.bootstrapBackendSessionId !== undefined && currentBackend.validateSessionId) {
+    const result = await currentBackend.validateSessionId({
       sessionId: opts.bootstrapBackendSessionId,
       cwd,
       env: process.env as Record<string, string>,
@@ -911,8 +964,9 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     assertKnownCliVars(varsSchema, cliVars);
   }
   const resolvedVars = resolveVars(varsSchema, cliVars);
-  const runtimeVars = resolvedVars.values;
-  const persistedRuntimeVars = redactRuntimeVars(runtimeVars, resolvedVars.sources, varsSchema);
+  let runtimeVars = resolvedVars.values;
+  validateRequiredVars(varsSchema, runtimeVars, "initial");
+  let persistedRuntimeVars = redactRuntimeVars(runtimeVars, resolvedVars.sources, varsSchema);
 
   const reusingWorkspace = (isResume && resume) || (priorInitialized && resume);
   const runId = reusingWorkspace && resume ? resume.manifest.runId : shortId();
@@ -936,10 +990,23 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     task_runner_cmd: resolveTaskRunnerCommand(),
     ...(assignmentName !== undefined ? { assignment_name: assignmentName } : {}),
   };
+  const resolvedHookDescriptors =
+    isResume || priorInitialized
+      ? (resume?.manifest.resolvedHooks ?? [])
+      : resolveAssignmentHooks(loadedAssignment, injectedVars);
 
   const priorHadTasks = Boolean(
     isResume && resume && Object.keys(resume.manifest.finalTasks).length > 0,
   );
+  const overrideName = normalizeRunName(overrides?.name);
+  let hookState = resume?.manifest.hookState ? { ...resume.manifest.hookState } : {};
+  let hookAttachments = resume?.manifest.attachments
+    ? resume.manifest.attachments.map((attachment) => ({ ...attachment }))
+    : [];
+  let hookNote = resume?.manifest.note ?? null;
+  let hookPinned = resume?.manifest.pinned ?? false;
+  let hookLockedFields =
+    resume?.manifest.lockedFields !== undefined ? [...resume.manifest.lockedFields] : null;
 
   let tasks: Map<string, TaskState>;
   if (isResume && resume) {
@@ -968,10 +1035,133 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     });
   }
 
+  const trimmedMessage = message?.trim() ?? "";
+
+  if (!isResume && !priorInitialized) {
+    const defaultInitialPrompt = buildFreshInitialPrompt(
+      agentInstructions,
+      assignmentInstructions,
+      tasks.size > 0,
+      trimmedMessage,
+      injectedVars,
+    );
+    const initialLockedFields = Array.from(
+      new Set<LockableField>([
+        ...agentConfig.lockedFields,
+        ...(assignmentConfig?.lockedFields ?? []),
+      ]),
+    );
+    const prepareManifest: RunManifest = {
+      schemaVersion: 9,
+      runId,
+      repo,
+      agent: {
+        name: agentConfig.name,
+        sourcePath: loaded.sourcePath,
+        instructions:
+          agentInstructions.length > 0 ? interpolate(agentInstructions, injectedVars) : "",
+      },
+      assignment: loadedAssignment
+        ? {
+            name: loadedAssignment.config.name,
+            sourcePath: loadedAssignment.sourcePath,
+            workspacePath: assignmentPath,
+          }
+        : null,
+      backend: effectiveBackendId,
+      model: model ?? null,
+      effort: effort ?? null,
+      backendSpecific: cloneBackendSpecificConfig(backendSpecific),
+      message,
+      name: overrideName,
+      note: null,
+      pinned: false,
+      unrestricted,
+      cwd,
+      lockedFields: initialLockedFields,
+      timeoutSec,
+      assignmentPath,
+      workspaceDir,
+      startedAt: new Date().toISOString(),
+      endedAt: null,
+      archivedAt: null,
+      status: isInitialize ? "initialized" : "running",
+      dependencyRunIds: [],
+      exitCode: null,
+      attempts: 0,
+      maxAttempts,
+      tasksCompleted: 0,
+      tasksTotal: tasks.size,
+      backendSessionId: opts.bootstrapBackendSessionId ?? null,
+      runtimeVars: { ...runtimeVars },
+      execution,
+      brief: "",
+      resolvedHooks: resolvedHookDescriptors.map((descriptor) => ({
+        ...descriptor,
+        source: { ...descriptor.source },
+        when: descriptor.when ? { ...descriptor.when } : null,
+      })),
+      hookState: {},
+      hookAudits: [],
+      callerInstructions: null,
+      resetSeed: buildRunResetSeed({
+        backend: effectiveBackendId,
+        model: model ?? null,
+        effort: effort ?? null,
+        backendSpecific: cloneBackendSpecificConfig(backendSpecific),
+        cwd,
+        lockedFields: initialLockedFields,
+        message,
+        name: overrideName,
+        note: null,
+        pinned: false,
+        dependencyRunIds: [],
+        unrestricted,
+        timeoutSec,
+        maxAttempts,
+        brief: "",
+        runtimeVars: { ...runtimeVars },
+        hookState: {},
+        attachments: [],
+        finalTasks: snapshotTasks(tasks),
+      }),
+      attachments: [],
+      finalTasks: snapshotTasks(tasks),
+      sessionCount: isInitialize ? 0 : 1,
+      sessions: [],
+      attemptRecords: [],
+    };
+    const prepareState = createHookExecutionState(
+      prepareManifest,
+      tasks,
+      {
+        initialPrompt: defaultInitialPrompt,
+      },
+      lifecycleRunEventContext(execution),
+    );
+    await runPrepareHooks(prepareState, defaultInitialPrompt, initialLockedFields);
+    tasks = prepareState.tasks;
+    cwd = prepareState.manifest.cwd;
+    repo = deriveRepoKey(cwd);
+    effectiveBackendId = prepareState.manifest.backend as BackendId;
+    currentBackend = resolveRuntimeBackend(effectiveBackendId, backend);
+    model = prepareState.manifest.model ?? undefined;
+    effort = (prepareState.manifest.effort ?? undefined) as RunOverrides["effort"];
+    timeoutSec = prepareState.manifest.timeoutSec;
+    unrestricted = prepareState.manifest.unrestricted;
+    runtimeVars = { ...prepareState.manifest.runtimeVars };
+    hookState = { ...prepareState.manifest.hookState };
+    hookAttachments = prepareState.manifest.attachments.map((attachment) => ({ ...attachment }));
+    hookNote = prepareState.manifest.note;
+    hookPinned = prepareState.manifest.pinned;
+    hookLockedFields = [...prepareState.manifest.lockedFields];
+    validateRequiredVars(varsSchema, runtimeVars, "prepare");
+    persistedRuntimeVars = redactRuntimeVars(runtimeVars, resolvedVars.sources, varsSchema);
+  }
+
   const hasTasks = tasks.size > 0;
   const firstTimeTasksAppear = isResume && !priorHadTasks && hasTasks;
   const resumeAddedNewTasks = isResume && priorHadTasks && addedTitles.length > 0;
-  const trimmedMessage = message?.trim() ?? "";
   const resumeUsesImplicitContinueMessage =
     isResume &&
     trimmedMessage.length === 0 &&
@@ -981,7 +1171,6 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   // Run name resolution: fresh `run` / `init` may set it via the
   // CLI override, while resume and execute-after-init always reuse
   // the persisted manifest value.
-  const overrideName = normalizeRunName(overrides?.name);
   let name =
     overrideName ?? ((isResume || priorInitialized) && resume ? resume.manifest.name : null);
 
@@ -1023,23 +1212,13 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     }
     initialPrompt = parts.join("\n\n");
   } else {
-    const parts: string[] = [];
-    if (agentInstructions.length > 0) {
-      parts.push(interpolate(agentInstructions, injectedVars));
-    }
-    if (assignmentInstructions.length > 0) {
-      parts.push(interpolate(assignmentInstructions, injectedVars));
-    }
-    if (hasTasks) {
-      parts.push(interpolate(WORKER_BRIEF_TEMPLATE, injectedVars));
-    }
-    if (trimmedMessage.length > 0) {
-      parts.push(trimmedMessage);
-    }
-    if (parts.length === 0) {
-      throw new EmptyPromptError();
-    }
-    initialPrompt = parts.join("\n\n");
+    initialPrompt = buildFreshInitialPrompt(
+      agentInstructions,
+      assignmentInstructions,
+      hasTasks,
+      trimmedMessage,
+      injectedVars,
+    );
   }
 
   const now = new Date().toISOString();
@@ -1100,7 +1279,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     const frozenCallerInstructions =
       rawCallerInstructions.length > 0 ? interpolate(rawCallerInstructions, injectedVars) : null;
     manifest = {
-      schemaVersion: 8,
+      schemaVersion: 9,
       runId,
       repo,
       agent: {
@@ -1126,11 +1305,11 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       backendSpecific: cloneBackendSpecificConfig(backendSpecific),
       message,
       name,
-      note: null,
-      pinned: false,
+      note: hookNote,
+      pinned: hookPinned,
       unrestricted,
       cwd,
-      lockedFields: frozenLockedFields,
+      lockedFields: [...(hookLockedFields ?? frozenLockedFields)],
       timeoutSec,
       assignmentPath,
       workspaceDir,
@@ -1152,22 +1331,36 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       runtimeVars: persistedRuntimeVars,
       execution,
       brief: initialPrompt,
+      resolvedHooks: resolvedHookDescriptors.map((descriptor) => ({
+        ...descriptor,
+        source: { ...descriptor.source },
+        when: descriptor.when ? { ...descriptor.when } : null,
+      })),
+      hookState: { ...hookState },
+      hookAudits: [],
       callerInstructions: frozenCallerInstructions,
       resetSeed: buildRunResetSeed({
+        backend: effectiveBackendId,
         model: model ?? null,
         effort: effort ?? null,
         backendSpecific: cloneBackendSpecificConfig(backendSpecific),
+        cwd,
+        lockedFields: [...(hookLockedFields ?? frozenLockedFields)],
+        message,
         name,
-        note: null,
-        pinned: false,
+        note: hookNote,
+        pinned: hookPinned,
         dependencyRunIds: [],
         unrestricted,
         timeoutSec,
         maxAttempts,
         brief: initialPrompt,
+        runtimeVars: { ...persistedRuntimeVars },
+        hookState: { ...hookState },
+        attachments: hookAttachments.map((attachment) => ({ ...attachment })),
         finalTasks: snapshotTasks(tasks),
       }),
-      attachments: [],
+      attachments: hookAttachments.map((attachment) => ({ ...attachment })),
       finalTasks: {},
       sessionCount: isInitialize ? 0 : 1,
       sessions: [],
@@ -1475,6 +1668,47 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       }
     });
   };
+  const runLockedAttemptHooks = async (
+    phase: "beforeAttempt" | "afterAttempt" | "afterExit",
+    options: {
+      sessionIndex: number;
+      attempt: number | null;
+      retriesRemaining: number;
+      attemptResult?: {
+        exitCode: number | null;
+        signal: NodeJS.Signals | null;
+        timedOut: boolean;
+        transcript: string | null;
+        rawStdout: string;
+        rawStderr: string;
+        sessionId: string | null;
+        aborted: boolean;
+      };
+    },
+  ) => {
+    return await withTaskStateLockAsync(workspaceDir, async () => {
+      tasks = refreshManifestTaskState(manifest);
+      refreshManifestAttachments(manifest);
+      const hookState = createHookExecutionState(
+        manifest,
+        tasks,
+        {
+          initialPrompt,
+          attemptPrompt: currentPrompt,
+        },
+        lifecycleContext,
+      );
+      const hookResult = await runAttemptHooks(phase, hookState, options);
+      manifest = hookState.manifest;
+      tasks = hookState.tasks;
+      syncManifestTaskState(manifest, tasks);
+      writeManifest(workspaceDir, manifest);
+      return {
+        hookResult,
+        attemptPrompt: hookState.attemptPrompt,
+      };
+    });
+  };
 
   try {
     while (sessionAttempts < maxAttempts && !terminal) {
@@ -1482,6 +1716,23 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       name = manifest.name;
       sessionAttempts++;
       const globalAttemptNumber = priorAttemptCount + sessionAttempts;
+      const { hookResult: beforeAttemptResult, attemptPrompt: beforeAttemptPrompt } =
+        await runLockedAttemptHooks("beforeAttempt", {
+          sessionIndex,
+          attempt: globalAttemptNumber,
+          retriesRemaining: maxAttempts - sessionAttempts,
+        });
+      currentPrompt = beforeAttemptResult.followUpPrompt ?? beforeAttemptPrompt;
+      cwd = manifest.cwd;
+      model = manifest.model ?? undefined;
+      effort = (manifest.effort ?? undefined) as RunOverrides["effort"];
+      timeoutSec = manifest.timeoutSec;
+      unrestricted = manifest.unrestricted;
+      currentBackend = resolveRuntimeBackend(manifest.backend, backend);
+      if (beforeAttemptResult.status === "block") {
+        terminal = { status: "blocked", exitCode: 2 };
+        break;
+      }
       const attemptStartedAt = new Date().toISOString();
       emitEvent({
         type: "attempt_started",
@@ -1499,7 +1750,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         sessionIdAtStart,
       };
 
-      const invokeResult = await backend.invoke({
+      const invokeResult = await currentBackend.invoke({
         prompt: currentPrompt,
         cwd,
         env: {
@@ -1567,6 +1818,52 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         invalidStatuses: mergeInfo.invalidStatuses,
         backendSessionUpdate,
       });
+      const { hookResult: afterAttemptResult, attemptPrompt: afterAttemptPrompt } =
+        await runLockedAttemptHooks("afterAttempt", {
+          sessionIndex,
+          attempt: globalAttemptNumber,
+          retriesRemaining: maxAttempts - sessionAttempts,
+          attemptResult: {
+            exitCode: invokeResult.exitCode,
+            signal: invokeResult.signal,
+            timedOut: invokeResult.timedOut,
+            transcript: invokeResult.transcript,
+            rawStdout: invokeResult.rawStdout,
+            rawStderr: invokeResult.rawStderr,
+            sessionId: invokeResult.sessionId,
+            aborted: invokeResult.aborted,
+          },
+        });
+      currentPrompt = afterAttemptResult.followUpPrompt ?? afterAttemptPrompt;
+      cwd = manifest.cwd;
+      model = manifest.model ?? undefined;
+      effort = (manifest.effort ?? undefined) as RunOverrides["effort"];
+      timeoutSec = manifest.timeoutSec;
+      unrestricted = manifest.unrestricted;
+      currentBackend = resolveRuntimeBackend(manifest.backend, backend);
+      if (afterAttemptResult.status === "block") {
+        terminal = { status: "blocked", exitCode: 2 };
+        break;
+      }
+      if (afterAttemptResult.status === "reinvoke") {
+        if (sessionAttempts >= maxAttempts) {
+          terminal = { status: "exhausted", exitCode: 1 };
+          break;
+        }
+        emitEvent({
+          type: "retrying",
+          incompleteCount: countBy(tasks, (t) => t.status !== "completed"),
+          invalidStatusCount: 0,
+        });
+        appendRunRetryingEvent({
+          manifest,
+          context: lifecycleContext,
+          sessionIndex,
+          incompleteCount: countBy(tasks, (t) => t.status !== "completed"),
+          invalidStatusCount: 0,
+        });
+        continue;
+      }
       if (invokeResult.aborted) {
         terminal = { status: "aborted", exitCode: 130 };
         sawRunAbort = true;
@@ -1704,6 +2001,16 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       sessionIndex,
     });
   });
+
+  try {
+    await runLockedAttemptHooks("afterExit", {
+      sessionIndex,
+      attempt: pendingAttempt?.attempt ?? null,
+      retriesRemaining: 0,
+    });
+  } catch {
+    // afterExit failures are warning-only; preserve the terminal result.
+  }
 
   const summary: RunCompletionSummary = {
     status: terminal.status,

@@ -4,6 +4,11 @@
 
 ### Breaking Changes
 
+- Manifest schema version is now `9`. Runs now freeze resolved hook
+  descriptors plus prepare-time hook outputs (`resolvedHooks`,
+  `hookState`, `hookAudits`) into the manifest and reset seed, and older
+  pre-hook runs must be recreated or upgraded out-of-band before resume.
+  ([#66](https://github.com/kcosr/task-runner/pull/66))
 - Hot-cut the run-targeted read surfaces under `task-runner run`: use `task-runner run status <run-id>` and `task-runner run brief <run-id>`, while top-level `task-runner status` now reports system/environment status instead of run state. ([#52](https://github.com/kcosr/task-runner/pull/52))
 - `task-runner list runs` now defaults to the caller's cwd instead of listing every repo. Use `--cwd <path>` to target a different exact cwd, `--repo <name>` to target one repo bucket, or `--global` to restore the previous global listing behavior. ([#44](https://github.com/kcosr/task-runner/pull/44))
 - Manifest schema version is now `8`. Authored `cwd` moved from agent definitions to assignment definitions, run manifests now persist first-class `repo` alongside frozen `cwd`, and older `schemaVersion: 7` runs must be upgraded explicitly with `scripts/migrate-manifests-v8.mjs` or recreated. Built-in assignments/docs now use `{{cwd}}` instead of redundant canonical `repo_path` vars. ([#43](https://github.com/kcosr/task-runner/pull/43))
@@ -24,6 +29,19 @@
 
 ### Added
 
+- Added assignment hook support with frozen `prepare` outputs, named
+  hooks under `${TASK_RUNNER_CONFIG_DIR}/hooks`, assignment-local path
+  hooks, raw `.ts` / `.mts` runtime loading through `jiti`, built-in
+  `command` / `git-worktree` hooks, and public hook authoring exports
+  from `@task-runner/core/hooks`. ([#66](https://github.com/kcosr/task-runner/pull/66))
+- Added compact `run.hook_recorded` entries to per-run
+  `run-events.jsonl` history for prepare, attempt, and task-transition
+  hook executions while keeping manifest `hookAudits` as the richer
+  detail projection surface. ([#66](https://github.com/kcosr/task-runner/pull/66))
+- Added narrow declarative `when.sessionIndex` support for attempt-phase
+  hooks and a separate prepare-only `git-sync-base` built-in for
+  rebasing a clean current branch onto an explicit base ref before work
+  begins. ([#66](https://github.com/kcosr/task-runner/pull/66))
 - Added SSH-assisted connected CLI mode with `--connect-host` /
   `TASK_RUNNER_CONNECT_HOST` and `--connect-local-port` /
   `TASK_RUNNER_CONNECT_LOCAL_PORT`, so daemon-targeted commands can keep a
@@ -57,6 +75,11 @@
 
 ### Changed
 
+- Changed shared run projections so `RunSummary` includes `hookCount`,
+  `RunDetail` includes `resolvedHooks` / `hookState` / `hookAudits`, and
+  hook-driven note/pin/task/attachment mutations reuse the existing
+  summary/detail/timeline daemon event names instead of introducing a
+  separate hook stream. ([#66](https://github.com/kcosr/task-runner/pull/66))
 - Changed the bundled planning workflow so `plan-feature` now leaves the planning run blocked on `create_implementer_run_after_approval` until the caller resumes the same run with approval, delayed implementer creation no longer forces `--backend passive`, generated implementation plans now teach backend-accurate execute-after-init handoff (`run brief` + `run --resume-run`), and the template's terminal workflow now ends with `push_branch_and_create_pr` instead of local-only finalization. ([#63](https://github.com/kcosr/task-runner/pull/63))
 - Changed the web run detail drawer so the attempts `Message` tab remains available after attempts start, keeping the concise run handoff visible alongside the full prompt. ([#63](https://github.com/kcosr/task-runner/pull/63))
 - Changed the web dashboard so pinned runs sort first within each status

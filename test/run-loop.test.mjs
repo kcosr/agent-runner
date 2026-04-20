@@ -1,12 +1,15 @@
 import { strict as assert } from "node:assert";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
+import { resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import { createRunEventCapture } from "./helpers/run-events.mjs";
 import {
+  resolveRunFromPrompt,
   setTaskStatusesForPrompt,
   updateTasksForPrompt,
   withEnv,
@@ -115,6 +118,51 @@ function writeAssignment(baseDir, name, body) {
   const path = join(dir, "assignment.md");
   writeFileSync(path, body);
   return path;
+}
+
+function writeNamedHook(baseDir, name, body) {
+  const dir = join(baseDir, "hooks", name);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "hook.ts"), body);
+}
+
+function writeNodeScript(baseDir, name, body) {
+  const path = join(baseDir, name);
+  writeFileSync(path, body);
+  return path;
+}
+
+function gitTestEnv() {
+  return Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => {
+      return !key.startsWith("GIT_");
+    }),
+  );
+}
+
+function initGitRepo(baseDir) {
+  const repoDir = join(baseDir, "repo");
+  const hooksDir = join(repoDir, ".githooks-disabled");
+  mkdirSync(repoDir, { recursive: true });
+  const env = gitTestEnv();
+  execFileSync("git", ["init", "--initial-branch=main", repoDir], { encoding: "utf8", env });
+  mkdirSync(hooksDir, { recursive: true });
+  execFileSync("git", ["-C", repoDir, "config", "core.hooksPath", hooksDir], {
+    encoding: "utf8",
+    env,
+  });
+  execFileSync("git", ["-C", repoDir, "config", "user.name", "Task Runner Tests"], {
+    encoding: "utf8",
+    env,
+  });
+  execFileSync("git", ["-C", repoDir, "config", "user.email", "tests@example.com"], {
+    encoding: "utf8",
+    env,
+  });
+  writeFileSync(join(repoDir, "README.md"), "seed\n");
+  execFileSync("git", ["-C", repoDir, "add", "README.md"], { encoding: "utf8", env });
+  execFileSync("git", ["-C", repoDir, "commit", "-m", "seed"], { encoding: "utf8", env });
+  return repoDir;
 }
 
 function writeAgentAndAssignment(baseDir) {
@@ -254,6 +302,817 @@ test("explicit --cwd override beats assignment cwd and callerCwd", async () => {
   );
 
   assert.equal(seenCwd, join(callerDir, "override-root"));
+});
+
+test("prepare named hooks freeze resolved descriptors and prepare outputs across init and resume", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  writeAssignment(
+    dir,
+    "three-work",
+    `---
+schemaVersion: 1
+name: three-work
+vars:
+  prepared_dir:
+    type: string
+    required: true
+    requiredAt: prepare
+hooks:
+  prepare:
+    - name: freeze-prepare
+tasks:
+  - id: t1
+    title: First
+---
+Work.
+`,
+  );
+  writeNamedHook(
+    dir,
+    "freeze-prepare",
+    `export default {
+  name: "freeze-prepare",
+  prepare(ctx) {
+    return {
+      action: "continue",
+      mutate: {
+        run: { cwd: ctx.run.cwd + "/prepared" },
+        vars: { prepared_dir: ctx.run.cwd + "/prepared" },
+        state: { prepared: true },
+        note: "prepared once",
+      },
+    };
+  },
+};
+`,
+  );
+
+  const initialized = await runWithMock(
+    dir,
+    async () => ({
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      sessionId: "session-1",
+      transcript: "init",
+      rawStdout: "",
+      rawStderr: "",
+    }),
+    {},
+    { assignmentName: "three-work", backendId: "claude" },
+  );
+
+  const initManifest = JSON.parse(
+    readFileSync(join(initialized.outcome.workspaceDir, "run.json"), "utf8"),
+  );
+  assert.equal(initManifest.runtimeVars.prepared_dir, join(dir, "prepared"));
+  assert.equal(initManifest.note, "prepared once");
+  assert.equal(initManifest.hookState.prepared, true);
+  assert.equal(initManifest.resolvedHooks[0].source.name, "freeze-prepare");
+  assert.match(initManifest.resolvedHooks[0].resolvedPath, /freeze-prepare\/hook\.ts$/);
+
+  writeNamedHook(
+    dir,
+    "freeze-prepare",
+    `export default {
+  name: "freeze-prepare",
+  prepare() {
+    return {
+      action: "continue",
+      mutate: { run: { cwd: "/different" }, vars: { prepared_dir: "/different" } },
+    };
+  },
+};
+`,
+  );
+
+  const target = withSharedRuntimeEnv(dir, () =>
+    resolveResumeTarget(initialized.outcome.runId, dir),
+  );
+  let resumedCwd;
+  await withSharedRuntimeEnv(dir, async () => {
+    const loaded = loadAgentConfig("three", dir);
+    const resumed = await runAgent({
+      loaded,
+      cliVars: {},
+      backend: {
+        id: "claude",
+        invoke: async (ctx) => {
+          resumedCwd = ctx.cwd;
+          const manifestPath = join(target.workspaceDir, "run.json");
+          const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+          manifest.finalTasks.t1.status = "completed";
+          manifest.tasksCompleted = 1;
+          writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+          return {
+            exitCode: 0,
+            signal: null,
+            timedOut: false,
+            sessionId: "session-2",
+            transcript: "done",
+            rawStdout: "",
+            rawStderr: "",
+          };
+        },
+      },
+      resume: target,
+    });
+    assert.equal(resumed.manifest.runtimeVars.prepared_dir, join(dir, "prepared"));
+  });
+
+  assert.equal(resumedCwd, join(dir, "prepared"));
+});
+
+test("command builtin json prepare hooks can mutate note, pin, attachments, vars, and state", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  const evidencePath = join(dir, "evidence.txt");
+  writeFileSync(evidencePath, "hook evidence\n");
+  const scriptPath = writeNodeScript(
+    dir,
+    "prepare-json-hook.mjs",
+    `process.stdout.write(JSON.stringify({
+  action: "continue",
+  mutate: {
+    note: "prepared by command",
+    pinned: true,
+    vars: { prepared_token: "ready" },
+    state: { preparedBy: "command" },
+    attachments: {
+      add: [{ sourcePath: ${JSON.stringify(evidencePath)}, name: "hook-evidence.txt" }],
+    },
+  },
+}));\n`,
+  );
+  writeAssignment(
+    dir,
+    "three-work",
+    `---
+schemaVersion: 1
+name: three-work
+vars:
+  prepared_token:
+    type: string
+    required: true
+    requiredAt: prepare
+hooks:
+  prepare:
+    - builtin: command
+      with:
+        mode: json
+        command: ${JSON.stringify(process.execPath)}
+        args:
+          - ${JSON.stringify(scriptPath)}
+tasks:
+  - id: t1
+    title: First
+---
+Work.
+`,
+  );
+
+  const { outcome } = await runWithMock(
+    dir,
+    async (ctx) => {
+      setTaskStatusesForPrompt(ctx.prompt, { t1: "completed" }, dir);
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "session-command-json",
+        transcript: "done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    },
+    {},
+    { assignmentName: "three-work", backendId: "claude" },
+  );
+
+  const manifest = JSON.parse(readFileSync(join(outcome.workspaceDir, "run.json"), "utf8"));
+  assert.equal(manifest.note, "prepared by command");
+  assert.equal(manifest.pinned, true);
+  assert.equal(manifest.runtimeVars.prepared_token, "ready");
+  assert.equal(manifest.hookState.preparedBy, "command");
+  assert.equal(manifest.attachments.length, 1);
+  assert.equal(manifest.attachments[0].name, "hook-evidence.txt");
+  assert.equal(
+    readFileSync(join(outcome.workspaceDir, manifest.attachments[0].relativePath), "utf8"),
+    "hook evidence\n",
+  );
+});
+
+test("command builtin status mode can block before attempts without invoking the backend", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  const scriptPath = writeNodeScript(
+    dir,
+    "before-attempt-block.mjs",
+    `process.stderr.write("blocked by command\\n");
+process.exit(7);\n`,
+  );
+  writeAssignment(
+    dir,
+    "three-work",
+    `---
+schemaVersion: 1
+name: three-work
+hooks:
+  beforeAttempt:
+    - builtin: command
+      with:
+        mode: status
+        command: ${JSON.stringify(process.execPath)}
+        args:
+          - ${JSON.stringify(scriptPath)}
+tasks:
+  - id: t1
+    title: First
+---
+Work.
+`,
+  );
+
+  let backendInvoked = false;
+  const { outcome } = await runWithMock(
+    dir,
+    async () => {
+      backendInvoked = true;
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: null,
+        transcript: "done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    },
+    {},
+    { assignmentName: "three-work", backendId: "claude" },
+  );
+
+  assert.equal(backendInvoked, false);
+  assert.equal(outcome.exitCode, 2);
+  assert.equal(outcome.manifest.status, "blocked");
+  assert.equal(outcome.manifest.hookAudits.at(-1)?.outcome, "block");
+  assert.equal(outcome.manifest.hookAudits.at(-1)?.summary, "blocked by command");
+});
+
+test("command builtin json mode rejects malformed JSON hook output", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  const scriptPath = writeNodeScript(
+    dir,
+    "prepare-bad-json.mjs",
+    'process.stdout.write("{bad");\n',
+  );
+  writeAssignment(
+    dir,
+    "three-work",
+    `---
+schemaVersion: 1
+name: three-work
+hooks:
+  prepare:
+    - builtin: command
+      with:
+        mode: json
+        command: ${JSON.stringify(process.execPath)}
+        args:
+          - ${JSON.stringify(scriptPath)}
+tasks:
+  - id: t1
+    title: First
+---
+Work.
+`,
+  );
+
+  await assert.rejects(
+    () =>
+      runWithMock(
+        dir,
+        async () => {
+          throw new Error("backend should not run when prepare hook JSON is malformed");
+        },
+        {},
+        { assignmentName: "three-work", backendId: "claude" },
+      ),
+    /malformed JSON output/,
+  );
+});
+
+test("beforeAttempt hooks persist changes before invoke and afterAttempt hooks can reinvoke with a follow-up prompt", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  writeNamedHook(
+    dir,
+    "before-attempt-note",
+    `export default {
+  name: "before-attempt-note",
+  beforeAttempt(ctx) {
+    const count = (ctx.state.beforeAttemptCount ?? 0) + 1;
+    return {
+      action: "continue",
+      mutate: {
+        note: "before-attempt-" + count,
+        state: { beforeAttemptCount: count },
+      },
+    };
+  },
+};
+`,
+  );
+  writeNamedHook(
+    dir,
+    "reinvoke-after-attempt",
+    `export default {
+  name: "reinvoke-after-attempt",
+  afterAttempt(ctx) {
+    if ((ctx.state.afterAttemptCount ?? 0) === 0) {
+      return {
+        action: "reinvoke",
+        followUpPrompt: "Follow up from afterAttempt hook",
+        mutate: {
+          note: "after-attempt-reinvoke",
+          state: { afterAttemptCount: 1 },
+        },
+      };
+    }
+    return {
+      action: "continue",
+      mutate: {
+        state: { afterAttemptCount: (ctx.state.afterAttemptCount ?? 0) + 1 },
+      },
+    };
+  },
+};
+`,
+  );
+  writeAssignment(
+    dir,
+    "three-work",
+    `---
+schemaVersion: 1
+name: three-work
+maxRetries: 2
+hooks:
+  beforeAttempt:
+    - name: before-attempt-note
+  afterAttempt:
+    - name: reinvoke-after-attempt
+tasks:
+  - id: t1
+    title: First
+  - id: t2
+    title: Second
+---
+Work.
+`,
+  );
+
+  const prompts = [];
+  const notesSeenByBackend = [];
+  let manifestPath = null;
+  let invocations = 0;
+  const { outcome } = await runWithMock(
+    dir,
+    async (ctx) => {
+      invocations++;
+      prompts.push(ctx.prompt);
+      if (!manifestPath) {
+        manifestPath = join(resolveRunFromPrompt(ctx.prompt, dir).workspaceDir, "run.json");
+      }
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+      notesSeenByBackend.push(manifest.note);
+      if (invocations === 1) {
+        manifest.finalTasks.t1.status = "completed";
+        manifest.tasksCompleted = 1;
+      } else {
+        manifest.finalTasks.t1.status = "completed";
+        manifest.finalTasks.t2.status = "completed";
+        manifest.tasksCompleted = 2;
+      }
+      writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "session-after-attempt",
+        transcript: `attempt ${invocations}`,
+        rawStdout: "",
+        rawStderr: "",
+      };
+    },
+    {},
+    { assignmentName: "three-work", backendId: "claude" },
+  );
+
+  assert.equal(invocations, 2);
+  assert.deepEqual(notesSeenByBackend, ["before-attempt-1", "before-attempt-2"]);
+  assert.equal(prompts[1], "Follow up from afterAttempt hook");
+  assert.equal(outcome.manifest.note, "before-attempt-2");
+  assert.equal(outcome.manifest.hookState.beforeAttemptCount, 2);
+  assert.equal(outcome.manifest.hookState.afterAttemptCount, 2);
+  assert.ok(
+    outcome.manifest.hookAudits.some(
+      (audit) => audit.phase === "afterAttempt" && audit.outcome === "reinvoke",
+    ),
+  );
+});
+
+test("afterExit hooks persist terminal note and task patches", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  writeNamedHook(
+    dir,
+    "after-exit-note",
+    `export default {
+  name: "after-exit-note",
+  afterExit() {
+    return {
+      action: "continue",
+      mutate: {
+        note: "after-exit-ran",
+        patchTasks: [{ taskId: "t1", notesAppend: "after-exit note" }],
+        state: { afterExitRan: true },
+      },
+    };
+  },
+};
+`,
+  );
+  writeAssignment(
+    dir,
+    "three-work",
+    `---
+schemaVersion: 1
+name: three-work
+hooks:
+  afterExit:
+    - name: after-exit-note
+tasks:
+  - id: t1
+    title: First
+---
+Work.
+`,
+  );
+
+  const { outcome } = await runWithMock(
+    dir,
+    async (ctx) => {
+      setTaskStatusesForPrompt(ctx.prompt, { t1: "completed" }, dir);
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "session-after-exit",
+        transcript: "done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    },
+    {},
+    { assignmentName: "three-work", backendId: "claude" },
+  );
+
+  const manifest = JSON.parse(readFileSync(join(outcome.workspaceDir, "run.json"), "utf8"));
+  assert.equal(manifest.status, "success");
+  assert.equal(manifest.note, "after-exit-ran");
+  assert.equal(manifest.hookState.afterExitRan, true);
+  assert.equal(manifest.finalTasks.t1.notes, "after-exit note");
+  assert.ok(
+    manifest.hookAudits.some(
+      (audit) => audit.phase === "afterExit" && audit.outcome === "continue",
+    ),
+  );
+});
+
+test("attempt hooks honor when.sessionIndex across retries and resumed sessions", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  writeNamedHook(
+    dir,
+    "session-zero-only",
+    `export default {
+  name: "session-zero-only",
+  beforeAttempt(ctx) {
+    return {
+      action: "continue",
+      mutate: {
+        note: "session-" + ctx.sessionIndex,
+        state: { beforeAttemptCount: (ctx.state.beforeAttemptCount ?? 0) + 1 },
+      },
+    };
+  },
+};
+`,
+  );
+  writeAssignment(
+    dir,
+    "three-work",
+    `---
+schemaVersion: 1
+name: three-work
+maxRetries: 1
+hooks:
+  beforeAttempt:
+    - name: session-zero-only
+      when:
+        sessionIndex: [0]
+tasks:
+  - id: t1
+    title: First
+  - id: t2
+    title: Second
+---
+Work.
+`,
+  );
+
+  let firstSessionInvocations = 0;
+  const first = await runWithMock(
+    dir,
+    async (ctx) => {
+      firstSessionInvocations += 1;
+      const run = resolveRunFromPrompt(ctx.prompt, dir);
+      const manifest = JSON.parse(readFileSync(join(run.workspaceDir, "run.json"), "utf8"));
+      assert.equal(manifest.note, "session-0");
+      if (firstSessionInvocations === 1) {
+        updateTasksForPrompt(ctx.prompt, { t1: { status: "completed" } }, dir);
+      }
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "session-zero",
+        transcript: `session 0 attempt ${firstSessionInvocations}`,
+        rawStdout: "",
+        rawStderr: "",
+      };
+    },
+    {},
+    { assignmentName: "three-work", backendId: "claude" },
+  );
+
+  assert.equal(firstSessionInvocations, 2);
+  assert.equal(first.outcome.manifest.status, "exhausted");
+  assert.equal(first.outcome.manifest.hookState.beforeAttemptCount, 2);
+
+  const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.outcome.runId, dir));
+  let resumedNoteSeen = null;
+  const resumed = await withSharedRuntimeEnv(dir, async () => {
+    const loaded = loadAgentConfig("three", dir);
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      return await runAgent({
+        loaded,
+        cliVars: {},
+        backend: {
+          id: "claude",
+          invoke: async (ctx) => {
+            const manifest = JSON.parse(
+              readFileSync(join(target.workspaceDir, "run.json"), "utf8"),
+            );
+            resumedNoteSeen = manifest.note;
+            manifest.finalTasks.t1.status = "completed";
+            manifest.finalTasks.t2.status = "completed";
+            manifest.tasksCompleted = 2;
+            writeFileSync(
+              join(target.workspaceDir, "run.json"),
+              `${JSON.stringify(manifest, null, 2)}\n`,
+            );
+            return {
+              exitCode: 0,
+              signal: null,
+              timedOut: false,
+              sessionId: "session-zero",
+              transcript: "resumed",
+              rawStdout: "",
+              rawStderr: "",
+            };
+          },
+        },
+        resume: target,
+        overrides: { message: "resume after exhaustion" },
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+
+  assert.equal(resumedNoteSeen, "session-0");
+  assert.equal(resumed.manifest.status, "success");
+  assert.equal(resumed.manifest.hookState.beforeAttemptCount, 2);
+  assert.equal(
+    resumed.manifest.hookAudits.filter((audit) => audit.phase === "beforeAttempt").length,
+    2,
+  );
+});
+
+test("git-worktree builtin prepare hooks create worktrees and project cwd plus worktree_path", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  const repoDir = initGitRepo(dir);
+  const worktreeDir = join(dir, "feature-worktree");
+  writeAssignment(
+    dir,
+    "three-work",
+    `---
+schemaVersion: 1
+name: three-work
+vars:
+  worktree_path:
+    type: string
+    required: true
+    requiredAt: prepare
+hooks:
+  prepare:
+    - builtin: git-worktree
+      with:
+        repo: ${JSON.stringify(repoDir)}
+        from: main
+        branch: hooks-test
+        path: ${JSON.stringify(worktreeDir)}
+tasks:
+  - id: t1
+    title: First
+---
+Work.
+`,
+  );
+
+  let seenCwd;
+  const { outcome } = await runWithMock(
+    dir,
+    async (ctx) => {
+      seenCwd = ctx.cwd;
+      setTaskStatusesForPrompt(ctx.prompt, { t1: "completed" }, dir);
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "session-worktree",
+        transcript: "done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    },
+    {},
+    { assignmentName: "three-work", backendId: "claude" },
+  );
+
+  const manifest = JSON.parse(readFileSync(join(outcome.workspaceDir, "run.json"), "utf8"));
+  assert.equal(seenCwd, worktreeDir);
+  assert.equal(manifest.cwd, worktreeDir);
+  assert.equal(manifest.runtimeVars.worktree_path, worktreeDir);
+  assert.equal(readFileSync(join(worktreeDir, "README.md"), "utf8"), "seed\n");
+  assert.equal(
+    execFileSync("git", ["-C", worktreeDir, "rev-parse", "--abbrev-ref", "HEAD"], {
+      encoding: "utf8",
+      env: gitTestEnv(),
+    }).trim(),
+    "hooks-test",
+  );
+});
+
+test("git-sync-base builtin prepare hooks rebase the current branch onto the configured base ref", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  const repoDir = initGitRepo(dir);
+  const env = gitTestEnv();
+
+  execFileSync("git", ["-C", repoDir, "checkout", "-b", "feature/hooks"], {
+    encoding: "utf8",
+    env,
+  });
+  writeFileSync(join(repoDir, "feature.txt"), "feature\n");
+  execFileSync("git", ["-C", repoDir, "add", "feature.txt"], { encoding: "utf8", env });
+  execFileSync("git", ["-C", repoDir, "commit", "-m", "feature"], { encoding: "utf8", env });
+  const featureHeadBefore = execFileSync("git", ["-C", repoDir, "rev-parse", "HEAD"], {
+    encoding: "utf8",
+    env,
+  }).trim();
+
+  execFileSync("git", ["-C", repoDir, "checkout", "main"], { encoding: "utf8", env });
+  writeFileSync(join(repoDir, "README.md"), "seed\nmain update\n");
+  execFileSync("git", ["-C", repoDir, "add", "README.md"], { encoding: "utf8", env });
+  execFileSync("git", ["-C", repoDir, "commit", "-m", "main update"], { encoding: "utf8", env });
+  const mainHead = execFileSync("git", ["-C", repoDir, "rev-parse", "main"], {
+    encoding: "utf8",
+    env,
+  }).trim();
+
+  execFileSync("git", ["-C", repoDir, "checkout", "feature/hooks"], { encoding: "utf8", env });
+
+  writeAssignment(
+    dir,
+    "three-work",
+    `---
+schemaVersion: 1
+name: three-work
+cwd: ${JSON.stringify(repoDir)}
+hooks:
+  prepare:
+    - builtin: git-sync-base
+      with:
+        repo: ${JSON.stringify(repoDir)}
+        baseRef: main
+tasks:
+  - id: t1
+    title: First
+---
+Work.
+`,
+  );
+
+  const { outcome } = await runWithMock(
+    dir,
+    async (ctx) => {
+      assert.equal(ctx.cwd, repoDir);
+      setTaskStatusesForPrompt(ctx.prompt, { t1: "completed" }, repoDir);
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "session-sync-base",
+        transcript: "done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    },
+    {},
+    { assignmentName: "three-work", backendId: "claude" },
+  );
+
+  const branchName = execFileSync("git", ["-C", repoDir, "rev-parse", "--abbrev-ref", "HEAD"], {
+    encoding: "utf8",
+    env,
+  }).trim();
+  const parentOfHead = execFileSync("git", ["-C", repoDir, "rev-parse", "HEAD^"], {
+    encoding: "utf8",
+    env,
+  }).trim();
+  const featureHeadAfter = execFileSync("git", ["-C", repoDir, "rev-parse", "HEAD"], {
+    encoding: "utf8",
+    env,
+  }).trim();
+
+  assert.equal(outcome.exitCode, 0);
+  assert.equal(branchName, "feature/hooks");
+  assert.equal(parentOfHead, mainHead);
+  assert.notEqual(featureHeadAfter, featureHeadBefore);
+});
+
+test("git-sync-base builtin prepare hooks reject dirty worktrees", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  const repoDir = initGitRepo(dir);
+  const env = gitTestEnv();
+
+  execFileSync("git", ["-C", repoDir, "checkout", "-b", "feature/hooks"], {
+    encoding: "utf8",
+    env,
+  });
+  writeFileSync(join(repoDir, "dirty.txt"), "dirty\n");
+
+  writeAssignment(
+    dir,
+    "three-work",
+    `---
+schemaVersion: 1
+name: three-work
+cwd: ${JSON.stringify(repoDir)}
+hooks:
+  prepare:
+    - builtin: git-sync-base
+      with:
+        repo: ${JSON.stringify(repoDir)}
+        baseRef: main
+tasks:
+  - id: t1
+    title: First
+---
+Work.
+`,
+  );
+
+  await assert.rejects(
+    () =>
+      runWithMock(
+        dir,
+        async () => {
+          throw new Error("backend should not run when git-sync-base rejects a dirty worktree");
+        },
+        {},
+        { assignmentName: "three-work", backendId: "claude" },
+      ),
+    /git-sync-base requires a clean worktree/,
+  );
 });
 
 test("effort level from frontmatter is forwarded to backend", async () => {

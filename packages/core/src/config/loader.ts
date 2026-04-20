@@ -182,6 +182,7 @@ function classifyAssignmentSurface(path: PathSegment[]): InterpolationSurface {
         case "source":
         case "envName":
         case "default":
+        case "requiredAt":
           return { mode: "exact", scalarKind: "string" };
         case "required":
           return { mode: "exact", scalarKind: "boolean" };
@@ -194,6 +195,27 @@ function classifyAssignmentSurface(path: PathSegment[]): InterpolationSurface {
 
     if (path.length === 4 && path[2] === "values" && typeof path[3] === "number") {
       return { mode: "exact", scalarKind: "string" };
+    }
+  }
+
+  if (path.length >= 3 && path[0] === "hooks" && typeof path[1] === "string") {
+    if (path.length === 4 && typeof path[2] === "number" && typeof path[3] === "string") {
+      switch (path[3]) {
+        case "builtin":
+        case "name":
+        case "path":
+          return { mode: "exact", scalarKind: "string" };
+        default:
+          return { mode: "disabled" };
+      }
+    }
+
+    if (
+      path.length >= 5 &&
+      typeof path[2] === "number" &&
+      (path[3] === "with" || path[3] === "when")
+    ) {
+      return { mode: "prose" };
     }
   }
 

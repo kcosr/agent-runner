@@ -13,6 +13,7 @@
     "./config/*": "./dist/config/*",
     "./contracts/*": "./dist/contracts/*",
     "./core/*": "./dist/core/*",
+    "./hooks": "./dist/hooks.js",
     "./run-command.js": "./dist/run-command.js",
     "./task-runner-command.js": "./dist/task-runner-command.js",
     "./util/*": "./dist/util/*"
@@ -22,6 +23,7 @@
   },
   "dependencies": {
     "gray-matter": "^4.0.3",
+    "jiti": "^2.4.2",
     "ws": "^8.20.0",
     "zod": "^3.23.8"
   }

@@ -327,6 +327,115 @@ describe("api client", () => {
     });
   });
 
+  it("parses hook projections from run detail payloads", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              run: {
+                runId: "run-1",
+                repo: "task-runner",
+                status: "initialized",
+                effectiveStatus: "initialized",
+                archivedAt: null,
+                isLive: false,
+                workspaceDir: "/tmp/run-1",
+                assignmentPath: "/tmp/run-1/assignment-seed.md",
+                agent: { name: "implementer", sourcePath: null },
+                assignment: null,
+                backend: "codex",
+                model: "gpt-5.4",
+                effort: "high",
+                name: "Build dashboard",
+                note: null,
+                pinned: false,
+                backendSessionId: null,
+                cwd: "/tmp/task-runner",
+                unrestricted: false,
+                timeoutSec: 60,
+                startedAt: "2026-04-13T05:00:00.000Z",
+                endedAt: null,
+                exitCode: null,
+                attempts: 0,
+                maxAttempts: 2,
+                sessionCount: 0,
+                tasksCompleted: 0,
+                tasksTotal: 1,
+                attachments: [],
+                resolvedHooks: [
+                  {
+                    hookId: "prepare:0:freeze",
+                    phase: "prepare",
+                    source: { name: "freeze" },
+                    resolvedPath: "/tmp/hooks/freeze/hook.ts",
+                    when: null,
+                    config: { mode: "json" },
+                  },
+                ],
+                hookState: { prepared: true },
+                hookAudits: [
+                  {
+                    phase: "prepare",
+                    hookId: "prepare:0:freeze",
+                    startedAt: "2026-04-20T10:00:00.000Z",
+                    endedAt: "2026-04-20T10:00:01.000Z",
+                    outcome: "continue",
+                    sessionIndex: null,
+                    attempt: null,
+                    taskId: null,
+                    summary: null,
+                  },
+                ],
+                dependencies: [],
+                dependents: [],
+                tasks: [],
+                activeTask: null,
+                message: null,
+                pendingPrompt: null,
+                callerInstructions: null,
+                lockedFields: [],
+                runtimeVars: {},
+                execution: {
+                  hostMode: "embedded",
+                  controller: { kind: "embedded" },
+                },
+                capabilities: {
+                  canArchive: true,
+                  canUnarchive: false,
+                  canReset: true,
+                  canDelete: false,
+                  canResume: true,
+                  canAbort: false,
+                  abortReason: "not_active_in_daemon",
+                  taskMutation: {
+                    canAdd: true,
+                    canEditNotes: true,
+                    canSetStatus: true,
+                  },
+                },
+              },
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+
+    const api = createApiClient(config);
+
+    await expect(api.getRun("run-1")).resolves.toMatchObject({
+      resolvedHooks: [
+        expect.objectContaining({
+          hookId: "prepare:0:freeze",
+          phase: "prepare",
+        }),
+      ],
+      hookState: { prepared: true },
+      hookAudits: [expect.objectContaining({ outcome: "continue" })],
+    });
+  });
+
   it("rejects invalid resume responses", async () => {
     vi.stubGlobal(
       "fetch",

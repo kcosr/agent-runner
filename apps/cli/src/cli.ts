@@ -1635,7 +1635,7 @@ async function runTaskSet(parsed: ParsedArgs, connect?: DaemonConnectContext): P
   try {
     const task =
       connect === undefined
-        ? updateTask(target, taskId, {
+        ? await updateTask(target, taskId, {
             status: parsed.taskStatus,
             notes: parsed.taskNotes,
           })
@@ -1680,7 +1680,7 @@ async function runTaskAppendNotes(
   try {
     const task =
       connect === undefined
-        ? appendNotes(target, taskId, parsed.taskAppendText)
+        ? await appendNotes(target, taskId, parsed.taskAppendText)
         : await withDaemonClient(connect, (client) =>
             client
               .call<{ task: ReturnType<typeof appendNotes> }>("tasks.appendNotes", {
@@ -1724,7 +1724,7 @@ async function runTaskAdd(parsed: ParsedArgs, connect?: DaemonConnectContext): P
   try {
     const task =
       connect === undefined
-        ? createTask(target, { title: parsed.taskTitle, body: parsed.taskBody })
+        ? await createTask(target, { title: parsed.taskTitle, body: parsed.taskBody })
         : await withDaemonClient(connect, (client) =>
             client
               .call<{ task: ReturnType<typeof createTask> }>("tasks.add", {

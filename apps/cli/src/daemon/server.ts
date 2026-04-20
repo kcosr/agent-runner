@@ -1113,7 +1113,7 @@ export async function serveDaemon(
         inferDependentFanout: true,
       }),
     updateTask: (target, taskId, updates) =>
-      withPublishedMutation(
+      withPublishedMutationAsync(
         target,
         () => app.updateTask(target, taskId, updates, mutationAuditContext),
         {
@@ -1121,13 +1121,17 @@ export async function serveDaemon(
         },
       ),
     appendNotes: (target, taskId, text) =>
-      withPublishedMutation(target, () =>
+      withPublishedMutationAsync(target, () =>
         app.appendNotes(target, taskId, text, mutationAuditContext),
       ),
     createTask: (target, input) =>
-      withPublishedMutation(target, () => app.createTask(target, input, mutationAuditContext), {
-        inferDependentFanout: true,
-      }),
+      withPublishedMutationAsync(
+        target,
+        () => app.createTask(target, input, mutationAuditContext),
+        {
+          inferDependentFanout: true,
+        },
+      ),
     daemonInfo: {
       daemonInstanceId,
       pid: process.pid,
@@ -1473,7 +1477,7 @@ export async function serveDaemon(
             ws,
             resultResponse(
               request.id,
-              operations.updateTask(
+              await operations.updateTask(
                 requiredString(parsed.target, "target"),
                 requiredString(parsed.taskId, "taskId"),
                 {
@@ -1491,7 +1495,7 @@ export async function serveDaemon(
             ws,
             resultResponse(
               request.id,
-              operations.appendTaskNotes(
+              await operations.appendTaskNotes(
                 requiredString(parsed.target, "target"),
                 requiredString(parsed.taskId, "taskId"),
                 requiredString(parsed.text, "text"),
@@ -1506,7 +1510,7 @@ export async function serveDaemon(
             ws,
             resultResponse(
               request.id,
-              operations.createTask(requiredString(parsed.target, "target"), {
+              await operations.createTask(requiredString(parsed.target, "target"), {
                 title: requiredString(parsed.title, "title"),
                 body: optionalString(parsed.body, "body"),
               }),

@@ -20,7 +20,7 @@ explicit concepts:
 - caller-facing documentation stays separate from worker-facing
   instructions
 
-The current manifest schema is version `8`. Older manifest shapes are not
+The current manifest schema is version `9`. Older manifest shapes are not
 silently upgraded or dual-read at runtime.
 
 ## Non-goals
@@ -90,6 +90,9 @@ The canonical record is `run.json`. Important persisted fields:
 - `backendSessionId` (backend-native resume handle; Pi, Codex, Claude,
   etc. each store their own flavor here)
 - `dependencyRunIds`
+- `resolvedHooks` (the frozen hook descriptors selected at first write)
+- `hookState` (hook-owned state bag)
+- `hookAudits` (per-hook execution audit records)
 - attachment metadata
 - attempt and session history
 - `runtimeVars` (env-sourced values redacted)
@@ -143,6 +146,51 @@ task-runner. They are:
 - never sent to the backend
 
 This split keeps operator workflow text out of worker prompts.
+
+## Hooks
+
+Assignment hooks are part of the frozen manifest contract, not an
+ephemeral loader detail.
+
+Fresh `run` / `init`:
+
+1. load the authored assignment hook entries
+2. resolve `builtin` / named / path hook descriptors
+3. run `prepare` hooks before the first manifest write
+4. freeze the resolved descriptors plus any prepare-time mutations into
+   `manifest.resolvedHooks`, `manifest.runtimeVars`, `manifest.cwd`,
+   `manifest.hookState`, prompt state, attachments, and reset seed
+
+Resume and reset do not re-run prepare hooks from current source files.
+They reuse the frozen manifest descriptor/config and the prepare outputs
+captured at first write.
+
+Phase behavior:
+
+- `prepare` may mutate runtime vars and all other hook-owned run state.
+- `beforeAttempt`, `afterAttempt`, and `afterExit` may continue, block,
+  or request a follow-up prompt reinvocation.
+- `taskTransition` wraps all task mutations from the run loop and task
+  command surfaces. Rejections roll back the requested task edit while
+  preserving the hook's own accepted side effects such as notes, pins,
+  attachments, or task patches.
+
+The built-in `command` hook supports:
+
+- `mode: status` — zero exit is success, non-zero blocks/rejects
+- `mode: json` — zero exit plus JSON stdout returning the full hook
+  result payload; malformed JSON is a runtime error
+
+The built-in `git-worktree` hook is prepare-only. It creates or reuses a
+worktree, switches the run cwd to that path, and projects
+`worktree_path` into runtime vars.
+
+The built-in `git-sync-base` hook is also prepare-only. It requires a
+clean current branch/worktree and rebases that branch onto an explicit
+configured base ref before backend work begins.
+
+Declarative `when` support remains narrow: attempt-phase hooks support
+`when.sessionIndex`, while task-transition hooks support `when.toStatus`.
 
 ## Task state model
 
@@ -336,6 +384,12 @@ Notifications:
   `summary_removed` with a `runId`
 - `run.detail` carries a fresh `RunDetail`
 - `run.timeline` carries one `RunTimelineEnvelope { runId, cursor, event }`
+
+Hooks do not add a fourth daemon event channel. Their externally visible
+state is carried inside the existing `RunSummary` and `RunDetail`
+projections (`hookCount` on summaries; `resolvedHooks`, `hookState`, and
+`hookAudits` on detail), and hook-driven task/note/attachment changes
+reuse the existing summary/detail/timeline publication flow.
 
 Shared run capabilities remain the canonical UX gate for lifecycle
 actions. `RunCapabilities` includes `canArchive`, `canUnarchive`,
