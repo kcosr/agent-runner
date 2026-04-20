@@ -165,14 +165,14 @@ export function createDaemonOperations(ctx: DaemonOperationContext) {
     getTask(target: string, taskId: string) {
       return { task: ctx.getTask(target, taskId) };
     },
-    updateTask(target: string, taskId: string, updates: Parameters<typeof updateTask>[2]) {
-      return { task: ctx.updateTask(target, taskId, updates) };
+    async updateTask(target: string, taskId: string, updates: Parameters<typeof updateTask>[2]) {
+      return { task: await ctx.updateTask(target, taskId, updates) };
     },
-    appendTaskNotes(target: string, taskId: string, text: string) {
-      return { task: ctx.appendNotes(target, taskId, text) };
+    async appendTaskNotes(target: string, taskId: string, text: string) {
+      return { task: await ctx.appendNotes(target, taskId, text) };
     },
-    createTask(target: string, task: Parameters<typeof createTask>[1]) {
-      return { task: ctx.createTask(target, task) };
+    async createTask(target: string, task: Parameters<typeof createTask>[1]) {
+      return { task: await ctx.createTask(target, task) };
     },
     listAgents() {
       return { agents: ctx.getDefinitionList("agent") };

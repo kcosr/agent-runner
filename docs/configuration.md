@@ -21,7 +21,10 @@ Contains named agent and assignment definitions:
 ```text
 ${TASK_RUNNER_CONFIG_DIR}/
 ├── agents/<agent-name>/agent.md
-└── assignments/<assignment-name>/assignment.md
+├── hooks/<hook-name>/hook.(ts|mts|js|mjs)
+└── assignments/<assignment-name>/
+    ├── assignment.md
+    └── hooks/
 ```
 
 See [agents-and-assignments.md](agents-and-assignments.md).
@@ -115,7 +118,7 @@ var named by the var's `envName` (or the var key itself). See
 
 ## Manifest upgrades
 
-The current manifest schema is version `8`. Older manifests are not
+The current manifest schema is version `9`. Older manifests are not
 silently upgraded at runtime — resuming a run with an older schema fails
 with a clear error. The repo ships migration scripts under `scripts/`:
 
@@ -126,6 +129,10 @@ with a clear error. The repo ships migration scripts under `scripts/`:
   `repo` from the frozen `cwd`; supports repeated `--repo <name>`
   filters for selective upgrades, and a `--root <path>` flag for
   legacy state roots)
+
+Schema v9 adds frozen hook descriptors/state/audits to the manifest. No
+automatic upgrader ships for pre-v9 hookless runs; recreate those runs
+or keep them on their original schema generation.
 
 Run the scripts explicitly; or recreate affected runs if an upgrade
 path isn't important. New runs are always created at the latest

@@ -30,7 +30,7 @@ function buildManifest(overrides = {}) {
   };
 
   return {
-    schemaVersion: 8,
+    schemaVersion: 9,
     runId: "run123",
     repo: "demo-repo",
     agent: {
@@ -68,6 +68,18 @@ function buildManifest(overrides = {}) {
     tasksTotal: Object.keys(finalTasks).length,
     backendSessionId: null,
     runtimeVars: {},
+    resolvedHooks: [
+      {
+        hookId: "prepare:0:freeze",
+        phase: "prepare",
+        source: { name: "freeze" },
+        resolvedPath: "/repo/hooks/freeze/hook.ts",
+        when: null,
+        config: { mode: "status" },
+      },
+    ],
+    hookState: { prepared: true },
+    hookAudits: [],
     execution: {
       hostMode: "embedded",
       controller: {
@@ -78,8 +90,12 @@ function buildManifest(overrides = {}) {
     callerInstructions: "Caller docs",
     attachments: [],
     resetSeed: {
+      backend: "claude",
       model: "claude-sonnet-4-6",
       effort: "medium",
+      cwd: "/repo",
+      lockedFields: ["backend"],
+      message: "Finish the task list.",
       name: "demo session",
       note: null,
       pinned: false,
@@ -88,6 +104,9 @@ function buildManifest(overrides = {}) {
       timeoutSec: 3600,
       maxAttempts: 2,
       brief: "Prepared handoff prompt.",
+      runtimeVars: {},
+      hookState: { prepared: true },
+      attachments: [],
       finalTasks,
     },
     finalTasks,
@@ -129,6 +148,7 @@ test("run contracts: toRunSummary maps listed manifest rows to the neutral summa
     tasksCompleted: 1,
     tasksTotal: 2,
     attachmentCount: 0,
+    hookCount: 1,
     dependencyState: {
       ready: true,
       total: 0,
@@ -225,6 +245,9 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
     tasksCompleted: 1,
     tasksTotal: 2,
     attachments: [],
+    resolvedHooks: manifest.resolvedHooks,
+    hookState: manifest.hookState,
+    hookAudits: [],
     dependencies: [],
     dependents: [],
     tasks: [

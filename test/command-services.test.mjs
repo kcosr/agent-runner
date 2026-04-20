@@ -613,6 +613,53 @@ test("command services: listRuns reflects canonical task state for running summa
   });
 });
 
+test("command services: readStatus and listRuns project hook detail and hook counts", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.resolvedHooks = [
+      {
+        hookId: "prepare:0:freeze",
+        phase: "prepare",
+        source: { name: "freeze" },
+        resolvedPath: "/tmp/hooks/freeze/hook.ts",
+        when: null,
+        config: { mode: "json" },
+      },
+    ];
+    manifest.hookState = { prepared: true };
+    manifest.hookAudits = [
+      {
+        phase: "prepare",
+        hookId: "prepare:0:freeze",
+        startedAt: "2026-04-20T10:00:00.000Z",
+        endedAt: "2026-04-20T10:00:01.000Z",
+        outcome: "continue",
+        sessionIndex: null,
+        attempt: null,
+        taskId: null,
+        summary: null,
+      },
+    ];
+  });
+
+  await withSharedRuntimeEnv(dir, async () => {
+    const detail = readStatus(outcome.runId);
+    const summary = listRuns({ includeArchived: true }).find(
+      (entry) => entry.runId === outcome.runId,
+    );
+
+    assert.ok(summary);
+    assert.equal(summary.hookCount, 1);
+    assert.equal(detail.resolvedHooks?.length, 1);
+    assert.deepEqual(detail.hookState, { prepared: true });
+    assert.equal(detail.hookAudits?.length, 1);
+    assert.equal(detail.resolvedHooks?.[0]?.hookId, "prepare:0:freeze");
+  });
+});
+
 test("command services: listRuns keeps persisted progress for terminal and running runs", async () => {
   const dir = tempDir();
   writeBundle(dir);
@@ -675,14 +722,14 @@ test("command services: setTask, listTasks, showTask, and appendTaskNotes persis
   const outcome = await initRun(dir);
 
   await withSharedRuntimeEnv(dir, async () => {
-    const updated = setTask(outcome.runId, "t1", {
+    const updated = await setTask(outcome.runId, "t1", {
       status: "in_progress",
       notes: "Investigating.",
     });
     assert.equal(updated.task.status, "in_progress");
     assert.equal(updated.task.notes, "Investigating.");
 
-    const appended = appendTaskNotes(outcome.runId, "t1", "Waiting on confirmation.");
+    const appended = await appendTaskNotes(outcome.runId, "t1", "Waiting on confirmation.");
     assert.equal(appended.task.notes, "Investigating.\nWaiting on confirmation.");
 
     const list = listTasks(outcome.runId);
@@ -706,7 +753,7 @@ test("command services: addTask returns the new snapshot and persists it", async
   const outcome = await initRun(dir);
 
   await withSharedRuntimeEnv(dir, async () => {
-    const added = addTask(outcome.runId, {
+    const added = await addTask(outcome.runId, {
       title: "CLI follow-up",
       body: "Track the extra work.",
     });

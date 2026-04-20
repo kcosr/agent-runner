@@ -1,4 +1,5 @@
 import type { LockableField } from "../core/config/schema.js";
+import type { HookAuditRecord, ResolvedHookDescriptor } from "../core/hooks/types.js";
 import {
   type RunDependencyDetail,
   type RunDependencyState,
@@ -41,6 +42,7 @@ export interface RunSummary {
   tasksCompleted: number;
   tasksTotal: number;
   attachmentCount: number;
+  hookCount?: number;
   dependencyState: RunDependencyState;
   activeTask: RunActiveTask | null;
   execution: RunExecution;
@@ -119,6 +121,9 @@ export interface RunDetail {
   tasksCompleted: number;
   tasksTotal: number;
   attachments: RunAttachment[];
+  resolvedHooks?: ResolvedHookDescriptor[];
+  hookState?: Record<string, unknown>;
+  hookAudits?: HookAuditRecord[];
   dependencies: RunDependencyDetail[];
   dependents: RunDependencyDetail[];
   tasks: RunTaskSummary[];
@@ -303,6 +308,7 @@ export function toRunSummary(
     tasksCompleted: entry.manifest.tasksCompleted,
     tasksTotal: entry.manifest.tasksTotal,
     attachmentCount: entry.manifest.attachments.length,
+    hookCount: entry.manifest.resolvedHooks.length,
     dependencyState: dependencyState ?? deriveDependencyState(entry.manifest, relatedManifests),
     activeTask: deriveActiveTask(entry.manifest.finalTasks),
     execution: entry.manifest.execution,
@@ -371,6 +377,13 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
     tasksCompleted: manifest.tasksCompleted,
     tasksTotal: manifest.tasksTotal,
     attachments: manifest.attachments.map((attachment) => ({ ...attachment })),
+    resolvedHooks: manifest.resolvedHooks.map((descriptor) => ({
+      ...descriptor,
+      source: { ...descriptor.source },
+      when: descriptor.when ? { ...descriptor.when } : null,
+    })),
+    hookState: { ...manifest.hookState },
+    hookAudits: manifest.hookAudits.map((audit) => ({ ...audit })),
     dependencies: result.dependencies ?? resolveDependencies(manifest, relatedManifests),
     dependents: result.dependents ?? resolveDependents(manifest, relatedManifests),
     tasks: Object.values(manifest.finalTasks).map(toRunTaskSummary),

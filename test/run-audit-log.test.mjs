@@ -613,8 +613,8 @@ test("daemon-context task commands append one task event with daemon host metada
     initialize: true,
   });
 
-  withSharedRuntimeEnv(dir, () => {
-    updateTaskViaApp(
+  await withSharedRuntimeEnv(dir, async () => {
+    await updateTaskViaApp(
       init.runId,
       "t1",
       { status: "in_progress" },

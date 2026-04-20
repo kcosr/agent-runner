@@ -1,0 +1,622 @@
+import { basename } from "node:path";
+import type { TaskState, TaskStatus } from "../../assignment/model.js";
+import type { RunAttachment } from "../../contracts/attachments.js";
+import { shortId } from "../../util/short-id.js";
+import type { LockableField } from "../config/schema.js";
+import {
+  getAttachment,
+  removeAttachmentFiles,
+  stageAttachmentFromFile,
+} from "../run/attachments.js";
+import type { RunManifest } from "../run/manifest.js";
+import { loadHookModule } from "./loader.js";
+import type {
+  AttemptHookContext,
+  HookAuditRecord,
+  HookModule,
+  HookMutations,
+  HookResult,
+  PrepareHookContext,
+  ResolvedHookDescriptor,
+  TaskTransitionHookContext,
+  TaskTransitionResult,
+  TaskTransitionSource,
+} from "./types.js";
+
+export class HookRuntimeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "HookRuntimeError";
+  }
+}
+
+interface AttemptResultSnapshot {
+  exitCode: number | null;
+  signal: string | null;
+  timedOut: boolean;
+  transcript: string | null;
+  rawStdout: string;
+  rawStderr: string;
+  sessionId: string | null;
+  aborted: boolean;
+}
+
+interface HookExecutionState {
+  manifest: RunManifest;
+  tasks: Map<string, TaskState>;
+  initialPrompt: string;
+  attemptPrompt: string;
+}
+
+interface HookAuditContext {
+  sessionIndex: number | null;
+  attempt: number | null;
+  taskId: string | null;
+}
+
+export interface AttemptPhaseResult {
+  status: "continue" | "reinvoke" | "block";
+  followUpPrompt?: string;
+  reason?: string;
+}
+
+export interface TaskTransitionOutcome {
+  accepted: boolean;
+  reason: string | null;
+}
+
+function tasksSnapshot(tasks: Map<string, TaskState>) {
+  const items = Array.from(tasks.values()).map((task) => ({ ...task }));
+  return {
+    items,
+    completed: items.filter((task) => task.status === "completed").length,
+    total: items.length,
+  };
+}
+
+function cloneTasks(tasks: Map<string, TaskState>): Map<string, TaskState> {
+  return new Map(Array.from(tasks.entries()).map(([id, task]) => [id, { ...task }]));
+}
+
+function normalizeNote(note: string | null): string | null {
+  const trimmed = note?.trim() ?? "";
+  return trimmed.length === 0 ? null : note;
+}
+
+function buildAuditRecord(
+  descriptor: ResolvedHookDescriptor,
+  outcome: string,
+  summary: string | null,
+  context: HookAuditContext,
+  startedAt: string,
+  endedAt: string,
+): HookAuditRecord {
+  return {
+    phase: descriptor.phase,
+    hookId: descriptor.hookId,
+    startedAt,
+    endedAt,
+    outcome,
+    sessionIndex: context.sessionIndex,
+    attempt: context.attempt,
+    taskId: context.taskId,
+    summary,
+  };
+}
+
+async function applyAttachmentMutations(
+  manifest: RunManifest,
+  attachments: NonNullable<HookMutations["attachments"]>,
+): Promise<void> {
+  for (const attachmentId of attachments.remove ?? []) {
+    removeAttachmentFiles(manifest, attachmentId);
+    manifest.attachments = manifest.attachments.filter(
+      (attachment) => attachment.id !== attachmentId,
+    );
+  }
+
+  for (const replacement of attachments.replace ?? []) {
+    const current = getAttachment(manifest, replacement.attachmentId);
+    const staged = await stageAttachmentFromFile(
+      {
+        ...manifest,
+        attachments: manifest.attachments.filter(
+          (attachment) => attachment.id !== replacement.attachmentId,
+        ),
+      },
+      {
+        id: current.id,
+        name: replacement.name ?? current.name,
+        sourcePath: replacement.sourcePath,
+        mimeType: replacement.mimeType,
+      },
+    );
+    removeAttachmentFiles(manifest, replacement.attachmentId);
+    manifest.attachments = manifest.attachments.map((attachment) =>
+      attachment.id === replacement.attachmentId ? staged : attachment,
+    );
+  }
+
+  for (const addition of attachments.add ?? []) {
+    const attachment = await stageAttachmentFromFile(manifest, {
+      id: `att-${shortId()}`,
+      name: addition.name ?? basename(addition.sourcePath),
+      sourcePath: addition.sourcePath,
+      mimeType: addition.mimeType,
+    });
+    manifest.attachments = [...manifest.attachments, attachment];
+  }
+}
+
+function applyTaskPatches(
+  tasks: Map<string, TaskState>,
+  patches: NonNullable<HookMutations["patchTasks"]>,
+) {
+  for (const patch of patches) {
+    const task = tasks.get(patch.taskId);
+    if (!task) {
+      throw new HookRuntimeError(`hook patchTasks references unknown task "${patch.taskId}"`);
+    }
+    if (patch.notesReplace !== undefined && patch.notesAppend !== undefined) {
+      throw new HookRuntimeError(
+        `hook patchTasks for task "${patch.taskId}" cannot set both notesReplace and notesAppend`,
+      );
+    }
+    if (patch.status !== undefined) {
+      task.status = patch.status;
+    }
+    if (patch.notesReplace !== undefined) {
+      task.notes = patch.notesReplace;
+    }
+    if (patch.notesAppend !== undefined) {
+      task.notes =
+        task.notes.length === 0 ? patch.notesAppend : `${task.notes}\n${patch.notesAppend}`;
+    }
+  }
+}
+
+async function applyMutations(
+  state: HookExecutionState,
+  mutate: HookMutations | undefined,
+  options: {
+    allowVars: boolean;
+  },
+): Promise<void> {
+  if (!mutate) {
+    return;
+  }
+
+  if (mutate.run) {
+    const run = mutate.run;
+    if (run.cwd !== undefined) {
+      state.manifest.cwd = run.cwd;
+    }
+    if (run.backend !== undefined) {
+      state.manifest.backend = run.backend;
+    }
+    if (run.model !== undefined) {
+      state.manifest.model = run.model;
+    }
+    if (run.effort !== undefined) {
+      state.manifest.effort = run.effort;
+    }
+    if (run.timeoutSec !== undefined) {
+      state.manifest.timeoutSec = run.timeoutSec;
+    }
+    if (run.unrestricted !== undefined) {
+      state.manifest.unrestricted = run.unrestricted;
+    }
+    if (run.lockedFields !== undefined) {
+      state.manifest.lockedFields = [...run.lockedFields];
+    }
+    if (run.initialPrompt !== undefined) {
+      state.initialPrompt = run.initialPrompt;
+    }
+    if (run.attemptPrompt !== undefined) {
+      state.attemptPrompt = run.attemptPrompt;
+    }
+  }
+
+  if (mutate.vars) {
+    if (!options.allowVars) {
+      throw new HookRuntimeError("hook vars mutations are only allowed during prepare");
+    }
+    state.manifest.runtimeVars = {
+      ...state.manifest.runtimeVars,
+      ...mutate.vars,
+    };
+  }
+
+  if (mutate.state) {
+    state.manifest.hookState = {
+      ...state.manifest.hookState,
+      ...mutate.state,
+    };
+  }
+
+  if (mutate.note !== undefined) {
+    state.manifest.note = normalizeNote(mutate.note);
+  }
+
+  if (mutate.pinned !== undefined) {
+    state.manifest.pinned = mutate.pinned;
+  }
+
+  if (mutate.patchTasks) {
+    applyTaskPatches(state.tasks, mutate.patchTasks);
+  }
+
+  if (mutate.attachments) {
+    await applyAttachmentMutations(state.manifest, mutate.attachments);
+  }
+}
+
+function matchesTaskTransitionWhen(
+  descriptor: ResolvedHookDescriptor,
+  nextStatus: TaskStatus,
+): boolean {
+  const when = descriptor.when;
+  if (!when) {
+    return true;
+  }
+  const toStatus = when.toStatus;
+  if (Array.isArray(toStatus)) {
+    return toStatus.includes(nextStatus);
+  }
+  return true;
+}
+
+async function invokeHook(
+  descriptor: ResolvedHookDescriptor,
+  hook: HookModule,
+  ctx: PrepareHookContext | AttemptHookContext | TaskTransitionHookContext,
+): Promise<HookResult | TaskTransitionResult | null> {
+  switch (descriptor.phase) {
+    case "prepare":
+      return hook.prepare ? hook.prepare(ctx as PrepareHookContext) : null;
+    case "beforeAttempt":
+      return hook.beforeAttempt ? hook.beforeAttempt(ctx as AttemptHookContext) : null;
+    case "afterAttempt":
+      return hook.afterAttempt ? hook.afterAttempt(ctx as AttemptHookContext) : null;
+    case "afterExit":
+      return hook.afterExit ? hook.afterExit(ctx as AttemptHookContext) : null;
+    case "taskTransition":
+      return hook.taskTransition ? hook.taskTransition(ctx as TaskTransitionHookContext) : null;
+  }
+}
+
+function attemptContext(
+  descriptor: ResolvedHookDescriptor,
+  state: HookExecutionState,
+  sessionIndex: number,
+  retriesRemaining: number,
+  attemptResult?: AttemptResultSnapshot,
+): AttemptHookContext {
+  return {
+    schemaVersion: 1,
+    phase: descriptor.phase as AttemptHookContext["phase"],
+    assignment: {
+      name: state.manifest.assignment?.name ?? "",
+      sourcePath: state.manifest.assignment?.sourcePath ?? null,
+      workspacePath: state.manifest.assignment?.workspacePath ?? null,
+    },
+    run: {
+      runId: state.manifest.runId,
+      repo: state.manifest.repo,
+      status: state.manifest.status,
+      backend: state.manifest.backend,
+      model: state.manifest.model,
+      effort: state.manifest.effort,
+      cwd: state.manifest.cwd,
+      workspaceDir: state.manifest.workspaceDir,
+      assignmentPath: state.manifest.assignmentPath,
+      name: state.manifest.name,
+      note: state.manifest.note,
+      pinned: state.manifest.pinned,
+      backendSessionId: state.manifest.backendSessionId,
+      attempts: state.manifest.attempts,
+      maxAttempts: state.manifest.maxAttempts,
+      sessionCount: state.manifest.sessionCount,
+    },
+    vars: { ...state.manifest.runtimeVars },
+    state: { ...state.manifest.hookState },
+    attachments: state.manifest.attachments.map((attachment) => ({ ...attachment })),
+    tasks: tasksSnapshot(state.tasks),
+    config: descriptor.config,
+    attemptPrompt: state.attemptPrompt,
+    attemptResult,
+    retriesRemaining,
+    sessionIndex,
+  };
+}
+
+function prepareContext(
+  descriptor: ResolvedHookDescriptor,
+  state: HookExecutionState,
+  defaultInitialPrompt: string,
+  initialLockedFields: LockableField[],
+): PrepareHookContext {
+  return {
+    ...attemptContext(descriptor, state, 0, state.manifest.maxAttempts - 1),
+    phase: "prepare",
+    defaultInitialPrompt,
+    currentInitialPrompt: state.initialPrompt,
+    initialLockedFields,
+  };
+}
+
+function taskTransitionContext(
+  descriptor: ResolvedHookDescriptor,
+  state: HookExecutionState,
+  transition: TaskTransitionHookContext["transition"],
+): TaskTransitionHookContext {
+  return {
+    ...attemptContext(descriptor, state, state.manifest.sessionCount, state.manifest.maxAttempts),
+    phase: "taskTransition",
+    transition,
+  };
+}
+
+export async function runPrepareHooks(
+  state: HookExecutionState,
+  defaultInitialPrompt: string,
+  initialLockedFields: LockableField[],
+): Promise<void> {
+  for (const descriptor of state.manifest.resolvedHooks.filter(
+    (entry) => entry.phase === "prepare",
+  )) {
+    const startedAt = new Date().toISOString();
+    try {
+      const hook = await loadHookModule(descriptor);
+      const result = await invokeHook(
+        descriptor,
+        hook,
+        prepareContext(descriptor, state, defaultInitialPrompt, initialLockedFields),
+      );
+      const hookResult = result as HookResult | null;
+      if (!hookResult) {
+        state.manifest.hookAudits.push(
+          buildAuditRecord(
+            descriptor,
+            "skipped",
+            null,
+            { sessionIndex: null, attempt: null, taskId: null },
+            startedAt,
+            new Date().toISOString(),
+          ),
+        );
+        continue;
+      }
+      await applyMutations(state, hookResult.mutate, { allowVars: true });
+      if (hookResult.action === "block") {
+        throw new HookRuntimeError(hookResult.reason);
+      }
+      if (hookResult.action === "reinvoke") {
+        state.initialPrompt = hookResult.followUpPrompt;
+      }
+      state.manifest.hookAudits.push(
+        buildAuditRecord(
+          descriptor,
+          hookResult.action,
+          null,
+          { sessionIndex: null, attempt: null, taskId: null },
+          startedAt,
+          new Date().toISOString(),
+        ),
+      );
+    } catch (error) {
+      state.manifest.hookAudits.push(
+        buildAuditRecord(
+          descriptor,
+          "error",
+          error instanceof Error ? error.message : String(error),
+          { sessionIndex: null, attempt: null, taskId: null },
+          startedAt,
+          new Date().toISOString(),
+        ),
+      );
+      throw error;
+    }
+  }
+}
+
+export async function runAttemptHooks(
+  phase: "beforeAttempt" | "afterAttempt" | "afterExit",
+  state: HookExecutionState,
+  options: {
+    sessionIndex: number;
+    attempt: number | null;
+    retriesRemaining: number;
+    attemptResult?: AttemptResultSnapshot;
+  },
+): Promise<AttemptPhaseResult> {
+  for (const descriptor of state.manifest.resolvedHooks.filter((entry) => entry.phase === phase)) {
+    const startedAt = new Date().toISOString();
+    try {
+      const hook = await loadHookModule(descriptor);
+      const result = (await invokeHook(
+        descriptor,
+        hook,
+        attemptContext(
+          descriptor,
+          state,
+          options.sessionIndex,
+          options.retriesRemaining,
+          options.attemptResult,
+        ),
+      )) as HookResult | null;
+      if (!result) {
+        state.manifest.hookAudits.push(
+          buildAuditRecord(
+            descriptor,
+            "skipped",
+            null,
+            { sessionIndex: options.sessionIndex, attempt: options.attempt, taskId: null },
+            startedAt,
+            new Date().toISOString(),
+          ),
+        );
+        continue;
+      }
+      await applyMutations(state, result.mutate, { allowVars: false });
+      state.manifest.hookAudits.push(
+        buildAuditRecord(
+          descriptor,
+          result.action,
+          result.action === "block" ? result.reason : null,
+          { sessionIndex: options.sessionIndex, attempt: options.attempt, taskId: null },
+          startedAt,
+          new Date().toISOString(),
+        ),
+      );
+      if (result.action === "continue") {
+        continue;
+      }
+      if (result.action === "reinvoke") {
+        return {
+          status: "reinvoke",
+          followUpPrompt: result.followUpPrompt,
+        };
+      }
+      return {
+        status: "block",
+        reason: result.reason,
+      };
+    } catch (error) {
+      state.manifest.hookAudits.push(
+        buildAuditRecord(
+          descriptor,
+          "error",
+          error instanceof Error ? error.message : String(error),
+          { sessionIndex: options.sessionIndex, attempt: options.attempt, taskId: null },
+          startedAt,
+          new Date().toISOString(),
+        ),
+      );
+      throw error;
+    }
+  }
+
+  return { status: "continue" };
+}
+
+export async function runTaskTransitionHooks(
+  state: HookExecutionState,
+  options: {
+    source: TaskTransitionSource;
+    taskId: string;
+    from: TaskTransitionHookContext["transition"]["from"];
+    to: TaskTransitionHookContext["transition"]["to"];
+    changedFields: TaskTransitionHookContext["transition"]["changedFields"];
+  },
+): Promise<TaskTransitionOutcome> {
+  for (const descriptor of state.manifest.resolvedHooks.filter(
+    (entry) => entry.phase === "taskTransition",
+  )) {
+    if (!matchesTaskTransitionWhen(descriptor, options.to.status)) {
+      continue;
+    }
+    const startedAt = new Date().toISOString();
+    try {
+      const hook = await loadHookModule(descriptor);
+      const result = (await invokeHook(
+        descriptor,
+        hook,
+        taskTransitionContext(descriptor, state, {
+          taskId: options.taskId,
+          source: options.source,
+          from: options.from,
+          to: options.to,
+          tentative: true,
+          changedFields: options.changedFields,
+        }),
+      )) as TaskTransitionResult | null;
+      if (!result) {
+        state.manifest.hookAudits.push(
+          buildAuditRecord(
+            descriptor,
+            "skipped",
+            null,
+            { sessionIndex: null, attempt: null, taskId: options.taskId },
+            startedAt,
+            new Date().toISOString(),
+          ),
+        );
+        continue;
+      }
+      await applyMutations(state, result.mutate, { allowVars: false });
+      state.manifest.hookAudits.push(
+        buildAuditRecord(
+          descriptor,
+          result.accept ? "accepted" : "rejected",
+          result.accept ? null : result.reason,
+          { sessionIndex: null, attempt: null, taskId: options.taskId },
+          startedAt,
+          new Date().toISOString(),
+        ),
+      );
+      if (!result.accept) {
+        return {
+          accepted: false,
+          reason: result.reason,
+        };
+      }
+    } catch (error) {
+      state.manifest.hookAudits.push(
+        buildAuditRecord(
+          descriptor,
+          "error",
+          error instanceof Error ? error.message : String(error),
+          { sessionIndex: null, attempt: null, taskId: options.taskId },
+          startedAt,
+          new Date().toISOString(),
+        ),
+      );
+      throw error;
+    }
+  }
+
+  return {
+    accepted: true,
+    reason: null,
+  };
+}
+
+export function createHookExecutionState(
+  manifest: RunManifest,
+  tasks: Map<string, TaskState>,
+  prompts: {
+    initialPrompt: string;
+    attemptPrompt?: string;
+  },
+): HookExecutionState {
+  return {
+    manifest,
+    tasks,
+    initialPrompt: prompts.initialPrompt,
+    attemptPrompt: prompts.attemptPrompt ?? prompts.initialPrompt,
+  };
+}
+
+export function cloneHookExecutionState(state: HookExecutionState): HookExecutionState {
+  return {
+    manifest: {
+      ...state.manifest,
+      lockedFields: [...state.manifest.lockedFields],
+      dependencyRunIds: [...state.manifest.dependencyRunIds],
+      runtimeVars: { ...state.manifest.runtimeVars },
+      hookState: { ...state.manifest.hookState },
+      attachments: state.manifest.attachments.map((attachment) => ({ ...attachment })),
+      finalTasks: { ...state.manifest.finalTasks },
+      resolvedHooks: state.manifest.resolvedHooks.map((descriptor) => ({
+        ...descriptor,
+        source: { ...descriptor.source },
+        when: descriptor.when ? { ...descriptor.when } : null,
+      })),
+      hookAudits: state.manifest.hookAudits.map((audit) => ({ ...audit })),
+    },
+    tasks: cloneTasks(state.tasks),
+    initialPrompt: state.initialPrompt,
+    attemptPrompt: state.attemptPrompt,
+  };
+}

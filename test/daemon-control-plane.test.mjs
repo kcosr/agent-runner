@@ -1742,6 +1742,174 @@ test("daemon projects active run detail as live while it owns the run", async ()
   }
 });
 
+test("daemon HTTP projections preserve hook summary and detail fields", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  const runId = "daemon-hook-projection";
+
+  const server = await serveDaemon(listenUrl, {
+    getRun() {
+      return {
+        runId,
+        repo: "task-runner",
+        status: "initialized",
+        effectiveStatus: "initialized",
+        archivedAt: null,
+        isLive: false,
+        workspaceDir: "/tmp/fake",
+        assignmentPath: "/tmp/fake/assignment.md",
+        agent: {
+          name: "daemon-agent",
+          sourcePath: null,
+        },
+        assignment: null,
+        backend: "codex",
+        model: "gpt-5.4",
+        effort: "high",
+        name: "Daemon hook projection",
+        note: null,
+        pinned: false,
+        backendSessionId: null,
+        cwd: "/tmp/fake",
+        unrestricted: false,
+        timeoutSec: 60,
+        startedAt: "2026-04-20T10:00:00.000Z",
+        endedAt: null,
+        exitCode: null,
+        attempts: 0,
+        maxAttempts: 1,
+        sessionCount: 0,
+        tasksCompleted: 0,
+        tasksTotal: 1,
+        attachments: [],
+        resolvedHooks: [
+          {
+            hookId: "prepare:0:freeze",
+            phase: "prepare",
+            source: { name: "freeze" },
+            resolvedPath: "/tmp/hooks/freeze/hook.ts",
+            when: null,
+            config: { mode: "json" },
+          },
+        ],
+        hookState: { prepared: true },
+        hookAudits: [
+          {
+            phase: "prepare",
+            hookId: "prepare:0:freeze",
+            startedAt: "2026-04-20T10:00:00.000Z",
+            endedAt: "2026-04-20T10:00:01.000Z",
+            outcome: "continue",
+            sessionIndex: null,
+            attempt: null,
+            taskId: null,
+            summary: null,
+          },
+        ],
+        dependencies: [],
+        dependents: [],
+        tasks: [
+          {
+            id: "t1",
+            title: "First",
+            body: "",
+            status: "pending",
+            notes: "",
+          },
+        ],
+        activeTask: null,
+        message: null,
+        callerInstructions: null,
+        lockedFields: [],
+        runtimeVars: {},
+        execution: {
+          hostMode: "daemon",
+          controller: {
+            kind: "daemon",
+            daemonInstanceId: "daemon-placeholder",
+          },
+        },
+        capabilities: {
+          canArchive: false,
+          canUnarchive: false,
+          canResume: false,
+          canAbort: false,
+          abortReason: "not_active_in_daemon",
+          taskMutation: {
+            canSetStatus: false,
+            canEditNotes: false,
+            canAdd: false,
+          },
+        },
+      };
+    },
+    getRunList() {
+      return [
+        {
+          runId,
+          repo: "task-runner",
+          status: "initialized",
+          effectiveStatus: "initialized",
+          archivedAt: null,
+          agentName: "daemon-agent",
+          name: "Daemon hook projection",
+          assignmentName: "daemon-work",
+          backend: "codex",
+          model: "gpt-5.4",
+          cwd: "/tmp/fake",
+          startedAt: "2026-04-20T10:00:00.000Z",
+          endedAt: null,
+          tasksCompleted: 0,
+          tasksTotal: 1,
+          attachmentCount: 0,
+          hookCount: 1,
+          dependencyState: {
+            ready: true,
+            total: 0,
+            satisfied: 0,
+            unsatisfied: 0,
+          },
+          activeTask: null,
+          execution: {
+            hostMode: "daemon",
+            controller: {
+              kind: "daemon",
+              daemonInstanceId: "daemon-placeholder",
+            },
+          },
+          capabilities: {
+            canArchive: false,
+            canUnarchive: false,
+            canResume: false,
+            canAbort: false,
+            abortReason: "not_active_in_daemon",
+            taskMutation: {
+              canSetStatus: false,
+              canEditNotes: false,
+              canAdd: false,
+            },
+          },
+        },
+      ];
+    },
+  });
+
+  try {
+    const list = await httpJson(httpBaseUrl, "/api/runs");
+    assert.equal(list.status, 200);
+    assert.equal(list.body.runs[0].hookCount, 1);
+
+    const detail = await httpJson(httpBaseUrl, `/api/runs/${runId}`);
+    assert.equal(detail.status, 200);
+    assert.equal(detail.body.run.resolvedHooks.length, 1);
+    assert.deepEqual(detail.body.run.hookState, { prepared: true });
+    assert.equal(detail.body.run.hookAudits[0].outcome, "continue");
+  } finally {
+    await server.close();
+  }
+});
+
 test("daemon subscriptions fan out run events and abort active runs", async () => {
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;

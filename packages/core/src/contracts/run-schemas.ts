@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { LOCKABLE_FIELDS } from "../core/config/schema.js";
+import { HOOK_PHASES } from "../core/config/schema.js";
 import type { AttachmentListEntry, RunAttachment } from "./attachments.js";
 import type {
   RunDetailStreamEvent,
@@ -107,6 +108,35 @@ const runAttachmentObjectSchema = z.object({
 
 export const runAttachmentSchema: z.ZodType<RunAttachment> = runAttachmentObjectSchema;
 
+const resolvedHookSourceSchema = z
+  .object({
+    builtin: z.string().optional(),
+    name: z.string().optional(),
+    path: z.string().optional(),
+  })
+  .strict();
+
+const resolvedHookDescriptorSchema = z.object({
+  hookId: z.string(),
+  phase: z.enum(HOOK_PHASES),
+  source: resolvedHookSourceSchema,
+  resolvedPath: z.string().nullable(),
+  when: z.record(z.string(), z.unknown()).nullable(),
+  config: z.any(),
+});
+
+const hookAuditRecordSchema = z.object({
+  phase: z.enum(HOOK_PHASES),
+  hookId: z.string(),
+  startedAt: z.string(),
+  endedAt: z.string(),
+  outcome: z.string(),
+  sessionIndex: z.number().nullable(),
+  attempt: z.number().nullable(),
+  taskId: z.string().nullable(),
+  summary: z.string().nullable(),
+});
+
 export const attachmentListEntrySchema: z.ZodType<AttachmentListEntry> =
   runAttachmentObjectSchema.extend({
     ownerRunId: z.string(),
@@ -148,6 +178,7 @@ export const runSummarySchema: z.ZodType<RunSummary> = z.object({
   tasksCompleted: z.number(),
   tasksTotal: z.number(),
   attachmentCount: z.number(),
+  hookCount: z.number().optional(),
   dependencyState: runDependencyStateSchema,
   activeTask: runActiveTaskSchema.nullable(),
   execution: runExecutionSchema,
@@ -193,6 +224,11 @@ export const runDetailSchema: z.ZodType<RunDetail> = z.object({
   tasksCompleted: z.number(),
   tasksTotal: z.number(),
   attachments: z.array(runAttachmentSchema),
+  resolvedHooks: (
+    z.array(resolvedHookDescriptorSchema) as z.ZodType<NonNullable<RunDetail["resolvedHooks"]>>
+  ).optional(),
+  hookState: z.record(z.string(), z.unknown()).optional(),
+  hookAudits: z.array(hookAuditRecordSchema).optional(),
   dependencies: z.array(runDependencyDetailSchema),
   dependents: z.array(runDependencyDetailSchema),
   tasks: z.array(runTaskSummarySchema),

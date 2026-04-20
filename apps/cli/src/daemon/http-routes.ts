@@ -353,7 +353,7 @@ const routes: RouteDefinition[] = [
       sendJson(
         res,
         200,
-        ctx.operations.updateTask(routeParam(params, "runId"), routeParam(params, "taskId"), {
+        await ctx.operations.updateTask(routeParam(params, "runId"), routeParam(params, "taskId"), {
           status: optionalEnum(body.status, "status", VALID_STATUSES),
           notes: optionalString(body.notes, "notes"),
         }),
@@ -368,7 +368,7 @@ const routes: RouteDefinition[] = [
       sendJson(
         res,
         200,
-        ctx.operations.appendTaskNotes(
+        await ctx.operations.appendTaskNotes(
           routeParam(params, "runId"),
           routeParam(params, "taskId"),
           requiredString(body.text, "text"),
@@ -384,7 +384,7 @@ const routes: RouteDefinition[] = [
       sendJson(
         res,
         200,
-        ctx.operations.createTask(routeParam(params, "runId"), {
+        await ctx.operations.createTask(routeParam(params, "runId"), {
           title: requiredString(body.title, "title"),
           body: optionalString(body.body, "body"),
         }),

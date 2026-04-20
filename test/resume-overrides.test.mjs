@@ -183,19 +183,19 @@ test("resolveResumeTarget rejects a manifest with a session missing brief", () =
   );
 });
 
-test("resolveResumeTarget accepts a well-formed v8 manifest from the unknown bucket", () => {
+test("resolveResumeTarget accepts a well-formed v9 manifest from the unknown bucket", () => {
   const dir = tempDir();
   const workspaceDir = join(dir, "runs", "unknown", "wellformed");
   writeManifest(dir, "unknown", "wellformed", baseManifest("wellformed", workspaceDir));
 
   const resolved = withStateRoot(dir, () => resolveResumeTarget("wellformed", dir));
   assert.equal(resolved.manifest.runId, "wellformed");
-  assert.equal(resolved.manifest.schemaVersion, 8);
+  assert.equal(resolved.manifest.schemaVersion, 9);
 });
 
 function baseManifest(runId, workspaceDir) {
   return {
-    schemaVersion: 8,
+    schemaVersion: 9,
     runId,
     repo: "unknown",
     agent: {
@@ -227,6 +227,9 @@ function baseManifest(runId, workspaceDir) {
     tasksTotal: 1,
     backendSessionId: "sess-base",
     runtimeVars: {},
+    resolvedHooks: [],
+    hookState: {},
+    hookAudits: [],
     execution: {
       hostMode: "embedded",
       controller: {
@@ -237,14 +240,23 @@ function baseManifest(runId, workspaceDir) {
     callerInstructions: null,
     attachments: [],
     resetSeed: {
+      backend: "claude",
       model: "claude-sonnet-4-6",
       effort: null,
+      cwd: process.cwd(),
+      lockedFields: [],
+      message: null,
       name: null,
+      note: null,
+      pinned: false,
       dependencyRunIds: [],
       unrestricted: false,
       timeoutSec: 3600,
       maxAttempts: 4,
       brief: "seed prompt",
+      runtimeVars: {},
+      hookState: {},
+      attachments: [],
       finalTasks: {
         t1: {
           id: "t1",

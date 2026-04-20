@@ -6,6 +6,16 @@ import {
   isWsOrWssUrl,
 } from "../backends/types.js";
 
+export const HOOK_PHASES = [
+  "prepare",
+  "beforeAttempt",
+  "afterAttempt",
+  "afterExit",
+  "taskTransition",
+] as const;
+
+export type HookPhase = (typeof HOOK_PHASES)[number];
+
 export const taskDefSchema = z.object({
   id: z
     .string()
@@ -47,6 +57,7 @@ export const varDefSchema = z
   .object({
     type: z.enum(["string", "number", "boolean", "enum"]).default("string"),
     required: z.boolean().default(false),
+    requiredAt: z.enum(["initial", "prepare"]).default("initial"),
     source: z.enum(["cli", "env", "either"]).default("cli"),
     envName: z.string().optional(),
     default: z.unknown().optional(),
@@ -68,6 +79,40 @@ export const varDefSchema = z
         message: `default is incompatible with var type "${v.type}"`,
       });
     }
+  });
+
+export const assignmentHookEntrySchema = z
+  .object({
+    builtin: z.string().min(1).optional(),
+    name: z.string().min(1).optional(),
+    path: z.string().min(1).optional(),
+    when: z.record(z.string(), z.unknown()).nullable().optional(),
+    with: z.unknown().optional(),
+  })
+  .superRefine((entry, ctx) => {
+    const defined = [entry.builtin, entry.name, entry.path].filter((value) => value !== undefined);
+    if (defined.length !== 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "hook entry must define exactly one of `builtin`, `name`, or `path`",
+      });
+    }
+  });
+
+export const assignmentHooksSchema = z
+  .object({
+    prepare: z.array(assignmentHookEntrySchema).default([]),
+    beforeAttempt: z.array(assignmentHookEntrySchema).default([]),
+    afterAttempt: z.array(assignmentHookEntrySchema).default([]),
+    afterExit: z.array(assignmentHookEntrySchema).default([]),
+    taskTransition: z.array(assignmentHookEntrySchema).default([]),
+  })
+  .default({
+    prepare: [],
+    beforeAttempt: [],
+    afterAttempt: [],
+    afterExit: [],
+    taskTransition: [],
   });
 
 export const LOCKABLE_FIELDS = [
@@ -159,6 +204,7 @@ export const assignmentConfigSchema = z
     callerInstructions: z.string().optional(),
     vars: z.record(z.string(), varDefSchema).default({}),
     tasks: z.array(taskDefSchema).max(100).default([]),
+    hooks: assignmentHooksSchema,
     lockedFields: z.array(z.enum(LOCKABLE_FIELDS)).default([]),
   })
   .refine(
@@ -174,5 +220,7 @@ export const assignmentConfigSchema = z
   );
 
 export type AssignmentConfig = z.infer<typeof assignmentConfigSchema>;
+export type AssignmentHookEntry = z.infer<typeof assignmentHookEntrySchema>;
+export type AssignmentHooks = z.infer<typeof assignmentHooksSchema>;
 export type TaskDef = z.infer<typeof taskDefSchema>;
 export type VarDef = z.infer<typeof varDefSchema>;

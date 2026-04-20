@@ -15,9 +15,14 @@ ${TASK_RUNNER_CONFIG_DIR}/
 ├── agents/
 │   └── <agent-name>/
 │       └── agent.md
+├── hooks/
+│   └── <hook-name>/
+│       └── hook.ts
 └── assignments/
     └── <assignment-name>/
-        └── assignment.md
+        ├── assignment.md
+        └── hooks/
+            └── local-hook.mts
 ```
 
 Bundled examples live in this repo under `agents/` and `assignments/`. See
@@ -114,6 +119,13 @@ tasks:                              # optional, max 100, ids unique
     title: Orient to the repo
     body: |
       Read README.md and AGENTS.md.
+hooks:                              # optional hook arrays by phase
+  prepare:
+    - name: freeze-prepare
+  taskTransition:
+    - path: ./hooks/guard.mts
+      when:
+        toStatus: [completed]
 lockedFields: []                    # optional lockable fields
 ---
 ```
@@ -161,6 +173,70 @@ If a required env var is missing or empty, a typed value cannot be
 coerced, or `${...}` is used on a disabled object or array surface,
 definition loading fails with a config error that names the config path
 and env var.
+
+## Assignment hooks
+
+Assignments can declare hook arrays under these phases:
+
+- `prepare`
+- `beforeAttempt`
+- `afterAttempt`
+- `afterExit`
+- `taskTransition`
+
+Each hook entry must select exactly one source:
+
+```yaml
+hooks:
+  prepare:
+    - builtin: git-worktree
+      with:
+        repo: "{{cwd}}"
+        from: main
+        branch: feature-review
+        path: "{{cwd}}/.worktrees/feature-review"
+    - name: freeze-prepare
+      with:
+        mode: strict
+    - path: ./hooks/seed-context.mts
+```
+
+Resolution rules:
+
+- `builtin` loads one of the first-party hooks shipped by core.
+- `name` resolves from `${TASK_RUNNER_CONFIG_DIR}/hooks/<name>/hook.(ts|mts|js|mjs)`.
+- `path` resolves relative to the authored `assignment.md`.
+- Raw `.ts` / `.mts` hook files load directly through the runtime's
+  `jiti` loader. Hook authors do not need a separate build step.
+
+Prepare hooks run once during fresh `run` / `init`, before the first
+manifest write. Their resolved descriptor, config, mutated prompts, vars,
+cwd, and hook state are then frozen into the manifest. Resume and reset
+reuse that frozen prepare output instead of re-reading the current hook
+source.
+
+Hook mutation boundaries:
+
+- `prepare` may mutate run config (`cwd`, backend/model/effort,
+  timeout/unrestricted, prompts, locked fields), runtime vars, hook
+  state, note/pin metadata, task patches, and attachments.
+- non-prepare phases may mutate run config, hook state, note/pin
+  metadata, task patches, and attachments, but not runtime vars.
+- task-transition hooks run transactionally around `task set`,
+  `task append-notes`, `task add`, and the run loop's own task writes.
+  If a task-transition hook rejects, the requested task edit rolls back,
+  but the hook's own accepted side effects such as notes, pins,
+  attachments, or task patches still persist.
+
+Built-in hooks:
+
+- `git-worktree` runs only in `prepare`. It ensures a git worktree,
+  switches the run `cwd` to that path, and projects `worktree_path`
+  into runtime vars.
+- `command` runs in every phase. `mode: status` treats exit code `0` as
+  success and a non-zero exit code as block/reject. `mode: json`
+  requires exit code `0` and parses a full hook result from stdout;
+  malformed JSON is a runtime error.
 
 ## Locked fields
 
@@ -264,6 +340,37 @@ task-runner show assignment <name|path>
 
 These surfaces render the parsed frontmatter, interpolation hooks, and task
 list for human review.
+
+## Authoring hook modules
+
+First-party and custom hooks share the public authoring surface exported
+from `@task-runner/core/hooks`:
+
+```ts
+import { defineHook, type PrepareHookContext } from "@task-runner/core/hooks";
+
+export default defineHook({
+  name: "freeze-prepare",
+  prepare(ctx: PrepareHookContext) {
+    return {
+      action: "continue",
+      mutate: {
+        state: { prepared: true },
+        note: `prepared in ${ctx.run.cwd}`,
+      },
+    };
+  },
+});
+```
+
+Use `defineHook(...)` for type inference and return one of:
+
+- `action: "continue"` to keep going
+- `action: "reinvoke"` with `followUpPrompt` to rewrite the next prompt
+- `action: "block"` with `reason` to stop the run
+
+Task-transition hooks return `{ accept: true }` or
+`{ accept: false, reason }` instead.
 
 ## Authoring tips
 

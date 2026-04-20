@@ -170,6 +170,7 @@ export function refreshManifestTaskState(manifest: RunManifest): Map<string, Tas
   manifest.name = latest.name;
   manifest.note = latest.note;
   manifest.pinned = latest.pinned;
+  manifest.hookState = { ...latest.hookState };
   manifest.resetSeed.name = latest.resetSeed.name;
   manifest.resetSeed.note = latest.resetSeed.note;
   manifest.resetSeed.pinned = latest.resetSeed.pinned;

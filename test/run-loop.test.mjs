@@ -1,9 +1,11 @@
 import { strict as assert } from "node:assert";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
+import { resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import { createRunEventCapture } from "./helpers/run-events.mjs";
 import {
@@ -115,6 +117,34 @@ function writeAssignment(baseDir, name, body) {
   const path = join(dir, "assignment.md");
   writeFileSync(path, body);
   return path;
+}
+
+function writeNamedHook(baseDir, name, body) {
+  const dir = join(baseDir, "hooks", name);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "hook.ts"), body);
+}
+
+function writeNodeScript(baseDir, name, body) {
+  const path = join(baseDir, name);
+  writeFileSync(path, body);
+  return path;
+}
+
+function initGitRepo(baseDir) {
+  const repoDir = join(baseDir, "repo");
+  mkdirSync(repoDir, { recursive: true });
+  execFileSync("git", ["init", "--initial-branch=main", repoDir], { encoding: "utf8" });
+  execFileSync("git", ["-C", repoDir, "config", "user.name", "Task Runner Tests"], {
+    encoding: "utf8",
+  });
+  execFileSync("git", ["-C", repoDir, "config", "user.email", "tests@example.com"], {
+    encoding: "utf8",
+  });
+  writeFileSync(join(repoDir, "README.md"), "seed\n");
+  execFileSync("git", ["-C", repoDir, "add", "README.md"], { encoding: "utf8" });
+  execFileSync("git", ["-C", repoDir, "commit", "-m", "seed"], { encoding: "utf8" });
+  return repoDir;
 }
 
 function writeAgentAndAssignment(baseDir) {
@@ -254,6 +284,371 @@ test("explicit --cwd override beats assignment cwd and callerCwd", async () => {
   );
 
   assert.equal(seenCwd, join(callerDir, "override-root"));
+});
+
+test("prepare named hooks freeze resolved descriptors and prepare outputs across init and resume", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  writeAssignment(
+    dir,
+    "three-work",
+    `---
+schemaVersion: 1
+name: three-work
+vars:
+  prepared_dir:
+    type: string
+    required: true
+    requiredAt: prepare
+hooks:
+  prepare:
+    - name: freeze-prepare
+tasks:
+  - id: t1
+    title: First
+---
+Work.
+`,
+  );
+  writeNamedHook(
+    dir,
+    "freeze-prepare",
+    `export default {
+  name: "freeze-prepare",
+  prepare(ctx) {
+    return {
+      action: "continue",
+      mutate: {
+        run: { cwd: ctx.run.cwd + "/prepared" },
+        vars: { prepared_dir: ctx.run.cwd + "/prepared" },
+        state: { prepared: true },
+        note: "prepared once",
+      },
+    };
+  },
+};
+`,
+  );
+
+  const initialized = await runWithMock(
+    dir,
+    async () => ({
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      sessionId: "session-1",
+      transcript: "init",
+      rawStdout: "",
+      rawStderr: "",
+    }),
+    {},
+    { assignmentName: "three-work", backendId: "claude" },
+  );
+
+  const initManifest = JSON.parse(
+    readFileSync(join(initialized.outcome.workspaceDir, "run.json"), "utf8"),
+  );
+  assert.equal(initManifest.runtimeVars.prepared_dir, join(dir, "prepared"));
+  assert.equal(initManifest.note, "prepared once");
+  assert.equal(initManifest.hookState.prepared, true);
+  assert.equal(initManifest.resolvedHooks[0].source.name, "freeze-prepare");
+  assert.match(initManifest.resolvedHooks[0].resolvedPath, /freeze-prepare\/hook\.ts$/);
+
+  writeNamedHook(
+    dir,
+    "freeze-prepare",
+    `export default {
+  name: "freeze-prepare",
+  prepare() {
+    return {
+      action: "continue",
+      mutate: { run: { cwd: "/different" }, vars: { prepared_dir: "/different" } },
+    };
+  },
+};
+`,
+  );
+
+  const target = withSharedRuntimeEnv(dir, () =>
+    resolveResumeTarget(initialized.outcome.runId, dir),
+  );
+  let resumedCwd;
+  await withSharedRuntimeEnv(dir, async () => {
+    const loaded = loadAgentConfig("three", dir);
+    const resumed = await runAgent({
+      loaded,
+      cliVars: {},
+      backend: {
+        id: "claude",
+        invoke: async (ctx) => {
+          resumedCwd = ctx.cwd;
+          const manifestPath = join(target.workspaceDir, "run.json");
+          const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+          manifest.finalTasks.t1.status = "completed";
+          manifest.tasksCompleted = 1;
+          writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+          return {
+            exitCode: 0,
+            signal: null,
+            timedOut: false,
+            sessionId: "session-2",
+            transcript: "done",
+            rawStdout: "",
+            rawStderr: "",
+          };
+        },
+      },
+      resume: target,
+    });
+    assert.equal(resumed.manifest.runtimeVars.prepared_dir, join(dir, "prepared"));
+  });
+
+  assert.equal(resumedCwd, join(dir, "prepared"));
+});
+
+test("command builtin json prepare hooks can mutate note, pin, attachments, vars, and state", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  const evidencePath = join(dir, "evidence.txt");
+  writeFileSync(evidencePath, "hook evidence\n");
+  const scriptPath = writeNodeScript(
+    dir,
+    "prepare-json-hook.mjs",
+    `process.stdout.write(JSON.stringify({
+  action: "continue",
+  mutate: {
+    note: "prepared by command",
+    pinned: true,
+    vars: { prepared_token: "ready" },
+    state: { preparedBy: "command" },
+    attachments: {
+      add: [{ sourcePath: ${JSON.stringify(evidencePath)}, name: "hook-evidence.txt" }],
+    },
+  },
+}));\n`,
+  );
+  writeAssignment(
+    dir,
+    "three-work",
+    `---
+schemaVersion: 1
+name: three-work
+vars:
+  prepared_token:
+    type: string
+    required: true
+    requiredAt: prepare
+hooks:
+  prepare:
+    - builtin: command
+      with:
+        mode: json
+        command: ${JSON.stringify(process.execPath)}
+        args:
+          - ${JSON.stringify(scriptPath)}
+tasks:
+  - id: t1
+    title: First
+---
+Work.
+`,
+  );
+
+  const { outcome } = await runWithMock(
+    dir,
+    async (ctx) => {
+      setTaskStatusesForPrompt(ctx.prompt, { t1: "completed" }, dir);
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "session-command-json",
+        transcript: "done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    },
+    {},
+    { assignmentName: "three-work", backendId: "claude" },
+  );
+
+  const manifest = JSON.parse(readFileSync(join(outcome.workspaceDir, "run.json"), "utf8"));
+  assert.equal(manifest.note, "prepared by command");
+  assert.equal(manifest.pinned, true);
+  assert.equal(manifest.runtimeVars.prepared_token, "ready");
+  assert.equal(manifest.hookState.preparedBy, "command");
+  assert.equal(manifest.attachments.length, 1);
+  assert.equal(manifest.attachments[0].name, "hook-evidence.txt");
+  assert.equal(
+    readFileSync(join(outcome.workspaceDir, manifest.attachments[0].relativePath), "utf8"),
+    "hook evidence\n",
+  );
+});
+
+test("command builtin status mode can block before attempts without invoking the backend", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  const scriptPath = writeNodeScript(
+    dir,
+    "before-attempt-block.mjs",
+    `process.stderr.write("blocked by command\\n");
+process.exit(7);\n`,
+  );
+  writeAssignment(
+    dir,
+    "three-work",
+    `---
+schemaVersion: 1
+name: three-work
+hooks:
+  beforeAttempt:
+    - builtin: command
+      with:
+        mode: status
+        command: ${JSON.stringify(process.execPath)}
+        args:
+          - ${JSON.stringify(scriptPath)}
+tasks:
+  - id: t1
+    title: First
+---
+Work.
+`,
+  );
+
+  let backendInvoked = false;
+  const { outcome } = await runWithMock(
+    dir,
+    async () => {
+      backendInvoked = true;
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: null,
+        transcript: "done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    },
+    {},
+    { assignmentName: "three-work", backendId: "claude" },
+  );
+
+  assert.equal(backendInvoked, false);
+  assert.equal(outcome.exitCode, 2);
+  assert.equal(outcome.manifest.status, "blocked");
+  assert.equal(outcome.manifest.hookAudits.at(-1)?.outcome, "block");
+  assert.equal(outcome.manifest.hookAudits.at(-1)?.summary, "blocked by command");
+});
+
+test("command builtin json mode rejects malformed JSON hook output", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  const scriptPath = writeNodeScript(
+    dir,
+    "prepare-bad-json.mjs",
+    'process.stdout.write("{bad");\n',
+  );
+  writeAssignment(
+    dir,
+    "three-work",
+    `---
+schemaVersion: 1
+name: three-work
+hooks:
+  prepare:
+    - builtin: command
+      with:
+        mode: json
+        command: ${JSON.stringify(process.execPath)}
+        args:
+          - ${JSON.stringify(scriptPath)}
+tasks:
+  - id: t1
+    title: First
+---
+Work.
+`,
+  );
+
+  await assert.rejects(
+    () =>
+      runWithMock(
+        dir,
+        async () => {
+          throw new Error("backend should not run when prepare hook JSON is malformed");
+        },
+        {},
+        { assignmentName: "three-work", backendId: "claude" },
+      ),
+    /malformed JSON output/,
+  );
+});
+
+test("git-worktree builtin prepare hooks create worktrees and project cwd plus worktree_path", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  const repoDir = initGitRepo(dir);
+  const worktreeDir = join(dir, "feature-worktree");
+  writeAssignment(
+    dir,
+    "three-work",
+    `---
+schemaVersion: 1
+name: three-work
+vars:
+  worktree_path:
+    type: string
+    required: true
+    requiredAt: prepare
+hooks:
+  prepare:
+    - builtin: git-worktree
+      with:
+        repo: ${JSON.stringify(repoDir)}
+        from: main
+        branch: hooks-test
+        path: ${JSON.stringify(worktreeDir)}
+tasks:
+  - id: t1
+    title: First
+---
+Work.
+`,
+  );
+
+  let seenCwd;
+  const { outcome } = await runWithMock(
+    dir,
+    async (ctx) => {
+      seenCwd = ctx.cwd;
+      setTaskStatusesForPrompt(ctx.prompt, { t1: "completed" }, dir);
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "session-worktree",
+        transcript: "done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    },
+    {},
+    { assignmentName: "three-work", backendId: "claude" },
+  );
+
+  const manifest = JSON.parse(readFileSync(join(outcome.workspaceDir, "run.json"), "utf8"));
+  assert.equal(seenCwd, worktreeDir);
+  assert.equal(manifest.cwd, worktreeDir);
+  assert.equal(manifest.runtimeVars.worktree_path, worktreeDir);
+  assert.equal(readFileSync(join(worktreeDir, "README.md"), "utf8"), "seed\n");
+  assert.equal(
+    execFileSync("git", ["-C", worktreeDir, "rev-parse", "--abbrev-ref", "HEAD"], {
+      encoding: "utf8",
+    }).trim(),
+    "hooks-test",
+  );
 });
 
 test("effort level from frontmatter is forwarded to backend", async () => {

@@ -52,6 +52,7 @@ import { resolveTaskRunnerCommand } from "../../task-runner-command.js";
 import { trimRunName } from "../../util/run-name.js";
 import { shortId } from "../../util/short-id.js";
 import type { LoadedAgent, LoadedAssignment } from "../config/loaded.js";
+import { createHookExecutionState, runTaskTransitionHooks } from "../hooks/runtime.js";
 import {
   AttachmentError,
   attachmentStoragePath,
@@ -440,13 +441,56 @@ function persistTaskMap(
 function updateTaskMap(
   resolved: ReturnType<typeof resolveResumeTarget>,
   auditOrigin: RunEventOrigin,
-  updater: (tasks: Map<string, TaskState>) => TaskMutationAuditEvent | null,
-): void {
-  withTaskStateLock(resolved.workspaceDir, () => {
+  source: "task-set" | "task-append-notes" | "task-add",
+  updater: (tasks: Map<string, TaskState>) => {
+    auditEvent: TaskMutationAuditEvent | null;
+    transition: {
+      taskId: string;
+      from: { status: TaskStatus; notes: string } | null;
+      to: { status: TaskStatus; notes: string; title: string; body: string };
+      changedFields: Array<"status" | "notes" | "title" | "body">;
+      rollback(tasks: Map<string, TaskState>): void;
+    } | null;
+  },
+): Promise<void> {
+  return withTaskStateLockAsync(resolved.workspaceDir, async () => {
     resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
-    const tasks = loadWorkspaceTaskMap(resolved.manifest);
-    const auditEvent = updater(tasks);
-    persistTaskMap(resolved, tasks, auditOrigin, auditEvent);
+    const originalTasks = loadWorkspaceTaskMap(resolved.manifest);
+    const workingTasks = new Map(
+      Array.from(originalTasks.entries()).map(([id, task]) => [id, { ...task }]),
+    );
+    const mutation = updater(workingTasks);
+    if (!mutation.auditEvent && !mutation.transition) {
+      return;
+    }
+
+    let auditEvent = mutation.auditEvent;
+    if (mutation.transition) {
+      const hookState = createHookExecutionState(resolved.manifest, workingTasks, {
+        initialPrompt: resolved.manifest.brief,
+      });
+      const outcome = await runTaskTransitionHooks(hookState, {
+        source,
+        taskId: mutation.transition.taskId,
+        from: mutation.transition.from,
+        to: mutation.transition.to,
+        changedFields: mutation.transition.changedFields,
+      });
+      resolved.manifest = hookState.manifest;
+      if (!outcome.accepted) {
+        mutation.transition.rollback(hookState.tasks);
+        auditEvent = null;
+      }
+      resolved.manifest.resetSeed.note = resolved.manifest.note;
+      resolved.manifest.resetSeed.pinned = resolved.manifest.pinned;
+      persistTaskMap(resolved, hookState.tasks, auditOrigin, auditEvent);
+      if (!outcome.accepted) {
+        throw new CommandError(outcome.reason ?? "task transition rejected");
+      }
+      return;
+    }
+
+    persistTaskMap(resolved, workingTasks, auditOrigin, auditEvent);
   });
 }
 
@@ -1212,7 +1256,7 @@ export function setTask(
   taskId: string,
   update: { status?: string; notes?: string },
   auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
-): TaskMutationResult {
+): Promise<TaskMutationResult> {
   if (update.status === undefined && update.notes === undefined) {
     throw new CommandError("task set requires at least one of --status / --notes");
   }
@@ -1225,7 +1269,7 @@ export function setTask(
   const resolved = resolveRun(target);
   const capabilities = requireTaskMutationAllowed(resolved.manifest, "set");
 
-  updateTaskMap(resolved, auditOrigin, (tasks) => {
+  return updateTaskMap(resolved, auditOrigin, "task-set", (tasks) => {
     const task = tasks.get(taskId);
     if (!task) {
       throw new TaskNotFoundError(resolved.manifest.runId, taskId);
@@ -1250,22 +1294,44 @@ export function setTask(
     const statusChanged = statusBefore !== task.status;
     const notesChanged = notesBefore !== task.notes;
     if (!statusChanged && !notesChanged) {
-      return null;
+      return { auditEvent: null, transition: null };
     }
     return {
-      type: "task.updated",
-      taskId: task.id,
-      taskTitle: task.title,
-      command: "set",
-      ...(statusChanged ? { statusBefore, statusAfter: task.status } : {}),
-      notesChanged,
+      auditEvent: {
+        type: "task.updated",
+        taskId: task.id,
+        taskTitle: task.title,
+        command: "set",
+        ...(statusChanged ? { statusBefore, statusAfter: task.status } : {}),
+        notesChanged,
+      },
+      transition: {
+        taskId: task.id,
+        from: { status: statusBefore, notes: notesBefore },
+        to: {
+          status: task.status,
+          notes: task.notes,
+          title: task.title,
+          body: task.body,
+        },
+        changedFields: [
+          ...(statusChanged ? (["status"] as const) : []),
+          ...(notesChanged ? (["notes"] as const) : []),
+        ],
+        rollback(currentTasks) {
+          const current = currentTasks.get(task.id);
+          if (!current) {
+            return;
+          }
+          current.status = statusBefore;
+          current.notes = notesBefore;
+        },
+      },
     };
-  });
-
-  return {
+  }).then(() => ({
     manifest: resolved.manifest,
     task: taskSnapshot(resolved.manifest, taskId),
-  };
+  }));
 }
 
 export function appendTaskNotes(
@@ -1273,7 +1339,7 @@ export function appendTaskNotes(
   taskId: string,
   text: string,
   auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
-): TaskMutationResult {
+): Promise<TaskMutationResult> {
   const appendText = text.trim();
   if (appendText.length === 0) {
     throw new CommandError("task append-notes: --text cannot be empty");
@@ -1282,38 +1348,57 @@ export function appendTaskNotes(
   const resolved = resolveRun(target);
   requireTaskMutationAllowed(resolved.manifest, "append-notes");
 
-  updateTaskMap(resolved, auditOrigin, (tasks) => {
+  return updateTaskMap(resolved, auditOrigin, "task-append-notes", (tasks) => {
     const task = tasks.get(taskId);
     if (!task) {
       throw new TaskNotFoundError(resolved.manifest.runId, taskId);
     }
+    const notesBefore = task.notes;
     task.notes = task.notes.length === 0 ? appendText : `${task.notes}\n${appendText}`;
     return {
-      type: "task.updated",
-      taskId: task.id,
-      taskTitle: task.title,
-      command: "append_notes",
-      notesChanged: true,
+      auditEvent: {
+        type: "task.updated",
+        taskId: task.id,
+        taskTitle: task.title,
+        command: "append_notes",
+        notesChanged: true,
+      },
+      transition: {
+        taskId: task.id,
+        from: { status: task.status, notes: notesBefore },
+        to: {
+          status: task.status,
+          notes: task.notes,
+          title: task.title,
+          body: task.body,
+        },
+        changedFields: ["notes"],
+        rollback(currentTasks) {
+          const current = currentTasks.get(task.id);
+          if (!current) {
+            return;
+          }
+          current.notes = notesBefore;
+        },
+      },
     };
-  });
-
-  return {
+  }).then(() => ({
     manifest: resolved.manifest,
     task: taskSnapshot(resolved.manifest, taskId),
-  };
+  }));
 }
 
 export function addTask(
   target: string,
   input: { title: string; body?: string },
   auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
-): TaskMutationResult {
+): Promise<TaskMutationResult> {
   const title = validateTaskTitle(input.title);
   const resolved = resolveRun(target);
   requireTaskMutationAllowed(resolved.manifest, "add");
 
   let taskId = "";
-  updateTaskMap(resolved, auditOrigin, (tasks) => {
+  return updateTaskMap(resolved, auditOrigin, "task-add", (tasks) => {
     do {
       taskId = `cli-${shortId()}`;
     } while (tasks.has(taskId));
@@ -1325,16 +1410,30 @@ export function addTask(
       notes: "",
     });
     return {
-      type: "task.added",
-      taskId,
-      taskTitle: title,
+      auditEvent: {
+        type: "task.added",
+        taskId,
+        taskTitle: title,
+      },
+      transition: {
+        taskId,
+        from: null,
+        to: {
+          status: "pending",
+          notes: "",
+          title,
+          body: input.body ?? "",
+        },
+        changedFields: ["title", "body"],
+        rollback(currentTasks) {
+          currentTasks.delete(taskId);
+        },
+      },
     };
-  });
-
-  return {
+  }).then(() => ({
     manifest: resolved.manifest,
     task: taskSnapshot(resolved.manifest, taskId),
-  };
+  }));
 }
 
 export function isCommandError(err: unknown): err is CommandError | ResumeError | AttachmentError {
