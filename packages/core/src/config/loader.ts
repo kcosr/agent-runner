@@ -1,18 +1,31 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { resolve } from "node:path";
+import { basename, dirname, extname, resolve } from "node:path";
 import matter from "gray-matter";
+import {
+  type AgentLauncherReference,
+  DIRECT_LAUNCHER_NAME,
+  LAUNCHER_FILE_EXTENSIONS,
+  type LoadedLauncherDefinition,
+} from "../core/config/launchers.js";
 import { AD_HOC_AGENT_NAME } from "../core/config/loaded.js";
 import type { LoadedAgent, LoadedAssignment } from "../core/config/loaded.js";
-import { agentConfigSchema, assignmentConfigSchema } from "../core/config/schema.js";
+import {
+  type LauncherDefinitionConfig,
+  agentConfigSchema,
+  assignmentConfigSchema,
+  launcherDefinitionSchema,
+} from "../core/config/schema.js";
 import {
   definitionLayout,
   isPathArg,
   resolveDefinitionRoot,
   resolveInputPath,
+  resolveLaunchersRoot,
 } from "./runtime-paths.js";
 
 type PathSegment = string | number;
-export type DefinitionKind = "agent" | "assignment";
+type AuthoredDefinitionKind = "agent" | "assignment";
+export type DefinitionKind = AuthoredDefinitionKind | "launcher";
 type ExactScalarKind = "string" | "number" | "boolean";
 type InterpolationSurface =
   | { mode: "exact"; scalarKind: ExactScalarKind; allowLiteral: boolean }
@@ -31,7 +44,7 @@ type ParsedStringPart =
 
 class DefinitionInterpolationError extends Error {
   constructor(
-    public readonly kind: DefinitionKind,
+    public readonly kind: AuthoredDefinitionKind,
     public readonly configPath: string,
     public readonly envName: string,
     public readonly reason: InterpolationReason,
@@ -84,11 +97,33 @@ export class AssignmentConfigError extends Error {
   }
 }
 
+export class LauncherNotFoundError extends Error {
+  constructor(
+    public readonly arg: string,
+    public readonly searched: string[],
+  ) {
+    super(
+      `Launcher not found: ${arg}\n  searched:\n${searched.map((s) => `    - ${s}`).join("\n")}`,
+    );
+    this.name = "LauncherNotFoundError";
+  }
+}
+
+export class LauncherConfigError extends Error {
+  constructor(
+    public readonly sourcePath: string,
+    public readonly issues: string,
+  ) {
+    super(`Invalid launcher config at ${sourcePath}:\n${issues}`);
+    this.name = "LauncherConfigError";
+  }
+}
+
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function formatConfigPath(kind: DefinitionKind, path: PathSegment[]): string {
+function formatConfigPath(kind: AuthoredDefinitionKind, path: PathSegment[]): string {
   if (path.length === 0) return kind;
 
   let rendered = kind;
@@ -107,6 +142,7 @@ function classifyAgentSurface(path: PathSegment[]): InterpolationSurface {
       case "backend":
       case "model":
       case "effort":
+      case "launcher":
         return { mode: "exact", scalarKind: "string", allowLiteral: false };
       case "timeoutSec":
         return { mode: "exact", scalarKind: "number", allowLiteral: false };
@@ -118,6 +154,24 @@ function classifyAgentSurface(path: PathSegment[]): InterpolationSurface {
   }
 
   if (path.length === 2 && path[0] === "lockedFields" && typeof path[1] === "number") {
+    return { mode: "exact", scalarKind: "string", allowLiteral: false };
+  }
+
+  if (path.length === 2 && path[0] === "launcher" && typeof path[1] === "string") {
+    switch (path[1]) {
+      case "command":
+        return { mode: "exact", scalarKind: "string", allowLiteral: false };
+      default:
+        return { mode: "disabled" };
+    }
+  }
+
+  if (
+    path.length === 3 &&
+    path[0] === "launcher" &&
+    path[1] === "args" &&
+    typeof path[2] === "number"
+  ) {
     return { mode: "exact", scalarKind: "string", allowLiteral: false };
   }
 
@@ -221,7 +275,7 @@ function classifyAssignmentSurface(path: PathSegment[]): InterpolationSurface {
   return { mode: "disabled" };
 }
 
-function classifySurface(kind: DefinitionKind, path: PathSegment[]): InterpolationSurface {
+function classifySurface(kind: AuthoredDefinitionKind, path: PathSegment[]): InterpolationSurface {
   if (path.length === 1 && path[0] === "instructions") {
     return { mode: "exact", scalarKind: "string", allowLiteral: true };
   }
@@ -229,7 +283,7 @@ function classifySurface(kind: DefinitionKind, path: PathSegment[]): Interpolati
 }
 
 function createInterpolationError(
-  kind: DefinitionKind,
+  kind: AuthoredDefinitionKind,
   path: PathSegment[],
   envName: string,
   reason: InterpolationReason,
@@ -245,7 +299,7 @@ function createInterpolationError(
 }
 
 function parseEnvExpression(
-  kind: DefinitionKind,
+  kind: AuthoredDefinitionKind,
   path: PathSegment[],
   token: string,
 ): EnvExpression {
@@ -273,7 +327,7 @@ function parseEnvExpression(
 
 function parseInterpolatedString(
   input: string,
-  kind: DefinitionKind,
+  kind: AuthoredDefinitionKind,
   path: PathSegment[],
 ): ParsedStringPart[] {
   const parts: ParsedStringPart[] = [];
@@ -318,7 +372,7 @@ function parseInterpolatedString(
 
 function resolveEnvExpressionValue(
   expression: EnvExpression,
-  kind: DefinitionKind,
+  kind: AuthoredDefinitionKind,
   path: PathSegment[],
 ): string {
   const current = process.env[expression.envName];
@@ -345,7 +399,7 @@ function resolveEnvExpressionValue(
 function coerceExactScalar(
   value: string,
   scalarKind: ExactScalarKind,
-  kind: DefinitionKind,
+  kind: AuthoredDefinitionKind,
   path: PathSegment[],
   envName: string,
 ): string | number | boolean {
@@ -386,7 +440,7 @@ function coerceExactScalar(
 
 function tryParseWholeEnvExpression(
   input: string,
-  kind: DefinitionKind,
+  kind: AuthoredDefinitionKind,
   path: PathSegment[],
 ): EnvExpression | null {
   if (!input.startsWith("${") || !input.endsWith("}")) {
@@ -400,7 +454,11 @@ function tryParseWholeEnvExpression(
   return parts[0].expression;
 }
 
-function interpolateStringValue(input: string, kind: DefinitionKind, path: PathSegment[]): unknown {
+function interpolateStringValue(
+  input: string,
+  kind: AuthoredDefinitionKind,
+  path: PathSegment[],
+): unknown {
   const surface = classifySurface(kind, path);
   if (surface.mode === "exact" && surface.allowLiteral) {
     const wholeExpression = tryParseWholeEnvExpression(input, kind, path);
@@ -454,7 +512,7 @@ function interpolateStringValue(input: string, kind: DefinitionKind, path: PathS
 
 function interpolateConfigTree(
   value: unknown,
-  kind: DefinitionKind,
+  kind: AuthoredDefinitionKind,
   path: PathSegment[] = [],
 ): unknown {
   if (typeof value === "string") {
@@ -484,7 +542,10 @@ function interpolateConfigTree(
   return value;
 }
 
-function interpolateDefinitionInstructions(instructions: string, kind: DefinitionKind): string {
+function interpolateDefinitionInstructions(
+  instructions: string,
+  kind: AuthoredDefinitionKind,
+): string {
   const trimmed = instructions.trim();
   if (trimmed.length === 0) {
     return "";
@@ -501,7 +562,7 @@ function formatConfigIssues(issues: { path: PathSegment[]; message: string }[]):
 }
 
 function toAgentOrAssignmentError(
-  kind: DefinitionKind,
+  kind: AuthoredDefinitionKind,
   sourcePath: string,
   error: unknown,
 ): AgentConfigError | AssignmentConfigError {
@@ -519,7 +580,7 @@ function toAgentOrAssignmentError(
 }
 
 function loadDefinitionConfig<TConfig>(
-  kind: DefinitionKind,
+  kind: AuthoredDefinitionKind,
   sourcePath: string,
   raw: string,
   schema: {
@@ -555,8 +616,117 @@ function loadDefinitionConfig<TConfig>(
   };
 }
 
+function isLauncherFileName(name: string): boolean {
+  return LAUNCHER_FILE_EXTENSIONS.includes(
+    extname(name) as (typeof LAUNCHER_FILE_EXTENSIONS)[number],
+  );
+}
+
+function launcherCanonicalNameFromPath(sourcePath: string): string {
+  return basename(sourcePath, extname(sourcePath));
+}
+
+function toLauncherIssues(issues: { path: PathSegment[]; message: string }[]): string {
+  return formatConfigIssues(issues);
+}
+
+function loadLauncherYaml(sourcePath: string): unknown {
+  const ext = extname(sourcePath);
+  if (!LAUNCHER_FILE_EXTENSIONS.includes(ext as (typeof LAUNCHER_FILE_EXTENSIONS)[number])) {
+    throw new LauncherConfigError(
+      sourcePath,
+      `  - extension "${ext || "(none)"}" is not supported; use .yaml or .yml`,
+    );
+  }
+
+  try {
+    const raw = readFileSync(sourcePath, "utf8");
+    return matter(`---\n${raw}\n---\n`).data;
+  } catch (error) {
+    throw new LauncherConfigError(
+      sourcePath,
+      error instanceof Error ? `  - ${error.message}` : `  - ${String(error)}`,
+    );
+  }
+}
+
+function loadLauncherDefinitionFromPath(
+  sourcePath: string,
+  options: { strictIdentity: boolean },
+): LoadedLauncherDefinition {
+  const configData = loadLauncherYaml(sourcePath);
+  const parsed = launcherDefinitionSchema.safeParse(configData);
+  if (!parsed.success) {
+    throw new LauncherConfigError(sourcePath, toLauncherIssues(parsed.error.issues));
+  }
+
+  const config = parsed.data;
+  const canonicalName = launcherCanonicalNameFromPath(sourcePath);
+  if (canonicalName === DIRECT_LAUNCHER_NAME) {
+    throw new LauncherConfigError(
+      sourcePath,
+      `  - filename stem "${DIRECT_LAUNCHER_NAME}" is reserved for the built-in direct launcher`,
+    );
+  }
+  if (config.name === DIRECT_LAUNCHER_NAME) {
+    throw new LauncherConfigError(
+      sourcePath,
+      `  - name: "${DIRECT_LAUNCHER_NAME}" is reserved for the built-in direct launcher`,
+    );
+  }
+  if (config.name !== undefined && config.name !== canonicalName) {
+    const issues = `  - name: "${config.name}" must match launcher file id "${canonicalName}"${options.strictIdentity ? "" : " (definition skipped)"}`;
+    throw new LauncherConfigError(sourcePath, issues);
+  }
+
+  return {
+    kind: "prefix",
+    name: canonicalName,
+    command: config.command,
+    args: [...config.args],
+    sourcePath,
+    root: "config",
+    config: {
+      schemaVersion: 1,
+      name: config.name,
+      command: config.command,
+      args: [...config.args],
+    },
+  };
+}
+
+function normalizeAgentLauncherReference(
+  launcher: LoadedAgent["config"]["launcher"],
+  sourcePath: string,
+): AgentLauncherReference | undefined {
+  if (launcher === undefined) {
+    return undefined;
+  }
+  if (typeof launcher === "string") {
+    if (isPathArg(launcher)) {
+      return {
+        kind: "path",
+        ref: launcher,
+        path: resolveInputPath(launcher, dirname(sourcePath)),
+      };
+    }
+    return {
+      kind: "name",
+      ref: launcher,
+      name: launcher,
+    };
+  }
+  return {
+    kind: "inline",
+    config: {
+      command: launcher.command,
+      args: [...(launcher.args ?? [])],
+    },
+  };
+}
+
 function resolveDefinitionPath(
-  kind: "agent" | "assignment",
+  kind: AuthoredDefinitionKind,
   arg: string,
   cwd: string,
 ): { path: string; searched: string[] } {
@@ -606,6 +776,7 @@ export function loadAgentConfig(arg: string, cwd: string = process.cwd()): Loade
   return {
     config: loaded.config,
     instructions: loaded.instructions,
+    launcher: normalizeAgentLauncherReference(loaded.config.launcher, sourcePath),
     sourcePath,
   };
 }
@@ -628,8 +799,8 @@ export function loadAssignmentConfig(arg: string, cwd: string = process.cwd()): 
 
 export interface DefinitionEntry {
   name: string;
-  path: string;
-  root: "config";
+  path: string | null;
+  root: "config" | "builtin";
 }
 
 export class DefinitionListError extends Error {
@@ -644,6 +815,9 @@ export class DefinitionListError extends Error {
 }
 
 function discoverDefinitions(kind: DefinitionKind): DefinitionEntry[] {
+  if (kind === "launcher") {
+    return listLaunchers().entries;
+  }
   const { fileName } = definitionLayout(kind);
   const entries: DefinitionEntry[] = [];
   const dir = resolveDefinitionRoot(kind);
@@ -674,4 +848,105 @@ export function listAgents(): DefinitionEntry[] {
 
 export function listAssignments(): DefinitionEntry[] {
   return discoverDefinitions("assignment");
+}
+
+export interface DefinitionListWarnings {
+  entries: DefinitionEntry[];
+  warnings: string[];
+}
+
+function resolveNamedLauncherPath(name: string): { path: string; searched: string[] } {
+  const root = resolveLaunchersRoot();
+  const searched = LAUNCHER_FILE_EXTENSIONS.map((ext) => resolve(root, `${name}${ext}`));
+  const path = searched.find((candidate) => existsSync(candidate)) ?? "";
+  return { path, searched };
+}
+
+export function resolveLauncherPath(arg: string, cwd: string = process.cwd()): string {
+  if (arg === DIRECT_LAUNCHER_NAME) {
+    return DIRECT_LAUNCHER_NAME;
+  }
+  if (isPathArg(arg)) {
+    const abs = resolveInputPath(arg, cwd);
+    if (!existsSync(abs)) {
+      throw new LauncherNotFoundError(arg, [abs]);
+    }
+    return abs;
+  }
+  const { path, searched } = resolveNamedLauncherPath(arg);
+  if (!path) {
+    throw new LauncherNotFoundError(arg, searched);
+  }
+  return path;
+}
+
+export function loadLauncherConfig(
+  arg: string,
+  cwd: string = process.cwd(),
+): LoadedLauncherDefinition {
+  if (arg === DIRECT_LAUNCHER_NAME) {
+    return {
+      kind: "direct",
+      name: DIRECT_LAUNCHER_NAME,
+      sourcePath: null,
+      root: "builtin",
+    };
+  }
+  if (isPathArg(arg)) {
+    const sourcePath = resolveLauncherPath(arg, cwd);
+    return loadLauncherDefinitionFromPath(sourcePath, { strictIdentity: true });
+  }
+  const discovered = listLaunchers();
+  const entry = discovered.entries.find((candidate) => candidate.name === arg);
+  if (!entry) {
+    const { searched } = resolveNamedLauncherPath(arg);
+    throw new LauncherNotFoundError(arg, searched);
+  }
+  if (entry.root === "builtin") {
+    return {
+      kind: "direct",
+      name: DIRECT_LAUNCHER_NAME,
+      sourcePath: null,
+      root: "builtin",
+    };
+  }
+  if (entry.path === null) {
+    throw new LauncherNotFoundError(arg, []);
+  }
+  return loadLauncherDefinitionFromPath(entry.path, { strictIdentity: true });
+}
+
+export function listLaunchers(): DefinitionListWarnings {
+  const entries: DefinitionEntry[] = [{ name: DIRECT_LAUNCHER_NAME, path: null, root: "builtin" }];
+  const warnings: string[] = [];
+  const dir = resolveLaunchersRoot();
+
+  if (!existsSync(dir)) {
+    return { entries, warnings };
+  }
+
+  let children: string[];
+  try {
+    children = readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && isLauncherFileName(entry.name))
+      .map((entry) => entry.name);
+  } catch (err) {
+    throw new DefinitionListError(dir, err);
+  }
+
+  for (const child of children.sort()) {
+    const sourcePath = resolve(dir, child);
+    try {
+      const loaded = loadLauncherDefinitionFromPath(sourcePath, { strictIdentity: false });
+      entries.push({ name: loaded.name, path: loaded.sourcePath, root: "config" });
+    } catch (error) {
+      if (error instanceof LauncherConfigError) {
+        warnings.push(error.message);
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  return { entries, warnings };
 }

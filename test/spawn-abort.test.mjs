@@ -1,6 +1,37 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { runProcess } from "../packages/core/dist/util/spawn.js";
+import { buildSpawnCommand, runProcess } from "../packages/core/dist/util/spawn.js";
+
+test("buildSpawnCommand preserves direct execution and wraps prefix launchers exactly once", () => {
+  assert.deepEqual(
+    buildSpawnCommand({
+      command: "claude",
+      args: ["--print", "hi"],
+      launcher: { kind: "direct", name: "direct" },
+    }),
+    {
+      command: "claude",
+      args: ["--print", "hi"],
+    },
+  );
+  assert.deepEqual(
+    buildSpawnCommand({
+      command: "cursor-agent",
+      args: ["-p", "prompt"],
+      launcher: {
+        kind: "prefix",
+        command: "ssh",
+        args: ["worker", "--"],
+        name: "ssh-worker",
+        source: "named",
+      },
+    }),
+    {
+      command: "ssh",
+      args: ["worker", "--", "cursor-agent", "-p", "prompt"],
+    },
+  );
+});
 
 test("runProcess: aborting before spawn marks aborted and kills the child", async () => {
   const controller = new AbortController();
@@ -71,4 +102,27 @@ test("runProcess: normal exit reports aborted: false", async () => {
   });
   assert.equal(result.aborted, false);
   assert.equal(result.exitCode, 0);
+});
+
+test("runProcess: launcher-wrapped commands preserve abort handling", async () => {
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), 100);
+  const result = await runProcess({
+    command: "sleep",
+    args: ["30"],
+    launcher: {
+      kind: "prefix",
+      command: "env",
+      args: [],
+      name: "env-wrap",
+      source: "named",
+    },
+    cwd: process.cwd(),
+    env: { ...process.env },
+    timeoutMs: 60_000,
+    abortSignal: controller.signal,
+  });
+  assert.equal(result.aborted, true);
+  assert.equal(result.timedOut, false);
+  assert.ok(result.signal !== null || result.exitCode !== 0);
 });

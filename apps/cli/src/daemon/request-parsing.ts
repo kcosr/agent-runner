@@ -5,6 +5,7 @@ import type {
 } from "@task-runner/core/core/backends/types.js";
 import { BACKEND_IDS, isWsOrWssUrl } from "@task-runner/core/core/backends/types.js";
 import type { RunListScopeFilter } from "@task-runner/core/core/commands/service.js";
+import { isNamedLauncherOverride } from "@task-runner/core/core/config/launchers.js";
 import { trimRunName } from "@task-runner/core/util/run-name.js";
 import type {
   RunSetBackendSessionParams,
@@ -293,6 +294,7 @@ export function optionalOverrides(value: unknown): RunCommandOverrides {
   const allowedKeys = new Set([
     "cwd",
     "backend",
+    "launcher",
     "model",
     "effort",
     "message",
@@ -308,9 +310,16 @@ export function optionalOverrides(value: unknown): RunCommandOverrides {
       throw new RequestValidationError(`overrides.${key} is not supported`);
     }
   }
+  const launcher = optionalNonEmptyString(record.launcher, "overrides.launcher");
+  if (launcher !== undefined && !isNamedLauncherOverride(launcher)) {
+    throw new RequestValidationError(
+      "overrides.launcher must be a named launcher id, not a path reference",
+    );
+  }
   return {
     cwd: optionalString(record.cwd, "overrides.cwd"),
     backend: optionalEnum(record.backend, "overrides.backend", BACKEND_IDS),
+    launcher,
     model: optionalString(record.model, "overrides.model"),
     effort: optionalEnum(record.effort, "overrides.effort", [
       "off",

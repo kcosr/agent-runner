@@ -55,6 +55,7 @@ import {
   showTask,
   unarchiveRun,
 } from "../core/commands/service.js";
+import type { LoadedLauncherDefinition } from "../core/config/launchers.js";
 import type { AgentConfig, AssignmentConfig } from "../core/config/schema.js";
 import type { AttemptLog, AttemptRecord } from "../core/run/manifest.js";
 import { type RunExecution, resolveResumeTarget } from "../core/run/manifest.js";
@@ -62,16 +63,28 @@ import type { RunEventOrigin } from "../core/run/run-events.js";
 import type { RunEvent, RunOutcome } from "../core/run/run-loop.js";
 import { executeRunCommand } from "../run-command.js";
 
-export interface DefinitionDetail {
-  kind: "agent" | "assignment";
-  config: AgentConfig | AssignmentConfig;
-  instructions: string;
-  sourcePath: string | null;
-}
+export type DefinitionDetail =
+  | {
+      kind: "agent";
+      config: AgentConfig;
+      instructions: string;
+      sourcePath: string | null;
+    }
+  | {
+      kind: "assignment";
+      config: AssignmentConfig;
+      instructions: string;
+      sourcePath: string;
+    }
+  | {
+      kind: "launcher";
+      definition: LoadedLauncherDefinition;
+    };
 
 export interface RunCommandOverrides {
   cwd?: string;
   backend?: BackendId;
+  launcher?: string;
   model?: string;
   effort?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   backendSpecific?: BackendSpecificConfig;
@@ -109,8 +122,22 @@ export interface ResumeRunRequest {
 export interface MutationAuditContext extends RunEventOrigin {}
 
 function toDefinitionDetail(result: ReturnType<typeof showDefinition>): DefinitionDetail {
+  if (result.kind === "launcher") {
+    return {
+      kind: "launcher",
+      definition: result.loaded,
+    };
+  }
+  if (result.kind === "agent") {
+    return {
+      kind: "agent",
+      config: result.loaded.config,
+      instructions: result.loaded.instructions,
+      sourcePath: result.loaded.sourcePath,
+    };
+  }
   return {
-    kind: result.kind,
+    kind: "assignment",
     config: result.loaded.config,
     instructions: result.loaded.instructions,
     sourcePath: result.loaded.sourcePath,
@@ -237,12 +264,14 @@ export function getAttachment(
   };
 }
 
-export function getDefinitionList(kind: "agent" | "assignment"): DefinitionEntry[] {
-  return listDefinitions(kind).entries;
+export function getDefinitionList(
+  kind: "agent" | "assignment" | "launcher",
+): ReturnType<typeof listDefinitions> {
+  return listDefinitions(kind);
 }
 
 export function getDefinition(
-  kind: "agent" | "assignment",
+  kind: "agent" | "assignment" | "launcher",
   target: string,
   cwd?: string,
 ): DefinitionDetail {

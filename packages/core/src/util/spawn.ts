@@ -1,8 +1,10 @@
 import { type ChildProcess, spawn } from "node:child_process";
+import type { ResolvedLauncherConfig } from "../core/config/launchers.js";
 
 export interface SpawnOptions {
   command: string;
   args: string[];
+  launcher?: ResolvedLauncherConfig;
   cwd: string;
   env: Record<string, string>;
   timeoutMs: number;
@@ -22,6 +24,22 @@ export interface SpawnResult {
 
 const KILL_GRACE_MS = 5_000;
 
+export function buildSpawnCommand(opts: Pick<SpawnOptions, "command" | "args" | "launcher">): {
+  command: string;
+  args: string[];
+} {
+  if (!opts.launcher || opts.launcher.kind === "direct") {
+    return {
+      command: opts.command,
+      args: [...opts.args],
+    };
+  }
+  return {
+    command: opts.launcher.command,
+    args: [...opts.launcher.args, opts.command, ...opts.args],
+  };
+}
+
 export function runProcess(opts: SpawnOptions): Promise<SpawnResult> {
   return new Promise((resolve, reject) => {
     if (opts.abortSignal?.aborted) {
@@ -38,7 +56,8 @@ export function runProcess(opts: SpawnOptions): Promise<SpawnResult> {
 
     let child: ChildProcess;
     try {
-      child = spawn(opts.command, opts.args, {
+      const launched = buildSpawnCommand(opts);
+      child = spawn(launched.command, launched.args, {
         cwd: opts.cwd,
         env: opts.env,
         stdio: ["ignore", "pipe", "pipe"],

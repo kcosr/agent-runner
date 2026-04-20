@@ -20,7 +20,7 @@ explicit concepts:
 - caller-facing documentation stays separate from worker-facing
   instructions
 
-The current manifest schema is version `9`. Older manifest shapes are not
+The current manifest schema is version `10`. Older manifest shapes are not
 silently upgraded or dual-read at runtime.
 
 ## Non-goals
@@ -42,12 +42,25 @@ instructions:
 - `effort`
 - `timeoutSec`
 - `unrestricted`
+- optional `launcher`
 - optional `backendSpecific` runtime config
 - `lockedFields`
 - role instructions (markdown body)
 
 Agents are parsed from `agent.md` files in the config tree or direct
 paths; see [agents-and-assignments.md](agents-and-assignments.md).
+
+### Launcher
+
+A launcher definition is a named subprocess prefix stored under
+`${TASK_RUNNER_CONFIG_DIR}/launchers/*.yaml|*.yml`.
+
+- built-in `direct` means "spawn the backend directly"
+- agents may author `launcher` as either a named string or an inline
+  launcher object
+- fresh-run/init callers may override with named-only `--launcher`
+- launchers are resolved once at fresh-run/init time and frozen into the
+  manifest and reset seed
 
 ### Assignment
 
@@ -79,7 +92,7 @@ The canonical record is `run.json`. Important persisted fields:
 - frozen assignment metadata (or `null` for chat-style runs)
 - `repo`, `cwd`
 - `backend`, `model`, `effort`, `backendSpecific`, `timeoutSec`,
-  `unrestricted`, `maxAttempts`
+  `unrestricted`, `maxAttempts`, `launcher`
 - `lockedFields` (union of agent and assignment locks)
 - `status`, `exitCode`
 - `startedAt`, `endedAt`, `archivedAt`
@@ -234,9 +247,11 @@ blocked with the rest completed or blocked → `blocked`; otherwise
 5. captures `repo` from the resolved cwd and creates the run workspace
 6. resolves backend-specific runtime config (for Codex transport:
    frontmatter → daemon request override → env → stdio default)
-7. freezes the initial manifest
-8. composes and stores `brief`
-9. invokes the backend, or leaves the run initialized if the backend is
+7. resolves launcher precedence (`--launcher` override → agent launcher →
+   `direct`, with passive and Codex websocket forced to `direct`)
+8. freezes the initial manifest
+9. composes and stores `brief`
+10. invokes the backend, or leaves the run initialized if the backend is
    `passive`
 
 ### Init
@@ -274,6 +289,8 @@ Important rules:
 - resume reuses the frozen `manifest.backendSpecific` runtime config; it
   does not re-resolve Codex transport from current env or new daemon
   request overrides
+- resume reuses the frozen `manifest.launcher`; `--launcher` is
+  forbidden on resume and execute-after-init
 - incomplete-task resumes may omit a follow-up message (an implicit
   continue message is used)
 - resumes of otherwise-complete runs must supply a follow-up message
@@ -289,7 +306,8 @@ See [resume.md](resume.md).
 
 `run reset <id|path>` restores the initialized-state seed stored in the
 manifest for non-running runs. Reset does not re-read current source
-definitions.
+definitions. It reuses the frozen launcher and other initialized
+runtime config captured in the reset seed.
 
 ### Delete archived runs
 
@@ -317,6 +335,20 @@ fresh-run/init time and stores it on both `manifest.backendSpecific` and
 
 This is an explicit Codex-only contract. There is no generic
 backend-specific env passthrough layer for other backends.
+
+## Launcher freezing
+
+Launcher resolution also happens exactly once, at fresh-run/init time.
+The resolved launcher is stored on both `manifest.launcher` and
+`manifest.resetSeed.launcher`.
+
+- Embedded / local fresh runs resolve named launchers from the caller's
+  config root.
+- Connected / daemon-owned fresh runs resolve named launchers on the
+  daemon host.
+- The built-in `direct` launcher is always available and reserved.
+- Launchers only affect subprocess-backed execution. Passive runs and
+  Codex websocket transport keep `direct`.
 
 ## Public command contract
 

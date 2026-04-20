@@ -253,6 +253,7 @@ export const claudeBackend: Backend = {
     const result = await runProcess({
       command,
       args,
+      launcher: ctx.launcher,
       cwd: ctx.cwd,
       env: ctx.env,
       timeoutMs: ctx.timeoutSec * 1000,

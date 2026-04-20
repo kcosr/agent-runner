@@ -15,6 +15,8 @@ ${TASK_RUNNER_CONFIG_DIR}/
 ├── agents/
 │   └── <agent-name>/
 │       └── agent.md
+├── launchers/
+│   └── <launcher-name>.yaml
 ├── hooks/
 │   └── <hook-name>/
 │       └── hook.ts
@@ -53,8 +55,20 @@ backendSpecific:            # optional backend-specific runtime config
       type: ws
       url: ws://127.0.0.1:4773/
 lockedFields: []            # optional list of lockable fields
+launcher: ssh-docker        # optional named launcher or inline object
 ---
 ```
+
+`launcher` supports exactly these authored shapes:
+
+- bare string: a named launcher id such as `ssh-docker`
+- inline object with `command` and optional `args`
+
+The built-in `direct` launcher is always available and means "no
+prefix". User-authored launcher files live under
+`${TASK_RUNNER_CONFIG_DIR}/launchers/*.yaml|*.yml`; their canonical id is
+the filename stem, and authored `name`, when present, must match that
+stem exactly.
 
 Only Codex currently defines `backendSpecific`. Its transport contract is
 exactly one of:
@@ -92,6 +106,44 @@ Everything after the frontmatter is the agent's role instructions. The body
 is trimmed, interpolated against the run's resolved variables, and frozen
 into `manifest.agent.instructions` at run creation. Resume never re-reads
 the source file.
+
+## Launcher definitions
+
+A launcher file is YAML only, not markdown:
+
+```yaml
+schemaVersion: 1
+name: ssh-docker
+command: ssh
+args: [worker, docker, exec, agent]
+```
+
+- `schemaVersion` must be `1`
+- `command` is the executable to prepend
+- `args` is an optional string array inserted before the backend command
+- `direct` is reserved; user files may not claim that id
+
+List/show commands resolve launchers the same way as agents and
+assignments:
+
+```bash
+task-runner list launchers
+task-runner show launcher ssh-docker
+```
+
+Fresh-run launcher precedence is:
+
+1. CLI/daemon override `--launcher <name>` / `overrides.launcher`
+2. agent-authored `launcher`
+3. built-in `direct`
+
+The override is named-only by design. Inline launchers are authored on
+agents, not supplied ad hoc on the CLI or daemon request boundary.
+
+Connected mode is daemon-authoritative for named launchers: the daemon
+resolves the name against its own `${TASK_RUNNER_CONFIG_DIR}` and freezes
+the result into the manifest. Resume and reset reuse that frozen
+launcher; they do not re-read current launcher files.
 
 ## Assignment definition
 

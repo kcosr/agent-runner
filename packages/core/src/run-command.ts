@@ -64,6 +64,9 @@ function validateResumeOverrides(
   if (opts.overrides.backend !== undefined) {
     return "--backend cannot be combined with --resume-run (backend is locked to the run that created the session)";
   }
+  if (opts.overrides.launcher !== undefined) {
+    return "--launcher cannot be combined with --resume-run (launcher is frozen into the run manifest)";
+  }
   if (opts.backendSessionId !== undefined) {
     return "--backend-session-id cannot be combined with --resume-run (the resume target already carries a backend session id)";
   }
@@ -82,6 +85,7 @@ function validateResumeOverrides(
     if (opts.overrides.message && opts.overrides.message.trim().length > 0)
       forbidden.push("message");
     if ((opts.overrides.addedTasks?.length ?? 0) > 0) forbidden.push("--add-task");
+    if (opts.overrides.launcher !== undefined) forbidden.push("--launcher");
     if (opts.overrides.model !== undefined) forbidden.push("--model");
     if (opts.overrides.effort !== undefined) forbidden.push("--effort");
     if (opts.overrides.timeoutSec !== undefined) forbidden.push("--timeout-sec");

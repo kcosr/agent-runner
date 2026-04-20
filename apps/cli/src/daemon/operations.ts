@@ -190,6 +190,14 @@ export function createDaemonOperations(ctx: DaemonOperationContext) {
         assignment: ctx.getDefinition("assignment", params.target, params.cwd),
       };
     },
+    listLaunchers() {
+      return { launchers: ctx.getDefinitionList("launcher") };
+    },
+    getLauncher(params: DefinitionGetParams) {
+      return {
+        launcher: ctx.getDefinition("launcher", params.target, params.cwd),
+      };
+    },
   };
 }
 

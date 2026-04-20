@@ -15,6 +15,7 @@ export interface ParsedArgs {
   vars: Record<string, string>;
   cwd?: string;
   backend?: BackendId;
+  launcher?: string;
   model?: string;
   effort?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   timeoutSec?: number;
@@ -163,6 +164,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
         throw new Error(`--backend must be one of: ${BACKEND_VALUES.join(", ")}`);
       }
       result.backend = next as BackendId;
+    } else if (arg === "--launcher") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--launcher requires a value");
+      if (next.trim().length === 0) throw new Error("--launcher cannot be empty");
+      result.launcher = next;
     } else if (arg === "--model") {
       const next = args.shift();
       if (next === undefined) throw new Error("--model requires a value");
@@ -289,6 +295,7 @@ export function overridesFromParsedArgs(parsed: ParsedArgs) {
   return {
     cwd: parsed.cwd,
     backend: parsed.backend,
+    launcher: parsed.launcher,
     model: parsed.model,
     effort: parsed.effort,
     message: parsed.message,

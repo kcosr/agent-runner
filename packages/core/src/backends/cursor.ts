@@ -173,6 +173,7 @@ export const cursorBackend: Backend = {
     const result = await runProcess({
       command: process.env.TASK_RUNNER_CURSOR_BIN ?? "cursor-agent",
       args: buildCursorArgs(ctx),
+      launcher: ctx.launcher,
       cwd: ctx.cwd,
       env: ctx.env,
       timeoutMs: ctx.timeoutSec * 1000,

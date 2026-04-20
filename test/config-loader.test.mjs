@@ -9,12 +9,17 @@ import {
   AssignmentConfigError,
   AssignmentNotFoundError,
   DefinitionListError,
+  LauncherConfigError,
+  LauncherNotFoundError,
   listAgents,
   listAssignments,
+  listLaunchers,
   loadAgentConfig,
   loadAssignmentConfig,
+  loadLauncherConfig,
   resolveAgentPath,
   resolveAssignmentPath,
+  resolveLauncherPath,
 } from "../packages/core/dist/config/loader.js";
 import { withEnv, withRuntimeRoots } from "./helpers/runtime-paths.mjs";
 
@@ -53,6 +58,14 @@ function writeAssignment(baseDir, name, body) {
   const dir = join(baseDir, "assignments", name);
   mkdirSync(dir, { recursive: true });
   const path = join(dir, "assignment.md");
+  writeFileSync(path, body);
+  return path;
+}
+
+function writeLauncher(baseDir, name, body, ext = ".yaml") {
+  const dir = join(baseDir, "launchers");
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, `${name}${ext}`);
   writeFileSync(path, body);
   return path;
 }
@@ -1099,5 +1112,264 @@ test("listAgents throws DefinitionListError when config agents directory is unre
       assert.throws(() => listAgents(), DefinitionListError);
     } finally {
       chmodSync(agentsDir, 0o755);
+    }
+  }));
+
+test("loadAgentConfig normalizes named, path, and inline launcher authoring", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    writeLauncher(
+      configDir,
+      "ssh-docker",
+      `schemaVersion: 1
+command: ssh
+args:
+  - buildbox
+  - docker
+  - exec
+  - worker
+  - --
+`,
+    );
+    const launcherPath = join(rootDir, "one-off.yaml");
+    writeFileSync(
+      launcherPath,
+      `schemaVersion: 1
+command: env
+args: [FOO=bar]
+`,
+    );
+    writeAgent(
+      configDir,
+      "named-launchers",
+      `---
+schemaVersion: 1
+name: named-launchers
+backend: claude
+launcher: ssh-docker
+---
+body
+`,
+    );
+    writeAgent(
+      configDir,
+      "path-launcher",
+      `---
+schemaVersion: 1
+name: path-launcher
+backend: claude
+launcher: ../../../one-off.yaml
+---
+body
+`,
+    );
+    writeAgent(
+      configDir,
+      "inline-launcher",
+      `---
+schemaVersion: 1
+name: inline-launcher
+backend: claude
+launcher:
+  command: ssh
+  args: [buildbox, docker, exec, worker, --]
+---
+body
+`,
+    );
+
+    assert.deepEqual(loadAgentConfig("named-launchers", rootDir).launcher, {
+      kind: "name",
+      ref: "ssh-docker",
+      name: "ssh-docker",
+    });
+    assert.deepEqual(loadAgentConfig("path-launcher", rootDir).launcher, {
+      kind: "path",
+      ref: "../../../one-off.yaml",
+      path: launcherPath,
+    });
+    assert.deepEqual(loadAgentConfig("inline-launcher", rootDir).launcher, {
+      kind: "inline",
+      config: {
+        command: "ssh",
+        args: ["buildbox", "docker", "exec", "worker", "--"],
+      },
+    });
+  }));
+
+test("loadAgentConfig rejects empty launcher strings at schema validation time", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    writeAgent(
+      configDir,
+      "blank-launcher",
+      `---
+schemaVersion: 1
+name: blank-launcher
+backend: claude
+launcher: ""
+---
+body
+`,
+    );
+
+    assert.throws(
+      () => loadAgentConfig("blank-launcher", rootDir),
+      (error) => {
+        assert.ok(error instanceof AgentConfigError);
+        assert.match(error.message, /launcher/i);
+        return true;
+      },
+    );
+  }));
+
+test("listLaunchers returns direct plus valid named launchers and skips invalid files with warnings", () =>
+  withRuntimeRoots("task-runner-loader-", ({ configDir }) => {
+    writeLauncher(
+      configDir,
+      "ssh-docker",
+      `schemaVersion: 1
+command: ssh
+args: [worker]
+`,
+    );
+    writeLauncher(
+      configDir,
+      "mismatch",
+      `schemaVersion: 1
+name: different
+command: ssh
+`,
+    );
+    writeLauncher(
+      configDir,
+      "direct",
+      `schemaVersion: 1
+command: ssh
+`,
+      ".yml",
+    );
+    writeLauncher(
+      configDir,
+      "broken",
+      `schemaVersion: not-a-number
+command:
+`,
+    );
+
+    const result = listLaunchers();
+    assert.deepEqual(
+      result.entries.map((entry) => ({ name: entry.name, root: entry.root })),
+      [
+        { name: "direct", root: "builtin" },
+        { name: "ssh-docker", root: "config" },
+      ],
+    );
+    assert.equal(result.warnings.length, 3);
+    assert.match(result.warnings[0], /Invalid launcher config/);
+    assert.match(result.warnings.join("\n"), /built-in direct launcher/);
+    assert.match(result.warnings.join("\n"), /must match launcher file id/);
+  }));
+
+test("loadLauncherConfig supports direct, named files, and targeted path loads", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    const path = writeLauncher(
+      configDir,
+      "ssh-docker",
+      `schemaVersion: 1
+name: ssh-docker
+command: ssh
+args: [worker]
+`,
+    );
+
+    assert.deepEqual(loadLauncherConfig("direct", rootDir), {
+      kind: "direct",
+      name: "direct",
+      sourcePath: null,
+      root: "builtin",
+    });
+    assert.deepEqual(loadLauncherConfig("ssh-docker", rootDir), {
+      kind: "prefix",
+      name: "ssh-docker",
+      command: "ssh",
+      args: ["worker"],
+      sourcePath: path,
+      root: "config",
+      config: {
+        schemaVersion: 1,
+        name: "ssh-docker",
+        command: "ssh",
+        args: ["worker"],
+      },
+    });
+    assert.equal(resolveLauncherPath("ssh-docker", rootDir), path);
+    assert.equal(loadLauncherConfig(path, rootDir).sourcePath, path);
+  }));
+
+test("loadLauncherConfig hard-fails targeted invalid paths and named invalid launchers remain undiscoverable", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    const mismatchPath = writeLauncher(
+      configDir,
+      "bad-name",
+      `schemaVersion: 1
+name: other-name
+command: ssh
+`,
+    );
+
+    assert.throws(
+      () => loadLauncherConfig(mismatchPath, rootDir),
+      (error) => {
+        assert.ok(error instanceof LauncherConfigError);
+        assert.match(error.message, /must match launcher file id/);
+        return true;
+      },
+    );
+    assert.throws(
+      () => loadLauncherConfig("bad-name", rootDir),
+      (error) => {
+        assert.ok(error instanceof LauncherNotFoundError);
+        return true;
+      },
+    );
+  }));
+
+test("listLaunchers throws DefinitionListError when launcher root is unreadable", () =>
+  withRuntimeRoots("task-runner-loader-", ({ configDir }) => {
+    const launchersDir = join(configDir, "launchers");
+    mkdirSync(launchersDir, { recursive: true });
+    writeLauncher(
+      configDir,
+      "visible",
+      `schemaVersion: 1
+command: ssh
+`,
+    );
+    chmodSync(launchersDir, 0o000);
+    try {
+      assert.throws(() => listLaunchers(), DefinitionListError);
+    } finally {
+      chmodSync(launchersDir, 0o755);
+    }
+  }));
+
+test("listLaunchers warn-skips unreadable launcher files", () =>
+  withRuntimeRoots("task-runner-loader-", ({ configDir }) => {
+    const unreadablePath = writeLauncher(
+      configDir,
+      "cant-read",
+      `schemaVersion: 1
+command: ssh
+`,
+    );
+    chmodSync(unreadablePath, 0o000);
+    try {
+      const result = listLaunchers();
+      assert.deepEqual(
+        result.entries.map((entry) => entry.name),
+        ["direct"],
+      );
+      assert.match(result.warnings.join("\n"), /cant-read\.yaml/);
+    } finally {
+      chmodSync(unreadablePath, 0o644);
     }
   }));

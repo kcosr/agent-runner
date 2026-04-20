@@ -29,9 +29,14 @@ All non-passive backends accept per-agent:
 - `effort` — mapped per backend (see below)
 - `timeoutSec` — per-attempt wall-clock budget
 - `unrestricted` — pass a safety bypass flag to the underlying CLI
+- `launcher` — optional subprocess prefix selection
 
 Every backend receives a `cwd`, a resume session id (when present), and a
 display name. Session state is bound to the resolved cwd.
+
+Launchers are subprocess-only. They wrap the spawned backend command for
+`claude`, `cursor`, `pi`, and Codex stdio. They do not apply to the
+`passive` backend or Codex websocket transport.
 
 ## `claude`
 
@@ -68,6 +73,8 @@ display name. Session state is bound to the resolved cwd.
 - The connected CLI only synthesizes that daemon override for Codex, and
   only from the caller's local `TASK_RUNNER_CODEX_WS_URL`. This does not
   add generic env passthrough and does not affect other backends.
+- Codex stdio honors the resolved launcher prefix; Codex websocket does
+  not because there is no local subprocess to wrap.
 - Uses JSON-RPC 2.0 with a thread/turn model:
   `thread/start`, `thread/resume`, `thread/read`, `turn/start`,
   `thread/name/set`.

@@ -120,6 +120,14 @@ function writeAssignment(baseDir, name, body) {
   return path;
 }
 
+function writeLauncher(baseDir, name, body, ext = ".yaml") {
+  const dir = join(baseDir, "launchers");
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, `${name}${ext}`);
+  writeFileSync(path, body);
+  return path;
+}
+
 function writeNamedHook(baseDir, name, body) {
   const dir = join(baseDir, "hooks", name);
   mkdirSync(dir, { recursive: true });
@@ -1641,4 +1649,171 @@ test("in-run resume rejection stops the run with an error", async () => {
   assert.equal(outcome.summary.status, "error");
   assert.equal(invocations, 2, "stops after the rejected retry");
   assert.ok(stderr.includes("backend rejected the resume session"));
+});
+
+test("fresh runs freeze launcher precedence as override over authored agent launcher", async () => {
+  const dir = tempDir();
+  writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
+  writeLauncher(
+    dir,
+    "shared",
+    `schemaVersion: 1
+command: ssh
+args: [shared-host]
+`,
+  );
+  writeLauncher(
+    dir,
+    "override-launcher",
+    `schemaVersion: 1
+name: override-launcher
+command: env
+args: [OVERRIDE=1]
+`,
+  );
+  writeAgent(
+    dir,
+    "launcher-agent",
+    `---
+schemaVersion: 1
+name: launcher-agent
+backend: claude
+launcher: shared
+---
+Agent prompt.
+`,
+  );
+
+  const { outcome } = await runWithMock(
+    dir,
+    async (ctx) => {
+      setTaskStatusesForPrompt(ctx.prompt, {
+        t1: "completed",
+        t2: "completed",
+        t3: "completed",
+      });
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: null,
+        transcript: "done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    },
+    { launcher: "override-launcher" },
+    { agentName: "launcher-agent" },
+  );
+
+  assert.deepEqual(outcome.manifest.launcher, {
+    kind: "prefix",
+    command: "env",
+    args: ["OVERRIDE=1"],
+    name: "override-launcher",
+    source: "named",
+  });
+  assert.deepEqual(outcome.manifest.resetSeed.launcher, outcome.manifest.launcher);
+});
+
+test("fresh runs keep passive and codex websocket execution on direct launcher", async () => {
+  const dir = tempDir();
+  writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
+  writeLauncher(
+    dir,
+    "shared",
+    `schemaVersion: 1
+command: ssh
+args: [shared-host]
+`,
+  );
+  writeAgent(
+    dir,
+    "codex-ws-launcher-agent",
+    `---
+schemaVersion: 1
+name: codex-ws-launcher-agent
+backend: codex
+launcher: shared
+backendSpecific:
+  codex:
+    transport:
+      type: ws
+      url: ws://127.0.0.1:4773/
+---
+Agent prompt.
+`,
+  );
+
+  const { outcome } = await runWithMock(
+    dir,
+    async () => ({
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      sessionId: "thread-1",
+      transcript: "done",
+      rawStdout: "",
+      rawStderr: "",
+    }),
+    {},
+    { agentName: "codex-ws-launcher-agent", backendId: "codex" },
+  );
+
+  assert.deepEqual(outcome.manifest.launcher, {
+    kind: "direct",
+    name: "direct",
+  });
+  assert.deepEqual(outcome.manifest.resetSeed.launcher, outcome.manifest.launcher);
+});
+
+test("daemon-owned fresh runs resolve named launcher overrides on the authoritative host", async () => {
+  const dir = tempDir();
+  writeAgentAndAssignment(dir);
+  writeLauncher(
+    dir,
+    "shared",
+    `schemaVersion: 1
+command: ssh
+args: [daemon-host]
+`,
+  );
+
+  const { outcome } = await runWithMock(
+    dir,
+    async (ctx) => {
+      setTaskStatusesForPrompt(ctx.prompt, {
+        t1: "completed",
+        t2: "completed",
+        t3: "completed",
+      });
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: null,
+        transcript: "done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    },
+    { launcher: "shared" },
+    {
+      execution: {
+        hostMode: "daemon",
+        controller: {
+          kind: "daemon",
+          daemonInstanceId: "daemon-1",
+        },
+      },
+    },
+  );
+
+  assert.deepEqual(outcome.manifest.launcher, {
+    kind: "prefix",
+    command: "ssh",
+    args: ["daemon-host"],
+    name: "shared",
+    source: "named",
+  });
 });

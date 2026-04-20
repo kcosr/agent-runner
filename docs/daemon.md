@@ -69,17 +69,22 @@ Connected mode can optionally add an invocation-scoped SSH tunnel:
 Connected mode is how multiple terminals can share state and how the web
 UI and CLI stay in sync. `run --detach` only works in connected mode.
 
-Codex transport selection stays explicit in connected mode:
+Connected-mode runtime selection stays explicit:
 
 - the client does not forward arbitrary env vars to the daemon
 - if the client has `TASK_RUNNER_CODEX_WS_URL` set, `run`, `init`, and
   `resume` synthesize
   `overrides.backendSpecific.codex.transport = { type: "ws", url }`
+- if the client passes `--launcher <name>`, the daemon resolves that
+  named launcher against its own config root and freezes the result into
+  the manifest
 - malformed Codex transport overrides are rejected at the daemon request
   boundary before any run is created
+- malformed launcher overrides are rejected at the same request boundary
 
-That special case exists only for Codex transport selection. No other
-backend gets daemon-side env passthrough from the client.
+That special case exists only for Codex transport selection. Launcher
+override handling is still explicit and named-only; no generic
+daemon-side env passthrough exists for other backends.
 
 ## HTTP API
 
@@ -192,6 +197,7 @@ Error codes:
 
 - `agents.list`, `agents.get`
 - `assignments.list`, `assignments.get`
+- `launchers.list`, `launchers.get`
 
 **Subscriptions**
 

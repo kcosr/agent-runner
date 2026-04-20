@@ -16,6 +16,7 @@ import {
   cloneBackendSpecificConfig,
   isWsOrWssUrl,
 } from "../backends/types.js";
+import { type ResolvedLauncherConfig, cloneResolvedLauncherConfig } from "../config/launchers.js";
 import type { LockableField } from "../config/schema.js";
 import type { HookAuditRecord, ResolvedHookDescriptor } from "../hooks/types.js";
 
@@ -68,6 +69,7 @@ export interface RunResetSeed {
   model: string | null;
   effort: string | null;
   backendSpecific?: BackendSpecificConfig;
+  launcher: ResolvedLauncherConfig;
   cwd: string;
   lockedFields: LockableField[];
   message: string | null;
@@ -146,13 +148,13 @@ export interface AssignmentInfo {
 // `timeoutSec` are all captured at init / fresh-run time and preserved
 // across all subsequent sessions.
 //
-// schemaVersion: 9 is the current manifest-canonical generation. Manifests written
+// schemaVersion: 10 is the current manifest-canonical generation. Manifests written
 // by earlier task-runner versions are not resumable by this version —
 // `isRunManifest` rejects them and
 // `resolveResumeTarget` surfaces a clear error telling the caller to
 // create a fresh run.
 export interface RunManifest {
-  schemaVersion: 9;
+  schemaVersion: 10;
   runId: string;
   repo: string;
   agent: {
@@ -171,6 +173,7 @@ export interface RunManifest {
   model: string | null;
   effort: string | null;
   backendSpecific?: BackendSpecificConfig;
+  launcher: ResolvedLauncherConfig;
   message: string | null;
   name: string | null;
   note: string | null;
@@ -251,6 +254,7 @@ export function buildRunResetSeed(seed: RunResetSeed): RunResetSeed {
   return {
     ...seed,
     backendSpecific: cloneBackendSpecificConfig(seed.backendSpecific),
+    launcher: cloneResolvedLauncherConfig(seed.launcher),
     lockedFields: [...seed.lockedFields],
     dependencyRunIds: [...seed.dependencyRunIds],
     runtimeVars: { ...seed.runtimeVars },
@@ -266,6 +270,7 @@ export function applyRunResetSeed(manifest: RunManifest): void {
   manifest.model = seed.model;
   manifest.effort = seed.effort;
   manifest.backendSpecific = cloneBackendSpecificConfig(seed.backendSpecific);
+  manifest.launcher = cloneResolvedLauncherConfig(seed.launcher);
   manifest.cwd = seed.cwd;
   manifest.lockedFields = [...seed.lockedFields];
   manifest.message = seed.message;
@@ -343,11 +348,13 @@ function normalizeRunManifest(
 ): RunManifest {
   return {
     ...parsed,
+    launcher: cloneResolvedLauncherConfig(parsed.launcher),
     archivedAt: parsed.archivedAt ?? null,
     note: parsed.note ?? null,
     pinned: parsed.pinned ?? false,
     resetSeed: {
       ...parsed.resetSeed,
+      launcher: cloneResolvedLauncherConfig(parsed.resetSeed.launcher),
       note: parsed.resetSeed.note ?? parsed.note ?? null,
       pinned: parsed.resetSeed.pinned ?? parsed.pinned ?? false,
     },
@@ -371,11 +378,11 @@ function readManifestCandidate(candidate: string): RunManifest {
     typeof parsed === "object" &&
     "schemaVersion" in parsed &&
     typeof (parsed as { schemaVersion: unknown }).schemaVersion === "number" &&
-    (parsed as { schemaVersion: number }).schemaVersion !== 9
+    (parsed as { schemaVersion: number }).schemaVersion !== 10
   ) {
     const version = (parsed as { schemaVersion: number }).schemaVersion;
     throw new ResumeError(
-      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 9. Manifests from earlier versions cannot be resumed — create a fresh run (task-runner init / run).`,
+      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 10. Manifests from earlier versions cannot be resumed — create a fresh run (task-runner init / run).`,
     );
   }
   if (!isRunManifest(parsed)) {
@@ -531,7 +538,7 @@ export function findRunManifestsById(
 function isRunManifest(value: unknown): value is RunManifest {
   if (!value || typeof value !== "object") return false;
   const obj = value as Record<string, unknown>;
-  if (obj.schemaVersion !== 9) return false;
+  if (obj.schemaVersion !== 10) return false;
   if (typeof obj.runId !== "string") return false;
   if (typeof obj.repo !== "string") return false;
 
@@ -603,6 +610,7 @@ function isRunManifest(value: unknown): value is RunManifest {
   if (!obj.resetSeed || typeof obj.resetSeed !== "object") return false;
   if (!obj.execution || typeof obj.execution !== "object") return false;
   if (!isValidPersistedBackendSpecific(obj.backendSpecific, false)) return false;
+  if (!isValidResolvedLauncherConfig(obj.launcher)) return false;
 
   // callerInstructions is string | null.
   if (obj.callerInstructions !== null && typeof obj.callerInstructions !== "string") {
@@ -616,6 +624,7 @@ function isRunManifest(value: unknown): value is RunManifest {
   if (!isValidPersistedBackendSpecific(resetSeed.backendSpecific, false)) {
     return false;
   }
+  if (!isValidResolvedLauncherConfig(resetSeed.launcher)) return false;
   if (typeof resetSeed.cwd !== "string") return false;
   if (!Array.isArray(resetSeed.lockedFields)) return false;
   if (resetSeed.message !== null && typeof resetSeed.message !== "string") return false;
@@ -673,6 +682,26 @@ function isRunManifest(value: unknown): value is RunManifest {
   }
 
   return false;
+}
+
+function isValidResolvedLauncherConfig(value: unknown): value is ResolvedLauncherConfig {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  if (record.kind === "direct") {
+    return record.name === "direct";
+  }
+  if (record.kind !== "prefix") {
+    return false;
+  }
+  return (
+    typeof record.command === "string" &&
+    Array.isArray(record.args) &&
+    record.args.every((entry) => typeof entry === "string") &&
+    (record.name === null || typeof record.name === "string") &&
+    (record.source === "builtin" || record.source === "named" || record.source === "inline")
+  );
 }
 
 function isValidPersistedBackendSpecific(

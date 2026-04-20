@@ -13,8 +13,10 @@ import {
   type DefinitionKind,
   listAgents,
   listAssignments,
+  listLaunchers,
   loadAgentConfig,
   loadAssignmentConfig,
+  loadLauncherConfig,
 } from "../../config/loader.js";
 import { isPathArg } from "../../config/runtime-paths.js";
 import type {
@@ -51,6 +53,7 @@ import {
 import { resolveTaskRunnerCommand } from "../../task-runner-command.js";
 import { trimRunName } from "../../util/run-name.js";
 import { shortId } from "../../util/short-id.js";
+import type { LoadedLauncherDefinition } from "../config/launchers.js";
 import type { LoadedAgent, LoadedAssignment } from "../config/loaded.js";
 import { createHookExecutionState, runTaskTransitionHooks } from "../hooks/runtime.js";
 import {
@@ -112,6 +115,7 @@ export type BriefCommandResult = string;
 export interface DefinitionListResult {
   kind: DefinitionKind;
   entries: DefinitionEntry[];
+  warnings: string[];
 }
 
 export type DefinitionDetailsResult =
@@ -122,6 +126,10 @@ export type DefinitionDetailsResult =
   | {
       kind: "assignment";
       loaded: LoadedAssignment;
+    }
+  | {
+      kind: "launcher";
+      loaded: LoadedLauncherDefinition;
     };
 
 export interface RunResetResult {
@@ -626,9 +634,18 @@ export function readBrief(target: string): BriefCommandResult {
 }
 
 export function listDefinitions(kind: DefinitionKind): DefinitionListResult {
+  if (kind === "launcher") {
+    const result = listLaunchers();
+    return {
+      kind,
+      entries: result.entries,
+      warnings: result.warnings,
+    };
+  }
   return {
     kind,
     entries: kind === "agent" ? listAgents() : listAssignments(),
+    warnings: [],
   };
 }
 
@@ -684,6 +701,12 @@ export function showDefinition(
   target: string,
   cwd?: string,
 ): DefinitionDetailsResult {
+  if (kind === "launcher") {
+    return {
+      kind,
+      loaded: loadLauncherConfig(target, cwd),
+    };
+  }
   if (kind === "agent") {
     return {
       kind,

@@ -12,6 +12,7 @@ import type {
 } from "../core/backends/types.js";
 import { isWsOrWssUrl } from "../core/backends/types.js";
 import { resolveTaskRunnerCommand } from "../task-runner-command.js";
+import { buildSpawnCommand } from "../util/spawn.js";
 import {
   composePersistedTranscript,
   isRecord,
@@ -128,9 +129,15 @@ function openStdioTransport(
   cwd: string,
   env: Record<string, string>,
   unrestricted: boolean,
+  launcher: BackendInvokeContext["launcher"],
 ): Transport {
   const binary = process.env.TASK_RUNNER_CODEX_BIN ?? "codex";
-  const child: ChildProcess = spawn(binary, buildCodexAppServerArgs(unrestricted), {
+  const launched = buildSpawnCommand({
+    command: binary,
+    args: buildCodexAppServerArgs(unrestricted),
+    launcher,
+  });
+  const child: ChildProcess = spawn(launched.command, launched.args, {
     cwd,
     env,
     stdio: ["pipe", "pipe", "pipe"],
@@ -170,7 +177,7 @@ function openStdioTransport(
   });
 
   return {
-    descriptor: `stdio:${binary}`,
+    descriptor: `stdio:${launched.command}`,
     send(line: string) {
       if (closed || !child.stdin) return;
       child.stdin.write(`${line}\n`);
@@ -755,7 +762,7 @@ async function openTransport(ctx: BackendInvokeContext): Promise<Transport> {
   if (transport.type === "ws") {
     return openWsTransport(transport.url);
   }
-  return openStdioTransport(ctx.cwd, ctx.env, ctx.unrestricted ?? false);
+  return openStdioTransport(ctx.cwd, ctx.env, ctx.unrestricted ?? false, ctx.launcher);
 }
 
 export function buildCodexThreadParams(

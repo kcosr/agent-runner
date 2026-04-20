@@ -70,6 +70,14 @@ function writeAssignment(baseDir, name, body) {
   return path;
 }
 
+function writeLauncher(baseDir, name, body, ext = ".yaml") {
+  const dir = join(baseDir, "launchers");
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, `${name}${ext}`);
+  writeFileSync(path, body);
+  return path;
+}
+
 function writeAgentAndAssignment(baseDir) {
   writeAgent(baseDir, "three", THREE_AGENT);
   writeAssignment(baseDir, "three-work", THREE_ASSIGNMENT);
@@ -235,6 +243,67 @@ test("manifest: blocked run records status and captures final state", async () =
   assert.equal(outcome.manifest.finalTasks.t2.status, "blocked");
   assert.equal(outcome.manifest.finalTasks.t2.notes, "could not reach the server");
   assert.equal(outcome.manifest.attemptRecords[0]?.tasksAfter.t1.status, "in_progress");
+});
+
+test("manifest: fresh runs persist the frozen launcher in run and reset seed state", async () => {
+  const dir = tempDir();
+  writeAgent(
+    dir,
+    "three",
+    `---
+schemaVersion: 1
+name: three
+backend: claude
+model: claude-sonnet-4-6
+launcher: shared
+---
+Agent prompt.
+`,
+  );
+  writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
+  writeLauncher(
+    dir,
+    "shared",
+    `schemaVersion: 1
+name: shared
+command: env
+args: [LAUNCHER=1]
+`,
+  );
+
+  const outcome = await runWithMock(dir, async (ctx) => {
+    assert.deepEqual(ctx.launcher, {
+      name: "shared",
+      kind: "prefix",
+      source: "named",
+      command: "env",
+      args: ["LAUNCHER=1"],
+    });
+    updateTasksForPrompt(ctx.prompt, {
+      t1: { status: "completed" },
+      t2: { status: "completed" },
+      t3: { status: "completed" },
+    });
+    return {
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      sessionId: "sess-launcher",
+      transcript: "launcher frozen",
+      rawStdout: "",
+      rawStderr: "",
+    };
+  });
+
+  const onDisk = JSON.parse(readFileSync(join(outcome.workspaceDir, "run.json"), "utf8"));
+  assert.deepEqual(onDisk.launcher, {
+    name: "shared",
+    kind: "prefix",
+    source: "named",
+    command: "env",
+    args: ["LAUNCHER=1"],
+  });
+  assert.deepEqual(onDisk.resetSeed.launcher, onDisk.launcher);
 });
 
 test("manifest: exhausted run records all attempts", async () => {

@@ -16,8 +16,8 @@ All commands accept `--help` / `-h`.
 | `run status\|brief` | Print run state or the composed worker handoff |
 | `task list\|show\|set\|append-notes\|add` | Task state inspection and mutation |
 | `attachment add\|list\|download\|remove` | Attachment management |
-| `list agents\|assignments\|runs` | Enumerate definitions and runs |
-| `show agent\|assignment` | Render a single definition |
+| `list agents\|assignments\|launchers\|runs` | Enumerate definitions and runs |
+| `show agent\|assignment\|launcher` | Render a single definition |
 | `run reset\|archive\|unarchive\|delete` | Lifecycle mutations |
 | `run set-name\|set-backend-session\|clear-backend-session` | Metadata mutations |
 | `run add-dep\|remove-dep\|clear-deps` | Dependency graph mutations |
@@ -52,6 +52,7 @@ task-runner run \
   [--assignment <name|path>] \
   [--cwd <path>] \
   [--backend <id>] \
+  [--launcher <name>] \
   [--model <id>] \
   [--effort <level>] \
   [--timeout-sec <n>] \
@@ -76,6 +77,9 @@ Flags:
   `--cwd` → assignment `cwd` → caller cwd.
 - `--backend <id>` — override the agent's backend. Valid ids:
   `claude`, `codex`, `cursor`, `pi`, `passive`.
+- `--launcher <name>` — override the agent's launcher by named launcher
+  id. Fresh-run/init only; forbidden on resume and execute-after-init.
+  The built-in `direct` launcher is always available.
 - `--model <id>` — override the agent's model.
 - `--effort <level>` — one of `off`, `minimal`, `low`, `medium`, `high`,
   `xhigh`, `max`.
@@ -114,6 +118,15 @@ task-runner init \
 
 `init` does not dump the worker brief to stdout — fetch it with
 `task-runner run brief <run-id>`.
+
+Launcher precedence on fresh run/init is:
+
+1. `--launcher <name>`
+2. agent-authored `launcher`
+3. built-in `direct`
+
+In connected mode the daemon resolves named launchers against its own
+config root, then freezes the result into the manifest and reset seed.
 
 ## `serve`
 
@@ -209,6 +222,7 @@ See [attachments.md](attachments.md).
 ```bash
 task-runner list agents
 task-runner list assignments
+task-runner list launchers
 task-runner list runs \
   [--cwd <path> | --repo <name> | --global] \
   [--include-archived]
@@ -225,6 +239,7 @@ task-runner list runs \
 ```bash
 task-runner show agent <name|path>
 task-runner show assignment <name|path>
+task-runner show launcher <name|path>
 ```
 
 Renders the parsed frontmatter, declared vars (for assignments), and

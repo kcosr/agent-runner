@@ -1322,6 +1322,23 @@ export async function serveDaemon(
           );
           return;
         }
+        case "launchers.list":
+          sendJson(ws, resultResponse(request.id, operations.listLaunchers()));
+          return;
+        case "launchers.get": {
+          const parsed = asRecord(params, "launchers.get params");
+          sendJson(
+            ws,
+            resultResponse(
+              request.id,
+              operations.getLauncher({
+                target: requiredString(parsed.target, "target"),
+                cwd: optionalString(parsed.cwd, "cwd"),
+              }),
+            ),
+          );
+          return;
+        }
         case "runs.archive":
           sendJson(
             ws,

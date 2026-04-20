@@ -139,12 +139,12 @@ function readManifest(workspaceDir) {
   return JSON.parse(readFileSync(join(workspaceDir, "run.json"), "utf8"));
 }
 
-test("manifest schemaVersion is 9 and captures repo", async () => {
+test("manifest schemaVersion is 10 and captures repo", async () => {
   const dir = tempDir();
   writeAgent(dir, "canonical-claude", CLAUDE_AGENT);
   writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
   const outcome = await freshRun(dir, { initialize: true });
-  assert.equal(outcome.manifest.schemaVersion, 9);
+  assert.equal(outcome.manifest.schemaVersion, 10);
   assert.equal(outcome.manifest.repo, "unknown");
   assert.equal(outcome.manifest.archivedAt, null);
 });
@@ -401,7 +401,7 @@ test("schemaVersion mismatch: resume rejects a v1 manifest with a clear error", 
       () => resolveResumeTarget("stale01", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 1/);
-        assert.match(err.message, /requires schemaVersion 9/);
+        assert.match(err.message, /requires schemaVersion 10/);
         return true;
       },
     );
@@ -452,7 +452,7 @@ test("schemaVersion mismatch: resume rejects a v2 manifest with a clear error", 
       () => resolveResumeTarget("stale02", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 2/);
-        assert.match(err.message, /requires schemaVersion 9/);
+        assert.match(err.message, /requires schemaVersion 10/);
         return true;
       },
     );
@@ -504,7 +504,7 @@ test("schemaVersion mismatch: resume rejects a v7 manifest with a clear error", 
       () => resolveResumeTarget("stale07", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 7/);
-        assert.match(err.message, /requires schemaVersion 9/);
+        assert.match(err.message, /requires schemaVersion 10/);
         return true;
       },
     );

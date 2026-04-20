@@ -21,6 +21,7 @@ import type {
   RunSummary,
   RunTaskSummary,
 } from "@task-runner/core/contracts/runs.js";
+import type { DefinitionListResult } from "@task-runner/core/core/commands/service.js";
 import type { RunListFilter } from "@task-runner/core/core/commands/service.js";
 
 export type RunEventChannel = "run_summary" | "run_detail" | "run_timeline";
@@ -198,11 +199,15 @@ export interface TaskResult {
 }
 
 export interface AgentsListResult {
-  agents: DefinitionEntry[];
+  agents: DefinitionListResult;
 }
 
 export interface AssignmentsListResult {
-  assignments: DefinitionEntry[];
+  assignments: DefinitionListResult;
+}
+
+export interface LaunchersListResult {
+  launchers: DefinitionListResult;
 }
 
 export interface AgentResult {
@@ -211,6 +216,10 @@ export interface AgentResult {
 
 export interface AssignmentResult {
   assignment: DefinitionDetail;
+}
+
+export interface LauncherResult {
+  launcher: DefinitionDetail;
 }
 
 export interface RunArchiveRpcResult {
