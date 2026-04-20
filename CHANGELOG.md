@@ -27,7 +27,7 @@
 - Added inline web attachment preview support for `image/png`,
   `image/jpeg`, `image/gif`, `image/webp`, and `image/svg+xml`, using
   blob-backed `<img>` rendering in the existing preview drawer while
-  keeping markdown/plain-text preview behavior unchanged.
+  keeping markdown/plain-text preview behavior unchanged. ([#65](https://github.com/kcosr/task-runner/pull/65))
 - Added an MIT `LICENSE` file and set `license: "MIT"` on the root and
   workspace package manifests. ([#60](https://github.com/kcosr/task-runner/pull/60))
 - Added persistent per-run note and pin metadata across the shared
