@@ -185,6 +185,13 @@ The built-in `git-worktree` hook is prepare-only. It creates or reuses a
 worktree, switches the run cwd to that path, and projects
 `worktree_path` into runtime vars.
 
+The built-in `git-sync-base` hook is also prepare-only. It requires a
+clean current branch/worktree and rebases that branch onto an explicit
+configured base ref before backend work begins.
+
+Declarative `when` support remains narrow: attempt-phase hooks support
+`when.sessionIndex`, while task-transition hooks support `when.toStatus`.
+
 ## Task state model
 
 Task state is canonical in `manifest.finalTasks` for all runs.

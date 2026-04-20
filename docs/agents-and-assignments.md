@@ -122,6 +122,10 @@ tasks:                              # optional, max 100, ids unique
 hooks:                              # optional hook arrays by phase
   prepare:
     - name: freeze-prepare
+  beforeAttempt:
+    - builtin: command
+      when:
+        sessionIndex: [0]
   taskTransition:
     - path: ./hooks/guard.mts
       when:
@@ -209,6 +213,14 @@ Resolution rules:
 - Raw `.ts` / `.mts` hook files load directly through the runtime's
   `jiti` loader. Hook authors do not need a separate build step.
 
+Supported `when` filters are intentionally narrow:
+
+- attempt phases (`beforeAttempt`, `afterAttempt`, `afterExit`) support
+  `when.sessionIndex`, either as one integer or an array of integers.
+  Session index `0` is the first execution session; retries and reinvokes
+  within that same session still match.
+- `taskTransition` supports `when.toStatus`.
+
 Prepare hooks run once during fresh `run` / `init`, before the first
 manifest write. Their resolved descriptor, config, mutated prompts, vars,
 cwd, and hook state are then frozen into the manifest. Resume and reset
@@ -233,6 +245,9 @@ Built-in hooks:
 - `git-worktree` runs only in `prepare`. It ensures a git worktree,
   switches the run `cwd` to that path, and projects `worktree_path`
   into runtime vars.
+- `git-sync-base` runs only in `prepare`. It requires a clean current
+  branch/worktree, then rebases that branch onto the configured
+  `baseRef` without switching the run to the base ref.
 - `command` runs in every phase. `mode: status` treats exit code `0` as
   success and a non-zero exit code as block/reject. `mode: json`
   requires exit code `0` and parses a full hook result from stdout;

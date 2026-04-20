@@ -37,6 +37,10 @@
   `run-events.jsonl` history for prepare, attempt, and task-transition
   hook executions while keeping manifest `hookAudits` as the richer
   detail projection surface.
+- Added narrow declarative `when.sessionIndex` support for attempt-phase
+  hooks and a separate prepare-only `git-sync-base` built-in for
+  rebasing a clean current branch onto an explicit base ref before work
+  begins.
 - Added SSH-assisted connected CLI mode with `--connect-host` /
   `TASK_RUNNER_CONNECT_HOST` and `--connect-local-port` /
   `TASK_RUNNER_CONNECT_LOCAL_PORT`, so daemon-targeted commands can keep a

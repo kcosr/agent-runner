@@ -187,8 +187,14 @@ hooks:
         from: main
         branch: review-worktree
         path: "{{cwd}}/.worktrees/review-worktree"
+    - builtin: git-sync-base
+      with:
+        repo: "{{cwd}}/.worktrees/review-worktree"
+        baseRef: origin/main
   beforeAttempt:
     - builtin: command
+      when:
+        sessionIndex: [0]
       with:
         mode: status
         command: npm

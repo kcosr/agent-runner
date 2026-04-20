@@ -298,6 +298,26 @@ function matchesTaskTransitionWhen(
   return true;
 }
 
+function matchesAttemptWhen(descriptor: ResolvedHookDescriptor, sessionIndex: number): boolean {
+  const when = descriptor.when;
+  if (!when || when.sessionIndex === undefined) {
+    return true;
+  }
+  const configured = when.sessionIndex;
+  if (typeof configured === "number" && Number.isInteger(configured) && configured >= 0) {
+    return configured === sessionIndex;
+  }
+  if (
+    Array.isArray(configured) &&
+    configured.every((value) => typeof value === "number" && Number.isInteger(value) && value >= 0)
+  ) {
+    return configured.includes(sessionIndex);
+  }
+  throw new HookRuntimeError(
+    `hook ${descriptor.hookId} when.sessionIndex must be a non-negative integer or array of non-negative integers`,
+  );
+}
+
 async function invokeHook(
   descriptor: ResolvedHookDescriptor,
   hook: HookModule,
@@ -460,6 +480,9 @@ export async function runAttemptHooks(
   },
 ): Promise<AttemptPhaseResult> {
   for (const descriptor of state.manifest.resolvedHooks.filter((entry) => entry.phase === phase)) {
+    if (!matchesAttemptWhen(descriptor, options.sessionIndex)) {
+      continue;
+    }
     const startedAt = new Date().toISOString();
     try {
       const hook = await loadHookModule(descriptor);
