@@ -6678,6 +6678,58 @@ describe("web app", () => {
     expect(preview.querySelector("pre code")).not.toBeNull();
   });
 
+  it("opens preview from attachment row metadata clicks and browser back returns to attachments", async () => {
+    installFetchMock(
+      {
+        runs: [makeRun({ runId: "run-1", name: "Attachment run" })],
+        details: {
+          "run-1": makeDetail({
+            runId: "run-1",
+            name: "Attachment run",
+            attachments: [
+              makeAttachment({
+                id: "att-log",
+                name: "build.log",
+                mimeType: "text/plain; charset=utf-8",
+              }),
+            ],
+          }),
+        },
+      },
+      {
+        handleRequest: (url) => {
+          if (/\/api\/runs\/run-1\/attachments\/att-log\/content$/.test(url)) {
+            return new Response("line one\nline two", {
+              status: 200,
+              headers: { "content-type": "text/plain; charset=utf-8" },
+            });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await user.click(await findRunCard("Attachment run"));
+    await user.click(await screen.findByRole("button", { name: /^Attachments\b/i }));
+    await user.click(screen.getByText("text/plain; charset=utf-8"));
+
+    const preview = await screen.findByLabelText("Attachment preview content");
+    expect(preview.querySelector("pre code")?.textContent).toBe("line one\nline two");
+    expect(router.state.location.pathname).toBe("/runs/run-1/attachments/run-1/att-log");
+
+    window.history.back();
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe("/runs/run-1");
+      expect(screen.getByLabelText("Run detail")).toBeInTheDocument();
+      expect(screen.queryByLabelText("Attachment preview")).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: /^Upload$/ })).toBeInTheDocument();
+  });
+
   it("navigates attachment previews with buttons and fullscreen arrow keys", async () => {
     installFetchMock(
       {
@@ -6753,6 +6805,73 @@ describe("web app", () => {
 
     await user.keyboard("{ArrowLeft}");
     expect(await screen.findByText("beta body")).toBeInTheDocument();
+  });
+
+  it("keeps attachment preview loading and unavailable states inline", async () => {
+    let resolvePreview: ((response: Response | PromiseLike<Response>) => void) | undefined;
+
+    installFetchMock(
+      {
+        runs: [makeRun({ runId: "run-1", name: "Attachment run" })],
+        details: {
+          "run-1": makeDetail({
+            runId: "run-1",
+            name: "Attachment run",
+            attachments: [
+              makeAttachment({
+                id: "att-md",
+                name: "notes.md",
+                mimeType: "text/markdown; charset=utf-8",
+              }),
+            ],
+          }),
+        },
+      },
+      {
+        handleRequest: (url) => {
+          if (/\/api\/runs\/run-1\/attachments\/att-md\/content$/.test(url)) {
+            return new Promise<Response>((resolve) => {
+              resolvePreview = resolve;
+            });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await user.click(await findRunCard("Attachment run"));
+    await user.click(await screen.findByRole("button", { name: /^Attachments\b/i }));
+    await user.click(screen.getByRole("button", { name: /^Preview notes\.md$/ }));
+
+    expect(await screen.findByLabelText("Attachment preview loading")).toBeInTheDocument();
+    resolvePreview?.(
+      new Response("# Loading complete", {
+        status: 200,
+        headers: { "content-type": "text/markdown; charset=utf-8" },
+      }),
+    );
+    expect(await screen.findByText("Loading complete")).toBeInTheDocument();
+
+    await router.navigate({
+      params: {
+        attachmentId: "att-missing",
+        attachmentOwnerRunId: "run-1",
+        runId: "run-1",
+      },
+      to: "/runs/$runId/attachments/$attachmentOwnerRunId/$attachmentId",
+    });
+
+    expect(await screen.findByLabelText("Attachment preview error")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "The selected attachment is no longer available in this run. Use Back to return to the attachments list.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /back to attachments/i })).toBeInTheDocument();
+    expect(getCloseDetailButton()).toBeInTheDocument();
   });
 
   it("keeps preview errors inline and isolates row preview clicks from attachment actions", async () => {

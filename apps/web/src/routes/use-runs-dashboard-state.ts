@@ -9,7 +9,7 @@ import type {
   RunStatus,
   RunSummary,
 } from "@task-runner/core/contracts/runs.js";
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { BoardColumn } from "../components/run-column.js";
 import { createApiClient, isNotFoundError } from "../lib/api-client.js";
 import { queryClient, runQueryKeys } from "../lib/query.js";
@@ -82,6 +82,27 @@ function useSettledDetailRunId(selectedRunId?: string) {
   return {
     detailRunId,
     detailSettling: detailRunId !== selectedRunId,
+  };
+}
+
+function attachmentsDetailDrawerView(): RunDrawerView {
+  return {
+    mode: "detail",
+    detailSection: "attachments",
+    attachmentId: null,
+    attachmentOwnerRunId: null,
+  };
+}
+
+function attachmentPreviewDrawerView(
+  attachmentOwnerRunId: string,
+  attachmentId: string,
+): RunDrawerView {
+  return {
+    mode: "attachment",
+    detailSection: "attachments",
+    attachmentId,
+    attachmentOwnerRunId,
   };
 }
 
@@ -361,6 +382,10 @@ export function useRunsDashboardState() {
   const navigate = useNavigate();
   const runRouteParams = useParams({ strict: false });
   const selectedRunId = "runId" in runRouteParams ? runRouteParams.runId : undefined;
+  const previewAttachmentOwnerRunId =
+    "attachmentOwnerRunId" in runRouteParams ? runRouteParams.attachmentOwnerRunId : undefined;
+  const previewAttachmentId =
+    "attachmentId" in runRouteParams ? runRouteParams.attachmentId : undefined;
   const [notices, setNotices] = useState<NoticeState[]>([]);
   const [actionError, setActionError] = useState<string>();
   const [detailStreamStale, setDetailStreamStale] = useState(false);
@@ -446,10 +471,19 @@ export function useRunsDashboardState() {
   const boardColumns = preferences.hideEmptyColumns
     ? columns.filter((column) => column.runs.length > 0)
     : columns;
-  const selectedDrawerView =
+  const selectedStoredDrawerView =
     selectedRunId !== undefined
       ? (viewState.drawerViewsByRunId[selectedRunId] ?? DEFAULT_DRAWER_VIEW)
       : undefined;
+  const routeAttachmentPreviewView =
+    selectedRunId && previewAttachmentOwnerRunId && previewAttachmentId
+      ? attachmentPreviewDrawerView(previewAttachmentOwnerRunId, previewAttachmentId)
+      : undefined;
+  const selectedDrawerView =
+    routeAttachmentPreviewView ??
+    (selectedStoredDrawerView?.mode === "attachment"
+      ? attachmentsDetailDrawerView()
+      : selectedStoredDrawerView);
   const selectedRunGroupAttachmentsQuery = useQuery({
     queryKey: ["attachment-list", detailRunId, "cwd-scope"],
     queryFn: async () => {
@@ -890,14 +924,17 @@ export function useRunsDashboardState() {
     });
   }
 
-  function setSelectedRunDrawerView(runId: string, drawerView: RunDrawerView) {
-    updateViewState((current) => ({
-      drawerViewsByRunId: {
-        ...current.drawerViewsByRunId,
-        [runId]: drawerView,
-      },
-    }));
-  }
+  const setSelectedRunDrawerView = useCallback(
+    (runId: string, drawerView: RunDrawerView) => {
+      updateViewState((current) => ({
+        drawerViewsByRunId: {
+          ...current.drawerViewsByRunId,
+          [runId]: drawerView,
+        },
+      }));
+    },
+    [updateViewState],
+  );
 
   function closeResumeDialog() {
     if (actionPending === "resume") {
@@ -951,6 +988,58 @@ export function useRunsDashboardState() {
     }
   }
 
+  function navigateToRunDetail(runId: string, options?: { replace?: boolean }) {
+    void navigate({ params: { runId }, replace: options?.replace, to: "/runs/$runId" });
+  }
+
+  function navigateToAttachmentPreview(
+    runId: string,
+    attachmentOwnerRunId: string,
+    attachmentId: string,
+    options?: { replace?: boolean },
+  ) {
+    void navigate({
+      params: {
+        attachmentId,
+        attachmentOwnerRunId,
+        runId,
+      },
+      replace: options?.replace,
+      to: "/runs/$runId/attachments/$attachmentOwnerRunId/$attachmentId",
+    });
+  }
+
+  useEffect(() => {
+    if (!selectedRunId) {
+      return;
+    }
+
+    if (previewAttachmentOwnerRunId && previewAttachmentId) {
+      if (
+        selectedStoredDrawerView?.mode === "attachment" &&
+        selectedStoredDrawerView.attachmentId === previewAttachmentId &&
+        selectedStoredDrawerView.attachmentOwnerRunId === previewAttachmentOwnerRunId
+      ) {
+        return;
+      }
+      setSelectedRunDrawerView(
+        selectedRunId,
+        attachmentPreviewDrawerView(previewAttachmentOwnerRunId, previewAttachmentId),
+      );
+      return;
+    }
+
+    if (selectedStoredDrawerView?.mode === "attachment") {
+      setSelectedRunDrawerView(selectedRunId, attachmentsDetailDrawerView());
+    }
+  }, [
+    previewAttachmentId,
+    previewAttachmentOwnerRunId,
+    selectedRunId,
+    selectedStoredDrawerView,
+    setSelectedRunDrawerView,
+  ]);
+
   return {
     actionError,
     activeBoardColumnKey: viewState.activeBoardColumnKey,
@@ -991,18 +1080,35 @@ export function useRunsDashboardState() {
     notices,
     openRun: (runId: string, options?: { replace?: boolean }) => {
       setActionError(undefined);
-      void navigate({ replace: options?.replace, to: `/runs/${runId}` });
+      const drawerView = viewState.drawerViewsByRunId[runId];
+      if (drawerView?.mode === "attachment") {
+        navigateToAttachmentPreview(
+          runId,
+          drawerView.attachmentOwnerRunId,
+          drawerView.attachmentId,
+          options,
+        );
+        return;
+      }
+      navigateToRunDetail(runId, options);
     },
     openSelectedRunResumeDialog: openResumeDialog,
     openSelectedRunAttachmentPreview: (attachmentOwnerRunId: string, attachmentId: string) => {
       if (!selectedRunId) {
         return;
       }
-      setSelectedRunDrawerView(selectedRunId, {
-        mode: "attachment",
-        detailSection: "attachments",
-        attachmentId,
-        attachmentOwnerRunId,
+      const drawerView = attachmentPreviewDrawerView(attachmentOwnerRunId, attachmentId);
+      setSelectedRunDrawerView(selectedRunId, drawerView);
+      navigateToAttachmentPreview(selectedRunId, attachmentOwnerRunId, attachmentId);
+    },
+    replaceSelectedRunAttachmentPreview: (attachmentOwnerRunId: string, attachmentId: string) => {
+      if (!selectedRunId) {
+        return;
+      }
+      const drawerView = attachmentPreviewDrawerView(attachmentOwnerRunId, attachmentId);
+      setSelectedRunDrawerView(selectedRunId, drawerView);
+      navigateToAttachmentPreview(selectedRunId, attachmentOwnerRunId, attachmentId, {
+        replace: true,
       });
     },
     preferences,
@@ -1073,12 +1179,8 @@ export function useRunsDashboardState() {
       if (!selectedRunId) {
         return;
       }
-      setSelectedRunDrawerView(selectedRunId, {
-        mode: "detail",
-        detailSection: "attachments",
-        attachmentId: null,
-        attachmentOwnerRunId: null,
-      });
+      setSelectedRunDrawerView(selectedRunId, attachmentsDetailDrawerView());
+      navigateToRunDetail(selectedRunId, { replace: true });
     },
     resetBoardFilters: () => {
       updateViewState({ search: "" });

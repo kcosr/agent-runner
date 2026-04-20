@@ -25,6 +25,12 @@ const runDetailRoute = createRoute({
   component: () => <RunsDashboardRoute />,
 });
 
+const runAttachmentPreviewRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/runs/$runId/attachments/$attachmentOwnerRunId/$attachmentId",
+  component: () => <RunsDashboardRoute />,
+});
+
 const settingsLayoutRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/settings",
@@ -46,6 +52,7 @@ const settingsKeybindingsRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   boardRoute,
   runDetailRoute,
+  runAttachmentPreviewRoute,
   settingsLayoutRoute.addChildren([settingsGeneralRoute, settingsKeybindingsRoute]),
 ]);
 
