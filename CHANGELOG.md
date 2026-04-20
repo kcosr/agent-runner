@@ -29,6 +29,10 @@
   `TASK_RUNNER_CONNECT_LOCAL_PORT`, so daemon-targeted commands can keep a
   logical remote `--connect` URL while routing WebSocket and attachment
   HTTP traffic through an invocation-scoped local SSH forward. ([#64](https://github.com/kcosr/task-runner/pull/64))
+- Added inline web attachment preview support for `image/png`,
+  `image/jpeg`, `image/gif`, `image/webp`, and `image/svg+xml`, using
+  blob-backed `<img>` rendering in the existing preview drawer while
+  keeping markdown/plain-text preview behavior unchanged. ([#65](https://github.com/kcosr/task-runner/pull/65))
 - Added config-time `${...}` env interpolation for agent and assignment
   frontmatter scalar values, with exact-match typed surfaces, prose-only
   partial interpolation, and load-time config errors for missing, empty,

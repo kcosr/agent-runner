@@ -2044,6 +2044,16 @@ body {
   border-radius: 0;
 }
 
+.attachment-preview-image {
+  display: block;
+  max-width: 100%;
+  max-height: min(70vh, 100%);
+  width: auto;
+  height: auto;
+  margin: 0 auto;
+  object-fit: contain;
+}
+
 @media (max-width: 900px) {
   .attachment-preview-title-row {
     flex-wrap: wrap;
