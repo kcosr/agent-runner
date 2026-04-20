@@ -94,8 +94,9 @@ feature, checks contract dimensions (with an ambiguity gate), surveys
 impact, scans for duplication, assesses risks, produces a contract
 artifact, drafts a plan from a template, runs a nested `plan-review`,
 applies fixes until approval, produces a human-facing summary, attaches
-both artifacts to the planning run, and prepares a delayed implementer
-run creation flow.
+both artifacts to the planning run, blocks on caller approval for
+delayed implementer creation, and emits generated implementation plans
+that end with a terminal `push_branch_and_create_pr` task.
 
 Notable feature uses:
 
@@ -107,8 +108,16 @@ Notable feature uses:
 - **Attachment coupling**: approved draft (`assignment-seed.md`) and
   summary are attached to the planning run and later discovered by
   implementation via `attachment list --cwd-scope`.
-- **Passive-backend handoff**: the implementer run is created with
-  `--backend passive` so it is externally driven via `run brief`.
+- **Approval-gated delayed creation**: the planning run prepares the
+  draft/summary/handoff first, then blocks on
+  `create_implementer_run_after_approval` until the caller resumes the
+  same run with approval.
+- **Backend-accurate handoff**: after delayed `init`, the caller
+  inspects `run brief <new-run-id>` and then executes the initialized
+  implementer run with `run --resume-run <new-run-id>`.
+- **Terminal publish step**: generated implementation plans end with
+  `push_branch_and_create_pr`, which records branch/push/PR evidence as
+  part of the normal successful workflow.
 
 ### `plan-review`
 
@@ -158,8 +167,8 @@ subagents for parallelism.
 
 | Agent | Typical assignment | Notes |
 |-------|-------------------|-------|
-| `planner` | `plan-feature` | Produces an executable plan and a summary; uses nested `plan-review`. |
-| `implementer` | generated plan assignment | Created with `--backend passive` by `plan-feature`, then driven externally. |
+| `planner` | `plan-feature` | Produces an executable plan and a summary; uses nested `plan-review` and blocks for caller approval before delayed implementer creation. |
+| `implementer` | generated plan assignment | Created by `plan-feature` after approval; inspect `run brief` and then execute with `run --resume-run`. |
 | `code-reviewer` | `plan-review` or `code-review` | Nested review surfaces (both assignments). |
 | `doc-reviewer` | `doc-review` | Review-only, writes no files. |
 | any | `repo-orientation` / `familiarize` | Quick or deep onboarding before other work. |
@@ -168,8 +177,12 @@ subagents for parallelism.
 ## Special features in use
 
 - **Ambiguity gate** — `plan-feature` `capture_feature` task.
-- **Passive backend** — `plan-feature` creates implementer runs with
-  `--backend passive` so the caller drives them through `run brief`.
+- **Approval-gated creation** — `plan-feature` keeps the planning run
+  blocked until the caller resumes it with approval to create the
+  implementer run.
+- **Backend-accurate execution handoff** — after delayed `init`, callers
+  inspect `run brief` and then execute the initialized implementer run
+  with `run --resume-run` instead of assuming a passive-only workflow.
 - **Locked tasks** — `plan-feature` template locks the task list so
   executors cannot silently drop or reorder tasks.
 - **Dependencies** — planning → implementation → code-review workflows

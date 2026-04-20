@@ -28,6 +28,10 @@
   `image/jpeg`, `image/gif`, `image/webp`, and `image/svg+xml`, using
   blob-backed `<img>` rendering in the existing preview drawer while
   keeping markdown/plain-text preview behavior unchanged. ([#65](https://github.com/kcosr/task-runner/pull/65))
+- Added config-time `${...}` env interpolation for agent and assignment
+  frontmatter scalar values, with exact-match typed surfaces, prose-only
+  partial interpolation, and load-time config errors for missing, empty,
+  or invalid env input. ([#62](https://github.com/kcosr/task-runner/pull/62))
 - Added an MIT `LICENSE` file and set `license: "MIT"` on the root and
   workspace package manifests. ([#60](https://github.com/kcosr/task-runner/pull/60))
 - Added persistent per-run note and pin metadata across the shared
@@ -48,6 +52,8 @@
 
 ### Changed
 
+- Changed the bundled planning workflow so `plan-feature` now leaves the planning run blocked on `create_implementer_run_after_approval` until the caller resumes the same run with approval, delayed implementer creation no longer forces `--backend passive`, generated implementation plans now teach backend-accurate execute-after-init handoff (`run brief` + `run --resume-run`), and the template's terminal workflow now ends with `push_branch_and_create_pr` instead of local-only finalization. ([#63](https://github.com/kcosr/task-runner/pull/63))
+- Changed the web run detail drawer so the attempts `Message` tab remains available after attempts start, keeping the concise run handoff visible alongside the full prompt. ([#63](https://github.com/kcosr/task-runner/pull/63))
 - Changed the web dashboard so pinned runs sort first within each status
   column, cards and the detail drawer share the same note editor/mutation
   flow, and the persisted preferences now include a pinned-only filter. ([#58](https://github.com/kcosr/task-runner/pull/58))
@@ -209,6 +215,7 @@
 
 ### Fixed
 
+- Fixed the web attachment preview flow so full-row clicks in the detail drawer open previewable attachments and browser/mobile back returns to the selected run's Attachments view instead of closing the drawer. ([#61](https://github.com/kcosr/task-runner/pull/61))
 - Fixed the web dashboard so disabling visible focus indicators suppresses fullscreen drawer `:focus-visible` outlines without removing the selected-card highlight. ([#54](https://github.com/kcosr/task-runner/pull/54))
 - Fixed embedded and daemon-managed runs so thrown backend launch failures such as `ENOENT` still settle `run.json` to terminal `error` and write an attempt log, instead of leaving the run stuck in `running`. ([#48](https://github.com/kcosr/task-runner/pull/48))
 - Fixed shared run detail and timeline lookup so bare run ids can resolve across repo buckets after v8 manifest migration, preventing dashboard/sidebar fetches from failing when the selected run lives outside the daemon's local repo bucket. ([#43](https://github.com/kcosr/task-runner/pull/43))
