@@ -1152,6 +1152,7 @@ pre {
   display: flex;
   flex-wrap: nowrap;
   gap: 0;
+  min-height: 41px;
   padding: 0 18px;
   border-bottom: 1px solid var(--border);
   background: var(--background);

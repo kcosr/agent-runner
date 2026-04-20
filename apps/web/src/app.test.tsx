@@ -4126,6 +4126,12 @@ describe("web app", () => {
     );
   });
 
+  it("keeps the run-section tab strip tall enough to render clipped labels", () => {
+    const css = readFileSync(join(process.cwd(), "src", "run-dashboard.css"), "utf8");
+
+    expect(css).toMatch(/\n\.tabs\s*\{[\s\S]*min-height:\s*41px;[\s\S]*\}/);
+  });
+
   it("clamps the transient drawer width to the current viewport", async () => {
     installFetchMock({
       runs: [makeRun()],
