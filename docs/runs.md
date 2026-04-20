@@ -26,8 +26,9 @@ ${TASK_RUNNER_STATE_DIR}/runs/<repo>/<run-id>/
 run-creation time. It is *not* a work surface — task state is canonical in
 `run.json.finalTasks`. Runs created by current code also include
 `run-events.jsonl`; pre-feature workspaces may still lack it. The file is
-diagnostic only: it records compact lifecycle/task provenance but is never
-replayed to derive current run state.
+diagnostic only: it records compact lifecycle/task provenance, including
+`run.hook_recorded` hook execution records, but is never replayed to
+derive current run state.
 
 ## Manifest (`run.json`)
 

@@ -1131,9 +1131,14 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       sessions: [],
       attemptRecords: [],
     };
-    const prepareState = createHookExecutionState(prepareManifest, tasks, {
-      initialPrompt: defaultInitialPrompt,
-    });
+    const prepareState = createHookExecutionState(
+      prepareManifest,
+      tasks,
+      {
+        initialPrompt: defaultInitialPrompt,
+      },
+      lifecycleRunEventContext(execution),
+    );
     await runPrepareHooks(prepareState, defaultInitialPrompt, initialLockedFields);
     tasks = prepareState.tasks;
     cwd = prepareState.manifest.cwd;
@@ -1684,10 +1689,15 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     return await withTaskStateLockAsync(workspaceDir, async () => {
       tasks = refreshManifestTaskState(manifest);
       refreshManifestAttachments(manifest);
-      const hookState = createHookExecutionState(manifest, tasks, {
-        initialPrompt,
-        attemptPrompt: currentPrompt,
-      });
+      const hookState = createHookExecutionState(
+        manifest,
+        tasks,
+        {
+          initialPrompt,
+          attemptPrompt: currentPrompt,
+        },
+        lifecycleContext,
+      );
       const hookResult = await runAttemptHooks(phase, hookState, options);
       manifest = hookState.manifest;
       tasks = hookState.tasks;

@@ -33,6 +33,10 @@
   hooks, raw `.ts` / `.mts` runtime loading through `jiti`, built-in
   `command` / `git-worktree` hooks, and public hook authoring exports
   from `@task-runner/core/hooks`.
+- Added compact `run.hook_recorded` entries to per-run
+  `run-events.jsonl` history for prepare, attempt, and task-transition
+  hook executions while keeping manifest `hookAudits` as the richer
+  detail projection surface.
 - Added SSH-assisted connected CLI mode with `--connect-host` /
   `TASK_RUNNER_CONNECT_HOST` and `--connect-local-port` /
   `TASK_RUNNER_CONNECT_LOCAL_PORT`, so daemon-targeted commands can keep a

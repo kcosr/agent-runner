@@ -466,9 +466,14 @@ function updateTaskMap(
 
     let auditEvent = mutation.auditEvent;
     if (mutation.transition) {
-      const hookState = createHookExecutionState(resolved.manifest, workingTasks, {
-        initialPrompt: resolved.manifest.brief,
-      });
+      const hookState = createHookExecutionState(
+        resolved.manifest,
+        workingTasks,
+        {
+          initialPrompt: resolved.manifest.brief,
+        },
+        taskCommandRunEventContext(auditOrigin),
+      );
       const outcome = await runTaskTransitionHooks(hookState, {
         source,
         taskId: mutation.transition.taskId,

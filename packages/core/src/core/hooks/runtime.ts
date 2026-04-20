@@ -9,6 +9,11 @@ import {
   stageAttachmentFromFile,
 } from "../run/attachments.js";
 import type { RunManifest } from "../run/manifest.js";
+import {
+  type RunEventWriteContext,
+  appendRunHookRecordedEvent,
+  systemRunEventContext,
+} from "../run/run-events.js";
 import { loadHookModule } from "./loader.js";
 import type {
   AttemptHookContext,
@@ -46,6 +51,7 @@ interface HookExecutionState {
   tasks: Map<string, TaskState>;
   initialPrompt: string;
   attemptPrompt: string;
+  eventContext: RunEventWriteContext;
 }
 
 interface HookAuditContext {
@@ -102,6 +108,32 @@ function buildAuditRecord(
     taskId: context.taskId,
     summary,
   };
+}
+
+function recordHookAudit(
+  state: HookExecutionState,
+  descriptor: ResolvedHookDescriptor,
+  outcome: string,
+  summary: string | null,
+  context: HookAuditContext,
+  startedAt: string,
+  endedAt: string,
+): void {
+  const audit = buildAuditRecord(descriptor, outcome, summary, context, startedAt, endedAt);
+  state.manifest.hookAudits.push(audit);
+  appendRunHookRecordedEvent({
+    manifest: state.manifest,
+    context: state.eventContext,
+    phase: audit.phase,
+    hookId: audit.hookId,
+    outcome: audit.outcome,
+    startedAt: audit.startedAt,
+    endedAt: audit.endedAt,
+    sessionIndex: audit.sessionIndex,
+    attempt: audit.attempt,
+    taskId: audit.taskId,
+    summary: audit.summary,
+  });
 }
 
 async function applyAttachmentMutations(
@@ -375,15 +407,14 @@ export async function runPrepareHooks(
       );
       const hookResult = result as HookResult | null;
       if (!hookResult) {
-        state.manifest.hookAudits.push(
-          buildAuditRecord(
-            descriptor,
-            "skipped",
-            null,
-            { sessionIndex: null, attempt: null, taskId: null },
-            startedAt,
-            new Date().toISOString(),
-          ),
+        recordHookAudit(
+          state,
+          descriptor,
+          "skipped",
+          null,
+          { sessionIndex: null, attempt: null, taskId: null },
+          startedAt,
+          new Date().toISOString(),
         );
         continue;
       }
@@ -394,26 +425,24 @@ export async function runPrepareHooks(
       if (hookResult.action === "reinvoke") {
         state.initialPrompt = hookResult.followUpPrompt;
       }
-      state.manifest.hookAudits.push(
-        buildAuditRecord(
-          descriptor,
-          hookResult.action,
-          null,
-          { sessionIndex: null, attempt: null, taskId: null },
-          startedAt,
-          new Date().toISOString(),
-        ),
+      recordHookAudit(
+        state,
+        descriptor,
+        hookResult.action,
+        null,
+        { sessionIndex: null, attempt: null, taskId: null },
+        startedAt,
+        new Date().toISOString(),
       );
     } catch (error) {
-      state.manifest.hookAudits.push(
-        buildAuditRecord(
-          descriptor,
-          "error",
-          error instanceof Error ? error.message : String(error),
-          { sessionIndex: null, attempt: null, taskId: null },
-          startedAt,
-          new Date().toISOString(),
-        ),
+      recordHookAudit(
+        state,
+        descriptor,
+        "error",
+        error instanceof Error ? error.message : String(error),
+        { sessionIndex: null, attempt: null, taskId: null },
+        startedAt,
+        new Date().toISOString(),
       );
       throw error;
     }
@@ -446,28 +475,26 @@ export async function runAttemptHooks(
         ),
       )) as HookResult | null;
       if (!result) {
-        state.manifest.hookAudits.push(
-          buildAuditRecord(
-            descriptor,
-            "skipped",
-            null,
-            { sessionIndex: options.sessionIndex, attempt: options.attempt, taskId: null },
-            startedAt,
-            new Date().toISOString(),
-          ),
+        recordHookAudit(
+          state,
+          descriptor,
+          "skipped",
+          null,
+          { sessionIndex: options.sessionIndex, attempt: options.attempt, taskId: null },
+          startedAt,
+          new Date().toISOString(),
         );
         continue;
       }
       await applyMutations(state, result.mutate, { allowVars: false });
-      state.manifest.hookAudits.push(
-        buildAuditRecord(
-          descriptor,
-          result.action,
-          result.action === "block" ? result.reason : null,
-          { sessionIndex: options.sessionIndex, attempt: options.attempt, taskId: null },
-          startedAt,
-          new Date().toISOString(),
-        ),
+      recordHookAudit(
+        state,
+        descriptor,
+        result.action,
+        result.action === "block" ? result.reason : null,
+        { sessionIndex: options.sessionIndex, attempt: options.attempt, taskId: null },
+        startedAt,
+        new Date().toISOString(),
       );
       if (result.action === "continue") {
         continue;
@@ -483,15 +510,14 @@ export async function runAttemptHooks(
         reason: result.reason,
       };
     } catch (error) {
-      state.manifest.hookAudits.push(
-        buildAuditRecord(
-          descriptor,
-          "error",
-          error instanceof Error ? error.message : String(error),
-          { sessionIndex: options.sessionIndex, attempt: options.attempt, taskId: null },
-          startedAt,
-          new Date().toISOString(),
-        ),
+      recordHookAudit(
+        state,
+        descriptor,
+        "error",
+        error instanceof Error ? error.message : String(error),
+        { sessionIndex: options.sessionIndex, attempt: options.attempt, taskId: null },
+        startedAt,
+        new Date().toISOString(),
       );
       throw error;
     }
@@ -532,28 +558,26 @@ export async function runTaskTransitionHooks(
         }),
       )) as TaskTransitionResult | null;
       if (!result) {
-        state.manifest.hookAudits.push(
-          buildAuditRecord(
-            descriptor,
-            "skipped",
-            null,
-            { sessionIndex: null, attempt: null, taskId: options.taskId },
-            startedAt,
-            new Date().toISOString(),
-          ),
+        recordHookAudit(
+          state,
+          descriptor,
+          "skipped",
+          null,
+          { sessionIndex: null, attempt: null, taskId: options.taskId },
+          startedAt,
+          new Date().toISOString(),
         );
         continue;
       }
       await applyMutations(state, result.mutate, { allowVars: false });
-      state.manifest.hookAudits.push(
-        buildAuditRecord(
-          descriptor,
-          result.accept ? "accepted" : "rejected",
-          result.accept ? null : result.reason,
-          { sessionIndex: null, attempt: null, taskId: options.taskId },
-          startedAt,
-          new Date().toISOString(),
-        ),
+      recordHookAudit(
+        state,
+        descriptor,
+        result.accept ? "accepted" : "rejected",
+        result.accept ? null : result.reason,
+        { sessionIndex: null, attempt: null, taskId: options.taskId },
+        startedAt,
+        new Date().toISOString(),
       );
       if (!result.accept) {
         return {
@@ -562,15 +586,14 @@ export async function runTaskTransitionHooks(
         };
       }
     } catch (error) {
-      state.manifest.hookAudits.push(
-        buildAuditRecord(
-          descriptor,
-          "error",
-          error instanceof Error ? error.message : String(error),
-          { sessionIndex: null, attempt: null, taskId: options.taskId },
-          startedAt,
-          new Date().toISOString(),
-        ),
+      recordHookAudit(
+        state,
+        descriptor,
+        "error",
+        error instanceof Error ? error.message : String(error),
+        { sessionIndex: null, attempt: null, taskId: options.taskId },
+        startedAt,
+        new Date().toISOString(),
       );
       throw error;
     }
@@ -589,12 +612,14 @@ export function createHookExecutionState(
     initialPrompt: string;
     attemptPrompt?: string;
   },
+  eventContext: RunEventWriteContext = systemRunEventContext(manifest.execution),
 ): HookExecutionState {
   return {
     manifest,
     tasks,
     initialPrompt: prompts.initialPrompt,
     attemptPrompt: prompts.attemptPrompt ?? prompts.initialPrompt,
+    eventContext,
   };
 }
 
@@ -618,5 +643,6 @@ export function cloneHookExecutionState(state: HookExecutionState): HookExecutio
     tasks: cloneTasks(state.tasks),
     initialPrompt: state.initialPrompt,
     attemptPrompt: state.attemptPrompt,
+    eventContext: { ...state.eventContext },
   };
 }
