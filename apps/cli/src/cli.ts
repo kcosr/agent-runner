@@ -39,6 +39,8 @@ import {
   AssignmentConfigError,
   AssignmentNotFoundError,
   DefinitionListError,
+  LauncherConfigError,
+  LauncherNotFoundError,
 } from "@task-runner/core/config/loader.js";
 import {
   isPathArg,
@@ -150,9 +152,9 @@ Commands:
                           Remove one attachment from a run.
   attachment download <id> <attachment-id> <output-path>
                           Download one attachment from a run.
-  list <agents|assignments|runs>
+  list <agents|assignments|launchers|runs>
                           Enumerate definitions or runs.
-  show <agent|assignment> <name|path>
+  show <agent|assignment|launcher> <name|path>
                           Print details of a specific definition.
 
 Arguments:
@@ -190,6 +192,7 @@ Execution options:
   --add-task <title>      Append a task to the run's task list.
   --cwd <path>            Override the run cwd, or scope list runs to a cwd.
   --backend <id>          Override the agent's backend.
+  --launcher <name>       Override the run launcher by named launcher id.
   --model <id>            Override the agent's model.
   --effort <level>        Override effort level.
   --timeout-sec <n>       Override the per-attempt timeout.
@@ -248,6 +251,8 @@ function exitCommandFailure(err: unknown, connectUrl?: string): never {
     err instanceof AgentConfigError ||
     err instanceof AssignmentNotFoundError ||
     err instanceof AssignmentConfigError ||
+    err instanceof LauncherNotFoundError ||
+    err instanceof LauncherConfigError ||
     err instanceof DefinitionListError
   ) {
     process.stderr.write(`task-runner: ${errorMessage(err)}\n`);
@@ -567,12 +572,17 @@ async function runRunBrief(parsed: ParsedArgs, connect?: DaemonConnectContext): 
 
 async function runListCommand(parsed: ParsedArgs, connect?: DaemonConnectContext): Promise<never> {
   const kindArg = parsed.subcommand;
-  if (kindArg !== "agents" && kindArg !== "assignments" && kindArg !== "runs") {
+  if (
+    kindArg !== "agents" &&
+    kindArg !== "assignments" &&
+    kindArg !== "launchers" &&
+    kindArg !== "runs"
+  ) {
     process.stderr.write(
-      `task-runner: list requires a kind: agents, assignments, or runs${kindArg ? ` (got "${kindArg}")` : ""}\n`,
+      `task-runner: list requires a kind: agents, assignments, launchers, or runs${kindArg ? ` (got "${kindArg}")` : ""}\n`,
     );
     process.stderr.write(
-      "Usage: task-runner list <agents|assignments|runs> [--cwd <path> | --repo <name> | --global] [--include-archived] [--output-format json]\n",
+      "Usage: task-runner list <agents|assignments|launchers|runs> [--cwd <path> | --repo <name> | --global] [--include-archived] [--output-format json]\n",
     );
     process.exit(3);
   }
@@ -619,24 +629,49 @@ async function runListCommand(parsed: ParsedArgs, connect?: DaemonConnectContext
       );
       process.exit(3);
     }
+    const definitionKind =
+      kindArg === "agents" ? "agent" : kindArg === "assignments" ? "assignment" : "launcher";
     const result =
       connect === undefined
-        ? getDefinitionList(kindArg === "agents" ? "agent" : "assignment")
+        ? getDefinitionList(definitionKind)
         : await withDaemonClient(connect, (client) =>
             client
               .call<{
                 agents?: ReturnType<typeof getDefinitionList>;
                 assignments?: ReturnType<typeof getDefinitionList>;
-              }>(kindArg === "agents" ? "agents.list" : "assignments.list")
-              .then((r) => (kindArg === "agents" ? (r.agents ?? []) : (r.assignments ?? []))),
+                launchers?: ReturnType<typeof getDefinitionList>;
+              }>(
+                kindArg === "agents"
+                  ? "agents.list"
+                  : kindArg === "assignments"
+                    ? "assignments.list"
+                    : "launchers.list",
+              )
+              .then((r) =>
+                kindArg === "agents"
+                  ? r.agents
+                  : kindArg === "assignments"
+                    ? r.assignments
+                    : r.launchers,
+              )
+              .then((detail) => {
+                if (!detail) {
+                  throw new Error(`missing ${definitionKind} list`);
+                }
+                return detail;
+              }),
           );
     if (parsed.outputFormat === "json") {
       writeJson(result);
     } else {
+      for (const warning of result.warnings) {
+        process.stderr.write(`task-runner: warning: ${warning}\n`);
+      }
       process.stdout.write(
         renderDefinitionList({
-          kind: kindArg === "agents" ? "agent" : "assignment",
-          entries: result,
+          kind: definitionKind,
+          entries: result.entries,
+          warnings: result.warnings,
         }),
       );
     }
@@ -648,12 +683,12 @@ async function runListCommand(parsed: ParsedArgs, connect?: DaemonConnectContext
 
 async function runShowCommand(parsed: ParsedArgs, connect?: DaemonConnectContext): Promise<never> {
   const kindArg = parsed.subcommand;
-  if (kindArg !== "agent" && kindArg !== "assignment") {
+  if (kindArg !== "agent" && kindArg !== "assignment" && kindArg !== "launcher") {
     process.stderr.write(
-      `task-runner: show requires a kind: agent or assignment${kindArg ? ` (got "${kindArg}")` : ""}\n`,
+      `task-runner: show requires a kind: agent, assignment, or launcher${kindArg ? ` (got "${kindArg}")` : ""}\n`,
     );
     process.stderr.write(
-      "Usage: task-runner show <agent|assignment> <name|path> [--connect <ws-url>] [--output-format json]\n",
+      "Usage: task-runner show <agent|assignment|launcher> <name|path> [--connect <ws-url>] [--output-format json]\n",
     );
     process.exit(3);
   }
@@ -662,7 +697,7 @@ async function runShowCommand(parsed: ParsedArgs, connect?: DaemonConnectContext
   if (!target) {
     process.stderr.write(`task-runner: show ${kindArg} requires a name or path\n`);
     process.stderr.write(
-      "Usage: task-runner show <agent|assignment> <name|path> [--connect <ws-url>] [--output-format json]\n",
+      "Usage: task-runner show <agent|assignment|launcher> <name|path> [--connect <ws-url>] [--output-format json]\n",
     );
     process.exit(3);
   }
@@ -676,11 +711,25 @@ async function runShowCommand(parsed: ParsedArgs, connect?: DaemonConnectContext
               .call<{
                 agent?: ReturnType<typeof getDefinition>;
                 assignment?: ReturnType<typeof getDefinition>;
-              }>(kindArg === "agent" ? "agents.get" : "assignments.get", {
-                target,
-                cwd: process.cwd(),
-              })
-              .then((r) => (kindArg === "agent" ? r.agent : r.assignment))
+                launcher?: ReturnType<typeof getDefinition>;
+              }>(
+                kindArg === "agent"
+                  ? "agents.get"
+                  : kindArg === "assignment"
+                    ? "assignments.get"
+                    : "launchers.get",
+                {
+                  target,
+                  cwd: process.cwd(),
+                },
+              )
+              .then((r) =>
+                kindArg === "agent"
+                  ? r.agent
+                  : kindArg === "assignment"
+                    ? r.assignment
+                    : r.launcher,
+              )
               .then((detail) => {
                 if (!detail) {
                   throw new Error(`missing ${kindArg} detail`);
@@ -691,16 +740,7 @@ async function runShowCommand(parsed: ParsedArgs, connect?: DaemonConnectContext
     if (parsed.outputFormat === "json") {
       writeJson(result);
     } else {
-      process.stdout.write(
-        renderDefinitionDetails({
-          kind: kindArg,
-          loaded: {
-            config: result.config,
-            instructions: result.instructions,
-            sourcePath: result.sourcePath,
-          },
-        } as never),
-      );
+      process.stdout.write(renderDefinitionDetails(result as never));
     }
     process.exit(0);
   } catch (err) {

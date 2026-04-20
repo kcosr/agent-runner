@@ -188,14 +188,14 @@ test("resolveResumeTarget rejects a manifest with a session missing brief", () =
   );
 });
 
-test("resolveResumeTarget accepts a well-formed v9 manifest from the unknown bucket", () => {
+test("resolveResumeTarget accepts a well-formed v10 manifest from the unknown bucket", () => {
   const dir = tempDir();
   const workspaceDir = join(dir, "runs", "unknown", "wellformed");
   writeManifest(dir, "unknown", "wellformed", baseManifest("wellformed", workspaceDir));
 
   const resolved = withStateRoot(dir, () => resolveResumeTarget("wellformed", dir));
   assert.equal(resolved.manifest.runId, "wellformed");
-  assert.equal(resolved.manifest.schemaVersion, 9);
+  assert.equal(resolved.manifest.schemaVersion, 10);
 });
 
 test("resume/list/find ignore legacy assignmentPath capture when workspaceDir matches", () => {
@@ -226,7 +226,7 @@ test("resume/list/find ignore legacy assignmentPath capture when workspaceDir ma
 
 function baseManifest(runId, workspaceDir) {
   return {
-    schemaVersion: 9,
+    schemaVersion: 10,
     runId,
     repo: "unknown",
     agent: {
@@ -238,6 +238,10 @@ function baseManifest(runId, workspaceDir) {
     backend: "claude",
     model: "claude-sonnet-4-6",
     effort: null,
+    launcher: {
+      kind: "direct",
+      name: "direct",
+    },
     message: null,
     name: null,
     unrestricted: false,
@@ -274,6 +278,10 @@ function baseManifest(runId, workspaceDir) {
       backend: "claude",
       model: "claude-sonnet-4-6",
       effort: null,
+      launcher: {
+        kind: "direct",
+        name: "direct",
+      },
       cwd: process.cwd(),
       lockedFields: [],
       message: null,

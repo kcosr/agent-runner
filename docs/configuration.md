@@ -21,6 +21,7 @@ Contains named agent and assignment definitions:
 ```text
 ${TASK_RUNNER_CONFIG_DIR}/
 ├── agents/<agent-name>/agent.md
+├── launchers/<launcher-name>.yaml
 ├── hooks/<hook-name>/hook.(ts|mts|js|mjs)
 └── assignments/<assignment-name>/
     ├── assignment.md
@@ -118,7 +119,7 @@ var named by the var's `envName` (or the var key itself). See
 
 ## Manifest upgrades
 
-The current manifest schema is version `9`. Older manifests are not
+The current manifest schema is version `10`. Older manifests are not
 silently upgraded at runtime — resuming a run with an older schema fails
 with a clear error. The repo ships migration scripts under `scripts/`:
 
@@ -134,6 +135,11 @@ with a clear error. The repo ships migration scripts under `scripts/`:
   repairs `assignment-seed.md` workspace paths, and backfills the full
   frozen `resetSeed` shape expected by current resume/discovery;
   supports repeated `--repo <name>` filters and `--root <path>`)
+
+Schema v10 adds frozen launcher state on both `manifest.launcher` and
+`manifest.resetSeed.launcher`. Resume and reset use that frozen value
+instead of re-resolving current launcher files or daemon/client
+overrides.
 
 Run the scripts explicitly; or recreate affected runs if an upgrade
 path isn't important. New runs are always created at the latest

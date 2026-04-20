@@ -8,6 +8,7 @@ import {
   UNKNOWN_REPO_KEY,
   deriveRepoKey,
   isPathArg,
+  resolveLaunchersRoot,
   resolveRunsBucketDir,
   resolveTaskRunnerStateDir,
   slugifyRepoKey,
@@ -92,5 +93,14 @@ test("resolveRunsBucketDir joins the runs root with an arbitrary bucket name", (
       TASK_RUNNER_STATE_DIR: "/tmp/state",
     }),
     "/tmp/state/runs/task-runner",
+  );
+});
+
+test("resolveLaunchersRoot places launchers beside agents and assignments in the config dir", () => {
+  assert.equal(
+    resolveLaunchersRoot({
+      TASK_RUNNER_CONFIG_DIR: "/tmp/config",
+    }),
+    "/tmp/config/launchers",
   );
 });

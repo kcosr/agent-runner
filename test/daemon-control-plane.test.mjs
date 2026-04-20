@@ -70,6 +70,12 @@ function writeAssignment(baseDir, name, body) {
   writeFileSync(join(dir, "assignment.md"), body);
 }
 
+function writeLauncher(baseDir, name, body, ext = ".yaml") {
+  const dir = join(baseDir, "launchers");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${name}${ext}`), body);
+}
+
 async function initRun(baseDir, agentName = "daemon-agent") {
   return withEnv(sharedRuntimeEnv(baseDir), async () => {
     const loaded = loadAgentConfig(agentName, baseDir);
@@ -670,7 +676,8 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
       assert.equal(updated.task.notes, "Handled through daemon RPC.");
 
       const agents = await client.call("agents.list");
-      assert.ok(agents.agents.some((entry) => entry.name === "daemon-agent"));
+      assert.ok(agents.agents.entries.some((entry) => entry.name === "daemon-agent"));
+      assert.deepEqual(agents.agents.warnings, []);
 
       const assignment = await client.call("assignments.get", { target: "daemon-work", cwd: dir });
       assert.equal(assignment.assignment.config.name, "daemon-work");
@@ -3626,6 +3633,31 @@ test("daemon HTTP init rejects malformed backendSpecific codex transport overrid
   }
 });
 
+test("daemon HTTP init rejects malformed launcher overrides", async () => {
+  const dir = tempDir();
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  const daemon = await startCliDaemon(dir, listenUrl);
+  try {
+    const response = await httpJson(httpBaseUrl, "/api/runs/init", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        cliVars: {},
+        overrides: {
+          launcher: 42,
+        },
+      }),
+    });
+    assert.equal(response.status, 400);
+    assert.equal(response.body.error.code, "INVALID_REQUEST");
+    assert.match(response.body.error.message, /overrides\.launcher/);
+  } finally {
+    await daemon.stop();
+  }
+});
+
 test("daemon init uses the remote caller cwd when the agent omits cwd", async () => {
   const daemonDir = tempDir();
   writeAgent(daemonDir, "daemon-agent", AGENT);
@@ -3690,6 +3722,61 @@ test("daemon RPC start rejects malformed backendSpecific codex transport overrid
         return true;
       },
     );
+  } finally {
+    await client.close();
+    await daemon.stop();
+  }
+});
+
+test("daemon rpc exposes launcher definitions and resolves named launcher overrides on the daemon host", async () => {
+  const daemonDir = tempDir();
+  writeAgent(daemonDir, "daemon-agent", AGENT);
+  writeAssignment(daemonDir, "daemon-work", ASSIGNMENT);
+  writeLauncher(
+    daemonDir,
+    "ssh-wrap",
+    `schemaVersion: 1
+name: ssh-wrap
+command: ssh
+args: [prod, --]
+`,
+  );
+  const clientDir = tempDir();
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const daemon = await startCliDaemon(daemonDir, listenUrl);
+  const client = await DaemonClient.connect(listenUrl);
+  try {
+    const launchers = await client.call("launchers.list", {});
+    assert.deepEqual(
+      launchers.launchers.entries.map((entry) => entry.name),
+      ["direct", "ssh-wrap"],
+    );
+    assert.deepEqual(launchers.launchers.warnings, []);
+
+    const launcher = await client.call("launchers.get", { target: "ssh-wrap" });
+    assert.equal(launcher.launcher.definition.name, "ssh-wrap");
+    assert.equal(launcher.launcher.definition.kind, "prefix");
+
+    const started = await client.call("runs.start", {
+      agent: join(daemonDir, "agents", "daemon-agent", "agent.md"),
+      assignment: join(daemonDir, "assignments", "daemon-work", "assignment.md"),
+      callerCwd: clientDir,
+      cliVars: {},
+      overrides: {
+        launcher: "ssh-wrap",
+      },
+    });
+    const run = await client.call("runs.get", { target: started.runId });
+    const manifest = readManifest(run.run.workspaceDir);
+    assert.deepEqual(manifest.launcher, {
+      name: "ssh-wrap",
+      kind: "prefix",
+      source: "named",
+      command: "ssh",
+      args: ["prod", "--"],
+    });
   } finally {
     await client.close();
     await daemon.stop();

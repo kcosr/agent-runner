@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
@@ -8,6 +8,12 @@ import {
   executeRunCommand,
 } from "../packages/core/dist/run-command.js";
 import { withRuntimeRoots } from "./helpers/runtime-paths.mjs";
+
+function writeLauncher(baseDir, name, body, ext = ".yaml") {
+  const dir = join(baseDir, "launchers");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${name}${ext}`), body);
+}
 
 test("executeRunCommand can initialize an ad-hoc passive run without an agent file", async () =>
   withRuntimeRoots("task-runner-run-command-", async () => {
@@ -148,5 +154,43 @@ test("executeRunCommand rejects cursor bootstrap session import with a command-l
       (err) =>
         err instanceof RunCommandError &&
         /--backend-session-id is unsupported for cursor/.test(err.message),
+    );
+  }));
+
+test("executeRunCommand rejects launcher overrides on resume before backend execution", async () =>
+  withRuntimeRoots("task-runner-run-command-", async ({ configDir }) => {
+    writeLauncher(
+      configDir,
+      "shared",
+      `schemaVersion: 1
+name: shared
+command: env
+args: [CODING=1]
+`,
+    );
+
+    const outcome = await executeRunCommand({
+      initialize: true,
+      cliVars: {},
+      overrides: {
+        backend: "passive",
+        launcher: "shared",
+        message: "Seed a resumable passive run with a frozen launcher.",
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        executeRunCommand({
+          initialize: false,
+          resumeRun: outcome.runId,
+          cliVars: {},
+          overrides: {
+            launcher: "shared",
+          },
+        }),
+      (err) =>
+        err instanceof ResumeError &&
+        /--launcher cannot be combined with --resume-run/.test(err.message),
     );
   }));

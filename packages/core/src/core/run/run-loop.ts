@@ -21,10 +21,12 @@ import type {
   CodexTransportConfig,
 } from "../backends/types.js";
 import { interpolate } from "../config/interpolate.js";
+import { type ResolvedLauncherConfig, cloneResolvedLauncherConfig } from "../config/launchers.js";
 import type { LoadedAgent, LoadedAssignment } from "../config/loaded.js";
 import type { LockableField, VarDef } from "../config/schema.js";
 import { resolveAssignmentHooks } from "../hooks/loader.js";
 import { createHookExecutionState, runAttemptHooks, runPrepareHooks } from "../hooks/runtime.js";
+import { resolveFreshLauncherConfig } from "./launchers.js";
 import {
   type AttemptRecord,
   type ResolvedResumeTarget,
@@ -77,6 +79,7 @@ import {
 export interface RunOverrides {
   cwd?: string;
   backend?: BackendId;
+  launcher?: string;
   model?: string;
   effort?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   backendSpecific?: BackendSpecificConfig;
@@ -313,6 +316,7 @@ function buildResumeSessionManifest(
   overrides: {
     model: string | null;
     effort: RunManifest["effort"];
+    launcher: ResolvedLauncherConfig;
     name: string | null;
     unrestricted: boolean;
     cwd: string;
@@ -328,6 +332,7 @@ function buildResumeSessionManifest(
     ...base,
     model: overrides.model,
     effort: overrides.effort,
+    launcher: cloneResolvedLauncherConfig(overrides.launcher),
     brief: initialPrompt,
     name: overrides.name,
     unrestricted: overrides.unrestricted,
@@ -832,6 +837,9 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         "--backend cannot be combined with --resume-run (backend is locked to the run that created the session)",
       );
     }
+    if (overrides?.launcher !== undefined) {
+      throw new ResumeError("--launcher cannot be combined with --resume-run");
+    }
     if (Object.keys(cliVars).length > 0) {
       throw new ResumeError(
         "--var cannot be combined with --resume-run — runtime vars are resolved from the assignment once at first write and frozen into the manifest; they are not re-resolved on resume.",
@@ -848,6 +856,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       const forbidden: string[] = [];
       if (overrides?.message && overrides.message.trim().length > 0) forbidden.push("message");
       if ((overrides?.addedTasks?.length ?? 0) > 0) forbidden.push("--add-task");
+      if (overrides?.launcher !== undefined) forbidden.push("--launcher");
       if (overrides?.model !== undefined) forbidden.push("--model");
       if (overrides?.effort !== undefined) forbidden.push("--effort");
       if (overrides?.timeoutSec !== undefined) forbidden.push("--timeout-sec");
@@ -902,6 +911,15 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const backendSpecific = resume
     ? resolveManifestBackendSpecific(resume.manifest)
     : resolveFreshBackendSpecific(effectiveBackendId, agentConfig, overrides, execution);
+  const launcher = resume
+    ? cloneResolvedLauncherConfig(resume.manifest.launcher)
+    : resolveFreshLauncherConfig({
+        backendId: effectiveBackendId,
+        backendSpecific,
+        agentLauncher: loaded.launcher,
+        overrideLauncher: overrides?.launcher,
+        cwd,
+      });
   const message = overrides?.message ?? assignmentConfig?.message ?? null;
   let timeoutSec = overrides?.timeoutSec ?? agentConfig.timeoutSec;
   let unrestricted = overrides?.unrestricted ?? agentConfig.unrestricted;
@@ -1052,7 +1070,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       ]),
     );
     const prepareManifest: RunManifest = {
-      schemaVersion: 9,
+      schemaVersion: 10,
       runId,
       repo,
       agent: {
@@ -1072,6 +1090,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       model: model ?? null,
       effort: effort ?? null,
       backendSpecific: cloneBackendSpecificConfig(backendSpecific),
+      launcher: cloneResolvedLauncherConfig(launcher),
       message,
       name: overrideName,
       note: null,
@@ -1109,6 +1128,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         model: model ?? null,
         effort: effort ?? null,
         backendSpecific: cloneBackendSpecificConfig(backendSpecific),
+        launcher: cloneResolvedLauncherConfig(launcher),
         cwd,
         lockedFields: initialLockedFields,
         message,
@@ -1232,6 +1252,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     manifest = buildResumeSessionManifest(resume.manifest, initialPrompt, {
       model: model ?? null,
       effort: effort ?? null,
+      launcher,
       name,
       unrestricted,
       cwd,
@@ -1279,7 +1300,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     const frozenCallerInstructions =
       rawCallerInstructions.length > 0 ? interpolate(rawCallerInstructions, injectedVars) : null;
     manifest = {
-      schemaVersion: 9,
+      schemaVersion: 10,
       runId,
       repo,
       agent: {
@@ -1303,6 +1324,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       model: model ?? null,
       effort: effort ?? null,
       backendSpecific: cloneBackendSpecificConfig(backendSpecific),
+      launcher: cloneResolvedLauncherConfig(launcher),
       message,
       name,
       note: hookNote,
@@ -1344,6 +1366,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         model: model ?? null,
         effort: effort ?? null,
         backendSpecific: cloneBackendSpecificConfig(backendSpecific),
+        launcher: cloneResolvedLauncherConfig(launcher),
         cwd,
         lockedFields: [...(hookLockedFields ?? frozenLockedFields)],
         message,
@@ -1460,6 +1483,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         manifest = buildResumeSessionManifest(latest, initialPrompt, {
           model: model ?? null,
           effort: effort ?? null,
+          launcher,
           name,
           unrestricted,
           cwd,
@@ -1763,6 +1787,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         model,
         effort,
         backendSpecific,
+        launcher,
         unrestricted,
         timeoutSec,
         resumeSessionId: sessionId ?? undefined,

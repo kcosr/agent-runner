@@ -30,7 +30,7 @@ function buildManifest(overrides = {}) {
   };
 
   return {
-    schemaVersion: 9,
+    schemaVersion: 10,
     runId: "run123",
     repo: "demo-repo",
     agent: {
@@ -46,6 +46,10 @@ function buildManifest(overrides = {}) {
     backend: "claude",
     model: "claude-sonnet-4-6",
     effort: "medium",
+    launcher: {
+      kind: "direct",
+      name: "direct",
+    },
     message: "Finish the task list.",
     name: "demo session",
     note: null,
@@ -93,6 +97,10 @@ function buildManifest(overrides = {}) {
       backend: "claude",
       model: "claude-sonnet-4-6",
       effort: "medium",
+      launcher: {
+        kind: "direct",
+        name: "direct",
+      },
       cwd: "/repo",
       lockedFields: ["backend"],
       message: "Finish the task list.",

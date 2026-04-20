@@ -55,6 +55,14 @@ function writeAssignment(baseDir, name, body) {
   return path;
 }
 
+function writeLauncher(baseDir, name, body, ext = ".yaml") {
+  const dir = join(baseDir, "launchers");
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, `${name}${ext}`);
+  writeFileSync(path, body);
+  return path;
+}
+
 function writeAgentAndAssignment(baseDir) {
   writeAgent(baseDir, "two", TWO_AGENT);
   writeAssignment(baseDir, "two-work", TWO_ASSIGNMENT);
@@ -342,6 +350,101 @@ test("execute-after-init: reset seed survives execution and restores initialized
   assert.deepEqual(reset.attemptRecords, []);
   assert.equal(reset.backendSessionId, null);
   assert.equal(existsSync(join(init.workspaceDir, "attempts")), false);
+});
+
+test("init freezes launcher state and reset restores the frozen launcher", async () => {
+  const dir = tempDir();
+  writeLauncher(
+    dir,
+    "shared",
+    `schemaVersion: 1
+command: ssh
+args: [buildbox]
+`,
+  );
+  writeAgent(
+    dir,
+    "two",
+    `---
+schemaVersion: 1
+name: two
+backend: claude
+launcher: shared
+---
+Agent role instructions.
+`,
+  );
+  writeAssignment(dir, "two-work", TWO_ASSIGNMENT);
+
+  const init = await initIn(dir);
+  assert.deepEqual(init.manifest.launcher, {
+    kind: "prefix",
+    command: "ssh",
+    args: ["buildbox"],
+    name: "shared",
+    source: "named",
+  });
+  assert.deepEqual(init.manifest.resetSeed.launcher, init.manifest.launcher);
+
+  const manifestPath = join(init.workspaceDir, "run.json");
+  const mutated = JSON.parse(readFileSync(manifestPath, "utf8"));
+  mutated.launcher = { kind: "direct", name: "direct" };
+  writeFileSync(manifestPath, `${JSON.stringify(mutated, null, 2)}\n`);
+
+  const reset = resetWorkspaceRun(init.workspaceDir);
+  assert.deepEqual(reset.launcher, init.manifest.launcher);
+  assert.deepEqual(reset.resetSeed.launcher, init.manifest.resetSeed.launcher);
+});
+
+test("execute-after-init rejects launcher overrides because init already froze them", async () => {
+  const dir = tempDir();
+  writeLauncher(
+    dir,
+    "shared",
+    `schemaVersion: 1
+command: ssh
+args: [buildbox]
+`,
+  );
+  writeAgent(
+    dir,
+    "two",
+    `---
+schemaVersion: 1
+name: two
+backend: claude
+launcher: shared
+---
+Agent role instructions.
+`,
+  );
+  writeAssignment(dir, "two-work", TWO_ASSIGNMENT);
+
+  const init = await initIn(dir);
+
+  await assert.rejects(
+    () =>
+      withSharedRuntimeEnv(dir, async () => {
+        const loaded = loadAgentConfig("two", dir);
+        const originalCwd = process.cwd();
+        process.chdir(dir);
+        try {
+          const target = resolveResumeTarget(init.runId, dir);
+          await runAgent({
+            loaded,
+            cliVars: {},
+            backend: mockBackend(async () => {
+              throw new Error("backend should not be invoked");
+            }),
+            resume: target,
+            overrides: { launcher: "shared" },
+          });
+        } finally {
+          process.chdir(originalCwd);
+        }
+      }),
+    /--launcher/,
+  );
 });
 
 test("execute-after-init: missing brief is a hard error", async () => {

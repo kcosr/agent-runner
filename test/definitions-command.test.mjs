@@ -7,8 +7,10 @@ import {
   AssignmentNotFoundError,
   listAgents,
   listAssignments,
+  listLaunchers,
   loadAgentConfig,
   loadAssignmentConfig,
+  loadLauncherConfig,
 } from "../packages/core/dist/config/loader.js";
 import { withRuntimeRoots } from "./helpers/runtime-paths.mjs";
 
@@ -48,6 +50,12 @@ function writeAssignment(baseDir, name, body) {
   writeFileSync(join(dir, "assignment.md"), body);
 }
 
+function writeLauncher(baseDir, name, body, ext = ".yaml") {
+  const dir = join(baseDir, "launchers");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${name}${ext}`), body);
+}
+
 test("definitions discovery reads from the config root and remains read-only", () =>
   withRuntimeRoots("task-runner-def-test-", ({ configDir, stateDir }) => {
     writeAgent(configDir, "alpha", AGENT_BODY);
@@ -82,6 +90,15 @@ test("definitions discovery returns sorted names from the config root", () =>
     writeAgent(configDir, "alpha", AGENT_BODY);
     writeAssignment(configDir, "work-z", ASSIGNMENT_BODY);
     writeAssignment(configDir, "work-a", ASSIGNMENT_BODY);
+    writeLauncher(
+      configDir,
+      "ssh-wrap",
+      `schemaVersion: 1
+name: ssh-wrap
+command: ssh
+args: [host, --]
+`,
+    );
 
     assert.deepEqual(
       listAgents().map((entry) => entry.name),
@@ -90,6 +107,10 @@ test("definitions discovery returns sorted names from the config root", () =>
     assert.deepEqual(
       listAssignments().map((entry) => entry.name),
       ["work-a", "work-z"],
+    );
+    assert.deepEqual(
+      listLaunchers().entries.map((entry) => entry.name),
+      ["direct", "ssh-wrap"],
     );
   }));
 
@@ -112,12 +133,23 @@ test("show-style direct path loads remain supported", () =>
   withRuntimeRoots("task-runner-def-test-", ({ configDir }) => {
     writeAgent(configDir, "demo", AGENT_BODY);
     writeAssignment(configDir, "demo", ASSIGNMENT_BODY);
+    writeLauncher(
+      configDir,
+      "demo-launcher",
+      `schemaVersion: 1
+name: demo-launcher
+command: env
+args: [FOO=bar]
+`,
+    );
 
     const agentPath = join(configDir, "agents", "demo", "agent.md");
     const assignmentPath = join(configDir, "assignments", "demo", "assignment.md");
+    const launcherPath = join(configDir, "launchers", "demo-launcher.yaml");
 
     assert.equal(loadAgentConfig(agentPath).sourcePath, agentPath);
     assert.equal(loadAssignmentConfig(assignmentPath).sourcePath, assignmentPath);
+    assert.equal(loadLauncherConfig(launcherPath).sourcePath, launcherPath);
   }));
 
 test("missing bare-name loads report config-root searched paths", () =>

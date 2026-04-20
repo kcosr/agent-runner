@@ -10,6 +10,7 @@ import type {
   ValidateSessionContext,
   ValidateSessionResult,
 } from "../core/backends/types.js";
+import { buildSpawnCommand } from "../util/spawn.js";
 import {
   composePersistedTranscript,
   isRecord,
@@ -334,9 +335,14 @@ function createPiProcess(ctx: BackendInvokeContext): Promise<{
 }> {
   return new Promise((resolve, reject) => {
     const command = process.env.TASK_RUNNER_PI_BIN ?? "pi";
+    const launched = buildSpawnCommand({
+      command,
+      args: buildPiArgs(ctx),
+      launcher: ctx.launcher,
+    });
     let child: ChildProcessWithoutNullStreams;
     try {
-      child = spawn(command, buildPiArgs(ctx), {
+      child = spawn(launched.command, launched.args, {
         cwd: ctx.cwd,
         env: ctx.env,
         stdio: ["pipe", "pipe", "pipe"],

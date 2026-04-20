@@ -157,6 +157,12 @@ function writeAssignment(baseDir, name, body) {
   writeFileSync(join(dir, "assignment.md"), body);
 }
 
+function writeLauncher(baseDir, name, body, ext = ".yaml") {
+  const dir = join(baseDir, "launchers");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${name}${ext}`), body);
+}
+
 function writeBundle(baseDir, assignmentBody = ASSIGNMENT, assignmentName = "svc-work") {
   writeAgent(baseDir, "svc-agent", AGENT);
   writeAgent(baseDir, "svc-passive-agent", PASSIVE_AGENT);
@@ -476,19 +482,39 @@ test("command services: getRunTimelineHistory degrades missing, corrupt, or esca
 test("command services: listDefinitions and showDefinition return typed config results", async () => {
   const dir = tempDir();
   writeBundle(dir);
+  writeLauncher(
+    dir,
+    "ssh-docker",
+    `schemaVersion: 1
+name: ssh-docker
+command: ssh
+args: [worker]
+`,
+  );
 
   await withSharedRuntimeEnv(dir, async () => {
     const agents = listDefinitions("agent");
     const assignments = listDefinitions("assignment");
+    const launchers = listDefinitions("launcher");
     const assignment = showDefinition("assignment", "svc-work");
+    const launcher = showDefinition("launcher", "ssh-docker");
 
     assert.equal(agents.kind, "agent");
     assert.equal(assignments.kind, "assignment");
+    assert.equal(launchers.kind, "launcher");
     assert.ok(agents.entries.some((entry) => entry.name === "svc-agent"));
     assert.ok(assignments.entries.some((entry) => entry.name === "svc-work"));
+    assert.deepEqual(
+      launchers.entries.map((entry) => entry.name),
+      ["direct", "ssh-docker"],
+    );
+    assert.deepEqual(launchers.warnings, []);
     assert.equal(assignment.kind, "assignment");
     assert.equal(assignment.loaded.config.name, "svc-work");
     assert.match(assignment.loaded.instructions, /Service test assignment/);
+    assert.equal(launcher.kind, "launcher");
+    assert.equal(launcher.loaded.name, "ssh-docker");
+    assert.equal(launcher.loaded.kind, "prefix");
   });
 });
 

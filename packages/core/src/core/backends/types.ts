@@ -1,3 +1,5 @@
+import type { ResolvedLauncherConfig } from "../config/launchers.js";
+
 export const BACKEND_IDS = ["claude", "codex", "cursor", "pi", "passive"] as const;
 export type BackendId = (typeof BACKEND_IDS)[number];
 
@@ -54,6 +56,7 @@ export interface BackendInvokeContext {
   model?: string;
   effort?: EffortLevel;
   backendSpecific?: BackendSpecificConfig;
+  launcher?: ResolvedLauncherConfig;
   unrestricted?: boolean;
   timeoutSec: number;
   resumeSessionId?: string;

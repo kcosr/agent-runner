@@ -181,6 +181,23 @@ export function renderDefinitionList(result: DefinitionListResult): string {
 }
 
 export function renderDefinitionDetails(result: DefinitionDetailsResult): string {
+  if (result.kind === "launcher") {
+    const { loaded } = result;
+    const lines: string[] = [];
+    lines.push(`Launcher: ${loaded.name}`);
+    if (loaded.kind === "direct") {
+      lines.push("  kind:         direct");
+      lines.push("  source:       built-in");
+      lines.push("  semantics:    no launcher prefix is applied");
+      return `${lines.join("\n")}\n`;
+    }
+    lines.push("  kind:         prefix");
+    lines.push(`  command:      ${loaded.command}`);
+    lines.push(`  args:         ${loaded.args.length === 0 ? "[]" : loaded.args.join(" ")}`);
+    lines.push(`  source:       ${loaded.sourcePath}`);
+    return `${lines.join("\n")}\n`;
+  }
+
   if (result.kind === "agent") {
     const { loaded } = result;
     const lines: string[] = [];
@@ -188,6 +205,11 @@ export function renderDefinitionDetails(result: DefinitionDetailsResult): string
     lines.push(`  backend:      ${loaded.config.backend}`);
     if (loaded.config.model) lines.push(`  model:        ${loaded.config.model}`);
     if (loaded.config.effort) lines.push(`  effort:       ${loaded.config.effort}`);
+    if (loaded.config.launcher !== undefined) {
+      lines.push(
+        `  launcher:     ${typeof loaded.config.launcher === "string" ? loaded.config.launcher : loaded.config.launcher.command}`,
+      );
+    }
     lines.push(`  timeoutSec:   ${loaded.config.timeoutSec}`);
     lines.push(`  unrestricted: ${loaded.config.unrestricted}`);
     if (loaded.config.lockedFields.length > 0) {

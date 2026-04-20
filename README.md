@@ -4,7 +4,8 @@
 state in a manifest-canonical workspace. It supports embedded CLI
 execution, active backend invocation, passive sidecar operation, a local
 daemon, a browser dashboard, resumable runs, attachments, dependencies,
-and a first-class `run brief` surface for handing a run to a worker.
+launcher prefixes for subprocess backends, and a first-class `run brief`
+surface for handing a run to a worker.
 
 - Task state is canonical in `run.json`.
 - `run-events.jsonl` is a per-run diagnostic audit trail for runs created by current code; it is append-only history, not canonical state.
@@ -142,6 +143,37 @@ task-runner init \
 task-runner run --resume-run <run-id>
 ```
 
+### Launcher-backed subprocess runs
+
+```yaml
+# ~/.config/task-runner/launchers/ssh-docker.yaml
+schemaVersion: 1
+name: ssh-docker
+command: ssh
+args: [worker, docker, exec, agent]
+```
+
+```yaml
+# ~/.config/task-runner/agents/remote/agent.md
+---
+schemaVersion: 1
+name: remote
+backend: claude
+launcher: ssh-docker
+---
+Operate remotely.
+```
+
+```bash
+task-runner run --agent remote --launcher ssh-docker
+task-runner list launchers
+task-runner show launcher ssh-docker
+```
+
+Launchers apply only to subprocess-backed execution (`claude`, `cursor`,
+`pi`, and Codex stdio). Passive runs and Codex websocket runs keep the
+built-in `direct` launcher.
+
 ### Passive / externally driven run
 
 ```bash
@@ -233,6 +265,12 @@ transport intent. Connected mode does not forward arbitrary env vars, but
 it does synthesize a Codex-only websocket override from the caller's
 local `TASK_RUNNER_CODEX_WS_URL` when that env var is set.
 
+Named launcher lookup follows the same freeze-first model. Fresh runs
+resolve the final launcher once, store it on the manifest and reset
+seed, and reuse it on resume/reset. In connected mode the daemon is
+authoritative for named launcher resolution because it owns the config
+root.
+
 ## Command index
 
 | Command | Purpose |
@@ -244,8 +282,8 @@ local `TASK_RUNNER_CODEX_WS_URL` when that env var is set.
 | `run status\|brief` | Print run state or the composed worker handoff |
 | `task list\|show\|set\|append-notes\|add` | Task inspection and mutation |
 | `attachment add\|list\|download\|remove` | Attachment management |
-| `list agents\|assignments\|runs` | Enumerate definitions and runs |
-| `show agent\|assignment` | Render a single definition |
+| `list agents\|assignments\|launchers\|runs` | Enumerate definitions and runs |
+| `show agent\|assignment\|launcher` | Render a single definition |
 | `run reset\|archive\|unarchive\|delete` | Lifecycle mutations |
 | `run set-name` | Set/clear persisted display name |
 | `run set-note\|clear-note` | Set/clear persisted human note metadata |

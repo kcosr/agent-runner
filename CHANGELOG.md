@@ -4,6 +4,10 @@
 
 ### Breaking Changes
 
+- Manifest schema version is now `10`. Runs now freeze the resolved
+  launcher on both `manifest.launcher` and `manifest.resetSeed.launcher`,
+  and resume / reset reuse that frozen launcher instead of re-reading
+  current launcher files or daemon/client overrides.
 - Manifest schema version is now `9`. Runs now freeze resolved hook
   descriptors plus prepare-time hook outputs (`resolvedHooks`,
   `hookState`, `hookAudits`) into the manifest and reset seed, and older
@@ -37,6 +41,10 @@
 
 ### Added
 
+- Added first-class launcher definitions under
+  `${TASK_RUNNER_CONFIG_DIR}/launchers/*.yaml|*.yml`, plus `task-runner
+  list launchers` and `task-runner show launcher` across embedded and
+  daemon control planes.
 - Added assignment hook support with frozen `prepare` outputs, named
   hooks under `${TASK_RUNNER_CONFIG_DIR}/hooks`, assignment-local path
   hooks, raw `.ts` / `.mts` runtime loading through `jiti`, built-in
@@ -90,6 +98,12 @@
 
 ### Changed
 
+- Changed subprocess backend startup so agents can author `launcher`
+  either as a named string or inline object, fresh runs can override it
+  with named-only `--launcher`, connected mode resolves named launchers
+  on the daemon host, and subprocess backends (`claude`, `cursor`, `pi`,
+  Codex stdio) honor the frozen launcher while passive and Codex
+  websocket runs stay on built-in `direct`.
 - Changed shared run projections so `RunSummary` includes `hookCount`,
   `RunDetail` includes `resolvedHooks` / `hookState` / `hookAudits`, and
   hook-driven note/pin/task/attachment mutations reuse the existing

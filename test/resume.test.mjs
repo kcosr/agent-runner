@@ -71,6 +71,14 @@ function writeAssignment(baseDir, name, body) {
   return path;
 }
 
+function writeLauncher(baseDir, name, body, ext = ".yaml") {
+  const dir = join(baseDir, "launchers");
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, `${name}${ext}`);
+  writeFileSync(path, body);
+  return path;
+}
+
 function writeAgentAndAssignment(baseDir) {
   writeAgent(baseDir, "three", THREE_AGENT);
   writeAssignment(baseDir, "three-work", THREE_ASSIGNMENT);
@@ -891,4 +899,86 @@ test("resume: text summary includes the resume-run hint with the run id", async 
       process.chdir(originalCwd);
     }
   });
+});
+
+test("resume reuses the frozen launcher instead of re-reading current launcher files", async () => {
+  const dir = tempDir();
+  writeLauncher(
+    dir,
+    "shared",
+    `schemaVersion: 1
+command: ssh
+args: [initial-host]
+`,
+  );
+  writeAgent(
+    dir,
+    "three",
+    `---
+schemaVersion: 1
+name: three
+backend: claude
+launcher: shared
+---
+Agent prompt.
+`,
+  );
+  writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
+
+  const first = await runIn(dir, {
+    backend: mockBackend(async (ctx) => {
+      setTaskStatusesForPrompt(ctx.prompt, { t1: "completed" });
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "sess-original",
+        transcript: "partial",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    }),
+  });
+
+  writeLauncher(
+    dir,
+    "shared",
+    `schemaVersion: 1
+command: ssh
+args: [mutated-host]
+`,
+  );
+
+  const second = await withSharedRuntimeEnv(dir, async () =>
+    runIn(dir, {
+      resume: resolveResumeTarget(first.runId, dir),
+      overrides: { message: "finish it" },
+      backend: mockBackend(async () => {
+        patchManifest(first.workspaceDir, (manifest) => {
+          for (const task of Object.values(manifest.finalTasks)) {
+            task.status = "completed";
+          }
+          manifest.tasksCompleted = Object.keys(manifest.finalTasks).length;
+        });
+        return {
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+          sessionId: "sess-original",
+          transcript: "done",
+          rawStdout: "",
+          rawStderr: "",
+        };
+      }),
+    }),
+  );
+
+  assert.deepEqual(second.manifest.launcher, {
+    kind: "prefix",
+    command: "ssh",
+    args: ["initial-host"],
+    name: "shared",
+    source: "named",
+  });
+  assert.deepEqual(second.manifest.resetSeed.launcher, second.manifest.launcher);
 });

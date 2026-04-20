@@ -78,6 +78,12 @@ test("parseArgs: --backend accepts cursor", () => {
   assert.equal(parsed.backend, "cursor");
 });
 
+test("parseArgs: --launcher captures the launcher override and forwards it into overrides", () => {
+  const parsed = parseArgs(argv("run", "--agent", "x", "--launcher", "./launchers/ssh.yaml"));
+  assert.equal(parsed.launcher, "./launchers/ssh.yaml");
+  assert.equal(overridesFromParsedArgs(parsed).launcher, "./launchers/ssh.yaml");
+});
+
 // ── list/show command parsing ────────────────────────────────────────
 
 test("parseArgs: list agents is parsed as command=list subcommand=agents", () => {
