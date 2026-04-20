@@ -149,6 +149,75 @@ test("init: persists workspace seed and manifest without invoking the backend", 
   assert.ok(outcome.manifest.brief.endsWith("the-ask"));
 });
 
+test("init freezes config-time env interpolation into manifest state and runtime var coercion", async () => {
+  const dir = tempDir();
+  writeAgent(
+    dir,
+    "two",
+    `---
+schemaVersion: \${AGENT_SCHEMA:-1}
+name: two
+backend: claude
+model: \${AGENT_MODEL}
+timeoutSec: \${AGENT_TIMEOUT}
+---
+Agent role for \${AGENT_TARGET}.
+`,
+  );
+  writeAssignment(
+    dir,
+    "two-work",
+    `---
+schemaVersion: \${ASSIGNMENT_SCHEMA:-1}
+name: \${ASSIGNMENT_NAME}
+maxRetries: \${MAX_RETRIES}
+cwd: \${ASSIGNMENT_CWD}
+message: \${MESSAGE_TEXT}
+callerInstructions: Review \${CALLER_TARGET}
+vars:
+  retries:
+    type: number
+    default: \${DEFAULT_RETRIES}
+tasks:
+  - id: deploy
+    title: Deploy \${TASK_TARGET}
+    body: Ship {{retries}} to \${TASK_TARGET}.
+---
+Work on \${BODY_TARGET}.
+`,
+  );
+
+  const outcome = await withEnv(
+    {
+      AGENT_MODEL: "claude-sonnet-4-6",
+      AGENT_TIMEOUT: "120",
+      AGENT_TARGET: "staging",
+      ASSIGNMENT_NAME: "env-two-work",
+      MAX_RETRIES: "4",
+      ASSIGNMENT_CWD: "env-repo",
+      MESSAGE_TEXT: "ship-it",
+      CALLER_TARGET: "production",
+      DEFAULT_RETRIES: "11",
+      TASK_TARGET: "staging",
+      BODY_TARGET: "env-repo",
+    },
+    () => initIn(dir),
+  );
+
+  assert.equal(outcome.manifest.model, "claude-sonnet-4-6");
+  assert.equal(outcome.manifest.timeoutSec, 120);
+  assert.equal(outcome.manifest.assignment?.name, "env-two-work");
+  assert.equal(outcome.manifest.cwd, join(dir, "env-repo"));
+  assert.equal(outcome.manifest.message, "ship-it");
+  assert.equal(outcome.manifest.maxAttempts, 5);
+  assert.equal(outcome.manifest.callerInstructions, "Review production");
+  assert.equal(outcome.manifest.agent.instructions, "Agent role for staging.");
+  assert.ok(outcome.manifest.brief.includes("Work on env-repo."));
+  assert.equal(outcome.manifest.runtimeVars.retries, 11);
+  assert.equal(outcome.manifest.finalTasks.deploy.title, "Deploy staging");
+  assert.equal(outcome.manifest.finalTasks.deploy.body, "Ship 11 to staging.");
+});
+
 test("init: rejects --resume-run", async () => {
   const dir = tempDir();
   writeAgentAndAssignment(dir);

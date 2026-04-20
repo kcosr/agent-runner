@@ -60,6 +60,27 @@ exactly one of:
 Other backends do not accept `backendSpecific`, and this pass does not
 add generic backend-specific env passthrough.
 
+Frontmatter scalar values are resolved for `${...}` env expressions before
+schema validation. Typed surfaces such as `name`, `backend`, `model`,
+`timeoutSec`, `unrestricted`, and `backendSpecific.codex.transport.url`
+require the whole value to be exactly one env expression:
+
+```yaml
+---
+name: ${AGENT_NAME}
+timeoutSec: ${AGENT_TIMEOUT:-3600}
+backendSpecific:
+  codex:
+    transport:
+      type: ws
+      url: ${CODEX_URL}
+---
+```
+
+Partial `${...}` interpolation is rejected for those typed fields, so
+`name: "agent-${AGENT_NAME}"` fails at load time. `${...}` also cannot
+replace whole objects or arrays such as `backendSpecific`.
+
 ### Body
 
 Everything after the frontmatter is the agent's role instructions. The body
@@ -111,6 +132,35 @@ brief at run creation.
 
 Assignments are markdown definitions, not a live workspace surface. Task
 state is canonical in the run manifest — not in the assignment file.
+
+Assignment frontmatter uses the same config-time `${...}` loader pass.
+Typed fields such as `cwd`, `maxRetries`, task ids, var metadata, and lock
+entries require exact-match env expressions. Prose fields such as
+`message`, `callerInstructions`, var descriptions, and task title/body may
+embed `${...}` within larger strings:
+
+```yaml
+---
+cwd: ${WORKTREE_DIR}
+maxRetries: ${MAX_RETRIES:-3}
+message: Review ${TARGET_BRANCH} before shipping
+callerInstructions: Check ${ENVIRONMENT} first
+vars:
+  retries:
+    type: number
+    default: ${DEFAULT_RETRIES:-5}
+    description: Retry budget for ${ENVIRONMENT}
+tasks:
+  - id: review
+    title: Review ${TARGET_BRANCH}
+    body: Validate ${ENVIRONMENT} before merge.
+---
+```
+
+If a required env var is missing or empty, a typed value cannot be
+coerced, or `${...}` is used on a disabled object or array surface,
+definition loading fails with a config error that names the config path
+and env var.
 
 ## Locked fields
 
@@ -198,6 +248,9 @@ being frozen into the manifest:
 The syntax is `{{key}}` (whitespace permitted). Always-available variables
 include `run_id`, `cwd`, `config_dir`, `state_dir`, `assignment_name`,
 `assignment_path`, and `task_runner_cmd`. See [variables.md](variables.md).
+
+This runtime `{{key}}` interpolation is distinct from the config-time
+`${...}` env interpolation used while loading frontmatter.
 
 ## Inspecting definitions
 

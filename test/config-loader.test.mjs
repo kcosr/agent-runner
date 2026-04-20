@@ -177,6 +177,447 @@ body
     assert.equal(loaded.config.name, "notasks");
   }));
 
+test("loadAgentConfig resolves exact-match env fields and prose instructions", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) =>
+    withEnv(
+      {
+        AGENT_NAME: "env-agent",
+        AGENT_MODEL: "gpt-5.4",
+        AGENT_TIMEOUT: "90",
+        AGENT_UNRESTRICTED: "true",
+        CODEX_URL: "ws://127.0.0.1:4773/socket",
+        BODY_TARGET: "release board",
+      },
+      () => {
+        writeAgent(
+          configDir,
+          "env-agent",
+          `---
+schemaVersion: \${AGENT_SCHEMA:-1}
+name: \${AGENT_NAME}
+backend: codex
+model: \${AGENT_MODEL}
+timeoutSec: \${AGENT_TIMEOUT}
+unrestricted: \${AGENT_UNRESTRICTED}
+backendSpecific:
+  codex:
+    transport:
+      type: ws
+      url: \${CODEX_URL}
+---
+Operate on the \${BODY_TARGET}.
+`,
+        );
+
+        const loaded = loadAgentConfig("env-agent", rootDir);
+        assert.equal(loaded.config.schemaVersion, 1);
+        assert.equal(loaded.config.name, "env-agent");
+        assert.equal(loaded.config.model, "gpt-5.4");
+        assert.equal(loaded.config.timeoutSec, 90);
+        assert.equal(loaded.config.unrestricted, true);
+        assert.deepEqual(loaded.config.backendSpecific, {
+          codex: {
+            transport: {
+              type: "ws",
+              url: "ws://127.0.0.1:4773/socket",
+            },
+          },
+        });
+        assert.equal(loaded.instructions, "Operate on the release board.");
+      },
+    ),
+  ));
+
+test("loadAssignmentConfig resolves typed fields, prose fields, and env-backed var defaults", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) =>
+    withEnv(
+      {
+        ASSIGNMENT_NAME: "env-work",
+        ASSIGNMENT_CWD: "packages/core",
+        MAX_RETRIES: "7",
+        DEFAULT_RETRIES: "5",
+        TASK_TARGET: "deployments",
+        DESCRIPTION_TARGET: "staging",
+        BODY_TARGET: "workspace",
+      },
+      () => {
+        writeAssignment(
+          configDir,
+          "env-work",
+          `---
+schemaVersion: \${ASSIGNMENT_SCHEMA:-1}
+name: \${ASSIGNMENT_NAME}
+cwd: \${ASSIGNMENT_CWD}
+maxRetries: \${MAX_RETRIES}
+message: Ship \${TASK_TARGET}
+callerInstructions: Review \${DESCRIPTION_TARGET} first
+vars:
+  retries:
+    type: number
+    default: \${DEFAULT_RETRIES}
+    description: Uses \${DESCRIPTION_TARGET}
+tasks:
+  - id: release
+    title: Release \${TASK_TARGET}
+    body: Verify \${TASK_TARGET}
+---
+Assignment body for \${BODY_TARGET}.
+`,
+        );
+
+        const loaded = loadAssignmentConfig("env-work", rootDir);
+        assert.equal(loaded.config.schemaVersion, 1);
+        assert.equal(loaded.config.name, "env-work");
+        assert.equal(loaded.config.cwd, "packages/core");
+        assert.equal(loaded.config.maxRetries, 7);
+        assert.equal(loaded.config.message, "Ship deployments");
+        assert.equal(loaded.config.callerInstructions, "Review staging first");
+        assert.equal(loaded.config.vars.retries.default, "5");
+        assert.equal(loaded.config.vars.retries.description, "Uses staging");
+        assert.equal(loaded.config.tasks[0].title, "Release deployments");
+        assert.equal(loaded.config.tasks[0].body, "Verify deployments");
+        assert.equal(loaded.instructions, "Assignment body for workspace.");
+      },
+    ),
+  ));
+
+for (const { name, expression, envValue, expected } of [
+  {
+    name: "exact env field uses the current value when set",
+    expression: "${RETRIES}",
+    envValue: "4",
+    expected: 4,
+  },
+  {
+    name: ":- fallback uses the env value when non-empty",
+    expression: "${RETRIES:-6}",
+    envValue: "9",
+    expected: 9,
+  },
+  {
+    name: ":- fallback uses the fallback when env is unset",
+    expression: "${RETRIES:-6}",
+    envValue: undefined,
+    expected: 6,
+  },
+  {
+    name: ":- fallback uses the fallback when env is empty",
+    expression: "${RETRIES:-6}",
+    envValue: "",
+    expected: 6,
+  },
+  {
+    name: "- fallback uses the fallback when env is unset",
+    expression: "${RETRIES-6}",
+    envValue: undefined,
+    expected: 6,
+  },
+]) {
+  test(`loadAssignmentConfig ${name}`, () =>
+    withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) =>
+      withEnv({ RETRIES: envValue }, () => {
+        writeAssignment(
+          configDir,
+          "fallbacks",
+          `---
+schemaVersion: 1
+name: fallbacks
+maxRetries: ${expression}
+---
+body
+`,
+        );
+
+        const loaded = loadAssignmentConfig("fallbacks", rootDir);
+        assert.equal(loaded.config.maxRetries, expected);
+      }),
+    ));
+}
+
+test("loadAssignmentConfig treats an empty env value as empty for - fallback exact fields", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) =>
+    withEnv({ RETRIES: "" }, () => {
+      writeAssignment(
+        configDir,
+        "dash-empty",
+        `---
+schemaVersion: 1
+name: dash-empty
+maxRetries: \${RETRIES-6}
+---
+body
+`,
+      );
+
+      assert.throws(
+        () => loadAssignmentConfig("dash-empty", rootDir),
+        (err) => {
+          assert.ok(err instanceof AssignmentConfigError);
+          assert.match(err.message, /assignment\.maxRetries/);
+          assert.match(err.message, /RETRIES/);
+          assert.match(err.message, /empty/);
+          return true;
+        },
+      );
+    }),
+  ));
+
+test("loadAssignmentConfig rejects missing required exact env fields", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) =>
+    withEnv({ RETRIES: undefined }, () => {
+      writeAssignment(
+        configDir,
+        "missing-env",
+        `---
+schemaVersion: 1
+name: missing-env
+maxRetries: \${RETRIES}
+---
+body
+`,
+      );
+
+      assert.throws(
+        () => loadAssignmentConfig("missing-env", rootDir),
+        (err) => {
+          assert.ok(err instanceof AssignmentConfigError);
+          assert.match(err.message, /assignment\.maxRetries/);
+          assert.match(err.message, /RETRIES/);
+          assert.match(err.message, /missing/);
+          return true;
+        },
+      );
+    }),
+  ));
+
+test("loadAssignmentConfig rejects empty required exact env fields", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) =>
+    withEnv({ RETRIES: "" }, () => {
+      writeAssignment(
+        configDir,
+        "empty-env",
+        `---
+schemaVersion: 1
+name: empty-env
+maxRetries: \${RETRIES}
+---
+body
+`,
+      );
+
+      assert.throws(
+        () => loadAssignmentConfig("empty-env", rootDir),
+        (err) => {
+          assert.ok(err instanceof AssignmentConfigError);
+          assert.match(err.message, /assignment\.maxRetries/);
+          assert.match(err.message, /RETRIES/);
+          assert.match(err.message, /empty/);
+          return true;
+        },
+      );
+    }),
+  ));
+
+test("loadAgentConfig rejects invalid number coercion for exact env fields", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) =>
+    withEnv({ AGENT_TIMEOUT: "abc" }, () => {
+      writeAgent(
+        configDir,
+        "bad-timeout",
+        `---
+schemaVersion: 1
+name: bad-timeout
+backend: claude
+timeoutSec: \${AGENT_TIMEOUT}
+---
+body
+`,
+      );
+
+      assert.throws(
+        () => loadAgentConfig("bad-timeout", rootDir),
+        (err) => {
+          assert.ok(err instanceof AgentConfigError);
+          assert.match(err.message, /agent\.timeoutSec/);
+          assert.match(err.message, /AGENT_TIMEOUT/);
+          assert.match(err.message, /not a valid number/);
+          return true;
+        },
+      );
+    }),
+  ));
+
+test("loadAgentConfig rejects invalid boolean coercion for exact env fields", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) =>
+    withEnv({ AGENT_FLAG: "yes" }, () => {
+      writeAgent(
+        configDir,
+        "bad-flag",
+        `---
+schemaVersion: 1
+name: bad-flag
+backend: claude
+unrestricted: \${AGENT_FLAG}
+---
+body
+`,
+      );
+
+      assert.throws(
+        () => loadAgentConfig("bad-flag", rootDir),
+        (err) => {
+          assert.ok(err instanceof AgentConfigError);
+          assert.match(err.message, /agent\.unrestricted/);
+          assert.match(err.message, /AGENT_FLAG/);
+          assert.match(err.message, /not a valid boolean/);
+          return true;
+        },
+      );
+    }),
+  ));
+
+test("loadAgentConfig rejects partial interpolation in exact-only fields", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) =>
+    withEnv({ AGENT_NAME: "demo" }, () => {
+      writeAgent(
+        configDir,
+        "partial-exact",
+        `---
+schemaVersion: 1
+name: agent-\${AGENT_NAME}
+backend: claude
+---
+body
+`,
+      );
+
+      assert.throws(
+        () => loadAgentConfig("partial-exact", rootDir),
+        (err) => {
+          assert.ok(err instanceof AgentConfigError);
+          assert.match(err.message, /agent\.name/);
+          assert.match(err.message, /AGENT_NAME/);
+          assert.match(err.message, /mismatch with field surface/);
+          return true;
+        },
+      );
+    }),
+  ));
+
+test("loadAgentConfig reports invalid env syntax with path context", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    writeAgent(
+      configDir,
+      "invalid-syntax",
+      `---
+schemaVersion: 1
+name: \${BROKEN
+backend: claude
+---
+body
+`,
+    );
+
+    assert.throws(
+      () => loadAgentConfig("invalid-syntax", rootDir),
+      (err) => {
+        assert.ok(err instanceof AgentConfigError);
+        assert.match(err.message, /agent\.name/);
+        assert.match(err.message, /BROKEN/);
+        assert.match(err.message, /invalid syntax/);
+        return true;
+      },
+    );
+  }));
+
+for (const { name, writer, load, id, expectedPath, expectedEnv } of [
+  {
+    name: "loadAgentConfig rejects env blob replacement for backendSpecific",
+    writer: (configDir) =>
+      writeAgent(
+        configDir,
+        "blob-agent",
+        `---
+schemaVersion: 1
+name: blob-agent
+backend: codex
+backendSpecific: \${CODEX_SETTINGS}
+---
+body
+`,
+      ),
+    load: loadAgentConfig,
+    id: "blob-agent",
+    expectedPath: /agent\.backendSpecific/,
+    expectedEnv: /CODEX_SETTINGS/,
+  },
+  {
+    name: "loadAssignmentConfig rejects env blob replacement for tasks",
+    writer: (configDir) =>
+      writeAssignment(
+        configDir,
+        "blob-tasks",
+        `---
+schemaVersion: 1
+name: blob-tasks
+tasks: \${TASKS}
+---
+body
+`,
+      ),
+    load: loadAssignmentConfig,
+    id: "blob-tasks",
+    expectedPath: /assignment\.tasks/,
+    expectedEnv: /TASKS/,
+  },
+  {
+    name: "loadAssignmentConfig rejects env blob replacement for lockedFields",
+    writer: (configDir) =>
+      writeAssignment(
+        configDir,
+        "blob-locks",
+        `---
+schemaVersion: 1
+name: blob-locks
+lockedFields: \${LOCKS}
+---
+body
+`,
+      ),
+    load: loadAssignmentConfig,
+    id: "blob-locks",
+    expectedPath: /assignment\.lockedFields/,
+    expectedEnv: /LOCKS/,
+  },
+]) {
+  test(name, () =>
+    withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) =>
+      withEnv(
+        {
+          CODEX_SETTINGS: '{"codex":{"transport":{"type":"ws","url":"ws://127.0.0.1:4773/"}}}',
+          TASKS: '[{"id":"t1","title":"Injected"}]',
+          LOCKS: '["backend"]',
+        },
+        () => {
+          writer(configDir);
+
+          assert.throws(
+            () => load(id, rootDir),
+            (err) => {
+              const expectedClass =
+                load === loadAgentConfig ? AgentConfigError : AssignmentConfigError;
+              assert.ok(err instanceof expectedClass);
+              assert.match(err.message, expectedPath);
+              assert.match(err.message, expectedEnv);
+              assert.match(err.message, /mismatch with field surface/);
+              return true;
+            },
+          );
+        },
+      ),
+    ));
+}
+
 test("loadAgentConfig accepts backendSpecific.codex.transport in agent frontmatter", () =>
   withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
     writeAgent(
