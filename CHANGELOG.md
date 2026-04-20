@@ -9,6 +9,10 @@
   `hookState`, `hookAudits`) into the manifest and reset seed, and older
   pre-hook runs must be recreated or upgraded out-of-band before resume.
   ([#66](https://github.com/kcosr/task-runner/pull/66))
+- Config-time `${...}` interpolation in prose-like definition fields now
+  only applies when the whole field is a single `${...}` expression.
+  Embedded `${...}` text inside larger prose strings remains literal.
+  ([#67](https://github.com/kcosr/task-runner/pull/67))
 - Hot-cut the run-targeted read surfaces under `task-runner run`: use `task-runner run status <run-id>` and `task-runner run brief <run-id>`, while top-level `task-runner status` now reports system/environment status instead of run state. ([#52](https://github.com/kcosr/task-runner/pull/52))
 - `task-runner list runs` now defaults to the caller's cwd instead of listing every repo. Use `--cwd <path>` to target a different exact cwd, `--repo <name>` to target one repo bucket, or `--global` to restore the previous global listing behavior. ([#44](https://github.com/kcosr/task-runner/pull/44))
 - Manifest schema version is now `8`. Authored `cwd` moved from agent definitions to assignment definitions, run manifests now persist first-class `repo` alongside frozen `cwd`, and older `schemaVersion: 7` runs must be upgraded explicitly with `scripts/migrate-manifests-v8.mjs` or recreated. Built-in assignments/docs now use `{{cwd}}` instead of redundant canonical `repo_path` vars. ([#43](https://github.com/kcosr/task-runner/pull/43))
