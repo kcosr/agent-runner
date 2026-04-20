@@ -1150,7 +1150,9 @@ pre {
 /* ─── tabs ───────────────────────────────────────────── */
 .tabs {
   display: flex;
+  flex-wrap: nowrap;
   gap: 0;
+  min-height: 41px;
   padding: 0 18px;
   border-bottom: 1px solid var(--border);
   background: var(--background);
@@ -1158,7 +1160,13 @@ pre {
   top: 0;
   z-index: 1;
 }
+.tabs--scrollable {
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+}
 .tab {
+  flex: 0 0 auto;
   position: relative;
   padding: 10px 14px;
   background: transparent;

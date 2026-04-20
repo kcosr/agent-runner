@@ -76,6 +76,40 @@ describe("applyEnvelope", () => {
     expect(result.history.attempts[0]?.transcript).toBe("Hello world");
   });
 
+  it("appends backend notices to the active attempt notices", () => {
+    const result = applyEnvelope(
+      makeHistory({
+        attempts: [
+          {
+            attempt: 1,
+            sessionIndex: 0,
+            startedAt: "2026-04-15T10:00:00.000Z",
+            endedAt: null,
+            prompt: "Write output",
+            transcript: "Hello",
+            notices: "warn:",
+            exitCode: null,
+            timedOut: false,
+            live: true,
+          },
+        ],
+        lastCursor: 1,
+      }),
+      {
+        runId: "run-1",
+        cursor: 2,
+        event: {
+          type: "backend_notice",
+          text: " disk nearly full",
+        },
+      },
+    );
+
+    expect(result.requiresReload).toBe(false);
+    expect(result.history.attempts[0]?.notices).toBe("warn: disk nearly full");
+    expect(result.history.attempts[0]?.transcript).toBe("Hello");
+  });
+
   it("treats unknown event types as requiring a reload", () => {
     const result = applyEnvelope(makeHistory({ lastCursor: 1 }), {
       runId: "run-1",
