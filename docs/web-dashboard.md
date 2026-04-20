@@ -104,8 +104,10 @@ timeline stream (`RunTimelineEnvelope`). The drawer surfaces:
   handle) and supports the same full-width toggle as the detail drawer.
   See [attachments.md](attachments.md).
 - Dependencies tab: upstream and downstream runs (`RunDependencyDetail`).
-- Attempts tab: attempt history plus prompt/output/timeline detail for
-  non-passive runs from the timeline stream.
+- Attempts tab: attempt history plus prompt/response/diagnostics detail
+  for non-passive runs from the timeline stream. On narrow layouts, the
+  top-level drawer section tabs stay on one line and scroll horizontally
+  instead of wrapping.
 
 ## Live projections
 

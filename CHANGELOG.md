@@ -97,6 +97,7 @@
   separate hook stream. ([#66](https://github.com/kcosr/task-runner/pull/66))
 - Changed the bundled planning workflow so `plan-feature` now leaves the planning run blocked on `create_implementer_run_after_approval` until the caller resumes the same run with approval, delayed implementer creation no longer forces `--backend passive`, generated implementation plans now teach backend-accurate execute-after-init handoff (`run brief` + `run --resume-run`), and the template's terminal workflow now ends with `push_branch_and_create_pr` instead of local-only finalization. ([#63](https://github.com/kcosr/task-runner/pull/63))
 - Changed the web run detail drawer so the attempts `Message` tab remains available after attempts start, keeping the concise run handoff visible alongside the full prompt. ([#63](https://github.com/kcosr/task-runner/pull/63))
+- Changed the web run detail drawer so attempt `Output` is now split into `Response` (transcript) and `Diagnostics` (backend notices), and the top-level drawer section tabs stay on one line with horizontal scrolling on narrow layouts.
 - Changed the web dashboard so pinned runs sort first within each status
   column, cards and the detail drawer share the same note editor/mutation
   flow, and the persisted preferences now include a pinned-only filter. ([#58](https://github.com/kcosr/task-runner/pull/58))
