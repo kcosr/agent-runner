@@ -210,12 +210,12 @@ Work on \${BODY_TARGET}.
   assert.equal(outcome.manifest.cwd, join(dir, "env-repo"));
   assert.equal(outcome.manifest.message, "ship-it");
   assert.equal(outcome.manifest.maxAttempts, 5);
-  assert.equal(outcome.manifest.callerInstructions, "Review production");
-  assert.equal(outcome.manifest.agent.instructions, "Agent role for staging.");
-  assert.ok(outcome.manifest.brief.includes("Work on env-repo."));
+  assert.equal(outcome.manifest.callerInstructions, "Review ${CALLER_TARGET}");
+  assert.equal(outcome.manifest.agent.instructions, "Agent role for ${AGENT_TARGET}.");
+  assert.ok(outcome.manifest.brief.includes("Work on ${BODY_TARGET}."));
   assert.equal(outcome.manifest.runtimeVars.retries, 11);
-  assert.equal(outcome.manifest.finalTasks.deploy.title, "Deploy staging");
-  assert.equal(outcome.manifest.finalTasks.deploy.body, "Ship 11 to staging.");
+  assert.equal(outcome.manifest.finalTasks.deploy.title, "Deploy ${TASK_TARGET}");
+  assert.equal(outcome.manifest.finalTasks.deploy.body, "Ship 11 to ${TASK_TARGET}.");
 });
 
 test("init: rejects --resume-run", async () => {

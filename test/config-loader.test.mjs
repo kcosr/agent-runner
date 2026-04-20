@@ -180,7 +180,7 @@ body
     assert.equal(loaded.config.name, "notasks");
   }));
 
-test("loadAgentConfig resolves exact-match env fields and prose instructions", () =>
+test("loadAgentConfig resolves exact-match env fields and whole-body instructions", () =>
   withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) =>
     withEnv(
       {
@@ -189,7 +189,7 @@ test("loadAgentConfig resolves exact-match env fields and prose instructions", (
         AGENT_TIMEOUT: "90",
         AGENT_UNRESTRICTED: "true",
         CODEX_URL: "ws://127.0.0.1:4773/socket",
-        BODY_TARGET: "release board",
+        BODY_TEXT: "Operate on the release board.",
       },
       () => {
         writeAgent(
@@ -208,7 +208,7 @@ backendSpecific:
       type: ws
       url: \${CODEX_URL}
 ---
-Operate on the \${BODY_TARGET}.
+\${BODY_TEXT}
 `,
         );
 
@@ -231,7 +231,7 @@ Operate on the \${BODY_TARGET}.
     ),
   ));
 
-test("loadAssignmentConfig resolves typed fields, prose fields, and env-backed var defaults", () =>
+test("loadAssignmentConfig resolves typed fields, whole-field prose envs, and env-backed var defaults", () =>
   withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) =>
     withEnv(
       {
@@ -239,9 +239,12 @@ test("loadAssignmentConfig resolves typed fields, prose fields, and env-backed v
         ASSIGNMENT_CWD: "packages/core",
         MAX_RETRIES: "7",
         DEFAULT_RETRIES: "5",
-        TASK_TARGET: "deployments",
-        DESCRIPTION_TARGET: "staging",
-        BODY_TARGET: "workspace",
+        MESSAGE_TEXT: "Ship deployments",
+        CALLER_TEXT: "Review staging first",
+        DESCRIPTION_TEXT: "Uses staging",
+        TASK_TITLE: "Release deployments",
+        TASK_BODY: "Verify deployments",
+        BODY_TEXT: "Assignment body for workspace.",
       },
       () => {
         writeAssignment(
@@ -252,19 +255,19 @@ schemaVersion: \${ASSIGNMENT_SCHEMA:-1}
 name: \${ASSIGNMENT_NAME}
 cwd: \${ASSIGNMENT_CWD}
 maxRetries: \${MAX_RETRIES}
-message: Ship \${TASK_TARGET}
-callerInstructions: Review \${DESCRIPTION_TARGET} first
+message: \${MESSAGE_TEXT}
+callerInstructions: \${CALLER_TEXT}
 vars:
   retries:
     type: number
     default: \${DEFAULT_RETRIES}
-    description: Uses \${DESCRIPTION_TARGET}
+    description: \${DESCRIPTION_TEXT}
 tasks:
   - id: release
-    title: Release \${TASK_TARGET}
-    body: Verify \${TASK_TARGET}
+    title: \${TASK_TITLE}
+    body: \${TASK_BODY}
 ---
-Assignment body for \${BODY_TARGET}.
+\${BODY_TEXT}
 `,
         );
 
@@ -317,6 +320,48 @@ body
     assert.equal(loaded.config.hooks.prepare[0].name, "named-prepare");
     assert.equal(loaded.config.hooks.taskTransition[0].path, "./hooks/guard.mts");
   }));
+
+test("loadAssignmentConfig leaves partial env syntax literal in prose surfaces", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) =>
+    withEnv(
+      {
+        TARGET_BRANCH: "main",
+        ENVIRONMENT: "staging",
+        BODY_TEXT: "Use ${TASK_RUNNER_CONFIG_DIR} when debugging.",
+      },
+      () => {
+        writeAssignment(
+          configDir,
+          "literal-prose",
+          `---
+schemaVersion: 1
+name: literal-prose
+message: Review \${TARGET_BRANCH} before shipping
+callerInstructions: Check \${ENVIRONMENT} first
+tasks:
+  - id: review
+    title: Review \${TARGET_BRANCH}
+    body: Validate \${ENVIRONMENT} before merge.
+vars:
+  target:
+    type: string
+    default: main
+    description: Uses \${ENVIRONMENT}
+---
+\${BODY_TEXT}
+`,
+        );
+
+        const loaded = loadAssignmentConfig("literal-prose", rootDir);
+        assert.equal(loaded.config.message, "Review ${TARGET_BRANCH} before shipping");
+        assert.equal(loaded.config.callerInstructions, "Check ${ENVIRONMENT} first");
+        assert.equal(loaded.config.tasks[0].title, "Review ${TARGET_BRANCH}");
+        assert.equal(loaded.config.tasks[0].body, "Validate ${ENVIRONMENT} before merge.");
+        assert.equal(loaded.config.vars.target.description, "Uses ${ENVIRONMENT}");
+        assert.equal(loaded.instructions, "Use ${TASK_RUNNER_CONFIG_DIR} when debugging.");
+      },
+    ),
+  ));
 
 test("loadAssignmentConfig rejects hook entries without exactly one source selector", () =>
   withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
