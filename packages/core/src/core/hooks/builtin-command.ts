@@ -68,10 +68,13 @@ async function runCommand(
       stdout?: string;
       stderr?: string;
       code?: number;
+      status?: number;
     };
-    if (typeof err.code === "number") {
+    const exitCode =
+      typeof err.status === "number" ? err.status : typeof err.code === "number" ? err.code : null;
+    if (exitCode !== null) {
       return {
-        exitCode: err.code,
+        exitCode,
         stdout: err.stdout ?? "",
         stderr: err.stderr ?? "",
       };

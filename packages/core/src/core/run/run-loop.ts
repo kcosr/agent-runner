@@ -71,6 +71,7 @@ import {
   refreshManifestTaskState,
   syncManifestTaskState,
   withTaskStateLock,
+  withTaskStateLockAsync,
 } from "./workspace-state.js";
 
 export interface RunOverrides {
@@ -1662,6 +1663,42 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       }
     });
   };
+  const runLockedAttemptHooks = async (
+    phase: "beforeAttempt" | "afterAttempt" | "afterExit",
+    options: {
+      sessionIndex: number;
+      attempt: number | null;
+      retriesRemaining: number;
+      attemptResult?: {
+        exitCode: number | null;
+        signal: NodeJS.Signals | null;
+        timedOut: boolean;
+        transcript: string | null;
+        rawStdout: string;
+        rawStderr: string;
+        sessionId: string | null;
+        aborted: boolean;
+      };
+    },
+  ) => {
+    return await withTaskStateLockAsync(workspaceDir, async () => {
+      tasks = refreshManifestTaskState(manifest);
+      refreshManifestAttachments(manifest);
+      const hookState = createHookExecutionState(manifest, tasks, {
+        initialPrompt,
+        attemptPrompt: currentPrompt,
+      });
+      const hookResult = await runAttemptHooks(phase, hookState, options);
+      manifest = hookState.manifest;
+      tasks = hookState.tasks;
+      syncManifestTaskState(manifest, tasks);
+      writeManifest(workspaceDir, manifest);
+      return {
+        hookResult,
+        attemptPrompt: hookState.attemptPrompt,
+      };
+    });
+  };
 
   try {
     while (sessionAttempts < maxAttempts && !terminal) {
@@ -1669,18 +1706,13 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       name = manifest.name;
       sessionAttempts++;
       const globalAttemptNumber = priorAttemptCount + sessionAttempts;
-      const beforeAttemptState = createHookExecutionState(manifest, tasks, {
-        initialPrompt,
-        attemptPrompt: currentPrompt,
-      });
-      const beforeAttemptResult = await runAttemptHooks("beforeAttempt", beforeAttemptState, {
-        sessionIndex,
-        attempt: globalAttemptNumber,
-        retriesRemaining: maxAttempts - sessionAttempts,
-      });
-      manifest = beforeAttemptState.manifest;
-      tasks = beforeAttemptState.tasks;
-      currentPrompt = beforeAttemptResult.followUpPrompt ?? beforeAttemptState.attemptPrompt;
+      const { hookResult: beforeAttemptResult, attemptPrompt: beforeAttemptPrompt } =
+        await runLockedAttemptHooks("beforeAttempt", {
+          sessionIndex,
+          attempt: globalAttemptNumber,
+          retriesRemaining: maxAttempts - sessionAttempts,
+        });
+      currentPrompt = beforeAttemptResult.followUpPrompt ?? beforeAttemptPrompt;
       cwd = manifest.cwd;
       model = manifest.model ?? undefined;
       effort = (manifest.effort ?? undefined) as RunOverrides["effort"];
@@ -1776,28 +1808,23 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         invalidStatuses: mergeInfo.invalidStatuses,
         backendSessionUpdate,
       });
-      const afterAttemptState = createHookExecutionState(manifest, tasks, {
-        initialPrompt,
-        attemptPrompt: currentPrompt,
-      });
-      const afterAttemptResult = await runAttemptHooks("afterAttempt", afterAttemptState, {
-        sessionIndex,
-        attempt: globalAttemptNumber,
-        retriesRemaining: maxAttempts - sessionAttempts,
-        attemptResult: {
-          exitCode: invokeResult.exitCode,
-          signal: invokeResult.signal,
-          timedOut: invokeResult.timedOut,
-          transcript: invokeResult.transcript,
-          rawStdout: invokeResult.rawStdout,
-          rawStderr: invokeResult.rawStderr,
-          sessionId: invokeResult.sessionId,
-          aborted: invokeResult.aborted,
-        },
-      });
-      manifest = afterAttemptState.manifest;
-      tasks = afterAttemptState.tasks;
-      currentPrompt = afterAttemptResult.followUpPrompt ?? afterAttemptState.attemptPrompt;
+      const { hookResult: afterAttemptResult, attemptPrompt: afterAttemptPrompt } =
+        await runLockedAttemptHooks("afterAttempt", {
+          sessionIndex,
+          attempt: globalAttemptNumber,
+          retriesRemaining: maxAttempts - sessionAttempts,
+          attemptResult: {
+            exitCode: invokeResult.exitCode,
+            signal: invokeResult.signal,
+            timedOut: invokeResult.timedOut,
+            transcript: invokeResult.transcript,
+            rawStdout: invokeResult.rawStdout,
+            rawStderr: invokeResult.rawStderr,
+            sessionId: invokeResult.sessionId,
+            aborted: invokeResult.aborted,
+          },
+        });
+      currentPrompt = afterAttemptResult.followUpPrompt ?? afterAttemptPrompt;
       cwd = manifest.cwd;
       model = manifest.model ?? undefined;
       effort = (manifest.effort ?? undefined) as RunOverrides["effort"];
@@ -1966,20 +1993,10 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   });
 
   try {
-    const afterExitState = createHookExecutionState(manifest, tasks, {
-      initialPrompt,
-      attemptPrompt: currentPrompt,
-    });
-    await runAttemptHooks("afterExit", afterExitState, {
+    await runLockedAttemptHooks("afterExit", {
       sessionIndex,
       attempt: pendingAttempt?.attempt ?? null,
       retriesRemaining: 0,
-    });
-    manifest = afterExitState.manifest;
-    tasks = afterExitState.tasks;
-    withTaskStateLock(workspaceDir, () => {
-      syncManifestTaskState(manifest, tasks);
-      writeManifest(workspaceDir, manifest);
     });
   } catch {
     // afterExit failures are warning-only; preserve the terminal result.

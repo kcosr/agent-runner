@@ -9,6 +9,7 @@ import { resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js"
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import { createRunEventCapture } from "./helpers/run-events.mjs";
 import {
+  resolveRunFromPrompt,
   setTaskStatusesForPrompt,
   updateTasksForPrompt,
   withEnv,
@@ -600,6 +601,193 @@ Work.
         { assignmentName: "three-work", backendId: "claude" },
       ),
     /malformed JSON output/,
+  );
+});
+
+test("beforeAttempt hooks persist changes before invoke and afterAttempt hooks can reinvoke with a follow-up prompt", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  writeNamedHook(
+    dir,
+    "before-attempt-note",
+    `export default {
+  name: "before-attempt-note",
+  beforeAttempt(ctx) {
+    const count = (ctx.state.beforeAttemptCount ?? 0) + 1;
+    return {
+      action: "continue",
+      mutate: {
+        note: "before-attempt-" + count,
+        state: { beforeAttemptCount: count },
+      },
+    };
+  },
+};
+`,
+  );
+  writeNamedHook(
+    dir,
+    "reinvoke-after-attempt",
+    `export default {
+  name: "reinvoke-after-attempt",
+  afterAttempt(ctx) {
+    if ((ctx.state.afterAttemptCount ?? 0) === 0) {
+      return {
+        action: "reinvoke",
+        followUpPrompt: "Follow up from afterAttempt hook",
+        mutate: {
+          note: "after-attempt-reinvoke",
+          state: { afterAttemptCount: 1 },
+        },
+      };
+    }
+    return {
+      action: "continue",
+      mutate: {
+        state: { afterAttemptCount: (ctx.state.afterAttemptCount ?? 0) + 1 },
+      },
+    };
+  },
+};
+`,
+  );
+  writeAssignment(
+    dir,
+    "three-work",
+    `---
+schemaVersion: 1
+name: three-work
+maxRetries: 2
+hooks:
+  beforeAttempt:
+    - name: before-attempt-note
+  afterAttempt:
+    - name: reinvoke-after-attempt
+tasks:
+  - id: t1
+    title: First
+  - id: t2
+    title: Second
+---
+Work.
+`,
+  );
+
+  const prompts = [];
+  const notesSeenByBackend = [];
+  let manifestPath = null;
+  let invocations = 0;
+  const { outcome } = await runWithMock(
+    dir,
+    async (ctx) => {
+      invocations++;
+      prompts.push(ctx.prompt);
+      if (!manifestPath) {
+        manifestPath = join(resolveRunFromPrompt(ctx.prompt, dir).workspaceDir, "run.json");
+      }
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+      notesSeenByBackend.push(manifest.note);
+      if (invocations === 1) {
+        manifest.finalTasks.t1.status = "completed";
+        manifest.tasksCompleted = 1;
+      } else {
+        manifest.finalTasks.t1.status = "completed";
+        manifest.finalTasks.t2.status = "completed";
+        manifest.tasksCompleted = 2;
+      }
+      writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "session-after-attempt",
+        transcript: `attempt ${invocations}`,
+        rawStdout: "",
+        rawStderr: "",
+      };
+    },
+    {},
+    { assignmentName: "three-work", backendId: "claude" },
+  );
+
+  assert.equal(invocations, 2);
+  assert.deepEqual(notesSeenByBackend, ["before-attempt-1", "before-attempt-2"]);
+  assert.equal(prompts[1], "Follow up from afterAttempt hook");
+  assert.equal(outcome.manifest.note, "before-attempt-2");
+  assert.equal(outcome.manifest.hookState.beforeAttemptCount, 2);
+  assert.equal(outcome.manifest.hookState.afterAttemptCount, 2);
+  assert.ok(
+    outcome.manifest.hookAudits.some(
+      (audit) => audit.phase === "afterAttempt" && audit.outcome === "reinvoke",
+    ),
+  );
+});
+
+test("afterExit hooks persist terminal note and task patches", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  writeNamedHook(
+    dir,
+    "after-exit-note",
+    `export default {
+  name: "after-exit-note",
+  afterExit() {
+    return {
+      action: "continue",
+      mutate: {
+        note: "after-exit-ran",
+        patchTasks: [{ taskId: "t1", notesAppend: "after-exit note" }],
+        state: { afterExitRan: true },
+      },
+    };
+  },
+};
+`,
+  );
+  writeAssignment(
+    dir,
+    "three-work",
+    `---
+schemaVersion: 1
+name: three-work
+hooks:
+  afterExit:
+    - name: after-exit-note
+tasks:
+  - id: t1
+    title: First
+---
+Work.
+`,
+  );
+
+  const { outcome } = await runWithMock(
+    dir,
+    async (ctx) => {
+      setTaskStatusesForPrompt(ctx.prompt, { t1: "completed" }, dir);
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "session-after-exit",
+        transcript: "done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    },
+    {},
+    { assignmentName: "three-work", backendId: "claude" },
+  );
+
+  const manifest = JSON.parse(readFileSync(join(outcome.workspaceDir, "run.json"), "utf8"));
+  assert.equal(manifest.status, "success");
+  assert.equal(manifest.note, "after-exit-ran");
+  assert.equal(manifest.hookState.afterExitRan, true);
+  assert.equal(manifest.finalTasks.t1.notes, "after-exit note");
+  assert.ok(
+    manifest.hookAudits.some(
+      (audit) => audit.phase === "afterExit" && audit.outcome === "continue",
+    ),
   );
 });
 
