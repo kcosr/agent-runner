@@ -91,10 +91,12 @@ Field surfaces are split explicitly:
   `name`, `backend`, `model`, `effort`, `timeoutSec`, `unrestricted`,
   `cwd`, `maxRetries`, task ids, lock entries, var metadata, and Codex
   transport leaf fields.
-- Prose fields allow partial interpolation inside a larger string. This
-  includes assignment `message`, `callerInstructions`, task titles and
-  bodies, var descriptions, and the markdown body text for agent and
-  assignment instructions.
+- String prose fields accept env interpolation only when the entire field
+  value is exactly one `${...}` expression. This includes assignment
+  `message`, `callerInstructions`, task titles and bodies, var
+  descriptions, and the markdown body text for agent and assignment
+  instructions. Partial `${...}` inside a larger prose string is left
+  literal.
 - Object and array containers do not accept blob replacement. `${...}`
   cannot inject YAML or JSON into `backendSpecific`, `vars`, `tasks`, or
   `lockedFields`.

@@ -151,27 +151,32 @@ state is canonical in the run manifest — not in the assignment file.
 
 Assignment frontmatter uses the same config-time `${...}` loader pass.
 Typed fields such as `cwd`, `maxRetries`, task ids, var metadata, and lock
-entries require exact-match env expressions. Prose fields such as
-`message`, `callerInstructions`, var descriptions, and task title/body may
-embed `${...}` within larger strings:
+entries require exact-match env expressions. String prose fields such as
+`message`, `callerInstructions`, var descriptions, task title/body, and
+the markdown body text only interpolate when the whole field is exactly one
+`${...}` expression; partial `${...}` inside a larger prose string stays
+literal:
 
 ```yaml
 ---
 cwd: ${WORKTREE_DIR}
 maxRetries: ${MAX_RETRIES:-3}
-message: Review ${TARGET_BRANCH} before shipping
-callerInstructions: Check ${ENVIRONMENT} first
+message: ${MESSAGE_TEXT}
+callerInstructions: ${CALLER_TEXT}
 vars:
   retries:
     type: number
     default: ${DEFAULT_RETRIES:-5}
-    description: Retry budget for ${ENVIRONMENT}
+    description: ${RETRY_DESCRIPTION}
 tasks:
   - id: review
-    title: Review ${TARGET_BRANCH}
-    body: Validate ${ENVIRONMENT} before merge.
+    title: ${REVIEW_TITLE}
+    body: ${REVIEW_BODY}
 ---
 ```
+
+Literal examples such as `message: Review ${TARGET_BRANCH} before shipping`
+remain authored text; they do not trigger config-time env interpolation.
 
 If a required env var is missing or empty, a typed value cannot be
 coerced, or `${...}` is used on a disabled object or array surface,

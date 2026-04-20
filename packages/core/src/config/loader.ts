@@ -15,8 +15,7 @@ type PathSegment = string | number;
 export type DefinitionKind = "agent" | "assignment";
 type ExactScalarKind = "string" | "number" | "boolean";
 type InterpolationSurface =
-  | { mode: "exact"; scalarKind: ExactScalarKind }
-  | { mode: "prose" }
+  | { mode: "exact"; scalarKind: ExactScalarKind; allowLiteral: boolean }
   | { mode: "disabled" };
 type InterpolationReason = "missing" | "empty" | "invalid syntax" | "mismatch with field surface";
 
@@ -103,23 +102,23 @@ function classifyAgentSurface(path: PathSegment[]): InterpolationSurface {
   if (path.length === 1) {
     switch (path[0]) {
       case "schemaVersion":
-        return { mode: "exact", scalarKind: "number" };
+        return { mode: "exact", scalarKind: "number", allowLiteral: false };
       case "name":
       case "backend":
       case "model":
       case "effort":
-        return { mode: "exact", scalarKind: "string" };
+        return { mode: "exact", scalarKind: "string", allowLiteral: false };
       case "timeoutSec":
-        return { mode: "exact", scalarKind: "number" };
+        return { mode: "exact", scalarKind: "number", allowLiteral: false };
       case "unrestricted":
-        return { mode: "exact", scalarKind: "boolean" };
+        return { mode: "exact", scalarKind: "boolean", allowLiteral: false };
       default:
         return { mode: "disabled" };
     }
   }
 
   if (path.length === 2 && path[0] === "lockedFields" && typeof path[1] === "number") {
-    return { mode: "exact", scalarKind: "string" };
+    return { mode: "exact", scalarKind: "string", allowLiteral: false };
   }
 
   if (
@@ -132,7 +131,7 @@ function classifyAgentSurface(path: PathSegment[]): InterpolationSurface {
     switch (path[3]) {
       case "type":
       case "url":
-        return { mode: "exact", scalarKind: "string" };
+        return { mode: "exact", scalarKind: "string", allowLiteral: false };
       default:
         return { mode: "disabled" };
     }
@@ -145,31 +144,31 @@ function classifyAssignmentSurface(path: PathSegment[]): InterpolationSurface {
   if (path.length === 1) {
     switch (path[0]) {
       case "schemaVersion":
-        return { mode: "exact", scalarKind: "number" };
+        return { mode: "exact", scalarKind: "number", allowLiteral: false };
       case "name":
       case "cwd":
-        return { mode: "exact", scalarKind: "string" };
+        return { mode: "exact", scalarKind: "string", allowLiteral: false };
       case "message":
       case "callerInstructions":
-        return { mode: "prose" };
+        return { mode: "exact", scalarKind: "string", allowLiteral: true };
       case "maxRetries":
-        return { mode: "exact", scalarKind: "number" };
+        return { mode: "exact", scalarKind: "number", allowLiteral: false };
       default:
         return { mode: "disabled" };
     }
   }
 
   if (path.length === 2 && path[0] === "lockedFields" && typeof path[1] === "number") {
-    return { mode: "exact", scalarKind: "string" };
+    return { mode: "exact", scalarKind: "string", allowLiteral: false };
   }
 
   if (path.length === 3 && path[0] === "tasks" && typeof path[1] === "number") {
     switch (path[2]) {
       case "id":
-        return { mode: "exact", scalarKind: "string" };
+        return { mode: "exact", scalarKind: "string", allowLiteral: false };
       case "title":
       case "body":
-        return { mode: "prose" };
+        return { mode: "exact", scalarKind: "string", allowLiteral: true };
       default:
         return { mode: "disabled" };
     }
@@ -183,18 +182,18 @@ function classifyAssignmentSurface(path: PathSegment[]): InterpolationSurface {
         case "envName":
         case "default":
         case "requiredAt":
-          return { mode: "exact", scalarKind: "string" };
+          return { mode: "exact", scalarKind: "string", allowLiteral: false };
         case "required":
-          return { mode: "exact", scalarKind: "boolean" };
+          return { mode: "exact", scalarKind: "boolean", allowLiteral: false };
         case "description":
-          return { mode: "prose" };
+          return { mode: "exact", scalarKind: "string", allowLiteral: true };
         default:
           return { mode: "disabled" };
       }
     }
 
     if (path.length === 4 && path[2] === "values" && typeof path[3] === "number") {
-      return { mode: "exact", scalarKind: "string" };
+      return { mode: "exact", scalarKind: "string", allowLiteral: false };
     }
   }
 
@@ -204,7 +203,7 @@ function classifyAssignmentSurface(path: PathSegment[]): InterpolationSurface {
         case "builtin":
         case "name":
         case "path":
-          return { mode: "exact", scalarKind: "string" };
+          return { mode: "exact", scalarKind: "string", allowLiteral: false };
         default:
           return { mode: "disabled" };
       }
@@ -215,7 +214,7 @@ function classifyAssignmentSurface(path: PathSegment[]): InterpolationSurface {
       typeof path[2] === "number" &&
       (path[3] === "with" || path[3] === "when")
     ) {
-      return { mode: "prose" };
+      return { mode: "exact", scalarKind: "string", allowLiteral: true };
     }
   }
 
@@ -224,7 +223,7 @@ function classifyAssignmentSurface(path: PathSegment[]): InterpolationSurface {
 
 function classifySurface(kind: DefinitionKind, path: PathSegment[]): InterpolationSurface {
   if (path.length === 1 && path[0] === "instructions") {
-    return { mode: "prose" };
+    return { mode: "exact", scalarKind: "string", allowLiteral: true };
   }
   return kind === "agent" ? classifyAgentSurface(path) : classifyAssignmentSurface(path);
 }
@@ -385,8 +384,33 @@ function coerceExactScalar(
   );
 }
 
+function tryParseWholeEnvExpression(
+  input: string,
+  kind: DefinitionKind,
+  path: PathSegment[],
+): EnvExpression | null {
+  if (!input.startsWith("${") || !input.endsWith("}")) {
+    return null;
+  }
+
+  const parts = parseInterpolatedString(input, kind, path);
+  if (parts.length !== 1 || parts[0]?.type !== "expression") {
+    return null;
+  }
+  return parts[0].expression;
+}
+
 function interpolateStringValue(input: string, kind: DefinitionKind, path: PathSegment[]): unknown {
   const surface = classifySurface(kind, path);
+  if (surface.mode === "exact" && surface.allowLiteral) {
+    const wholeExpression = tryParseWholeEnvExpression(input, kind, path);
+    if (wholeExpression === null) {
+      return input;
+    }
+    const resolved = resolveEnvExpressionValue(wholeExpression, kind, path);
+    return coerceExactScalar(resolved, surface.scalarKind, kind, path, wholeExpression.envName);
+  }
+
   const parts = parseInterpolatedString(input, kind, path);
   let expressionCount = 0;
   let firstExpression: EnvExpression | null = null;
@@ -425,15 +449,7 @@ function interpolateStringValue(input: string, kind: DefinitionKind, path: PathS
     return coerceExactScalar(resolved, surface.scalarKind, kind, path, onlyPart.expression.envName);
   }
 
-  let output = "";
-  for (const part of parts) {
-    if (part.type === "text") {
-      output += part.value;
-      continue;
-    }
-    output += resolveEnvExpressionValue(part.expression, kind, path);
-  }
-  return output;
+  return input;
 }
 
 function interpolateConfigTree(
@@ -469,7 +485,12 @@ function interpolateConfigTree(
 }
 
 function interpolateDefinitionInstructions(instructions: string, kind: DefinitionKind): string {
-  const resolved = interpolateStringValue(instructions, kind, ["instructions"]);
+  const trimmed = instructions.trim();
+  if (trimmed.length === 0) {
+    return "";
+  }
+
+  const resolved = interpolateStringValue(trimmed, kind, ["instructions"]);
   return typeof resolved === "string" ? resolved.trim() : String(resolved).trim();
 }
 
