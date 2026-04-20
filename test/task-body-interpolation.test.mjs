@@ -155,13 +155,14 @@ test("task body var uses the assignment's default when no CLI value", async () =
   assert.match(t1.body, /Scope is\s+`full`\./);
 });
 
-test("workspace assignment.md is not generated for interpolated task bodies", async () => {
+test("workspace assignment-seed.md is generated for interpolated task bodies", async () => {
   const dir = tempDir();
   writeAgent(dir, "interp", INTERP_AGENT);
   writeAssignment(dir, "interp-work", INTERP_ASSIGNMENT);
 
   const outcome = await runIn(dir, { repo_path: "/tmp/fake-repo", scope: "staged" });
-  assert.equal(existsSync(join(outcome.workspaceDir, "assignment.md")), false);
+  assert.equal(outcome.assignmentPath, join(outcome.workspaceDir, "assignment-seed.md"));
+  assert.equal(existsSync(outcome.assignmentPath), true);
   assert.match(
     outcome.manifest.finalTasks.t1.body,
     /Work against the repository at `\/tmp\/fake-repo`/,

@@ -181,9 +181,9 @@ function moveRunToRepoBucket(baseDir, workspaceDir, repo) {
   patchManifest(nextWorkspaceDir, (manifest) => {
     manifest.repo = repo;
     manifest.workspaceDir = nextWorkspaceDir;
-    manifest.assignmentPath = join(nextWorkspaceDir, "assignment.md");
+    manifest.assignmentPath = join(nextWorkspaceDir, "assignment-seed.md");
     if (manifest.assignment) {
-      manifest.assignment.workspacePath = join(nextWorkspaceDir, "assignment.md");
+      manifest.assignment.workspacePath = join(nextWorkspaceDir, "assignment-seed.md");
     }
   });
   return nextWorkspaceDir;
@@ -693,7 +693,7 @@ test("command services: listRuns keeps persisted progress for terminal and runni
   });
 });
 
-test("command services: listRuns tolerates missing workspace assignment artifacts", async () => {
+test("command services: listRuns tolerates workspace assignment seed artifacts", async () => {
   const dir = tempDir();
   writeBundle(dir);
   const outcome = await initRun(dir);
@@ -706,7 +706,7 @@ test("command services: listRuns tolerates missing workspace assignment artifact
     manifest.finalTasks.t2.status = "pending";
     manifest.tasksCompleted = 0;
   });
-  assert.equal(existsSync(outcome.assignmentPath), false);
+  assert.equal(existsSync(outcome.assignmentPath), true);
 
   await withSharedRuntimeEnv(dir, async () => {
     const run = listRuns({ includeArchived: true }).find((entry) => entry.runId === outcome.runId);
@@ -934,11 +934,11 @@ test("command services: listRuns supports exact cwd scope, repo scope, and unsco
   otherManifest.repo = "other-repo";
   otherManifest.cwd = join(dir, "other-repo-cwd");
   otherManifest.workspaceDir = otherWorkspaceDir;
-  otherManifest.assignmentPath = join(otherWorkspaceDir, "assignment.md");
+  otherManifest.assignmentPath = join(otherWorkspaceDir, "assignment-seed.md");
   otherManifest.startedAt = "2026-04-12T09:00:00.000Z";
   otherManifest.archivedAt = null;
   writeFileSync(join(otherWorkspaceDir, "run.json"), `${JSON.stringify(otherManifest, null, 2)}\n`);
-  writeFileSync(otherManifest.assignmentPath, "# Assignment\n");
+  writeFileSync(otherManifest.assignmentPath, "# Assignment seed\n");
 
   mkdirSync(join(dir, "runs", "broken-repo", "bad999"), { recursive: true });
   writeFileSync(join(dir, "runs", "broken-repo", "bad999", "run.json"), "{not json\n");

@@ -148,11 +148,11 @@ test("list runs scopes to cwd by default and supports explicit cwd, repo, global
   otherManifest.repo = "other-repo";
   otherManifest.cwd = join(dir, "other-repo-cwd");
   otherManifest.workspaceDir = otherWorkspaceDir;
-  otherManifest.assignmentPath = join(otherWorkspaceDir, "assignment.md");
+  otherManifest.assignmentPath = join(otherWorkspaceDir, "assignment-seed.md");
   otherManifest.startedAt = "2026-04-12T09:00:00.000Z";
   otherManifest.archivedAt = null;
   writeFileSync(join(otherWorkspaceDir, "run.json"), `${JSON.stringify(otherManifest, null, 2)}\n`);
-  writeFileSync(otherManifest.assignmentPath, "# Assignment\n");
+  writeFileSync(otherManifest.assignmentPath, "# Assignment seed\n");
 
   mkdirSync(join(dir, "runs", "broken", "bad111"), { recursive: true });
   writeFileSync(join(dir, "runs", "broken", "bad111", "run.json"), "{ bad json\n");

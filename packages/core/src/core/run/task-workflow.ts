@@ -33,7 +33,7 @@ notes:
 Check overall run status at any time:
    \`{{task_runner_cmd}} run status {{run_id}}\`
 
-Use the task CLI as the task interface for this run. \`assignment.md\`
+Use the task CLI as the task interface for this run. \`assignment-seed.md\`
 may exist on disk for human audit, but it is not your work surface.`;
 
 export function buildAddedTasksReminder(addedCount: number, runId: string): string {

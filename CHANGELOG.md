@@ -8,6 +8,9 @@
   descriptors plus prepare-time hook outputs (`resolvedHooks`,
   `hookState`, `hookAudits`) into the manifest and reset seed, and older
   pre-hook runs must be recreated or upgraded out-of-band before resume.
+  Schema v9 also freezes workspace assignment capture at
+  `assignment-seed.md` for both `assignmentPath` and
+  `assignment.workspacePath`.
   ([#66](https://github.com/kcosr/task-runner/pull/66))
 - Config-time `${...}` interpolation in prose-like definition fields now
   only applies when the whole field is a single `${...}` expression.
@@ -46,6 +49,11 @@
   hooks and a separate prepare-only `git-sync-base` built-in for
   rebasing a clean current branch onto an explicit base ref before work
   begins. ([#66](https://github.com/kcosr/task-runner/pull/66))
+- Added `scripts/migrate-manifests-v9.mjs` to promote schema v8 run
+  manifests to schema v9 and canonicalize repairable schema v9 manifests
+  by backfilling hook descriptor/state/audit surfaces, repairing
+  `assignment-seed.md` workspace capture paths, and expanding the frozen
+  `resetSeed` shape current resume/discovery expects.
 - Added SSH-assisted connected CLI mode with `--connect-host` /
   `TASK_RUNNER_CONNECT_HOST` and `--connect-local-port` /
   `TASK_RUNNER_CONNECT_LOCAL_PORT`, so daemon-targeted commands can keep a

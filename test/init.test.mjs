@@ -139,8 +139,8 @@ test("init: persists workspace seed and manifest without invoking the backend", 
   assert.equal(outcome.manifest.cwd, join(dir, "repo-root"));
   assert.equal(outcome.manifest.repo, "unknown");
 
-  assert.ok(!existsSync(outcome.assignmentPath), "workspace assignment.md is not generated");
-  assert.ok(existsSync(join(outcome.workspaceDir, "assignment-seed.md")), "workspace seed exists");
+  assert.equal(outcome.assignmentPath, join(outcome.workspaceDir, "assignment-seed.md"));
+  assert.ok(existsSync(outcome.assignmentPath), "workspace seed exists");
 
   // brief is stored verbatim
   assert.ok(outcome.manifest.brief, "brief is set");

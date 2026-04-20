@@ -305,7 +305,7 @@ export function manifestPath(workspaceDir: string): string {
 }
 
 export function workspaceAssignmentPath(workspaceDir: string): string {
-  return join(workspaceDir, "assignment.md");
+  return join(workspaceDir, "assignment-seed.md");
 }
 
 export class ResumeError extends Error {
@@ -408,15 +408,11 @@ export function resolveResumeTarget(
     if (!existsSync(candidate)) continue;
     const parsed = readManifestCandidate(candidate);
     const resolvedWorkspaceDir = dirname(candidate);
-    const expectedAssignmentPath = workspaceAssignmentPath(resolvedWorkspaceDir);
+    // workspaceDir is the discovery/resume identity anchor. assignmentPath is
+    // frozen audit metadata, not a lookup invariant.
     if (parsed.workspaceDir !== resolvedWorkspaceDir) {
       throw new ResumeError(
         `manifest at ${candidate} has workspaceDir "${parsed.workspaceDir}", but it was loaded from "${resolvedWorkspaceDir}"`,
-      );
-    }
-    if (parsed.assignmentPath !== expectedAssignmentPath) {
-      throw new ResumeError(
-        `manifest at ${candidate} has assignmentPath "${parsed.assignmentPath}", but expected "${expectedAssignmentPath}"`,
       );
     }
     return { workspaceDir: resolvedWorkspaceDir, manifest: parsed };
@@ -460,10 +456,9 @@ export function listRunManifests(env: NodeJS.ProcessEnv = process.env): ListedRu
       if (!existsSync(candidate)) continue;
       try {
         const manifest = readManifestCandidate(candidate);
-        if (
-          manifest.workspaceDir !== workspaceDir ||
-          manifest.assignmentPath !== workspaceAssignmentPath(workspaceDir)
-        ) {
+        // workspaceDir anchors manifest identity during discovery. Persisted
+        // assignmentPath captures audit metadata and is not required to match.
+        if (manifest.workspaceDir !== workspaceDir) {
           continue;
         }
         runs.push({ workspaceDir, manifest });
@@ -505,10 +500,9 @@ export function findRunManifestsById(
     }
     try {
       const manifest = readManifestCandidate(candidate);
-      if (
-        manifest.workspaceDir !== workspaceDir ||
-        manifest.assignmentPath !== workspaceAssignmentPath(workspaceDir)
-      ) {
+      // workspaceDir anchors manifest identity during discovery. Persisted
+      // assignmentPath captures audit metadata and is not required to match.
+      if (manifest.workspaceDir !== workspaceDir) {
         continue;
       }
       matches.push({ workspaceDir, manifest });
