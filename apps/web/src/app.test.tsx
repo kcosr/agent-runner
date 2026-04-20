@@ -1193,16 +1193,17 @@ describe("web app", () => {
       stickyControls?.querySelector('[role="tablist"][aria-label="Attempt view"]'),
     ).not.toBeNull();
 
-    const output = await screen.findByRole("region", { name: "Attempt output" });
-    expect(output).toHaveTextContent("Streaming");
-    expect(within(output).getByText("warning")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Response" })).toHaveAttribute("aria-selected", "true");
+    const response = await screen.findByRole("region", { name: "Attempt response" });
+    expect(response).toHaveTextContent("Streaming");
+    expect(response).not.toHaveTextContent("warning");
 
     const scrollRegion = setTimelineScrollGeometry({
       clientHeight: 120,
       scrollHeight: 280,
       scrollTop: 160,
     });
-    expect(scrollRegion.querySelector('[aria-label="Attempt output"]')).not.toBeNull();
+    expect(scrollRegion.querySelector('[aria-label="Attempt response"]')).not.toBeNull();
 
     await user.click(screen.getByRole("tab", { name: "Prompt" }));
     const prompt = screen.getByRole("region", { name: "Attempt prompt" });
@@ -1210,7 +1211,12 @@ describe("web app", () => {
       within(prompt).getByRole("heading", { level: 2, name: "Continue working" }),
     ).toBeInTheDocument();
 
-    await user.click(screen.getByRole("tab", { name: "Output" }));
+    await user.click(screen.getByRole("tab", { name: "Diagnostics" }));
+    const diagnostics = screen.getByRole("region", { name: "Attempt diagnostics" });
+    expect(diagnostics).toHaveTextContent("warning");
+    expect(diagnostics).not.toHaveTextContent("Streaming");
+
+    await user.click(screen.getByRole("tab", { name: "Response" }));
     setTimelineScrollGeometry({
       clientHeight: 120,
       scrollHeight: 280,
@@ -1227,8 +1233,8 @@ describe("web app", () => {
     defineElementMetric(scrollRegion, "scrollHeight", 360);
 
     await waitFor(() => {
-      expect(screen.getByRole("region", { name: "Attempt output" })).toHaveTextContent(
-        "Streaming live warning",
+      expect(screen.getByRole("region", { name: "Attempt response" })).toHaveTextContent(
+        "Streaming live",
       );
     });
     await waitFor(() => {
@@ -1249,8 +1255,8 @@ describe("web app", () => {
     defineElementMetric(scrollRegion, "scrollHeight", 420);
 
     await waitFor(() => {
-      expect(screen.getByRole("region", { name: "Attempt output" })).toHaveTextContent(
-        "Streaming live detached warning",
+      expect(screen.getByRole("region", { name: "Attempt response" })).toHaveTextContent(
+        "Streaming live detached",
       );
     });
     expect(scrollRegion.scrollTop).toBe(32);
@@ -1296,14 +1302,18 @@ describe("web app", () => {
     expect(screen.getByRole("tablist", { name: "Attempt view" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Message" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Prompt" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Output" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Response" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Diagnostics" })).toBeInTheDocument();
     expect(screen.getByText("Review this handoff before launch.")).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Prompt" }));
     expect(screen.getByRole("heading", { level: 2, name: "Prepared prompt" })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("tab", { name: "Output" }));
-    expect(screen.getByText("No output yet — this run has not started.")).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "Response" }));
+    expect(screen.getByText("No response yet — this run has not started.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Diagnostics" }));
+    expect(screen.getByText("No diagnostics yet — this run has not started.")).toBeInTheDocument();
 
     const detailSource = findEventSource("/api/runs/run-1/events/detail");
     detailSource.emitOpen();
@@ -1348,9 +1358,12 @@ describe("web app", () => {
     });
     expect(screen.getByRole("tab", { name: "Message" })).toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.getByRole("tab", { name: "Output" })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("tab", { name: "Response" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
     });
-    expect(screen.getByText("Waiting for live output…")).toBeInTheDocument();
+    expect(screen.getByText("Waiting for live response text…")).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Message" }));
     expect(screen.getByRole("tab", { name: "Message" })).toHaveAttribute("aria-selected", "true");
@@ -1360,9 +1373,12 @@ describe("web app", () => {
 
     await user.click(screen.getByRole("tab", { name: "Prompt" }));
     expect(screen.getByRole("heading", { level: 2, name: "Attempt prompt" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Diagnostics" }));
+    expect(screen.getByText("No diagnostics have arrived yet.")).toBeInTheDocument();
   });
 
-  it("auto-selects a newly started attempt and switches to output while viewing attempts", async () => {
+  it("auto-selects a newly started attempt and switches to response while viewing attempts", async () => {
     installFetchMock({
       runs: [makeRun()],
       details: { "run-1": makeDetail() },
@@ -1426,8 +1442,8 @@ describe("web app", () => {
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: "3" })).toHaveAttribute("aria-selected", "true");
     });
-    expect(screen.getByRole("tab", { name: "Output" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByText("Waiting for live output…")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Response" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("Waiting for live response text…")).toBeInTheDocument();
   });
 
   it("separates transcript and backend notices instead of gluing them together", async () => {
@@ -1464,13 +1480,74 @@ describe("web app", () => {
     const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
     timelineSource.emitOpen();
 
-    const output = await screen.findByRole("region", { name: "Attempt output" });
-    expect(output).not.toHaveTextContent("nullable access:Good");
-    expect(within(output).getByText("nullable access:")).toBeInTheDocument();
+    const response = await screen.findByRole("region", { name: "Attempt response" });
+    expect(response).toHaveTextContent("nullable access:");
+    expect(response).not.toHaveTextContent("Good - assignment is indeed nullable on RunDetail.");
+
+    await user.click(screen.getByRole("tab", { name: "Diagnostics" }));
+    const diagnostics = screen.getByRole("region", { name: "Attempt diagnostics" });
     expect(
-      within(output).getByText("Good - assignment is indeed nullable on RunDetail."),
+      within(diagnostics).getByText("Good - assignment is indeed nullable on RunDetail."),
     ).toBeInTheDocument();
-    expect(within(output).getByText("Now the next note.")).toBeInTheDocument();
+    expect(within(diagnostics).getByText("Now the next note.")).toBeInTheDocument();
+    expect(diagnostics).not.toHaveTextContent("nullable access:");
+  });
+
+  it("shows split empty states for completed attempts without transcript or diagnostics", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+      timelineHistories: {
+        "run-1": {
+          runId: "run-1",
+          lastCursor: 1,
+          attempts: [
+            {
+              attempt: 1,
+              sessionIndex: 0,
+              startedAt: "2026-04-13T05:00:00.000Z",
+              endedAt: "2026-04-13T05:02:00.000Z",
+              prompt: "Prompt",
+              transcript: "",
+              notices: "",
+              exitCode: 0,
+              timedOut: false,
+              live: false,
+            },
+          ],
+        },
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+    await user.click(screen.getByRole("button", { name: "Attempts" }));
+
+    const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
+    timelineSource.emitOpen();
+
+    expect(
+      await screen.findByText("This attempt produced no transcript response."),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Diagnostics" }));
+    expect(screen.getByText("This attempt produced no diagnostics.")).toBeInTheDocument();
+  });
+
+  it("uses a scrollable single-line run-section tab strip in the drawer", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+
+    const runSections = await screen.findByRole("navigation", { name: "Run sections" });
+    expect(runSections).toHaveClass("tabs", "tabs--scrollable");
+    expect(runSections.querySelectorAll(":scope > .tab")).toHaveLength(5);
   });
 
   it("reloads timeline history after a cursor gap instead of merging heuristically", async () => {
@@ -1519,7 +1596,7 @@ describe("web app", () => {
     const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
     timelineSource.emitOpen();
 
-    expect(await screen.findByRole("region", { name: "Attempt output" })).toHaveTextContent(
+    expect(await screen.findByRole("region", { name: "Attempt response" })).toHaveTextContent(
       "Before gap",
     );
 
@@ -1544,7 +1621,7 @@ describe("web app", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByRole("region", { name: "Attempt output" })).toHaveTextContent(
+      expect(screen.getByRole("region", { name: "Attempt response" })).toHaveTextContent(
         "After reload",
       );
     });

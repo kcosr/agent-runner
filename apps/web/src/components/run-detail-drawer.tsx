@@ -40,7 +40,7 @@ import { RunNoteEditor } from "./run-note-editor.js";
 import { RunTaskList } from "./run-task-list.js";
 import { StatusBadge } from "./status-badge.js";
 
-type TimelineTab = "message" | "prompt" | "output";
+type TimelineTab = "message" | "prompt" | "response" | "diagnostics";
 type AttemptSelection = number | "pending" | null;
 type SummaryRow = readonly [label: string, value: string];
 
@@ -125,34 +125,6 @@ function SummaryLongRow({
       <div className="meta-row">{children}</div>
     </div>
   );
-}
-
-function attemptOutput(attempt: {
-  transcript: string;
-  notices: string;
-}) {
-  if (!attempt.transcript || !attempt.notices) {
-    return `${attempt.transcript}${attempt.notices}`;
-  }
-
-  let trailing = 0;
-  for (let index = attempt.transcript.length - 1; index >= 0; index--) {
-    if (attempt.transcript[index] !== "\n") {
-      break;
-    }
-    trailing += 1;
-  }
-
-  let leading = 0;
-  for (const character of attempt.notices) {
-    if (character !== "\n") {
-      break;
-    }
-    leading += 1;
-  }
-
-  const separator = "\n".repeat(Math.max(0, 2 - trailing - leading));
-  return `${attempt.transcript}${separator}${attempt.notices}`;
 }
 
 function isScrolledToBottom(element: HTMLElement) {
@@ -295,11 +267,11 @@ export function RunDetailDrawer({
   const drawerBodyRef = useRef<HTMLDivElement | null>(null);
   const sectionTabsRef = useRef<HTMLElement | null>(null);
   const timelineContentScrollRef = useRef<HTMLDivElement | null>(null);
-  const timelineOutputAtBottomRef = useRef(false);
+  const timelineResponseAtBottomRef = useRef(false);
   const latestAttemptRef = useRef<number | null>(null);
   const [selectedAttempt, setSelectedAttempt] = useState<AttemptSelection>(null);
   const [timelineTab, setTimelineTab] = useState<TimelineTab>(
-    run.status === "initialized" && run.attempts === 0 ? "message" : "output",
+    run.status === "initialized" && run.attempts === 0 ? "message" : "response",
   );
   const [editingName, setEditingName] = useState(false);
   const [editingBackendSession, setEditingBackendSession] = useState(false);
@@ -399,10 +371,9 @@ export function RunDetailDrawer({
     timelineAttempts[timelineAttempts.length - 1] ??
     null;
   const selectedPendingAttempt = pendingAttemptAvailable && selectedAttemptRecord === null;
-  const effectiveTimelineTab =
-    timelineTab === "message" || timelineTab === "prompt" ? timelineTab : "output";
   const selectedAttemptNumber = selectedAttemptRecord?.attempt ?? null;
-  const selectedAttemptOutput = selectedAttemptRecord ? attemptOutput(selectedAttemptRecord) : "";
+  const selectedAttemptResponse = selectedAttemptRecord?.transcript ?? "";
+  const selectedAttemptDiagnostics = selectedAttemptRecord?.notices ?? "";
   const selectedAttemptLive = selectedAttemptRecord?.live ?? false;
 
   function startNameEdit() {
@@ -571,7 +542,7 @@ export function RunDetailDrawer({
     if (latestAttemptRef.current !== latestAttempt) {
       latestAttemptRef.current = latestAttempt;
       setSelectedAttempt(latestAttempt);
-      setTimelineTab("output");
+      setTimelineTab("response");
       return;
     }
     latestAttemptRef.current = latestAttempt;
@@ -636,22 +607,22 @@ export function RunDetailDrawer({
     };
   }, []);
 
-  // Seed the "at bottom" ref whenever the output tab is (re)activated for an
+  // Seed the "at bottom" ref whenever the response tab is (re)activated for an
   // attempt, so the live-stream follow check reflects the user's actual
   // position instead of a defaulted value.
   useEffect(() => {
     if (
       activeSection !== "events" ||
-      effectiveTimelineTab !== "output" ||
+      timelineTab !== "response" ||
       selectedAttemptNumber === null
     ) {
       return;
     }
     const element = timelineContentScrollRef.current;
     if (element) {
-      timelineOutputAtBottomRef.current = isScrolledToBottom(element);
+      timelineResponseAtBottomRef.current = isScrolledToBottom(element);
     }
-  }, [activeSection, effectiveTimelineTab, selectedAttemptNumber]);
+  }, [activeSection, timelineTab, selectedAttemptNumber]);
 
   // While the selected attempt is live, whenever the transcript grows, keep
   // the scroll pinned to the bottom if the user was already at the bottom.
@@ -659,7 +630,7 @@ export function RunDetailDrawer({
   useEffect(() => {
     if (
       activeSection !== "events" ||
-      effectiveTimelineTab !== "output" ||
+      timelineTab !== "response" ||
       selectedAttemptNumber === null
     ) {
       return;
@@ -667,10 +638,10 @@ export function RunDetailDrawer({
     if (!selectedAttemptLive) {
       return;
     }
-    if (!selectedAttemptOutput) {
+    if (!selectedAttemptResponse) {
       return;
     }
-    if (!timelineOutputAtBottomRef.current) {
+    if (!timelineResponseAtBottomRef.current) {
       return;
     }
     const element = timelineContentScrollRef.current;
@@ -680,10 +651,10 @@ export function RunDetailDrawer({
     scrollElementToBottom(element);
   }, [
     activeSection,
-    effectiveTimelineTab,
+    timelineTab,
     selectedAttemptLive,
     selectedAttemptNumber,
-    selectedAttemptOutput,
+    selectedAttemptResponse,
   ]);
 
   async function submitDependencyAdd() {
@@ -872,10 +843,10 @@ export function RunDetailDrawer({
 
   function handleTimelineContentScroll() {
     const element = timelineContentScrollRef.current;
-    if (!element || effectiveTimelineTab !== "output") {
+    if (!element || timelineTab !== "response") {
       return;
     }
-    timelineOutputAtBottomRef.current = isScrolledToBottom(element);
+    timelineResponseAtBottomRef.current = isScrolledToBottom(element);
   }
 
   function handleResumeMessageKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
@@ -1255,7 +1226,7 @@ export function RunDetailDrawer({
             </div>
           ) : null}
 
-          <nav aria-label="Run sections" className="tabs" ref={sectionTabsRef}>
+          <nav aria-label="Run sections" className="tabs tabs--scrollable" ref={sectionTabsRef}>
             <button
               aria-selected={activeSection === "tasks"}
               className={activeSection === "tasks" ? "tab active" : "tab"}
@@ -1630,10 +1601,8 @@ export function RunDetailDrawer({
 
                       <div className="task-tabs" role="tablist" aria-label="Attempt view">
                         <button
-                          aria-selected={effectiveTimelineTab === "message"}
-                          className={
-                            effectiveTimelineTab === "message" ? "task-tab active" : "task-tab"
-                          }
+                          aria-selected={timelineTab === "message"}
+                          className={timelineTab === "message" ? "task-tab active" : "task-tab"}
                           onClick={() => setTimelineTab("message")}
                           role="tab"
                           type="button"
@@ -1641,10 +1610,8 @@ export function RunDetailDrawer({
                           Message
                         </button>
                         <button
-                          aria-selected={effectiveTimelineTab === "prompt"}
-                          className={
-                            effectiveTimelineTab === "prompt" ? "task-tab active" : "task-tab"
-                          }
+                          aria-selected={timelineTab === "prompt"}
+                          className={timelineTab === "prompt" ? "task-tab active" : "task-tab"}
                           onClick={() => setTimelineTab("prompt")}
                           role="tab"
                           type="button"
@@ -1652,15 +1619,22 @@ export function RunDetailDrawer({
                           Prompt
                         </button>
                         <button
-                          aria-selected={effectiveTimelineTab === "output"}
-                          className={
-                            effectiveTimelineTab === "output" ? "task-tab active" : "task-tab"
-                          }
-                          onClick={() => setTimelineTab("output")}
+                          aria-selected={timelineTab === "response"}
+                          className={timelineTab === "response" ? "task-tab active" : "task-tab"}
+                          onClick={() => setTimelineTab("response")}
                           role="tab"
                           type="button"
                         >
-                          Output
+                          Response
+                        </button>
+                        <button
+                          aria-selected={timelineTab === "diagnostics"}
+                          className={timelineTab === "diagnostics" ? "task-tab active" : "task-tab"}
+                          onClick={() => setTimelineTab("diagnostics")}
+                          role="tab"
+                          type="button"
+                        >
+                          Diagnostics
                         </button>
                       </div>
                     </div>
@@ -1670,7 +1644,7 @@ export function RunDetailDrawer({
                       onScroll={handleTimelineContentScroll}
                       ref={timelineContentScrollRef}
                     >
-                      {effectiveTimelineTab === "message" ? (
+                      {timelineTab === "message" ? (
                         run.message ? (
                           <section aria-label="Run message">
                             <MarkdownContent className="timeline-content" text={run.message} />
@@ -1678,7 +1652,7 @@ export function RunDetailDrawer({
                         ) : (
                           <p className="task-empty">No message was provided for this run.</p>
                         )
-                      ) : effectiveTimelineTab === "prompt" ? (
+                      ) : timelineTab === "prompt" ? (
                         selectedPendingAttempt ? (
                           run.pendingPrompt ? (
                             <section aria-label="Pending prompt">
@@ -1702,20 +1676,37 @@ export function RunDetailDrawer({
                         ) : (
                           <p className="task-empty">This attempt did not record a prompt.</p>
                         )
+                      ) : timelineTab === "response" ? (
+                        selectedPendingAttempt ? (
+                          <p className="task-empty">No response yet — this run has not started.</p>
+                        ) : selectedAttemptResponse ? (
+                          <section aria-label="Attempt response">
+                            <MarkdownContent
+                              className="timeline-content"
+                              text={selectedAttemptResponse}
+                            />
+                          </section>
+                        ) : (
+                          <p className="task-empty">
+                            {selectedAttemptRecord?.live
+                              ? "Waiting for live response text…"
+                              : "This attempt produced no transcript response."}
+                          </p>
+                        )
                       ) : selectedPendingAttempt ? (
-                        <p className="task-empty">No output yet — this run has not started.</p>
-                      ) : selectedAttemptOutput ? (
-                        <section aria-label="Attempt output">
+                        <p className="task-empty">No diagnostics yet — this run has not started.</p>
+                      ) : selectedAttemptDiagnostics ? (
+                        <section aria-label="Attempt diagnostics">
                           <MarkdownContent
                             className="timeline-content"
-                            text={selectedAttemptOutput}
+                            text={selectedAttemptDiagnostics}
                           />
                         </section>
                       ) : (
                         <p className="task-empty">
                           {selectedAttemptRecord?.live
-                            ? "Waiting for live output…"
-                            : "This attempt produced no transcript output."}
+                            ? "No diagnostics have arrived yet."
+                            : "This attempt produced no diagnostics."}
                         </p>
                       )}
                     </div>
