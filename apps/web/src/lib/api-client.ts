@@ -450,9 +450,6 @@ export function createApiClient(config: AppRuntimeConfig) {
       );
       return await response.blob();
     },
-    async readAttachmentBlob(runId: string, attachmentId: string): Promise<Blob> {
-      return await this.downloadAttachment(runId, attachmentId);
-    },
     async readAttachmentText(
       runId: string,
       attachmentId: string,

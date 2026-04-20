@@ -87,7 +87,7 @@ export function AttachmentPreviewDrawer({
       isImagePreviewMediaType(previewMediaType)
         ? {
             kind: "image" as const,
-            blob: await api.readAttachmentBlob(runId, attachmentId),
+            blob: await api.downloadAttachment(runId, attachmentId),
           }
         : {
             kind: "text" as const,
