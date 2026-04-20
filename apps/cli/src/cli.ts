@@ -97,7 +97,7 @@ import {
 } from "./commands/render.js";
 import { DaemonClient, DaemonConnectionError, DaemonRpcError } from "./daemon/client.js";
 import { type ResolvedHostMode, resolveHostMode, resolveListenUrl } from "./daemon/config.js";
-import { type SshTunnelHandle, SshTunnelSetupError, openSshTunnel } from "./daemon/connect-host.js";
+import { SshTunnelSetupError, openSshTunnel } from "./daemon/connect-host.js";
 import {
   daemonAddAttachment,
   daemonDownloadAttachment,
@@ -2016,7 +2016,6 @@ async function main(): Promise<void> {
     process.exit(3);
   }
 
-  let connectUrl: string | undefined;
   let daemonConnect: DaemonConnectContext | undefined;
   try {
     const resolvedHostMode = resolveHostMode(
@@ -2025,7 +2024,6 @@ async function main(): Promise<void> {
       parsed.connectLocalPort,
     );
     if (resolvedHostMode.mode === "daemon") {
-      connectUrl = resolvedHostMode.connectUrl;
       daemonConnect = resolvedHostMode;
     }
   } catch (err) {
@@ -2033,17 +2031,21 @@ async function main(): Promise<void> {
     process.exit(3);
   }
 
-  if (parsed.detach && parsed.command === "run" && parsed.subcommand === undefined && !connectUrl) {
+  if (
+    parsed.detach &&
+    parsed.command === "run" &&
+    parsed.subcommand === undefined &&
+    !daemonConnect
+  ) {
     process.stderr.write(
       "task-runner: --detach requires daemon-connected run execution (--connect or TASK_RUNNER_CONNECT)\n",
     );
     process.exit(3);
   }
 
-  let sshTunnel: SshTunnelHandle | undefined;
   if (daemonConnect?.connectHost) {
     try {
-      sshTunnel = await openSshTunnel(daemonConnect.connectHost);
+      await openSshTunnel(daemonConnect.connectHost);
     } catch (err) {
       exitCommandFailure(err, daemonConnect.connectUrl);
     }
@@ -2130,10 +2132,6 @@ async function main(): Promise<void> {
     await runExecuteCommandDaemon(parsed, daemonConnect);
   } else {
     await runExecuteCommandEmbedded(parsed);
-  }
-
-  if (sshTunnel) {
-    await sshTunnel.close();
   }
 }
 

@@ -51,6 +51,21 @@ runs in one of two modes:
   The CLI opens a WebSocket, makes JSON-RPC calls, and prints the
   response.
 
+Connected mode can optionally add an invocation-scoped SSH tunnel:
+
+- `--connect-host <host>` (or `TASK_RUNNER_CONNECT_HOST`) tells the CLI
+  to run `ssh -N -L 127.0.0.1:<local-port>:<daemon-host>:<daemon-port>`
+  before it dials the daemon.
+- `--connect-local-port <port>` (or `TASK_RUNNER_CONNECT_LOCAL_PORT`)
+  overrides the loopback port used for that local forward. Without it,
+  the CLI reuses the daemon port from `--connect`.
+- The logical `--connect` URL remains the user-facing daemon address in
+  status output and error hints; the tunneled loopback URL is internal.
+- This helper is per-invocation only. Advanced SSH behavior such as jump
+  hosts, identities, or multiplexing belongs in the user's SSH config.
+- `task-runner serve` is still local-only infrastructure and rejects
+  `--connect`, `--connect-host`, and `--connect-local-port`.
+
 Connected mode is how multiple terminals can share state and how the web
 UI and CLI stay in sync. `run --detach` only works in connected mode.
 

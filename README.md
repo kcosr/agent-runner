@@ -173,6 +173,14 @@ CLI commands can either:
 - route through the daemon with `--connect <ws-url>` (or
   `TASK_RUNNER_CONNECT`).
 
+Connected CLI commands can also tunnel through SSH with
+`--connect-host <host>` / `TASK_RUNNER_CONNECT_HOST`. The CLI then keeps
+the logical `--connect` URL for user-facing output while forwarding the
+actual daemon traffic through an invocation-scoped loopback port
+(`--connect-local-port` / `TASK_RUNNER_CONNECT_LOCAL_PORT` overrides the
+default port reuse). Anything more advanced than that belongs in your
+SSH config, not in `task-runner`.
+
 Both modes operate on the same persisted runs. The important difference
 is that connected mode lets the daemon observe and broadcast changes in
 real time, which is how the browser UI stays live as commands mutate

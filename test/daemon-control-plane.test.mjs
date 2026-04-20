@@ -3327,6 +3327,17 @@ test("connect-host reports local port collisions before websocket dialing", asyn
   }
 });
 
+test("serve rejects connect-host tunnel flags", async () => {
+  const dir = tempDir();
+  const failedHost = runCliExpectFail(["serve", "--connect-host", "prod-box"], { cwd: dir });
+  assert.equal(failedHost.status, 3);
+  assert.match(failedHost.stderr, /task-runner: serve does not accept --connect-host/);
+
+  const failedLocalPort = runCliExpectFail(["serve", "--connect-local-port", "5773"], { cwd: dir });
+  assert.equal(failedLocalPort.status, 3);
+  assert.match(failedLocalPort.stderr, /task-runner: serve does not accept --connect-local-port/);
+});
+
 test("serve exposes HTTP/SSE alongside the existing WebSocket RPC transport", async () => {
   const dir = tempDir();
   writeAgent(dir, "daemon-agent", AGENT);

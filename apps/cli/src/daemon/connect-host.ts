@@ -4,6 +4,8 @@ import { Socket, createServer } from "node:net";
 const SSH_READY_TIMEOUT_MS = 5000;
 const SSH_READY_POLL_INTERVAL_MS = 25;
 const SSH_READY_GRACE_MS = 50;
+const SSH_CONNECT_TIMEOUT_MS = 250;
+const SSH_STDERR_LIMIT = 8192;
 
 export class SshTunnelSetupError extends Error {
   constructor(
@@ -22,12 +24,17 @@ export interface SshTunnelOptions {
   targetPort: number;
 }
 
-export interface SshTunnelHandle {
-  close(): Promise<void>;
-}
-
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function formatForwardTargetHost(host: string): string {
+  return host.includes(":") ? `[${host}]` : host;
+}
+
+function appendStderr(stderr: string, chunk: string): string {
+  const next = stderr + chunk;
+  return next.length > SSH_STDERR_LIMIT ? next.slice(-SSH_STDERR_LIMIT) : next;
 }
 
 async function canConnectToLocalPort(localPort: number): Promise<boolean> {
@@ -37,10 +44,16 @@ async function canConnectToLocalPort(localPort: number): Promise<boolean> {
       const cleanup = () => {
         socket.removeAllListeners();
       };
+      socket.setTimeout(SSH_CONNECT_TIMEOUT_MS);
       socket.once("connect", () => {
         cleanup();
         socket.end();
         resolve();
+      });
+      socket.once("timeout", () => {
+        cleanup();
+        socket.destroy();
+        reject(new Error("timed out"));
       });
       socket.once("error", (err) => {
         cleanup();
@@ -83,7 +96,7 @@ function formatSshFailureDetail(stderr: string, fallback: string): string {
   return detail.length > 0 ? detail : fallback;
 }
 
-export async function openSshTunnel(options: SshTunnelOptions): Promise<SshTunnelHandle> {
+export async function openSshTunnel(options: SshTunnelOptions): Promise<void> {
   try {
     await assertLocalPortAvailable(options.localPort);
   } catch (err) {
@@ -102,7 +115,8 @@ export async function openSshTunnel(options: SshTunnelOptions): Promise<SshTunne
       "-o",
       "BatchMode=yes",
       "-L",
-      `127.0.0.1:${options.localPort}:${options.targetHost}:${options.targetPort}`,
+      `127.0.0.1:${options.localPort}:${formatForwardTargetHost(options.targetHost)}:${options.targetPort}`,
+      "--",
       options.host,
     ],
     {
@@ -115,71 +129,53 @@ export async function openSshTunnel(options: SshTunnelOptions): Promise<SshTunne
       child.kill("SIGTERM");
     }
   };
+  const detachCleanupOnExit = () => {
+    process.off("exit", cleanupOnExit);
+  };
   process.once("exit", cleanupOnExit);
+  child.once("exit", () => {
+    closed = true;
+    detachCleanupOnExit();
+  });
 
   child.stderr?.setEncoding("utf8");
   child.stderr?.on("data", (chunk: string) => {
-    stderr += chunk;
+    stderr = appendStderr(stderr, chunk);
   });
   child.once("error", (err: Error) => {
     spawnError = err;
   });
 
+  const fail = (detail: string): never => {
+    closed = true;
+    detachCleanupOnExit();
+    if (child.exitCode === null && !child.killed) {
+      child.kill("SIGTERM");
+    }
+    throw new SshTunnelSetupError(options.host, detail);
+  };
+
   const deadline = Date.now() + SSH_READY_TIMEOUT_MS;
   while (Date.now() < deadline) {
     if (spawnError) {
-      cleanupOnExit();
-      throw new SshTunnelSetupError(options.host, spawnError.message);
+      fail(spawnError.message);
     }
     if (child.exitCode !== null) {
-      cleanupOnExit();
-      throw new SshTunnelSetupError(
-        options.host,
-        formatSshFailureDetail(stderr, `ssh exited with code ${child.exitCode}`),
-      );
+      fail(formatSshFailureDetail(stderr, `ssh exited with code ${child.exitCode}`));
     }
     if (await canConnectToLocalPort(options.localPort)) {
       await sleep(SSH_READY_GRACE_MS);
       const readySpawnError = spawnError as Error | undefined;
       if (readySpawnError) {
-        cleanupOnExit();
-        throw new SshTunnelSetupError(options.host, readySpawnError.message);
+        fail(readySpawnError.message);
       }
       if (child.exitCode !== null) {
-        cleanupOnExit();
-        throw new SshTunnelSetupError(
-          options.host,
-          formatSshFailureDetail(stderr, `ssh exited with code ${child.exitCode}`),
-        );
+        fail(formatSshFailureDetail(stderr, `ssh exited with code ${child.exitCode}`));
       }
-      return {
-        async close() {
-          if (closed) {
-            return;
-          }
-          closed = true;
-          process.off("exit", cleanupOnExit);
-          if (child.exitCode !== null || child.killed) {
-            return;
-          }
-          child.kill("SIGTERM");
-          await Promise.race([
-            new Promise<void>((resolve) => child.once("exit", () => resolve())),
-            sleep(500).then(() => {
-              if (child.exitCode === null && !child.killed) {
-                child.kill("SIGKILL");
-              }
-            }),
-          ]);
-        },
-      };
+      return;
     }
     await sleep(SSH_READY_POLL_INTERVAL_MS);
   }
 
-  cleanupOnExit();
-  throw new SshTunnelSetupError(
-    options.host,
-    `timed out waiting for ssh to listen on 127.0.0.1:${options.localPort}`,
-  );
+  fail(`timed out waiting for ssh to listen on 127.0.0.1:${options.localPort}`);
 }
