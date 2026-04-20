@@ -400,7 +400,7 @@ export function RunDetailDrawer({
     null;
   const selectedPendingAttempt = pendingAttemptAvailable && selectedAttemptRecord === null;
   const effectiveTimelineTab =
-    selectedPendingAttempt || timelineTab === "prompt" ? timelineTab : "output";
+    timelineTab === "message" || timelineTab === "prompt" ? timelineTab : "output";
   const selectedAttemptNumber = selectedAttemptRecord?.attempt ?? null;
   const selectedAttemptOutput = selectedAttemptRecord ? attemptOutput(selectedAttemptRecord) : "";
   const selectedAttemptLive = selectedAttemptRecord?.live ?? false;
@@ -1629,19 +1629,17 @@ export function RunDetailDrawer({
                       ) : null}
 
                       <div className="task-tabs" role="tablist" aria-label="Attempt view">
-                        {selectedPendingAttempt ? (
-                          <button
-                            aria-selected={effectiveTimelineTab === "message"}
-                            className={
-                              effectiveTimelineTab === "message" ? "task-tab active" : "task-tab"
-                            }
-                            onClick={() => setTimelineTab("message")}
-                            role="tab"
-                            type="button"
-                          >
-                            Message
-                          </button>
-                        ) : null}
+                        <button
+                          aria-selected={effectiveTimelineTab === "message"}
+                          className={
+                            effectiveTimelineTab === "message" ? "task-tab active" : "task-tab"
+                          }
+                          onClick={() => setTimelineTab("message")}
+                          role="tab"
+                          type="button"
+                        >
+                          Message
+                        </button>
                         <button
                           aria-selected={effectiveTimelineTab === "prompt"}
                           className={
@@ -1672,9 +1670,9 @@ export function RunDetailDrawer({
                       onScroll={handleTimelineContentScroll}
                       ref={timelineContentScrollRef}
                     >
-                      {selectedPendingAttempt && effectiveTimelineTab === "message" ? (
+                      {effectiveTimelineTab === "message" ? (
                         run.message ? (
-                          <section aria-label="Pending message">
+                          <section aria-label="Run message">
                             <MarkdownContent className="timeline-content" text={run.message} />
                           </section>
                         ) : (

@@ -18,12 +18,13 @@ callerInstructions: |
   ## Executing the plan
 
       {{task_runner_cmd}} run brief {{run_id}}
+      {{task_runner_cmd}} run --resume-run {{run_id}}
 
-  Use the run id plus `brief` as the canonical execution
-  handoff. This implementer run is created with the
-  `implementer` agent on the passive backend, so execution is
-  externally driven through the task workflow surfaced in the
-  brief rather than `run --resume-run`.
+  Use `run brief` to inspect the frozen worker handoff and
+  `run --resume-run` to execute the initialized implementer
+  run. Do not assume this run is passive-only. The bundled
+  `implementer` agent currently freezes `backend: codex`, so
+  the normal execute-after-init path is `run --resume-run`.
 
   A same-cwd planning run may carry an attachment named
   `assignment-summary.md`. If it exists in the cwd-scoped
@@ -36,14 +37,13 @@ callerInstructions: |
   The caller environment must allow one nested review run, or
   that step will be rejected.
 
-  Any agent with shell access can execute this run through the
-  passive workflow surfaced in the brief. The run is created
-  with the shared `implementer` agent so the execution
+  Any agent with shell access can execute this run. The run is
+  created with the shared `implementer` agent so the role
   contract is stable even when planning and execution happen
-  in different sessions or under different coordinators.
-  Any agent with shell access can drive the passive workflow;
-  the `implementer` agent pins the role instructions, not the
-  execution environment.
+  in different sessions or under different coordinators. The
+  frozen agent/backend in the run manifest controls execution
+  semantics; the caller should not layer extra backend
+  assumptions on top.
 
   ## How the reviewer sees your work
 
@@ -69,12 +69,14 @@ callerInstructions: |
 
   ## Reading the result
 
-  The final self-check task (the last task in this plan)
-  carries the synthesis of what shipped, the touched files,
-  test results, and a pointer to the review run id. Start
-  there:
+  Start with:
 
       {{task_runner_cmd}} run status {{run_id}}
+
+  The `self_check` task carries the synthesis of what shipped,
+  the touched files, test results, and a pointer to the review
+  run id. The final `push_branch_and_create_pr` task records
+  the branch/push/PR evidence for audit.
 
   The review run is a separate task-runner run; its findings
   live in that run's own workspace and are referenced by id
@@ -534,13 +536,14 @@ tasks:
       `blocked`. If anything is blocked, this task is
       blocked too — escalate to the caller rather than
       silently marking the plan successful.
-  - id: final_commit
-    title: Finalize post-review commits and confirm clean tree
+  - id: push_branch_and_create_pr
+    title: Push the branch and create the PR
     body: |
       **Category**: process
 
-      Finalize git state. Everything this plan produced must
-      be committed before the run can end successfully.
+      Finalize the published git state for this plan. Everything
+      this run produced must be committed, pushed, and attached
+      to a PR before the run can end successfully.
 
         1. Run `git status` and paste the output into Notes.
         2. If review fixes, docs updates, or final verification
@@ -562,34 +565,45 @@ tasks:
            multiple commits, that's fine — leave them as
            separate commits; do not squash without the
            caller's instruction.
-        6. Run `git status` again. The working tree must
-           be clean (nothing staged, nothing unstaged,
-           nothing untracked that should have been added).
-           If it isn't, go back to step 2.
-        7. Run `git log --oneline <base>..HEAD` (where
-           `<base>` is the commit this plan was planned
-           against — capture it from `scaffold` notes or ask the
-           caller in a blocked state if you don't know it)
-           and paste the list of commits this plan produced
-           into Notes.
-
-      Do **not** push. Pushing is the caller's decision and
-      often depends on branch / PR workflow that this plan
-      does not know about. Leave the commits on the local
-      branch and let the caller handle the remote.
+        6. Run `git status` again. The working tree must be
+           clean (nothing staged, nothing unstaged, nothing
+           untracked that should have been added). If it isn't,
+           go back to step 2.
+        7. Run `git log --oneline <base>..HEAD` (where `<base>`
+           is the commit this plan was planned against — capture
+           it from `scaffold` notes or ask the caller in a
+           blocked state if you don't know it) and paste the
+           list of commits this plan produced into Notes.
+        8. Push the current branch to the appropriate remote and
+           branch ref for this repo's workflow. Paste the exact
+           push command and result into Notes.
+        9. Create or open the PR using the repo's normal tool
+           (for example `gh pr create`, a web flow, or an
+           equivalent wrapper). Paste the exact command/tool you
+           used and the result into Notes.
+       10. Record the PR URL and PR number. If an existing PR
+           already covered the exact branch instead of creating a
+           new one, record that existing PR URL/number and why no
+           duplicate PR was opened.
 
       Notes should contain:
-        - The final `git status` output (should say clean).
-        - The list of commit shas this plan produced.
-        - The base commit the plan started from, for audit.
+        - the current branch name
+        - the base/target branch for the PR
+        - the final `git status` output (should say clean)
+        - the list of commit shas this plan produced
+        - the base commit the plan started from, for audit
+        - the push command/result, including remote + pushed ref
+        - the PR creation command/tool used
+        - the PR URL and PR number (or the existing PR and why no
+          duplicate was created)
 
       If any step fails and you cannot resolve it — a
-      pre-commit hook fails for a reason outside the
-      plan's scope, or the plan produced no changes at all
-      and you cannot explain why — mark this task `blocked`
-      with the failure details. Do not mark it `completed`
-      while uncommitted work remains on disk; that defeats
-      the point of the gate.
+      pre-commit hook fails for a reason outside the plan's
+      scope, the push fails, or you cannot create/open the PR —
+      mark this task `blocked` with the failure details. Do not
+      mark it `completed` while unpublished work remains local or
+      the PR evidence is missing; that defeats the point of the
+      terminal workflow.
 ---
 You are executing a feature implementation plan that was
 generated by the `plan-feature` meta-assignment. Every task

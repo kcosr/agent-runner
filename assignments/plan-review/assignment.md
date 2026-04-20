@@ -86,7 +86,8 @@ tasks:
         - task ordering that matches the dependency chain
         - required workflow tasks still present when applicable:
           orient, check gate, fresh-eyes pass, commit,
-          internal review, docs drift, self-check, final_commit
+          internal review, docs drift, self-check,
+          push_branch_and_create_pr
         - the scaffold/setup task explicitly requires the
           implementer to confirm it is in a non-`main`
           git worktree, confirm local `main` is already in
@@ -119,14 +120,23 @@ tasks:
           `Implementation` wording)
         - the draft explains the recursion-depth requirement for
           the nested code-review run
+        - the generated implementation workflow ends with a
+          final `push_branch_and_create_pr` task whose Notes
+          contract requires concrete branch / push / PR evidence
 
       In the planning run, verify:
         - the planner attaches the approved draft and summary to
           the planning run as `assignment-seed.md` and
           `assignment-summary.md`
         - the handoff tells the caller to review the planning-run
-          attachments instead of running `init` immediately
-        - the delayed creation flow hard-codes `--backend passive`
+          attachments before requesting implementer creation
+        - the planning run ends the initial pass with
+          `create_implementer_run_after_approval` blocked after
+          `handoff`, rather than with every task completed
+        - the delayed creation flow resumes this same planning
+          run after caller approval
+        - the delayed creation flow does **not** force
+          `--backend passive`
         - the delayed creation flow includes a short descriptive `--name`
           with the same format rule: capitalized first word,
           about 2-4 words / 32 chars, and no cwd / repo / range
@@ -139,9 +149,10 @@ tasks:
         - the delayed creation flow says the planner keeps those
           artifacts on the planning run rather than duplicating
           them onto the new implementer run
-        - the handoff tells the caller how to request creation
-          and how to run the resulting implementer run after the
-          planner creates it
+        - after delayed `init`, the execution handoff inspects
+          `run brief` and then executes the resulting implementer
+          run with `run --resume-run`, rather than describing a
+          passive-only brief-first workflow
         - the draft-review loop itself is reflected accurately in
           the planner tasks and handoff notes
         - the generated implementer orientation tells the
