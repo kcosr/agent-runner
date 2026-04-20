@@ -175,7 +175,7 @@ export const launcherDefinitionSchema = z
   })
   .strict();
 
-export const agentLauncherSchema = z.union([z.string(), launcherInlineConfigSchema]);
+export const agentLauncherSchema = z.union([z.string().trim().min(1), launcherInlineConfigSchema]);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Agent schema — identity, backend config, role instructions, locks.

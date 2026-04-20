@@ -639,8 +639,8 @@ function loadLauncherYaml(sourcePath: string): unknown {
     );
   }
 
-  const raw = readFileSync(sourcePath, "utf8");
   try {
+    const raw = readFileSync(sourcePath, "utf8");
     return matter(`---\n${raw}\n---\n`).data;
   } catch (error) {
     throw new LauncherConfigError(

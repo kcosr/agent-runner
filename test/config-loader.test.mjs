@@ -1196,6 +1196,31 @@ body
     });
   }));
 
+test("loadAgentConfig rejects empty launcher strings at schema validation time", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    writeAgent(
+      configDir,
+      "blank-launcher",
+      `---
+schemaVersion: 1
+name: blank-launcher
+backend: claude
+launcher: ""
+---
+body
+`,
+    );
+
+    assert.throws(
+      () => loadAgentConfig("blank-launcher", rootDir),
+      (error) => {
+        assert.ok(error instanceof AgentConfigError);
+        assert.match(error.message, /launcher/i);
+        return true;
+      },
+    );
+  }));
+
 test("listLaunchers returns direct plus valid named launchers and skips invalid files with warnings", () =>
   withRuntimeRoots("task-runner-loader-", ({ configDir }) => {
     writeLauncher(
@@ -1324,5 +1349,27 @@ command: ssh
       assert.throws(() => listLaunchers(), DefinitionListError);
     } finally {
       chmodSync(launchersDir, 0o755);
+    }
+  }));
+
+test("listLaunchers warn-skips unreadable launcher files", () =>
+  withRuntimeRoots("task-runner-loader-", ({ configDir }) => {
+    const unreadablePath = writeLauncher(
+      configDir,
+      "cant-read",
+      `schemaVersion: 1
+command: ssh
+`,
+    );
+    chmodSync(unreadablePath, 0o000);
+    try {
+      const result = listLaunchers();
+      assert.deepEqual(
+        result.entries.map((entry) => entry.name),
+        ["direct"],
+      );
+      assert.match(result.warnings.join("\n"), /cant-read\.yaml/);
+    } finally {
+      chmodSync(unreadablePath, 0o644);
     }
   }));

@@ -1,4 +1,4 @@
-import { loadLauncherConfig } from "../../config/loader.js";
+import { LauncherConfigError, loadLauncherConfig } from "../../config/loader.js";
 import type { BackendSpecificConfig } from "../backends/types.js";
 import {
   type AgentLauncherReference,
@@ -47,7 +47,10 @@ export function resolveFreshLauncherConfig(args: {
 
   if (args.overrideLauncher !== undefined) {
     if (!isNamedLauncherOverride(args.overrideLauncher)) {
-      throw new Error("--launcher only accepts named launchers in fresh-run overrides");
+      throw new LauncherConfigError(
+        args.cwd,
+        "  - --launcher only accepts named launchers in fresh-run overrides",
+      );
     }
     return resolvePrefixFromNamedReference(args.overrideLauncher, args.cwd);
   }

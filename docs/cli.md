@@ -121,8 +121,8 @@ task-runner init \
 
 Launcher precedence on fresh run/init is:
 
-1. agent-authored `launcher`
-2. `--launcher <name>`
+1. `--launcher <name>`
+2. agent-authored `launcher`
 3. built-in `direct`
 
 In connected mode the daemon resolves named launchers against its own

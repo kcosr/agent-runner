@@ -247,11 +247,11 @@ blocked with the rest completed or blocked → `blocked`; otherwise
 5. captures `repo` from the resolved cwd and creates the run workspace
 6. resolves backend-specific runtime config (for Codex transport:
    frontmatter → daemon request override → env → stdio default)
-7. resolves launcher precedence (agent launcher → `--launcher` override →
+7. resolves launcher precedence (`--launcher` override → agent launcher →
    `direct`, with passive and Codex websocket forced to `direct`)
 8. freezes the initial manifest
-8. composes and stores `brief`
-9. invokes the backend, or leaves the run initialized if the backend is
+9. composes and stores `brief`
+10. invokes the backend, or leaves the run initialized if the backend is
    `passive`
 
 ### Init

@@ -62,5 +62,5 @@ export function cloneResolvedLauncherConfig(
 }
 
 export function isNamedLauncherOverride(reference: string): boolean {
-  return !reference.includes("/") && !reference.startsWith(".");
+  return reference.length > 0 && !reference.includes("/") && !reference.startsWith(".");
 }

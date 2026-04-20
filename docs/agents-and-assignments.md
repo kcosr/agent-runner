@@ -62,7 +62,7 @@ launcher: ssh-docker        # optional named launcher or inline object
 `launcher` supports exactly these authored shapes:
 
 - bare string: a named launcher id such as `ssh-docker`
-- inline object with `schemaVersion: 1`, `command`, and optional `args`
+- inline object with `command` and optional `args`
 
 The built-in `direct` launcher is always available and means "no
 prefix". User-authored launcher files live under
@@ -133,8 +133,8 @@ task-runner show launcher ssh-docker
 
 Fresh-run launcher precedence is:
 
-1. agent-authored `launcher`
-2. CLI/daemon override `--launcher <name>` / `overrides.launcher`
+1. CLI/daemon override `--launcher <name>` / `overrides.launcher`
+2. agent-authored `launcher`
 3. built-in `direct`
 
 The override is named-only by design. Inline launchers are authored on
