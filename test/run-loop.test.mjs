@@ -131,19 +131,36 @@ function writeNodeScript(baseDir, name, body) {
   return path;
 }
 
+function gitTestEnv() {
+  return Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => {
+      return !key.startsWith("GIT_");
+    }),
+  );
+}
+
 function initGitRepo(baseDir) {
   const repoDir = join(baseDir, "repo");
+  const hooksDir = join(repoDir, ".githooks-disabled");
   mkdirSync(repoDir, { recursive: true });
-  execFileSync("git", ["init", "--initial-branch=main", repoDir], { encoding: "utf8" });
+  const env = gitTestEnv();
+  execFileSync("git", ["init", "--initial-branch=main", repoDir], { encoding: "utf8", env });
+  mkdirSync(hooksDir, { recursive: true });
+  execFileSync("git", ["-C", repoDir, "config", "core.hooksPath", hooksDir], {
+    encoding: "utf8",
+    env,
+  });
   execFileSync("git", ["-C", repoDir, "config", "user.name", "Task Runner Tests"], {
     encoding: "utf8",
+    env,
   });
   execFileSync("git", ["-C", repoDir, "config", "user.email", "tests@example.com"], {
     encoding: "utf8",
+    env,
   });
   writeFileSync(join(repoDir, "README.md"), "seed\n");
-  execFileSync("git", ["-C", repoDir, "add", "README.md"], { encoding: "utf8" });
-  execFileSync("git", ["-C", repoDir, "commit", "-m", "seed"], { encoding: "utf8" });
+  execFileSync("git", ["-C", repoDir, "add", "README.md"], { encoding: "utf8", env });
+  execFileSync("git", ["-C", repoDir, "commit", "-m", "seed"], { encoding: "utf8", env });
   return repoDir;
 }
 
@@ -646,6 +663,7 @@ Work.
   assert.equal(
     execFileSync("git", ["-C", worktreeDir, "rev-parse", "--abbrev-ref", "HEAD"], {
       encoding: "utf8",
+      env: gitTestEnv(),
     }).trim(),
     "hooks-test",
   );

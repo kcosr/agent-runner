@@ -11,6 +11,14 @@ interface GitWorktreeConfig {
   collision?: "fail" | "reuse" | "replace";
 }
 
+function gitEnv(): NodeJS.ProcessEnv {
+  return Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => {
+      return !key.startsWith("GIT_");
+    }),
+  );
+}
+
 function gitWorktreeConfig(config: unknown): GitWorktreeConfig {
   if (!config || typeof config !== "object") {
     throw new Error("git-worktree hook requires an object config");
@@ -37,6 +45,7 @@ function git(args: string[], cwd: string): string {
   return execFileSync("git", args, {
     cwd,
     encoding: "utf8",
+    env: gitEnv(),
     stdio: ["ignore", "pipe", "pipe"],
   }).trim();
 }
@@ -49,6 +58,7 @@ function ensureWorktree(config: GitWorktreeConfig): void {
     if (config.collision === "replace") {
       try {
         execFileSync("git", ["-C", config.repo, "worktree", "remove", "--force", config.path], {
+          env: gitEnv(),
           stdio: "ignore",
         });
       } catch {
@@ -68,6 +78,7 @@ function ensureWorktree(config: GitWorktreeConfig): void {
 
   if (branchExists) {
     execFileSync("git", ["-C", config.repo, "worktree", "add", config.path, config.branch], {
+      env: gitEnv(),
       stdio: "ignore",
     });
     return;
@@ -77,6 +88,7 @@ function ensureWorktree(config: GitWorktreeConfig): void {
     "git",
     ["-C", config.repo, "worktree", "add", "-b", config.branch, config.path, config.from],
     {
+      env: gitEnv(),
       stdio: "ignore",
     },
   );
