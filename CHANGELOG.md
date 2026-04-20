@@ -11,7 +11,8 @@
   Schema v9 also freezes workspace assignment capture at
   `assignment-seed.md` for both `assignmentPath` and
   `assignment.workspacePath`.
-  ([#66](https://github.com/kcosr/task-runner/pull/66))
+  ([#66](https://github.com/kcosr/task-runner/pull/66),
+  [#68](https://github.com/kcosr/task-runner/pull/68))
 - Config-time `${...}` interpolation in prose-like definition fields now
   only applies when the whole field is a single `${...}` expression.
   Embedded `${...}` text inside larger prose strings remains literal.
@@ -54,6 +55,7 @@
   by backfilling hook descriptor/state/audit surfaces, repairing
   `assignment-seed.md` workspace capture paths, and expanding the frozen
   `resetSeed` shape current resume/discovery expects.
+  ([#68](https://github.com/kcosr/task-runner/pull/68))
 - Added SSH-assisted connected CLI mode with `--connect-host` /
   `TASK_RUNNER_CONNECT_HOST` and `--connect-local-port` /
   `TASK_RUNNER_CONNECT_LOCAL_PORT`, so daemon-targeted commands can keep a
