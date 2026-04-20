@@ -1315,6 +1315,7 @@ describe("web app", () => {
         isLive: true,
         attempts: 1,
         sessionCount: 1,
+        message: "Review this handoff before launch.",
         pendingPrompt: null,
       }),
     });
@@ -1345,11 +1346,17 @@ describe("web app", () => {
     await waitFor(() => {
       expect(screen.queryByRole("tab", { name: "Pending" })).not.toBeInTheDocument();
     });
-    expect(screen.queryByRole("tab", { name: "Message" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Message" })).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: "Output" })).toHaveAttribute("aria-selected", "true");
     });
     expect(screen.getByText("Waiting for live output…")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Message" }));
+    expect(screen.getByRole("tab", { name: "Message" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("Run message")).toHaveTextContent(
+      "Review this handoff before launch.",
+    );
 
     await user.click(screen.getByRole("tab", { name: "Prompt" }));
     expect(screen.getByRole("heading", { level: 2, name: "Attempt prompt" })).toBeInTheDocument();
