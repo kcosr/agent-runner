@@ -27,7 +27,7 @@
 - Added config-time `${...}` env interpolation for agent and assignment
   frontmatter scalar values, with exact-match typed surfaces, prose-only
   partial interpolation, and load-time config errors for missing, empty,
-  or invalid env input.
+  or invalid env input. ([#62](https://github.com/kcosr/task-runner/pull/62))
 - Added an MIT `LICENSE` file and set `license: "MIT"` on the root and
   workspace package manifests. ([#60](https://github.com/kcosr/task-runner/pull/60))
 - Added persistent per-run note and pin metadata across the shared
