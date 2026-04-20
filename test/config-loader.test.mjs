@@ -418,6 +418,64 @@ body
     }),
   ));
 
+test("loadAgentConfig rejects invalid number coercion for exact env fields", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) =>
+    withEnv({ AGENT_TIMEOUT: "abc" }, () => {
+      writeAgent(
+        configDir,
+        "bad-timeout",
+        `---
+schemaVersion: 1
+name: bad-timeout
+backend: claude
+timeoutSec: \${AGENT_TIMEOUT}
+---
+body
+`,
+      );
+
+      assert.throws(
+        () => loadAgentConfig("bad-timeout", rootDir),
+        (err) => {
+          assert.ok(err instanceof AgentConfigError);
+          assert.match(err.message, /agent\.timeoutSec/);
+          assert.match(err.message, /AGENT_TIMEOUT/);
+          assert.match(err.message, /not a valid number/);
+          return true;
+        },
+      );
+    }),
+  ));
+
+test("loadAgentConfig rejects invalid boolean coercion for exact env fields", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) =>
+    withEnv({ AGENT_FLAG: "yes" }, () => {
+      writeAgent(
+        configDir,
+        "bad-flag",
+        `---
+schemaVersion: 1
+name: bad-flag
+backend: claude
+unrestricted: \${AGENT_FLAG}
+---
+body
+`,
+      );
+
+      assert.throws(
+        () => loadAgentConfig("bad-flag", rootDir),
+        (err) => {
+          assert.ok(err instanceof AgentConfigError);
+          assert.match(err.message, /agent\.unrestricted/);
+          assert.match(err.message, /AGENT_FLAG/);
+          assert.match(err.message, /not a valid boolean/);
+          return true;
+        },
+      );
+    }),
+  ));
+
 test("loadAgentConfig rejects partial interpolation in exact-only fields", () =>
   withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) =>
     withEnv({ AGENT_NAME: "demo" }, () => {

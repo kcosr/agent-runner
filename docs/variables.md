@@ -71,6 +71,38 @@ order:
 CLI values come in as strings and are coerced; env values are coerced the
 same way. `default` must already match the declared type.
 
+## Config-time env interpolation in definitions
+
+Before task-runner validates agent or assignment frontmatter, it resolves
+shell-style env expressions in parsed scalar values:
+
+- `${VAR}` — use `VAR`; fail if it is unset or empty
+- `${VAR:-fallback}` — use `fallback` when `VAR` is unset or empty
+- `${VAR-fallback}` — use `fallback` only when `VAR` is unset
+
+This happens during definition loading, before run creation and before
+schema validation. Resolved values are then validated and coerced by the
+existing schemas.
+
+Field surfaces are split explicitly:
+
+- Exact-match typed fields accept only a single env expression for the
+  whole value. This includes scalar config such as `schemaVersion`,
+  `name`, `backend`, `model`, `effort`, `timeoutSec`, `unrestricted`,
+  `cwd`, `maxRetries`, task ids, lock entries, var metadata, and Codex
+  transport leaf fields.
+- Prose fields allow partial interpolation inside a larger string. This
+  includes assignment `message`, `callerInstructions`, task titles and
+  bodies, var descriptions, and the markdown body text for agent and
+  assignment instructions.
+- Object and array containers do not accept blob replacement. `${...}`
+  cannot inject YAML or JSON into `backendSpecific`, `vars`, `tasks`, or
+  `lockedFields`.
+
+Failures are load-time config errors, not runtime interpolation misses.
+The error includes the definition path, config path, env var name, and the
+reason (`missing`, `empty`, `invalid syntax`, or field-surface mismatch).
+
 ## Injected variables
 
 task-runner always provides these variables in addition to the declared
@@ -90,13 +122,16 @@ These cannot be overridden by `--var`. When a run has no assignment,
 `assignment_name` is omitted, so `{{assignment_name}}` remains
 uninterpolated under the normal undefined-value rule.
 
-## Interpolation syntax
+## Runtime interpolation syntax
 
 References use `{{key}}` with optional whitespace. The matching pattern is
 `/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g`. Undefined or `null` values leave the
 token unchanged.
 
-Interpolation is applied to:
+This runtime `{{key}}` interpolation is separate from the config-time
+`${...}` env interpolation above.
+
+Runtime interpolation is applied to:
 
 - Agent role instructions
 - Assignment instructions

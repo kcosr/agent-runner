@@ -177,7 +177,9 @@ blocked with the rest completed or blocked → `blocked`; otherwise
 
 `task-runner run`:
 
-1. resolves agent and assignment
+1. resolves agent and assignment definitions
+   (parse frontmatter, apply config-time `${...}` env interpolation on
+   allowed scalar surfaces, then schema-validate)
 2. resolves cwd: `--cwd` → assignment `cwd` → caller cwd
 3. resolves vars
 4. enforces locked fields
