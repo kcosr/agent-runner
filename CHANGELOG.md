@@ -28,7 +28,7 @@
   `TASK_RUNNER_CONNECT_HOST` and `--connect-local-port` /
   `TASK_RUNNER_CONNECT_LOCAL_PORT`, so daemon-targeted commands can keep a
   logical remote `--connect` URL while routing WebSocket and attachment
-  HTTP traffic through an invocation-scoped local SSH forward.
+  HTTP traffic through an invocation-scoped local SSH forward. ([#64](https://github.com/kcosr/task-runner/pull/64))
 - Added config-time `${...}` env interpolation for agent and assignment
   frontmatter scalar values, with exact-match typed surfaces, prose-only
   partial interpolation, and load-time config errors for missing, empty,
