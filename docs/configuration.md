@@ -129,10 +129,11 @@ with a clear error. The repo ships migration scripts under `scripts/`:
   `repo` from the frozen `cwd`; supports repeated `--repo <name>`
   filters for selective upgrades, and a `--root <path>` flag for
   legacy state roots)
-
-Schema v9 adds frozen hook descriptors/state/audits to the manifest. No
-automatic upgrader ships for pre-v9 hookless runs; recreate those runs
-or keep them on their original schema generation.
+- `scripts/migrate-manifests-v9.mjs` — v8 → v9 (adds frozen hook
+  descriptor/state/audit surfaces with empty defaults for pre-hook runs,
+  repairs `assignment-seed.md` workspace paths, and backfills the full
+  frozen `resetSeed` shape expected by current resume/discovery;
+  supports repeated `--repo <name>` filters and `--root <path>`)
 
 Run the scripts explicitly; or recreate affected runs if an upgrade
 path isn't important. New runs are always created at the latest

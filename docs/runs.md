@@ -11,7 +11,7 @@ ${TASK_RUNNER_STATE_DIR}/runs/<repo>/<run-id>/
 
 ```text
 <workspace>/
-├── run.json               # canonical manifest (schema version 8)
+├── run.json               # canonical manifest (schema version 9)
 ├── run-events.jsonl       # append-only diagnostic audit history (pre-feature runs may lack it)
 ├── assignment-seed.md     # only when the run started from an assignment file
 ├── attempts/
@@ -36,7 +36,7 @@ The manifest is the source of truth. Important fields:
 
 | Field | Purpose |
 |-------|---------|
-| `schemaVersion` | currently `8`; older manifests are not silently upgraded |
+| `schemaVersion` | currently `9`; older manifests are not silently upgraded |
 | `runId`, `repo`, `cwd` | identity and scope |
 | `agent` | frozen `{ name, sourcePath, instructions }` |
 | `assignment` | frozen `{ name, sourcePath, workspacePath }` or `null` |

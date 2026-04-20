@@ -4,7 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { deriveRepoKey } from "../packages/core/dist/config/runtime-paths.js";
-import { ResumeError, resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js";
+import {
+  ResumeError,
+  findRunManifestsById,
+  listRunManifests,
+  resolveResumeTarget,
+} from "../packages/core/dist/core/run/manifest.js";
 import { withEnv } from "./helpers/runtime-paths.mjs";
 
 function tempDir() {
@@ -193,6 +198,32 @@ test("resolveResumeTarget accepts a well-formed v9 manifest from the unknown buc
   assert.equal(resolved.manifest.schemaVersion, 9);
 });
 
+test("resume/list/find ignore legacy assignmentPath capture when workspaceDir matches", () => {
+  const dir = tempDir();
+  const workspaceDir = join(dir, "runs", "unknown", "legacy-path");
+  const manifest = baseManifest("legacy-path", workspaceDir);
+  manifest.assignmentPath = join(workspaceDir, "assignment.md");
+  manifest.assignment = {
+    name: "legacy-assignment",
+    sourcePath: "/repo/assignments/legacy/assignment.md",
+    workspacePath: join(workspaceDir, "assignment.md"),
+  };
+  writeManifest(dir, "unknown", "legacy-path", manifest);
+
+  const resumed = withStateRoot(dir, () => resolveResumeTarget("legacy-path", dir));
+  assert.equal(resumed.workspaceDir, workspaceDir);
+
+  const listed = withStateRoot(dir, () => listRunManifests(process.env));
+  assert.deepEqual(
+    listed.map((entry) => entry.manifest.runId),
+    ["legacy-path"],
+  );
+
+  const found = withStateRoot(dir, () => findRunManifestsById("legacy-path", process.env));
+  assert.equal(found.length, 1);
+  assert.equal(found[0]?.workspaceDir, workspaceDir);
+});
+
 function baseManifest(runId, workspaceDir) {
   return {
     schemaVersion: 9,
@@ -213,7 +244,7 @@ function baseManifest(runId, workspaceDir) {
     cwd: process.cwd(),
     lockedFields: [],
     timeoutSec: 3600,
-    assignmentPath: join(workspaceDir, "assignment.md"),
+    assignmentPath: join(workspaceDir, "assignment-seed.md"),
     workspaceDir,
     startedAt: "2026-04-11T16:00:00Z",
     endedAt: "2026-04-11T16:05:00Z",

@@ -143,7 +143,7 @@ function spawnLockedManifestWriter(dir, workspaceDir, mutateSource) {
   );
 }
 
-test("init stores a canonical brief and does not generate workspace assignment.md", async () => {
+test("init stores a canonical brief and captures a workspace assignment seed", async () => {
   const dir = tempDir();
   writeAgent(dir, "brief-agent", AGENT);
   writeAssignment(dir, "brief-work", ASSIGNMENT);
@@ -156,8 +156,8 @@ test("init stores a canonical brief and does not generate workspace assignment.m
   assert.match(brief, new RegExp(`task set ${outcome.runId}`));
   assert.match(brief, new RegExp(`task append-notes ${outcome.runId}`));
   assert.match(brief, new RegExp(`run status ${outcome.runId}`));
-  assert.ok(!existsSync(outcome.assignmentPath), "workspace assignment.md is not generated");
-  assert.ok(existsSync(join(outcome.workspaceDir, "assignment-seed.md")), "seed file captured");
+  assert.equal(outcome.assignmentPath, join(outcome.workspaceDir, "assignment-seed.md"));
+  assert.ok(existsSync(outcome.assignmentPath), "seed file captured");
 });
 
 test("run brief command prints the stored handoff and rejects path targets", async () => {
@@ -285,7 +285,7 @@ test("task-state persistence serializes concurrent writes into run.json only", a
 
   const manifest = readManifest(outcome.workspaceDir);
   assert.equal(manifest.finalTasks.t1.notes, "Serialized write");
-  assert.ok(!existsSync(outcome.assignmentPath), "no workspace assignment.md was created");
+  assert.ok(existsSync(outcome.assignmentPath), "seed file captured");
 });
 
 test("status and task commands wait for the task-state lock and read fresh snapshots", async () => {

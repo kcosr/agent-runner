@@ -157,7 +157,7 @@ test("task set: updates status only on initialized run", async () => {
   assert.equal(manifest.finalTasks.t1.notes, "");
   assert.equal(manifest.finalTasks.t2.status, "pending");
   assert.equal(manifest.tasksCompleted, 0);
-  assert.ok(!existsSync(outcome.assignmentPath));
+  assert.ok(existsSync(outcome.assignmentPath));
 });
 
 test("task set: updates notes only", async () => {
@@ -170,7 +170,7 @@ test("task set: updates notes only", async () => {
   const manifest = readManifest(outcome.workspaceDir);
   assert.equal(manifest.finalTasks.t2.status, "pending");
   assert.equal(manifest.finalTasks.t2.notes, "Investigation ongoing.");
-  assert.ok(!existsSync(outcome.assignmentPath));
+  assert.ok(existsSync(outcome.assignmentPath));
 });
 
 test("task set: updates both status and notes; --output-format json returns task snapshot", async () => {
@@ -406,7 +406,7 @@ test("task add: appends new task with cli-* id to initialized run", async () => 
   assert.equal(manifest.finalTasks[ids[2]].title, "Third thing");
   assert.equal(manifest.finalTasks[ids[2]].status, "pending");
   assert.equal(manifest.tasksTotal, 3);
-  assert.ok(!existsSync(outcome.assignmentPath));
+  assert.ok(existsSync(outcome.assignmentPath));
 });
 
 test("task add: rejects when `tasks` is locked via assignment lockedFields", async () => {
@@ -501,7 +501,7 @@ test("run reset: restores the original initialized task snapshot after task muta
   assert.deepEqual(manifest.sessions, []);
   assert.deepEqual(manifest.attemptRecords, []);
 
-  assert.ok(!existsSync(outcome.assignmentPath));
+  assert.ok(existsSync(outcome.assignmentPath));
 });
 
 test("run reset: json output restores initialized state and removes attempt artifacts", async () => {
