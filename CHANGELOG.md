@@ -24,6 +24,10 @@
 
 ### Added
 
+- Added inline web attachment preview support for `image/png`,
+  `image/jpeg`, `image/gif`, `image/webp`, and `image/svg+xml`, using
+  blob-backed `<img>` rendering in the existing preview drawer while
+  keeping markdown/plain-text preview behavior unchanged. ([#65](https://github.com/kcosr/task-runner/pull/65))
 - Added config-time `${...}` env interpolation for agent and assignment
   frontmatter scalar values, with exact-match typed surfaces, prose-only
   partial interpolation, and load-time config errors for missing, empty,
