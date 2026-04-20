@@ -68,9 +68,12 @@ cannot find a git dir fall into an `unknown` bucket.
 |----------|--------|
 | `TASK_RUNNER_LISTEN` | Listen URL for `task-runner serve` (default `ws://127.0.0.1:4773/`) |
 | `TASK_RUNNER_CONNECT` | WebSocket URL the CLI should connect to instead of executing embedded |
+| `TASK_RUNNER_CONNECT_HOST` | SSH host the CLI should tunnel through before dialing `TASK_RUNNER_CONNECT` / `--connect` |
+| `TASK_RUNNER_CONNECT_LOCAL_PORT` | Loopback port to bind for `TASK_RUNNER_CONNECT_HOST`; defaults to the daemon port from `TASK_RUNNER_CONNECT` / `--connect` |
 
 Both can be overridden on the CLI via `--listen` (on `serve`) and
-`--connect` (on client commands). See [daemon.md](daemon.md).
+`--connect` (on client commands). SSH-assisted connected mode uses
+`--connect-host` and `--connect-local-port`. See [daemon.md](daemon.md).
 
 ### Backends
 
@@ -151,6 +154,12 @@ unaffected.
 export TASK_RUNNER_CLAUDE_BIN=/opt/claude/bin/claude
 export TASK_RUNNER_PI_BIN=/opt/pi/bin/pi
 
-# Point the CLI at a running daemon for shared state across terminals.
+# Local daemon mode for shared state across terminals.
 export TASK_RUNNER_CONNECT=ws://127.0.0.1:4773/
+
+# Optional instead: reach a remote daemon through an invocation-scoped SSH forward.
+# Replace the local TASK_RUNNER_CONNECT above with the remote daemon URL when using this mode.
+# export TASK_RUNNER_CONNECT=ws://task-runner.remote.example:4773/
+export TASK_RUNNER_CONNECT_HOST=prod-box
+# export TASK_RUNNER_CONNECT_LOCAL_PORT=5773
 ```

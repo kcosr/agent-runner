@@ -24,6 +24,11 @@
 
 ### Added
 
+- Added SSH-assisted connected CLI mode with `--connect-host` /
+  `TASK_RUNNER_CONNECT_HOST` and `--connect-local-port` /
+  `TASK_RUNNER_CONNECT_LOCAL_PORT`, so daemon-targeted commands can keep a
+  logical remote `--connect` URL while routing WebSocket and attachment
+  HTTP traffic through an invocation-scoped local SSH forward. ([#64](https://github.com/kcosr/task-runner/pull/64))
 - Added inline web attachment preview support for `image/png`,
   `image/jpeg`, `image/gif`, `image/webp`, and `image/svg+xml`, using
   blob-backed `<img>` rendering in the existing preview drawer while

@@ -28,10 +28,17 @@ All commands accept `--help` / `-h`.
 |------|-----------|--------|
 | `--help`, `-h` | any | Print command help |
 | `--connect <ws-url>` | client commands | Route command through a daemon (also `TASK_RUNNER_CONNECT`) |
+| `--connect-host <host>` | connected client commands | Open an invocation-scoped SSH local forward before dialing `--connect` (also `TASK_RUNNER_CONNECT_HOST`) |
+| `--connect-local-port <port>` | connected client commands | Override the loopback port used by `--connect-host` (also `TASK_RUNNER_CONNECT_LOCAL_PORT`) |
 | `--output-format text\|json` | most commands | Output format (default `text`) |
 
 Commands reject flags they do not consume — unknown flag combinations
 error out rather than being silently ignored.
+
+`--connect-host` requires connected mode via `--connect` or
+`TASK_RUNNER_CONNECT`. When present, the CLI keeps the logical daemon URL
+for user-facing output, but tunnels the actual WebSocket/HTTP traffic
+through `127.0.0.1:<local-port>` for the lifetime of the invocation.
 
 ## `run`
 
@@ -118,7 +125,7 @@ task-runner serve [--listen <ws-url>]
 
 - `--listen <ws-url>` — defaults to `ws://127.0.0.1:4773/` (or
   `TASK_RUNNER_LISTEN`).
-- Rejects `--connect`.
+- Rejects `--connect`, `--connect-host`, and `--connect-local-port`.
 
 See [daemon.md](daemon.md).
 

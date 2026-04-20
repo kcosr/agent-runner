@@ -38,6 +38,8 @@ export interface ParsedArgs {
   attachmentMimeType?: string;
   cwdScope?: boolean;
   connect?: string;
+  connectHost?: string;
+  connectLocalPort?: string;
   listen?: string;
   includeArchived?: boolean;
   repo?: string;
@@ -251,6 +253,14 @@ export function parseArgs(argv: string[]): ParsedArgs {
       const next = args.shift();
       if (next === undefined) throw new Error("--connect requires a value");
       result.connect = next;
+    } else if (arg === "--connect-host") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--connect-host requires a value");
+      result.connectHost = next;
+    } else if (arg === "--connect-local-port") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--connect-local-port requires a value");
+      result.connectLocalPort = next;
     } else if (arg === "--listen") {
       const next = args.shift();
       if (next === undefined) throw new Error("--listen requires a value");

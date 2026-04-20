@@ -1,7 +1,15 @@
 import { strict as assert } from "node:assert";
 import { execFileSync, spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
@@ -381,6 +389,91 @@ async function startCliDaemon(baseDir, listenUrl) {
         child.once("exit", (code, exitSignal) => resolve({ code, signal: exitSignal })),
       );
     },
+  };
+}
+
+function installFakeSsh(baseDir) {
+  const binDir = join(baseDir, "fake-bin");
+  mkdirSync(binDir, { recursive: true });
+  const scriptPath = join(binDir, "ssh");
+  const modulePath = `${scriptPath}.mjs`;
+  writeFileSync(
+    scriptPath,
+    `#!/usr/bin/env bash
+exec node "${modulePath}" "$@"
+`,
+  );
+  writeFileSync(
+    modulePath,
+    `#!/usr/bin/env node
+import { appendFileSync } from "node:fs";
+import { connect, createServer } from "node:net";
+
+const args = process.argv.slice(2);
+const mode = process.env.TASK_RUNNER_FAKE_SSH_MODE ?? "proxy";
+const logPath = process.env.TASK_RUNNER_FAKE_SSH_LOG;
+const forwardIndex = args.indexOf("-L");
+const host = args.at(-1) ?? "";
+const forward = forwardIndex >= 0 ? args[forwardIndex + 1] : "";
+
+if (logPath) {
+  appendFileSync(logPath, JSON.stringify({ args, host, forward }) + "\\n");
+}
+
+if (mode === "fail-auth") {
+  process.stderr.write("Permission denied (publickey).\\n");
+  process.exit(255);
+}
+
+const match = /^127\\.0\\.0\\.1:(\\d+):([^:]+):(\\d+)$/.exec(forward);
+if (!match) {
+  process.stderr.write("invalid -L forward\\n");
+  process.exit(2);
+}
+
+const [, localPortRaw, targetHostRaw, targetPortRaw] = match;
+const localPort = Number(localPortRaw);
+const targetHost = process.env.TASK_RUNNER_FAKE_SSH_TARGET_HOST ?? targetHostRaw;
+const targetPort = Number(targetPortRaw);
+
+const server = createServer((client) => {
+  const upstream = connect({ host: targetHost, port: targetPort });
+  client.pipe(upstream);
+  upstream.pipe(client);
+  upstream.on("error", () => {
+    client.destroy();
+  });
+  client.on("error", () => {
+    upstream.destroy();
+  });
+});
+
+server.on("error", (err) => {
+  if (err && typeof err === "object" && "code" in err && err.code === "EADDRINUSE") {
+    process.stderr.write(\`bind [127.0.0.1]:\${localPort}: Address already in use\\n\`);
+    process.exit(255);
+  }
+  process.stderr.write(\`\${err.message}\\n\`);
+  process.exit(1);
+});
+
+server.listen(localPort, "127.0.0.1");
+
+const shutdown = () => {
+  server.close(() => process.exit(0));
+};
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
+`,
+  );
+  chmodSync(scriptPath, 0o755);
+  return { binDir, scriptPath, modulePath };
+}
+
+function fakeSshEnv(binDir, extra = {}) {
+  return {
+    PATH: `${binDir}:${process.env.PATH ?? ""}`,
+    ...extra,
   };
 }
 
@@ -3087,6 +3180,162 @@ test("serve and --connect route CLI commands remotely and fail clearly when no d
   } finally {
     await daemon.stop();
   }
+});
+
+test("connected cli can reach a daemon through --connect-host and reuse the same connect context for attachment HTTP", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const init = await initRun(dir);
+  const sourcePath = join(dir, "evidence.txt");
+  writeFileSync(sourcePath, "ssh tunnel evidence\n");
+  const fakeSsh = installFakeSsh(dir);
+
+  const port = await freePort();
+  const localPort = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/control`;
+  const logicalConnectUrl = `ws://task-runner.remote.invalid:${port}/control`;
+  const daemon = await startCliDaemon(dir, listenUrl);
+  try {
+    const statusJson = JSON.parse(
+      runCli(
+        [
+          "status",
+          "--connect",
+          logicalConnectUrl,
+          "--connect-host",
+          "prod-box",
+          "--connect-local-port",
+          String(localPort),
+          "--output-format",
+          "json",
+        ],
+        {
+          cwd: dir,
+          env: fakeSshEnv(fakeSsh.binDir, {
+            TASK_RUNNER_FAKE_SSH_TARGET_HOST: "127.0.0.1",
+          }),
+        },
+      ),
+    );
+    assert.equal(statusJson.hostMode, "daemon");
+    assert.equal(statusJson.connectUrl, logicalConnectUrl);
+
+    const attachmentJson = JSON.parse(
+      runCli(
+        [
+          "attachment",
+          "add",
+          init.runId,
+          sourcePath,
+          "--connect",
+          logicalConnectUrl,
+          "--connect-host",
+          "prod-box",
+          "--connect-local-port",
+          String(localPort),
+          "--output-format",
+          "json",
+        ],
+        {
+          cwd: dir,
+          env: fakeSshEnv(fakeSsh.binDir, {
+            TASK_RUNNER_FAKE_SSH_TARGET_HOST: "127.0.0.1",
+          }),
+        },
+      ),
+    );
+    assert.equal(attachmentJson.name, "evidence.txt");
+
+    const manifest = readManifest(init.workspaceDir);
+    assert.equal(manifest.attachments.length, 1);
+    assert.equal(manifest.attachments[0].name, "evidence.txt");
+  } finally {
+    await daemon.stop();
+  }
+});
+
+test("connect-host surfaces ssh tunnel setup failures before daemon dialing", async () => {
+  const dir = tempDir();
+  const fakeSsh = installFakeSsh(dir);
+  const port = await freePort();
+  const localPort = await freePort();
+  const logicalConnectUrl = `ws://task-runner.remote.invalid:${port}/`;
+
+  const failed = runCliExpectFail(
+    [
+      "status",
+      "--connect",
+      logicalConnectUrl,
+      "--connect-host",
+      "prod-box",
+      "--connect-local-port",
+      String(localPort),
+    ],
+    {
+      cwd: dir,
+      env: fakeSshEnv(fakeSsh.binDir, {
+        TASK_RUNNER_FAKE_SSH_MODE: "fail-auth",
+      }),
+    },
+  );
+
+  assert.equal(failed.status, 3);
+  assert.match(
+    failed.stderr,
+    /task-runner: ssh tunnel setup failed for host prod-box: Permission denied \(publickey\)\./,
+  );
+  assert.doesNotMatch(failed.stderr, /cannot connect to daemon/);
+});
+
+test("connect-host reports local port collisions before websocket dialing", async () => {
+  const dir = tempDir();
+  const fakeSsh = installFakeSsh(dir);
+  const port = await freePort();
+  const localPort = await freePort();
+  const logicalConnectUrl = `ws://task-runner.remote.invalid:${port}/`;
+  const blocker = createServer();
+  await new Promise((resolve) => blocker.listen(localPort, "127.0.0.1", resolve));
+
+  try {
+    const failed = runCliExpectFail(
+      [
+        "status",
+        "--connect",
+        logicalConnectUrl,
+        "--connect-host",
+        "prod-box",
+        "--connect-local-port",
+        String(localPort),
+      ],
+      {
+        cwd: dir,
+        env: fakeSshEnv(fakeSsh.binDir, {
+          TASK_RUNNER_FAKE_SSH_TARGET_HOST: "127.0.0.1",
+        }),
+      },
+    );
+
+    assert.equal(failed.status, 3);
+    assert.match(
+      failed.stderr,
+      /task-runner: ssh tunnel setup failed for host prod-box: bind \[127\.0\.0\.1\]:\d+: Address already in use/,
+    );
+    assert.doesNotMatch(failed.stderr, /cannot connect to daemon/);
+  } finally {
+    await new Promise((resolve) => blocker.close(resolve));
+  }
+});
+
+test("serve rejects connect-host tunnel flags", async () => {
+  const dir = tempDir();
+  const failedHost = runCliExpectFail(["serve", "--connect-host", "prod-box"], { cwd: dir });
+  assert.equal(failedHost.status, 3);
+  assert.match(failedHost.stderr, /task-runner: serve does not accept --connect-host/);
+
+  const failedLocalPort = runCliExpectFail(["serve", "--connect-local-port", "5773"], { cwd: dir });
+  assert.equal(failedLocalPort.status, 3);
+  assert.match(failedLocalPort.stderr, /task-runner: serve does not accept --connect-local-port/);
 });
 
 test("serve exposes HTTP/SSE alongside the existing WebSocket RPC transport", async () => {
