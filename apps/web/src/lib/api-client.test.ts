@@ -881,4 +881,23 @@ describe("api client", () => {
     });
     expect(fetchMock).toHaveBeenCalledWith("/api/runs/run-1/attachments/att-1/content");
   });
+
+  it("reads attachment preview blobs from the existing content endpoint", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(new Uint8Array([137, 80, 78, 71]), {
+          status: 200,
+          headers: { "content-type": "image/png" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createApiClient(config);
+    const blob = await api.readAttachmentBlob("run-1", "att-image");
+
+    expect(blob.size).toBe(4);
+    expect(blob.type).toBe("image/png");
+    await expect(blob.arrayBuffer()).resolves.toEqual(new Uint8Array([137, 80, 78, 71]).buffer);
+    expect(fetchMock).toHaveBeenCalledWith("/api/runs/run-1/attachments/att-image/content");
+  });
 });

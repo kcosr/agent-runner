@@ -6678,6 +6678,92 @@ describe("web app", () => {
     expect(preview.querySelector("pre code")).not.toBeNull();
   });
 
+  it("renders supported image previews through object URLs and revokes them on attachment changes and unmount", async () => {
+    installFetchMock(
+      {
+        runs: [makeRun({ runId: "run-1", name: "Attachment run" })],
+        details: {
+          "run-1": makeDetail({
+            runId: "run-1",
+            name: "Attachment run",
+            attachments: [
+              makeAttachment({
+                id: "att-svg",
+                name: "diagram.svg",
+                mimeType: "image/svg+xml",
+              }),
+              makeAttachment({
+                id: "att-png",
+                name: "photo.png",
+                mimeType: "image/png",
+              }),
+              makeAttachment({
+                id: "att-pdf",
+                name: "report.pdf",
+                mimeType: "application/pdf",
+              }),
+            ],
+          }),
+        },
+      },
+      {
+        handleRequest: (url) => {
+          if (/\/api\/runs\/run-1\/attachments\/att-svg\/content$/.test(url)) {
+            return new Response(
+              '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>',
+              {
+                status: 200,
+                headers: { "content-type": "image/svg+xml" },
+              },
+            );
+          }
+          if (/\/api\/runs\/run-1\/attachments\/att-png\/content$/.test(url)) {
+            return new Response(new Uint8Array([137, 80, 78, 71]), {
+              status: 200,
+              headers: { "content-type": "image/png" },
+            });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const createObjectURL = vi.fn((blob: Blob) =>
+      blob.type === "image/svg+xml" ? "blob:svg-preview" : "blob:png-preview",
+    );
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", {
+      ...URL,
+      createObjectURL,
+      revokeObjectURL,
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await user.click(await findRunCard("Attachment run"));
+    await user.click(await screen.findByRole("button", { name: /^Attachments\b/i }));
+
+    expect(screen.queryByRole("button", { name: /^Preview report\.pdf$/ })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^Preview diagram\.svg$/ }));
+    const svgPreview = await screen.findByRole("img", { name: "diagram.svg" });
+    expect(svgPreview).toHaveAttribute("src", "blob:svg-preview");
+    expect(screen.getByLabelText("Attachment preview content").querySelector("svg")).toBeNull();
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole("button", { name: "Next attachment: photo.png" }));
+    const pngPreview = await screen.findByRole("img", { name: "photo.png" });
+    expect(pngPreview).toHaveAttribute("src", "blob:png-preview");
+    await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith("blob:svg-preview"));
+
+    await user.click(screen.getByRole("button", { name: "Close detail" }));
+    await waitFor(() =>
+      expect(screen.queryByLabelText("Attachment preview")).not.toBeInTheDocument(),
+    );
+    await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith("blob:png-preview"));
+  });
+
   it("navigates attachment previews with buttons and fullscreen arrow keys", async () => {
     installFetchMock(
       {
@@ -6753,6 +6839,59 @@ describe("web app", () => {
 
     await user.keyboard("{ArrowLeft}");
     expect(await screen.findByText("beta body")).toBeInTheDocument();
+  });
+
+  it("keeps image preview failures on the existing inline error copy", async () => {
+    installFetchMock(
+      {
+        runs: [makeRun({ runId: "run-1", name: "Attachment run" })],
+        details: {
+          "run-1": makeDetail({
+            runId: "run-1",
+            name: "Attachment run",
+            attachments: [
+              makeAttachment({
+                id: "att-image",
+                name: "photo.png",
+                mimeType: "image/png",
+              }),
+            ],
+          }),
+        },
+      },
+      {
+        handleRequest: (url) => {
+          if (/\/api\/runs\/run-1\/attachments\/att-image\/content$/.test(url)) {
+            return new Response(JSON.stringify({ error: { message: "preview failed" } }), {
+              status: 500,
+              headers: { "content-type": "application/json" },
+            });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const createObjectURL = vi.fn(() => "blob:image-preview");
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", {
+      ...URL,
+      createObjectURL,
+      revokeObjectURL,
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await user.click(await findRunCard("Attachment run"));
+    await user.click(await screen.findByRole("button", { name: /^Attachments\b/i }));
+    await user.click(screen.getByRole("button", { name: /^Preview photo\.png$/ }));
+
+    expect(await screen.findByLabelText("Attachment preview")).toBeInTheDocument();
+    expect(await screen.findByText("Attachment preview failed to load")).toBeInTheDocument();
+    expect(screen.getByText("preview failed")).toBeInTheDocument();
+    expect(createObjectURL).not.toHaveBeenCalled();
+    expect(revokeObjectURL).not.toHaveBeenCalled();
   });
 
   it("keeps preview errors inline and isolates row preview clicks from attachment actions", async () => {

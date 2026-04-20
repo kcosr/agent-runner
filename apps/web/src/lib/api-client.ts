@@ -339,6 +339,27 @@ function normalizeResponseMediaType(value: string | null): string | null {
   return mediaType && mediaType.length > 0 ? mediaType : null;
 }
 
+async function readAttachmentContentResponse(
+  responsePromise: Promise<Response>,
+): Promise<Response> {
+  const response = await responsePromise;
+  if (!response.ok) {
+    return await readError(response);
+  }
+  return response;
+}
+
+function attachmentContentPath(
+  config: AppRuntimeConfig,
+  runId: string,
+  attachmentId: string,
+): string {
+  return joinPath(
+    config.apiBasePath,
+    `/runs/${encodeURIComponent(runId)}/attachments/${encodeURIComponent(attachmentId)}/content`,
+  );
+}
+
 export function createApiClient(config: AppRuntimeConfig) {
   return {
     async listRuns(): Promise<RunSummary[]> {
@@ -424,30 +445,21 @@ export function createApiClient(config: AppRuntimeConfig) {
       return await readAttachmentRemoveResult(response, "Remove attachment");
     },
     async downloadAttachment(runId: string, attachmentId: string): Promise<Blob> {
-      const response = await fetch(
-        joinPath(
-          config.apiBasePath,
-          `/runs/${encodeURIComponent(runId)}/attachments/${encodeURIComponent(attachmentId)}/content`,
-        ),
+      const response = await readAttachmentContentResponse(
+        fetch(attachmentContentPath(config, runId, attachmentId)),
       );
-      if (!response.ok) {
-        return await readError(response);
-      }
       return await response.blob();
+    },
+    async readAttachmentBlob(runId: string, attachmentId: string): Promise<Blob> {
+      return await this.downloadAttachment(runId, attachmentId);
     },
     async readAttachmentText(
       runId: string,
       attachmentId: string,
     ): Promise<AttachmentContentResult> {
-      const response = await fetch(
-        joinPath(
-          config.apiBasePath,
-          `/runs/${encodeURIComponent(runId)}/attachments/${encodeURIComponent(attachmentId)}/content`,
-        ),
+      const response = await readAttachmentContentResponse(
+        fetch(attachmentContentPath(config, runId, attachmentId)),
       );
-      if (!response.ok) {
-        return await readError(response);
-      }
       return {
         mediaType: normalizeResponseMediaType(response.headers.get("content-type")),
         text: await response.text(),

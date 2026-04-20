@@ -3,7 +3,7 @@ import type {
   AttachmentListEntry,
   RunAttachment,
 } from "@task-runner/core/contracts/attachments.js";
-import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useRef } from "react";
+import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from "react";
 import { createApiClient } from "../lib/api-client.js";
 import { formatBytes, formatTimestamp } from "../lib/format.js";
 import { useRuntimeConfig } from "../lib/runtime-config.js";
@@ -19,9 +19,27 @@ export function normalizeAttachmentMimeType(mimeType: string): string {
   return mimeType.split(";")[0]?.trim().toLowerCase() ?? "";
 }
 
+const IMAGE_ATTACHMENT_MEDIA_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "image/svg+xml",
+]);
+
+const PREVIEWABLE_ATTACHMENT_MEDIA_TYPES = new Set([
+  "text/markdown",
+  "text/plain",
+  ...IMAGE_ATTACHMENT_MEDIA_TYPES,
+]);
+
 export function isPreviewableAttachment(attachment: Pick<RunAttachment, "mimeType">): boolean {
   const mediaType = normalizeAttachmentMimeType(attachment.mimeType);
-  return mediaType === "text/markdown" || mediaType === "text/plain";
+  return PREVIEWABLE_ATTACHMENT_MEDIA_TYPES.has(mediaType);
+}
+
+function isImagePreviewMediaType(mediaType: string | null): boolean {
+  return mediaType !== null && IMAGE_ATTACHMENT_MEDIA_TYPES.has(mediaType);
 }
 
 export function AttachmentPreviewDrawer({
@@ -60,15 +78,25 @@ export function AttachmentPreviewDrawer({
   const { drawerStyle, isFullscreen, toggleFullscreen } = resize;
   const downloadPending = actionPending === "download-attachment";
   useHorizontalWheelGuard(drawerRef);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const imagePreviewUrlRef = useRef<string | null>(null);
+  const previewMediaType = attachment ? normalizeAttachmentMimeType(attachment.mimeType) : null;
   const previewQuery = useQuery({
-    queryKey: ["attachment-preview", runId, attachmentId],
-    queryFn: () => api.readAttachmentText(runId, attachmentId),
+    queryKey: ["attachment-preview", runId, attachmentId, previewMediaType],
+    queryFn: async () =>
+      isImagePreviewMediaType(previewMediaType)
+        ? {
+            kind: "image" as const,
+            blob: await api.readAttachmentBlob(runId, attachmentId),
+          }
+        : {
+            kind: "text" as const,
+            content: await api.readAttachmentText(runId, attachmentId),
+          },
     enabled: attachment !== undefined,
     retry: false,
   });
-  const previewMediaType =
-    previewQuery.data?.mediaType ??
-    (attachment ? normalizeAttachmentMimeType(attachment.mimeType) : null);
+  const textPreview = previewQuery.data?.kind === "text" ? previewQuery.data.content : null;
 
   useEffect(() => {
     if (!isFullscreen) {
@@ -111,6 +139,33 @@ export function AttachmentPreviewDrawer({
       window.removeEventListener("keydown", handleKeyDown, { capture: true });
     };
   }, [isFullscreen, onNextAttachment, onPreviousAttachment, toggleFullscreen]);
+
+  useEffect(() => {
+    if (previewQuery.data?.kind !== "image") {
+      if (imagePreviewUrlRef.current !== null) {
+        URL.revokeObjectURL(imagePreviewUrlRef.current);
+        imagePreviewUrlRef.current = null;
+        setImagePreviewUrl(null);
+      }
+      return;
+    }
+
+    const nextUrl = URL.createObjectURL(previewQuery.data.blob);
+    if (imagePreviewUrlRef.current !== null) {
+      URL.revokeObjectURL(imagePreviewUrlRef.current);
+    }
+    imagePreviewUrlRef.current = nextUrl;
+    setImagePreviewUrl(nextUrl);
+  }, [previewQuery.data]);
+
+  useEffect(() => {
+    return () => {
+      if (imagePreviewUrlRef.current !== null) {
+        URL.revokeObjectURL(imagePreviewUrlRef.current);
+        imagePreviewUrlRef.current = null;
+      }
+    };
+  }, []);
 
   function handleDrawerKeyDownCapture(event: ReactKeyboardEvent<HTMLElement>) {
     if (!isFullscreen || event.defaultPrevented || isEditableEventTarget(event.target)) {
@@ -286,17 +341,29 @@ export function AttachmentPreviewDrawer({
                 <p>{previewQuery.error.message}</p>
               </div>
             </section>
+          ) : isImagePreviewMediaType(previewMediaType) ? (
+            <section aria-label="Attachment preview content" className="drawer-panel">
+              <div className="drawer-panel-card attachment-preview-content">
+                {imagePreviewUrl ? (
+                  <img
+                    alt={attachment.name}
+                    className="attachment-preview-image"
+                    src={imagePreviewUrl}
+                  />
+                ) : null}
+              </div>
+            </section>
           ) : previewMediaType === "text/markdown" ? (
             <section aria-label="Attachment preview content" className="drawer-panel">
               <div className="drawer-panel-card attachment-preview-content">
-                <MarkdownContent text={previewQuery.data.text} />
+                <MarkdownContent text={textPreview?.text ?? ""} />
               </div>
             </section>
           ) : (
             <section aria-label="Attachment preview content" className="drawer-panel">
               <div className="drawer-panel-card attachment-preview-content">
                 <pre className="timeline-content attachment-preview-plain">
-                  <code>{previewQuery.data.text}</code>
+                  <code>{textPreview?.text ?? ""}</code>
                 </pre>
               </div>
             </section>
