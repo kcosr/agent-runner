@@ -582,6 +582,17 @@ test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mu
     },
   });
 
+  const readyBlockedOnDependency = deriveRunCapabilities(
+    buildManifest({
+      status: "ready",
+      dependencyRunIds: ["dep-1"],
+    }),
+    {
+      unsatisfied: 1,
+    },
+  );
+  assert.equal(readyBlockedOnDependency.canResume, false);
+
   const archived = deriveRunCapabilities(
     buildManifest({
       status: "success",
