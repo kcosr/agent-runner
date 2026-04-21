@@ -271,7 +271,7 @@ export function renderRunList(result: RunListResult): string {
   return `${result
     .map((run) => {
       const archived = run.archivedAt !== null ? ` archived=${run.archivedAt}` : "";
-      return `${run.runId} [${run.effectiveStatus}] name=${run.name ?? "<unnamed>"} ${run.tasksCompleted}/${run.tasksTotal} repo=${run.repo} agent=${run.agentName} assignment=${run.assignmentName ?? "none"}${archived}`;
+      return `${run.runId} [${run.effectiveStatus}] name=${run.name ?? "<unnamed>"} ${run.tasksCompleted}/${run.tasksTotal} repo=${run.repo} agent=${run.agentName} assignment=${run.assignmentName ?? "none"}${archived} cwd=${run.cwd}`;
     })
     .join("\n")}\n`;
 }

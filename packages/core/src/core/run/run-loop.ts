@@ -428,6 +428,11 @@ function codexTransportFromEnv(): CodexTransportConfig | undefined {
   };
 }
 
+function captureFullAttemptLogs(env: NodeJS.ProcessEnv = process.env): boolean {
+  const raw = env.TASK_RUNNER_FULL_ATTEMPT_LOGS?.trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "on" || raw === "yes";
+}
+
 function resolveFreshBackendSpecific(
   backendId: BackendId,
   agentConfig: LoadedAgent["config"],
@@ -1632,6 +1637,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     prompt: string;
     sessionIdAtStart: string | null;
   } | null = null;
+  const includeStdoutInAttemptLog = captureFullAttemptLogs();
   const persistAttemptRecord = (record: {
     attempt: number;
     startedAt: string;
@@ -1660,7 +1666,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       sessionIndex,
       startedAt: record.startedAt,
       endedAt: record.endedAt,
-      stdout: record.rawStdout,
+      stdout: includeStdoutInAttemptLog ? record.rawStdout : "",
       stderr: record.rawStderr,
     });
     withTaskStateLock(workspaceDir, () => {

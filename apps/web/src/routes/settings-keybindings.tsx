@@ -41,6 +41,30 @@ const SHORTCUT_SECTIONS: readonly ShortcutSection[] = [
         title: "Toggle Filters",
       },
       {
+        description: "Toggle the board filter that keeps only pinned runs visible.",
+        keys: ["Ctrl", "Shift", "P"],
+        macKeys: ["Cmd", "Shift", "P"],
+        title: "Toggle pinned-only filter",
+      },
+      {
+        description: "Toggle the board filter that keeps only runs with notes visible.",
+        keys: ["Ctrl", "Shift", "N"],
+        macKeys: ["Cmd", "Shift", "N"],
+        title: "Toggle notes-only filter",
+      },
+      {
+        description: "Toggle whether archived runs stay visible on the board.",
+        keys: ["Ctrl", "Shift", "A"],
+        macKeys: ["Cmd", "Shift", "A"],
+        title: "Toggle archived filter",
+      },
+      {
+        description: "Toggle whether empty board columns stay visible.",
+        keys: ["Ctrl", "Shift", "E"],
+        macKeys: ["Cmd", "Shift", "E"],
+        title: "Toggle empty columns",
+      },
+      {
         description: "Blur the focused search field and keep the current query.",
         keys: ["Enter"],
         title: "Exit search focus",

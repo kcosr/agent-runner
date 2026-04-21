@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AppShell } from "../components/app-shell.js";
 import { RunFilters } from "../components/run-filters.js";
+import type { DashboardPreferences } from "../lib/settings.js";
 import {
   isEditableEventTarget,
   resolveBoardNeighborRunId,
@@ -9,6 +10,19 @@ import {
 import { RunDetailPanel } from "./run-detail-panel.js";
 import { RunsBoardPanel } from "./runs-board-panel.js";
 import { useRunsDashboardState } from "./use-runs-dashboard-state.js";
+
+const BOARD_FILTER_PREFERENCE_KEYS = {
+  "ui.togglePinnedOnly": "showPinnedOnly",
+  "ui.toggleNotesOnly": "showNotesOnly",
+  "ui.toggleArchived": "showArchived",
+  "ui.toggleHideEmptyColumns": "hideEmptyColumns",
+} satisfies Record<string, keyof DashboardPreferences>;
+
+type BoardFilterShortcutCommand = keyof typeof BOARD_FILTER_PREFERENCE_KEYS;
+
+function isBoardFilterShortcutCommand(command: string): command is BoardFilterShortcutCommand {
+  return command in BOARD_FILTER_PREFERENCE_KEYS;
+}
 
 export function RunsDashboardRoute() {
   const state = useRunsDashboardState();
@@ -70,6 +84,15 @@ export function RunsDashboardRoute() {
       if (command === "ui.toggleFilters") {
         event.preventDefault();
         setToggleFiltersVersion((current) => current + 1);
+        return;
+      }
+
+      if (isBoardFilterShortcutCommand(command)) {
+        event.preventDefault();
+        const key = BOARD_FILTER_PREFERENCE_KEYS[command];
+        currentState.updatePreferences({
+          [key]: !currentState.preferences[key],
+        } as Partial<DashboardPreferences>);
         return;
       }
 

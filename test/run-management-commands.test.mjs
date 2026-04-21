@@ -164,31 +164,40 @@ test("list runs scopes to cwd by default and supports explicit cwd, repo, global
   assert.match(
     includeArchived,
     new RegExp(
-      `${first.runId} \\[initialized\\] name=<unnamed> 0/2 .* archived=2026-04-12T12:00:00.000Z`,
+      `${first.runId} \\[initialized\\] name=<unnamed> 0/2 .* archived=2026-04-12T12:00:00.000Z cwd=${dir.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}`,
     ),
   );
   assert.doesNotMatch(includeArchived, new RegExp(second.runId));
 
   const explicitCwd = runCli(["list", "runs", "--cwd", otherCwd], { cwd: dir });
-  assert.match(
-    explicitCwd,
-    new RegExp(`^${second.runId} \\[initialized\\] name=<unnamed> 0/2 repo=unknown`, "m"),
+  assert.equal(
+    explicitCwd.trim(),
+    `${second.runId} [initialized] name=<unnamed> 0/2 repo=unknown agent=run-mgmt-agent assignment=run-mgmt-work cwd=${otherCwd}`,
   );
   assert.doesNotMatch(explicitCwd, /^oth123 /m);
 
   const repoScoped = runCli(["list", "runs", "--repo", "other-repo"], { cwd: dir });
   assert.equal(
     repoScoped.trim(),
-    "oth123 [initialized] name=<unnamed> 0/2 repo=other-repo agent=run-mgmt-agent assignment=run-mgmt-work",
+    `oth123 [initialized] name=<unnamed> 0/2 repo=other-repo agent=run-mgmt-agent assignment=run-mgmt-work cwd=${otherManifest.cwd}`,
   );
 
   const globalText = runCli(["list", "runs", "--global"], { cwd: dir });
   assert.doesNotMatch(globalText, new RegExp(first.runId));
   assert.match(
     globalText,
-    new RegExp(`^${second.runId} \\[initialized\\] name=<unnamed> 0/2 repo=unknown`, "m"),
+    new RegExp(
+      `^${second.runId} \\[initialized\\] name=<unnamed> 0/2 repo=unknown agent=run-mgmt-agent assignment=run-mgmt-work cwd=${otherCwd.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}$`,
+      "m",
+    ),
   );
-  assert.match(globalText, /^oth123 \[initialized\] name=<unnamed> 0\/2 repo=other-repo/m);
+  assert.match(
+    globalText,
+    new RegExp(
+      `^oth123 \\[initialized\\] name=<unnamed> 0/2 repo=other-repo agent=run-mgmt-agent assignment=run-mgmt-work cwd=${otherManifest.cwd.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}$`,
+      "m",
+    ),
+  );
 
   const jsonOut = runCli(
     ["list", "runs", "--global", "--include-archived", "--output-format", "json"],

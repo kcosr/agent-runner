@@ -5,6 +5,7 @@ export interface DashboardPreferences {
   hideEmptyColumns: boolean;
   collapseFailureStates: boolean;
   showArchived: boolean;
+  showNotesOnly: boolean;
   showPinnedOnly: boolean;
   sortByRecentUpdates: boolean;
   visibleFocusIndicators: boolean;
@@ -73,6 +74,7 @@ export const DEFAULT_DASHBOARD_PREFERENCES: DashboardPreferences = {
   hideEmptyColumns: true,
   collapseFailureStates: true,
   showArchived: false,
+  showNotesOnly: false,
   showPinnedOnly: false,
   sortByRecentUpdates: false,
   visibleFocusIndicators: false,
@@ -173,6 +175,10 @@ function parseStoredDashboardPreferences(value: unknown): DashboardPreferences {
       typeof record.showArchived === "boolean"
         ? record.showArchived
         : DEFAULT_DASHBOARD_PREFERENCES.showArchived,
+    showNotesOnly:
+      typeof record.showNotesOnly === "boolean"
+        ? record.showNotesOnly
+        : DEFAULT_DASHBOARD_PREFERENCES.showNotesOnly,
     showPinnedOnly:
       typeof record.showPinnedOnly === "boolean"
         ? record.showPinnedOnly

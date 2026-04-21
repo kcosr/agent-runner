@@ -6,6 +6,10 @@ export type RunsShortcutCommand =
   | "board.moveDown"
   | "board.moveLeft"
   | "board.moveRight"
+  | "ui.togglePinnedOnly"
+  | "ui.toggleNotesOnly"
+  | "ui.toggleArchived"
+  | "ui.toggleHideEmptyColumns"
   | "run.openNote"
   | "run.toggleArchived"
   | "run.togglePinned"
@@ -46,6 +50,21 @@ export interface RunsShortcutContext {
 
 export type BoardDirection = "up" | "down" | "left" | "right";
 
+type BoardFilterShortcutCommand = Extract<
+  RunsShortcutCommand,
+  "ui.togglePinnedOnly" | "ui.toggleNotesOnly" | "ui.toggleArchived" | "ui.toggleHideEmptyColumns"
+>;
+
+const BOARD_FILTER_SHORTCUTS: readonly {
+  command: BoardFilterShortcutCommand;
+  key: string;
+}[] = [
+  { command: "ui.togglePinnedOnly", key: "p" },
+  { command: "ui.toggleNotesOnly", key: "n" },
+  { command: "ui.toggleArchived", key: "a" },
+  { command: "ui.toggleHideEmptyColumns", key: "e" },
+];
+
 export function isEditableEventTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) {
     return false;
@@ -83,6 +102,26 @@ function matchesShortcut(
 
 function firstRunIdInColumn(column: BoardColumn | undefined): string | null {
   return column?.runs[0]?.runId ?? null;
+}
+
+function resolveBoardFilterShortcut(
+  event: ShortcutEventLike,
+  context: Pick<RunsShortcutContext, "resumeDialogOpen" | "typingTarget">,
+): BoardFilterShortcutCommand | null {
+  if (context.typingTarget || context.resumeDialogOpen) {
+    return null;
+  }
+
+  for (const shortcut of BOARD_FILTER_SHORTCUTS) {
+    if (
+      matchesShortcut(event, { ctrlKey: true, key: shortcut.key, shiftKey: true }) ||
+      matchesShortcut(event, { key: shortcut.key, metaKey: true, shiftKey: true })
+    ) {
+      return shortcut.command;
+    }
+  }
+
+  return null;
 }
 
 export function resolveBoardEntryRunId(
@@ -181,6 +220,11 @@ export function resolveRunsShortcutCommand(
     matchesShortcut(event, { key: "f", metaKey: true, shiftKey: true })
   ) {
     return context.typingTarget || context.resumeDialogOpen ? null : "ui.toggleFilters";
+  }
+
+  const boardFilterCommand = resolveBoardFilterShortcut(event, context);
+  if (boardFilterCommand) {
+    return boardFilterCommand;
   }
 
   if (

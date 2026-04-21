@@ -47,6 +47,10 @@
 
 ### Added
 
+- Added a persisted notes-only board filter in the web dashboard, plus
+  `Ctrl+Shift+N` / `Cmd+Shift+N` for notes-only and matching
+  `Ctrl+Shift` / `Cmd+Shift` shortcuts for pinned-only, archived, and
+  hide-empty board filters. ([#73](https://github.com/kcosr/task-runner/pull/73))
 - Added `task-runner run ready <run-id>` plus `RunCapabilities.canReady`
   across the CLI, daemon, contracts, and web dashboard so initialized
   runs can be explicitly promoted before first execution.
@@ -113,6 +117,12 @@
 
 ### Changed
 
+- Changed `task-runner list runs` text output to append each run's exact
+  persisted `cwd=...` alongside repo, agent, and assignment metadata.
+  ([#73](https://github.com/kcosr/task-runner/pull/73))
+- Changed attempt-log persistence to omit captured stdout by default;
+  set `TASK_RUNNER_FULL_ATTEMPT_LOGS=1` to keep full stdout in
+  per-attempt records for local debugging. ([#73](https://github.com/kcosr/task-runner/pull/73))
 - Changed the web run detail drawer to expose read-only `Vars` and
   `Hook state` data in a dedicated `Data` tab with a clearer key/value
   table layout, and moved the mobile note/resume dialogs lower so they

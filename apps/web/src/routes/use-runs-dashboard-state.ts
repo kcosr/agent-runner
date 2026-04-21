@@ -448,12 +448,21 @@ export function useRunsDashboardState() {
         if (!preferences.showArchived && run.archivedAt) {
           return false;
         }
+        if (preferences.showNotesOnly && !run.notePresent) {
+          return false;
+        }
         if (preferences.showPinnedOnly && !run.pinned) {
           return false;
         }
         return matchesStructuredFilters(run, preferences.structuredFilters);
       }),
-    [preferences.showArchived, preferences.showPinnedOnly, preferences.structuredFilters, runs],
+    [
+      preferences.showArchived,
+      preferences.showNotesOnly,
+      preferences.showPinnedOnly,
+      preferences.structuredFilters,
+      runs,
+    ],
   );
   const visibleRuns = useMemo(
     () => structuredVisibleRuns.filter((run) => matchesSearch(run, deferredSearch)),
@@ -1202,6 +1211,7 @@ export function useRunsDashboardState() {
       updateViewState({ search: "" });
       updatePreferences({
         showArchived: false,
+        showNotesOnly: false,
         showPinnedOnly: false,
         structuredFilters: EMPTY_DASHBOARD_STRUCTURED_FILTERS,
       });

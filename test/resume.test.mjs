@@ -306,7 +306,7 @@ test("resume: attempt numbers are monotonic across sessions", async () => {
   const log4 = JSON.parse(readFileSync(join(second.workspaceDir, "attempts", "04.json"), "utf8"));
   assert.equal(log4.attempt, 4);
   assert.equal(log4.sessionIndex, 1);
-  assert.equal(log4.stdout, "done raw");
+  assert.equal(log4.stdout, "");
 });
 
 test("resume: archived runs are rejected until unarchived", async () => {

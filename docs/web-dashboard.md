@@ -172,6 +172,14 @@ The dashboard's shortcut system is customizable from
 | `Enter` | Primary action for the selected card (Resume, etc.) |
 | `↑` / `↓` / `←` / `→` | Move the board selection |
 | `Ctrl+Shift+F` | Toggle Filters panel |
+| `Ctrl+Shift+P` | Toggle pinned-only filter |
+| `Ctrl+Shift+N` | Toggle notes-only filter |
+| `Ctrl+Shift+A` | Toggle archived filter |
+| `Ctrl+Shift+E` | Toggle hide-empty-columns |
+| `P` | Pin or unpin the selected run |
+| `N` | Open the selected run's note |
+| `A` | Archive or restore the selected run |
+| `F` | Toggle the detail drawer fullscreen |
 
 Shortcuts are suppressed while typing in inputs or when a modal dialog
 is open.
@@ -184,6 +192,7 @@ Preferences are persisted to `localStorage` and include:
 - Collapse failure states into a single column.
 - Sort by recent updates.
 - Show archived runs.
+- Show runs with notes only.
 - Show pinned runs only.
 - Structured filters (repo, agent, backend).
 - Visible focus indicators.
