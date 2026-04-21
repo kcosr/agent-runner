@@ -747,6 +747,63 @@ describe("api client", () => {
     );
   });
 
+  it("parses run audit timeline history payloads", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              history: {
+                runId: "run-1",
+                lastCursor: 2,
+                attempts: [],
+                events: [
+                  {
+                    runId: "run-1",
+                    cursor: 1,
+                    recordedAt: "2026-04-21T12:41:02.000Z",
+                    event: {
+                      type: "run.created",
+                      source: "system",
+                      hostMode: "embedded",
+                    },
+                  },
+                  {
+                    runId: "run-1",
+                    cursor: 2,
+                    recordedAt: "2026-04-21T12:41:03.000Z",
+                    event: {
+                      type: "task.updated",
+                      source: "task_command",
+                      hostMode: "embedded",
+                      taskId: "orient",
+                      statusAfter: "completed",
+                    },
+                  },
+                ],
+              },
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+
+    const api = createApiClient(config);
+
+    const history = await api.getRunAuditTimelineHistory("run-1");
+    expect(history.runId).toBe("run-1");
+    expect(history.lastCursor).toBe(2);
+    expect(history.events).toHaveLength(2);
+    expect(history.events[1]).toMatchObject({
+      cursor: 2,
+      event: {
+        type: "task.updated",
+        taskId: "orient",
+      },
+    });
+  });
+
   it("sends rename requests and parses the result payload", async () => {
     const fetchMock = vi.fn(
       async () =>

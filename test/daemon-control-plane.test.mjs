@@ -3061,6 +3061,129 @@ test("streamEvents keeps SSE subscribers active when writes report backpressure"
   assert.equal(unsubscribeCount, 1);
 });
 
+test("daemon serves audit timeline history over HTTP", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  const runId = "daemon-audit-history";
+
+  const server = await serveDaemon(listenUrl, {
+    getRunAuditTimelineHistory() {
+      return {
+        runId,
+        attempts: [],
+        events: [
+          {
+            runId,
+            cursor: 1,
+            recordedAt: "2026-04-21T12:41:02.000Z",
+            event: {
+              type: "run.created",
+              source: "system",
+              hostMode: "embedded",
+            },
+          },
+          {
+            runId,
+            cursor: 2,
+            recordedAt: "2026-04-21T12:41:03.000Z",
+            event: {
+              type: "run.hook_recorded",
+              source: "system",
+              hostMode: "embedded",
+              phase: "prepare",
+              hookId: "prepare:0:git-worktree",
+              outcome: "continue",
+            },
+          },
+        ],
+        lastCursor: 2,
+      };
+    },
+    getRun() {
+      return {
+        runId,
+        repo: "task-runner",
+        status: "initialized",
+        effectiveStatus: "initialized",
+        archivedAt: null,
+        isLive: false,
+        workspaceDir: "/tmp/fake",
+        assignmentPath: "/tmp/fake/assignment-seed.md",
+        agent: {
+          name: "daemon-agent",
+          sourcePath: null,
+        },
+        assignment: {
+          name: "daemon-work",
+          sourcePath: "/tmp/fake/source.md",
+          workspacePath: "/tmp/fake/assignment-seed.md",
+        },
+        backend: "passive",
+        model: null,
+        effort: null,
+        name: "daemon audit history",
+        backendSessionId: null,
+        cwd: "/tmp/fake",
+        unrestricted: false,
+        timeoutSec: 60,
+        startedAt: "2026-04-13T05:00:00.000Z",
+        endedAt: null,
+        exitCode: null,
+        attempts: 0,
+        maxAttempts: 1,
+        sessionCount: 0,
+        tasksCompleted: 0,
+        tasksTotal: 0,
+        attachments: [],
+        dependencies: [],
+        dependents: [],
+        tasks: [],
+        activeTask: null,
+        message: null,
+        pendingPrompt: null,
+        callerInstructions: null,
+        lockedFields: [],
+        runtimeVars: {},
+        execution: {
+          hostMode: "daemon",
+          controller: {
+            kind: "daemon",
+            daemonInstanceId: "daemon-placeholder",
+          },
+        },
+        capabilities: {
+          canArchive: false,
+          canUnarchive: false,
+          canReset: false,
+          canDelete: false,
+          canReady: false,
+          canResume: false,
+          canAbort: false,
+          abortReason: "not_active_in_daemon",
+          taskMutation: {
+            canSetStatus: false,
+            canEditNotes: false,
+            canAdd: false,
+          },
+        },
+      };
+    },
+  });
+
+  try {
+    const response = await httpJson(httpBaseUrl, `/api/runs/${runId}/events/timeline/history`);
+    assert.equal(response.status, 200);
+    assert.equal(response.body.history.runId, runId);
+    assert.equal(response.body.history.lastCursor, 2);
+    assert.equal(response.body.history.events.length, 2);
+    assert.equal(response.body.history.events[0].event.type, "run.created");
+    assert.equal(response.body.history.events[1].event.hookId, "prepare:0:git-worktree");
+  } finally {
+    await server.close();
+  }
+});
+
 test("daemon close aborts active runs and releases connected clients", async () => {
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;

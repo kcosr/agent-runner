@@ -4,6 +4,7 @@ import type {
   RunAttachmentDownloadResult,
   RunAttachmentRemoveResult,
 } from "@task-runner/core/contracts/attachments.js";
+import type { RunAuditTimelineHistory } from "@task-runner/core/contracts/events.js";
 import type {
   RunBackendSessionResult,
   RunDetail,
@@ -32,6 +33,68 @@ export interface SystemStatusResult {
   hostMode: HostMode;
   connectUrl: string | null;
   daemon: DaemonInfo | null;
+}
+
+function renderAuditSentence(
+  cursor: number,
+  auditEvent: RunAuditTimelineHistory["events"][number]["event"],
+): string {
+  switch (auditEvent.type) {
+    case "run.created":
+      return "Run initialized.";
+    case "run.ready":
+      return "Run marked ready.";
+    case "run.started":
+      return "Run attempt session started.";
+    case "run.resumed":
+      return "Run resumed.";
+    case "run.backend_session_updated":
+      return "Backend session updated.";
+    case "run.attempt_recorded":
+      return `Attempt ${typeof auditEvent.attempt === "number" ? auditEvent.attempt : "?"} recorded.`;
+    case "run.retrying":
+      return "Retrying execution.";
+    case "run.finished":
+      return `Run finished with status ${String(auditEvent.terminalStatus ?? "unknown")}.`;
+    case "run.resume_rejected":
+      return "Backend rejected resume request; aborting.";
+    case "run.aborted":
+      return "Run aborted.";
+    case "run.reset":
+      return "Run reset.";
+    case "run.archived":
+      return "Run archived.";
+    case "run.unarchived":
+      return "Run unarchived.";
+    case "run.renamed":
+      return "Run renamed.";
+    case "task.added":
+      return `Task \`${String(auditEvent.taskId ?? "?")}\` added: ${String(auditEvent.taskTitle ?? "Untitled")}.`;
+    case "task.updated":
+      return typeof auditEvent.statusAfter === "string"
+        ? `Task \`${String(auditEvent.taskId ?? "?")}\` marked ${auditEvent.statusAfter}.`
+        : `Task \`${String(auditEvent.taskId ?? "?")}\` updated.`;
+    case "run.hook_recorded": {
+      const hookId = String(auditEvent.hookId ?? "?");
+      const outcome = String(auditEvent.outcome ?? "recorded");
+      switch (auditEvent.phase) {
+        case "prepare":
+          return `Prepare hook \`${hookId}\` ${outcome}.`;
+        case "beforeAttempt":
+          return `Before-attempt hook \`${hookId}\` ${outcome}.`;
+        case "taskTransition":
+          return `Task-transition hook \`${hookId}\` ${outcome} for task \`${String(auditEvent.taskId ?? "?")}\`.`;
+        case "afterAttempt":
+          return `After-attempt hook \`${hookId}\` ${outcome}.`;
+        case "afterExit":
+          return `After-exit hook \`${hookId}\` ${outcome}.`;
+        default:
+          return `Hook \`${hookId}\` ${outcome}.`;
+      }
+    }
+    default:
+      return `Unhandled audit event ${auditEvent.type} at cursor ${cursor}.`;
+  }
 }
 
 export function renderRunStatus(detail: RunDetail): string {
@@ -176,6 +239,15 @@ export function renderSystemStatus(result: SystemStatusResult): string {
   }
 
   return `${lines.join("\n")}\n`;
+}
+
+export function renderRunAuditHistory(history: RunAuditTimelineHistory): string {
+  if (history.events.length === 0) {
+    return "No audit events recorded.\n";
+  }
+  return `${history.events
+    .map((event) => `${event.recordedAt}  ${renderAuditSentence(event.cursor, event.event)}`)
+    .join("\n")}\n`;
 }
 
 export function renderDefinitionList(result: DefinitionListResult): string {

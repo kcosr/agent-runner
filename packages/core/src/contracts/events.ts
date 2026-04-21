@@ -42,6 +42,31 @@ export interface RunTimelineHistory {
   lastCursor: number;
 }
 
+// Persisted run-audit events expanded from run-events.jsonl for history/bootstrap.
+export interface RunAuditEvent {
+  type: string;
+  source: "system" | "cli" | "daemon" | "task_command";
+  hostMode: "embedded" | "daemon";
+  controllerInstanceId?: string;
+  sessionIndex?: number;
+  attempt?: number;
+  [key: string]: unknown;
+}
+
+export interface RunTimelineAuditEvent {
+  runId: string;
+  cursor: number;
+  recordedAt: string;
+  event: RunAuditEvent;
+}
+
+export interface RunAuditTimelineHistory {
+  runId: string;
+  attempts: RunTimelineAttempt[];
+  events: RunTimelineAuditEvent[];
+  lastCursor: number;
+}
+
 // Live per-run timeline payload shared by SSE and WebSocket subscribers.
 export interface RunTimelineEnvelope {
   runId: string;

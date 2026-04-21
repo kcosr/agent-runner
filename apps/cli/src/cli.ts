@@ -16,6 +16,7 @@ import {
   getDefinition,
   getDefinitionList,
   getRun,
+  getRunAuditTimelineHistory,
   getRunBrief,
   getRunList,
   getTask,
@@ -83,6 +84,7 @@ import {
   renderDefinitionList,
   renderRunAddDependency,
   renderRunArchive,
+  renderRunAuditHistory,
   renderRunClearBackendSession,
   renderRunClearDependencies,
   renderRunDelete,
@@ -117,6 +119,7 @@ Commands:
   run                     Execute an agent. Either a fresh run, a resume,
                           or start/resume an existing non-initialized run.
   run status <id>         Read a run and print its current status.
+  run audit <id>          Print the persisted audit timeline for a run.
   run brief <id>          Print the canonical worker handoff for a run.
   run ready <id|path>     Promote an initialized run into ready state.
   run reset <id|path>     Restore a non-running run to initialized state.
@@ -529,6 +532,51 @@ async function runRunStatus(parsed: ParsedArgs, connect?: DaemonConnectContext):
       }
       process.stdout.write(renderRunStatus(result));
     }
+    process.exit(0);
+  } catch (err) {
+    exitCommandFailure(err, connect?.connectUrl);
+  }
+}
+
+async function runRunAudit(parsed: ParsedArgs, connect?: DaemonConnectContext): Promise<never> {
+  try {
+    if (parsed.outputFormatExplicit) {
+      throw new CommandError("run audit does not support --output-format");
+    }
+    if (parsed.fields.length > 0) {
+      throw new CommandError("run audit does not support --field");
+    }
+    const unsupported = unsupportedFlagsForGroupedCommand(parsed);
+    if (unsupported.length > 0) {
+      process.stderr.write(
+        `task-runner: run audit only supports <run-id> and --connect (got ${unsupported.join(", ")})\n`,
+      );
+      process.exit(3);
+    }
+    const target = normalizeRunIdTarget(parsed.positionals[0], "run audit");
+    if (!target) {
+      process.stderr.write("task-runner: run audit requires a run id\n");
+      process.stderr.write("Usage: task-runner run audit <id>\n");
+      process.exit(3);
+    }
+    if (parsed.positionals.length > 1) {
+      process.stderr.write(
+        `task-runner: run audit takes exactly one run id; got "${parsed.positionals[1]}"\n`,
+      );
+      process.exit(3);
+    }
+    const history =
+      connect === undefined
+        ? getRunAuditTimelineHistory(target)
+        : await withDaemonClient(connect, (client) =>
+            client
+              .call<{ history: ReturnType<typeof getRunAuditTimelineHistory> }>(
+                "runs.auditTimelineHistory",
+                { target },
+              )
+              .then((result) => result.history),
+          );
+    process.stdout.write(renderRunAuditHistory(history));
     process.exit(0);
   } catch (err) {
     exitCommandFailure(err, connect?.connectUrl);
@@ -2159,6 +2207,9 @@ async function main(): Promise<void> {
   if (parsed.command === "run") {
     if (parsed.subcommand === "status") {
       await runRunStatus(parsed, daemonConnect);
+    }
+    if (parsed.subcommand === "audit") {
+      await runRunAudit(parsed, daemonConnect);
     }
     if (parsed.subcommand === "brief") {
       await runRunBrief(parsed, daemonConnect);

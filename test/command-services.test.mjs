@@ -13,7 +13,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { WebSocketServer } from "ws";
-import { getRunTimelineHistory } from "../packages/core/dist/app/service.js";
+import {
+  getRunAuditTimelineHistory,
+  getRunTimelineHistory,
+} from "../packages/core/dist/app/service.js";
 import { encodePiSessionDir } from "../packages/core/dist/backends/pi.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import {
@@ -477,6 +480,51 @@ test("command services: getRunTimelineHistory degrades missing, corrupt, or esca
     assert.equal(history.attempts[1]?.notices, "");
     assert.equal(history.attempts[2]?.transcript, "Third output");
     assert.equal(history.attempts[2]?.notices, "");
+  });
+});
+
+test("command services: getRunAuditTimelineHistory skips malformed audit lines and preserves readable cursors", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+  writeFileSync(
+    join(outcome.workspaceDir, "run-events.jsonl"),
+    [
+      JSON.stringify({
+        schemaVersion: 1,
+        recordedAt: "2026-04-15T01:00:00.000Z",
+        runId: outcome.runId,
+        eventType: "run.created",
+        source: "system",
+        hostMode: "embedded",
+      }),
+      "{",
+      JSON.stringify({
+        schemaVersion: 1,
+        recordedAt: "2026-04-15T01:01:00.000Z",
+        runId: outcome.runId,
+        eventType: "task.updated",
+        source: "task_command",
+        hostMode: "embedded",
+        taskId: "t1",
+        taskTitle: "First",
+        statusAfter: "completed",
+        notesChanged: false,
+      }),
+      "",
+    ].join("\n"),
+  );
+
+  await withSharedRuntimeEnv(dir, async () => {
+    const history = getRunAuditTimelineHistory(outcome.runId);
+    assert.equal(history.runId, outcome.runId);
+    assert.equal(history.events.length, 2);
+    assert.equal(history.lastCursor, 2);
+    assert.equal(history.events[0]?.cursor, 1);
+    assert.equal(history.events[0]?.event.type, "run.created");
+    assert.equal(history.events[1]?.cursor, 2);
+    assert.equal(history.events[1]?.event.type, "task.updated");
+    assert.equal(history.events[1]?.event.taskId, "t1");
   });
 });
 

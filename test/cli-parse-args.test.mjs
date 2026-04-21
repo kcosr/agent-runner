@@ -147,6 +147,13 @@ test("parseArgs: run brief parses as a grouped run subcommand", () => {
   assert.deepEqual(parsed.positionals, ["abc123"]);
 });
 
+test("parseArgs: run audit parses as a grouped run subcommand", () => {
+  const parsed = parseArgs(argv("run", "audit", "abc123"));
+  assert.equal(parsed.command, "run");
+  assert.equal(parsed.subcommand, "audit");
+  assert.deepEqual(parsed.positionals, ["abc123"]);
+});
+
 test("parseArgs: serve captures --listen", () => {
   const parsed = parseArgs(argv("serve", "--listen", "ws://127.0.0.1:4773/"));
   assert.equal(parsed.command, "serve");

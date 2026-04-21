@@ -144,6 +144,15 @@ function runCli(args, opts = {}) {
   });
 }
 
+function runCliFailure(args, opts = {}) {
+  try {
+    runCli(args, opts);
+    throw new Error(`expected CLI failure for ${args.join(" ")}`);
+  } catch (error) {
+    return error;
+  }
+}
+
 function readAuditPath(workspaceDir) {
   return join(workspaceDir, "run-events.jsonl");
 }
@@ -842,4 +851,63 @@ test("daemon-context task commands append one task event with daemon host metada
   assert.equal(taskUpdates[0].source, "task_command");
   assert.equal(taskUpdates[0].hostMode, "daemon");
   assert.equal(taskUpdates[0].controllerInstanceId, "daemon-task-test");
+});
+
+test("run audit prints human-readable rows in recorded order", async () => {
+  const dir = tempDir();
+  writeAuditBundle(dir);
+  const init = await runIn(dir, {
+    agentName: "audit-passive",
+    assignmentName: "audit-passive-work",
+    backend: mockBackend(async () => {
+      throw new Error("backend should not be invoked during init");
+    }, "passive"),
+    initialize: true,
+  });
+
+  runCli(["task", "set", init.runId, "t1", "--status", "completed"], { cwd: dir });
+  const text = runCli(["run", "audit", init.runId], { cwd: dir });
+  const lines = text.trim().split("\n");
+
+  assert.match(lines[0], /Run initialized\./);
+  assert.match(lines[1], /Task `t1` marked completed\./);
+});
+
+test("run audit rejects missing and path-like run ids", async () => {
+  const dir = tempDir();
+  writeAuditBundle(dir);
+  const init = await runIn(dir, {
+    agentName: "audit-passive",
+    assignmentName: "audit-passive-work",
+    backend: mockBackend(async () => {
+      throw new Error("backend should not be invoked during init");
+    }, "passive"),
+    initialize: true,
+  });
+
+  const missing = runCliFailure(["run", "audit"], { cwd: dir });
+  assert.equal(missing.status, 3);
+  assert.match(missing.stderr.toString(), /run audit requires a run id/);
+
+  const badPath = runCliFailure(["run", "audit", init.workspaceDir], { cwd: dir });
+  assert.equal(badPath.status, 3);
+  assert.match(badPath.stderr.toString(), /run audit accepts a run id, not a path/);
+});
+
+test("run audit prints an explicit empty-history message", async () => {
+  const dir = tempDir();
+  writeAuditBundle(dir);
+  const init = await runIn(dir, {
+    agentName: "audit-passive",
+    assignmentName: "audit-passive-work",
+    backend: mockBackend(async () => {
+      throw new Error("backend should not be invoked during init");
+    }, "passive"),
+    initialize: true,
+  });
+
+  unlinkSync(readAuditPath(init.workspaceDir));
+
+  const text = runCli(["run", "audit", init.runId], { cwd: dir });
+  assert.equal(text, "No audit events recorded.\n");
 });

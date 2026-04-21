@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, watch } from "node:fs";
 import { createServer } from "node:http";
 import { type Socket, createServer as createNetServer } from "node:net";
 import {
@@ -15,6 +15,7 @@ import {
   getDefinition,
   getDefinitionList,
   getRun,
+  getRunAuditTimelineHistory,
   getRunBrief,
   getRunList,
   getRunSummary,
@@ -41,6 +42,7 @@ import type {
   RunDetailStreamEvent,
   RunSummaryStreamEvent,
   RunTimelineAttempt,
+  RunTimelineAuditEvent,
   RunTimelineEnvelope,
   RunTimelineEvent,
   RunTimelineHistory,
@@ -69,6 +71,7 @@ import {
   listRunManifests,
   resolveResumeTarget,
 } from "@task-runner/core/core/run/manifest.js";
+import { RUN_EVENTS_FILENAME } from "@task-runner/core/core/run/run-events.js";
 import type { RunEvent } from "@task-runner/core/core/run/run-loop.js";
 import { withTaskStateLock } from "@task-runner/core/core/run/workspace-state.js";
 import { shortId } from "@task-runner/core/util/short-id.js";
@@ -123,6 +126,13 @@ interface TimelineSubscriptionRecord {
   publish(event: RunTimelineEnvelope): boolean;
 }
 
+interface AuditTimelineSubscriptionRecord {
+  id: string;
+  owner: object;
+  runId: string;
+  publish(event: RunTimelineAuditEvent): boolean;
+}
+
 interface ActiveRunRecord {
   abortController: AbortController;
   done: Promise<void>;
@@ -135,6 +145,11 @@ interface ActiveRunRecord {
 interface RecentTimelineRecord {
   events: RunTimelineEnvelope[];
   cleanupTimer: ReturnType<typeof setTimeout>;
+}
+
+interface AuditWatcherRecord {
+  close(): void;
+  lastCursor: number;
 }
 
 interface SubscriptionHandle {
@@ -332,16 +347,19 @@ export async function serveDaemon(
   const summarySubscriptions = new Map<string, SummarySubscriptionRecord>();
   const detailSubscriptions = new Map<string, DetailSubscriptionRecord>();
   const timelineSubscriptions = new Map<string, TimelineSubscriptionRecord>();
+  const auditTimelineSubscriptions = new Map<string, AuditTimelineSubscriptionRecord>();
   const activeRuns = new Map<string, ActiveRunRecord>();
   const manifestEntriesByRunId = new Map<string, ListedRunManifest>();
   const dependentRunIdsByRunId = new Map<string, Set<string>>();
   let manifestIndexInitialized = false;
   const recentTimelineBuffers = new Map<string, RecentTimelineRecord>();
+  const auditWatchers = new Map<string, AuditWatcherRecord>();
   const sockets = new Set<Socket>();
   const wsClients = new Set<WebSocket>();
 
   const app: DaemonHandlers = {
     getRun,
+    getRunAuditTimelineHistory,
     getRunBrief,
     getRunList,
     getRunSummary,
@@ -592,6 +610,70 @@ export async function serveDaemon(
     };
   };
 
+  const closeAuditWatcher = (runId: string): void => {
+    const existing = auditWatchers.get(runId);
+    if (!existing) {
+      return;
+    }
+    existing.close();
+    auditWatchers.delete(runId);
+  };
+
+  const publishAuditTimeline = (event: RunTimelineAuditEvent): void => {
+    for (const [id, subscription] of auditTimelineSubscriptions) {
+      if (subscription.runId !== event.runId) {
+        continue;
+      }
+      const keep = subscription.publish(event);
+      if (!keep) {
+        auditTimelineSubscriptions.delete(id);
+      }
+    }
+  };
+
+  const syncAuditWatcher = (runId: string): void => {
+    const watcher = auditWatchers.get(runId);
+    if (!watcher) {
+      return;
+    }
+    try {
+      const history = app.getRunAuditTimelineHistory(runId);
+      if (history.lastCursor <= watcher.lastCursor) {
+        return;
+      }
+      for (const event of history.events) {
+        if (event.cursor <= watcher.lastCursor) {
+          continue;
+        }
+        publishAuditTimeline(event);
+      }
+      watcher.lastCursor = history.lastCursor;
+    } catch {
+      // Keep the watcher alive; the next file change or reload can recover.
+    }
+  };
+
+  const ensureAuditWatcher = (runId: string): void => {
+    if (auditWatchers.has(runId)) {
+      return;
+    }
+    const detail = getProjectedDetail(runId);
+    if (!detail) {
+      return;
+    }
+    const history = app.getRunAuditTimelineHistory(runId);
+    const directoryWatcher = watch(detail.workspaceDir, (_eventType, filename) => {
+      if (filename !== RUN_EVENTS_FILENAME) {
+        return;
+      }
+      syncAuditWatcher(runId);
+    });
+    auditWatchers.set(runId, {
+      close: () => directoryWatcher.close(),
+      lastCursor: history.lastCursor,
+    });
+  };
+
   const createActiveRunRecord = (
     abortController: AbortController,
     done: Promise<void>,
@@ -803,6 +885,7 @@ export async function serveDaemon(
       publishDependentSummaries: shouldPublishDependentSummaries(previous, current),
       publishDependentDetails: shouldPublishDependentDetails(previous, current),
     });
+    syncAuditWatcher(runId);
     return result;
   };
 
@@ -823,6 +906,7 @@ export async function serveDaemon(
       publishDependentSummaries: shouldPublishDependentSummaries(previous, current),
       publishDependentDetails: shouldPublishDependentDetails(previous, current),
     });
+    syncAuditWatcher(runId);
     return result;
   };
 
@@ -837,6 +921,7 @@ export async function serveDaemon(
     if (active) {
       active.detail = detail;
     }
+    syncAuditWatcher(runId);
     return result;
   };
 
@@ -930,6 +1015,37 @@ export async function serveDaemon(
       subscriptionId,
     );
 
+  const subscribeRunAuditTimeline = (
+    owner: object,
+    runId: string,
+    publish: (event: RunTimelineAuditEvent) => boolean,
+    subscriptionId = `sub-${shortId()}`,
+  ): SubscriptionHandle => {
+    ensureAuditWatcher(runId);
+    const handle = createSubscription(
+      auditTimelineSubscriptions,
+      (id) => ({
+        id,
+        owner,
+        runId,
+        publish,
+      }),
+      subscriptionId,
+    );
+    return {
+      ...handle,
+      unsubscribe: () => {
+        handle.unsubscribe();
+        const hasOtherSubscribers = [...auditTimelineSubscriptions.values()].some(
+          (subscription) => subscription.runId === runId,
+        );
+        if (!hasOtherSubscribers) {
+          closeAuditWatcher(runId);
+        }
+      },
+    };
+  };
+
   const replayTimeline = (
     runId: string,
     publish: (event: RunTimelineEnvelope) => boolean,
@@ -956,6 +1072,19 @@ export async function serveDaemon(
     for (const [id, subscription] of timelineSubscriptions) {
       if (subscription.owner === owner) {
         timelineSubscriptions.delete(id);
+      }
+    }
+    for (const [id, subscription] of auditTimelineSubscriptions) {
+      if (subscription.owner !== owner) {
+        continue;
+      }
+      const runId = subscription.runId;
+      auditTimelineSubscriptions.delete(id);
+      const hasOtherSubscribers = [...auditTimelineSubscriptions.values()].some(
+        (candidate) => candidate.runId === runId,
+      );
+      if (!hasOtherSubscribers) {
+        closeAuditWatcher(runId);
       }
     }
   };
@@ -989,6 +1118,7 @@ export async function serveDaemon(
         runId ?? (event.type === "run_finished" ? event.summary.runId : undefined);
       if (resolvedRunId) {
         publishTimeline(resolvedRunId, event);
+        syncAuditWatcher(resolvedRunId);
         if (
           event.type === "run_started" ||
           event.type === "retrying" ||
@@ -1187,6 +1317,8 @@ export async function serveDaemon(
           replayTimeline(runId, publish);
           return subscription.unsubscribe;
         },
+        subscribeRunAuditTimeline: (runId, publish) =>
+          subscribeRunAuditTimeline(res, runId, publish).unsubscribe,
       });
       return;
     }
@@ -1252,6 +1384,20 @@ export async function serveDaemon(
               operations.getRunTimelineHistory(
                 requiredRunIdString(
                   asRecord(params, "runs.timelineHistory params").target,
+                  "target",
+                ),
+              ),
+            ),
+          );
+          return;
+        case "runs.auditTimelineHistory":
+          sendJson(
+            ws,
+            resultResponse(
+              request.id,
+              operations.getRunAuditTimelineHistory(
+                requiredRunIdString(
+                  asRecord(params, "runs.auditTimelineHistory params").target,
                   "target",
                 ),
               ),
@@ -1686,6 +1832,16 @@ export async function serveDaemon(
           summarySubscriptions.delete(subscriptionId);
           detailSubscriptions.delete(subscriptionId);
           timelineSubscriptions.delete(subscriptionId);
+          const auditSubscription = auditTimelineSubscriptions.get(subscriptionId);
+          auditTimelineSubscriptions.delete(subscriptionId);
+          if (auditSubscription) {
+            const hasOtherSubscribers = [...auditTimelineSubscriptions.values()].some(
+              (candidate) => candidate.runId === auditSubscription.runId,
+            );
+            if (!hasOtherSubscribers) {
+              closeAuditWatcher(auditSubscription.runId);
+            }
+          }
           sendJson(ws, resultResponse(request.id, { unsubscribed: true }));
           return;
         }
@@ -1759,10 +1915,14 @@ export async function serveDaemon(
       summarySubscriptions.clear();
       detailSubscriptions.clear();
       timelineSubscriptions.clear();
+      auditTimelineSubscriptions.clear();
       for (const record of recentTimelineBuffers.values()) {
         clearTimeout(record.cleanupTimer);
       }
       recentTimelineBuffers.clear();
+      for (const runId of auditWatchers.keys()) {
+        closeAuditWatcher(runId);
+      }
       for (const ws of wsClients) {
         ws.terminate();
       }

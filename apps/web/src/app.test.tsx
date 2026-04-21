@@ -6745,7 +6745,7 @@ describe("web app", () => {
     await user.click(await findRunCard("Build dashboard"));
     expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
     await waitFor(() => {
-      expect(MockEventSource.instances).toHaveLength(3);
+      expect(MockEventSource.instances).toHaveLength(4);
     });
 
     await user.click(getCloseDetailButton());
@@ -6753,7 +6753,7 @@ describe("web app", () => {
 
     expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
     await waitFor(() => {
-      expect(MockEventSource.instances).toHaveLength(5);
+      expect(MockEventSource.instances).toHaveLength(7);
     });
   });
 

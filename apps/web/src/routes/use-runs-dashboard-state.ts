@@ -16,7 +16,7 @@ import { queryClient, runQueryKeys } from "../lib/query.js";
 import { useRunEvents } from "../lib/run-events.js";
 import { compareRunsByStartedAtDesc, sortRunsWithPinnedFirst } from "../lib/run-order.js";
 import { getRunPrimaryAction } from "../lib/run-primary-action.js";
-import { useRunTimelineState } from "../lib/run-timeline.js";
+import { useRunAuditTimelineState, useRunTimelineState } from "../lib/run-timeline.js";
 import { useRuntimeConfig } from "../lib/runtime-config.js";
 import {
   DEFAULT_DRAWER_VIEW,
@@ -415,6 +415,11 @@ export function useRunsDashboardState() {
     enabled: Boolean(detailRunId),
   });
   const timelineState = useRunTimelineState({
+    config,
+    runId: detailRunId,
+    runIsLive: detailRunId === selectedRunId && selectedRunQuery.data?.isLive === true,
+  });
+  const auditTimelineState = useRunAuditTimelineState({
     config,
     runId: detailRunId,
     runIsLive: detailRunId === selectedRunId && selectedRunQuery.data?.isLive === true,
@@ -1187,8 +1192,10 @@ export function useRunsDashboardState() {
     selectedRunQuery,
     setResumeMessageDraft,
     setResumeMessageExpanded,
-    streamStale: summaryStreamStale || detailStreamStale || timelineState.stale,
+    streamStale:
+      summaryStreamStale || detailStreamStale || timelineState.stale || auditTimelineState.stale,
     submitSelectedRunResume,
+    auditTimelineState,
     timelineState,
     triggerSelectedRunPrimaryAction,
     returnSelectedRunToAttachments: () => {

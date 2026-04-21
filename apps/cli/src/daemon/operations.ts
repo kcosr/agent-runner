@@ -12,6 +12,7 @@ import type {
   getDefinition,
   getDefinitionList,
   getRun,
+  getRunAuditTimelineHistory,
   getRunBrief,
   getRunList,
   getRunSummary,
@@ -42,6 +43,7 @@ import type {
 
 export interface DaemonHandlers {
   getRun: typeof getRun;
+  getRunAuditTimelineHistory: typeof getRunAuditTimelineHistory;
   getRunBrief: typeof getRunBrief;
   getRunList: typeof getRunList;
   getRunSummary: typeof getRunSummary;
@@ -94,6 +96,9 @@ export function createDaemonOperations(ctx: DaemonOperationContext) {
     },
     getRun(target: string) {
       return { run: ctx.getRun(target) };
+    },
+    getRunAuditTimelineHistory(target: string) {
+      return { history: ctx.getRunAuditTimelineHistory(target) };
     },
     getRunTimelineHistory(target: string) {
       return { history: ctx.getRunTimelineHistory(target) };

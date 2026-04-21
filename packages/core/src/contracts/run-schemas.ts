@@ -3,9 +3,12 @@ import { LOCKABLE_FIELDS } from "../core/config/schema.js";
 import { HOOK_PHASES } from "../core/config/schema.js";
 import type { AttachmentListEntry, RunAttachment } from "./attachments.js";
 import type {
+  RunAuditEvent,
+  RunAuditTimelineHistory,
   RunDetailStreamEvent,
   RunSummaryStreamEvent,
   RunTimelineAttempt,
+  RunTimelineAuditEvent,
   RunTimelineEnvelope,
   RunTimelineEvent,
   RunTimelineHistory,
@@ -323,9 +326,34 @@ export const runTimelineAttemptSchema: z.ZodType<RunTimelineAttempt> = z.object(
   live: z.boolean(),
 });
 
+export const runAuditEventSchema: z.ZodType<RunAuditEvent> = z
+  .object({
+    type: z.string(),
+    source: z.enum(["system", "cli", "daemon", "task_command"]),
+    hostMode: z.enum(["embedded", "daemon"]),
+    controllerInstanceId: z.string().optional(),
+    sessionIndex: z.number().int().nonnegative().optional(),
+    attempt: z.number().int().positive().optional(),
+  })
+  .passthrough();
+
+export const runTimelineAuditEventSchema: z.ZodType<RunTimelineAuditEvent> = z.object({
+  runId: z.string(),
+  cursor: z.number().int().positive(),
+  recordedAt: z.string(),
+  event: runAuditEventSchema,
+});
+
 export const runTimelineHistorySchema: z.ZodType<RunTimelineHistory> = z.object({
   runId: z.string(),
   attempts: z.array(runTimelineAttemptSchema),
+  lastCursor: z.number().int().nonnegative(),
+});
+
+export const runAuditTimelineHistorySchema: z.ZodType<RunAuditTimelineHistory> = z.object({
+  runId: z.string(),
+  attempts: z.array(runTimelineAttemptSchema),
+  events: z.array(runTimelineAuditEventSchema),
   lastCursor: z.number().int().nonnegative(),
 });
 

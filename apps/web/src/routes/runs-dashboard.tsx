@@ -305,6 +305,7 @@ export function RunsDashboardRoute() {
           selectedRunGroupAttachmentsQuery={state.selectedRunGroupAttachmentsQuery}
           selectedRunId={state.selectedRunId}
           selectedRunQuery={state.selectedRunQuery}
+          auditTimelineState={state.auditTimelineState}
           timelineState={state.timelineState}
         />
       }

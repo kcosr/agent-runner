@@ -6,6 +6,7 @@ import type {
   RunAttachmentRemoveResult,
 } from "@task-runner/core/contracts/attachments.js";
 import type {
+  RunAuditTimelineHistory,
   RunTimelineEnvelope,
   RunTimelineEvent,
   RunTimelineHistory,
@@ -189,6 +190,10 @@ export interface RunBriefResult {
 
 export interface RunsTimelineHistoryResult {
   history: RunTimelineHistory;
+}
+
+export interface RunsAuditTimelineHistoryResult {
+  history: RunAuditTimelineHistory;
 }
 
 export interface TasksListResult {

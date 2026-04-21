@@ -12,9 +12,14 @@ import {
   useRef,
   useState,
 } from "react";
+import {
+  type AuditFilterCategory,
+  formatAuditEventRow,
+  matchesAuditFilter,
+} from "../lib/audit-formatter.js";
 import { formatBytes, formatTimestamp, formatTimestampWithRelative } from "../lib/format.js";
 import { getRunPrimaryAction } from "../lib/run-primary-action.js";
-import type { RunTimelineState } from "../lib/run-timeline.js";
+import type { RunAuditTimelineState, RunTimelineState } from "../lib/run-timeline.js";
 import type { DrawerDetailSection } from "../lib/settings.js";
 import { isEditableEventTarget } from "../lib/shortcuts.js";
 import { useDrawerResize } from "../lib/use-drawer-resize.js";
@@ -42,6 +47,7 @@ import { RunTaskList } from "./run-task-list.js";
 import { StatusBadge } from "./status-badge.js";
 
 type TimelineTab = "message" | "prompt" | "response" | "diagnostics";
+type EventsMode = "attempts" | "audit";
 type AttemptSelection = number | "pending" | null;
 type SummaryRow = readonly [label: string, value: string];
 type DataTab = "vars" | "hookState";
@@ -256,6 +262,7 @@ export function RunDetailDrawer({
   onAddDependency,
   actionError,
   actionPending,
+  auditTimelineState,
   onAbort,
   onArchive,
   onClearDependencies,
@@ -322,6 +329,7 @@ export function RunDetailDrawer({
   resumeDialogOpen: boolean;
   resumeMessageDraft: string;
   resumeMessageExpanded: boolean;
+  auditTimelineState: RunAuditTimelineState;
   timelineState: RunTimelineState;
   onUnarchive: () => void;
   onUploadAttachment: (file: File) => Promise<void>;
@@ -335,6 +343,8 @@ export function RunDetailDrawer({
   const latestAttemptRef = useRef<number | null>(null);
   const [selectedAttempt, setSelectedAttempt] = useState<AttemptSelection>(null);
   const [dataTab, setDataTab] = useState<DataTab>("vars");
+  const [eventsMode, setEventsMode] = useState<EventsMode>("attempts");
+  const [auditFilter, setAuditFilter] = useState<AuditFilterCategory>("All");
   const [timelineTab, setTimelineTab] = useState<TimelineTab>(
     (run.status === "initialized" || run.status === "ready") && run.attempts === 0
       ? "message"
@@ -348,6 +358,7 @@ export function RunDetailDrawer({
   const [confirmingReset, setConfirmingReset] = useState(false);
   const [confirmingAbort, setConfirmingAbort] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [expandedAuditCursors, setExpandedAuditCursors] = useState<number[]>([]);
   const [dependencyDraft, setDependencyDraft] = useState("");
   const [selectedDependencyRunId, setSelectedDependencyRunId] = useState<string | null>(null);
   const resize = useDrawerResize();
@@ -431,6 +442,8 @@ export function RunDetailDrawer({
       (candidate) => candidate.runId.toLowerCase() === normalizedDependencyDraft.toLowerCase(),
     )?.runId;
   const timelineAttempts = timelineState.history?.attempts ?? [];
+  const auditEvents = auditTimelineState.history?.events ?? [];
+  const filteredAuditEvents = auditEvents.filter((event) => matchesAuditFilter(event, auditFilter));
   const pendingAttemptAvailable =
     (run.status === "initialized" || run.status === "ready") &&
     run.attempts === 0 &&
@@ -752,6 +765,14 @@ export function RunDetailDrawer({
   function selectDependencyCandidate(candidate: RunSummary) {
     setDependencyDraft(dependencyCandidateLabel(candidate));
     setSelectedDependencyRunId(candidate.runId);
+  }
+
+  function toggleAuditDetails(cursor: number) {
+    setExpandedAuditCursors((current) =>
+      current.includes(cursor)
+        ? current.filter((candidate) => candidate !== cursor)
+        : [...current, cursor],
+    );
   }
 
   async function submitDependencyRemove(dependencyRunId: string) {
@@ -1656,186 +1677,309 @@ export function RunDetailDrawer({
           {activeSection === "events" ? (
             <section aria-label="Attempts" className="drawer-panel drawer-panel--events">
               <div className="drawer-panel-card timeline-panel">
-                {timelineState.stale ? (
-                  <div className="notice" data-tone="warning">
-                    <span className="notice__message">
-                      Timeline sync is stale. The drawer is waiting for a clean reload.
-                    </span>
-                  </div>
-                ) : null}
+                <div className="task-tabs" role="tablist" aria-label="Run events view">
+                  <button
+                    aria-selected={eventsMode === "attempts"}
+                    className={eventsMode === "attempts" ? "task-tab active" : "task-tab"}
+                    onClick={() => setEventsMode("attempts")}
+                    role="tab"
+                    type="button"
+                  >
+                    Attempts
+                  </button>
+                  <button
+                    aria-selected={eventsMode === "audit"}
+                    className={eventsMode === "audit" ? "task-tab active" : "task-tab"}
+                    onClick={() => setEventsMode("audit")}
+                    role="tab"
+                    type="button"
+                  >
+                    Audit
+                  </button>
+                </div>
 
-                {timelineState.error && !selectedAttemptRecord ? (
-                  <p className="muted-inline">{timelineState.error}</p>
-                ) : null}
+                {eventsMode === "attempts" ? (
+                  <>
+                    {timelineState.stale ? (
+                      <div className="notice" data-tone="warning">
+                        <span className="notice__message">
+                          Timeline sync is stale. The drawer is waiting for a clean reload.
+                        </span>
+                      </div>
+                    ) : null}
 
-                {timelineState.isLoading && timelineAttempts.length === 0 ? (
-                  <p className="muted-inline">Loading timeline history…</p>
-                ) : null}
+                    {timelineState.error && !selectedAttemptRecord ? (
+                      <p className="muted-inline">{timelineState.error}</p>
+                    ) : null}
 
-                {!timelineState.isLoading &&
-                timelineAttempts.length === 0 &&
-                !selectedPendingAttempt ? (
-                  <p className="muted-inline">No attempt history is available for this run yet.</p>
-                ) : null}
+                    {timelineState.isLoading && timelineAttempts.length === 0 ? (
+                      <p className="muted-inline">Loading timeline history…</p>
+                    ) : null}
 
-                {selectedAttemptRecord || selectedPendingAttempt ? (
-                  <div className="timeline-attempt-panel">
-                    <div className="timeline-sticky-controls">
-                      {selectedPendingAttempt || timelineAttempts.length > 1 ? (
-                        <div className="timeline-attempts">
-                          <div
-                            className="timeline-attempt-tabs"
-                            role="tablist"
-                            aria-label="Attempts"
-                          >
-                            {selectedPendingAttempt ? (
-                              <button
-                                aria-selected={true}
-                                className="timeline-attempt-tab active"
-                                onClick={() => setSelectedAttempt("pending")}
-                                role="tab"
-                                type="button"
+                    {!timelineState.isLoading &&
+                    timelineAttempts.length === 0 &&
+                    !selectedPendingAttempt ? (
+                      <p className="muted-inline">
+                        No attempt history is available for this run yet.
+                      </p>
+                    ) : null}
+
+                    {selectedAttemptRecord || selectedPendingAttempt ? (
+                      <div className="timeline-attempt-panel">
+                        <div className="timeline-sticky-controls">
+                          {selectedPendingAttempt || timelineAttempts.length > 1 ? (
+                            <div className="timeline-attempts">
+                              <div
+                                className="timeline-attempt-tabs"
+                                role="tablist"
+                                aria-label="Attempts"
                               >
-                                <span>Pending</span>
-                              </button>
-                            ) : (
-                              timelineAttempts.map((attempt) => (
-                                <button
-                                  aria-selected={selectedAttemptRecord?.attempt === attempt.attempt}
-                                  className={
-                                    selectedAttemptRecord?.attempt === attempt.attempt
-                                      ? "timeline-attempt-tab active"
-                                      : "timeline-attempt-tab"
-                                  }
-                                  key={attempt.attempt}
-                                  onClick={() => setSelectedAttempt(attempt.attempt)}
-                                  role="tab"
-                                  type="button"
-                                >
-                                  <span>{attempt.attempt}</span>
-                                  {attempt.live ? (
-                                    <span aria-hidden="true" className="timeline-live-dot" />
-                                  ) : null}
-                                </button>
-                              ))
-                            )}
+                                {selectedPendingAttempt ? (
+                                  <button
+                                    aria-selected={true}
+                                    className="timeline-attempt-tab active"
+                                    onClick={() => setSelectedAttempt("pending")}
+                                    role="tab"
+                                    type="button"
+                                  >
+                                    <span>Pending</span>
+                                  </button>
+                                ) : (
+                                  timelineAttempts.map((attempt) => (
+                                    <button
+                                      aria-selected={
+                                        selectedAttemptRecord?.attempt === attempt.attempt
+                                      }
+                                      className={
+                                        selectedAttemptRecord?.attempt === attempt.attempt
+                                          ? "timeline-attempt-tab active"
+                                          : "timeline-attempt-tab"
+                                      }
+                                      key={attempt.attempt}
+                                      onClick={() => setSelectedAttempt(attempt.attempt)}
+                                      role="tab"
+                                      type="button"
+                                    >
+                                      <span>{attempt.attempt}</span>
+                                      {attempt.live ? (
+                                        <span aria-hidden="true" className="timeline-live-dot" />
+                                      ) : null}
+                                    </button>
+                                  ))
+                                )}
+                              </div>
+                            </div>
+                          ) : null}
+
+                          <div className="task-tabs" role="tablist" aria-label="Attempt view">
+                            <button
+                              aria-selected={timelineTab === "message"}
+                              className={timelineTab === "message" ? "task-tab active" : "task-tab"}
+                              onClick={() => setTimelineTab("message")}
+                              role="tab"
+                              type="button"
+                            >
+                              Message
+                            </button>
+                            <button
+                              aria-selected={timelineTab === "prompt"}
+                              className={timelineTab === "prompt" ? "task-tab active" : "task-tab"}
+                              onClick={() => setTimelineTab("prompt")}
+                              role="tab"
+                              type="button"
+                            >
+                              Prompt
+                            </button>
+                            <button
+                              aria-selected={timelineTab === "response"}
+                              className={
+                                timelineTab === "response" ? "task-tab active" : "task-tab"
+                              }
+                              onClick={() => setTimelineTab("response")}
+                              role="tab"
+                              type="button"
+                            >
+                              Response
+                            </button>
+                            <button
+                              aria-selected={timelineTab === "diagnostics"}
+                              className={
+                                timelineTab === "diagnostics" ? "task-tab active" : "task-tab"
+                              }
+                              onClick={() => setTimelineTab("diagnostics")}
+                              role="tab"
+                              type="button"
+                            >
+                              Diagnostics
+                            </button>
                           </div>
                         </div>
-                      ) : null}
 
-                      <div className="task-tabs" role="tablist" aria-label="Attempt view">
-                        <button
-                          aria-selected={timelineTab === "message"}
-                          className={timelineTab === "message" ? "task-tab active" : "task-tab"}
-                          onClick={() => setTimelineTab("message")}
-                          role="tab"
-                          type="button"
+                        <div
+                          className="timeline-content-scroll"
+                          onScroll={handleTimelineContentScroll}
+                          ref={timelineContentScrollRef}
                         >
-                          Message
-                        </button>
-                        <button
-                          aria-selected={timelineTab === "prompt"}
-                          className={timelineTab === "prompt" ? "task-tab active" : "task-tab"}
-                          onClick={() => setTimelineTab("prompt")}
-                          role="tab"
-                          type="button"
-                        >
-                          Prompt
-                        </button>
-                        <button
-                          aria-selected={timelineTab === "response"}
-                          className={timelineTab === "response" ? "task-tab active" : "task-tab"}
-                          onClick={() => setTimelineTab("response")}
-                          role="tab"
-                          type="button"
-                        >
-                          Response
-                        </button>
-                        <button
-                          aria-selected={timelineTab === "diagnostics"}
-                          className={timelineTab === "diagnostics" ? "task-tab active" : "task-tab"}
-                          onClick={() => setTimelineTab("diagnostics")}
-                          role="tab"
-                          type="button"
-                        >
-                          Diagnostics
-                        </button>
-                      </div>
-                    </div>
-
-                    <div
-                      className="timeline-content-scroll"
-                      onScroll={handleTimelineContentScroll}
-                      ref={timelineContentScrollRef}
-                    >
-                      {timelineTab === "message" ? (
-                        run.message ? (
-                          <section aria-label="Run message">
-                            <MarkdownContent className="timeline-content" text={run.message} />
-                          </section>
-                        ) : (
-                          <p className="task-empty">No message was provided for this run.</p>
-                        )
-                      ) : timelineTab === "prompt" ? (
-                        selectedPendingAttempt ? (
-                          run.pendingPrompt ? (
-                            <section aria-label="Pending prompt">
+                          {timelineTab === "message" ? (
+                            run.message ? (
+                              <section aria-label="Run message">
+                                <MarkdownContent className="timeline-content" text={run.message} />
+                              </section>
+                            ) : (
+                              <p className="task-empty">No message was provided for this run.</p>
+                            )
+                          ) : timelineTab === "prompt" ? (
+                            selectedPendingAttempt ? (
+                              run.pendingPrompt ? (
+                                <section aria-label="Pending prompt">
+                                  <MarkdownContent
+                                    className="timeline-content"
+                                    text={run.pendingPrompt}
+                                  />
+                                </section>
+                              ) : (
+                                <p className="task-empty">
+                                  No prompt preview is available for this run yet.
+                                </p>
+                              )
+                            ) : selectedAttemptRecord?.prompt ? (
+                              <section aria-label="Attempt prompt">
+                                <MarkdownContent
+                                  className="timeline-content"
+                                  text={selectedAttemptRecord.prompt}
+                                />
+                              </section>
+                            ) : (
+                              <p className="task-empty">This attempt did not record a prompt.</p>
+                            )
+                          ) : timelineTab === "response" ? (
+                            selectedPendingAttempt ? (
+                              <p className="task-empty">
+                                No response yet — this run has not started.
+                              </p>
+                            ) : selectedAttemptResponse ? (
+                              <section aria-label="Attempt response">
+                                <MarkdownContent
+                                  className="timeline-content"
+                                  text={selectedAttemptResponse}
+                                />
+                              </section>
+                            ) : (
+                              <p className="task-empty">
+                                {selectedAttemptRecord?.live
+                                  ? "Waiting for live response text…"
+                                  : "This attempt produced no transcript response."}
+                              </p>
+                            )
+                          ) : selectedPendingAttempt ? (
+                            <p className="task-empty">
+                              No diagnostics yet — this run has not started.
+                            </p>
+                          ) : selectedAttemptDiagnostics ? (
+                            <section aria-label="Attempt diagnostics">
                               <MarkdownContent
                                 className="timeline-content"
-                                text={run.pendingPrompt}
+                                text={selectedAttemptDiagnostics}
                               />
                             </section>
                           ) : (
                             <p className="task-empty">
-                              No prompt preview is available for this run yet.
+                              {selectedAttemptRecord?.live
+                                ? "No diagnostics have arrived yet."
+                                : "This attempt produced no diagnostics."}
                             </p>
-                          )
-                        ) : selectedAttemptRecord?.prompt ? (
-                          <section aria-label="Attempt prompt">
-                            <MarkdownContent
-                              className="timeline-content"
-                              text={selectedAttemptRecord.prompt}
-                            />
-                          </section>
-                        ) : (
-                          <p className="task-empty">This attempt did not record a prompt.</p>
-                        )
-                      ) : timelineTab === "response" ? (
-                        selectedPendingAttempt ? (
-                          <p className="task-empty">No response yet — this run has not started.</p>
-                        ) : selectedAttemptResponse ? (
-                          <section aria-label="Attempt response">
-                            <MarkdownContent
-                              className="timeline-content"
-                              text={selectedAttemptResponse}
-                            />
-                          </section>
-                        ) : (
-                          <p className="task-empty">
-                            {selectedAttemptRecord?.live
-                              ? "Waiting for live response text…"
-                              : "This attempt produced no transcript response."}
-                          </p>
-                        )
-                      ) : selectedPendingAttempt ? (
-                        <p className="task-empty">No diagnostics yet — this run has not started.</p>
-                      ) : selectedAttemptDiagnostics ? (
-                        <section aria-label="Attempt diagnostics">
-                          <MarkdownContent
-                            className="timeline-content"
-                            text={selectedAttemptDiagnostics}
-                          />
-                        </section>
-                      ) : (
-                        <p className="task-empty">
-                          {selectedAttemptRecord?.live
-                            ? "No diagnostics have arrived yet."
-                            : "This attempt produced no diagnostics."}
-                        </p>
-                      )}
+                          )}
+                        </div>
+                      </div>
+                    ) : null}
+                  </>
+                ) : (
+                  <div className="timeline-attempt-panel">
+                    <div className="timeline-sticky-controls">
+                      <div className="task-tabs" role="tablist" aria-label="Audit filters">
+                        {(["All", "Hooks", "Tasks", "Lifecycle", "Backend"] as const).map(
+                          (filter) => (
+                            <button
+                              aria-selected={auditFilter === filter}
+                              className={auditFilter === filter ? "task-tab active" : "task-tab"}
+                              key={filter}
+                              onClick={() => setAuditFilter(filter)}
+                              role="tab"
+                              type="button"
+                            >
+                              {filter}
+                            </button>
+                          ),
+                        )}
+                      </div>
                     </div>
+
+                    {auditTimelineState.stale ? (
+                      <div className="notice" data-tone="warning">
+                        <span className="notice__message">
+                          Audit sync is stale. The drawer is waiting for a clean reload.
+                        </span>
+                      </div>
+                    ) : null}
+
+                    {auditTimelineState.error ? (
+                      <p className="muted-inline">{auditTimelineState.error}</p>
+                    ) : null}
+
+                    {auditTimelineState.isLoading && auditEvents.length === 0 ? (
+                      <p className="muted-inline">Loading audit history…</p>
+                    ) : null}
+
+                    {!auditTimelineState.isLoading && auditEvents.length === 0 ? (
+                      <p className="muted-inline">No audit activity yet for this run.</p>
+                    ) : null}
+
+                    {!auditTimelineState.isLoading && auditEvents.length > 0 ? (
+                      filteredAuditEvents.length > 0 ? (
+                        <div className="timeline-content-scroll">
+                          {filteredAuditEvents.map((event) => {
+                            const formatted = formatAuditEventRow(event);
+                            const detailsOpen = expandedAuditCursors.includes(event.cursor);
+                            return (
+                              <article key={event.cursor} style={{ marginBottom: "12px" }}>
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "8px",
+                                    flexWrap: "wrap",
+                                  }}
+                                >
+                                  <span className="mono muted-inline">
+                                    {formatTimestamp(event.recordedAt)}
+                                  </span>
+                                  <span className="badge">{formatted.categoryLabel}</span>
+                                  <span>{formatted.sentence}</span>
+                                  <button
+                                    className="btn btn-ghost"
+                                    onClick={() => toggleAuditDetails(event.cursor)}
+                                    type="button"
+                                  >
+                                    {detailsOpen ? "Hide details" : "Details"}
+                                  </button>
+                                </div>
+                                {detailsOpen ? (
+                                  <div className="drawer-data-table__structured markdown task-markdown">
+                                    <pre>
+                                      <code>{JSON.stringify(event, null, 2)}</code>
+                                    </pre>
+                                  </div>
+                                ) : null}
+                              </article>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <p className="muted-inline">No audit rows match the selected filter.</p>
+                      )
+                    ) : null}
                   </div>
-                ) : null}
+                )}
               </div>
             </section>
           ) : null}

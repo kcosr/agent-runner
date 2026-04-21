@@ -1,11 +1,13 @@
 import type { AppRuntimeConfig } from "@task-runner/core/contracts/app-config.js";
 import type {
+  RunAuditTimelineHistory,
+  RunTimelineAuditEvent,
   RunTimelineEnvelope,
   RunTimelineHistory,
 } from "@task-runner/core/contracts/events.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createApiClient } from "./api-client.js";
-import { subscribeToRunTimelineEvents } from "./sse.js";
+import { subscribeToRunAuditTimelineEvents, subscribeToRunTimelineEvents } from "./sse.js";
 
 export interface RunTimelineState {
   error?: string;
@@ -14,8 +16,20 @@ export interface RunTimelineState {
   stale: boolean;
 }
 
+export interface RunAuditTimelineState {
+  error?: string;
+  history: RunAuditTimelineHistory | null;
+  isLoading: boolean;
+  stale: boolean;
+}
+
 export interface ApplyEnvelopeResult {
   history: RunTimelineHistory;
+  requiresReload: boolean;
+}
+
+export interface ApplyAuditEnvelopeResult {
+  history: RunAuditTimelineHistory;
   requiresReload: boolean;
 }
 
@@ -31,6 +45,17 @@ function cloneHistory(history: RunTimelineHistory): RunTimelineHistory {
   return {
     ...history,
     attempts: history.attempts.map((attempt) => ({ ...attempt })),
+  };
+}
+
+function cloneAuditHistory(history: RunAuditTimelineHistory): RunAuditTimelineHistory {
+  return {
+    ...history,
+    attempts: history.attempts.map((attempt) => ({ ...attempt })),
+    events: history.events.map((event) => ({
+      ...event,
+      event: { ...event.event },
+    })),
   };
 }
 
@@ -104,6 +129,25 @@ export function applyEnvelope(
     default:
       return { history, requiresReload: true };
   }
+}
+
+export function applyAuditEnvelope(
+  history: RunAuditTimelineHistory,
+  envelope: RunTimelineAuditEvent,
+): ApplyAuditEnvelopeResult {
+  if (envelope.cursor <= history.lastCursor) {
+    return { history, requiresReload: false };
+  }
+  if (envelope.cursor > history.lastCursor + 1) {
+    return { history, requiresReload: true };
+  }
+  const next = cloneAuditHistory(history);
+  next.lastCursor = envelope.cursor;
+  next.events.push({
+    ...envelope,
+    event: { ...envelope.event },
+  });
+  return { history: next, requiresReload: false };
 }
 
 export function useRunTimelineState({
@@ -269,6 +313,202 @@ export function useRunTimelineState({
         }
 
         const result = applyEnvelope(historyRef.current, envelope);
+        if (result.requiresReload) {
+          bufferRef.current = [];
+          staleRef.current = true;
+          setState((current) => ({ ...current, stale: true }));
+          requestReload();
+          return;
+        }
+
+        reloadCountRef.current = 0;
+        historyRef.current = result.history;
+        staleRef.current = false;
+        setState({
+          history: result.history,
+          isLoading: false,
+          stale: false,
+        });
+      },
+      onStaleChange: (stale) => {
+        if (disposed || !stale) {
+          return;
+        }
+        staleRef.current = true;
+        setState((current) => ({ ...current, stale: true }));
+      },
+    });
+
+    return () => {
+      disposed = true;
+      loadAbortControllerRef.current?.abort();
+      loadAbortControllerRef.current = null;
+      unsubscribe();
+    };
+  }, [api, config, runId, runIsLive]);
+
+  return state;
+}
+
+export function useRunAuditTimelineState({
+  config,
+  runId,
+  runIsLive,
+}: {
+  config: AppRuntimeConfig;
+  runId?: string;
+  runIsLive: boolean;
+}): RunAuditTimelineState {
+  const api = useMemo(() => createApiClient(config), [config]);
+  const [state, setState] = useState<RunAuditTimelineState>({
+    history: null,
+    isLoading: false,
+    stale: false,
+  });
+  const historyRef = useRef<RunAuditTimelineHistory | null>(null);
+  const staleRef = useRef(false);
+  const bootstrappedRef = useRef(false);
+  const bufferRef = useRef<RunTimelineAuditEvent[]>([]);
+  const loadSeqRef = useRef(0);
+  const loadAbortControllerRef = useRef<AbortController | null>(null);
+  const reloadCountRef = useRef(0);
+  const previousRunIdRef = useRef<string | undefined>(undefined);
+
+  useEffect(() => {
+    historyRef.current = state.history;
+  }, [state.history]);
+
+  useEffect(() => {
+    staleRef.current = state.stale;
+  }, [state.stale]);
+
+  useEffect(() => {
+    if (!runId) {
+      loadAbortControllerRef.current?.abort();
+      loadAbortControllerRef.current = null;
+      historyRef.current = null;
+      staleRef.current = false;
+      bootstrappedRef.current = false;
+      bufferRef.current = [];
+      setState({ history: null, isLoading: false, stale: false });
+      return;
+    }
+
+    let disposed = false;
+    const requestReload = () => {
+      if (disposed) {
+        return;
+      }
+      reloadCountRef.current += 1;
+      if (reloadCountRef.current > MAX_CONSECUTIVE_RELOADS) {
+        staleRef.current = true;
+        setState((current) => ({
+          ...current,
+          isLoading: false,
+          stale: true,
+        }));
+        return;
+      }
+      void loadHistory();
+    };
+
+    const loadHistory = async () => {
+      const loadSeq = ++loadSeqRef.current;
+      loadAbortControllerRef.current?.abort();
+      const controller = new AbortController();
+      loadAbortControllerRef.current = controller;
+      setState((current) => ({ ...current, error: undefined, isLoading: true }));
+      try {
+        const fetched = await api.getRunAuditTimelineHistory(runId, { signal: controller.signal });
+        if (disposed || loadSeq !== loadSeqRef.current) {
+          return;
+        }
+
+        let merged = fetched;
+        for (const envelope of [...bufferRef.current].sort(
+          (left, right) => left.cursor - right.cursor,
+        )) {
+          const result = applyAuditEnvelope(merged, envelope);
+          if (result.requiresReload) {
+            bufferRef.current = [];
+            staleRef.current = true;
+            setState((current) => ({ ...current, stale: true }));
+            requestReload();
+            return;
+          }
+          merged = result.history;
+        }
+
+        bufferRef.current = bufferRef.current.filter(
+          (envelope) => envelope.cursor > merged.lastCursor,
+        );
+        bootstrappedRef.current = true;
+        reloadCountRef.current = 0;
+        historyRef.current = merged;
+        staleRef.current = false;
+        setState({
+          history: merged,
+          isLoading: false,
+          stale: false,
+        });
+      } catch (error) {
+        if (isAbortError(error)) {
+          return;
+        }
+        if (disposed || loadSeq !== loadSeqRef.current) {
+          return;
+        }
+        setState({
+          error: error instanceof Error ? error.message : "Audit timeline failed to load",
+          history: historyRef.current,
+          isLoading: false,
+          stale: true,
+        });
+        staleRef.current = true;
+      }
+    };
+
+    const sameRunId = previousRunIdRef.current === runId;
+    previousRunIdRef.current = runId;
+    if (!sameRunId) {
+      historyRef.current = null;
+      staleRef.current = false;
+      bootstrappedRef.current = false;
+      bufferRef.current = [];
+      reloadCountRef.current = 0;
+      setState({ history: null, isLoading: true, stale: false });
+    } else {
+      setState((current) => ({ ...current, isLoading: true, error: undefined }));
+    }
+
+    if (!runIsLive) {
+      void loadHistory();
+      return () => {
+        disposed = true;
+        loadAbortControllerRef.current?.abort();
+        loadAbortControllerRef.current = null;
+      };
+    }
+
+    const unsubscribe = subscribeToRunAuditTimelineEvents(config, runId, {
+      onOpen: () => {
+        if (disposed) {
+          return;
+        }
+        if (!bootstrappedRef.current || staleRef.current) {
+          void loadHistory();
+        }
+      },
+      onEvent: (envelope) => {
+        if (disposed) {
+          return;
+        }
+        if (!bootstrappedRef.current || !historyRef.current) {
+          bufferRef.current.push(envelope);
+          return;
+        }
+
+        const result = applyAuditEnvelope(historyRef.current, envelope);
         if (result.requiresReload) {
           bufferRef.current = [];
           staleRef.current = true;

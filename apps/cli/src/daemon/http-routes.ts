@@ -5,6 +5,7 @@ import { VALID_STATUSES } from "@task-runner/core/assignment/model.js";
 import type {
   RunDetailStreamEvent,
   RunSummaryStreamEvent,
+  RunTimelineAuditEvent,
   RunTimelineEnvelope,
 } from "@task-runner/core/contracts/events.js";
 import { HttpError } from "./http-errors.js";
@@ -53,6 +54,10 @@ interface RouteContext {
     runId: string,
     publish: (payload: RunTimelineEnvelope) => boolean,
   ): () => void;
+  subscribeRunAuditTimeline(
+    runId: string,
+    publish: (payload: RunTimelineAuditEvent) => boolean,
+  ): () => void;
 }
 
 type RouteHandler = (
@@ -96,6 +101,13 @@ const routes: RouteDefinition[] = [
     pattern: ["api", "runs", ":runId", "timeline"],
     handler: (_req, res, ctx, params) => {
       sendJson(res, 200, ctx.operations.getRunTimelineHistory(routeParam(params, "runId")));
+    },
+  },
+  {
+    method: "GET",
+    pattern: ["api", "runs", ":runId", "events", "timeline", "history"],
+    handler: (_req, res, ctx, params) => {
+      sendJson(res, 200, ctx.operations.getRunAuditTimelineHistory(routeParam(params, "runId")));
     },
   },
   {
@@ -412,6 +424,23 @@ const routes: RouteDefinition[] = [
       const runId = routeParam(params, "runId");
       ctx.operations.getRun(runId);
       streamEvents(req, res, (publish) => ctx.subscribeRunDetail(runId, publish));
+    },
+  },
+  {
+    method: "GET",
+    pattern: ["api", "runs", ":runId", "events", "audit"],
+    handler: (req, res, ctx, params) => {
+      const runId = routeParam(params, "runId");
+      ctx.operations.getRun(runId);
+      streamEvents(
+        req,
+        res,
+        (publish) => ctx.subscribeRunAuditTimeline(runId, publish),
+        (payload: RunTimelineAuditEvent) => ({
+          id: String(payload.cursor),
+          data: payload,
+        }),
+      );
     },
   },
   {

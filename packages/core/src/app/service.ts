@@ -8,7 +8,13 @@ import type {
   RunAttachmentDownloadResult,
   RunAttachmentRemoveResult,
 } from "../contracts/attachments.js";
-import type { RunTimelineAttempt, RunTimelineHistory } from "../contracts/events.js";
+import type {
+  RunAuditEvent,
+  RunAuditTimelineHistory,
+  RunTimelineAttempt,
+  RunTimelineAuditEvent,
+  RunTimelineHistory,
+} from "../contracts/events.js";
 import type {
   RunArchiveResult,
   RunBackendSessionResult,
@@ -61,6 +67,7 @@ import type { AgentConfig, AssignmentConfig } from "../core/config/schema.js";
 import type { AttemptLog, AttemptRecord } from "../core/run/manifest.js";
 import { type RunExecution, resolveResumeTarget } from "../core/run/manifest.js";
 import type { RunEventOrigin } from "../core/run/run-events.js";
+import { runEventsPath } from "../core/run/run-events.js";
 import type { RunEvent, RunOutcome } from "../core/run/run-loop.js";
 import { executeRunCommand } from "../run-command.js";
 
@@ -196,6 +203,77 @@ function toRunTimelineAttempt(
   };
 }
 
+function readRunAuditEvents(workspaceDir: string, runId: string): RunTimelineAuditEvent[] {
+  let raw = "";
+  try {
+    raw = readFileSync(runEventsPath(workspaceDir), "utf8");
+  } catch {
+    return [];
+  }
+
+  const events: RunTimelineAuditEvent[] = [];
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) {
+      continue;
+    }
+
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(trimmed) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+
+    if (
+      typeof parsed.recordedAt !== "string" ||
+      typeof parsed.runId !== "string" ||
+      typeof parsed.eventType !== "string" ||
+      typeof parsed.source !== "string" ||
+      typeof parsed.hostMode !== "string"
+    ) {
+      continue;
+    }
+
+    const event: RunAuditEvent = {
+      type: parsed.eventType,
+      source: parsed.source as RunAuditEvent["source"],
+      hostMode: parsed.hostMode as RunAuditEvent["hostMode"],
+      ...(typeof parsed.controllerInstanceId === "string"
+        ? { controllerInstanceId: parsed.controllerInstanceId }
+        : {}),
+      ...(typeof parsed.sessionIndex === "number" ? { sessionIndex: parsed.sessionIndex } : {}),
+      ...(typeof parsed.attempt === "number" ? { attempt: parsed.attempt } : {}),
+    };
+
+    for (const [key, value] of Object.entries(parsed)) {
+      if (
+        key === "schemaVersion" ||
+        key === "recordedAt" ||
+        key === "runId" ||
+        key === "eventType" ||
+        key === "source" ||
+        key === "hostMode" ||
+        key === "controllerInstanceId" ||
+        key === "sessionIndex" ||
+        key === "attempt"
+      ) {
+        continue;
+      }
+      event[key] = value;
+    }
+
+    events.push({
+      runId,
+      cursor: events.length + 1,
+      recordedAt: parsed.recordedAt,
+      event,
+    });
+  }
+
+  return events;
+}
+
 export function getRun(target: string): RunDetail {
   return readStatus(target);
 }
@@ -213,6 +291,21 @@ export function getRunTimelineHistory(target: string): RunTimelineHistory {
       toRunTimelineAttempt(resolved.manifest.runId, resolved.workspaceDir, record),
     ),
     lastCursor: 0,
+  };
+}
+
+export function getRunAuditTimelineHistory(target: string): RunAuditTimelineHistory {
+  const detail = getRun(target);
+  const resolved = resolveResumeTarget(detail.workspaceDir);
+  const attempts = resolved.manifest.attemptRecords.map((record) =>
+    toRunTimelineAttempt(resolved.manifest.runId, resolved.workspaceDir, record),
+  );
+  const events = readRunAuditEvents(resolved.workspaceDir, resolved.manifest.runId);
+  return {
+    runId: resolved.manifest.runId,
+    attempts,
+    events,
+    lastCursor: events.at(-1)?.cursor ?? 0,
   };
 }
 

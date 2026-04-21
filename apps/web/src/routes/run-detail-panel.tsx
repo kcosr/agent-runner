@@ -5,7 +5,7 @@ import type { CSSProperties } from "react";
 import { AttachmentPreviewDrawer } from "../components/attachment-preview-drawer.js";
 import { RunDetailDrawer } from "../components/run-detail-drawer.js";
 import { isNotFoundError } from "../lib/api-client.js";
-import type { RunTimelineState } from "../lib/run-timeline.js";
+import type { RunAuditTimelineState, RunTimelineState } from "../lib/run-timeline.js";
 import type { DrawerDetailSection, RunDrawerView } from "../lib/settings.js";
 import type { RunActionPending } from "./use-runs-dashboard-state.js";
 
@@ -49,6 +49,7 @@ export function RunDetailPanel({
   resumeMessageDraft,
   resumeMessageExpanded,
   detailSettling,
+  auditTimelineState,
   selectedRunGroupAttachmentsQuery,
   selectedRunId,
   selectedRunQuery,
@@ -93,6 +94,7 @@ export function RunDetailPanel({
   resumeMessageDraft: string;
   resumeMessageExpanded: boolean;
   detailSettling: boolean;
+  auditTimelineState: RunAuditTimelineState;
   selectedRunGroupAttachmentsQuery: UseQueryResult<AttachmentListEntry[], Error>;
   selectedRunId?: string;
   selectedRunQuery: UseQueryResult<RunDetail, Error>;
@@ -254,6 +256,7 @@ export function RunDetailPanel({
       onSetPinned={(pinned) => onSetPinned(selectedRun.runId, pinned)}
       onSelectSection={onSelectDetailSection}
       onSubmitResume={onSubmitResume}
+      auditTimelineState={auditTimelineState}
       onTriggerPrimaryAction={onTriggerPrimaryAction}
       timelineState={timelineState}
       onUnarchive={() => onUnarchive(selectedRun.runId)}

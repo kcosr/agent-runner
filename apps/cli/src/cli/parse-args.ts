@@ -94,6 +94,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   } else if (
     result.command === "run" &&
     (args[0] === "status" ||
+      args[0] === "audit" ||
       args[0] === "brief" ||
       args[0] === "ready" ||
       args[0] === "reset" ||
