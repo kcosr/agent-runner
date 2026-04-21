@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import { execFileSync, spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import {
+  appendFileSync,
   chmodSync,
   existsSync,
   mkdirSync,
@@ -110,6 +111,10 @@ function patchManifest(workspaceDir, mutator) {
   const manifest = readManifest(workspaceDir);
   mutator(manifest);
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+function appendAuditEvent(workspaceDir, event) {
+  appendFileSync(join(workspaceDir, "run-events.jsonl"), `${JSON.stringify(event)}\n`);
 }
 
 async function withSeededFrontendDist(fn) {
@@ -3182,6 +3187,149 @@ test("daemon serves audit timeline history over HTTP", async () => {
   } finally {
     await server.close();
   }
+});
+
+test("daemon streams live audit events over SSE and mirrors audit history over websocket", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "passive-daemon-agent", PASSIVE_AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const init = await initRun(dir, "passive-daemon-agent");
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl);
+    const sse = await openSseFrames(httpBaseUrl, `/api/runs/${init.runId}/events/audit`);
+    const client = await DaemonClient.connect(listenUrl);
+    try {
+      const historyBefore = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${init.runId}/events/timeline/history`,
+      );
+      assert.equal(historyBefore.status, 200);
+
+      const wsHistoryBefore = await client.call("runs.auditTimelineHistory", {
+        target: init.runId,
+      });
+      assert.equal(wsHistoryBefore.history.lastCursor, historyBefore.body.history.lastCursor);
+
+      appendAuditEvent(init.workspaceDir, {
+        schemaVersion: 1,
+        recordedAt: "2026-04-21T13:02:00.000Z",
+        runId: init.runId,
+        eventType: "task.updated",
+        source: "task_command",
+        hostMode: "embedded",
+        taskId: "t1",
+        status: "completed",
+      });
+
+      const frame = await sse.next();
+      assert.equal(frame.id, String(historyBefore.body.history.lastCursor + 1));
+      assert.equal(frame.data.runId, init.runId);
+      assert.equal(frame.data.cursor, historyBefore.body.history.lastCursor + 1);
+      assert.equal(frame.data.event.type, "task.updated");
+      assert.equal(frame.data.event.source, "task_command");
+      assert.equal(frame.data.event.hostMode, "embedded");
+      assert.equal(frame.data.event.taskId, "t1");
+      assert.equal(frame.data.event.status, "completed");
+
+      const wsHistoryAfter = await client.call("runs.auditTimelineHistory", { target: init.runId });
+      assert.equal(wsHistoryAfter.history.lastCursor, historyBefore.body.history.lastCursor + 1);
+      assert.equal(wsHistoryAfter.history.events.at(-1)?.event.type, "task.updated");
+      assert.equal(wsHistoryAfter.history.events.at(-1)?.event.taskId, "t1");
+    } finally {
+      await client.close();
+      await sse.close();
+      await server.close();
+    }
+  });
+});
+
+test("daemon audit SSE subscriptions continue cleanly after all subscribers disconnect", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "passive-daemon-agent", PASSIVE_AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const init = await initRun(dir, "passive-daemon-agent");
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl);
+    const baselineHistory = await httpJson(
+      httpBaseUrl,
+      `/api/runs/${init.runId}/events/timeline/history`,
+    );
+    assert.equal(baselineHistory.status, 200);
+    let nextCursor = baselineHistory.body.history.lastCursor;
+
+    const first = await openSseFrames(httpBaseUrl, `/api/runs/${init.runId}/events/audit`);
+    const second = await openSseFrames(httpBaseUrl, `/api/runs/${init.runId}/events/audit`);
+    try {
+      nextCursor += 1;
+      appendAuditEvent(init.workspaceDir, {
+        schemaVersion: 1,
+        recordedAt: "2026-04-21T13:10:00.000Z",
+        runId: init.runId,
+        eventType: "task.updated",
+        source: "task_command",
+        hostMode: "embedded",
+        taskId: "t1",
+        status: "in_progress",
+      });
+      const firstFrame = await first.next();
+      const secondFrame = await second.next();
+      assert.equal(firstFrame.data.cursor, nextCursor);
+      assert.equal(secondFrame.data.cursor, nextCursor);
+
+      await first.close();
+      await new Promise((resolve) => setTimeout(resolve, 25));
+
+      nextCursor += 1;
+      appendAuditEvent(init.workspaceDir, {
+        schemaVersion: 1,
+        recordedAt: "2026-04-21T13:10:01.000Z",
+        runId: init.runId,
+        eventType: "task.updated",
+        source: "task_command",
+        hostMode: "embedded",
+        taskId: "t1",
+        status: "completed",
+      });
+      const secondOnlyFrame = await second.next();
+      assert.equal(secondOnlyFrame.data.cursor, nextCursor);
+      assert.equal(secondOnlyFrame.data.event.status, "completed");
+
+      await second.close();
+      await new Promise((resolve) => setTimeout(resolve, 25));
+
+      const third = await openSseFrames(httpBaseUrl, `/api/runs/${init.runId}/events/audit`);
+      try {
+        nextCursor += 1;
+        appendAuditEvent(init.workspaceDir, {
+          schemaVersion: 1,
+          recordedAt: "2026-04-21T13:10:02.000Z",
+          runId: init.runId,
+          eventType: "task.updated",
+          source: "task_command",
+          hostMode: "embedded",
+          taskId: "t1",
+          status: "blocked",
+        });
+        const reopenedFrame = await third.next();
+        assert.equal(reopenedFrame.data.cursor, nextCursor);
+        assert.equal(reopenedFrame.data.event.status, "blocked");
+      } finally {
+        await third.close();
+      }
+    } finally {
+      await first.close().catch(() => undefined);
+      await second.close().catch(() => undefined);
+      await server.close();
+    }
+  });
 });
 
 test("daemon close aborts active runs and releases connected clients", async () => {

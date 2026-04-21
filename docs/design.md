@@ -148,6 +148,16 @@ task-runner run brief <run-id>
 
 `run brief` is text-only. It is not projected through `run status --field ...`.
 
+Run audit history uses a separate read surface:
+
+```bash
+task-runner run audit <run-id>
+```
+
+`run audit` is also text-only. It prints readable per-event summaries
+plus compact metadata instead of projecting raw JSON fields through
+`run status`.
+
 ### Caller instructions
 
 `callerInstructions` are assignment docs for the human or script using
@@ -362,6 +372,7 @@ The resolved launcher is stored on both `manifest.launcher` and
 - `task-runner status`
 - `task-runner run status <run-id>`
 - `task-runner run brief <run-id>`
+- `task-runner run audit <run-id>`
 - `task-runner task list <run-id>`
 - `task-runner task show <run-id> <task-id>`
 - `task-runner attachment list <run-id> [--cwd-scope]`
@@ -369,7 +380,7 @@ The resolved launcher is stored on both `manifest.launcher` and
 Rules:
 
 - Top-level `status` reports system/environment status and takes no run id.
-- `run status` and `run brief` are run-id-only.
+- `run status`, `run brief`, and `run audit` are run-id-only.
 - `attachment list --cwd-scope` uses the target run's persisted `cwd` as
   an exact-match scope key. It does not infer groups from caller cwd,
   repo buckets, or path prefixes.
@@ -408,6 +419,8 @@ mixed event bus:
 - per-run detail stream: `GET /api/runs/:runId/events/detail`
 - per-run timeline history query: `GET /api/runs/:runId/timeline`
 - per-run timeline stream: `GET /api/runs/:runId/events/timeline`
+- per-run audit history query: `GET /api/runs/:runId/events/timeline/history`
+- per-run audit stream: `GET /api/runs/:runId/events/audit`
 
 The WebSocket subscription contract mirrors that split:
 
@@ -421,6 +434,12 @@ Notifications:
   `summary_removed` with a `runId`
 - `run.detail` carries a fresh `RunDetail`
 - `run.timeline` carries one `RunTimelineEnvelope { runId, cursor, event }`
+
+Timeline and audit consumers both use the same bootstrap rule: subscribe
+first, fetch history, then merge by cursor and reload history if a gap
+appears. The daemon never treats `run-events.jsonl` as canonical state;
+history queries and live envelopes are projections over the append-only
+audit file.
 
 Hooks do not add a fourth daemon event channel. Their externally visible
 state is carried inside the existing `RunSummary` and `RunDetail`

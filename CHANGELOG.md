@@ -47,6 +47,9 @@
 
 ### Added
 
+- Added `task-runner run audit <run-id>` plus daemon/web audit history
+  and live stream surfaces for readable inspection of per-run
+  `run-events.jsonl` history while keeping `run.json` canonical.
 - Added `task-runner run ready <run-id>` plus `RunCapabilities.canReady`
   across the CLI, daemon, contracts, and web dashboard so initialized
   runs can be explicitly promoted before first execution.
@@ -113,6 +116,9 @@
 
 ### Changed
 
+- Changed the web run detail drawer to split execution attempts from the
+  per-run audit feed, keeping attempt transcript state and append-only
+  audit history on distinct read surfaces.
 - Changed the web run detail drawer to expose read-only `Vars` and
   `Hook state` data in a dedicated `Data` tab with a clearer key/value
   table layout, and moved the mobile note/resume dialogs lower so they

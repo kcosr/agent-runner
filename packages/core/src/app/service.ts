@@ -203,6 +203,31 @@ function toRunTimelineAttempt(
   };
 }
 
+const VALID_AUDIT_EVENT_SOURCES = ["system", "cli", "daemon", "task_command"] as const;
+const VALID_AUDIT_HOST_MODES = ["embedded", "daemon"] as const;
+const SKIPPED_AUDIT_EVENT_KEYS = new Set([
+  "__proto__",
+  "attempt",
+  "constructor",
+  "controllerInstanceId",
+  "eventType",
+  "hostMode",
+  "prototype",
+  "recordedAt",
+  "runId",
+  "schemaVersion",
+  "sessionIndex",
+  "source",
+]);
+
+function isAuditEventSource(value: string): value is RunAuditEvent["source"] {
+  return VALID_AUDIT_EVENT_SOURCES.includes(value as (typeof VALID_AUDIT_EVENT_SOURCES)[number]);
+}
+
+function isAuditHostMode(value: string): value is RunAuditEvent["hostMode"] {
+  return VALID_AUDIT_HOST_MODES.includes(value as (typeof VALID_AUDIT_HOST_MODES)[number]);
+}
+
 function readRunAuditEvents(workspaceDir: string, runId: string): RunTimelineAuditEvent[] {
   let raw = "";
   try {
@@ -218,46 +243,44 @@ function readRunAuditEvents(workspaceDir: string, runId: string): RunTimelineAud
       continue;
     }
 
-    let parsed: Record<string, unknown>;
+    let parsed: unknown;
     try {
-      parsed = JSON.parse(trimmed) as Record<string, unknown>;
+      parsed = JSON.parse(trimmed);
     } catch {
       continue;
     }
 
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      continue;
+    }
+
+    const record = parsed as Record<string, unknown>;
+
     if (
-      typeof parsed.recordedAt !== "string" ||
-      typeof parsed.runId !== "string" ||
-      typeof parsed.eventType !== "string" ||
-      typeof parsed.source !== "string" ||
-      typeof parsed.hostMode !== "string"
+      typeof record.recordedAt !== "string" ||
+      typeof record.runId !== "string" ||
+      typeof record.eventType !== "string" ||
+      typeof record.source !== "string" ||
+      typeof record.hostMode !== "string" ||
+      !isAuditEventSource(record.source) ||
+      !isAuditHostMode(record.hostMode)
     ) {
       continue;
     }
 
     const event: RunAuditEvent = {
-      type: parsed.eventType,
-      source: parsed.source as RunAuditEvent["source"],
-      hostMode: parsed.hostMode as RunAuditEvent["hostMode"],
-      ...(typeof parsed.controllerInstanceId === "string"
-        ? { controllerInstanceId: parsed.controllerInstanceId }
+      type: record.eventType,
+      source: record.source,
+      hostMode: record.hostMode,
+      ...(typeof record.controllerInstanceId === "string"
+        ? { controllerInstanceId: record.controllerInstanceId }
         : {}),
-      ...(typeof parsed.sessionIndex === "number" ? { sessionIndex: parsed.sessionIndex } : {}),
-      ...(typeof parsed.attempt === "number" ? { attempt: parsed.attempt } : {}),
+      ...(typeof record.sessionIndex === "number" ? { sessionIndex: record.sessionIndex } : {}),
+      ...(typeof record.attempt === "number" ? { attempt: record.attempt } : {}),
     };
 
-    for (const [key, value] of Object.entries(parsed)) {
-      if (
-        key === "schemaVersion" ||
-        key === "recordedAt" ||
-        key === "runId" ||
-        key === "eventType" ||
-        key === "source" ||
-        key === "hostMode" ||
-        key === "controllerInstanceId" ||
-        key === "sessionIndex" ||
-        key === "attempt"
-      ) {
+    for (const [key, value] of Object.entries(record)) {
+      if (SKIPPED_AUDIT_EVENT_KEYS.has(key)) {
         continue;
       }
       event[key] = value;
@@ -266,7 +289,7 @@ function readRunAuditEvents(workspaceDir: string, runId: string): RunTimelineAud
     events.push({
       runId,
       cursor: events.length + 1,
-      recordedAt: parsed.recordedAt,
+      recordedAt: record.recordedAt,
       event,
     });
   }

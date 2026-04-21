@@ -4,8 +4,9 @@
 state in a manifest-canonical workspace. It supports embedded CLI
 execution, active backend invocation, passive sidecar operation, a local
 daemon, a browser dashboard, resumable runs, attachments, dependencies,
-launcher prefixes for subprocess backends, and a first-class `run brief`
-surface for handing a run to a worker.
+launcher prefixes for subprocess backends, a first-class `run brief`
+surface for handing a run to a worker, and a first-class `run audit`
+surface for reading per-run audit history.
 
 - Task state is canonical in `run.json`.
 - `run-events.jsonl` is a per-run diagnostic audit trail for runs created by current code; it is append-only history, not canonical state.
@@ -37,8 +38,9 @@ When you need to debug how a run got from one lifecycle/task state to
 another, runs created by current code include `run-events.jsonl`: a
 compact append-only audit trail for major lifecycle and task-mutation
 events. Pre-feature workspaces may still lack the file. It is
-diagnostic only; `run.json` remains the source of truth and there is no
-separate CLI or API read surface for the file in this first pass.
+diagnostic only; `run.json` remains the source of truth. Supported read
+surfaces are `task-runner run audit <run-id>` for plain-text CLI
+inspection plus the daemon/web audit history and live stream endpoints.
 
 It is also a useful primitive for orchestration — an outer agent can
 compose an assignment, hand it to `task-runner`, and get back a
@@ -129,6 +131,7 @@ task-runner run \
 task-runner status
 task-runner run status <run-id>
 task-runner run brief <run-id>
+task-runner run audit <run-id>
 task-runner task list <run-id>
 task-runner task show <run-id> <task-id>
 ```
@@ -280,7 +283,7 @@ root.
 | `init` | Prepare a run workspace without invoking the backend |
 | `serve` | Start the local daemon (WS JSON-RPC + HTTP/SSE + web UI) |
 | `status` | Print system/environment status |
-| `run status\|brief` | Print run state or the composed worker handoff |
+| `run status\|brief\|audit` | Print run state, the composed worker handoff, or plain-text audit history |
 | `task list\|show\|set\|append-notes\|add` | Task inspection and mutation |
 | `attachment add\|list\|download\|remove` | Attachment management |
 | `list agents\|assignments\|launchers\|runs` | Enumerate definitions and runs |
@@ -297,8 +300,8 @@ See [docs/cli.md](docs/cli.md) for the full flag-by-flag reference.
 Key rules:
 
 - `task-runner status` takes no run id and reports config/state/daemon info.
-- `task-runner run status` and `task-runner run brief` accept a run id, not a workspace path.
-- `run brief` is text-only (no `--output-format`, no `--field`).
+- `task-runner run status`, `task-runner run brief`, and `task-runner run audit` accept a run id, not a workspace path.
+- `run brief` and `run audit` are text-only (no `--output-format`, no `--field`).
 - `run status --output-format json` returns the shared `RunDetail` DTO, including full `note` text plus `pinned`.
 - Text `run status` surfaces note/pin metadata compactly (`Pinned: yes`, `Note: present`) and never prints the note body.
 - Run notes are human metadata only: they persist on the run but are not auto-injected into worker briefs or backend prompts.

@@ -503,6 +503,14 @@ test("command services: getRunAuditTimelineHistory skips malformed audit lines a
         schemaVersion: 1,
         recordedAt: "2026-04-15T01:01:00.000Z",
         runId: outcome.runId,
+        eventType: "run.created",
+        source: "unsupported",
+        hostMode: "embedded",
+      }),
+      JSON.stringify({
+        schemaVersion: 1,
+        recordedAt: "2026-04-15T01:01:30.000Z",
+        runId: outcome.runId,
         eventType: "task.updated",
         source: "task_command",
         hostMode: "embedded",
@@ -510,6 +518,7 @@ test("command services: getRunAuditTimelineHistory skips malformed audit lines a
         taskTitle: "First",
         statusAfter: "completed",
         notesChanged: false,
+        __proto__: { polluted: true },
       }),
       "",
     ].join("\n"),
@@ -525,6 +534,8 @@ test("command services: getRunAuditTimelineHistory skips malformed audit lines a
     assert.equal(history.events[1]?.cursor, 2);
     assert.equal(history.events[1]?.event.type, "task.updated");
     assert.equal(history.events[1]?.event.taskId, "t1");
+    assert.equal(Object.getPrototypeOf(history.events[1]?.event ?? null), Object.prototype);
+    assert.equal(Object.prototype.polluted, undefined);
   });
 });
 

@@ -619,6 +619,24 @@ export async function serveDaemon(
     auditWatchers.delete(runId);
   };
 
+  const maybeCloseAuditWatcher = (runId: string): void => {
+    const hasOtherSubscribers = [...auditTimelineSubscriptions.values()].some(
+      (candidate) => candidate.runId === runId,
+    );
+    if (!hasOtherSubscribers) {
+      closeAuditWatcher(runId);
+    }
+  };
+
+  const removeAuditSubscription = (subscriptionId: string): void => {
+    const existing = auditTimelineSubscriptions.get(subscriptionId);
+    if (!existing) {
+      return;
+    }
+    auditTimelineSubscriptions.delete(subscriptionId);
+    maybeCloseAuditWatcher(existing.runId);
+  };
+
   const publishAuditTimeline = (event: RunTimelineAuditEvent): void => {
     for (const [id, subscription] of auditTimelineSubscriptions) {
       if (subscription.runId !== event.runId) {
@@ -626,7 +644,7 @@ export async function serveDaemon(
       }
       const keep = subscription.publish(event);
       if (!keep) {
-        auditTimelineSubscriptions.delete(id);
+        removeAuditSubscription(id);
       }
     }
   };
@@ -667,6 +685,9 @@ export async function serveDaemon(
         return;
       }
       syncAuditWatcher(runId);
+    });
+    directoryWatcher.on("error", () => {
+      closeAuditWatcher(runId);
     });
     auditWatchers.set(runId, {
       close: () => directoryWatcher.close(),
@@ -1034,15 +1055,7 @@ export async function serveDaemon(
     );
     return {
       ...handle,
-      unsubscribe: () => {
-        handle.unsubscribe();
-        const hasOtherSubscribers = [...auditTimelineSubscriptions.values()].some(
-          (subscription) => subscription.runId === runId,
-        );
-        if (!hasOtherSubscribers) {
-          closeAuditWatcher(runId);
-        }
-      },
+      unsubscribe: () => removeAuditSubscription(handle.subscriptionId),
     };
   };
 
@@ -1078,14 +1091,7 @@ export async function serveDaemon(
       if (subscription.owner !== owner) {
         continue;
       }
-      const runId = subscription.runId;
-      auditTimelineSubscriptions.delete(id);
-      const hasOtherSubscribers = [...auditTimelineSubscriptions.values()].some(
-        (candidate) => candidate.runId === runId,
-      );
-      if (!hasOtherSubscribers) {
-        closeAuditWatcher(runId);
-      }
+      removeAuditSubscription(id);
     }
   };
 
@@ -1832,16 +1838,7 @@ export async function serveDaemon(
           summarySubscriptions.delete(subscriptionId);
           detailSubscriptions.delete(subscriptionId);
           timelineSubscriptions.delete(subscriptionId);
-          const auditSubscription = auditTimelineSubscriptions.get(subscriptionId);
-          auditTimelineSubscriptions.delete(subscriptionId);
-          if (auditSubscription) {
-            const hasOtherSubscribers = [...auditTimelineSubscriptions.values()].some(
-              (candidate) => candidate.runId === auditSubscription.runId,
-            );
-            if (!hasOtherSubscribers) {
-              closeAuditWatcher(auditSubscription.runId);
-            }
-          }
+          removeAuditSubscription(subscriptionId);
           sendJson(ws, resultResponse(request.id, { unsubscribed: true }));
           return;
         }

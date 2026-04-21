@@ -13,7 +13,7 @@ All commands accept `--help` / `-h`.
 | `init` | Prepare a run workspace without invoking the backend |
 | `serve` | Start the local daemon / control plane |
 | `status` | Print system/environment status |
-| `run status\|brief` | Print run state or the composed worker handoff |
+| `run status\|brief\|audit` | Print run state, the composed worker handoff, or plain-text audit history |
 | `task list\|show\|set\|append-notes\|add` | Task state inspection and mutation |
 | `attachment add\|list\|download\|remove` | Attachment management |
 | `list agents\|assignments\|launchers\|runs` | Enumerate definitions and runs |
@@ -180,6 +180,20 @@ Print the composed worker handoff for a run. Text-only — does not support
 ```bash
 task-runner run brief <run-id>
 ```
+
+## `run audit <run-id>`
+
+Print the run's audit history as readable text. Text-only — does not
+support `--output-format` or `--field`. Run-id-only. Connected-mode
+lookups via `--connect` are supported.
+
+```bash
+task-runner run audit <run-id>
+```
+
+- Prints sentence-first audit rows with compact metadata lines instead
+  of preformatted JSON/protocol output.
+- Prints `No audit events recorded.` when the run has no audit history.
 
 ## `task`
 
