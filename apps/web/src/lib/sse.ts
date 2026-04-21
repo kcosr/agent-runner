@@ -1,10 +1,12 @@
 import type { AppRuntimeConfig } from "@task-runner/core/contracts/app-config.js";
 import type {
+  RunAuditEnvelope,
   RunDetailStreamEvent,
   RunSummaryStreamEvent,
   RunTimelineEnvelope,
 } from "@task-runner/core/contracts/events.js";
 import {
+  runAuditEnvelopeSchema,
   runDetailStreamEventSchema,
   runSummaryStreamEventSchema,
   runTimelineEnvelopeSchema,
@@ -25,6 +27,12 @@ export interface DetailEventsSubscriptionOptions {
 
 export interface TimelineEventsSubscriptionOptions {
   onEvent: (payload: RunTimelineEnvelope) => void;
+  onOpen?: () => void;
+  onStaleChange?: (stale: boolean) => void;
+}
+
+export interface AuditEventsSubscriptionOptions {
+  onEvent: (payload: RunAuditEnvelope) => void;
   onOpen?: () => void;
   onStaleChange?: (stale: boolean) => void;
 }
@@ -97,6 +105,18 @@ export function subscribeToRunTimelineEvents(
   return subscribeToEventSource(
     joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/events/timeline`),
     runTimelineEnvelopeSchema,
+    options,
+  );
+}
+
+export function subscribeToRunAuditEvents(
+  config: AppRuntimeConfig,
+  runId: string,
+  options: AuditEventsSubscriptionOptions,
+): () => void {
+  return subscribeToEventSource(
+    joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/events/audit`),
+    runAuditEnvelopeSchema,
     options,
   );
 }

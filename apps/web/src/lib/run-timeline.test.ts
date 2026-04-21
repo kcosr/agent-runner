@@ -1,11 +1,21 @@
-import type { RunTimelineHistory } from "@task-runner/core/contracts/events.js";
+import type { RunAuditHistory, RunTimelineHistory } from "@task-runner/core/contracts/events.js";
 import { describe, expect, it } from "vitest";
+import { applyAuditEnvelope } from "./run-audit.js";
 import { applyEnvelope } from "./run-timeline.js";
 
 function makeHistory(overrides: Partial<RunTimelineHistory> = {}): RunTimelineHistory {
   return {
     runId: "run-1",
     attempts: [],
+    lastCursor: 0,
+    ...overrides,
+  };
+}
+
+function makeAuditHistory(overrides: Partial<RunAuditHistory> = {}): RunAuditHistory {
+  return {
+    runId: "run-1",
+    events: [],
     lastCursor: 0,
     ...overrides,
   };
@@ -121,5 +131,71 @@ describe("applyEnvelope", () => {
 
     expect(result.requiresReload).toBe(true);
     expect(result.history.lastCursor).toBe(1);
+  });
+});
+
+describe("applyAuditEnvelope", () => {
+  it("appends audit envelopes in cursor order", () => {
+    const result = applyAuditEnvelope(makeAuditHistory(), {
+      runId: "run-1",
+      cursor: 1,
+      event: {
+        type: "run.ready",
+        recordedAt: "2026-04-15T10:00:00.000Z",
+        source: "cli",
+        hostMode: "embedded",
+        fields: {
+          previousStatus: "initialized",
+        },
+      },
+    });
+
+    expect(result.requiresReload).toBe(false);
+    expect(result.history.lastCursor).toBe(1);
+    expect(result.history.events).toHaveLength(1);
+    expect(result.history.events[0]?.event.type).toBe("run.ready");
+  });
+
+  it("treats audit cursor gaps as requiring a reload", () => {
+    const result = applyAuditEnvelope(
+      makeAuditHistory({
+        lastCursor: 1,
+        events: [
+          {
+            runId: "run-1",
+            cursor: 1,
+            event: {
+              type: "run.ready",
+              recordedAt: "2026-04-15T10:00:00.000Z",
+              source: "cli",
+              hostMode: "embedded",
+              fields: {
+                previousStatus: "initialized",
+              },
+            },
+          },
+        ],
+      }),
+      {
+        runId: "run-1",
+        cursor: 3,
+        event: {
+          type: "run.finished",
+          recordedAt: "2026-04-15T10:05:00.000Z",
+          source: "system",
+          hostMode: "embedded",
+          fields: {
+            terminalStatus: "success",
+            exitCode: 0,
+            tasksCompleted: 1,
+            tasksTotal: 1,
+          },
+        },
+      },
+    );
+
+    expect(result.requiresReload).toBe(true);
+    expect(result.history.lastCursor).toBe(1);
+    expect(result.history.events).toHaveLength(1);
   });
 });

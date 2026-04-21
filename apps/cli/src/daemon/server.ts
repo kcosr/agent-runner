@@ -15,6 +15,7 @@ import {
   getDefinition,
   getDefinitionList,
   getRun,
+  getRunAuditHistory,
   getRunBrief,
   getRunList,
   getRunSummary,
@@ -38,6 +39,8 @@ import {
 import { VALID_STATUSES } from "@task-runner/core/assignment/model.js";
 import { isPathArg } from "@task-runner/core/config/runtime-paths.js";
 import type {
+  RunAuditEnvelope,
+  RunAuditHistory,
   RunDetailStreamEvent,
   RunSummaryStreamEvent,
   RunTimelineAttempt,
@@ -83,6 +86,7 @@ import {
   type JsonRpcResponse,
   RPC_ERROR_COMMAND,
   RPC_ERROR_RUNTIME,
+  type RunAuditNotificationParams,
   type RunDetailNotificationParams,
   type RunSummaryNotificationParams,
   type RunTimelineNotificationParams,
@@ -123,10 +127,18 @@ interface TimelineSubscriptionRecord {
   publish(event: RunTimelineEnvelope): boolean;
 }
 
+interface AuditSubscriptionRecord {
+  id: string;
+  owner: object;
+  runId: string;
+  publish(event: RunAuditEnvelope): boolean;
+}
+
 interface ActiveRunRecord {
   abortController: AbortController;
   done: Promise<void>;
   detail: RunDetail | null;
+  auditBuffer: RunAuditEnvelope[];
   timelineBuffer: RunTimelineEnvelope[];
   nextCursor: number;
   currentAttempt: RunTimelineAttempt | null;
@@ -134,6 +146,11 @@ interface ActiveRunRecord {
 
 interface RecentTimelineRecord {
   events: RunTimelineEnvelope[];
+  cleanupTimer: ReturnType<typeof setTimeout>;
+}
+
+interface RecentAuditRecord {
+  events: RunAuditEnvelope[];
   cleanupTimer: ReturnType<typeof setTimeout>;
 }
 
@@ -312,6 +329,14 @@ function bufferTimelineEvent(record: ActiveRunRecord, envelope: RunTimelineEnvel
   applyTimelineEnvelope(record, envelope);
 }
 
+function bufferAuditEvent(record: ActiveRunRecord, envelope: RunAuditEnvelope): void {
+  record.auditBuffer.push(envelope);
+  if (record.auditBuffer.length > MAX_TIMELINE_BUFFER_EVENTS) {
+    const overflow = record.auditBuffer.length - MAX_TIMELINE_BUFFER_EVENTS;
+    record.auditBuffer.splice(0, overflow);
+  }
+}
+
 export interface DaemonServerHandle {
   listenUrl: string;
   httpBaseUrl: string;
@@ -332,12 +357,14 @@ export async function serveDaemon(
   const summarySubscriptions = new Map<string, SummarySubscriptionRecord>();
   const detailSubscriptions = new Map<string, DetailSubscriptionRecord>();
   const timelineSubscriptions = new Map<string, TimelineSubscriptionRecord>();
+  const auditSubscriptions = new Map<string, AuditSubscriptionRecord>();
   const activeRuns = new Map<string, ActiveRunRecord>();
   const manifestEntriesByRunId = new Map<string, ListedRunManifest>();
   const dependentRunIdsByRunId = new Map<string, Set<string>>();
   const pendingDependencyAutoStarts = new Set<string>();
   let manifestIndexInitialized = false;
   const recentTimelineBuffers = new Map<string, RecentTimelineRecord>();
+  const recentAuditBuffers = new Map<string, RecentAuditRecord>();
   const sockets = new Set<Socket>();
   const wsClients = new Set<WebSocket>();
   let queueReadyDependencyAutoStartSweep: (() => void) | null = null;
@@ -348,6 +375,7 @@ export async function serveDaemon(
     getRunBrief,
     getRunList,
     getRunSummary,
+    getRunAuditHistory,
     getRunTimelineHistory,
     getAttachment,
     getAttachmentList,
@@ -573,12 +601,50 @@ export async function serveDaemon(
     });
   };
 
+  const clearRecentAuditBuffer = (runId: string): void => {
+    const existing = recentAuditBuffers.get(runId);
+    if (!existing) {
+      return;
+    }
+    clearTimeout(existing.cleanupTimer);
+    recentAuditBuffers.delete(runId);
+  };
+
+  const rememberRecentAuditBuffer = (runId: string, events: RunAuditEnvelope[]): void => {
+    clearRecentAuditBuffer(runId);
+    const cleanupTimer = setTimeout(() => {
+      recentAuditBuffers.delete(runId);
+    }, COMPLETED_TIMELINE_BUFFER_TTL_MS);
+    cleanupTimer.unref?.();
+    recentAuditBuffers.set(runId, {
+      events: [...events],
+      cleanupTimer,
+    });
+  };
+
+  const rememberRecentAuditEvent = (runId: string, envelope: RunAuditEnvelope): void => {
+    const nextEvents = [...(recentAuditBuffers.get(runId)?.events ?? []), envelope];
+    if (nextEvents.length > MAX_TIMELINE_BUFFER_EVENTS) {
+      const overflow = nextEvents.length - MAX_TIMELINE_BUFFER_EVENTS;
+      nextEvents.splice(0, overflow);
+    }
+    rememberRecentAuditBuffer(runId, nextEvents);
+  };
+
   const getReplayableTimeline = (runId: string): RunTimelineEnvelope[] => {
     const active = activeRuns.get(runId);
     if (active) {
       return active.timelineBuffer;
     }
     return recentTimelineBuffers.get(runId)?.events ?? [];
+  };
+
+  const getReplayableAudit = (runId: string): RunAuditEnvelope[] => {
+    const active = activeRuns.get(runId);
+    if (active) {
+      return active.auditBuffer;
+    }
+    return recentAuditBuffers.get(runId)?.events ?? [];
   };
 
   const getProjectedTimelineHistory = (runId: string): RunTimelineHistory => {
@@ -596,32 +662,45 @@ export async function serveDaemon(
     };
   };
 
+  const getProjectedAuditHistory = (
+    runId: string,
+    options?: {
+      limit?: number;
+    },
+  ): RunAuditHistory => app.getRunAuditHistory(runId, options);
+
   const createActiveRunRecord = (
     abortController: AbortController,
     done: Promise<void>,
     runId: string,
   ): ActiveRunRecord => {
+    const seededAuditBuffer = recentAuditBuffers.get(runId)?.events ?? [];
     clearRecentTimelineBuffer(runId);
+    clearRecentAuditBuffer(runId);
     return {
       abortController,
       done,
       detail: getProjectedDetail(runId),
+      auditBuffer: [...seededAuditBuffer],
       timelineBuffer: [],
       nextCursor: lastTimelineCursorByRun.get(runId) ?? 0,
       currentAttempt: null,
     };
   };
 
-  const parseRunEventChannel = (value: unknown): "run_summary" | "run_detail" | "run_timeline" => {
+  const parseRunEventChannel = (
+    value: unknown,
+  ): "run_summary" | "run_detail" | "run_timeline" | "run_audit" => {
     const channel = requiredString(value, "channel");
     switch (channel) {
       case "run_summary":
       case "run_detail":
       case "run_timeline":
+      case "run_audit":
         return channel;
       default:
         throw new RequestValidationError(
-          'channel must be one of "run_summary", "run_detail", or "run_timeline"',
+          'channel must be one of "run_summary", "run_detail", "run_timeline", or "run_audit"',
         );
     }
   };
@@ -802,6 +881,24 @@ export async function serveDaemon(
       const keep = subscription.publish(payload);
       if (!keep) {
         detailSubscriptions.delete(id);
+      }
+    }
+  };
+
+  const publishAudit = (envelope: RunAuditEnvelope): void => {
+    const active = activeRuns.get(envelope.runId);
+    if (active) {
+      bufferAuditEvent(active, envelope);
+    } else {
+      rememberRecentAuditEvent(envelope.runId, envelope);
+    }
+    for (const [id, subscription] of auditSubscriptions) {
+      if (subscription.runId !== envelope.runId) {
+        continue;
+      }
+      const keep = subscription.publish(envelope);
+      if (!keep) {
+        auditSubscriptions.delete(id);
       }
     }
   };
@@ -1074,11 +1171,37 @@ export async function serveDaemon(
       subscriptionId,
     );
 
+  const subscribeRunAudit = (
+    owner: object,
+    runId: string,
+    publish: (event: RunAuditEnvelope) => boolean,
+    subscriptionId = `sub-${shortId()}`,
+  ): SubscriptionHandle =>
+    createSubscription(
+      auditSubscriptions,
+      (id) => ({
+        id,
+        owner,
+        runId,
+        publish,
+      }),
+      subscriptionId,
+    );
+
   const replayTimeline = (
     runId: string,
     publish: (event: RunTimelineEnvelope) => boolean,
   ): void => {
     const buffer = getReplayableTimeline(runId);
+    for (const event of buffer) {
+      if (!publish(event)) {
+        break;
+      }
+    }
+  };
+
+  const replayAudit = (runId: string, publish: (event: RunAuditEnvelope) => boolean): void => {
+    const buffer = getReplayableAudit(runId);
     for (const event of buffer) {
       if (!publish(event)) {
         break;
@@ -1102,12 +1225,18 @@ export async function serveDaemon(
         timelineSubscriptions.delete(id);
       }
     }
+    for (const [id, subscription] of auditSubscriptions) {
+      if (subscription.owner === owner) {
+        auditSubscriptions.delete(id);
+      }
+    }
   };
 
   const executeManagedRun = async (
     startManagedRun: (
       emitEvent: (event: RunEvent) => void,
       abortSignal: AbortSignal,
+      emitAuditEnvelope: (envelope: RunAuditEnvelope) => void,
     ) => Promise<{ runId: string }>,
   ): Promise<{ runId: string }> => {
     const abortController = new AbortController();
@@ -1123,33 +1252,39 @@ export async function serveDaemon(
       resolveDone = resolve;
     });
 
-    void startManagedRun((event) => {
-      if ((event.type === "run_started" || event.type === "run_initialized") && !runId) {
-        runId = event.runId;
-        activeRuns.set(runId, createActiveRunRecord(abortController, done, runId));
-        resolveRunId?.(runId);
-      }
-      const resolvedRunId =
-        runId ?? (event.type === "run_finished" ? event.summary.runId : undefined);
-      if (resolvedRunId) {
-        publishTimeline(resolvedRunId, event);
-        if (
-          event.type === "run_started" ||
-          event.type === "retrying" ||
-          event.type === "run_aborted" ||
-          event.type === "run_finished"
-        ) {
-          const previous = activeRuns.get(resolvedRunId)?.detail ?? null;
-          const current = getProjectedDetail(resolvedRunId);
-          publishMutationResult(resolvedRunId, {
-            summary: getProjectedSummary(resolvedRunId),
-            detail: current,
-            publishDependentSummaries: shouldPublishDependentSummaries(previous, current),
-            publishDependentDetails: shouldPublishDependentDetails(previous, current),
-          });
+    void startManagedRun(
+      (event) => {
+        if ((event.type === "run_started" || event.type === "run_initialized") && !runId) {
+          runId = event.runId;
+          activeRuns.set(runId, createActiveRunRecord(abortController, done, runId));
+          resolveRunId?.(runId);
         }
-      }
-    }, abortController.signal)
+        const resolvedRunId =
+          runId ?? (event.type === "run_finished" ? event.summary.runId : undefined);
+        if (resolvedRunId) {
+          publishTimeline(resolvedRunId, event);
+          if (
+            event.type === "run_started" ||
+            event.type === "retrying" ||
+            event.type === "run_aborted" ||
+            event.type === "run_finished"
+          ) {
+            const previous = activeRuns.get(resolvedRunId)?.detail ?? null;
+            const current = getProjectedDetail(resolvedRunId);
+            publishMutationResult(resolvedRunId, {
+              summary: getProjectedSummary(resolvedRunId),
+              detail: current,
+              publishDependentSummaries: shouldPublishDependentSummaries(previous, current),
+              publishDependentDetails: shouldPublishDependentDetails(previous, current),
+            });
+          }
+        }
+      },
+      abortController.signal,
+      (envelope) => {
+        publishAudit(envelope);
+      },
+    )
       .then((outcome) => {
         if (!runId) {
           runId = outcome.runId;
@@ -1172,6 +1307,9 @@ export async function serveDaemon(
         if (runId) {
           const active = activeRuns.get(runId);
           const previous = active?.detail ?? null;
+          if (active && active.auditBuffer.length > 0) {
+            rememberRecentAuditBuffer(runId, active.auditBuffer);
+          }
           if (active && active.timelineBuffer.length > 0) {
             rememberRecentTimelineBuffer(runId, active.timelineBuffer);
           }
@@ -1204,6 +1342,7 @@ export async function serveDaemon(
     ...app,
     getRun: getDaemonRun,
     getRunList: getDaemonRunList,
+    getRunAuditHistory: getProjectedAuditHistory,
     getRunTimelineHistory: getProjectedTimelineHistory,
     getAttachment,
     getAttachmentList,
@@ -1218,7 +1357,7 @@ export async function serveDaemon(
     readyRun: (target) => {
       const mutation = applyPublishedMutation(
         target,
-        () => app.readyRun(target, mutationAuditContext),
+        () => app.readyRun(target, mutationAuditContext, publishAudit),
         {
           inferDependentFanout: true,
         },
@@ -1230,33 +1369,41 @@ export async function serveDaemon(
       return mutation.result;
     },
     archive: (target) =>
-      withPublishedMutation(target, () => app.archive(target, mutationAuditContext), {
+      withPublishedMutation(target, () => app.archive(target, mutationAuditContext, publishAudit), {
         inferDependentFanout: true,
       }),
     unarchive: (target) =>
-      withPublishedMutation(target, () => app.unarchive(target, mutationAuditContext), {
-        inferDependentFanout: true,
-      }),
+      withPublishedMutation(
+        target,
+        () => app.unarchive(target, mutationAuditContext, publishAudit),
+        {
+          inferDependentFanout: true,
+        },
+      ),
     deleteArchivedRun: (target) => {
       const result = app.deleteArchivedRun(target);
       publishRunDeletion(result.runId);
       return result;
     },
     renameRun: (target, input) =>
-      withPublishedMutationAsync(target, () => app.renameRun(target, input, mutationAuditContext), {
-        inferDependentFanout: true,
-      }),
+      withPublishedMutationAsync(
+        target,
+        () => app.renameRun(target, input, mutationAuditContext, publishAudit),
+        {
+          inferDependentFanout: true,
+        },
+      ),
     updateRunNote: (target, input) =>
       withPublishedMutation(target, () => app.updateRunNote(target, input)),
     updateRunPinned: (target, input) =>
       withPublishedMutation(target, () => app.updateRunPinned(target, input)),
     updateRunBackendSession: (target, input) =>
       withPublishedDetailMutation(target, () =>
-        app.updateRunBackendSession(target, input, mutationAuditContext),
+        app.updateRunBackendSession(target, input, mutationAuditContext, publishAudit),
       ),
     clearBackendSession: (target) =>
       withPublishedDetailMutation(target, () =>
-        app.clearBackendSession(target, mutationAuditContext),
+        app.clearBackendSession(target, mutationAuditContext, publishAudit),
       ),
     addDependency: (target, dependencyRunId) =>
       withPublishedMutation(target, () => app.addDependency(target, dependencyRunId)),
@@ -1269,25 +1416,25 @@ export async function serveDaemon(
     removeRunAttachment: (target, attachmentId) =>
       withPublishedMutation(target, () => app.removeRunAttachment(target, attachmentId)),
     reset: (target) =>
-      withPublishedMutation(target, () => app.reset(target, mutationAuditContext), {
+      withPublishedMutation(target, () => app.reset(target, mutationAuditContext, publishAudit), {
         inferDependentFanout: true,
       }),
     updateTask: (target, taskId, updates) =>
       withPublishedMutationAsync(
         target,
-        () => app.updateTask(target, taskId, updates, mutationAuditContext),
+        () => app.updateTask(target, taskId, updates, mutationAuditContext, publishAudit),
         {
           inferDependentFanout: true,
         },
       ),
     appendNotes: (target, taskId, text) =>
       withPublishedMutationAsync(target, () =>
-        app.appendNotes(target, taskId, text, mutationAuditContext),
+        app.appendNotes(target, taskId, text, mutationAuditContext, publishAudit),
       ),
     createTask: (target, input) =>
       withPublishedMutationAsync(
         target,
-        () => app.createTask(target, input, mutationAuditContext),
+        () => app.createTask(target, input, mutationAuditContext, publishAudit),
         {
           inferDependentFanout: true,
         },
@@ -1300,21 +1447,23 @@ export async function serveDaemon(
       startedAt,
     },
     startManagedRun: (request) =>
-      executeManagedRun((emitEvent, abortSignal) =>
+      executeManagedRun((emitEvent, abortSignal, emitAuditEnvelope) =>
         app.startRun({
           ...request,
           execution: daemonExecution(daemonInstanceId),
           abortSignal,
           emitEvent,
+          emitAuditEnvelope,
         }),
       ),
     resumeManagedRun: (request) =>
-      executeManagedRun((emitEvent, abortSignal) =>
+      executeManagedRun((emitEvent, abortSignal, emitAuditEnvelope) =>
         app.resumeRun({
           ...request,
           execution: daemonExecution(daemonInstanceId),
           abortSignal,
           emitEvent,
+          emitAuditEnvelope,
         }),
       ),
     abortRun,
@@ -1348,6 +1497,11 @@ export async function serveDaemon(
         httpBaseUrl,
         subscribeRunSummaries: (publish) => subscribeRunSummaries(res, publish).unsubscribe,
         subscribeRunDetail: (runId, publish) => subscribeRunDetail(res, runId, publish).unsubscribe,
+        subscribeRunAudit: (runId, publish) => {
+          const subscription = subscribeRunAudit(res, runId, publish);
+          replayAudit(runId, publish);
+          return subscription.unsubscribe;
+        },
         subscribeRunTimeline: (runId, publish) => {
           const subscription = subscribeRunTimeline(res, runId, publish);
           replayTimeline(runId, publish);
@@ -1756,11 +1910,12 @@ export async function serveDaemon(
           const subscriptionId = `sub-${shortId()}`;
           let subscription: { subscriptionId: string; unsubscribe(): void } | undefined;
           const sendNotification = (
-            method: "run.summary" | "run.detail" | "run.timeline",
+            method: "run.summary" | "run.detail" | "run.timeline" | "run.audit",
             notificationParams:
               | RunSummaryNotificationParams
               | RunDetailNotificationParams
-              | RunTimelineNotificationParams,
+              | RunTimelineNotificationParams
+              | RunAuditNotificationParams,
           ): boolean => {
             if (ws.readyState !== WebSocket.OPEN) {
               return false;
@@ -1837,8 +1992,26 @@ export async function serveDaemon(
               replayTimeline(requiredRunId, publish);
               break;
             }
+            case "run_audit": {
+              const requiredRunId = requiredRunIdString(parsed.runId, "runId");
+              operations.getRun(requiredRunId);
+              const publish = (envelope: RunAuditEnvelope) =>
+                sendNotification("run.audit", {
+                  subscriptionId,
+                  runId: requiredRunId,
+                  cursor: envelope.cursor,
+                  event: envelope.event,
+                });
+              subscription = subscribeRunAudit(ws, requiredRunId, publish, subscriptionId);
+              sendJson(
+                ws,
+                resultResponse(request.id, { subscriptionId: subscription.subscriptionId }),
+              );
+              replayAudit(requiredRunId, publish);
+              break;
+            }
           }
-          if (channel !== "run_timeline") {
+          if (channel !== "run_timeline" && channel !== "run_audit") {
             sendJson(
               ws,
               resultResponse(request.id, { subscriptionId: subscription.subscriptionId }),
@@ -1852,6 +2025,7 @@ export async function serveDaemon(
           summarySubscriptions.delete(subscriptionId);
           detailSubscriptions.delete(subscriptionId);
           timelineSubscriptions.delete(subscriptionId);
+          auditSubscriptions.delete(subscriptionId);
           sendJson(ws, resultResponse(request.id, { unsubscribed: true }));
           return;
         }
@@ -1925,10 +2099,15 @@ export async function serveDaemon(
       summarySubscriptions.clear();
       detailSubscriptions.clear();
       timelineSubscriptions.clear();
+      auditSubscriptions.clear();
       for (const record of recentTimelineBuffers.values()) {
         clearTimeout(record.cleanupTimer);
       }
       recentTimelineBuffers.clear();
+      for (const record of recentAuditBuffers.values()) {
+        clearTimeout(record.cleanupTimer);
+      }
+      recentAuditBuffers.clear();
       for (const ws of wsClients) {
         ws.terminate();
       }

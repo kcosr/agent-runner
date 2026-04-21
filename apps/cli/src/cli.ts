@@ -16,6 +16,7 @@ import {
   getDefinition,
   getDefinitionList,
   getRun,
+  getRunAuditHistory,
   getRunBrief,
   getRunList,
   getTask,
@@ -56,6 +57,7 @@ import {
   isCommandError,
 } from "@task-runner/core/core/commands/service.js";
 import { AttachmentError } from "@task-runner/core/core/run/attachments.js";
+import { RunNotFoundError } from "@task-runner/core/core/run/manifest.js";
 import {
   EmptyPromptError,
   InvalidAddedTaskError,
@@ -83,6 +85,7 @@ import {
   renderDefinitionList,
   renderRunAddDependency,
   renderRunArchive,
+  renderRunAuditHistory,
   renderRunClearBackendSession,
   renderRunClearDependencies,
   renderRunDelete,
@@ -103,8 +106,10 @@ import { DaemonClient, DaemonConnectionError, DaemonRpcError } from "./daemon/cl
 import { type ResolvedHostMode, resolveHostMode, resolveListenUrl } from "./daemon/config.js";
 import { SshTunnelSetupError, openSshTunnel } from "./daemon/connect-host.js";
 import {
+  DaemonHttpError,
   daemonAddAttachment,
   daemonDownloadAttachment,
+  daemonGetRunAuditHistory,
   daemonListAttachments,
   daemonRemoveAttachment,
 } from "./daemon/http-client.js";
@@ -117,6 +122,7 @@ Commands:
   run                     Execute an agent. Either a fresh run, a resume,
                           or start/resume an existing non-initialized run.
   run status <id>         Read a run and print its current status.
+  run audit <id>          Read the persisted audit history for a run.
   run brief <id>          Print the canonical worker handoff for a run.
   run ready <id|path>     Promote an initialized run into ready state.
   run reset <id|path>     Restore a non-running run to initialized state.
@@ -210,6 +216,7 @@ Execution options:
   --repo <name>           (list runs only) Scope runs to an exact repo.
   --global                (list runs only) Disable default cwd scoping.
   --output-format <fmt>   Output format: "text" (default) or "json".
+  --limit <n>             (run audit only) Limit history to the last N rows.
   --field <name>          (run status only, repeatable) Restrict JSON output.
   --include-archived      (list runs only) Include archived runs.
   --help, -h              Print this message.
@@ -535,6 +542,57 @@ async function runRunStatus(parsed: ParsedArgs, connect?: DaemonConnectContext):
   }
 }
 
+async function runRunAudit(parsed: ParsedArgs, connect?: DaemonConnectContext): Promise<never> {
+  try {
+    if (parsed.fields.length > 0) {
+      throw new CommandError("run audit does not support --field");
+    }
+    const unsupported = unsupportedFlagsForGroupedCommand(parsed, { allowLimit: true });
+    if (unsupported.length > 0) {
+      process.stderr.write(
+        `task-runner: run audit only supports <run-id>, --connect, --output-format, and --limit (got ${unsupported.join(", ")})\n`,
+      );
+      process.exit(1);
+    }
+    const target = normalizeRunIdTarget(parsed.positionals[0], "run audit");
+    if (!target) {
+      process.stderr.write("task-runner: run audit requires a run id\n");
+      process.stderr.write(
+        "Usage: task-runner run audit <id> [--output-format json] [--limit <n>]\n",
+      );
+      process.exit(1);
+    }
+    if (parsed.positionals.length > 1) {
+      process.stderr.write(
+        `task-runner: run audit takes exactly one run id; got "${parsed.positionals[1]}"\n`,
+      );
+      process.exit(1);
+    }
+    const history =
+      connect === undefined
+        ? getRunAuditHistory(target, { limit: parsed.limit })
+        : await daemonGetRunAuditHistory(connect.effectiveConnectUrl, target, {
+            limit: parsed.limit,
+          });
+    if (parsed.outputFormat === "json") {
+      writeJson(history);
+    } else {
+      process.stdout.write(renderRunAuditHistory(history));
+    }
+    process.exit(0);
+  } catch (err) {
+    if (err instanceof RunNotFoundError) {
+      process.stderr.write(`task-runner: ${err.message}\n`);
+      process.exit(2);
+    }
+    if (err instanceof DaemonHttpError && err.status === 404) {
+      process.stderr.write(`task-runner: ${err.message}\n`);
+      process.exit(2);
+    }
+    exitCommandFailure(err, connect?.connectUrl);
+  }
+}
+
 async function runRunBrief(parsed: ParsedArgs, connect?: DaemonConnectContext): Promise<never> {
   try {
     if (parsed.outputFormatExplicit) {
@@ -757,6 +815,7 @@ function unsupportedFlagsForGroupedCommand(
   parsed: ParsedArgs,
   opts: {
     allowFields?: boolean;
+    allowLimit?: boolean;
     allowIncludeArchived?: boolean;
     allowRunListScope?: boolean;
     allowClear?: boolean;
@@ -794,6 +853,7 @@ function unsupportedFlagsForGroupedCommand(
     unsupported.push("--mime-type");
   }
   if (!opts.allowCwdScope && parsed.cwdScope) unsupported.push("--cwd-scope");
+  if (!opts.allowLimit && parsed.limit !== undefined) unsupported.push("--limit");
   if (parsed.addedTasks.length > 0) unsupported.push("--add-task");
   if (parsed.detach) unsupported.push("--detach");
   if (parsed.listen !== undefined) unsupported.push("--listen");
@@ -2159,6 +2219,9 @@ async function main(): Promise<void> {
   if (parsed.command === "run") {
     if (parsed.subcommand === "status") {
       await runRunStatus(parsed, daemonConnect);
+    }
+    if (parsed.subcommand === "audit") {
+      await runRunAudit(parsed, daemonConnect);
     }
     if (parsed.subcommand === "brief") {
       await runRunBrief(parsed, daemonConnect);

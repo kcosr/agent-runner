@@ -5,6 +5,8 @@ import type {
   RunAttachmentDownloadResult,
   RunAttachmentRemoveResult,
 } from "@task-runner/core/contracts/attachments.js";
+import type { RunAuditHistory } from "@task-runner/core/contracts/events.js";
+import { runAuditHistorySchema } from "@task-runner/core/contracts/run-schemas.js";
 import { resolveAttachmentOutputPath } from "@task-runner/core/core/run/attachments.js";
 import { deriveHttpBaseUrl } from "./config.js";
 
@@ -12,6 +14,16 @@ interface ErrorEnvelope {
   error?: {
     message?: string;
   };
+}
+
+export class DaemonHttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = "DaemonHttpError";
+  }
 }
 
 function joinPath(baseUrl: string, path: string): string {
@@ -72,7 +84,7 @@ async function readError(response: Response): Promise<never> {
   } catch {
     // Keep the status-derived fallback.
   }
-  throw new Error(message);
+  throw new DaemonHttpError(message, response.status);
 }
 
 async function readJson(response: Response): Promise<unknown> {
@@ -81,6 +93,35 @@ async function readJson(response: Response): Promise<unknown> {
   } catch {
     throw new Error("daemon returned invalid JSON");
   }
+}
+
+function parseRunAuditHistory(value: unknown): RunAuditHistory {
+  const record = asRecord(value);
+  const parsed = runAuditHistorySchema.safeParse(record?.history);
+  if (!parsed.success) {
+    throw new Error("invalid run audit history payload from daemon");
+  }
+  return parsed.data;
+}
+
+export async function daemonGetRunAuditHistory(
+  connectUrl: string,
+  runId: string,
+  options: { limit?: number } = {},
+): Promise<RunAuditHistory> {
+  const url = new URL(
+    joinPath(deriveHttpBaseUrl(connectUrl), `/api/runs/${encodeURIComponent(runId)}/audit`),
+  );
+  if (options.limit !== undefined) {
+    url.searchParams.set("limit", String(options.limit));
+  }
+  const response = await fetch(url, {
+    headers: { accept: "application/json" },
+  });
+  if (!response.ok) {
+    return await readError(response);
+  }
+  return parseRunAuditHistory(await readJson(response));
 }
 
 export async function daemonListAttachments(

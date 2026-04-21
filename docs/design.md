@@ -116,8 +116,9 @@ If the run started from an assignment file, task-runner also stores
 `assignment-seed.md` as an immutable audit snapshot. Runs created by
 current code also include `run-events.jsonl`; pre-feature workspaces may
 still lack it. The file is append-only diagnostic history for major
-lifecycle/task mutations, survives `run reset`, and is never used to
-reconstruct canonical state.
+lifecycle/task mutations, survives `run reset`, is surfaced through
+`task-runner run audit <run-id>` plus daemon audit APIs, and is never
+used to reconstruct canonical state.
 
 ## Brief and caller instructions
 
@@ -144,9 +145,11 @@ The public read surface is:
 
 ```bash
 task-runner run brief <run-id>
+task-runner run audit <run-id>
 ```
 
 `run brief` is text-only. It is not projected through `run status --field ...`.
+`run audit` is the raw persisted audit-history read surface.
 
 ### Caller instructions
 
@@ -362,6 +365,7 @@ The resolved launcher is stored on both `manifest.launcher` and
 - `task-runner status`
 - `task-runner run status <run-id>`
 - `task-runner run brief <run-id>`
+- `task-runner run audit <run-id>`
 - `task-runner task list <run-id>`
 - `task-runner task show <run-id> <task-id>`
 - `task-runner attachment list <run-id> [--cwd-scope]`
@@ -369,7 +373,7 @@ The resolved launcher is stored on both `manifest.launcher` and
 Rules:
 
 - Top-level `status` reports system/environment status and takes no run id.
-- `run status` and `run brief` are run-id-only.
+- `run status`, `run brief`, and `run audit` are run-id-only.
 - `attachment list --cwd-scope` uses the target run's persisted `cwd` as
   an exact-match scope key. It does not infer groups from caller cwd,
   repo buckets, or path prefixes.
@@ -406,6 +410,8 @@ mixed event bus:
 - global summary stream: `GET /api/events/run-summaries` (`summary_upsert`
   and `summary_removed`)
 - per-run detail stream: `GET /api/runs/:runId/events/detail`
+- per-run audit history query: `GET /api/runs/:runId/audit`
+- per-run audit stream: `GET /api/runs/:runId/events/audit`
 - per-run timeline history query: `GET /api/runs/:runId/timeline`
 - per-run timeline stream: `GET /api/runs/:runId/events/timeline`
 
@@ -413,6 +419,7 @@ The WebSocket subscription contract mirrors that split:
 
 - `events.subscribe { channel: "run_summary" }`
 - `events.subscribe { channel: "run_detail", runId }`
+- `events.subscribe { channel: "run_audit", runId }`
 - `events.subscribe { channel: "run_timeline", runId }`
 
 Notifications:
@@ -420,6 +427,7 @@ Notifications:
 - `run.summary` carries a `summary_upsert` with a fresh `RunSummary` or a
   `summary_removed` with a `runId`
 - `run.detail` carries a fresh `RunDetail`
+- `run.audit` carries one `RunAuditEnvelope { runId, cursor, event }`
 - `run.timeline` carries one `RunTimelineEnvelope { runId, cursor, event }`
 
 Hooks do not add a fourth daemon event channel. Their externally visible
@@ -441,9 +449,9 @@ set/clear, but does not fan out summary or dependent-run updates because
 
 `RunSummary` and `RunDetail` both expose derived `activeTask` data so
 live consumers do not need to re-scan task arrays to render the current
-in-progress task label. Timeline consumers subscribe first, fetch
-`/api/runs/:runId/timeline`, then apply buffered live envelopes where
-`cursor > history.lastCursor`.
+in-progress task label. Timeline and audit consumers subscribe first,
+fetch `/api/runs/:runId/timeline` or `/api/runs/:runId/audit`, then
+apply buffered live envelopes where `cursor > history.lastCursor`.
 
 ## Workspace layout
 

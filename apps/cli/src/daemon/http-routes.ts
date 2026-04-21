@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { RunCommandOverrides } from "@task-runner/core/app/service.js";
 import { VALID_STATUSES } from "@task-runner/core/assignment/model.js";
 import type {
+  RunAuditEnvelope,
   RunDetailStreamEvent,
   RunSummaryStreamEvent,
   RunTimelineEnvelope,
@@ -49,6 +50,7 @@ interface RouteContext {
     runId: string,
     publish: (payload: RunDetailStreamEvent) => boolean,
   ): () => void;
+  subscribeRunAudit(runId: string, publish: (payload: RunAuditEnvelope) => boolean): () => void;
   subscribeRunTimeline(
     runId: string,
     publish: (payload: RunTimelineEnvelope) => boolean,
@@ -89,6 +91,19 @@ const routes: RouteDefinition[] = [
     pattern: ["api", "runs", ":runId"],
     handler: (_req, res, ctx, params) => {
       sendJson(res, 200, ctx.operations.getRun(routeParam(params, "runId")));
+    },
+  },
+  {
+    method: "GET",
+    pattern: ["api", "runs", ":runId", "audit"],
+    handler: (_req, res, ctx, params, url) => {
+      sendJson(
+        res,
+        200,
+        ctx.operations.getRunAuditHistory(routeParam(params, "runId"), {
+          limit: parsePositiveIntegerQueryValue(url.searchParams.get("limit"), "limit"),
+        }),
+      );
     },
   },
   {
@@ -416,6 +431,23 @@ const routes: RouteDefinition[] = [
   },
   {
     method: "GET",
+    pattern: ["api", "runs", ":runId", "events", "audit"],
+    handler: (req, res, ctx, params) => {
+      const runId = routeParam(params, "runId");
+      ctx.operations.getRun(runId);
+      streamEvents(
+        req,
+        res,
+        (publish) => ctx.subscribeRunAudit(runId, publish),
+        (payload: RunAuditEnvelope) => ({
+          id: String(payload.cursor),
+          data: payload,
+        }),
+      );
+    },
+  },
+  {
+    method: "GET",
     pattern: ["api", "runs", ":runId", "events", "timeline"],
     handler: (req, res, ctx, params) => {
       const runId = routeParam(params, "runId");
@@ -578,4 +610,15 @@ function parseRunListQuery(url: URL): RunsListParams {
     };
   }
   return { includeArchived };
+}
+
+function parsePositiveIntegerQueryValue(value: string | null, label: string): number | undefined {
+  if (value === null) {
+    return undefined;
+  }
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new RequestValidationError(`${label} must be a positive integer`);
+  }
+  return parsed;
 }

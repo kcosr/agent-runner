@@ -11,8 +11,8 @@ ${TASK_RUNNER_STATE_DIR}/runs/<repo>/<run-id>/
 
 ```text
 <workspace>/
-├── run.json               # canonical manifest (schema version 9)
-├── run-events.jsonl       # append-only diagnostic audit history (pre-feature runs may lack it)
+├── run.json               # canonical manifest (schema version 10)
+├── run-events.jsonl       # append-only audit history with monotonic cursors
 ├── assignment-seed.md     # only when the run started from an assignment file
 ├── attempts/
 │   ├── 00.json
@@ -25,10 +25,12 @@ ${TASK_RUNNER_STATE_DIR}/runs/<repo>/<run-id>/
 `assignment-seed.md` is an immutable audit snapshot of the assignment at
 run-creation time. It is *not* a work surface — task state is canonical in
 `run.json.finalTasks`. Runs created by current code also include
-`run-events.jsonl`; pre-feature workspaces may still lack it. The file is
-diagnostic only: it records compact lifecycle/task provenance, including
-`run.hook_recorded` hook execution records, but is never replayed to
-derive current run state.
+`run-events.jsonl`; older workspaces may still need
+`scripts/migrate-run-events-v2.mjs` before the audit history has canonical
+cursors. The file records compact lifecycle/task provenance, including
+`run.hook_recorded` hook execution records. It is durable history surfaced
+via `task-runner run audit <run-id>` and daemon audit APIs, but it is
+never replayed to derive current run state.
 
 ## Manifest (`run.json`)
 
@@ -36,7 +38,7 @@ The manifest is the source of truth. Important fields:
 
 | Field | Purpose |
 |-------|---------|
-| `schemaVersion` | currently `9`; older manifests are not silently upgraded |
+| `schemaVersion` | currently `10`; older manifests are not silently upgraded |
 | `runId`, `repo`, `cwd` | identity and scope |
 | `agent` | frozen `{ name, sourcePath, instructions }` |
 | `assignment` | frozen `{ name, sourcePath, workspacePath }` or `null` |
@@ -119,14 +121,18 @@ promoted with `task-runner run ready <run-id>` before the first
 task-runner status
 task-runner run status <run-id> [--output-format json] [--field <name>]...
 task-runner run brief <run-id>
+task-runner run audit <run-id> [--output-format text|json] [--limit <n>]
 task-runner task list <run-id>
 task-runner task show <run-id> <task-id>
 task-runner attachment list <run-id> [--cwd-scope]
 ```
 
 - Top-level `status` reports system/environment status and takes no run id.
-- `run status` and `run brief` are run-id-only.
+- `run status`, `run brief`, and `run audit` are run-id-only.
 - `run brief` is text-only; no `--output-format` or `--field`.
+- `run audit --output-format json` returns `{ runId, events, lastCursor }`.
+- `run audit` text output is chronological rendering from the persisted
+  audit envelopes.
 - `run status --output-format json` returns the shared `RunDetail` DTO.
 - `RunDetail` includes full `note` plus `pinned`; `RunSummary` includes
   `notePresent` plus `pinned`.

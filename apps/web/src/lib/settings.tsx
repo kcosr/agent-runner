@@ -8,6 +8,7 @@ export interface DashboardPreferences {
   showNotesOnly: boolean;
   showPinnedOnly: boolean;
   sortByRecentUpdates: boolean;
+  auditNewestFirst: boolean;
   visibleFocusIndicators: boolean;
   structuredFilters: DashboardStructuredFilters;
 }
@@ -31,6 +32,7 @@ export type DrawerDetailSection =
   | "notes"
   | "attachments"
   | "dependencies"
+  | "audit"
   | "events"
   | "data";
 
@@ -77,6 +79,7 @@ export const DEFAULT_DASHBOARD_PREFERENCES: DashboardPreferences = {
   showNotesOnly: false,
   showPinnedOnly: false,
   sortByRecentUpdates: false,
+  auditNewestFirst: false,
   visibleFocusIndicators: false,
   structuredFilters: EMPTY_DASHBOARD_STRUCTURED_FILTERS,
 };
@@ -187,6 +190,10 @@ function parseStoredDashboardPreferences(value: unknown): DashboardPreferences {
       typeof record.sortByRecentUpdates === "boolean"
         ? record.sortByRecentUpdates
         : DEFAULT_DASHBOARD_PREFERENCES.sortByRecentUpdates,
+    auditNewestFirst:
+      typeof record.auditNewestFirst === "boolean"
+        ? record.auditNewestFirst
+        : DEFAULT_DASHBOARD_PREFERENCES.auditNewestFirst,
     visibleFocusIndicators:
       typeof record.visibleFocusIndicators === "boolean"
         ? record.visibleFocusIndicators

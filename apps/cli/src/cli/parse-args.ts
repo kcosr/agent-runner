@@ -44,6 +44,7 @@ export interface ParsedArgs {
   connectLocalPort?: string;
   listen?: string;
   includeArchived?: boolean;
+  limit?: number;
   repo?: string;
   global?: boolean;
   showHelp: boolean;
@@ -94,6 +95,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   } else if (
     result.command === "run" &&
     (args[0] === "status" ||
+      args[0] === "audit" ||
       args[0] === "brief" ||
       args[0] === "ready" ||
       args[0] === "reset" ||
@@ -280,6 +282,14 @@ export function parseArgs(argv: string[]): ParsedArgs {
       result.listen = next;
     } else if (arg === "--include-archived") {
       result.includeArchived = true;
+    } else if (arg === "--limit") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--limit requires a value");
+      const n = Number(next);
+      if (!Number.isInteger(n) || n <= 0) {
+        throw new Error("--limit must be a positive integer");
+      }
+      result.limit = n;
     } else if (arg === "--") {
       positional.push(...args);
       break;

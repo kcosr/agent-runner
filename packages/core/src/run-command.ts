@@ -17,6 +17,7 @@ import {
   resolveResumeTarget,
 } from "./core/run/manifest.js";
 import { hasIncompleteTasks, missingResumeInputMessage } from "./core/run/resume-policy.js";
+import type { RunAuditEnvelope } from "./core/run/run-events.js";
 import { type RunEvent, type RunOptions, type RunOutcome, runAgent } from "./core/run/run-loop.js";
 import { resolveTaskRunnerCommand } from "./task-runner-command.js";
 
@@ -43,6 +44,7 @@ export interface ExecuteRunCommandOptions {
   execution?: RunExecution;
   abortSignal?: AbortSignal;
   emitEvent?: (event: RunEvent) => void;
+  emitAuditEnvelope?: (envelope: RunAuditEnvelope) => void;
 }
 
 function passiveRunError(agentName: string, runId?: string): string {
@@ -221,6 +223,7 @@ export async function executeRunCommand(opts: ExecuteRunCommandOptions): Promise
     abortSignal: opts.abortSignal,
     overrides: opts.overrides,
     emitEvent: opts.emitEvent,
+    emitAuditEnvelope: opts.emitAuditEnvelope,
   });
 }
 

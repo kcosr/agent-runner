@@ -28,6 +28,9 @@ function SettingsProbe() {
       >
         Enable recent updates sort
       </button>
+      <button onClick={() => updatePreferences({ auditNewestFirst: true })} type="button">
+        Enable newest-first audit
+      </button>
       <button
         onClick={() =>
           updatePreferences({
@@ -120,6 +123,7 @@ describe("DashboardSettingsProvider", () => {
         showNotesOnly: false,
         showPinnedOnly: false,
         sortByRecentUpdates: false,
+        auditNewestFirst: false,
         visibleFocusIndicators: false,
         structuredFilters: {
           repo: null,
@@ -178,6 +182,7 @@ describe("DashboardSettingsProvider", () => {
         showNotesOnly: false,
         showPinnedOnly: false,
         sortByRecentUpdates: true,
+        auditNewestFirst: false,
         visibleFocusIndicators: true,
         structuredFilters: {
           repo: null,
@@ -271,6 +276,17 @@ describe("DashboardSettingsProvider", () => {
     expect(screen.getByTestId("preferences")).toHaveTextContent('"visibleFocusIndicators":false');
   });
 
+  it("hydrates the persisted audit sort preference", () => {
+    window.localStorage.setItem(
+      "task-runner:web:dashboard-preferences",
+      JSON.stringify({ auditNewestFirst: true }),
+    );
+
+    renderSettingsProbe();
+
+    expect(screen.getByTestId("preferences")).toHaveTextContent('"auditNewestFirst":true');
+  });
+
   it("persists preferences and collapsed column keys without persisting transient view-state updates", () => {
     renderSettingsProbe();
 
@@ -290,6 +306,7 @@ describe("DashboardSettingsProvider", () => {
         showNotesOnly: true,
         showPinnedOnly: true,
         sortByRecentUpdates: true,
+        auditNewestFirst: false,
         visibleFocusIndicators: true,
         structuredFilters: {
           repo: null,
@@ -321,6 +338,7 @@ describe("DashboardSettingsProvider", () => {
         showNotesOnly: false,
         showPinnedOnly: false,
         sortByRecentUpdates: false,
+        auditNewestFirst: false,
         visibleFocusIndicators: false,
         structuredFilters: {
           repo: null,
@@ -345,6 +363,7 @@ describe("DashboardSettingsProvider", () => {
         showNotesOnly: false,
         showPinnedOnly: false,
         sortByRecentUpdates: false,
+        auditNewestFirst: false,
         visibleFocusIndicators: false,
         structuredFilters: {
           repo: null,

@@ -2804,7 +2804,7 @@ test("daemon websocket validates events.subscribe channel and runId rules", asyn
     const invalidChannel = await nextRawMessage(ws);
     assert.equal(
       invalidChannel.error.message,
-      'channel must be one of "run_summary", "run_detail", or "run_timeline"',
+      'channel must be one of "run_summary", "run_detail", "run_timeline", or "run_audit"',
     );
 
     ws.send(
@@ -3397,6 +3397,297 @@ test("daemon serves timeline history and cursored timeline replay over HTTP and 
     const aborted = await httpJson(httpBaseUrl, `/api/runs/${runId}/abort`, { method: "POST" });
     assert.equal(aborted.status, 200);
     assert.equal(aborted.body.accepted, true);
+  } finally {
+    await client.close();
+    await sse.close();
+    await server.close();
+  }
+});
+
+test("daemon serves audit history and cursored audit replay over HTTP and websocket", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  const runId = "daemon-audit-history";
+  let status = "initialized";
+  const persistedAudit = [];
+
+  const server = await serveDaemon(listenUrl, {
+    getRunAuditHistory() {
+      return {
+        runId,
+        events: [...persistedAudit],
+        lastCursor: persistedAudit.at(-1)?.cursor ?? 0,
+      };
+    },
+    getRun() {
+      return {
+        runId,
+        repo: "task-runner",
+        status,
+        effectiveStatus: status,
+        archivedAt: null,
+        isLive: status === "running",
+        workspaceDir: "/tmp/fake",
+        assignmentPath: "/tmp/fake/assignment-seed.md",
+        agent: {
+          name: "daemon-agent",
+          sourcePath: null,
+        },
+        assignment: null,
+        backend: "codex",
+        model: "gpt-5.4",
+        effort: "high",
+        name: "daemon audit history",
+        backendSessionId: null,
+        cwd: "/tmp/fake",
+        unrestricted: false,
+        timeoutSec: 60,
+        startedAt: "2026-04-13T05:00:00.000Z",
+        endedAt: null,
+        exitCode: null,
+        attempts: 1,
+        maxAttempts: 3,
+        sessionCount: 1,
+        tasksCompleted: 0,
+        tasksTotal: 1,
+        attachments: [],
+        dependencies: [],
+        dependents: [],
+        tasks: [],
+        activeTask: null,
+        message: null,
+        callerInstructions: null,
+        lockedFields: [],
+        runtimeVars: {},
+        execution: {
+          hostMode: "daemon",
+          controller: {
+            kind: "daemon",
+            daemonInstanceId: "daemon-placeholder",
+          },
+        },
+        capabilities: {
+          canArchive: false,
+          canUnarchive: false,
+          canResume: false,
+          canAbort: status === "running",
+          abortReason: status === "running" ? undefined : "not_active_in_daemon",
+          taskMutation: {
+            canSetStatus: false,
+            canEditNotes: false,
+            canAdd: false,
+          },
+        },
+      };
+    },
+    getRunList() {
+      return [
+        {
+          runId,
+          repo: "task-runner",
+          status,
+          effectiveStatus: status,
+          archivedAt: null,
+          agentName: "daemon-agent",
+          name: "daemon audit history",
+          assignmentName: "daemon-work",
+          backend: "codex",
+          model: "gpt-5.4",
+          cwd: "/tmp/fake",
+          startedAt: "2026-04-13T05:00:00.000Z",
+          endedAt: null,
+          tasksCompleted: 0,
+          tasksTotal: 1,
+          attachmentCount: 0,
+          dependencyState: {
+            ready: true,
+            total: 0,
+            satisfied: 0,
+            unsatisfied: 0,
+          },
+          activeTask: null,
+          execution: {
+            hostMode: "daemon",
+            controller: {
+              kind: "daemon",
+              daemonInstanceId: "daemon-placeholder",
+            },
+          },
+          capabilities: {
+            canArchive: false,
+            canUnarchive: false,
+            canResume: false,
+            canAbort: status === "running",
+            abortReason: status === "running" ? undefined : "not_active_in_daemon",
+            taskMutation: {
+              canSetStatus: false,
+              canEditNotes: false,
+              canAdd: false,
+            },
+          },
+        },
+      ];
+    },
+    async startRun({ emitEvent, emitAuditEnvelope, abortSignal }) {
+      status = "running";
+      const startedEnvelope = {
+        runId,
+        cursor: 1,
+        event: {
+          type: "run.started",
+          recordedAt: "2026-04-13T05:00:00.000Z",
+          source: "daemon",
+          hostMode: "daemon",
+          sessionIndex: 0,
+          fields: {
+            backend: "codex",
+            name: "daemon audit history",
+            cwd: "/tmp/fake",
+            backendSessionIdAtStart: null,
+          },
+        },
+      };
+      persistedAudit.push(startedEnvelope);
+      emitAuditEnvelope(startedEnvelope);
+      emitEvent({
+        type: "run_started",
+        runId,
+        agentName: "daemon-agent",
+        assignmentSourcePath: null,
+        assignmentPath: "/tmp/fake/assignment-seed.md",
+        name: "daemon audit history",
+        cwd: process.cwd(),
+        sessionIndex: 0,
+      });
+
+      const taskEnvelope = {
+        runId,
+        cursor: 2,
+        event: {
+          type: "task.updated",
+          recordedAt: "2026-04-13T05:01:00.000Z",
+          source: "daemon",
+          hostMode: "daemon",
+          fields: {
+            taskId: "t1",
+            taskTitle: "First",
+            command: "set",
+            statusBefore: "pending",
+            statusAfter: "completed",
+            notesChanged: false,
+          },
+        },
+      };
+      persistedAudit.push(taskEnvelope);
+      emitAuditEnvelope(taskEnvelope);
+
+      await new Promise((resolve) => {
+        abortSignal.addEventListener(
+          "abort",
+          () => {
+            status = "aborted";
+            const finishedEnvelope = {
+              runId,
+              cursor: 3,
+              event: {
+                type: "run.finished",
+                recordedAt: "2026-04-13T05:02:00.000Z",
+                source: "daemon",
+                hostMode: "daemon",
+                fields: {
+                  terminalStatus: "aborted",
+                  exitCode: null,
+                  tasksCompleted: 1,
+                  tasksTotal: 1,
+                },
+              },
+            };
+            persistedAudit.push(finishedEnvelope);
+            emitAuditEnvelope(finishedEnvelope);
+            emitEvent({ type: "run_aborted" });
+            emitEvent({
+              type: "run_finished",
+              summary: {
+                status: "aborted",
+                attempts: 1,
+                maxAttempts: 1,
+                tasksCompleted: 1,
+                tasksTotal: 1,
+                assignmentPath: "/tmp/fake/assignment-seed.md",
+                tasks: [],
+                runId,
+              },
+            });
+            resolve();
+          },
+          { once: true },
+        );
+      });
+
+      return { runId };
+    },
+  });
+
+  const started = await httpJson(httpBaseUrl, "/api/runs", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ cliVars: {}, overrides: {} }),
+  });
+  assert.equal(started.status, 200);
+  assert.equal(started.body.runId, runId);
+
+  const historyResponse = await httpJson(httpBaseUrl, `/api/runs/${runId}/audit`);
+  assert.equal(historyResponse.status, 200);
+  assert.equal(historyResponse.body.history.lastCursor, 2);
+  assert.deepEqual(
+    historyResponse.body.history.events.map((event) => event.cursor),
+    [1, 2],
+  );
+
+  const sse = await openSseFrames(httpBaseUrl, `/api/runs/${runId}/events/audit`);
+  const client = await DaemonClient.connect(listenUrl);
+
+  try {
+    const wsEvents = [];
+    await client.subscribe({ channel: "run_audit", runId }, (msg) => {
+      if (msg.method === "run.audit") {
+        wsEvents.push(msg);
+      }
+    });
+
+    const replayFrames = [await sse.next(), await sse.next()].sort(
+      (left, right) => left.data.cursor - right.data.cursor,
+    );
+    assert.deepEqual(
+      replayFrames.map((frame) => frame.data.cursor),
+      [1, 2],
+    );
+    assert.deepEqual(
+      replayFrames.map((frame) => frame.data.event.type),
+      ["run.started", "task.updated"],
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    assert.deepEqual(
+      wsEvents.map((event) => event.cursor).sort((left, right) => left - right),
+      [1, 2],
+    );
+    assert.deepEqual(
+      wsEvents
+        .slice()
+        .sort((left, right) => left.cursor - right.cursor)
+        .map((event) => event.event.type),
+      ["run.started", "task.updated"],
+    );
+
+    const aborted = await httpJson(httpBaseUrl, `/api/runs/${runId}/abort`, { method: "POST" });
+    assert.equal(aborted.status, 200);
+
+    const finalFrame = await sse.next();
+    assert.equal(finalFrame.id, "3");
+    assert.equal(finalFrame.data.cursor, 3);
+    assert.equal(finalFrame.data.event.type, "run.finished");
   } finally {
     await client.close();
     await sse.close();
