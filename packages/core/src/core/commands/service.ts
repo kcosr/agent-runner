@@ -89,6 +89,7 @@ import {
   appendRunArchivedEvent,
   appendRunBackendSessionUpdatedEvent,
   appendRunFinishedEvent,
+  appendRunReadyEvent,
   appendRunRenamedEvent,
   appendRunResetEvent,
   appendRunUnarchivedEvent,
@@ -284,6 +285,18 @@ function requireDeletableRun(manifest: RunManifest): void {
     throw new ConflictError("cannot delete a running run");
   }
   throw new CommandError(`cannot delete run ${manifest.runId} unless it is archived`);
+}
+
+function requireReadyableRun(manifest: RunManifest): void {
+  if (manifest.archivedAt !== null) {
+    throw new CommandError(`cannot mark run ${manifest.runId} ready while it is archived`);
+  }
+  if (manifest.backend === "passive") {
+    throw new CommandError(`cannot mark passive run ${manifest.runId} ready`);
+  }
+  if (manifest.status !== "initialized") {
+    throw new CommandError(`cannot mark run ${manifest.runId} ready unless it is initialized`);
+  }
 }
 
 function requireDependencyMutationAllowed(
@@ -745,6 +758,26 @@ export function resetRun(
       },
     }),
   };
+}
+
+export function readyRun(
+  target: string,
+  auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
+): RunDetail {
+  const resolved = resolveRun(target);
+  withTaskStateLock(resolved.workspaceDir, () => {
+    resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
+    requireReadyableRun(resolved.manifest);
+    const previousStatus = resolved.manifest.status;
+    resolved.manifest.status = "ready";
+    writeManifest(resolved.workspaceDir, resolved.manifest);
+    appendRunReadyEvent({
+      manifest: resolved.manifest,
+      context: commandRunEventContext(auditOrigin),
+      previousStatus,
+    });
+  });
+  return toRunDetail({ manifest: resolved.manifest, isLive: false });
 }
 
 function setRunArchived(
@@ -1309,6 +1342,11 @@ export function setTask(
       update.status !== task.status &&
       !capabilities.canSetStatus
     ) {
+      if (resolved.manifest.status === "ready") {
+        throw new CommandError(
+          `cannot change task status while run ${resolved.manifest.runId} is ready`,
+        );
+      }
       throw new CommandError(
         `cannot change task status on a terminal non-passive run; use ${resolveTaskRunnerCommand()} run --resume-run <id> with a follow-up message instead`,
       );

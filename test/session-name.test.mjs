@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { parseArgs } from "../apps/cli/dist/cli/parse-args.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
+import { readyRun } from "../packages/core/dist/core/commands/service.js";
 import { ResumeError, resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import { setTaskStatusesForPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
@@ -218,6 +219,7 @@ test("run name: init persists the name and execute-after-init replays it", async
     initialize: true,
   });
   assert.equal(init.manifest.name, "Init-time name");
+  withSharedRuntimeEnv(dir, () => readyRun(init.runId));
 
   const captured = {};
   await withSharedRuntimeEnv(dir, async () => {
@@ -302,6 +304,7 @@ test("run name: execute-after-init rejects --name", async () => {
     },
     initialize: true,
   });
+  withSharedRuntimeEnv(dir, () => readyRun(init.runId));
 
   await withSharedRuntimeEnv(dir, async () => {
     const target = resolveResumeTarget(init.runId, dir);

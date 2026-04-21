@@ -4,9 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
+import { readyRun } from "../packages/core/dist/core/commands/service.js";
 import { ResumeError, resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import { resetWorkspaceRun } from "../packages/core/dist/core/run/workspace-state.js";
+import { executeRunCommand } from "../packages/core/dist/run-command.js";
 import { completeAllTasksFromPrompt, withEnv } from "./helpers/runtime-paths.mjs";
 
 const TWO_AGENT = `---
@@ -226,44 +228,46 @@ Work on \${BODY_TARGET}.
   assert.equal(outcome.manifest.finalTasks.deploy.body, "Ship 11 to ${TASK_TARGET}.");
 });
 
-test("init: rejects --resume-run", async () => {
+test("init: initialize-plus-resume reuses the existing initialized workspace", async () => {
   const dir = tempDir();
   writeAgentAndAssignment(dir);
 
   const first = await initIn(dir);
   const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.runId, dir));
 
-  await assert.rejects(async () => {
-    await withSharedRuntimeEnv(dir, async () => {
-      const loaded = loadAgentConfig("two", dir);
-      const loadedAssignment = loadAssignmentConfig("two-work", dir);
-      const originalCwd = process.cwd();
-      process.chdir(dir);
-      try {
-        await runAgent({
-          loaded,
-          loadedAssignment,
-          cliVars: {},
-          backend: mockBackend(async () => ({
-            exitCode: 0,
-            signal: null,
-            timedOut: false,
-            sessionId: null,
-            transcript: null,
-            rawStdout: "",
-            rawStderr: "",
-          })),
-          initialize: true,
-          resume: target,
-          callerCwd: dir,
-          stderr: () => {},
-          stdout: () => {},
-        });
-      } finally {
-        process.chdir(originalCwd);
-      }
-    });
-  }, ResumeError);
+  const second = await withSharedRuntimeEnv(dir, async () => {
+    const loaded = loadAgentConfig("two", dir);
+    const loadedAssignment = loadAssignmentConfig("two-work", dir);
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      return await runAgent({
+        loaded,
+        loadedAssignment,
+        cliVars: {},
+        backend: mockBackend(async () => ({
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+          sessionId: null,
+          transcript: null,
+          rawStdout: "",
+          rawStderr: "",
+        })),
+        initialize: true,
+        resume: target,
+        callerCwd: dir,
+        stderr: () => {},
+        stdout: () => {},
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+
+  assert.equal(second.runId, first.runId);
+  assert.equal(second.workspaceDir, first.workspaceDir);
+  assert.equal(second.manifest.status, "initialized");
 });
 
 test("execute-after-init: uses stored brief verbatim", async () => {
@@ -271,6 +275,7 @@ test("execute-after-init: uses stored brief verbatim", async () => {
   writeAgentAndAssignment(dir);
 
   const init = await initIn(dir);
+  withSharedRuntimeEnv(dir, () => readyRun(init.runId));
 
   let seenPrompt;
   let seenResumeSessionId;
@@ -315,6 +320,7 @@ test("execute-after-init: reset seed survives execution and restores initialized
   writeAgentAndAssignment(dir);
 
   const init = await initIn(dir);
+  withSharedRuntimeEnv(dir, () => readyRun(init.runId));
   await executeAfterInit(
     dir,
     init.runId,
@@ -350,6 +356,107 @@ test("execute-after-init: reset seed survives execution and restores initialized
   assert.deepEqual(reset.attemptRecords, []);
   assert.equal(reset.backendSessionId, null);
   assert.equal(existsSync(join(init.workspaceDir, "attempts")), false);
+});
+
+test("execute-after-init: initialized runs reject execution until promoted to ready", async () => {
+  const dir = tempDir();
+  writeAgentAndAssignment(dir);
+
+  const init = await initIn(dir);
+
+  await assert.rejects(
+    () =>
+      executeAfterInit(
+        dir,
+        init.runId,
+        mockBackend(async () => {
+          throw new Error("backend should not be invoked before ready");
+        }),
+      ),
+    (err) => err instanceof ResumeError && new RegExp(`run ready ${init.runId}`).test(err.message),
+  );
+});
+
+test("init overwrite: reinitializing an initialized run-id clears stale workspace state in place", async () => {
+  const dir = tempDir();
+  writeAgentAndAssignment(dir);
+
+  const init = await initIn(dir);
+  const manifestPath = join(init.workspaceDir, "run.json");
+  const attemptsDir = join(init.workspaceDir, "attempts");
+  const attachmentsDir = join(init.workspaceDir, "attachments");
+  mkdirSync(attemptsDir, { recursive: true });
+  mkdirSync(attachmentsDir, { recursive: true });
+  writeFileSync(join(attemptsDir, "01.json"), "{}\n");
+  writeFileSync(join(attachmentsDir, "stale.txt"), "stale attachment\n");
+  writeFileSync(init.assignmentPath, "# stale assignment seed\n");
+
+  const staleManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  staleManifest.tasksCompleted = 2;
+  staleManifest.tasksTotal = 2;
+  staleManifest.finalTasks.t1.status = "completed";
+  staleManifest.finalTasks.t2.status = "completed";
+  staleManifest.sessionCount = 1;
+  staleManifest.sessions = [
+    {
+      sessionIndex: 0,
+      startedAt: "2026-04-12T10:00:00.000Z",
+      endedAt: "2026-04-12T10:01:00.000Z",
+      status: "success",
+      exitCode: 0,
+      message: "stale",
+      brief: "stale",
+      firstAttempt: 1,
+      lastAttempt: 1,
+      maxAttempts: 2,
+      backendSessionIdAtStart: null,
+      backendSessionIdAtEnd: "sess-stale",
+    },
+  ];
+  staleManifest.attemptRecords = [
+    {
+      attempt: 1,
+      sessionIndex: 0,
+      startedAt: "2026-04-12T10:00:00.000Z",
+      endedAt: "2026-04-12T10:01:00.000Z",
+      prompt: "stale prompt",
+      sessionIdAtStart: null,
+      sessionIdAtEnd: "sess-stale",
+      exitCode: 0,
+      logPath: "attempts/01.json",
+    },
+  ];
+  staleManifest.backendSessionId = "sess-stale";
+  staleManifest.backend = "claude";
+  staleManifest.resetSeed.backend = "claude";
+  writeFileSync(manifestPath, `${JSON.stringify(staleManifest, null, 2)}\n`);
+
+  const overwritten = await withSharedRuntimeEnv(dir, async () =>
+    executeRunCommand({
+      initialize: true,
+      agent: "two",
+      assignment: "two-work",
+      definitionCwd: dir,
+      callerCwd: dir,
+      resumeRun: init.runId,
+      cliVars: {},
+      overrides: {},
+    }),
+  );
+
+  assert.equal(overwritten.runId, init.runId);
+  assert.equal(overwritten.workspaceDir, init.workspaceDir);
+  assert.equal(overwritten.manifest.status, "initialized");
+  assert.equal(overwritten.manifest.tasksCompleted, 0);
+  assert.equal(overwritten.manifest.finalTasks.t1.status, "pending");
+  assert.equal(overwritten.manifest.finalTasks.t2.status, "pending");
+  assert.equal(overwritten.manifest.sessionCount, 0);
+  assert.deepEqual(overwritten.manifest.sessions, []);
+  assert.deepEqual(overwritten.manifest.attemptRecords, []);
+  assert.equal(overwritten.manifest.backendSessionId, null);
+  assert.equal(existsSync(attemptsDir), false);
+  assert.equal(existsSync(attachmentsDir), false);
+  assert.ok(readFileSync(overwritten.assignmentPath, "utf8").includes("Work on"));
 });
 
 test("init freezes launcher state and reset restores the frozen launcher", async () => {
@@ -421,6 +528,7 @@ Agent role instructions.
   writeAssignment(dir, "two-work", TWO_ASSIGNMENT);
 
   const init = await initIn(dir);
+  withSharedRuntimeEnv(dir, () => readyRun(init.runId));
 
   await assert.rejects(
     () =>

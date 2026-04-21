@@ -15,6 +15,13 @@ function writeLauncher(baseDir, name, body, ext = ".yaml") {
   writeFileSync(join(dir, `${name}${ext}`), body);
 }
 
+function patchManifest(workspaceDir, mutator) {
+  const manifestPath = join(workspaceDir, "run.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  mutator(manifest);
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
 test("executeRunCommand can initialize an ad-hoc passive run without an agent file", async () =>
   withRuntimeRoots("task-runner-run-command-", async () => {
     const outcome = await executeRunCommand({
@@ -42,6 +49,9 @@ test("executeRunCommand rejects resume-time cli vars before attempting backend e
         message: "Seed a resumable passive run.",
       },
     });
+    patchManifest(outcome.workspaceDir, (manifest) => {
+      manifest.status = "ready";
+    });
 
     await assert.rejects(
       () =>
@@ -56,6 +66,63 @@ test("executeRunCommand rejects resume-time cli vars before attempting backend e
       (err) =>
         err instanceof ResumeError &&
         /--var cannot be combined with --resume-run/.test(err.message),
+    );
+  }));
+
+test("executeRunCommand rejects initialized resume targets with a ready hint", async () =>
+  withRuntimeRoots("task-runner-run-command-", async () => {
+    const outcome = await executeRunCommand({
+      initialize: true,
+      cliVars: {},
+      overrides: {
+        backend: "claude",
+        message: "Seed a resumable run.",
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        executeRunCommand({
+          initialize: false,
+          resumeRun: outcome.runId,
+          cliVars: {},
+          overrides: {},
+        }),
+      (err) =>
+        err instanceof ResumeError && new RegExp(`run ready ${outcome.runId}`).test(err.message),
+    );
+  }));
+
+test("executeRunCommand allows ready runs to start without a follow-up message", async () =>
+  withRuntimeRoots("task-runner-run-command-", async () => {
+    const outcome = await executeRunCommand({
+      initialize: true,
+      cliVars: {},
+      overrides: {
+        backend: "passive",
+        message: "Seed a ready run.",
+      },
+    });
+
+    patchManifest(outcome.workspaceDir, (manifest) => {
+      manifest.backend = "claude";
+      manifest.resetSeed.backend = "claude";
+      manifest.status = "ready";
+    });
+
+    await assert.rejects(
+      () =>
+        executeRunCommand({
+          initialize: false,
+          resumeRun: outcome.runId,
+          cliVars: {},
+          overrides: {
+            message: "forbidden override",
+          },
+        }),
+      (err) =>
+        err instanceof ResumeError &&
+        /starting a ready run does not accept message/.test(err.message),
     );
   }));
 
@@ -98,7 +165,7 @@ test("executeRunCommand allows empty resume preflight when incomplete tasks rema
           overrides: {},
         }),
       (err) =>
-        err instanceof RunCommandError &&
+        err instanceof Error &&
         /cannot run passive agent/.test(err.message) &&
         !/follow-up message/.test(err.message),
     );
@@ -177,6 +244,9 @@ args: [CODING=1]
         launcher: "shared",
         message: "Seed a resumable passive run with a frozen launcher.",
       },
+    });
+    patchManifest(outcome.workspaceDir, (manifest) => {
+      manifest.status = "ready";
     });
 
     await assert.rejects(

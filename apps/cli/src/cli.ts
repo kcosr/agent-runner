@@ -21,6 +21,7 @@ import {
   getTask,
   getTaskList,
   initRun,
+  readyRun,
   removeDependency,
   removeRunAttachment,
   renameRun,
@@ -86,6 +87,7 @@ import {
   renderRunClearDependencies,
   renderRunDelete,
   renderRunList,
+  renderRunReady,
   renderRunRemoveDependency,
   renderRunSetBackendSession,
   renderRunSetName,
@@ -113,10 +115,10 @@ const HELP = `Usage: task-runner <run|init|serve|status|task|attachment|list|sho
 
 Commands:
   run                     Execute an agent. Either a fresh run, a resume,
-                          or execute-after-init (when --resume-run points
-                          at an initialized run).
+                          or start/resume an existing non-initialized run.
   run status <id>         Read a run and print its current status.
   run brief <id>          Print the canonical worker handoff for a run.
+  run ready <id|path>     Promote an initialized run into ready state.
   run reset <id|path>     Restore a non-running run to initialized state.
   run archive <id|path>   Mark a non-running run as archived.
   run unarchive <id|path> Clear a run's archive marker.
@@ -137,6 +139,8 @@ Commands:
                           Remove a dependency from an initialized run.
   run clear-deps <id>     Remove all dependencies from an initialized run.
   init                    Prepare a run without invoking the backend.
+                          Use --run-id <id|path> to overwrite an
+                          existing initialized run in place.
   serve                   Start the local daemon server.
   status                  Print the current task-runner environment status.
   task list <id>          List tasks for a run in stable task order.
@@ -188,6 +192,7 @@ Execution options:
   --assignment <n|path>   Assignment bare name or direct path to assignment.md.
   --backend-session-id    Adopt an existing backend session id.
   --resume-run <id|path>  Continue an existing run by short id or path.
+  --run-id <id|path>      (init only) Overwrite an initialized run in place.
   --var <key>=<value>     Set an input variable (repeatable).
   --add-task <title>      Append a task to the run's task list.
   --cwd <path>            Override the run cwd, or scope list runs to a cwd.
@@ -764,6 +769,7 @@ function unsupportedFlagsForGroupedCommand(
   if (parsed.agent !== undefined) unsupported.push("--agent");
   if (parsed.assignment !== undefined) unsupported.push("--assignment");
   if (parsed.resumeRun !== undefined) unsupported.push("--resume-run");
+  if (parsed.runId !== undefined) unsupported.push("--run-id");
   if (parsed.backendSessionId !== undefined) unsupported.push("--backend-session-id");
   if (Object.keys(parsed.vars).length > 0) unsupported.push("--var");
   if (!opts.allowRunListScope && parsed.cwd !== undefined) unsupported.push("--cwd");
@@ -1139,6 +1145,47 @@ async function runResetCommand(parsed: ParsedArgs, connect?: DaemonConnectContex
       writeJson({ runId: result.runId, status: result.status });
     } else {
       process.stdout.write(`task-runner: reset run ${result.runId} to initialized state\n`);
+    }
+    process.exit(0);
+  } catch (err) {
+    exitCommandFailure(err, connect?.connectUrl);
+  }
+}
+
+async function runReadyCommand(parsed: ParsedArgs, connect?: DaemonConnectContext): Promise<never> {
+  const [runArg, extra] = parsed.positionals;
+  const target = normalizeTarget(runArg);
+  if (!target) {
+    process.stderr.write("task-runner: run ready requires <id-or-path>\n");
+    process.exit(3);
+  }
+  if (extra !== undefined) {
+    process.stderr.write(
+      `task-runner: run ready takes exactly one positional (<id-or-path>); got extra "${extra}"\n`,
+    );
+    process.exit(3);
+  }
+  const unsupported = unsupportedFlagsForGroupedCommand(parsed);
+  if (unsupported.length > 0) {
+    process.stderr.write(
+      `task-runner: run ready only supports <id-or-path>, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+    );
+    process.exit(3);
+  }
+
+  try {
+    const result =
+      connect === undefined
+        ? readyRun(target)
+        : await withDaemonClient(connect, (client) =>
+            client
+              .call<{ run: ReturnType<typeof readyRun> }>("runs.ready", { target })
+              .then((r) => r.run),
+          );
+    if (parsed.outputFormat === "json") {
+      writeJson({ runId: result.runId, status: result.status });
+    } else {
+      process.stdout.write(renderRunReady(result));
     }
     process.exit(0);
   } catch (err) {
@@ -1805,8 +1852,15 @@ async function runExecuteCommandEmbedded(parsed: ParsedArgs): Promise<never> {
   process.on("SIGINT", onSigint);
 
   try {
+    if (!isInitCommand && parsed.runId !== undefined) {
+      throw new RunCommandError("--run-id is only valid with init");
+    }
+    if (isInitCommand && parsed.resumeRun !== undefined) {
+      throw new RunCommandError("init cannot be combined with --resume-run");
+    }
     if (isInitCommand) {
       const run = await initRun({
+        runId: normalizeTarget(parsed.runId) ?? parsed.runId,
         agent: normalizeTarget(parsed.agent),
         assignment: normalizeTarget(parsed.assignment),
         definitionCwd: process.cwd(),
@@ -1879,8 +1933,15 @@ async function runExecuteCommandDaemon(
   const isJson = parsed.outputFormat === "json";
 
   await withDaemonClient(connect, async (client) => {
+    if (!isInitCommand && parsed.runId !== undefined) {
+      throw new RunCommandError("--run-id is only valid with init");
+    }
+    if (isInitCommand && parsed.resumeRun !== undefined) {
+      throw new RunCommandError("init cannot be combined with --resume-run");
+    }
     if (isInitCommand) {
       const result = await client.call<{ run: ReturnType<typeof getRun> }>("runs.init", {
+        runId: normalizeTarget(parsed.runId) ?? parsed.runId,
         agent: normalizeTarget(parsed.agent),
         assignment: normalizeTarget(parsed.assignment),
         definitionCwd: process.cwd(),
@@ -2104,6 +2165,9 @@ async function main(): Promise<void> {
     }
     if (parsed.subcommand === "reset") {
       await runResetCommand(parsed, daemonConnect);
+    }
+    if (parsed.subcommand === "ready") {
+      await runReadyCommand(parsed, daemonConnect);
     }
     if (parsed.subcommand === "archive") {
       await runArchiveToggleCommand(parsed, daemonConnect, "archive");

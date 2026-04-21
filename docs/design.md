@@ -223,6 +223,8 @@ Mutation rules (non-passive):
 
 - initialized runs allow `task set`, `task append-notes`, and `task add`
   (unless `tasks` is locked)
+- ready runs allow `task append-notes`, but not status changes or
+  `task add`
 - running runs allow `task set` and `task append-notes`, but not
   `task add`
 - terminal runs allow notes edits, not status changes
@@ -267,15 +269,18 @@ backend. This is important for:
 `init` no longer dumps the worker handoff body to stdout. Operators
 fetch it explicitly with `task-runner run brief <run-id>`.
 
-### Execute-after-init
+### Ready and start
 
 For non-passive initialized runs:
 
 ```bash
+task-runner run ready <run-id>
 task-runner run --resume-run <run-id>
 ```
 
-The stored `manifest.brief` is reused verbatim as the execution handoff.
+`run ready` promotes the run from `initialized` to `ready` without
+starting the backend. The subsequent first `run --resume-run` reuses the
+stored `manifest.brief` verbatim as the execution handoff.
 
 ### Resume
 
@@ -290,7 +295,7 @@ Important rules:
   does not re-resolve Codex transport from current env or new daemon
   request overrides
 - resume reuses the frozen `manifest.launcher`; `--launcher` is
-  forbidden on resume and execute-after-init
+  forbidden on resume and ready-start
 - incomplete-task resumes may omit a follow-up message (an implicit
   continue message is used)
 - resumes of otherwise-complete runs must supply a follow-up message
@@ -425,9 +430,9 @@ reuse the existing summary/detail/timeline publication flow.
 
 Shared run capabilities remain the canonical UX gate for lifecycle
 actions. `RunCapabilities` includes `canArchive`, `canUnarchive`,
-`canReset`, `canDelete`, `canResume`, `canAbort`, and the `taskMutation`
-sub-booleans. Browser and daemon clients should use those booleans
-directly instead of reproducing lifecycle state checks locally.
+`canReset`, `canDelete`, `canReady`, `canResume`, `canAbort`, and the
+`taskMutation` sub-booleans. Browser and daemon clients should use those
+booleans directly instead of reproducing lifecycle state checks locally.
 
 Passive backend-session editing is an explicit detail-surface mutation,
 not a summary mutation: the daemon publishes a fresh `RunDetail` after

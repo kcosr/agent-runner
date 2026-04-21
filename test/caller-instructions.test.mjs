@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
+import { readyRun } from "../packages/core/dist/core/commands/service.js";
 import { resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import { createRunEventCapture } from "./helpers/run-events.mjs";
@@ -325,6 +326,7 @@ test("execute-after-init does NOT print callerInstructions (init already did)", 
   // Init — prints
   const init = await runFreshRun(dir, "caller-work", { initialize: true });
   assert.match(init.stderr, /── caller instructions ──/);
+  await withSharedRuntimeEnv(dir, async () => readyRun(init.outcome.runId));
 
   await withSharedRuntimeEnv(dir, async () => {
     // Execute-after-init — must NOT reprint
@@ -403,6 +405,7 @@ test("persisted run note and pin metadata stay out of briefs and backend prompts
   manifest.resetSeed.note = manifest.note;
   manifest.resetSeed.pinned = true;
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  await withSharedRuntimeEnv(dir, async () => readyRun(outcome.runId));
 
   const brief = runCli(["run", "brief", outcome.runId], { cwd: dir });
   assert.doesNotMatch(brief, /Private note/);

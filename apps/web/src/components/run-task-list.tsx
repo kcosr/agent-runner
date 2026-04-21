@@ -2,7 +2,6 @@ import type { RunTaskSummary } from "@task-runner/core/contracts/runs.js";
 import { useState } from "react";
 import { AlertIcon, CheckIcon, ChevronIcon, PendingIcon, RunningIcon } from "./icons.js";
 import { MarkdownContent } from "./markdown.js";
-import { StatusBadge } from "./status-badge.js";
 
 function taskStatusClass(status: RunTaskSummary["status"]) {
   switch (status) {
@@ -97,7 +96,9 @@ export function RunTaskList({ tasks }: { tasks: RunTaskSummary[] }) {
               ) : (
                 <span className="task-chevron-spacer" aria-hidden="true" />
               )}
-              <StatusBadge status={taskStatusToRunStatus(task.status)} />
+              <span className={taskStatusBadgeClass(task.status)}>
+                {taskStatusLabel(task.status)}
+              </span>
             </button>
             {isExpanded && hasDetails ? (
               <div className="task-details" id={detailsId}>
@@ -140,15 +141,28 @@ export function RunTaskList({ tasks }: { tasks: RunTaskSummary[] }) {
   );
 }
 
-function taskStatusToRunStatus(status: RunTaskSummary["status"]) {
+function taskStatusLabel(status: RunTaskSummary["status"]) {
   switch (status) {
     case "pending":
-      return "initialized";
+      return "pending";
     case "in_progress":
-      return "running";
+      return "in progress";
     case "completed":
-      return "success";
+      return "completed";
     case "blocked":
       return "blocked";
+  }
+}
+
+function taskStatusBadgeClass(status: RunTaskSummary["status"]) {
+  switch (status) {
+    case "pending":
+      return "badge badge-pending";
+    case "in_progress":
+      return "badge badge-running";
+    case "completed":
+      return "badge badge-completed";
+    case "blocked":
+      return "badge badge-blocked";
   }
 }

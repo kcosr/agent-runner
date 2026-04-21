@@ -48,9 +48,9 @@ through the shared preferences store.
 
 ### Board
 
-The board groups runs into status columns (pending, running, terminal
-variants). Cards are populated from the global `RunSummary` SSE stream,
-so state stays live without polling.
+The board groups runs into status columns (`Initialized`, `Ready`,
+`Running`, and terminal variants). Cards are populated from the global
+`RunSummary` SSE stream, so state stays live without polling.
 
 Each card shows:
 
@@ -144,7 +144,7 @@ Every action button consults the run's `RunCapabilities`:
 | Unarchive | `canUnarchive` |
 | Reset | `canReset` |
 | Delete | `canDelete` (archived only) |
-| Resume | `canResume` and dependency readiness |
+| Primary action (`Ready`, `Start`, or `Resume`) | `canReady` for `Ready`; `canResume` for `Start` / `Resume` |
 | Abort | `canAbort` (with `abortReason` when disabled) |
 | Edit backend session | passive runs only |
 | Add/remove dependency | initialized runs only |

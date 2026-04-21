@@ -4,6 +4,11 @@
 
 ### Breaking Changes
 
+- Run lifecycle now includes an explicit `ready` state between
+  `initialized` and `running`. Non-passive initialized runs are no longer
+  directly executable: promote them with `task-runner run ready <run-id>`
+  before the first `run --resume-run`.
+  ([#71](https://github.com/kcosr/task-runner/pull/71))
 - Manifest schema version is now `10`. Runs now freeze the resolved
   launcher on both `manifest.launcher` and `manifest.resetSeed.launcher`,
   and resume / reset reuse that frozen launcher instead of re-reading
@@ -42,6 +47,15 @@
 
 ### Added
 
+- Added `task-runner run ready <run-id>` plus `RunCapabilities.canReady`
+  across the CLI, daemon, contracts, and web dashboard so initialized
+  runs can be explicitly promoted before first execution.
+  ([#71](https://github.com/kcosr/task-runner/pull/71))
+- Added `scripts/migrate-manifests-v10.mjs` to promote schema v9 run
+  manifests to schema v10 and canonicalize repairable schema v10
+  manifests by backfilling frozen launcher capture plus
+  `callerInstructions`.
+  ([#71](https://github.com/kcosr/task-runner/pull/71))
 - Added first-class launcher definitions under
   `${TASK_RUNNER_CONFIG_DIR}/launchers/*.yaml|*.yml`, plus `task-runner
   list launchers` and `task-runner show launcher` across embedded and
@@ -99,6 +113,11 @@
 
 ### Changed
 
+- Changed the web dashboard board and primary action semantics so
+  initialized runs stay in `Initialized`, ready runs move to `Ready`, and
+  the primary action switches between `Ready`, `Start`, and `Resume`
+  based on lifecycle state and attempt history.
+  ([#71](https://github.com/kcosr/task-runner/pull/71))
 - Changed subprocess backend startup so agents can author `launcher`
   either as a named string or inline object, fresh runs can override it
   with named-only `--launcher`, connected mode resolves named launchers
@@ -111,7 +130,15 @@
   hook-driven note/pin/task/attachment mutations reuse the existing
   summary/detail/timeline daemon event names instead of introducing a
   separate hook stream. ([#66](https://github.com/kcosr/task-runner/pull/66))
-- Changed the bundled planning workflow so `plan-feature` now leaves the planning run blocked on `create_implementer_run_after_approval` until the caller resumes the same run with approval, delayed implementer creation no longer forces `--backend passive`, generated implementation plans now teach backend-accurate execute-after-init handoff (`run brief` + `run --resume-run`), and the template's terminal workflow now ends with `push_branch_and_create_pr` instead of local-only finalization. ([#63](https://github.com/kcosr/task-runner/pull/63))
+- Changed the bundled planning workflow so `plan-feature` creates the
+  implementer run during the initial pass, keeps
+  `assignment-seed.md` / `assignment-summary.md` on the planning run,
+  teaches the caller to approve execution with `run ready`, and, when
+  caller feedback arrives after init, refreshes the planning-run
+  attachments and reinitializes the same implementer run with
+  `init --run-id ...` instead of recreating it.
+  ([#63](https://github.com/kcosr/task-runner/pull/63),
+  [#71](https://github.com/kcosr/task-runner/pull/71))
 - Changed the web run detail drawer so the attempts `Message` tab remains available after attempts start, keeping the concise run handoff visible alongside the full prompt. ([#63](https://github.com/kcosr/task-runner/pull/63))
 - Changed the web run detail drawer so attempt `Output` is now split into `Response` (transcript) and `Diagnostics` (backend notices), and the top-level drawer section tabs stay on one line with horizontal scrolling on narrow layouts. ([#69](https://github.com/kcosr/task-runner/pull/69))
 - Changed the web dashboard so pinned runs sort first within each status

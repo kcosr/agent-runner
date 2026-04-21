@@ -317,6 +317,52 @@ test("renderRunStatus shows effective status separately from lifecycle status", 
   assert.match(text, /task-runner run brief/);
 });
 
+test("renderRunStatus shows ready promotion and execution hints separately", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "status-agent", STATUS_AGENT);
+  writeAssignment(dir, "status-work", STATUS_ASSIGNMENT);
+  const outcome = await runFresh(dir);
+
+  const initializedText = renderRunStatus(
+    toRunDetail({
+      manifest: {
+        ...outcome.manifest,
+        status: "initialized",
+        endedAt: null,
+        exitCode: null,
+        attempts: 0,
+        sessionCount: 0,
+        sessions: [],
+        attemptRecords: [],
+        backendSessionId: null,
+      },
+      isLive: false,
+    }),
+  );
+  assert.match(initializedText, /To promote this run for execution:/);
+  assert.match(initializedText, new RegExp(`task-runner run ready ${outcome.runId}`));
+  assert.doesNotMatch(initializedText, new RegExp(`task-runner run --resume-run ${outcome.runId}`));
+
+  const readyText = renderRunStatus(
+    toRunDetail({
+      manifest: {
+        ...outcome.manifest,
+        status: "ready",
+        endedAt: null,
+        exitCode: null,
+        attempts: 0,
+        sessionCount: 0,
+        sessions: [],
+        attemptRecords: [],
+        backendSessionId: null,
+      },
+      isLive: false,
+    }),
+  );
+  assert.match(readyText, /To execute this run:/);
+  assert.match(readyText, new RegExp(`task-runner run --resume-run ${outcome.runId}`));
+});
+
 test("renderSystemStatus prints embedded-mode environment details", () => {
   const text = renderSystemStatus({
     configDir: "/tmp/config",
@@ -474,6 +520,7 @@ test("run status --field capabilities exposes the current run capability contrac
     canUnarchive: false,
     canReset: true,
     canDelete: false,
+    canReady: false,
     canResume: true,
     canAbort: false,
     abortReason: "already_terminal",

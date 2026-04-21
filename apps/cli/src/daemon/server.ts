@@ -22,6 +22,7 @@ import {
   getTask,
   getTaskList,
   initRun,
+  readyRun,
   removeDependency,
   removeRunAttachment,
   renameRun,
@@ -369,6 +370,7 @@ export async function serveDaemon(
     appendNotes,
     createTask,
     initRun,
+    readyRun,
     startRun,
     resumeRun,
     ...handlers,
@@ -1069,6 +1071,10 @@ export async function serveDaemon(
       publishRunProjections(run.runId);
       return run;
     },
+    readyRun: (target) =>
+      withPublishedMutation(target, () => app.readyRun(target, mutationAuditContext), {
+        inferDependentFanout: true,
+      }),
     archive: (target) =>
       withPublishedMutation(target, () => app.archive(target, mutationAuditContext), {
         inferDependentFanout: true,
@@ -1339,6 +1345,17 @@ export async function serveDaemon(
           );
           return;
         }
+        case "runs.ready":
+          sendJson(
+            ws,
+            resultResponse(
+              request.id,
+              operations.readyRun(
+                requiredString(asRecord(params, "runs.ready params").target, "target"),
+              ),
+            ),
+          );
+          return;
         case "runs.archive":
           sendJson(
             ws,

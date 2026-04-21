@@ -13,6 +13,7 @@ import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
 import { updateTask as updateTaskViaApp } from "../packages/core/dist/app/service.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
+import { readyRun } from "../packages/core/dist/core/commands/service.js";
 import { resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import {
@@ -216,6 +217,7 @@ test("execute-after-init appends ordered created/started/attempt/finished record
     initialize: true,
     bootstrapBackendSessionId: "bootstrap-thread",
   });
+  withSharedRuntimeEnv(dir, () => readyRun(init.runId));
 
   const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(init.runId));
   const resumed = await runIn(dir, {
@@ -243,6 +245,7 @@ test("execute-after-init appends ordered created/started/attempt/finished record
     [
       "run.created",
       "run.backend_session_updated",
+      "run.ready",
       "run.started",
       "run.attempt_recorded",
       "run.finished",
@@ -250,9 +253,10 @@ test("execute-after-init appends ordered created/started/attempt/finished record
   );
   assert.equal(records[0].initialStatus, "initialized");
   assert.equal(records[1].reason, "bootstrap_import");
-  assert.equal(records[2].backendSessionIdAtStart, "bootstrap-thread");
-  assert.equal(records[3].backendSessionIdCaptured, "bootstrap-thread");
-  assert.equal(records[4].terminalStatus, "success");
+  assert.equal(records[2].previousStatus, "initialized");
+  assert.equal(records[3].backendSessionIdAtStart, "bootstrap-thread");
+  assert.equal(records[4].backendSessionIdCaptured, "bootstrap-thread");
+  assert.equal(records[5].terminalStatus, "success");
   const raw = readAuditRaw(resumed.workspaceDir);
   assert.equal(raw.includes("secret transcript"), false);
   assert.equal(raw.includes("stdout-secret"), false);

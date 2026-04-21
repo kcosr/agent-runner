@@ -175,6 +175,7 @@ test("run contracts: toRunSummary maps listed manifest rows to the neutral summa
       canUnarchive: false,
       canReset: true,
       canDelete: false,
+      canReady: false,
       canResume: true,
       canAbort: false,
       abortReason: "already_terminal",
@@ -206,6 +207,7 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
     canUnarchive: false,
     canReset: true,
     canDelete: false,
+    canReady: false,
     canResume: true,
     canAbort: false,
     abortReason: "already_terminal",
@@ -293,6 +295,17 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
 test("run contracts: toRunDetail exposes pendingPrompt for initialized zero-attempt runs", () => {
   const detail = toRunDetail({
     manifest: buildManifest(),
+    isLive: false,
+  });
+
+  assert.equal(detail.pendingPrompt, "Prepared handoff prompt.");
+});
+
+test("run contracts: toRunDetail exposes pendingPrompt for ready zero-attempt runs", () => {
+  const detail = toRunDetail({
+    manifest: buildManifest({
+      status: "ready",
+    }),
     isLive: false,
   });
 
@@ -537,13 +550,35 @@ test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mu
     canUnarchive: false,
     canReset: true,
     canDelete: false,
-    canResume: true,
+    canReady: true,
+    canResume: false,
     canAbort: false,
     abortReason: "not_active_in_daemon",
     taskMutation: {
       canSetStatus: true,
       canEditNotes: true,
       canAdd: true,
+    },
+  });
+
+  const ready = deriveRunCapabilities(
+    buildManifest({
+      status: "ready",
+    }),
+  );
+  assert.deepEqual(ready, {
+    canArchive: true,
+    canUnarchive: false,
+    canReset: true,
+    canDelete: false,
+    canReady: false,
+    canResume: true,
+    canAbort: false,
+    abortReason: "not_active_in_daemon",
+    taskMutation: {
+      canSetStatus: false,
+      canEditNotes: true,
+      canAdd: false,
     },
   });
 
@@ -561,6 +596,7 @@ test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mu
     canUnarchive: true,
     canReset: true,
     canDelete: true,
+    canReady: false,
     canResume: false,
     canAbort: false,
     abortReason: "already_terminal",
@@ -581,6 +617,7 @@ test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mu
     canUnarchive: false,
     canReset: false,
     canDelete: false,
+    canReady: false,
     canResume: false,
     canAbort: false,
     abortReason: "not_active_in_daemon",
@@ -597,6 +634,7 @@ test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mu
     }),
   );
   assert.equal(passive.canResume, false);
+  assert.equal(passive.canReady, false);
   assert.equal(passive.canAbort, false);
   assert.equal(passive.abortReason, "not_active_in_daemon");
   assert.deepEqual(passive.taskMutation, {
@@ -610,6 +648,7 @@ test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mu
       lockedFields: ["tasks"],
     }),
   );
+  assert.equal(initializedLocked.canReady, true);
   assert.deepEqual(initializedLocked.taskMutation, {
     canSetStatus: true,
     canEditNotes: true,
@@ -656,6 +695,7 @@ test("run contracts: passive summaries and details derive effectiveStatus from t
     canUnarchive: false,
     canReset: true,
     canDelete: false,
+    canReady: false,
     canResume: false,
     canAbort: false,
     abortReason: "not_active_in_daemon",

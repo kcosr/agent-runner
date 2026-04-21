@@ -832,11 +832,10 @@ test("built-in plan-feature assignment uses cwd instead of repo_path for canonic
   assert.ok((loaded.config.callerInstructions ?? "").includes("--assignment plan-feature"));
 
   const taskIds = loaded.config.tasks.map((task) => task.id);
-  assert.ok(taskIds.includes("create_implementer_run_after_approval"));
-  assert.ok(!taskIds.includes("prepare_creation_followup"));
+  assert.ok(taskIds.includes("create_initialized_implementer_run"));
 
   const createTask = loaded.config.tasks.find(
-    (task) => task.id === "create_implementer_run_after_approval",
+    (task) => task.id === "create_initialized_implementer_run",
   );
   assert.ok(createTask);
   assert.match(createTask.body ?? "", /--agent implementer/);
@@ -844,10 +843,24 @@ test("built-in plan-feature assignment uses cwd instead of repo_path for canonic
     createTask.body ?? "",
     /Always use `--agent implementer --backend passive`|--agent implementer \\\n\s+--backend passive/,
   );
+  assert.match(
+    createTask.body ?? "",
+    /resulting implementer run is left in\s+`initialized`, not `ready`/,
+  );
+  assert.match(createTask.body ?? "", /--run-id <existing-implementer-run-id>/);
+  assert.match(
+    createTask.body ?? "",
+    /Do not assume updating the draft file or refreshing the\s+planning-run attachments alone updates the implementer\s+run/i,
+  );
+  assert.match(createTask.body ?? "", /run ready <new-run-id>/);
   assert.match(createTask.body ?? "", /run --resume-run <new-run-id>/);
 
-  assert.match(loaded.config.callerInstructions ?? "", /resume this same planning run/i);
+  assert.match(loaded.config.callerInstructions ?? "", /run ready <new-run-id>/);
   assert.match(loaded.config.callerInstructions ?? "", /run --resume-run <new-run-id>/);
+  assert.match(
+    loaded.config.callerInstructions ?? "",
+    /reinitialize the same initialized\s+implementer run from the updated draft/i,
+  );
   assert.doesNotMatch(loaded.config.callerInstructions ?? "", /passive backend/i);
 });
 
@@ -855,13 +868,14 @@ test("built-in plan-feature template emits implement-prefixed assignment names",
   const template = readFileSync(BUILTIN_PLAN_TEMPLATE_PATH, "utf8");
   assert.match(template, /^name: implement-<<KEBAB_FEATURE_SLUG>>$/m);
   assert.doesNotMatch(template, /^name: plan-<<KEBAB_FEATURE_SLUG>>$/m);
+  assert.match(template, /run ready {{run_id}}/);
   assert.match(template, /run --resume-run {{run_id}}/);
   assert.doesNotMatch(template, /passive backend/i);
   assert.match(template, /- id: push_branch_and_create_pr/);
   assert.doesNotMatch(template, /- id: final_commit/);
 });
 
-test("built-in plan-review tracks approval-gated creation and terminal publish workflow", () => {
+test("built-in plan-review tracks immediate-init revision handoff and terminal publish workflow", () => {
   const loaded = loadAssignmentConfig(BUILTIN_PLAN_REVIEW_PATH);
   const structureTask = loaded.config.tasks.find((task) => task.id === "review_task_structure");
   const workflowTask = loaded.config.tasks.find(
@@ -872,8 +886,11 @@ test("built-in plan-review tracks approval-gated creation and terminal publish w
   assert.ok(workflowTask);
   assert.match(structureTask.body ?? "", /push_branch_and_create_pr/);
   assert.doesNotMatch(structureTask.body ?? "", /final_commit/);
-  assert.match(workflowTask.body ?? "", /create_implementer_run_after_approval/);
+  assert.match(workflowTask.body ?? "", /creates the implementer run during the/);
   assert.match(workflowTask.body ?? "", /does \*\*not\*\* force/);
+  assert.match(workflowTask.body ?? "", /refresh the planning run's/);
+  assert.match(workflowTask.body ?? "", /init --run-id <implementer-run-id>/);
+  assert.match(workflowTask.body ?? "", /run ready/);
   assert.match(workflowTask.body ?? "", /run --resume-run/);
 });
 

@@ -492,6 +492,16 @@ export function createApiClient(config: AppRuntimeConfig) {
       );
       return await readRun(response);
     },
+    async readyRun(runId: string): Promise<RunDetail> {
+      const response = await fetch(
+        joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/ready`),
+        {
+          method: "POST",
+          headers: { accept: "application/json" },
+        },
+      );
+      return await readRun(response);
+    },
     async deleteRun(runId: string): Promise<RunDeleteResult> {
       const response = await fetch(
         joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}`),

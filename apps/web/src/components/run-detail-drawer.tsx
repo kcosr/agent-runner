@@ -13,6 +13,7 @@ import {
   useState,
 } from "react";
 import { formatBytes, formatTimestamp, formatTimestampWithRelative } from "../lib/format.js";
+import { getRunPrimaryAction } from "../lib/run-primary-action.js";
 import type { RunTimelineState } from "../lib/run-timeline.js";
 import type { DrawerDetailSection } from "../lib/settings.js";
 import { isEditableEventTarget } from "../lib/shortcuts.js";
@@ -271,7 +272,9 @@ export function RunDetailDrawer({
   const latestAttemptRef = useRef<number | null>(null);
   const [selectedAttempt, setSelectedAttempt] = useState<AttemptSelection>(null);
   const [timelineTab, setTimelineTab] = useState<TimelineTab>(
-    run.status === "initialized" && run.attempts === 0 ? "message" : "response",
+    (run.status === "initialized" || run.status === "ready") && run.attempts === 0
+      ? "message"
+      : "response",
   );
   const [editingName, setEditingName] = useState(false);
   const [editingBackendSession, setEditingBackendSession] = useState(false);
@@ -294,10 +297,12 @@ export function RunDetailDrawer({
   const isPassiveRun = run.backend === "passive";
   const canEditBackendSession = isPassiveRun;
   const actionsLocked = actionPending !== undefined;
+  const primaryAction = getRunPrimaryAction(run);
   const resumePending = actionPending === "resume";
+  const readyPending = actionPending === "ready";
   const trimmedResumeMessage = resumeMessageDraft.trim();
   const hasIncompleteTasks = run.tasks.some((task) => task.status !== "completed");
-  const startableRun = run.capabilities.canResume && run.status === "initialized";
+  const startableRun = primaryAction === "start";
   const resumeRequiresMessage = !hasIncompleteTasks;
   const showResumeMessageField = resumeRequiresMessage || resumeMessageExpanded;
   const renamePending = actionPending === "rename";
@@ -310,7 +315,7 @@ export function RunDetailDrawer({
   const removeAttachmentPending = actionPending === "remove-attachment";
   const downloadAttachmentPending = actionPending === "download-attachment";
   const visibleName = run.name ?? "Unnamed";
-  const canEditDependencies = run.status === "initialized";
+  const canEditDependencies = run.status === "initialized" && run.archivedAt === null;
   const addDependencyPending = actionPending === "add-dependency";
   const removeDependencyPending = actionPending === "remove-dependency";
   const clearDependenciesPending = actionPending === "clear-dependencies";
@@ -363,7 +368,9 @@ export function RunDetailDrawer({
     )?.runId;
   const timelineAttempts = timelineState.history?.attempts ?? [];
   const pendingAttemptAvailable =
-    run.status === "initialized" && run.attempts === 0 && timelineAttempts.length === 0;
+    (run.status === "initialized" || run.status === "ready") &&
+    run.attempts === 0 &&
+    timelineAttempts.length === 0;
   const selectedAttemptRecord =
     (typeof selectedAttempt === "number"
       ? timelineAttempts.find((attempt) => attempt.attempt === selectedAttempt)
@@ -924,20 +931,24 @@ export function RunDetailDrawer({
                 {actionPending === "unarchive" ? "Restoring..." : "Unarchive"}
               </button>
             ) : null}
-            {run.capabilities.canResume ? (
+            {primaryAction !== null ? (
               <button
                 className="btn"
                 disabled={actionsLocked}
                 onClick={() => void onTriggerPrimaryAction()}
                 type="button"
               >
-                {actionPending === "resume"
-                  ? startableRun
-                    ? "Starting..."
-                    : "Resuming..."
-                  : startableRun
-                    ? "Start"
-                    : "Resume"}
+                {primaryAction === "ready"
+                  ? readyPending
+                    ? "Readying..."
+                    : "Ready"
+                  : actionPending === "resume"
+                    ? startableRun
+                      ? "Starting..."
+                      : "Resuming..."
+                    : startableRun
+                      ? "Start"
+                      : "Resume"}
               </button>
             ) : null}
             {run.capabilities.canReset ? (

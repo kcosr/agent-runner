@@ -140,6 +140,7 @@ task-runner init \
   --agent ./agents/implementer/agent.md \
   --assignment ./assignments/repo-orientation/assignment.md
 
+task-runner run ready <run-id>
 task-runner run --resume-run <run-id>
 ```
 
@@ -275,7 +276,7 @@ root.
 
 | Command | Purpose |
 |---------|---------|
-| `run` | Execute a fresh run, resume, or execute-after-init |
+| `run` | Execute a fresh run, promote an initialized run to ready, start a ready run, or resume |
 | `init` | Prepare a run workspace without invoking the backend |
 | `serve` | Start the local daemon (WS JSON-RPC + HTTP/SSE + web UI) |
 | `status` | Print system/environment status |
@@ -319,7 +320,7 @@ The rest are focused topic pages:
 | [docs/tasks.md](docs/tasks.md) | Task model, status values, task CLI, mutation rules |
 | [docs/runs.md](docs/runs.md) | Workspace layout, manifest, lifecycle, capabilities |
 | [docs/variables.md](docs/variables.md) | Typed vars, resolution, interpolation, redaction |
-| [docs/resume.md](docs/resume.md) | Resume rules, execute-after-init, retry nudges |
+| [docs/resume.md](docs/resume.md) | Resume rules, ready-start, retry nudges |
 | [docs/dependencies.md](docs/dependencies.md) | Dependency graph and execution gate |
 | [docs/attachments.md](docs/attachments.md) | File handoff, cwd-scope grouping, limits |
 | [docs/backends.md](docs/backends.md) | Claude, Codex, Cursor, Pi, Passive |

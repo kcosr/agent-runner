@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
-import { readStatus } from "../packages/core/dist/core/commands/service.js";
+import { readStatus, readyRun } from "../packages/core/dist/core/commands/service.js";
 import { ResumeError, resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import { createRunEventCapture } from "./helpers/run-events.mjs";
@@ -117,6 +117,69 @@ async function runIn(baseDir, opts) {
     }
   });
 }
+
+async function initIn(baseDir) {
+  return withSharedRuntimeEnv(baseDir, async () => {
+    const loaded = loadAgentConfig("three", baseDir);
+    const loadedAssignment = loadAssignmentConfig("three-work", baseDir);
+    const originalCwd = process.cwd();
+    process.chdir(baseDir);
+    try {
+      return await runAgent({
+        loaded,
+        loadedAssignment,
+        cliVars: {},
+        backend: mockBackend(async () => {
+          throw new Error("backend should not be invoked during init");
+        }),
+        initialize: true,
+        stderr: () => {},
+        stdout: () => {},
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+}
+
+test("resume: initialized runs reject until promoted to ready", async () => {
+  const dir = tempDir();
+  writeAgentAndAssignment(dir);
+
+  const init = await initIn(dir);
+  const initialTarget = withSharedRuntimeEnv(dir, () => resolveResumeTarget(init.runId, dir));
+
+  await assert.rejects(
+    () =>
+      runIn(dir, {
+        backend: mockBackend(async () => {
+          throw new Error("backend should not run before ready");
+        }),
+        resume: initialTarget,
+      }),
+    (err) => err instanceof ResumeError && new RegExp(`run ready ${init.runId}`).test(err.message),
+  );
+
+  withSharedRuntimeEnv(dir, () => readyRun(init.runId));
+  const readyTarget = withSharedRuntimeEnv(dir, () => resolveResumeTarget(init.runId, dir));
+  const resumed = await runIn(dir, {
+    backend: mockBackend(async (ctx) => {
+      completeAllTasksFromPrompt(ctx.prompt);
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "sess-ready-start",
+        transcript: "done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    }),
+    resume: readyTarget,
+  });
+
+  assert.equal(resumed.manifest.status, "success");
+});
 
 test("resume: happy path — original blocks, resume completes, same workspace", async () => {
   const dir = tempDir();
@@ -429,13 +492,13 @@ test("resume: start refreshes the latest initialized task state before claiming 
     }
   });
 
-  const staleTarget = withSharedRuntimeEnv(dir, () => resolveResumeTarget(initialized.runId, dir));
-
   const initializedManifestPath = join(initialized.workspaceDir, "run.json");
   const initializedManifest = JSON.parse(readFileSync(initializedManifestPath, "utf8"));
   initializedManifest.finalTasks.t1.status = "completed";
   initializedManifest.tasksCompleted = 1;
   writeFileSync(initializedManifestPath, `${JSON.stringify(initializedManifest, null, 2)}\n`);
+  withSharedRuntimeEnv(dir, () => readyRun(initialized.runId));
+  const readyTarget = withSharedRuntimeEnv(dir, () => resolveResumeTarget(initialized.runId, dir));
 
   const resumed = await runIn(dir, {
     backend: mockBackend(async (ctx) => {
@@ -450,7 +513,7 @@ test("resume: start refreshes the latest initialized task state before claiming 
         rawStderr: "",
       };
     }),
-    resume: staleTarget,
+    resume: readyTarget,
   });
 
   assert.equal(resumed.exitCode, 0);

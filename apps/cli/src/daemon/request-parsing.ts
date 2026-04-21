@@ -343,6 +343,7 @@ export function optionalOverrides(value: unknown): RunCommandOverrides {
 export function parseStartRunParams(value: unknown, label: string): RunsStartParams {
   const record = asRecord(value, label);
   return {
+    runId: optionalString(record.runId, "runId"),
     agent: optionalString(record.agent, "agent"),
     assignment: optionalString(record.assignment, "assignment"),
     definitionCwd: optionalString(record.definitionCwd, "definitionCwd"),

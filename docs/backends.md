@@ -82,8 +82,8 @@ Launchers are subprocess-only. They wrap the spawned backend command for
 - Resume validates the thread exists and the cwd matches exactly via
   `thread/read`.
 - The resolved transport is frozen into the manifest and reset seed at
-  fresh-run/init time. Resume and execute-after-init reuse that frozen
-  transport even if later client or daemon env changes.
+  fresh-run/init time. Resume and ready-start reuse that frozen transport
+  even if later client or daemon env changes.
 - Detects external interrupts when another client cancels the turn, and
   authentication failures via stderr markers.
 - Effort mapping: `minimal`, `low`, `medium`, `high`, `xhigh`; `max` →

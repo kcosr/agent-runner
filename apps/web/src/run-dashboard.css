@@ -767,6 +767,10 @@ pre {
   background: color-mix(in srgb, var(--info) var(--status-tint-alpha) * 100%, transparent);
   color: var(--info-foreground);
 }
+.badge-ready {
+  background: color-mix(in srgb, var(--warning) var(--status-tint-alpha) * 100%, transparent);
+  color: var(--warning-foreground);
+}
 .badge-completed {
   background: color-mix(in srgb, var(--success) var(--status-tint-alpha) * 100%, transparent);
   color: var(--success-foreground);

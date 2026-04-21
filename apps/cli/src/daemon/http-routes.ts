@@ -129,6 +129,13 @@ const routes: RouteDefinition[] = [
   },
   {
     method: "POST",
+    pattern: ["api", "runs", ":runId", "ready"],
+    handler: (_req, res, ctx, params) => {
+      sendJson(res, 200, ctx.operations.readyRun(routeParam(params, "runId")));
+    },
+  },
+  {
+    method: "POST",
     pattern: ["api", "runs", ":runId", "archive"],
     handler: (_req, res, ctx, params) => {
       sendJson(res, 200, ctx.operations.archiveRun(routeParam(params, "runId")));

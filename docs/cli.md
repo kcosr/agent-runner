@@ -9,7 +9,7 @@ All commands accept `--help` / `-h`.
 
 | Command | Purpose |
 |---------|---------|
-| `run` | Execute a fresh run, resume an existing run, or execute-after-init |
+| `run` | Execute a fresh run, promote an initialized run to ready, start a ready run, or resume |
 | `init` | Prepare a run workspace without invoking the backend |
 | `serve` | Start the local daemon / control plane |
 | `status` | Print system/environment status |
@@ -42,9 +42,9 @@ through `127.0.0.1:<local-port>` for the lifetime of the invocation.
 
 ## `run`
 
-Execute a run. With no subcommand it creates a fresh run, resumes an
-existing run (`--resume-run`), or executes an initialized run
-(`--resume-run`). See [resume.md](resume.md) for the rules.
+Execute a run. With no subcommand it creates a fresh run, starts a ready
+run (`run ready` then `run --resume-run`), or resumes an existing run.
+See [resume.md](resume.md) for the rules.
 
 ```bash
 task-runner run \
@@ -78,7 +78,7 @@ Flags:
 - `--backend <id>` — override the agent's backend. Valid ids:
   `claude`, `codex`, `cursor`, `pi`, `passive`.
 - `--launcher <name>` — override the agent's launcher by named launcher
-  id. Fresh-run/init only; forbidden on resume and execute-after-init.
+  id. Fresh-run/init only; forbidden on resume and ready-start.
   The built-in `direct` launcher is always available.
 - `--model <id>` — override the agent's model.
 - `--effort <level>` — one of `off`, `minimal`, `low`, `medium`, `high`,
@@ -90,7 +90,7 @@ Flags:
 - `--var <key>=<value>` — repeatable. Split on the first `=`. Forbidden
   on resume.
 - `--add-task <title>` — repeatable. Append a task to the run's list.
-  Allowed on resume (non-passive runs); forbidden on execute-after-init.
+  Allowed on resume (non-passive runs); forbidden on ready-start.
 - `--backend-session-id <id>` — bootstrap-import an existing backend
   session. Forbidden on resume.
 - `--resume-run <id|path>` — continue an existing run. Many flags are
@@ -250,6 +250,7 @@ task list.
 ### Lifecycle
 
 ```bash
+task-runner run ready    <id|path>
 task-runner run reset     <id|path>
 task-runner run archive   <id|path>
 task-runner run unarchive <id|path>

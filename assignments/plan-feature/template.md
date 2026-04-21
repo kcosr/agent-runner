@@ -18,13 +18,15 @@ callerInstructions: |
   ## Executing the plan
 
       {{task_runner_cmd}} run brief {{run_id}}
+      {{task_runner_cmd}} run ready {{run_id}}
       {{task_runner_cmd}} run --resume-run {{run_id}}
 
-  Use `run brief` to inspect the frozen worker handoff and
-  `run --resume-run` to execute the initialized implementer
-  run. Do not assume this run is passive-only. The bundled
-  `implementer` agent currently freezes `backend: codex`, so
-  the normal execute-after-init path is `run --resume-run`.
+  Use `run brief` to inspect the frozen worker handoff,
+  `run ready` to approve the initialized implementer run for
+  execution, and `run --resume-run` to execute it. Do not
+  assume this run is passive-only. The bundled `implementer`
+  agent currently freezes `backend: codex`, so the normal
+  execution path is `run ready` followed by `run --resume-run`.
 
   A same-cwd planning run may carry an attachment named
   `assignment-summary.md`. If it exists in the cwd-scoped

@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, readFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import type { TaskState, TaskStatus } from "../../assignment/model.js";
 import { resolveBackend } from "../../backends/registry.js";
@@ -275,8 +275,8 @@ function checkLockedFields(
 }
 
 // Re-check overrides against the frozen manifest's lockedFields. Used
-// for execute-after-init (priorInitialized) as a defense-in-depth
-// backstop — the explicit per-field "no overrides on init" list
+// for ready-start as a defense-in-depth backstop — the explicit
+// per-field "no overrides on ready start" list
 // above should already have rejected everything, but if a future
 // RunOverrides field is added and someone forgets to add it to the
 // explicit list, this re-check still enforces any relevant lock
@@ -792,18 +792,29 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   checkRecursionDepth(recursionState);
 
   const isInitialize = opts.initialize === true;
-  const priorInitialized = resume?.manifest.status === "initialized";
-  const isResume = Boolean(resume) && !priorInitialized;
+  const isReinitialize = isInitialize && Boolean(resume);
+  const priorReady = !isInitialize && resume?.manifest.status === "ready";
+  const isResume = Boolean(resume) && !isReinitialize && !priorReady;
 
-  if (isInitialize && resume) {
-    throw new ResumeError("--init cannot be combined with --resume-run");
-  }
   if (resume && resume.manifest.archivedAt !== null) {
+    if (isReinitialize) {
+      throw new ResumeError(`cannot reinitialize archived run ${resume.manifest.runId}`);
+    }
     throw new ResumeError(
       `cannot resume archived run ${resume.manifest.runId} — unarchive it first with ${resolveTaskRunnerCommand()} run unarchive ${resume.manifest.runId}`,
     );
   }
-  if (resume && !priorInitialized && resume.manifest.status === "running") {
+  if (isReinitialize && resume && resume.manifest.status !== "initialized") {
+    throw new ResumeError(
+      `cannot reinitialize run ${resume.manifest.runId} unless it is initialized`,
+    );
+  }
+  if (!isInitialize && resume?.manifest.status === "initialized") {
+    throw new ResumeError(
+      `cannot execute initialized run ${resume.manifest.runId} — promote it first with ${resolveTaskRunnerCommand()} run ready ${resume.manifest.runId}`,
+    );
+  }
+  if (resume && !priorReady && resume.manifest.status === "running") {
     throw new ResumeError(`cannot resume run ${resume.manifest.runId} — it is already running`);
   }
 
@@ -814,13 +825,13 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   // otherwise be able to violate the manifest-canonical contract.
   // Mirrors the policy matrix documented in docs/design.md under
   // "--resume-run".
-  if (isResume || priorInitialized) {
+  if (isResume || priorReady) {
     // Fields that are never valid on any resume (regular or
-    // execute-after-init), regardless of prior status.
+    // ready-start), regardless of prior status.
     if (loadedAssignment) {
       throw new ResumeError(
-        priorInitialized
-          ? "--assignment cannot be combined with resuming an initialized run"
+        priorReady
+          ? "--assignment cannot be combined with starting a ready run"
           : "--assignment cannot be combined with --resume-run",
       );
     }
@@ -849,10 +860,10 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       throw new ResumeError("--name cannot be combined with --resume-run");
     }
 
-    // Execute-after-init is stricter: no overrides at all. Init
+    // Starting a ready run is stricter: no overrides at all. Init
     // deliberately froze every resolvable field at creation time,
     // and the only valid invocation is `run --resume-run <id>`.
-    if (priorInitialized) {
+    if (priorReady) {
       const forbidden: string[] = [];
       if (overrides?.message && overrides.message.trim().length > 0) forbidden.push("message");
       if ((overrides?.addedTasks?.length ?? 0) > 0) forbidden.push("--add-task");
@@ -865,7 +876,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       if (overrides?.name !== undefined) forbidden.push("--name");
       if (forbidden.length > 0) {
         throw new ResumeError(
-          `resuming an initialized run does not accept ${forbidden.join(", ")} — init froze these at creation. If you need different values, create a fresh run.`,
+          `starting a ready run does not accept ${forbidden.join(", ")} — init froze these at creation. If you need different values, reinitialize the run first.`,
         );
       }
     }
@@ -877,13 +888,13 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
   // Locked-field enforcement. For fresh runs and regular resumes,
   // `checkLockedFields` vets every CLI override against the agent's
-  // and assignment's lockedFields. For execute-after-init we run a
+  // and assignment's lockedFields. For ready-start we run a
   // defensive second pass against the **frozen** `manifest.lockedFields`
   // union — the per-field override list above should already have
   // rejected everything, but if a future addition to RunOverrides
   // forgets to be added to that list, this catches the regression
   // instead of silently letting it through.
-  if (!priorInitialized) {
+  if (!priorReady && !isResume) {
     checkLockedFields(
       agentConfig,
       assignmentConfig,
@@ -896,10 +907,11 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     checkLockedFieldsFromManifest(resume.manifest, overrides, addedTitles);
   }
 
-  let cwd = resume
+  const reusesFrozenSetup = (isResume || priorReady) && resume !== undefined;
+  let cwd = reusesFrozenSetup
     ? resume.manifest.cwd
     : resolveFreshRunCwd(loadedAssignment, overrides, opts.callerCwd);
-  let repo = resume ? resume.manifest.repo : deriveRepoKey(cwd);
+  let repo = reusesFrozenSetup ? resume.manifest.repo : deriveRepoKey(cwd);
   let effectiveBackendId = backend.id;
   let currentBackend = backend;
   // When --backend overrides the agent's backend, the agent's `model`
@@ -908,10 +920,10 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const backendOverridden = overrides?.backend !== undefined;
   let model = overrides?.model ?? (backendOverridden ? undefined : agentConfig.model);
   let effort = overrides?.effort ?? agentConfig.effort;
-  const backendSpecific = resume
+  const backendSpecific = reusesFrozenSetup
     ? resolveManifestBackendSpecific(resume.manifest)
     : resolveFreshBackendSpecific(effectiveBackendId, agentConfig, overrides, execution);
-  const launcher = resume
+  const launcher = reusesFrozenSetup
     ? cloneResolvedLauncherConfig(resume.manifest.launcher)
     : resolveFreshLauncherConfig({
         backendId: effectiveBackendId,
@@ -970,10 +982,9 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     }
   }
 
-  // `priorInitialized` short-circuits most of the fresh-run setup below
-  // because the workspace and prompt were already persisted by the earlier
-  // `init`. We reuse the runId + workspace and use the stored prompt
-  // verbatim for session 0's first attempt.
+  // Ready-start reuses the workspace and stored prompt from the earlier
+  // `init` + `run ready` flow. Reinitialize also reuses the workspace
+  // container, but rebuilds the manifest from fresh-init inputs.
 
   // Vars live on the assignment. Chat mode (no assignment) has no var
   // schema, so there is nothing to validate against or resolve from.
@@ -986,7 +997,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   validateRequiredVars(varsSchema, runtimeVars, "initial");
   let persistedRuntimeVars = redactRuntimeVars(runtimeVars, resolvedVars.sources, varsSchema);
 
-  const reusingWorkspace = (isResume && resume) || (priorInitialized && resume);
+  const reusingWorkspace = resume !== undefined;
   const runId = reusingWorkspace && resume ? resume.manifest.runId : shortId();
   const workspaceDir =
     reusingWorkspace && resume ? resume.workspaceDir : resolveRunWorkspaceDirForRepo(repo, runId);
@@ -1009,7 +1020,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     ...(assignmentName !== undefined ? { assignment_name: assignmentName } : {}),
   };
   const resolvedHookDescriptors =
-    isResume || priorInitialized
+    isResume || priorReady
       ? (resume?.manifest.resolvedHooks ?? [])
       : resolveAssignmentHooks(loadedAssignment, injectedVars);
 
@@ -1017,19 +1028,24 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     isResume && resume && Object.keys(resume.manifest.finalTasks).length > 0,
   );
   const overrideName = normalizeRunName(overrides?.name);
-  let hookState = resume?.manifest.hookState ? { ...resume.manifest.hookState } : {};
-  let hookAttachments = resume?.manifest.attachments
-    ? resume.manifest.attachments.map((attachment) => ({ ...attachment }))
-    : [];
-  let hookNote = resume?.manifest.note ?? null;
-  let hookPinned = resume?.manifest.pinned ?? false;
+  let hookState = isResume || priorReady ? { ...(resume?.manifest.hookState ?? {}) } : {};
+  let hookAttachments =
+    isResume || priorReady
+      ? (resume?.manifest.attachments.map((attachment) => ({ ...attachment })) ?? [])
+      : [];
+  let hookNote = isResume || priorReady ? (resume?.manifest.note ?? null) : null;
+  let hookPinned = isResume || priorReady ? (resume?.manifest.pinned ?? false) : false;
   let hookLockedFields =
-    resume?.manifest.lockedFields !== undefined ? [...resume.manifest.lockedFields] : null;
+    isResume || priorReady
+      ? resume?.manifest.lockedFields !== undefined
+        ? [...resume.manifest.lockedFields]
+        : null
+      : null;
 
   let tasks: Map<string, TaskState>;
   if (isResume && resume) {
     tasks = rebuildTasksFromAssignmentAndSnapshot(undefined, resume.manifest.finalTasks, true);
-  } else if (priorInitialized && resume) {
+  } else if (priorReady && resume) {
     tasks = rebuildTasksFromAssignmentAndSnapshot(undefined, resume.manifest.finalTasks, false);
   } else {
     tasks = rebuildTasksFromAssignmentAndSnapshot(loadedAssignment, {}, false, injectedVars);
@@ -1055,7 +1071,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
   const trimmedMessage = message?.trim() ?? "";
 
-  if (!isResume && !priorInitialized) {
+  if (!isResume && !priorReady) {
     const defaultInitialPrompt = buildFreshInitialPrompt(
       agentInstructions,
       assignmentInstructions,
@@ -1189,10 +1205,9 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     hasIncompleteTasks(resume?.manifest.finalTasks ?? {});
 
   // Run name resolution: fresh `run` / `init` may set it via the
-  // CLI override, while resume and execute-after-init always reuse
+  // CLI override, while resume and ready-start always reuse
   // the persisted manifest value.
-  let name =
-    overrideName ?? ((isResume || priorInitialized) && resume ? resume.manifest.name : null);
+  let name = overrideName ?? ((isResume || priorReady) && resume ? resume.manifest.name : null);
 
   // Worker handoff composition (Option B: broad → specific → mechanics → ask).
   //
@@ -1206,15 +1221,15 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   //   1. workflow (only if firstTimeTasksAppear) OR new-tasks reminder
   //   2. message, or an implicit continue prompt when unfinished tasks remain
   //
-  // Execute-after-init: reuse the stored brief verbatim.
+  // Start-after-ready: reuse the stored brief verbatim.
   //
   // Both message-last. Fresh runs error if parts is empty.
   let initialPrompt: string;
-  if (priorInitialized && resume) {
+  if (priorReady && resume) {
     const stored = resume.manifest.brief;
     if (stored.length === 0) {
       throw new ResumeError(
-        `cannot resume initialized run ${resume.manifest.runId} — manifest has no brief`,
+        `cannot start ready run ${resume.manifest.runId} — manifest has no brief`,
       );
     }
     initialPrompt = stored;
@@ -1244,8 +1259,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const now = new Date().toISOString();
   let priorAttemptCount = isResume && resume ? resume.manifest.attemptRecords.length : 0;
   let priorSessionCount = isResume && resume ? resume.manifest.sessions.length : 0;
-  // `priorInitialized` runs start at session 0 — init never created a session.
-  let sessionIndex = priorInitialized ? 0 : priorSessionCount;
+  // Ready-start runs begin at session 0 — init/ready created no session.
+  let sessionIndex = priorReady ? 0 : priorSessionCount;
 
   let manifest: RunManifest;
   if (isResume && resume) {
@@ -1263,8 +1278,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       execution,
       sessionCount: priorSessionCount + 1,
     });
-  } else if (priorInitialized && resume) {
-    // Execute-after-init: the manifest was persisted by `init`. Flip it
+  } else if (priorReady && resume) {
+    // Start-after-ready: the manifest was persisted by `init`. Flip it
     // to "running", promote sessionCount to 1, and preserve the brief.
     manifest = {
       ...resume.manifest,
@@ -1391,8 +1406,15 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     };
   }
 
-  if (!reusingWorkspace && loadedAssignment?.sourcePath) {
+  if (isReinitialize) {
+    rmSync(`${workspaceDir}/attempts`, { recursive: true, force: true });
+    rmSync(`${workspaceDir}/attachments`, { recursive: true, force: true });
+  }
+
+  if (loadedAssignment?.sourcePath) {
     copyFileSync(loadedAssignment.sourcePath, `${workspaceDir}/assignment-seed.md`);
+  } else if (isReinitialize) {
+    rmSync(`${workspaceDir}/assignment-seed.md`, { force: true });
   }
 
   const lifecycleContext = lifecycleRunEventContext(execution);
@@ -1423,7 +1445,9 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     syncManifestTaskState(manifest, tasks);
     writeManifest(workspaceDir, manifest);
     const isPassive = agentConfig.backend === "passive";
-    appendRunCreatedAudit(manifest);
+    if (!isReinitialize) {
+      appendRunCreatedAudit(manifest);
+    }
     emitEvent({
       type: "run_initialized",
       runId,
@@ -1457,7 +1481,9 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   }
 
   const addedTasks =
-    reusingWorkspace && resume ? collectNewTasks(tasks, resume.manifest.finalTasks) : [];
+    reusingWorkspace && resume && !priorReady
+      ? collectNewTasks(tasks, resume.manifest.finalTasks)
+      : [];
   let sessionRecord: SessionRecord;
   if (reusingWorkspace) {
     withTaskStateLock(workspaceDir, () => {
@@ -1473,7 +1499,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
       priorAttemptCount = latest.attemptRecords.length;
       priorSessionCount = latest.sessions.length;
-      sessionIndex = priorInitialized ? 0 : priorSessionCount;
+      sessionIndex = priorReady ? 0 : priorSessionCount;
       tasks = rebuildTasksFromAssignmentAndSnapshot(undefined, latest.finalTasks, isResume);
       for (const task of addedTasks) {
         tasks.set(task.id, { ...task });
@@ -1515,7 +1541,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         endedAt: null,
         status: "running",
         exitCode: null,
-        message: priorInitialized ? latest.message : message,
+        message: priorReady ? latest.message : message,
         brief: initialPrompt,
         firstAttempt: null,
         lastAttempt: null,
@@ -1574,23 +1600,23 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   });
 
   // Caller-instructions banner on fresh runs only. Resume and
-  // execute-after-init skip the banner (the caller already saw it
+  // ready-start skip the banner (the caller already saw it
   // on init or on the fresh run that created the workspace). See
   // the `callerInstructions` field doc on RunManifest for the rule.
-  if (!isResume && !priorInitialized) {
+  if (!isResume && !priorReady) {
     emitCallerInstructions(manifest.callerInstructions, emitEvent);
   }
 
   let sessionAttempts = 0;
   // Seed the per-attempt session id from one of three sources:
-  //   1. resume target's manifest (regular resume OR execute-after-init
+  //   1. resume target's manifest (regular resume OR ready-start
   //      against a manifest that imported a session via init time
   //      `--backend-session-id` — the value lives on the persisted manifest)
   //   2. bootstrapBackendSessionId (caller imported an existing session
   //      on a fresh run)
   //   3. null (fresh session — backend allocates a new id on first invoke)
   let sessionId: string | null =
-    ((isResume || priorInitialized) && resume ? resume.manifest.backendSessionId : null) ??
+    ((isResume || priorReady) && resume ? resume.manifest.backendSessionId : null) ??
     opts.bootstrapBackendSessionId ??
     null;
   let currentPrompt = initialPrompt;

@@ -95,7 +95,8 @@ error — no partial mutation is persisted.
 The web dashboard surfaces dependencies on run cards (summary) and in the
 detail drawer (full `RunDependencyDetail[]` plus dependents). Unsatisfied
 dependencies are called out on the card as a readiness indicator, and the
-drawer's Resume button is disabled when the dependency gate is not ready.
+drawer keeps showing that readiness state while the backend rejects
+`Start` / `Resume` until the dependency gate is satisfied.
 
 ## CLI output
 

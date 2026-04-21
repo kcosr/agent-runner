@@ -39,6 +39,7 @@ import {
   listDefinitions,
   listRuns,
   listTasks,
+  readyRun as markRunReady,
   readAttachment,
   readBrief,
   readRunSummary,
@@ -97,6 +98,7 @@ export interface RunCommandOverrides {
 }
 
 export interface StartRunRequest {
+  runId?: string;
   agent?: string;
   assignment?: string;
   definitionCwd?: string;
@@ -290,6 +292,10 @@ export function reset(target: string, auditContext?: MutationAuditContext): RunD
   return toRunDetail({ manifest: resetRun(target, auditContext).manifest, isLive: false });
 }
 
+export function readyRun(target: string, auditContext?: MutationAuditContext): RunDetail {
+  return markRunReady(target, auditContext);
+}
+
 export function deleteArchivedRun(target: string): RunDeleteResult {
   return deleteRun(target);
 }
@@ -409,6 +415,7 @@ function getTaskFromMutation(task: ReturnType<typeof showTask>["task"]): RunTask
 export async function initRun(request: StartRunRequest): Promise<RunDetail> {
   const outcome = await executeRunCommand({
     initialize: true,
+    resumeRun: request.runId,
     agent: request.agent,
     assignment: request.assignment,
     definitionCwd: request.definitionCwd,
