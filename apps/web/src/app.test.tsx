@@ -1571,7 +1571,109 @@ describe("web app", () => {
 
     const runSections = await screen.findByRole("navigation", { name: "Run sections" });
     expect(runSections).toHaveClass("tabs", "tabs--scrollable");
+    expect(runSections.querySelectorAll(":scope > .tab")).toHaveLength(6);
+  });
+
+  it("omits Attempts but keeps Data in the passive run-section tab strip", async () => {
+    installFetchMock({
+      runs: [makeRun({ backend: "passive" })],
+      details: {
+        "run-1": makeDetail({
+          backend: "passive",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+
+    const runSections = await screen.findByRole("navigation", { name: "Run sections" });
     expect(runSections.querySelectorAll(":scope > .tab")).toHaveLength(5);
+    expect(within(runSections).getByRole("button", { name: "Data" })).toBeInTheDocument();
+    expect(within(runSections).queryByRole("button", { name: "Attempts" })).not.toBeInTheDocument();
+  });
+
+  it("renders read-only vars and hook state data with local subtabs", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: {
+        "run-1": makeDetail({
+          runtimeVars: {
+            token: "token-123",
+            count: 3,
+            config: {
+              enabled: true,
+              retries: 2,
+            },
+          },
+          hookState: {
+            lastRun: {
+              status: "ready",
+            },
+          },
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+    await user.click(screen.getByRole("button", { name: "Data" }));
+
+    const dataPanel = screen.getByLabelText("Data");
+    const dataTabs = within(dataPanel).getByRole("tablist", { name: "Data view" });
+    const varsTable = within(dataPanel).getByRole("table", { name: "Vars" });
+    expect(within(dataTabs).getByRole("tab", { name: "Vars" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(within(varsTable).getByRole("columnheader", { name: "Key" })).toBeInTheDocument();
+    expect(within(varsTable).getByRole("columnheader", { name: "Value" })).toBeInTheDocument();
+    expect(within(varsTable).getByRole("rowheader", { name: "token" })).toBeInTheDocument();
+    expect(within(varsTable).getByText("token-123")).toBeInTheDocument();
+    expect(within(varsTable).getByRole("rowheader", { name: "config" })).toBeInTheDocument();
+    expect(
+      within(varsTable).getByText(/\{\s+"enabled": true,\s+"retries": 2\s+\}/s),
+    ).toBeInTheDocument();
+    expect(within(dataPanel).queryByRole("textbox")).not.toBeInTheDocument();
+    expect(within(dataPanel).queryByRole("button", { name: "Upload" })).not.toBeInTheDocument();
+    expect(
+      within(dataPanel).queryByRole("button", { name: "Add dependency" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(within(dataTabs).getByRole("tab", { name: "Hook state" }));
+
+    const hookStateTable = within(dataPanel).getByRole("table", { name: "Hook state" });
+    expect(within(dataTabs).getByRole("tab", { name: "Hook state" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(within(hookStateTable).getByRole("rowheader", { name: "lastRun" })).toBeInTheDocument();
+    expect(within(hookStateTable).getByText(/\{\s+"status": "ready"\s+\}/s)).toBeInTheDocument();
+  });
+
+  it("shows empty states for missing vars and hook state data", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: {
+        "run-1": makeDetail({
+          runtimeVars: {},
+          hookState: undefined,
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+    await user.click(screen.getByRole("button", { name: "Data" }));
+
+    const dataPanel = screen.getByLabelText("Data");
+    expect(within(dataPanel).getByText("No vars")).toBeInTheDocument();
+
+    await user.click(within(dataPanel).getByRole("tab", { name: "Hook state" }));
+    expect(within(dataPanel).getByText("No hook state")).toBeInTheDocument();
   });
 
   it("reloads timeline history after a cursor gap instead of merging heuristically", async () => {

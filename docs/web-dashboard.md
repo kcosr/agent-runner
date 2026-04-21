@@ -104,6 +104,9 @@ timeline stream (`RunTimelineEnvelope`). The drawer surfaces:
   handle) and supports the same full-width toggle as the detail drawer.
   See [attachments.md](attachments.md).
 - Dependencies tab: upstream and downstream runs (`RunDependencyDetail`).
+- Data tab: read-only `Vars` and `Hook state` subtabs exposing
+  `RunDetail.runtimeVars` and `RunDetail.hookState`. Scalar values render
+  inline; objects and arrays render as pretty JSON blocks.
 - Attempts tab: attempt history plus prompt/response/diagnostics detail
   for non-passive runs from the timeline stream. On narrow layouts, the
   top-level drawer section tabs stay on one line and scroll horizontally
@@ -129,10 +132,10 @@ retry button. Reconnects reconcile through the cached query state.
 
 Hook-visible state follows the same summary/detail channels. The board
 can observe `RunSummary.hookCount`, and the drawer's backing `RunDetail`
-includes `resolvedHooks`, `hookState`, and `hookAudits`, but the current
-UI does not render a dedicated hook panel. Hook-driven task, note, pin,
-and attachment mutations still appear live because they reuse the
-existing summary/detail/timeline caches.
+includes `resolvedHooks`, `hookState`, and `hookAudits`. The drawer now
+surfaces `runtimeVars` and `hookState` through the read-only `Data` tab;
+hook-driven task, note, pin, and attachment mutations still appear live
+because they reuse the existing summary/detail/timeline caches.
 
 ## Capability-gated actions
 

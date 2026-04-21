@@ -702,12 +702,13 @@ body {
 @media (max-width: 640px) {
   .resume-dialog-backdrop {
     align-items: flex-start;
-    padding-top: max(40px, calc(env(safe-area-inset-top) + 32px));
+    padding-top: max(24px, calc(env(safe-area-inset-top) + 16px));
     padding-bottom: max(72px, calc(env(safe-area-inset-bottom) + 20px));
   }
 
   .resume-dialog {
-    max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 120px);
+    margin-top: max(128px, calc(env(safe-area-inset-top) + 120px));
+    max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 240px);
     overflow-y: auto;
   }
 }

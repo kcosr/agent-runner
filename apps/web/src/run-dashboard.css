@@ -1034,6 +1034,20 @@ pre {
   box-shadow: 0 28px 64px rgba(0, 0, 0, 0.16);
 }
 
+@media (max-width: 640px) {
+  .note-dialog-backdrop {
+    align-items: flex-start;
+    padding-top: max(24px, calc(env(safe-area-inset-top) + 16px));
+    padding-bottom: max(72px, calc(env(safe-area-inset-bottom) + 20px));
+  }
+
+  .note-dialog {
+    margin-top: max(128px, calc(env(safe-area-inset-top) + 120px));
+    max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 240px);
+    overflow-y: auto;
+  }
+}
+
 .note-dialog__header {
   display: flex;
   align-items: flex-start;
@@ -1149,6 +1163,67 @@ pre {
 .meta-row .copy svg {
   width: 11px;
   height: 11px;
+}
+
+.drawer-data-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--card) 96%, var(--background));
+}
+
+.drawer-data-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.drawer-data-table th,
+.drawer-data-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  text-align: left;
+}
+
+.drawer-data-table thead th {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: color-mix(in srgb, var(--muted) 80%, transparent);
+}
+
+.drawer-data-table tbody th {
+  width: 40%;
+  min-width: 12rem;
+  color: var(--foreground);
+  font-size: 12.5px;
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.drawer-data-table tbody td {
+  min-width: 0;
+}
+
+.drawer-data-table tbody tr:last-child th,
+.drawer-data-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.drawer-data-table__scalar {
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+  word-break: break-word;
+}
+
+.drawer-data-table__structured {
+  min-width: 18rem;
+}
+
+.drawer-data-table__structured pre {
+  margin: 0;
 }
 
 /* ─── tabs ───────────────────────────────────────────── */

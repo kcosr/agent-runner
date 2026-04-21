@@ -44,6 +44,7 @@ import { StatusBadge } from "./status-badge.js";
 type TimelineTab = "message" | "prompt" | "response" | "diagnostics";
 type AttemptSelection = number | "pending" | null;
 type SummaryRow = readonly [label: string, value: string];
+type DataTab = "vars" | "hookState";
 
 const TIMELINE_BOTTOM_THRESHOLD_PX = 24;
 
@@ -111,6 +112,68 @@ function summaryRows(run: RunDetail) {
   );
 
   return rows;
+}
+
+function isStructuredDataValue(value: unknown): value is Record<string, unknown> | unknown[] {
+  return typeof value === "object" && value !== null;
+}
+
+function formatScalarDataValue(value: unknown) {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value === undefined) {
+    return "undefined";
+  }
+  return JSON.stringify(value);
+}
+
+function ReadOnlyDataEntries({
+  data,
+  emptyMessage,
+  tableLabel,
+}: {
+  data: Record<string, unknown> | undefined;
+  emptyMessage: string;
+  tableLabel: string;
+}) {
+  const entries = Object.entries(data ?? {});
+  if (entries.length === 0) {
+    return <p className="task-empty">{emptyMessage}</p>;
+  }
+
+  return (
+    <div className="drawer-data-table-wrap">
+      <table aria-label={tableLabel} className="drawer-data-table">
+        <thead>
+          <tr>
+            <th scope="col">Key</th>
+            <th scope="col">Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          {entries.map(([key, value]) => (
+            <tr key={key}>
+              <th scope="row">{key}</th>
+              <td>
+                {isStructuredDataValue(value) ? (
+                  <div className="drawer-data-table__structured markdown task-markdown">
+                    <pre>
+                      <code>{JSON.stringify(value, null, 2)}</code>
+                    </pre>
+                  </div>
+                ) : (
+                  <span className="drawer-data-table__scalar mono">
+                    {formatScalarDataValue(value)}
+                  </span>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 function SummaryLongRow({
@@ -271,6 +334,7 @@ export function RunDetailDrawer({
   const timelineResponseAtBottomRef = useRef(false);
   const latestAttemptRef = useRef<number | null>(null);
   const [selectedAttempt, setSelectedAttempt] = useState<AttemptSelection>(null);
+  const [dataTab, setDataTab] = useState<DataTab>("vars");
   const [timelineTab, setTimelineTab] = useState<TimelineTab>(
     (run.status === "initialized" || run.status === "ready") && run.attempts === 0
       ? "message"
@@ -1285,6 +1349,14 @@ export function RunDetailDrawer({
                 </span>
               ) : null}
             </button>
+            <button
+              aria-selected={activeSection === "data"}
+              className={activeSection === "data" ? "tab active" : "tab"}
+              onClick={() => onSelectSection("data")}
+              type="button"
+            >
+              Data
+            </button>
             {isPassiveRun ? null : (
               <button
                 aria-selected={activeSection === "events"}
@@ -1379,6 +1451,47 @@ export function RunDetailDrawer({
                     <p>{groupAttachmentsQuery.error.message}</p>
                   </div>
                 ) : null}
+              </div>
+            </section>
+          ) : null}
+
+          {activeSection === "data" ? (
+            <section aria-label="Data" className="drawer-panel drawer-panel--data">
+              <div className="drawer-panel-card dependency-panel">
+                <div className="task-tabs" role="tablist" aria-label="Data view">
+                  <button
+                    aria-selected={dataTab === "vars"}
+                    className={dataTab === "vars" ? "task-tab active" : "task-tab"}
+                    onClick={() => setDataTab("vars")}
+                    role="tab"
+                    type="button"
+                  >
+                    Vars
+                  </button>
+                  <button
+                    aria-selected={dataTab === "hookState"}
+                    className={dataTab === "hookState" ? "task-tab active" : "task-tab"}
+                    onClick={() => setDataTab("hookState")}
+                    role="tab"
+                    type="button"
+                  >
+                    Hook state
+                  </button>
+                </div>
+
+                {dataTab === "vars" ? (
+                  <ReadOnlyDataEntries
+                    data={run.runtimeVars}
+                    emptyMessage="No vars"
+                    tableLabel="Vars"
+                  />
+                ) : (
+                  <ReadOnlyDataEntries
+                    data={run.hookState}
+                    emptyMessage="No hook state"
+                    tableLabel="Hook state"
+                  />
+                )}
               </div>
             </section>
           ) : null}

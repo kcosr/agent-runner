@@ -113,6 +113,10 @@
 
 ### Changed
 
+- Changed the web run detail drawer to expose read-only `Vars` and
+  `Hook state` data in a dedicated `Data` tab with a clearer key/value
+  table layout, and moved the mobile note/resume dialogs lower so they
+  sit above the keyboard more reliably. ([#72](https://github.com/kcosr/task-runner/pull/72))
 - Changed the web dashboard board and primary action semantics so
   initialized runs stay in `Initialized`, ready runs move to `Ready`, and
   the primary action switches between `Ready`, `Start`, and `Resume`
