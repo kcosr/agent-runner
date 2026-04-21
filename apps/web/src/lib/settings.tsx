@@ -25,7 +25,13 @@ export const EMPTY_DASHBOARD_STRUCTURED_FILTERS: DashboardStructuredFilters = {
   backend: null,
 };
 
-export type DrawerDetailSection = "tasks" | "notes" | "attachments" | "dependencies" | "events";
+export type DrawerDetailSection =
+  | "tasks"
+  | "notes"
+  | "attachments"
+  | "dependencies"
+  | "events"
+  | "data";
 
 export type RunDrawerView =
   | {
