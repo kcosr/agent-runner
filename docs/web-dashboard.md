@@ -114,18 +114,20 @@ timeline stream (`RunTimelineEnvelope`). The drawer surfaces:
 
 ## Live projections
 
-The dashboard consumes three independent streams:
+The dashboard consumes four independent streams:
 
 | Stream | Source | Consumer |
 |--------|--------|----------|
 | `run_summary` | `/api/events/run-summaries` | Board cards |
 | `run_detail` | `/api/runs/:runId/events/detail` | Drawer header, tabs |
+| `run_audit` | `/api/runs/:runId/events/audit` (+ `/audit` history) | Audit tab |
 | `run_timeline` | `/api/runs/:runId/events/timeline` (+ `/timeline` history) | Attempts tab |
 
-The timeline stream uses a monotonically increasing cursor for ordering
-and reconnect safety. The detail drawer delays its initial fetch by a
-short debounce to avoid flashing when the user is tabbing through cards
-quickly; a "settling" indicator appears until the first snapshot lands.
+The timeline and audit streams both use monotonically increasing cursors
+for ordering and reconnect safety. The detail drawer delays its initial
+fetch by a short debounce to avoid flashing when the user is tabbing
+through cards quickly; a "settling" indicator appears until the first
+snapshot lands.
 
 If the summary stream drops, the board shows a stale banner with a
 retry button. Reconnects reconcile through the cached query state.
@@ -134,8 +136,10 @@ Hook-visible state follows the same summary/detail channels. The board
 can observe `RunSummary.hookCount`, and the drawer's backing `RunDetail`
 includes `resolvedHooks`, `hookState`, and `hookAudits`. The drawer now
 surfaces `runtimeVars` and `hookState` through the read-only `Data` tab;
-hook-driven task, note, pin, and attachment mutations still appear live
-because they reuse the existing summary/detail/timeline caches.
+the top-level `Audit` tab renders compact lifecycle/task history from the
+audit stream; hook-driven task, note, pin, and attachment mutations still
+appear live because they reuse the existing summary/detail/audit/timeline
+caches.
 
 ## Capability-gated actions
 
@@ -231,7 +235,7 @@ is no standalone web server in the shipped runtime.
 2. Subscribes to the global summary stream; mutations arrive as
    `summary_upsert` / `summary_removed` events and update the
    TanStack React Query cache.
-3. Selecting a run subscribes to its detail and timeline streams.
+3. Selecting a run subscribes to its detail, audit, and timeline streams.
 4. User actions call the HTTP API; responses feed the cache and the
    daemon broadcasts matching detail/summary updates back to all
    subscribers.

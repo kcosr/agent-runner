@@ -1458,7 +1458,9 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     writeManifest(workspaceDir, manifest);
     const isPassive = agentConfig.backend === "passive";
     if (!isReinitialize) {
-      appendRunCreatedAudit(manifest);
+      withTaskStateLock(workspaceDir, () => {
+        appendRunCreatedAudit(manifest);
+      });
     }
     emitEvent({
       type: "run_initialized",
@@ -1592,16 +1594,18 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     manifest.sessions.push(sessionRecord);
     refreshManifestAttachments(manifest);
     writeManifest(workspaceDir, manifest);
-    appendRunCreatedAudit(manifest);
-    emitAuditEnvelope(
-      appendRunStartedEvent({
-        manifest,
-        context: lifecycleContext,
-        sessionIndex,
-        backendSessionIdAtStart: sessionRecord.backendSessionIdAtStart,
-        resumed: false,
-      }),
-    );
+    withTaskStateLock(workspaceDir, () => {
+      appendRunCreatedAudit(manifest);
+      emitAuditEnvelope(
+        appendRunStartedEvent({
+          manifest,
+          context: lifecycleContext,
+          sessionIndex,
+          backendSessionIdAtStart: sessionRecord.backendSessionIdAtStart,
+          resumed: false,
+        }),
+      );
+    });
   }
 
   emitEvent({

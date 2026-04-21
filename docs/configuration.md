@@ -128,6 +128,8 @@ The current manifest schema is version `10`. Older manifests are not
 silently upgraded at runtime — resuming a run with an older schema fails
 with a clear error. The repo ships migration scripts under `scripts/`:
 
+- `scripts/migrate-manifests-v10.mjs` — v9 → v10 (freezes launcher
+  capture plus `callerInstructions`)
 - `scripts/migrate-manifests-v6.mjs` — v5 → v6 (adds `attachments: []`)
 - `scripts/migrate-manifests-v7.mjs` — v6 → v7 (converts
   `pendingPrompt` / `taskMode` into persisted `brief`)
@@ -140,15 +142,19 @@ with a clear error. The repo ships migration scripts under `scripts/`:
   repairs `assignment-seed.md` workspace paths, and backfills the full
   frozen `resetSeed` shape expected by current resume/discovery;
   supports repeated `--repo <name>` filters and `--root <path>`)
+- `scripts/migrate-run-events-v2.mjs` — audit-event schema v1 → v2
+  (canonicalizes per-run cursors in `run-events.jsonl`; dry-run by
+  default, `--write` for in-place rewrite, supports repeated `--repo
+  <name>` filters plus `--root <path>`)
 
 Schema v10 adds frozen launcher state on both `manifest.launcher` and
 `manifest.resetSeed.launcher`. Resume and reset use that frozen value
 instead of re-resolving current launcher files or daemon/client
 overrides.
 
-Run the scripts explicitly; or recreate affected runs if an upgrade
-path isn't important. New runs are always created at the latest
-schema version.
+Run the scripts explicitly; or recreate affected runs if an upgrade path
+isn't important. New manifests and new audit-event files are always
+created at the latest schema version.
 
 ## Git environment isolation
 

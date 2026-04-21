@@ -47,6 +47,10 @@
 
 ### Added
 
+- Added `task-runner run audit <run-id>` plus daemon/web audit history
+  surfaces for reading cursored persisted run event history, and
+  `scripts/migrate-run-events-v2.mjs` for upgrading legacy uncursored
+  `run-events.jsonl` rows to schema v2.
 - Added a persisted notes-only board filter in the web dashboard, plus
   `Ctrl+Shift+N` / `Cmd+Shift+N` for notes-only and matching
   `Ctrl+Shift` / `Cmd+Shift` shortcuts for pinned-only, archived, and

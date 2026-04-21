@@ -2088,10 +2088,15 @@ export async function serveDaemon(
       summarySubscriptions.clear();
       detailSubscriptions.clear();
       timelineSubscriptions.clear();
+      auditSubscriptions.clear();
       for (const record of recentTimelineBuffers.values()) {
         clearTimeout(record.cleanupTimer);
       }
       recentTimelineBuffers.clear();
+      for (const record of recentAuditBuffers.values()) {
+        clearTimeout(record.cleanupTimer);
+      }
+      recentAuditBuffers.clear();
       for (const ws of wsClients) {
         ws.terminate();
       }

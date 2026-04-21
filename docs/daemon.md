@@ -142,15 +142,17 @@ All routes are under `/api/`.
 |------|--------|
 | `GET /api/events/run-summaries` | Global summary SSE |
 | `GET /api/runs/:runId/events/detail` | Per-run detail SSE |
+| `GET /api/runs/:runId/audit` | Per-run audit history (JSON, plus `lastCursor`) |
 | `GET /api/runs/:runId/timeline` | Per-run timeline history (JSON, plus `lastCursor`) |
+| `GET /api/runs/:runId/events/audit` | Per-run audit SSE (live envelopes with SSE `id: <cursor>`) |
 | `GET /api/runs/:runId/events/timeline` | Per-run timeline SSE (live envelopes with SSE `id: <cursor>`) |
 
 ### App config
 
 - `GET /app-config.json` → `{ apiBasePath, runSummaryEventsPath }`
 
-The web UI fetches this before initialization. Per-run detail and
-timeline paths are derived from `apiBasePath` and the active run id.
+The web UI fetches this before initialization. Per-run detail, audit,
+and timeline paths are derived from `apiBasePath` and the active run id.
 
 ## WebSocket JSON-RPC
 
@@ -205,11 +207,12 @@ Error codes:
 - `events.unsubscribe { subscriptionId }`
 
 Valid `channel` values: `"run_summary"`, `"run_detail"`,
-`"run_timeline"`. Detail and timeline require a `runId`.
+`"run_timeline"`, `"run_audit"`. Detail, timeline, and audit require a
+`runId`.
 
 ## Event projections
 
-Live state is split into three independent channels; each has a matching
+Live state is split into four independent channels; each has a matching
 HTTP SSE route and WebSocket notification method.
 
 ### Global summary
@@ -268,6 +271,21 @@ Hook executions do not mint new event names. Hook-driven task, note,
 pin, and attachment mutations surface through the same summary/detail
 channels above, while attempt lifecycle hooks still appear through the
 normal timeline envelopes.
+
+### Per-run audit
+
+- History (bootstrap): `GET /api/runs/:runId/audit` →
+  `RunAuditHistory { events[], lastCursor }`
+- Live SSE: `GET /api/runs/:runId/events/audit` — envelopes framed with
+  `id: <cursor>` for reconnection
+- WS channel: `run_audit`
+- WS notification method: `run.audit`
+- Event shape: `RunAuditEnvelope { runId, cursor, event }`
+
+Audit cursor ordering is monotonic per run. Consumers use the same
+bootstrap pattern as timeline: subscribe, fetch history once, then apply
+buffered live envelopes where `cursor > history.lastCursor`. Audit
+events are compact lifecycle/task records, not transcript deltas.
 
 ## Shared DTOs
 

@@ -13,7 +13,7 @@ All commands accept `--help` / `-h`.
 | `init` | Prepare a run workspace without invoking the backend |
 | `serve` | Start the local daemon / control plane |
 | `status` | Print system/environment status |
-| `run status\|brief` | Print run state or the composed worker handoff |
+| `run status\|brief\|audit` | Print run state, the composed worker handoff, or persisted audit history |
 | `task list\|show\|set\|append-notes\|add` | Task state inspection and mutation |
 | `attachment add\|list\|download\|remove` | Attachment management |
 | `list agents\|assignments\|launchers\|runs` | Enumerate definitions and runs |
@@ -180,6 +180,29 @@ Print the composed worker handoff for a run. Text-only — does not support
 ```bash
 task-runner run brief <run-id>
 ```
+
+## `run audit <run-id>`
+
+Print the persisted audit history for a run. Text is the default output;
+JSON returns the shared `RunAuditHistory` DTO.
+
+```bash
+task-runner run audit <run-id> [--output-format text|json] [--limit <n>]
+```
+
+- Run-id-only. Paths are not accepted.
+- `--output-format text|json` — defaults to `text`.
+- `--limit <n>` — optional positive integer; keeps only the newest `n`
+  audit envelopes after history load.
+- Text output is deterministic chronological rendering from the raw audit
+  envelopes. Unknown event types fall back to raw field rendering instead
+  of failing.
+- JSON output returns `{ runId, events, lastCursor }`.
+- Exit codes:
+  - `0` success
+  - `1` usage / validation error
+  - `2` run not found
+  - `3` daemon / transport / other runtime error
 
 ## `task`
 
