@@ -146,6 +146,14 @@ tasks:
         - the creation flow says the planner keeps those
           artifacts on the planning run rather than duplicating
           them onto the new implementer run
+        - if caller feedback can arrive after the initial-pass
+          `init`, the workflow tells the planner to revise the
+          draft and summary, refresh the planning run's
+          `assignment-seed.md` and `assignment-summary.md`
+          attachments, and reinitialize the same initialized
+          implementer run with `init --run-id <implementer-run-id>`
+          instead of creating a second run or assuming attachment
+          refresh alone updates the implementer run
         - the handoff tells the caller to review the planning-run
           attachments and the initialized implementer run before
           promoting that implementer run with `run ready`

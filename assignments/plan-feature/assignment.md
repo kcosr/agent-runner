@@ -57,6 +57,16 @@ callerInstructions: |
        implementer and reviewer flows can discover them through
        cwd-scoped attachment listing when they need supplemental
        context.
+       If the caller later resumes the planning run with
+       requested plan changes after that `init`, the planner
+       must revise the draft and summary, refresh the planning
+       run's `assignment-seed.md` and `assignment-summary.md`
+       attachments, then reinitialize the same initialized
+       implementer run from the updated draft with
+       `init --run-id <implementer-run-id> ...`. Updating the
+       draft file or refreshing planning-run attachments alone
+       does not refresh the implementer run's frozen copied
+       assignment/task state.
     6. Finishes with a handoff that tells the caller to review
        the planning artifacts and the initialized implementer
        run, then promote that implementer run with
@@ -121,7 +131,9 @@ callerInstructions: |
   `init` succeeds, the canonical execution artifact becomes the new
   implementer run id plus its canonical task state in
   `run.json`. Edits to the draft file after init have no
-  effect on the run.
+  effect on the run unless the planner explicitly reruns
+  `init --run-id <implementer-run-id>` against the updated
+  draft to refresh that implementer run's frozen copied state.
 tasks:
   - id: orient
     title: Target repo orientation and conventions
@@ -864,7 +876,9 @@ tasks:
       If you are re-running this task after revising the draft or
       summary, remove any older attachments with those same names
       first so the planning run ends with one current copy of
-      each artifact.
+      each artifact. These refreshed attachments stay on the
+      planning run; do not duplicate them onto the implementer
+      run just because you are revising a post-init plan.
 
       Verify the final state with `{{task_runner_cmd}} attachment list {{run_id}}`
       and paste the command output or equivalent attachment-id
@@ -875,14 +889,33 @@ tasks:
       Create the implementer run during the initial planning
       pass. Do not wait for a later approval resume.
 
+      If the caller later resumes this planning run with
+      requested plan changes after the implementer run already
+      exists, do **not** create a second implementer run.
+      Reuse the existing implementer run id from your earlier
+      Notes, revise the approved draft and summary first, refresh
+      the planning-run attachments in `attach_artifacts`, then
+      reinitialize that same implementer run from the updated
+      draft before handing it back again.
+
       Before running `init`, confirm the target directory or
       worktree path. Do not guess from your own cwd.
 
-      Then run:
+      For the first creation, run:
 
             {{task_runner_cmd}} init \
               --agent implementer \
               --assignment <draft-path-from-draft_plan> \
+              --name <short-descriptive-name> \
+              --cwd <confirmed-worktree-dir>
+
+      For the post-feedback refresh path, rerun `init` against
+      the updated draft with the existing run id:
+
+            {{task_runner_cmd}} init \
+              --run-id <existing-implementer-run-id> \
+              --agent implementer \
+              --assignment <updated-draft-path-from-draft_plan> \
               --name <short-descriptive-name> \
               --cwd <confirmed-worktree-dir>
 
@@ -897,6 +930,14 @@ tasks:
           such as `Plan`, `Review`, or `Implementation`
         - never include cwd paths, repo names, or git ranges
         Examples: `Run naming`, `Web dashboard`, `Daemon control plane`.
+      - Do not assume updating the draft file or refreshing the
+        planning-run attachments alone updates the implementer
+        run. Once that run has been initialized, its canonical
+        copied assignment/task state must be refreshed explicitly
+        with `init --run-id ...` when the approved draft changes.
+      - Use the overwrite path rather than archiving/deleting and
+        recreating the run when the existing implementer run is
+        still in the allowed initialized state.
 
       Completion Notes must include:
       - the approved draft path from `draft_plan`
@@ -904,12 +945,19 @@ tasks:
       - the draft-review run id from `review_draft`
       - the exact `init` command you ran
       - the confirmed target directory/worktree path
-      - the new implementer run id emitted by `init`
-      - that the new implementer run is left in `initialized`,
-        not `ready`
+      - the implementer run id affected by `init`
+      - whether this task created a new implementer run or
+        reinitialized the existing one after caller feedback
+      - that the resulting implementer run is left in
+        `initialized`, not `ready`
       - that the planner did **not** duplicate
         `assignment-seed.md` or `assignment-summary.md` onto the
         new run; they remain attached to the planning run
+      - if this was the post-feedback refresh path, that the
+        planning run's `assignment-seed.md` and
+        `assignment-summary.md` attachments were refreshed first
+        and the same implementer run id was reinitialized from
+        the updated draft
       - that later implementer and reviewer flows can discover
         the planning artifacts with cwd-scoped attachment
         listing rooted at the new run id
@@ -958,6 +1006,11 @@ tasks:
           run rather than being duplicated onto the implementer
           run. Later implementer and reviewer flows should
           discover them through cwd-scoped attachment listing.
+        - If this handoff follows caller-requested plan changes
+          after the initial-pass `init`, a note that the
+          planning-run attachments were refreshed and the same
+          implementer run id was reinitialized from the updated
+          draft before being handed back again.
         - The exact approval/execution flow:
 
               {{task_runner_cmd}} run brief <new-run-id>
