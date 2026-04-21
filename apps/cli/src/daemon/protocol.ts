@@ -116,6 +116,7 @@ export interface DefinitionGetParams {
 }
 
 export interface RunsStartParams {
+  runId?: string;
   agent?: string;
   assignment?: string;
   definitionCwd?: string;

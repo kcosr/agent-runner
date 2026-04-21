@@ -22,6 +22,7 @@ import type { HookAuditRecord, ResolvedHookDescriptor } from "../hooks/types.js"
 
 export type ManifestStatus =
   | "initialized"
+  | "ready"
   | "running"
   | "success"
   | "blocked"
@@ -300,6 +301,19 @@ export function applyRunResetSeed(manifest: RunManifest): void {
   manifest.attemptRecords = [];
 }
 
+function isManifestStatus(value: unknown): value is ManifestStatus {
+  return (
+    value === "initialized" ||
+    value === "ready" ||
+    value === "running" ||
+    value === "success" ||
+    value === "blocked" ||
+    value === "exhausted" ||
+    value === "aborted" ||
+    value === "error"
+  );
+}
+
 export function writeManifest(workspaceDir: string, manifest: RunManifest): void {
   const path = join(workspaceDir, MANIFEST_FILENAME);
   writeTextFileAtomic(path, `${JSON.stringify(manifest, null, 2)}\n`);
@@ -551,7 +565,7 @@ function isRunManifest(value: unknown): value is RunManifest {
   if (typeof obj.assignmentPath !== "string") return false;
   if (typeof obj.workspaceDir !== "string") return false;
   if (typeof obj.startedAt !== "string") return false;
-  if (typeof obj.status !== "string") return false;
+  if (!isManifestStatus(obj.status)) return false;
   if (
     !Array.isArray(obj.dependencyRunIds) ||
     !obj.dependencyRunIds.every((runId) => typeof runId === "string")

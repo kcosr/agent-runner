@@ -19,6 +19,7 @@ import type {
   getTask,
   getTaskList,
   initRun,
+  readyRun,
   removeDependency,
   removeRunAttachment,
   renameRun,
@@ -69,6 +70,7 @@ export interface DaemonHandlers {
   appendNotes: typeof appendNotes;
   createTask: typeof createTask;
   initRun: typeof initRun;
+  readyRun: typeof readyRun;
   startRun: typeof startRun;
   resumeRun: typeof resumeRun;
 }
@@ -101,6 +103,9 @@ export function createDaemonOperations(ctx: DaemonOperationContext) {
     },
     initRun(request: RunsStartParams) {
       return ctx.initRun(request).then((run) => ({ run }));
+    },
+    readyRun(target: string) {
+      return { run: ctx.readyRun(target) };
     },
     startRun(request: RunsStartParams) {
       return ctx.startManagedRun(request);

@@ -11,6 +11,7 @@ export interface ParsedArgs {
   agent?: string;
   assignment?: string;
   resumeRun?: string;
+  runId?: string;
   backendSessionId?: string;
   vars: Record<string, string>;
   cwd?: string;
@@ -94,6 +95,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     result.command === "run" &&
     (args[0] === "status" ||
       args[0] === "brief" ||
+      args[0] === "ready" ||
       args[0] === "reset" ||
       args[0] === "archive" ||
       args[0] === "unarchive" ||
@@ -128,6 +130,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
       const next = args.shift();
       if (next === undefined) throw new Error("--resume-run requires a value");
       result.resumeRun = next;
+    } else if (arg === "--run-id") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--run-id requires a value");
+      if (next.trim().length === 0) throw new Error("--run-id cannot be empty");
+      result.runId = next;
     } else if (arg === "--backend-session-id") {
       const next = args.shift();
       if (next === undefined) throw new Error("--backend-session-id requires a value");

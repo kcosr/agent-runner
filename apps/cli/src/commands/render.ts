@@ -134,10 +134,15 @@ export function renderRunStatus(detail: RunDetail): string {
       lines.push(`  ${taskRunnerCmd} run brief ${detail.runId}`);
       lines.push(`  ${taskRunnerCmd} task set ${detail.runId} <task-id> --status in_progress`);
     } else {
-      lines.push("To execute this run:");
-      lines.push(`  ${taskRunnerCmd} run --resume-run ${detail.runId}`);
+      lines.push("To promote this run for execution:");
+      lines.push(`  ${taskRunnerCmd} run ready ${detail.runId}`);
       lines.push(`  ${taskRunnerCmd} run brief ${detail.runId}`);
     }
+  } else if (detail.status === "ready") {
+    lines.push("");
+    lines.push("To execute this run:");
+    lines.push(`  ${taskRunnerCmd} run --resume-run ${detail.runId}`);
+    lines.push(`  ${taskRunnerCmd} run brief ${detail.runId}`);
   } else if (
     detail.status === "blocked" ||
     detail.status === "exhausted" ||
@@ -253,6 +258,10 @@ export function renderDefinitionDetails(result: DefinitionDetailsResult): string
 
 export function renderRunReset(result: RunResetResult): string {
   return `task-runner: reset run ${result.manifest.runId} to initialized state\n`;
+}
+
+export function renderRunReady(result: RunDetail): string {
+  return `task-runner: promoted run ${result.runId} to ready\n`;
 }
 
 export function renderRunList(result: RunListResult): string {

@@ -214,7 +214,9 @@ function parseStoredDashboardViewState(value: unknown): DashboardViewState {
   return {
     ...DEFAULT_DASHBOARD_VIEW_STATE,
     collapsedColumnKeys: Array.isArray(record.collapsedColumnKeys)
-      ? record.collapsedColumnKeys.filter((key): key is string => typeof key === "string")
+      ? record.collapsedColumnKeys
+          .filter((key): key is string => typeof key === "string")
+          .map((key) => (key === "pending" ? "initialized" : key))
       : DEFAULT_DASHBOARD_VIEW_STATE.collapsedColumnKeys,
   };
 }

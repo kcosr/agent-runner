@@ -70,6 +70,7 @@ export interface RunCapabilities {
   canUnarchive: boolean;
   canReset: boolean;
   canDelete: boolean;
+  canReady: boolean;
   canResume: boolean;
   canAbort: boolean;
   abortReason?: RunAbortReason;
@@ -262,6 +263,12 @@ export function deriveTaskMutationCapabilities(manifest: RunManifest): RunTaskMu
         canEditNotes: true,
         canAdd: !tasksLocked,
       };
+    case "ready":
+      return {
+        canSetStatus: false,
+        canEditNotes: true,
+        canAdd: false,
+      };
     case "running": {
       return {
         canSetStatus: true,
@@ -318,12 +325,15 @@ export function toRunSummary(
 
 export function deriveRunCapabilities(manifest: RunManifest): RunCapabilities {
   const canAbort = false;
+  const archived = isArchived(manifest);
+  const nonPassive = manifest.backend !== "passive";
   return {
     canArchive: canArchiveRun(manifest),
     canUnarchive: canUnarchiveRun(manifest),
     canReset: canResetRun(manifest),
     canDelete: canDeleteRun(manifest),
-    canResume: !isRunning(manifest) && !isArchived(manifest) && manifest.backend !== "passive",
+    canReady: !archived && nonPassive && manifest.status === "initialized",
+    canResume: !isRunning(manifest) && !archived && nonPassive && manifest.status !== "initialized",
     canAbort,
     abortReason: canAbort
       ? undefined
@@ -390,7 +400,9 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
     activeTask: deriveActiveTask(manifest.finalTasks),
     message: manifest.message,
     pendingPrompt:
-      manifest.status === "initialized" && manifest.attempts === 0 ? manifest.brief : null,
+      (manifest.status === "initialized" || manifest.status === "ready") && manifest.attempts === 0
+        ? manifest.brief
+        : null,
     callerInstructions: manifest.callerInstructions,
     lockedFields: [...manifest.lockedFields],
     runtimeVars: { ...manifest.runtimeVars },

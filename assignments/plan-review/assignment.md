@@ -128,31 +128,31 @@ tasks:
         - the planner attaches the approved draft and summary to
           the planning run as `assignment-seed.md` and
           `assignment-summary.md`
-        - the handoff tells the caller to review the planning-run
-          attachments before requesting implementer creation
-        - the planning run ends the initial pass with
-          `create_implementer_run_after_approval` blocked after
-          `handoff`, rather than with every task completed
-        - the delayed creation flow resumes this same planning
-          run after caller approval
-        - the delayed creation flow does **not** force
-          `--backend passive`
-        - the delayed creation flow includes a short descriptive `--name`
+        - the planner creates the implementer run during the
+          initial pass instead of leaving creation blocked for a
+          later approval resume
+        - the creation task records the implementer run id and
+          leaves that run in `initialized`, not `ready`
+        - the creation flow does **not** force `--backend passive`
+        - the creation flow includes a short descriptive `--name`
           with the same format rule: capitalized first word,
           about 2-4 words / 32 chars, and no cwd / repo / range
           clutter or redundant `Plan` / `Review` /
           `Implementation` wording
-        - the delayed creation flow requires the planner to
+        - the creation flow requires the planner to
           confirm the target directory or worktree path before
           running `init`, rather than guessing from its own
           environment
-        - the delayed creation flow says the planner keeps those
+        - the creation flow says the planner keeps those
           artifacts on the planning run rather than duplicating
           them onto the new implementer run
-        - after delayed `init`, the execution handoff inspects
-          `run brief` and then executes the resulting implementer
-          run with `run --resume-run`, rather than describing a
-          passive-only brief-first workflow
+        - the handoff tells the caller to review the planning-run
+          attachments and the initialized implementer run before
+          promoting that implementer run with `run ready`
+        - after initial-pass `init`, the execution handoff
+          inspects `run brief`, then promotes with `run ready`,
+          then executes with `run --resume-run`, rather than
+          describing a passive-only brief-first workflow
         - the draft-review loop itself is reflected accurately in
           the planner tasks and handoff notes
         - the generated implementer orientation tells the

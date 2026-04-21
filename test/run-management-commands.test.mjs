@@ -215,9 +215,10 @@ test("list runs scopes to cwd by default and supports explicit cwd, repo, global
     canUnarchive: false,
     canReset: true,
     canDelete: false,
+    canReady: true,
     canAbort: false,
     abortReason: "not_active_in_daemon",
-    canResume: true,
+    canResume: false,
     taskMutation: {
       canSetStatus: true,
       canEditNotes: true,
@@ -229,6 +230,7 @@ test("list runs scopes to cwd by default and supports explicit cwd, repo, global
     canUnarchive: true,
     canReset: true,
     canDelete: true,
+    canReady: false,
     canAbort: false,
     abortReason: "not_active_in_daemon",
     canResume: false,
@@ -283,6 +285,29 @@ test("run archive and run unarchive expose idempotent text and json results", as
   const unarchivedAgain = JSON.parse(unarchivedAgainJson);
   assert.equal(unarchivedAgain.changed, false);
   assert.equal(unarchivedAgain.archivedAt, null);
+});
+
+test("run ready promotes initialized runs and returns text and json results", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "run-mgmt-agent", AGENT);
+  writeAssignment(dir, "run-mgmt-work", ASSIGNMENT);
+  const outcome = await initRun(dir);
+
+  const text = runCli(["run", "ready", outcome.runId], { cwd: dir });
+  assert.match(text, new RegExp(`promoted run ${outcome.runId} to ready`));
+
+  let manifest = readManifest(outcome.workspaceDir);
+  assert.equal(manifest.status, "ready");
+
+  const second = await initRun(dir);
+  const json = runCli(["run", "ready", second.runId, "--output-format", "json"], { cwd: dir });
+  assert.deepEqual(JSON.parse(json), {
+    runId: second.runId,
+    status: "ready",
+  });
+
+  manifest = readManifest(second.workspaceDir);
+  assert.equal(manifest.status, "ready");
 });
 
 test("run set-name updates, clears, and preserves reset seed", async () => {
@@ -538,6 +563,7 @@ test("run --resume-run rejects initialized runs with unsatisfied dependencies", 
   const dependency = await initRun(dir);
 
   runCli(["run", "add-dep", target.runId, dependency.runId], { cwd: dir });
+  runCli(["run", "ready", target.runId], { cwd: dir });
 
   const result = runCliExpectFail(["run", "--resume-run", target.runId], { cwd: dir });
   assert.equal(result.status, 3);

@@ -122,7 +122,7 @@ export function renderRunEvent(event: RunEvent): RenderedRunChunk[] {
         );
       } else {
         lines.push(`             brief=${taskRunnerCmd} run brief ${event.runId}`);
-        lines.push(`             resume with: ${taskRunnerCmd} run --resume-run ${event.runId}`);
+        lines.push(`             ready with: ${taskRunnerCmd} run ready ${event.runId}`);
       }
       return stderr(`${lines.join("\n")}\n`);
     }

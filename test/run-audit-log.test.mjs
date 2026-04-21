@@ -13,6 +13,7 @@ import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
 import { updateTask as updateTaskViaApp } from "../packages/core/dist/app/service.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
+import { readyRun } from "../packages/core/dist/core/commands/service.js";
 import { resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import {
@@ -216,6 +217,7 @@ test("execute-after-init appends ordered created/started/attempt/finished record
     initialize: true,
     bootstrapBackendSessionId: "bootstrap-thread",
   });
+  withSharedRuntimeEnv(dir, () => readyRun(init.runId));
 
   const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(init.runId));
   const resumed = await runIn(dir, {

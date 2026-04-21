@@ -148,6 +148,7 @@ function makeRun(
       canUnarchive: false,
       canReset: true,
       canDelete: false,
+      canReady: false,
       canResume: true,
       canAbort: false,
       abortReason: "not_active_in_daemon",
@@ -272,6 +273,7 @@ function makeDetail(
       canUnarchive: false,
       canReset: true,
       canDelete: false,
+      canReady: false,
       canResume: true,
       canAbort: false,
       abortReason: "not_active_in_daemon",
@@ -572,7 +574,9 @@ function installFetchMock(
       return new Response(JSON.stringify({ history }), { status: 200 });
     }
 
-    const archiveMatch = /\/api\/runs\/([^/]+)\/(archive|unarchive|reset|resume|abort)$/.exec(url);
+    const archiveMatch = /\/api\/runs\/([^/]+)\/(archive|unarchive|reset|ready|resume|abort)$/.exec(
+      url,
+    );
     if (archiveMatch) {
       const [, encodedRunId, action] = archiveMatch;
       const runId = decodeURIComponent(encodedRunId ?? "");
@@ -660,9 +664,29 @@ function installFetchMock(
           canUnarchive: false,
           canReset: true,
           canDelete: false,
-          canResume: true,
+          canReady: true,
+          canResume: false,
           canAbort: false,
           abortReason: "not_active_in_daemon",
+        };
+        syncRunSummary(runId);
+        return new Response(JSON.stringify({ run: detail }), { status: 200 });
+      }
+      if (action === "ready") {
+        if (!detail) {
+          return new Response(
+            JSON.stringify({ error: { message: "missing", code: "not_found" } }),
+            {
+              status: 404,
+            },
+          );
+        }
+        detail.status = "ready";
+        detail.effectiveStatus = "ready";
+        detail.capabilities = {
+          ...detail.capabilities,
+          canReady: false,
+          canResume: true,
         };
         syncRunSummary(runId);
         return new Response(JSON.stringify({ run: detail }), { status: 200 });
@@ -1687,7 +1711,7 @@ describe("web app", () => {
     ).toBeInTheDocument();
     expect(within(runningColumn).getByText("running", { selector: ".badge" })).toBeInTheDocument();
     expect(
-      screen.queryByRole("heading", { name: /^Pending(?: \(\d+\))?$/ }),
+      screen.queryByRole("heading", { name: /^Initialized(?: \(\d+\))?$/ }),
     ).not.toBeInTheDocument();
   });
 
@@ -4492,7 +4516,8 @@ describe("web app", () => {
     await findRunCard("Running dashboard");
 
     expect(getBoardColumnTitles()).toEqual([
-      "Pending",
+      "Initialized",
+      "Ready",
       "Running",
       "Blocked",
       "Error",
@@ -4590,7 +4615,8 @@ describe("web app", () => {
     await findRunCard("Running dashboard");
 
     expect(getBoardColumnTitles()).toEqual([
-      "Pending",
+      "Initialized",
+      "Ready",
       "Running",
       "Blocked",
       "Failed",
@@ -4649,7 +4675,8 @@ describe("web app", () => {
       expect(screen.getByRole("button", { name: "Blocked (1)" })).toBeInTheDocument();
     });
 
-    expect(screen.queryByRole("button", { name: "Pending (0)" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Initialized (0)" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Ready (0)" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Aborted (0)" })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Blocked (1)" }));
@@ -4944,7 +4971,7 @@ describe("web app", () => {
       ).toHaveLength(1);
     });
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Start" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Ready" })).toBeInTheDocument();
     });
     expect(screen.getByRole("button", { name: "Reset" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
@@ -5112,8 +5139,8 @@ describe("web app", () => {
     expect(screen.getByRole("button", { name: "Resume" })).toBeInTheDocument();
   });
 
-  it("shows Start for initialized runs and resumes without opening the dialog", async () => {
-    let resumeBody: { overrides?: { message?: string } } | undefined;
+  it("shows Ready for initialized runs and promotes without opening the dialog", async () => {
+    let readyRequested = false;
     const fetchMock = installFetchMock(
       {
         runs: [
@@ -5147,7 +5174,8 @@ describe("web app", () => {
             capabilities: {
               canArchive: true,
               canUnarchive: false,
-              canResume: true,
+              canReady: true,
+              canResume: false,
               taskMutation: {
                 canAdd: false,
                 canEditNotes: false,
@@ -5159,11 +5187,8 @@ describe("web app", () => {
       },
       {
         handleRequest: async (url, init) => {
-          if (url.endsWith("/api/runs/initialized/resume")) {
-            resumeBody =
-              typeof init?.body === "string"
-                ? (JSON.parse(init.body) as { overrides?: { message?: string } })
-                : undefined;
+          if (url.endsWith("/api/runs/initialized/ready") && init?.method === "POST") {
+            readyRequested = true;
           }
           return undefined;
         },
@@ -5175,41 +5200,42 @@ describe("web app", () => {
     const initializedRunCard = await findRunCard("Initialized run");
     await user.click(initializedRunCard);
 
-    const startButton = await screen.findByRole("button", { name: "Start" });
+    const readyButton = await screen.findByRole("button", { name: "Ready" });
     expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
 
-    await user.click(startButton);
+    await user.click(readyButton);
 
     expect(screen.queryByRole("dialog", { name: "Resume run" })).not.toBeInTheDocument();
     await waitFor(() => {
-      expect(resumeBody).toEqual({ overrides: {} });
+      expect(readyRequested).toBe(true);
     });
   });
 
-  it("starts selected initialized runs with Enter without opening the resume dialog", async () => {
+  it("starts selected ready runs with Enter without opening the resume dialog", async () => {
     let resumeBody: { overrides?: { message?: string } } | undefined;
     installFetchMock(
       {
         runs: [
           makeRun({
-            runId: "initialized-enter",
-            assignmentName: "Initialized from keyboard",
-            name: "Initialized from keyboard",
-            status: "initialized",
-            effectiveStatus: "initialized",
+            runId: "ready-enter",
+            assignmentName: "Ready from keyboard",
+            name: "Ready from keyboard",
+            status: "ready",
+            effectiveStatus: "ready",
             activeTask: null,
           }),
         ],
         details: {
-          "initialized-enter": makeDetail({
-            runId: "initialized-enter",
-            status: "initialized",
-            effectiveStatus: "initialized",
+          "ready-enter": makeDetail({
+            runId: "ready-enter",
+            status: "ready",
+            effectiveStatus: "ready",
             isLive: false,
             backendSessionId: null,
-            name: "Initialized from keyboard",
+            attempts: 0,
+            name: "Ready from keyboard",
             assignment: {
-              name: "Initialized from keyboard",
+              name: "Ready from keyboard",
               sourcePath: "/tmp/keyboard-a.md",
               workspacePath: "/tmp/keyboard-b.md",
             },
@@ -5225,6 +5251,7 @@ describe("web app", () => {
             capabilities: {
               canArchive: true,
               canUnarchive: false,
+              canReady: false,
               canResume: true,
               taskMutation: {
                 canAdd: false,
@@ -5237,7 +5264,7 @@ describe("web app", () => {
       },
       {
         handleRequest: async (url, init) => {
-          if (url.endsWith("/api/runs/initialized-enter/resume")) {
+          if (url.endsWith("/api/runs/ready-enter/resume")) {
             resumeBody =
               typeof init?.body === "string"
                 ? (JSON.parse(init.body) as { overrides?: { message?: string } })
@@ -5250,7 +5277,7 @@ describe("web app", () => {
 
     const user = userEvent.setup();
     await renderApp();
-    await user.click(await findRunCard("Initialized from keyboard"));
+    await user.click(await findRunCard("Ready from keyboard"));
 
     await user.keyboard("{Enter}");
 
@@ -5287,6 +5314,7 @@ describe("web app", () => {
             capabilities: {
               canArchive: true,
               canUnarchive: false,
+              canReady: false,
               canResume: true,
               taskMutation: {
                 canAdd: false,
@@ -5647,11 +5675,12 @@ describe("web app", () => {
       type: "detail_updated",
       detail: makeDetail({
         runId: "run-1",
-        status: "initialized",
+        status: "ready",
         isLive: false,
         backendSessionId: null,
         endedAt: null,
         activeTask: null,
+        attempts: 0,
         tasks: [
           {
             id: "setup",
@@ -5664,6 +5693,7 @@ describe("web app", () => {
         tasksCompleted: 0,
         tasksTotal: 1,
         capabilities: {
+          canReady: false,
           canResume: true,
           canAbort: false,
         },

@@ -9,6 +9,7 @@ import {
 } from "../packages/core/dist/backends/claude.js";
 import { encodePiSessionDir, piBackend } from "../packages/core/dist/backends/pi.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
+import { readyRun } from "../packages/core/dist/core/commands/service.js";
 import { resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js";
 import { InvalidBackendSessionError, runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import {
@@ -420,6 +421,7 @@ test("import (init+resume): pi execute-after-init reuses the persisted session i
   );
   assert.equal(init.manifest.backendSessionId, sessionId);
   assert.equal(captured.resumeSessionId, undefined);
+  await withSharedRuntimeEnv(dir, async () => readyRun(init.runId));
 
   const target = await withSharedRuntimeEnv(dir, async () => resolveResumeTarget(init.runId, dir));
   await withEnv({ PI_HOME: piHome }, () =>
@@ -481,6 +483,7 @@ test("import (init+resume): execute-after-init forwards the imported id on first
     initialize: true,
   });
   assert.equal(initCaptured.resumeSessionId, undefined, "init must not invoke");
+  await withSharedRuntimeEnv(dir, async () => readyRun(init.runId));
 
   const target = await withSharedRuntimeEnv(dir, async () => resolveResumeTarget(init.runId, dir));
   const execCaptured = {};

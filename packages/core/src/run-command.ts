@@ -45,6 +45,14 @@ export interface ExecuteRunCommandOptions {
   emitEvent?: (event: RunEvent) => void;
 }
 
+function passiveRunError(agentName: string, runId?: string): string {
+  const taskRunnerCmd = resolveTaskRunnerCommand();
+  const hint = runId
+    ? `${taskRunnerCmd} task set ${runId} <task-id> --status in_progress\n  ${taskRunnerCmd} status ${runId}`
+    : `${taskRunnerCmd} init --agent <passive-agent> --assignment <...>\n  ${taskRunnerCmd} task set <run-id> <task-id> --status in_progress`;
+  return `cannot run passive agent "${agentName}" — passive agents are driven externally via task commands. Use:\n  ${hint}`;
+}
+
 function validateResumeOverrides(
   manifest: RunManifest,
   opts: ExecuteRunCommandOptions,
@@ -53,7 +61,7 @@ function validateResumeOverrides(
     return `cannot resume archived run ${manifest.runId} — unarchive it first with ${resolveTaskRunnerCommand()} run unarchive ${manifest.runId}`;
   }
 
-  const priorInitialized = manifest.status === "initialized";
+  const priorReady = manifest.status === "ready";
 
   if (opts.agent !== undefined) {
     return "--agent cannot be combined with --resume-run (the agent is fixed on the run; under the manifest-canonical design, resume reads it from run.json instead of reloading agent.md)";
@@ -79,8 +87,14 @@ function validateResumeOverrides(
   if (Object.keys(opts.cliVars).length > 0) {
     return "--var cannot be combined with --resume-run — runtime vars are resolved from the assignment at first write and frozen into the manifest; they are not re-resolved on resume, so passing --var would silently no-op. Edit the assignment and create a fresh run if vars need to change.";
   }
+  if (manifest.backend === "passive") {
+    return passiveRunError(manifest.agent.name, manifest.runId);
+  }
+  if (manifest.status === "initialized") {
+    return `cannot execute initialized run ${manifest.runId} — promote it first with ${resolveTaskRunnerCommand()} run ready ${manifest.runId}`;
+  }
 
-  if (priorInitialized) {
+  if (priorReady) {
     const forbidden: string[] = [];
     if (opts.overrides.message && opts.overrides.message.trim().length > 0)
       forbidden.push("message");
@@ -93,7 +107,7 @@ function validateResumeOverrides(
     if (opts.overrides.unrestricted !== undefined) forbidden.push("--unrestricted");
     if (opts.overrides.name !== undefined) forbidden.push("--name");
     if (forbidden.length > 0) {
-      return `resuming an initialized run does not accept ${forbidden.join(", ")} — init froze these at creation. If you need different values, create a fresh run.`;
+      return `starting a ready run does not accept ${forbidden.join(", ")} — init froze these at creation. If you need different values, reinitialize the run first.`;
     }
     const unsatisfied = countUnsatisfiedDependencies(
       manifest,
@@ -113,22 +127,49 @@ function validateResumeOverrides(
   return null;
 }
 
-export async function executeRunCommand(opts: ExecuteRunCommandOptions): Promise<RunOutcome> {
-  if (opts.initialize && opts.resumeRun !== undefined) {
-    throw new ResumeError("init cannot be combined with --resume-run");
+function validateInitOverwriteTarget(manifest: RunManifest): string | null {
+  if (manifest.archivedAt !== null) {
+    return `cannot reinitialize archived run ${manifest.runId}`;
   }
+  if (manifest.status !== "initialized") {
+    return `cannot reinitialize run ${manifest.runId} unless it is initialized`;
+  }
+  return null;
+}
+
+export async function executeRunCommand(opts: ExecuteRunCommandOptions): Promise<RunOutcome> {
+  const isInitOverwrite = opts.initialize && opts.resumeRun !== undefined;
 
   let resumeTarget: ReturnType<typeof resolveResumeTarget> | undefined;
   if (opts.resumeRun !== undefined) {
     resumeTarget = resolveResumeTarget(opts.resumeRun);
-    const violation = validateResumeOverrides(resumeTarget.manifest, opts);
+    const violation = isInitOverwrite
+      ? validateInitOverwriteTarget(resumeTarget.manifest)
+      : validateResumeOverrides(resumeTarget.manifest, opts);
     if (violation !== null) {
       throw new ResumeError(violation);
     }
   }
 
-  const loaded =
-    resumeTarget !== undefined
+  const loaded = isInitOverwrite
+    ? opts.agent !== undefined
+      ? loadAgentConfig(opts.agent, opts.definitionCwd)
+      : (() => {
+          if (opts.overrides.backend === undefined) {
+            throw new RunCommandError(
+              "--agent was omitted — --backend is required to synthesize an ad-hoc agent",
+              true,
+            );
+          }
+          return synthesizeAdHocAgent({
+            backend: opts.overrides.backend,
+            model: opts.overrides.model,
+            effort: opts.overrides.effort,
+            timeoutSec: opts.overrides.timeoutSec,
+            unrestricted: opts.overrides.unrestricted,
+          });
+        })()
+    : resumeTarget !== undefined
       ? loadedAgentFromManifest(resumeTarget.manifest)
       : opts.agent !== undefined
         ? loadAgentConfig(opts.agent, opts.definitionCwd)
@@ -164,14 +205,7 @@ export async function executeRunCommand(opts: ExecuteRunCommandOptions): Promise
   }
 
   if (!opts.initialize && backendId === "passive") {
-    const taskRunnerCmd = resolveTaskRunnerCommand();
-    const runId = resumeTarget?.manifest.runId;
-    const hint = runId
-      ? `${taskRunnerCmd} task set ${runId} <task-id> --status in_progress\n  ${taskRunnerCmd} status ${runId}`
-      : `${taskRunnerCmd} init --agent <passive-agent> --assignment <...>\n  ${taskRunnerCmd} task set <run-id> <task-id> --status in_progress`;
-    throw new RunCommandError(
-      `cannot run passive agent "${loaded.config.name}" — passive agents are driven externally via task commands. Use:\n  ${hint}`,
-    );
+    throw new RunCommandError(passiveRunError(loaded.config.name, resumeTarget?.manifest.runId));
   }
 
   return runAgent({

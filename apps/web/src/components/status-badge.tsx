@@ -1,7 +1,8 @@
 import type { RunStatus } from "@task-runner/core/contracts/runs.js";
 
 const LABELS: Record<RunStatus, string> = {
-  initialized: "pending",
+  initialized: "initialized",
+  ready: "ready",
   running: "running",
   success: "completed",
   blocked: "blocked",
@@ -12,6 +13,7 @@ const LABELS: Record<RunStatus, string> = {
 
 const CLASSES: Record<RunStatus, string> = {
   initialized: "badge badge-pending",
+  ready: "badge badge-ready",
   running: "badge badge-running",
   success: "badge badge-completed",
   blocked: "badge badge-blocked",

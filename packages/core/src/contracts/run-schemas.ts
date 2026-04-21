@@ -32,6 +32,7 @@ import type {
 
 const RUN_STATUSES = [
   "initialized",
+  "ready",
   "running",
   "success",
   "blocked",
@@ -90,6 +91,7 @@ export const runCapabilitiesSchema: z.ZodType<RunCapabilities> = z.object({
   canUnarchive: z.boolean(),
   canReset: z.boolean(),
   canDelete: z.boolean(),
+  canReady: z.boolean(),
   canResume: z.boolean(),
   canAbort: z.boolean(),
   abortReason: runAbortReasonSchema.optional(),

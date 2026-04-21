@@ -532,7 +532,8 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
         canUnarchive: false,
         canReset: true,
         canDelete: false,
-        canResume: true,
+        canReady: true,
+        canResume: false,
         canAbort: false,
         abortReason: "not_active_in_daemon",
         taskMutation: {
@@ -560,6 +561,8 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
       });
       assert.equal(detail.run.capabilities.canAbort, false);
       assert.equal(detail.run.capabilities.abortReason, "not_active_in_daemon");
+      assert.equal(detail.run.capabilities.canReady, true);
+      assert.equal(detail.run.capabilities.canResume, false);
 
       const dependency = await initRun(dir);
       const addedDependency = await client.call("runs.addDependency", {
@@ -675,6 +678,18 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
       assert.equal(updated.task.status, "completed");
       assert.equal(updated.task.notes, "Handled through daemon RPC.");
 
+      const readied = await client.call("runs.ready", {
+        target: init.runId,
+      });
+      assert.equal(readied.run.status, "ready");
+      assert.equal(readied.run.capabilities.canReady, false);
+      assert.equal(readied.run.capabilities.canResume, true);
+
+      const readyDetail = await client.call("runs.get", { target: init.runId });
+      assert.equal(readyDetail.run.status, "ready");
+      assert.equal(readyDetail.run.capabilities.canReady, false);
+      assert.equal(readyDetail.run.capabilities.canResume, true);
+
       const agents = await client.call("agents.list");
       assert.ok(agents.agents.entries.some((entry) => entry.name === "daemon-agent"));
       assert.deepEqual(agents.agents.warnings, []);
@@ -775,6 +790,8 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
       assert.equal(initSummary?.runId, init.runId);
       assert.equal(initSummary?.status, "initialized");
       assert.equal(initSummary?.effectiveStatus, "initialized");
+      assert.equal(initSummary?.capabilities.canReady, true);
+      assert.equal(initSummary?.capabilities.canResume, false);
       assert.deepEqual(initSummary?.dependencyState, {
         ready: true,
         total: 0,
@@ -794,6 +811,8 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
       assert.equal(detail.body.run.name, null);
       assert.equal(detail.body.run.status, "initialized");
       assert.equal(detail.body.run.effectiveStatus, "initialized");
+      assert.equal(detail.body.run.capabilities.canReady, true);
+      assert.equal(detail.body.run.capabilities.canResume, false);
       assert.deepEqual(detail.body.run.dependencies, []);
       assert.deepEqual(detail.body.run.dependents, []);
       assert.deepEqual(detail.body.run.execution, {
@@ -981,6 +1000,14 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
       });
       assert.equal(added.status, 200);
       assert.equal(added.body.task.title, "Follow-up task");
+
+      const readied = await httpJson(httpBaseUrl, `/api/runs/${init.runId}/ready`, {
+        method: "POST",
+      });
+      assert.equal(readied.status, 200);
+      assert.equal(readied.body.run.status, "ready");
+      assert.equal(readied.body.run.capabilities.canReady, false);
+      assert.equal(readied.body.run.capabilities.canResume, true);
 
       const notFound = await httpJson(httpBaseUrl, "/api/runs/missing-run");
       assert.equal(notFound.status, 404);

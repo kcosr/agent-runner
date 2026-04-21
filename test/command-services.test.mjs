@@ -31,6 +31,7 @@ import {
   listRuns,
   listTasks,
   readStatus,
+  readyRun,
   removeAttachment,
   removeRunDependency,
   setRunBackendSession,
@@ -548,6 +549,7 @@ test("command services: readStatus reads canonical task state for running runs",
       canUnarchive: false,
       canReset: false,
       canDelete: false,
+      canReady: false,
       canResume: false,
       canAbort: false,
       abortReason: "not_active_in_daemon",
@@ -922,6 +924,49 @@ test("command services: dependency mutations reject missing runs, self edges, du
   });
 });
 
+test("command services: readyRun promotes initialized runs and tightens task and dependency mutations", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const target = await initRun(dir);
+  const dependency = await initRun(dir);
+
+  await withSharedRuntimeEnv(dir, async () => {
+    const ready = readyRun(target.runId);
+    assert.equal(ready.status, "ready");
+    assert.equal(ready.capabilities.canReady, false);
+    assert.equal(ready.capabilities.canResume, true);
+    assert.deepEqual(ready.capabilities.taskMutation, {
+      canSetStatus: false,
+      canEditNotes: true,
+      canAdd: false,
+    });
+
+    await assert.rejects(
+      () =>
+        setTask(target.runId, "t1", {
+          status: "in_progress",
+        }),
+      (err) =>
+        err instanceof CommandError &&
+        new RegExp(`cannot change task status while run ${target.runId} is ready`).test(
+          err.message,
+        ),
+    );
+
+    const appended = await appendTaskNotes(target.runId, "t1", "Ready notes");
+    assert.equal(appended.task.notes, "Ready notes");
+
+    assert.throws(
+      () => addRunDependency(target.runId, dependency.runId),
+      (err) =>
+        err instanceof CommandError &&
+        new RegExp(`cannot add dependencies unless run ${target.runId} is initialized`).test(
+          err.message,
+        ),
+    );
+  });
+});
+
 test("command services: locked task lists reject addTask with CommandError", async () => {
   const dir = tempDir();
   writeBundle(dir, LOCKED_ASSIGNMENT, "svc-locked-work");
@@ -1023,7 +1068,8 @@ test("command services: listRuns supports exact cwd scope, repo scope, and unsco
       canUnarchive: false,
       canReset: true,
       canDelete: false,
-      canResume: true,
+      canReady: true,
+      canResume: false,
       canAbort: false,
       abortReason: "not_active_in_daemon",
       taskMutation: {
@@ -1043,6 +1089,7 @@ test("command services: listRuns supports exact cwd scope, repo scope, and unsco
       canUnarchive: true,
       canReset: true,
       canDelete: true,
+      canReady: false,
       canResume: false,
       canAbort: false,
       abortReason: "not_active_in_daemon",

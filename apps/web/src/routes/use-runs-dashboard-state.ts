@@ -15,6 +15,7 @@ import { createApiClient, isNotFoundError } from "../lib/api-client.js";
 import { queryClient, runQueryKeys } from "../lib/query.js";
 import { useRunEvents } from "../lib/run-events.js";
 import { compareRunsByStartedAtDesc, sortRunsWithPinnedFirst } from "../lib/run-order.js";
+import { getRunPrimaryAction } from "../lib/run-primary-action.js";
 import { useRunTimelineState } from "../lib/run-timeline.js";
 import { useRuntimeConfig } from "../lib/runtime-config.js";
 import {
@@ -42,6 +43,7 @@ export type RunActionPending =
   | "unarchive"
   | "reset"
   | "delete"
+  | "ready"
   | "resume"
   | "abort"
   | "rename"
@@ -135,7 +137,8 @@ function buildColumns(
   compareRuns: (left: RunSummary, right: RunSummary) => number,
 ): BoardColumn[] {
   const base: BoardColumn[] = [
-    { key: "pending", title: "Pending", statuses: ["initialized"], runs: [] },
+    { key: "initialized", title: "Initialized", statuses: ["initialized"], runs: [] },
+    { key: "ready", title: "Ready", statuses: ["ready"], runs: [] },
     { key: "running", title: "Running", statuses: ["running"], runs: [] },
   ];
 
@@ -667,6 +670,9 @@ export function useRunsDashboardState() {
   const resetMutation = useRunActionMutation(api.resetRun, setActionError, {
     onSuccess: markRunTouched,
   });
+  const readyMutation = useRunActionMutation(api.readyRun, setActionError, {
+    onSuccess: markRunTouched,
+  });
   const deleteMutation = useMutation({
     mutationFn: (runId: string) => api.deleteRun(runId),
     onError: (error: Error) => {
@@ -865,44 +871,49 @@ export function useRunsDashboardState() {
       ? "unarchive"
       : resetMutation.isPending
         ? "reset"
-        : deleteMutation.isPending
-          ? "delete"
-          : resumeMutation.isPending
-            ? "resume"
-            : abortMutation.isPending
-              ? "abort"
-              : renameMutation.isPending
-                ? "rename"
-                : noteMutation.isPending
-                  ? "note"
-                  : pinnedMutation.isPending
-                    ? "pin"
-                    : backendSessionMutation.isPending
-                      ? "backend-session"
-                      : uploadAttachmentMutation.isPending
-                        ? "upload-attachment"
-                        : removeAttachmentMutation.isPending
-                          ? "remove-attachment"
-                          : downloadAttachmentMutation.isPending
-                            ? "download-attachment"
-                            : addDependencyMutation.isPending
-                              ? "add-dependency"
-                              : removeDependencyMutation.isPending
-                                ? "remove-dependency"
-                                : clearDependenciesMutation.isPending
-                                  ? "clear-dependencies"
-                                  : undefined;
+        : readyMutation.isPending
+          ? "ready"
+          : deleteMutation.isPending
+            ? "delete"
+            : resumeMutation.isPending
+              ? "resume"
+              : abortMutation.isPending
+                ? "abort"
+                : renameMutation.isPending
+                  ? "rename"
+                  : noteMutation.isPending
+                    ? "note"
+                    : pinnedMutation.isPending
+                      ? "pin"
+                      : backendSessionMutation.isPending
+                        ? "backend-session"
+                        : uploadAttachmentMutation.isPending
+                          ? "upload-attachment"
+                          : removeAttachmentMutation.isPending
+                            ? "remove-attachment"
+                            : downloadAttachmentMutation.isPending
+                              ? "download-attachment"
+                              : addDependencyMutation.isPending
+                                ? "add-dependency"
+                                : removeDependencyMutation.isPending
+                                  ? "remove-dependency"
+                                  : clearDependenciesMutation.isPending
+                                    ? "clear-dependencies"
+                                    : undefined;
   const selectedRunDetailReady =
     detailRunId !== undefined &&
     detailRunId === selectedRunId &&
     selectedRunQuery.data?.runId === detailRunId;
   const selectedRunDetail = selectedRunDetailReady ? selectedRunQuery.data : undefined;
+  const selectedRunPrimaryAction =
+    selectedRunDetail === undefined ? null : getRunPrimaryAction(selectedRunDetail);
   const selectedRunCanResume = selectedRunDetail?.capabilities.canResume === true;
-  const selectedRunPrimaryActionAvailable = selectedRunCanResume && actionPending === undefined;
-  const selectedRunStartable = selectedRunCanResume && selectedRunDetail?.status === "initialized";
+  const selectedRunPrimaryActionAvailable =
+    selectedRunPrimaryAction !== null && actionPending === undefined;
   const selectedRunHasIncompleteTasks =
     selectedRunDetail?.tasks.some((task) => task.status !== "completed") ?? true;
-  const selectedRunResumeRequiresMessage = selectedRunCanResume && !selectedRunHasIncompleteTasks;
+  const selectedRunResumeRequiresMessage =
+    selectedRunPrimaryAction === "resume" && !selectedRunHasIncompleteTasks;
   const trimmedResumeMessage = resumeMessageDraft.trim();
 
   function resetResumeDialogState() {
@@ -944,7 +955,7 @@ export function useRunsDashboardState() {
   }
 
   function openResumeDialog() {
-    if (!selectedRunCanResume || actionPending !== undefined) {
+    if (selectedRunPrimaryAction !== "resume" || actionPending !== undefined) {
       return;
     }
     setResumeMessageExpanded(selectedRunResumeRequiresMessage);
@@ -954,7 +965,7 @@ export function useRunsDashboardState() {
   async function submitSelectedRunResume() {
     if (
       !selectedRunId ||
-      !selectedRunCanResume ||
+      selectedRunPrimaryAction !== "resume" ||
       actionPending === "resume" ||
       (selectedRunResumeRequiresMessage && trimmedResumeMessage.length === 0)
     ) {
@@ -973,15 +984,19 @@ export function useRunsDashboardState() {
   }
 
   async function triggerSelectedRunPrimaryAction() {
-    if (!selectedRunId || !selectedRunCanResume || actionPending !== undefined) {
+    if (!selectedRunId || selectedRunPrimaryAction === null || actionPending !== undefined) {
       return;
     }
-    if (!selectedRunStartable) {
+    if (selectedRunPrimaryAction === "resume") {
       openResumeDialog();
       return;
     }
     try {
-      await resumeMutation.mutateAsync({ runId: selectedRunId });
+      if (selectedRunPrimaryAction === "ready") {
+        await readyMutation.mutateAsync(selectedRunId);
+      } else {
+        await resumeMutation.mutateAsync({ runId: selectedRunId });
+      }
       setActionError(undefined);
     } catch {
       // actionError is surfaced by the shared mutation handler.
@@ -1127,6 +1142,9 @@ export function useRunsDashboardState() {
         await clearDependenciesMutation.mutateAsync(runId);
       },
       delete: (runId: string) => deleteMutation.mutate(runId),
+      ready: async (runId: string) => {
+        await readyMutation.mutateAsync(runId);
+      },
       downloadAttachment: async (runId: string, attachmentId: string, name: string) => {
         await downloadAttachmentMutation.mutateAsync({ runId, attachmentId, name });
       },
