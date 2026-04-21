@@ -1614,10 +1614,24 @@ describe("web app", () => {
     expect(within(runSections).queryByRole("button", { name: "Attempts" })).not.toBeInTheDocument();
   });
 
-  it("toggles audit ordering globally and keeps live audit appends at the top in newest-first mode", async () => {
+  it("toggles audit ordering globally and keeps audit appends at the top in newest-first mode for non-live runs", async () => {
     installFetchMock({
-      runs: [makeRun()],
-      details: { "run-1": makeDetail() },
+      runs: [
+        makeRun({
+          activeTask: null,
+          effectiveStatus: "success",
+          endedAt: "2026-04-21T16:05:00.000Z",
+          status: "success",
+        }),
+      ],
+      details: {
+        "run-1": makeDetail({
+          effectiveStatus: "success",
+          endedAt: "2026-04-21T16:05:00.000Z",
+          isLive: false,
+          status: "success",
+        }),
+      },
       auditHistories: {
         "run-1": {
           runId: "run-1",
@@ -5070,6 +5084,9 @@ describe("web app", () => {
 
     await user.click(screen.getByRole("button", { name: "Blocked (1)" }));
 
+    await waitFor(() => {
+      expect(scrollTo).toHaveBeenCalledTimes(1);
+    });
     expect(scrollTo).toHaveBeenCalledWith({ behavior: "smooth", left: 360 });
   });
 
@@ -5177,7 +5194,7 @@ describe("web app", () => {
     expect(scrollTo).toHaveBeenCalledWith({ behavior: "smooth", left: 360 });
   });
 
-  it("hides jump buttons when all non-empty columns already fit", async () => {
+  it("keeps jump buttons visible when all non-empty columns already fit", async () => {
     installFetchMock({
       runs: [
         makeRun(),
@@ -5219,7 +5236,9 @@ describe("web app", () => {
     });
 
     await waitFor(() => {
-      expect(screen.queryByRole("button", { name: "Running (1)" })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Running (1)" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Completed (1)" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Blocked (1)" })).toBeInTheDocument();
     });
   });
 

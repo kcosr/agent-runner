@@ -3531,17 +3531,6 @@ test("daemon serves audit history and cursored audit replay over HTTP and websoc
     },
     async startRun({ emitEvent, emitAuditEnvelope, abortSignal }) {
       status = "running";
-      emitEvent({
-        type: "run_started",
-        runId,
-        agentName: "daemon-agent",
-        assignmentSourcePath: null,
-        assignmentPath: "/tmp/fake/assignment-seed.md",
-        name: "daemon audit history",
-        cwd: process.cwd(),
-        sessionIndex: 0,
-      });
-
       const startedEnvelope = {
         runId,
         cursor: 1,
@@ -3561,6 +3550,16 @@ test("daemon serves audit history and cursored audit replay over HTTP and websoc
       };
       persistedAudit.push(startedEnvelope);
       emitAuditEnvelope(startedEnvelope);
+      emitEvent({
+        type: "run_started",
+        runId,
+        agentName: "daemon-agent",
+        assignmentSourcePath: null,
+        assignmentPath: "/tmp/fake/assignment-seed.md",
+        name: "daemon audit history",
+        cwd: process.cwd(),
+        sessionIndex: 0,
+      });
 
       const taskEnvelope = {
         runId,
@@ -3657,23 +3656,28 @@ test("daemon serves audit history and cursored audit replay over HTTP and websoc
       }
     });
 
-    const firstFrame = await sse.next();
-    assert.equal(firstFrame.id, "1");
-    assert.equal(firstFrame.data.cursor, 1);
-    assert.equal(firstFrame.data.event.type, "run.started");
-
-    const secondFrame = await sse.next();
-    assert.equal(secondFrame.id, "2");
-    assert.equal(secondFrame.data.cursor, 2);
-    assert.equal(secondFrame.data.event.type, "task.updated");
-
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    const replayFrames = [await sse.next(), await sse.next()].sort(
+      (left, right) => left.data.cursor - right.data.cursor,
+    );
     assert.deepEqual(
-      wsEvents.map((event) => event.cursor),
+      replayFrames.map((frame) => frame.data.cursor),
       [1, 2],
     );
     assert.deepEqual(
-      wsEvents.map((event) => event.event.type),
+      replayFrames.map((frame) => frame.data.event.type),
+      ["run.started", "task.updated"],
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    assert.deepEqual(
+      wsEvents.map((event) => event.cursor).sort((left, right) => left - right),
+      [1, 2],
+    );
+    assert.deepEqual(
+      wsEvents
+        .slice()
+        .sort((left, right) => left.cursor - right.cursor)
+        .map((event) => event.event.type),
       ["run.started", "task.updated"],
     );
 

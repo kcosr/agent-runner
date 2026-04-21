@@ -98,10 +98,10 @@ export function RunsBoardPanel({
   const columnBodyRefCallbacks = useRef(new Map<string, (node: HTMLElement | null) => void>());
   const pendingScrollColumnKeyRef = useRef<string | undefined>(undefined);
   const pendingRestoreColumnKeyRef = useRef<string | null>(activeBoardColumnKey);
+  const suppressSelectedRunAutoScrollRef = useRef(false);
   const cardMotionRevisionRef = useRef(0);
   const previousRunBoardPositionsRef = useRef<Record<string, RunBoardPosition> | null>(null);
   const [motionsByRunId, setMotionsByRunId] = useState<Record<string, RunCardMotion>>({});
-  const [showColumnJumpBar, setShowColumnJumpBar] = useState(false);
   const collapsedColumnKeySet = useMemo(() => new Set(collapsedColumnKeys), [collapsedColumnKeys]);
   const runBoardPositions = useMemo(() => buildRunBoardPositions(boardColumns), [boardColumns]);
   const jumpColumns = useMemo(
@@ -213,7 +213,6 @@ export function RunsBoardPanel({
   const recomputeBoardViewportState = useCallback(() => {
     const board = boardRef.current;
     if (!board || jumpColumns.length === 0) {
-      setShowColumnJumpBar(false);
       return;
     }
 
@@ -222,19 +221,6 @@ export function RunsBoardPanel({
       pendingRestoreColumnKeyRef.current = null;
     }
 
-    const viewportLeft = board.scrollLeft;
-    const viewportRight = viewportLeft + board.clientWidth;
-    const allVisible = jumpColumns.every((column) => {
-      const element = columnRefs.current.get(column.key);
-      if (!element) {
-        return false;
-      }
-      const left = element.offsetLeft;
-      const right = left + element.offsetWidth;
-      return left >= viewportLeft && right <= viewportRight;
-    });
-
-    setShowColumnJumpBar(!allVisible);
     const centeredColumnKey = resolveCenteredColumnKey(board);
     if (centeredColumnKey) {
       onActiveBoardColumnKeyChange(centeredColumnKey);
@@ -286,6 +272,8 @@ export function RunsBoardPanel({
       return;
     }
 
+    suppressSelectedRunAutoScrollRef.current = false;
+
     const activeElement = document.activeElement;
     if (!(activeElement instanceof HTMLElement)) {
       return;
@@ -315,6 +303,10 @@ export function RunsBoardPanel({
 
   useEffect(() => {
     if (!selectedRunId) {
+      return;
+    }
+
+    if (suppressSelectedRunAutoScrollRef.current) {
       return;
     }
 
@@ -414,6 +406,7 @@ export function RunsBoardPanel({
   }
 
   function handleJumpToColumn(columnKey: string) {
+    suppressSelectedRunAutoScrollRef.current = true;
     bringColumnIntoView(columnKey);
   }
 
@@ -495,7 +488,7 @@ export function RunsBoardPanel({
 
   return (
     <div className="board-region">
-      {showColumnJumpBar ? (
+      {jumpColumns.length > 0 ? (
         <div aria-label="Board columns" className="board-jumpbar" role="toolbar">
           {jumpColumns.map((column) => (
             <button

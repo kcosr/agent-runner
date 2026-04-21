@@ -424,7 +424,6 @@ export function useRunsDashboardState() {
   const auditState = useRunAuditState({
     config,
     runId: detailRunId,
-    runIsLive: selectedRunIsLive,
   });
 
   useEffect(() => {

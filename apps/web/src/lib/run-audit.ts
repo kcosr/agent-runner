@@ -47,11 +47,9 @@ export function applyAuditEnvelope(
 export function useRunAuditState({
   config,
   runId,
-  runIsLive,
 }: {
   config: AppRuntimeConfig;
   runId?: string;
-  runIsLive: boolean;
 }): RunAuditState {
   const api = useMemo(() => createApiClient(config), [config]);
   const [state, setState] = useState<Omit<RunAuditState, "reload">>({
@@ -182,21 +180,12 @@ export function useRunAuditState({
       setState((current) => ({ ...current, isLoading: true, error: undefined }));
     }
 
-    if (!runIsLive) {
-      void loadHistory();
-      return () => {
-        disposed = true;
-        loadAbortControllerRef.current?.abort();
-        loadAbortControllerRef.current = null;
-      };
-    }
-
     const unsubscribe = subscribeToRunAuditEvents(config, runId, {
       onOpen: () => {
         if (disposed) {
           return;
         }
-        if (!bootstrappedRef.current || staleRef.current) {
+        if (staleRef.current) {
           void loadHistory();
         }
       },
@@ -236,13 +225,15 @@ export function useRunAuditState({
       },
     });
 
+    void loadHistory();
+
     return () => {
       disposed = true;
       loadAbortControllerRef.current?.abort();
       loadAbortControllerRef.current = null;
       unsubscribe();
     };
-  }, [api, config, runId, runIsLive]);
+  }, [api, config, runId]);
 
   return {
     ...state,

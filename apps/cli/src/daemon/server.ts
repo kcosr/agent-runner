@@ -622,6 +622,15 @@ export async function serveDaemon(
     });
   };
 
+  const rememberRecentAuditEvent = (runId: string, envelope: RunAuditEnvelope): void => {
+    const nextEvents = [...(recentAuditBuffers.get(runId)?.events ?? []), envelope];
+    if (nextEvents.length > MAX_TIMELINE_BUFFER_EVENTS) {
+      const overflow = nextEvents.length - MAX_TIMELINE_BUFFER_EVENTS;
+      nextEvents.splice(0, overflow);
+    }
+    rememberRecentAuditBuffer(runId, nextEvents);
+  };
+
   const getReplayableTimeline = (runId: string): RunTimelineEnvelope[] => {
     const active = activeRuns.get(runId);
     if (active) {
@@ -665,13 +674,14 @@ export async function serveDaemon(
     done: Promise<void>,
     runId: string,
   ): ActiveRunRecord => {
+    const seededAuditBuffer = recentAuditBuffers.get(runId)?.events ?? [];
     clearRecentTimelineBuffer(runId);
     clearRecentAuditBuffer(runId);
     return {
       abortController,
       done,
       detail: getProjectedDetail(runId),
-      auditBuffer: [],
+      auditBuffer: [...seededAuditBuffer],
       timelineBuffer: [],
       nextCursor: lastTimelineCursorByRun.get(runId) ?? 0,
       currentAttempt: null,
@@ -877,10 +887,11 @@ export async function serveDaemon(
 
   const publishAudit = (envelope: RunAuditEnvelope): void => {
     const active = activeRuns.get(envelope.runId);
-    if (!active) {
-      return;
+    if (active) {
+      bufferAuditEvent(active, envelope);
+    } else {
+      rememberRecentAuditEvent(envelope.runId, envelope);
     }
-    bufferAuditEvent(active, envelope);
     for (const [id, subscription] of auditSubscriptions) {
       if (subscription.runId !== envelope.runId) {
         continue;
