@@ -248,14 +248,29 @@ Assignments can declare hook arrays under these phases:
 Each hook entry must select exactly one source:
 
 ```yaml
+vars:
+  worktree_slug:
+    type: string
+    required: true
+    requiredAt: prepare
+  worktree_path:
+    type: string
+    required: true
+    requiredAt: prepare
 hooks:
   prepare:
+    - builtin: command
+      with:
+        mode: status
+        command: git
+        args: ["-C", "{{cwd}}", "fetch", "origin", "main"]
     - builtin: git-worktree
       with:
         repo: "{{cwd}}"
-        from: main
-        branch: feature-review
-        path: "{{cwd}}/.worktrees/feature-review"
+        from: origin/main
+        branch: "feat/{{worktree_slug}}"
+        path: "{{cwd}}/.worktrees/{{worktree_slug}}"
+        collision: fail
     - name: freeze-prepare
       with:
         mode: strict
@@ -300,8 +315,10 @@ Hook mutation boundaries:
 Built-in hooks:
 
 - `git-worktree` runs only in `prepare`. It ensures a git worktree,
-  switches the run `cwd` to that path, and projects `worktree_path`
-  into runtime vars.
+  switches the run `cwd` to that path, projects `worktree_path`
+  into runtime vars, and supports `collision: must_exist` when a
+  workflow needs to reuse an already-created path and fail if it is
+  missing.
 - `git-sync-base` runs only in `prepare`. It requires a clean current
   branch/worktree, then rebases that branch onto the configured
   `baseRef` without switching the run to the base ref.

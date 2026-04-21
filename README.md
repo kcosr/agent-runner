@@ -213,21 +213,31 @@ same daemon and is not a standalone app.
 schemaVersion: 1
 name: repo-work
 vars:
+  worktree_slug:
+    type: string
+    required: true
+    requiredAt: prepare
   worktree_path:
     type: string
     required: true
     requiredAt: prepare
 hooks:
   prepare:
+    - builtin: command
+      with:
+        mode: status
+        command: git
+        args: ["-C", "{{cwd}}", "fetch", "origin", "main"]
     - builtin: git-worktree
       with:
         repo: "{{cwd}}"
-        from: main
-        branch: review-worktree
-        path: "{{cwd}}/.worktrees/review-worktree"
+        from: origin/main
+        branch: "feat/{{worktree_slug}}"
+        path: "{{cwd}}/.worktrees/{{worktree_slug}}"
+        collision: fail
     - builtin: git-sync-base
       with:
-        repo: "{{cwd}}/.worktrees/review-worktree"
+        repo: "{{cwd}}/.worktrees/{{worktree_slug}}"
         baseRef: origin/main
   beforeAttempt:
     - builtin: command

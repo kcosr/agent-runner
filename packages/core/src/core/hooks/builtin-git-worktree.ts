@@ -8,7 +8,7 @@ interface GitWorktreeConfig {
   from: string;
   branch: string;
   path: string;
-  collision?: "fail" | "reuse" | "replace";
+  collision?: "fail" | "reuse" | "replace" | "must_exist";
 }
 
 function gitEnv(): NodeJS.ProcessEnv {
@@ -37,7 +37,11 @@ function gitWorktreeConfig(config: unknown): GitWorktreeConfig {
     throw new Error("git-worktree hook requires `repo`, `from`, `branch`, and `path`");
   }
   const collision =
-    record.collision === "reuse" || record.collision === "replace" ? record.collision : "fail";
+    record.collision === "reuse" ||
+    record.collision === "replace" ||
+    record.collision === "must_exist"
+      ? record.collision
+      : "fail";
   return { repo, from, branch, path, collision };
 }
 
@@ -52,7 +56,7 @@ function git(args: string[], cwd: string): string {
 
 function ensureWorktree(config: GitWorktreeConfig): void {
   if (existsSync(config.path)) {
-    if (config.collision === "reuse") {
+    if (config.collision === "reuse" || config.collision === "must_exist") {
       return;
     }
     if (config.collision === "replace") {
@@ -67,6 +71,9 @@ function ensureWorktree(config: GitWorktreeConfig): void {
     } else {
       throw new Error(`git-worktree path ${config.path} already exists`);
     }
+  }
+  if (config.collision === "must_exist") {
+    throw new Error(`git-worktree path ${config.path} does not exist`);
   }
 
   let branchExists = true;

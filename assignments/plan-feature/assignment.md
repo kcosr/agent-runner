@@ -50,8 +50,10 @@ callerInstructions: |
        itself as `assignment-seed.md` and
        `assignment-summary.md` so the caller can review them
        directly from the run.
-    5. Confirms the target directory or worktree path during the
-       initial pass, then runs `init` immediately to create the
+    5. Confirms the canonical repo root plus an explicit
+       `worktree_slug` during the initial pass, then runs
+       `init` immediately with `--cwd <repo-root>` and
+       `--var worktree_slug=<slug>` to create the
        implementer run in `initialized` state. The planning
        artifacts stay attached to the planning run; later
        implementer and reviewer flows can discover them through
@@ -898,8 +900,9 @@ tasks:
       reinitialize that same implementer run from the updated
       draft before handing it back again.
 
-      Before running `init`, confirm the target directory or
-      worktree path. Do not guess from your own cwd.
+      Before running `init`, confirm the canonical repo root
+      and explicit `worktree_slug`. Do not guess from your own
+      cwd or infer the slug after hooks start.
 
       For the first creation, run:
 
@@ -907,7 +910,8 @@ tasks:
               --agent implementer \
               --assignment <draft-path-from-draft_plan> \
               --name <short-descriptive-name> \
-              --cwd <confirmed-worktree-dir>
+              --cwd <confirmed-repo-root> \
+              --var worktree_slug=<confirmed-worktree-slug>
 
       For the post-feedback refresh path, rerun `init` against
       the updated draft with the existing run id:
@@ -917,7 +921,8 @@ tasks:
               --agent implementer \
               --assignment <updated-draft-path-from-draft_plan> \
               --name <short-descriptive-name> \
-              --cwd <confirmed-worktree-dir>
+              --cwd <confirmed-repo-root> \
+              --var worktree_slug=<confirmed-worktree-slug>
 
       Command rules:
       - Do **not** force `--backend passive`.
@@ -944,7 +949,8 @@ tasks:
       - the approved summary path from `produce_summary`
       - the draft-review run id from `review_draft`
       - the exact `init` command you ran
-      - the confirmed target directory/worktree path
+      - the confirmed repo root passed via `--cwd`
+      - the confirmed `worktree_slug` passed via `--var`
       - the implementer run id affected by `init`
       - whether this task created a new implementer run or
         reinitialized the existing one after caller feedback
