@@ -414,10 +414,6 @@ task-runner today.
 - **Richer attachment previews in the web dashboard** — text and
   Mermaid previews render inline today; image and PDF previews would
   close the loop.
-- **Dependency auto-invocation** — today declaring a dependency only
-  gates resume. A future step is to automatically start a dependent
-  run when all its prerequisites reach `status=success`. See
-  [docs/dependencies.md](docs/dependencies.md).
 - **Improved run provenance tracking** — today manifests record which
   host/controller executed the latest session (`execution.hostMode`,
   `execution.controller.daemonInstanceId`). A richer audit trail —

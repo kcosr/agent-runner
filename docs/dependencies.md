@@ -1,9 +1,10 @@
 # Dependencies
 
 Runs can declare dependencies on other runs. Dependencies are lightweight
-metadata on initialized runs; at execution time they act as a gate that
-prevents a dependent run from starting until every upstream run reaches
-`success`.
+metadata on initialized runs; at execution time they gate execution until
+every upstream run reaches `success`. When a daemon manages the run, it
+also auto-starts `ready` runs whose dependencies have all become
+satisfied.
 
 ## Why dependencies
 
@@ -14,8 +15,9 @@ code-review) want to:
 - surface readiness on the board (`dependencyState`)
 - reject premature execution of downstream runs
 
-Dependencies are strictly a gate; they do not copy state, transfer
-attachments, or carry message content between runs.
+Dependencies gate execution and, for daemon-managed `ready` runs,
+trigger auto-start when all upstream runs succeed. They do not copy
+state, transfer attachments, or carry message content between runs.
 
 ## CLI
 
@@ -47,8 +49,10 @@ run's status is `success`. If any dependency is missing, archived with
 non-success terminal status, or not-yet-success, the run is rejected
 before invocation.
 
-Removing or successfully completing the upstream run clears the gate on
-the next invocation.
+Once every dependency resolves to `success`, the gate clears. Daemon-
+managed runs that are already in `ready` status are resumed
+automatically; other runs can be started or resumed manually on the next
+invocation.
 
 ## DTOs
 
@@ -94,9 +98,10 @@ error — no partial mutation is persisted.
 
 The web dashboard surfaces dependencies on run cards (summary) and in the
 detail drawer (full `RunDependencyDetail[]` plus dependents). Unsatisfied
-dependencies are called out on the card as a readiness indicator, and the
-drawer keeps showing that readiness state while the backend rejects
-`Start` / `Resume` until the dependency gate is satisfied.
+dependencies are called out on the card as a readiness indicator. While
+the dependency gate is still closed, the drawer hides `Start` / `Resume`;
+once the gate clears, daemon-managed `ready` runs auto-start and manual
+execution controls become available again where appropriate.
 
 ## CLI output
 

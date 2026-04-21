@@ -2662,21 +2662,32 @@ test("daemon clears pending dependency auto-start markers after resume failures"
   const firstListenUrl = `ws://127.0.0.1:${firstPort}/`;
   const firstHttpBaseUrl = deriveHttpBaseUrl(firstListenUrl);
   let failedCalls = 0;
+  let releaseFailure;
 
   await withEnv(sharedRuntimeEnv(dir), async () => {
     const failingServer = await serveDaemon(firstListenUrl, {
       async resumeRun({ target }) {
         failedCalls += 1;
         assert.equal(target, dependent.runId);
+        await new Promise((resolve) => {
+          releaseFailure = resolve;
+        });
         throw new Error("synthetic dependency auto-start failure");
       },
     });
+    const summaries = await openSse(firstHttpBaseUrl, "/api/events/run-summaries");
     try {
+      releaseFailure();
+      const recoverySummary = await summaries.next();
       await sleep(100);
       const ready = await waitForRunStatus(firstHttpBaseUrl, dependent.runId, "ready");
+      assert.equal(recoverySummary.type, "summary_upsert");
+      assert.equal(recoverySummary.summary.runId, dependent.runId);
+      assert.equal(recoverySummary.summary.status, "ready");
       assert.equal(ready.runId, dependent.runId);
       assert.equal(failedCalls, 1);
     } finally {
+      await summaries.close();
       await failingServer.close();
     }
 

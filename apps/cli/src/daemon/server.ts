@@ -668,6 +668,7 @@ export async function serveDaemon(
     active: Map<string, ActiveRunRecord>,
     pendingAutoStart: ReadonlySet<string>,
   ): boolean =>
+    // Fast-path mirror of shouldAutoStartReadyDependencyRun; keep conditions in sync.
     summary !== null &&
     summary.status === "ready" &&
     summary.archivedAt === null &&
@@ -676,6 +677,25 @@ export async function serveDaemon(
     summary.dependencyState.unsatisfied === 0 &&
     !active.has(summary.runId) &&
     !pendingAutoStart.has(summary.runId);
+
+  const formatAutoStartError = (error: unknown): string =>
+    error instanceof Error ? (error.stack ?? error.message) : String(error);
+
+  const publishAutoStartRecovery = (runId: string, error: unknown): void => {
+    console.error(
+      `task-runner daemon: dependency auto-start failed for run ${runId}: ${formatAutoStartError(error)}`,
+    );
+    try {
+      publishMutationResult(runId, {
+        summary: getProjectedSummary(runId),
+        detail: getProjectedDetail(runId),
+      });
+    } catch (publishError) {
+      console.error(
+        `task-runner daemon: failed to publish dependency auto-start recovery for run ${runId}: ${formatAutoStartError(publishError)}`,
+      );
+    }
+  };
 
   const tryAutoStartDependencyRun = async (
     runId: string,
@@ -739,11 +759,8 @@ export async function serveDaemon(
       summary?: RunSummary | null;
     },
   ): void => {
-    void tryAutoStartDependencyRun(runId, provided).catch(() => {
-      publishMutationResult(runId, {
-        summary: getProjectedSummary(runId),
-        detail: getProjectedDetail(runId),
-      });
+    void tryAutoStartDependencyRun(runId, provided).catch((error) => {
+      publishAutoStartRecovery(runId, error);
     });
   };
 
