@@ -17,7 +17,7 @@ import { formatBytes, formatTimestamp, formatTimestampWithRelative } from "../li
 import type { RunAuditState } from "../lib/run-audit.js";
 import { getRunPrimaryAction } from "../lib/run-primary-action.js";
 import type { RunTimelineState } from "../lib/run-timeline.js";
-import type { DrawerDetailSection } from "../lib/settings.js";
+import { type DrawerDetailSection, useDashboardPreferences } from "../lib/settings.js";
 import { isEditableEventTarget } from "../lib/shortcuts.js";
 import { useDrawerResize } from "../lib/use-drawer-resize.js";
 import { useHorizontalWheelGuard } from "../lib/use-horizontal-wheel-guard.js";
@@ -409,6 +409,7 @@ export function RunDetailDrawer({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [dependencyDraft, setDependencyDraft] = useState("");
   const [selectedDependencyRunId, setSelectedDependencyRunId] = useState<string | null>(null);
+  const { preferences, updatePreferences } = useDashboardPreferences();
   const resize = useDrawerResize();
   const { drawerStyle, isFullscreen, toggleFullscreen } = resize;
   const nameInputRef = useRef<HTMLInputElement | null>(null);
@@ -438,6 +439,9 @@ export function RunDetailDrawer({
   const removeAttachmentPending = actionPending === "remove-attachment";
   const downloadAttachmentPending = actionPending === "download-attachment";
   const auditEvents = auditState.history?.events ?? [];
+  const displayedAuditEvents = preferences.auditNewestFirst
+    ? [...auditEvents].reverse()
+    : auditEvents;
   const visibleName = run.name ?? "Unnamed";
   const canEditDependencies = run.status === "initialized" && run.archivedAt === null;
   const addDependencyPending = actionPending === "add-dependency";
@@ -1569,13 +1573,31 @@ export function RunDetailDrawer({
                       <span>
                         {auditEvents.length} audit event{auditEvents.length === 1 ? "" : "s"}
                       </span>
-                      <button className="btn" onClick={auditState.reload} type="button">
-                        Reload
-                      </button>
+                      <div className="dependency-actions">
+                        <button
+                          aria-pressed={preferences.auditNewestFirst}
+                          className={
+                            preferences.auditNewestFirst
+                              ? "btn btn--quiet active"
+                              : "btn btn--quiet"
+                          }
+                          onClick={() =>
+                            updatePreferences({
+                              auditNewestFirst: !preferences.auditNewestFirst,
+                            })
+                          }
+                          type="button"
+                        >
+                          {preferences.auditNewestFirst ? "Newest first" : "Oldest first"}
+                        </button>
+                        <button className="btn" onClick={auditState.reload} type="button">
+                          Reload
+                        </button>
+                      </div>
                     </div>
                     {auditState.error ? <p className="muted-inline">{auditState.error}</p> : null}
                     <ul aria-label="Audit events" className="dependency-list">
-                      {auditEvents.map((envelope) => {
+                      {displayedAuditEvents.map((envelope) => {
                         const formatted = formatAuditEvent(envelope.event);
                         return (
                           <li className="dependency-row" key={envelope.cursor}>

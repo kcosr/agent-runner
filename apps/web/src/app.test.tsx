@@ -35,6 +35,7 @@ const DEFAULT_DASHBOARD_PREFERENCES = {
   showNotesOnly: false,
   showPinnedOnly: false,
   sortByRecentUpdates: false,
+  auditNewestFirst: false,
   visibleFocusIndicators: false,
   structuredFilters: {
     repo: null,
@@ -1613,6 +1614,107 @@ describe("web app", () => {
     expect(within(runSections).queryByRole("button", { name: "Attempts" })).not.toBeInTheDocument();
   });
 
+  it("toggles audit ordering globally and keeps live audit appends at the top in newest-first mode", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+      auditHistories: {
+        "run-1": {
+          runId: "run-1",
+          lastCursor: 2,
+          events: [
+            {
+              runId: "run-1",
+              cursor: 1,
+              event: {
+                type: "task.added",
+                recordedAt: "2026-04-21T16:00:00.000Z",
+                source: "task_command",
+                hostMode: "embedded",
+                fields: {
+                  taskId: "task-old",
+                  taskTitle: "Old task",
+                },
+              },
+            },
+            {
+              runId: "run-1",
+              cursor: 2,
+              event: {
+                type: "task.added",
+                recordedAt: "2026-04-21T16:01:00.000Z",
+                source: "task_command",
+                hostMode: "embedded",
+                fields: {
+                  taskId: "task-new",
+                  taskTitle: "New task",
+                },
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+
+    const auditSource = findEventSource("/api/runs/run-1/events/audit");
+    auditSource.emitOpen();
+    await user.click(screen.getByRole("button", { name: /^Audit\b/ }));
+
+    const auditPanel = await screen.findByLabelText("Audit");
+    await waitFor(() =>
+      expect(within(auditPanel).getByRole("button", { name: "Oldest first" })).toBeInTheDocument(),
+    );
+
+    let rows = within(within(auditPanel).getByRole("list", { name: "Audit events" })).getAllByRole(
+      "listitem",
+    );
+    expect(rows[0]).toHaveTextContent("Old task");
+    expect(rows[1]).toHaveTextContent("New task");
+
+    await user.click(within(auditPanel).getByRole("button", { name: "Oldest first" }));
+    expect(within(auditPanel).getByRole("button", { name: "Newest first" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    rows = within(within(auditPanel).getByRole("list", { name: "Audit events" })).getAllByRole(
+      "listitem",
+    );
+    expect(rows[0]).toHaveTextContent("New task");
+    expect(rows[1]).toHaveTextContent("Old task");
+    expect(window.localStorage.getItem("task-runner:web:dashboard-preferences")).toContain(
+      '"auditNewestFirst":true',
+    );
+
+    auditSource.emitMessage({
+      runId: "run-1",
+      cursor: 3,
+      event: {
+        type: "task.added",
+        recordedAt: "2026-04-21T16:02:00.000Z",
+        source: "task_command",
+        hostMode: "embedded",
+        fields: {
+          taskId: "task-live",
+          taskTitle: "Live task",
+        },
+      },
+    });
+
+    await waitFor(() => {
+      const updatedRows = within(
+        within(auditPanel).getByRole("list", { name: "Audit events" }),
+      ).getAllByRole("listitem");
+      expect(updatedRows[0]).toHaveTextContent("Live task");
+      expect(updatedRows[1]).toHaveTextContent("New task");
+      expect(updatedRows[2]).toHaveTextContent("Old task");
+    });
+  });
+
   it("renders read-only vars and hook state data with local subtabs", async () => {
     installFetchMock({
       runs: [makeRun()],
@@ -3189,6 +3291,7 @@ describe("web app", () => {
       showNotesOnly: false,
       showPinnedOnly: false,
       sortByRecentUpdates: false,
+      auditNewestFirst: false,
       visibleFocusIndicators: false,
       structuredFilters: {
         repo: null,
@@ -3872,6 +3975,7 @@ describe("web app", () => {
       showNotesOnly: false,
       showPinnedOnly: false,
       sortByRecentUpdates: true,
+      auditNewestFirst: false,
       visibleFocusIndicators: true,
       structuredFilters: {
         repo: null,
@@ -4373,6 +4477,7 @@ describe("web app", () => {
       showNotesOnly: false,
       showPinnedOnly: false,
       sortByRecentUpdates: false,
+      auditNewestFirst: false,
       visibleFocusIndicators: false,
       structuredFilters: {
         repo: null,
@@ -4412,6 +4517,7 @@ describe("web app", () => {
       showNotesOnly: false,
       showPinnedOnly: false,
       sortByRecentUpdates: false,
+      auditNewestFirst: false,
       visibleFocusIndicators: false,
       structuredFilters: {
         repo: null,
