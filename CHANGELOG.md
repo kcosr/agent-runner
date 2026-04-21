@@ -120,6 +120,7 @@
 - Changed daemon-managed ready-run scheduling so dependency-bearing runs
   auto-start once every dependency run is successful, including
   ready-time checks and daemon startup/rebuild sweeps after restarts.
+  ([#75](https://github.com/kcosr/task-runner/pull/75))
 - Changed `task-runner list runs` text output to append each run's exact
   persisted `cwd=...` alongside repo, agent, and assignment metadata.
   ([#73](https://github.com/kcosr/task-runner/pull/73))
