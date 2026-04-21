@@ -354,6 +354,7 @@ The rest are focused topic pages:
 | `TASK_RUNNER_CODEX_BIN` | Codex stdio binary |
 | `TASK_RUNNER_CODEX_WS_URL` | Default websocket transport for fresh Codex runs when no explicit `backendSpecific.codex.transport` was authored |
 | `TASK_RUNNER_CURSOR_BIN` | Cursor CLI binary |
+| `TASK_RUNNER_FULL_ATTEMPT_LOGS` | Keep full stdout in per-attempt log records |
 | `TASK_RUNNER_PI_BIN` | Pi CLI binary |
 | `PI_HOME` | Pi session storage root (default `~/.pi`) |
 | `TASK_RUNNER_MAX_CALL_DEPTH` | Recursion cap (default `1`) |

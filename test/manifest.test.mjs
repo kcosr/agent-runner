@@ -160,6 +160,34 @@ test("manifest: run.json is written and matches outcome.manifest", async () => {
   assert.equal(log.schemaVersion, 1);
   assert.equal(log.runId, outcome.runId);
   assert.equal(log.attempt, 1);
+  assert.equal(log.stdout, "");
+  assert.equal(log.stderr, "raw stderr text");
+});
+
+test("manifest: TASK_RUNNER_FULL_ATTEMPT_LOGS opt-in preserves stdout in attempt logs", async () => {
+  const dir = tempDir();
+  writeAgentAndAssignment(dir);
+
+  const outcome = await withEnv({ TASK_RUNNER_FULL_ATTEMPT_LOGS: "yes" }, () =>
+    runWithMock(dir, async (ctx) => {
+      updateTasksForPrompt(ctx.prompt, {
+        t1: { status: "completed" },
+        t2: { status: "completed" },
+        t3: { status: "completed" },
+      });
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "sess-full-log",
+        transcript: "all three done with stdout",
+        rawStdout: "raw stdout text",
+        rawStderr: "raw stderr text",
+      };
+    }),
+  );
+
+  const log = JSON.parse(readFileSync(join(outcome.workspaceDir, "attempts", "01.json"), "utf8"));
   assert.equal(log.stdout, "raw stdout text");
   assert.equal(log.stderr, "raw stderr text");
 });
@@ -199,8 +227,8 @@ test("manifest: attempt records snapshot state after each attempt", async () => 
   assert.equal(m.attemptRecords[1].logPath, "attempts/02.json");
   const log1 = JSON.parse(readFileSync(join(outcome.workspaceDir, "attempts", "01.json"), "utf8"));
   const log2 = JSON.parse(readFileSync(join(outcome.workspaceDir, "attempts", "02.json"), "utf8"));
-  assert.equal(log1.stdout, "raw 1");
-  assert.equal(log2.stdout, "raw 2");
+  assert.equal(log1.stdout, "");
+  assert.equal(log2.stdout, "");
   assert.equal(log1.attempt, 1);
   assert.equal(log2.attempt, 2);
 

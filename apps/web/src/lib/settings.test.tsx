@@ -31,6 +31,16 @@ function SettingsProbe() {
       <button
         onClick={() =>
           updatePreferences({
+            showNotesOnly: true,
+          })
+        }
+        type="button"
+      >
+        Enable notes only
+      </button>
+      <button
+        onClick={() =>
+          updatePreferences({
             showPinnedOnly: true,
           })
         }
@@ -107,6 +117,7 @@ describe("DashboardSettingsProvider", () => {
         hideEmptyColumns: true,
         collapseFailureStates: true,
         showArchived: false,
+        showNotesOnly: false,
         showPinnedOnly: false,
         sortByRecentUpdates: false,
         visibleFocusIndicators: false,
@@ -164,6 +175,7 @@ describe("DashboardSettingsProvider", () => {
         hideEmptyColumns: false,
         collapseFailureStates: false,
         showArchived: true,
+        showNotesOnly: false,
         showPinnedOnly: false,
         sortByRecentUpdates: true,
         visibleFocusIndicators: true,
@@ -263,6 +275,7 @@ describe("DashboardSettingsProvider", () => {
     renderSettingsProbe();
 
     fireEvent.click(screen.getByRole("button", { name: "Enable archived" }));
+    fireEvent.click(screen.getByRole("button", { name: "Enable notes only" }));
     fireEvent.click(screen.getByRole("button", { name: "Enable pinned only" }));
     fireEvent.click(screen.getByRole("button", { name: "Enable recent updates sort" }));
     fireEvent.click(screen.getByRole("button", { name: "Enable visible focus indicators" }));
@@ -274,6 +287,7 @@ describe("DashboardSettingsProvider", () => {
         hideEmptyColumns: true,
         collapseFailureStates: true,
         showArchived: true,
+        showNotesOnly: true,
         showPinnedOnly: true,
         sortByRecentUpdates: true,
         visibleFocusIndicators: true,
@@ -304,6 +318,7 @@ describe("DashboardSettingsProvider", () => {
         hideEmptyColumns: true,
         collapseFailureStates: true,
         showArchived: false,
+        showNotesOnly: false,
         showPinnedOnly: false,
         sortByRecentUpdates: false,
         visibleFocusIndicators: false,
@@ -327,6 +342,7 @@ describe("DashboardSettingsProvider", () => {
         hideEmptyColumns: true,
         collapseFailureStates: true,
         showArchived: false,
+        showNotesOnly: false,
         showPinnedOnly: false,
         sortByRecentUpdates: false,
         visibleFocusIndicators: false,

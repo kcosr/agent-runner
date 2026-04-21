@@ -21,6 +21,7 @@ import {
   runIdFromPrompt,
   sharedRuntimeEnv,
   updateTasksForPrompt,
+  withEnv,
   withSharedRuntimeEnv,
 } from "./helpers/runtime-paths.mjs";
 
@@ -261,6 +262,41 @@ test("execute-after-init appends ordered created/started/attempt/finished record
   assert.equal(raw.includes("secret transcript"), false);
   assert.equal(raw.includes("stdout-secret"), false);
   assert.equal(raw.includes("stderr-secret"), false);
+  const attemptLog = JSON.parse(
+    readFileSync(join(resumed.workspaceDir, resumed.manifest.attemptRecords[0].logPath), "utf8"),
+  );
+  assert.equal(attemptLog.stdout, "");
+  assert.equal(attemptLog.stderr, "stderr-secret");
+});
+
+test("attempt logs include stdout only when TASK_RUNNER_FULL_ATTEMPT_LOGS is enabled", async () => {
+  const dir = tempDir();
+  writeAuditBundle(dir);
+
+  const outcome = await withEnv({ TASK_RUNNER_FULL_ATTEMPT_LOGS: "true" }, () =>
+    runIn(dir, {
+      agentName: "audit-active",
+      assignmentName: "audit-active-work",
+      backend: mockBackend(async (ctx) => {
+        completeAllTasksFromPrompt(ctx.prompt, dir);
+        return {
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+          sessionId: "session-with-stdout",
+          transcript: "secret transcript",
+          rawStdout: "stdout-secret",
+          rawStderr: "stderr-secret",
+        };
+      }),
+    }),
+  );
+
+  const attemptLog = JSON.parse(
+    readFileSync(join(outcome.workspaceDir, outcome.manifest.attemptRecords[0].logPath), "utf8"),
+  );
+  assert.equal(attemptLog.stdout, "stdout-secret");
+  assert.equal(attemptLog.stderr, "stderr-secret");
 });
 
 test("hook executions append compact run.hook_recorded records for prepare and attempt phases", async () => {

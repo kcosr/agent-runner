@@ -161,6 +161,54 @@ describe("resolveRunsShortcutCommand", () => {
       resolveRunsShortcutCommand(
         {
           altKey: false,
+          ctrlKey: true,
+          key: "p",
+          metaKey: false,
+          shiftKey: true,
+        },
+        context,
+      ),
+    ).toBe("ui.togglePinnedOnly");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: true,
+          key: "n",
+          metaKey: false,
+          shiftKey: true,
+        },
+        context,
+      ),
+    ).toBe("ui.toggleNotesOnly");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: true,
+          key: "a",
+          metaKey: false,
+          shiftKey: true,
+        },
+        context,
+      ),
+    ).toBe("ui.toggleArchived");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: true,
+          key: "e",
+          metaKey: false,
+          shiftKey: true,
+        },
+        context,
+      ),
+    ).toBe("ui.toggleHideEmptyColumns");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
           ctrlKey: false,
           key: "f",
           metaKey: false,
@@ -169,6 +217,93 @@ describe("resolveRunsShortcutCommand", () => {
         context,
       ),
     ).toBe("ui.toggleDrawerFullscreen");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "n",
+          metaKey: false,
+          shiftKey: false,
+        },
+        context,
+      ),
+    ).toBe("run.openNote");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "p",
+          metaKey: false,
+          shiftKey: false,
+        },
+        context,
+      ),
+    ).toBe("run.togglePinned");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "a",
+          metaKey: false,
+          shiftKey: false,
+        },
+        context,
+      ),
+    ).toBe("run.toggleArchived");
+  });
+
+  it("supports the Cmd+Shift filter namespace while leaving plain letter shortcuts on run actions", () => {
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "p",
+          metaKey: true,
+          shiftKey: true,
+        },
+        context,
+      ),
+    ).toBe("ui.togglePinnedOnly");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "n",
+          metaKey: true,
+          shiftKey: true,
+        },
+        context,
+      ),
+    ).toBe("ui.toggleNotesOnly");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "a",
+          metaKey: true,
+          shiftKey: true,
+        },
+        context,
+      ),
+    ).toBe("ui.toggleArchived");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "e",
+          metaKey: true,
+          shiftKey: true,
+        },
+        context,
+      ),
+    ).toBe("ui.toggleHideEmptyColumns");
     expect(
       resolveRunsShortcutCommand(
         {

@@ -32,6 +32,7 @@ const DEFAULT_DASHBOARD_PREFERENCES = {
   hideEmptyColumns: true,
   collapseFailureStates: true,
   showArchived: false,
+  showNotesOnly: false,
   showPinnedOnly: false,
   sortByRecentUpdates: false,
   visibleFocusIndicators: false,
@@ -3070,6 +3071,11 @@ describe("web app", () => {
     expect(screen.getByText("Navigate runs")).toBeInTheDocument();
     expect(screen.getByLabelText("Shortcut: Ctrl + F")).toBeInTheDocument();
     expect(screen.getByLabelText("Shortcut: Ctrl + Shift + F")).toBeInTheDocument();
+    expect(screen.getByLabelText("Shortcut: Ctrl + Shift + P")).toBeInTheDocument();
+    expect(screen.getByLabelText("Shortcut: Ctrl + Shift + N")).toBeInTheDocument();
+    expect(screen.getByLabelText("Shortcut: Ctrl + Shift + A")).toBeInTheDocument();
+    expect(screen.getByLabelText("Shortcut: Ctrl + Shift + E")).toBeInTheDocument();
+    expect(screen.getByText("Toggle notes-only filter")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Runs" }));
 
@@ -3162,6 +3168,7 @@ describe("web app", () => {
       hideEmptyColumns: true,
       collapseFailureStates: true,
       showArchived: false,
+      showNotesOnly: false,
       showPinnedOnly: false,
       sortByRecentUpdates: false,
       visibleFocusIndicators: false,
@@ -3815,7 +3822,6 @@ describe("web app", () => {
     await user.click(screen.getByRole("button", { name: "Settings" }));
     expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
 
-    const hideEmptyColumns = screen.getByRole("checkbox", { name: "Hide empty columns" });
     const collapseFailureStates = screen.getByRole("checkbox", {
       name: "Collapse failure states",
     });
@@ -3827,7 +3833,7 @@ describe("web app", () => {
     });
     const appShell = document.querySelector(".app");
     expect(appShell).toHaveAttribute("data-focus-indicators", "off");
-    expect(hideEmptyColumns).not.toBeChecked();
+    expect(screen.queryByRole("checkbox", { name: "Hide empty columns" })).not.toBeInTheDocument();
     expect(collapseFailureStates).not.toBeChecked();
     expect(showArchived).toBeChecked();
     expect(showPinnedOnly).not.toBeChecked();
@@ -3845,6 +3851,7 @@ describe("web app", () => {
       hideEmptyColumns: false,
       collapseFailureStates: false,
       showArchived: true,
+      showNotesOnly: false,
       showPinnedOnly: false,
       sortByRecentUpdates: true,
       visibleFocusIndicators: true,
@@ -3972,6 +3979,67 @@ describe("web app", () => {
 
     await user.click(screen.getByRole("button", { name: "Settings" }));
     expect(screen.getByRole("checkbox", { name: "Show pinned runs only" })).toBeChecked();
+  });
+
+  it("filters board-visible runs to notes only and persists the quick toggle", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "run-noted",
+          assignmentName: "Noted dashboard",
+          name: "Noted dashboard",
+          notePresent: true,
+        }),
+        makeRun({
+          runId: "run-plain",
+          assignmentName: "Plain dashboard",
+          name: "Plain dashboard",
+          notePresent: false,
+        }),
+      ],
+      details: {
+        "run-noted": makeDetail({
+          runId: "run-noted",
+          assignment: {
+            name: "Noted dashboard",
+            sourcePath: "/tmp/noted-a.md",
+            workspacePath: "/tmp/noted-b.md",
+          },
+          note: "already tracked",
+        }),
+        "run-plain": makeDetail({
+          runId: "run-plain",
+          assignment: {
+            name: "Plain dashboard",
+            sourcePath: "/tmp/plain-a.md",
+            workspacePath: "/tmp/plain-b.md",
+          },
+          note: null,
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    const view = await renderApp();
+    await findRunCard("Noted dashboard");
+    expect(screen.getByRole("button", { name: /plain dashboard/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /show runs with notes only/i }));
+
+    expect(await findRunCard("Noted dashboard")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /plain dashboard/i })).not.toBeInTheDocument();
+
+    const stored = window.localStorage.getItem("task-runner:web:dashboard-preferences");
+    expect(stored ? JSON.parse(stored) : null).toMatchObject({
+      showNotesOnly: true,
+    });
+
+    view.unmount();
+    queryClient.clear();
+
+    await renderApp();
+    expect(await findRunCard("Noted dashboard")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /plain dashboard/i })).not.toBeInTheDocument();
   });
 
   it("pins a selected run without forcing list and detail refetches while streams are healthy", async () => {
@@ -4107,6 +4175,99 @@ describe("web app", () => {
     expect(callsAfterArchive).toEqual(["/api/runs/run-1/archive"]);
   });
 
+  it("uses Ctrl+Shift shortcuts for board filters without replacing plain selected-run actions", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "run-pinned-noted",
+          assignmentName: "Pinned noted",
+          name: "Pinned noted",
+          notePresent: true,
+          pinned: true,
+        }),
+        makeRun({
+          runId: "run-plain",
+          assignmentName: "Plain run",
+          name: "Plain run",
+          notePresent: false,
+        }),
+        makeRun({
+          runId: "run-archived",
+          archivedAt: "2026-04-13T06:00:00.000Z",
+          assignmentName: "Archived noted",
+          name: "Archived noted",
+          notePresent: true,
+          pinned: true,
+          status: "success",
+        }),
+      ],
+      details: {
+        "run-pinned-noted": makeDetail({
+          runId: "run-pinned-noted",
+          assignment: {
+            name: "Pinned noted",
+            sourcePath: "/tmp/pinned-noted-a.md",
+            workspacePath: "/tmp/pinned-noted-b.md",
+          },
+          note: "keep visible",
+          pinned: true,
+        }),
+        "run-plain": makeDetail({
+          runId: "run-plain",
+          assignment: {
+            name: "Plain run",
+            sourcePath: "/tmp/plain-run-a.md",
+            workspacePath: "/tmp/plain-run-b.md",
+          },
+          note: null,
+        }),
+        "run-archived": makeDetail({
+          runId: "run-archived",
+          assignment: {
+            name: "Archived noted",
+            sourcePath: "/tmp/archived-noted-a.md",
+            workspacePath: "/tmp/archived-noted-b.md",
+          },
+          archivedAt: "2026-04-13T06:00:00.000Z",
+          note: "archived note",
+          pinned: true,
+          status: "success",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Pinned noted"));
+
+    await user.keyboard("{Control>}{Shift>}n{/Shift}{/Control}");
+    expect(screen.getByRole("button", { name: /show runs with notes only/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.queryByRole("button", { name: /plain run/i })).not.toBeInTheDocument();
+
+    await user.keyboard("{Control>}{Shift>}p{/Shift}{/Control}");
+    expect(screen.getByRole("button", { name: /show pinned runs only/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    await user.keyboard("{Control>}{Shift>}a{/Shift}{/Control}");
+    expect(screen.getByRole("button", { name: /show archived runs/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(await findRunCard("Archived noted")).toBeInTheDocument();
+
+    await user.keyboard("{Control>}{Shift>}e{/Shift}{/Control}");
+    expect(screen.getByRole("button", { name: /hide empty columns/i })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    expect(getBoardColumn("Aborted")).toBeInTheDocument();
+  });
+
   it("restores the in-scope dashboard preferences to defaults from settings", async () => {
     installFetchMock({
       runs: [
@@ -4140,7 +4301,7 @@ describe("web app", () => {
     await renderApp("/settings/general");
     await screen.findByRole("heading", { name: "General" });
 
-    await user.click(screen.getByRole("checkbox", { name: "Hide empty columns" }));
+    expect(screen.queryByRole("checkbox", { name: "Hide empty columns" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("checkbox", { name: "Collapse failure states" }));
     await user.click(screen.getByRole("checkbox", { name: "Show archived runs" }));
     await user.click(screen.getByRole("checkbox", { name: "Sort by recent updates" }));
@@ -4149,7 +4310,7 @@ describe("web app", () => {
 
     await user.click(screen.getByRole("button", { name: "Restore defaults" }));
 
-    expect(screen.getByRole("checkbox", { name: "Hide empty columns" })).toBeChecked();
+    expect(screen.queryByRole("checkbox", { name: "Hide empty columns" })).not.toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Collapse failure states" })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "Show archived runs" })).not.toBeChecked();
     expect(screen.getByRole("checkbox", { name: "Sort by recent updates" })).not.toBeChecked();
@@ -4167,7 +4328,7 @@ describe("web app", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("resets a single preference row without affecting the others", async () => {
+  it("does not render a settings row for hide empty columns", async () => {
     installFetchMock({
       runs: [makeRun()],
       details: { "run-1": makeDetail() },
@@ -4177,12 +4338,12 @@ describe("web app", () => {
     await renderApp("/settings/general");
     await screen.findByRole("heading", { name: "General" });
 
-    await user.click(screen.getByRole("checkbox", { name: "Hide empty columns" }));
     await user.click(screen.getByRole("checkbox", { name: "Show archived runs" }));
 
-    await user.click(screen.getByRole("button", { name: "Reset Hide empty columns to default" }));
-
-    expect(screen.getByRole("checkbox", { name: "Hide empty columns" })).toBeChecked();
+    expect(screen.queryByRole("checkbox", { name: "Hide empty columns" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Reset Hide empty columns to default" }),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Show archived runs" })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "Collapse failure states" })).toBeChecked();
 
@@ -4191,6 +4352,7 @@ describe("web app", () => {
       hideEmptyColumns: true,
       collapseFailureStates: true,
       showArchived: true,
+      showNotesOnly: false,
       showPinnedOnly: false,
       sortByRecentUpdates: false,
       visibleFocusIndicators: false,
@@ -4229,6 +4391,7 @@ describe("web app", () => {
       hideEmptyColumns: true,
       collapseFailureStates: true,
       showArchived: true,
+      showNotesOnly: false,
       showPinnedOnly: false,
       sortByRecentUpdates: false,
       visibleFocusIndicators: false,

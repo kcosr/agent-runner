@@ -742,7 +742,7 @@ test("connected cli sends caller cwd scope while daemon and http defaults remain
     const cliDefault = runCli(["list", "runs", "--connect", listenUrl], { cwd: dir });
     assert.equal(
       cliDefault.trim(),
-      `${first.runId} [initialized] name=<unnamed> 0/1 repo=unknown agent=daemon-agent assignment=daemon-work`,
+      `${first.runId} [initialized] name=<unnamed> 0/1 repo=unknown agent=daemon-agent assignment=daemon-work cwd=${dir}`,
     );
     assert.doesNotMatch(cliDefault, new RegExp(second.runId));
 

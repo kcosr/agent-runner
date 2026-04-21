@@ -87,6 +87,7 @@ Both can be overridden on the CLI via `--listen` (on `serve`) and
 | `TASK_RUNNER_CODEX_BIN` | Codex stdio binary (default `codex`) |
 | `TASK_RUNNER_CODEX_WS_URL` | Fresh Codex runs use this websocket URL when no explicit `backendSpecific.codex.transport` was authored; daemon-connected CLI calls forward it only as a Codex-specific structured override |
 | `TASK_RUNNER_CURSOR_BIN` | Cursor CLI binary (default `cursor-agent`) |
+| `TASK_RUNNER_FULL_ATTEMPT_LOGS` | Keep full stdout in per-attempt log records instead of the default compact stderr/metadata-only capture |
 | `TASK_RUNNER_PI_BIN` | Pi CLI binary (default `pi`) |
 | `PI_HOME` | Pi session storage root (default `~/.pi`) |
 
@@ -96,6 +97,10 @@ See [backends.md](backends.md).
 Only Codex reads it, and only during fresh-run transport resolution.
 Malformed values are rejected unless they are absolute `ws://` or
 `wss://` URLs.
+
+`TASK_RUNNER_FULL_ATTEMPT_LOGS` is an opt-in local debugging knob. When
+unset, per-attempt records keep stderr and structured metadata but omit
+captured stdout to reduce noisy manifest-side log output.
 
 ### Recursion guard
 

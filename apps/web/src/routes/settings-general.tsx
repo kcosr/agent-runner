@@ -20,11 +20,6 @@ interface PreferenceRowDefinition {
 
 const BOARD_PREFERENCE_ROWS: PreferenceRowDefinition[] = [
   {
-    key: "hideEmptyColumns",
-    title: "Hide empty columns",
-    description: "Keep board columns with no visible runs out of the main board by default.",
-  },
-  {
     key: "collapseFailureStates",
     title: "Collapse failure states",
     description: "Group exhausted and error runs into one Failed column on the board.",
