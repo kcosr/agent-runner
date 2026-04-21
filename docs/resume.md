@@ -18,7 +18,7 @@ time (see [Forbidden flags](#forbidden-flags)).
 
 Resume is how you:
 
-- execute a run you earlier created with `task-runner init`
+- start a ready run you earlier created with `task-runner init`
 - re-run a run that exited with incomplete tasks
 - follow up with a continuation message
 - append new tasks to an in-flight workflow
@@ -36,10 +36,17 @@ On resume, the following flags are rejected:
 - `--name` — cannot be changed on resume; use `run set-name` instead.
 - `--var` — runtime vars are frozen at first write.
 
-For initialized runs, execute-after-init additionally rejects `--model`,
+Initialized runs are not directly executable. Promote them first:
+
+```bash
+task-runner run ready <run-id>
+task-runner run --resume-run <run-id>
+```
+
+For ready-start, `run --resume-run` additionally rejects `--model`,
 `--effort`, `--timeout-sec`, `--max-retries`, `--unrestricted`,
-`--add-task`, and positional messages — the run already composed its
-brief.
+`--add-task`, and positional messages — init already composed and froze
+the execution handoff.
 
 ## Input requirements
 
@@ -98,8 +105,8 @@ On resume, the brief sent to the backend is composed as follows:
 3. The follow-up message is appended, or the implicit continue message is
    used if incomplete tasks remain.
 
-For execute-after-init (running an `initialized` run), the stored
-`manifest.brief` is reused verbatim.
+For ready-start (running a `ready` run with zero prior attempts), the
+stored `manifest.brief` is reused verbatim.
 
 ## Retry nudges
 

@@ -4,6 +4,10 @@
 
 ### Breaking Changes
 
+- Run lifecycle now includes an explicit `ready` state between
+  `initialized` and `running`. Non-passive initialized runs are no longer
+  directly executable: promote them with `task-runner run ready <run-id>`
+  before the first `run --resume-run`.
 - Manifest schema version is now `10`. Runs now freeze the resolved
   launcher on both `manifest.launcher` and `manifest.resetSeed.launcher`,
   and resume / reset reuse that frozen launcher instead of re-reading
@@ -42,6 +46,9 @@
 
 ### Added
 
+- Added `task-runner run ready <run-id>` plus `RunCapabilities.canReady`
+  across the CLI, daemon, contracts, and web dashboard so initialized
+  runs can be explicitly promoted before first execution.
 - Added first-class launcher definitions under
   `${TASK_RUNNER_CONFIG_DIR}/launchers/*.yaml|*.yml`, plus `task-runner
   list launchers` and `task-runner show launcher` across embedded and
@@ -99,6 +106,10 @@
 
 ### Changed
 
+- Changed the web dashboard board and primary action semantics so
+  initialized runs stay in `Initialized`, ready runs move to `Ready`, and
+  the primary action switches between `Ready`, `Start`, and `Resume`
+  based on lifecycle state and attempt history.
 - Changed subprocess backend startup so agents can author `launcher`
   either as a named string or inline object, fresh runs can override it
   with named-only `--launcher`, connected mode resolves named launchers

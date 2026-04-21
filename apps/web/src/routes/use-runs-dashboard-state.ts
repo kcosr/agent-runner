@@ -907,7 +907,6 @@ export function useRunsDashboardState() {
   const selectedRunDetail = selectedRunDetailReady ? selectedRunQuery.data : undefined;
   const selectedRunPrimaryAction =
     selectedRunDetail === undefined ? null : getRunPrimaryAction(selectedRunDetail);
-  const selectedRunCanResume = selectedRunDetail?.capabilities.canResume === true;
   const selectedRunPrimaryActionAvailable =
     selectedRunPrimaryAction !== null && actionPending === undefined;
   const selectedRunHasIncompleteTasks =
@@ -1184,7 +1183,6 @@ export function useRunsDashboardState() {
     selectedRunId,
     selectedDrawerView,
     selectedRunGroupAttachmentsQuery,
-    selectedRunCanResume,
     selectedRunPrimaryActionAvailable,
     selectedRunQuery,
     setResumeMessageDraft,

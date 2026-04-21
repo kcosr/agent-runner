@@ -292,8 +292,8 @@ export function reset(target: string, auditContext?: MutationAuditContext): RunD
   return toRunDetail({ manifest: resetRun(target, auditContext).manifest, isLive: false });
 }
 
-export function readyRun(target: string): RunDetail {
-  return markRunReady(target);
+export function readyRun(target: string, auditContext?: MutationAuditContext): RunDetail {
+  return markRunReady(target, auditContext);
 }
 
 export function deleteArchivedRun(target: string): RunDeleteResult {

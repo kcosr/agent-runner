@@ -17,6 +17,7 @@ export type RunEventType =
   | "run.created"
   | "run.started"
   | "run.resumed"
+  | "run.ready"
   | "run.backend_session_updated"
   | "run.hook_recorded"
   | "run.attempt_recorded"
@@ -342,6 +343,22 @@ export function appendRunResumeRejectedEvent(params: {
     eventType: "run.resume_rejected",
     context: params.context,
     sessionIndex: params.sessionIndex,
+  });
+}
+
+export function appendRunReadyEvent(params: {
+  manifest: Pick<RunManifest, "workspaceDir" | "runId">;
+  context: RunEventWriteContext;
+  previousStatus: ManifestStatus;
+}): void {
+  appendRunEvent({
+    workspaceDir: params.manifest.workspaceDir,
+    runId: params.manifest.runId,
+    eventType: "run.ready",
+    context: params.context,
+    fields: {
+      previousStatus: params.previousStatus,
+    },
   });
 }
 

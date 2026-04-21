@@ -1072,7 +1072,7 @@ export async function serveDaemon(
       return run;
     },
     readyRun: (target) =>
-      withPublishedMutation(target, () => app.readyRun(target), {
+      withPublishedMutation(target, () => app.readyRun(target, mutationAuditContext), {
         inferDependentFanout: true,
       }),
     archive: (target) =>

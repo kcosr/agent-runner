@@ -89,6 +89,7 @@ import {
   appendRunArchivedEvent,
   appendRunBackendSessionUpdatedEvent,
   appendRunFinishedEvent,
+  appendRunReadyEvent,
   appendRunRenamedEvent,
   appendRunResetEvent,
   appendRunUnarchivedEvent,
@@ -759,13 +760,22 @@ export function resetRun(
   };
 }
 
-export function readyRun(target: string): RunDetail {
+export function readyRun(
+  target: string,
+  auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
+): RunDetail {
   const resolved = resolveRun(target);
   withTaskStateLock(resolved.workspaceDir, () => {
     resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
     requireReadyableRun(resolved.manifest);
+    const previousStatus = resolved.manifest.status;
     resolved.manifest.status = "ready";
     writeManifest(resolved.workspaceDir, resolved.manifest);
+    appendRunReadyEvent({
+      manifest: resolved.manifest,
+      context: commandRunEventContext(auditOrigin),
+      previousStatus,
+    });
   });
   return toRunDetail({ manifest: resolved.manifest, isLive: false });
 }

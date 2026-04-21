@@ -66,7 +66,8 @@ The manifest is the source of truth. Important fields:
 
 ## Lifecycle states
 
-- `initialized` — created by `init`, awaiting first execution
+- `initialized` — created by `init`, awaiting approval for first execution
+- `ready` — approved for execution, awaiting first start
 - `running` — actively executing
 - `success` — all tasks completed
 - `blocked` — at least one task reported blocked
@@ -101,13 +102,16 @@ task-runner init \
   --agent ./agents/implementer/agent.md \
   --assignment ./assignments/repo-orientation/assignment.md
 
+task-runner run ready <run-id>
 task-runner run --resume-run <run-id>
 ```
 
 `init` performs the same setup work but does not invoke the backend. This
 is useful for passive runs, planning flows, or delayed execution. `init`
 does not dump the worker brief to stdout — fetch it explicitly with
-`task-runner run brief <run-id>`.
+`task-runner run brief <run-id>`. Non-passive initialized runs must be
+promoted with `task-runner run ready <run-id>` before the first
+`run --resume-run`.
 
 ## Read surfaces
 
@@ -134,6 +138,7 @@ task-runner attachment list <run-id> [--cwd-scope]
 ## Mutation surfaces
 
 ```bash
+task-runner run ready <id>
 task-runner run reset <id>
 task-runner run archive <id>
 task-runner run unarchive <id>
@@ -225,8 +230,8 @@ See [daemon.md](daemon.md) for how the daemon adopts and publishes runs.
 The daemon and CLI expose a `RunCapabilities` boolean block on each run so
 clients do not reimplement lifecycle gates:
 
-- `canArchive`, `canUnarchive`, `canReset`, `canDelete`, `canResume`,
-  `canAbort`
+- `canArchive`, `canUnarchive`, `canReset`, `canDelete`, `canReady`,
+  `canResume`, `canAbort`
 - `taskMutation.canSetStatus`, `taskMutation.canEditNotes`,
   `taskMutation.canAdd`
 

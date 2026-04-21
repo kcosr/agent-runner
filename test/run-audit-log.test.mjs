@@ -245,6 +245,7 @@ test("execute-after-init appends ordered created/started/attempt/finished record
     [
       "run.created",
       "run.backend_session_updated",
+      "run.ready",
       "run.started",
       "run.attempt_recorded",
       "run.finished",
@@ -252,9 +253,10 @@ test("execute-after-init appends ordered created/started/attempt/finished record
   );
   assert.equal(records[0].initialStatus, "initialized");
   assert.equal(records[1].reason, "bootstrap_import");
-  assert.equal(records[2].backendSessionIdAtStart, "bootstrap-thread");
-  assert.equal(records[3].backendSessionIdCaptured, "bootstrap-thread");
-  assert.equal(records[4].terminalStatus, "success");
+  assert.equal(records[2].previousStatus, "initialized");
+  assert.equal(records[3].backendSessionIdAtStart, "bootstrap-thread");
+  assert.equal(records[4].backendSessionIdCaptured, "bootstrap-thread");
+  assert.equal(records[5].terminalStatus, "success");
   const raw = readAuditRaw(resumed.workspaceDir);
   assert.equal(raw.includes("secret transcript"), false);
   assert.equal(raw.includes("stdout-secret"), false);
