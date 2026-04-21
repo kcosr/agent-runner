@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { TaskStatus } from "../../assignment/model.js";
 import { appendTextFileDurable } from "../../util/write-file-atomic.js";
@@ -9,28 +10,44 @@ import type {
 } from "./manifest.js";
 
 export const RUN_EVENTS_FILENAME = "run-events.jsonl";
-const RUN_EVENT_SCHEMA_VERSION = 1;
+const RUN_EVENT_SCHEMA_VERSION = 2;
 
-export type RunEventRecordSource = "system" | "cli" | "daemon" | "task_command";
+const RUN_EVENT_SOURCES = ["system", "cli", "daemon", "task_command"] as const;
+const RUN_EVENT_TYPES = [
+  "run.created",
+  "run.started",
+  "run.resumed",
+  "run.ready",
+  "run.backend_session_updated",
+  "run.hook_recorded",
+  "run.attempt_recorded",
+  "run.retrying",
+  "run.finished",
+  "run.aborted",
+  "run.resume_rejected",
+  "run.reset",
+  "run.archived",
+  "run.unarchived",
+  "run.renamed",
+  "task.added",
+  "task.updated",
+] as const;
 
-export type RunEventType =
-  | "run.created"
-  | "run.started"
-  | "run.resumed"
-  | "run.ready"
-  | "run.backend_session_updated"
-  | "run.hook_recorded"
-  | "run.attempt_recorded"
-  | "run.retrying"
-  | "run.finished"
-  | "run.aborted"
-  | "run.resume_rejected"
-  | "run.reset"
-  | "run.archived"
-  | "run.unarchived"
-  | "run.renamed"
-  | "task.added"
-  | "task.updated";
+const RUN_EVENT_SHARED_KEYS = new Set([
+  "schemaVersion",
+  "recordedAt",
+  "cursor",
+  "runId",
+  "eventType",
+  "source",
+  "hostMode",
+  "controllerInstanceId",
+  "sessionIndex",
+  "attempt",
+]);
+
+export type RunEventRecordSource = (typeof RUN_EVENT_SOURCES)[number];
+export type RunEventType = (typeof RUN_EVENT_TYPES)[number];
 
 export type BackendSessionUpdateReason =
   | "bootstrap_import"
@@ -49,7 +66,6 @@ export interface RunEventWriteContext extends RunEventOrigin {
 }
 
 interface RunEventBaseRecord {
-  schemaVersion: 1;
   recordedAt: string;
   runId: string;
   eventType: RunEventType;
@@ -58,6 +74,44 @@ interface RunEventBaseRecord {
   controllerInstanceId?: string;
   sessionIndex?: number;
   attempt?: number;
+}
+
+export interface PersistedRunEventV1 extends RunEventBaseRecord {
+  schemaVersion: 1;
+  [field: string]: unknown;
+}
+
+export interface PersistedRunEventV2 extends RunEventBaseRecord {
+  schemaVersion: 2;
+  cursor: number;
+  [field: string]: unknown;
+}
+
+export interface RunAuditEvent {
+  type: RunEventType;
+  recordedAt: string;
+  source: RunEventRecordSource;
+  hostMode: RunExecutionHostMode;
+  controllerInstanceId?: string;
+  sessionIndex?: number;
+  attempt?: number;
+  fields: Record<string, unknown>;
+}
+
+export interface RunAuditEnvelope {
+  runId: string;
+  cursor: number;
+  event: RunAuditEvent;
+}
+
+export interface RunAuditHistory {
+  runId: string;
+  events: RunAuditEnvelope[];
+  lastCursor: number;
+}
+
+interface ReadRunAuditHistoryResult extends RunAuditHistory {
+  malformedCount: number;
 }
 
 export const EMBEDDED_RUN_EVENT_ORIGIN: RunEventOrigin = {
@@ -111,6 +165,153 @@ export function taskCommandRunEventContext(
   return makeRunEventContext("task_command", origin);
 }
 
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isRunEventRecordSource(value: unknown): value is RunEventRecordSource {
+  return typeof value === "string" && (RUN_EVENT_SOURCES as readonly string[]).includes(value);
+}
+
+function isRunEventType(value: unknown): value is RunEventType {
+  return typeof value === "string" && (RUN_EVENT_TYPES as readonly string[]).includes(value);
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+function isOptionalNonNegativeInteger(value: unknown): value is number | undefined {
+  return (
+    value === undefined || (typeof value === "number" && Number.isInteger(value) && value >= 0)
+  );
+}
+
+function parsePersistedRunEventV2(value: unknown): PersistedRunEventV2 | null {
+  if (!isObjectRecord(value)) {
+    return null;
+  }
+  if (value.schemaVersion !== 2) {
+    return null;
+  }
+  if (typeof value.recordedAt !== "string") {
+    return null;
+  }
+  if (!isPositiveInteger(value.cursor)) {
+    return null;
+  }
+  if (typeof value.runId !== "string") {
+    return null;
+  }
+  if (!isRunEventType(value.eventType)) {
+    return null;
+  }
+  if (!isRunEventRecordSource(value.source)) {
+    return null;
+  }
+  if (value.hostMode !== "embedded" && value.hostMode !== "daemon") {
+    return null;
+  }
+  if (value.controllerInstanceId !== undefined && typeof value.controllerInstanceId !== "string") {
+    return null;
+  }
+  if (!isOptionalNonNegativeInteger(value.sessionIndex)) {
+    return null;
+  }
+  if (!isOptionalNonNegativeInteger(value.attempt)) {
+    return null;
+  }
+  return value as PersistedRunEventV2;
+}
+
+function toRunAuditEnvelope(record: PersistedRunEventV2): RunAuditEnvelope {
+  const fields: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(record)) {
+    if (!RUN_EVENT_SHARED_KEYS.has(key)) {
+      fields[key] = value;
+    }
+  }
+  return {
+    runId: record.runId,
+    cursor: record.cursor,
+    event: {
+      type: record.eventType,
+      recordedAt: record.recordedAt,
+      source: record.source,
+      hostMode: record.hostMode,
+      ...(record.controllerInstanceId !== undefined
+        ? { controllerInstanceId: record.controllerInstanceId }
+        : {}),
+      ...(record.sessionIndex !== undefined ? { sessionIndex: record.sessionIndex } : {}),
+      ...(record.attempt !== undefined ? { attempt: record.attempt } : {}),
+      fields,
+    },
+  };
+}
+
+function readRunAuditHistoryInternal(params: {
+  workspaceDir: string;
+  runId: string;
+  limit?: number;
+}): ReadRunAuditHistoryResult {
+  const auditPath = runEventsPath(params.workspaceDir);
+  if (!existsSync(auditPath)) {
+    return {
+      runId: params.runId,
+      events: [],
+      lastCursor: 0,
+      malformedCount: 0,
+    };
+  }
+
+  const raw = readFileSync(auditPath, "utf8");
+  const lines = raw.length === 0 ? [] : raw.split("\n");
+  if (lines.at(-1) === "") {
+    lines.pop();
+  }
+
+  const events: RunAuditEnvelope[] = [];
+  let lastCursor = 0;
+  let malformedCount = 0;
+
+  for (const line of lines) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      malformedCount += 1;
+      continue;
+    }
+
+    const record = parsePersistedRunEventV2(parsed);
+    if (!record) {
+      malformedCount += 1;
+      continue;
+    }
+    if (record.runId !== params.runId) {
+      continue;
+    }
+    events.push(toRunAuditEnvelope(record));
+    lastCursor = record.cursor;
+  }
+
+  return {
+    runId: params.runId,
+    events:
+      params.limit === undefined ? events : events.slice(Math.max(0, events.length - params.limit)),
+    lastCursor,
+    malformedCount,
+  };
+}
+
+export function readRunAuditHistory(params: {
+  workspaceDir: string;
+  runId: string;
+  limit?: number;
+}): RunAuditHistory {
+  return readRunAuditHistoryInternal(params);
+}
+
 function appendRunEvent(params: {
   workspaceDir: string;
   runId: string;
@@ -119,10 +320,16 @@ function appendRunEvent(params: {
   sessionIndex?: number;
   attempt?: number;
   fields?: Record<string, unknown>;
-}): void {
-  const record: RunEventBaseRecord & Record<string, unknown> = {
+}): RunAuditEnvelope {
+  const cursor =
+    readRunAuditHistoryInternal({
+      workspaceDir: params.workspaceDir,
+      runId: params.runId,
+    }).lastCursor + 1;
+  const record: PersistedRunEventV2 & Record<string, unknown> = {
     schemaVersion: RUN_EVENT_SCHEMA_VERSION,
     recordedAt: new Date().toISOString(),
+    cursor,
     runId: params.runId,
     eventType: params.eventType,
     source: params.context.source,
@@ -135,6 +342,7 @@ function appendRunEvent(params: {
     ...(params.fields ?? {}),
   };
   appendTextFileDurable(runEventsPath(params.workspaceDir), `${JSON.stringify(record)}\n`);
+  return toRunAuditEnvelope(record);
 }
 
 export function appendRunCreatedEvent(params: {
@@ -143,8 +351,8 @@ export function appendRunCreatedEvent(params: {
   agentName: string;
   assignmentName: string | null;
   passive: boolean;
-}): void {
-  appendRunEvent({
+}): RunAuditEnvelope {
+  return appendRunEvent({
     workspaceDir: params.manifest.workspaceDir,
     runId: params.manifest.runId,
     eventType: "run.created",
@@ -167,8 +375,8 @@ export function appendRunStartedEvent(params: {
   sessionIndex: number;
   backendSessionIdAtStart: string | null;
   resumed: boolean;
-}): void {
-  appendRunEvent({
+}): RunAuditEnvelope {
+  return appendRunEvent({
     workspaceDir: params.manifest.workspaceDir,
     runId: params.manifest.runId,
     eventType: params.resumed ? "run.resumed" : "run.started",
@@ -191,8 +399,8 @@ export function appendRunBackendSessionUpdatedEvent(params: {
   reason: BackendSessionUpdateReason;
   sessionIndex?: number;
   attempt?: number;
-}): void {
-  appendRunEvent({
+}): RunAuditEnvelope {
+  return appendRunEvent({
     workspaceDir: params.manifest.workspaceDir,
     runId: params.manifest.runId,
     eventType: "run.backend_session_updated",
@@ -217,8 +425,8 @@ export function appendRunAttemptRecordedEvent(params: {
   timedOut: boolean;
   backendSessionIdAtStart: string | null;
   backendSessionIdCaptured: string | null;
-}): void {
-  appendRunEvent({
+}): RunAuditEnvelope {
+  return appendRunEvent({
     workspaceDir: params.manifest.workspaceDir,
     runId: params.manifest.runId,
     eventType: "run.attempt_recorded",
@@ -247,8 +455,8 @@ export function appendRunHookRecordedEvent(params: {
   attempt?: number | null;
   taskId?: string | null;
   summary?: string | null;
-}): void {
-  appendRunEvent({
+}): RunAuditEnvelope {
+  return appendRunEvent({
     workspaceDir: params.manifest.workspaceDir,
     runId: params.manifest.runId,
     eventType: "run.hook_recorded",
@@ -277,8 +485,8 @@ export function appendRunRetryingEvent(params: {
   sessionIndex: number;
   incompleteCount: number;
   invalidStatusCount: number;
-}): void {
-  appendRunEvent({
+}): RunAuditEnvelope {
+  return appendRunEvent({
     workspaceDir: params.manifest.workspaceDir,
     runId: params.manifest.runId,
     eventType: "run.retrying",
@@ -302,8 +510,8 @@ export function appendRunFinishedEvent(params: {
   tasksCompleted: number;
   tasksTotal: number;
   sessionIndex?: number;
-}): void {
-  appendRunEvent({
+}): RunAuditEnvelope {
+  return appendRunEvent({
     workspaceDir: params.manifest.workspaceDir,
     runId: params.manifest.runId,
     eventType: "run.finished",
@@ -322,8 +530,8 @@ export function appendRunAbortedEvent(params: {
   manifest: Pick<RunManifest, "workspaceDir" | "runId">;
   context: RunEventWriteContext;
   sessionIndex: number;
-}): void {
-  appendRunEvent({
+}): RunAuditEnvelope {
+  return appendRunEvent({
     workspaceDir: params.manifest.workspaceDir,
     runId: params.manifest.runId,
     eventType: "run.aborted",
@@ -336,8 +544,8 @@ export function appendRunResumeRejectedEvent(params: {
   manifest: Pick<RunManifest, "workspaceDir" | "runId">;
   context: RunEventWriteContext;
   sessionIndex: number;
-}): void {
-  appendRunEvent({
+}): RunAuditEnvelope {
+  return appendRunEvent({
     workspaceDir: params.manifest.workspaceDir,
     runId: params.manifest.runId,
     eventType: "run.resume_rejected",
@@ -350,8 +558,8 @@ export function appendRunReadyEvent(params: {
   manifest: Pick<RunManifest, "workspaceDir" | "runId">;
   context: RunEventWriteContext;
   previousStatus: ManifestStatus;
-}): void {
-  appendRunEvent({
+}): RunAuditEnvelope {
+  return appendRunEvent({
     workspaceDir: params.manifest.workspaceDir,
     runId: params.manifest.runId,
     eventType: "run.ready",
@@ -366,8 +574,8 @@ export function appendRunResetEvent(params: {
   manifest: Pick<RunManifest, "workspaceDir" | "runId">;
   context: RunEventWriteContext;
   previousStatus: ManifestStatus;
-}): void {
-  appendRunEvent({
+}): RunAuditEnvelope {
+  return appendRunEvent({
     workspaceDir: params.manifest.workspaceDir,
     runId: params.manifest.runId,
     eventType: "run.reset",
@@ -381,8 +589,8 @@ export function appendRunResetEvent(params: {
 export function appendRunArchivedEvent(params: {
   manifest: Pick<RunManifest, "workspaceDir" | "runId">;
   context: RunEventWriteContext;
-}): void {
-  appendRunEvent({
+}): RunAuditEnvelope {
+  return appendRunEvent({
     workspaceDir: params.manifest.workspaceDir,
     runId: params.manifest.runId,
     eventType: "run.archived",
@@ -393,8 +601,8 @@ export function appendRunArchivedEvent(params: {
 export function appendRunUnarchivedEvent(params: {
   manifest: Pick<RunManifest, "workspaceDir" | "runId">;
   context: RunEventWriteContext;
-}): void {
-  appendRunEvent({
+}): RunAuditEnvelope {
+  return appendRunEvent({
     workspaceDir: params.manifest.workspaceDir,
     runId: params.manifest.runId,
     eventType: "run.unarchived",
@@ -407,8 +615,8 @@ export function appendRunRenamedEvent(params: {
   context: RunEventWriteContext;
   previousName: string | null;
   nextName: string | null;
-}): void {
-  appendRunEvent({
+}): RunAuditEnvelope {
+  return appendRunEvent({
     workspaceDir: params.manifest.workspaceDir,
     runId: params.manifest.runId,
     eventType: "run.renamed",
@@ -425,8 +633,8 @@ export function appendTaskAddedEvent(params: {
   context: RunEventWriteContext;
   taskId: string;
   taskTitle: string;
-}): void {
-  appendRunEvent({
+}): RunAuditEnvelope {
+  return appendRunEvent({
     workspaceDir: params.manifest.workspaceDir,
     runId: params.manifest.runId,
     eventType: "task.added",
@@ -448,8 +656,8 @@ export function appendTaskUpdatedEvent(params: {
   statusBefore?: TaskStatus;
   statusAfter?: TaskStatus;
   notesChanged: boolean;
-}): void {
-  appendRunEvent({
+}): RunAuditEnvelope {
+  return appendRunEvent({
     workspaceDir: params.manifest.workspaceDir,
     runId: params.manifest.runId,
     eventType: "task.updated",

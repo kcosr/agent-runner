@@ -12,7 +12,9 @@ import {
   useRef,
   useState,
 } from "react";
+import { type AuditMessagePart, formatAuditEvent } from "../lib/audit-formatter.js";
 import { formatBytes, formatTimestamp, formatTimestampWithRelative } from "../lib/format.js";
+import type { RunAuditState } from "../lib/run-audit.js";
 import { getRunPrimaryAction } from "../lib/run-primary-action.js";
 import type { RunTimelineState } from "../lib/run-timeline.js";
 import type { DrawerDetailSection } from "../lib/settings.js";
@@ -201,6 +203,21 @@ function scrollElementToBottom(element: HTMLElement) {
   element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
 }
 
+function renderAuditMessagePart(part: AuditMessagePart, key: string) {
+  switch (part.type) {
+    case "code":
+      return <code key={key}>{part.text}</code>;
+    case "strong":
+      return <strong key={key}>{part.text}</strong>;
+    case "status":
+      return <StatusBadge key={key} status={part.status} />;
+    case "text":
+      return <span key={key}>{part.text}</span>;
+    default:
+      return null;
+  }
+}
+
 interface AttachmentRowEntry {
   attachment: RunAttachment | AttachmentListEntry;
   ownerRunId: string;
@@ -281,6 +298,7 @@ export function RunDetailDrawer({
   onSelectSection,
   onSubmitResume,
   onTriggerPrimaryAction,
+  auditState,
   timelineState,
   onUnarchive,
   onUploadAttachment,
@@ -319,6 +337,7 @@ export function RunDetailDrawer({
   onSelectSection: (section: DrawerDetailSection) => void;
   onSubmitResume: () => Promise<void>;
   onTriggerPrimaryAction: () => Promise<void>;
+  auditState: RunAuditState;
   resumeDialogOpen: boolean;
   resumeMessageDraft: string;
   resumeMessageExpanded: boolean;
@@ -378,6 +397,7 @@ export function RunDetailDrawer({
   const uploadAttachmentPending = actionPending === "upload-attachment";
   const removeAttachmentPending = actionPending === "remove-attachment";
   const downloadAttachmentPending = actionPending === "download-attachment";
+  const auditEvents = auditState.history?.events ?? [];
   const visibleName = run.name ?? "Unnamed";
   const canEditDependencies = run.status === "initialized" && run.archivedAt === null;
   const addDependencyPending = actionPending === "add-dependency";
@@ -1350,6 +1370,17 @@ export function RunDetailDrawer({
               ) : null}
             </button>
             <button
+              aria-selected={activeSection === "audit"}
+              className={activeSection === "audit" ? "tab active" : "tab"}
+              onClick={() => onSelectSection("audit")}
+              type="button"
+            >
+              Audit
+              {auditEvents.length > 0 ? (
+                <span className="tab-count"> {auditEvents.length}</span>
+              ) : null}
+            </button>
+            <button
               aria-selected={activeSection === "data"}
               className={activeSection === "data" ? "tab active" : "tab"}
               onClick={() => onSelectSection("data")}
@@ -1449,6 +1480,85 @@ export function RunDetailDrawer({
                   <div className="drawer-state">
                     <h3>Group attachments failed to load</h3>
                     <p>{groupAttachmentsQuery.error.message}</p>
+                  </div>
+                ) : null}
+              </div>
+            </section>
+          ) : null}
+
+          {activeSection === "audit" ? (
+            <section aria-label="Audit" className="drawer-panel drawer-panel--audit">
+              <div className="drawer-panel-card timeline-panel">
+                {auditState.stale ? (
+                  <div className="notice" data-tone="warning">
+                    <span className="notice__message">
+                      Audit sync is stale. Reload to resync the persisted history and live stream.
+                    </span>
+                  </div>
+                ) : null}
+
+                {auditState.error && auditEvents.length === 0 ? (
+                  <div className="drawer-state">
+                    <h3>Audit history failed to load</h3>
+                    <p>{auditState.error}</p>
+                    <button className="btn" onClick={auditState.reload} type="button">
+                      Reload audit history
+                    </button>
+                  </div>
+                ) : null}
+
+                {auditState.isLoading && auditEvents.length === 0 ? (
+                  <p className="muted-inline">Loading audit history…</p>
+                ) : null}
+
+                {!auditState.isLoading && auditEvents.length === 0 && !auditState.error ? (
+                  <div className="drawer-state">
+                    <h3>No audit events yet</h3>
+                    <p>No persisted audit history is available for this run.</p>
+                    {auditState.stale ? (
+                      <button className="btn" onClick={auditState.reload} type="button">
+                        Reconnect and reload
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {auditEvents.length > 0 ? (
+                  <div className="dependency-section">
+                    <div className="dependency-summary">
+                      <span>
+                        {auditEvents.length} audit event{auditEvents.length === 1 ? "" : "s"}
+                      </span>
+                      <button className="btn" onClick={auditState.reload} type="button">
+                        Reload
+                      </button>
+                    </div>
+                    {auditState.error ? <p className="muted-inline">{auditState.error}</p> : null}
+                    <ul aria-label="Audit events" className="dependency-list">
+                      {auditEvents.map((envelope) => {
+                        const formatted = formatAuditEvent(envelope.event);
+                        return (
+                          <li className="dependency-row" key={envelope.cursor}>
+                            <div className="dependency-copy">
+                              <span className="dependency-name">
+                                {formatted.message.map((part, index) =>
+                                  renderAuditMessagePart(part, `${envelope.cursor}-${index}`),
+                                )}
+                              </span>
+                              <span className="dependency-meta">
+                                <span className="dependency-meta-id mono">
+                                  {formatTimestamp(envelope.event.recordedAt)}
+                                </span>
+                                <span className="dependency-meta-id mono">#{envelope.cursor}</span>
+                                <span className="dependency-meta-id mono">
+                                  {envelope.event.source}
+                                </span>
+                              </span>
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
                   </div>
                 ) : null}
               </div>

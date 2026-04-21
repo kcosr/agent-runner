@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -15,6 +15,7 @@ import { updateTask as updateTaskViaApp } from "../packages/core/dist/app/servic
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { readyRun } from "../packages/core/dist/core/commands/service.js";
 import { resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js";
+import { readRunAuditHistory } from "../packages/core/dist/core/run/run-events.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import {
   completeAllTasksFromPrompt,
@@ -145,6 +146,14 @@ function runCli(args, opts = {}) {
   });
 }
 
+function runCliResult(args, opts = {}) {
+  return spawnSync("node", [CLI_PATH, ...args], {
+    cwd: opts.cwd ?? process.cwd(),
+    env: { ...process.env, ...sharedRuntimeEnv(opts.cwd ?? process.cwd()) },
+    encoding: "utf8",
+  });
+}
+
 function readAuditPath(workspaceDir) {
   return join(workspaceDir, "run-events.jsonl");
 }
@@ -159,6 +168,14 @@ function readAuditRecords(workspaceDir) {
     return [];
   }
   return raw.split("\n").map((line) => JSON.parse(line));
+}
+
+function readAuditHistory(workspaceDir, runId, options = {}) {
+  return readRunAuditHistory({
+    workspaceDir,
+    runId,
+    limit: options.limit,
+  });
 }
 
 function patchManifest(workspaceDir, mutator) {
@@ -189,21 +206,70 @@ test("audit log is created lazily for a logless run and task updates stay compac
 
   const records = readAuditRecords(init.workspaceDir);
   assert.equal(records.length, 1);
-  assert.deepEqual(records[0], {
-    schemaVersion: 1,
-    recordedAt: records[0].recordedAt,
-    runId: init.runId,
-    eventType: "task.updated",
-    source: "task_command",
-    hostMode: "embedded",
-    taskId: "t1",
-    taskTitle: "First",
-    command: "set",
-    statusBefore: "pending",
-    statusAfter: "in_progress",
-    notesChanged: false,
-  });
+  assert.equal(records[0].schemaVersion, 2);
+  assert.equal(records[0].cursor, 1);
+  assert.equal(records[0].runId, init.runId);
+  assert.equal(records[0].eventType, "task.updated");
+  assert.equal(records[0].source, "task_command");
+  assert.equal(records[0].hostMode, "embedded");
+  assert.equal(records[0].taskId, "t1");
+  assert.equal(records[0].taskTitle, "First");
+  assert.equal(records[0].command, "set");
+  assert.equal(records[0].statusBefore, "pending");
+  assert.equal(records[0].statusAfter, "in_progress");
+  assert.equal(records[0].notesChanged, false);
+  const history = readAuditHistory(init.workspaceDir, init.runId);
+  assert.equal(history.lastCursor, 1);
+  assert.equal(history.malformedCount, 0);
+  assert.deepEqual(history.events, [
+    {
+      runId: init.runId,
+      cursor: 1,
+      event: {
+        type: "task.updated",
+        recordedAt: records[0].recordedAt,
+        source: "task_command",
+        hostMode: "embedded",
+        fields: {
+          taskId: "t1",
+          taskTitle: "First",
+          command: "set",
+          statusBefore: "pending",
+          statusAfter: "in_progress",
+          notesChanged: false,
+        },
+      },
+    },
+  ]);
   assert.equal(readAuditRaw(init.workspaceDir).includes("Do thing one."), false);
+});
+
+test("audit history uses last persisted cursor and skips malformed rows", async () => {
+  const dir = tempDir();
+  writeAuditBundle(dir);
+  const init = await runIn(dir, {
+    agentName: "audit-passive",
+    assignmentName: "audit-passive-work",
+    backend: mockBackend(async () => {
+      throw new Error("backend should not be invoked during init");
+    }, "passive"),
+    initialize: true,
+  });
+
+  runCli(["task", "set", init.runId, "t1", "--status", "in_progress"], { cwd: dir });
+  runCli(["task", "append-notes", init.runId, "t1", "--text", "waiting"], { cwd: dir });
+  writeFileSync(
+    readAuditPath(init.workspaceDir),
+    `${readAuditRaw(init.workspaceDir)}{"schemaVersion":1}\nnot-json\n`,
+  );
+
+  const history = readAuditHistory(init.workspaceDir, init.runId, { limit: 1 });
+  assert.equal(history.lastCursor, 3);
+  assert.equal(history.events.length, 1);
+  assert.equal(history.events[0]?.cursor, 3);
+  assert.equal(history.events[0]?.event.type, "task.updated");
+  assert.equal(history.events[0]?.event.fields.command, "append_notes");
+  assert.equal(history.malformedCount, 2);
 });
 
 test("execute-after-init appends ordered created/started/attempt/finished records and omits transcripts", async () => {
@@ -251,6 +317,10 @@ test("execute-after-init appends ordered created/started/attempt/finished record
       "run.attempt_recorded",
       "run.finished",
     ],
+  );
+  assert.deepEqual(
+    records.map((record) => record.cursor),
+    [1, 2, 3, 4, 5, 6],
   );
   assert.equal(records[0].initialStatus, "initialized");
   assert.equal(records[1].reason, "bootstrap_import");
@@ -878,4 +948,45 @@ test("daemon-context task commands append one task event with daemon host metada
   assert.equal(taskUpdates[0].source, "task_command");
   assert.equal(taskUpdates[0].hostMode, "daemon");
   assert.equal(taskUpdates[0].controllerInstanceId, "daemon-task-test");
+});
+
+test("run audit CLI renders empty, text, json, and not-found responses", async () => {
+  const dir = tempDir();
+  writeAuditBundle(dir);
+  const init = await runIn(dir, {
+    agentName: "audit-passive",
+    assignmentName: "audit-passive-work",
+    backend: mockBackend(async () => {
+      throw new Error("backend should not be invoked during init");
+    }, "passive"),
+    initialize: true,
+  });
+
+  unlinkSync(readAuditPath(init.workspaceDir));
+  assert.equal(runCli(["run", "audit", init.runId], { cwd: dir }), "No audit events found.\n");
+
+  runCli(["task", "set", init.runId, "t1", "--status", "completed"], { cwd: dir });
+
+  const text = runCli(["run", "audit", init.runId], { cwd: dir });
+  assert.match(text, /task\.updated/);
+  assert.match(text, /statusBefore="pending"/);
+  assert.match(text, /statusAfter="completed"/);
+
+  const json = JSON.parse(
+    runCli(["run", "audit", init.runId, "--output-format", "json", "--limit", "1"], {
+      cwd: dir,
+    }),
+  );
+  assert.equal(json.lastCursor, 1);
+  assert.equal(json.events.length, 1);
+  assert.equal(json.events[0].cursor, 1);
+  assert.equal(json.events[0].event.type, "task.updated");
+
+  const missingId = runCliResult(["run", "audit"], { cwd: dir });
+  assert.equal(missingId.status, 1);
+  assert.match(missingId.stderr, /run audit requires a run id/);
+
+  const notFound = runCliResult(["run", "audit", "run-missing"], { cwd: dir });
+  assert.equal(notFound.status, 2);
+  assert.match(notFound.stderr, /could not find run manifest for "run-missing"/);
 });

@@ -8,7 +8,11 @@ import type {
   RunAttachmentDownloadResult,
   RunAttachmentRemoveResult,
 } from "../contracts/attachments.js";
-import type { RunTimelineAttempt, RunTimelineHistory } from "../contracts/events.js";
+import type {
+  RunAuditHistory,
+  RunTimelineAttempt,
+  RunTimelineHistory,
+} from "../contracts/events.js";
 import type {
   RunArchiveResult,
   RunBackendSessionResult,
@@ -61,6 +65,8 @@ import type { AgentConfig, AssignmentConfig } from "../core/config/schema.js";
 import type { AttemptLog, AttemptRecord } from "../core/run/manifest.js";
 import { type RunExecution, resolveResumeTarget } from "../core/run/manifest.js";
 import type { RunEventOrigin } from "../core/run/run-events.js";
+import type { RunAuditEnvelope } from "../core/run/run-events.js";
+import { readRunAuditHistory } from "../core/run/run-events.js";
 import type { RunEvent, RunOutcome } from "../core/run/run-loop.js";
 import { executeRunCommand } from "../run-command.js";
 
@@ -109,6 +115,7 @@ export interface StartRunRequest {
   execution?: RunExecution;
   abortSignal?: AbortSignal;
   emitEvent?: (event: RunEvent) => void;
+  emitAuditEnvelope?: (envelope: RunAuditEnvelope) => void;
 }
 
 export interface ResumeRunRequest {
@@ -117,11 +124,14 @@ export interface ResumeRunRequest {
   execution?: RunExecution;
   abortSignal?: AbortSignal;
   emitEvent?: (event: RunEvent) => void;
+  emitAuditEnvelope?: (envelope: RunAuditEnvelope) => void;
 }
 
 // Optional host/controller provenance for mutation calls that should be
 // reflected in per-run diagnostic audit records.
 export interface MutationAuditContext extends RunEventOrigin {}
+
+type AuditEnvelopeEmitter = (envelope: RunAuditEnvelope) => void;
 
 function toDefinitionDetail(result: ReturnType<typeof showDefinition>): DefinitionDetail {
   if (result.kind === "launcher") {
@@ -216,6 +226,21 @@ export function getRunTimelineHistory(target: string): RunTimelineHistory {
   };
 }
 
+export function getRunAuditHistory(
+  target: string,
+  opts: {
+    limit?: number;
+  } = {},
+): RunAuditHistory {
+  const detail = getRun(target);
+  const resolved = resolveResumeTarget(detail.workspaceDir);
+  return readRunAuditHistory({
+    workspaceDir: resolved.workspaceDir,
+    runId: resolved.manifest.runId,
+    limit: opts.limit,
+  });
+}
+
 export function getRunBrief(target: string): string {
   return readBrief(target);
 }
@@ -280,20 +305,39 @@ export function getDefinition(
   return toDefinitionDetail(showDefinition(kind, target, cwd));
 }
 
-export function archive(target: string, auditContext?: MutationAuditContext): RunArchiveResult {
-  return archiveRun(target, auditContext);
+export function archive(
+  target: string,
+  auditContext?: MutationAuditContext,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
+): RunArchiveResult {
+  return archiveRun(target, auditContext, emitAuditEnvelope);
 }
 
-export function unarchive(target: string, auditContext?: MutationAuditContext): RunArchiveResult {
-  return unarchiveRun(target, auditContext);
+export function unarchive(
+  target: string,
+  auditContext?: MutationAuditContext,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
+): RunArchiveResult {
+  return unarchiveRun(target, auditContext, emitAuditEnvelope);
 }
 
-export function reset(target: string, auditContext?: MutationAuditContext): RunDetail {
-  return toRunDetail({ manifest: resetRun(target, auditContext).manifest, isLive: false });
+export function reset(
+  target: string,
+  auditContext?: MutationAuditContext,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
+): RunDetail {
+  return toRunDetail({
+    manifest: resetRun(target, auditContext, emitAuditEnvelope).manifest,
+    isLive: false,
+  });
 }
 
-export function readyRun(target: string, auditContext?: MutationAuditContext): RunDetail {
-  return markRunReady(target, auditContext);
+export function readyRun(
+  target: string,
+  auditContext?: MutationAuditContext,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
+): RunDetail {
+  return markRunReady(target, auditContext, emitAuditEnvelope);
 }
 
 export function deleteArchivedRun(target: string): RunDeleteResult {
@@ -304,8 +348,9 @@ export function renameRun(
   target: string,
   input: { name: string | null },
   auditContext?: MutationAuditContext,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
 ): Promise<RunNameResult> {
-  return setRunName(target, input, auditContext);
+  return setRunName(target, input, auditContext, emitAuditEnvelope);
 }
 
 export function updateRunNote(target: string, input: { note: string | null }): RunNoteResult {
@@ -320,15 +365,17 @@ export function updateRunBackendSession(
   target: string,
   input: { backendSessionId: string },
   auditContext?: MutationAuditContext,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
 ): RunBackendSessionResult {
-  return setRunBackendSession(target, input, auditContext);
+  return setRunBackendSession(target, input, auditContext, emitAuditEnvelope);
 }
 
 export function clearBackendSession(
   target: string,
   auditContext?: MutationAuditContext,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
 ): RunBackendSessionResult {
-  return clearRunBackendSession(target, auditContext);
+  return clearRunBackendSession(target, auditContext, emitAuditEnvelope);
 }
 
 export function addDependency(target: string, dependencyRunId: string): RunDependenciesResult {
@@ -377,8 +424,9 @@ export function updateTask(
   taskId: string,
   update: { status?: string; notes?: string },
   auditContext?: MutationAuditContext,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
 ): Promise<RunTaskSummary> {
-  return setTask(target, taskId, update, auditContext).then((result) =>
+  return setTask(target, taskId, update, auditContext, emitAuditEnvelope).then((result) =>
     getTaskFromMutation(result.task),
   );
 }
@@ -388,8 +436,9 @@ export function appendNotes(
   taskId: string,
   text: string,
   auditContext?: MutationAuditContext,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
 ): Promise<RunTaskSummary> {
-  return appendTaskNotes(target, taskId, text, auditContext).then((result) =>
+  return appendTaskNotes(target, taskId, text, auditContext, emitAuditEnvelope).then((result) =>
     getTaskFromMutation(result.task),
   );
 }
@@ -398,8 +447,11 @@ export function createTask(
   target: string,
   input: { title: string; body?: string },
   auditContext?: MutationAuditContext,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
 ): Promise<RunTaskSummary> {
-  return addTask(target, input, auditContext).then((result) => getTaskFromMutation(result.task));
+  return addTask(target, input, auditContext, emitAuditEnvelope).then((result) =>
+    getTaskFromMutation(result.task),
+  );
 }
 
 function getTaskFromMutation(task: ReturnType<typeof showTask>["task"]): RunTaskSummary {
@@ -426,6 +478,7 @@ export async function initRun(request: StartRunRequest): Promise<RunDetail> {
     execution: request.execution,
     abortSignal: request.abortSignal,
     emitEvent: request.emitEvent,
+    emitAuditEnvelope: request.emitAuditEnvelope,
   });
   return toRunDetail({ manifest: outcome.manifest, isLive: false });
 }
@@ -443,6 +496,7 @@ export function startRun(request: StartRunRequest): Promise<RunOutcome> {
     execution: request.execution,
     abortSignal: request.abortSignal,
     emitEvent: request.emitEvent,
+    emitAuditEnvelope: request.emitAuditEnvelope,
   });
 }
 
@@ -455,5 +509,6 @@ export function resumeRun(request: ResumeRunRequest): Promise<RunOutcome> {
     execution: request.execution,
     abortSignal: request.abortSignal,
     emitEvent: request.emitEvent,
+    emitAuditEnvelope: request.emitAuditEnvelope,
   });
 }

@@ -4,11 +4,12 @@ import type {
   RunAttachment,
   RunAttachmentRemoveResult,
 } from "@task-runner/core/contracts/attachments.js";
-import type { RunTimelineHistory } from "@task-runner/core/contracts/events.js";
+import type { RunAuditHistory, RunTimelineHistory } from "@task-runner/core/contracts/events.js";
 import {
   attachmentListEntrySchema,
   runArchiveResultSchema,
   runAttachmentSchema,
+  runAuditHistorySchema,
   runBackendSessionResultSchema,
   runDeleteResultSchema,
   runDependenciesResultSchema,
@@ -157,6 +158,19 @@ async function readRunTimelineHistory(response: Response): Promise<RunTimelineHi
     "history",
     runTimelineHistorySchema,
     "Run timeline history",
+  );
+}
+
+async function readRunAuditHistory(response: Response): Promise<RunAuditHistory> {
+  if (!response.ok) {
+    return await readError(response);
+  }
+  return parseField(
+    await parseResponseJson(response, "Run audit history"),
+    response.status,
+    "history",
+    runAuditHistorySchema,
+    "Run audit history",
   );
 }
 
@@ -390,6 +404,26 @@ export function createApiClient(config: AppRuntimeConfig) {
         },
       );
       return await readRunTimelineHistory(response);
+    },
+    async getRunAuditHistory(
+      runId: string,
+      options: RequestOptions & { limit?: number } = {},
+    ): Promise<RunAuditHistory> {
+      const params = new URLSearchParams();
+      if (options.limit !== undefined) {
+        params.set("limit", String(options.limit));
+      }
+      const response = await fetch(
+        joinPath(
+          config.apiBasePath,
+          `/runs/${encodeURIComponent(runId)}/audit${params.size > 0 ? `?${params.toString()}` : ""}`,
+        ),
+        {
+          headers: { accept: "application/json" },
+          signal: options.signal,
+        },
+      );
+      return await readRunAuditHistory(response);
     },
     async listAttachments(
       runId: string,

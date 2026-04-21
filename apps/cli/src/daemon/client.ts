@@ -1,5 +1,6 @@
-import type { RunTimelineEvent } from "@task-runner/core/contracts/events.js";
+import type { RunAuditEvent, RunTimelineEvent } from "@task-runner/core/contracts/events.js";
 import {
+  runAuditEventSchema,
   runDetailSchema,
   runSummarySchema,
   runTimelineEventSchema,
@@ -11,6 +12,7 @@ import type {
   JsonRpcNotification,
   JsonRpcRequest,
   JsonRpcResponse,
+  RunAuditNotificationParams,
   RunDetailNotificationParams,
   RunSummaryNotificationParams,
   RunTimelineNotificationParams,
@@ -49,6 +51,7 @@ type PendingCall = {
 export type DaemonSubscriptionNotification =
   | ({ method: "run.summary" } & RunSummaryNotificationParams)
   | ({ method: "run.detail" } & RunDetailNotificationParams)
+  | ({ method: "run.audit" } & RunAuditNotificationParams)
   | ({ method: "run.timeline" } & RunTimelineNotificationParams);
 
 const runSummaryNotificationSchema = z
@@ -85,6 +88,14 @@ const runTimelineNotificationSchema = z.object({
   event: runTimelineEventSchema,
 });
 
+const runAuditNotificationSchema = z.object({
+  method: z.literal("run.audit"),
+  subscriptionId: z.string(),
+  runId: z.string(),
+  cursor: z.number().int().positive(),
+  event: runAuditEventSchema,
+});
+
 const runSummaryNotificationResultSchema: z.ZodType<DaemonSubscriptionNotification> =
   runSummaryNotificationSchema;
 const runDetailNotificationResultSchema: z.ZodType<DaemonSubscriptionNotification> =
@@ -96,6 +107,15 @@ const runTimelineNotificationResultSchema = runTimelineNotificationSchema.transf
     runId: value.runId,
     cursor: value.cursor,
     event: value.event as RunTimelineEvent,
+  }),
+);
+const runAuditNotificationResultSchema = runAuditNotificationSchema.transform(
+  (value): DaemonSubscriptionNotification => ({
+    method: "run.audit",
+    subscriptionId: value.subscriptionId,
+    runId: value.runId,
+    cursor: value.cursor,
+    event: value.event as RunAuditEvent,
   }),
 );
 
@@ -119,6 +139,13 @@ function parseSubscriptionNotification(
     }
     case "run.timeline": {
       const result = runTimelineNotificationResultSchema.safeParse({
+        method: parsed.method,
+        ...(parsed.params as object),
+      });
+      return result.success ? result.data : null;
+    }
+    case "run.audit": {
+      const result = runAuditNotificationResultSchema.safeParse({
         method: parsed.method,
         ...(parsed.params as object),
       });

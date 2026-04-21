@@ -31,6 +31,7 @@ export type DrawerDetailSection =
   | "notes"
   | "attachments"
   | "dependencies"
+  | "audit"
   | "events"
   | "data";
 

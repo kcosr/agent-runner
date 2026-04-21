@@ -1,26 +1,16 @@
 import type { AppRuntimeConfig } from "@task-runner/core/contracts/app-config.js";
-import type {
-  RunTimelineEnvelope,
-  RunTimelineHistory,
-} from "@task-runner/core/contracts/events.js";
+import type { RunAuditEnvelope, RunAuditHistory } from "@task-runner/core/contracts/events.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createApiClient } from "./api-client.js";
-import { subscribeToRunTimelineEvents } from "./sse.js";
+import { type ApplyEnvelopeResult, applyCursoredEnvelope } from "./run-timeline.js";
+import { subscribeToRunAuditEvents } from "./sse.js";
 
-export interface RunTimelineState {
+export interface RunAuditState {
   error?: string;
-  history: RunTimelineHistory | null;
+  history: RunAuditHistory | null;
   isLoading: boolean;
   stale: boolean;
-}
-
-export interface ApplyEnvelopeResult<THistory> {
-  history: THistory;
-  requiresReload: boolean;
-}
-
-export interface CursoredEnvelope {
-  cursor: number;
+  reload: () => void;
 }
 
 const MAX_CONSECUTIVE_RELOADS = 5;
@@ -31,98 +21,30 @@ function isAbortError(error: unknown): boolean {
     : error instanceof Error && error.name === "AbortError";
 }
 
-function cloneHistory(history: RunTimelineHistory): RunTimelineHistory {
+function cloneHistory(history: RunAuditHistory): RunAuditHistory {
   return {
     ...history,
-    attempts: history.attempts.map((attempt) => ({ ...attempt })),
+    events: history.events.map((event) => ({
+      ...event,
+      event: {
+        ...event.event,
+        fields: { ...event.event.fields },
+      },
+    })),
   };
 }
 
-function findLiveAttempt(history: RunTimelineHistory) {
-  for (let index = history.attempts.length - 1; index >= 0; index--) {
-    const attempt = history.attempts[index];
-    if (attempt?.live) {
-      return attempt;
-    }
-  }
-  return null;
-}
-
-export function applyCursoredEnvelope<
-  THistory extends { lastCursor: number },
-  TEnvelope extends CursoredEnvelope,
->(
-  history: THistory,
-  envelope: TEnvelope,
-  cloneHistory: (history: THistory) => THistory,
-  apply: (history: THistory, envelope: TEnvelope) => ApplyEnvelopeResult<THistory>,
-): ApplyEnvelopeResult<THistory> {
-  if (envelope.cursor <= history.lastCursor) {
-    return { history, requiresReload: false };
-  }
-  if (envelope.cursor > history.lastCursor + 1) {
-    return { history, requiresReload: true };
-  }
-  const next = cloneHistory(history);
-  next.lastCursor = envelope.cursor;
-  return apply(next, envelope);
-}
-
-export function applyEnvelope(
-  history: RunTimelineHistory,
-  envelope: RunTimelineEnvelope,
-): ApplyEnvelopeResult<RunTimelineHistory> {
-  return applyCursoredEnvelope(history, envelope, cloneHistory, (next) => {
-    switch (envelope.event.type) {
-      case "run_initialized":
-      case "caller_instructions":
-      case "run_started":
-        return { history: next, requiresReload: false };
-      case "attempt_started":
-        next.attempts = next.attempts.map((attempt) =>
-          attempt.live ? { ...attempt, live: false } : attempt,
-        );
-        next.attempts.push({
-          attempt: envelope.event.attempt,
-          sessionIndex: envelope.event.sessionIndex,
-          startedAt: envelope.event.startedAt,
-          endedAt: null,
-          prompt: envelope.event.prompt,
-          transcript: "",
-          notices: "",
-          exitCode: null,
-          timedOut: false,
-          live: true,
-        });
-        return { history: next, requiresReload: false };
-      case "agent_message_delta": {
-        const activeAttempt = findLiveAttempt(next);
-        if (!activeAttempt) {
-          return { history, requiresReload: true };
-        }
-        activeAttempt.transcript += envelope.event.text;
-        return { history: next, requiresReload: false };
-      }
-      case "backend_notice": {
-        const activeAttempt = findLiveAttempt(next);
-        if (!activeAttempt) {
-          return { history, requiresReload: false };
-        }
-        activeAttempt.notices += envelope.event.text;
-        return { history: next, requiresReload: false };
-      }
-      case "retrying":
-      case "run_aborted":
-      case "resume_rejected":
-      case "run_finished":
-        return { history, requiresReload: true };
-      default:
-        return { history, requiresReload: true };
-    }
+export function applyAuditEnvelope(
+  history: RunAuditHistory,
+  envelope: RunAuditEnvelope,
+): ApplyEnvelopeResult<RunAuditHistory> {
+  return applyCursoredEnvelope(history, envelope, cloneHistory, (next, currentEnvelope) => {
+    next.events.push(currentEnvelope);
+    return { history: next, requiresReload: false };
   });
 }
 
-export function useRunTimelineState({
+export function useRunAuditState({
   config,
   runId,
   runIsLive,
@@ -130,21 +52,22 @@ export function useRunTimelineState({
   config: AppRuntimeConfig;
   runId?: string;
   runIsLive: boolean;
-}): RunTimelineState {
+}): RunAuditState {
   const api = useMemo(() => createApiClient(config), [config]);
-  const [state, setState] = useState<RunTimelineState>({
+  const [state, setState] = useState<Omit<RunAuditState, "reload">>({
     history: null,
     isLoading: false,
     stale: false,
   });
-  const historyRef = useRef<RunTimelineHistory | null>(null);
+  const historyRef = useRef<RunAuditHistory | null>(null);
   const staleRef = useRef(false);
   const bootstrappedRef = useRef(false);
-  const bufferRef = useRef<RunTimelineEnvelope[]>([]);
+  const bufferRef = useRef<RunAuditEnvelope[]>([]);
   const loadSeqRef = useRef(0);
   const loadAbortControllerRef = useRef<AbortController | null>(null);
   const reloadCountRef = useRef(0);
   const previousRunIdRef = useRef<string | undefined>(undefined);
+  const reloadRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     historyRef.current = state.history;
@@ -163,6 +86,7 @@ export function useRunTimelineState({
       bootstrappedRef.current = false;
       bufferRef.current = [];
       setState({ history: null, isLoading: false, stale: false });
+      reloadRef.current = () => {};
       return;
     }
 
@@ -191,7 +115,7 @@ export function useRunTimelineState({
       loadAbortControllerRef.current = controller;
       setState((current) => ({ ...current, error: undefined, isLoading: true }));
       try {
-        const fetched = await api.getRunTimelineHistory(runId, { signal: controller.signal });
+        const fetched = await api.getRunAuditHistory(runId, { signal: controller.signal });
         if (disposed || loadSeq !== loadSeqRef.current) {
           return;
         }
@@ -200,7 +124,7 @@ export function useRunTimelineState({
         for (const envelope of [...bufferRef.current].sort(
           (left, right) => left.cursor - right.cursor,
         )) {
-          const result = applyEnvelope(merged, envelope);
+          const result = applyAuditEnvelope(merged, envelope);
           if (result.requiresReload) {
             bufferRef.current = [];
             staleRef.current = true;
@@ -231,7 +155,7 @@ export function useRunTimelineState({
           return;
         }
         setState({
-          error: error instanceof Error ? error.message : "Timeline failed to load",
+          error: error instanceof Error ? error.message : "Audit history failed to load",
           history: historyRef.current,
           isLoading: false,
           stale: true,
@@ -240,10 +164,11 @@ export function useRunTimelineState({
       }
     };
 
-    // On a run-id change, reset everything. On re-entering this effect for
-    // the same run (e.g. runIsLive flipping from true to false when the run
-    // ends), keep the already-loaded history so the drawer doesn't flash
-    // through an empty "Loading…" state.
+    reloadRef.current = () => {
+      reloadCountRef.current = 0;
+      void loadHistory();
+    };
+
     const sameRunId = previousRunIdRef.current === runId;
     previousRunIdRef.current = runId;
     if (!sameRunId) {
@@ -266,7 +191,7 @@ export function useRunTimelineState({
       };
     }
 
-    const unsubscribe = subscribeToRunTimelineEvents(config, runId, {
+    const unsubscribe = subscribeToRunAuditEvents(config, runId, {
       onOpen: () => {
         if (disposed) {
           return;
@@ -284,7 +209,7 @@ export function useRunTimelineState({
           return;
         }
 
-        const result = applyEnvelope(historyRef.current, envelope);
+        const result = applyAuditEnvelope(historyRef.current, envelope);
         if (result.requiresReload) {
           bufferRef.current = [];
           staleRef.current = true;
@@ -319,5 +244,8 @@ export function useRunTimelineState({
     };
   }, [api, config, runId, runIsLive]);
 
-  return state;
+  return {
+    ...state,
+    reload: () => reloadRef.current(),
+  };
 }

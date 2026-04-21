@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { RunAttachment } from "@task-runner/core/contracts/attachments.js";
-import type { RunTimelineHistory } from "@task-runner/core/contracts/events.js";
+import type { RunAuditHistory, RunTimelineHistory } from "@task-runner/core/contracts/events.js";
 import type { RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -342,6 +342,7 @@ function installFetchMock(
   state: {
     runs: RunSummary[];
     details: Record<string, RunDetail>;
+    auditHistories?: Record<string, RunAuditHistory>;
     timelineHistories?: Record<string, RunTimelineHistory>;
   },
   options?: {
@@ -570,6 +571,22 @@ function installFetchMock(
       const history = state.timelineHistories?.[runId] ?? {
         runId,
         attempts: [],
+        lastCursor: 0,
+      };
+      return new Response(JSON.stringify({ history }), { status: 200 });
+    }
+
+    const auditMatch = /\/api\/runs\/([^/]+)\/audit(?:\?.*)?$/.exec(url);
+    if (auditMatch && (!init?.method || init.method === "GET")) {
+      const runId = decodeURIComponent(auditMatch[1] ?? "");
+      if (!state.details[runId]) {
+        return new Response(JSON.stringify({ error: { message: "missing", code: "not_found" } }), {
+          status: 404,
+        });
+      }
+      const history = state.auditHistories?.[runId] ?? {
+        runId,
+        events: [],
         lastCursor: 0,
       };
       return new Response(JSON.stringify({ history }), { status: 200 });
@@ -1572,10 +1589,10 @@ describe("web app", () => {
 
     const runSections = await screen.findByRole("navigation", { name: "Run sections" });
     expect(runSections).toHaveClass("tabs", "tabs--scrollable");
-    expect(runSections.querySelectorAll(":scope > .tab")).toHaveLength(6);
+    expect(runSections.querySelectorAll(":scope > .tab")).toHaveLength(7);
   });
 
-  it("omits Attempts but keeps Data in the passive run-section tab strip", async () => {
+  it("omits Attempts but keeps Audit and Data in the passive run-section tab strip", async () => {
     installFetchMock({
       runs: [makeRun({ backend: "passive" })],
       details: {
@@ -1590,7 +1607,8 @@ describe("web app", () => {
     await user.click(await findRunCard("Build dashboard"));
 
     const runSections = await screen.findByRole("navigation", { name: "Run sections" });
-    expect(runSections.querySelectorAll(":scope > .tab")).toHaveLength(5);
+    expect(runSections.querySelectorAll(":scope > .tab")).toHaveLength(6);
+    expect(within(runSections).getByRole("button", { name: "Audit" })).toBeInTheDocument();
     expect(within(runSections).getByRole("button", { name: "Data" })).toBeInTheDocument();
     expect(within(runSections).queryByRole("button", { name: "Attempts" })).not.toBeInTheDocument();
   });
@@ -6908,7 +6926,7 @@ describe("web app", () => {
     await user.click(await findRunCard("Build dashboard"));
     expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
     await waitFor(() => {
-      expect(MockEventSource.instances).toHaveLength(3);
+      expect(MockEventSource.instances).toHaveLength(4);
     });
 
     await user.click(getCloseDetailButton());
@@ -6916,7 +6934,7 @@ describe("web app", () => {
 
     expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
     await waitFor(() => {
-      expect(MockEventSource.instances).toHaveLength(5);
+      expect(MockEventSource.instances).toHaveLength(7);
     });
   });
 

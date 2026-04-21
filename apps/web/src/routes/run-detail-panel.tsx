@@ -5,6 +5,7 @@ import type { CSSProperties } from "react";
 import { AttachmentPreviewDrawer } from "../components/attachment-preview-drawer.js";
 import { RunDetailDrawer } from "../components/run-detail-drawer.js";
 import { isNotFoundError } from "../lib/api-client.js";
+import type { RunAuditState } from "../lib/run-audit.js";
 import type { RunTimelineState } from "../lib/run-timeline.js";
 import type { DrawerDetailSection, RunDrawerView } from "../lib/settings.js";
 import type { RunActionPending } from "./use-runs-dashboard-state.js";
@@ -52,6 +53,7 @@ export function RunDetailPanel({
   selectedRunGroupAttachmentsQuery,
   selectedRunId,
   selectedRunQuery,
+  auditState,
   timelineState,
 }: {
   onAddDependency: (runId: string, dependencyRunId: string) => Promise<void>;
@@ -96,6 +98,7 @@ export function RunDetailPanel({
   selectedRunGroupAttachmentsQuery: UseQueryResult<AttachmentListEntry[], Error>;
   selectedRunId?: string;
   selectedRunQuery: UseQueryResult<RunDetail, Error>;
+  auditState: RunAuditState;
   timelineState: RunTimelineState;
 }) {
   if (!selectedRunId) {
@@ -255,6 +258,7 @@ export function RunDetailPanel({
       onSelectSection={onSelectDetailSection}
       onSubmitResume={onSubmitResume}
       onTriggerPrimaryAction={onTriggerPrimaryAction}
+      auditState={auditState}
       timelineState={timelineState}
       onUnarchive={() => onUnarchive(selectedRun.runId)}
       onUploadAttachment={(file) => onUploadAttachment(selectedRun.runId, file)}

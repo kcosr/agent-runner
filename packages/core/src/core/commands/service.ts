@@ -85,6 +85,7 @@ import {
 } from "../run/manifest.js";
 import {
   EMBEDDED_RUN_EVENT_ORIGIN,
+  type RunAuditEnvelope,
   type RunEventOrigin,
   appendRunArchivedEvent,
   appendRunBackendSessionUpdatedEvent,
@@ -196,6 +197,15 @@ export interface AttachmentReadResult {
   manifest: RunManifest;
   attachment: RunAttachment;
   absolutePath: string;
+}
+
+type AuditEnvelopeEmitter = (envelope: RunAuditEnvelope) => void;
+
+function emitPersistedAudit(
+  emitAuditEnvelope: AuditEnvelopeEmitter | undefined,
+  envelope: RunAuditEnvelope,
+): void {
+  emitAuditEnvelope?.(envelope);
 }
 
 type TaskMutationAuditEvent =
@@ -409,6 +419,7 @@ function persistTaskMap(
   tasks: Map<string, TaskState>,
   auditOrigin: RunEventOrigin,
   auditEvent: TaskMutationAuditEvent | null,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
 ): void {
   const statusBeforePersist = resolved.manifest.status;
   persistWorkspaceTaskState(resolved.manifest, tasks, {
@@ -421,23 +432,29 @@ function persistTaskMap(
       if (auditEvent) {
         const taskCommandContext = taskCommandRunEventContext(auditOrigin);
         if (auditEvent.type === "task.added") {
-          appendTaskAddedEvent({
-            manifest,
-            context: taskCommandContext,
-            taskId: auditEvent.taskId,
-            taskTitle: auditEvent.taskTitle,
-          });
+          emitPersistedAudit(
+            emitAuditEnvelope,
+            appendTaskAddedEvent({
+              manifest,
+              context: taskCommandContext,
+              taskId: auditEvent.taskId,
+              taskTitle: auditEvent.taskTitle,
+            }),
+          );
         } else {
-          appendTaskUpdatedEvent({
-            manifest,
-            context: taskCommandContext,
-            taskId: auditEvent.taskId,
-            taskTitle: auditEvent.taskTitle,
-            command: auditEvent.command,
-            statusBefore: auditEvent.statusBefore,
-            statusAfter: auditEvent.statusAfter,
-            notesChanged: auditEvent.notesChanged,
-          });
+          emitPersistedAudit(
+            emitAuditEnvelope,
+            appendTaskUpdatedEvent({
+              manifest,
+              context: taskCommandContext,
+              taskId: auditEvent.taskId,
+              taskTitle: auditEvent.taskTitle,
+              command: auditEvent.command,
+              statusBefore: auditEvent.statusBefore,
+              statusAfter: auditEvent.statusAfter,
+              notesChanged: auditEvent.notesChanged,
+            }),
+          );
         }
       }
       if (
@@ -445,14 +462,17 @@ function persistTaskMap(
         statusBeforePersist === "initialized" &&
         (manifest.status === "success" || manifest.status === "blocked")
       ) {
-        appendRunFinishedEvent({
-          manifest,
-          context: systemRunEventContext(auditOrigin),
-          terminalStatus: manifest.status,
-          exitCode: manifest.exitCode,
-          tasksCompleted: manifest.tasksCompleted,
-          tasksTotal: manifest.tasksTotal,
-        });
+        emitPersistedAudit(
+          emitAuditEnvelope,
+          appendRunFinishedEvent({
+            manifest,
+            context: systemRunEventContext(auditOrigin),
+            terminalStatus: manifest.status,
+            exitCode: manifest.exitCode,
+            tasksCompleted: manifest.tasksCompleted,
+            tasksTotal: manifest.tasksTotal,
+          }),
+        );
       }
     },
     alreadyLocked: true,
@@ -463,6 +483,7 @@ function updateTaskMap(
   resolved: ReturnType<typeof resolveResumeTarget>,
   auditOrigin: RunEventOrigin,
   source: "task-set" | "task-append-notes" | "task-add",
+  emitAuditEnvelope: AuditEnvelopeEmitter | undefined,
   updater: (tasks: Map<string, TaskState>) => {
     auditEvent: TaskMutationAuditEvent | null;
     transition: {
@@ -509,14 +530,14 @@ function updateTaskMap(
       }
       resolved.manifest.resetSeed.note = resolved.manifest.note;
       resolved.manifest.resetSeed.pinned = resolved.manifest.pinned;
-      persistTaskMap(resolved, hookState.tasks, auditOrigin, auditEvent);
+      persistTaskMap(resolved, hookState.tasks, auditOrigin, auditEvent, emitAuditEnvelope);
       if (!outcome.accepted) {
         throw new CommandError(outcome.reason ?? "task transition rejected");
       }
       return;
     }
 
-    persistTaskMap(resolved, workingTasks, auditOrigin, auditEvent);
+    persistTaskMap(resolved, workingTasks, auditOrigin, auditEvent, emitAuditEnvelope);
   });
 }
 
@@ -735,6 +756,7 @@ export function showDefinition(
 export function resetRun(
   target: string,
   auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
 ): RunResetResult {
   const resolved = resolveRun(target);
   requireResettableRun(resolved.manifest);
@@ -742,19 +764,25 @@ export function resetRun(
     manifest: resetWorkspaceRun(resolved.workspaceDir, {
       afterManifestWrite: (manifest, previousStatus, previousBackendSessionId) => {
         if (previousBackendSessionId !== null) {
-          appendRunBackendSessionUpdatedEvent({
+          emitPersistedAudit(
+            emitAuditEnvelope,
+            appendRunBackendSessionUpdatedEvent({
+              manifest,
+              context: systemRunEventContext(auditOrigin),
+              previousBackendSessionId,
+              nextBackendSessionId: null,
+              reason: "reset_clear",
+            }),
+          );
+        }
+        emitPersistedAudit(
+          emitAuditEnvelope,
+          appendRunResetEvent({
             manifest,
             context: systemRunEventContext(auditOrigin),
-            previousBackendSessionId,
-            nextBackendSessionId: null,
-            reason: "reset_clear",
-          });
-        }
-        appendRunResetEvent({
-          manifest,
-          context: systemRunEventContext(auditOrigin),
-          previousStatus,
-        });
+            previousStatus,
+          }),
+        );
       },
     }),
   };
@@ -763,6 +791,7 @@ export function resetRun(
 export function readyRun(
   target: string,
   auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
 ): RunDetail {
   const resolved = resolveRun(target);
   withTaskStateLock(resolved.workspaceDir, () => {
@@ -771,11 +800,14 @@ export function readyRun(
     const previousStatus = resolved.manifest.status;
     resolved.manifest.status = "ready";
     writeManifest(resolved.workspaceDir, resolved.manifest);
-    appendRunReadyEvent({
-      manifest: resolved.manifest,
-      context: commandRunEventContext(auditOrigin),
-      previousStatus,
-    });
+    emitPersistedAudit(
+      emitAuditEnvelope,
+      appendRunReadyEvent({
+        manifest: resolved.manifest,
+        context: commandRunEventContext(auditOrigin),
+        previousStatus,
+      }),
+    );
   });
   return toRunDetail({ manifest: resolved.manifest, isLive: false });
 }
@@ -784,6 +816,7 @@ function setRunArchived(
   target: string,
   archived: boolean,
   auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
 ): RunArchiveResult {
   const resolved = resolveRun(target);
   let changed = false;
@@ -811,15 +844,21 @@ function setRunArchived(
 
     writeManifest(resolved.workspaceDir, resolved.manifest);
     if (archived) {
-      appendRunArchivedEvent({
-        manifest: resolved.manifest,
-        context: commandRunEventContext(auditOrigin),
-      });
+      emitPersistedAudit(
+        emitAuditEnvelope,
+        appendRunArchivedEvent({
+          manifest: resolved.manifest,
+          context: commandRunEventContext(auditOrigin),
+        }),
+      );
     } else {
-      appendRunUnarchivedEvent({
-        manifest: resolved.manifest,
-        context: commandRunEventContext(auditOrigin),
-      });
+      emitPersistedAudit(
+        emitAuditEnvelope,
+        appendRunUnarchivedEvent({
+          manifest: resolved.manifest,
+          context: commandRunEventContext(auditOrigin),
+        }),
+      );
     }
   });
 
@@ -832,15 +871,17 @@ function setRunArchived(
 export function archiveRun(
   target: string,
   auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
 ): RunArchiveResult {
-  return setRunArchived(target, true, auditOrigin);
+  return setRunArchived(target, true, auditOrigin, emitAuditEnvelope);
 }
 
 export function unarchiveRun(
   target: string,
   auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
 ): RunArchiveResult {
-  return setRunArchived(target, false, auditOrigin);
+  return setRunArchived(target, false, auditOrigin, emitAuditEnvelope);
 }
 
 export function deleteRun(target: string): RunDeleteResult {
@@ -857,6 +898,7 @@ export async function setRunName(
   target: string,
   input: { name: string | null },
   auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
 ): Promise<RunNameResult> {
   const resolved = resolveRun(target);
   let changed = false;
@@ -871,12 +913,15 @@ export async function setRunName(
     resolved.manifest.name = nextName;
     resolved.manifest.resetSeed.name = nextName;
     writeManifest(resolved.workspaceDir, resolved.manifest);
-    appendRunRenamedEvent({
-      manifest: resolved.manifest,
-      context: commandRunEventContext(auditOrigin),
-      previousName,
-      nextName,
-    });
+    emitPersistedAudit(
+      emitAuditEnvelope,
+      appendRunRenamedEvent({
+        manifest: resolved.manifest,
+        context: commandRunEventContext(auditOrigin),
+        previousName,
+        nextName,
+      }),
+    );
     changed = true;
   });
 
@@ -950,6 +995,7 @@ export function setRunBackendSession(
   target: string,
   input: { backendSessionId: string },
   auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
 ): RunBackendSessionResult {
   const resolved = resolveRun(target);
   let changed = false;
@@ -964,13 +1010,16 @@ export function setRunBackendSession(
     const previousBackendSessionId = resolved.manifest.backendSessionId;
     resolved.manifest.backendSessionId = nextBackendSessionId;
     writeManifest(resolved.workspaceDir, resolved.manifest);
-    appendRunBackendSessionUpdatedEvent({
-      manifest: resolved.manifest,
-      context: commandRunEventContext(auditOrigin),
-      previousBackendSessionId,
-      nextBackendSessionId,
-      reason: "passive_set",
-    });
+    emitPersistedAudit(
+      emitAuditEnvelope,
+      appendRunBackendSessionUpdatedEvent({
+        manifest: resolved.manifest,
+        context: commandRunEventContext(auditOrigin),
+        previousBackendSessionId,
+        nextBackendSessionId,
+        reason: "passive_set",
+      }),
+    );
     changed = true;
   });
 
@@ -983,6 +1032,7 @@ export function setRunBackendSession(
 export function clearRunBackendSession(
   target: string,
   auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
 ): RunBackendSessionResult {
   const resolved = resolveRun(target);
   let changed = false;
@@ -996,13 +1046,16 @@ export function clearRunBackendSession(
     const previousBackendSessionId = resolved.manifest.backendSessionId;
     resolved.manifest.backendSessionId = null;
     writeManifest(resolved.workspaceDir, resolved.manifest);
-    appendRunBackendSessionUpdatedEvent({
-      manifest: resolved.manifest,
-      context: commandRunEventContext(auditOrigin),
-      previousBackendSessionId,
-      nextBackendSessionId: null,
-      reason: "passive_clear",
-    });
+    emitPersistedAudit(
+      emitAuditEnvelope,
+      appendRunBackendSessionUpdatedEvent({
+        manifest: resolved.manifest,
+        context: commandRunEventContext(auditOrigin),
+        previousBackendSessionId,
+        nextBackendSessionId: null,
+        reason: "passive_clear",
+      }),
+    );
     changed = true;
   });
 
@@ -1317,6 +1370,7 @@ export function setTask(
   taskId: string,
   update: { status?: string; notes?: string },
   auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
 ): Promise<TaskMutationResult> {
   if (update.status === undefined && update.notes === undefined) {
     throw new CommandError("task set requires at least one of --status / --notes");
@@ -1330,7 +1384,7 @@ export function setTask(
   const resolved = resolveRun(target);
   const capabilities = requireTaskMutationAllowed(resolved.manifest, "set");
 
-  return updateTaskMap(resolved, auditOrigin, "task-set", (tasks) => {
+  return updateTaskMap(resolved, auditOrigin, "task-set", emitAuditEnvelope, (tasks) => {
     const task = tasks.get(taskId);
     if (!task) {
       throw new TaskNotFoundError(resolved.manifest.runId, taskId);
@@ -1405,6 +1459,7 @@ export function appendTaskNotes(
   taskId: string,
   text: string,
   auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
 ): Promise<TaskMutationResult> {
   const appendText = text.trim();
   if (appendText.length === 0) {
@@ -1414,7 +1469,7 @@ export function appendTaskNotes(
   const resolved = resolveRun(target);
   requireTaskMutationAllowed(resolved.manifest, "append-notes");
 
-  return updateTaskMap(resolved, auditOrigin, "task-append-notes", (tasks) => {
+  return updateTaskMap(resolved, auditOrigin, "task-append-notes", emitAuditEnvelope, (tasks) => {
     const task = tasks.get(taskId);
     if (!task) {
       throw new TaskNotFoundError(resolved.manifest.runId, taskId);
@@ -1458,13 +1513,14 @@ export function addTask(
   target: string,
   input: { title: string; body?: string },
   auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
 ): Promise<TaskMutationResult> {
   const title = validateTaskTitle(input.title);
   const resolved = resolveRun(target);
   requireTaskMutationAllowed(resolved.manifest, "add");
 
   let taskId = "";
-  return updateTaskMap(resolved, auditOrigin, "task-add", (tasks) => {
+  return updateTaskMap(resolved, auditOrigin, "task-add", emitAuditEnvelope, (tasks) => {
     do {
       taskId = `cli-${shortId()}`;
     } while (tasks.has(taskId));

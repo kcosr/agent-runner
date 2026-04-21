@@ -747,6 +747,104 @@ describe("api client", () => {
     );
   });
 
+  it("parses run audit history payloads", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              history: {
+                runId: "run-1",
+                lastCursor: 3,
+                events: [
+                  {
+                    runId: "run-1",
+                    cursor: 2,
+                    event: {
+                      type: "task.updated",
+                      recordedAt: "2026-04-13T05:00:00.000Z",
+                      source: "task_command",
+                      hostMode: "embedded",
+                      fields: {
+                        taskId: "t1",
+                        taskTitle: "First",
+                        command: "set",
+                        statusBefore: "pending",
+                        statusAfter: "completed",
+                        notesChanged: false,
+                      },
+                    },
+                  },
+                  {
+                    runId: "run-1",
+                    cursor: 3,
+                    event: {
+                      type: "run.finished",
+                      recordedAt: "2026-04-13T05:01:00.000Z",
+                      source: "system",
+                      hostMode: "embedded",
+                      fields: {
+                        terminalStatus: "success",
+                        exitCode: 0,
+                        tasksCompleted: 1,
+                        tasksTotal: 1,
+                      },
+                    },
+                  },
+                ],
+              },
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+
+    const api = createApiClient(config);
+
+    await expect(api.getRunAuditHistory("run-1", { limit: 2 })).resolves.toEqual({
+      runId: "run-1",
+      lastCursor: 3,
+      events: [
+        expect.objectContaining({
+          cursor: 2,
+          event: expect.objectContaining({ type: "task.updated" }),
+        }),
+        expect.objectContaining({
+          cursor: 3,
+          event: expect.objectContaining({ type: "run.finished" }),
+        }),
+      ],
+    });
+  });
+
+  it("rejects invalid run audit history payloads", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              history: {
+                runId: "run-1",
+                lastCursor: "bad",
+                events: [],
+              },
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+
+    const api = createApiClient(config);
+
+    await expect(api.getRunAuditHistory("run-1")).rejects.toMatchObject({
+      code: "INVALID_RESPONSE",
+      name: "ApiError",
+      status: 200,
+    });
+  });
+
   it("sends rename requests and parses the result payload", async () => {
     const fetchMock = vi.fn(
       async () =>

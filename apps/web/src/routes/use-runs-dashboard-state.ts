@@ -13,6 +13,7 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } f
 import type { BoardColumn } from "../components/run-column.js";
 import { createApiClient, isNotFoundError } from "../lib/api-client.js";
 import { queryClient, runQueryKeys } from "../lib/query.js";
+import { useRunAuditState } from "../lib/run-audit.js";
 import { useRunEvents } from "../lib/run-events.js";
 import { compareRunsByStartedAtDesc, sortRunsWithPinnedFirst } from "../lib/run-order.js";
 import { getRunPrimaryAction } from "../lib/run-primary-action.js";
@@ -414,10 +415,16 @@ export function useRunsDashboardState() {
     },
     enabled: Boolean(detailRunId),
   });
+  const selectedRunIsLive = detailRunId === selectedRunId && selectedRunQuery.data?.isLive === true;
   const timelineState = useRunTimelineState({
     config,
     runId: detailRunId,
-    runIsLive: detailRunId === selectedRunId && selectedRunQuery.data?.isLive === true,
+    runIsLive: selectedRunIsLive,
+  });
+  const auditState = useRunAuditState({
+    config,
+    runId: detailRunId,
+    runIsLive: selectedRunIsLive,
   });
 
   useEffect(() => {
@@ -1196,7 +1203,8 @@ export function useRunsDashboardState() {
     selectedRunQuery,
     setResumeMessageDraft,
     setResumeMessageExpanded,
-    streamStale: summaryStreamStale || detailStreamStale || timelineState.stale,
+    streamStale: summaryStreamStale || detailStreamStale || timelineState.stale || auditState.stale,
+    auditState,
     submitSelectedRunResume,
     timelineState,
     triggerSelectedRunPrimaryAction,

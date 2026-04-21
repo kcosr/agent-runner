@@ -3,6 +3,9 @@ import { LOCKABLE_FIELDS } from "../core/config/schema.js";
 import { HOOK_PHASES } from "../core/config/schema.js";
 import type { AttachmentListEntry, RunAttachment } from "./attachments.js";
 import type {
+  RunAuditEnvelope,
+  RunAuditEvent,
+  RunAuditHistory,
   RunDetailStreamEvent,
   RunSummaryStreamEvent,
   RunTimelineAttempt,
@@ -333,4 +336,27 @@ export const runTimelineEnvelopeSchema: z.ZodType<RunTimelineEnvelope> = z.objec
   runId: z.string(),
   cursor: z.number().int().positive(),
   event: runTimelineEventSchema,
+});
+
+export const runAuditEventSchema: z.ZodType<RunAuditEvent> = z.object({
+  type: z.string() as z.ZodType<RunAuditEvent["type"]>,
+  recordedAt: z.string(),
+  source: z.enum(["system", "cli", "daemon", "task_command"]),
+  hostMode: z.enum(["embedded", "daemon"]),
+  controllerInstanceId: z.string().optional(),
+  sessionIndex: z.number().int().nonnegative().optional(),
+  attempt: z.number().int().nonnegative().optional(),
+  fields: z.record(z.string(), z.unknown()),
+});
+
+export const runAuditEnvelopeSchema: z.ZodType<RunAuditEnvelope> = z.object({
+  runId: z.string(),
+  cursor: z.number().int().positive(),
+  event: runAuditEventSchema,
+});
+
+export const runAuditHistorySchema: z.ZodType<RunAuditHistory> = z.object({
+  runId: z.string(),
+  events: z.array(runAuditEnvelopeSchema),
+  lastCursor: z.number().int().nonnegative(),
 });

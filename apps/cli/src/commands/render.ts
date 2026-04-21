@@ -4,6 +4,7 @@ import type {
   RunAttachmentDownloadResult,
   RunAttachmentRemoveResult,
 } from "@task-runner/core/contracts/attachments.js";
+import type { RunAuditHistory } from "@task-runner/core/contracts/events.js";
 import type {
   RunBackendSessionResult,
   RunDetail,
@@ -292,6 +293,111 @@ export function renderRunUnarchive(result: RunArchiveResult): string {
 
 export function renderRunDelete(result: RunDeleteResult): string {
   return `task-runner: deleted archived run ${result.runId}\n`;
+}
+
+function formatAuditFieldValue(value: unknown): string {
+  if (typeof value === "string") {
+    return JSON.stringify(value);
+  }
+  if (value === null) {
+    return "null";
+  }
+  if (typeof value === "object") {
+    return JSON.stringify(value);
+  }
+  return String(value);
+}
+
+function formatAuditDetails(details: Array<[string, unknown]>): string {
+  const populated = details.filter(([, value]) => value !== undefined);
+  if (populated.length === 0) {
+    return "";
+  }
+  return `: ${populated.map(([key, value]) => `${key}=${formatAuditFieldValue(value)}`).join(" ")}`;
+}
+
+function formatRunAuditEventLine(event: RunAuditHistory["events"][number]["event"]): string {
+  switch (event.type) {
+    case "run.created":
+      return `${event.type}${formatAuditDetails([
+        ["backend", event.fields.backend],
+        ["agent", event.fields.agentName],
+        ["name", event.fields.name],
+      ])}`;
+    case "run.started":
+    case "run.resumed":
+      return `${event.type}${formatAuditDetails([
+        ["sessionIndex", event.sessionIndex],
+        ["backendSessionIdAtStart", event.fields.backendSessionIdAtStart],
+      ])}`;
+    case "run.ready":
+    case "run.reset":
+      return `${event.type}${formatAuditDetails([["previousStatus", event.fields.previousStatus]])}`;
+    case "run.backend_session_updated":
+      return `${event.type}${formatAuditDetails([
+        ["reason", event.fields.reason],
+        ["previous", event.fields.previousBackendSessionId],
+        ["next", event.fields.nextBackendSessionId],
+      ])}`;
+    case "run.hook_recorded":
+      return `${event.type}${formatAuditDetails([
+        ["phase", event.fields.phase],
+        ["id", event.fields.hookId],
+        ["outcome", event.fields.outcome],
+      ])}`;
+    case "run.attempt_recorded":
+      return `${event.type}${formatAuditDetails([
+        ["attempt", event.attempt],
+        ["exitCode", event.fields.exitCode],
+        ["timedOut", event.fields.timedOut],
+      ])}`;
+    case "run.retrying":
+      return `${event.type}${formatAuditDetails([
+        ["incomplete", event.fields.incompleteCount],
+        ["invalid", event.fields.invalidStatusCount],
+      ])}`;
+    case "run.finished":
+      return `${event.type}${formatAuditDetails([
+        ["status", event.fields.terminalStatus],
+        ["exitCode", event.fields.exitCode],
+      ])}`;
+    case "run.aborted":
+    case "run.resume_rejected":
+    case "run.archived":
+    case "run.unarchived":
+      return event.type;
+    case "run.renamed":
+      return `${event.type}${formatAuditDetails([
+        ["previous", event.fields.previousName],
+        ["next", event.fields.nextName],
+      ])}`;
+    case "task.added":
+      return `${event.type}${formatAuditDetails([
+        ["taskId", event.fields.taskId],
+        ["title", event.fields.taskTitle],
+      ])}`;
+    case "task.updated":
+      return `${event.type}${formatAuditDetails([
+        ["taskId", event.fields.taskId],
+        ["command", event.fields.command],
+        ["statusBefore", event.fields.statusBefore],
+        ["statusAfter", event.fields.statusAfter],
+        ["notesChanged", event.fields.notesChanged],
+      ])}`;
+    default: {
+      const raw = Object.keys(event.fields).length === 0 ? "" : ` ${JSON.stringify(event.fields)}`;
+      return `${event.type}${raw}`;
+    }
+  }
+}
+
+export function renderRunAuditHistory(history: RunAuditHistory): string {
+  if (history.events.length === 0) {
+    return "No audit events found.\n";
+  }
+  return `${history.events
+    .map((envelope) => `${envelope.event.recordedAt}  ${formatRunAuditEventLine(envelope.event)}`)
+    .join("\n")}\n`;
 }
 
 export function renderRunSetName(result: {

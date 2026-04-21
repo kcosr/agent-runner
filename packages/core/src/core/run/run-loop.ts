@@ -54,6 +54,7 @@ import {
   missingResumeInputMessage,
 } from "./resume-policy.js";
 import {
+  type RunAuditEnvelope,
   appendRunAbortedEvent,
   appendRunAttemptRecordedEvent,
   appendRunBackendSessionUpdatedEvent,
@@ -114,6 +115,7 @@ export interface RunOptions {
   execution?: RunExecution;
   abortSignal?: AbortSignal;
   emitEvent?: (event: RunEvent) => void;
+  emitAuditEnvelope?: (envelope: RunAuditEnvelope) => void;
   resumeFailureDetector?: (result: BackendInvokeResult) => boolean;
 }
 
@@ -778,6 +780,7 @@ function collectNewTasks(
 export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const { loaded, loadedAssignment, cliVars, backend, overrides, resume } = opts;
   const emitEvent = opts.emitEvent ?? (() => {});
+  const emitAuditEnvelope = opts.emitAuditEnvelope ?? (() => {});
   const execution: RunExecution = opts.execution ?? {
     hostMode: "embedded",
     controller: {
@@ -1424,21 +1427,25 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
   const lifecycleContext = lifecycleRunEventContext(execution);
   const appendRunCreatedAudit = (targetManifest: RunManifest): void => {
-    appendRunCreatedEvent({
-      manifest: targetManifest,
-      context: lifecycleContext,
-      agentName: agentConfig.name,
-      assignmentName: loadedAssignment?.config.name ?? null,
-      passive: agentConfig.backend === "passive",
-    });
-    if (targetManifest.backendSessionId !== null) {
-      appendRunBackendSessionUpdatedEvent({
+    emitAuditEnvelope(
+      appendRunCreatedEvent({
         manifest: targetManifest,
         context: lifecycleContext,
-        previousBackendSessionId: null,
-        nextBackendSessionId: targetManifest.backendSessionId,
-        reason: "bootstrap_import",
-      });
+        agentName: agentConfig.name,
+        assignmentName: loadedAssignment?.config.name ?? null,
+        passive: agentConfig.backend === "passive",
+      }),
+    );
+    if (targetManifest.backendSessionId !== null) {
+      emitAuditEnvelope(
+        appendRunBackendSessionUpdatedEvent({
+          manifest: targetManifest,
+          context: lifecycleContext,
+          previousBackendSessionId: null,
+          nextBackendSessionId: targetManifest.backendSessionId,
+          reason: "bootstrap_import",
+        }),
+      );
     }
   };
 
@@ -1556,13 +1563,15 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       };
       manifest.sessions.push(sessionRecord);
       writeManifest(workspaceDir, manifest);
-      appendRunStartedEvent({
-        manifest,
-        context: lifecycleContext,
-        sessionIndex,
-        backendSessionIdAtStart: sessionRecord.backendSessionIdAtStart,
-        resumed: priorSessionCount > 0,
-      });
+      emitAuditEnvelope(
+        appendRunStartedEvent({
+          manifest,
+          context: lifecycleContext,
+          sessionIndex,
+          backendSessionIdAtStart: sessionRecord.backendSessionIdAtStart,
+          resumed: priorSessionCount > 0,
+        }),
+      );
     });
   } else {
     syncManifestTaskState(manifest, tasks);
@@ -1584,13 +1593,15 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     refreshManifestAttachments(manifest);
     writeManifest(workspaceDir, manifest);
     appendRunCreatedAudit(manifest);
-    appendRunStartedEvent({
-      manifest,
-      context: lifecycleContext,
-      sessionIndex,
-      backendSessionIdAtStart: sessionRecord.backendSessionIdAtStart,
-      resumed: false,
-    });
+    emitAuditEnvelope(
+      appendRunStartedEvent({
+        manifest,
+        context: lifecycleContext,
+        sessionIndex,
+        backendSessionIdAtStart: sessionRecord.backendSessionIdAtStart,
+        resumed: false,
+      }),
+    );
   }
 
   emitEvent({
@@ -1700,27 +1711,31 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       tryRefreshMutableManifestMetadata(manifest);
       writeManifest(workspaceDir, manifest);
       pendingAttempt = null;
-      appendRunAttemptRecordedEvent({
-        manifest,
-        context: lifecycleContext,
-        sessionIndex,
-        attempt: record.attempt,
-        exitCode: record.exitCode,
-        signal: record.signal,
-        timedOut: record.timedOut,
-        backendSessionIdAtStart: record.sessionIdAtStart,
-        backendSessionIdCaptured: record.sessionIdCaptured,
-      });
-      if (record.backendSessionUpdate) {
-        appendRunBackendSessionUpdatedEvent({
+      emitAuditEnvelope(
+        appendRunAttemptRecordedEvent({
           manifest,
           context: lifecycleContext,
-          previousBackendSessionId: record.backendSessionUpdate.previousBackendSessionId,
-          nextBackendSessionId: record.backendSessionUpdate.nextBackendSessionId,
-          reason: "backend_capture",
           sessionIndex,
           attempt: record.attempt,
-        });
+          exitCode: record.exitCode,
+          signal: record.signal,
+          timedOut: record.timedOut,
+          backendSessionIdAtStart: record.sessionIdAtStart,
+          backendSessionIdCaptured: record.sessionIdCaptured,
+        }),
+      );
+      if (record.backendSessionUpdate) {
+        emitAuditEnvelope(
+          appendRunBackendSessionUpdatedEvent({
+            manifest,
+            context: lifecycleContext,
+            previousBackendSessionId: record.backendSessionUpdate.previousBackendSessionId,
+            nextBackendSessionId: record.backendSessionUpdate.nextBackendSessionId,
+            reason: "backend_capture",
+            sessionIndex,
+            attempt: record.attempt,
+          }),
+        );
       }
     });
   };
@@ -1912,13 +1927,15 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
           incompleteCount: countBy(tasks, (t) => t.status !== "completed"),
           invalidStatusCount: 0,
         });
-        appendRunRetryingEvent({
-          manifest,
-          context: lifecycleContext,
-          sessionIndex,
-          incompleteCount: countBy(tasks, (t) => t.status !== "completed"),
-          invalidStatusCount: 0,
-        });
+        emitAuditEnvelope(
+          appendRunRetryingEvent({
+            manifest,
+            context: lifecycleContext,
+            sessionIndex,
+            incompleteCount: countBy(tasks, (t) => t.status !== "completed"),
+            invalidStatusCount: 0,
+          }),
+        );
         continue;
       }
       if (invokeResult.aborted) {
@@ -1970,13 +1987,15 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         incompleteCount,
         invalidStatusCount: mergeInfo.invalidStatuses.length,
       });
-      appendRunRetryingEvent({
-        manifest,
-        context: lifecycleContext,
-        sessionIndex,
-        incompleteCount,
-        invalidStatusCount: mergeInfo.invalidStatuses.length,
-      });
+      emitAuditEnvelope(
+        appendRunRetryingEvent({
+          manifest,
+          context: lifecycleContext,
+          sessionIndex,
+          incompleteCount,
+          invalidStatusCount: mergeInfo.invalidStatuses.length,
+        }),
+      );
 
       currentPrompt = buildNudgeMessage(tasks, mergeInfo.invalidStatuses, runId);
     }
@@ -2035,28 +2054,34 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     tryRefreshMutableManifestMetadata(manifest);
     writeManifest(workspaceDir, manifest);
     if (sawRunAbort) {
-      appendRunAbortedEvent({
-        manifest,
-        context: lifecycleContext,
-        sessionIndex,
-      });
+      emitAuditEnvelope(
+        appendRunAbortedEvent({
+          manifest,
+          context: lifecycleContext,
+          sessionIndex,
+        }),
+      );
     }
     if (sawResumeRejected) {
-      appendRunResumeRejectedEvent({
+      emitAuditEnvelope(
+        appendRunResumeRejectedEvent({
+          manifest,
+          context: lifecycleContext,
+          sessionIndex,
+        }),
+      );
+    }
+    emitAuditEnvelope(
+      appendRunFinishedEvent({
         manifest,
         context: lifecycleContext,
+        terminalStatus: terminal.status,
+        exitCode: terminal.exitCode,
+        tasksCompleted: manifest.tasksCompleted,
+        tasksTotal: manifest.tasksTotal,
         sessionIndex,
-      });
-    }
-    appendRunFinishedEvent({
-      manifest,
-      context: lifecycleContext,
-      terminalStatus: terminal.status,
-      exitCode: terminal.exitCode,
-      tasksCompleted: manifest.tasksCompleted,
-      tasksTotal: manifest.tasksTotal,
-      sessionIndex,
-    });
+      }),
+    );
   });
 
   try {
