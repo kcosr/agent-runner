@@ -19,6 +19,7 @@ import { DaemonClient, DaemonRpcError } from "../apps/cli/dist/daemon/client.js"
 import { deriveHttpBaseUrl } from "../apps/cli/dist/daemon/config.js";
 import { serveDaemon } from "../apps/cli/dist/daemon/server.js";
 import { streamEvents } from "../apps/cli/dist/daemon/sse.js";
+import { getRun as getRunDetail } from "../packages/core/dist/app/service.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import { sharedRuntimeEnv, withEnv } from "./helpers/runtime-paths.mjs";
@@ -110,6 +111,56 @@ function patchManifest(workspaceDir, mutator) {
   const manifest = readManifest(workspaceDir);
   mutator(manifest);
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+function markRunRunning(workspaceDir) {
+  patchManifest(workspaceDir, (manifest) => {
+    manifest.status = "running";
+    manifest.attempts = Math.max(manifest.attempts, 1);
+    manifest.sessionCount = Math.max(manifest.sessionCount, 1);
+  });
+}
+
+function markRunSuccessful(workspaceDir) {
+  patchManifest(workspaceDir, (manifest) => {
+    manifest.status = "success";
+    manifest.endedAt ??= "2026-04-21T12:05:00.000Z";
+    manifest.exitCode = 0;
+    manifest.attempts = Math.max(manifest.attempts, 1);
+    manifest.tasksCompleted = manifest.tasksTotal;
+    for (const task of Object.values(manifest.finalTasks)) {
+      task.status = "completed";
+    }
+  });
+}
+
+function emitRunStarted(emitEvent, runId, cwd) {
+  emitEvent({
+    type: "run_started",
+    runId,
+    agentName: "daemon-agent",
+    assignmentSourcePath: null,
+    assignmentPath: "/tmp/fake/assignment-seed.md",
+    name: "daemon-work",
+    cwd,
+    sessionIndex: 0,
+  });
+}
+
+function emitRunFinished(emitEvent, runId, status = "success") {
+  emitEvent({
+    type: "run_finished",
+    summary: {
+      status,
+      attempts: 1,
+      maxAttempts: 1,
+      tasksCompleted: 1,
+      tasksTotal: 1,
+      assignmentPath: "/tmp/fake/assignment-seed.md",
+      tasks: [],
+      runId,
+    },
+  });
 }
 
 async function withSeededFrontendDist(fn) {
@@ -396,6 +447,29 @@ async function startCliDaemon(baseDir, listenUrl) {
       );
     },
   };
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForValue(read, description) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const value = await read();
+    if (value !== null) {
+      return value;
+    }
+    await sleep(20);
+  }
+  throw new Error(`timed out waiting for ${description}`);
+}
+
+async function waitForRunStatus(baseUrl, runId, expectedStatus) {
+  return await waitForValue(async () => {
+    const response = await httpJson(baseUrl, `/api/runs/${runId}`);
+    assert.equal(response.status, 200);
+    return response.body.run.status === expectedStatus ? response.body.run : null;
+  }, `run ${runId} to reach ${expectedStatus}`);
 }
 
 function installFakeSsh(baseDir) {
@@ -2345,6 +2419,292 @@ test("daemon mutation-driven projection SSE events include dependent summary fan
       await summaries.close();
       await sourceDetails.close();
       await server.close();
+    }
+  });
+});
+
+test("daemon auto-starts ready dependency runs immediately when dependencies are already satisfied", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const source = await initRun(dir);
+  const dependent = await initRun(dir);
+  markRunSuccessful(source.workspaceDir);
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  let autoStartCalls = 0;
+  let resolveAutoStarted;
+  const autoStarted = new Promise((resolve) => {
+    resolveAutoStarted = resolve;
+  });
+
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl, {
+      async resumeRun({ target, emitEvent }) {
+        autoStartCalls += 1;
+        assert.equal(target, dependent.runId);
+        markRunRunning(dependent.workspaceDir);
+        emitRunStarted(emitEvent, target, dir);
+        resolveAutoStarted();
+        return { runId: target };
+      },
+    });
+    const client = await DaemonClient.connect(listenUrl);
+    try {
+      await client.call("runs.addDependency", {
+        target: dependent.runId,
+        dependencyRunId: source.runId,
+      });
+
+      const readied = await client.call("runs.ready", { target: dependent.runId });
+      assert.equal(readied.run.status, "ready");
+      await autoStarted;
+      const running = await waitForRunStatus(httpBaseUrl, dependent.runId, "running");
+      assert.equal(running.runId, dependent.runId);
+      assert.equal(autoStartCalls, 1);
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+});
+
+test("daemon auto-starts ready dependency runs after the final dependency succeeds", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const source = await initRun(dir);
+  const dependent = await initRun(dir);
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  const resumeTargets = [];
+
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl, {
+      async resumeRun({ target, emitEvent }) {
+        resumeTargets.push(target);
+        if (target === source.runId) {
+          markRunRunning(source.workspaceDir);
+          emitRunStarted(emitEvent, target, dir);
+          markRunSuccessful(source.workspaceDir);
+          emitRunFinished(emitEvent, target);
+          return { runId: target };
+        }
+
+        assert.equal(target, dependent.runId);
+        markRunRunning(dependent.workspaceDir);
+        emitRunStarted(emitEvent, target, dir);
+        return { runId: target };
+      },
+    });
+    const client = await DaemonClient.connect(listenUrl);
+    try {
+      await client.call("runs.addDependency", {
+        target: dependent.runId,
+        dependencyRunId: source.runId,
+      });
+
+      await client.call("runs.ready", { target: source.runId });
+      const dependentReady = await client.call("runs.ready", { target: dependent.runId });
+      assert.equal(dependentReady.run.status, "ready");
+      assert.deepEqual(resumeTargets, []);
+
+      await client.call("runs.resume", { target: source.runId, overrides: {} });
+      const running = await waitForRunStatus(httpBaseUrl, dependent.runId, "running");
+      assert.equal(running.runId, dependent.runId);
+      assert.deepEqual(resumeTargets, [source.runId, dependent.runId]);
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+});
+
+test("daemon does not auto-start zero-dependency ready runs", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const run = await initRun(dir);
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  let autoStartCalls = 0;
+
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl, {
+      async resumeRun() {
+        autoStartCalls += 1;
+        throw new Error("zero-dependency ready run should not auto-start");
+      },
+    });
+    const client = await DaemonClient.connect(listenUrl);
+    try {
+      await client.call("runs.ready", { target: run.runId });
+      await sleep(100);
+      const ready = await waitForRunStatus(httpBaseUrl, run.runId, "ready");
+      assert.equal(ready.runId, run.runId);
+      assert.equal(autoStartCalls, 0);
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+});
+
+test("daemon startup sweep auto-starts eligible ready dependency runs", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const source = await initRun(dir);
+  const dependent = await initRun(dir);
+  markRunSuccessful(source.workspaceDir);
+  runCli(["run", "add-dep", dependent.runId, source.runId], { cwd: dir });
+  runCli(["run", "ready", dependent.runId], { cwd: dir });
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  let resolveAutoStarted;
+  const autoStarted = new Promise((resolve) => {
+    resolveAutoStarted = resolve;
+  });
+
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl, {
+      async resumeRun({ target, emitEvent }) {
+        assert.equal(target, dependent.runId);
+        markRunRunning(dependent.workspaceDir);
+        emitRunStarted(emitEvent, target, dir);
+        resolveAutoStarted();
+        return { runId: target };
+      },
+    });
+    try {
+      await autoStarted;
+      const running = await waitForRunStatus(httpBaseUrl, dependent.runId, "running");
+      assert.equal(running.runId, dependent.runId);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+test("daemon suppresses duplicate dependency auto-start attempts while one is already pending", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const source = await initRun(dir);
+  const dependent = await initRun(dir);
+  markRunSuccessful(source.workspaceDir);
+  runCli(["run", "add-dep", dependent.runId, source.runId], { cwd: dir });
+  runCli(["run", "ready", dependent.runId], { cwd: dir });
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  let autoStartCalls = 0;
+  let releaseAutoStart;
+  let resolveFirstCall;
+  const firstCallSeen = new Promise((resolve) => {
+    resolveFirstCall = resolve;
+  });
+
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl, {
+      readyRun(target) {
+        return getRunDetail(target);
+      },
+      async resumeRun({ target, emitEvent }) {
+        autoStartCalls += 1;
+        assert.equal(target, dependent.runId);
+        resolveFirstCall();
+        await new Promise((resolve) => {
+          releaseAutoStart = resolve;
+        });
+        markRunRunning(dependent.workspaceDir);
+        emitRunStarted(emitEvent, target, dir);
+        return { runId: target };
+      },
+    });
+    const client = await DaemonClient.connect(listenUrl);
+    try {
+      await firstCallSeen;
+      const readyResult = await client.call("runs.ready", { target: dependent.runId });
+      assert.equal(readyResult.run.runId, dependent.runId);
+      await sleep(50);
+      assert.equal(autoStartCalls, 1);
+      releaseAutoStart();
+      const running = await waitForRunStatus(httpBaseUrl, dependent.runId, "running");
+      assert.equal(running.runId, dependent.runId);
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+});
+
+test("daemon clears pending dependency auto-start markers after resume failures", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const source = await initRun(dir);
+  const dependent = await initRun(dir);
+  markRunSuccessful(source.workspaceDir);
+  runCli(["run", "add-dep", dependent.runId, source.runId], { cwd: dir });
+  runCli(["run", "ready", dependent.runId], { cwd: dir });
+
+  const firstPort = await freePort();
+  const firstListenUrl = `ws://127.0.0.1:${firstPort}/`;
+  const firstHttpBaseUrl = deriveHttpBaseUrl(firstListenUrl);
+  let failedCalls = 0;
+
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const failingServer = await serveDaemon(firstListenUrl, {
+      async resumeRun({ target }) {
+        failedCalls += 1;
+        assert.equal(target, dependent.runId);
+        throw new Error("synthetic dependency auto-start failure");
+      },
+    });
+    try {
+      await sleep(100);
+      const ready = await waitForRunStatus(firstHttpBaseUrl, dependent.runId, "ready");
+      assert.equal(ready.runId, dependent.runId);
+      assert.equal(failedCalls, 1);
+    } finally {
+      await failingServer.close();
+    }
+
+    const retryPort = await freePort();
+    const retryListenUrl = `ws://127.0.0.1:${retryPort}/`;
+    const retryHttpBaseUrl = deriveHttpBaseUrl(retryListenUrl);
+    let retriedCalls = 0;
+    let resolveRetryStarted;
+    const retryStarted = new Promise((resolve) => {
+      resolveRetryStarted = resolve;
+    });
+    const retryServer = await serveDaemon(retryListenUrl, {
+      async resumeRun({ target, emitEvent }) {
+        retriedCalls += 1;
+        assert.equal(target, dependent.runId);
+        markRunRunning(dependent.workspaceDir);
+        emitRunStarted(emitEvent, target, dir);
+        resolveRetryStarted();
+        return { runId: target };
+      },
+    });
+    try {
+      await retryStarted;
+      const running = await waitForRunStatus(retryHttpBaseUrl, dependent.runId, "running");
+      assert.equal(running.runId, dependent.runId);
+      assert.equal(retriedCalls, 1);
+    } finally {
+      await retryServer.close();
     }
   });
 });

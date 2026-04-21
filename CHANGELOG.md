@@ -117,6 +117,9 @@
 
 ### Changed
 
+- Changed daemon-managed ready-run scheduling so dependency-bearing runs
+  auto-start once every dependency run is successful, including
+  ready-time checks and daemon startup/rebuild sweeps after restarts.
 - Changed `task-runner list runs` text output to append each run's exact
   persisted `cwd=...` alongside repo, agent, and assignment metadata.
   ([#73](https://github.com/kcosr/task-runner/pull/73))
@@ -316,6 +319,9 @@
 
 ### Fixed
 
+- Fixed shared run capabilities and web primary-action gating so `ready`
+  runs with unsatisfied dependencies no longer expose `Start` or
+  `Resume` before their dependencies complete.
 - Fixed the web attachment preview flow so full-row clicks in the detail drawer open previewable attachments and browser/mobile back returns to the selected run's Attachments view instead of closing the drawer. ([#61](https://github.com/kcosr/task-runner/pull/61))
 - Fixed the web dashboard so disabling visible focus indicators suppresses fullscreen drawer `:focus-visible` outlines without removing the selected-card highlight. ([#54](https://github.com/kcosr/task-runner/pull/54))
 - Fixed embedded and daemon-managed runs so thrown backend launch failures such as `ENOENT` still settle `run.json` to terminal `error` and write an attempt log, instead of leaving the run stuck in `running`. ([#48](https://github.com/kcosr/task-runner/pull/48))

@@ -335,10 +335,13 @@ export async function serveDaemon(
   const activeRuns = new Map<string, ActiveRunRecord>();
   const manifestEntriesByRunId = new Map<string, ListedRunManifest>();
   const dependentRunIdsByRunId = new Map<string, Set<string>>();
+  const pendingDependencyAutoStarts = new Set<string>();
   let manifestIndexInitialized = false;
   const recentTimelineBuffers = new Map<string, RecentTimelineRecord>();
   const sockets = new Set<Socket>();
   const wsClients = new Set<WebSocket>();
+  let queueReadyDependencyAutoStartSweep: (() => void) | null = null;
+  let operations: ReturnType<typeof createDaemonOperations> | null = null;
 
   const app: DaemonHandlers = {
     getRun,
@@ -411,6 +414,7 @@ export async function serveDaemon(
       rememberManifestIndexEntry(entry);
     }
     manifestIndexInitialized = true;
+    queueReadyDependencyAutoStartSweep?.();
   };
 
   const ensureManifestIndex = (): void => {
@@ -644,6 +648,105 @@ export async function serveDaemon(
       previous.archivedAt !== current.archivedAt ||
       previous.name !== current.name);
 
+  const shouldAutoStartReadyDependencyRun = (
+    manifest: ListedRunManifest,
+    detail: RunDetail | null,
+    active: Map<string, ActiveRunRecord>,
+    pendingAutoStart: ReadonlySet<string>,
+  ): boolean =>
+    manifest.manifest.status === "ready" &&
+    manifest.manifest.archivedAt === null &&
+    manifest.manifest.backend !== "passive" &&
+    manifest.manifest.dependencyRunIds.length > 0 &&
+    detail !== null &&
+    detail.dependencies.every((dependency) => dependency.satisfied) &&
+    !active.has(manifest.manifest.runId) &&
+    !pendingAutoStart.has(manifest.manifest.runId);
+
+  const shouldAutoStartReadyDependencySummary = (
+    summary: RunSummary | null,
+    active: Map<string, ActiveRunRecord>,
+    pendingAutoStart: ReadonlySet<string>,
+  ): boolean =>
+    summary !== null &&
+    summary.status === "ready" &&
+    summary.archivedAt === null &&
+    summary.backend !== "passive" &&
+    summary.dependencyState.total > 0 &&
+    summary.dependencyState.unsatisfied === 0 &&
+    !active.has(summary.runId) &&
+    !pendingAutoStart.has(summary.runId);
+
+  const tryAutoStartDependencyRun = async (
+    runId: string,
+    provided?: {
+      manifest?: ListedRunManifest;
+      detail?: RunDetail | null;
+      summary?: RunSummary | null;
+    },
+  ): Promise<boolean> => {
+    if (
+      provided?.summary !== undefined &&
+      !shouldAutoStartReadyDependencySummary(
+        provided.summary,
+        activeRuns,
+        pendingDependencyAutoStarts,
+      )
+    ) {
+      return false;
+    }
+    const entry =
+      provided?.manifest ??
+      manifestEntriesByRunId.get(runId) ??
+      (() => {
+        try {
+          return refreshManifestIndexEntry(runId);
+        } catch (error) {
+          if (error instanceof RunNotFoundError) {
+            return null;
+          }
+          throw error;
+        }
+      })();
+    if (!entry) {
+      return false;
+    }
+    const detail = provided?.detail ?? getProjectedDetail(runId);
+    if (
+      operations === null ||
+      !shouldAutoStartReadyDependencyRun(entry, detail, activeRuns, pendingDependencyAutoStarts)
+    ) {
+      return false;
+    }
+
+    pendingDependencyAutoStarts.add(runId);
+    try {
+      await operations.resumeRun({
+        target: runId,
+        overrides: {},
+      });
+      return true;
+    } finally {
+      pendingDependencyAutoStarts.delete(runId);
+    }
+  };
+
+  const queueAutoStartDependencyRun = (
+    runId: string,
+    provided?: {
+      manifest?: ListedRunManifest;
+      detail?: RunDetail | null;
+      summary?: RunSummary | null;
+    },
+  ): void => {
+    void tryAutoStartDependencyRun(runId, provided).catch(() => {
+      publishMutationResult(runId, {
+        summary: getProjectedSummary(runId),
+        detail: getProjectedDetail(runId),
+      });
+    });
+  };
+
   const publishSummary = (summary: RunSummary): void => {
     const payload: RunSummaryStreamEvent = {
       type: "summary_upsert",
@@ -737,18 +840,24 @@ export async function serveDaemon(
     const dependents = dependentRunIds(runId);
 
     for (const dependentRunId of dependents) {
+      let dependentSummary: RunSummary | null | undefined;
+      let dependentDetail: RunDetail | null | undefined;
       if (options.publishDependentSummaries) {
-        const dependentSummary = getProjectedSummary(dependentRunId);
+        dependentSummary = getProjectedSummary(dependentRunId);
         if (dependentSummary) {
           publishSummary(dependentSummary);
         }
       }
       if (options.publishDependentDetails) {
-        const dependentDetail = getProjectedDetail(dependentRunId);
+        dependentDetail = getProjectedDetail(dependentRunId);
         if (dependentDetail) {
           publishDetail(dependentDetail);
         }
       }
+      queueAutoStartDependencyRun(dependentRunId, {
+        summary: dependentSummary,
+        detail: dependentDetail,
+      });
     }
   };
 
@@ -786,6 +895,34 @@ export async function serveDaemon(
     }
   };
 
+  const applyPublishedMutation = <T>(
+    runId: string,
+    mutate: () => T,
+    options: {
+      inferDependentFanout?: boolean;
+    } = {},
+  ): {
+    result: T;
+    summary: RunSummary | null;
+    detail: RunDetail | null;
+  } => {
+    const previous = options.inferDependentFanout ? getProjectedDetail(runId) : null;
+    const result = mutate();
+    const detail = getProjectedDetail(runId);
+    const summary = getProjectedSummary(runId);
+    publishMutationResult(runId, {
+      summary,
+      detail,
+      publishDependentSummaries: shouldPublishDependentSummaries(previous, detail),
+      publishDependentDetails: shouldPublishDependentDetails(previous, detail),
+    });
+    return {
+      result,
+      summary,
+      detail,
+    };
+  };
+
   const withPublishedMutation = <T>(
     runId: string,
     mutate: () => T,
@@ -793,17 +930,7 @@ export async function serveDaemon(
       inferDependentFanout?: boolean;
     } = {},
   ): T => {
-    const previous = options.inferDependentFanout ? getProjectedDetail(runId) : null;
-    const result = mutate();
-    const current = getProjectedDetail(runId);
-    const summary = getProjectedSummary(runId);
-    publishMutationResult(runId, {
-      summary,
-      detail: current,
-      publishDependentSummaries: shouldPublishDependentSummaries(previous, current),
-      publishDependentDetails: shouldPublishDependentDetails(previous, current),
-    });
-    return result;
+    return applyPublishedMutation(runId, mutate, options).result;
   };
 
   const withPublishedMutationAsync = async <T>(
@@ -1056,7 +1183,7 @@ export async function serveDaemon(
     return { runId: target, accepted: true };
   };
 
-  const operations = createDaemonOperations({
+  operations = createDaemonOperations({
     ...app,
     getRun: getDaemonRun,
     getRunList: getDaemonRunList,
@@ -1071,10 +1198,20 @@ export async function serveDaemon(
       publishRunProjections(run.runId);
       return run;
     },
-    readyRun: (target) =>
-      withPublishedMutation(target, () => app.readyRun(target, mutationAuditContext), {
-        inferDependentFanout: true,
-      }),
+    readyRun: (target) => {
+      const mutation = applyPublishedMutation(
+        target,
+        () => app.readyRun(target, mutationAuditContext),
+        {
+          inferDependentFanout: true,
+        },
+      );
+      queueAutoStartDependencyRun(mutation.result.runId, {
+        summary: mutation.summary,
+        detail: mutation.detail,
+      });
+      return mutation.result;
+    },
     archive: (target) =>
       withPublishedMutation(target, () => app.archive(target, mutationAuditContext), {
         inferDependentFanout: true,
@@ -1165,6 +1302,18 @@ export async function serveDaemon(
       ),
     abortRun,
   });
+
+  queueReadyDependencyAutoStartSweep = () => {
+    const eligibleRunIds = Array.from(manifestEntriesByRunId.values())
+      .filter(
+        (entry) => entry.manifest.status === "ready" && entry.manifest.dependencyRunIds.length > 0,
+      )
+      .map((entry) => entry.manifest.runId);
+    for (const runId of eligibleRunIds) {
+      queueAutoStartDependencyRun(runId);
+    }
+  };
+  rebuildManifestIndex();
 
   const httpServer = createServer((req, res) => {
     const pathname = new URL(req.url ?? "/", httpBaseUrl).pathname;

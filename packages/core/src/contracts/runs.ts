@@ -296,6 +296,8 @@ export function toRunSummary(
   ]),
   dependencyState?: RunDependencyState,
 ): RunSummary {
+  const resolvedDependencyState =
+    dependencyState ?? deriveDependencyState(entry.manifest, relatedManifests);
   return {
     runId: entry.manifest.runId,
     repo: entry.manifest.repo,
@@ -316,24 +318,43 @@ export function toRunSummary(
     tasksTotal: entry.manifest.tasksTotal,
     attachmentCount: entry.manifest.attachments.length,
     hookCount: entry.manifest.resolvedHooks.length,
-    dependencyState: dependencyState ?? deriveDependencyState(entry.manifest, relatedManifests),
+    dependencyState: resolvedDependencyState,
     activeTask: deriveActiveTask(entry.manifest.finalTasks),
     execution: entry.manifest.execution,
-    capabilities: deriveRunCapabilities(entry.manifest),
+    capabilities: deriveRunCapabilities(entry.manifest, resolvedDependencyState),
   };
 }
 
-export function deriveRunCapabilities(manifest: RunManifest): RunCapabilities {
+function isReadyRunBlockedOnDependencies(
+  status: RunStatus,
+  dependencyState?: Pick<RunDependencyState, "unsatisfied">,
+): boolean {
+  return status === "ready" && (dependencyState?.unsatisfied ?? 0) > 0;
+}
+
+export function deriveRunCapabilities(
+  manifest: RunManifest,
+  dependencyState?: Pick<RunDependencyState, "unsatisfied">,
+): RunCapabilities {
   const canAbort = false;
   const archived = isArchived(manifest);
   const nonPassive = manifest.backend !== "passive";
+  const dependencyBlockedReadyRun = isReadyRunBlockedOnDependencies(
+    manifest.status,
+    dependencyState,
+  );
   return {
     canArchive: canArchiveRun(manifest),
     canUnarchive: canUnarchiveRun(manifest),
     canReset: canResetRun(manifest),
     canDelete: canDeleteRun(manifest),
     canReady: !archived && nonPassive && manifest.status === "initialized",
-    canResume: !isRunning(manifest) && !archived && nonPassive && manifest.status !== "initialized",
+    canResume:
+      !isRunning(manifest) &&
+      !archived &&
+      nonPassive &&
+      manifest.status !== "initialized" &&
+      !dependencyBlockedReadyRun,
     canAbort,
     abortReason: canAbort
       ? undefined
@@ -348,6 +369,7 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
   const { manifest } = result;
   const relatedManifests =
     result.relatedManifests ?? new Map<string, RunManifest>([[manifest.runId, manifest]]);
+  const dependencyState = deriveDependencyState(manifest, relatedManifests);
   return {
     runId: manifest.runId,
     repo: manifest.repo,
@@ -407,7 +429,7 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
     lockedFields: [...manifest.lockedFields],
     runtimeVars: { ...manifest.runtimeVars },
     execution: manifest.execution,
-    capabilities: deriveRunCapabilities(manifest),
+    capabilities: deriveRunCapabilities(manifest, dependencyState),
   };
 }
 
