@@ -1094,6 +1094,76 @@ Work.
   assert.equal(backendInvoked, false);
 });
 
+test("git-worktree builtin prepare hooks reuse existing paths when collision is must_exist", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  const repoDir = initGitRepo(dir);
+  const worktreeDir = join(dir, "feature-worktree");
+  execFileSync("git", ["-C", repoDir, "worktree", "add", "-b", "hooks-test", worktreeDir, "main"], {
+    encoding: "utf8",
+    env: gitTestEnv(),
+  });
+  writeAssignment(
+    dir,
+    "three-work",
+    `---
+schemaVersion: 1
+name: three-work
+vars:
+  worktree_path:
+    type: string
+    required: true
+    requiredAt: prepare
+hooks:
+  prepare:
+    - builtin: git-worktree
+      with:
+        repo: ${JSON.stringify(repoDir)}
+        from: main
+        branch: hooks-test
+        path: ${JSON.stringify(worktreeDir)}
+        collision: must_exist
+tasks:
+  - id: t1
+    title: First
+---
+Work.
+`,
+  );
+
+  let seenCwd;
+  const { outcome } = await runWithMock(
+    dir,
+    async (ctx) => {
+      seenCwd = ctx.cwd;
+      setTaskStatusesForPrompt(ctx.prompt, { t1: "completed" }, repoDir);
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "session-worktree-existing",
+        transcript: "done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    },
+    {},
+    { assignmentName: "three-work", backendId: "claude" },
+  );
+
+  const manifest = JSON.parse(readFileSync(join(outcome.workspaceDir, "run.json"), "utf8"));
+  assert.equal(seenCwd, worktreeDir);
+  assert.equal(manifest.cwd, worktreeDir);
+  assert.equal(manifest.runtimeVars.worktree_path, worktreeDir);
+  assert.equal(
+    execFileSync("git", ["-C", worktreeDir, "rev-parse", "--abbrev-ref", "HEAD"], {
+      encoding: "utf8",
+      env: gitTestEnv(),
+    }).trim(),
+    "hooks-test",
+  );
+});
+
 test("prepare hooks can fetch origin/main, switch into .worktrees, and rebase a feature branch onto the fetched base", async () => {
   const dir = tempDir();
   writeAgent(dir, "three", THREE_AGENT);
