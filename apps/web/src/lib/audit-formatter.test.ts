@@ -44,4 +44,32 @@ describe("formatAuditEvent", () => {
       { type: "text", text: "." },
     ]);
   });
+
+  it("renders task status transitions with task-status badges", () => {
+    const formatted = formatAuditEvent({
+      type: "task.updated",
+      recordedAt: "2026-04-21T16:09:00.000Z",
+      source: "task_command",
+      hostMode: "embedded",
+      fields: {
+        taskTitle: "Apply agreed review fixes and request delta re-review",
+        command: "set",
+        statusBefore: "in_progress",
+        statusAfter: "completed",
+        notesChanged: true,
+      },
+    } as never);
+
+    expect(formatted.message).toEqual([
+      { type: "text", text: "Updated task " },
+      { type: "strong", text: "Apply agreed review fixes and request delta re-review" },
+      { type: "text", text: " from " },
+      { type: "task_status", status: "in_progress" },
+      { type: "text", text: " to " },
+      { type: "task_status", status: "completed" },
+      { type: "text", text: " via " },
+      { type: "code", text: "set" },
+      { type: "text", text: "." },
+    ]);
+  });
 });

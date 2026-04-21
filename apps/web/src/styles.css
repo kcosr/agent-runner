@@ -1256,6 +1256,44 @@ body {
   white-space: nowrap;
 }
 
+.drawer-panel--audit .dependency-name {
+  font-weight: 500;
+}
+
+.audit-message-strong {
+  font-weight: 700;
+  color: var(--foreground);
+}
+
+.audit-message-code {
+  display: inline-block;
+  margin-inline: 0.08rem;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--muted) 88%, var(--background));
+  color: var(--foreground);
+  font-family: var(--mono);
+  font-size: 0.92em;
+  line-height: 1.35;
+  vertical-align: baseline;
+}
+
+.drawer-panel--audit pre {
+  margin: 0.35rem 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--muted) 92%, var(--background));
+}
+
+.drawer-panel--audit pre code {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
 .attachment-title-row {
   display: inline-flex;
   align-items: center;

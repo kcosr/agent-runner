@@ -1,5 +1,5 @@
 import type { RunAuditEvent } from "@task-runner/core/contracts/events.js";
-import type { RunStatus } from "@task-runner/core/contracts/runs.js";
+import type { RunStatus, RunTaskSummary } from "@task-runner/core/contracts/runs.js";
 
 export type AuditMessagePart =
   | {
@@ -17,6 +17,10 @@ export type AuditMessagePart =
   | {
       type: "status";
       status: RunStatus;
+    }
+  | {
+      type: "task_status";
+      status: RunTaskSummary["status"];
     };
 
 export interface FormattedAuditEvent {
@@ -50,6 +54,20 @@ function isRunStatus(value: unknown): value is RunStatus {
 
 function status(value: unknown): AuditMessagePart {
   return { type: "status", status: isRunStatus(value) ? value : "error" };
+}
+
+function isTaskStatus(value: unknown): value is RunTaskSummary["status"] {
+  return (
+    value === "pending" || value === "in_progress" || value === "completed" || value === "blocked"
+  );
+}
+
+function taskStatus(value: unknown): AuditMessagePart {
+  return { type: "task_status", status: isTaskStatus(value) ? value : "blocked" };
+}
+
+function formatTaskCommand(value: unknown): string {
+  return value === "append_notes" ? "append-notes" : String(value ?? "unknown");
 }
 
 function nullableCode(value: unknown, fallback = "none"): AuditMessagePart {
@@ -188,12 +206,51 @@ export function formatAuditEvent(event: RunAuditEvent): FormattedAuditEvent {
         ],
       };
     case "task.updated":
+      if (isTaskStatus(fields.statusBefore) && isTaskStatus(fields.statusAfter)) {
+        return {
+          message: [
+            text("Updated task "),
+            strong(fields.taskTitle ?? fields.taskId ?? "unknown"),
+            text(" from "),
+            taskStatus(fields.statusBefore),
+            text(" to "),
+            taskStatus(fields.statusAfter),
+            text(" via "),
+            code(formatTaskCommand(fields.command)),
+            text("."),
+          ],
+        };
+      }
+      if (isTaskStatus(fields.statusAfter)) {
+        return {
+          message: [
+            text("Set task "),
+            strong(fields.taskTitle ?? fields.taskId ?? "unknown"),
+            text(" to "),
+            taskStatus(fields.statusAfter),
+            text(" via "),
+            code(formatTaskCommand(fields.command)),
+            text("."),
+          ],
+        };
+      }
+      if (fields.notesChanged === true) {
+        return {
+          message: [
+            text("Updated notes on task "),
+            strong(fields.taskTitle ?? fields.taskId ?? "unknown"),
+            text(" via "),
+            code(formatTaskCommand(fields.command)),
+            text("."),
+          ],
+        };
+      }
       return {
         message: [
           text("Updated task "),
           strong(fields.taskTitle ?? fields.taskId ?? "unknown"),
           text(" via "),
-          code(fields.command ?? "unknown"),
+          code(formatTaskCommand(fields.command)),
           text("."),
         ],
       };

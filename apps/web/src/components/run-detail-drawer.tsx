@@ -206,15 +206,55 @@ function scrollElementToBottom(element: HTMLElement) {
 function renderAuditMessagePart(part: AuditMessagePart, key: string) {
   switch (part.type) {
     case "code":
-      return <code key={key}>{part.text}</code>;
+      return (
+        <code className="audit-message-code" key={key}>
+          {part.text}
+        </code>
+      );
+    case "task_status":
+      return (
+        <span className={taskStatusBadgeClass(part.status)} key={key}>
+          {taskStatusBadgeLabel(part.status)}
+        </span>
+      );
     case "strong":
-      return <strong key={key}>{part.text}</strong>;
+      return (
+        <strong className="audit-message-strong" key={key}>
+          {part.text}
+        </strong>
+      );
     case "status":
       return <StatusBadge key={key} status={part.status} />;
     case "text":
       return <span key={key}>{part.text}</span>;
     default:
       return null;
+  }
+}
+
+function taskStatusBadgeLabel(status: "pending" | "in_progress" | "completed" | "blocked") {
+  switch (status) {
+    case "pending":
+      return "pending";
+    case "in_progress":
+      return "in progress";
+    case "completed":
+      return "completed";
+    case "blocked":
+      return "blocked";
+  }
+}
+
+function taskStatusBadgeClass(status: "pending" | "in_progress" | "completed" | "blocked") {
+  switch (status) {
+    case "pending":
+      return "badge badge-pending";
+    case "in_progress":
+      return "badge badge-running";
+    case "completed":
+      return "badge badge-completed";
+    case "blocked":
+      return "badge badge-blocked";
   }
 }
 
