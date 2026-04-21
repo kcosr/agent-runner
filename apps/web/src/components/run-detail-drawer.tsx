@@ -131,9 +131,11 @@ function formatScalarDataValue(value: unknown) {
 function ReadOnlyDataEntries({
   data,
   emptyMessage,
+  tableLabel,
 }: {
   data: Record<string, unknown> | undefined;
   emptyMessage: string;
+  tableLabel: string;
 }) {
   const entries = Object.entries(data ?? {});
   if (entries.length === 0) {
@@ -141,21 +143,35 @@ function ReadOnlyDataEntries({
   }
 
   return (
-    <div className="dependency-section">
-      {entries.map(([key, value]) => (
-        <div className="meta-cell full" key={key}>
-          <span className="meta-label">{key}</span>
-          {isStructuredDataValue(value) ? (
-            <div className="markdown task-markdown">
-              <pre>
-                <code>{JSON.stringify(value, null, 2)}</code>
-              </pre>
-            </div>
-          ) : (
-            <span className="meta-value mono">{formatScalarDataValue(value)}</span>
-          )}
-        </div>
-      ))}
+    <div className="drawer-data-table-wrap">
+      <table aria-label={tableLabel} className="drawer-data-table">
+        <thead>
+          <tr>
+            <th scope="col">Key</th>
+            <th scope="col">Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          {entries.map(([key, value]) => (
+            <tr key={key}>
+              <th scope="row">{key}</th>
+              <td>
+                {isStructuredDataValue(value) ? (
+                  <div className="drawer-data-table__structured markdown task-markdown">
+                    <pre>
+                      <code>{JSON.stringify(value, null, 2)}</code>
+                    </pre>
+                  </div>
+                ) : (
+                  <span className="drawer-data-table__scalar mono">
+                    {formatScalarDataValue(value)}
+                  </span>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -1464,9 +1480,17 @@ export function RunDetailDrawer({
                 </div>
 
                 {dataTab === "vars" ? (
-                  <ReadOnlyDataEntries data={run.runtimeVars} emptyMessage="No vars" />
+                  <ReadOnlyDataEntries
+                    data={run.runtimeVars}
+                    emptyMessage="No vars"
+                    tableLabel="Vars"
+                  />
                 ) : (
-                  <ReadOnlyDataEntries data={run.hookState} emptyMessage="No hook state" />
+                  <ReadOnlyDataEntries
+                    data={run.hookState}
+                    emptyMessage="No hook state"
+                    tableLabel="Hook state"
+                  />
                 )}
               </div>
             </section>

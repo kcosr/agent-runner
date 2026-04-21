@@ -1623,15 +1623,18 @@ describe("web app", () => {
 
     const dataPanel = screen.getByLabelText("Data");
     const dataTabs = within(dataPanel).getByRole("tablist", { name: "Data view" });
+    const varsTable = within(dataPanel).getByRole("table", { name: "Vars" });
     expect(within(dataTabs).getByRole("tab", { name: "Vars" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
-    expect(within(dataPanel).getByText("token")).toBeInTheDocument();
-    expect(within(dataPanel).getByText("token-123")).toBeInTheDocument();
-    expect(within(dataPanel).getByText("config")).toBeInTheDocument();
+    expect(within(varsTable).getByRole("columnheader", { name: "Key" })).toBeInTheDocument();
+    expect(within(varsTable).getByRole("columnheader", { name: "Value" })).toBeInTheDocument();
+    expect(within(varsTable).getByRole("rowheader", { name: "token" })).toBeInTheDocument();
+    expect(within(varsTable).getByText("token-123")).toBeInTheDocument();
+    expect(within(varsTable).getByRole("rowheader", { name: "config" })).toBeInTheDocument();
     expect(
-      within(dataPanel).getByText(/\{\s+"enabled": true,\s+"retries": 2\s+\}/s),
+      within(varsTable).getByText(/\{\s+"enabled": true,\s+"retries": 2\s+\}/s),
     ).toBeInTheDocument();
     expect(within(dataPanel).queryByRole("textbox")).not.toBeInTheDocument();
     expect(within(dataPanel).queryByRole("button", { name: "Upload" })).not.toBeInTheDocument();
@@ -1641,12 +1644,13 @@ describe("web app", () => {
 
     await user.click(within(dataTabs).getByRole("tab", { name: "Hook state" }));
 
+    const hookStateTable = within(dataPanel).getByRole("table", { name: "Hook state" });
     expect(within(dataTabs).getByRole("tab", { name: "Hook state" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
-    expect(within(dataPanel).getByText("lastRun")).toBeInTheDocument();
-    expect(within(dataPanel).getByText(/\{\s+"status": "ready"\s+\}/s)).toBeInTheDocument();
+    expect(within(hookStateTable).getByRole("rowheader", { name: "lastRun" })).toBeInTheDocument();
+    expect(within(hookStateTable).getByText(/\{\s+"status": "ready"\s+\}/s)).toBeInTheDocument();
   });
 
   it("shows empty states for missing vars and hook state data", async () => {
