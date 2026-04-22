@@ -199,6 +199,11 @@ The built-in `command` hook supports:
 - `mode: json` — zero exit plus JSON stdout returning the full hook
   result payload; malformed JSON is a runtime error
 
+The built-in `require-children-success` hook is task-transition only. It
+checks direct child runs by `parentRunId` inside core state and rejects
+completion of configured task ids until every direct child is
+`success`.
+
 The built-in `git-worktree` hook is prepare-only. It creates or reuses a
 worktree, switches the run cwd to that path, and projects
 `worktree_path` into runtime vars.

@@ -24,6 +24,11 @@ hooks:
         branch: "{{worktree_slug}}"
         path: "{{worktree_path}}"
         collision: reuse
+  taskTransition:
+    - builtin: require-children-success
+      with:
+        taskIds: ["apply_review_fixes"]
+        requireAny: true
 maxRetries: 4
 lockedFields:
   - tasks

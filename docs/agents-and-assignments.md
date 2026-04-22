@@ -315,6 +315,11 @@ Built-in hooks:
   success and a non-zero exit code as block/reject. `mode: json`
   requires exit code `0` and parses a full hook result from stdout;
   malformed JSON is a runtime error.
+- `require-children-success` runs in `taskTransition`. It guards
+  completion of specific tasks until all direct child runs of the
+  current run are `success`. Configure it with `taskIds: [...]`, and set
+  `requireAny: true` only when the task must refuse completion until at
+  least one child run exists.
 
 ## Locked fields
 
