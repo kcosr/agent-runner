@@ -13,6 +13,7 @@ import {
 import {
   LineageMissingError,
   LineageResolutionError,
+  VarResolutionError,
   runAgent,
 } from "../packages/core/dist/core/run/run-loop.js";
 import { createRunEventCapture } from "./helpers/run-events.mjs";
@@ -1244,6 +1245,91 @@ Child.
   assert.equal(
     outcome.manifest.finalTasks.t1.body.trim(),
     `Child cwd ${worktreeDir} worktree ${worktreeDir}`,
+  );
+});
+
+test("lineage skips only legacy redacted parent sentinels, not arbitrary object-shaped values", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  writeAssignment(
+    dir,
+    "lineage-parent-object",
+    `---
+schemaVersion: 1
+name: lineage-parent-object
+vars:
+  lineage_value:
+    type: string
+    required: true
+tasks:
+  - id: t1
+    title: Parent
+---
+Parent.
+`,
+  );
+  writeAssignment(
+    dir,
+    "lineage-child-object",
+    `---
+schemaVersion: 1
+name: lineage-child-object
+vars:
+  lineage_value:
+    type: string
+    required: true
+    sources: [parent]
+tasks:
+  - id: t1
+    title: Child
+---
+Child.
+`,
+  );
+
+  const parent = await initWithOptions(dir, "lineage-parent-object", {
+    cliVars: { lineage_value: "parent-value" },
+  });
+  const parentManifestPath = join(parent.workspaceDir, "run.json");
+  const mutatedParent = JSON.parse(readFileSync(parentManifestPath, "utf8"));
+  mutatedParent.runtimeVars.lineage_value = {
+    redacted: true,
+    nested: "not-a-legacy-sentinel",
+  };
+  writeFileSync(parentManifestPath, `${JSON.stringify(mutatedParent, null, 2)}\n`);
+
+  await assert.rejects(
+    () =>
+      initWithOptions(dir, "lineage-child-object", {
+        parentRunId: parent.runId,
+      }),
+    (error) => error instanceof VarResolutionError && /lineage_value/.test(error.message),
+  );
+});
+
+test("cwd interpolation throws when required tokens remain unresolved", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  writeAssignment(
+    dir,
+    "cwd-unresolved",
+    `---
+schemaVersion: 1
+name: cwd-unresolved
+cwd: "{{worktree_path}}"
+tasks:
+  - id: t1
+    title: First
+---
+Child.
+`,
+  );
+
+  await assert.rejects(
+    () => initWithOptions(dir, "cwd-unresolved"),
+    (error) =>
+      error instanceof VarResolutionError &&
+      /cwd interpolation could not resolve token \{\{worktree_path\}\}/.test(error.message),
   );
 });
 

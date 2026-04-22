@@ -512,11 +512,22 @@ function emitCallerInstructions(
 }
 
 function coerceVar(key: string, value: unknown, def: VarDef): unknown {
-  if (typeof value !== "string") return value;
   switch (def.type) {
     case "string":
+      if (typeof value !== "string") {
+        throw new VarResolutionError(`var "${key}": expected string`);
+      }
       return value;
     case "number": {
+      if (typeof value === "number") {
+        if (Number.isNaN(value)) {
+          throw new VarResolutionError(`var "${key}": expected number, got NaN`);
+        }
+        return value;
+      }
+      if (typeof value !== "string") {
+        throw new VarResolutionError(`var "${key}": expected number`);
+      }
       const n = Number(value);
       if (Number.isNaN(n)) {
         throw new VarResolutionError(`var "${key}": expected number, got "${value}"`);
@@ -524,10 +535,21 @@ function coerceVar(key: string, value: unknown, def: VarDef): unknown {
       return n;
     }
     case "boolean":
+      if (typeof value === "boolean") {
+        return value;
+      }
+      if (typeof value !== "string") {
+        throw new VarResolutionError(`var "${key}": expected boolean`);
+      }
       if (value === "true" || value === "1") return true;
       if (value === "false" || value === "0") return false;
       throw new VarResolutionError(`var "${key}": expected boolean, got "${value}"`);
     case "enum":
+      if (typeof value !== "string") {
+        throw new VarResolutionError(
+          `var "${key}": expected one of ${def.values?.join(", ") ?? ""}`,
+        );
+      }
       if (!def.values?.includes(value)) {
         throw new VarResolutionError(
           `var "${key}": expected one of ${def.values?.join(", ") ?? ""}, got "${value}"`,
@@ -576,6 +598,24 @@ interface LineageManifest {
   manifest: RunManifest;
 }
 
+function isLegacyRedactedRuntimeVar(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  if (record.redacted !== true || typeof record.source !== "string") {
+    return false;
+  }
+  if (record.envName !== undefined && typeof record.envName !== "string") {
+    return false;
+  }
+  if (record.inheritedFromRunId !== undefined && typeof record.inheritedFromRunId !== "string") {
+    return false;
+  }
+  const allowedKeys = new Set(["redacted", "source", "envName", "inheritedFromRunId"]);
+  return Object.keys(record).every((key) => allowedKeys.has(key));
+}
+
 function resolveLineageManifest(runId: string): LineageManifest {
   const matches = findRunManifestsById(runId);
   if (matches.length === 0) {
@@ -621,15 +661,10 @@ function resolveFromParentLineage(
     if (value === undefined) {
       continue;
     }
-    if (
-      value &&
-      typeof value === "object" &&
-      !Array.isArray(value) &&
-      (value as Record<string, unknown>).redacted === true
-    ) {
+    const inheritedSource = ancestor.manifest.runtimeVarSources[key];
+    if (inheritedSource === undefined && isLegacyRedactedRuntimeVar(value)) {
       continue;
     }
-    const inheritedSource = ancestor.manifest.runtimeVarSources[key];
     return {
       value,
       source: {
@@ -737,8 +772,9 @@ function resolveConfiguredCwd(
 ): string {
   if (!input || input === ".") return fallback;
   const interpolated = interpolate(input, injectedVars);
-  if (INTERPOLATION_TOKEN_PATTERN.test(interpolated)) {
-    return fallback;
+  const unresolvedToken = interpolated.match(INTERPOLATION_TOKEN_PATTERN)?.[0];
+  if (unresolvedToken) {
+    throw new VarResolutionError(`cwd interpolation could not resolve token ${unresolvedToken}`);
   }
   return isAbsolute(interpolated) ? interpolated : resolve(fallback, interpolated);
 }
