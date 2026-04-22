@@ -251,6 +251,20 @@ automatically freezes `parentRunId`. Author descendant assignments with
 `sources: [parent]` for values like `worktree_path` instead of manually
 repeating `--var` flags.
 
+Task-completion guards that depend on spawned child runs can stay fully
+declarative. For example, this blocks `peer_review` from being marked
+`completed` until every direct child run reaches `success`; with
+`requireAny: false`, the task may still complete if no child run exists:
+
+```yaml
+hooks:
+  taskTransition:
+    - builtin: require-children-success
+      with:
+        taskIds: ["peer_review"]
+        requireAny: false
+```
+
 CLI commands can either:
 
 - run **embedded** against the shared filesystem state, or

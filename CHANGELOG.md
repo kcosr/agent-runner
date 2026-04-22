@@ -56,6 +56,9 @@
   explicitly as structured daemon request `parentRunId` instead of
   relying on implicit env forwarding between the client and daemon.
   ([#81](https://github.com/kcosr/task-runner/pull/81))
+- Added the built-in `require-children-success` task-transition hook so
+  assignments can block completion of selected tasks until direct child
+  runs reach `success`.
 - Added `task-runner run audit <run-id>` plus daemon/web audit history
   surfaces for reading cursored persisted run event history, and
   `scripts/migrate-run-events-v2.mjs` for upgrading legacy uncursored

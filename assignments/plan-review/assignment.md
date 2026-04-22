@@ -119,6 +119,11 @@ tasks:
           prepare hook wired to `repo_root`, `worktree_slug`, and
           `worktree_path` rather than recomputing them inside task
           prose
+        - the generated implementer draft includes a
+          `taskTransition` `require-children-success` hook for
+          `apply_review_fixes` with `requireAny: true`, so the
+          implementer cannot mark review-fix work complete until
+          the nested review run actually reaches `success`
         - the internal review step passes
           `implementation_run_id={{run_id}}` so the code
           reviewer sees the implementer run

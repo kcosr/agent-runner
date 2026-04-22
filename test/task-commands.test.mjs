@@ -144,6 +144,29 @@ function patchManifest(workspaceDir, mutator) {
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
+function taskGuardedAssignment({ requireAny, taskIds = ["peer_review"] } = {}) {
+  return `---
+schemaVersion: 1
+name: task-cmd-work
+maxRetries: 1
+hooks:
+  taskTransition:
+    - builtin: require-children-success
+      with:
+        taskIds:
+${taskIds.map((taskId) => `          - ${taskId}`).join("\n")}
+${requireAny === undefined ? "" : `        requireAny: ${requireAny}\n`}tasks:
+  - id: peer_review
+    title: Peer review
+    body: Wait for reviewer child runs.
+  - id: ship
+    title: Ship
+    body: Ship the change.
+---
+Work.
+`;
+}
+
 test("task set: updates status only on initialized run", async () => {
   const dir = tempDir();
   writeBundle(dir);
@@ -336,6 +359,116 @@ Work.
   manifest = readManifest(outcome.workspaceDir);
   assert.equal(manifest.finalTasks.t1.status, "completed");
   assert.equal(manifest.finalTasks.t1.notes, "OK to ship");
+});
+
+test("task set: require-children-success allows completion when no direct children exist by default", async () => {
+  const dir = tempDir();
+  writeBundle(dir, taskGuardedAssignment());
+  const outcome = await initRun(dir);
+
+  runCli(["task", "set", outcome.runId, "peer_review", "--status", "completed"], { cwd: dir });
+
+  const manifest = readManifest(outcome.workspaceDir);
+  assert.equal(manifest.finalTasks.peer_review.status, "completed");
+});
+
+test("task set: require-children-success rejects completion when requireAny is true and no direct children exist", async () => {
+  const dir = tempDir();
+  writeBundle(dir, taskGuardedAssignment({ requireAny: true }));
+  const outcome = await initRun(dir);
+
+  const rejected = runCliExpectFail(
+    ["task", "set", outcome.runId, "peer_review", "--status", "completed"],
+    { cwd: dir },
+  );
+  assert.equal(rejected.status, 3);
+  assert.match(rejected.stderr, /no direct child runs exist yet/);
+
+  const manifest = readManifest(outcome.workspaceDir);
+  assert.equal(manifest.finalTasks.peer_review.status, "pending");
+});
+
+test("task set: require-children-success ignores unrelated task ids", async () => {
+  const dir = tempDir();
+  writeBundle(dir, taskGuardedAssignment());
+  const outcome = await initRun(dir);
+  const child = await initRun(dir);
+  patchManifest(child.workspaceDir, (manifest) => {
+    manifest.parentRunId = outcome.runId;
+    manifest.resetSeed.parentRunId = outcome.runId;
+    manifest.status = "running";
+  });
+
+  runCli(["task", "set", outcome.runId, "ship", "--status", "completed"], { cwd: dir });
+
+  const manifest = readManifest(outcome.workspaceDir);
+  assert.equal(manifest.finalTasks.ship.status, "completed");
+});
+
+test("task set: require-children-success rejects completion while a direct child is not successful", async () => {
+  const dir = tempDir();
+  writeBundle(dir, taskGuardedAssignment());
+  const outcome = await initRun(dir);
+  const child = await initRun(dir);
+  patchManifest(child.workspaceDir, (manifest) => {
+    manifest.parentRunId = outcome.runId;
+    manifest.resetSeed.parentRunId = outcome.runId;
+    manifest.status = "running";
+  });
+
+  const rejected = runCliExpectFail(
+    ["task", "set", outcome.runId, "peer_review", "--status", "completed"],
+    { cwd: dir },
+  );
+  assert.equal(rejected.status, 3);
+  assert.match(rejected.stderr, new RegExp(`${child.runId} \\(running`));
+
+  const manifest = readManifest(outcome.workspaceDir);
+  assert.equal(manifest.finalTasks.peer_review.status, "pending");
+});
+
+test("task set: require-children-success allows completion once all direct children succeed", async () => {
+  const dir = tempDir();
+  writeBundle(dir, taskGuardedAssignment({ requireAny: true }));
+  const outcome = await initRun(dir);
+  const child = await initRun(dir);
+  patchManifest(child.workspaceDir, (manifest) => {
+    manifest.parentRunId = outcome.runId;
+    manifest.resetSeed.parentRunId = outcome.runId;
+    manifest.status = "success";
+    manifest.exitCode = 0;
+    manifest.endedAt = new Date().toISOString();
+  });
+
+  runCli(["task", "set", outcome.runId, "peer_review", "--status", "completed"], { cwd: dir });
+
+  const manifest = readManifest(outcome.workspaceDir);
+  assert.equal(manifest.finalTasks.peer_review.status, "completed");
+});
+
+test("task set: require-children-success only checks direct children, not grandchildren", async () => {
+  const dir = tempDir();
+  writeBundle(dir, taskGuardedAssignment({ requireAny: true }));
+  const outcome = await initRun(dir);
+  const child = await initRun(dir);
+  patchManifest(child.workspaceDir, (manifest) => {
+    manifest.parentRunId = outcome.runId;
+    manifest.resetSeed.parentRunId = outcome.runId;
+    manifest.status = "success";
+    manifest.exitCode = 0;
+    manifest.endedAt = new Date().toISOString();
+  });
+  const grandchild = await initRun(dir);
+  patchManifest(grandchild.workspaceDir, (manifest) => {
+    manifest.parentRunId = child.runId;
+    manifest.resetSeed.parentRunId = child.runId;
+    manifest.status = "running";
+  });
+
+  runCli(["task", "set", outcome.runId, "peer_review", "--status", "completed"], { cwd: dir });
+
+  const manifest = readManifest(outcome.workspaceDir);
+  assert.equal(manifest.finalTasks.peer_review.status, "completed");
 });
 
 test("task set: preserves existing manifest task state when CLI touches a different task", async () => {

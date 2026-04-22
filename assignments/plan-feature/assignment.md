@@ -12,6 +12,11 @@ vars:
 hooks:
   prepare:
     - path: hooks/derive-worktree-vars.ts
+  taskTransition:
+    - builtin: require-children-success
+      with:
+        taskIds: ["apply_review_fixes"]
+        requireAny: true
 maxRetries: 4
 callerInstructions: |
   This assignment turns a free-form feature description into an
@@ -59,7 +64,11 @@ callerInstructions: |
        run id so the reviewer can validate the draft against
        the planning evidence. The planner
        applies fixes and reruns the draft review until it is
-       approved.
+       approved. The bundled planner assignment guards its own
+       `apply_review_fixes` task with
+       `require-children-success`, so that task cannot be marked
+       complete until the nested draft-review run reaches
+       `success`.
     4. Produces a human-facing summary next to the approved
        draft, then attaches both artifacts to the planning run
        itself as `assignment-seed.md` and
