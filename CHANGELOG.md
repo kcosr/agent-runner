@@ -59,6 +59,7 @@
 - Added the built-in `require-children-success` task-transition hook so
   assignments can block completion of selected tasks until direct child
   runs reach `success`.
+  ([#82](https://github.com/kcosr/task-runner/pull/82))
 - Added `task-runner run audit <run-id>` plus daemon/web audit history
   surfaces for reading cursored persisted run event history, and
   `scripts/migrate-run-events-v2.mjs` for upgrading legacy uncursored
