@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, rmSync } from "node:fs";
 import { defineHook } from "../../hooks.js";
-import type { PrepareHookContext } from "./types.js";
+import type { AttemptHookContext, HookResult, PrepareHookContext } from "./types.js";
 
 interface GitWorktreeConfig {
   repo: string;
@@ -96,7 +96,7 @@ function ensureWorktree(config: GitWorktreeConfig): void {
 
 export default defineHook({
   name: "git-worktree",
-  prepare(ctx: PrepareHookContext) {
+  prepare(ctx: PrepareHookContext): HookResult {
     const config = gitWorktreeConfig(ctx.config);
     ensureWorktree(config);
     return {
@@ -107,6 +107,18 @@ export default defineHook({
         },
         vars: {
           worktree_path: config.path,
+        },
+      },
+    };
+  },
+  beforeAttempt(ctx: AttemptHookContext): HookResult {
+    const config = gitWorktreeConfig(ctx.config);
+    ensureWorktree(config);
+    return {
+      action: "continue",
+      mutate: {
+        run: {
+          cwd: config.path,
         },
       },
     };

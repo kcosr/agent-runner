@@ -151,6 +151,7 @@ export interface AttemptHookContext extends HookContextBase {
   };
   retriesRemaining: number;
   sessionIndex: number;
+  attemptInSession: number;
 }
 
 export type TaskTransitionSource = "run-loop" | "task-set" | "task-append-notes" | "task-add";

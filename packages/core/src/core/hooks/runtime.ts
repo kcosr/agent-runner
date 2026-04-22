@@ -311,24 +311,61 @@ function matchesTaskTransitionWhen(
   return true;
 }
 
-function matchesAttemptWhen(descriptor: ResolvedHookDescriptor, sessionIndex: number): boolean {
+function matchesAttemptWhen(
+  descriptor: ResolvedHookDescriptor,
+  sessionIndex: number,
+  attemptInSession: number,
+): boolean {
   const when = descriptor.when;
-  if (!when || when.sessionIndex === undefined) {
+  if (!when) {
     return true;
   }
-  const configured = when.sessionIndex;
-  if (typeof configured === "number" && Number.isInteger(configured) && configured >= 0) {
-    return configured === sessionIndex;
+
+  if (when.sessionIndex !== undefined) {
+    const configured = when.sessionIndex;
+    if (typeof configured === "number" && Number.isInteger(configured) && configured >= 0) {
+      if (configured !== sessionIndex) {
+        return false;
+      }
+    } else if (
+      Array.isArray(configured) &&
+      configured.every(
+        (value) => typeof value === "number" && Number.isInteger(value) && value >= 0,
+      )
+    ) {
+      if (!configured.includes(sessionIndex)) {
+        return false;
+      }
+    } else {
+      throw new HookRuntimeError(
+        `hook ${descriptor.hookId} when.sessionIndex must be a non-negative integer or array of non-negative integers`,
+      );
+    }
   }
-  if (
-    Array.isArray(configured) &&
-    configured.every((value) => typeof value === "number" && Number.isInteger(value) && value >= 0)
-  ) {
-    return configured.includes(sessionIndex);
+
+  if (when.attemptInSession !== undefined) {
+    const configured = when.attemptInSession;
+    if (typeof configured === "number" && Number.isInteger(configured) && configured >= 0) {
+      if (configured !== attemptInSession) {
+        return false;
+      }
+    } else if (
+      Array.isArray(configured) &&
+      configured.every(
+        (value) => typeof value === "number" && Number.isInteger(value) && value >= 0,
+      )
+    ) {
+      if (!configured.includes(attemptInSession)) {
+        return false;
+      }
+    } else {
+      throw new HookRuntimeError(
+        `hook ${descriptor.hookId} when.attemptInSession must be a non-negative integer or array of non-negative integers`,
+      );
+    }
   }
-  throw new HookRuntimeError(
-    `hook ${descriptor.hookId} when.sessionIndex must be a non-negative integer or array of non-negative integers`,
-  );
+
+  return true;
 }
 
 async function invokeHook(
@@ -354,6 +391,7 @@ function attemptContext(
   descriptor: ResolvedHookDescriptor,
   state: HookExecutionState,
   sessionIndex: number,
+  attemptInSession: number,
   retriesRemaining: number,
   attemptResult?: AttemptResultSnapshot,
 ): AttemptHookContext {
@@ -392,6 +430,7 @@ function attemptContext(
     attemptResult,
     retriesRemaining,
     sessionIndex,
+    attemptInSession,
   };
 }
 
@@ -402,7 +441,7 @@ function prepareContext(
   initialLockedFields: LockableField[],
 ): PrepareHookContext {
   return {
-    ...attemptContext(descriptor, state, 0, state.manifest.maxAttempts - 1),
+    ...attemptContext(descriptor, state, 0, 0, state.manifest.maxAttempts - 1),
     phase: "prepare",
     defaultInitialPrompt,
     currentInitialPrompt: state.initialPrompt,
@@ -416,7 +455,13 @@ function taskTransitionContext(
   transition: TaskTransitionHookContext["transition"],
 ): TaskTransitionHookContext {
   return {
-    ...attemptContext(descriptor, state, state.manifest.sessionCount, state.manifest.maxAttempts),
+    ...attemptContext(
+      descriptor,
+      state,
+      state.manifest.sessionCount,
+      0,
+      state.manifest.maxAttempts,
+    ),
     phase: "taskTransition",
     transition,
   };
@@ -487,13 +532,14 @@ export async function runAttemptHooks(
   state: HookExecutionState,
   options: {
     sessionIndex: number;
+    attemptInSession: number;
     attempt: number | null;
     retriesRemaining: number;
     attemptResult?: AttemptResultSnapshot;
   },
 ): Promise<AttemptPhaseResult> {
   for (const descriptor of state.manifest.resolvedHooks.filter((entry) => entry.phase === phase)) {
-    if (!matchesAttemptWhen(descriptor, options.sessionIndex)) {
+    if (!matchesAttemptWhen(descriptor, options.sessionIndex, options.attemptInSession)) {
       continue;
     }
     const startedAt = new Date().toISOString();
@@ -506,6 +552,7 @@ export async function runAttemptHooks(
           descriptor,
           state,
           options.sessionIndex,
+          options.attemptInSession,
           options.retriesRemaining,
           options.attemptResult,
         ),

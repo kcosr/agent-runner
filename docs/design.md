@@ -204,16 +204,13 @@ checks direct child runs by `parentRunId` inside core state and rejects
 completion of configured task ids until every direct child is
 `success`.
 
-The built-in `git-worktree` hook is prepare-only. It creates or reuses a
-worktree, switches the run cwd to that path, and projects
-`worktree_path` into runtime vars.
-
-The built-in `git-sync-base` hook is also prepare-only. It requires a
-clean current branch/worktree and rebases that branch onto an explicit
-configured base ref before backend work begins.
+The built-in `git-worktree` hook runs in `prepare` and `beforeAttempt`.
+It creates or reuses a worktree, switches the run cwd to that path, and
+in `prepare` also projects `worktree_path` into runtime vars.
 
 Declarative `when` support remains narrow: attempt-phase hooks support
-`when.sessionIndex`, while task-transition hooks support `when.toStatus`.
+`when.sessionIndex` and `when.attemptInSession`, while task-transition
+hooks support `when.toStatus`.
 
 ## Task state model
 

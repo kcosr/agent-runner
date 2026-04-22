@@ -1956,6 +1956,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     phase: "beforeAttempt" | "afterAttempt" | "afterExit",
     options: {
       sessionIndex: number;
+      attemptInSession: number;
       attempt: number | null;
       retriesRemaining: number;
       attemptResult?: {
@@ -2003,6 +2004,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       const { hookResult: beforeAttemptResult, attemptPrompt: beforeAttemptPrompt } =
         await runLockedAttemptHooks("beforeAttempt", {
           sessionIndex,
+          attemptInSession: sessionAttempts - 1,
           attempt: globalAttemptNumber,
           retriesRemaining: maxAttempts - sessionAttempts,
         });
@@ -2106,6 +2108,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       const { hookResult: afterAttemptResult, attemptPrompt: afterAttemptPrompt } =
         await runLockedAttemptHooks("afterAttempt", {
           sessionIndex,
+          attemptInSession: sessionAttempts - 1,
           attempt: globalAttemptNumber,
           retriesRemaining: maxAttempts - sessionAttempts,
           attemptResult: {
@@ -2300,6 +2303,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   try {
     await runLockedAttemptHooks("afterExit", {
       sessionIndex,
+      attemptInSession: sessionAttempts === 0 ? 0 : sessionAttempts - 1,
       attempt: pendingAttempt?.attempt ?? null,
       retriesRemaining: 0,
     });

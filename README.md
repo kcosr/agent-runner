@@ -215,24 +215,26 @@ family.
 ---
 schemaVersion: 1
 name: repo-work
-vars:
-  worktree_path:
-    type: string
-    required: true
-    requiredAt: prepare
 hooks:
-  prepare:
+  beforeAttempt:
     - builtin: git-worktree
+      when:
+        sessionIndex: [0]
+        attemptInSession: [0]
       with:
         repo: "{{cwd}}"
         from: main
         branch: review-worktree
         path: "{{cwd}}/.worktrees/review-worktree"
-    - builtin: git-sync-base
+    - builtin: command
+      when:
+        sessionIndex: [0]
+        attemptInSession: [0]
       with:
-        repo: "{{cwd}}/.worktrees/review-worktree"
-        baseRef: origin/main
-  beforeAttempt:
+        mode: status
+        command: bash
+        args:
+          ["-lc", "git fetch origin --prune && git merge --ff-only origin/main"]
     - builtin: command
       when:
         sessionIndex: [0]

@@ -89,11 +89,12 @@ tasks:
           internal review, docs drift, self-check,
           push_branch_and_create_pr
         - the scaffold/setup task explicitly requires the
-          implementer to confirm it is in a non-`main`
-          git worktree, confirm local `main` is already in
-          sync with `origin/main` without updating `main`
-          itself, and sync the current worktree to local
-          `main` before starting implementation
+          implementer to confirm the inherited `repo_root`,
+          `worktree_slug`, and `worktree_path` values, ensure
+          the repo root is clean before execution, and verify
+          that the assignment's first-attempt hooks create or
+          reuse the target worktree and fast-forward it to
+          `origin/main` before backend work begins
         - every code-bearing task has a concrete `**Done when:**`
           block with test-backed completion criteria
         - every task body has concrete file paths, commands, or
@@ -101,7 +102,8 @@ tasks:
         - no `<<PLACEHOLDER>>` markers remain anywhere in the draft
 
       A placeholder left in the draft, a code-bearing task with no
-      meaningful `Done when:`, a missing worktree/main-sync
+      meaningful `Done when:`, a missing first-attempt
+      worktree/setup sync preflight
       preflight, or an id scheme that encodes array position
       instead of meaning are all findings.
   - id: review_workflow_and_handoff
@@ -115,8 +117,8 @@ tasks:
           `repo_root`, `worktree_slug`, and `worktree_path` vars
           with `sources: [parent]`
         - the generated implementer draft sets
-          `cwd: "{{worktree_path}}"` and uses a `git-worktree`
-          prepare hook wired to `repo_root`, `worktree_slug`, and
+          `cwd: "{{repo_root}}"` and uses a `git-worktree`
+          first-attempt hook wired to `repo_root`, `worktree_slug`, and
           `worktree_path` rather than recomputing them inside task
           prose
         - the generated implementer draft includes a

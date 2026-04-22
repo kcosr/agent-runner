@@ -101,10 +101,12 @@
   `run-events.jsonl` history for prepare, attempt, and task-transition
   hook executions while keeping manifest `hookAudits` as the richer
   detail projection surface. ([#66](https://github.com/kcosr/task-runner/pull/66))
-- Added narrow declarative `when.sessionIndex` support for attempt-phase
-  hooks and a separate prepare-only `git-sync-base` built-in for
-  rebasing a clean current branch onto an explicit base ref before work
-  begins. ([#66](https://github.com/kcosr/task-runner/pull/66))
+- Added narrow declarative `when.sessionIndex` and
+  `when.attemptInSession` support for attempt-phase hooks. `git-worktree`
+  can now also run during `beforeAttempt`, so assignments can lazily
+  create or reuse worktrees on the first execution attempt instead of at
+  init time.
+  ([#66](https://github.com/kcosr/task-runner/pull/66))
 - Added `scripts/migrate-manifests-v9.mjs` to promote schema v8 run
   manifests to schema v9 and canonicalize repairable schema v9 manifests
   by backfilling hook descriptor/state/audit surfaces, repairing
@@ -144,6 +146,16 @@
 - Added a `Visible focus indicators` display preference in Settings > General for toggling dashboard focus-ring styling. ([#54](https://github.com/kcosr/task-runner/pull/54))
 
 ### Changed
+
+- Built-in implementer assignments now start from `repo_root` and use a
+  first-attempt `git-worktree` hook plus explicit `git fetch origin
+  --prune && git merge --ff-only origin/main` sync instead of creating
+  worktrees during `prepare`.
+
+### Removed
+
+- Removed the unreleased `git-sync-base` built-in hook in favor of
+  explicit first-attempt fast-forward sync flows.
 
 - Assignment vars now use ordered `sources` (`cli`, `env`, `parent`)
   instead of the old singular source contract, nested runs freeze
