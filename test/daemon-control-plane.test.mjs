@@ -1228,26 +1228,27 @@ test("daemon attachment HTTP routes upload, list, download, remove, and reject m
   });
 });
 
-test("daemon attachment HTTP routes scope cwd listings and reject invalid cwdScope query values", async () => {
+test("daemon attachment HTTP routes default to family scope and reject invalid scope query values", async () => {
   const dir = tempDir();
   writeAgent(dir, "daemon-agent", AGENT);
   writeAssignment(dir, "daemon-work", ASSIGNMENT);
-  const target = await initRun(dir);
-  const peer = await initRun(dir);
+  const root = await initRun(dir);
+  const target = await initRun(dir, "daemon-agent", { parentRunId: root.runId });
+  const peer = await initRun(dir, "daemon-agent", { parentRunId: root.runId });
+  const child = await initRun(dir, "daemon-agent", { parentRunId: target.runId });
   const different = await initRun(dir);
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
   const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
-  patchManifest(different.workspaceDir, (manifest) => {
-    manifest.cwd = join(dir, "other-cwd");
-  });
 
   await withEnv(sharedRuntimeEnv(dir), async () => {
     const server = await serveDaemon(listenUrl);
     try {
       for (const [runId, name] of [
+        [root.runId, "root.txt"],
         [target.runId, "target.txt"],
         [peer.runId, "peer.txt"],
+        [child.runId, "child.txt"],
         [different.runId, "different.txt"],
       ]) {
         const response = await fetch(new URL(`/api/runs/${runId}/attachments`, httpBaseUrl), {
@@ -1261,14 +1262,11 @@ test("daemon attachment HTTP routes scope cwd listings and reject invalid cwdSco
         assert.equal(response.status, 200);
       }
 
-      const scoped = await httpJson(
-        httpBaseUrl,
-        `/api/runs/${target.runId}/attachments?cwdScope=true`,
-      );
+      const scoped = await httpJson(httpBaseUrl, `/api/runs/${target.runId}/attachments`);
       assert.equal(scoped.status, 200);
       assert.deepEqual(
         new Set(scoped.body.attachments.map((attachment) => attachment.ownerRunId)),
-        new Set([target.runId, peer.runId]),
+        new Set([root.runId, target.runId, peer.runId, child.runId]),
       );
       assert.equal(
         scoped.body.attachments.some((attachment) => attachment.ownerRunId === different.runId),
@@ -1277,7 +1275,7 @@ test("daemon attachment HTTP routes scope cwd listings and reject invalid cwdSco
 
       const unscoped = await httpJson(
         httpBaseUrl,
-        `/api/runs/${target.runId}/attachments?cwdScope=false`,
+        `/api/runs/${target.runId}/attachments?scope=run`,
       );
       assert.equal(unscoped.status, 200);
       assert.deepEqual(
@@ -1287,11 +1285,11 @@ test("daemon attachment HTTP routes scope cwd listings and reject invalid cwdSco
 
       const invalid = await httpJson(
         httpBaseUrl,
-        `/api/runs/${target.runId}/attachments?cwdScope=maybe`,
+        `/api/runs/${target.runId}/attachments?scope=mesh`,
       );
       assert.equal(invalid.status, 400);
       assert.equal(invalid.body.error.code, "INVALID_REQUEST");
-      assert.match(invalid.body.error.message, /cwdScope must be "true" or "false"/);
+      assert.match(invalid.body.error.message, /scope must be "run" or "family"/);
     } finally {
       await server.close();
     }
@@ -4614,6 +4612,50 @@ test("daemon-target CLI forwards local TASK_RUNNER_CODEX_WS_URL as a structured 
   }
 });
 
+test("daemon-target CLI forwards --parent-run as structured start parentRunId", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const wsServer = new WebSocketServer({ host: "127.0.0.1", port });
+  const requests = [];
+  if (wsServer.address() === null) {
+    await new Promise((resolve) => wsServer.once("listening", resolve));
+  }
+
+  wsServer.on("connection", (ws) => {
+    ws.on("message", (payload) => {
+      const request = JSON.parse(payload.toString());
+      requests.push(request);
+      ws.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: request.id,
+          result: { runId: "detached-start-run" },
+        }),
+      );
+    });
+  });
+
+  try {
+    const result = await runCliAsync([
+      "run",
+      "--connect",
+      listenUrl,
+      "--detach",
+      "--agent",
+      "daemon-agent",
+      "--parent-run",
+      "parent-123",
+    ]);
+    assert.equal(result.code, 0);
+    assert.equal(requests[0].params.parentRunId, "parent-123");
+  } finally {
+    for (const client of wsServer.clients) {
+      client.terminate();
+    }
+    await new Promise((resolve) => wsServer.close(() => resolve()));
+  }
+});
+
 test("daemon-target CLI detaches resume runs and supports json output", async () => {
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
@@ -4740,6 +4782,57 @@ test("daemon-target CLI forwards local TASK_RUNNER_CODEX_WS_URL as a structured 
   }
 });
 
+test("daemon-target CLI does not forward TASK_RUNNER_PARENT_RUN_ID on resume requests", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const wsServer = new WebSocketServer({ host: "127.0.0.1", port });
+  const requests = [];
+  if (wsServer.address() === null) {
+    await new Promise((resolve) => wsServer.once("listening", resolve));
+  }
+
+  wsServer.on("connection", (ws) => {
+    ws.on("message", (payload) => {
+      const request = JSON.parse(payload.toString());
+      requests.push(request);
+      ws.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: request.id,
+          result: { runId: "detached-resume-run" },
+        }),
+      );
+    });
+  });
+
+  try {
+    const result = await runCliAsync(
+      [
+        "run",
+        "--connect",
+        listenUrl,
+        "--detach",
+        "--resume-run",
+        "abc123",
+        "--output-format",
+        "json",
+      ],
+      {
+        env: {
+          TASK_RUNNER_PARENT_RUN_ID: "parent-123",
+        },
+      },
+    );
+    assert.equal(result.code, 0);
+    assert.equal(requests[0].params.parentRunId, undefined);
+  } finally {
+    for (const client of wsServer.clients) {
+      client.terminate();
+    }
+    await new Promise((resolve) => wsServer.close(() => resolve()));
+  }
+});
+
 test("daemon-target CLI forwards local TASK_RUNNER_CODEX_WS_URL as a structured init override", async () => {
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
@@ -4785,6 +4878,52 @@ test("daemon-target CLI forwards local TASK_RUNNER_CODEX_WS_URL as a structured 
         },
       },
     });
+  } finally {
+    for (const client of wsServer.clients) {
+      client.terminate();
+    }
+    await new Promise((resolve) => wsServer.close(() => resolve()));
+  }
+});
+
+test("daemon-target CLI forwards local TASK_RUNNER_PARENT_RUN_ID as structured init parentRunId", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const wsServer = new WebSocketServer({ host: "127.0.0.1", port });
+  const requests = [];
+  if (wsServer.address() === null) {
+    await new Promise((resolve) => wsServer.once("listening", resolve));
+  }
+
+  wsServer.on("connection", (ws) => {
+    ws.on("message", (payload) => {
+      const request = JSON.parse(payload.toString());
+      requests.push(request);
+      ws.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: request.id,
+          result: {
+            run: {
+              runId: "init-run",
+            },
+          },
+        }),
+      );
+    });
+  });
+
+  try {
+    const result = await runCliAsync(
+      ["init", "--connect", listenUrl, "--agent", "daemon-agent", "--output-format", "json"],
+      {
+        env: {
+          TASK_RUNNER_PARENT_RUN_ID: "parent-123",
+        },
+      },
+    );
+    assert.equal(result.code, 0);
+    assert.equal(requests[0].params.parentRunId, "parent-123");
   } finally {
     for (const client of wsServer.clients) {
       client.terminate();

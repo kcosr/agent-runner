@@ -26,6 +26,7 @@ import {
   optionalHeaderString,
   optionalOverrides,
   optionalString,
+  parseAttachmentScopeQueryValue,
   parseBooleanQueryValue,
   parseRunSetBackendSessionParams,
   parseRunSetNameParams,
@@ -288,7 +289,7 @@ const routes: RouteDefinition[] = [
         res,
         200,
         ctx.operations.listAttachments(routeParam(params, "runId"), {
-          cwdScope: parseBooleanQueryValue(url.searchParams.get("cwdScope"), "cwdScope"),
+          scope: parseAttachmentScopeQueryValue(url.searchParams.get("scope"), "scope"),
         }),
       );
     },

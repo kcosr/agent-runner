@@ -503,12 +503,12 @@ export function useRunsDashboardState() {
       ? attachmentsDetailDrawerView()
       : selectedStoredDrawerView);
   const selectedRunGroupAttachmentsQuery = useQuery({
-    queryKey: ["attachment-list", detailRunId, "cwd-scope"],
+    queryKey: ["attachment-list", detailRunId, "family"],
     queryFn: async () => {
       if (!detailRunId) {
         throw new Error("Selected run id is required");
       }
-      return await api.listAttachments(detailRunId, { cwdScope: true });
+      return await api.listAttachments(detailRunId, { scope: "family" });
     },
     enabled: Boolean(detailRunId),
     retry: false,

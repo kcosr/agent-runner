@@ -107,7 +107,7 @@ Notable feature uses:
   run`.
 - **Attachment coupling**: approved draft (`assignment-seed.md`) and
   summary are attached to the planning run and later discovered by
-  implementation via `attachment list --cwd-scope`.
+  implementation via `attachment list --scope family`.
 - **Lineage-backed inheritance**: planner-created child runs auto-link to
   the planning run and can inherit vars such as `worktree_path` through
   `sources: [parent]` instead of repeating `--var`.
@@ -192,7 +192,7 @@ subagents for parallelism.
 - **Dependencies** — planning → implementation → code-review workflows
   link runs with `run add-dep`.
 - **Attachments as handoff** — planning artifacts attached to the
-  planning run and later discovered via `attachment list --cwd-scope`.
+  planning run and later discovered via `attachment list --scope family`.
 - **Multiple delta re-reviews** — `plan-review` and `code-review` both
   switch into delta mode on resume.
 - **Subagent delegation** — `plan-feature`, `code-review`, `doc-review`,

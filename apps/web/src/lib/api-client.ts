@@ -1,6 +1,7 @@
 import type { AppRuntimeConfig } from "@task-runner/core/contracts/app-config.js";
 import type {
   AttachmentListEntry,
+  AttachmentScope,
   RunAttachment,
   RunAttachmentRemoveResult,
 } from "@task-runner/core/contracts/attachments.js";
@@ -427,11 +428,11 @@ export function createApiClient(config: AppRuntimeConfig) {
     },
     async listAttachments(
       runId: string,
-      options: { cwdScope?: boolean } = {},
+      options: { scope?: AttachmentScope } = {},
     ): Promise<AttachmentListEntry[]> {
       const params = new URLSearchParams();
-      if (options.cwdScope !== undefined) {
-        params.set("cwdScope", String(options.cwdScope));
+      if (options.scope !== undefined) {
+        params.set("scope", options.scope);
       }
       const response = await fetch(
         joinPath(

@@ -1494,7 +1494,7 @@ export function RunDetailDrawer({
                   <span>
                     {combinedAttachments.length === 0
                       ? groupAttachmentsQuery.isPending
-                        ? "No run attachments yet. Loading group attachments..."
+                        ? "No run attachments yet. Loading family attachments..."
                         : "No attachments yet."
                       : `${combinedAttachments.length} attachment${combinedAttachments.length === 1 ? "" : "s"} · ${formatBytes(combinedAttachmentSize)}`}
                   </span>
@@ -1533,18 +1533,18 @@ export function RunDetailDrawer({
                   </div>
                 ) : groupAttachmentsQuery.isError ? (
                   <div className="drawer-state">
-                    <h3>Group attachments failed to load</h3>
+                    <h3>Family attachments failed to load</h3>
                     <p>{groupAttachmentsQuery.error.message}</p>
                   </div>
                 ) : (
                   <div className="drawer-state">
                     <h3>No attachments yet</h3>
-                    <p>No attachments are available for this run or its cwd group.</p>
+                    <p>No attachments are available for this run or its lineage family.</p>
                   </div>
                 )}
                 {combinedAttachments.length > 0 && groupAttachmentsQuery.isError ? (
                   <div className="drawer-state">
-                    <h3>Group attachments failed to load</h3>
+                    <h3>Family attachments failed to load</h3>
                     <p>{groupAttachmentsQuery.error.message}</p>
                   </div>
                 ) : null}

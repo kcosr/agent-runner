@@ -82,6 +82,9 @@ function validateResumeOverrides(
   if (opts.backendSessionId !== undefined) {
     return "--backend-session-id cannot be combined with --resume-run (the resume target already carries a backend session id)";
   }
+  if (opts.parentRunId !== undefined && opts.parentRunId !== null) {
+    return "--parent-run cannot be combined with --resume-run";
+  }
   if (opts.overrides.cwd !== undefined) {
     return "--cwd cannot be combined with --resume-run — backend sessions are bound to the cwd they were created in, so a different cwd would invalidate the captured session id. If you need a different cwd, create a fresh run instead.";
   }
@@ -216,7 +219,7 @@ export async function executeRunCommand(opts: ExecuteRunCommandOptions): Promise
     loaded,
     loadedAssignment,
     cliVars: opts.cliVars,
-    parentRunId: opts.parentRunId ?? readParentRunIdFromEnv(),
+    parentRunId: opts.parentRunId,
     backend,
     callerCwd: opts.callerCwd,
     resume: resumeTarget,

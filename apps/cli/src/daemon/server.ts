@@ -95,8 +95,8 @@ import {
   RequestValidationError,
   asRecord,
   optionalEnum,
-  optionalOverrides,
   optionalString,
+  parseResumeRunParams,
   parseRunSetBackendSessionParams,
   parseRunSetNameParams,
   parseRunSetNoteParams,
@@ -1883,17 +1883,8 @@ export async function serveDaemon(
           return;
         }
         case "runs.resume": {
-          const parsed = asRecord(params, "runs.resume params");
-          sendJson(
-            ws,
-            resultResponse(
-              request.id,
-              await operations.resumeRun({
-                target: requiredString(parsed.target, "target"),
-                overrides: optionalOverrides(parsed.overrides),
-              }),
-            ),
-          );
+          const parsed = parseResumeRunParams(params, "runs.resume params");
+          sendJson(ws, resultResponse(request.id, await operations.resumeRun(parsed)));
           return;
         }
         case "runs.abort": {

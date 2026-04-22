@@ -73,7 +73,7 @@ callerInstructions: |
        lineage instead of retyping them as CLI handoff flags. The
        planning artifacts stay attached to the planning run; later
        implementer and reviewer flows can discover them through
-       cwd-scoped attachment listing when they need supplemental
+       family-scoped attachment listing when they need supplemental
        context.
        If the caller later resumes the planning run with
        requested plan changes after that `init`, the planner
@@ -990,7 +990,7 @@ tasks:
         and the same implementer run id was reinitialized from
         the updated draft
       - that later implementer and reviewer flows can discover
-        the planning artifacts with cwd-scoped attachment
+        the planning artifacts with family-scoped attachment
         listing rooted at the new run id
       - the post-init approval/execution handoff:
 
@@ -1036,7 +1036,7 @@ tasks:
           `assignment-summary.md` stay attached to the planning
           run rather than being duplicated onto the implementer
           run. Later implementer and reviewer flows should
-          discover them through cwd-scoped attachment listing.
+          discover them through family-scoped attachment listing.
         - If this handoff follows caller-requested plan changes
           after the initial-pass `init`, a note that the
           planning-run attachments were refreshed and the same

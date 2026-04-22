@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import type {
   AttachmentListEntry,
+  AttachmentScope,
   RunAttachment,
   RunAttachmentDownloadResult,
   RunAttachmentRemoveResult,
@@ -127,13 +128,13 @@ export async function daemonGetRunAuditHistory(
 export async function daemonListAttachments(
   connectUrl: string,
   runId: string,
-  options: { cwdScope?: boolean } = {},
+  options: { scope?: AttachmentScope } = {},
 ): Promise<AttachmentListEntry[]> {
   const url = new URL(
     joinPath(deriveHttpBaseUrl(connectUrl), `/api/runs/${encodeURIComponent(runId)}/attachments`),
   );
-  if (options.cwdScope !== undefined) {
-    url.searchParams.set("cwdScope", String(options.cwdScope));
+  if (options.scope !== undefined) {
+    url.searchParams.set("scope", options.scope);
   }
   const response = await fetch(url, {
     headers: { accept: "application/json" },

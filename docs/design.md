@@ -376,15 +376,15 @@ The resolved launcher is stored on both `manifest.launcher` and
 - `task-runner run audit <run-id>`
 - `task-runner task list <run-id>`
 - `task-runner task show <run-id> <task-id>`
-- `task-runner attachment list <run-id> [--cwd-scope]`
+- `task-runner attachment list <run-id> [--scope run|family]`
 
 Rules:
 
 - Top-level `status` reports system/environment status and takes no run id.
 - `run status`, `run brief`, and `run audit` are run-id-only.
-- `attachment list --cwd-scope` uses the target run's persisted `cwd` as
-  an exact-match scope key. It does not infer groups from caller cwd,
-  repo buckets, or path prefixes.
+- `attachment list` defaults to `family`, which walks the target run's
+  parent chain to the lineage root and includes every run that shares
+  that root. Use `--scope run` for target-only attachment listing.
 
 ### Mutation surfaces
 
@@ -482,9 +482,9 @@ Notes:
 - Attempt logs are append-only audit records.
 - Attachment metadata lives in the manifest; attachment bytes live under
   `attachments/`.
-- cwd-scoped attachment grouping is derived at read time only; ownership
-  and storage remain per-run, and web `Group` rows stay preview /
-  download-only.
+- Family-scoped attachment grouping is derived at read time only;
+  ownership and storage remain per-run, and cross-run rows stay preview
+  / download-only.
 
 ## Prompt and retry behavior
 

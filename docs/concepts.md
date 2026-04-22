@@ -119,8 +119,9 @@ See [backends.md](backends.md).
 ## Attachments and dependencies
 
 Runs can carry **attachments** (files stored under the run workspace with
-SHA-256 integrity). `attachment list --cwd-scope` groups attachments across
-peer runs with the same persisted `cwd`. See
+SHA-256 integrity). `attachment list` defaults to family-scoped
+discovery across runs that share the same lineage root; use
+`--scope run` for the target run only. See
 [attachments.md](attachments.md).
 
 Runs can declare **dependencies** on other runs. Dependencies are metadata

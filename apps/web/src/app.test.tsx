@@ -7711,7 +7711,7 @@ describe("web app", () => {
     anchorClick.mockRestore();
   });
 
-  it("shows combined attachments with a source run id and uses ownerRunId for peer preview/download", async () => {
+  it("shows family attachments with a source run id and uses ownerRunId for cross-run preview/download", async () => {
     const fetchMock = installFetchMock(
       {
         runs: [makeRun({ runId: "run-1", name: "Attachment run" })],
@@ -7730,7 +7730,7 @@ describe("web app", () => {
       },
       {
         handleRequest: (url) => {
-          if (/\/api\/runs\/run-1\/attachments\?cwdScope=true$/.test(url)) {
+          if (/\/api\/runs\/run-1\/attachments\?scope=family$/.test(url)) {
             return new Response(
               JSON.stringify({
                 attachments: [
@@ -7748,7 +7748,7 @@ describe("web app", () => {
             );
           }
           if (/\/api\/runs\/run-2\/attachments\/att-peer\/content$/.test(url)) {
-            return new Response("peer attachment body", {
+            return new Response("family attachment body", {
               status: 200,
               headers: { "content-type": "text/plain; charset=utf-8" },
             });
@@ -7796,7 +7796,7 @@ describe("web app", () => {
     expect(anchorClick).toHaveBeenCalledTimes(1);
 
     await user.click(screen.getByRole("button", { name: /^Preview peer-notes\.md$/ }));
-    expect(await screen.findByText("peer attachment body")).toBeInTheDocument();
+    expect(await screen.findByText("family attachment body")).toBeInTheDocument();
     expect(screen.getByText("run-2")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /^Download$/ }));
@@ -7806,7 +7806,7 @@ describe("web app", () => {
     anchorClick.mockRestore();
   });
 
-  it("switches to the source run when clicking a peer attachment run id", async () => {
+  it("switches to the source run when clicking a family attachment run id", async () => {
     installFetchMock(
       {
         runs: [
@@ -7828,7 +7828,7 @@ describe("web app", () => {
       },
       {
         handleRequest: (url) => {
-          if (/\/api\/runs\/run-1\/attachments\?cwdScope=true$/.test(url)) {
+          if (/\/api\/runs\/run-1\/attachments\?scope=family$/.test(url)) {
             return new Response(
               JSON.stringify({
                 attachments: [

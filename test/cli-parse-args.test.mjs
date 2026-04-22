@@ -78,6 +78,19 @@ test("parseArgs: --backend accepts cursor", () => {
   assert.equal(parsed.backend, "cursor");
 });
 
+test("parseArgs: --parent-run captures a fresh-run lineage parent", () => {
+  const parsed = parseArgs(argv("run", "--agent", "x", "--parent-run", "parent-123"));
+  assert.equal(parsed.parentRun, "parent-123");
+});
+
+test("parseArgs: --parent-run requires a non-empty value", () => {
+  assert.throws(() => parseArgs(argv("run", "--agent", "x", "--parent-run")), /requires a value/);
+  assert.throws(
+    () => parseArgs(argv("run", "--agent", "x", "--parent-run", "   ")),
+    /cannot be empty/,
+  );
+});
+
 test("parseArgs: --launcher captures the launcher override and forwards it into overrides", () => {
   const parsed = parseArgs(argv("run", "--agent", "x", "--launcher", "./launchers/ssh.yaml"));
   assert.equal(parsed.launcher, "./launchers/ssh.yaml");

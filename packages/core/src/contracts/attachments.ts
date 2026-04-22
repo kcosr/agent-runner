@@ -12,8 +12,10 @@ export interface AttachmentListEntry extends RunAttachment {
   ownerRunId: string;
 }
 
+export type AttachmentScope = "run" | "family";
+
 export interface AttachmentListOptions {
-  cwdScope?: boolean;
+  scope?: AttachmentScope;
 }
 
 export interface RunAttachmentRemoveResult {

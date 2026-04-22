@@ -273,8 +273,13 @@ issue those CLI commands through `--connect`.
 
 For Codex runs, embedded and connected mode both resolve an explicit
 transport intent. Connected mode does not forward arbitrary env vars, but
-it does synthesize a Codex-only websocket override from the caller's
-local `TASK_RUNNER_CODEX_WS_URL` when that env var is set.
+it does synthesize structured daemon request fields for a small set of
+known caller-local inputs:
+
+- `TASK_RUNNER_CODEX_WS_URL` becomes a Codex-only websocket transport
+  override
+- `--parent-run <run-id>` or local `TASK_RUNNER_PARENT_RUN_ID` becomes
+  request `parentRunId` for fresh `run` / `init`
 
 Named launcher lookup follows the same freeze-first model. Fresh runs
 resolve the final launcher once, store it on the manifest and reset
@@ -316,8 +321,9 @@ Key rules:
 - `list runs` defaults to the caller's cwd; use `--cwd`, `--repo`, or
   `--global` to scope otherwise; `--include-archived` adds archived
   runs.
-- `attachment list --cwd-scope` anchors at the target run but includes
-  peer runs with the exact same persisted `cwd`.
+- `attachment list` now defaults to `--scope family`, which anchors at
+  the target run and includes attachments from the entire lineage
+  family. Use `--scope run` for the target run only.
 
 ## Documentation
 
@@ -333,7 +339,7 @@ The rest are focused topic pages:
 | [docs/variables.md](docs/variables.md) | Typed vars, resolution, interpolation, redaction |
 | [docs/resume.md](docs/resume.md) | Resume rules, ready-start, retry nudges |
 | [docs/dependencies.md](docs/dependencies.md) | Dependency graph and execution gate |
-| [docs/attachments.md](docs/attachments.md) | File handoff, cwd-scope grouping, limits |
+| [docs/attachments.md](docs/attachments.md) | File handoff, family scope, limits |
 | [docs/backends.md](docs/backends.md) | Claude, Codex, Cursor, Pi, Passive |
 | [docs/configuration.md](docs/configuration.md) | Env vars, XDG roots, manifest upgrades |
 | [docs/cli.md](docs/cli.md) | Full CLI reference — every command and flag |
@@ -361,6 +367,7 @@ The rest are focused topic pages:
 | `TASK_RUNNER_STATE_DIR` | Run workspaces root |
 | `TASK_RUNNER_CONNECT` | Route client commands through a daemon |
 | `TASK_RUNNER_LISTEN` | Daemon listen URL |
+| `TASK_RUNNER_PARENT_RUN_ID` | Default lineage parent for fresh runs when `--parent-run` is omitted |
 | `TASK_RUNNER_CLAUDE_BIN` | Claude CLI binary |
 | `TASK_RUNNER_CODEX_BIN` | Codex stdio binary |
 | `TASK_RUNNER_CODEX_WS_URL` | Default websocket transport for fresh Codex runs when no explicit `backendSpecific.codex.transport` was authored |
