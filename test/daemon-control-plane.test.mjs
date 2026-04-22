@@ -1290,6 +1290,11 @@ test("daemon run-list family filtering supports HTTP and RPC and rejects invalid
       assert.equal(malformed.body.error.code, "INVALID_REQUEST");
       assert.match(malformed.body.error.message, /familyOf must be a run id, not a path/);
 
+      const empty = await httpJson(httpBaseUrl, "/api/runs?familyOf=");
+      assert.equal(empty.status, 400);
+      assert.equal(empty.body.error.code, "INVALID_REQUEST");
+      assert.match(empty.body.error.message, /familyOf cannot be empty/);
+
       const missing = await httpJson(httpBaseUrl, "/api/runs?familyOf=missing-run");
       assert.equal(missing.status, 404);
       assert.equal(missing.body.error.code, "NOT_FOUND");

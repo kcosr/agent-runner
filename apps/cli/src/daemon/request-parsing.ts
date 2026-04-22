@@ -70,7 +70,7 @@ export function requiredNonEmptyString(value: unknown, label: string): string {
 }
 
 export function requiredRunIdString(value: unknown, label: string): string {
-  const stringValue = requiredString(value, label);
+  const stringValue = requiredNonEmptyString(value, label);
   if (stringValue.includes("/") || stringValue.includes("\\") || stringValue.includes("..")) {
     throw new RequestValidationError(`${label} must be a run id, not a path`);
   }
