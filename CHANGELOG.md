@@ -132,7 +132,7 @@
   `worktree_path` during planning, generates implementer drafts that
   inherit those vars through `sources: [parent]`, and keeps nested
   code-review runs in the same worktree cwd without manual var
-  repetition.
+  repetition. ([#80](https://github.com/kcosr/task-runner/pull/80))
 
 - Changed daemon-managed ready-run scheduling so dependency-bearing runs
   auto-start once every dependency run is successful, including
