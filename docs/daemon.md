@@ -124,6 +124,53 @@ All routes are under `/api/`.
 | `DELETE` | `/api/runs/:runId/dependencies/:depRunId` | Remove a dependency |
 | `POST` | `/api/runs/:runId/dependencies/clear` | Clear all dependencies |
 
+Fresh-run HTTP requests reuse the same generic run-start contract as
+the WebSocket methods:
+
+```json
+{
+  "agent": "planner",
+  "assignment": "implement-feature",
+  "definitionCwd": "/repo",
+  "callerCwd": "/repo",
+  "parentRunId": "abcd12",
+  "backendSessionId": "session-123",
+  "cliVars": {},
+  "overrides": {}
+}
+```
+
+Browser callers should send an explicit `callerCwd` on `POST
+/api/runs/init` and `POST /api/runs`. The daemon keeps `callerCwd`
+distinct from `overrides.cwd`; it is not a browser-only alias.
+
+### Definitions
+
+| Method | Path | Effect |
+|--------|------|--------|
+| `GET` | `/api/agents` | List agents. Returns `{ agents: DefinitionListResult }` |
+| `GET` | `/api/agents/:target` | Read one agent. Returns `{ agent: DefinitionDetail }` |
+| `GET` | `/api/assignments` | List assignments. Returns `{ assignments: DefinitionListResult }` |
+| `GET` | `/api/assignments/:target` | Read one assignment. Returns `{ assignment: DefinitionDetail }` |
+| `GET` | `/api/launchers` | List launchers. Returns `{ launchers: DefinitionListResult }` |
+| `GET` | `/api/launchers/:target` | Read one launcher. Returns `{ launcher: DefinitionDetail }` |
+
+Definition routes share the same payloads as the WebSocket RPC methods:
+HTTP is the browser-facing transport, while connected CLI clients keep
+using WebSocket JSON-RPC for definitions and orchestration.
+
+Definition detail routes accept:
+
+- `:target` as either a named definition (for example `planner`) or a
+  percent-encoded direct path target (for example
+  `./agents/planner/agent.md`).
+- Optional `?cwd=<path>` when a relative direct path needs an explicit
+  resolution base.
+
+List routes return the shared `DefinitionListResult` shape with
+`kind`, `entries`, and `warnings`. Detail routes return the shared
+`DefinitionDetail` union for the requested resource kind.
+
 ### Tasks
 
 | Method | Path | Effect |

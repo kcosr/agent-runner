@@ -3,6 +3,7 @@ import {
   AgentNotFoundError,
   AssignmentConfigError,
   AssignmentNotFoundError,
+  LauncherConfigError,
   LauncherNotFoundError,
 } from "@task-runner/core/config/loader.js";
 import {
@@ -59,6 +60,8 @@ export function isKnownControlPlaneError(err: unknown): boolean {
     err instanceof AgentConfigError ||
     err instanceof AssignmentNotFoundError ||
     err instanceof AssignmentConfigError ||
+    err instanceof LauncherNotFoundError ||
+    err instanceof LauncherConfigError ||
     err instanceof RunCommandError ||
     err instanceof VarResolutionError ||
     err instanceof LockedFieldError ||

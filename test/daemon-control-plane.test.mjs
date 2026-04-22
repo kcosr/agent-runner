@@ -4525,6 +4525,57 @@ args: [prod, --]
   }
 });
 
+test("daemon classifies launcher lookup and config errors as command errors across WS and HTTP", async () => {
+  const daemonDir = tempDir();
+  writeLauncher(
+    daemonDir,
+    "bad-name",
+    `schemaVersion: 1
+name: other-name
+command: ssh
+`,
+  );
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  const daemon = await startCliDaemon(daemonDir, listenUrl);
+  const client = await DaemonClient.connect(listenUrl);
+  try {
+    await assert.rejects(
+      () => client.call("launchers.get", { target: "missing-launcher" }),
+      (err) =>
+        err instanceof DaemonRpcError &&
+        err.code === -32003 &&
+        /Launcher not found: missing-launcher/.test(err.message),
+    );
+
+    const targetedInvalidPath = encodeURIComponent("./launchers/bad-name.yaml");
+    await assert.rejects(
+      () =>
+        client.call("launchers.get", {
+          target: "./launchers/bad-name.yaml",
+          cwd: daemonDir,
+        }),
+      (err) =>
+        err instanceof DaemonRpcError &&
+        err.code === -32003 &&
+        /must match launcher file id/.test(err.message),
+    );
+
+    const invalidLauncherHttp = await httpJson(
+      httpBaseUrl,
+      `/api/launchers/${targetedInvalidPath}?cwd=${encodeURIComponent(daemonDir)}`,
+    );
+    assert.equal(invalidLauncherHttp.status, 422);
+    assert.equal(invalidLauncherHttp.body.error.code, "INVALID_COMMAND");
+    assert.match(invalidLauncherHttp.body.error.message, /must match launcher file id/);
+  } finally {
+    await client.close();
+    await daemon.stop();
+  }
+});
+
 test("daemon HTTP exposes definition routes with WS parity and direct-path support", async () => {
   const daemonDir = tempDir();
   writeAgent(daemonDir, "daemon-agent", AGENT);
