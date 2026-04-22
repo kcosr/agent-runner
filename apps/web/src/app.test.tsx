@@ -4696,10 +4696,10 @@ describe("web app", () => {
     expect(getBoardColumn("Failed")).toBeInTheDocument();
     expect(getBoardColumn("Blocked")).toBeInTheDocument();
 
-    expect(screen.getByRole("button", { name: /hide empty columns/i })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    const hideEmptyColumnsButton = screen.getByRole("button", { name: /hide empty columns/i });
+    expect(hideEmptyColumnsButton).toHaveAttribute("aria-pressed", "true");
+    expect(hideEmptyColumnsButton.querySelector('path[d="m20 17-5-5 5-5"]')).not.toBeNull();
+    expect(hideEmptyColumnsButton.querySelector('path[d="m4 17 5-5-5-5"]')).not.toBeNull();
     expect(screen.getByRole("button", { name: /collapse failure states/i })).toHaveAttribute(
       "aria-pressed",
       "true",
