@@ -25,6 +25,7 @@ export interface RunActiveTask {
 
 export interface RunSummary {
   runId: string;
+  parentRunId: string | null;
   repo: string;
   status: RunStatus;
   effectiveStatus: RunStatus;
@@ -87,6 +88,7 @@ export interface RunDetailInput {
 
 export interface RunDetail {
   runId: string;
+  parentRunId: string | null;
   repo: string;
   status: RunStatus;
   effectiveStatus: RunStatus;
@@ -300,6 +302,7 @@ export function toRunSummary(
     dependencyState ?? deriveDependencyState(entry.manifest, relatedManifests);
   return {
     runId: entry.manifest.runId,
+    parentRunId: entry.manifest.parentRunId,
     repo: entry.manifest.repo,
     status: entry.manifest.status,
     effectiveStatus: deriveEffectiveStatus(entry.manifest),
@@ -372,6 +375,7 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
   const dependencyState = deriveDependencyState(manifest, relatedManifests);
   return {
     runId: manifest.runId,
+    parentRunId: manifest.parentRunId,
     repo: manifest.repo,
     status: manifest.status,
     effectiveStatus: deriveEffectiveStatus(manifest),
@@ -427,10 +431,28 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
         : null,
     callerInstructions: manifest.callerInstructions,
     lockedFields: [...manifest.lockedFields],
-    runtimeVars: { ...manifest.runtimeVars },
+    runtimeVars: redactRuntimeVarsForDisplay(manifest),
     execution: manifest.execution,
     capabilities: deriveRunCapabilities(manifest, dependencyState),
   };
+}
+
+function redactRuntimeVarsForDisplay(manifest: RunManifest): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(manifest.runtimeVars)) {
+    const source = manifest.runtimeVarSources[key];
+    if (source?.redacted && source.envName) {
+      out[key] = {
+        redacted: true,
+        source: source.source === "parent" ? "parent" : "env",
+        envName: source.envName,
+        ...(source.inheritedFromRunId ? { inheritedFromRunId: source.inheritedFromRunId } : {}),
+      };
+      continue;
+    }
+    out[key] = value;
+  }
+  return out;
 }
 
 export function toRunArchiveResult(result: {

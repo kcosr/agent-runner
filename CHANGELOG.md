@@ -122,6 +122,12 @@
 
 ### Changed
 
+- Assignment vars now use ordered `sources` (`cli`, `env`, `parent`)
+  instead of the old singular source contract, nested runs freeze
+  `parentRunId` for lineage-based inheritance, and run summaries/details
+  surface parent-run linkage while keeping env-backed vars redacted at
+  read time.
+
 - Changed daemon-managed ready-run scheduling so dependency-bearing runs
   auto-start once every dependency run is successful, including
   ready-time checks and daemon startup/rebuild sweeps after restarts.

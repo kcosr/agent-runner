@@ -246,6 +246,11 @@ Assignment-local path hooks resolve relative to the authored
 `assignment.md`. Raw `.ts` / `.mts` hooks load directly through the core
 runtime's `jiti` loader, so hook authors do not need to precompile them.
 
+When a run launches a descendant `task-runner` process, the child run
+automatically freezes `parentRunId`. Author descendant assignments with
+`sources: [parent]` for values like `worktree_path` instead of manually
+repeating `--var` flags.
+
 CLI commands can either:
 
 - run **embedded** against the shared filesystem state, or

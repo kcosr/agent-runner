@@ -65,6 +65,7 @@ function buildManifest(overrides = {}) {
     archivedAt: null,
     status: "initialized",
     dependencyRunIds: [],
+    parentRunId: null,
     exitCode: null,
     attempts: 0,
     maxAttempts: 2,
@@ -72,6 +73,7 @@ function buildManifest(overrides = {}) {
     tasksTotal: Object.keys(finalTasks).length,
     backendSessionId: null,
     runtimeVars: {},
+    runtimeVarSources: {},
     resolvedHooks: [
       {
         hookId: "prepare:0:freeze",
@@ -108,11 +110,13 @@ function buildManifest(overrides = {}) {
       note: null,
       pinned: false,
       dependencyRunIds: [],
+      parentRunId: null,
       unrestricted: false,
       timeoutSec: 3600,
       maxAttempts: 2,
       brief: "Prepared handoff prompt.",
       runtimeVars: {},
+      runtimeVarSources: {},
       hookState: { prepared: true },
       attachments: [],
       finalTasks,
@@ -139,6 +143,7 @@ test("run contracts: toRunSummary maps listed manifest rows to the neutral summa
 
   assert.deepEqual(summary, {
     runId: "run123",
+    parentRunId: null,
     repo: "demo-repo",
     status: "success",
     effectiveStatus: "success",
@@ -220,6 +225,7 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
   assert.equal("canMutateTasks" in detail.capabilities, false);
   assert.deepEqual(detail, {
     runId: "run123",
+    parentRunId: null,
     repo: "demo-repo",
     status: "success",
     effectiveStatus: "success",
@@ -310,6 +316,38 @@ test("run contracts: toRunDetail exposes pendingPrompt for ready zero-attempt ru
   });
 
   assert.equal(detail.pendingPrompt, "Prepared handoff prompt.");
+});
+
+test("run contracts: toRunDetail redacts inherited env vars from runtimeVarSources", () => {
+  const detail = toRunDetail({
+    manifest: buildManifest({
+      parentRunId: "run-parent",
+      runtimeVars: {
+        visible: "plain",
+        inherited_secret: "token-123",
+      },
+      runtimeVarSources: {
+        inherited_secret: {
+          source: "parent",
+          envName: "LINEAGE_SECRET",
+          inheritedFromRunId: "run-parent",
+          redacted: true,
+        },
+      },
+    }),
+    isLive: false,
+  });
+
+  assert.equal(detail.parentRunId, "run-parent");
+  assert.deepEqual(detail.runtimeVars, {
+    visible: "plain",
+    inherited_secret: {
+      redacted: true,
+      source: "parent",
+      envName: "LINEAGE_SECRET",
+      inheritedFromRunId: "run-parent",
+    },
+  });
 });
 
 test("run contracts: note and pin metadata project through summary, detail, and mutation DTOs", () => {

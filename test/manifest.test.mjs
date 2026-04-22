@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
+import { resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import { updateTasksForPrompt, withEnv, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
@@ -162,6 +163,42 @@ test("manifest: run.json is written and matches outcome.manifest", async () => {
   assert.equal(log.attempt, 1);
   assert.equal(log.stdout, "");
   assert.equal(log.stderr, "raw stderr text");
+});
+
+test("manifest: older root-like manifests without parentRunId normalize to null on resume", async () => {
+  const dir = tempDir();
+  writeAgentAndAssignment(dir);
+
+  const outcome = await runWithMock(dir, async (ctx) => {
+    updateTasksForPrompt(ctx.prompt, {
+      t1: { status: "completed" },
+      t2: { status: "completed" },
+      t3: { status: "completed" },
+    });
+    return {
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      sessionId: "sess-legacy-lineage",
+      transcript: "done",
+      rawStdout: "",
+      rawStderr: "",
+    };
+  });
+
+  const manifestPath = join(outcome.workspaceDir, "run.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  Reflect.deleteProperty(manifest, "parentRunId");
+  Reflect.deleteProperty(manifest, "runtimeVarSources");
+  Reflect.deleteProperty(manifest.resetSeed, "parentRunId");
+  Reflect.deleteProperty(manifest.resetSeed, "runtimeVarSources");
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+  const resumed = withSharedRuntimeEnv(dir, () => resolveResumeTarget(outcome.runId, dir));
+  assert.equal(resumed.manifest.parentRunId, null);
+  assert.deepEqual(resumed.manifest.runtimeVarSources, {});
+  assert.equal(resumed.manifest.resetSeed.parentRunId, null);
+  assert.deepEqual(resumed.manifest.resetSeed.runtimeVarSources, {});
 });
 
 test("manifest: TASK_RUNNER_FULL_ATTEMPT_LOGS opt-in preserves stdout in attempt logs", async () => {

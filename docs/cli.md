@@ -89,6 +89,8 @@ Flags:
 - `--name <name>` — set the persisted display name.
 - `--var <key>=<value>` — repeatable. Split on the first `=`. Forbidden
   on resume.
+  Descendant runs usually should prefer assignment `sources: [parent]`
+  over manually re-passing inherited vars.
 - `--add-task <title>` — repeatable. Append a task to the run's list.
   Allowed on resume (non-passive runs); forbidden on ready-start.
 - `--backend-session-id <id>` — bootstrap-import an existing backend
@@ -168,6 +170,7 @@ task-runner run status <run-id> [--output-format json] [--field <name> ...]
 - Run-id-only. Paths are not accepted.
 - `--output-format json` returns the shared `RunDetail` DTO.
 - `--field <name>` — repeatable. Projects top-level JSON fields.
+- JSON detail includes `parentRunId` when the run belongs to a lineage.
 - JSON detail now includes `note` and `pinned`.
 - Text output may show `Pinned: yes` and `Note: present`, but it never
   prints the note markdown body.

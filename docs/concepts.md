@@ -91,9 +91,14 @@ task-runner maintains two separate instruction surfaces:
 
 ## Variables
 
-Assignments can declare typed variables with `cli` / `env` / `either`
-sources. Values are resolved at run creation and frozen in
-`manifest.runtimeVars` (env-sourced vars are redacted). `{{var}}` references
+Assignments can declare typed variables with ordered
+`sources: [cli | env | parent, ...]`. Values are resolved at run
+creation, frozen in `manifest.runtimeVars`, and annotated in
+`manifest.runtimeVarSources`. Nested runs launched from workers
+automatically link to their parent run, so descendant assignments can
+inherit values such as `worktree_path` without repeating `--var` flags.
+Read surfaces redact env-backed values even though the frozen manifest
+keeps the concrete value for descendant resolution. `{{var}}` references
 are interpolated into titles, bodies, and instructions.
 
 See [variables.md](variables.md).

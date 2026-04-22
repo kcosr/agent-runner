@@ -103,12 +103,14 @@ The canonical record is `run.json`. Important persisted fields:
 - `backendSessionId` (backend-native resume handle; Pi, Codex, Claude,
   etc. each store their own flavor here)
 - `dependencyRunIds`
+- `parentRunId`
 - `resolvedHooks` (the frozen hook descriptors selected at first write)
 - `hookState` (hook-owned state bag)
 - `hookAudits` (per-hook execution audit records)
 - attachment metadata
 - attempt and session history
-- `runtimeVars` (env-sourced values redacted)
+- `runtimeVars` (frozen concrete values)
+- `runtimeVarSources` (frozen var provenance for projection-time redaction)
 - `resetSeed` (snapshot used by `run reset`)
 - `execution` (host mode and controller)
 
@@ -247,7 +249,8 @@ blocked with the rest completed or blocked → `blocked`; otherwise
    (parse frontmatter, apply config-time `${...}` env interpolation on
    allowed scalar surfaces, then schema-validate)
 2. resolves cwd: `--cwd` → assignment `cwd` → caller cwd
-3. resolves vars
+3. resolves vars in authored `sources` order (`cli`, `env`, `parent`)
+   and applies `default` / `required` only after every source fails
 4. enforces locked fields
 5. captures `repo` from the resolved cwd and creates the run workspace
 6. resolves backend-specific runtime config (for Codex transport:
@@ -258,6 +261,11 @@ blocked with the rest completed or blocked → `blocked`; otherwise
 9. composes and stores `brief`
 10. invokes the backend, or leaves the run initialized if the backend is
    `passive`
+
+Nested `task-runner` invocations automatically carry
+`TASK_RUNNER_PARENT_RUN_ID`, so child runs freeze an explicit lineage
+edge at creation time. Descendants read inherited vars from the nearest
+ancestor that already froze the value.
 
 ### Init
 

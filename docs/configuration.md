@@ -108,6 +108,7 @@ captured stdout to reduce noisy manifest-side log output.
 |----------|--------|
 | `TASK_RUNNER_CALL_DEPTH` | Current recursion depth; set automatically by task-runner when it invokes itself from a worker |
 | `TASK_RUNNER_MAX_CALL_DEPTH` | Hard cap on recursion depth (default `1`) |
+| `TASK_RUNNER_PARENT_RUN_ID` | Current parent run id for nested launches; set automatically for child `task-runner` invocations |
 
 A user-initiated invocation starts at depth 0. If a worker invokes
 `task-runner` via its backend, the child starts at depth 1. Any
@@ -117,10 +118,12 @@ Raise the cap only when deliberate nesting is required.
 
 ## Variable-sourced env
 
-Assignment variables with `source: env` (or `either`) read from an env
-var named by the var's `envName` (or the var key itself). See
-[variables.md](variables.md). These values are redacted in the manifest's
-`runtimeVars`.
+Assignment variables can declare ordered `sources`, including `env` and
+`parent`. `env` reads from `envName` (or the var key itself), and
+`parent` resolves from the nearest ancestor run in the frozen lineage
+chain. See [variables.md](variables.md). Concrete values remain in
+`manifest.runtimeVars`; CLI/daemon/web read projections redact env-backed
+values using `runtimeVarSources`.
 
 ## Manifest upgrades
 

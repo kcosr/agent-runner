@@ -69,6 +69,10 @@ Connected mode can optionally add an invocation-scoped SSH tunnel:
 Connected mode is how multiple terminals can share state and how the web
 UI and CLI stay in sync. `run --detach` only works in connected mode.
 
+Nested `task-runner` invocations launched by a worker also preserve
+lineage through `TASK_RUNNER_PARENT_RUN_ID`. Shared `RunSummary` /
+`RunDetail` payloads surface that edge as `parentRunId`.
+
 Connected-mode runtime selection stays explicit:
 
 - the client does not forward arbitrary env vars to the daemon

@@ -5,12 +5,22 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
-import { resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js";
-import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
+import { readStatus } from "../packages/core/dist/core/commands/service.js";
+import {
+  findRunManifestsById,
+  resolveResumeTarget,
+} from "../packages/core/dist/core/run/manifest.js";
+import {
+  LineageMissingError,
+  LineageResolutionError,
+  runAgent,
+} from "../packages/core/dist/core/run/run-loop.js";
 import { createRunEventCapture } from "./helpers/run-events.mjs";
 import {
   resolveRunFromPrompt,
+  runIdFromPrompt,
   setTaskStatusesForPrompt,
+  sharedRuntimeEnv,
   updateTasksForPrompt,
   withEnv,
   withSharedRuntimeEnv,
@@ -194,6 +204,7 @@ async function runWithMock(baseDir, mockInvoke, overrides = {}, options = {}) {
         loaded,
         loadedAssignment,
         cliVars: {},
+        parentRunId: options.parentRunId ?? null,
         backend,
         overrides,
         callerCwd: options.callerCwd,
@@ -205,6 +216,32 @@ async function runWithMock(baseDir, mockInvoke, overrides = {}, options = {}) {
         stdout: capture.stdout(),
         stderr: capture.stderr(),
       };
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+}
+
+async function initWithOptions(baseDir, assignmentName, { cliVars = {}, parentRunId = null } = {}) {
+  return withSharedRuntimeEnv(baseDir, async () => {
+    const loaded = loadAgentConfig("three", baseDir);
+    const loadedAssignment = loadAssignmentConfig(assignmentName, baseDir);
+    const originalCwd = process.cwd();
+    process.chdir(baseDir);
+    try {
+      return await runAgent({
+        loaded,
+        loadedAssignment,
+        cliVars,
+        parentRunId,
+        backend: {
+          id: "claude",
+          async invoke() {
+            throw new Error("backend should not be invoked during init");
+          },
+        },
+        initialize: true,
+      });
     } finally {
       process.chdir(originalCwd);
     }
@@ -985,6 +1022,304 @@ Work.
       env: gitTestEnv(),
     }).trim(),
     "hooks-test",
+  );
+});
+
+test("lineage vars resolve in authored source order, use nearest ancestors, and freeze inherited values", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  writeAssignment(
+    dir,
+    "lineage-root",
+    `---
+schemaVersion: 1
+name: lineage-root
+vars:
+  shared_secret:
+    type: string
+    required: true
+    envName: LINEAGE_SECRET
+    sources: [env]
+  lineage_value:
+    type: string
+    required: true
+    sources: [cli]
+tasks:
+  - id: t1
+    title: First
+---
+Root.
+`,
+  );
+  writeAssignment(
+    dir,
+    "lineage-middle",
+    `---
+schemaVersion: 1
+name: lineage-middle
+vars:
+  shared_secret:
+    type: string
+    required: true
+    sources: [parent]
+  lineage_value:
+    type: string
+    required: true
+    sources: [cli, parent]
+tasks:
+  - id: t1
+    title: First
+---
+Middle.
+`,
+  );
+  writeAssignment(
+    dir,
+    "lineage-child",
+    `---
+schemaVersion: 1
+name: lineage-child
+vars:
+  shared_secret:
+    type: string
+    required: true
+    envName: CHILD_SECRET
+    sources: [cli, parent, env]
+  lineage_value:
+    type: string
+    required: true
+    envName: UNUSED_ENV
+    sources: [parent, env]
+  fallback_value:
+    type: string
+    sources: [parent]
+    default: fallback
+tasks:
+  - id: t1
+    title: Resolve vars
+---
+Child.
+`,
+  );
+
+  const root = await withEnv({ LINEAGE_SECRET: "root-secret" }, () =>
+    initWithOptions(dir, "lineage-root", {
+      cliVars: { lineage_value: "root-value" },
+    }),
+  );
+  const middle = await initWithOptions(dir, "lineage-middle", {
+    cliVars: { lineage_value: "middle-value" },
+    parentRunId: root.runId,
+  });
+  const child = await withEnv(
+    { CHILD_SECRET: "child-env-secret", UNUSED_ENV: "env-fallback" },
+    () =>
+      initWithOptions(dir, "lineage-child", {
+        cliVars: { shared_secret: "cli-wins" },
+        parentRunId: middle.runId,
+      }),
+  );
+
+  assert.equal(middle.manifest.runtimeVars.shared_secret, "root-secret");
+  assert.equal(middle.manifest.runtimeVarSources.shared_secret.source, "parent");
+  assert.equal(middle.manifest.runtimeVarSources.shared_secret.inheritedFromRunId, root.runId);
+
+  const middleDetail = withSharedRuntimeEnv(dir, () => readStatus(middle.runId));
+  assert.deepEqual(middleDetail.runtimeVars.shared_secret, {
+    redacted: true,
+    source: "parent",
+    envName: "LINEAGE_SECRET",
+    inheritedFromRunId: root.runId,
+  });
+
+  assert.equal(child.manifest.parentRunId, middle.runId);
+  assert.equal(child.manifest.runtimeVars.shared_secret, "cli-wins");
+  assert.equal(child.manifest.runtimeVarSources.shared_secret.source, "cli");
+  assert.equal(child.manifest.runtimeVars.lineage_value, "middle-value");
+  assert.equal(child.manifest.runtimeVarSources.lineage_value.source, "parent");
+  assert.equal(child.manifest.runtimeVarSources.lineage_value.inheritedFromRunId, middle.runId);
+  assert.equal(child.manifest.runtimeVars.fallback_value, "fallback");
+  assert.equal(child.manifest.runtimeVarSources.fallback_value.source, "default");
+
+  const middleManifestPath = join(middle.workspaceDir, "run.json");
+  const mutatedMiddle = JSON.parse(readFileSync(middleManifestPath, "utf8"));
+  mutatedMiddle.runtimeVars.lineage_value = "changed-after-child";
+  writeFileSync(middleManifestPath, `${JSON.stringify(mutatedMiddle, null, 2)}\n`);
+
+  const frozenChild = JSON.parse(readFileSync(join(child.workspaceDir, "run.json"), "utf8"));
+  assert.equal(frozenChild.runtimeVars.lineage_value, "middle-value");
+});
+
+test("lineage vars support inherited cwd interpolation from parent worktree_path", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  const repoDir = initGitRepo(dir);
+  const worktreeDir = join(dir, "lineage-worktree");
+  writeAssignment(
+    dir,
+    "lineage-parent-worktree",
+    `---
+schemaVersion: 1
+name: lineage-parent-worktree
+vars:
+  worktree_path:
+    type: string
+    required: true
+    requiredAt: prepare
+hooks:
+  prepare:
+    - builtin: git-worktree
+      with:
+        repo: ${JSON.stringify(repoDir)}
+        from: main
+        branch: lineage-worktree
+        path: ${JSON.stringify(worktreeDir)}
+tasks:
+  - id: t1
+    title: First
+---
+Parent worktree.
+`,
+  );
+  writeAssignment(
+    dir,
+    "lineage-child-cwd",
+    `---
+schemaVersion: 1
+name: lineage-child-cwd
+cwd: "{{worktree_path}}"
+vars:
+  worktree_path:
+    type: string
+    required: true
+    sources: [parent]
+tasks:
+  - id: t1
+    title: Worktree {{worktree_path}}
+    body: |
+      Child cwd {{cwd}} worktree {{worktree_path}}
+---
+Child.
+`,
+  );
+
+  const parent = await initWithOptions(dir, "lineage-parent-worktree");
+  let seenCwd = null;
+  const { outcome } = await runWithMock(
+    dir,
+    async (ctx) => {
+      seenCwd = ctx.cwd;
+      const [resolved] = findRunManifestsById(runIdFromPrompt(ctx.prompt), sharedRuntimeEnv(dir));
+      assert.ok(resolved, "child run manifest should exist during invoke");
+      const manifestPath = join(resolved.workspaceDir, "run.json");
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+      manifest.finalTasks.t1.status = "completed";
+      manifest.tasksCompleted = Object.values(manifest.finalTasks).filter(
+        (task) => task.status === "completed",
+      ).length;
+      writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "session-lineage-child",
+        transcript: "done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    },
+    {},
+    {
+      assignmentName: "lineage-child-cwd",
+      backendId: "claude",
+      parentRunId: parent.runId,
+    },
+  );
+
+  assert.equal(seenCwd, worktreeDir);
+  assert.equal(outcome.manifest.cwd, worktreeDir);
+  assert.equal(outcome.manifest.parentRunId, parent.runId);
+  assert.equal(outcome.manifest.runtimeVars.worktree_path, worktreeDir);
+  assert.equal(outcome.manifest.finalTasks.t1.title, `Worktree ${worktreeDir}`);
+  assert.equal(
+    outcome.manifest.finalTasks.t1.body.trim(),
+    `Child cwd ${worktreeDir} worktree ${worktreeDir}`,
+  );
+});
+
+test("lineage resolution errors when the declared parent run cannot be read", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  writeAssignment(
+    dir,
+    "lineage-missing-parent",
+    `---
+schemaVersion: 1
+name: lineage-missing-parent
+vars:
+  inherited_value:
+    type: string
+    required: true
+    sources: [parent]
+tasks:
+  - id: t1
+    title: First
+---
+Child.
+`,
+  );
+
+  await assert.rejects(
+    () =>
+      initWithOptions(dir, "lineage-missing-parent", {
+        parentRunId: "missing-parent",
+      }),
+    (error) => error instanceof LineageResolutionError && /missing-parent/.test(error.message),
+  );
+});
+
+test("lineage missing errors when a required inherited var cannot be resolved", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  writeAssignment(
+    dir,
+    "lineage-required-parent",
+    `---
+schemaVersion: 1
+name: lineage-required-parent
+vars:
+  inherited_value:
+    type: string
+    required: true
+    sources: [parent]
+tasks:
+  - id: t1
+    title: First
+---
+Child.
+`,
+  );
+  writeAssignment(
+    dir,
+    "lineage-empty-parent",
+    `---
+schemaVersion: 1
+name: lineage-empty-parent
+tasks:
+  - id: t1
+    title: First
+---
+Parent.
+`,
+  );
+
+  const parent = await initWithOptions(dir, "lineage-empty-parent");
+  await assert.rejects(
+    () =>
+      initWithOptions(dir, "lineage-required-parent", {
+        parentRunId: parent.runId,
+      }),
+    (error) => error instanceof LineageMissingError && /inherited_value/.test(error.message),
   );
 });
 

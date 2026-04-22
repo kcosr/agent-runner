@@ -48,7 +48,7 @@ vars:
   repo_path:
     type: string
     required: true
-    source: cli
+    sources: [cli]
 tasks:
   - id: t1
     title: First
@@ -67,7 +67,7 @@ vars:
   repo_path:
     type: string
     required: true
-    source: cli
+    sources: [cli]
 tasks:
   - id: t1
     title: Only
@@ -501,7 +501,7 @@ vars:
   repo_path:
     type: string
     required: true
-    source: cli
+    sources: [cli]
 tasks:
   - id: t1
     title: Only
@@ -532,7 +532,7 @@ vars:
   repo_path:
     type: string
     required: true
-    source: cli
+    sources: [cli]
 tasks:
   - id: t1
     title: Only

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import {
   AgentNotFoundError,
+  AssignmentConfigError,
   AssignmentNotFoundError,
   listAgents,
   listAssignments,
@@ -33,7 +34,7 @@ vars:
   repo_path:
     type: string
     required: true
-    source: cli
+    sources: [cli]
 ---
 Work instructions.
 `;
@@ -150,6 +151,92 @@ args: [FOO=bar]
     assert.equal(loadAgentConfig(agentPath).sourcePath, agentPath);
     assert.equal(loadAssignmentConfig(assignmentPath).sourcePath, assignmentPath);
     assert.equal(loadLauncherConfig(launcherPath).sourcePath, launcherPath);
+  }));
+
+test("assignment var schema accepts `sources` and rejects legacy or malformed source definitions", () =>
+  withRuntimeRoots("task-runner-def-test-", ({ configDir, rootDir }) => {
+    writeAssignment(
+      configDir,
+      "sources-valid",
+      `---
+schemaVersion: 1
+name: sources-valid
+vars:
+  repo_path:
+    type: string
+    required: true
+    sources: [cli, parent]
+tasks:
+  - id: t1
+    title: First
+---
+Valid.
+`,
+    );
+    assert.deepEqual(loadAssignmentConfig("sources-valid", rootDir).config.vars.repo_path.sources, [
+      "cli",
+      "parent",
+    ]);
+
+    writeAssignment(
+      configDir,
+      "sources-legacy",
+      `---
+schemaVersion: 1
+name: sources-legacy
+vars:
+  repo_path:
+    type: string
+    required: true
+    source: cli
+tasks:
+  - id: t1
+    title: First
+---
+Legacy.
+`,
+    );
+    assert.throws(() => loadAssignmentConfig("sources-legacy", rootDir), AssignmentConfigError);
+
+    writeAssignment(
+      configDir,
+      "sources-duplicate",
+      `---
+schemaVersion: 1
+name: sources-duplicate
+vars:
+  repo_path:
+    type: string
+    required: true
+    sources: [cli, cli]
+tasks:
+  - id: t1
+    title: First
+---
+Duplicate.
+`,
+    );
+    assert.throws(() => loadAssignmentConfig("sources-duplicate", rootDir), AssignmentConfigError);
+
+    writeAssignment(
+      configDir,
+      "sources-empty",
+      `---
+schemaVersion: 1
+name: sources-empty
+vars:
+  repo_path:
+    type: string
+    required: true
+    sources: []
+tasks:
+  - id: t1
+    title: First
+---
+Empty.
+`,
+    );
+    assert.throws(() => loadAssignmentConfig("sources-empty", rootDir), AssignmentConfigError);
   }));
 
 test("missing bare-name loads report config-root searched paths", () =>

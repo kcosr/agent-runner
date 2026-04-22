@@ -59,10 +59,12 @@ The manifest is the source of truth. Important fields:
 | `callerInstructions` | operator-facing docs, never sent to backend |
 | `backendSessionId` | backend-native resume handle |
 | `dependencyRunIds` | upstream runs that must succeed before execution |
+| `parentRunId` | direct lineage edge to the parent run when this run was launched from another run |
 | `attachments` | metadata for files under `attachments/` |
 | `attempts`, `attemptRecords` | per-attempt execution log |
 | `sessionCount`, `sessions` | session-level summaries |
-| `runtimeVars` | resolved vars (env-sourced values redacted) |
+| `runtimeVars` | frozen resolved vars |
+| `runtimeVarSources` | frozen provenance for each resolved var |
 | `resetSeed` | snapshot used by `run reset` |
 | `execution` | `{ hostMode: "embedded" \| "daemon", controller }`; for daemon runs, `controller.daemonInstanceId` links back to the daemon instance |
 
@@ -96,6 +98,12 @@ Fresh `run` resolves agent and assignment, resolves cwd
 locked fields, creates the workspace, freezes the manifest, composes the
 brief, and invokes the backend — except for passive runs, which stop after
 initialization.
+
+If a run launches another `task-runner` process from inside a worker, the
+child run automatically freezes `parentRunId` and can inherit parent vars
+through assignment `sources: [parent]`. This is how planner →
+implementer → descendant worktree flows reuse values such as
+`worktree_path` without repeating `--var` flags.
 
 ### Init, then execute later
 
@@ -134,6 +142,7 @@ task-runner attachment list <run-id> [--cwd-scope]
 - `run audit` text output is chronological rendering from the persisted
   audit envelopes.
 - `run status --output-format json` returns the shared `RunDetail` DTO.
+- `RunSummary` and `RunDetail` include `parentRunId` when lineage exists.
 - `RunDetail` includes full `note` plus `pinned`; `RunSummary` includes
   `notePresent` plus `pinned`.
 - Text `run status` may show `Pinned: yes` and `Note: present`, but does

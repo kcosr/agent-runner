@@ -1357,6 +1357,28 @@ export function RunDetailDrawer({
                 )}
               </SummaryLongRow>
             ) : null}
+            {run.parentRunId ? (
+              <SummaryLongRow label="Parent run">
+                <button
+                  aria-label={`Open parent run ${run.parentRunId}`}
+                  className="attachment-source-run run-id"
+                  onClick={() => onSelectRun(run.parentRunId as string)}
+                  type="button"
+                >
+                  {run.parentRunId}
+                </button>
+                <div className="meta-actions">
+                  <button
+                    aria-label="Copy parent run id"
+                    className="copy"
+                    onClick={() => onCopy(run.parentRunId as string, "parent run id")}
+                    type="button"
+                  >
+                    <CopyIcon aria-hidden="true" />
+                  </button>
+                </div>
+              </SummaryLongRow>
+            ) : null}
           </section>
 
           {actionError ? (

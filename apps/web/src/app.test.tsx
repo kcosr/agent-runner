@@ -118,6 +118,7 @@ function makeRun(
 ): RunSummary {
   const base = {
     runId: "run-1",
+    parentRunId: null,
     repo: "task-runner",
     status: "running",
     effectiveStatus: "running",
@@ -208,6 +209,7 @@ function makeDetail(
 ): RunDetail {
   const base = {
     runId: "run-1",
+    parentRunId: null,
     repo: "task-runner",
     status: "running",
     effectiveStatus: "running",
@@ -1175,6 +1177,53 @@ describe("web app", () => {
     expect(screen.getByText("/tmp/task-runner")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /copy cwd path/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /copy run id/i })).toBeInTheDocument();
+  });
+
+  it("shows the parent run row in the detail drawer and navigates to the parent run", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({ runId: "run-parent", name: "Planning run", assignmentName: "Planning run" }),
+        makeRun({
+          runId: "run-child",
+          name: "Implementer run",
+          assignmentName: "Implementer run",
+          parentRunId: "run-parent",
+        }),
+      ],
+      details: {
+        "run-parent": makeDetail({
+          runId: "run-parent",
+          name: "Planning run",
+          assignment: {
+            name: "Planning run",
+            sourcePath: "/tmp/planning-assignment.md",
+            workspacePath: "/tmp/task-runner/planning-assignment.md",
+          },
+        }),
+        "run-child": makeDetail({
+          runId: "run-child",
+          name: "Implementer run",
+          assignment: {
+            name: "Implementer run",
+            sourcePath: "/tmp/implementer-assignment.md",
+            workspacePath: "/tmp/task-runner/implementer-assignment.md",
+          },
+          parentRunId: "run-parent",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await user.click(await findRunCard("Implementer run"));
+
+    expect(await screen.findByText("Parent run")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Open parent run run-parent" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Planning run" })).toBeInTheDocument();
+    });
   });
 
   it("renders attempt history in the attempts tab with nested scroll-follow behavior", async () => {

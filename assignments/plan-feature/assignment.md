@@ -901,6 +901,12 @@ tasks:
       Before running `init`, confirm the target directory or
       worktree path. Do not guess from your own cwd.
 
+      If the approved draft declares descendant vars with
+      `sources: [parent]` (for example `worktree_path`), rely on
+      lineage inheritance. Do not add redundant `--var` flags
+      just to re-pass values that already exist on the planning
+      run.
+
       For the first creation, run:
 
             {{task_runner_cmd}} init \
@@ -923,6 +929,8 @@ tasks:
       - Do **not** force `--backend passive`.
       - Do not add another backend override unless some other
         explicit requirement justifies it.
+      - Do not add manual `--var` handoff for values the draft
+        already inherits through `sources: [parent]`.
       - Always use a short descriptive `--name`:
         - start with a capitalized first word
         - target 2-4 words and about 32 characters or less

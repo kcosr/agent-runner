@@ -232,7 +232,6 @@ function classifyAssignmentSurface(path: PathSegment[]): InterpolationSurface {
     if (path.length === 3 && typeof path[2] === "string") {
       switch (path[2]) {
         case "type":
-        case "source":
         case "envName":
         case "default":
         case "requiredAt":
@@ -244,6 +243,10 @@ function classifyAssignmentSurface(path: PathSegment[]): InterpolationSurface {
         default:
           return { mode: "disabled" };
       }
+    }
+
+    if (path.length === 4 && path[2] === "sources" && typeof path[3] === "number") {
+      return { mode: "exact", scalarKind: "string", allowLiteral: false };
     }
 
     if (path.length === 4 && path[2] === "values" && typeof path[3] === "number") {

@@ -21,6 +21,7 @@ describe("api client", () => {
               runs: [
                 {
                   runId: "run-1",
+                  parentRunId: null,
                   repo: "task-runner",
                   status: "running",
                   archivedAt: null,
@@ -91,6 +92,7 @@ describe("api client", () => {
               runs: [
                 {
                   runId: "run-1",
+                  parentRunId: null,
                   repo: "task-runner",
                   status: "initialized",
                   effectiveStatus: "running",
@@ -171,6 +173,7 @@ describe("api client", () => {
           JSON.stringify({
             run: {
               runId: "run-1",
+              parentRunId: null,
               repo: "task-runner",
               status: "running",
               effectiveStatus: "running",
@@ -259,6 +262,7 @@ describe("api client", () => {
             JSON.stringify({
               run: {
                 runId: "run-1",
+                parentRunId: null,
                 repo: "task-runner",
                 status: "initialized",
                 effectiveStatus: "initialized",
@@ -340,6 +344,7 @@ describe("api client", () => {
             JSON.stringify({
               run: {
                 runId: "run-1",
+                parentRunId: null,
                 repo: "task-runner",
                 status: "initialized",
                 effectiveStatus: "initialized",
@@ -487,6 +492,7 @@ describe("api client", () => {
           JSON.stringify({
             run: {
               runId: "run-1",
+              parentRunId: null,
               repo: "task-runner",
               status: "initialized",
               effectiveStatus: "initialized",

@@ -27,11 +27,11 @@ vars:
   repo_path:
     type: string
     required: true
-    source: cli
+    sources: [cli]
   scope:
     type: string
     required: false
-    source: cli
+    sources: [cli]
     default: full
 tasks:
   - id: t1

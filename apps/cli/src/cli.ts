@@ -200,6 +200,8 @@ Execution options:
   --resume-run <id|path>  Continue an existing run by short id or path.
   --run-id <id|path>      (init only) Overwrite an initialized run in place.
   --var <key>=<value>     Set an input variable (repeatable).
+                          Nested child runs usually inherit parent-owned
+                          vars through assignment \`sources: [parent]\`.
   --add-task <title>      Append a task to the run's task list.
   --cwd <path>            Override the run cwd, or scope list runs to a cwd.
   --backend <id>          Override the agent's backend.
