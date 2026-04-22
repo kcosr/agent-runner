@@ -204,7 +204,10 @@ task-runner serve
 ```
 
 `task-runner serve` starts the local daemon. The web UI talks to that
-same daemon and is not a standalone app.
+same daemon and is not a standalone app. The runs board supports
+exact-match filters for repo, agent, backend, and lineage family, and
+run cards expose a `Family` chip that scopes the board to one run
+family.
 
 ### Hooked assignment
 
@@ -452,11 +455,6 @@ task-runner today.
   who/what originally launched the run, which parent spawned which
   nested child, which caller issued which mid-run mutation — would
   make cross-run forensics and orchestration replay tractable.
-- **Parent/child run linking for UI filtering** — when one run spawns
-  another through the recursion path, capture the parent-child edge
-  explicitly and let the web dashboard filter, group, and collapse
-  by ancestry so an orchestrator run and its generated implementer /
-  reviewer runs can be viewed as a single tree.
 - **External webhook support** — emit run lifecycle events
   (`run_started`, `run_finished`, `attempt_started`, per-task updates,
   etc.) to configured external HTTP endpoints so task-runner can

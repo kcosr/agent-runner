@@ -105,7 +105,7 @@ All routes are under `/api/`.
 
 | Method | Path | Effect |
 |--------|------|--------|
-| `GET` | `/api/runs` | List runs. Query: `includeArchived`, `cwd`, `repo`, `global` |
+| `GET` | `/api/runs` | List runs. Query: `includeArchived`, plus exactly one of `cwd`, `repo`, `global=true`, or `familyOf=<run-id>` |
 | `GET` | `/api/runs/:runId` | Full `RunDetail` (including frozen hook descriptors/state/audits when present) |
 | `POST` | `/api/runs/init` | Initialize a run |
 | `POST` | `/api/runs` | Start a run |
@@ -123,6 +123,11 @@ All routes are under `/api/`.
 | `POST` | `/api/runs/:runId/dependencies` | Add a dependency |
 | `DELETE` | `/api/runs/:runId/dependencies/:depRunId` | Remove a dependency |
 | `POST` | `/api/runs/:runId/dependencies/clear` | Clear all dependencies |
+
+`familyOf=<run-id>` resolves the target run's lineage root and returns
+every run that shares that root. It is mutually exclusive with `cwd`,
+`repo`, and `global=true`; empty `familyOf` values are rejected as
+invalid requests.
 
 Fresh-run HTTP requests reuse the same generic run-start contract as
 the WebSocket methods:
@@ -282,8 +287,8 @@ HTTP SSE route and WebSocket notification method.
 
 Drives board cards. The global summary stream is projection-only — it
 never carries transcript deltas. `RunSummary` now includes persisted
-`pinned`, derived `notePresent`, and `hookCount` so cards and filters
-can react without fetching full detail.
+`pinned`, derived `notePresent`, `hookCount`, and `familyRootRunId` so
+cards and filters can react without fetching full detail.
 
 ### Per-run detail
 
