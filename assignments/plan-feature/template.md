@@ -208,19 +208,17 @@ tasks:
 
       <<PLACEHOLDER_SCAFFOLD_STEPS>>
 
-      Typical content: validate hook-owned setup rather
-      than re-running it. Confirm the run is already in
-      the hook-selected `.worktrees/<worktree_slug>` path,
-      confirm the effective `run.cwd` and branch name
-      match the expected `feat/<worktree_slug>` contract
-      and are not `main`, record the pre-implementation
-      base ref (`git rev-parse HEAD` or merge-base against
-      `origin/main`), and confirm no manual `git
-      worktree`, `git fetch`, or `git rebase` setup
-      commands are re-run here. If the hook-prepared
-      cwd/branch/vars are inconsistent, mark the task
-      `blocked` with the exact mismatch and stop rather
-      than repairing setup by hand.
+      Typical content: confirm you are in a non-`main`
+      git worktree, confirm local `main` is already in
+      sync with `origin/main` (without updating it
+      yourself), sync the current worktree to local
+      `main`, ensure a clean working tree, and set up any
+      feature-specific config. If local `main` is not in
+      sync with `origin/main`, if you are not in a
+      worktree, or if the current worktree cannot be
+      synced cleanly to local `main`, mark the task
+      `blocked` and stop rather than starting
+      implementation.
   - id: implement_core
     title: Implement core feature logic
     body: |
@@ -373,7 +371,7 @@ tasks:
 
       Substitute `<<PLACEHOLDER_REVIEW_RANGE>>` with the
       appropriate git-range spec for the changes you
-      produced (e.g. `HEAD~N..HEAD`, `origin/main..HEAD`, or
+      produced (e.g. `HEAD~N..HEAD`, `main..HEAD`, or
       `staged`). The `implementation_run_id` var points the
       reviewer at this plan so it can cross-check that
       every planned task actually shipped — that is what

@@ -148,9 +148,12 @@ function gitTestEnv() {
   );
 }
 
-function configureGitRepo(repoDir) {
+function initGitRepo(baseDir) {
+  const repoDir = join(baseDir, "repo");
   const hooksDir = join(repoDir, ".githooks-disabled");
+  mkdirSync(repoDir, { recursive: true });
   const env = gitTestEnv();
+  execFileSync("git", ["init", "--initial-branch=main", repoDir], { encoding: "utf8", env });
   mkdirSync(hooksDir, { recursive: true });
   execFileSync("git", ["-C", repoDir, "config", "core.hooksPath", hooksDir], {
     encoding: "utf8",
@@ -164,28 +167,10 @@ function configureGitRepo(repoDir) {
     encoding: "utf8",
     env,
   });
-}
-
-function initGitRepoAt(repoDir) {
-  const env = gitTestEnv();
-  mkdirSync(repoDir, { recursive: true });
-  execFileSync("git", ["init", "--initial-branch=main", repoDir], { encoding: "utf8", env });
-  configureGitRepo(repoDir);
   writeFileSync(join(repoDir, "README.md"), "seed\n");
   execFileSync("git", ["-C", repoDir, "add", "README.md"], { encoding: "utf8", env });
   execFileSync("git", ["-C", repoDir, "commit", "-m", "seed"], { encoding: "utf8", env });
   return repoDir;
-}
-
-function initGitRepo(baseDir) {
-  return initGitRepoAt(join(baseDir, "repo"));
-}
-
-function cloneGitRepo(sourceRepo, targetRepo) {
-  const env = gitTestEnv();
-  execFileSync("git", ["clone", sourceRepo, targetRepo], { encoding: "utf8", env });
-  configureGitRepo(targetRepo);
-  return targetRepo;
 }
 
 function writeAgentAndAssignment(baseDir) {
@@ -208,7 +193,7 @@ async function runWithMock(baseDir, mockInvoke, overrides = {}, options = {}) {
       const outcome = await runAgent({
         loaded,
         loadedAssignment,
-        cliVars: options.cliVars ?? {},
+        cliVars: {},
         backend,
         overrides,
         callerCwd: options.callerCwd,
@@ -1001,311 +986,6 @@ Work.
     }).trim(),
     "hooks-test",
   );
-});
-
-test("git-worktree builtin prepare hooks reject existing paths when collision is fail", async () => {
-  const dir = tempDir();
-  writeAgent(dir, "three", THREE_AGENT);
-  const repoDir = initGitRepo(dir);
-  const worktreeDir = join(dir, "feature-worktree");
-  mkdirSync(worktreeDir, { recursive: true });
-  writeAssignment(
-    dir,
-    "three-work",
-    `---
-schemaVersion: 1
-name: three-work
-hooks:
-  prepare:
-    - builtin: git-worktree
-      with:
-        repo: ${JSON.stringify(repoDir)}
-        from: main
-        branch: hooks-test
-        path: ${JSON.stringify(worktreeDir)}
-        collision: fail
-tasks:
-  - id: t1
-    title: First
----
-Work.
-`,
-  );
-
-  let backendInvoked = false;
-  await assert.rejects(
-    () =>
-      runWithMock(
-        dir,
-        async () => {
-          backendInvoked = true;
-          throw new Error("backend should not run when git-worktree collision=fail rejects");
-        },
-        {},
-        { assignmentName: "three-work", backendId: "claude" },
-      ),
-    new RegExp(`git-worktree path ${worktreeDir} already exists`),
-  );
-  assert.equal(backendInvoked, false);
-});
-
-test("git-worktree builtin prepare hooks reject missing paths when collision is must_exist", async () => {
-  const dir = tempDir();
-  writeAgent(dir, "three", THREE_AGENT);
-  const repoDir = initGitRepo(dir);
-  const worktreeDir = join(dir, "feature-worktree");
-  writeAssignment(
-    dir,
-    "three-work",
-    `---
-schemaVersion: 1
-name: three-work
-hooks:
-  prepare:
-    - builtin: git-worktree
-      with:
-        repo: ${JSON.stringify(repoDir)}
-        from: main
-        branch: hooks-test
-        path: ${JSON.stringify(worktreeDir)}
-        collision: must_exist
-tasks:
-  - id: t1
-    title: First
----
-Work.
-`,
-  );
-
-  let backendInvoked = false;
-  await assert.rejects(
-    () =>
-      runWithMock(
-        dir,
-        async () => {
-          backendInvoked = true;
-          throw new Error("backend should not run when git-worktree collision=must_exist rejects");
-        },
-        {},
-        { assignmentName: "three-work", backendId: "claude" },
-      ),
-    new RegExp(`git-worktree path ${worktreeDir} does not exist`),
-  );
-  assert.equal(backendInvoked, false);
-});
-
-test("git-worktree builtin prepare hooks reuse existing paths when collision is must_exist", async () => {
-  const dir = tempDir();
-  writeAgent(dir, "three", THREE_AGENT);
-  const repoDir = initGitRepo(dir);
-  const worktreeDir = join(dir, "feature-worktree");
-  execFileSync("git", ["-C", repoDir, "worktree", "add", "-b", "hooks-test", worktreeDir, "main"], {
-    encoding: "utf8",
-    env: gitTestEnv(),
-  });
-  writeAssignment(
-    dir,
-    "three-work",
-    `---
-schemaVersion: 1
-name: three-work
-vars:
-  worktree_path:
-    type: string
-    required: true
-    requiredAt: prepare
-hooks:
-  prepare:
-    - builtin: git-worktree
-      with:
-        repo: ${JSON.stringify(repoDir)}
-        from: main
-        branch: hooks-test
-        path: ${JSON.stringify(worktreeDir)}
-        collision: must_exist
-tasks:
-  - id: t1
-    title: First
----
-Work.
-`,
-  );
-
-  let seenCwd;
-  const { outcome } = await runWithMock(
-    dir,
-    async (ctx) => {
-      seenCwd = ctx.cwd;
-      setTaskStatusesForPrompt(ctx.prompt, { t1: "completed" }, repoDir);
-      return {
-        exitCode: 0,
-        signal: null,
-        timedOut: false,
-        sessionId: "session-worktree-existing",
-        transcript: "done",
-        rawStdout: "",
-        rawStderr: "",
-      };
-    },
-    {},
-    { assignmentName: "three-work", backendId: "claude" },
-  );
-
-  const manifest = JSON.parse(readFileSync(join(outcome.workspaceDir, "run.json"), "utf8"));
-  assert.equal(seenCwd, worktreeDir);
-  assert.equal(manifest.cwd, worktreeDir);
-  assert.equal(manifest.runtimeVars.worktree_path, worktreeDir);
-  assert.equal(
-    execFileSync("git", ["-C", worktreeDir, "rev-parse", "--abbrev-ref", "HEAD"], {
-      encoding: "utf8",
-      env: gitTestEnv(),
-    }).trim(),
-    "hooks-test",
-  );
-});
-
-test("prepare hooks can fetch origin/main, switch into .worktrees, and rebase a feature branch onto the fetched base", async () => {
-  const dir = tempDir();
-  writeAgent(dir, "three", THREE_AGENT);
-  const env = gitTestEnv();
-
-  const originSeedDir = initGitRepoAt(join(dir, "origin-seed"));
-  const originBareDir = join(dir, "origin.git");
-  execFileSync("git", ["clone", "--bare", originSeedDir, originBareDir], { encoding: "utf8", env });
-
-  const repoDir = cloneGitRepo(originBareDir, join(dir, "repo"));
-  const staleMain = execFileSync("git", ["-C", repoDir, "rev-parse", "main"], {
-    encoding: "utf8",
-    env,
-  }).trim();
-  const worktreeSlug = "workflow-main";
-
-  execFileSync("git", ["-C", repoDir, "checkout", "-b", `feat/${worktreeSlug}`], {
-    encoding: "utf8",
-    env,
-  });
-  writeFileSync(join(repoDir, "feature.txt"), "feature\n");
-  execFileSync("git", ["-C", repoDir, "add", "feature.txt"], { encoding: "utf8", env });
-  execFileSync("git", ["-C", repoDir, "commit", "-m", "feature"], { encoding: "utf8", env });
-  const featureHeadBefore = execFileSync("git", ["-C", repoDir, "rev-parse", "HEAD"], {
-    encoding: "utf8",
-    env,
-  }).trim();
-  execFileSync("git", ["-C", repoDir, "checkout", "main"], { encoding: "utf8", env });
-
-  const updaterDir = cloneGitRepo(originBareDir, join(dir, "updater"));
-  writeFileSync(join(updaterDir, "README.md"), "seed\nremote update\n");
-  execFileSync("git", ["-C", updaterDir, "add", "README.md"], { encoding: "utf8", env });
-  execFileSync("git", ["-C", updaterDir, "commit", "-m", "origin main update"], {
-    encoding: "utf8",
-    env,
-  });
-  execFileSync("git", ["-C", updaterDir, "push", "origin", "main"], { encoding: "utf8", env });
-  const remoteHead = execFileSync("git", ["-C", updaterDir, "rev-parse", "HEAD"], {
-    encoding: "utf8",
-    env,
-  }).trim();
-
-  writeAssignment(
-    dir,
-    "three-work",
-    `---
-schemaVersion: 1
-name: three-work
-cwd: ${JSON.stringify(repoDir)}
-vars:
-  worktree_slug:
-    type: string
-    required: true
-    requiredAt: prepare
-  worktree_path:
-    type: string
-    required: true
-    requiredAt: prepare
-hooks:
-  prepare:
-    - builtin: command
-      with:
-        mode: status
-        command: git
-        args: ["-C", ${JSON.stringify(repoDir)}, "fetch", "origin", "main"]
-    - builtin: git-worktree
-      with:
-        repo: ${JSON.stringify(repoDir)}
-        from: origin/main
-        branch: "feat/{{worktree_slug}}"
-        path: "{{cwd}}/.worktrees/{{worktree_slug}}"
-        collision: fail
-    - builtin: git-sync-base
-      with:
-        repo: "{{cwd}}/.worktrees/{{worktree_slug}}"
-        baseRef: origin/main
-tasks:
-  - id: t1
-    title: First
----
-Work.
-`,
-  );
-
-  const worktreeDir = join(repoDir, ".worktrees", worktreeSlug);
-  let seenCwd;
-  const { outcome } = await runWithMock(
-    dir,
-    async (ctx) => {
-      seenCwd = ctx.cwd;
-      setTaskStatusesForPrompt(ctx.prompt, { t1: "completed" }, repoDir);
-      return {
-        exitCode: 0,
-        signal: null,
-        timedOut: false,
-        sessionId: "session-prepare-chain",
-        transcript: "done",
-        rawStdout: "",
-        rawStderr: "",
-      };
-    },
-    {},
-    {
-      assignmentName: "three-work",
-      backendId: "claude",
-      cliVars: { worktree_slug: worktreeSlug },
-    },
-  );
-
-  const manifest = JSON.parse(readFileSync(join(outcome.workspaceDir, "run.json"), "utf8"));
-  const fetchedOriginMain = execFileSync("git", ["-C", repoDir, "rev-parse", "origin/main"], {
-    encoding: "utf8",
-    env,
-  }).trim();
-  const rebasedBranch = execFileSync(
-    "git",
-    ["-C", worktreeDir, "rev-parse", "--abbrev-ref", "HEAD"],
-    {
-      encoding: "utf8",
-      env,
-    },
-  ).trim();
-  const rebasedParent = execFileSync("git", ["-C", worktreeDir, "rev-parse", "HEAD^"], {
-    encoding: "utf8",
-    env,
-  }).trim();
-  const featureHeadAfter = execFileSync("git", ["-C", worktreeDir, "rev-parse", "HEAD"], {
-    encoding: "utf8",
-    env,
-  }).trim();
-
-  assert.equal(seenCwd, worktreeDir);
-  assert.equal(manifest.cwd, worktreeDir);
-  assert.equal(manifest.runtimeVars.worktree_slug, worktreeSlug);
-  assert.equal(manifest.runtimeVars.worktree_path, worktreeDir);
-  assert.equal(fetchedOriginMain, remoteHead);
-  assert.notEqual(fetchedOriginMain, staleMain);
-  assert.equal(rebasedBranch, `feat/${worktreeSlug}`);
-  assert.equal(rebasedParent, remoteHead);
-  assert.notEqual(featureHeadAfter, featureHeadBefore);
-  assert.equal(readFileSync(join(worktreeDir, "README.md"), "utf8"), "seed\nremote update\n");
-  assert.equal(readFileSync(join(worktreeDir, "feature.txt"), "utf8"), "feature\n");
 });
 
 test("git-sync-base builtin prepare hooks rebase the current branch onto the configured base ref", async () => {

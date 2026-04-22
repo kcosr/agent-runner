@@ -17,7 +17,7 @@ vars:
     type: string
     source: cli
     default: full
-    description: Git range to review (e.g. origin/main..HEAD)
+    description: Git range to review (e.g. main..HEAD)
   implementation_run_id:
     type: string
     source: cli
@@ -149,7 +149,7 @@ values are redacted to avoid persisting secrets:
 
 ```json
 "runtimeVars": {
-  "range": "origin/main..HEAD",
+  "range": "main..HEAD",
   "log_level": {
     "redacted": true,
     "source": "env",
@@ -172,7 +172,7 @@ new information. See [resume.md](resume.md).
 task-runner run \
   --agent implementer \
   --assignment code-review \
-  --var range=origin/main..HEAD \
+  --var range=main..HEAD \
   --var implementation_run_id=abc123
 ```
 

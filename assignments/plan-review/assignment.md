@@ -89,12 +89,11 @@ tasks:
           internal review, docs drift, self-check,
           push_branch_and_create_pr
         - the scaffold/setup task explicitly requires the
-          implementer to validate hook-owned setup: confirm
-          the hook-selected `.worktrees/<worktree_slug>` cwd
-          and expected feature branch are already in place,
-          record the pre-implementation base ref, and avoid
-          manually re-running `git worktree`, `git fetch`,
-          or `git rebase` setup commands
+          implementer to confirm it is in a non-`main`
+          git worktree, confirm local `main` is already in
+          sync with `origin/main` without updating `main`
+          itself, and sync the current worktree to local
+          `main` before starting implementation
         - every code-bearing task has a concrete `**Done when:**`
           block with test-backed completion criteria
         - every task body has concrete file paths, commands, or
@@ -102,8 +101,8 @@ tasks:
         - no `<<PLACEHOLDER>>` markers remain anywhere in the draft
 
       A placeholder left in the draft, a code-bearing task with no
-      meaningful `Done when:`, missing hook-owned setup
-      validation, or an id scheme that encodes array position
+      meaningful `Done when:`, a missing worktree/main-sync
+      preflight, or an id scheme that encodes array position
       instead of meaning are all findings.
   - id: review_workflow_and_handoff
     title: Review workflow wiring and caller handoff
@@ -141,10 +140,9 @@ tasks:
           clutter or redundant `Plan` / `Review` /
           `Implementation` wording
         - the creation flow requires the planner to
-          confirm the canonical repo root and explicit
-          `worktree_slug` before running `init`, rather than
-          guessing from its own environment or confirming a
-          pre-provisioned worktree path
+          confirm the target directory or worktree path before
+          running `init`, rather than guessing from its own
+          environment
         - the creation flow says the planner keeps those
           artifacts on the planning run rather than duplicating
           them onto the new implementer run
