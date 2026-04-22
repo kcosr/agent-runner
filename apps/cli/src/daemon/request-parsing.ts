@@ -70,7 +70,7 @@ export function requiredNonEmptyString(value: unknown, label: string): string {
 }
 
 export function requiredRunIdString(value: unknown, label: string): string {
-  const stringValue = requiredString(value, label);
+  const stringValue = requiredNonEmptyString(value, label);
   if (stringValue.includes("/") || stringValue.includes("\\") || stringValue.includes("..")) {
     throw new RequestValidationError(`${label} must be a run id, not a path`);
   }
@@ -430,7 +430,7 @@ export function parseRunListScope(value: unknown, label: string): RunListScopeFi
     return undefined;
   }
   const record = asRecord(value, label);
-  const kind = optionalEnum(record.kind, `${label}.kind`, ["cwd", "repo", "global"]);
+  const kind = optionalEnum(record.kind, `${label}.kind`, ["cwd", "repo", "global", "family"]);
   if (kind === undefined) {
     throw new RequestValidationError(`${label}.kind is required`);
   }
@@ -444,6 +444,12 @@ export function parseRunListScope(value: unknown, label: string): RunListScopeFi
     return {
       kind,
       repo: requiredString(record.repo, `${label}.repo`),
+    };
+  }
+  if (kind === "family") {
+    return {
+      kind,
+      targetRunId: requiredRunIdString(record.targetRunId, `${label}.targetRunId`),
     };
   }
   return { kind };

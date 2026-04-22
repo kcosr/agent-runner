@@ -144,6 +144,7 @@ test("run contracts: toRunSummary maps listed manifest rows to the neutral summa
   assert.deepEqual(summary, {
     runId: "run123",
     parentRunId: null,
+    familyRootRunId: null,
     repo: "demo-repo",
     status: "success",
     effectiveStatus: "success",
@@ -191,6 +192,23 @@ test("run contracts: toRunSummary maps listed manifest rows to the neutral summa
       },
     },
   });
+});
+
+test("run contracts: toRunSummary carries an explicit family root id when provided", () => {
+  const manifest = buildManifest();
+
+  const summary = toRunSummary(
+    {
+      repo: "demo-repo",
+      workspaceDir: manifest.workspaceDir,
+      manifest,
+    },
+    undefined,
+    undefined,
+    "run-root",
+  );
+
+  assert.equal(summary.familyRootRunId, "run-root");
 });
 
 test("run contracts: toRunDetail maps status results to the neutral detail DTO", () => {

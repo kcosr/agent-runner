@@ -74,6 +74,11 @@ import {
   wouldCreateDependencyCycle,
 } from "../run/dependencies.js";
 import {
+  RunLineageError,
+  deriveFamilyRootRunIds,
+  resolveScopedRunManifests,
+} from "../run/lineage.js";
+import {
   ResumeError,
   type RunManifest,
   RunNotFoundError,
@@ -161,6 +166,10 @@ export type RunListScopeFilter =
     }
   | {
       kind: "global";
+    }
+  | {
+      kind: "family";
+      targetRunId: string;
     };
 
 export interface RunListFilter {
@@ -640,6 +649,7 @@ export function readStatus(target: string): StatusCommandResult {
 export function readRunSummary(target: string): SummaryCommandResult {
   const resolved = resolveRun(target);
   refreshRunSnapshotAfterTaskStateSettles(resolved);
+  const familyRootRunIdsByWorkspaceDir = deriveFamilyRootRunIds(listRunManifests());
   const satisfiedRunIds = new Set<string>();
   for (const dependencyRunId of resolved.manifest.dependencyRunIds) {
     const dependencyMatches = findRunManifestsById(dependencyRunId);
@@ -658,6 +668,7 @@ export function readRunSummary(target: string): SummaryCommandResult {
     },
     undefined,
     dependencyState,
+    familyRootRunIdsByWorkspaceDir.get(resolved.workspaceDir) ?? null,
   );
 }
 
@@ -684,17 +695,23 @@ export function listDefinitions(kind: DefinitionKind): DefinitionListResult {
 }
 
 function matchesRunListScope(
-  manifest: RunManifest,
+  entry: {
+    workspaceDir: string;
+    manifest: RunManifest;
+  },
   scope: RunListScopeFilter | undefined,
+  familyWorkspaceDirs?: ReadonlySet<string>,
 ): boolean {
   if (scope === undefined || scope.kind === "global") {
     return true;
   }
   switch (scope.kind) {
     case "cwd":
-      return manifest.cwd === scope.cwd;
+      return entry.manifest.cwd === scope.cwd;
     case "repo":
-      return manifest.repo === scope.repo;
+      return entry.manifest.repo === scope.repo;
+    case "family":
+      return familyWorkspaceDirs?.has(entry.workspaceDir) ?? false;
     default: {
       const unreachableScope: never = scope;
       return unreachableScope;
@@ -705,6 +722,16 @@ function matchesRunListScope(
 export function listRuns(filter: RunListFilter = {}): RunListResult {
   const includeArchived = filter.includeArchived === true;
   const entries = listRunManifests();
+  const familyWorkspaceDirs =
+    filter.scope?.kind === "family"
+      ? new Set(
+          resolveScopedRunManifests({
+            target: filter.scope.targetRunId,
+            scope: "family",
+          }).map((manifest) => manifest.workspaceDir),
+        )
+      : undefined;
+  const familyRootRunIdsByWorkspaceDir = deriveFamilyRootRunIds(entries);
   const projectedEntries = entries.map((entry) => ({
     ...entry,
     manifest: entry.manifest,
@@ -715,13 +742,14 @@ export function listRuns(filter: RunListFilter = {}): RunListResult {
       .map((entry) => entry.manifest.runId),
   );
   const scopedEntries = projectedEntries.filter((entry) =>
-    matchesRunListScope(entry.manifest, filter.scope),
+    matchesRunListScope(entry, filter.scope, familyWorkspaceDirs),
   );
   const summaries = scopedEntries.map((entry) =>
     toRunSummary(
       entry,
       undefined,
       deriveDependencyStateFromSatisfiedRunIds(entry.manifest, successfulRunIds),
+      familyRootRunIdsByWorkspaceDir.get(entry.workspaceDir) ?? null,
     ),
   );
   const visibleSummaries = summaries.filter(
@@ -1202,71 +1230,6 @@ function toAttachmentListEntry(attachment: RunAttachment, ownerRunId: string): A
   };
 }
 
-type ListedRunEntry = ReturnType<typeof listRunManifests>[number];
-
-function compareListedRunEntries(left: ListedRunEntry, right: ListedRunEntry): number {
-  const startedAtCompare = left.manifest.startedAt.localeCompare(right.manifest.startedAt);
-  if (startedAtCompare !== 0) {
-    return startedAtCompare;
-  }
-  return left.manifest.runId.localeCompare(right.manifest.runId);
-}
-
-function buildEntriesByRunId(entries: ListedRunEntry[]): Map<string, ListedRunEntry[]> {
-  const entriesByRunId = new Map<string, ListedRunEntry[]>();
-  for (const entry of entries) {
-    const current = entriesByRunId.get(entry.manifest.runId);
-    if (current) {
-      current.push(entry);
-      current.sort(compareListedRunEntries);
-    } else {
-      entriesByRunId.set(entry.manifest.runId, [entry]);
-    }
-  }
-  return entriesByRunId;
-}
-
-function resolveUniqueLineageEntry(
-  runId: string,
-  entriesByRunId: Map<string, ListedRunEntry[]>,
-): ListedRunEntry {
-  const matches = entriesByRunId.get(runId) ?? [];
-  if (matches.length === 0) {
-    throw new CommandError(`attachment family scope could not resolve parent run "${runId}"`);
-  }
-  if (matches.length > 1) {
-    throw new CommandError(
-      `attachment family scope is ambiguous because parent run "${runId}" exists in multiple run buckets`,
-    );
-  }
-  const match = matches[0];
-  if (match === undefined) {
-    throw new CommandError(`attachment family scope could not resolve parent run "${runId}"`);
-  }
-  return match;
-}
-
-function collectLineageChainFromEntry(
-  start: ListedRunEntry,
-  entriesByRunId: Map<string, ListedRunEntry[]>,
-): ListedRunEntry[] {
-  const chain = [start];
-  const seenWorkspaceDirs = new Set([start.workspaceDir]);
-  let current = start;
-  while (current.manifest.parentRunId !== null) {
-    const parent = resolveUniqueLineageEntry(current.manifest.parentRunId, entriesByRunId);
-    if (seenWorkspaceDirs.has(parent.workspaceDir)) {
-      throw new CommandError(
-        `attachment family scope detected a lineage cycle at parent run "${parent.manifest.runId}"`,
-      );
-    }
-    seenWorkspaceDirs.add(parent.workspaceDir);
-    chain.push(parent);
-    current = parent;
-  }
-  return chain;
-}
-
 function listAttachmentOwnerManifests(
   target: string,
   options: AttachmentListOptions = {},
@@ -1277,45 +1240,21 @@ function listAttachmentOwnerManifests(
   if (scope === "run") {
     return [resolved.manifest];
   }
-
-  const listedEntries = listRunManifests();
-  const entriesByRunId = buildEntriesByRunId(listedEntries);
-  const targetEntry = listedEntries.find(
-    (entry) => entry.workspaceDir === resolved.workspaceDir,
-  ) ?? {
-    workspaceDir: resolved.workspaceDir,
-    manifest: resolved.manifest,
-  };
-  let targetLineage: ListedRunEntry[];
   try {
-    targetLineage = collectLineageChainFromEntry(targetEntry, entriesByRunId);
-  } catch {
+    return resolveScopedRunManifests({ target, scope }).map((manifest) => {
+      if (manifest.workspaceDir === resolved.workspaceDir) {
+        return resolved.manifest;
+      }
+      const peerResolved = resolveResumeTarget(manifest.workspaceDir);
+      refreshRunSnapshotAfterTaskStateSettles(peerResolved);
+      return peerResolved.manifest;
+    });
+  } catch (error) {
+    if (!(error instanceof RunLineageError)) {
+      throw error;
+    }
     return [resolved.manifest];
   }
-  const targetRootWorkspaceDir = targetLineage.at(-1)?.workspaceDir ?? resolved.workspaceDir;
-  const targetLineageWorkspaceDirs = new Set(targetLineage.map((entry) => entry.workspaceDir));
-
-  const familyEntries = listedEntries.filter((entry) => {
-    try {
-      const lineage = collectLineageChainFromEntry(entry, entriesByRunId);
-      return lineage.at(-1)?.workspaceDir === targetRootWorkspaceDir;
-    } catch {
-      return false;
-    }
-  });
-  const remainingFamilyEntries = familyEntries
-    .filter((entry) => !targetLineageWorkspaceDirs.has(entry.workspaceDir))
-    .sort(compareListedRunEntries);
-  const orderedEntries = [...targetLineage, ...remainingFamilyEntries];
-
-  return orderedEntries.map((entry) => {
-    if (entry.workspaceDir === resolved.workspaceDir) {
-      return resolved.manifest;
-    }
-    const peerResolved = resolveResumeTarget(entry.workspaceDir);
-    refreshRunSnapshotAfterTaskStateSettles(peerResolved);
-    return peerResolved.manifest;
-  });
 }
 
 export function listAttachments(
@@ -1647,8 +1586,13 @@ export function addTask(
   }));
 }
 
-export function isCommandError(err: unknown): err is CommandError | ResumeError | AttachmentError {
+export function isCommandError(
+  err: unknown,
+): err is CommandError | ResumeError | AttachmentError | RunLineageError {
   return (
-    err instanceof CommandError || err instanceof ResumeError || err instanceof AttachmentError
+    err instanceof CommandError ||
+    err instanceof ResumeError ||
+    err instanceof AttachmentError ||
+    err instanceof RunLineageError
   );
 }

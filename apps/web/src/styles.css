@@ -1787,6 +1787,48 @@ body {
   max-width: 7rem;
 }
 
+.card-row--header {
+  align-items: center;
+  gap: 8px;
+}
+
+.run-id {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.card-family-filter {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  margin-left: -2px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: background 120ms, border-color 120ms, color 120ms;
+}
+
+.card-family-filter:hover {
+  border-color: color-mix(in srgb, var(--border) 92%, var(--foreground));
+  color: var(--foreground);
+}
+
+.card-family-filter[data-active-filter="true"] {
+  border-color: color-mix(in srgb, var(--accent-strong, #2563eb) 24%, var(--border));
+  background: color-mix(in srgb, var(--accent) 60%, transparent);
+  color: color-mix(in srgb, var(--foreground) 88%, var(--accent-strong, #2563eb));
+}
+
+.card-family-filter svg {
+  width: 12px;
+  height: 12px;
+}
+
 .meta-filter-badge--repo {
   background: var(--secondary);
 }

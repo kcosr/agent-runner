@@ -586,6 +586,8 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
       assert.ok(runs.runs.some((run) => run.runId === init.runId));
       assert.ok(runs.runs.some((run) => run.runId === passiveInit.runId));
       assert.equal(runs.runs.find((run) => run.runId === child.runId)?.parentRunId, init.runId);
+      assert.equal(runs.runs.find((run) => run.runId === init.runId)?.familyRootRunId, init.runId);
+      assert.equal(runs.runs.find((run) => run.runId === child.runId)?.familyRootRunId, init.runId);
 
       const cwdScoped = await client.call("runs.list", {
         scope: { kind: "cwd", cwd: otherCwd },
@@ -887,6 +889,14 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
       assert.equal(initSummary?.capabilities.abortReason, "not_active_in_daemon");
       assert.equal(
         runs.body.runs.find((run) => run.runId === child.runId)?.parentRunId,
+        init.runId,
+      );
+      assert.equal(
+        runs.body.runs.find((run) => run.runId === init.runId)?.familyRootRunId,
+        init.runId,
+      );
+      assert.equal(
+        runs.body.runs.find((run) => run.runId === child.runId)?.familyRootRunId,
         init.runId,
       );
 
@@ -1223,6 +1233,85 @@ test("daemon attachment HTTP routes upload, list, download, remove, and reject m
       assert.equal(rejectedBody.error.code, "INVALID_COMMAND");
       assert.match(rejectedBody.error.message, /already has 100 attachments/);
     } finally {
+      await server.close();
+    }
+  });
+});
+
+test("daemon run-list family filtering supports HTTP and RPC and rejects invalid targets", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const root = await initRun(dir);
+  const target = await initRun(dir, "daemon-agent", { parentRunId: root.runId });
+  const peer = await initRun(dir, "daemon-agent", { parentRunId: root.runId });
+  const child = await initRun(dir, "daemon-agent", { parentRunId: target.runId });
+  const different = await initRun(dir);
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl);
+    const client = await DaemonClient.connect(listenUrl);
+    try {
+      const httpFamily = await httpJson(httpBaseUrl, `/api/runs?familyOf=${root.runId}`);
+      assert.equal(httpFamily.status, 200);
+      assert.deepEqual(
+        new Set(httpFamily.body.runs.map((run) => run.runId)),
+        new Set([root.runId, target.runId, peer.runId, child.runId]),
+      );
+      assert.equal(
+        httpFamily.body.runs.some((run) => run.runId === different.runId),
+        false,
+      );
+
+      const rpcFamily = await client.call("runs.list", {
+        scope: { kind: "family", targetRunId: root.runId },
+      });
+      assert.deepEqual(
+        new Set(rpcFamily.runs.map((run) => run.runId)),
+        new Set([root.runId, target.runId, peer.runId, child.runId]),
+      );
+
+      const conflicting = await httpJson(
+        httpBaseUrl,
+        `/api/runs?familyOf=${root.runId}&repo=${encodeURIComponent("daemon-control-plane")}`,
+      );
+      assert.equal(conflicting.status, 400);
+      assert.equal(conflicting.body.error.code, "INVALID_REQUEST");
+      assert.match(
+        conflicting.body.error.message,
+        /runs\.list accepts only one of cwd, repo, global=true, or familyOf/,
+      );
+
+      const malformed = await httpJson(httpBaseUrl, "/api/runs?familyOf=../bad");
+      assert.equal(malformed.status, 400);
+      assert.equal(malformed.body.error.code, "INVALID_REQUEST");
+      assert.match(malformed.body.error.message, /familyOf must be a run id, not a path/);
+
+      const empty = await httpJson(httpBaseUrl, "/api/runs?familyOf=");
+      assert.equal(empty.status, 400);
+      assert.equal(empty.body.error.code, "INVALID_REQUEST");
+      assert.match(empty.body.error.message, /familyOf cannot be empty/);
+
+      const missing = await httpJson(httpBaseUrl, "/api/runs?familyOf=missing-run");
+      assert.equal(missing.status, 404);
+      assert.equal(missing.body.error.code, "NOT_FOUND");
+
+      patchManifest(target.workspaceDir, (manifest) => {
+        manifest.parentRunId = "missing-parent";
+      });
+
+      const unresolved = await httpJson(httpBaseUrl, `/api/runs?familyOf=${target.runId}`);
+      assert.equal(unresolved.status, 422);
+      assert.equal(unresolved.body.error.code, "COMMAND_ERROR");
+      assert.match(
+        unresolved.body.error.message,
+        /family scope could not resolve parent run "missing-parent"/,
+      );
+    } finally {
+      await client.close();
       await server.close();
     }
   });

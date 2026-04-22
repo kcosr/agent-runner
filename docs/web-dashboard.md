@@ -37,10 +37,11 @@ A three-pane layout:
 
 The grouped **Filters** control opens an anchored popover on desktop and a
 sheet-style overlay on narrow/mobile layouts. It applies exact-match
-structured filters for repo, agent, and backend, while free-text search
-remains separate. Structured filter state persists across reloads, and the
-repo/agent/backend badges on run cards act as shortcuts that apply, replace,
-or clear those exact-match filters.
+structured filters for repo, agent, backend, and lineage family, while
+free-text search remains separate. Structured filter state persists
+across reloads, and the repo/agent/backend badges plus the `Family`
+chip on run cards act as shortcuts that apply, replace, or clear those
+exact-match filters.
 
 Dashboard preferences also persist `showPinnedOnly`. The toolbar and
 Settings > General expose the same toggle, and both stay synchronized
@@ -56,6 +57,8 @@ Each card shows:
 
 - Run name (or assignment name if unnamed).
 - Status badge and task progress (e.g. `3 / 7`).
+- `Family` chip when `familyRootRunId` is present; clicking it scopes
+  the board to that lineage family.
 - Pin toggle plus note affordance.
 - Dependency readiness icon (warning if unsatisfied).
 - Attachment count.
@@ -97,12 +100,14 @@ timeline stream (`RunTimelineEnvelope`). The drawer surfaces:
 - Tasks tab: expandable task rows with inline notes and status editing,
   gated by `taskMutation` capabilities.
 - Attachments tab: **Run** and **Group** sub-tabs. Group is read-only and
-  aggregates by persisted cwd. In-app preview is available for
-  `text/markdown` and `text/plain` attachments; fenced `mermaid` blocks
-  render inline (with an inline error if a diagram fails to load). The
-  attachment preview drawer is itself resizable (edge drag or keyboard
-  handle) and supports the same full-width toggle as the detail drawer.
-  See [attachments.md](attachments.md).
+  aggregates lineage-family attachments returned by
+  `attachment list --scope family`, including attachments owned by
+  ancestors, descendants, siblings, and cousins of the selected run.
+  In-app preview is available for `text/markdown` and `text/plain`
+  attachments; fenced `mermaid` blocks render inline (with an inline
+  error if a diagram fails to load). The attachment preview drawer is
+  itself resizable (edge drag or keyboard handle) and supports the same
+  full-width toggle as the detail drawer. See [attachments.md](attachments.md).
 - Dependencies tab: upstream and downstream runs (`RunDependencyDetail`).
 - Data tab: read-only `Vars` and `Hook state` subtabs exposing
   `RunDetail.runtimeVars` and `RunDetail.hookState`. Scalar values render
@@ -198,7 +203,7 @@ Preferences are persisted to `localStorage` and include:
 - Show archived runs.
 - Show runs with notes only.
 - Show pinned runs only.
-- Structured filters (repo, agent, backend).
+- Structured filters (repo, agent, backend, family).
 - Visible focus indicators.
 - Detail drawer width.
 

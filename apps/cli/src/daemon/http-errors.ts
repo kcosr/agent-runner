@@ -15,6 +15,7 @@ import {
   AttachmentError,
   AttachmentNotFoundError,
 } from "@task-runner/core/core/run/attachments.js";
+import { RunLineageError } from "@task-runner/core/core/run/lineage.js";
 import { ResumeError, RunNotFoundError } from "@task-runner/core/core/run/manifest.js";
 import {
   EmptyPromptError,
@@ -51,6 +52,7 @@ export function isKnownControlPlaneError(err: unknown): boolean {
     err instanceof RequestValidationError ||
     err instanceof AttachmentError ||
     err instanceof CommandError ||
+    err instanceof RunLineageError ||
     err instanceof ConflictError ||
     err instanceof TaskNotFoundError ||
     err instanceof RunNotFoundError ||
@@ -95,7 +97,9 @@ export function toHttpError(err: unknown): HttpError {
   if (isKnownControlPlaneError(err)) {
     return new HttpError(
       422,
-      err instanceof CommandError ? "COMMAND_ERROR" : "INVALID_COMMAND",
+      err instanceof CommandError || err instanceof RunLineageError
+        ? "COMMAND_ERROR"
+        : "INVALID_COMMAND",
       err instanceof Error ? err.message : String(err),
       err,
     );

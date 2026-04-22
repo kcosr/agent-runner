@@ -132,6 +132,12 @@ function matchesStructuredFilters(
   );
 }
 
+function updateRunListCaches(
+  update: (runs: RunSummary[] | undefined) => RunSummary[] | undefined,
+): void {
+  queryClient.setQueriesData<RunSummary[] | undefined>({ queryKey: runQueryKeys.lists() }, update);
+}
+
 function buildColumns(
   runs: RunSummary[],
   collapseFailureStates: boolean,
@@ -268,7 +274,7 @@ function updateRunCaches(
   }
   const updateSummary = update.summary;
   if (updateSummary) {
-    queryClient.setQueryData<RunSummary[] | undefined>(runQueryKeys.list(), (current) =>
+    updateRunListCaches((current) =>
       current?.map((run) => (run.runId === runId ? updateSummary(run) : run)),
     );
   }
@@ -319,7 +325,7 @@ function updateRunArchivedCaches(result: RunArchiveResult) {
 }
 
 function syncRunSummaryFromDetail(detail: RunDetail) {
-  queryClient.setQueryData<RunSummary[] | undefined>(runQueryKeys.list(), (current) =>
+  updateRunListCaches((current) =>
     current?.map((run) =>
       run.runId === detail.runId
         ? {
@@ -341,6 +347,7 @@ function syncRunSummaryFromDetail(detail: RunDetail) {
             tasksCompleted: detail.tasksCompleted,
             tasksTotal: detail.tasksTotal,
             attachmentCount: detail.attachments.length,
+            familyRootRunId: run.familyRootRunId,
             activeTask: detail.activeTask,
             execution: detail.execution,
             capabilities: detail.capabilities,
@@ -352,7 +359,7 @@ function syncRunSummaryFromDetail(detail: RunDetail) {
 
 async function invalidateRunQueries(runId: string) {
   await Promise.all([
-    queryClient.invalidateQueries({ queryKey: runQueryKeys.list() }),
+    queryClient.invalidateQueries({ queryKey: runQueryKeys.lists() }),
     queryClient.invalidateQueries({ queryKey: runQueryKeys.detail(runId) }),
   ]);
 }
@@ -399,10 +406,11 @@ export function useRunsDashboardState() {
   const [resumeMessageDraft, setResumeMessageDraft] = useState("");
   const noticeTimersRef = useRef(new Map<string, number>());
   const detailStreamStaleRef = useRef(detailStreamStale);
+  const familyFilter = preferences.structuredFilters.family;
 
   const runsQuery = useQuery({
-    queryKey: runQueryKeys.list(),
-    queryFn: () => api.listRuns(),
+    queryKey: runQueryKeys.list(familyFilter),
+    queryFn: ({ signal }) => api.listRuns({ familyOf: familyFilter, signal }),
   });
 
   const selectedRunQuery = useQuery({
@@ -587,7 +595,7 @@ export function useRunsDashboardState() {
     async function refreshActiveQueries() {
       await Promise.all([
         queryClient.refetchQueries(
-          { queryKey: runQueryKeys.list(), type: "active" },
+          { queryKey: runQueryKeys.lists(), type: "active" },
           { throwOnError: true },
         ),
         queryClient.refetchQueries(
@@ -1223,6 +1231,11 @@ export function useRunsDashboardState() {
         structuredFilters: EMPTY_DASHBOARD_STRUCTURED_FILTERS,
       });
     },
+    clearStructuredFilters: () => {
+      updatePreferences({
+        structuredFilters: EMPTY_DASHBOARD_STRUCTURED_FILTERS,
+      });
+    },
     setActiveBoardColumnKey: (columnKey: string | null) => {
       if (viewState.activeBoardColumnKey === columnKey) {
         return;
@@ -1244,13 +1257,9 @@ export function useRunsDashboardState() {
       });
     },
     toggleStructuredFilter: (key: keyof DashboardStructuredFilters, value: string) => {
-      updatePreferences({
-        structuredFilters: toggleDashboardStructuredFilter(
-          preferences.structuredFilters,
-          key,
-          value,
-        ),
-      });
+      updatePreferences((current) => ({
+        structuredFilters: toggleDashboardStructuredFilter(current.structuredFilters, key, value),
+      }));
     },
     updatePreferences,
     updateViewState,

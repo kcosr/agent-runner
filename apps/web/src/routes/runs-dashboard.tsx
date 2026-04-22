@@ -58,6 +58,7 @@ export function RunsDashboardRoute() {
         activeBoardColumnKey: currentState.activeBoardColumnKey,
         boardColumns: currentBoardColumns,
         drawerFullscreen,
+        hasActiveStructuredFilters: currentState.hasActiveStructuredFilters,
         modalOpen,
         resumeDialogOpen: currentState.resumeDialogOpen,
         searchFocused: document.activeElement === searchInputRef.current,
@@ -111,6 +112,12 @@ export function RunsDashboardRoute() {
       if (command === "ui.blurSearch") {
         event.preventDefault();
         searchInputRef.current?.blur();
+        return;
+      }
+
+      if (command === "ui.clearStructuredFilters") {
+        event.preventDefault();
+        currentState.clearStructuredFilters();
         return;
       }
 

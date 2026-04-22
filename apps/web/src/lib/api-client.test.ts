@@ -22,6 +22,7 @@ describe("api client", () => {
                 {
                   runId: "run-1",
                   parentRunId: null,
+                  familyRootRunId: null,
                   repo: "task-runner",
                   status: "running",
                   archivedAt: null,
@@ -93,6 +94,7 @@ describe("api client", () => {
                 {
                   runId: "run-1",
                   parentRunId: null,
+                  familyRootRunId: "run-root",
                   repo: "task-runner",
                   status: "initialized",
                   effectiveStatus: "running",
@@ -152,6 +154,7 @@ describe("api client", () => {
     await expect(api.listRuns()).resolves.toEqual([
       expect.objectContaining({
         runId: "run-1",
+        familyRootRunId: "run-root",
         status: "initialized",
         effectiveStatus: "running",
         notePresent: true,
@@ -164,6 +167,29 @@ describe("api client", () => {
         },
       }),
     ]);
+  });
+
+  it("adds the optional familyOf query parameter to run-list requests", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            runs: [],
+          }),
+          { status: 200 },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createApiClient(config);
+    await expect(api.listRuns({ familyOf: "run-root" })).resolves.toEqual([]);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs?includeArchived=true&familyOf=run-root",
+      expect.objectContaining({
+        headers: { accept: "application/json" },
+      }),
+    );
   });
 
   it("passes an abort signal to run-detail requests", async () => {

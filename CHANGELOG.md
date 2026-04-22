@@ -56,6 +56,11 @@
   variants with optional `cwd`), and browser API client support for
   definition reads plus fresh-run `init` / `start` requests with
   explicit `callerCwd`.
+- Added family-scoped run filtering across the daemon and web dashboard:
+  `GET /api/runs?familyOf=<run-id>` now scopes results to one lineage
+  family, `RunSummary` now includes `familyRootRunId`, and dashboard
+  cards expose a header family toggle for filtering the board to that
+  family. ([#85](https://github.com/kcosr/task-runner/pull/85))
 - Added `--parent-run <run-id>` for fresh `task-runner run` / `init`
   invocations, and in connected mode the CLI now forwards parent lineage
   explicitly as structured daemon request `parentRunId` instead of

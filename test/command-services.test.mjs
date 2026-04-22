@@ -1114,6 +1114,94 @@ test("command services: listRuns supports exact cwd scope, repo scope, and unsco
   });
 });
 
+test("command services: listRuns supports family scope across branching lineages and projects familyRootRunId", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const root = await initRun(dir);
+  const target = await initRun(dir, "svc-work", "svc-agent", { parentRunId: root.runId });
+  const peer = await initRun(dir, "svc-work", "svc-agent", { parentRunId: root.runId });
+  const child = await initRun(dir, "svc-work", "svc-agent", { parentRunId: target.runId });
+  const different = await initRun(dir);
+
+  await withSharedRuntimeEnv(dir, async () => {
+    const familyRuns = listRuns({
+      includeArchived: true,
+      scope: {
+        kind: "family",
+        targetRunId: target.runId,
+      },
+    });
+    assert.deepEqual(
+      new Set(familyRuns.map((run) => run.runId)),
+      new Set([root.runId, target.runId, peer.runId, child.runId]),
+    );
+    assert.deepEqual(new Set(familyRuns.map((run) => run.familyRootRunId)), new Set([root.runId]));
+
+    const allRuns = listRuns({ includeArchived: true });
+    const summariesByRunId = new Map(allRuns.map((run) => [run.runId, run]));
+    assert.equal(summariesByRunId.get(root.runId)?.familyRootRunId, root.runId);
+    assert.equal(summariesByRunId.get(target.runId)?.familyRootRunId, root.runId);
+    assert.equal(summariesByRunId.get(peer.runId)?.familyRootRunId, root.runId);
+    assert.equal(summariesByRunId.get(child.runId)?.familyRootRunId, root.runId);
+    assert.equal(summariesByRunId.get(different.runId)?.familyRootRunId, null);
+  });
+});
+
+test("command services: listRuns family scope rejects broken target lineage", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const root = await initRun(dir);
+  const target = await initRun(dir, "svc-work", "svc-agent", { parentRunId: root.runId });
+
+  patchManifest(target.workspaceDir, (manifest) => {
+    manifest.parentRunId = "missing-parent";
+  });
+
+  await withSharedRuntimeEnv(dir, async () => {
+    assert.throws(
+      () =>
+        listRuns({
+          includeArchived: true,
+          scope: {
+            kind: "family",
+            targetRunId: target.runId,
+          },
+        }),
+      /family scope could not resolve parent run "missing-parent"/,
+    );
+  });
+});
+
+test("command services: listRuns family scope ignores unrelated broken lineages", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const root = await initRun(dir);
+  const target = await initRun(dir, "svc-work", "svc-agent", { parentRunId: root.runId });
+  const peer = await initRun(dir, "svc-work", "svc-agent", { parentRunId: root.runId });
+  const unrelatedRoot = await initRun(dir);
+  const unrelatedChild = await initRun(dir, "svc-work", "svc-agent", {
+    parentRunId: unrelatedRoot.runId,
+  });
+
+  patchManifest(unrelatedChild.workspaceDir, (manifest) => {
+    manifest.parentRunId = "missing-parent";
+  });
+
+  await withSharedRuntimeEnv(dir, async () => {
+    const familyRuns = listRuns({
+      includeArchived: true,
+      scope: {
+        kind: "family",
+        targetRunId: target.runId,
+      },
+    });
+    assert.deepEqual(
+      new Set(familyRuns.map((run) => run.runId)),
+      new Set([root.runId, target.runId, peer.runId]),
+    );
+  });
+});
+
 test("command services: archived runs allow attachment add/list/download/remove with canonical storage", async () => {
   const dir = tempDir();
   writeBundle(dir);

@@ -167,6 +167,7 @@ export const runDependencyDetailSchema: z.ZodType<RunDependencyDetail> = z.objec
 export const runSummarySchema: z.ZodType<RunSummary> = z.object({
   runId: z.string(),
   parentRunId: z.string().nullable(),
+  familyRootRunId: z.string().nullable(),
   repo: z.string(),
   status: runStatusSchema,
   effectiveStatus: runStatusSchema,

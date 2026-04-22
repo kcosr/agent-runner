@@ -42,6 +42,22 @@ function upsertSummary(
   return next;
 }
 
+function updateExistingSummary(
+  current: RunSummary[] | undefined,
+  incoming: RunSummary,
+): RunSummary[] | undefined {
+  if (!current) {
+    return current;
+  }
+  const existingIndex = current.findIndex((run) => run.runId === incoming.runId);
+  if (existingIndex === -1) {
+    return current;
+  }
+  const next = [...current];
+  next[existingIndex] = incoming;
+  return next;
+}
+
 function applySummaryEvent(
   current: RunSummary[] | undefined,
   event: RunSummaryStreamEvent,
@@ -50,6 +66,14 @@ function applySummaryEvent(
     return upsertSummary(current, event.summary);
   }
   return current?.filter((run) => run.runId !== event.runId);
+}
+
+function hasFamilyFilter(queryKey: readonly unknown[]): boolean {
+  const last = queryKey.at(-1);
+  if (!last || typeof last !== "object" || Array.isArray(last)) {
+    return false;
+  }
+  return typeof (last as { familyRootRunId?: unknown }).familyRootRunId === "string";
 }
 
 export function RunEventsProvider({
@@ -84,7 +108,7 @@ export function RunEventsProvider({
     async function refreshActiveQueries() {
       await Promise.all([
         queryClient.refetchQueries(
-          { queryKey: runQueryKeys.list(), type: "active" },
+          { queryKey: runQueryKeys.lists(), type: "active" },
           { throwOnError: true },
         ),
         queryClient.refetchQueries(
@@ -118,9 +142,28 @@ export function RunEventsProvider({
         }
         if (payload.type === "summary_upsert") {
           markRunTouched(payload.summary.runId);
+          queryClient.setQueriesData<RunSummary[] | undefined>(
+            { queryKey: runQueryKeys.lists() },
+            (current) => updateExistingSummary(current, payload.summary),
+          );
+          queryClient.setQueryData<RunSummary[] | undefined>(runQueryKeys.list(), (current) =>
+            upsertSummary(current, payload.summary),
+          );
+          const activeFamilyQueries = queryClient
+            .getQueryCache()
+            .findAll({ queryKey: runQueryKeys.lists(), type: "active" })
+            .filter((query) => hasFamilyFilter(query.queryKey));
+          for (const query of activeFamilyQueries) {
+            void queryClient.refetchQueries(
+              { queryKey: query.queryKey, exact: true, type: "active" },
+              { throwOnError: false },
+            );
+          }
+          return;
         }
-        queryClient.setQueryData<RunSummary[] | undefined>(runQueryKeys.list(), (current) =>
-          applySummaryEvent(current, payload),
+        queryClient.setQueriesData<RunSummary[] | undefined>(
+          { queryKey: runQueryKeys.lists() },
+          (current) => applySummaryEvent(current, payload),
         );
       },
       onStaleChange: (stale) => {
