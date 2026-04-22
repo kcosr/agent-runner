@@ -3,6 +3,7 @@ import {
   AgentNotFoundError,
   AssignmentConfigError,
   AssignmentNotFoundError,
+  LauncherNotFoundError,
 } from "@task-runner/core/config/loader.js";
 import {
   CommandError,
@@ -76,6 +77,9 @@ export function toHttpError(err: unknown): HttpError {
     return new HttpError(400, "INVALID_REQUEST", err.message, err);
   }
   if (
+    err instanceof AgentNotFoundError ||
+    err instanceof AssignmentNotFoundError ||
+    err instanceof LauncherNotFoundError ||
     err instanceof RunNotFoundError ||
     err instanceof TaskNotFoundError ||
     err instanceof AttachmentNotFoundError

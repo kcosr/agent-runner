@@ -1,3 +1,4 @@
+import type { DefinitionDetail, StartRunRequest } from "@task-runner/core/app/service.js";
 import type { AppRuntimeConfig } from "@task-runner/core/contracts/app-config.js";
 import type {
   AttachmentListEntry,
@@ -32,6 +33,12 @@ import type {
   RunPinnedResult,
   RunSummary,
 } from "@task-runner/core/contracts/runs.js";
+import type { DefinitionListResult } from "@task-runner/core/core/commands/service.js";
+import {
+  agentConfigSchema,
+  assignmentConfigSchema,
+  launcherDefinitionSchema,
+} from "@task-runner/core/core/config/schema.js";
 import { z } from "zod";
 
 export class ApiError extends Error {
@@ -51,8 +58,25 @@ export interface AttachmentContentResult {
   text: string;
 }
 
+type RunsStartRequest = Pick<
+  StartRunRequest,
+  | "runId"
+  | "agent"
+  | "assignment"
+  | "definitionCwd"
+  | "callerCwd"
+  | "parentRunId"
+  | "backendSessionId"
+  | "cliVars"
+  | "overrides"
+>;
+
 interface RequestOptions {
   signal?: AbortSignal;
+}
+
+interface DefinitionRequestOptions extends RequestOptions {
+  cwd?: string;
 }
 
 interface ErrorEnvelope {
@@ -70,6 +94,64 @@ interface SafeParseSchema<T> {
 }
 
 const INVALID_RESPONSE_CODE = "INVALID_RESPONSE";
+const DEFINITION_KINDS = ["agent", "assignment", "launcher"] as const;
+
+const definitionEntrySchema = z.object({
+  name: z.string(),
+  path: z.string().nullable(),
+  root: z.enum(["config", "builtin"]),
+});
+
+const definitionListResultSchema = z.object({
+  kind: z.enum(DEFINITION_KINDS),
+  entries: z.array(definitionEntrySchema),
+  warnings: z.array(z.string()),
+});
+
+const builtInDirectLauncherDefinitionSchema = z.object({
+  kind: z.literal("direct"),
+  name: z.literal("direct"),
+  sourcePath: z.null(),
+  root: z.literal("builtin"),
+});
+
+const loadedPrefixLauncherDefinitionSchema = z.object({
+  kind: z.literal("prefix"),
+  name: z.string(),
+  command: z.string(),
+  args: z.array(z.string()),
+  sourcePath: z.string(),
+  root: z.literal("config"),
+  config: launcherDefinitionSchema,
+});
+
+const agentDefinitionDetailSchema = z.object({
+  kind: z.literal("agent"),
+  config: agentConfigSchema,
+  instructions: z.string(),
+  sourcePath: z.string().nullable(),
+});
+
+const assignmentDefinitionDetailSchema = z.object({
+  kind: z.literal("assignment"),
+  config: assignmentConfigSchema,
+  instructions: z.string(),
+  sourcePath: z.string(),
+});
+
+const launcherDefinitionDetailSchema = z.object({
+  kind: z.literal("launcher"),
+  definition: z.union([
+    builtInDirectLauncherDefinitionSchema,
+    loadedPrefixLauncherDefinitionSchema,
+  ]),
+});
+
+const definitionDetailSchema = z.union([
+  agentDefinitionDetailSchema,
+  assignmentDefinitionDetailSchema,
+  launcherDefinitionDetailSchema,
+]);
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -335,6 +417,40 @@ async function readRunIdResult(response: Response, label: string): Promise<strin
   return body.runId;
 }
 
+async function readDefinitionList(
+  response: Response,
+  key: "agents" | "assignments" | "launchers",
+  label: string,
+): Promise<DefinitionListResult> {
+  if (!response.ok) {
+    return await readError(response);
+  }
+  return parseField(
+    await parseResponseJson(response, label),
+    response.status,
+    key,
+    definitionListResultSchema as SafeParseSchema<DefinitionListResult>,
+    label,
+  );
+}
+
+async function readDefinitionDetail(
+  response: Response,
+  key: "agent" | "assignment" | "launcher",
+  label: string,
+): Promise<DefinitionDetail> {
+  if (!response.ok) {
+    return await readError(response);
+  }
+  return parseField(
+    await parseResponseJson(response, label),
+    response.status,
+    key,
+    definitionDetailSchema as SafeParseSchema<DefinitionDetail>,
+    label,
+  );
+}
+
 async function readAbortResult(response: Response): Promise<void> {
   if (!response.ok) {
     return await readError(response);
@@ -375,8 +491,73 @@ function attachmentContentPath(
   );
 }
 
+function definitionPath(
+  config: AppRuntimeConfig,
+  kind: "agents" | "assignments" | "launchers",
+  target?: string,
+  cwd?: string,
+): string {
+  const params = new URLSearchParams();
+  if (cwd !== undefined) {
+    params.set("cwd", cwd);
+  }
+  const suffix =
+    target === undefined
+      ? ""
+      : `/${encodeURIComponent(target)}${params.size > 0 ? `?${params.toString()}` : ""}`;
+  return joinPath(config.apiBasePath, `/${kind}${suffix}`);
+}
+
 export function createApiClient(config: AppRuntimeConfig) {
   return {
+    async listAgents(): Promise<DefinitionListResult> {
+      const response = await fetch(definitionPath(config, "agents"), {
+        headers: { accept: "application/json" },
+      });
+      return await readDefinitionList(response, "agents", "Agent list");
+    },
+    async getAgent(
+      target: string,
+      options: DefinitionRequestOptions = {},
+    ): Promise<DefinitionDetail> {
+      const response = await fetch(definitionPath(config, "agents", target, options.cwd), {
+        headers: { accept: "application/json" },
+        signal: options.signal,
+      });
+      return await readDefinitionDetail(response, "agent", "Agent detail");
+    },
+    async listAssignments(): Promise<DefinitionListResult> {
+      const response = await fetch(definitionPath(config, "assignments"), {
+        headers: { accept: "application/json" },
+      });
+      return await readDefinitionList(response, "assignments", "Assignment list");
+    },
+    async getAssignment(
+      target: string,
+      options: DefinitionRequestOptions = {},
+    ): Promise<DefinitionDetail> {
+      const response = await fetch(definitionPath(config, "assignments", target, options.cwd), {
+        headers: { accept: "application/json" },
+        signal: options.signal,
+      });
+      return await readDefinitionDetail(response, "assignment", "Assignment detail");
+    },
+    async listLaunchers(): Promise<DefinitionListResult> {
+      const response = await fetch(definitionPath(config, "launchers"), {
+        headers: { accept: "application/json" },
+      });
+      return await readDefinitionList(response, "launchers", "Launcher list");
+    },
+    async getLauncher(
+      target: string,
+      options: DefinitionRequestOptions = {},
+    ): Promise<DefinitionDetail> {
+      const response = await fetch(definitionPath(config, "launchers", target, options.cwd), {
+        headers: { accept: "application/json" },
+        signal: options.signal,
+      });
+      return await readDefinitionDetail(response, "launcher", "Launcher detail");
+    },
     async listRuns(): Promise<RunSummary[]> {
       const response = await fetch(joinPath(config.apiBasePath, "/runs?includeArchived=true"), {
         headers: { accept: "application/json" },
@@ -536,6 +717,30 @@ export function createApiClient(config: AppRuntimeConfig) {
         },
       );
       return await readRun(response);
+    },
+    async initRun(input: RunsStartRequest, options: RequestOptions = {}): Promise<RunDetail> {
+      const response = await fetch(joinPath(config.apiBasePath, "/runs/init"), {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json",
+        },
+        body: JSON.stringify(input),
+        signal: options.signal,
+      });
+      return await readRun(response);
+    },
+    async startRun(input: RunsStartRequest, options: RequestOptions = {}): Promise<string> {
+      const response = await fetch(joinPath(config.apiBasePath, "/runs"), {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json",
+        },
+        body: JSON.stringify(input),
+        signal: options.signal,
+      });
+      return await readRunIdResult(response, "Start run");
     },
     async deleteRun(runId: string): Promise<RunDeleteResult> {
       const response = await fetch(
