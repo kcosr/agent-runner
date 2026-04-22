@@ -106,7 +106,8 @@
   can now also run during `beforeAttempt`, so assignments can lazily
   create or reuse worktrees on the first execution attempt instead of at
   init time.
-  ([#66](https://github.com/kcosr/task-runner/pull/66))
+  ([#66](https://github.com/kcosr/task-runner/pull/66),
+  [#86](https://github.com/kcosr/task-runner/pull/86))
 - Added `scripts/migrate-manifests-v9.mjs` to promote schema v8 run
   manifests to schema v9 and canonicalize repairable schema v9 manifests
   by backfilling hook descriptor/state/audit surfaces, repairing
@@ -151,11 +152,13 @@
   first-attempt `git-worktree` hook plus explicit `git fetch origin
   --prune && git merge --ff-only origin/main` sync instead of creating
   worktrees during `prepare`.
+  ([#86](https://github.com/kcosr/task-runner/pull/86))
 
 ### Removed
 
 - Removed the unreleased `git-sync-base` built-in hook in favor of
   explicit first-attempt fast-forward sync flows.
+  ([#86](https://github.com/kcosr/task-runner/pull/86))
 
 - Assignment vars now use ordered `sources` (`cli`, `env`, `parent`)
   instead of the old singular source contract, nested runs freeze
