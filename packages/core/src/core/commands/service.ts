@@ -1202,27 +1202,116 @@ function toAttachmentListEntry(attachment: RunAttachment, ownerRunId: string): A
   };
 }
 
+type ListedRunEntry = ReturnType<typeof listRunManifests>[number];
+
+function compareListedRunEntries(left: ListedRunEntry, right: ListedRunEntry): number {
+  const startedAtCompare = left.manifest.startedAt.localeCompare(right.manifest.startedAt);
+  if (startedAtCompare !== 0) {
+    return startedAtCompare;
+  }
+  return left.manifest.runId.localeCompare(right.manifest.runId);
+}
+
+function buildEntriesByRunId(entries: ListedRunEntry[]): Map<string, ListedRunEntry[]> {
+  const entriesByRunId = new Map<string, ListedRunEntry[]>();
+  for (const entry of entries) {
+    const current = entriesByRunId.get(entry.manifest.runId);
+    if (current) {
+      current.push(entry);
+      current.sort(compareListedRunEntries);
+    } else {
+      entriesByRunId.set(entry.manifest.runId, [entry]);
+    }
+  }
+  return entriesByRunId;
+}
+
+function resolveUniqueLineageEntry(
+  runId: string,
+  entriesByRunId: Map<string, ListedRunEntry[]>,
+): ListedRunEntry {
+  const matches = entriesByRunId.get(runId) ?? [];
+  if (matches.length === 0) {
+    throw new CommandError(`attachment family scope could not resolve parent run "${runId}"`);
+  }
+  if (matches.length > 1) {
+    throw new CommandError(
+      `attachment family scope is ambiguous because parent run "${runId}" exists in multiple run buckets`,
+    );
+  }
+  const match = matches[0];
+  if (match === undefined) {
+    throw new CommandError(`attachment family scope could not resolve parent run "${runId}"`);
+  }
+  return match;
+}
+
+function collectLineageChainFromEntry(
+  start: ListedRunEntry,
+  entriesByRunId: Map<string, ListedRunEntry[]>,
+): ListedRunEntry[] {
+  const chain = [start];
+  const seenWorkspaceDirs = new Set([start.workspaceDir]);
+  let current = start;
+  while (current.manifest.parentRunId !== null) {
+    const parent = resolveUniqueLineageEntry(current.manifest.parentRunId, entriesByRunId);
+    if (seenWorkspaceDirs.has(parent.workspaceDir)) {
+      throw new CommandError(
+        `attachment family scope detected a lineage cycle at parent run "${parent.manifest.runId}"`,
+      );
+    }
+    seenWorkspaceDirs.add(parent.workspaceDir);
+    chain.push(parent);
+    current = parent;
+  }
+  return chain;
+}
+
 function listAttachmentOwnerManifests(
   target: string,
   options: AttachmentListOptions = {},
 ): AttachmentListResult["manifest"][] {
   const resolved = resolveRun(target);
   refreshRunSnapshotAfterTaskStateSettles(resolved);
-  if (!options.cwdScope) {
+  const scope = options.scope ?? "family";
+  if (scope === "run") {
     return [resolved.manifest];
   }
 
-  const matchingEntries = listRunManifests()
-    .filter((entry) => entry.manifest.cwd === resolved.manifest.cwd)
-    .sort((left, right) => {
-      const startedAtCompare = left.manifest.startedAt.localeCompare(right.manifest.startedAt);
-      if (startedAtCompare !== 0) {
-        return startedAtCompare;
-      }
-      return left.manifest.runId.localeCompare(right.manifest.runId);
-    });
+  const listedEntries = listRunManifests();
+  const entriesByRunId = buildEntriesByRunId(listedEntries);
+  const targetEntry = listedEntries.find(
+    (entry) => entry.workspaceDir === resolved.workspaceDir,
+  ) ?? {
+    workspaceDir: resolved.workspaceDir,
+    manifest: resolved.manifest,
+  };
+  let targetLineage: ListedRunEntry[];
+  try {
+    targetLineage = collectLineageChainFromEntry(targetEntry, entriesByRunId);
+  } catch {
+    return [resolved.manifest];
+  }
+  const targetRootWorkspaceDir = targetLineage.at(-1)?.workspaceDir ?? resolved.workspaceDir;
+  const targetLineageWorkspaceDirs = new Set(targetLineage.map((entry) => entry.workspaceDir));
 
-  return matchingEntries.map((entry) => {
+  const familyEntries = listedEntries.filter((entry) => {
+    try {
+      const lineage = collectLineageChainFromEntry(entry, entriesByRunId);
+      return lineage.at(-1)?.workspaceDir === targetRootWorkspaceDir;
+    } catch {
+      return false;
+    }
+  });
+  const remainingFamilyEntries = familyEntries
+    .filter((entry) => !targetLineageWorkspaceDirs.has(entry.workspaceDir))
+    .sort(compareListedRunEntries);
+  const orderedEntries = [...targetLineage, ...remainingFamilyEntries];
+
+  return orderedEntries.map((entry) => {
+    if (entry.workspaceDir === resolved.workspaceDir) {
+      return resolved.manifest;
+    }
     const peerResolved = resolveResumeTarget(entry.workspaceDir);
     refreshRunSnapshotAfterTaskStateSettles(peerResolved);
     return peerResolved.manifest;

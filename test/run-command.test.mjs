@@ -7,7 +7,7 @@ import {
   RunCommandError,
   executeRunCommand,
 } from "../packages/core/dist/run-command.js";
-import { withRuntimeRoots } from "./helpers/runtime-paths.mjs";
+import { withEnv, withRuntimeRoots } from "./helpers/runtime-paths.mjs";
 
 function writeLauncher(baseDir, name, body, ext = ".yaml") {
   const dir = join(baseDir, "launchers");
@@ -50,6 +50,8 @@ test("executeRunCommand rejects resume-time cli vars before attempting backend e
       },
     });
     patchManifest(outcome.workspaceDir, (manifest) => {
+      manifest.backend = "claude";
+      manifest.resetSeed.backend = "claude";
       manifest.status = "ready";
     });
 
@@ -262,5 +264,70 @@ args: [CODING=1]
       (err) =>
         err instanceof ResumeError &&
         /--launcher cannot be combined with --resume-run/.test(err.message),
+    );
+  }));
+
+test("executeRunCommand rejects explicit parentRunId on resume", async () =>
+  withRuntimeRoots("task-runner-run-command-", async () => {
+    const outcome = await executeRunCommand({
+      initialize: true,
+      cliVars: {},
+      overrides: {
+        backend: "passive",
+        message: "Seed a resumable passive run.",
+      },
+    });
+    patchManifest(outcome.workspaceDir, (manifest) => {
+      manifest.backend = "claude";
+      manifest.resetSeed.backend = "claude";
+      manifest.status = "ready";
+    });
+
+    await assert.rejects(
+      () =>
+        executeRunCommand({
+          initialize: false,
+          resumeRun: outcome.runId,
+          parentRunId: "parent-123",
+          cliVars: {},
+          overrides: {},
+        }),
+      (err) =>
+        err instanceof ResumeError &&
+        /--parent-run cannot be combined with --resume-run/.test(err.message),
+    );
+  }));
+
+test("executeRunCommand ignores env-derived parentRunId on resume", async () =>
+  withRuntimeRoots("task-runner-run-command-", async () => {
+    const outcome = await executeRunCommand({
+      initialize: true,
+      cliVars: {},
+      overrides: {
+        backend: "passive",
+        message: "Seed a resumable passive run.",
+      },
+    });
+    patchManifest(outcome.workspaceDir, (manifest) => {
+      manifest.backend = "claude";
+      manifest.resetSeed.backend = "claude";
+      manifest.status = "ready";
+    });
+
+    await assert.rejects(
+      () =>
+        withEnv({ TASK_RUNNER_PARENT_RUN_ID: "env-parent-1" }, () =>
+          executeRunCommand({
+            initialize: false,
+            resumeRun: outcome.runId,
+            cliVars: {},
+            overrides: {
+              message: "forbidden override",
+            },
+          }),
+        ),
+      (err) =>
+        err instanceof ResumeError &&
+        /starting a ready run does not accept message/.test(err.message),
     );
   }));

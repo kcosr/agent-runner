@@ -4,6 +4,10 @@
 
 ### Breaking Changes
 
+- `task-runner attachment list` now uses structured `--scope run|family`
+  selection instead of `--cwd-scope`, and the default view is now
+  lineage-family attachment discovery rather than exact same-cwd
+  grouping.
 - Run lifecycle now includes an explicit `ready` state between
   `initialized` and `running`. Non-passive initialized runs are no longer
   directly executable: promote them with `task-runner run ready <run-id>`
@@ -47,6 +51,10 @@
 
 ### Added
 
+- Added `--parent-run <run-id>` for fresh `task-runner run` / `init`
+  invocations, and in connected mode the CLI now forwards parent lineage
+  explicitly as structured daemon request `parentRunId` instead of
+  relying on implicit env forwarding between the client and daemon.
 - Added `task-runner run audit <run-id>` plus daemon/web audit history
   surfaces for reading cursored persisted run event history, and
   `scripts/migrate-run-events-v2.mjs` for upgrading legacy uncursored

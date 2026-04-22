@@ -1,3 +1,4 @@
+import type { AttachmentScope } from "@task-runner/core/contracts/attachments.js";
 import { BACKEND_IDS, type BackendId } from "@task-runner/core/core/backends/types.js";
 import { trimRunName } from "@task-runner/core/util/run-name.js";
 
@@ -11,6 +12,7 @@ export interface ParsedArgs {
   agent?: string;
   assignment?: string;
   resumeRun?: string;
+  parentRun?: string;
   runId?: string;
   backendSessionId?: string;
   vars: Record<string, string>;
@@ -38,7 +40,7 @@ export interface ParsedArgs {
   taskBody?: string;
   attachmentName?: string;
   attachmentMimeType?: string;
-  cwdScope?: boolean;
+  attachmentScope?: AttachmentScope;
   connect?: string;
   connectHost?: string;
   connectLocalPort?: string;
@@ -53,6 +55,7 @@ export interface ParsedArgs {
 const EFFORT_VALUES = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const OUTPUT_FORMATS = ["text", "json"] as const;
 const BACKEND_VALUES = BACKEND_IDS;
+const ATTACHMENT_SCOPE_VALUES = ["run", "family"] as const;
 export function parseArgs(argv: string[]): ParsedArgs {
   const args = argv.slice(2);
   const result: ParsedArgs = {
@@ -132,6 +135,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
       const next = args.shift();
       if (next === undefined) throw new Error("--resume-run requires a value");
       result.resumeRun = next;
+    } else if (arg === "--parent-run") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--parent-run requires a value");
+      if (next.trim().length === 0) throw new Error("--parent-run cannot be empty");
+      result.parentRun = next;
     } else if (arg === "--run-id") {
       const next = args.shift();
       if (next === undefined) throw new Error("--run-id requires a value");
@@ -225,8 +233,13 @@ export function parseArgs(argv: string[]): ParsedArgs {
       if (next === undefined) throw new Error("--mime-type requires a value");
       if (next.trim().length === 0) throw new Error("--mime-type cannot be empty");
       result.attachmentMimeType = next;
-    } else if (arg === "--cwd-scope") {
-      result.cwdScope = true;
+    } else if (arg === "--scope") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--scope requires a value");
+      if (!(ATTACHMENT_SCOPE_VALUES as readonly string[]).includes(next)) {
+        throw new Error(`--scope must be one of: ${ATTACHMENT_SCOPE_VALUES.join(", ")}`);
+      }
+      result.attachmentScope = next as AttachmentScope;
     } else if (arg === "--clear") {
       result.clear = true;
     } else if (arg === "--detach") {

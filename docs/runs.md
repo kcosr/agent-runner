@@ -132,7 +132,7 @@ task-runner run brief <run-id>
 task-runner run audit <run-id> [--output-format text|json] [--limit <n>]
 task-runner task list <run-id>
 task-runner task show <run-id> <task-id>
-task-runner attachment list <run-id> [--cwd-scope]
+task-runner attachment list <run-id> [--scope run|family]
 ```
 
 - Top-level `status` reports system/environment status and takes no run id.

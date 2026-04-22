@@ -66,17 +66,18 @@ during the stream.
 
 ```bash
 task-runner attachment list <run-id>
-task-runner attachment list <run-id> --cwd-scope
+task-runner attachment list <run-id> --scope run
+task-runner attachment list <run-id> --scope family
 ```
 
-Without `--cwd-scope`, only the target run's attachments are listed.
+`attachment list` defaults to `--scope family`.
 
-With `--cwd-scope`, the target run is still the anchor, but the result
-also includes attachments from *peer runs* whose persisted `cwd` exactly
-matches the target run's `cwd`. JSON rows include `ownerRunId` so you can
-tell which run owns each file. The scope key is an exact-match on the
-persisted `cwd` — it is not inferred from the caller cwd, repo bucket, or
-path prefixes.
+- `--scope run` lists only the target run's attachments.
+- `--scope family` walks the target run's parent chain to the lineage
+  root and includes attachments from every run that shares that root:
+  the target, its ancestors, siblings, cousins, and descendants.
+
+JSON rows include `ownerRunId` so you can tell which run owns each file.
 
 ### Download
 
@@ -101,22 +102,24 @@ updated by filtering out the removed entry.
 
 ## Web dashboard
 
-The detail drawer's Attachments panel has two tabs:
+The detail drawer's Attachments panel shows the selected run's
+attachments plus any family-scoped attachments returned by
+`attachment list --scope family`.
 
-- **Run** — attachments owned by the selected run. Supports upload,
-  download, in-app preview for `text/markdown` and `text/plain`
-  (fenced `mermaid` blocks render inline), and delete.
-- **Group** — attachments from peer runs with the same persisted `cwd`.
-  Read-only: preview and download only. The backing surface is the same
-  `attachment list --cwd-scope` query, and each row carries `ownerRunId`.
+- Attachments owned by the selected run support upload, download,
+  in-app preview for `text/markdown` and `text/plain` (fenced
+  `mermaid` blocks render inline), and delete.
+- Family attachments owned by other runs are read-only. They still
+  support preview and download, and each row shows the source
+  `ownerRunId`.
 
 ## Common patterns
 
 - **Seed context**: drop a file into the run before resume (e.g. a diff, a
   report, a summary).
 - **Handoff between runs**: attach artifacts to a planning run so an
-  implementation run with the same `cwd` can discover them via
-  `--cwd-scope`.
+  implementation or review run in the same lineage family can discover
+  them via `--scope family`.
 - **Audit trail**: attach the exact generated draft so the manifest
   captures byte-for-byte what was handed to the next stage.
 

@@ -1043,7 +1043,7 @@ describe("api client", () => {
     });
   });
 
-  it("lists attachments with cwd scope and parses ownerRunId", async () => {
+  it("lists attachments with family scope and parses ownerRunId", async () => {
     const fetchMock = vi.fn(
       async () =>
         new Response(
@@ -1068,14 +1068,14 @@ describe("api client", () => {
 
     const api = createApiClient(config);
 
-    await expect(api.listAttachments("run-1", { cwdScope: true })).resolves.toEqual([
+    await expect(api.listAttachments("run-1", { scope: "family" })).resolves.toEqual([
       expect.objectContaining({
         id: "att-1",
         ownerRunId: "run-2",
       }),
     ]);
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/runs/run-1/attachments?cwdScope=true",
+      "/api/runs/run-1/attachments?scope=family",
       expect.objectContaining({
         headers: { accept: "application/json" },
       }),

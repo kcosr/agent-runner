@@ -123,6 +123,7 @@ export interface RunsStartParams {
   assignment?: string;
   definitionCwd?: string;
   callerCwd?: string;
+  parentRunId?: string;
   cliVars: Record<string, string>;
   backendSessionId?: string;
   overrides: RunCommandOverrides;
@@ -130,6 +131,7 @@ export interface RunsStartParams {
 
 export interface RunsResumeParams {
   target: string;
+  parentRunId?: string;
   overrides: RunCommandOverrides;
 }
 

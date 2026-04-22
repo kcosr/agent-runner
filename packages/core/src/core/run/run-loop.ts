@@ -1028,6 +1028,9 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     if (opts.bootstrapBackendSessionId !== undefined) {
       throw new ResumeError("--backend-session-id cannot be combined with --resume-run");
     }
+    if (opts.parentRunId !== undefined && opts.parentRunId !== null) {
+      throw new ResumeError("--parent-run cannot be combined with --resume-run");
+    }
     if (overrides?.cwd !== undefined) {
       throw new ResumeError(
         "--cwd cannot be combined with --resume-run — backend sessions are bound to the cwd they were created in, so a different cwd would invalidate the captured session id. Create a fresh run if you need a different cwd.",

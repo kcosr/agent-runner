@@ -58,6 +58,7 @@ import {
 } from "@task-runner/core/core/commands/service.js";
 import { AttachmentError } from "@task-runner/core/core/run/attachments.js";
 import { RunNotFoundError } from "@task-runner/core/core/run/manifest.js";
+import { readParentRunIdFromEnv } from "@task-runner/core/core/run/recursion-guard.js";
 import {
   EmptyPromptError,
   InvalidAddedTaskError,
@@ -178,7 +179,7 @@ Task command options:
   --body <text>           (task add) Optional task body.
   --name <text>           (attachment add) Optional display name.
   --mime-type <type>      (attachment add) Optional MIME type override.
-  --cwd-scope             (attachment list) Include same-cwd peer-run attachments.
+  --scope <run|family>    (attachment list) Attachment listing scope.
 
 Host selection:
   --connect <ws-url>      Route the command through the daemon host.
@@ -198,6 +199,7 @@ Execution options:
   --assignment <n|path>   Assignment bare name or direct path to assignment.md.
   --backend-session-id    Adopt an existing backend session id.
   --resume-run <id|path>  Continue an existing run by short id or path.
+  --parent-run <run-id>   Set the lineage parent for a fresh run/init.
   --run-id <id|path>      (init only) Overwrite an initialized run in place.
   --var <key>=<value>     Set an input variable (repeatable).
                           Nested child runs usually inherit parent-owned
@@ -327,6 +329,11 @@ function normalizeRunIdTarget(target: string | undefined, commandName: string): 
     throw new CommandError(`${commandName} accepts a run id, not a path`);
   }
   return target;
+}
+
+function resolveParentRunId(parsed: ParsedArgs): string | undefined {
+  const explicit = normalizeRunIdTarget(parsed.parentRun, "--parent-run");
+  return explicit ?? readParentRunIdFromEnv() ?? undefined;
 }
 
 function resolvedOverrides(parsed: ParsedArgs) {
@@ -823,7 +830,7 @@ function unsupportedFlagsForGroupedCommand(
     allowClear?: boolean;
     allowAttachmentName?: boolean;
     allowAttachmentMimeType?: boolean;
-    allowCwdScope?: boolean;
+    allowAttachmentScope?: boolean;
   } = {},
 ): string[] {
   const unsupported: string[] = [];
@@ -832,6 +839,7 @@ function unsupportedFlagsForGroupedCommand(
   if (parsed.resumeRun !== undefined) unsupported.push("--resume-run");
   if (parsed.runId !== undefined) unsupported.push("--run-id");
   if (parsed.backendSessionId !== undefined) unsupported.push("--backend-session-id");
+  if (parsed.parentRun !== undefined) unsupported.push("--parent-run");
   if (Object.keys(parsed.vars).length > 0) unsupported.push("--var");
   if (!opts.allowRunListScope && parsed.cwd !== undefined) unsupported.push("--cwd");
   if (!opts.allowRunListScope && parsed.repo !== undefined) unsupported.push("--repo");
@@ -854,7 +862,8 @@ function unsupportedFlagsForGroupedCommand(
   if (!opts.allowAttachmentMimeType && parsed.attachmentMimeType !== undefined) {
     unsupported.push("--mime-type");
   }
-  if (!opts.allowCwdScope && parsed.cwdScope) unsupported.push("--cwd-scope");
+  if (!opts.allowAttachmentScope && parsed.attachmentScope !== undefined)
+    unsupported.push("--scope");
   if (!opts.allowLimit && parsed.limit !== undefined) unsupported.push("--limit");
   if (parsed.addedTasks.length > 0) unsupported.push("--add-task");
   if (parsed.detach) unsupported.push("--detach");
@@ -918,6 +927,7 @@ async function startOrResumeDaemonRun(
         assignment: normalizeTarget(parsed.assignment),
         definitionCwd: process.cwd(),
         callerCwd: process.cwd(),
+        parentRunId: resolveParentRunId(parsed),
         backendSessionId: parsed.backendSessionId,
         cliVars: parsed.vars,
         overrides: resolvedDaemonOverrides(parsed),
@@ -987,10 +997,10 @@ async function runAttachmentCommand(
         );
         process.exit(3);
       }
-      const unsupported = unsupportedFlagsForGroupedCommand(parsed, { allowCwdScope: true });
+      const unsupported = unsupportedFlagsForGroupedCommand(parsed, { allowAttachmentScope: true });
       if (unsupported.length > 0) {
         process.stderr.write(
-          `task-runner: attachment list only supports <run-id-or-path>, --cwd-scope, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+          `task-runner: attachment list only supports <run-id-or-path>, --scope, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
         );
         process.exit(3);
       }
@@ -998,17 +1008,19 @@ async function runAttachmentCommand(
       try {
         const attachments =
           connect === undefined
-            ? getAttachmentList(target, { cwdScope: parsed.cwdScope })
+            ? getAttachmentList(target, { scope: parsed.attachmentScope })
             : await daemonListAttachments(
                 connect.effectiveConnectUrl,
                 await resolveAttachmentTargetForDaemon(target, connect),
-                { cwdScope: parsed.cwdScope },
+                { scope: parsed.attachmentScope },
               );
         if (parsed.outputFormat === "json") {
           writeJson(attachments);
         } else {
           process.stdout.write(
-            renderAttachmentList(attachments, { showOwnerRunId: parsed.cwdScope === true }),
+            renderAttachmentList(attachments, {
+              showOwnerRunId: (parsed.attachmentScope ?? "family") !== "run",
+            }),
           );
         }
         return process.exit(0);
@@ -1917,6 +1929,9 @@ async function runExecuteCommandEmbedded(parsed: ParsedArgs): Promise<never> {
     if (!isInitCommand && parsed.runId !== undefined) {
       throw new RunCommandError("--run-id is only valid with init");
     }
+    if (parsed.resumeRun !== undefined && parsed.parentRun !== undefined) {
+      throw new RunCommandError("--parent-run cannot be combined with --resume-run");
+    }
     if (isInitCommand && parsed.resumeRun !== undefined) {
       throw new RunCommandError("init cannot be combined with --resume-run");
     }
@@ -1926,6 +1941,7 @@ async function runExecuteCommandEmbedded(parsed: ParsedArgs): Promise<never> {
         agent: normalizeTarget(parsed.agent),
         assignment: normalizeTarget(parsed.assignment),
         definitionCwd: process.cwd(),
+        parentRunId: resolveParentRunId(parsed),
         backendSessionId: parsed.backendSessionId,
         cliVars: parsed.vars,
         overrides: resolvedOverrides(parsed),
@@ -1949,6 +1965,7 @@ async function runExecuteCommandEmbedded(parsed: ParsedArgs): Promise<never> {
           agent: normalizeTarget(parsed.agent),
           assignment: normalizeTarget(parsed.assignment),
           definitionCwd: process.cwd(),
+          parentRunId: resolveParentRunId(parsed),
           backendSessionId: parsed.backendSessionId,
           cliVars: parsed.vars,
           overrides: resolvedOverrides(parsed),
@@ -1998,6 +2015,9 @@ async function runExecuteCommandDaemon(
     if (!isInitCommand && parsed.runId !== undefined) {
       throw new RunCommandError("--run-id is only valid with init");
     }
+    if (parsed.resumeRun !== undefined && parsed.parentRun !== undefined) {
+      throw new RunCommandError("--parent-run cannot be combined with --resume-run");
+    }
     if (isInitCommand && parsed.resumeRun !== undefined) {
       throw new RunCommandError("init cannot be combined with --resume-run");
     }
@@ -2008,6 +2028,7 @@ async function runExecuteCommandDaemon(
         assignment: normalizeTarget(parsed.assignment),
         definitionCwd: process.cwd(),
         callerCwd: process.cwd(),
+        parentRunId: resolveParentRunId(parsed),
         backendSessionId: parsed.backendSessionId,
         cliVars: parsed.vars,
         overrides: resolvedDaemonOverrides(parsed),

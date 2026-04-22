@@ -1,4 +1,5 @@
 import type { RunCommandOverrides } from "@task-runner/core/app/service.js";
+import type { AttachmentScope } from "@task-runner/core/contracts/attachments.js";
 import type {
   BackendSpecificConfig,
   CodexTransportConfig,
@@ -13,6 +14,7 @@ import type {
   RunSetNoteParams,
   RunSetPinnedParams,
   RunsListParams,
+  RunsResumeParams,
   RunsStartParams,
 } from "./protocol.js";
 
@@ -69,6 +71,17 @@ export function requiredNonEmptyString(value: unknown, label: string): string {
 
 export function requiredRunIdString(value: unknown, label: string): string {
   const stringValue = requiredString(value, label);
+  if (stringValue.includes("/") || stringValue.includes("\\") || stringValue.includes("..")) {
+    throw new RequestValidationError(`${label} must be a run id, not a path`);
+  }
+  return stringValue;
+}
+
+export function optionalRunIdString(value: unknown, label: string): string | undefined {
+  const stringValue = optionalNonEmptyString(value, label);
+  if (stringValue === undefined) {
+    return undefined;
+  }
   if (stringValue.includes("/") || stringValue.includes("\\") || stringValue.includes("..")) {
     throw new RequestValidationError(`${label} must be a run id, not a path`);
   }
@@ -218,6 +231,19 @@ export function parseBooleanQueryValue(value: string | null, label: string): boo
   throw new RequestValidationError(`${label} must be "true" or "false"`);
 }
 
+export function parseAttachmentScopeQueryValue(
+  value: string | null,
+  label: string,
+): AttachmentScope | undefined {
+  if (value === null) {
+    return undefined;
+  }
+  if (value === "run" || value === "family") {
+    return value;
+  }
+  throw new RequestValidationError(`${label} must be "run" or "family"`);
+}
+
 function validateAbsoluteCodexWsUrl(value: string, label: string): string {
   if (!isWsOrWssUrl(value)) {
     throw new RequestValidationError(`${label} must be an absolute ws:// or wss:// URL`);
@@ -348,8 +374,18 @@ export function parseStartRunParams(value: unknown, label: string): RunsStartPar
     assignment: optionalString(record.assignment, "assignment"),
     definitionCwd: optionalString(record.definitionCwd, "definitionCwd"),
     callerCwd: optionalString(record.callerCwd, "callerCwd"),
+    parentRunId: optionalRunIdString(record.parentRunId, "parentRunId"),
     backendSessionId: optionalString(record.backendSessionId, "backendSessionId"),
     cliVars: stringRecord(record.cliVars, "cliVars"),
+    overrides: optionalOverrides(record.overrides),
+  };
+}
+
+export function parseResumeRunParams(value: unknown, label: string): RunsResumeParams {
+  const record = asRecord(value, label);
+  return {
+    target: requiredString(record.target, `${label}.target`),
+    parentRunId: optionalRunIdString(record.parentRunId, `${label}.parentRunId`),
     overrides: optionalOverrides(record.overrides),
   };
 }

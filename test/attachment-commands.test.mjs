@@ -51,7 +51,7 @@ function writeBundle(baseDir) {
   writeAssignment(baseDir, "attachment-cmd-work", ASSIGNMENT);
 }
 
-async function initRun(baseDir) {
+async function initRun(baseDir, options = {}) {
   return withSharedRuntimeEnv(baseDir, async () => {
     const loaded = loadAgentConfig("attachment-cmd-agent", baseDir);
     const loadedAssignment = loadAssignmentConfig("attachment-cmd-work", baseDir);
@@ -62,6 +62,7 @@ async function initRun(baseDir) {
         loaded,
         loadedAssignment,
         cliVars: {},
+        parentRunId: options.parentRunId ?? null,
         backend: { id: "mock", invoke: async () => ({}) },
         initialize: true,
         stderr: () => {},
@@ -161,64 +162,96 @@ test("attachment commands add, list, download, and remove attachments", async ()
   assert.match(runCli(["attachment", "list", outcome.runId], { cwd: dir }), /No attachments\./);
 });
 
-test("attachment list --cwd-scope includes exact same-cwd peers and preserves default run-only output", async () => {
+test("attachment list defaults to family scope and supports explicit run scope", async () => {
   const dir = tempDir();
   writeBundle(dir);
-  const target = await initRun(dir);
-  const peer = await initRun(dir);
+  const root = await initRun(dir);
+  const target = await initRun(dir, { parentRunId: root.runId });
+  const peer = await initRun(dir, { parentRunId: root.runId });
+  const child = await initRun(dir, { parentRunId: target.runId });
   const different = await initRun(dir);
+  const rootFile = join(dir, "root.txt");
   const targetFile = join(dir, "target.txt");
   const peerFile = join(dir, "peer.txt");
+  const childFile = join(dir, "child.txt");
   const differentFile = join(dir, "different.txt");
+  writeFileSync(rootFile, "root\n");
   writeFileSync(targetFile, "target\n");
   writeFileSync(peerFile, "peer\n");
+  writeFileSync(childFile, "child\n");
   writeFileSync(differentFile, "different\n");
 
-  patchManifest(different.workspaceDir, (manifest) => {
-    manifest.cwd = join(dir, "other-cwd");
-  });
-
+  runCli(["attachment", "add", root.runId, rootFile], { cwd: dir });
   runCli(["attachment", "add", target.runId, targetFile], { cwd: dir });
   runCli(["attachment", "add", peer.runId, peerFile], { cwd: dir });
+  runCli(["attachment", "add", child.runId, childFile], { cwd: dir });
   runCli(["attachment", "add", different.runId, differentFile], { cwd: dir });
 
-  const runOnly = JSON.parse(
+  const family = JSON.parse(
     runCli(["attachment", "list", target.runId, "--output-format", "json"], { cwd: dir }),
+  );
+  assert.deepEqual(
+    new Set(family.map((attachment) => attachment.ownerRunId)),
+    new Set([root.runId, target.runId, peer.runId, child.runId]),
+  );
+  assert.equal(
+    family.some((attachment) => attachment.ownerRunId === different.runId),
+    false,
+  );
+  const familyText = runCli(["attachment", "list", target.runId], { cwd: dir });
+  assert.match(
+    familyText,
+    /target\.txt/,
+    "default text output should still render the target attachment row",
+  );
+  assert.match(familyText, new RegExp(`owner=${target.runId}`));
+  assert.match(familyText, new RegExp(`owner=${peer.runId}`));
+  assert.match(familyText, new RegExp(`owner=${child.runId}`));
+  assert.match(familyText, new RegExp(`owner=${root.runId}`));
+  assert.doesNotMatch(familyText, new RegExp(`owner=${different.runId}`));
+
+  const runOnly = JSON.parse(
+    runCli(["attachment", "list", target.runId, "--scope", "run", "--output-format", "json"], {
+      cwd: dir,
+    }),
   );
   assert.deepEqual(
     runOnly.map((attachment) => attachment.ownerRunId),
     [target.runId],
   );
-  const runOnlyText = runCli(["attachment", "list", target.runId], { cwd: dir });
-  assert.match(
-    runOnlyText,
-    /target\.txt/,
-    "default text output should still render the target attachment row",
-  );
-  assert.doesNotMatch(
-    runOnlyText,
-    /owner=/,
-    "default text output should not show owner run ids without --cwd-scope",
-  );
+  const runOnlyText = runCli(["attachment", "list", target.runId, "--scope", "run"], {
+    cwd: dir,
+  });
+  assert.doesNotMatch(runOnlyText, /owner=/);
+});
 
-  const scoped = JSON.parse(
-    runCli(["attachment", "list", target.runId, "--cwd-scope", "--output-format", "json"], {
-      cwd: dir,
-    }),
+test("attachment list falls back to target-only when the target family lineage is broken", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const root = await initRun(dir);
+  const target = await initRun(dir, { parentRunId: root.runId });
+  const rootFile = join(dir, "root.txt");
+  const targetFile = join(dir, "target.txt");
+  writeFileSync(rootFile, "root\n");
+  writeFileSync(targetFile, "target\n");
+
+  runCli(["attachment", "add", root.runId, rootFile], { cwd: dir });
+  runCli(["attachment", "add", target.runId, targetFile], { cwd: dir });
+  patchManifest(target.workspaceDir, (manifest) => {
+    manifest.parentRunId = "missing-parent";
+  });
+
+  const family = JSON.parse(
+    runCli(["attachment", "list", target.runId, "--output-format", "json"], { cwd: dir }),
   );
-  assert.equal(scoped.length, 2);
   assert.deepEqual(
-    new Set(scoped.map((attachment) => attachment.ownerRunId)),
-    new Set([target.runId, peer.runId]),
+    family.map((attachment) => attachment.ownerRunId),
+    [target.runId],
   );
-  assert.equal(
-    scoped.some((attachment) => attachment.ownerRunId === different.runId),
-    false,
-  );
-  const scopedText = runCli(["attachment", "list", target.runId, "--cwd-scope"], { cwd: dir });
-  assert.match(scopedText, new RegExp(`owner=${target.runId}`));
-  assert.match(scopedText, new RegExp(`owner=${peer.runId}`));
-  assert.doesNotMatch(scopedText, new RegExp(`owner=${different.runId}`));
+  const familyText = runCli(["attachment", "list", target.runId], { cwd: dir });
+  assert.match(familyText, /target\.txt/);
+  assert.match(familyText, new RegExp(`owner=${target.runId}`));
+  assert.doesNotMatch(familyText, new RegExp(`owner=${root.runId}`));
 });
 
 test("attachment download rejects an existing destination path", async () => {

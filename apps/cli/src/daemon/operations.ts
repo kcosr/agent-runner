@@ -151,7 +151,7 @@ export function createDaemonOperations(ctx: DaemonOperationContext) {
     clearDependencies(target: string) {
       return { result: ctx.clearDependencies(target) };
     },
-    listAttachments(target: string, options?: { cwdScope?: boolean }) {
+    listAttachments(target: string, options?: { scope?: "run" | "family" }) {
       return { attachments: ctx.getAttachmentList(target, options) };
     },
     async addAttachment(target: string, input: Parameters<typeof addRunAttachmentFromStream>[1]) {

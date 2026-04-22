@@ -234,7 +234,7 @@ Mutation rules depend on run state and backend type; see
 task-runner attachment add <run-id|path> <source-file> \
   [--name <text>] [--mime-type <type>]
 
-task-runner attachment list <run-id|path> [--cwd-scope]
+task-runner attachment list <run-id|path> [--scope run|family]
 
 task-runner attachment download <run-id|path> <attachment-id> <output-path>
 

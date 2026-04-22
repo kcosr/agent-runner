@@ -76,6 +76,9 @@ lineage through `TASK_RUNNER_PARENT_RUN_ID`. Shared `RunSummary` /
 Connected-mode runtime selection stays explicit:
 
 - the client does not forward arbitrary env vars to the daemon
+- if the client passes `--parent-run <run-id>` or has
+  `TASK_RUNNER_PARENT_RUN_ID` set, fresh `run` / `init` requests
+  synthesize structured `parentRunId`
 - if the client has `TASK_RUNNER_CODEX_WS_URL` set, `run`, `init`, and
   `resume` synthesize
   `overrides.backendSpecific.codex.transport = { type: "ws", url }`
@@ -135,7 +138,7 @@ All routes are under `/api/`.
 
 | Method | Path | Effect |
 |--------|------|--------|
-| `GET` | `/api/runs/:runId/attachments` | List. Query: `cwdScope=true` for cwd-scoped group view |
+| `GET` | `/api/runs/:runId/attachments` | List. Query: `scope=run\|family` (default `family`) |
 | `POST` | `/api/runs/:runId/attachments` | Upload; requires `x-task-runner-attachment-name` header |
 | `DELETE` | `/api/runs/:runId/attachments/:attachmentId` | Delete |
 | `GET` | `/api/runs/:runId/attachments/:attachmentId/content` | Download; sets `content-disposition`, `x-task-runner-attachment-id`, `x-task-runner-sha256` |

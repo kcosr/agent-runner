@@ -196,7 +196,12 @@ function moveRunToRepoBucket(baseDir, workspaceDir, repo) {
   return nextWorkspaceDir;
 }
 
-async function initRun(baseDir, assignmentName = "svc-work", agentName = "svc-agent") {
+async function initRun(
+  baseDir,
+  assignmentName = "svc-work",
+  agentName = "svc-agent",
+  options = {},
+) {
   return withSharedRuntimeEnv(baseDir, async () => {
     const loaded = loadAgentConfig(agentName, baseDir);
     const loadedAssignment = loadAssignmentConfig(assignmentName, baseDir);
@@ -207,6 +212,7 @@ async function initRun(baseDir, assignmentName = "svc-work", agentName = "svc-ag
         loaded,
         loadedAssignment,
         cliVars: {},
+        parentRunId: options.parentRunId ?? null,
         backend: {
           id: loaded.config.backend,
           async invoke() {
@@ -1149,43 +1155,47 @@ test("command services: archived runs allow attachment add/list/download/remove 
   });
 });
 
-test("command services: attachment list cwd scope includes exact same-cwd peers only", async () => {
+test("command services: attachment list defaults to family scope and supports explicit run scope", async () => {
   const dir = tempDir();
   writeBundle(dir);
-  const target = await initRun(dir);
-  const peer = await initRun(dir);
+  const root = await initRun(dir);
+  const target = await initRun(dir, "svc-work", "svc-agent", { parentRunId: root.runId });
+  const peer = await initRun(dir, "svc-work", "svc-agent", { parentRunId: root.runId });
+  const child = await initRun(dir, "svc-work", "svc-agent", { parentRunId: target.runId });
   const different = await initRun(dir);
+  const rootFile = join(dir, "root.txt");
   const targetFile = join(dir, "target.txt");
   const peerFile = join(dir, "peer.txt");
+  const childFile = join(dir, "child.txt");
   const differentFile = join(dir, "different.txt");
+  writeFileSync(rootFile, "root\n");
   writeFileSync(targetFile, "target\n");
   writeFileSync(peerFile, "peer\n");
+  writeFileSync(childFile, "child\n");
   writeFileSync(differentFile, "different\n");
 
-  patchManifest(different.workspaceDir, (manifest) => {
-    manifest.cwd = join(dir, "other-cwd");
-  });
-
   await withSharedRuntimeEnv(dir, async () => {
+    await addAttachmentFromFile(root.runId, { sourcePath: rootFile });
     await addAttachmentFromFile(target.runId, { sourcePath: targetFile });
     await addAttachmentFromFile(peer.runId, { sourcePath: peerFile });
+    await addAttachmentFromFile(child.runId, { sourcePath: childFile });
     await addAttachmentFromFile(different.runId, { sourcePath: differentFile });
 
-    const runOnly = listAttachments(target.runId);
+    const family = listAttachments(target.runId);
+    assert.equal(family.attachments.length, 4);
+    assert.deepEqual(
+      new Set(family.attachments.map((attachment) => attachment.ownerRunId)),
+      new Set([root.runId, target.runId, peer.runId, child.runId]),
+    );
+    assert.equal(
+      family.attachments.some((attachment) => attachment.ownerRunId === different.runId),
+      false,
+    );
+
+    const runOnly = listAttachments(target.runId, { scope: "run" });
     assert.deepEqual(
       runOnly.attachments.map((attachment) => attachment.ownerRunId),
       [target.runId],
-    );
-
-    const scoped = listAttachments(target.runId, { cwdScope: true });
-    assert.equal(scoped.attachments.length, 2);
-    assert.deepEqual(
-      new Set(scoped.attachments.map((attachment) => attachment.ownerRunId)),
-      new Set([target.runId, peer.runId]),
-    );
-    assert.equal(
-      scoped.attachments.some((attachment) => attachment.ownerRunId === different.runId),
-      false,
     );
   });
 });

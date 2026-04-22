@@ -51,8 +51,8 @@ callerInstructions: |
   agent currently freezes `backend: codex`, so the normal
   execution path is `run ready` followed by `run --resume-run`.
 
-  A same-cwd planning run may carry an attachment named
-  `assignment-summary.md`. If it exists in the cwd-scoped
+  A parent planning run may carry an attachment named
+  `assignment-summary.md`. If it exists in the family-scoped
   attachment view rooted at this run, download it to a temp
   directory and review it for supplemental context. The task
   list in this run remains the canonical execution contract.
@@ -186,19 +186,19 @@ tasks:
       the normal task commands. Those tasks and their bodies are
       the canonical execution contract for this run.
 
-      If a same-cwd planning run attached
+      If a parent planning run attached
       `assignment-summary.md`, you can load it for additional
       context:
 
-          {{task_runner_cmd}} attachment list {{run_id}} --cwd-scope --output-format json
+          {{task_runner_cmd}} attachment list {{run_id}} --scope family --output-format json
           mkdir -p /tmp/task-runner-plan-artifacts-{{run_id}}
           {{task_runner_cmd}} attachment download <owner-run-id> <summary-attachment-id> /tmp/task-runner-plan-artifacts-{{run_id}}/
 
-      In the cwd-scoped JSON output, find the row whose `name` is
+      In the family-scoped JSON output, find the row whose `name` is
       `assignment-summary.md` and use that row's `ownerRunId` plus
       `id` in the download command above.
 
-      If no such attachment exists in the same cwd group,
+      If no such attachment exists in the run family,
       continue without blocking. Do not treat the summary
       attachment as overriding this run's canonical task state.
 
