@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { readStatus } from "../packages/core/dist/core/commands/service.js";
@@ -110,6 +110,10 @@ backendSpecific:
 ---
 Codex agent prompt.
 `;
+
+const BUILTIN_PLAN_FEATURE_PATH = resolvePath(
+  new URL("../assignments/plan-feature/assignment.md", import.meta.url).pathname,
+);
 
 function tempDir() {
   return mkdtempSync(join(tmpdir(), "task-runner-run-"));
@@ -1024,6 +1028,45 @@ Work.
     }).trim(),
     "hooks-test",
   );
+});
+
+test("built-in plan-feature prepare hook freezes repo_root and sibling worktree_path from worktree_slug", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  const repoDir = initGitRepo(dir);
+
+  const initialized = await withSharedRuntimeEnv(dir, async () => {
+    const loaded = loadAgentConfig("three", dir);
+    const loadedAssignment = loadAssignmentConfig(BUILTIN_PLAN_FEATURE_PATH);
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      return await runAgent({
+        loaded,
+        loadedAssignment,
+        cliVars: { worktree_slug: "feature-slug" },
+        parentRunId: null,
+        backend: {
+          id: "claude",
+          async invoke() {
+            throw new Error("backend should not be invoked during init");
+          },
+        },
+        initialize: true,
+        callerCwd: repoDir,
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+
+  assert.equal(initialized.manifest.cwd, repoDir);
+  assert.equal(initialized.manifest.runtimeVars.worktree_slug, "feature-slug");
+  assert.equal(initialized.manifest.runtimeVarSources.worktree_slug.source, "cli");
+  assert.equal(initialized.manifest.runtimeVars.repo_root, repoDir);
+  assert.equal(initialized.manifest.runtimeVarSources.repo_root.source, "hook");
+  assert.equal(initialized.manifest.runtimeVars.worktree_path, join(dir, "repo-feature-slug"));
+  assert.equal(initialized.manifest.runtimeVarSources.worktree_path.source, "hook");
 });
 
 test("lineage vars resolve in authored source order, use nearest ancestors, and freeze inherited values", async () => {

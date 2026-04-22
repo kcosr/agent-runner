@@ -127,6 +127,12 @@
   `parentRunId` for lineage-based inheritance, and run summaries/details
   surface parent-run linkage while keeping env-backed vars redacted at
   read time.
+- Changed the bundled planning workflow so `plan-feature` now requires
+  `--var worktree_slug=...`, freezes `repo_root` plus a derived sibling
+  `worktree_path` during planning, generates implementer drafts that
+  inherit those vars through `sources: [parent]`, and keeps nested
+  code-review runs in the same worktree cwd without manual var
+  repetition.
 
 - Changed daemon-managed ready-run scheduling so dependency-bearing runs
   auto-start once every dependency run is successful, including

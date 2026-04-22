@@ -111,9 +111,20 @@ tasks:
       correctness.
 
       In the draft, verify:
+        - the generated implementer draft declares inherited
+          `repo_root`, `worktree_slug`, and `worktree_path` vars
+          with `sources: [parent]`
+        - the generated implementer draft sets
+          `cwd: "{{worktree_path}}"` and uses a `git-worktree`
+          prepare hook wired to `repo_root`, `worktree_slug`, and
+          `worktree_path` rather than recomputing them inside task
+          prose
         - the internal review step passes
           `implementation_run_id={{run_id}}` so the code
           reviewer sees the implementer run
+        - the internal review step keeps the reviewer in the same
+          worktree with `--cwd {{cwd}}` instead of re-deriving the
+          path or retyping lineage vars as CLI input
         - descendant assignments use the `sources` model explicitly
           and rely on `sources: [parent]` for inherited worktree or
           lineage vars instead of old `source` / `either` contracts
@@ -143,14 +154,17 @@ tasks:
           about 2-4 words / 32 chars, and no cwd / repo / range
           clutter or redundant `Plan` / `Review` /
           `Implementation` wording
-        - the creation flow requires the planner to
-          confirm the target directory or worktree path before
-          running `init`, rather than guessing from its own
-          environment
+        - the creation flow requires the planner to confirm the
+          target repo-root cwd plus the requested `worktree_slug`
+          / derived sibling `worktree_path` before running `init`,
+          rather than guessing from some other environment
         - the creation and handoff flow explains that nested child
           runs auto-link back to the implementer/planning lineage
           and should inherit worktree vars through
           `sources: [parent]` rather than retyping them as CLI vars
+        - when the approved draft already authors inherited
+          worktree cwd/vars, the creation flow avoids redundant
+          `--cwd` and `--var` overrides during `init`
         - the creation flow says the planner keeps those
           artifacts on the planning run rather than duplicating
           them onto the new implementer run

@@ -1,6 +1,17 @@
 ---
 schemaVersion: 1
 name: plan-feature
+vars:
+  worktree_slug:
+    type: string
+    required: true
+    sources: [cli]
+    description: |
+      Git-safe slug used to derive the sibling implementer
+      worktree path and branch name.
+hooks:
+  prepare:
+    - path: hooks/derive-worktree-vars.ts
 maxRetries: 4
 callerInstructions: |
   This assignment turns a free-form feature description into an
@@ -11,9 +22,13 @@ callerInstructions: |
 
   ## Invoking the planner
 
+  Run this from the target repo root. Pass a short slug that
+  the planner can freeze into descendant worktree vars:
+
       {{task_runner_cmd}} run \
         --agent <your-planner-agent> \
         --assignment plan-feature \
+        --var worktree_slug=<git-safe-slug> \
         "$(cat /tmp/feature-brief.md)"
 
   Use the bundled `planner` agent or another unrestricted
@@ -50,10 +65,13 @@ callerInstructions: |
        itself as `assignment-seed.md` and
        `assignment-summary.md` so the caller can review them
        directly from the run.
-    5. Confirms the target directory or worktree path during the
+    5. Freezes the planning run's repo-root cwd plus a sibling
+       `worktree_path` derived from `worktree_slug` during the
        initial pass, then runs `init` immediately to create the
-       implementer run in `initialized` state. The planning
-       artifacts stay attached to the planning run; later
+       implementer run in `initialized` state. The generated
+       implementer and reviewer flows inherit those vars through
+       lineage instead of retyping them as CLI handoff flags. The
+       planning artifacts stay attached to the planning run; later
        implementer and reviewer flows can discover them through
        cwd-scoped attachment listing when they need supplemental
        context.
@@ -898,8 +916,11 @@ tasks:
       reinitialize that same implementer run from the updated
       draft before handing it back again.
 
-      Before running `init`, confirm the target directory or
-      worktree path. Do not guess from your own cwd.
+      Before running `init`, confirm that the planning run is
+      rooted at the target repo and that the requested
+      `worktree_slug` is the one you intend to freeze into the
+      sibling worktree path. Do not guess a different cwd or
+      override the derived path ad hoc.
 
       If the approved draft declares descendant vars with
       `sources: [parent]` (for example `worktree_path`), rely on
@@ -912,8 +933,7 @@ tasks:
             {{task_runner_cmd}} init \
               --agent implementer \
               --assignment <draft-path-from-draft_plan> \
-              --name <short-descriptive-name> \
-              --cwd <confirmed-worktree-dir>
+              --name <short-descriptive-name>
 
       For the post-feedback refresh path, rerun `init` against
       the updated draft with the existing run id:
@@ -922,13 +942,16 @@ tasks:
               --run-id <existing-implementer-run-id> \
               --agent implementer \
               --assignment <updated-draft-path-from-draft_plan> \
-              --name <short-descriptive-name> \
-              --cwd <confirmed-worktree-dir>
+              --name <short-descriptive-name>
 
       Command rules:
       - Do **not** force `--backend passive`.
       - Do not add another backend override unless some other
         explicit requirement justifies it.
+      - If the approved draft authors `cwd` from inherited vars
+        (for example `cwd: "{{worktree_path}}"`), let that authored
+        cwd resolve during `init` instead of overriding it with
+        `--cwd`.
       - Do not add manual `--var` handoff for values the draft
         already inherits through `sources: [parent]`.
       - Always use a short descriptive `--name`:
