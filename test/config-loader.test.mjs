@@ -334,6 +334,60 @@ body
     assert.equal(loaded.config.hooks.taskTransition[0].path, "./hooks/guard.mts");
   }));
 
+test("loadAssignmentConfig accepts task-local task-transition hooks", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    writeAssignment(
+      configDir,
+      "task-local-hooks",
+      `---
+schemaVersion: 1
+name: task-local-hooks
+tasks:
+  - id: review
+    title: Review
+    hooks:
+      - builtin: require-children-success
+        with:
+          requireAny: true
+---
+body
+`,
+    );
+
+    const loaded = loadAssignmentConfig("task-local-hooks", rootDir);
+    assert.equal(loaded.config.tasks[0]?.hooks.length, 1);
+    assert.equal(loaded.config.tasks[0]?.hooks[0]?.builtin, "require-children-success");
+    assert.equal(loaded.config.tasks[0]?.hooks[0]?.with?.requireAny, true);
+  }));
+
+test("loadAssignmentConfig rejects invalid task-transition when clauses", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    writeAssignment(
+      configDir,
+      "bad-task-transition-when",
+      `---
+schemaVersion: 1
+name: bad-task-transition-when
+hooks:
+  taskTransition:
+    - builtin: require-children-success
+      when:
+        taskId: review
+        taskIds: [review]
+tasks:
+  - id: review
+    title: Review
+---
+body
+`,
+    );
+
+    assert.throws(
+      () => loadAssignmentConfig("bad-task-transition-when", rootDir),
+      AssignmentConfigError,
+    );
+  }));
+
 test("loadAssignmentConfig leaves partial env syntax literal in prose surfaces", () =>
   withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) =>
     withEnv(

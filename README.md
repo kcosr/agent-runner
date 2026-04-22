@@ -262,13 +262,17 @@ declarative. For example, this blocks `peer_review` from being marked
 `requireAny: false`, the task may still complete if no child run exists:
 
 ```yaml
-hooks:
-  taskTransition:
-    - builtin: require-children-success
-      with:
-        taskIds: ["peer_review"]
-        requireAny: false
+tasks:
+  - id: peer_review
+    title: Peer review
+    hooks:
+      - builtin: require-children-success
+        with:
+          requireAny: false
 ```
+
+The same targeting also works at the assignment root with native
+`taskTransition.when.taskId` / `when.taskIds` filters.
 
 CLI commands can either:
 

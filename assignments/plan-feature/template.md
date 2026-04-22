@@ -37,11 +37,6 @@ hooks:
         args:
           - -lc
           - git fetch origin --prune && git merge --ff-only origin/main
-  taskTransition:
-    - builtin: require-children-success
-      with:
-        taskIds: ["apply_review_fixes"]
-        requireAny: true
 maxRetries: 4
 lockedFields:
   - tasks
@@ -474,6 +469,10 @@ tasks:
       and surface that to the caller instead of continuing.
   - id: apply_review_fixes
     title: Apply agreed review fixes and request delta re-review
+    hooks:
+      - builtin: require-children-success
+        with:
+          requireAny: true
     body: |
       **Category**: hybrid
 

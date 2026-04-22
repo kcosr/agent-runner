@@ -9,7 +9,7 @@ import {
 import type { LoadedAssignment } from "../config/loaded.js";
 import type { HookPhase } from "../config/schema.js";
 import { builtinHookModule } from "./registry.js";
-import type { HookModule, ResolvedHookDescriptor } from "./types.js";
+import type { HookModule, HookWhen, ResolvedHookDescriptor } from "./types.js";
 
 export class HookConfigError extends Error {
   constructor(message: string) {
@@ -84,47 +84,79 @@ export function resolveAssignmentHooks(
 
   const descriptors: ResolvedHookDescriptor[] = [];
   const configDir = resolveTaskRunnerConfigDir(env);
-  for (const phase of Object.keys(assignment.config.hooks) as HookPhase[]) {
-    const entries = assignment.config.hooks[phase];
-    entries.forEach((entry, index) => {
-      const config = interpolateHookValue(entry.with, vars);
-      const when = interpolateHookValue(entry.when ?? null, vars) as Record<string, unknown> | null;
-      if (entry.builtin) {
-        descriptors.push({
-          hookId: `${phase}:${index}:${entry.builtin}`,
-          phase,
-          source: { builtin: entry.builtin },
-          resolvedPath: null,
-          when,
-          config,
-        });
-        return;
-      }
-      if (entry.name) {
-        descriptors.push({
-          hookId: `${phase}:${index}:${entry.name}`,
-          phase,
-          source: { name: entry.name, path: `${configDir}/hooks/${entry.name}` },
-          resolvedPath: resolveNamedHookPath(entry.name, env),
-          when,
-          config,
-        });
-        return;
-      }
-      if (!entry.path) {
-        throw new HookConfigError(`hook ${phase}[${index}] is missing a hook source`);
-      }
+  const pushResolvedDescriptor = (
+    phase: HookPhase,
+    index: number,
+    entry: {
+      builtin?: string;
+      name?: string;
+      path?: string;
+      when?: unknown;
+      with?: unknown;
+    },
+    scope: {
+      taskScopeId?: string;
+      hookIdPrefix?: string;
+    } = {},
+  ) => {
+    const config = interpolateHookValue(entry.with, vars);
+    const when = interpolateHookValue(entry.when ?? null, vars) as HookWhen | null;
+    const scopeTaskId = scope.taskScopeId ?? null;
+    const hookIdPrefix = scope.hookIdPrefix ? `${scope.hookIdPrefix}:` : "";
+    if (entry.builtin) {
       descriptors.push({
-        hookId: `${phase}:${index}:${entry.path}`,
+        hookId: `${phase}:${hookIdPrefix}${index}:${entry.builtin}`,
         phase,
-        source: { path: entry.path },
-        resolvedPath: resolvePathHookPath(
-          interpolateHookValue(entry.path, vars) as string,
-          assignment,
-        ),
+        source: { builtin: entry.builtin },
+        resolvedPath: null,
+        taskScopeId: scopeTaskId,
         when,
         config,
       });
+      return;
+    }
+    if (entry.name) {
+      descriptors.push({
+        hookId: `${phase}:${hookIdPrefix}${index}:${entry.name}`,
+        phase,
+        source: { name: entry.name, path: `${configDir}/hooks/${entry.name}` },
+        resolvedPath: resolveNamedHookPath(entry.name, env),
+        taskScopeId: scopeTaskId,
+        when,
+        config,
+      });
+      return;
+    }
+    if (!entry.path) {
+      throw new HookConfigError(`hook ${phase}[${index}] is missing a hook source`);
+    }
+    descriptors.push({
+      hookId: `${phase}:${hookIdPrefix}${index}:${entry.path}`,
+      phase,
+      source: { path: entry.path },
+      resolvedPath: resolvePathHookPath(
+        interpolateHookValue(entry.path, vars) as string,
+        assignment,
+      ),
+      taskScopeId: scopeTaskId,
+      when,
+      config,
+    });
+  };
+
+  assignment.config.tasks.forEach((task) => {
+    task.hooks.forEach((entry, index) => {
+      pushResolvedDescriptor("taskTransition", index, entry, {
+        taskScopeId: task.id,
+        hookIdPrefix: `task:${task.id}`,
+      });
+    });
+  });
+
+  for (const phase of Object.keys(assignment.config.hooks) as HookPhase[]) {
+    const entries = assignment.config.hooks[phase];
+    entries.forEach((entry, index) => {
+      pushResolvedDescriptor(phase, index, entry);
     });
   }
   return descriptors;

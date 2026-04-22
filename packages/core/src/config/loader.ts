@@ -228,6 +228,32 @@ function classifyAssignmentSurface(path: PathSegment[]): InterpolationSurface {
     }
   }
 
+  if (
+    path.length >= 4 &&
+    path[0] === "tasks" &&
+    typeof path[1] === "number" &&
+    path[2] === "hooks"
+  ) {
+    if (path.length === 5 && typeof path[3] === "number" && typeof path[4] === "string") {
+      switch (path[4]) {
+        case "builtin":
+        case "name":
+        case "path":
+          return { mode: "exact", scalarKind: "string", allowLiteral: false };
+        default:
+          return { mode: "disabled" };
+      }
+    }
+
+    if (
+      path.length >= 6 &&
+      typeof path[3] === "number" &&
+      (path[4] === "with" || path[4] === "when")
+    ) {
+      return { mode: "exact", scalarKind: "string", allowLiteral: true };
+    }
+  }
+
   if (path.length >= 3 && path[0] === "vars" && typeof path[1] === "string") {
     if (path.length === 3 && typeof path[2] === "string") {
       switch (path[2]) {

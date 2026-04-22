@@ -286,6 +286,75 @@ test("fresh runs use callerCwd when the assignment omits cwd", async () => {
   assert.equal(seenCwd, callerDir);
 });
 
+test("runAgent freezes task-local task-transition hooks before assignment-level hooks", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  writeAssignment(
+    dir,
+    "hook-order-work",
+    `---
+schemaVersion: 1
+name: hook-order-work
+hooks:
+  taskTransition:
+    - name: assignment-guard
+tasks:
+  - id: t1
+    title: First
+    hooks:
+      - name: local-guard
+  - id: t2
+    title: Second
+---
+Work on the repo. Plan at {{assignment_path}}.
+`,
+  );
+  writeNamedHook(
+    dir,
+    "local-guard",
+    `export default {
+  name: "local-guard",
+  taskTransition() {
+    return { accept: true };
+  },
+};
+`,
+  );
+  writeNamedHook(
+    dir,
+    "assignment-guard",
+    `export default {
+  name: "assignment-guard",
+  taskTransition() {
+    return { accept: true };
+  },
+};
+`,
+  );
+
+  const initialized = await initWithOptions(dir, "hook-order-work");
+  const initManifest = JSON.parse(readFileSync(join(initialized.workspaceDir, "run.json"), "utf8"));
+  assert.deepEqual(
+    initManifest.resolvedHooks.map((descriptor) => ({
+      hookId: descriptor.hookId,
+      taskScopeId: descriptor.taskScopeId,
+      name: descriptor.source.name,
+    })),
+    [
+      {
+        hookId: "taskTransition:task:t1:0:local-guard",
+        taskScopeId: "t1",
+        name: "local-guard",
+      },
+      {
+        hookId: "taskTransition:0:assignment-guard",
+        taskScopeId: null,
+        name: "assignment-guard",
+      },
+    ],
+  );
+});
+
 test("explicit assignment cwd resolves relative to callerCwd", async () => {
   const dir = tempDir();
   writeAgent(dir, "three", THREE_AGENT);

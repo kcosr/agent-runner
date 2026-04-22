@@ -189,9 +189,10 @@ Phase behavior:
 - `beforeAttempt`, `afterAttempt`, and `afterExit` may continue, block,
   or request a follow-up prompt reinvocation.
 - `taskTransition` wraps all task mutations from the run loop and task
-  command surfaces. Rejections roll back the requested task edit while
-  preserving the hook's own accepted side effects such as notes, pins,
-  attachments, or task patches.
+  command surfaces. Task-local `tasks[].hooks[]` run before root
+  `hooks.taskTransition[]`, and rejections roll back the requested task
+  edit while preserving the hook's own accepted side effects such as
+  notes, pins, attachments, or task patches.
 
 The built-in `command` hook supports:
 
@@ -201,8 +202,9 @@ The built-in `command` hook supports:
 
 The built-in `require-children-success` hook is task-transition only. It
 checks direct child runs by `parentRunId` inside core state and rejects
-completion of configured task ids until every direct child is
-`success`.
+completion until every direct child is `success`. Target task selection
+is handled natively by task-local placement or task-transition
+`when.taskId` / `when.taskIds`, not by builtin-local config.
 
 The built-in `git-worktree` hook runs in `prepare` and `beforeAttempt`.
 It creates or reuses a worktree, switches the run cwd to that path, and
@@ -210,7 +212,8 @@ in `prepare` also projects `worktree_path` into runtime vars.
 
 Declarative `when` support remains narrow: attempt-phase hooks support
 `when.sessionIndex` and `when.attemptInSession`, while task-transition
-hooks support `when.toStatus`.
+hooks support `when.taskId`, `when.taskIds`, `when.fromStatus`,
+`when.toStatus`, and `when.source`.
 
 ## Task state model
 

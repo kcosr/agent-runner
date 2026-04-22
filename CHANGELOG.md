@@ -4,6 +4,10 @@
 
 ### Breaking Changes
 
+- Hot-cut task-transition hook targeting: use task-local
+  `tasks[].hooks[]` or native `hooks.taskTransition[].when.taskId|taskIds`
+  to select guarded tasks, and stop authoring
+  `require-children-success.with.taskIds`.
 - `task-runner attachment list` now uses structured `--scope run|family`
   selection instead of `--cwd-scope`, and the default view is now
   lineage-family attachment discovery rather than exact same-cwd
@@ -148,6 +152,10 @@
 
 ### Changed
 
+- Task-transition hooks now match natively on `taskId`, `taskIds`,
+  `fromStatus`, `toStatus`, and `source`; unmatched hooks are skipped
+  without emitting accepted `run.hook_recorded` audit rows, and
+  task-local hooks run before assignment-level task-transition hooks.
 - Built-in implementer assignments now start from `repo_root` and use a
   first-attempt `git-worktree` hook plus explicit `git fetch origin
   --prune && git merge --ff-only origin/main` sync instead of creating

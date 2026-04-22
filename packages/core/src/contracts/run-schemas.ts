@@ -126,6 +126,7 @@ const resolvedHookDescriptorSchema = z.object({
   phase: z.enum(HOOK_PHASES),
   source: resolvedHookSourceSchema,
   resolvedPath: z.string().nullable(),
+  taskScopeId: z.string().nullable(),
   when: z.record(z.string(), z.unknown()).nullable(),
   config: z.any(),
 });

@@ -405,6 +405,7 @@ describe("api client", () => {
                     phase: "prepare",
                     source: { name: "freeze" },
                     resolvedPath: "/tmp/hooks/freeze/hook.ts",
+                    taskScopeId: null,
                     when: null,
                     config: { mode: "json" },
                   },

@@ -144,21 +144,19 @@ function patchManifest(workspaceDir, mutator) {
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
-function taskGuardedAssignment({ requireAny, taskIds = ["peer_review"] } = {}) {
+function taskGuardedAssignment({ requireAny } = {}) {
   return `---
 schemaVersion: 1
 name: task-cmd-work
 maxRetries: 1
-hooks:
-  taskTransition:
-    - builtin: require-children-success
-      with:
-        taskIds:
-${taskIds.map((taskId) => `          - ${taskId}`).join("\n")}
-${requireAny === undefined ? "" : `        requireAny: ${requireAny}\n`}tasks:
+tasks:
   - id: peer_review
     title: Peer review
     body: Wait for reviewer child runs.
+    hooks:
+      - builtin: require-children-success
+        with:
+          requireAny: ${requireAny === true ? "true" : "false"}
   - id: ship
     title: Ship
     body: Ship the change.
@@ -359,6 +357,144 @@ Work.
   manifest = readManifest(outcome.workspaceDir);
   assert.equal(manifest.finalTasks.t1.status, "completed");
   assert.equal(manifest.finalTasks.t1.notes, "OK to ship");
+});
+
+test("task set: native task-transition when matching composes task id, source, and status filters", async () => {
+  const dir = tempDir();
+  writeBundle(
+    dir,
+    `---
+schemaVersion: 1
+name: task-cmd-work
+maxRetries: 1
+hooks:
+  taskTransition:
+    - path: ./hooks/native-when-guard.mts
+      when:
+        taskId: peer_review
+        source: ["task-set"]
+        fromStatus: ["pending"]
+        toStatus: ["completed"]
+tasks:
+  - id: peer_review
+    title: Peer review
+    body: Wait for reviewer child runs.
+  - id: ship
+    title: Ship
+    body: Ship the change.
+---
+Work.
+`,
+  );
+  writeAssignmentHook(
+    dir,
+    "task-cmd-work",
+    "native-when-guard.mts",
+    `export default {
+  name: "native-when-guard",
+  taskTransition() {
+    return { accept: false, reason: "peer review completion is guarded" };
+  },
+};
+`,
+  );
+  const outcome = await initRun(dir);
+
+  runCli(["task", "append-notes", outcome.runId, "peer_review", "--text", "capture context"], {
+    cwd: dir,
+  });
+  runCli(["task", "set", outcome.runId, "ship", "--status", "completed"], { cwd: dir });
+
+  const rejected = runCliExpectFail(
+    ["task", "set", outcome.runId, "peer_review", "--status", "completed"],
+    { cwd: dir },
+  );
+  assert.equal(rejected.status, 3);
+  assert.match(rejected.stderr, /peer review completion is guarded/);
+
+  const manifest = readManifest(outcome.workspaceDir);
+  assert.equal(manifest.finalTasks.ship.status, "completed");
+  assert.equal(manifest.finalTasks.peer_review.status, "pending");
+  assert.equal(manifest.finalTasks.peer_review.notes, "capture context");
+});
+
+test("task set: task-local hooks run before assignment-level hooks and short-circuit on first rejection", async () => {
+  const dir = tempDir();
+  writeBundle(
+    dir,
+    `---
+schemaVersion: 1
+name: task-cmd-work
+maxRetries: 1
+hooks:
+  taskTransition:
+    - path: ./hooks/assignment-guard.mts
+tasks:
+  - id: t1
+    title: First
+    hooks:
+      - path: ./hooks/local-guard.mts
+  - id: t2
+    title: Second
+---
+Work.
+`,
+  );
+  writeAssignmentHook(
+    dir,
+    "task-cmd-work",
+    "local-guard.mts",
+    `export default {
+  name: "local-guard",
+  taskTransition() {
+    return {
+      accept: false,
+      reason: "local guard blocked completion",
+      mutate: { note: "local guard ran" },
+    };
+  },
+};
+`,
+  );
+  writeAssignmentHook(
+    dir,
+    "task-cmd-work",
+    "assignment-guard.mts",
+    `export default {
+  name: "assignment-guard",
+  taskTransition() {
+    return {
+      accept: false,
+      reason: "assignment guard blocked completion",
+      mutate: { note: "assignment guard ran" },
+    };
+  },
+};
+`,
+  );
+  const outcome = await initRun(dir);
+
+  const firstRejected = runCliExpectFail(
+    ["task", "set", outcome.runId, "t1", "--status", "completed"],
+    { cwd: dir },
+  );
+  assert.equal(firstRejected.status, 3);
+  assert.match(firstRejected.stderr, /local guard blocked completion/);
+
+  let manifest = readManifest(outcome.workspaceDir);
+  assert.equal(manifest.finalTasks.t1.status, "pending");
+  assert.equal(manifest.note, "local guard ran");
+
+  const secondRejected = runCliExpectFail(
+    ["task", "set", outcome.runId, "t2", "--status", "completed"],
+    { cwd: dir },
+  );
+  assert.equal(secondRejected.status, 3);
+  assert.match(secondRejected.stderr, /assignment guard blocked completion/);
+
+  manifest = readManifest(outcome.workspaceDir);
+  assert.equal(manifest.finalTasks.t2.status, "pending");
+  assert.equal(manifest.note, "assignment guard ran");
 });
 
 test("task set: require-children-success allows completion when no direct children exist by default", async () => {
