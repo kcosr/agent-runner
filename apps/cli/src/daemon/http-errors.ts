@@ -3,6 +3,8 @@ import {
   AgentNotFoundError,
   AssignmentConfigError,
   AssignmentNotFoundError,
+  LauncherConfigError,
+  LauncherNotFoundError,
 } from "@task-runner/core/config/loader.js";
 import {
   CommandError,
@@ -58,6 +60,8 @@ export function isKnownControlPlaneError(err: unknown): boolean {
     err instanceof AgentConfigError ||
     err instanceof AssignmentNotFoundError ||
     err instanceof AssignmentConfigError ||
+    err instanceof LauncherNotFoundError ||
+    err instanceof LauncherConfigError ||
     err instanceof RunCommandError ||
     err instanceof VarResolutionError ||
     err instanceof LockedFieldError ||
@@ -76,6 +80,9 @@ export function toHttpError(err: unknown): HttpError {
     return new HttpError(400, "INVALID_REQUEST", err.message, err);
   }
   if (
+    err instanceof AgentNotFoundError ||
+    err instanceof AssignmentNotFoundError ||
+    err instanceof LauncherNotFoundError ||
     err instanceof RunNotFoundError ||
     err instanceof TaskNotFoundError ||
     err instanceof AttachmentNotFoundError

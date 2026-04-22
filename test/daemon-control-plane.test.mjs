@@ -1411,10 +1411,15 @@ test("daemon HTTP rejects encoded traversal route params without leaking paths",
   const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
   const server = await serveDaemon(listenUrl);
   try {
-    const response = await httpJson(httpBaseUrl, "/api/runs/..%2F..%2Fetc/tasks");
-    assert.equal(response.status, 404);
-    assert.equal(response.body.error.code, "NOT_FOUND");
-    assert.equal(response.body.error.message, "resource not found");
+    const detailResponse = await httpJson(httpBaseUrl, "/api/runs/..%2F..%2Fetc");
+    assert.equal(detailResponse.status, 404);
+    assert.equal(detailResponse.body.error.code, "NOT_FOUND");
+    assert.equal(detailResponse.body.error.message, "resource not found");
+
+    const taskResponse = await httpJson(httpBaseUrl, "/api/runs/..%2F..%2Fetc/tasks");
+    assert.equal(taskResponse.status, 404);
+    assert.equal(taskResponse.body.error.code, "NOT_FOUND");
+    assert.equal(taskResponse.body.error.message, "resource not found");
   } finally {
     await server.close();
   }
@@ -4302,6 +4307,41 @@ test("daemon HTTP init uses the remote caller cwd when the agent omits cwd", asy
   }
 });
 
+test("daemon HTTP supports a browser definition-to-init flow with explicit callerCwd", async () => {
+  const daemonDir = tempDir();
+  writeAgent(daemonDir, "daemon-agent", AGENT);
+  writeAssignment(daemonDir, "daemon-work", ASSIGNMENT);
+  const clientDir = tempDir();
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  const daemon = await startCliDaemon(daemonDir, listenUrl);
+  try {
+    const agentDefinition = await httpJson(httpBaseUrl, "/api/agents/daemon-agent");
+    assert.equal(agentDefinition.status, 200);
+    assert.equal(agentDefinition.body.agent.config.name, "daemon-agent");
+
+    const run = await httpJson(httpBaseUrl, "/api/runs/init", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        agent: agentDefinition.body.agent.config.name,
+        assignment: "daemon-work",
+        callerCwd: clientDir,
+        cliVars: {},
+        overrides: {},
+      }),
+    });
+    assert.equal(run.status, 200);
+    assert.equal(run.body.run.agent.name, "daemon-agent");
+    assert.equal(run.body.run.assignment?.name, "daemon-work");
+    assert.equal(run.body.run.cwd, clientDir);
+  } finally {
+    await daemon.stop();
+  }
+});
+
 test("daemon HTTP init rejects malformed backendSpecific codex transport overrides", async () => {
   const dir = tempDir();
   const port = await freePort();
@@ -4479,6 +4519,153 @@ args: [prod, --]
       command: "ssh",
       args: ["prod", "--"],
     });
+  } finally {
+    await client.close();
+    await daemon.stop();
+  }
+});
+
+test("daemon classifies launcher lookup and config errors as command errors across WS and HTTP", async () => {
+  const daemonDir = tempDir();
+  writeLauncher(
+    daemonDir,
+    "bad-name",
+    `schemaVersion: 1
+name: other-name
+command: ssh
+`,
+  );
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  const daemon = await startCliDaemon(daemonDir, listenUrl);
+  const client = await DaemonClient.connect(listenUrl);
+  try {
+    await assert.rejects(
+      () => client.call("launchers.get", { target: "missing-launcher" }),
+      (err) =>
+        err instanceof DaemonRpcError &&
+        err.code === -32003 &&
+        /Launcher not found: missing-launcher/.test(err.message),
+    );
+
+    const targetedInvalidPath = encodeURIComponent("./launchers/bad-name.yaml");
+    await assert.rejects(
+      () =>
+        client.call("launchers.get", {
+          target: "./launchers/bad-name.yaml",
+          cwd: daemonDir,
+        }),
+      (err) =>
+        err instanceof DaemonRpcError &&
+        err.code === -32003 &&
+        /must match launcher file id/.test(err.message),
+    );
+
+    const invalidLauncherHttp = await httpJson(
+      httpBaseUrl,
+      `/api/launchers/${targetedInvalidPath}?cwd=${encodeURIComponent(daemonDir)}`,
+    );
+    assert.equal(invalidLauncherHttp.status, 422);
+    assert.equal(invalidLauncherHttp.body.error.code, "INVALID_COMMAND");
+    assert.match(invalidLauncherHttp.body.error.message, /must match launcher file id/);
+  } finally {
+    await client.close();
+    await daemon.stop();
+  }
+});
+
+test("daemon HTTP exposes definition routes with WS parity and direct-path support", async () => {
+  const daemonDir = tempDir();
+  writeAgent(daemonDir, "daemon-agent", AGENT);
+  writeAssignment(daemonDir, "daemon-work", ASSIGNMENT);
+  writeLauncher(
+    daemonDir,
+    "ssh-wrap",
+    `schemaVersion: 1
+name: ssh-wrap
+command: ssh
+args: [prod, --]
+`,
+  );
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  const daemon = await startCliDaemon(daemonDir, listenUrl);
+  const client = await DaemonClient.connect(listenUrl);
+  try {
+    const agentListHttp = await httpJson(httpBaseUrl, "/api/agents");
+    const assignmentListHttp = await httpJson(httpBaseUrl, "/api/assignments");
+    const launcherListHttp = await httpJson(httpBaseUrl, "/api/launchers");
+    assert.equal(agentListHttp.status, 200);
+    assert.equal(assignmentListHttp.status, 200);
+    assert.equal(launcherListHttp.status, 200);
+    assert.deepEqual(agentListHttp.body, await client.call("agents.list"));
+    assert.deepEqual(assignmentListHttp.body, await client.call("assignments.list"));
+    assert.deepEqual(launcherListHttp.body, await client.call("launchers.list"));
+
+    const agentDetailHttp = await httpJson(httpBaseUrl, "/api/agents/daemon-agent");
+    const assignmentDetailHttp = await httpJson(httpBaseUrl, "/api/assignments/daemon-work");
+    const launcherDetailHttp = await httpJson(httpBaseUrl, "/api/launchers/ssh-wrap");
+    assert.equal(agentDetailHttp.status, 200);
+    assert.equal(assignmentDetailHttp.status, 200);
+    assert.equal(launcherDetailHttp.status, 200);
+    assert.deepEqual(
+      agentDetailHttp.body,
+      await client.call("agents.get", { target: "daemon-agent" }),
+    );
+    assert.deepEqual(
+      assignmentDetailHttp.body,
+      await client.call("assignments.get", { target: "daemon-work" }),
+    );
+    assert.deepEqual(
+      launcherDetailHttp.body,
+      await client.call("launchers.get", { target: "ssh-wrap" }),
+    );
+
+    const agentTarget = encodeURIComponent("./agents/daemon-agent/agent.md");
+    const assignmentTarget = encodeURIComponent("./assignments/daemon-work/assignment.md");
+    const launcherTarget = encodeURIComponent("./launchers/ssh-wrap.yaml");
+    const cwdQuery = `cwd=${encodeURIComponent(daemonDir)}`;
+
+    const directAgent = await httpJson(httpBaseUrl, `/api/agents/${agentTarget}?${cwdQuery}`);
+    const directAssignment = await httpJson(
+      httpBaseUrl,
+      `/api/assignments/${assignmentTarget}?${cwdQuery}`,
+    );
+    const directLauncher = await httpJson(
+      httpBaseUrl,
+      `/api/launchers/${launcherTarget}?${cwdQuery}`,
+    );
+    assert.equal(directAgent.status, 200);
+    assert.equal(directAssignment.status, 200);
+    assert.equal(directLauncher.status, 200);
+    assert.deepEqual(directAgent.body, agentDetailHttp.body);
+    assert.deepEqual(directAssignment.body, assignmentDetailHttp.body);
+    assert.deepEqual(directLauncher.body, launcherDetailHttp.body);
+
+    const missingAgent = await httpJson(httpBaseUrl, "/api/agents/missing-agent");
+    const missingAssignment = await httpJson(httpBaseUrl, "/api/assignments/missing-assignment");
+    const missingLauncher = await httpJson(httpBaseUrl, "/api/launchers/missing-launcher");
+    assert.equal(missingAgent.status, 404);
+    assert.equal(missingAssignment.status, 404);
+    assert.equal(missingLauncher.status, 404);
+    assert.equal(missingAgent.body.error.code, "NOT_FOUND");
+    assert.equal(missingAssignment.body.error.code, "NOT_FOUND");
+    assert.equal(missingLauncher.body.error.code, "NOT_FOUND");
+
+    for (const path of [
+      "/api/agents/%E0%A4%A",
+      "/api/assignments/%E0%A4%A",
+      "/api/launchers/%E0%A4%A",
+    ]) {
+      const response = await httpJson(httpBaseUrl, path);
+      assert.equal(response.status, 400);
+      assert.equal(response.body.error.code, "INVALID_REQUEST");
+      assert.match(response.body.error.message, /valid percent-encoded text/);
+    }
   } finally {
     await client.close();
     await daemon.stop();

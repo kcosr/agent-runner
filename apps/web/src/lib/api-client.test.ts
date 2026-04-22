@@ -1082,6 +1082,387 @@ describe("api client", () => {
     );
   });
 
+  it("lists and gets definitions through the HTTP API", async () => {
+    const fetchMock = vi.fn(async (input) => {
+      switch (input) {
+        case "/api/agents":
+          return new Response(
+            JSON.stringify({
+              agents: {
+                kind: "agent",
+                entries: [
+                  {
+                    name: "planner",
+                    path: "/tmp/agents/planner/agent.md",
+                    root: "config",
+                  },
+                ],
+                warnings: [],
+              },
+            }),
+            { status: 200 },
+          );
+        case "/api/agents/planner":
+          return new Response(
+            JSON.stringify({
+              agent: {
+                kind: "agent",
+                config: {
+                  schemaVersion: 1,
+                  name: "planner",
+                  backend: "passive",
+                },
+                instructions: "Plan the work.",
+                sourcePath: "/tmp/agents/planner/agent.md",
+              },
+            }),
+            { status: 200 },
+          );
+        case "/api/assignments":
+          return new Response(
+            JSON.stringify({
+              assignments: {
+                kind: "assignment",
+                entries: [
+                  {
+                    name: "daemon-work",
+                    path: "/tmp/assignments/daemon-work/assignment.md",
+                    root: "config",
+                  },
+                ],
+                warnings: [],
+              },
+            }),
+            { status: 200 },
+          );
+        case "/api/assignments/daemon-work":
+          return new Response(
+            JSON.stringify({
+              assignment: {
+                kind: "assignment",
+                config: {
+                  schemaVersion: 1,
+                  name: "daemon-work",
+                  maxRetries: 1,
+                  vars: {},
+                  tasks: [],
+                  hooks: {
+                    prepare: [],
+                    beforeAttempt: [],
+                    afterAttempt: [],
+                    afterExit: [],
+                    taskTransition: [],
+                  },
+                  lockedFields: [],
+                },
+                instructions: "Ship the work.",
+                sourcePath: "/tmp/assignments/daemon-work/assignment.md",
+              },
+            }),
+            { status: 200 },
+          );
+        case "/api/launchers":
+          return new Response(
+            JSON.stringify({
+              launchers: {
+                kind: "launcher",
+                entries: [
+                  { name: "direct", path: null, root: "builtin" },
+                  {
+                    name: "ssh-wrap",
+                    path: "/tmp/launchers/ssh-wrap.yaml",
+                    root: "config",
+                  },
+                ],
+                warnings: [],
+              },
+            }),
+            { status: 200 },
+          );
+        case "/api/launchers/ssh-wrap":
+          return new Response(
+            JSON.stringify({
+              launcher: {
+                kind: "launcher",
+                definition: {
+                  kind: "prefix",
+                  name: "ssh-wrap",
+                  command: "ssh",
+                  args: ["prod", "--"],
+                  sourcePath: "/tmp/launchers/ssh-wrap.yaml",
+                  root: "config",
+                  config: {
+                    schemaVersion: 1,
+                    name: "ssh-wrap",
+                    command: "ssh",
+                    args: ["prod", "--"],
+                  },
+                },
+              },
+            }),
+            { status: 200 },
+          );
+        default:
+          throw new Error(`unexpected fetch ${String(input)}`);
+      }
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createApiClient(config);
+
+    await expect(api.listAgents()).resolves.toMatchObject({
+      kind: "agent",
+      entries: [expect.objectContaining({ name: "planner" })],
+    });
+    await expect(api.getAgent("planner")).resolves.toMatchObject({
+      kind: "agent",
+      config: expect.objectContaining({ name: "planner" }),
+    });
+    await expect(api.listAssignments()).resolves.toMatchObject({
+      kind: "assignment",
+      entries: [expect.objectContaining({ name: "daemon-work" })],
+    });
+    await expect(api.getAssignment("daemon-work")).resolves.toMatchObject({
+      kind: "assignment",
+      config: expect.objectContaining({ name: "daemon-work" }),
+    });
+    const launchers = await api.listLaunchers();
+    expect(launchers.kind).toBe("launcher");
+    expect(launchers.entries).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "direct" })]),
+    );
+    await expect(api.getLauncher("ssh-wrap")).resolves.toMatchObject({
+      kind: "launcher",
+      definition: expect.objectContaining({ name: "ssh-wrap" }),
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/agents",
+      expect.objectContaining({ headers: { accept: "application/json" } }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/agents/planner",
+      expect.objectContaining({ headers: { accept: "application/json" } }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/api/assignments",
+      expect.objectContaining({ headers: { accept: "application/json" } }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      "/api/assignments/daemon-work",
+      expect.objectContaining({ headers: { accept: "application/json" } }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      5,
+      "/api/launchers",
+      expect.objectContaining({ headers: { accept: "application/json" } }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      6,
+      "/api/launchers/ssh-wrap",
+      expect.objectContaining({ headers: { accept: "application/json" } }),
+    );
+  });
+
+  it("encodes direct-path launcher targets and forwards cwd", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            launcher: {
+              kind: "launcher",
+              definition: {
+                kind: "direct",
+                name: "direct",
+                sourcePath: null,
+                root: "builtin",
+              },
+            },
+          }),
+          { status: 200 },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createApiClient(config);
+
+    await expect(
+      api.getLauncher("./launchers/direct.yaml", { cwd: "/tmp/config-root" }),
+    ).resolves.toMatchObject({
+      kind: "launcher",
+      definition: expect.objectContaining({ kind: "direct" }),
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/launchers/.%2Flaunchers%2Fdirect.yaml?cwd=%2Ftmp%2Fconfig-root",
+      expect.objectContaining({
+        headers: { accept: "application/json" },
+      }),
+    );
+  });
+
+  it("keeps callerCwd explicit in initRun and startRun request bodies", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createApiClient(config);
+    const input = {
+      agent: "planner",
+      assignment: "daemon-work",
+      callerCwd: "/tmp/browser-cwd",
+      cliVars: { plan: "web-init" },
+      overrides: {
+        cwd: "/tmp/override-cwd",
+        message: "Start planning.",
+      },
+    };
+
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            run: {
+              runId: "run-1",
+              parentRunId: null,
+              repo: "task-runner",
+              status: "initialized",
+              effectiveStatus: "initialized",
+              archivedAt: null,
+              isLive: false,
+              workspaceDir: "/tmp/run-1",
+              assignmentPath: "/tmp/run-1/assignment-seed.md",
+              agent: { name: "planner", sourcePath: null },
+              assignment: null,
+              backend: "passive",
+              model: null,
+              effort: null,
+              name: null,
+              note: null,
+              pinned: false,
+              backendSessionId: null,
+              cwd: "/tmp/browser-cwd",
+              unrestricted: false,
+              timeoutSec: 60,
+              startedAt: "2026-04-13T05:00:00.000Z",
+              endedAt: null,
+              exitCode: null,
+              attempts: 0,
+              maxAttempts: 1,
+              sessionCount: 0,
+              tasksCompleted: 0,
+              tasksTotal: 0,
+              attachments: [],
+              dependencies: [],
+              dependents: [],
+              tasks: [],
+              activeTask: null,
+              message: null,
+              pendingPrompt: null,
+              callerInstructions: null,
+              lockedFields: [],
+              runtimeVars: {},
+              execution: {
+                hostMode: "embedded",
+                controller: { kind: "embedded" },
+              },
+              capabilities: {
+                canArchive: true,
+                canUnarchive: false,
+                canReset: true,
+                canDelete: false,
+                canReady: false,
+                canResume: true,
+                canAbort: false,
+                abortReason: "not_active_in_daemon",
+                taskMutation: {
+                  canAdd: true,
+                  canEditNotes: true,
+                  canSetStatus: true,
+                },
+              },
+            },
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            runId: "run-2",
+          }),
+          { status: 200 },
+        ),
+      );
+
+    await expect(api.initRun(input)).resolves.toMatchObject({ runId: "run-1" });
+    await expect(api.startRun(input)).resolves.toBe("run-2");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/runs/init",
+      expect.objectContaining({
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json",
+        },
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/runs",
+      expect.objectContaining({
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json",
+        },
+      }),
+    );
+
+    const initRequest = fetchMock.mock.calls[0]?.[1];
+    const startRequest = fetchMock.mock.calls[1]?.[1];
+    expect(initRequest).toBeDefined();
+    expect(startRequest).toBeDefined();
+
+    const initBody = JSON.parse((initRequest as RequestInit).body as string);
+    const startBody = JSON.parse((startRequest as RequestInit).body as string);
+    expect(initBody.callerCwd).toBe("/tmp/browser-cwd");
+    expect(startBody.callerCwd).toBe("/tmp/browser-cwd");
+    expect(initBody.overrides.cwd).toBe("/tmp/override-cwd");
+    expect(startBody.overrides.cwd).toBe("/tmp/override-cwd");
+  });
+
+  it("rejects invalid definition list payloads", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              agents: {
+                kind: "agent",
+                entries: [],
+              },
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+
+    const api = createApiClient(config);
+
+    await expect(api.listAgents()).rejects.toMatchObject({
+      code: "INVALID_RESPONSE",
+      name: "ApiError",
+      status: 200,
+    });
+  });
+
   it("reads attachment preview text and normalizes the response media type", async () => {
     const fetchMock = vi.fn(
       async () =>
