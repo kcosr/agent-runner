@@ -75,7 +75,6 @@ interface RequestOptions {
   signal?: AbortSignal;
 }
 
-<<<<<<< HEAD
 interface ListRunsOptions extends RequestOptions {
   familyOf?: string | null;
 }
