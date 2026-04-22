@@ -27,6 +27,15 @@ export function GridIcon(props: IconProps) {
   );
 }
 
+export function ChevronsRightLeftIcon(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="m20 17-5-5 5-5" />
+      <path d="m4 17 5-5-5-5" />
+    </IconBase>
+  );
+}
+
 export function FileIcon(props: IconProps) {
   return (
     <IconBase {...props}>

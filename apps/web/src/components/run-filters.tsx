@@ -12,8 +12,8 @@ import {
 import {
   AlertIcon,
   ArchiveIcon,
+  ChevronsRightLeftIcon,
   FilterIcon,
-  GridIcon,
   NotepadTextIcon,
   PinIcon,
   SearchIcon,
@@ -283,7 +283,7 @@ export function RunFilters({
           title="Hide empty columns"
           type="button"
         >
-          <GridIcon aria-hidden="true" />
+          <ChevronsRightLeftIcon aria-hidden="true" />
         </button>
 
         <button
