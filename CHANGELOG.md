@@ -122,11 +122,6 @@
 
 ### Changed
 
-- Changed the built-in plan/review workflow contract to move repo setup
-  into prepare hooks: generated runs now validate hook-owned
-  `.worktrees/<worktree_slug>` setup, document `origin/main..HEAD`
-  review ranges, and support `git-worktree` reuse flows that fail when a
-  required path is missing. ([#77](https://github.com/kcosr/task-runner/pull/77))
 - Changed daemon-managed ready-run scheduling so dependency-bearing runs
   auto-start once every dependency run is successful, including
   ready-time checks and daemon startup/rebuild sweeps after restarts.
