@@ -1030,21 +1030,17 @@ Work.
   );
 });
 
-test("built-in plan-feature prepare hook freezes repo_root and sibling worktree_path from worktree_slug", async () => {
-  const dir = tempDir();
-  writeAgent(dir, "three", THREE_AGENT);
-  const repoDir = initGitRepo(dir);
-
-  const initialized = await withSharedRuntimeEnv(dir, async () => {
-    const loaded = loadAgentConfig("three", dir);
+async function initBuiltInPlanFeature(baseDir, repoDir, cliVars) {
+  return withSharedRuntimeEnv(baseDir, async () => {
+    const loaded = loadAgentConfig("three", baseDir);
     const loadedAssignment = loadAssignmentConfig(BUILTIN_PLAN_FEATURE_PATH);
     const originalCwd = process.cwd();
-    process.chdir(dir);
+    process.chdir(baseDir);
     try {
       return await runAgent({
         loaded,
         loadedAssignment,
-        cliVars: { worktree_slug: "feature-slug" },
+        cliVars,
         parentRunId: null,
         backend: {
           id: "claude",
@@ -1059,6 +1055,16 @@ test("built-in plan-feature prepare hook freezes repo_root and sibling worktree_
       process.chdir(originalCwd);
     }
   });
+}
+
+test("built-in plan-feature prepare hook freezes repo_root and sibling worktree_path from worktree_slug", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  const repoDir = initGitRepo(dir);
+
+  const initialized = await initBuiltInPlanFeature(dir, repoDir, {
+    worktree_slug: "feature-slug",
+  });
 
   assert.equal(initialized.manifest.cwd, repoDir);
   assert.equal(initialized.manifest.runtimeVars.worktree_slug, "feature-slug");
@@ -1067,6 +1073,36 @@ test("built-in plan-feature prepare hook freezes repo_root and sibling worktree_
   assert.equal(initialized.manifest.runtimeVarSources.repo_root.source, "hook");
   assert.equal(initialized.manifest.runtimeVars.worktree_path, join(dir, "repo-feature-slug"));
   assert.equal(initialized.manifest.runtimeVarSources.worktree_path.source, "hook");
+});
+
+test("built-in plan-feature prepare hook rejects an empty worktree_slug", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  const repoDir = initGitRepo(dir);
+
+  await assert.rejects(
+    () =>
+      initBuiltInPlanFeature(dir, repoDir, {
+        worktree_slug: "",
+      }),
+    (error) => error instanceof Error && /non-empty worktree_slug/.test(error.message),
+  );
+});
+
+test("built-in plan-feature prepare hook rejects regex-failing worktree_slug values", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  const repoDir = initGitRepo(dir);
+
+  await assert.rejects(
+    () =>
+      initBuiltInPlanFeature(dir, repoDir, {
+        worktree_slug: "../escape",
+      }),
+    (error) =>
+      error instanceof Error &&
+      /worktree_slug must match \[A-Za-z0-9\]\[A-Za-z0-9._-\]\*/.test(error.message),
+  );
 });
 
 test("lineage vars resolve in authored source order, use nearest ancestors, and freeze inherited values", async () => {
