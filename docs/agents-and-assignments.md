@@ -279,9 +279,10 @@ Resolution rules:
 Supported `when` filters are intentionally narrow:
 
 - attempt phases (`beforeAttempt`, `afterAttempt`, `afterExit`) support
-  `when.sessionIndex`, either as one integer or an array of integers.
-  Session index `0` is the first execution session; retries and reinvokes
-  within that same session still match.
+  `when.sessionIndex` and `when.attemptInSession`, each as one integer or
+  an array of integers. Session index `0` is the first execution session;
+  attempt-in-session `0` is the first backend attempt within that
+  execution session.
 - `taskTransition` supports `when.toStatus`.
 
 Prepare hooks run once during fresh `run` / `init`, before the first
@@ -305,12 +306,9 @@ Hook mutation boundaries:
 
 Built-in hooks:
 
-- `git-worktree` runs only in `prepare`. It ensures a git worktree,
-  switches the run `cwd` to that path, and projects `worktree_path`
-  into runtime vars.
-- `git-sync-base` runs only in `prepare`. It requires a clean current
-  branch/worktree, then rebases that branch onto the configured
-  `baseRef` without switching the run to the base ref.
+- `git-worktree` runs in `prepare` and `beforeAttempt`. It ensures a git
+  worktree, switches the run `cwd` to that path, and in `prepare` also
+  projects `worktree_path` into runtime vars.
 - `command` runs in every phase. `mode: status` treats exit code `0` as
   success and a non-zero exit code as block/reject. `mode: json`
   requires exit code `0` and parses a full hook result from stdout;

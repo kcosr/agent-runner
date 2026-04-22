@@ -21,6 +21,24 @@ This file is a lightweight, internal onboarding note for agents working in this 
 - Avoid fallback logic and heuristic shape-detection when the contract can be made explicit.
 - Treat config/schema/API redesigns and migrations as hot cuts unless the caller explicitly asks for backward compatibility.
 
+### Validation and defensive code
+
+- Validate data at trust boundaries, not repeatedly in internal code.
+- Do not add duplicate runtime guards for values already guaranteed by parsing, schema validation, control flow, or TypeScript types.
+- In reviews, flag redundant null checks, shape checks, and fallback branches that do not protect a real boundary or invariant.
+
+TypeScript specifics:
+
+- Prefer narrowing once and passing strongly typed values downstream.
+- Prefer stricter parameter types over re-checking broad inputs in private helpers.
+- Do not add `if (!x)`, `typeof`, `Array.isArray`, or property-existence checks in internal code when the type and calling path already guarantee them.
+
+Repeated checks remain legitimate when:
+
+- the inner function is public or reusable across trust boundaries
+- async/stateful code can invalidate assumptions between checks
+- the second check enforces a different business invariant, not the same input shape
+
 ## Testing Requirements
 
 - Run `npm install` to install dependencies.
