@@ -29,6 +29,7 @@
 
 export const TASK_RUNNER_CALL_DEPTH_ENV = "TASK_RUNNER_CALL_DEPTH";
 export const TASK_RUNNER_MAX_CALL_DEPTH_ENV = "TASK_RUNNER_MAX_CALL_DEPTH";
+export const TASK_RUNNER_PARENT_RUN_ID_ENV = "TASK_RUNNER_PARENT_RUN_ID";
 export const DEFAULT_MAX_CALL_DEPTH = 1;
 
 export class RecursionDepthError extends Error {
@@ -46,6 +47,11 @@ export class RecursionDepthError extends Error {
 export interface RecursionState {
   currentDepth: number;
   maxDepth: number;
+}
+
+export function readParentRunIdFromEnv(env: NodeJS.ProcessEnv = process.env): string | null {
+  const value = env[TASK_RUNNER_PARENT_RUN_ID_ENV]?.trim();
+  return value ? value : null;
 }
 
 function parseNonNegInt(value: string | undefined, fallback: number): number {
@@ -89,9 +95,16 @@ export function checkRecursionDepth(state: RecursionState): void {
  * (e.g. `{ ...process.env, ...buildChildRecursionEnv(state) }`) when
  * constructing `BackendInvokeContext.env`.
  */
-export function buildChildRecursionEnv(state: RecursionState): Record<string, string> {
-  return {
+export function buildChildRecursionEnv(
+  state: RecursionState,
+  parentRunId?: string | null,
+): Record<string, string> {
+  const childEnv: Record<string, string> = {
     [TASK_RUNNER_CALL_DEPTH_ENV]: String(state.currentDepth + 1),
     [TASK_RUNNER_MAX_CALL_DEPTH_ENV]: String(state.maxDepth),
   };
+  if (parentRunId) {
+    childEnv[TASK_RUNNER_PARENT_RUN_ID_ENV] = parentRunId;
+  }
+  return childEnv;
 }

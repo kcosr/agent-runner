@@ -29,6 +29,9 @@ export const taskDefSchema = z.object({
   body: z.string().optional().default(""),
 });
 
+export const VAR_SOURCES = ["cli", "env", "parent"] as const;
+export type VarSource = (typeof VAR_SOURCES)[number];
+
 function isValidVarDefault(value: unknown, def: { type: string; values?: string[] }): boolean {
   switch (def.type) {
     case "string":
@@ -58,13 +61,21 @@ export const varDefSchema = z
     type: z.enum(["string", "number", "boolean", "enum"]).default("string"),
     required: z.boolean().default(false),
     requiredAt: z.enum(["initial", "prepare"]).default("initial"),
-    source: z.enum(["cli", "env", "either"]).default("cli"),
+    sources: z.array(z.enum(VAR_SOURCES)).nonempty().default(["cli"]),
     envName: z.string().optional(),
     default: z.unknown().optional(),
     description: z.string().optional(),
     values: z.array(z.string()).optional(),
   })
+  .strict()
   .superRefine((v, ctx) => {
+    if (new Set(v.sources).size !== v.sources.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["sources"],
+        message: "var sources must not contain duplicates",
+      });
+    }
     if (v.type === "enum" && (v.values === undefined || v.values.length === 0)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

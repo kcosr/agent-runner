@@ -33,9 +33,12 @@ import {
   ResumeError,
   type RunExecution,
   type RunManifest,
+  type RuntimeVarSourceRecord,
   type SessionRecord,
   type TaskSnapshot,
   buildRunResetSeed,
+  cloneRuntimeVarSources,
+  findRunManifestsById,
   resolveResumeTarget,
   snapshotTasks,
   workspaceAssignmentPath,
@@ -46,6 +49,7 @@ import { buildNudgeMessage } from "./nudge.js";
 import {
   buildChildRecursionEnv,
   checkRecursionDepth,
+  readParentRunIdFromEnv,
   readRecursionState,
 } from "./recursion-guard.js";
 import {
@@ -96,6 +100,7 @@ export interface RunOptions {
   loaded: LoadedAgent;
   loadedAssignment?: LoadedAssignment;
   cliVars: Record<string, string>;
+  parentRunId?: string | null;
   backend: Backend;
   callerCwd?: string;
   overrides?: RunOverrides;
@@ -396,22 +401,18 @@ function tryRefreshMutableManifestMetadata(manifest: RunManifest): void {
   }
 }
 
-function resolveConfiguredCwd(input: string | undefined, fallback: string): string {
-  if (!input || input === ".") return fallback;
-  return isAbsolute(input) ? input : resolve(fallback, input);
-}
-
 function resolveFreshRunCwd(
   assignment: LoadedAssignment | undefined,
   overrides: RunOverrides | undefined,
   callerCwd: string | undefined,
+  injectedVars: Record<string, unknown>,
 ): string {
   const resolutionBase = callerCwd ?? process.cwd();
   if (overrides?.cwd !== undefined) {
-    return resolveConfiguredCwd(overrides.cwd, resolutionBase);
+    return resolveConfiguredCwd(overrides.cwd, resolutionBase, injectedVars);
   }
   if (assignment?.config.cwd !== undefined) {
-    return resolveConfiguredCwd(assignment.config.cwd, resolutionBase);
+    return resolveConfiguredCwd(assignment.config.cwd, resolutionBase, injectedVars);
   }
   return resolutionBase;
 }
@@ -511,11 +512,22 @@ function emitCallerInstructions(
 }
 
 function coerceVar(key: string, value: unknown, def: VarDef): unknown {
-  if (typeof value !== "string") return value;
   switch (def.type) {
     case "string":
+      if (typeof value !== "string") {
+        throw new VarResolutionError(`var "${key}": expected string`);
+      }
       return value;
     case "number": {
+      if (typeof value === "number") {
+        if (Number.isNaN(value)) {
+          throw new VarResolutionError(`var "${key}": expected number, got NaN`);
+        }
+        return value;
+      }
+      if (typeof value !== "string") {
+        throw new VarResolutionError(`var "${key}": expected number`);
+      }
       const n = Number(value);
       if (Number.isNaN(n)) {
         throw new VarResolutionError(`var "${key}": expected number, got "${value}"`);
@@ -523,10 +535,21 @@ function coerceVar(key: string, value: unknown, def: VarDef): unknown {
       return n;
     }
     case "boolean":
+      if (typeof value === "boolean") {
+        return value;
+      }
+      if (typeof value !== "string") {
+        throw new VarResolutionError(`var "${key}": expected boolean`);
+      }
       if (value === "true" || value === "1") return true;
       if (value === "false" || value === "0") return false;
       throw new VarResolutionError(`var "${key}": expected boolean, got "${value}"`);
     case "enum":
+      if (typeof value !== "string") {
+        throw new VarResolutionError(
+          `var "${key}": expected one of ${def.values?.join(", ") ?? ""}`,
+        );
+      }
       if (!def.values?.includes(value)) {
         throw new VarResolutionError(
           `var "${key}": expected one of ${def.values?.join(", ") ?? ""}, got "${value}"`,
@@ -538,39 +561,11 @@ function coerceVar(key: string, value: unknown, def: VarDef): unknown {
   }
 }
 
-type ResolvedVarSource = "cli" | "env" | "default";
+const INTERPOLATION_TOKEN_PATTERN = /\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/;
 
 interface ResolvedVarsResult {
   values: Record<string, unknown>;
-  sources: Record<string, ResolvedVarSource>;
-}
-
-interface RedactedRuntimeVar {
-  redacted: true;
-  source: "env";
-  envName: string;
-}
-
-function redactRuntimeVars(
-  values: Record<string, unknown>,
-  sources: Record<string, ResolvedVarSource>,
-  varsSchema: Record<string, VarDef>,
-): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(values)) {
-    if (sources[key] === "env") {
-      const envName = varsSchema[key]?.envName ?? key;
-      const redacted: RedactedRuntimeVar = {
-        redacted: true,
-        source: "env",
-        envName,
-      };
-      out[key] = redacted;
-      continue;
-    }
-    out[key] = value;
-  }
-  return out;
+  sources: Record<string, RuntimeVarSourceRecord>;
 }
 
 function assertKnownCliVars(
@@ -585,43 +580,153 @@ function assertKnownCliVars(
   );
 }
 
+export class LineageResolutionError extends VarResolutionError {
+  constructor(message: string) {
+    super(message);
+    this.name = "LineageResolutionError";
+  }
+}
+
+export class LineageMissingError extends VarResolutionError {
+  constructor(message: string) {
+    super(message);
+    this.name = "LineageMissingError";
+  }
+}
+
+interface LineageManifest {
+  manifest: RunManifest;
+}
+
+function isLegacyRedactedRuntimeVar(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  if (record.redacted !== true || typeof record.source !== "string") {
+    return false;
+  }
+  if (record.envName !== undefined && typeof record.envName !== "string") {
+    return false;
+  }
+  if (record.inheritedFromRunId !== undefined && typeof record.inheritedFromRunId !== "string") {
+    return false;
+  }
+  const allowedKeys = new Set(["redacted", "source", "envName", "inheritedFromRunId"]);
+  return Object.keys(record).every((key) => allowedKeys.has(key));
+}
+
+function resolveLineageManifest(runId: string): LineageManifest {
+  const matches = findRunManifestsById(runId);
+  if (matches.length === 0) {
+    throw new LineageResolutionError(`lineage parent run "${runId}" was not found`);
+  }
+  if (matches.length > 1) {
+    throw new LineageResolutionError(
+      `lineage parent run "${runId}" is ambiguous across multiple run buckets`,
+    );
+  }
+  const [match] = matches;
+  if (!match) {
+    throw new LineageResolutionError(`lineage parent run "${runId}" could not be resolved`);
+  }
+  return { manifest: match.manifest };
+}
+
+function resolveLineageChain(parentRunId: string | null): LineageManifest[] {
+  if (parentRunId === null) {
+    return [];
+  }
+  const chain: LineageManifest[] = [];
+  const seen = new Set<string>();
+  let currentRunId: string | null = parentRunId;
+  while (currentRunId !== null) {
+    if (seen.has(currentRunId)) {
+      throw new LineageResolutionError(`lineage cycle detected at parent run "${currentRunId}"`);
+    }
+    seen.add(currentRunId);
+    const current = resolveLineageManifest(currentRunId);
+    chain.push(current);
+    currentRunId = current.manifest.parentRunId;
+  }
+  return chain;
+}
+
+function resolveFromParentLineage(
+  key: string,
+  lineageChain: LineageManifest[],
+): { value: unknown; source: RuntimeVarSourceRecord } | null {
+  for (const ancestor of lineageChain) {
+    const value = ancestor.manifest.runtimeVars[key];
+    if (value === undefined) {
+      continue;
+    }
+    const inheritedSource = ancestor.manifest.runtimeVarSources[key];
+    if (inheritedSource === undefined && isLegacyRedactedRuntimeVar(value)) {
+      continue;
+    }
+    return {
+      value,
+      source: {
+        source: "parent",
+        inheritedFromRunId: ancestor.manifest.runId,
+        envName: inheritedSource?.envName,
+        redacted: inheritedSource?.redacted,
+      },
+    };
+  }
+  return null;
+}
+
 function resolveVars(
   varsSchema: Record<string, VarDef>,
   cliVars: Record<string, string>,
+  lineageChain: LineageManifest[],
 ): ResolvedVarsResult {
   const values: Record<string, unknown> = {};
-  const sources: Record<string, ResolvedVarSource> = {};
+  const sources: Record<string, RuntimeVarSourceRecord> = {};
   for (const [key, def] of Object.entries(varsSchema)) {
     let value: unknown;
-    let source: ResolvedVarSource | undefined;
+    let source: RuntimeVarSourceRecord | undefined;
 
-    if (def.source === "cli" || def.source === "either") {
-      if (cliVars[key] !== undefined) {
-        value = cliVars[key];
-        source = "cli";
+    for (const authoredSource of def.sources) {
+      if (authoredSource === "cli") {
+        if (cliVars[key] !== undefined) {
+          value = cliVars[key];
+          source = { source: "cli" };
+          break;
+        }
+        continue;
       }
-    }
-    if (value === undefined && (def.source === "env" || def.source === "either")) {
-      const envName = def.envName ?? key;
-      const envValue = process.env[envName];
-      if (envValue !== undefined) {
-        value = envValue;
-        source = "env";
+      if (authoredSource === "env") {
+        const envName = def.envName ?? key;
+        const envValue = process.env[envName];
+        if (envValue !== undefined) {
+          value = envValue;
+          source = { source: "env", envName, redacted: true };
+          break;
+        }
+        continue;
+      }
+      const inherited = resolveFromParentLineage(key, lineageChain);
+      if (inherited !== null) {
+        value = inherited.value;
+        source = inherited.source;
+        break;
       }
     }
     if (value === undefined && def.default !== undefined) {
       value = def.default;
-      source = "default";
+      source = { source: "default" };
     }
     if (value === undefined) {
-      if (def.required && def.requiredAt !== "prepare") {
-        throw new VarResolutionError(`missing required var: ${key}`);
-      }
       continue;
     }
 
     values[key] = coerceVar(key, value, def);
-    if (source) sources[key] = source;
+    if (source) {
+      sources[key] = source;
+    }
   }
   return { values, sources };
 }
@@ -636,9 +741,86 @@ function validateRequiredVars(
       continue;
     }
     if (values[key] === undefined) {
-      throw new VarResolutionError(`missing required ${requiredAt} var: ${key}`);
+      throw new LineageMissingError(`missing required ${requiredAt} var: ${key}`);
     }
   }
+}
+
+function buildInjectedVars(params: {
+  runtimeVars: Record<string, unknown>;
+  assignmentPath: string;
+  runId: string;
+  cwd: string;
+  assignmentName: string | undefined;
+}): Record<string, unknown> {
+  return {
+    ...params.runtimeVars,
+    assignment_path: params.assignmentPath,
+    run_id: params.runId,
+    cwd: params.cwd,
+    config_dir: resolveTaskRunnerConfigDir(),
+    state_dir: resolveTaskRunnerStateDir(),
+    task_runner_cmd: resolveTaskRunnerCommand(),
+    ...(params.assignmentName !== undefined ? { assignment_name: params.assignmentName } : {}),
+  };
+}
+
+function resolveConfiguredCwd(
+  input: string | undefined,
+  fallback: string,
+  injectedVars: Record<string, unknown>,
+): string {
+  if (!input || input === ".") return fallback;
+  const interpolated = interpolate(input, injectedVars);
+  const unresolvedToken = interpolated.match(INTERPOLATION_TOKEN_PATTERN)?.[0];
+  if (unresolvedToken) {
+    throw new VarResolutionError(`cwd interpolation could not resolve token ${unresolvedToken}`);
+  }
+  return isAbsolute(interpolated) ? interpolated : resolve(fallback, interpolated);
+}
+
+function syncFreshTasksToFinalInjectedVars(
+  assignment: LoadedAssignment | undefined,
+  currentTasks: Map<string, TaskState>,
+  initialInjectedVars: Record<string, unknown>,
+  finalInjectedVars: Record<string, unknown>,
+): Map<string, TaskState> {
+  if (!assignment) {
+    return currentTasks;
+  }
+  const synced = new Map<string, TaskState>();
+  for (const authoredTask of assignment.config.tasks) {
+    const existing = currentTasks.get(authoredTask.id);
+    if (!existing) {
+      synced.set(authoredTask.id, {
+        id: authoredTask.id,
+        title: interpolate(authoredTask.title, finalInjectedVars),
+        body: interpolate(authoredTask.body ?? "", finalInjectedVars),
+        status: "pending",
+        notes: "",
+      });
+      continue;
+    }
+    const initialTitle = interpolate(authoredTask.title, initialInjectedVars);
+    const initialBody = interpolate(authoredTask.body ?? "", initialInjectedVars);
+    synced.set(authoredTask.id, {
+      ...existing,
+      title:
+        existing.title === initialTitle
+          ? interpolate(authoredTask.title, finalInjectedVars)
+          : existing.title,
+      body:
+        existing.body === initialBody
+          ? interpolate(authoredTask.body ?? "", finalInjectedVars)
+          : existing.body,
+    });
+  }
+  for (const [taskId, task] of currentTasks) {
+    if (!synced.has(taskId)) {
+      synced.set(taskId, { ...task });
+    }
+  }
+  return synced;
 }
 
 function resolveRuntimeBackend(backendId: string, fallback: Backend): Backend {
@@ -916,10 +1098,9 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   }
 
   const reusesFrozenSetup = (isResume || priorReady) && resume !== undefined;
-  let cwd = reusesFrozenSetup
-    ? resume.manifest.cwd
-    : resolveFreshRunCwd(loadedAssignment, overrides, opts.callerCwd);
-  let repo = reusesFrozenSetup ? resume.manifest.repo : deriveRepoKey(cwd);
+  const parentRunId = reusesFrozenSetup
+    ? (resume?.manifest.parentRunId ?? null)
+    : (opts.parentRunId ?? readParentRunIdFromEnv() ?? null);
   let effectiveBackendId = backend.id;
   let currentBackend = backend;
   // When --backend overrides the agent's backend, the agent's `model`
@@ -928,6 +1109,27 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const backendOverridden = overrides?.backend !== undefined;
   let model = overrides?.model ?? (backendOverridden ? undefined : agentConfig.model);
   let effort = overrides?.effort ?? agentConfig.effort;
+  // Vars live on the assignment. Chat mode (no assignment) has no var
+  // schema, so there is nothing to validate against or resolve from.
+  const varsSchema = assignmentConfig?.vars ?? {};
+  if (assignmentConfig) {
+    assertKnownCliVars(varsSchema, cliVars);
+  }
+  const lineageChain = reusesFrozenSetup ? [] : resolveLineageChain(parentRunId);
+  const resolvedVars = resolveVars(varsSchema, cliVars, lineageChain);
+  let runtimeVars = reusesFrozenSetup
+    ? { ...(resume?.manifest.runtimeVars ?? {}) }
+    : resolvedVars.values;
+  let runtimeVarSources = reusesFrozenSetup
+    ? cloneRuntimeVarSources(resume?.manifest.runtimeVarSources ?? {})
+    : cloneRuntimeVarSources(resolvedVars.sources);
+  if (!reusesFrozenSetup) {
+    validateRequiredVars(varsSchema, runtimeVars, "initial");
+  }
+  let cwd = reusesFrozenSetup
+    ? resume.manifest.cwd
+    : resolveFreshRunCwd(loadedAssignment, overrides, opts.callerCwd, runtimeVars);
+  let repo = reusesFrozenSetup ? resume.manifest.repo : deriveRepoKey(cwd);
   const backendSpecific = reusesFrozenSetup
     ? resolveManifestBackendSpecific(resume.manifest)
     : resolveFreshBackendSpecific(effectiveBackendId, agentConfig, overrides, execution);
@@ -990,21 +1192,6 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     }
   }
 
-  // Ready-start reuses the workspace and stored prompt from the earlier
-  // `init` + `run ready` flow. Reinitialize also reuses the workspace
-  // container, but rebuilds the manifest from fresh-init inputs.
-
-  // Vars live on the assignment. Chat mode (no assignment) has no var
-  // schema, so there is nothing to validate against or resolve from.
-  const varsSchema = assignmentConfig?.vars ?? {};
-  if (assignmentConfig) {
-    assertKnownCliVars(varsSchema, cliVars);
-  }
-  const resolvedVars = resolveVars(varsSchema, cliVars);
-  let runtimeVars = resolvedVars.values;
-  validateRequiredVars(varsSchema, runtimeVars, "initial");
-  let persistedRuntimeVars = redactRuntimeVars(runtimeVars, resolvedVars.sources, varsSchema);
-
   const reusingWorkspace = resume !== undefined;
   const runId = reusingWorkspace && resume ? resume.manifest.runId : shortId();
   const workspaceDir =
@@ -1012,21 +1199,13 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   mkdirSync(workspaceDir, { recursive: true });
   const assignmentPath = workspaceAssignmentPath(workspaceDir);
   const assignmentName = loadedAssignment?.config.name ?? resume?.manifest.assignment?.name;
-
-  // `injectedVars` has to be built *before* the task-map rebuild so
-  // that fresh-run task titles and bodies get `{{var}}` references
-  // substituted. Every field it needs (runtimeVars, assignmentPath,
-  // runId, cwd) is known at this point.
-  const injectedVars: Record<string, unknown> = {
-    ...runtimeVars,
-    assignment_path: assignmentPath,
-    run_id: runId,
+  let injectedVars = buildInjectedVars({
+    runtimeVars,
+    assignmentPath,
+    runId,
     cwd,
-    config_dir: resolveTaskRunnerConfigDir(),
-    state_dir: resolveTaskRunnerStateDir(),
-    task_runner_cmd: resolveTaskRunnerCommand(),
-    ...(assignmentName !== undefined ? { assignment_name: assignmentName } : {}),
-  };
+    assignmentName,
+  });
   const resolvedHookDescriptors =
     isResume || priorReady
       ? (resume?.manifest.resolvedHooks ?? [])
@@ -1130,6 +1309,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       archivedAt: null,
       status: isInitialize ? "initialized" : "running",
       dependencyRunIds: [],
+      parentRunId,
       exitCode: null,
       attempts: 0,
       maxAttempts,
@@ -1137,6 +1317,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       tasksTotal: tasks.size,
       backendSessionId: opts.bootstrapBackendSessionId ?? null,
       runtimeVars: { ...runtimeVars },
+      runtimeVarSources: cloneRuntimeVarSources(runtimeVarSources),
       execution,
       brief: "",
       resolvedHooks: resolvedHookDescriptors.map((descriptor) => ({
@@ -1160,11 +1341,13 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         note: null,
         pinned: false,
         dependencyRunIds: [],
+        parentRunId,
         unrestricted,
         timeoutSec,
         maxAttempts,
         brief: "",
         runtimeVars: { ...runtimeVars },
+        runtimeVarSources: cloneRuntimeVarSources(runtimeVarSources),
         hookState: {},
         attachments: [],
         finalTasks: snapshotTasks(tasks),
@@ -1194,13 +1377,32 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     timeoutSec = prepareState.manifest.timeoutSec;
     unrestricted = prepareState.manifest.unrestricted;
     runtimeVars = { ...prepareState.manifest.runtimeVars };
+    runtimeVarSources = cloneRuntimeVarSources(prepareState.manifest.runtimeVarSources);
     hookState = { ...prepareState.manifest.hookState };
     hookAttachments = prepareState.manifest.attachments.map((attachment) => ({ ...attachment }));
     hookNote = prepareState.manifest.note;
     hookPinned = prepareState.manifest.pinned;
     hookLockedFields = [...prepareState.manifest.lockedFields];
     validateRequiredVars(varsSchema, runtimeVars, "prepare");
-    persistedRuntimeVars = redactRuntimeVars(runtimeVars, resolvedVars.sources, varsSchema);
+    injectedVars = buildInjectedVars({
+      runtimeVars,
+      assignmentPath,
+      runId,
+      cwd,
+      assignmentName,
+    });
+    tasks = syncFreshTasksToFinalInjectedVars(
+      loadedAssignment,
+      tasks,
+      buildInjectedVars({
+        runtimeVars: resolvedVars.values,
+        assignmentPath,
+        runId,
+        cwd: prepareManifest.cwd,
+        assignmentName,
+      }),
+      injectedVars,
+    );
   }
 
   const hasTasks = tasks.size > 0;
@@ -1363,6 +1565,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       archivedAt: null,
       status: isInitialize ? "initialized" : "running",
       dependencyRunIds: [],
+      parentRunId,
       exitCode: null,
       attempts: 0,
       maxAttempts,
@@ -1373,7 +1576,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       // local also seeds from this so the very first invocation does
       // a backend resume instead of starting a fresh session.
       backendSessionId: opts.bootstrapBackendSessionId ?? null,
-      runtimeVars: persistedRuntimeVars,
+      runtimeVars: { ...runtimeVars },
+      runtimeVarSources: cloneRuntimeVarSources(runtimeVarSources),
       execution,
       brief: initialPrompt,
       resolvedHooks: resolvedHookDescriptors.map((descriptor) => ({
@@ -1397,11 +1601,13 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         note: hookNote,
         pinned: hookPinned,
         dependencyRunIds: [],
+        parentRunId,
         unrestricted,
         timeoutSec,
         maxAttempts,
         brief: initialPrompt,
-        runtimeVars: { ...persistedRuntimeVars },
+        runtimeVars: { ...runtimeVars },
+        runtimeVarSources: cloneRuntimeVarSources(runtimeVarSources),
         hookState: { ...hookState },
         attachments: hookAttachments.map((attachment) => ({ ...attachment })),
         finalTasks: snapshotTasks(tasks),
@@ -1833,7 +2039,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
           // Increment recursion depth so a nested `task-runner run` spawned
           // by this backend can detect it. Always last so it overrides any
           // stale value the parent inherited.
-          ...buildChildRecursionEnv(recursionState),
+          ...buildChildRecursionEnv(recursionState, manifest.runId),
         },
         model,
         effort,

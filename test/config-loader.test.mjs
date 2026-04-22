@@ -828,8 +828,11 @@ test("loadAssignmentConfig parses a minimal assignment.md from TASK_RUNNER_CONFI
 test("built-in plan-feature assignment uses cwd instead of repo_path for canonical repo context", () => {
   const loaded = loadAssignmentConfig(BUILTIN_PLAN_FEATURE_PATH);
   assert.equal(loaded.config.vars.repo_path, undefined);
+  assert.deepEqual(loaded.config.vars.worktree_slug?.sources, ["cli"]);
+  assert.equal(loaded.config.hooks.prepare[0]?.path, "hooks/derive-worktree-vars.ts");
   assert.match(loaded.instructions, /`{{cwd}}`/);
   assert.ok((loaded.config.callerInstructions ?? "").includes("--assignment plan-feature"));
+  assert.match(loaded.config.callerInstructions ?? "", /--var worktree_slug=<git-safe-slug>/);
 
   const taskIds = loaded.config.tasks.map((task) => task.id);
   assert.ok(taskIds.includes("create_initialized_implementer_run"));
@@ -848,6 +851,8 @@ test("built-in plan-feature assignment uses cwd instead of repo_path for canonic
     /resulting implementer run is left in\s+`initialized`, not `ready`/,
   );
   assert.match(createTask.body ?? "", /--run-id <existing-implementer-run-id>/);
+  assert.doesNotMatch(createTask.body ?? "", /--cwd <confirmed-worktree-dir>/);
+  assert.match(createTask.body ?? "", /cwd: "\{\{worktree_path\}\}"/);
   assert.match(
     createTask.body ?? "",
     /Do not assume updating the draft file or refreshing the\s+planning-run attachments alone updates the implementer\s+run/i,
@@ -868,6 +873,10 @@ test("built-in plan-feature template emits implement-prefixed assignment names",
   const template = readFileSync(BUILTIN_PLAN_TEMPLATE_PATH, "utf8");
   assert.match(template, /^name: implement-<<KEBAB_FEATURE_SLUG>>$/m);
   assert.doesNotMatch(template, /^name: plan-<<KEBAB_FEATURE_SLUG>>$/m);
+  assert.match(template, /^cwd: "\{\{worktree_path\}\}"$/m);
+  assert.match(template, /sources: \[parent\]/);
+  assert.match(template, /builtin: git-worktree/);
+  assert.match(template, /collision: reuse/);
   assert.match(template, /run ready {{run_id}}/);
   assert.match(template, /run --resume-run {{run_id}}/);
   assert.doesNotMatch(template, /passive backend/i);
@@ -888,6 +897,8 @@ test("built-in plan-review tracks immediate-init revision handoff and terminal p
   assert.doesNotMatch(structureTask.body ?? "", /final_commit/);
   assert.match(workflowTask.body ?? "", /creates the implementer run during the/);
   assert.match(workflowTask.body ?? "", /does \*\*not\*\* force/);
+  assert.match(workflowTask.body ?? "", /repo_root`, `worktree_slug`, and `worktree_path` vars/);
+  assert.match(workflowTask.body ?? "", /`cwd: "\{\{worktree_path\}\}"`/);
   assert.match(workflowTask.body ?? "", /refresh the planning run's/);
   assert.match(workflowTask.body ?? "", /init --run-id <implementer-run-id>/);
   assert.match(workflowTask.body ?? "", /run ready/);

@@ -16,6 +16,7 @@ import {
   listRunManifests,
   resolveResumeTarget,
 } from "./core/run/manifest.js";
+import { readParentRunIdFromEnv } from "./core/run/recursion-guard.js";
 import { hasIncompleteTasks, missingResumeInputMessage } from "./core/run/resume-policy.js";
 import type { RunAuditEnvelope } from "./core/run/run-events.js";
 import { type RunEvent, type RunOptions, type RunOutcome, runAgent } from "./core/run/run-loop.js";
@@ -37,6 +38,7 @@ export interface ExecuteRunCommandOptions {
   assignment?: string;
   definitionCwd?: string;
   callerCwd?: string;
+  parentRunId?: string | null;
   resumeRun?: string;
   backendSessionId?: string;
   cliVars: Record<string, string>;
@@ -214,6 +216,7 @@ export async function executeRunCommand(opts: ExecuteRunCommandOptions): Promise
     loaded,
     loadedAssignment,
     cliVars: opts.cliVars,
+    parentRunId: opts.parentRunId ?? readParentRunIdFromEnv(),
     backend,
     callerCwd: opts.callerCwd,
     resume: resumeTarget,

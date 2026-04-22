@@ -65,6 +65,15 @@ export interface TaskSnapshot {
   notes: string;
 }
 
+export type RuntimeVarSourceKind = "cli" | "env" | "parent" | "default" | "hook";
+
+export interface RuntimeVarSourceRecord {
+  source: RuntimeVarSourceKind;
+  envName?: string;
+  inheritedFromRunId?: string;
+  redacted?: boolean;
+}
+
 export interface RunResetSeed {
   backend: string;
   model: string | null;
@@ -78,11 +87,13 @@ export interface RunResetSeed {
   note: string | null;
   pinned: boolean;
   dependencyRunIds: string[];
+  parentRunId: string | null;
   unrestricted: boolean;
   timeoutSec: number;
   maxAttempts: number;
   brief: string;
   runtimeVars: Record<string, unknown>;
+  runtimeVarSources: Record<string, RuntimeVarSourceRecord>;
   hookState: Record<string, unknown>;
   attachments: RunAttachment[];
   finalTasks: Record<string, TaskSnapshot>;
@@ -195,6 +206,7 @@ export interface RunManifest {
   archivedAt: string | null;
   status: ManifestStatus;
   dependencyRunIds: string[];
+  parentRunId: string | null;
   exitCode: number | null;
   attempts: number;
   maxAttempts: number;
@@ -202,6 +214,7 @@ export interface RunManifest {
   tasksTotal: number;
   backendSessionId: string | null;
   runtimeVars: Record<string, unknown>;
+  runtimeVarSources: Record<string, RuntimeVarSourceRecord>;
   execution: RunExecution;
   brief: string;
   resolvedHooks: ResolvedHookDescriptor[];
@@ -251,6 +264,16 @@ function cloneTaskSnapshots(tasks: Record<string, TaskSnapshot>): Record<string,
   return out;
 }
 
+export function cloneRuntimeVarSources(
+  runtimeVarSources: Record<string, RuntimeVarSourceRecord>,
+): Record<string, RuntimeVarSourceRecord> {
+  const out: Record<string, RuntimeVarSourceRecord> = {};
+  for (const [key, source] of Object.entries(runtimeVarSources)) {
+    out[key] = { ...source };
+  }
+  return out;
+}
+
 export function buildRunResetSeed(seed: RunResetSeed): RunResetSeed {
   return {
     ...seed,
@@ -258,7 +281,9 @@ export function buildRunResetSeed(seed: RunResetSeed): RunResetSeed {
     launcher: cloneResolvedLauncherConfig(seed.launcher),
     lockedFields: [...seed.lockedFields],
     dependencyRunIds: [...seed.dependencyRunIds],
+    parentRunId: seed.parentRunId,
     runtimeVars: { ...seed.runtimeVars },
+    runtimeVarSources: cloneRuntimeVarSources(seed.runtimeVarSources),
     hookState: { ...seed.hookState },
     attachments: seed.attachments.map((attachment) => ({ ...attachment })),
     finalTasks: cloneTaskSnapshots(seed.finalTasks),
@@ -279,6 +304,7 @@ export function applyRunResetSeed(manifest: RunManifest): void {
   manifest.note = seed.note;
   manifest.pinned = seed.pinned;
   manifest.dependencyRunIds = [...seed.dependencyRunIds];
+  manifest.parentRunId = seed.parentRunId;
   manifest.unrestricted = seed.unrestricted;
   manifest.timeoutSec = seed.timeoutSec;
   manifest.maxAttempts = seed.maxAttempts;
@@ -289,6 +315,7 @@ export function applyRunResetSeed(manifest: RunManifest): void {
   manifest.backendSessionId = null;
   manifest.brief = seed.brief;
   manifest.runtimeVars = { ...seed.runtimeVars };
+  manifest.runtimeVarSources = cloneRuntimeVarSources(seed.runtimeVarSources);
   manifest.hookState = { ...seed.hookState };
   manifest.attachments = seed.attachments.map((attachment) => ({ ...attachment }));
   manifest.finalTasks = cloneTaskSnapshots(seed.finalTasks);
@@ -358,6 +385,12 @@ function normalizeRunManifest(
     archivedAt?: string | null;
     note?: string | null;
     pinned?: boolean;
+    parentRunId?: string | null;
+    runtimeVarSources?: Record<string, RuntimeVarSourceRecord>;
+    resetSeed: RunManifest["resetSeed"] & {
+      parentRunId?: string | null;
+      runtimeVarSources?: Record<string, RuntimeVarSourceRecord>;
+    };
   },
 ): RunManifest {
   return {
@@ -366,11 +399,17 @@ function normalizeRunManifest(
     archivedAt: parsed.archivedAt ?? null,
     note: parsed.note ?? null,
     pinned: parsed.pinned ?? false,
+    parentRunId: parsed.parentRunId ?? null,
+    runtimeVarSources: cloneRuntimeVarSources(parsed.runtimeVarSources ?? {}),
     resetSeed: {
       ...parsed.resetSeed,
       launcher: cloneResolvedLauncherConfig(parsed.resetSeed.launcher),
       note: parsed.resetSeed.note ?? parsed.note ?? null,
       pinned: parsed.resetSeed.pinned ?? parsed.pinned ?? false,
+      parentRunId: parsed.resetSeed.parentRunId ?? parsed.parentRunId ?? null,
+      runtimeVarSources: cloneRuntimeVarSources(
+        parsed.resetSeed.runtimeVarSources ?? parsed.runtimeVarSources ?? {},
+      ),
     },
   };
 }
@@ -573,6 +612,13 @@ function isRunManifest(value: unknown): value is RunManifest {
     return false;
   }
   if (
+    obj.parentRunId !== undefined &&
+    obj.parentRunId !== null &&
+    typeof obj.parentRunId !== "string"
+  ) {
+    return false;
+  }
+  if (
     obj.archivedAt !== undefined &&
     obj.archivedAt !== null &&
     typeof obj.archivedAt !== "string"
@@ -620,6 +666,12 @@ function isRunManifest(value: unknown): value is RunManifest {
   // so these need explicit null rejection.
   if (!obj.finalTasks || typeof obj.finalTasks !== "object") return false;
   if (!obj.runtimeVars || typeof obj.runtimeVars !== "object") return false;
+  if (
+    obj.runtimeVarSources !== undefined &&
+    (!obj.runtimeVarSources || typeof obj.runtimeVarSources !== "object")
+  ) {
+    return false;
+  }
   if (!obj.hookState || typeof obj.hookState !== "object") return false;
   if (!obj.resetSeed || typeof obj.resetSeed !== "object") return false;
   if (!obj.execution || typeof obj.execution !== "object") return false;
@@ -657,11 +709,24 @@ function isRunManifest(value: unknown): value is RunManifest {
   ) {
     return false;
   }
+  if (
+    resetSeed.parentRunId !== undefined &&
+    resetSeed.parentRunId !== null &&
+    typeof resetSeed.parentRunId !== "string"
+  ) {
+    return false;
+  }
   if (typeof resetSeed.unrestricted !== "boolean") return false;
   if (typeof resetSeed.timeoutSec !== "number") return false;
   if (typeof resetSeed.maxAttempts !== "number") return false;
   if (typeof resetSeed.brief !== "string") return false;
   if (!resetSeed.runtimeVars || typeof resetSeed.runtimeVars !== "object") return false;
+  if (
+    resetSeed.runtimeVarSources !== undefined &&
+    (!resetSeed.runtimeVarSources || typeof resetSeed.runtimeVarSources !== "object")
+  ) {
+    return false;
+  }
   if (!resetSeed.hookState || typeof resetSeed.hookState !== "object") return false;
   if (!Array.isArray(resetSeed.attachments)) return false;
   if (!resetSeed.finalTasks || typeof resetSeed.finalTasks !== "object") return false;

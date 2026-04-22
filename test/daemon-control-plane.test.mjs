@@ -77,7 +77,7 @@ function writeLauncher(baseDir, name, body, ext = ".yaml") {
   writeFileSync(join(dir, `${name}${ext}`), body);
 }
 
-async function initRun(baseDir, agentName = "daemon-agent") {
+async function initRun(baseDir, agentName = "daemon-agent", options = {}) {
   return withEnv(sharedRuntimeEnv(baseDir), async () => {
     const loaded = loadAgentConfig(agentName, baseDir);
     const loadedAssignment = loadAssignmentConfig("daemon-work", baseDir);
@@ -88,6 +88,7 @@ async function initRun(baseDir, agentName = "daemon-agent") {
         loaded,
         loadedAssignment,
         cliVars: {},
+        parentRunId: options.parentRunId ?? null,
         backend: {
           id: loaded.config.backend,
           async invoke() {
@@ -563,6 +564,7 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
   writeAgent(dir, "passive-daemon-agent", PASSIVE_AGENT);
   writeAssignment(dir, "daemon-work", ASSIGNMENT);
   const init = await initRun(dir);
+  const child = await initRun(dir, "daemon-agent", { parentRunId: init.runId });
   const passiveInit = await initRun(dir, "passive-daemon-agent");
   const otherCwd = join(dir, "other-cwd");
   mkdirSync(otherCwd, { recursive: true });
@@ -583,6 +585,7 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
       const runs = await client.call("runs.list", {});
       assert.ok(runs.runs.some((run) => run.runId === init.runId));
       assert.ok(runs.runs.some((run) => run.runId === passiveInit.runId));
+      assert.equal(runs.runs.find((run) => run.runId === child.runId)?.parentRunId, init.runId);
 
       const cwdScoped = await client.call("runs.list", {
         scope: { kind: "cwd", cwd: otherCwd },
@@ -637,6 +640,9 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
       assert.equal(detail.run.capabilities.abortReason, "not_active_in_daemon");
       assert.equal(detail.run.capabilities.canReady, true);
       assert.equal(detail.run.capabilities.canResume, false);
+
+      const childDetail = await client.call("runs.get", { target: child.runId });
+      assert.equal(childDetail.run.parentRunId, init.runId);
 
       const dependency = await initRun(dir);
       const addedDependency = await client.call("runs.addDependency", {
@@ -845,6 +851,7 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
   writeAgent(dir, "passive-daemon-agent", PASSIVE_AGENT);
   writeAssignment(dir, "daemon-work", ASSIGNMENT);
   const init = await initRun(dir);
+  const child = await initRun(dir, "daemon-agent", { parentRunId: init.runId });
   const passiveInit = await initRun(dir, "passive-daemon-agent");
 
   const port = await freePort();
@@ -878,6 +885,10 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
       });
       assert.equal(initSummary?.capabilities.canAbort, false);
       assert.equal(initSummary?.capabilities.abortReason, "not_active_in_daemon");
+      assert.equal(
+        runs.body.runs.find((run) => run.runId === child.runId)?.parentRunId,
+        init.runId,
+      );
 
       const detail = await httpJson(httpBaseUrl, `/api/runs/${init.runId}`);
       assert.equal(detail.status, 200);
@@ -895,6 +906,10 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
       });
       assert.equal(detail.body.run.capabilities.canAbort, false);
       assert.equal(detail.body.run.capabilities.abortReason, "not_active_in_daemon");
+
+      const childDetail = await httpJson(httpBaseUrl, `/api/runs/${child.runId}`);
+      assert.equal(childDetail.status, 200);
+      assert.equal(childDetail.body.run.parentRunId, init.runId);
 
       const dependency = await initRun(dir);
       const addedDependency = await httpJson(httpBaseUrl, `/api/runs/${init.runId}/dependencies`, {

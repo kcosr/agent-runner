@@ -61,6 +61,9 @@ export function renderRunStatus(detail: RunDetail): string {
   if (detail.backendSessionId) {
     lines.push(`Backend session: ${detail.backendSessionId}`);
   }
+  if (detail.parentRunId) {
+    lines.push(`Parent run: ${detail.parentRunId}`);
+  }
   lines.push(`Repo: ${detail.repo}`);
   lines.push(`Cwd: ${detail.cwd}`);
   lines.push(`Workspace: ${detail.workspaceDir}`);

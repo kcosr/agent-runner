@@ -1,6 +1,29 @@
 ---
 schemaVersion: 1
 name: implement-<<KEBAB_FEATURE_SLUG>>
+cwd: "{{worktree_path}}"
+vars:
+  repo_root:
+    type: string
+    required: true
+    sources: [parent]
+  worktree_slug:
+    type: string
+    required: true
+    sources: [parent]
+  worktree_path:
+    type: string
+    required: true
+    sources: [parent]
+hooks:
+  prepare:
+    - builtin: git-worktree
+      with:
+        repo: "{{repo_root}}"
+        from: main
+        branch: "{{worktree_slug}}"
+        path: "{{worktree_path}}"
+        collision: reuse
 maxRetries: 4
 lockedFields:
   - tasks
@@ -376,6 +399,12 @@ tasks:
       reviewer at this plan so it can cross-check that
       every planned task actually shipped — that is what
       the reviewer's plan-coverage task consumes.
+
+      Keep `--cwd {{cwd}}` on the nested review command. This run's
+      authored `cwd` already resolves from the inherited
+      `worktree_path`, so the reviewer stays in the same sibling
+      worktree without recomputing the path or manually re-passing
+      lineage vars.
 
       Use the same short topic label the caller used when they
       initialized this run:

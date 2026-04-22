@@ -109,6 +109,7 @@ export interface StartRunRequest {
   assignment?: string;
   definitionCwd?: string;
   callerCwd?: string;
+  parentRunId?: string | null;
   backendSessionId?: string;
   cliVars: Record<string, string>;
   overrides: RunCommandOverrides;
@@ -120,6 +121,7 @@ export interface StartRunRequest {
 
 export interface ResumeRunRequest {
   target: string;
+  parentRunId?: string | null;
   overrides: RunCommandOverrides;
   execution?: RunExecution;
   abortSignal?: AbortSignal;
@@ -472,6 +474,7 @@ export async function initRun(request: StartRunRequest): Promise<RunDetail> {
     assignment: request.assignment,
     definitionCwd: request.definitionCwd,
     callerCwd: request.callerCwd,
+    parentRunId: request.parentRunId,
     backendSessionId: request.backendSessionId,
     cliVars: request.cliVars,
     overrides: request.overrides,
@@ -490,6 +493,7 @@ export function startRun(request: StartRunRequest): Promise<RunOutcome> {
     assignment: request.assignment,
     definitionCwd: request.definitionCwd,
     callerCwd: request.callerCwd,
+    parentRunId: request.parentRunId,
     backendSessionId: request.backendSessionId,
     cliVars: request.cliVars,
     overrides: request.overrides,
@@ -505,6 +509,7 @@ export function resumeRun(request: ResumeRunRequest): Promise<RunOutcome> {
     initialize: false,
     resumeRun: request.target,
     cliVars: {},
+    parentRunId: request.parentRunId,
     overrides: request.overrides,
     execution: request.execution,
     abortSignal: request.abortSignal,

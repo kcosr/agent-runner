@@ -164,7 +164,7 @@ callerInstructions: |               # optional; not sent to backend
 vars:                               # optional variable schema
   range:
     type: string
-    source: cli
+    sources: [cli]
     default: full
 tasks:                              # optional, max 100, ids unique
   - id: orient
@@ -197,6 +197,12 @@ Task definitions must match:
 Everything after the frontmatter is the assignment instructions. The body
 is interpolated against resolved variables and frozen into the composed
 brief at run creation.
+
+Variable authoring is order-preserving. Use `sources: [...]` to declare
+explicit precedence across `cli`, `env`, and `parent`. Nested runs
+launched from a worker automatically carry `parentRunId`, so descendant
+assignments can inherit values such as `worktree_path` from the nearest
+ancestor without manual `--var` handoff.
 
 Assignments are markdown definitions, not a live workspace surface. Task
 state is canonical in the run manifest — not in the assignment file.

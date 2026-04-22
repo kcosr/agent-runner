@@ -108,6 +108,9 @@ Notable feature uses:
 - **Attachment coupling**: approved draft (`assignment-seed.md`) and
   summary are attached to the planning run and later discovered by
   implementation via `attachment list --cwd-scope`.
+- **Lineage-backed inheritance**: planner-created child runs auto-link to
+  the planning run and can inherit vars such as `worktree_path` through
+  `sources: [parent]` instead of repeating `--var`.
 - **Approval-gated delayed creation**: the planning run prepares the
   draft/summary/handoff first, then blocks on
   `create_implementer_run_after_approval` until the caller resumes the
@@ -133,7 +136,8 @@ task graph structure, task-id/verifiability, and workflow wiring.
 Produces a synthesis and an explicit approval decision in the
 `approval` task — exit code 0 signals approval, exit code 2 signals
 blocked. On resume, performs a delta-focused re-review rather than a
-full re-walk.
+full re-walk. Review checks now also cover the `sources` var model and
+descendant worktree inheritance wiring.
 
 ### `code-review`
 

@@ -15,17 +15,17 @@ name: code-review
 vars:
   range:
     type: string
-    source: cli
+    sources: [cli]
     default: full
     description: Git range to review (e.g. main..HEAD)
   implementation_run_id:
     type: string
-    source: cli
+    sources: [cli]
     required: true
   log_level:
     type: enum
     values: [debug, info, warn]
-    source: either
+    sources: [parent, env]
     envName: LOG_LEVEL
     default: info
 tasks: [...]
@@ -38,7 +38,8 @@ tasks: [...]
 {
   type?: "string" | "number" | "boolean" | "enum"   // default: "string"
   required?: boolean                                 // default: false
-  source?: "cli" | "env" | "either"                  // default: "cli"
+  requiredAt?: "initial" | "prepare"                 // default: "initial"
+  sources?: ("cli" | "env" | "parent")[]             // default: ["cli"]
   envName?: string                                   // default: same as key
   default?: unknown                                  // must match type
   description?: string
@@ -48,17 +49,35 @@ tasks: [...]
 
 ## Resolution at run creation
 
-For each declared variable, task-runner resolves a value in the following
-order:
+For each declared variable, task-runner walks the authored `sources` array
+from left to right:
 
-1. If `source` is `cli` or `either` and `--var key=value` was provided on
-   the CLI, use the CLI value.
-2. Otherwise, if `source` is `env` or `either` and an env var named
-   `envName` (or the var key, if `envName` is absent) is set, use the env
-   value.
-3. Otherwise, if `default` is defined, use it.
-4. Otherwise, if `required: true`, the run errors at creation.
-5. Otherwise, the variable is omitted from the resolved var set.
+1. `cli` reads `--var key=value`.
+2. `env` reads `envName` (or the var key when `envName` is omitted).
+3. `parent` walks the declared `parentRunId` chain and picks the nearest
+   ancestor run that already froze that variable.
+
+If every authored source fails, task-runner then applies `default`, then
+`required`, and otherwise omits the variable.
+
+`parent` is a hot-cut source, not a fallback heuristic. Nested
+`task-runner` invocations launched from a worker automatically receive
+`TASK_RUNNER_PARENT_RUN_ID`, so descendant runs can inherit parent vars
+without repeating `--var` flags.
+
+Prepare hooks run after the initial resolution pass and can add or mutate
+runtime vars such as `worktree_path`. Fresh-run interpolation is then
+recomputed against the final runtime namespace so descendant assignments
+can author patterns like:
+
+```yaml
+cwd: "{{worktree_path}}"
+vars:
+  worktree_path:
+    type: string
+    required: true
+    sources: [parent]
+```
 
 ## Type coercion
 
@@ -144,21 +163,31 @@ Values are stringified with `String(value)` before substitution.
 
 ## Persistence and redaction
 
-Resolved variables are frozen into `manifest.runtimeVars`. Env-sourced
-values are redacted to avoid persisting secrets:
+Resolved variables are frozen into `manifest.runtimeVars`, and their
+provenance is frozen into `manifest.runtimeVarSources`.
+
+The manifest persists the concrete resolved value, including inherited
+values, so descendants can keep resolving from frozen lineage state. CLI,
+daemon, and web read surfaces redact env-backed values at projection time:
 
 ```json
 "runtimeVars": {
   "range": "main..HEAD",
+  "log_level": "info"
+},
+"runtimeVarSources": {
+  "range": { "source": "cli" },
   "log_level": {
+    "source": "parent",
+    "envName": "LOG_LEVEL",
     "redacted": true,
-    "source": "env",
-    "envName": "LOG_LEVEL"
+    "inheritedFromRunId": "abc123"
   }
 }
 ```
 
-CLI- and default-sourced values persist their concrete value.
+Projected `RunDetail.runtimeVars` still redacts env-derived or
+inherited-env-derived values for humans.
 
 ## Resume and variables
 
@@ -178,6 +207,11 @@ task-runner run \
 
 `--var` is repeatable. Values are split on the first `=`, so
 `--var message=key=value` yields `message=key=value`.
+
+Nested descendant runs usually should not repeat parent-owned vars
+manually. Prefer assignment schemas that declare `sources: [parent]` or
+`sources: [parent, env]` and let lineage resolution reuse the frozen
+parent values.
 
 ## Inspecting resolved variables
 

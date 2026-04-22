@@ -8,7 +8,11 @@ import {
   removeAttachmentFiles,
   stageAttachmentFromFile,
 } from "../run/attachments.js";
-import type { RunManifest } from "../run/manifest.js";
+import {
+  type RunManifest,
+  type RuntimeVarSourceRecord,
+  cloneRuntimeVarSources,
+} from "../run/manifest.js";
 import {
   type RunEventWriteContext,
   appendRunHookRecordedEvent,
@@ -256,6 +260,15 @@ async function applyMutations(
     state.manifest.runtimeVars = {
       ...state.manifest.runtimeVars,
       ...mutate.vars,
+    };
+    state.manifest.runtimeVarSources = {
+      ...state.manifest.runtimeVarSources,
+      ...Object.fromEntries(
+        Object.keys(mutate.vars).map((key) => [
+          key,
+          { source: "hook" } satisfies RuntimeVarSourceRecord,
+        ]),
+      ),
     };
   }
 
@@ -653,6 +666,7 @@ export function cloneHookExecutionState(state: HookExecutionState): HookExecutio
       lockedFields: [...state.manifest.lockedFields],
       dependencyRunIds: [...state.manifest.dependencyRunIds],
       runtimeVars: { ...state.manifest.runtimeVars },
+      runtimeVarSources: cloneRuntimeVarSources(state.manifest.runtimeVarSources),
       hookState: { ...state.manifest.hookState },
       attachments: state.manifest.attachments.map((attachment) => ({ ...attachment })),
       finalTasks: { ...state.manifest.finalTasks },

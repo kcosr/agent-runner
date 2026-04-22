@@ -9,8 +9,10 @@ import {
   RecursionDepthError,
   TASK_RUNNER_CALL_DEPTH_ENV,
   TASK_RUNNER_MAX_CALL_DEPTH_ENV,
+  TASK_RUNNER_PARENT_RUN_ID_ENV,
   buildChildRecursionEnv,
   checkRecursionDepth,
+  readParentRunIdFromEnv,
   readRecursionState,
 } from "../packages/core/dist/core/run/recursion-guard.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
@@ -83,6 +85,20 @@ test("buildChildRecursionEnv: increments depth, propagates max", () => {
 test("buildChildRecursionEnv: starts a fresh chain at depth 1", () => {
   const env = buildChildRecursionEnv({ currentDepth: 0, maxDepth: 4 });
   assert.equal(env[TASK_RUNNER_CALL_DEPTH_ENV], "1");
+});
+
+test("readParentRunIdFromEnv: trims and normalizes the lineage parent env", () => {
+  assert.equal(
+    readParentRunIdFromEnv({ [TASK_RUNNER_PARENT_RUN_ID_ENV]: " parent-1 " }),
+    "parent-1",
+  );
+  assert.equal(readParentRunIdFromEnv({ [TASK_RUNNER_PARENT_RUN_ID_ENV]: "   " }), null);
+});
+
+test("buildChildRecursionEnv: includes the parent run id when provided", () => {
+  const env = buildChildRecursionEnv({ currentDepth: 1, maxDepth: 4 }, "run-parent");
+  assert.equal(env[TASK_RUNNER_CALL_DEPTH_ENV], "2");
+  assert.equal(env[TASK_RUNNER_PARENT_RUN_ID_ENV], "run-parent");
 });
 
 // ─── runAgent integration tests ─────────────────────────────────────────────
@@ -214,11 +230,30 @@ test("runAgent: clean env → child env has depth=1", async () => {
       [TASK_RUNNER_MAX_CALL_DEPTH_ENV]: undefined,
     },
     async () => {
-      await runIn(dir, { backend: captureBackend(captured) });
+      const outcome = await runIn(dir, { backend: captureBackend(captured) });
+      assert.equal(captured.env[TASK_RUNNER_PARENT_RUN_ID_ENV], outcome.runId);
     },
   );
   assert.equal(captured.env[TASK_RUNNER_CALL_DEPTH_ENV], "1");
   assert.equal(captured.env[TASK_RUNNER_MAX_CALL_DEPTH_ENV], String(DEFAULT_MAX_CALL_DEPTH));
+});
+
+test("runAgent: nested launches auto-link parentRunId from env into the child manifest", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "depth-agent", DEPTH_AGENT);
+  writeAssignment(dir, "depth-work", DEPTH_ASSIGNMENT);
+  const parent = await runIn(dir, { backend: captureBackend({}) });
+
+  await withEnv(
+    {
+      [TASK_RUNNER_PARENT_RUN_ID_ENV]: parent.runId,
+    },
+    async () => {
+      const outcome = await runIn(dir, { backend: captureBackend({}) });
+      assert.equal(outcome.manifest.parentRunId, parent.runId);
+      assert.equal(outcome.manifest.resetSeed.parentRunId, parent.runId);
+    },
+  );
 });
 
 test("runAgent: depth=2 in env → child env has depth=3", async () => {

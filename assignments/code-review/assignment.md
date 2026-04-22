@@ -2,10 +2,31 @@
 schemaVersion: 1
 name: code-review
 vars:
+  repo_root:
+    type: string
+    required: false
+    sources: [parent]
+    description: |
+      Optional inherited repo root from the parent implementation
+      run when this review is launched by a lineage-aware plan.
+  worktree_slug:
+    type: string
+    required: false
+    sources: [parent]
+    description: |
+      Optional inherited worktree slug from the parent
+      implementation run when present.
+  worktree_path:
+    type: string
+    required: false
+    sources: [parent]
+    description: |
+      Optional inherited worktree path from the parent
+      implementation run when present.
   range:
     type: string
     required: false
-    source: cli
+    sources: [cli]
     default: full
     description: |
       What scope to review. One of:
@@ -19,7 +40,7 @@ vars:
   implementation_run_id:
     type: string
     required: true
-    source: cli
+    sources: [cli]
     description: |
       Canonical task-runner run id for the implementation run
       being reviewed. The reviewer reads the implementation run's
@@ -56,6 +77,12 @@ callerInstructions: |
   Silent deferrals and dropped review fixes are flagged at
   HIGH/CRITICAL severity, and any unresolved HIGH/CRITICAL from
   the plan-coverage pass blocks `approval`.
+
+  When this run is launched from a lineage-aware implementation
+  plan, `repo_root`, `worktree_slug`, and `worktree_path` may be
+  inherited automatically from the parent run. The bundled
+  implementation workflow also passes `--cwd {{cwd}}` so git
+  inspection stays rooted in the same sibling worktree.
 
   ## Reviewing findings
 

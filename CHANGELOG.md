@@ -122,6 +122,18 @@
 
 ### Changed
 
+- Assignment vars now use ordered `sources` (`cli`, `env`, `parent`)
+  instead of the old singular source contract, nested runs freeze
+  `parentRunId` for lineage-based inheritance, and run summaries/details
+  surface parent-run linkage while keeping env-backed vars redacted at
+  read time.
+- Changed the bundled planning workflow so `plan-feature` now requires
+  `--var worktree_slug=...`, freezes `repo_root` plus a derived sibling
+  `worktree_path` during planning, generates implementer drafts that
+  inherit those vars through `sources: [parent]`, and keeps nested
+  code-review runs in the same worktree cwd without manual var
+  repetition. ([#80](https://github.com/kcosr/task-runner/pull/80))
+
 - Changed daemon-managed ready-run scheduling so dependency-bearing runs
   auto-start once every dependency run is successful, including
   ready-time checks and daemon startup/rebuild sweeps after restarts.
