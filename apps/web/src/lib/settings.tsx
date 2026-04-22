@@ -112,7 +112,11 @@ const VIEW_STATE_STORAGE_KEY = "task-runner:web:dashboard-view-state";
 
 interface DashboardPreferencesContextValue {
   preferences: DashboardPreferences;
-  updatePreferences: (updates: Partial<DashboardPreferences>) => void;
+  updatePreferences: (
+    updates:
+      | Partial<DashboardPreferences>
+      | ((current: DashboardPreferences) => Partial<DashboardPreferences>),
+  ) => void;
   resetPreferences: () => void;
   resetPreference: (key: DashboardPreferenceKey) => void;
 }
@@ -288,7 +292,10 @@ export function DashboardSettingsProvider({ children }: { children: ReactNode })
     () => ({
       preferences,
       updatePreferences: (updates) => {
-        setPreferences((current) => ({ ...current, ...updates }));
+        setPreferences((current) => ({
+          ...current,
+          ...(typeof updates === "function" ? updates(current) : updates),
+        }));
       },
       resetPreferences: () => {
         setPreferences(DEFAULT_DASHBOARD_PREFERENCES);

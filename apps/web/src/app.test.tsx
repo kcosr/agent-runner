@@ -2526,6 +2526,81 @@ describe("web app", () => {
     expect(screen.getByRole("combobox", { name: "Repo" })).toHaveValue("repo-a");
   });
 
+  it("uses bare-board Escape as a final fallback to clear only structured filters", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "run-a",
+          repo: "repo-a",
+          agentName: "implementer",
+          backend: "codex",
+          assignmentName: "Repo A pinned",
+          name: "Repo A pinned",
+          pinned: true,
+        }),
+        makeRun({
+          runId: "run-b",
+          repo: "repo-b",
+          agentName: "reviewer",
+          backend: "claude",
+          assignmentName: "Repo B unpinned",
+          name: "Repo B unpinned",
+          pinned: false,
+        }),
+        makeRun({
+          runId: "run-c",
+          repo: "repo-c",
+          agentName: "reviewer",
+          backend: "passive",
+          assignmentName: "Repo C pinned",
+          name: "Repo C pinned",
+          pinned: true,
+        }),
+      ],
+      details: {},
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await findRunCard("Repo A pinned");
+
+    await openFilters(user);
+    await user.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "repo-a");
+    await user.keyboard("{Control>}{Shift>}f{/Shift}{/Control}");
+    expect(screen.queryByRole("dialog", { name: "Filters" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /show pinned runs only/i }));
+    await user.type(screen.getByPlaceholderText("Search runs"), "Repo");
+
+    expect(await findRunCard("Repo A pinned")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Repo B unpinned/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Repo C pinned/i })).not.toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    expect(screen.getByPlaceholderText("Search runs")).toHaveValue("");
+    expect(document.activeElement).toBe(screen.getByPlaceholderText("Search runs"));
+    expect(screen.queryByRole("button", { name: /Repo C pinned/i })).not.toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    expect(document.activeElement).not.toBe(screen.getByPlaceholderText("Search runs"));
+    expect(screen.queryByRole("button", { name: /Repo C pinned/i })).not.toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    expect(await findRunCard("Repo A pinned")).toBeInTheDocument();
+    expect(await findRunCard("Repo C pinned")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Repo B unpinned/i })).not.toBeInTheDocument();
+
+    const stored = window.localStorage.getItem("task-runner:web:dashboard-preferences");
+    expect(stored ? JSON.parse(stored) : null).toMatchObject({
+      showPinnedOnly: true,
+      structuredFilters: {
+        repo: null,
+        agent: null,
+        backend: null,
+        family: null,
+      },
+    });
+  });
+
   it("applies and clears structured filters from run-card badges without breaking card selection", async () => {
     installFetchMock({
       runs: [
@@ -2611,7 +2686,7 @@ describe("web app", () => {
     expect(screen.getByLabelText("Run detail")).toBeInTheDocument();
   });
 
-  it("renders Family chips for roots and descendants and persists/clears the family filter", async () => {
+  it("renders family toggles in the card header and reapplies after clearing from filters", async () => {
     const familyRuns = [
       makeRun({
         runId: "run-root",
@@ -2686,6 +2761,14 @@ describe("web app", () => {
     await user.click(screen.getByRole("button", { name: "Clear" }));
 
     expect(await findRunCard("Outside run")).toBeInTheDocument();
+
+    await user.click(
+      within(await findRunCard("Family child")).getByLabelText("Filter by family run-root"),
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: /Outside run/i })).not.toBeInTheDocument();
+    });
   });
 
   it("composes the family filter with search, pinned, notes, and archived dashboard filters", async () => {

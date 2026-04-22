@@ -1231,6 +1231,11 @@ export function useRunsDashboardState() {
         structuredFilters: EMPTY_DASHBOARD_STRUCTURED_FILTERS,
       });
     },
+    clearStructuredFilters: () => {
+      updatePreferences({
+        structuredFilters: EMPTY_DASHBOARD_STRUCTURED_FILTERS,
+      });
+    },
     setActiveBoardColumnKey: (columnKey: string | null) => {
       if (viewState.activeBoardColumnKey === columnKey) {
         return;
@@ -1252,13 +1257,9 @@ export function useRunsDashboardState() {
       });
     },
     toggleStructuredFilter: (key: keyof DashboardStructuredFilters, value: string) => {
-      updatePreferences({
-        structuredFilters: toggleDashboardStructuredFilter(
-          preferences.structuredFilters,
-          key,
-          value,
-        ),
-      });
+      updatePreferences((current) => ({
+        structuredFilters: toggleDashboardStructuredFilter(current.structuredFilters, key, value),
+      }));
     },
     updatePreferences,
     updateViewState,

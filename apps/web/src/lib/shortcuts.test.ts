@@ -110,6 +110,7 @@ describe("resolveRunsShortcutCommand", () => {
     activeBoardColumnKey: "running",
     boardColumns: makeBoardColumns(),
     drawerFullscreen: false,
+    hasActiveStructuredFilters: false,
     modalOpen: false,
     resumeDialogOpen: false,
     searchFocused: false,
@@ -374,6 +375,25 @@ describe("resolveRunsShortcutCommand", () => {
         },
       ),
     ).toBe("ui.blurSearch");
+  });
+
+  it("uses bare-board Escape as a final fallback to clear active structured filters", () => {
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "Escape",
+          metaKey: false,
+          shiftKey: false,
+        },
+        {
+          ...context,
+          hasActiveStructuredFilters: true,
+          selectedRunId: undefined,
+        },
+      ),
+    ).toBe("ui.clearStructuredFilters");
   });
 
   it("blurs a focused search on Enter without triggering run actions", () => {

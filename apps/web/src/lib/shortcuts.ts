@@ -16,6 +16,7 @@ export type RunsShortcutCommand =
   | "ui.toggleFilters"
   | "ui.toggleDrawerFullscreen"
   | "ui.blurSearch"
+  | "ui.clearStructuredFilters"
   | "run.close"
   | "run.closeAttachmentPreview"
   | "run.primaryAction"
@@ -38,6 +39,7 @@ export interface RunsShortcutContext {
   activeBoardColumnKey: string | null;
   boardColumns: BoardColumn[];
   drawerFullscreen: boolean;
+  hasActiveStructuredFilters: boolean;
   modalOpen: boolean;
   selectedRunPrimaryActionAvailable: boolean;
   resumeDialogOpen: boolean;
@@ -250,6 +252,12 @@ export function resolveRunsShortcutCommand(
     }
     if (context.selectedRunId) {
       return "run.close";
+    }
+    if (context.modalOpen) {
+      return null;
+    }
+    if (context.hasActiveStructuredFilters) {
+      return "ui.clearStructuredFilters";
     }
     return null;
   }

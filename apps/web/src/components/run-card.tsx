@@ -13,6 +13,7 @@ import {
   AttachmentIcon,
   CloseIcon,
   DependencyIcon,
+  GroupIcon,
   NotepadTextIcon,
   PinIcon,
   RunningIcon,
@@ -387,8 +388,20 @@ export function RunCard({
         type="button"
       >
         <div className="card-header-block">
-          <div className="card-row">
+          <div className="card-row card-row--header">
             <span className="run-id">{run.runId}</span>
+            {run.familyRootRunId !== null ? (
+              <span
+                aria-label={`Filter by family ${run.familyRootRunId}`}
+                className="card-family-filter"
+                data-active-filter={familyFilterActive ? "true" : undefined}
+                data-structured-filter-key="family"
+                data-structured-filter-value={run.familyRootRunId}
+                title={`Filter by run family ${run.familyRootRunId}`}
+              >
+                <GroupIcon aria-hidden="true" />
+              </span>
+            ) : null}
             <span className="card-row-spacer" />
             <StatusBadge status={run.effectiveStatus} />
           </div>
@@ -426,17 +439,6 @@ export function RunCard({
             >
               {run.backend}
             </span>
-            {run.familyRootRunId !== null ? (
-              <span
-                aria-label={`Filter by family ${run.familyRootRunId}`}
-                className="family-badge meta-filter-badge meta-filter-badge--family"
-                data-active-filter={familyFilterActive ? "true" : undefined}
-                data-structured-filter-key="family"
-                data-structured-filter-value={run.familyRootRunId}
-              >
-                Family
-              </span>
-            ) : null}
             {showDependencyIndicator ? (
               <span
                 aria-label={`${run.dependencyState.satisfied} of ${run.dependencyState.total} dependencies satisfied`}

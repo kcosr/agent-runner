@@ -91,6 +91,19 @@ function SettingsProbe() {
       <button onClick={() => resetPreferences()} type="button">
         Reset all preferences
       </button>
+      <button
+        onClick={() =>
+          updatePreferences((current) => ({
+            structuredFilters: {
+              ...current.structuredFilters,
+              family: current.structuredFilters.family === "run-root" ? null : "run-root",
+            },
+          }))
+        }
+        type="button"
+      >
+        Toggle family filter
+      </button>
     </div>
   );
 }
@@ -378,6 +391,20 @@ describe("DashboardSettingsProvider", () => {
           family: null,
         },
       }),
+    );
+  });
+
+  it("supports functional preference updates against the latest structured-filter state", () => {
+    renderSettingsProbe();
+
+    fireEvent.click(screen.getByRole("button", { name: "Toggle family filter" }));
+    expect(screen.getByTestId("preferences")).toHaveTextContent(
+      '"structuredFilters":{"repo":null,"agent":null,"backend":null,"family":"run-root"}',
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Toggle family filter" }));
+    expect(screen.getByTestId("preferences")).toHaveTextContent(
+      '"structuredFilters":{"repo":null,"agent":null,"backend":null,"family":null}',
     );
   });
 });
