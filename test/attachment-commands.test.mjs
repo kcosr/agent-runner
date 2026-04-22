@@ -254,6 +254,42 @@ test("attachment list falls back to target-only when the target family lineage i
   assert.doesNotMatch(familyText, new RegExp(`owner=${root.runId}`));
 });
 
+test("attachment list ignores unrelated broken lineages when resolving family scope", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const root = await initRun(dir);
+  const target = await initRun(dir, { parentRunId: root.runId });
+  const peer = await initRun(dir, { parentRunId: root.runId });
+  const unrelatedRoot = await initRun(dir);
+  const unrelatedChild = await initRun(dir, { parentRunId: unrelatedRoot.runId });
+  const targetFile = join(dir, "target.txt");
+  const peerFile = join(dir, "peer.txt");
+  const unrelatedFile = join(dir, "unrelated.txt");
+  writeFileSync(targetFile, "target\n");
+  writeFileSync(peerFile, "peer\n");
+  writeFileSync(unrelatedFile, "unrelated\n");
+
+  runCli(["attachment", "add", target.runId, targetFile], { cwd: dir });
+  runCli(["attachment", "add", peer.runId, peerFile], { cwd: dir });
+  runCli(["attachment", "add", unrelatedChild.runId, unrelatedFile], { cwd: dir });
+  patchManifest(unrelatedChild.workspaceDir, (manifest) => {
+    manifest.parentRunId = "missing-parent";
+  });
+
+  const family = JSON.parse(
+    runCli(["attachment", "list", target.runId, "--output-format", "json"], { cwd: dir }),
+  );
+  assert.deepEqual(
+    new Set(family.map((attachment) => attachment.ownerRunId)),
+    new Set([target.runId, peer.runId]),
+  );
+
+  const familyText = runCli(["attachment", "list", target.runId], { cwd: dir });
+  assert.match(familyText, new RegExp(`owner=${target.runId}`));
+  assert.match(familyText, new RegExp(`owner=${peer.runId}`));
+  assert.doesNotMatch(familyText, new RegExp(`owner=${unrelatedChild.runId}`));
+});
+
 test("attachment download rejects an existing destination path", async () => {
   const dir = tempDir();
   writeBundle(dir);

@@ -646,10 +646,17 @@ function parseRunListQuery(url: URL): RunsListParams {
   const cwd = url.searchParams.get("cwd");
   const repo = url.searchParams.get("repo");
   const global = parseBooleanQueryValue(url.searchParams.get("global"), "global");
-  const scopeCount = Number(cwd !== null) + Number(repo !== null) + Number(global === true);
+  const familyOf = url.searchParams.get("familyOf");
+  const scopeCount =
+    Number(cwd !== null) +
+    Number(repo !== null) +
+    Number(global === true) +
+    Number(familyOf !== null);
 
   if (scopeCount > 1) {
-    throw new RequestValidationError("runs.list accepts only one of cwd, repo, or global=true");
+    throw new RequestValidationError(
+      "runs.list accepts only one of cwd, repo, global=true, or familyOf",
+    );
   }
   if (cwd !== null) {
     return {
@@ -673,6 +680,15 @@ function parseRunListQuery(url: URL): RunsListParams {
     return {
       includeArchived,
       scope: { kind: "global" },
+    };
+  }
+  if (familyOf !== null) {
+    return {
+      includeArchived,
+      scope: {
+        kind: "family",
+        targetRunId: requiredRunIdString(familyOf, "familyOf"),
+      },
     };
   }
   return { includeArchived };

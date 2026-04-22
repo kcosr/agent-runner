@@ -26,6 +26,7 @@ export interface RunActiveTask {
 export interface RunSummary {
   runId: string;
   parentRunId: string | null;
+  familyRootRunId: string | null;
   repo: string;
   status: RunStatus;
   effectiveStatus: RunStatus;
@@ -297,12 +298,14 @@ export function toRunSummary(
     [entry.manifest.runId, entry.manifest],
   ]),
   dependencyState?: RunDependencyState,
+  familyRootRunId: string | null = null,
 ): RunSummary {
   const resolvedDependencyState =
     dependencyState ?? deriveDependencyState(entry.manifest, relatedManifests);
   return {
     runId: entry.manifest.runId,
     parentRunId: entry.manifest.parentRunId,
+    familyRootRunId,
     repo: entry.manifest.repo,
     status: entry.manifest.status,
     effectiveStatus: deriveEffectiveStatus(entry.manifest),

@@ -118,6 +118,7 @@ export function RunCard({
   const repoFilterActive = structuredFilters.repo === run.repo;
   const agentFilterActive = structuredFilters.agent === run.agentName;
   const backendFilterActive = structuredFilters.backend === run.backend;
+  const familyFilterActive = structuredFilters.family === run.familyRootRunId;
   const notePending = actionPending === "note";
   const pinPending = actionPending === "pin";
   const cardClassName = ["card", selected ? "selected" : null].filter(Boolean).join(" ");
@@ -425,6 +426,17 @@ export function RunCard({
             >
               {run.backend}
             </span>
+            {run.familyRootRunId !== null ? (
+              <span
+                aria-label={`Filter by family ${run.familyRootRunId}`}
+                className="family-badge meta-filter-badge meta-filter-badge--family"
+                data-active-filter={familyFilterActive ? "true" : undefined}
+                data-structured-filter-key="family"
+                data-structured-filter-value={run.familyRootRunId}
+              >
+                Family
+              </span>
+            ) : null}
             {showDependencyIndicator ? (
               <span
                 aria-label={`${run.dependencyState.satisfied} of ${run.dependencyState.total} dependencies satisfied`}

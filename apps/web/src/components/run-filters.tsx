@@ -144,6 +144,9 @@ export function RunFilters({
         ) : null}
         {preferences.showNotesOnly ? <span className="page-title-meta">notes only</span> : null}
         {preferences.showPinnedOnly ? <span className="page-title-meta">pinned only</span> : null}
+        {preferences.structuredFilters.family ? (
+          <span className="page-title-meta">family {preferences.structuredFilters.family}</span>
+        ) : null}
       </span>
       <span className="topbar-spacer" />
       <div className="toolbar-matrix">
@@ -203,6 +206,19 @@ export function RunFilters({
                 </div>
 
                 <div className="filters-panel__body">
+                  <div className="filters-panel__field">
+                    <div aria-hidden="true" className="field filters-panel__field-label">
+                      <span className="field-label">Family</span>
+                    </div>
+                    <label className="field filters-panel__field-control">
+                      <input
+                        aria-label="Family"
+                        readOnly
+                        value={preferences.structuredFilters.family ?? "Any"}
+                      />
+                    </label>
+                  </div>
+
                   <div className="filters-panel__field">
                     <div aria-hidden="true" className="field filters-panel__field-label">
                       <span className="field-label">Repo</span>

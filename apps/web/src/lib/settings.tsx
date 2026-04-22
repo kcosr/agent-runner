@@ -19,12 +19,14 @@ export interface DashboardStructuredFilters {
   repo: string | null;
   agent: string | null;
   backend: string | null;
+  family: string | null;
 }
 
 export const EMPTY_DASHBOARD_STRUCTURED_FILTERS: DashboardStructuredFilters = {
   repo: null,
   agent: null,
   backend: null,
+  family: null,
 };
 
 export type DrawerDetailSection =
@@ -212,6 +214,7 @@ function parseStoredStructuredFilters(value: unknown): DashboardStructuredFilter
     repo: parseStoredStructuredFilterValue(record.repo),
     agent: parseStoredStructuredFilterValue(record.agent),
     backend: parseStoredStructuredFilterValue(record.backend),
+    family: parseStoredStructuredFilterValue(record.family),
   };
 }
 
@@ -246,7 +249,8 @@ export function hasActiveDashboardStructuredFilters(
   return (
     structuredFilters.repo !== null ||
     structuredFilters.agent !== null ||
-    structuredFilters.backend !== null
+    structuredFilters.backend !== null ||
+    structuredFilters.family !== null
   );
 }
 

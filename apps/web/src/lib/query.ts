@@ -2,7 +2,9 @@ import { QueryClient } from "@tanstack/react-query";
 
 export const runQueryKeys = {
   all: ["runs"] as const,
-  list: () => [...runQueryKeys.all, "list"] as const,
+  lists: () => [...runQueryKeys.all, "list"] as const,
+  list: (familyRootRunId: string | null = null) =>
+    [...runQueryKeys.lists(), { familyRootRunId }] as const,
   detail: (runId: string) => [...runQueryKeys.all, "detail", runId] as const,
 };
 

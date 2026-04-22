@@ -430,7 +430,7 @@ export function parseRunListScope(value: unknown, label: string): RunListScopeFi
     return undefined;
   }
   const record = asRecord(value, label);
-  const kind = optionalEnum(record.kind, `${label}.kind`, ["cwd", "repo", "global"]);
+  const kind = optionalEnum(record.kind, `${label}.kind`, ["cwd", "repo", "global", "family"]);
   if (kind === undefined) {
     throw new RequestValidationError(`${label}.kind is required`);
   }
@@ -444,6 +444,12 @@ export function parseRunListScope(value: unknown, label: string): RunListScopeFi
     return {
       kind,
       repo: requiredString(record.repo, `${label}.repo`),
+    };
+  }
+  if (kind === "family") {
+    return {
+      kind,
+      targetRunId: requiredRunIdString(record.targetRunId, `${label}.targetRunId`),
     };
   }
   return { kind };

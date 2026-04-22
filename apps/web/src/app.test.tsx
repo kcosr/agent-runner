@@ -41,6 +41,7 @@ const DEFAULT_DASHBOARD_PREFERENCES = {
     repo: null,
     agent: null,
     backend: null,
+    family: null,
   },
 };
 
@@ -119,6 +120,7 @@ function makeRun(
   const base = {
     runId: "run-1",
     parentRunId: null,
+    familyRootRunId: null,
     repo: "task-runner",
     status: "running",
     effectiveStatus: "running",
@@ -2505,6 +2507,7 @@ describe("web app", () => {
         repo: "repo-a",
         agent: null,
         backend: null,
+        family: null,
       },
     });
 
@@ -2606,6 +2609,229 @@ describe("web app", () => {
     await user.click(filteredCard);
     expect(filteredCard).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByLabelText("Run detail")).toBeInTheDocument();
+  });
+
+  it("renders Family chips for roots and descendants and persists/clears the family filter", async () => {
+    const familyRuns = [
+      makeRun({
+        runId: "run-root",
+        familyRootRunId: "run-root",
+        assignmentName: "Family root",
+        name: "Family root",
+      }),
+      makeRun({
+        runId: "run-child",
+        parentRunId: "run-root",
+        familyRootRunId: "run-root",
+        assignmentName: "Family child",
+        name: "Family child",
+      }),
+    ];
+    const fetchMock = installFetchMock(
+      {
+        runs: [
+          ...familyRuns,
+          makeRun({
+            runId: "run-outside",
+            assignmentName: "Outside run",
+            name: "Outside run",
+          }),
+        ],
+        details: {},
+      },
+      {
+        handleRequest: (url) => {
+          if (url.includes("/api/runs?includeArchived=true&familyOf=run-root")) {
+            return new Response(JSON.stringify({ runs: familyRuns }), { status: 200 });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    const rootCard = await findRunCard("Family root");
+    const childCard = await findRunCard("Family child");
+    expect(within(rootCard).getByLabelText("Filter by family run-root")).toBeInTheDocument();
+    expect(within(childCard).getByLabelText("Filter by family run-root")).toBeInTheDocument();
+    expect(
+      within(await findRunCard("Outside run")).queryByLabelText(/filter by family/i),
+    ).not.toBeInTheDocument();
+
+    await user.click(within(childCard).getByLabelText("Filter by family run-root"));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/runs?includeArchived=true&familyOf=run-root",
+        expect.objectContaining({
+          headers: { accept: "application/json" },
+        }),
+      ),
+    );
+    expect(await findRunCard("Family root")).toBeInTheDocument();
+    expect(await findRunCard("Family child")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Outside run/i })).not.toBeInTheDocument();
+
+    const stored = window.localStorage.getItem("task-runner:web:dashboard-preferences");
+    expect(stored ? JSON.parse(stored) : null).toMatchObject({
+      structuredFilters: {
+        family: "run-root",
+      },
+    });
+
+    await openFilters(user);
+    expect(screen.getByRole("textbox", { name: "Family" })).toHaveValue("run-root");
+    await user.click(screen.getByRole("button", { name: "Clear" }));
+
+    expect(await findRunCard("Outside run")).toBeInTheDocument();
+  });
+
+  it("composes the family filter with search, pinned, notes, and archived dashboard filters", async () => {
+    const familyRuns = [
+      makeRun({
+        runId: "run-root",
+        familyRootRunId: "run-root",
+        assignmentName: "Family root",
+        name: "Family root",
+        notePresent: true,
+      }),
+      makeRun({
+        runId: "run-child",
+        parentRunId: "run-root",
+        familyRootRunId: "run-root",
+        assignmentName: "Family child",
+        name: "Family child",
+        pinned: true,
+      }),
+      makeRun({
+        runId: "run-archived",
+        parentRunId: "run-root",
+        familyRootRunId: "run-root",
+        assignmentName: "Archived family",
+        name: "Archived family",
+        archivedAt: "2026-04-13T06:00:00.000Z",
+        notePresent: true,
+        status: "success",
+        pinned: true,
+      }),
+    ];
+    installFetchMock(
+      {
+        runs: [
+          ...familyRuns,
+          makeRun({
+            runId: "run-outside",
+            assignmentName: "Outside run",
+            name: "Outside run",
+            notePresent: true,
+            pinned: true,
+          }),
+        ],
+        details: {},
+      },
+      {
+        handleRequest: (url) => {
+          if (url.includes("/api/runs?includeArchived=true&familyOf=run-root")) {
+            return new Response(JSON.stringify({ runs: familyRuns }), { status: 200 });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(
+      within(await findRunCard("Family root")).getByLabelText("Filter by family run-root"),
+    );
+
+    await user.type(screen.getByPlaceholderText("Search runs"), "child");
+    expect(await findRunCard("Family child")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Family root/i })).not.toBeInTheDocument();
+
+    await user.clear(screen.getByPlaceholderText("Search runs"));
+    await user.click(screen.getByRole("button", { name: /show pinned runs only/i }));
+    expect(await findRunCard("Family child")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Family root/i })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /show pinned runs only/i }));
+    await user.click(screen.getByRole("button", { name: /show runs with notes only/i }));
+    expect(await findRunCard("Family root")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Family child/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Archived family/i })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /show archived runs/i }));
+    expect(await findRunCard("Archived family")).toBeInTheDocument();
+  });
+
+  it("shows the board error panel for failing family queries and retries the same family scope", async () => {
+    let failFamilyFetch = true;
+    const familyRuns = [
+      makeRun({
+        runId: "run-root",
+        familyRootRunId: "run-root",
+        assignmentName: "Family root",
+        name: "Family root",
+      }),
+      makeRun({
+        runId: "run-child",
+        parentRunId: "run-root",
+        familyRootRunId: "run-root",
+        assignmentName: "Family child",
+        name: "Family child",
+      }),
+    ];
+    const fetchMock = installFetchMock(
+      {
+        runs: familyRuns,
+        details: {},
+      },
+      {
+        handleRequest: (url) => {
+          if (!url.includes("/api/runs?includeArchived=true&familyOf=run-root")) {
+            return undefined;
+          }
+          if (failFamilyFetch) {
+            return new Response(
+              JSON.stringify({
+                error: {
+                  code: "COMMAND_ERROR",
+                  message: 'family scope could not resolve parent run "missing-parent"',
+                },
+              }),
+              { status: 422 },
+            );
+          }
+          return new Response(JSON.stringify({ runs: familyRuns }), { status: 200 });
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(
+      within(await findRunCard("Family root")).getByLabelText("Filter by family run-root"),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Run board failed to load" }, { timeout: 5_000 }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/family scope could not resolve parent run "missing-parent"/i),
+    ).toBeInTheDocument();
+
+    failFamilyFetch = false;
+    await user.click(screen.getByRole("button", { name: "Retry board load" }));
+
+    expect(await findRunCard("Family child")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs?includeArchived=true&familyOf=run-root",
+      expect.objectContaining({
+        headers: { accept: "application/json" },
+      }),
+    );
   });
 
   it("navigates between selected runs with arrow keys", async () => {
@@ -3360,6 +3586,7 @@ describe("web app", () => {
         repo: null,
         agent: null,
         backend: null,
+        family: null,
       },
     });
 
@@ -4044,6 +4271,7 @@ describe("web app", () => {
         repo: null,
         agent: null,
         backend: null,
+        family: null,
       },
     });
 
@@ -4546,6 +4774,7 @@ describe("web app", () => {
         repo: null,
         agent: null,
         backend: null,
+        family: null,
       },
     });
   });
@@ -4586,6 +4815,7 @@ describe("web app", () => {
         repo: null,
         agent: null,
         backend: null,
+        family: null,
       },
     });
   });

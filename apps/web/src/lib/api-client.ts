@@ -75,6 +75,11 @@ interface RequestOptions {
   signal?: AbortSignal;
 }
 
+<<<<<<< HEAD
+interface ListRunsOptions extends RequestOptions {
+  familyOf?: string | null;
+}
+
 interface DefinitionRequestOptions extends RequestOptions {
   cwd?: string;
 }
@@ -558,9 +563,14 @@ export function createApiClient(config: AppRuntimeConfig) {
       });
       return await readDefinitionDetail(response, "launcher", "Launcher detail");
     },
-    async listRuns(): Promise<RunSummary[]> {
-      const response = await fetch(joinPath(config.apiBasePath, "/runs?includeArchived=true"), {
+    async listRuns(options: ListRunsOptions = {}): Promise<RunSummary[]> {
+      const params = new URLSearchParams({ includeArchived: "true" });
+      if (options.familyOf) {
+        params.set("familyOf", options.familyOf);
+      }
+      const response = await fetch(joinPath(config.apiBasePath, `/runs?${params.toString()}`), {
         headers: { accept: "application/json" },
+        signal: options.signal,
       });
       return await readRuns(response);
     },

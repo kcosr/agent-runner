@@ -1787,6 +1787,10 @@ body {
   max-width: 7rem;
 }
 
+.card-meta .family-badge {
+  max-width: 7rem;
+}
+
 .meta-filter-badge--repo {
   background: var(--secondary);
 }
@@ -2117,6 +2121,21 @@ body {
 
 .meta-filter-badge--backend {
   border-color: var(--border);
+}
+
+.family-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+  font-size: 11px;
+}
+
+.meta-filter-badge--family {
+  border-color: color-mix(in srgb, var(--accent-strong, #2563eb) 18%, var(--border));
+  color: color-mix(in srgb, var(--foreground) 84%, var(--accent-strong, #2563eb));
 }
 
 .copy {

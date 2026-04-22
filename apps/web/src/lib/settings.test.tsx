@@ -129,6 +129,7 @@ describe("DashboardSettingsProvider", () => {
           repo: null,
           agent: null,
           backend: null,
+          family: null,
         },
       }),
     );
@@ -157,6 +158,7 @@ describe("DashboardSettingsProvider", () => {
           repo: null,
           agent: null,
           backend: null,
+          family: null,
         },
         drawerWidth: 1200,
       }),
@@ -188,6 +190,7 @@ describe("DashboardSettingsProvider", () => {
           repo: null,
           agent: null,
           backend: null,
+          family: null,
         },
       }),
     );
@@ -204,7 +207,7 @@ describe("DashboardSettingsProvider", () => {
 
     expect(screen.getByTestId("preferences")).toHaveTextContent('"sortByRecentUpdates":true');
     expect(screen.getByTestId("preferences")).toHaveTextContent(
-      '"structuredFilters":{"repo":null,"agent":null,"backend":null}',
+      '"structuredFilters":{"repo":null,"agent":null,"backend":null,"family":null}',
     );
     expect(screen.getByTestId("view-state")).toHaveTextContent('"drawerWidth":540');
   });
@@ -236,7 +239,7 @@ describe("DashboardSettingsProvider", () => {
     renderSettingsProbe();
 
     expect(screen.getByTestId("preferences")).toHaveTextContent(
-      '"structuredFilters":{"repo":"task-runner","agent":null,"backend":null}',
+      '"structuredFilters":{"repo":"task-runner","agent":null,"backend":null,"family":null}',
     );
   });
 
@@ -249,6 +252,7 @@ describe("DashboardSettingsProvider", () => {
           repo: 42,
           agent: "   ",
           backend: false,
+          family: [],
         },
       }),
     );
@@ -257,7 +261,7 @@ describe("DashboardSettingsProvider", () => {
 
     expect(screen.getByTestId("preferences")).toHaveTextContent('"showArchived":true');
     expect(screen.getByTestId("preferences")).toHaveTextContent(
-      '"structuredFilters":{"repo":null,"agent":null,"backend":null}',
+      '"structuredFilters":{"repo":null,"agent":null,"backend":null,"family":null}',
     );
   });
 
@@ -312,6 +316,7 @@ describe("DashboardSettingsProvider", () => {
           repo: null,
           agent: null,
           backend: null,
+          family: null,
         },
       }),
     );
@@ -344,6 +349,7 @@ describe("DashboardSettingsProvider", () => {
           repo: null,
           agent: null,
           backend: null,
+          family: null,
         },
       }),
     );
@@ -369,6 +375,7 @@ describe("DashboardSettingsProvider", () => {
           repo: null,
           agent: null,
           backend: null,
+          family: null,
         },
       }),
     );
