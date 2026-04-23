@@ -20,6 +20,34 @@ function roundDurationMs(value: number): number {
   return Math.round(value * 1_000) / 1_000;
 }
 
+const PERF_FIELD_PRIORITY = new Map(
+  [
+    "durationMs",
+    "queuedMs",
+    "waitMs",
+    "holdMs",
+    "retries",
+    "utilization",
+    "active",
+    "idle",
+    "minMs",
+    "meanMs",
+    "maxMs",
+    "p99Ms",
+    "statusCode",
+    "published",
+    "subscriberCount",
+    "eventCount",
+    "attemptCount",
+    "taskCount",
+    "dependencyCount",
+    "dependencyTotal",
+    "dependencyUnsatisfied",
+    "lastCursor",
+    "cursor",
+  ].map((key, index) => [key, index]),
+);
+
 function formatFieldValue(value: unknown): string {
   if (typeof value === "number") {
     return Number.isFinite(value) ? String(value) : JSON.stringify(value);
@@ -37,7 +65,31 @@ function formatFieldValue(value: unknown): string {
 }
 
 function formatFields(fields: DebugPerfFields): string {
-  const entries = Object.entries(fields).filter(([, value]) => value !== undefined);
+  const entries = Object.entries(fields)
+    .filter(([, value]) => value !== undefined)
+    .sort(([leftKey, leftValue], [rightKey, rightValue]) => {
+      const leftPriority = PERF_FIELD_PRIORITY.get(leftKey);
+      const rightPriority = PERF_FIELD_PRIORITY.get(rightKey);
+      if (leftPriority !== undefined || rightPriority !== undefined) {
+        return (leftPriority ?? Number.MAX_SAFE_INTEGER) - (rightPriority ?? Number.MAX_SAFE_INTEGER);
+      }
+
+      const classify = (value: unknown): number => {
+        if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+          return 0;
+        }
+        if (value === null) {
+          return 1;
+        }
+        return 2;
+      };
+
+      const categoryDelta = classify(leftValue) - classify(rightValue);
+      if (categoryDelta !== 0) {
+        return categoryDelta;
+      }
+      return leftKey.localeCompare(rightKey);
+    });
   if (entries.length === 0) {
     return "";
   }
