@@ -80,6 +80,7 @@ function buildManifest(overrides = {}) {
         phase: "prepare",
         source: { name: "freeze" },
         resolvedPath: "/repo/hooks/freeze/hook.ts",
+        taskScopeId: null,
         when: null,
         config: { mode: "status" },
       },
@@ -314,6 +315,63 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
     },
     capabilities: detail.capabilities,
   });
+});
+
+test("run contracts: toRunDetail normalizes legacy hook fields missing from older manifests", () => {
+  const manifest = buildManifest({
+    resolvedHooks: [
+      {
+        hookId: "prepare:0:freeze",
+        phase: "prepare",
+        source: { name: "freeze" },
+        resolvedPath: "/repo/hooks/freeze/hook.ts",
+        when: null,
+        config: { mode: "status" },
+      },
+    ],
+    hookAudits: [
+      {
+        phase: "prepare",
+        hookId: "prepare:0:freeze",
+        startedAt: "2026-04-12T10:00:00.000Z",
+        endedAt: "2026-04-12T10:00:01.000Z",
+        outcome: "continue",
+        sessionIndex: null,
+        attempt: null,
+        taskId: null,
+      },
+    ],
+  });
+
+  const detail = toRunDetail({
+    manifest,
+    isLive: false,
+  });
+
+  assert.deepEqual(detail.resolvedHooks, [
+    {
+      hookId: "prepare:0:freeze",
+      phase: "prepare",
+      source: { name: "freeze" },
+      resolvedPath: "/repo/hooks/freeze/hook.ts",
+      taskScopeId: null,
+      when: null,
+      config: { mode: "status" },
+    },
+  ]);
+  assert.deepEqual(detail.hookAudits, [
+    {
+      phase: "prepare",
+      hookId: "prepare:0:freeze",
+      startedAt: "2026-04-12T10:00:00.000Z",
+      endedAt: "2026-04-12T10:00:01.000Z",
+      outcome: "continue",
+      sessionIndex: null,
+      attempt: null,
+      taskId: null,
+      summary: null,
+    },
+  ]);
 });
 
 test("run contracts: toRunDetail exposes pendingPrompt for initialized zero-attempt runs", () => {

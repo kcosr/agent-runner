@@ -72,4 +72,79 @@ describe("formatAuditEvent", () => {
       { type: "text", text: "." },
     ]);
   });
+
+  it("formats hook audit events with resolved hook names, task titles, and summaries", () => {
+    const formatted = formatAuditEvent(
+      {
+        type: "run.hook_recorded",
+        recordedAt: "2026-04-21T16:09:00.000Z",
+        source: "system",
+        hostMode: "embedded",
+        fields: {
+          phase: "taskTransition",
+          hookId: "taskTransition:0:require-children-success",
+          outcome: "rejected",
+          taskId: "apply_review_fixes",
+          summary: "Child runs are incomplete",
+        },
+      },
+      {
+        resolvedHooks: [
+          {
+            hookId: "taskTransition:0:require-children-success",
+            phase: "taskTransition",
+            source: {
+              name: "require-children-success",
+            },
+            resolvedPath: null,
+            taskScopeId: null,
+            when: null,
+            config: {},
+          },
+        ],
+        tasks: [
+          {
+            id: "apply_review_fixes",
+            title: "Apply review fixes",
+            body: "Do the work",
+            status: "pending",
+            notes: "",
+          },
+        ],
+      },
+    );
+
+    expect(formatted.message).toEqual([
+      { type: "text", text: "Hook " },
+      { type: "code", text: "require-children-success" },
+      { type: "text", text: " rejected task transition for " },
+      { type: "strong", text: "Apply review fixes" },
+      { type: "text", text: ": " },
+      { type: "text", text: "Child runs are incomplete" },
+      { type: "text", text: "." },
+    ]);
+  });
+
+  it("falls back to the raw task id when a hook task cannot be resolved", () => {
+    const formatted = formatAuditEvent({
+      type: "run.hook_recorded",
+      recordedAt: "2026-04-21T16:09:00.000Z",
+      source: "system",
+      hostMode: "embedded",
+      fields: {
+        phase: "taskTransition",
+        hookId: "taskTransition:0:require-children-success",
+        outcome: "accepted",
+        taskId: "apply_review_fixes",
+      },
+    });
+
+    expect(formatted.message).toEqual([
+      { type: "text", text: "Hook " },
+      { type: "code", text: "require-children-success" },
+      { type: "text", text: " accepted task transition for " },
+      { type: "strong", text: "apply_review_fixes" },
+      { type: "text", text: "." },
+    ]);
+  });
 });

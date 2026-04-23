@@ -1,5 +1,6 @@
 import type { RunAuditEvent } from "@task-runner/core/contracts/events.js";
 import type { RunStatus, RunTaskSummary } from "@task-runner/core/contracts/runs.js";
+import type { ResolvedHookDescriptor } from "@task-runner/core/hooks";
 
 export type AuditMessagePart =
   | {
@@ -25,6 +26,11 @@ export type AuditMessagePart =
 
 export interface FormattedAuditEvent {
   message: AuditMessagePart[];
+}
+
+export interface AuditFormatContext {
+  resolvedHooks?: ResolvedHookDescriptor[];
+  tasks?: RunTaskSummary[];
 }
 
 function text(value: string): AuditMessagePart {
@@ -74,7 +80,157 @@ function nullableCode(value: unknown, fallback = "none"): AuditMessagePart {
   return code(value ?? fallback);
 }
 
-export function formatAuditEvent(event: RunAuditEvent): FormattedAuditEvent {
+function asString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function punctuationSuffix(value: string): string {
+  return /[.!?]$/.test(value) ? "" : ".";
+}
+
+function taskLabel(taskId: unknown, context?: AuditFormatContext): string | null {
+  const id = asString(taskId);
+  if (!id) {
+    return null;
+  }
+  const task = context?.tasks?.find((entry) => entry.id === id);
+  return task?.title ?? id;
+}
+
+function pathBasename(value: string | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+  const segments = value.split(/[\\/]/).filter(Boolean);
+  return segments.at(-1) ?? null;
+}
+
+function hookLabel(hookId: unknown, context?: AuditFormatContext): string {
+  const id = asString(hookId) ?? "unknown";
+  const descriptor = context?.resolvedHooks?.find((entry) => entry.hookId === id);
+  return (
+    descriptor?.source.builtin ??
+    descriptor?.source.name ??
+    pathBasename(descriptor?.resolvedPath) ??
+    (id.split(":").at(-1) as string)
+  );
+}
+
+function hookSummarySuffix(fields: Record<string, unknown>): AuditMessagePart[] {
+  const summary = asString(fields.summary);
+  if (!summary) {
+    return [text(".")];
+  }
+  return [text(": "), text(summary), text(punctuationSuffix(summary))];
+}
+
+function formatHookAuditEvent(
+  event: RunAuditEvent,
+  context?: AuditFormatContext,
+): FormattedAuditEvent {
+  const fields = event.fields;
+  const name = hookLabel(fields.hookId, context);
+  const phase = asString(fields.phase) ?? "unknown";
+  const outcome = asString(fields.outcome) ?? "unknown";
+  const task = taskLabel(fields.taskId, context);
+
+  if (phase === "taskTransition" && task) {
+    switch (outcome) {
+      case "accepted":
+        return {
+          message: [
+            text("Hook "),
+            code(name),
+            text(" accepted task transition for "),
+            strong(task),
+            text("."),
+          ],
+        };
+      case "rejected":
+        return {
+          message: [
+            text("Hook "),
+            code(name),
+            text(" rejected task transition for "),
+            strong(task),
+            ...hookSummarySuffix(fields),
+          ],
+        };
+      case "error":
+        return {
+          message: [
+            text("Hook "),
+            code(name),
+            text(" errored during task transition for "),
+            strong(task),
+            ...hookSummarySuffix(fields),
+          ],
+        };
+      case "skipped":
+        return {
+          message: [
+            text("Hook "),
+            code(name),
+            text(" skipped task transition for "),
+            strong(task),
+            text("."),
+          ],
+        };
+    }
+  }
+
+  switch (outcome) {
+    case "block":
+      return {
+        message: [
+          text("Hook "),
+          code(name),
+          text(" blocked during "),
+          code(phase),
+          ...hookSummarySuffix(fields),
+        ],
+      };
+    case "error":
+      return {
+        message: [
+          text("Hook "),
+          code(name),
+          text(" errored during "),
+          code(phase),
+          ...hookSummarySuffix(fields),
+        ],
+      };
+    case "skipped":
+      return {
+        message: [text("Hook "), code(name), text(" skipped during "), code(phase), text(".")],
+      };
+    case "reinvoke":
+      return {
+        message: [text("Hook "), code(name), text(" reinvoked during "), code(phase), text(".")],
+      };
+    case "continue":
+      return {
+        message: [text("Hook "), code(name), text(" ran during "), code(phase), text(".")],
+      };
+    default:
+      return {
+        message: [
+          text("Hook "),
+          code(name),
+          text(" ran during "),
+          code(phase),
+          text(" with outcome "),
+          code(outcome),
+          ...hookSummarySuffix(fields),
+        ],
+      };
+  }
+}
+
+export function formatAuditEvent(
+  event: RunAuditEvent,
+  context?: AuditFormatContext,
+): FormattedAuditEvent {
   const fields = event.fields;
   switch (event.type) {
     case "run.created":
@@ -116,17 +272,7 @@ export function formatAuditEvent(event: RunAuditEvent): FormattedAuditEvent {
         ],
       };
     case "run.hook_recorded":
-      return {
-        message: [
-          text("Recorded hook "),
-          code(fields.hookId ?? "unknown"),
-          text(" for "),
-          strong(fields.phase ?? "unknown"),
-          text(" with outcome "),
-          code(fields.outcome ?? "unknown"),
-          text("."),
-        ],
-      };
+      return formatHookAuditEvent(event, context);
     case "run.attempt_recorded":
       return {
         message: [
