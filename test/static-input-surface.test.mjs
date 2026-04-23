@@ -92,6 +92,49 @@ test("static input surface: built-in planner + plan-feature surfaces the documen
   assert.ok(!surface.assignmentInputs.some((field) => field.key === "repo_root"));
 });
 
+test("static input surface: launcher path and inline definitions preserve authored values", () =>
+  withRuntimeRoots("task-runner-static-input-launchers-", ({ rootDir, configDir }) => {
+    writeAgent(
+      configDir,
+      "path-launcher",
+      `---
+schemaVersion: 1
+name: path-launcher
+backend: codex
+launcher: ./launchers/prefix.yml
+---
+Path launcher fixture.
+`,
+    );
+    writeAgent(
+      configDir,
+      "inline-launcher",
+      `---
+schemaVersion: 1
+name: inline-launcher
+backend: codex
+launcher:
+  command: env
+  args: [TASK_RUNNER_TEST, "1"]
+---
+Inline launcher fixture.
+`,
+    );
+
+    const pathSurface = resolveStaticInputSurface(loadAgentConfig("path-launcher", rootDir));
+    const inlineSurface = resolveStaticInputSurface(loadAgentConfig("inline-launcher", rootDir));
+
+    assert.equal(
+      fieldByKey(pathSurface.runSettings, "launcher").value,
+      join(configDir, "agents", "path-launcher", "launchers", "prefix.yml"),
+    );
+
+    assert.deepEqual(fieldByKey(inlineSurface.runSettings, "launcher").value, {
+      command: "env",
+      args: ["TASK_RUNNER_TEST", "1"],
+    });
+  }));
+
 test("static input surface: lock union and CLI-capable var metadata are preserved", () =>
   withRuntimeRoots("task-runner-static-input-", ({ rootDir, configDir }) => {
     writeAgent(

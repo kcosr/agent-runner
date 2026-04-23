@@ -55,6 +55,9 @@
 
 ### Added
 
+- Added `@task-runner/core/core/run/static-input-surface.js` to resolve
+  the static fresh-run input surface for core consumers, including
+  authored run-setting metadata and CLI-capable assignment inputs.
 - Added daemon HTTP definition routes for agents, assignments, and
   launchers (`GET /api/agents|assignments|launchers` plus detail
   variants with optional `cwd`), and browser API client support for

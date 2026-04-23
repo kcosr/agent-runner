@@ -1,7 +1,13 @@
 import { cloneBackendSpecificConfig } from "../backends/types.js";
 import type { RunManifest } from "../run/manifest.js";
 import type { AgentLauncherReference } from "./launchers.js";
-import type { AgentConfig, AssignmentConfig, LockableField } from "./schema.js";
+import {
+  type AgentConfig,
+  type AssignmentConfig,
+  DEFAULT_AGENT_TIMEOUT_SEC,
+  DEFAULT_AGENT_UNRESTRICTED,
+  type LockableField,
+} from "./schema.js";
 
 // Reserved agent name for CLI-synthesized ad-hoc runs. `loadAgentConfig`
 // refuses to load any on-disk agent file that uses this name so it
@@ -68,8 +74,8 @@ export function synthesizeAdHocAgent(inputs: AdHocAgentInputs): LoadedAgent {
     backend: inputs.backend,
     model: inputs.model,
     effort: inputs.effort,
-    timeoutSec: inputs.timeoutSec ?? 3600,
-    unrestricted: inputs.unrestricted ?? false,
+    timeoutSec: inputs.timeoutSec ?? DEFAULT_AGENT_TIMEOUT_SEC,
+    unrestricted: inputs.unrestricted ?? DEFAULT_AGENT_UNRESTRICTED,
     lockedFields: [] as LockableField[],
   };
   return {
