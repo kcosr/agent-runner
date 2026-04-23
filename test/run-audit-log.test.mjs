@@ -766,7 +766,7 @@ test("command and task mutations append compact records, preserve history on res
   assert.equal(existsSync(init.workspaceDir), false);
 });
 
-test("task-transition hooks append compact run.hook_recorded records with task ids", async () => {
+test("task-transition hooks skip unmatched transitions and append compact run.hook_recorded records with task ids once matched", async () => {
   const dir = tempDir();
   writeAgent(dir, "audit-passive", PASSIVE_AGENT);
   writeAssignment(
@@ -778,6 +778,9 @@ name: audit-passive-work
 hooks:
   taskTransition:
     - name: audit-task-transition
+      when:
+        taskId: t1
+        toStatus: ["completed"]
 tasks:
   - id: t1
     title: First
@@ -808,8 +811,14 @@ Audit passive assignment.
   });
 
   runCli(["task", "set", init.runId, "t1", "--status", "in_progress"], { cwd: dir });
+  let hookEvents = readAuditRecords(init.workspaceDir).filter(
+    (record) => record.eventType === "run.hook_recorded",
+  );
+  assert.equal(hookEvents.length, 0);
 
-  const hookEvents = readAuditRecords(init.workspaceDir).filter(
+  runCli(["task", "set", init.runId, "t1", "--status", "completed"], { cwd: dir });
+
+  hookEvents = readAuditRecords(init.workspaceDir).filter(
     (record) => record.eventType === "run.hook_recorded",
   );
   assert.equal(hookEvents.length, 1);

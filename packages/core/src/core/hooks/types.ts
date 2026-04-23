@@ -9,12 +9,30 @@ export interface HookSourceDescriptor {
   path?: string;
 }
 
+export type AttemptHookWhen = {
+  sessionIndex?: number | number[];
+  attemptInSession?: number | number[];
+};
+
+export type TaskTransitionSource = "run-loop" | "task-set" | "task-append-notes" | "task-add";
+
+export interface TaskTransitionHookWhen {
+  taskId?: string;
+  taskIds?: string[];
+  fromStatus?: TaskStatus[];
+  toStatus?: TaskStatus[];
+  source?: TaskTransitionSource[];
+}
+
+export type HookWhen = AttemptHookWhen | TaskTransitionHookWhen | Record<string, unknown>;
+
 export interface ResolvedHookDescriptor {
   hookId: string;
   phase: HookPhase;
   source: HookSourceDescriptor;
   resolvedPath: string | null;
-  when: Record<string, unknown> | null;
+  taskScopeId: string | null;
+  when: HookWhen | null;
   config: unknown;
 }
 
@@ -153,8 +171,6 @@ export interface AttemptHookContext extends HookContextBase {
   sessionIndex: number;
   attemptInSession: number;
 }
-
-export type TaskTransitionSource = "run-loop" | "task-set" | "task-append-notes" | "task-add";
 
 export interface TaskTransitionHookContext extends HookContextBase {
   phase: "taskTransition";

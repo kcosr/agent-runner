@@ -171,6 +171,10 @@ tasks:                              # optional, max 100, ids unique
     title: Orient to the repo
     body: |
       Read README.md and AGENTS.md.
+    hooks:
+      - builtin: require-children-success
+        with:
+          requireAny: true
 hooks:                              # optional hook arrays by phase
   prepare:
     - name: freeze-prepare
@@ -191,6 +195,9 @@ Task definitions must match:
 - `id`: `[A-Za-z0-9._:-]+`, max 128 chars, unique within the assignment
 - `title`: 1–200 chars, single line
 - `body`: optional free-form markdown
+- `hooks`: optional task-local `taskTransition` hook entries using the
+  same `builtin` / `name` / `path`, `when`, and `with` authoring shape
+  as root `hooks.taskTransition[]`
 
 ### Body
 
@@ -283,7 +290,16 @@ Supported `when` filters are intentionally narrow:
   an array of integers. Session index `0` is the first execution session;
   attempt-in-session `0` is the first backend attempt within that
   execution session.
-- `taskTransition` supports `when.toStatus`.
+- `taskTransition` supports:
+  - `when.taskId`
+  - `when.taskIds`
+  - `when.fromStatus`
+  - `when.toStatus`
+  - `when.source`
+
+Task-local `tasks[].hooks[]` are always `taskTransition` hooks scoped to
+the enclosing task. They do not use a nested `taskTransition:` key under
+the task.
 
 Prepare hooks run once during fresh `run` / `init`, before the first
 manifest write. Their resolved descriptor, config, mutated prompts, vars,
@@ -314,10 +330,10 @@ Built-in hooks:
   requires exit code `0` and parses a full hook result from stdout;
   malformed JSON is a runtime error.
 - `require-children-success` runs in `taskTransition`. It guards
-  completion of specific tasks until all direct child runs of the
-  current run are `success`. Configure it with `taskIds: [...]`, and set
-  `requireAny: true` only when the task must refuse completion until at
-  least one child run exists.
+  completion until all direct child runs of the current run are
+  `success`. Scope it with task-local placement or native
+  `when.taskId` / `when.taskIds`, and set `requireAny: true` only when
+  the task must refuse completion until at least one child run exists.
 
 ## Locked fields
 

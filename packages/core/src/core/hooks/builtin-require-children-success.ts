@@ -3,29 +3,26 @@ import { type RunManifest, listRunManifests } from "../run/manifest.js";
 import type { TaskTransitionHookContext, TaskTransitionResult } from "./types.js";
 
 interface RequireChildrenSuccessConfig {
-  taskIds: string[];
   requireAny: boolean;
 }
 
 function parseConfig(config: unknown): RequireChildrenSuccessConfig {
-  if (!config || typeof config !== "object") {
+  if (config === undefined || config === null) {
+    return { requireAny: false };
+  }
+  if (typeof config !== "object") {
     throw new Error("require-children-success hook requires an object config");
   }
   const record = config as Record<string, unknown>;
-  if (!Array.isArray(record.taskIds) || record.taskIds.length === 0) {
-    throw new Error("require-children-success hook requires a non-empty `taskIds` array");
-  }
-  const taskIds = record.taskIds.map((value) => {
-    if (typeof value !== "string" || value.trim().length === 0) {
-      throw new Error("require-children-success hook taskIds must be non-empty strings");
-    }
-    return value.trim();
-  });
   if (record.requireAny !== undefined && typeof record.requireAny !== "boolean") {
     throw new Error("require-children-success hook requireAny must be a boolean");
   }
+  for (const key of Object.keys(record)) {
+    if (key !== "requireAny") {
+      throw new Error(`require-children-success hook does not support config key "${key}"`);
+    }
+  }
   return {
-    taskIds,
     requireAny: record.requireAny === true,
   };
 }
@@ -51,15 +48,6 @@ function allChildrenSuccessful(children: readonly RunManifest[]): boolean {
   return children.every((manifest) => manifest.status === "success");
 }
 
-function transitionIgnored(
-  ctx: TaskTransitionHookContext,
-  config: RequireChildrenSuccessConfig,
-): boolean {
-  return (
-    ctx.transition.to.status !== "completed" || !config.taskIds.includes(ctx.transition.taskId)
-  );
-}
-
 function buildReason(
   taskId: string,
   children: readonly RunManifest[],
@@ -83,7 +71,7 @@ export default defineHook({
   name: "require-children-success",
   taskTransition(ctx: TaskTransitionHookContext): TaskTransitionResult {
     const config = parseConfig(ctx.config);
-    if (transitionIgnored(ctx, config)) {
+    if (ctx.transition.to.status !== "completed") {
       return { accept: true };
     }
 

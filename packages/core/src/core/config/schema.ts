@@ -16,18 +16,21 @@ export const HOOK_PHASES = [
 
 export type HookPhase = (typeof HOOK_PHASES)[number];
 
-export const taskDefSchema = z.object({
-  id: z
-    .string()
-    .regex(/^[A-Za-z0-9._:-]+$/, "task id must match [A-Za-z0-9._:-]+")
-    .max(128),
-  title: z
-    .string()
-    .min(1)
-    .max(200)
-    .refine((value) => !/[\r\n]/.test(value), "task title must be a single line"),
-  body: z.string().optional().default(""),
-});
+const TASK_STATUSES = ["pending", "in_progress", "completed", "blocked"] as const;
+const TASK_TRANSITION_SOURCES = ["run-loop", "task-set", "task-append-notes", "task-add"] as const;
+
+function validateHookSourceSelector(
+  entry: { builtin?: string; name?: string; path?: string },
+  ctx: z.RefinementCtx,
+): void {
+  const defined = [entry.builtin, entry.name, entry.path].filter((value) => value !== undefined);
+  if (defined.length !== 1) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "hook entry must define exactly one of `builtin`, `name`, or `path`",
+    });
+  }
+}
 
 export const VAR_SOURCES = ["cli", "env", "parent"] as const;
 export type VarSource = (typeof VAR_SOURCES)[number];
@@ -92,31 +95,88 @@ export const varDefSchema = z
     }
   });
 
-export const assignmentHookEntrySchema = z
+const hookEntrySelectorShape = {
+  builtin: z.string().min(1).optional(),
+  name: z.string().min(1).optional(),
+  path: z.string().min(1).optional(),
+  with: z.unknown().optional(),
+} as const;
+
+const hookEntrySelectorSchema = z
+  .object(hookEntrySelectorShape)
+  .superRefine(validateHookSourceSelector);
+
+const nonEmptyStringArraySchema = z.array(z.string().trim().min(1)).nonempty();
+
+const attemptWhenValueSchema = z.union([
+  z.number().int().nonnegative(),
+  z.array(z.number().int().nonnegative()).nonempty(),
+]);
+
+const attemptHookWhenSchema = z
   .object({
-    builtin: z.string().min(1).optional(),
-    name: z.string().min(1).optional(),
-    path: z.string().min(1).optional(),
-    when: z.record(z.string(), z.unknown()).nullable().optional(),
-    with: z.unknown().optional(),
+    sessionIndex: attemptWhenValueSchema.optional(),
+    attemptInSession: attemptWhenValueSchema.optional(),
   })
-  .superRefine((entry, ctx) => {
-    const defined = [entry.builtin, entry.name, entry.path].filter((value) => value !== undefined);
-    if (defined.length !== 1) {
+  .strict();
+
+const taskTransitionHookWhenSchema = z
+  .object({
+    taskId: z.string().trim().min(1).optional(),
+    taskIds: nonEmptyStringArraySchema.optional(),
+    toStatus: z.array(z.enum(TASK_STATUSES)).nonempty().optional(),
+    fromStatus: z.array(z.enum(TASK_STATUSES)).nonempty().optional(),
+    source: z.array(z.enum(TASK_TRANSITION_SOURCES)).nonempty().optional(),
+  })
+  .strict()
+  .superRefine((when, ctx) => {
+    if (when.taskId !== undefined && when.taskIds !== undefined) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "hook entry must define exactly one of `builtin`, `name`, or `path`",
+        message: "task-transition when cannot define both `taskId` and `taskIds`",
+      });
+    }
+    if (when.taskIds !== undefined && new Set(when.taskIds).size !== when.taskIds.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["taskIds"],
+        message: "task-transition when.taskIds must not contain duplicates",
       });
     }
   });
 
+const baseHookEntrySchema = <TWhen extends z.ZodTypeAny>(whenSchema: TWhen) =>
+  z
+    .object({
+      ...hookEntrySelectorShape,
+      when: whenSchema.nullable().optional(),
+    })
+    .superRefine(validateHookSourceSelector);
+
+const attemptHookEntrySchema = baseHookEntrySchema(attemptHookWhenSchema);
+const taskTransitionHookEntrySchema = baseHookEntrySchema(taskTransitionHookWhenSchema);
+
+export const taskDefSchema = z.object({
+  id: z
+    .string()
+    .regex(/^[A-Za-z0-9._:-]+$/, "task id must match [A-Za-z0-9._:-]+")
+    .max(128),
+  title: z
+    .string()
+    .min(1)
+    .max(200)
+    .refine((value) => !/[\r\n]/.test(value), "task title must be a single line"),
+  body: z.string().optional().default(""),
+  hooks: z.array(taskTransitionHookEntrySchema).default([]),
+});
+
 export const assignmentHooksSchema = z
   .object({
-    prepare: z.array(assignmentHookEntrySchema).default([]),
-    beforeAttempt: z.array(assignmentHookEntrySchema).default([]),
-    afterAttempt: z.array(assignmentHookEntrySchema).default([]),
-    afterExit: z.array(assignmentHookEntrySchema).default([]),
-    taskTransition: z.array(assignmentHookEntrySchema).default([]),
+    prepare: z.array(baseHookEntrySchema(z.record(z.string(), z.unknown()))).default([]),
+    beforeAttempt: z.array(attemptHookEntrySchema).default([]),
+    afterAttempt: z.array(attemptHookEntrySchema).default([]),
+    afterExit: z.array(attemptHookEntrySchema).default([]),
+    taskTransition: z.array(taskTransitionHookEntrySchema).default([]),
   })
   .default({
     prepare: [],
@@ -253,7 +313,10 @@ export const assignmentConfigSchema = z
   );
 
 export type AssignmentConfig = z.infer<typeof assignmentConfigSchema>;
-export type AssignmentHookEntry = z.infer<typeof assignmentHookEntrySchema>;
+export type AssignmentHookEntry = z.infer<typeof hookEntrySelectorSchema> & {
+  when?: unknown | null;
+};
 export type AssignmentHooks = z.infer<typeof assignmentHooksSchema>;
 export type TaskDef = z.infer<typeof taskDefSchema>;
+export type TaskTransitionHookEntry = z.infer<typeof taskTransitionHookEntrySchema>;
 export type VarDef = z.infer<typeof varDefSchema>;

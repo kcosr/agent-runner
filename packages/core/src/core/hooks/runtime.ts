@@ -21,6 +21,7 @@ import {
 import { loadHookModule } from "./loader.js";
 import type {
   AttemptHookContext,
+  AttemptHookWhen,
   HookAuditRecord,
   HookModule,
   HookMutations,
@@ -28,6 +29,7 @@ import type {
   PrepareHookContext,
   ResolvedHookDescriptor,
   TaskTransitionHookContext,
+  TaskTransitionHookWhen,
   TaskTransitionResult,
   TaskTransitionSource,
 } from "./types.js";
@@ -298,15 +300,40 @@ async function applyMutations(
 
 function matchesTaskTransitionWhen(
   descriptor: ResolvedHookDescriptor,
-  nextStatus: TaskStatus,
+  options: {
+    source: TaskTransitionSource;
+    taskId: string;
+    from: TaskTransitionHookContext["transition"]["from"];
+    to: TaskTransitionHookContext["transition"]["to"];
+  },
 ): boolean {
+  if (descriptor.taskScopeId !== null && descriptor.taskScopeId !== options.taskId) {
+    return false;
+  }
+
   const when = descriptor.when;
   if (!when) {
     return true;
   }
-  const toStatus = when.toStatus;
+  const transitionWhen = when as TaskTransitionHookWhen;
+  if (transitionWhen.taskId !== undefined && transitionWhen.taskId !== options.taskId) {
+    return false;
+  }
+  if (transitionWhen.taskIds !== undefined && !transitionWhen.taskIds.includes(options.taskId)) {
+    return false;
+  }
+  if (
+    transitionWhen.fromStatus !== undefined &&
+    (options.from === null || !transitionWhen.fromStatus.includes(options.from.status))
+  ) {
+    return false;
+  }
+  if (transitionWhen.source !== undefined && !transitionWhen.source.includes(options.source)) {
+    return false;
+  }
+  const toStatus = transitionWhen.toStatus;
   if (Array.isArray(toStatus)) {
-    return toStatus.includes(nextStatus);
+    return toStatus.includes(options.to.status);
   }
   return true;
 }
@@ -320,9 +347,10 @@ function matchesAttemptWhen(
   if (!when) {
     return true;
   }
+  const attemptWhen = when as AttemptHookWhen;
 
-  if (when.sessionIndex !== undefined) {
-    const configured = when.sessionIndex;
+  if (attemptWhen.sessionIndex !== undefined) {
+    const configured = attemptWhen.sessionIndex;
     if (typeof configured === "number" && Number.isInteger(configured) && configured >= 0) {
       if (configured !== sessionIndex) {
         return false;
@@ -343,8 +371,8 @@ function matchesAttemptWhen(
     }
   }
 
-  if (when.attemptInSession !== undefined) {
-    const configured = when.attemptInSession;
+  if (attemptWhen.attemptInSession !== undefined) {
+    const configured = attemptWhen.attemptInSession;
     if (typeof configured === "number" && Number.isInteger(configured) && configured >= 0) {
       if (configured !== attemptInSession) {
         return false;
@@ -622,7 +650,14 @@ export async function runTaskTransitionHooks(
   for (const descriptor of state.manifest.resolvedHooks.filter(
     (entry) => entry.phase === "taskTransition",
   )) {
-    if (!matchesTaskTransitionWhen(descriptor, options.to.status)) {
+    if (
+      !matchesTaskTransitionWhen(descriptor, {
+        source: options.source,
+        taskId: options.taskId,
+        from: options.from,
+        to: options.to,
+      })
+    ) {
       continue;
     }
     const startedAt = new Date().toISOString();

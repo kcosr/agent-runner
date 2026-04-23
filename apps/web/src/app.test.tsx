@@ -1780,6 +1780,311 @@ describe("web app", () => {
     });
   });
 
+  it("renders hook audit events with resolved hook names, task titles, and summaries", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: {
+        "run-1": makeDetail({
+          resolvedHooks: [
+            {
+              hookId: "taskTransition:0:require-children-success",
+              phase: "taskTransition",
+              source: {
+                name: "require-children-success",
+              },
+              resolvedPath: null,
+              taskScopeId: null,
+              when: null,
+              config: {},
+            },
+          ],
+          tasks: [
+            {
+              id: "apply_review_fixes",
+              title: "Apply review fixes",
+              body: "Update the code",
+              status: "in_progress",
+              notes: "",
+            },
+          ],
+          activeTask: {
+            id: "apply_review_fixes",
+            title: "Apply review fixes",
+          },
+        }),
+      },
+      auditHistories: {
+        "run-1": {
+          runId: "run-1",
+          lastCursor: 1,
+          events: [
+            {
+              runId: "run-1",
+              cursor: 1,
+              event: {
+                type: "run.hook_recorded",
+                recordedAt: "2026-04-21T16:00:00.000Z",
+                source: "system",
+                hostMode: "embedded",
+                fields: {
+                  phase: "taskTransition",
+                  hookId: "taskTransition:0:require-children-success",
+                  outcome: "rejected",
+                  taskId: "apply_review_fixes",
+                  summary: "Child runs are incomplete",
+                },
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+
+    const auditSource = findEventSource("/api/runs/run-1/events/audit");
+    auditSource.emitOpen();
+    await user.click(screen.getByRole("button", { name: /^Audit\b/ }));
+
+    const auditPanel = await screen.findByLabelText("Audit");
+    const rows = within(
+      within(auditPanel).getByRole("list", { name: "Audit events" }),
+    ).getAllByRole("listitem");
+    expect(rows[0]).toHaveTextContent(
+      "Hook require-children-success rejected task transition for Apply review fixes: Child runs are incomplete.",
+    );
+  });
+
+  it("filters audit events by hooks, tasks, and run types", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          effectiveStatus: "success",
+          endedAt: "2026-04-21T16:05:00.000Z",
+          status: "success",
+        }),
+      ],
+      details: {
+        "run-1": makeDetail({
+          effectiveStatus: "success",
+          endedAt: "2026-04-21T16:05:00.000Z",
+          isLive: false,
+          resolvedHooks: [
+            {
+              hookId: "taskTransition:0:require-children-success",
+              phase: "taskTransition",
+              source: { name: "require-children-success" },
+              resolvedPath: null,
+              taskScopeId: null,
+              when: null,
+              config: {},
+            },
+          ],
+          status: "success",
+          tasks: [
+            {
+              id: "apply_review_fixes",
+              title: "Apply review fixes",
+              body: "Update the code",
+              status: "completed",
+              notes: "",
+            },
+          ],
+        }),
+      },
+      auditHistories: {
+        "run-1": {
+          runId: "run-1",
+          lastCursor: 3,
+          events: [
+            {
+              runId: "run-1",
+              cursor: 1,
+              event: {
+                type: "run.hook_recorded",
+                recordedAt: "2026-04-21T16:00:00.000Z",
+                source: "system",
+                hostMode: "embedded",
+                fields: {
+                  phase: "taskTransition",
+                  hookId: "taskTransition:0:require-children-success",
+                  outcome: "accepted",
+                  taskId: "apply_review_fixes",
+                },
+              },
+            },
+            {
+              runId: "run-1",
+              cursor: 2,
+              event: {
+                type: "task.updated",
+                recordedAt: "2026-04-21T16:01:00.000Z",
+                source: "task_command",
+                hostMode: "embedded",
+                fields: {
+                  taskId: "apply_review_fixes",
+                  taskTitle: "Apply review fixes",
+                  command: "set",
+                  statusBefore: "in_progress",
+                  statusAfter: "completed",
+                  notesChanged: false,
+                },
+              },
+            },
+            {
+              runId: "run-1",
+              cursor: 3,
+              event: {
+                type: "run.finished",
+                recordedAt: "2026-04-21T16:02:00.000Z",
+                source: "system",
+                hostMode: "embedded",
+                fields: {
+                  terminalStatus: "success",
+                  exitCode: 0,
+                  tasksCompleted: 1,
+                  tasksTotal: 1,
+                },
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+
+    const auditSource = findEventSource("/api/runs/run-1/events/audit");
+    auditSource.emitOpen();
+    await user.click(screen.getByRole("button", { name: /^Audit\b/ }));
+
+    const auditPanel = await screen.findByLabelText("Audit");
+    const auditList = within(auditPanel).getByRole("list", { name: "Audit events" });
+
+    expect(within(auditList).getAllByRole("listitem")).toHaveLength(3);
+
+    await user.click(within(auditPanel).getByRole("tab", { name: "Hooks" }));
+    expect(within(auditList).getAllByRole("listitem")).toHaveLength(1);
+    expect(auditList).toHaveTextContent(
+      "Hook require-children-success accepted task transition for Apply review fixes.",
+    );
+
+    await user.click(within(auditPanel).getByRole("tab", { name: "Tasks" }));
+    expect(within(auditList).getAllByRole("listitem")).toHaveLength(1);
+    expect(auditList).toHaveTextContent("Updated task Apply review fixes");
+
+    await user.click(within(auditPanel).getByRole("tab", { name: "Run" }));
+    expect(within(auditList).getAllByRole("listitem")).toHaveLength(1);
+    expect(auditList).toHaveTextContent("Finished run as completed with 1/1 tasks complete.");
+
+    await user.click(within(auditPanel).getByRole("tab", { name: "All" }));
+    expect(within(auditList).getAllByRole("listitem")).toHaveLength(3);
+  });
+
+  it("shows an empty state when the active audit filter has no matching events", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          effectiveStatus: "success",
+          endedAt: "2026-04-21T16:05:00.000Z",
+          status: "success",
+        }),
+      ],
+      details: {
+        "run-1": makeDetail({
+          effectiveStatus: "success",
+          endedAt: "2026-04-21T16:05:00.000Z",
+          isLive: false,
+          resolvedHooks: [
+            {
+              hookId: "taskTransition:task:attach_artifacts:0:require-implementation-brief",
+              phase: "taskTransition",
+              source: { name: "require-implementation-brief" },
+              resolvedPath: null,
+              taskScopeId: "attach_artifacts",
+              when: null,
+              config: {},
+            },
+          ],
+          status: "success",
+          tasks: [
+            {
+              id: "attach_artifacts",
+              title: "Attach the approved draft artifacts to the planning run",
+              body: "Attach assignment-summary.md",
+              status: "completed",
+              notes: "",
+            },
+          ],
+        }),
+      },
+      auditHistories: {
+        "run-1": {
+          runId: "run-1",
+          lastCursor: 2,
+          events: [
+            {
+              runId: "run-1",
+              cursor: 1,
+              event: {
+                type: "run.hook_recorded",
+                recordedAt: "2026-04-21T16:00:00.000Z",
+                source: "task_command",
+                hostMode: "embedded",
+                fields: {
+                  phase: "taskTransition",
+                  hookId: "taskTransition:task:attach_artifacts:0:require-implementation-brief",
+                  outcome: "accepted",
+                  taskId: "attach_artifacts",
+                },
+              },
+            },
+            {
+              runId: "run-1",
+              cursor: 2,
+              event: {
+                type: "task.updated",
+                recordedAt: "2026-04-21T16:01:00.000Z",
+                source: "task_command",
+                hostMode: "embedded",
+                fields: {
+                  taskId: "attach_artifacts",
+                  taskTitle: "Attach the approved draft artifacts to the planning run",
+                  command: "set",
+                  statusBefore: "in_progress",
+                  statusAfter: "completed",
+                  notesChanged: false,
+                },
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+
+    const auditSource = findEventSource("/api/runs/run-1/events/audit");
+    auditSource.emitOpen();
+    await user.click(screen.getByRole("button", { name: /^Audit\b/ }));
+
+    const auditPanel = await screen.findByLabelText("Audit");
+    await user.click(within(auditPanel).getByRole("tab", { name: "Run" }));
+
+    expect(within(auditPanel).getByText("No audit events match this filter")).toBeInTheDocument();
+    expect(
+      within(auditPanel).getByText(
+        "Change the audit filter to view the other persisted events for this run.",
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("renders read-only vars and hook state data with local subtabs", async () => {
     installFetchMock({
       runs: [makeRun()],

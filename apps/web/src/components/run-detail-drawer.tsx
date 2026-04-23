@@ -3,6 +3,7 @@ import type {
   AttachmentListEntry,
   RunAttachment,
 } from "@task-runner/core/contracts/attachments.js";
+import type { RunAuditEvent } from "@task-runner/core/contracts/events.js";
 import type { RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
 import {
   type ChangeEvent,
@@ -47,6 +48,7 @@ type TimelineTab = "message" | "prompt" | "response" | "diagnostics";
 type AttemptSelection = number | "pending" | null;
 type SummaryRow = readonly [label: string, value: string];
 type DataTab = "vars" | "hookState";
+type AuditFilter = "all" | "hooks" | "tasks" | "run";
 
 const TIMELINE_BOTTOM_THRESHOLD_PX = 24;
 
@@ -232,6 +234,19 @@ function renderAuditMessagePart(part: AuditMessagePart, key: string) {
   }
 }
 
+function matchesAuditFilter(filter: AuditFilter, event: RunAuditEvent) {
+  switch (filter) {
+    case "all":
+      return true;
+    case "hooks":
+      return event.type === "run.hook_recorded";
+    case "tasks":
+      return event.type.startsWith("task.");
+    case "run":
+      return event.type.startsWith("run.") && event.type !== "run.hook_recorded";
+  }
+}
+
 function taskStatusBadgeLabel(status: "pending" | "in_progress" | "completed" | "blocked") {
   switch (status) {
     case "pending":
@@ -394,6 +409,7 @@ export function RunDetailDrawer({
   const latestAttemptRef = useRef<number | null>(null);
   const [selectedAttempt, setSelectedAttempt] = useState<AttemptSelection>(null);
   const [dataTab, setDataTab] = useState<DataTab>("vars");
+  const [auditFilter, setAuditFilter] = useState<AuditFilter>("all");
   const [timelineTab, setTimelineTab] = useState<TimelineTab>(
     (run.status === "initialized" || run.status === "ready") && run.attempts === 0
       ? "message"
@@ -439,9 +455,12 @@ export function RunDetailDrawer({
   const removeAttachmentPending = actionPending === "remove-attachment";
   const downloadAttachmentPending = actionPending === "download-attachment";
   const auditEvents = auditState.history?.events ?? [];
+  const filteredAuditEvents = auditEvents.filter((envelope) =>
+    matchesAuditFilter(auditFilter, envelope.event),
+  );
   const displayedAuditEvents = preferences.auditNewestFirst
-    ? [...auditEvents].reverse()
-    : auditEvents;
+    ? [...filteredAuditEvents].reverse()
+    : filteredAuditEvents;
   const visibleName = run.name ?? "Unnamed";
   const canEditDependencies = run.status === "initialized" && run.archivedAt === null;
   const addDependencyPending = actionPending === "add-dependency";
@@ -1593,9 +1612,31 @@ export function RunDetailDrawer({
                   <div className="dependency-section">
                     <div className="dependency-summary">
                       <span>
-                        {auditEvents.length} audit event{auditEvents.length === 1 ? "" : "s"}
+                        {displayedAuditEvents.length} audit event
+                        {displayedAuditEvents.length === 1 ? "" : "s"}
                       </span>
                       <div className="dependency-actions">
+                        <div className="task-tabs" aria-label="Audit event filter" role="tablist">
+                          {(
+                            [
+                              ["all", "All"],
+                              ["hooks", "Hooks"],
+                              ["tasks", "Tasks"],
+                              ["run", "Run"],
+                            ] as const
+                          ).map(([value, label]) => (
+                            <button
+                              aria-selected={auditFilter === value}
+                              className={auditFilter === value ? "task-tab active" : "task-tab"}
+                              key={value}
+                              onClick={() => setAuditFilter(value)}
+                              role="tab"
+                              type="button"
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
                         <button
                           aria-pressed={preferences.auditNewestFirst}
                           className={
@@ -1618,31 +1659,45 @@ export function RunDetailDrawer({
                       </div>
                     </div>
                     {auditState.error ? <p className="muted-inline">{auditState.error}</p> : null}
-                    <ul aria-label="Audit events" className="dependency-list">
-                      {displayedAuditEvents.map((envelope) => {
-                        const formatted = formatAuditEvent(envelope.event);
-                        return (
-                          <li className="dependency-row" key={envelope.cursor}>
-                            <div className="dependency-copy">
-                              <span className="dependency-name">
-                                {formatted.message.map((part, index) =>
-                                  renderAuditMessagePart(part, `${envelope.cursor}-${index}`),
-                                )}
-                              </span>
-                              <span className="dependency-meta">
-                                <span className="dependency-meta-id mono">
-                                  {formatTimestamp(envelope.event.recordedAt)}
+                    {displayedAuditEvents.length > 0 ? (
+                      <ul aria-label="Audit events" className="dependency-list">
+                        {displayedAuditEvents.map((envelope) => {
+                          const formatted = formatAuditEvent(envelope.event, {
+                            resolvedHooks: run.resolvedHooks,
+                            tasks: run.tasks,
+                          });
+                          return (
+                            <li className="dependency-row" key={envelope.cursor}>
+                              <div className="dependency-copy">
+                                <span className="dependency-name">
+                                  {formatted.message.map((part, index) =>
+                                    renderAuditMessagePart(part, `${envelope.cursor}-${index}`),
+                                  )}
                                 </span>
-                                <span className="dependency-meta-id mono">#{envelope.cursor}</span>
-                                <span className="dependency-meta-id mono">
-                                  {envelope.event.source}
+                                <span className="dependency-meta">
+                                  <span className="dependency-meta-id mono">
+                                    {formatTimestamp(envelope.event.recordedAt)}
+                                  </span>
+                                  <span className="dependency-meta-id mono">
+                                    #{envelope.cursor}
+                                  </span>
+                                  <span className="dependency-meta-id mono">
+                                    {envelope.event.source}
+                                  </span>
                                 </span>
-                              </span>
-                            </div>
-                          </li>
-                        );
-                      })}
-                    </ul>
+                              </div>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    ) : (
+                      <div className="drawer-state">
+                        <h3>No audit events match this filter</h3>
+                        <p>
+                          Change the audit filter to view the other persisted events for this run.
+                        </p>
+                      </div>
+                    )}
                   </div>
                 ) : null}
               </div>
