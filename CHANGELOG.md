@@ -156,11 +156,21 @@
   `fromStatus`, `toStatus`, and `source`; unmatched hooks are skipped
   without emitting accepted `run.hook_recorded` audit rows, and
   task-local hooks run before assignment-level task-transition hooks.
+  ([#87](https://github.com/kcosr/task-runner/pull/87))
+- Changed the web run detail drawer audit view to render friendlier hook
+  messages, add `All` / `Hooks` / `Tasks` / `Run` filters, and show an
+  explicit empty-filter state. ([#87](https://github.com/kcosr/task-runner/pull/87))
 - Built-in implementer assignments now start from `repo_root` and use a
   first-attempt `git-worktree` hook plus explicit `git fetch origin
   --prune && git merge --ff-only origin/main` sync instead of creating
   worktrees during `prepare`.
   ([#86](https://github.com/kcosr/task-runner/pull/86))
+
+### Fixed
+
+- Fixed shared `RunDetail` projections to normalize missing legacy hook
+  `taskScopeId` and `summary` fields before serving older manifests to
+  the web dashboard. ([#87](https://github.com/kcosr/task-runner/pull/87))
 
 ### Removed
 
