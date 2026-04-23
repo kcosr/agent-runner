@@ -9,7 +9,12 @@ import {
 import type { LoadedAssignment } from "../config/loaded.js";
 import type { HookPhase } from "../config/schema.js";
 import { builtinHookModule } from "./registry.js";
-import type { HookModule, HookWhen, ResolvedHookDescriptor } from "./types.js";
+import type {
+  HookModule,
+  HookWhen,
+  ResolvedHookDescriptor,
+  TaskTransitionHookWhen,
+} from "./types.js";
 
 export class HookConfigError extends Error {
   constructor(message: string) {
@@ -73,6 +78,28 @@ function hookSourceLabel(descriptor: ResolvedHookDescriptor): string {
   return `path:${descriptor.source.path ?? descriptor.resolvedPath ?? "<unknown>"}`;
 }
 
+function validateTaskScopedWhen(
+  phase: HookPhase,
+  index: number,
+  taskScopeId: string | null,
+  when: HookWhen | null,
+): void {
+  if (phase !== "taskTransition" || taskScopeId === null || when === null) {
+    return;
+  }
+  const taskWhen = when as TaskTransitionHookWhen;
+  if (taskWhen.taskId !== undefined && taskWhen.taskId !== taskScopeId) {
+    throw new HookConfigError(
+      `task hook taskTransition[${index}] for task "${taskScopeId}" cannot target when.taskId "${taskWhen.taskId}"`,
+    );
+  }
+  if (taskWhen.taskIds?.some((taskId) => taskId !== taskScopeId)) {
+    throw new HookConfigError(
+      `task hook taskTransition[${index}] for task "${taskScopeId}" cannot target taskIds outside its task scope`,
+    );
+  }
+}
+
 export function resolveAssignmentHooks(
   assignment: LoadedAssignment | undefined,
   vars: Record<string, unknown>,
@@ -102,6 +129,7 @@ export function resolveAssignmentHooks(
     const config = interpolateHookValue(entry.with, vars);
     const when = interpolateHookValue(entry.when ?? null, vars) as HookWhen | null;
     const scopeTaskId = scope.taskScopeId ?? null;
+    validateTaskScopedWhen(phase, index, scopeTaskId, when);
     const hookIdPrefix = scope.hookIdPrefix ? `${scope.hookIdPrefix}:` : "";
     if (entry.builtin) {
       descriptors.push({

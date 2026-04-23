@@ -7,7 +7,10 @@ interface RequireChildrenSuccessConfig {
 }
 
 function parseConfig(config: unknown): RequireChildrenSuccessConfig {
-  if (!config || typeof config !== "object") {
+  if (config === undefined || config === null) {
+    return { requireAny: false };
+  }
+  if (typeof config !== "object") {
     throw new Error("require-children-success hook requires an object config");
   }
   const record = config as Record<string, unknown>;

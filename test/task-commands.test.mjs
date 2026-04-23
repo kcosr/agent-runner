@@ -144,7 +144,7 @@ function patchManifest(workspaceDir, mutator) {
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
-function taskGuardedAssignment({ requireAny } = {}) {
+function taskGuardedAssignment({ requireAny, omitWith } = {}) {
   return `---
 schemaVersion: 1
 name: task-cmd-work
@@ -155,8 +155,12 @@ tasks:
     body: Wait for reviewer child runs.
     hooks:
       - builtin: require-children-success
-        with:
-          requireAny: ${requireAny === true ? "true" : "false"}
+${
+  omitWith === true
+    ? ""
+    : `        with:
+          requireAny: ${requireAny === true ? "true" : "false"}`
+}
   - id: ship
     title: Ship
     body: Ship the change.
@@ -164,6 +168,25 @@ tasks:
 Work.
 `;
 }
+
+const TASK_SCOPED_CONTRADICTION_ASSIGNMENT = `---
+schemaVersion: 1
+name: task-cmd-work
+maxRetries: 1
+tasks:
+  - id: peer_review
+    title: Peer review
+    body: Wait for reviewer child runs.
+    hooks:
+      - builtin: require-children-success
+        when:
+          taskId: ship
+  - id: ship
+    title: Ship
+    body: Ship the change.
+---
+Work.
+`;
 
 test("task set: updates status only on initialized run", async () => {
   const dir = tempDir();
@@ -508,6 +531,17 @@ test("task set: require-children-success allows completion when no direct childr
   assert.equal(manifest.finalTasks.peer_review.status, "completed");
 });
 
+test("task set: require-children-success defaults requireAny to false when config is omitted", async () => {
+  const dir = tempDir();
+  writeBundle(dir, taskGuardedAssignment({ omitWith: true }));
+  const outcome = await initRun(dir);
+
+  runCli(["task", "set", outcome.runId, "peer_review", "--status", "completed"], { cwd: dir });
+
+  const manifest = readManifest(outcome.workspaceDir);
+  assert.equal(manifest.finalTasks.peer_review.status, "completed");
+});
+
 test("task set: require-children-success rejects completion when requireAny is true and no direct children exist", async () => {
   const dir = tempDir();
   writeBundle(dir, taskGuardedAssignment({ requireAny: true }));
@@ -522,6 +556,16 @@ test("task set: require-children-success rejects completion when requireAny is t
 
   const manifest = readManifest(outcome.workspaceDir);
   assert.equal(manifest.finalTasks.peer_review.status, "pending");
+});
+
+test("task-local hooks reject cross-task when.taskId selectors during resolution", async () => {
+  const dir = tempDir();
+  writeBundle(dir, TASK_SCOPED_CONTRADICTION_ASSIGNMENT);
+
+  await assert.rejects(
+    initRun(dir),
+    /task hook taskTransition\[0\] for task "peer_review" cannot target when\.taskId "ship"/,
+  );
 });
 
 test("task set: require-children-success ignores unrelated task ids", async () => {
