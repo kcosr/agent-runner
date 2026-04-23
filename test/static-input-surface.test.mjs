@@ -1,0 +1,283 @@
+import { strict as assert } from "node:assert";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { test } from "node:test";
+import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
+import { resolveStaticInputSurface } from "../packages/core/dist/core/run/static-input-surface.js";
+import { withRuntimeRoots } from "./helpers/runtime-paths.mjs";
+
+const REPO_ROOT = new URL("..", import.meta.url).pathname;
+const PLANNER_AGENT_PATH = new URL("../agents/planner/agent.md", import.meta.url).pathname;
+const PLAN_FEATURE_ASSIGNMENT_PATH = new URL(
+  "../assignments/plan-feature/assignment.md",
+  import.meta.url,
+).pathname;
+
+function writeAgent(baseDir, name, body) {
+  const agentDir = join(baseDir, "agents", name);
+  mkdirSync(agentDir, { recursive: true });
+  writeFileSync(join(agentDir, "agent.md"), body);
+}
+
+function writeAssignment(baseDir, name, body) {
+  const assignmentDir = join(baseDir, "assignments", name);
+  mkdirSync(assignmentDir, { recursive: true });
+  writeFileSync(join(assignmentDir, "assignment.md"), body);
+}
+
+function fieldByKey(fields, key) {
+  const field = fields.find((entry) => entry.key === key);
+  assert.ok(field, `expected field ${key}`);
+  return field;
+}
+
+test("static input surface: built-in planner + plan-feature surfaces the documented static fields", () => {
+  const loadedAgent = loadAgentConfig(PLANNER_AGENT_PATH, REPO_ROOT);
+  const loadedAssignment = loadAssignmentConfig(PLAN_FEATURE_ASSIGNMENT_PATH, REPO_ROOT);
+
+  const surface = resolveStaticInputSurface(loadedAgent, loadedAssignment);
+  const backend = fieldByKey(surface.runSettings, "backend");
+  const timeoutSec = fieldByKey(surface.runSettings, "timeoutSec");
+  const unrestricted = fieldByKey(surface.runSettings, "unrestricted");
+  const maxRetries = fieldByKey(surface.runSettings, "maxRetries");
+  const message = fieldByKey(surface.runSettings, "message");
+  const model = fieldByKey(surface.runSettings, "model");
+  const effort = fieldByKey(surface.runSettings, "effort");
+
+  assert.deepEqual(
+    surface.runSettings.map((field) => field.key),
+    [
+      "cwd",
+      "backend",
+      "launcher",
+      "model",
+      "effort",
+      "message",
+      "name",
+      "timeoutSec",
+      "unrestricted",
+      "maxRetries",
+    ],
+  );
+
+  assert.equal(backend.value, "codex");
+  assert.equal(backend.source, "agent");
+  assert.equal(timeoutSec.value, 3600);
+  assert.equal(timeoutSec.source, "schema_default");
+  assert.equal(unrestricted.value, true);
+  assert.equal(unrestricted.source, "agent");
+  assert.equal(maxRetries.value, 4);
+  assert.equal(maxRetries.source, "assignment");
+
+  assert.equal(message.editable, true);
+  assert.equal(message.valueStatus, "unset");
+  assert.equal(message.source, "available_override");
+
+  assert.equal(model.editable, true);
+  assert.equal(model.valueStatus, "delegated");
+  assert.equal(model.source, "available_override");
+  assert.equal(model.value, undefined);
+
+  assert.equal(effort.editable, true);
+  assert.equal(effort.valueStatus, "delegated");
+  assert.equal(effort.source, "available_override");
+  assert.equal(effort.value, undefined);
+
+  assert.deepEqual(
+    surface.assignmentInputs.map((field) => field.key),
+    ["worktree_slug"],
+  );
+  assert.equal(fieldByKey(surface.assignmentInputs, "worktree_slug").required, true);
+  assert.ok(!surface.assignmentInputs.some((field) => field.key === "worktree_path"));
+  assert.ok(!surface.assignmentInputs.some((field) => field.key === "repo_root"));
+});
+
+test("static input surface: launcher path and inline definitions preserve authored values", () =>
+  withRuntimeRoots("task-runner-static-input-launchers-", ({ rootDir, configDir }) => {
+    writeAgent(
+      configDir,
+      "path-launcher",
+      `---
+schemaVersion: 1
+name: path-launcher
+backend: codex
+launcher: ./launchers/prefix.yml
+---
+Path launcher fixture.
+`,
+    );
+    writeAgent(
+      configDir,
+      "inline-launcher",
+      `---
+schemaVersion: 1
+name: inline-launcher
+backend: codex
+launcher:
+  command: env
+  args: [TASK_RUNNER_TEST, "1"]
+---
+Inline launcher fixture.
+`,
+    );
+
+    const pathSurface = resolveStaticInputSurface(loadAgentConfig("path-launcher", rootDir));
+    const inlineSurface = resolveStaticInputSurface(loadAgentConfig("inline-launcher", rootDir));
+
+    assert.equal(
+      fieldByKey(pathSurface.runSettings, "launcher").value,
+      join(configDir, "agents", "path-launcher", "launchers", "prefix.yml"),
+    );
+
+    assert.deepEqual(fieldByKey(inlineSurface.runSettings, "launcher").value, {
+      command: "env",
+      args: ["TASK_RUNNER_TEST", "1"],
+    });
+  }));
+
+test("static input surface: lock union and CLI-capable var metadata are preserved", () =>
+  withRuntimeRoots("task-runner-static-input-", ({ rootDir, configDir }) => {
+    writeAgent(
+      configDir,
+      "fixture",
+      `---
+schemaVersion: 1
+name: fixture
+backend: codex
+launcher: ssh-wrap
+lockedFields: [message, model]
+---
+Fixture agent.
+`,
+    );
+    writeAssignment(
+      configDir,
+      "fixture-work",
+      `---
+schemaVersion: 1
+name: fixture-work
+cwd: packages/core
+message: ship it
+maxRetries: 5
+lockedFields: [cwd, maxRetries, message]
+vars:
+  cli_default:
+    type: string
+    sources: [cli]
+    default: alpha
+  env_only:
+    type: string
+    sources: [env]
+  parent_only:
+    type: string
+    sources: [parent]
+  mixed_default:
+    type: enum
+    values: [small, large]
+    sources: [cli, env]
+    default: large
+  cli_prepare_required:
+    type: string
+    required: true
+    requiredAt: prepare
+    sources: [cli]
+  cli_initial_required:
+    type: boolean
+    required: true
+    sources: [cli]
+---
+Fixture assignment.
+`,
+    );
+
+    const loadedAgent = loadAgentConfig("fixture", rootDir);
+    const loadedAssignment = loadAssignmentConfig("fixture-work", rootDir);
+    const surface = resolveStaticInputSurface(loadedAgent, loadedAssignment);
+
+    const cwd = fieldByKey(surface.runSettings, "cwd");
+    const launcher = fieldByKey(surface.runSettings, "launcher");
+    const model = fieldByKey(surface.runSettings, "model");
+    const effort = fieldByKey(surface.runSettings, "effort");
+    const message = fieldByKey(surface.runSettings, "message");
+    const maxRetries = fieldByKey(surface.runSettings, "maxRetries");
+
+    assert.equal(cwd.locked, true);
+    assert.equal(cwd.editable, false);
+    assert.equal(cwd.value, "packages/core");
+    assert.equal(cwd.source, "assignment");
+
+    assert.equal(launcher.locked, false);
+    assert.equal(launcher.editable, true);
+    assert.equal(launcher.value, "ssh-wrap");
+    assert.equal(launcher.source, "agent");
+
+    assert.equal(model.locked, true);
+    assert.equal(model.editable, false);
+    assert.equal(model.valueStatus, "delegated");
+    assert.equal(model.hiddenWhenUnset, true);
+    assert.equal(model.value, undefined);
+
+    assert.equal(effort.locked, false);
+    assert.equal(effort.editable, true);
+    assert.equal(effort.valueStatus, "delegated");
+    assert.equal(effort.hiddenWhenUnset, false);
+
+    assert.equal(message.locked, true);
+    assert.equal(message.editable, false);
+    assert.equal(message.value, "ship it");
+
+    assert.equal(maxRetries.locked, true);
+    assert.equal(maxRetries.editable, false);
+    assert.equal(maxRetries.value, 5);
+    assert.equal(maxRetries.source, "assignment");
+
+    assert.deepEqual(
+      surface.assignmentInputs.map((field) => field.key),
+      ["cli_default", "mixed_default", "cli_prepare_required", "cli_initial_required"],
+    );
+
+    const cliDefault = fieldByKey(surface.assignmentInputs, "cli_default");
+    const mixedDefault = fieldByKey(surface.assignmentInputs, "mixed_default");
+    const cliPrepareRequired = fieldByKey(surface.assignmentInputs, "cli_prepare_required");
+    const cliInitialRequired = fieldByKey(surface.assignmentInputs, "cli_initial_required");
+
+    assert.equal(cliDefault.value, "alpha");
+    assert.equal(cliDefault.source, "var_default");
+
+    assert.equal(mixedDefault.inputKind, "enum");
+    assert.deepEqual(mixedDefault.enumValues, ["small", "large"]);
+    assert.equal(mixedDefault.value, "large");
+    assert.equal(mixedDefault.source, "var_default");
+
+    assert.equal(cliPrepareRequired.valueStatus, "unset");
+    assert.equal(cliPrepareRequired.required, undefined);
+
+    assert.equal(cliInitialRequired.valueStatus, "unset");
+    assert.equal(cliInitialRequired.required, true);
+  }));
+
+test("static input surface: agent-only resolution keeps run-loop defaults without inventing assignment state", () =>
+  withRuntimeRoots("task-runner-static-input-agent-", ({ rootDir, configDir }) => {
+    writeAgent(
+      configDir,
+      "agent-only",
+      `---
+schemaVersion: 1
+name: agent-only
+backend: claude
+---
+Agent only.
+`,
+    );
+
+    const loadedAgent = loadAgentConfig("agent-only", rootDir);
+    const surface = resolveStaticInputSurface(loadedAgent);
+
+    assert.deepEqual(surface.assignmentInputs, []);
+    assert.equal(fieldByKey(surface.runSettings, "cwd").valueStatus, "unset");
+    assert.equal(fieldByKey(surface.runSettings, "message").valueStatus, "unset");
+    assert.equal(fieldByKey(surface.runSettings, "maxRetries").value, 3);
+    assert.equal(fieldByKey(surface.runSettings, "maxRetries").source, "run_loop_default");
+    assert.equal(fieldByKey(surface.runSettings, "unrestricted").source, "schema_default");
+    assert.equal(fieldByKey(surface.runSettings, "model").valueStatus, "delegated");
+  }));

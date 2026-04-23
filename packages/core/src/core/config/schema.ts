@@ -34,6 +34,10 @@ function validateHookSourceSelector(
 
 export const VAR_SOURCES = ["cli", "env", "parent"] as const;
 export type VarSource = (typeof VAR_SOURCES)[number];
+export const EFFORT_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+export const DEFAULT_AGENT_TIMEOUT_SEC = 3600;
+export const DEFAULT_AGENT_UNRESTRICTED = false;
+export const DEFAULT_MAX_RETRIES = 3;
 
 function isValidVarDefault(value: unknown, def: { type: string; values?: string[] }): boolean {
   switch (def.type) {
@@ -258,11 +262,11 @@ export const agentConfigSchema = z.object({
   name: z.string().min(1),
   backend: z.enum(BACKEND_IDS),
   model: z.string().optional(),
-  effort: z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]).optional(),
+  effort: z.enum(EFFORT_LEVELS).optional(),
   launcher: agentLauncherSchema.optional(),
   backendSpecific: backendSpecificConfigSchema.optional(),
-  timeoutSec: z.number().int().positive().default(3600),
-  unrestricted: z.boolean().default(false),
+  timeoutSec: z.number().int().positive().default(DEFAULT_AGENT_TIMEOUT_SEC),
+  unrestricted: z.boolean().default(DEFAULT_AGENT_UNRESTRICTED),
   lockedFields: z.array(z.enum(LOCKABLE_FIELDS)).default([]),
 });
 
@@ -283,7 +287,7 @@ export const assignmentConfigSchema = z
     name: z.string().min(1),
     cwd: z.string().trim().min(1).optional(),
     message: z.string().optional(),
-    maxRetries: z.number().int().min(0).max(20).default(3),
+    maxRetries: z.number().int().min(0).max(20).default(DEFAULT_MAX_RETRIES),
     // Documentation surface for the human / script invoking
     // task-runner, NOT part of the prompt sent to the backend.
     // Printed to stderr on fresh `run` and `init` (never on

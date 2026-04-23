@@ -16,7 +16,7 @@ import {
 } from "../packages/core/dist/core/config/loaded.js";
 import { resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
-import { withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
+import { sharedRuntimeEnv, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 const CLI_PATH = resolvePath(new URL("../apps/cli/dist/cli.js", import.meta.url).pathname);
 
@@ -126,10 +126,7 @@ function runCli(args, opts = {}) {
     encoding: "utf8",
     env: {
       ...process.env,
-      TASK_RUNNER_CONFIG_DIR: opts.cwd ?? process.cwd(),
-      TASK_RUNNER_STATE_DIR: opts.cwd ?? process.cwd(),
-      TASK_RUNNER_CONNECT: undefined,
-      TASK_RUNNER_LISTEN: undefined,
+      ...sharedRuntimeEnv(opts.cwd ?? process.cwd()),
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -209,10 +206,7 @@ test("ad-hoc agent: --agent omitted without --backend errors with exit 3", async
       encoding: "utf8",
       env: {
         ...process.env,
-        TASK_RUNNER_CONFIG_DIR: dir,
-        TASK_RUNNER_STATE_DIR: dir,
-        TASK_RUNNER_CONNECT: undefined,
-        TASK_RUNNER_LISTEN: undefined,
+        ...sharedRuntimeEnv(dir),
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
