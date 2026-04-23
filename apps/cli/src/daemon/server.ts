@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { type Socket, createServer as createNetServer } from "node:net";
+import { monitorEventLoopDelay, performance } from "node:perf_hooks";
 import {
   addDependency,
   addRunAttachmentFromStream,
@@ -74,6 +75,12 @@ import {
 } from "@task-runner/core/core/run/manifest.js";
 import type { RunEvent } from "@task-runner/core/core/run/run-loop.js";
 import { withTaskStateLock } from "@task-runner/core/core/run/workspace-state.js";
+import {
+  debugPerfEnabled,
+  debugPerfLog,
+  readDebugPerfIntervalMs,
+  startDebugPerfTimer,
+} from "@task-runner/core/util/debug-perf.js";
 import { shortId } from "@task-runner/core/util/short-id.js";
 import { WebSocket, WebSocketServer } from "ws";
 import { deriveAppRuntimeConfig, deriveHttpBaseUrl, listenSocketConfig } from "./config.js";
@@ -161,6 +168,10 @@ interface SubscriptionHandle {
 
 const MAX_TIMELINE_BUFFER_EVENTS = 1_000;
 const COMPLETED_TIMELINE_BUFFER_TTL_MS = 5_000;
+
+function roundMetric(value: number): number {
+  return Math.round(value * 1_000) / 1_000;
+}
 
 function daemonExecution(daemonInstanceId: string) {
   return {
@@ -557,23 +568,49 @@ export async function serveDaemon(
   };
 
   const getProjectedSummary = (runId: string): RunSummary | null => {
+    const finish = startDebugPerfTimer("daemon.project.summary", { runId });
     try {
-      return getDaemonRunSummary(runId);
+      const summary = getDaemonRunSummary(runId);
+      finish({
+        found: true,
+        status: summary.status,
+        dependencyTotal: summary.dependencyState?.total ?? null,
+        tasksTotal: summary.tasksTotal ?? null,
+      });
+      return summary;
     } catch (err) {
       if (err instanceof RunNotFoundError) {
+        finish({ found: false });
         return null;
       }
+      finish({
+        found: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
       throw err;
     }
   };
 
   const getProjectedDetail = (runId: string): RunDetail | null => {
+    const finish = startDebugPerfTimer("daemon.project.detail", { runId });
     try {
-      return getDaemonRun(runId);
+      const detail = getDaemonRun(runId);
+      finish({
+        found: true,
+        taskCount: Array.isArray(detail.tasks) ? detail.tasks.length : null,
+        dependencyCount: Array.isArray(detail.dependencies) ? detail.dependencies.length : null,
+        attemptCount: detail.attempts ?? null,
+      });
+      return detail;
     } catch (err) {
       if (err instanceof RunNotFoundError) {
+        finish({ found: false });
         return null;
       }
+      finish({
+        found: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
       throw err;
     }
   };
@@ -648,18 +685,24 @@ export async function serveDaemon(
   };
 
   const getProjectedTimelineHistory = (runId: string): RunTimelineHistory => {
+    const finish = startDebugPerfTimer("daemon.project.timeline_history", { runId });
     const history = app.getRunTimelineHistory(runId);
     const active = activeRuns.get(runId);
-    if (!active) {
-      return history;
-    }
-    return {
-      runId,
-      attempts: active.currentAttempt
-        ? [...history.attempts, { ...active.currentAttempt }]
-        : history.attempts,
-      lastCursor: active.nextCursor,
-    };
+    const projected = !active
+      ? history
+      : {
+          runId,
+          attempts: active.currentAttempt
+            ? [...history.attempts, { ...active.currentAttempt }]
+            : history.attempts,
+          lastCursor: active.nextCursor,
+        };
+    finish({
+      active: Boolean(active),
+      attemptCount: projected.attempts.length,
+      lastCursor: projected.lastCursor,
+    });
+    return projected;
   };
 
   const getProjectedAuditHistory = (
@@ -667,7 +710,18 @@ export async function serveDaemon(
     options?: {
       limit?: number;
     },
-  ): RunAuditHistory => app.getRunAuditHistory(runId, options);
+  ): RunAuditHistory => {
+    const finish = startDebugPerfTimer("daemon.project.audit_history", {
+      runId,
+      limit: options?.limit ?? null,
+    });
+    const history = app.getRunAuditHistory(runId, options);
+    finish({
+      eventCount: history.events.length,
+      lastCursor: history.lastCursor,
+    });
+    return history;
+  };
 
   const createActiveRunRecord = (
     abortController: AbortController,
@@ -844,16 +898,23 @@ export async function serveDaemon(
   };
 
   const publishSummary = (summary: RunSummary): void => {
+    const finish = startDebugPerfTimer("daemon.publish.summary", {
+      runId: summary.runId,
+      subscriberCount: summarySubscriptions.size,
+    });
     const payload: RunSummaryStreamEvent = {
       type: "summary_upsert",
       summary,
     };
+    let published = 0;
     for (const [id, subscription] of summarySubscriptions) {
       const keep = subscription.publish(payload);
+      published++;
       if (!keep) {
         summarySubscriptions.delete(id);
       }
     }
+    finish({ published });
   };
 
   const publishSummaryRemoval = (runId: string): void => {
@@ -870,42 +931,63 @@ export async function serveDaemon(
   };
 
   const publishDetail = (detail: RunDetail): void => {
+    const finish = startDebugPerfTimer("daemon.publish.detail", {
+      runId: detail.runId,
+      subscriberCount: detailSubscriptions.size,
+    });
     const payload: RunDetailStreamEvent = {
       type: "detail_updated",
       detail,
     };
+    let published = 0;
     for (const [id, subscription] of detailSubscriptions) {
       if (subscription.runId !== detail.runId) {
         continue;
       }
       const keep = subscription.publish(payload);
+      published++;
       if (!keep) {
         detailSubscriptions.delete(id);
       }
     }
+    finish({ published });
   };
 
   const publishAudit = (envelope: RunAuditEnvelope): void => {
+    const finish = startDebugPerfTimer("daemon.publish.audit", {
+      runId: envelope.runId,
+      cursor: envelope.cursor,
+      subscriberCount: auditSubscriptions.size,
+    });
     const active = activeRuns.get(envelope.runId);
     if (active) {
       bufferAuditEvent(active, envelope);
     } else {
       rememberRecentAuditEvent(envelope.runId, envelope);
     }
+    let published = 0;
     for (const [id, subscription] of auditSubscriptions) {
       if (subscription.runId !== envelope.runId) {
         continue;
       }
       const keep = subscription.publish(envelope);
+      published++;
       if (!keep) {
         auditSubscriptions.delete(id);
       }
     }
+    finish({ published, active: Boolean(active) });
   };
 
   const publishTimeline = (runId: string, event: RunTimelineEvent): void => {
+    const finish = startDebugPerfTimer("daemon.publish.timeline", {
+      runId,
+      eventType: event.type,
+      subscriberCount: timelineSubscriptions.size,
+    });
     const active = activeRuns.get(runId);
     if (!active) {
+      finish({ active: false, published: 0 });
       return;
     }
     const cursor = active.nextCursor + 1;
@@ -913,15 +995,22 @@ export async function serveDaemon(
     lastTimelineCursorByRun.set(runId, cursor);
     const envelope: RunTimelineEnvelope = { runId, cursor, event };
     bufferTimelineEvent(active, envelope);
+    let published = 0;
     for (const [id, subscription] of timelineSubscriptions) {
       if (subscription.runId !== runId) {
         continue;
       }
       const keep = subscription.publish(envelope);
+      published++;
       if (!keep) {
         timelineSubscriptions.delete(id);
       }
     }
+    finish({
+      active: true,
+      cursor,
+      published,
+    });
   };
 
   const publishRunProjections = (
@@ -933,6 +1022,11 @@ export async function serveDaemon(
       publishDependentDetails?: boolean;
     } = {},
   ): void => {
+    const finish = startDebugPerfTimer("daemon.publish.projections", {
+      runId,
+      publishDependentSummaries: options.publishDependentSummaries ?? false,
+      publishDependentDetails: options.publishDependentDetails ?? false,
+    });
     const summary = options.summary === undefined ? getProjectedSummary(runId) : options.summary;
     if (summary) {
       publishSummary(summary);
@@ -973,6 +1067,11 @@ export async function serveDaemon(
         detail: dependentDetail,
       });
     }
+    finish({
+      summaryPublished: summary !== null,
+      detailPublished: detail !== null,
+      dependentCount: dependents.length,
+    });
   };
 
   const publishMutationResult = (
@@ -1233,12 +1332,22 @@ export async function serveDaemon(
   };
 
   const executeManagedRun = async (
+    kind: "start" | "resume",
     startManagedRun: (
       emitEvent: (event: RunEvent) => void,
       abortSignal: AbortSignal,
       emitAuditEnvelope: (envelope: RunAuditEnvelope) => void,
     ) => Promise<{ runId: string }>,
   ): Promise<{ runId: string }> => {
+    const finish = startDebugPerfTimer("daemon.managed_run", { kind });
+    let finished = false;
+    const finalize = (fields: Record<string, unknown>) => {
+      if (finished) {
+        return;
+      }
+      finished = true;
+      finish(fields);
+    };
     const abortController = new AbortController();
     let runId: string | undefined;
     let resolveRunId: ((value: string) => void) | undefined;
@@ -1293,6 +1402,11 @@ export async function serveDaemon(
         }
       })
       .catch((err) => {
+        finalize({
+          kind,
+          runId: runId ?? null,
+          error: err instanceof Error ? err.message : String(err),
+        });
         if (!runId) {
           rejectRunId?.(err);
           return;
@@ -1326,7 +1440,9 @@ export async function serveDaemon(
         resolveDone?.();
       });
 
-    return { runId: await runIdPromise };
+    const result = { runId: await runIdPromise };
+    finalize({ kind, runId: result.runId });
+    return result;
   };
 
   const abortRun = (target: string): { runId: string; accepted: true } => {
@@ -1447,7 +1563,7 @@ export async function serveDaemon(
       startedAt,
     },
     startManagedRun: (request) =>
-      executeManagedRun((emitEvent, abortSignal, emitAuditEnvelope) =>
+      executeManagedRun("start", (emitEvent, abortSignal, emitAuditEnvelope) =>
         app.startRun({
           ...request,
           execution: daemonExecution(daemonInstanceId),
@@ -1457,7 +1573,7 @@ export async function serveDaemon(
         }),
       ),
     resumeManagedRun: (request) =>
-      executeManagedRun((emitEvent, abortSignal, emitAuditEnvelope) =>
+      executeManagedRun("resume", (emitEvent, abortSignal, emitAuditEnvelope) =>
         app.resumeRun({
           ...request,
           execution: daemonExecution(daemonInstanceId),
@@ -1480,6 +1596,32 @@ export async function serveDaemon(
     }
   };
   rebuildManifestIndex();
+
+  const eventLoopHistogram = debugPerfEnabled() ? monitorEventLoopDelay({ resolution: 20 }) : null;
+  let previousEventLoopUtilization = debugPerfEnabled()
+    ? performance.eventLoopUtilization()
+    : undefined;
+  if (eventLoopHistogram) {
+    eventLoopHistogram.enable();
+  }
+  const eventLoopInterval =
+    eventLoopHistogram && previousEventLoopUtilization
+      ? setInterval(() => {
+          const currentUtilization = performance.eventLoopUtilization(previousEventLoopUtilization);
+          previousEventLoopUtilization = performance.eventLoopUtilization();
+          debugPerfLog("daemon.event_loop", {
+            utilization: roundMetric(currentUtilization.utilization),
+            active: roundMetric(currentUtilization.active),
+            idle: roundMetric(currentUtilization.idle),
+            minMs: roundMetric(eventLoopHistogram.min / 1_000_000),
+            meanMs: roundMetric(eventLoopHistogram.mean / 1_000_000),
+            maxMs: roundMetric(eventLoopHistogram.max / 1_000_000),
+            p99Ms: roundMetric(eventLoopHistogram.percentile(99) / 1_000_000),
+          });
+          eventLoopHistogram.reset();
+        }, readDebugPerfIntervalMs())
+      : null;
+  eventLoopInterval?.unref?.();
 
   const httpServer = createServer((req, res) => {
     const pathname = new URL(req.url ?? "/", httpBaseUrl).pathname;
@@ -2105,6 +2247,10 @@ export async function serveDaemon(
       for (const socket of sockets) {
         socket.destroy();
       }
+      if (eventLoopInterval) {
+        clearInterval(eventLoopInterval);
+      }
+      eventLoopHistogram?.disable();
       await Promise.all([wsClosePromise, httpClosePromise]);
     },
   };

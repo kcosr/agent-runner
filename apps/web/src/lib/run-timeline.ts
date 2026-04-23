@@ -17,6 +17,7 @@ export interface RunTimelineState {
 export interface ApplyEnvelopeResult<THistory> {
   history: THistory;
   requiresReload: boolean;
+  showStaleWarning?: boolean;
 }
 
 export interface CursoredEnvelope {
@@ -58,10 +59,10 @@ export function applyCursoredEnvelope<
   apply: (history: THistory, envelope: TEnvelope) => ApplyEnvelopeResult<THistory>,
 ): ApplyEnvelopeResult<THistory> {
   if (envelope.cursor <= history.lastCursor) {
-    return { history, requiresReload: false };
+    return { history, requiresReload: false, showStaleWarning: false };
   }
   if (envelope.cursor > history.lastCursor + 1) {
-    return { history, requiresReload: true };
+    return { history, requiresReload: true, showStaleWarning: true };
   }
   const next = cloneHistory(history);
   next.lastCursor = envelope.cursor;
@@ -77,7 +78,7 @@ export function applyEnvelope(
       case "run_initialized":
       case "caller_instructions":
       case "run_started":
-        return { history: next, requiresReload: false };
+        return { history: next, requiresReload: false, showStaleWarning: false };
       case "attempt_started":
         next.attempts = next.attempts.map((attempt) =>
           attempt.live ? { ...attempt, live: false } : attempt,
@@ -94,30 +95,30 @@ export function applyEnvelope(
           timedOut: false,
           live: true,
         });
-        return { history: next, requiresReload: false };
+        return { history: next, requiresReload: false, showStaleWarning: false };
       case "agent_message_delta": {
         const activeAttempt = findLiveAttempt(next);
         if (!activeAttempt) {
-          return { history, requiresReload: true };
+          return { history, requiresReload: true, showStaleWarning: true };
         }
         activeAttempt.transcript += envelope.event.text;
-        return { history: next, requiresReload: false };
+        return { history: next, requiresReload: false, showStaleWarning: false };
       }
       case "backend_notice": {
         const activeAttempt = findLiveAttempt(next);
         if (!activeAttempt) {
-          return { history, requiresReload: false };
+          return { history, requiresReload: false, showStaleWarning: false };
         }
         activeAttempt.notices += envelope.event.text;
-        return { history: next, requiresReload: false };
+        return { history: next, requiresReload: false, showStaleWarning: false };
       }
       case "retrying":
       case "run_aborted":
       case "resume_rejected":
       case "run_finished":
-        return { history, requiresReload: true };
+        return { history, requiresReload: true, showStaleWarning: false };
       default:
-        return { history, requiresReload: true };
+        return { history, requiresReload: true, showStaleWarning: true };
     }
   });
 }
@@ -203,8 +204,10 @@ export function useRunTimelineState({
           const result = applyEnvelope(merged, envelope);
           if (result.requiresReload) {
             bufferRef.current = [];
-            staleRef.current = true;
-            setState((current) => ({ ...current, stale: true }));
+            if (result.showStaleWarning ?? true) {
+              staleRef.current = true;
+              setState((current) => ({ ...current, stale: true }));
+            }
             requestReload();
             return;
           }
@@ -287,8 +290,10 @@ export function useRunTimelineState({
         const result = applyEnvelope(historyRef.current, envelope);
         if (result.requiresReload) {
           bufferRef.current = [];
-          staleRef.current = true;
-          setState((current) => ({ ...current, stale: true }));
+          if (result.showStaleWarning ?? true) {
+            staleRef.current = true;
+            setState((current) => ({ ...current, stale: true }));
+          }
           requestReload();
           return;
         }

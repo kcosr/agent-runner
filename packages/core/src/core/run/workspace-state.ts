@@ -2,6 +2,7 @@ import { mkdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { TaskState } from "../../assignment/model.js";
 import { resolveRunsRoot } from "../../config/runtime-paths.js";
+import { debugPerfEnabled, debugPerfLog } from "../../util/debug-perf.js";
 import {
   type RunManifest,
   applyRunResetSeed,
@@ -16,6 +17,11 @@ const LOCK_TIMEOUT_MS = 5_000;
 const LOCK_WAIT_BUFFER = new Int32Array(new SharedArrayBuffer(4));
 const ASYNC_LOCK_QUEUES = new Map<string, Promise<void>>();
 
+interface LockAcquisitionStats {
+  waitMs: number;
+  retries: number;
+}
+
 function sleep(ms: number): void {
   Atomics.wait(LOCK_WAIT_BUFFER, 0, 0, ms);
 }
@@ -28,19 +34,25 @@ function taskLockPath(workspaceDir: string): string {
   return `${workspaceDir}/${LOCK_DIR_NAME}`;
 }
 
-function acquireFilesystemLock(lockPath: string): void {
+function acquireFilesystemLock(lockPath: string): LockAcquisitionStats {
   const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  const startedAt = Date.now();
+  let retries = 0;
   mkdirSync(dirname(lockPath), { recursive: true });
 
   while (true) {
     try {
       mkdirSync(lockPath);
-      return;
+      return {
+        waitMs: Date.now() - startedAt,
+        retries,
+      };
     } catch (error) {
       const err = error as NodeJS.ErrnoException;
       if (err.code !== "EEXIST") {
         throw error;
       }
+      retries++;
       if (Date.now() >= deadline) {
         throw new Error(`timed out waiting for task-state lock at ${lockPath}`);
       }
@@ -49,19 +61,25 @@ function acquireFilesystemLock(lockPath: string): void {
   }
 }
 
-async function acquireFilesystemLockAsync(lockPath: string): Promise<void> {
+async function acquireFilesystemLockAsync(lockPath: string): Promise<LockAcquisitionStats> {
   const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  const startedAt = Date.now();
+  let retries = 0;
   mkdirSync(dirname(lockPath), { recursive: true });
 
   while (true) {
     try {
       mkdirSync(lockPath);
-      return;
+      return {
+        waitMs: Date.now() - startedAt,
+        retries,
+      };
     } catch (error) {
       const err = error as NodeJS.ErrnoException;
       if (err.code !== "EEXIST") {
         throw error;
       }
+      retries++;
       if (Date.now() >= deadline) {
         throw new Error(`timed out waiting for task-state lock at ${lockPath}`);
       }
@@ -75,15 +93,29 @@ function releaseFilesystemLock(lockPath: string): void {
 }
 
 function withFilesystemLock<T>(lockPath: string, fn: () => T): T {
-  acquireFilesystemLock(lockPath);
+  const shouldLog = debugPerfEnabled();
+  const queueStartedAt = shouldLog ? Date.now() : 0;
+  const acquisition = acquireFilesystemLock(lockPath);
+  const lockAcquiredAt = shouldLog ? Date.now() : 0;
   try {
     return fn();
   } finally {
     releaseFilesystemLock(lockPath);
+    if (shouldLog) {
+      debugPerfLog("lock.sync", {
+        lockPath,
+        queuedMs: lockAcquiredAt - queueStartedAt,
+        waitMs: acquisition.waitMs,
+        holdMs: Date.now() - lockAcquiredAt,
+        retries: acquisition.retries,
+      });
+    }
   }
 }
 
 async function withFilesystemLockAsync<T>(lockPath: string, fn: () => Promise<T>): Promise<T> {
+  const shouldLog = debugPerfEnabled();
+  const queueStartedAt = shouldLog ? Date.now() : 0;
   const previous = ASYNC_LOCK_QUEUES.get(lockPath) ?? Promise.resolve();
   let releaseTurn!: () => void;
   const turn = new Promise<void>((resolve) => {
@@ -100,13 +132,27 @@ async function withFilesystemLockAsync<T>(lockPath: string, fn: () => Promise<T>
   await previous;
 
   let locked = false;
+  let lockAcquiredAt = 0;
+  let acquisition: LockAcquisitionStats = { waitMs: 0, retries: 0 };
   try {
-    await acquireFilesystemLockAsync(lockPath);
+    acquisition = await acquireFilesystemLockAsync(lockPath);
     locked = true;
+    if (shouldLog) {
+      lockAcquiredAt = Date.now();
+    }
     return await fn();
   } finally {
     if (locked) {
       releaseFilesystemLock(lockPath);
+      if (shouldLog) {
+        debugPerfLog("lock.async", {
+          lockPath,
+          queuedMs: lockAcquiredAt - queueStartedAt,
+          waitMs: acquisition.waitMs,
+          holdMs: Date.now() - lockAcquiredAt,
+          retries: acquisition.retries,
+        });
+      }
     }
     releaseTurn();
   }

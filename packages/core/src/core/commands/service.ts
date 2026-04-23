@@ -51,6 +51,7 @@ import {
   toRunSummary,
 } from "../../contracts/runs.js";
 import { resolveTaskRunnerCommand } from "../../task-runner-command.js";
+import { startDebugPerfTimer } from "../../util/debug-perf.js";
 import { trimRunName } from "../../util/run-name.js";
 import { shortId } from "../../util/short-id.js";
 import type { LoadedLauncherDefinition } from "../config/launchers.js";
@@ -340,8 +341,16 @@ function withDependencyMutationLock<T>(fn: () => T): T {
 export function refreshRunSnapshotAfterTaskStateSettles(
   resolved: ReturnType<typeof resolveResumeTarget>,
 ): void {
+  const finish = startDebugPerfTimer("runs.refresh_snapshot", {
+    runId: resolved.manifest.runId,
+    workspaceDir: resolved.workspaceDir,
+  });
   withTaskStateLock(resolved.workspaceDir, () => {
     resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
+  });
+  finish({
+    taskCount: Object.keys(resolved.manifest.finalTasks).length,
+    attemptCount: resolved.manifest.attemptRecords.length,
   });
 }
 
@@ -618,6 +627,7 @@ async function propagateRunNameChange(manifest: RunManifest): Promise<void> {
 }
 
 export function readStatus(target: string): StatusCommandResult {
+  const finish = startDebugPerfTimer("runs.read_status", { target });
   const resolved = resolveRun(target);
   refreshRunSnapshotAfterTaskStateSettles(resolved);
 
@@ -638,15 +648,23 @@ export function readStatus(target: string): StatusCommandResult {
     }
   }
 
-  return toRunDetail({
+  const detail = toRunDetail({
     manifest: manifestView,
     isLive: false,
     dependencies: resolveDependencies(manifestView, dependencyGraph),
     dependents: resolveDependentsFromManifests(manifestView.runId, dependents),
   });
+  finish({
+    runId: detail.runId,
+    dependencyCount: detail.dependencies.length,
+    dependentCount: detail.dependents.length,
+    taskCount: detail.tasks.length,
+  });
+  return detail;
 }
 
 export function readRunSummary(target: string): SummaryCommandResult {
+  const finish = startDebugPerfTimer("runs.read_summary", { target });
   const resolved = resolveRun(target);
   refreshRunSnapshotAfterTaskStateSettles(resolved);
   const familyRootRunIdsByWorkspaceDir = deriveFamilyRootRunIds(listRunManifests());
@@ -661,7 +679,7 @@ export function readRunSummary(target: string): SummaryCommandResult {
     resolved.manifest,
     satisfiedRunIds,
   );
-  return toRunSummary(
+  const summary = toRunSummary(
     {
       workspaceDir: resolved.workspaceDir,
       manifest: resolved.manifest,
@@ -670,6 +688,13 @@ export function readRunSummary(target: string): SummaryCommandResult {
     dependencyState,
     familyRootRunIdsByWorkspaceDir.get(resolved.workspaceDir) ?? null,
   );
+  finish({
+    runId: summary.runId,
+    dependencyTotal: summary.dependencyState.total,
+    dependencyUnsatisfied: summary.dependencyState.unsatisfied,
+    tasksTotal: summary.tasksTotal,
+  });
+  return summary;
 }
 
 export function readBrief(target: string): BriefCommandResult {
@@ -720,6 +745,18 @@ function matchesRunListScope(
 }
 
 export function listRuns(filter: RunListFilter = {}): RunListResult {
+  const finish = startDebugPerfTimer("runs.list", {
+    includeArchived: filter.includeArchived === true,
+    scopeKind: filter.scope?.kind ?? "global",
+    scopeTarget:
+      filter.scope?.kind === "cwd"
+        ? filter.scope.cwd
+        : filter.scope?.kind === "repo"
+          ? filter.scope.repo
+          : filter.scope?.kind === "family"
+            ? filter.scope.targetRunId
+            : null,
+  });
   const includeArchived = filter.includeArchived === true;
   const entries = listRunManifests();
   const familyWorkspaceDirs =
@@ -755,7 +792,12 @@ export function listRuns(filter: RunListFilter = {}): RunListResult {
   const visibleSummaries = summaries.filter(
     (entry) => includeArchived || entry.archivedAt === null,
   );
-  return visibleSummaries.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  const sorted = visibleSummaries.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  finish({
+    manifestCount: entries.length,
+    visibleCount: sorted.length,
+  });
+  return sorted;
 }
 
 export function showDefinition(
