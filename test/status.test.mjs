@@ -59,13 +59,7 @@ function writeAssignment(baseDir, name, body) {
 }
 
 function withSharedRuntimeEnv(baseDir, fn) {
-  return withEnv(
-    {
-      TASK_RUNNER_CONFIG_DIR: baseDir,
-      TASK_RUNNER_STATE_DIR: baseDir,
-    },
-    fn,
-  );
+  return withEnv(sharedRuntimeEnv(baseDir), fn);
 }
 
 function runCliExpectFail(args, opts = {}) {

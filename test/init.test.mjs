@@ -9,7 +9,7 @@ import { ResumeError, resolveResumeTarget } from "../packages/core/dist/core/run
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import { resetWorkspaceRun } from "../packages/core/dist/core/run/workspace-state.js";
 import { executeRunCommand } from "../packages/core/dist/run-command.js";
-import { completeAllTasksFromPrompt, withEnv } from "./helpers/runtime-paths.mjs";
+import { completeAllTasksFromPrompt, sharedRuntimeEnv, withEnv } from "./helpers/runtime-paths.mjs";
 
 const TWO_AGENT = `---
 schemaVersion: 1
@@ -75,13 +75,7 @@ function mockBackend(handler) {
 }
 
 function withSharedRuntimeEnv(baseDir, fn) {
-  return withEnv(
-    {
-      TASK_RUNNER_CONFIG_DIR: baseDir,
-      TASK_RUNNER_STATE_DIR: baseDir,
-    },
-    fn,
-  );
+  return withEnv(sharedRuntimeEnv(baseDir), fn);
 }
 
 async function initIn(baseDir, { cliVars, overrides } = {}) {

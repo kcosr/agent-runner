@@ -69,6 +69,7 @@ import {
   appendRunStartedEvent,
   lifecycleRunEventContext,
 } from "./run-events.js";
+import { resolveFreshRunMaxRetries } from "./static-input-surface.js";
 import type { RunCompletionStatus, RunCompletionSummary } from "./status.js";
 
 export { RecursionDepthError } from "./recursion-guard.js";
@@ -1151,7 +1152,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   // maxRetries lives on the assignment. In chat mode (no assignment
   // loaded), fall back to a hard default of 3 to match the assignment
   // schema's own default.
-  const maxRetries = overrides?.maxRetries ?? assignmentConfig?.maxRetries ?? 3;
+  const maxRetries = resolveFreshRunMaxRetries(overrides?.maxRetries, loadedAssignment);
   const maxAttempts = maxRetries + 1;
 
   if (isResume) {
