@@ -1,5 +1,6 @@
 import { Outlet, createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
 import { SETTINGS_SECTIONS } from "./components/settings/settings-sections.js";
+import { NewRunRoute } from "./routes/new-run-route.js";
 import { RunsDashboardRoute } from "./routes/runs-dashboard.js";
 import { SettingsGeneralRoute } from "./routes/settings-general.js";
 import { SettingsKeybindingsRoute } from "./routes/settings-keybindings.js";
@@ -17,6 +18,12 @@ const boardRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
   component: () => <RunsDashboardRoute />,
+});
+
+const newRunRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/runs/new",
+  component: () => <NewRunRoute />,
 });
 
 const runDetailRoute = createRoute({
@@ -51,6 +58,7 @@ const settingsKeybindingsRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   boardRoute,
+  newRunRoute,
   runDetailRoute,
   runAttachmentPreviewRoute,
   settingsLayoutRoute.addChildren([settingsGeneralRoute, settingsKeybindingsRoute]),

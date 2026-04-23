@@ -13,6 +13,10 @@ import type {
   RunTimelineHistory,
 } from "@task-runner/core/contracts/events.js";
 import type {
+  RunInputSurfaceParams,
+  RunInputSurfaceResult,
+} from "@task-runner/core/contracts/run-input-surface.js";
+import type {
   RunArchiveResult,
   RunBackendSessionResult,
   RunDependenciesResult,
@@ -116,6 +120,8 @@ export interface DefinitionGetParams {
   target: string;
   cwd?: string;
 }
+
+export type { RunInputSurfaceParams };
 
 export interface RunsStartParams {
   runId?: string;
@@ -240,6 +246,8 @@ export interface AssignmentResult {
 export interface LauncherResult {
   launcher: DefinitionDetail;
 }
+
+export type { RunInputSurfaceResult };
 
 export interface RunArchiveRpcResult {
   result: RunArchiveResult;

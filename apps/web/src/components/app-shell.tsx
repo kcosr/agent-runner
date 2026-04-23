@@ -22,6 +22,7 @@ export function AppShell({
     select: (state) => state.location.pathname,
   });
   const activeSection = pathname.startsWith("/settings") ? "settings" : "runs";
+  const creatingRun = pathname === "/runs/new";
 
   return (
     <div className="app" data-focus-indicators={preferences.visibleFocusIndicators ? "on" : "off"}>
@@ -31,8 +32,8 @@ export function AppShell({
             tr
           </span>
           <button
-            aria-current={activeSection === "runs" ? "page" : undefined}
-            className={activeSection === "runs" ? "nav-item active" : "nav-item"}
+            aria-current={activeSection === "runs" && !creatingRun ? "page" : undefined}
+            className={activeSection === "runs" && !creatingRun ? "nav-item active" : "nav-item"}
             onClick={() => void navigate({ to: "/" })}
             title="Runs"
             type="button"
@@ -40,10 +41,10 @@ export function AppShell({
             <GridIcon aria-hidden="true" />
           </button>
           <button
-            aria-disabled="true"
-            className="nav-item"
-            disabled
-            title="Definitions (deferred in phase 1)"
+            aria-current={creatingRun ? "page" : undefined}
+            className={creatingRun ? "nav-item active" : "nav-item"}
+            onClick={() => void navigate({ to: "/runs/new" })}
+            title="New Run"
             type="button"
           >
             <FileIcon aria-hidden="true" />

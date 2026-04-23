@@ -4761,6 +4761,109 @@ args: [prod, --]
   }
 });
 
+test("daemon HTTP exposes the run input surface route with validation and direct-path support", async () => {
+  const daemonDir = tempDir();
+  writeAgent(daemonDir, "daemon-agent", AGENT);
+  writeAssignment(
+    daemonDir,
+    "new-run-work",
+    `---
+schemaVersion: 1
+name: new-run-work
+cwd: packages/core
+message: Ship the resolver-backed UI.
+maxRetries: 2
+vars:
+  plan:
+    type: string
+    description: Short feature brief.
+    required: true
+    sources: [cli]
+tasks:
+  - id: t1
+    title: First
+---
+New run work.
+`,
+  );
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  const daemon = await startCliDaemon(daemonDir, listenUrl);
+  try {
+    const success = await httpJson(
+      httpBaseUrl,
+      "/api/run-input-surface?agent=daemon-agent&assignment=new-run-work",
+    );
+    assert.equal(success.status, 200);
+    assert.deepEqual(
+      success.body.inputSurface.runSettings.map((field) => field.key),
+      [
+        "cwd",
+        "backend",
+        "launcher",
+        "model",
+        "effort",
+        "message",
+        "name",
+        "timeoutSec",
+        "unrestricted",
+        "maxRetries",
+      ],
+    );
+    assert.equal(success.body.inputSurface.runSettings[0].section, "context");
+    assert.equal(success.body.inputSurface.runSettings[1].section, "execution");
+    assert.equal(success.body.inputSurface.assignmentInputs[0].key, "plan");
+    assert.equal(success.body.inputSurface.assignmentInputs[0].section, "task");
+    assert.equal(success.body.inputSurface.assignmentInputs[0].required, true);
+    assert.equal(success.body.inputSurface.assignmentInputs[0].value, null);
+
+    const directAgent = encodeURIComponent("./agents/daemon-agent/agent.md");
+    const directAssignment = encodeURIComponent("./assignments/new-run-work/assignment.md");
+    const directPath = await httpJson(
+      httpBaseUrl,
+      `/api/run-input-surface?agent=${directAgent}&assignment=${directAssignment}&cwd=${encodeURIComponent(daemonDir)}`,
+    );
+    assert.equal(directPath.status, 200);
+    assert.deepEqual(directPath.body, success.body);
+
+    const missingAgent = await httpJson(
+      httpBaseUrl,
+      "/api/run-input-surface?assignment=new-run-work",
+    );
+    const emptyAssignment = await httpJson(
+      httpBaseUrl,
+      "/api/run-input-surface?agent=daemon-agent&assignment=",
+    );
+    const malformed = await httpJson(
+      httpBaseUrl,
+      "/api/run-input-surface?agent=daemon-agent&assignment=%E0%A4%A",
+    );
+    assert.equal(missingAgent.status, 400);
+    assert.equal(emptyAssignment.status, 400);
+    assert.equal(malformed.status, 400);
+    assert.equal(missingAgent.body.error.code, "INVALID_REQUEST");
+    assert.equal(emptyAssignment.body.error.code, "INVALID_REQUEST");
+    assert.equal(malformed.body.error.code, "INVALID_REQUEST");
+
+    const unknownAgent = await httpJson(
+      httpBaseUrl,
+      "/api/run-input-surface?agent=missing-agent&assignment=new-run-work",
+    );
+    const unknownAssignment = await httpJson(
+      httpBaseUrl,
+      "/api/run-input-surface?agent=daemon-agent&assignment=missing-work",
+    );
+    assert.equal(unknownAgent.status, 404);
+    assert.equal(unknownAssignment.status, 404);
+    assert.equal(unknownAgent.body.error.code, "NOT_FOUND");
+    assert.equal(unknownAssignment.body.error.code, "NOT_FOUND");
+  } finally {
+    await daemon.stop();
+  }
+});
+
 test("daemon-target CLI detaches fresh runs without subscribing for events", async () => {
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;

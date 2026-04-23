@@ -14,6 +14,7 @@ import type {
   getRun,
   getRunAuditHistory,
   getRunBrief,
+  getRunInputSurface,
   getRunList,
   getRunSummary,
   getRunTimelineHistory,
@@ -36,6 +37,7 @@ import type {
 import type {
   DaemonInfo,
   DefinitionGetParams,
+  RunInputSurfaceParams,
   RunsListParams,
   RunsResumeParams,
   RunsStartParams,
@@ -52,6 +54,7 @@ export interface DaemonHandlers {
   getTaskList: typeof getTaskList;
   getDefinition: typeof getDefinition;
   getDefinitionList: typeof getDefinitionList;
+  getRunInputSurface: typeof getRunInputSurface;
   getAttachment: typeof getAttachment;
   getAttachmentList: typeof getAttachmentList;
   archive: typeof archive;
@@ -206,6 +209,11 @@ export function createDaemonOperations(ctx: DaemonOperationContext) {
     getLauncher(params: DefinitionGetParams) {
       return {
         launcher: ctx.getDefinition("launcher", params.target, params.cwd),
+      };
+    },
+    getRunInputSurface(params: RunInputSurfaceParams) {
+      return {
+        inputSurface: ctx.getRunInputSurface(params),
       };
     },
   };

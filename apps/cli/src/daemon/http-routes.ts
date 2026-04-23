@@ -29,6 +29,7 @@ import {
   optionalString,
   parseAttachmentScopeQueryValue,
   parseBooleanQueryValue,
+  parseRunInputSurfaceQuery,
   parseRunSetBackendSessionParams,
   parseRunSetNameParams,
   parseRunSetNoteParams,
@@ -111,6 +112,13 @@ const routes: RouteDefinition[] = [
     pattern: ["api", "assignments", ":target"],
     handler: (_req, res, ctx, params, url) => {
       sendJson(res, 200, ctx.operations.getAssignment(parseDefinitionQuery(params, url)));
+    },
+  },
+  {
+    method: "GET",
+    pattern: ["api", "run-input-surface"],
+    handler: (_req, res, ctx, _params, url) => {
+      sendJson(res, 200, ctx.operations.getRunInputSurface(parseRunInputSurfaceQuery(url.search)));
     },
   },
   {

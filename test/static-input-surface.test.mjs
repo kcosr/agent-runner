@@ -76,12 +76,12 @@ test("static input surface: built-in planner + plan-feature surfaces the documen
   assert.equal(model.editable, true);
   assert.equal(model.valueStatus, "delegated");
   assert.equal(model.source, "available_override");
-  assert.equal(model.value, undefined);
+  assert.equal(model.value, null);
 
   assert.equal(effort.editable, true);
   assert.equal(effort.valueStatus, "delegated");
   assert.equal(effort.source, "available_override");
-  assert.equal(effort.value, undefined);
+  assert.equal(effort.value, null);
 
   assert.deepEqual(
     surface.assignmentInputs.map((field) => field.key),
@@ -215,7 +215,7 @@ Fixture assignment.
     assert.equal(model.editable, false);
     assert.equal(model.valueStatus, "delegated");
     assert.equal(model.hiddenWhenUnset, true);
-    assert.equal(model.value, undefined);
+    assert.equal(model.value, null);
 
     assert.equal(effort.locked, false);
     assert.equal(effort.editable, true);
@@ -275,9 +275,14 @@ Agent only.
 
     assert.deepEqual(surface.assignmentInputs, []);
     assert.equal(fieldByKey(surface.runSettings, "cwd").valueStatus, "unset");
+    assert.equal(fieldByKey(surface.runSettings, "cwd").value, null);
     assert.equal(fieldByKey(surface.runSettings, "message").valueStatus, "unset");
+    assert.equal(fieldByKey(surface.runSettings, "message").value, null);
     assert.equal(fieldByKey(surface.runSettings, "maxRetries").value, 3);
     assert.equal(fieldByKey(surface.runSettings, "maxRetries").source, "run_loop_default");
     assert.equal(fieldByKey(surface.runSettings, "unrestricted").source, "schema_default");
     assert.equal(fieldByKey(surface.runSettings, "model").valueStatus, "delegated");
+    assert.equal(fieldByKey(surface.runSettings, "model").value, null);
+    assert.equal(fieldByKey(surface.runSettings, "effort").valueStatus, "delegated");
+    assert.equal(fieldByKey(surface.runSettings, "effort").value, null);
   }));

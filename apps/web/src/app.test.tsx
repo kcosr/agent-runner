@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { RunAttachment } from "@task-runner/core/contracts/attachments.js";
 import type { RunAuditHistory, RunTimelineHistory } from "@task-runner/core/contracts/events.js";
+import type { RunInputSurface } from "@task-runner/core/contracts/run-input-surface.js";
 import type { RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -340,6 +341,122 @@ function makeAttachment(
     sha256: overrides.sha256 ?? "abc123",
     addedAt: overrides.addedAt ?? "2026-04-14T06:00:00.000Z",
     relativePath: overrides.relativePath ?? `attachments/${overrides.id}/${overrides.name}`,
+  };
+}
+
+function makeDefinitionList(kind: "agent" | "assignment", names: string[]) {
+  return {
+    kind,
+    entries: names.map((name) => ({
+      name,
+      path: null,
+      root: "builtin",
+    })),
+    warnings: [],
+  };
+}
+
+function makeRunInputSurface(overrides: Partial<RunInputSurface> = {}): RunInputSurface {
+  return {
+    runSettings: [
+      {
+        key: "cwd",
+        label: "Working Directory",
+        description: "Working directory for the run.",
+        section: "context",
+        inputKind: "string",
+        valueStatus: "concrete",
+        value: "/tmp/task-runner",
+        editable: false,
+        locked: true,
+        hiddenWhenUnset: false,
+        source: "assignment",
+      },
+      {
+        key: "message",
+        label: "Message",
+        description: "Default worker ask supplied to the run.",
+        section: "execution",
+        inputKind: "textarea",
+        valueStatus: "unset",
+        value: null,
+        editable: true,
+        locked: false,
+        hiddenWhenUnset: false,
+        source: "available_override",
+      },
+      {
+        key: "name",
+        label: "Name",
+        description: "Optional run name.",
+        section: "context",
+        inputKind: "string",
+        valueStatus: "unset",
+        value: null,
+        editable: true,
+        locked: false,
+        hiddenWhenUnset: false,
+        source: "available_override",
+      },
+      {
+        key: "backend",
+        label: "Backend",
+        description: "Execution backend.",
+        section: "execution",
+        inputKind: "enum",
+        valueStatus: "concrete",
+        value: "codex",
+        editable: false,
+        locked: true,
+        hiddenWhenUnset: false,
+        source: "agent",
+        required: true,
+        enumValues: ["codex", "claude"],
+      },
+      {
+        key: "launcher",
+        label: "Launcher",
+        description: "Subprocess launcher override for supported backends.",
+        section: "execution",
+        inputKind: "launcher",
+        valueStatus: "unset",
+        value: null,
+        editable: true,
+        locked: false,
+        hiddenWhenUnset: false,
+        source: "available_override",
+      },
+      {
+        key: "model",
+        label: "Model",
+        description: "Backend model override.",
+        section: "execution",
+        inputKind: "model",
+        valueStatus: "delegated",
+        value: null,
+        editable: true,
+        locked: false,
+        hiddenWhenUnset: false,
+        source: "available_override",
+      },
+    ],
+    assignmentInputs: [
+      {
+        key: "plan",
+        label: "Plan",
+        description: "Short feature brief.",
+        section: "task",
+        inputKind: "string",
+        valueStatus: "unset",
+        value: null,
+        editable: true,
+        locked: false,
+        hiddenWhenUnset: false,
+        source: "available_override",
+        required: true,
+      },
+    ],
+    ...overrides,
   };
 }
 
@@ -8499,5 +8616,233 @@ describe("web app", () => {
     expect(await screen.findByText("Peer run")).toBeInTheDocument();
     await user.click(await screen.findByRole("button", { name: /^Attachments\b/i }));
     expect(screen.getByText("peer-notes.md")).toBeInTheDocument();
+  });
+
+  it("navigates from the sidebar into the New Run route and hides the board", async () => {
+    installFetchMock(
+      {
+        runs: [makeRun({ runId: "run-existing", name: "Existing run" })],
+        details: {
+          "run-existing": makeDetail({ runId: "run-existing", name: "Existing run" }),
+        },
+      },
+      {
+        handleRequest: (url) => {
+          if (url === "/api/agents") {
+            return new Response(
+              JSON.stringify({ agents: makeDefinitionList("agent", ["planner"]) }),
+              {
+                status: 200,
+              },
+            );
+          }
+          if (url === "/api/assignments") {
+            return new Response(
+              JSON.stringify({ assignments: makeDefinitionList("assignment", ["plan-feature"]) }),
+              { status: 200 },
+            );
+          }
+          if (url.includes("/api/run-input-surface")) {
+            return new Response(JSON.stringify({ inputSurface: makeRunInputSurface() }), {
+              status: 200,
+            });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    expect(await findRunCard("Existing run")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "New Run" }));
+
+    expect(await screen.findByRole("heading", { name: "New Run" })).toBeInTheDocument();
+    expect(screen.queryByText("Initialized")).not.toBeInTheDocument();
+
+    await user.selectOptions(await screen.findByLabelText("Agent"), "planner");
+    await user.selectOptions(screen.getByLabelText("Assignment"), "plan-feature");
+
+    expect(await screen.findByRole("heading", { name: "Task" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Execution" })).toBeInTheDocument();
+  });
+
+  it("shows an inline retryable resolver error and preserves entered values", async () => {
+    let resolverAttempts = 0;
+    installFetchMock(
+      {
+        runs: [],
+        details: {},
+      },
+      {
+        handleRequest: (url) => {
+          if (url === "/api/agents") {
+            return new Response(
+              JSON.stringify({ agents: makeDefinitionList("agent", ["planner"]) }),
+              {
+                status: 200,
+              },
+            );
+          }
+          if (url === "/api/assignments") {
+            return new Response(
+              JSON.stringify({ assignments: makeDefinitionList("assignment", ["plan-feature"]) }),
+              { status: 200 },
+            );
+          }
+          if (url.includes("/api/run-input-surface")) {
+            resolverAttempts += 1;
+            if (resolverAttempts === 1) {
+              return new Response(
+                JSON.stringify({ error: { code: "INTERNAL_ERROR", message: "surface failed" } }),
+                { status: 500 },
+              );
+            }
+            return new Response(JSON.stringify({ inputSurface: makeRunInputSurface() }), {
+              status: 200,
+            });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp("/runs/new");
+
+    await user.type(await screen.findByLabelText("Name"), "Resolver retry");
+    await user.selectOptions(screen.getByLabelText("Agent"), "planner");
+    await user.selectOptions(screen.getByLabelText("Assignment"), "plan-feature");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("surface failed");
+    expect(screen.getByLabelText("Name")).toHaveValue("Resolver retry");
+    expect(screen.getByLabelText("Agent")).toHaveValue("planner");
+    expect(screen.getByLabelText("Assignment")).toHaveValue("plan-feature");
+
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(await screen.findByRole("heading", { name: "Task" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Name")).toHaveValue("Resolver retry");
+    expect(resolverAttempts).toBe(2);
+  });
+
+  it("keeps Initialize disabled until required fields are satisfied and submits via /api/runs/init", async () => {
+    const state = {
+      runs: [makeRun({ runId: "run-init", name: "Initialized run" })],
+      details: {
+        "run-init": makeDetail({
+          runId: "run-init",
+          name: "Initialized run",
+          status: "initialized",
+        }),
+      },
+    };
+    const fetchMock = installFetchMock(state, {
+      handleRequest: async (url, init) => {
+        if (url === "/api/agents") {
+          return new Response(
+            JSON.stringify({ agents: makeDefinitionList("agent", ["planner"]) }),
+            {
+              status: 200,
+            },
+          );
+        }
+        if (url === "/api/assignments") {
+          return new Response(
+            JSON.stringify({ assignments: makeDefinitionList("assignment", ["plan-feature"]) }),
+            { status: 200 },
+          );
+        }
+        if (url.includes("/api/run-input-surface")) {
+          return new Response(JSON.stringify({ inputSurface: makeRunInputSurface() }), {
+            status: 200,
+          });
+        }
+        if (url === "/api/runs/init" && init?.method === "POST") {
+          return new Response(JSON.stringify({ run: state.details["run-init"] }), { status: 200 });
+        }
+        return undefined;
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp("/runs/new");
+
+    await screen.findByRole("option", { name: "planner" });
+    await user.selectOptions(await screen.findByLabelText("Agent"), "planner");
+    await user.selectOptions(screen.getByLabelText("Assignment"), "plan-feature");
+    await screen.findByRole("heading", { name: "Task" });
+
+    const initializeButton = screen.getByRole("button", { name: "Initialize" });
+    expect(initializeButton).toBeDisabled();
+
+    await user.type(screen.getByLabelText("Plan"), "Implement the new route.");
+    expect(initializeButton).toBeEnabled();
+
+    await user.click(initializeButton);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs/init",
+      expect.objectContaining({
+        method: "POST",
+      }),
+    );
+    expect((await screen.findAllByText("Initialized run")).length).toBeGreaterThan(0);
+  });
+
+  it("submits Start now through /api/runs and routes to the started run", async () => {
+    const state = {
+      runs: [makeRun({ runId: "run-start", name: "Started run" })],
+      details: {
+        "run-start": makeDetail({ runId: "run-start", name: "Started run" }),
+      },
+    };
+    const fetchMock = installFetchMock(state, {
+      handleRequest: async (url, init) => {
+        if (url === "/api/agents") {
+          return new Response(
+            JSON.stringify({ agents: makeDefinitionList("agent", ["planner"]) }),
+            {
+              status: 200,
+            },
+          );
+        }
+        if (url === "/api/assignments") {
+          return new Response(
+            JSON.stringify({ assignments: makeDefinitionList("assignment", ["plan-feature"]) }),
+            { status: 200 },
+          );
+        }
+        if (url.includes("/api/run-input-surface")) {
+          return new Response(JSON.stringify({ inputSurface: makeRunInputSurface() }), {
+            status: 200,
+          });
+        }
+        if (url === "/api/runs" && init?.method === "POST") {
+          return new Response(JSON.stringify({ runId: "run-start" }), { status: 200 });
+        }
+        return undefined;
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp("/runs/new");
+
+    await screen.findByRole("option", { name: "planner" });
+    await user.selectOptions(await screen.findByLabelText("Agent"), "planner");
+    await user.selectOptions(screen.getByLabelText("Assignment"), "plan-feature");
+    await screen.findByRole("heading", { name: "Task" });
+    await user.type(screen.getByLabelText("Plan"), "Start immediately.");
+
+    await user.click(screen.getByRole("button", { name: "Start now" }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs",
+      expect.objectContaining({
+        method: "POST",
+      }),
+    );
+    expect((await screen.findAllByText("Started run")).length).toBeGreaterThan(0);
   });
 });
