@@ -13,20 +13,6 @@ type FieldDraftValue = string;
 type FieldDrafts = Record<string, FieldDraftValue>;
 type SubmitMode = "init" | "start";
 
-const NAME_FIELD: RunInputField = {
-  key: "name",
-  label: "Name",
-  description: "Optional run name.",
-  section: "context",
-  inputKind: "string",
-  valueStatus: "unset",
-  value: null,
-  editable: true,
-  locked: false,
-  hiddenWhenUnset: false,
-  source: "available_override",
-};
-
 function isEmptyValue(value: string): boolean {
   return value.trim().length === 0;
 }
@@ -39,6 +25,10 @@ function inputValueFromField(field: RunInputField): FieldDraftValue {
     return field.value ? "true" : "false";
   }
   return String(field.value);
+}
+
+function inputValueFromOptionalField(field: RunInputField | undefined): FieldDraftValue {
+  return field ? inputValueFromField(field) : "";
 }
 
 function fieldValue(field: RunInputField, drafts: FieldDrafts): FieldDraftValue {
@@ -159,7 +149,7 @@ export function useNewRunState() {
   const navigate = useNavigate();
   const [selectedAgent, setSelectedAgent] = useState("");
   const [selectedAssignment, setSelectedAssignment] = useState("");
-  const [drafts, setDrafts] = useState<FieldDrafts>({ name: "" });
+  const [drafts, setDrafts] = useState<FieldDrafts>({});
   const [submitError, setSubmitError] = useState<string>();
   const [attemptedSubmit, setAttemptedSubmit] = useState(false);
   const fieldRefs = useRef(new Map<string, HTMLElement>());
@@ -204,15 +194,14 @@ export function useNewRunState() {
   }, [surfaceQuery.data]);
 
   const surface = surfaceQuery.data;
+  const nameField = useMemo(
+    () => (surface?.runSettings ?? []).find((field) => field.key === "name"),
+    [surface],
+  );
   const contextFields = useMemo(() => {
-    const resolvedContextFields = (surface?.runSettings ?? []).filter(
-      (field) =>
-        (field.key === "name" || field.key === "cwd") &&
-        fieldIsMeaningfulContextField(field, drafts),
+    return (surface?.runSettings ?? []).filter(
+      (field) => field.key === "cwd" && fieldIsMeaningfulContextField(field, drafts),
     );
-    return resolvedContextFields.some((field) => field.key === "name")
-      ? resolvedContextFields
-      : [NAME_FIELD, ...resolvedContextFields];
   }, [drafts, surface]);
   const taskFields = useMemo(
     () =>
@@ -359,6 +348,8 @@ export function useNewRunState() {
     selectedAssignment,
     setSelectedAgent,
     setSelectedAssignment,
+    nameDescription: nameField?.description ?? "Optional run name.",
+    nameValue: drafts.name ?? inputValueFromOptionalField(nameField),
     contextFields,
     taskFields,
     executionFields,

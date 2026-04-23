@@ -485,9 +485,10 @@ function queryEntries(search: string): Map<string, string> {
     const separatorIndex = pair.indexOf("=");
     const rawKey = separatorIndex === -1 ? pair : pair.slice(0, separatorIndex);
     const rawValue = separatorIndex === -1 ? "" : pair.slice(separatorIndex + 1);
+    const decodedKey = decodeQueryComponent(rawKey, "query parameter name");
     entries.set(
-      decodeQueryComponent(rawKey, "query parameter name"),
-      decodeQueryComponent(rawValue, decodeQueryComponent(rawKey, "query parameter name")),
+      decodedKey,
+      decodeQueryComponent(rawValue, `value for query parameter '${decodedKey}'`),
     );
   }
   return entries;

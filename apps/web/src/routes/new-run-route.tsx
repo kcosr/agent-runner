@@ -234,6 +234,27 @@ export function NewRunRoute() {
                 </select>
               </label>
 
+              <div className="new-run-field">
+                <div className="new-run-field__header">
+                  <label className="new-run-field__label" htmlFor="new-run-name">
+                    Name
+                  </label>
+                </div>
+                <span className="new-run-field__description" id="new-run-name-description">
+                  {state.nameDescription}
+                </span>
+                <input
+                  aria-describedby="new-run-name-description"
+                  aria-label="Name"
+                  className="new-run-input"
+                  id="new-run-name"
+                  onChange={(event) => state.updateDraft("name", event.target.value)}
+                  ref={(element) => state.registerFieldRef("name", element)}
+                  type="text"
+                  value={state.nameValue}
+                />
+              </div>
+
               {state.contextFields.map((field) => (
                 <SurfaceField
                   field={field}
