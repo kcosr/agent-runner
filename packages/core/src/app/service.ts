@@ -69,6 +69,7 @@ import type { RunAuditEnvelope } from "../core/run/run-events.js";
 import { readRunAuditHistory } from "../core/run/run-events.js";
 import type { RunEvent, RunOutcome } from "../core/run/run-loop.js";
 import { executeRunCommand } from "../run-command.js";
+import { startDebugPerfTimer } from "../util/debug-perf.js";
 
 export type DefinitionDetail =
   | {
@@ -163,6 +164,12 @@ function readAttemptLogForRecord(
   workspaceDir: string,
   record: AttemptRecord,
 ): AttemptLog {
+  const finish = startDebugPerfTimer("runs.read_attempt_log", {
+    runId,
+    attempt: record.attempt,
+    sessionIndex: record.sessionIndex,
+    logPath: record.logPath,
+  });
   try {
     const workspaceRoot = resolve(workspaceDir);
     const absoluteLogPath = resolve(workspaceRoot, record.logPath);
@@ -173,10 +180,16 @@ function readAttemptLogForRecord(
       throw new Error("attempt log path escapes workspace");
     }
     const raw = readFileSync(absoluteLogPath, "utf8");
-    return JSON.parse(raw) as AttemptLog;
+    const parsed = JSON.parse(raw) as AttemptLog;
+    finish({
+      fallback: false,
+      stderrBytes: parsed.stderr.length,
+      stdoutBytes: parsed.stdout.length,
+    });
+    return parsed;
   } catch {
-    return {
-      schemaVersion: 1,
+    const fallback = {
+      schemaVersion: 1 as const,
       runId,
       attempt: record.attempt,
       sessionIndex: record.sessionIndex,
@@ -185,6 +198,12 @@ function readAttemptLogForRecord(
       stdout: "",
       stderr: "",
     };
+    finish({
+      fallback: true,
+      stderrBytes: 0,
+      stdoutBytes: 0,
+    });
+    return fallback;
   }
 }
 
@@ -217,15 +236,21 @@ export function getRunSummary(target: string): RunSummary {
 }
 
 export function getRunTimelineHistory(target: string): RunTimelineHistory {
+  const finish = startDebugPerfTimer("runs.timeline_history", { target });
   const detail = getRun(target);
   const resolved = resolveResumeTarget(detail.workspaceDir);
-  return {
+  const history = {
     runId: resolved.manifest.runId,
     attempts: resolved.manifest.attemptRecords.map((record) =>
       toRunTimelineAttempt(resolved.manifest.runId, resolved.workspaceDir, record),
     ),
     lastCursor: 0,
   };
+  finish({
+    runId: history.runId,
+    attemptCount: history.attempts.length,
+  });
+  return history;
 }
 
 export function getRunAuditHistory(
@@ -234,13 +259,23 @@ export function getRunAuditHistory(
     limit?: number;
   } = {},
 ): RunAuditHistory {
+  const finish = startDebugPerfTimer("runs.audit_history", {
+    target,
+    limit: opts.limit ?? null,
+  });
   const detail = getRun(target);
   const resolved = resolveResumeTarget(detail.workspaceDir);
-  return readRunAuditHistory({
+  const history = readRunAuditHistory({
     workspaceDir: resolved.workspaceDir,
     runId: resolved.manifest.runId,
     limit: opts.limit,
   });
+  finish({
+    runId: history.runId,
+    eventCount: history.events.length,
+    lastCursor: history.lastCursor,
+  });
+  return history;
 }
 
 export function getRunBrief(target: string): string {

@@ -130,6 +130,65 @@ describe("applyEnvelope", () => {
     });
 
     expect(result.requiresReload).toBe(true);
+    expect(result.showStaleWarning).toBe(true);
+    expect(result.history.lastCursor).toBe(1);
+  });
+
+  it("treats cursor gaps as requiring a stale-warning reload", () => {
+    const result = applyEnvelope(makeHistory({ lastCursor: 1 }), {
+      runId: "run-1",
+      cursor: 3,
+      event: {
+        type: "agent_message_delta",
+        text: " world",
+      },
+    });
+
+    expect(result.requiresReload).toBe(true);
+    expect(result.showStaleWarning).toBe(true);
+    expect(result.history.lastCursor).toBe(1);
+  });
+
+  it("reloads silently when a run finishes", () => {
+    const result = applyEnvelope(
+      makeHistory({
+        attempts: [
+          {
+            attempt: 1,
+            sessionIndex: 0,
+            startedAt: "2026-04-15T10:00:00.000Z",
+            endedAt: null,
+            prompt: "Write output",
+            transcript: "Hello world",
+            notices: "",
+            exitCode: null,
+            timedOut: false,
+            live: true,
+          },
+        ],
+        lastCursor: 1,
+      }),
+      {
+        runId: "run-1",
+        cursor: 2,
+        event: {
+          type: "run_finished",
+          summary: {
+            status: "success",
+            attempts: 1,
+            maxAttempts: 3,
+            tasksCompleted: 1,
+            tasksTotal: 1,
+            assignmentPath: "/tmp/assignment.md",
+            tasks: [],
+            runId: "run-1",
+          },
+        },
+      },
+    );
+
+    expect(result.requiresReload).toBe(true);
+    expect(result.showStaleWarning).toBe(false);
     expect(result.history.lastCursor).toBe(1);
   });
 });

@@ -338,6 +338,7 @@ describe("DashboardSettingsProvider", () => {
     expect(window.localStorage.getItem("task-runner:web:dashboard-view-state")).toBe(
       JSON.stringify({
         collapsedColumnKeys: ["running"],
+        drawerWidth: 700,
       }),
     );
   });

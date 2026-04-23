@@ -1421,14 +1421,16 @@ export function RunDetailDrawer({
                 </span>
               ) : null}
             </button>
-            <button
-              aria-selected={activeSection === "notes"}
-              className={activeSection === "notes" ? "tab active" : "tab"}
-              onClick={() => onSelectSection("notes")}
-              type="button"
-            >
-              Notes
-            </button>
+            {isPassiveRun ? null : (
+              <button
+                aria-selected={activeSection === "events"}
+                className={activeSection === "events" ? "tab active" : "tab"}
+                onClick={() => onSelectSection("events")}
+                type="button"
+              >
+                Attempts
+              </button>
+            )}
             <button
               aria-selected={activeSection === "attachments"}
               className={activeSection === "attachments" ? "tab active" : "tab"}
@@ -1438,6 +1440,25 @@ export function RunDetailDrawer({
               Attachments
               {combinedAttachments.length > 0 ? (
                 <span className="tab-count"> {combinedAttachments.length}</span>
+              ) : null}
+            </button>
+            <button
+              aria-selected={activeSection === "data"}
+              className={activeSection === "data" ? "tab active" : "tab"}
+              onClick={() => onSelectSection("data")}
+              type="button"
+            >
+              Data
+            </button>
+            <button
+              aria-selected={activeSection === "audit"}
+              className={activeSection === "audit" ? "tab active" : "tab"}
+              onClick={() => onSelectSection("audit")}
+              type="button"
+            >
+              Audit
+              {auditEvents.length > 0 ? (
+                <span className="tab-count"> {auditEvents.length}</span>
               ) : null}
             </button>
             <button
@@ -1455,34 +1476,13 @@ export function RunDetailDrawer({
               ) : null}
             </button>
             <button
-              aria-selected={activeSection === "audit"}
-              className={activeSection === "audit" ? "tab active" : "tab"}
-              onClick={() => onSelectSection("audit")}
+              aria-selected={activeSection === "notes"}
+              className={activeSection === "notes" ? "tab active" : "tab"}
+              onClick={() => onSelectSection("notes")}
               type="button"
             >
-              Audit
-              {auditEvents.length > 0 ? (
-                <span className="tab-count"> {auditEvents.length}</span>
-              ) : null}
+              Notes
             </button>
-            <button
-              aria-selected={activeSection === "data"}
-              className={activeSection === "data" ? "tab active" : "tab"}
-              onClick={() => onSelectSection("data")}
-              type="button"
-            >
-              Data
-            </button>
-            {isPassiveRun ? null : (
-              <button
-                aria-selected={activeSection === "events"}
-                className={activeSection === "events" ? "tab active" : "tab"}
-                onClick={() => onSelectSection("events")}
-                type="button"
-              >
-                Attempts
-              </button>
-            )}
           </nav>
 
           {activeSection === "tasks" ? (

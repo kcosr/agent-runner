@@ -8,6 +8,7 @@ import type {
   RunSummaryStreamEvent,
   RunTimelineEnvelope,
 } from "@task-runner/core/contracts/events.js";
+import { startDebugPerfTimer } from "@task-runner/core/util/debug-perf.js";
 import { HttpError } from "./http-errors.js";
 import { readJsonBody, sendBuffer, sendError, sendJson } from "./http-serializers.js";
 import type { DaemonOperations } from "./operations.js";
@@ -70,6 +71,10 @@ interface RouteDefinition {
   method: string;
   pattern: string[];
   handler: RouteHandler;
+}
+
+function routeLabel(route: RouteDefinition): string {
+  return `${route.method} /${route.pattern.join("/")}`;
 }
 
 const routes: RouteDefinition[] = [
@@ -513,9 +518,14 @@ export async function handleHttpRequest(
   res: ServerResponse,
   ctx: RouteContext,
 ): Promise<void> {
+  const method = req.method ?? "GET";
+  const url = new URL(req.url ?? "/", ctx.httpBaseUrl);
+  const finish = startDebugPerfTimer("daemon.http.request", {
+    method,
+    path: url.pathname,
+  });
+  let matchedRoute: RouteDefinition | null = null;
   try {
-    const method = req.method ?? "GET";
-    const url = new URL(req.url ?? "/", ctx.httpBaseUrl);
     const path = splitPath(url.pathname);
 
     for (const route of routes) {
@@ -526,7 +536,12 @@ export async function handleHttpRequest(
       if (!params) {
         continue;
       }
+      matchedRoute = route;
       await route.handler(req, res, ctx, params, url);
+      finish({
+        route: routeLabel(route),
+        statusCode: res.statusCode,
+      });
       return;
     }
 
@@ -539,6 +554,11 @@ export async function handleHttpRequest(
         res.end();
       }
     }
+    finish({
+      route: matchedRoute ? routeLabel(matchedRoute) : null,
+      statusCode: res.statusCode,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
