@@ -35,6 +35,15 @@ export function RunTaskList({ tasks }: { tasks: RunTaskSummary[] }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [activeTabs, setActiveTabs] = useState<Map<string, TaskTab>>(new Map());
 
+  if (tasks.length === 0) {
+    return (
+      <div className="drawer-state">
+        <h3>No tasks configured</h3>
+        <p>No tasks are configured for this run.</p>
+      </div>
+    );
+  }
+
   function toggle(id: string) {
     setExpanded((prev) => {
       const next = new Set(prev);

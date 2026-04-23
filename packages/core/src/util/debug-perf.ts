@@ -7,13 +7,14 @@ type DebugPerfFields = Record<string, unknown>;
 type DebugPerfTimer = (extraFields?: DebugPerfFields) => void;
 
 const NOOP_DEBUG_PERF_TIMER: DebugPerfTimer = () => {};
+const FALSEY_DEBUG_VALUES = new Set(["", "0", "false", "off", "no"]);
 
 function normalizeEnabled(value: string | undefined): boolean {
   if (!value) {
     return false;
   }
   const normalized = value.trim().toLowerCase();
-  return normalized !== "" && normalized !== "0" && normalized !== "false" && normalized !== "off";
+  return !FALSEY_DEBUG_VALUES.has(normalized);
 }
 
 function roundDurationMs(value: number): number {
@@ -71,7 +72,9 @@ function formatFields(fields: DebugPerfFields): string {
       const leftPriority = PERF_FIELD_PRIORITY.get(leftKey);
       const rightPriority = PERF_FIELD_PRIORITY.get(rightKey);
       if (leftPriority !== undefined || rightPriority !== undefined) {
-        return (leftPriority ?? Number.MAX_SAFE_INTEGER) - (rightPriority ?? Number.MAX_SAFE_INTEGER);
+        return (
+          (leftPriority ?? Number.MAX_SAFE_INTEGER) - (rightPriority ?? Number.MAX_SAFE_INTEGER)
+        );
       }
 
       const classify = (value: unknown): number => {
@@ -94,6 +97,11 @@ function formatFields(fields: DebugPerfFields): string {
     return "";
   }
   return ` ${entries.map(([key, value]) => `${key}=${formatFieldValue(value)}`).join(" ")}`;
+}
+
+function writeDebugPerfLog(event: string, fields: DebugPerfFields): void {
+  const line = `[task-runner perf] ${new Date().toISOString()} ${event}${formatFields(fields)}\n`;
+  process.stderr.write(line);
 }
 
 export function debugPerfEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -120,8 +128,7 @@ export function debugPerfLog(
   if (!debugPerfEnabled(env)) {
     return;
   }
-  const line = `[task-runner perf] ${new Date().toISOString()} ${event}${formatFields(fields)}\n`;
-  process.stderr.write(line);
+  writeDebugPerfLog(event, fields);
 }
 
 export function startDebugPerfTimer(
@@ -129,19 +136,16 @@ export function startDebugPerfTimer(
   fields: DebugPerfFields = {},
   env: NodeJS.ProcessEnv = process.env,
 ): DebugPerfTimer {
-  if (!debugPerfEnabled(env)) {
+  const enabled = debugPerfEnabled(env);
+  if (!enabled) {
     return NOOP_DEBUG_PERF_TIMER;
   }
   const startedAt = performance.now();
   return (extraFields: DebugPerfFields = {}) => {
-    debugPerfLog(
-      event,
-      {
-        ...fields,
-        ...extraFields,
-        durationMs: roundDurationMs(performance.now() - startedAt),
-      },
-      env,
-    );
+    writeDebugPerfLog(event, {
+      ...fields,
+      ...extraFields,
+      durationMs: roundDurationMs(performance.now() - startedAt),
+    });
   };
 }

@@ -62,7 +62,8 @@
   explicit `callerCwd`.
 - Added opt-in daemon perf diagnostics behind `TASK_RUNNER_DEBUG_PERF`
   for request timing, projection timing, task-state lock timing, and
-  event-loop telemetry.
+  event-loop telemetry, plus `TASK_RUNNER_DEBUG_PERF_INTERVAL_MS` to
+  tune the periodic event-loop sample interval. ([#88](https://github.com/kcosr/task-runner/pull/88))
 - Added family-scoped run filtering across the daemon and web dashboard:
   `GET /api/runs?familyOf=<run-id>` now scopes results to one lineage
   family, `RunSummary` now includes `familyRootRunId`, and dashboard
@@ -81,12 +82,6 @@
   surfaces for reading cursored persisted run event history, and
   `scripts/migrate-run-events-v2.mjs` for upgrading legacy uncursored
   `run-events.jsonl` rows to schema v2.
-
-### Fixed
-
-- The run detail timeline no longer flashes the stale-data warning on
-  normal terminal-event reconciliation; terminal reloads now happen
-  silently while real stream breakage still surfaces the warning.
   ([#76](https://github.com/kcosr/task-runner/pull/76))
 - Added a persisted notes-only board filter in the web dashboard, plus
   `Ctrl+Shift+N` / `Cmd+Shift+N` for notes-only and matching
@@ -177,6 +172,10 @@
 
 ### Fixed
 
+- The run detail timeline no longer flashes the stale-data warning on
+  normal terminal-event reconciliation; terminal reloads now happen
+  silently while real stream breakage still surfaces the warning.
+  ([#88](https://github.com/kcosr/task-runner/pull/88))
 - Fixed shared `RunDetail` projections to normalize missing legacy hook
   `taskScopeId` and `summary` fields before serving older manifests to
   the web dashboard. ([#87](https://github.com/kcosr/task-runner/pull/87))

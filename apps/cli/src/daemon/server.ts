@@ -1339,7 +1339,7 @@ export async function serveDaemon(
       emitAuditEnvelope: (envelope: RunAuditEnvelope) => void,
     ) => Promise<{ runId: string }>,
   ): Promise<{ runId: string }> => {
-    const finish = startDebugPerfTimer("daemon.managed_run", { kind });
+    const finish = startDebugPerfTimer("daemon.managed_run.start", { kind });
     let finished = false;
     const finalize = (fields: Record<string, unknown>) => {
       if (finished) {
@@ -1621,7 +1621,7 @@ export async function serveDaemon(
           eventLoopHistogram.reset();
         }, readDebugPerfIntervalMs())
       : null;
-  eventLoopInterval?.unref?.();
+  eventLoopInterval?.unref();
 
   const httpServer = createServer((req, res) => {
     const pathname = new URL(req.url ?? "/", httpBaseUrl).pathname;

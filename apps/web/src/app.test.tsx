@@ -1181,6 +1181,27 @@ describe("web app", () => {
     expect(screen.getByRole("button", { name: /copy run id/i })).toBeInTheDocument();
   });
 
+  it("shows an explicit empty state when the selected run has no tasks", async () => {
+    installFetchMock({
+      runs: [makeRun({ tasksCompleted: 0, tasksTotal: 0 })],
+      details: {
+        "run-1": makeDetail({
+          tasks: [],
+          tasksCompleted: 0,
+          tasksTotal: 0,
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await user.click(await findRunCard("Build dashboard"));
+
+    expect(await screen.findByText("No tasks configured")).toBeInTheDocument();
+    expect(screen.getByText("No tasks are configured for this run.")).toBeInTheDocument();
+  });
+
   it("shows the parent run row in the detail drawer and navigates to the parent run", async () => {
     installFetchMock({
       runs: [
@@ -1642,6 +1663,11 @@ describe("web app", () => {
     const runSections = await screen.findByRole("navigation", { name: "Run sections" });
     expect(runSections).toHaveClass("tabs", "tabs--scrollable");
     expect(runSections.querySelectorAll(":scope > .tab")).toHaveLength(7);
+    expect(
+      [...runSections.querySelectorAll(":scope > .tab")].map((tab) =>
+        tab.textContent?.replace(/\s+\S+\/\S+$/, "").trim(),
+      ),
+    ).toEqual(["Tasks", "Attempts", "Attachments", "Data", "Audit", "Dependencies", "Notes"]);
   });
 
   it("omits Attempts but keeps Audit and Data in the passive run-section tab strip", async () => {
@@ -1660,6 +1686,11 @@ describe("web app", () => {
 
     const runSections = await screen.findByRole("navigation", { name: "Run sections" });
     expect(runSections.querySelectorAll(":scope > .tab")).toHaveLength(6);
+    expect(
+      [...runSections.querySelectorAll(":scope > .tab")].map((tab) =>
+        tab.textContent?.replace(/\s+\S+\/\S+$/, "").trim(),
+      ),
+    ).toEqual(["Tasks", "Attachments", "Data", "Audit", "Dependencies", "Notes"]);
     expect(within(runSections).getByRole("button", { name: "Audit" })).toBeInTheDocument();
     expect(within(runSections).getByRole("button", { name: "Data" })).toBeInTheDocument();
     expect(within(runSections).queryByRole("button", { name: "Attempts" })).not.toBeInTheDocument();
@@ -3940,7 +3971,7 @@ describe("web app", () => {
     expect(screen.getByPlaceholderText("Search runs")).toBeInTheDocument();
   });
 
-  it("resizes the detail drawer via the keyboard separator for the current session only", async () => {
+  it("persists the detail drawer width after resizing it from the keyboard separator", async () => {
     installFetchMock({
       runs: [makeRun()],
       details: { "run-1": makeDetail() },
@@ -3960,22 +3991,10 @@ describe("web app", () => {
     expect(drawer.style.getPropertyValue("--drawer-width")).toBe("570px");
     expect(handle.getAttribute("aria-valuenow")).toBe("570");
 
-    const stored = window.localStorage.getItem("task-runner:web:dashboard-preferences");
-    expect(stored ? JSON.parse(stored) : null).toEqual({
-      hideEmptyColumns: true,
-      collapseFailureStates: true,
-      showArchived: false,
-      showNotesOnly: false,
-      showPinnedOnly: false,
-      sortByRecentUpdates: false,
-      auditNewestFirst: false,
-      visibleFocusIndicators: false,
-      structuredFilters: {
-        repo: null,
-        agent: null,
-        backend: null,
-        family: null,
-      },
+    const storedViewState = window.localStorage.getItem("task-runner:web:dashboard-view-state");
+    expect(storedViewState ? JSON.parse(storedViewState) : null).toEqual({
+      collapsedColumnKeys: [],
+      drawerWidth: 570,
     });
 
     cleanup();
@@ -3985,7 +4004,7 @@ describe("web app", () => {
     await user.click(await findRunCard("Build dashboard"));
 
     const restoredDrawer = await screen.findByLabelText("Run detail");
-    expect(restoredDrawer.style.getPropertyValue("--drawer-width")).toBe("540px");
+    expect(restoredDrawer.style.getPropertyValue("--drawer-width")).toBe("570px");
   });
 
   it("renders markdown in task body and notes", async () => {
@@ -5376,6 +5395,7 @@ describe("web app", () => {
     expect(window.localStorage.getItem("task-runner:web:dashboard-view-state")).toBe(
       JSON.stringify({
         collapsedColumnKeys: ["running"],
+        drawerWidth: 540,
       }),
     );
     expect(
@@ -5391,6 +5411,7 @@ describe("web app", () => {
     expect(window.localStorage.getItem("task-runner:web:dashboard-view-state")).toBe(
       JSON.stringify({
         collapsedColumnKeys: [],
+        drawerWidth: 540,
       }),
     );
     expect(

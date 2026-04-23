@@ -134,6 +134,21 @@ describe("applyEnvelope", () => {
     expect(result.history.lastCursor).toBe(1);
   });
 
+  it("treats cursor gaps as requiring a stale-warning reload", () => {
+    const result = applyEnvelope(makeHistory({ lastCursor: 1 }), {
+      runId: "run-1",
+      cursor: 3,
+      event: {
+        type: "agent_message_delta",
+        text: " world",
+      },
+    });
+
+    expect(result.requiresReload).toBe(true);
+    expect(result.showStaleWarning).toBe(true);
+    expect(result.history.lastCursor).toBe(1);
+  });
+
   it("reloads silently when a run finishes", () => {
     const result = applyEnvelope(
       makeHistory({

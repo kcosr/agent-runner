@@ -239,6 +239,10 @@ function parseStoredDashboardViewState(value: unknown): DashboardViewState {
   const record = value as Record<string, unknown>;
   return {
     ...DEFAULT_DASHBOARD_VIEW_STATE,
+    drawerWidth:
+      typeof record.drawerWidth === "number"
+        ? clampDrawerWidth(record.drawerWidth)
+        : DEFAULT_DASHBOARD_VIEW_STATE.drawerWidth,
     collapsedColumnKeys: Array.isArray(record.collapsedColumnKeys)
       ? record.collapsedColumnKeys
           .filter((key): key is string => typeof key === "string")
@@ -284,9 +288,10 @@ export function DashboardSettingsProvider({ children }: { children: ReactNode })
       VIEW_STATE_STORAGE_KEY,
       JSON.stringify({
         collapsedColumnKeys: viewState.collapsedColumnKeys,
+        drawerWidth: viewState.drawerWidth,
       }),
     );
-  }, [viewState.collapsedColumnKeys]);
+  }, [viewState.collapsedColumnKeys, viewState.drawerWidth]);
 
   const preferencesValue = useMemo<DashboardPreferencesContextValue>(
     () => ({

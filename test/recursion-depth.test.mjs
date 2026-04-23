@@ -160,22 +160,24 @@ function captureBackend(captured) {
 
 async function runIn(baseDir, opts) {
   return withSharedRuntimeEnv(baseDir, async () => {
-    const loaded = loadAgentConfig("depth-agent", baseDir);
-    const loadedAssignment = loadAssignmentConfig("depth-work", baseDir);
-    const originalCwd = process.cwd();
-    process.chdir(baseDir);
-    try {
-      return await runAgent({
-        loaded,
-        loadedAssignment,
-        cliVars: {},
-        backend: opts.backend,
-        stderr: () => {},
-        stdout: () => {},
-      });
-    } finally {
-      process.chdir(originalCwd);
-    }
+    return withEnv(opts.env ?? {}, async () => {
+      const loaded = loadAgentConfig("depth-agent", baseDir);
+      const loadedAssignment = loadAssignmentConfig("depth-work", baseDir);
+      const originalCwd = process.cwd();
+      process.chdir(baseDir);
+      try {
+        return await runAgent({
+          loaded,
+          loadedAssignment,
+          cliVars: {},
+          backend: opts.backend,
+          stderr: () => {},
+          stdout: () => {},
+        });
+      } finally {
+        process.chdir(originalCwd);
+      }
+    });
   });
 }
 
@@ -244,16 +246,14 @@ test("runAgent: nested launches auto-link parentRunId from env into the child ma
   writeAssignment(dir, "depth-work", DEPTH_ASSIGNMENT);
   const parent = await runIn(dir, { backend: captureBackend({}) });
 
-  await withEnv(
-    {
+  const outcome = await runIn(dir, {
+    backend: captureBackend({}),
+    env: {
       [TASK_RUNNER_PARENT_RUN_ID_ENV]: parent.runId,
     },
-    async () => {
-      const outcome = await runIn(dir, { backend: captureBackend({}) });
-      assert.equal(outcome.manifest.parentRunId, parent.runId);
-      assert.equal(outcome.manifest.resetSeed.parentRunId, parent.runId);
-    },
-  );
+  });
+  assert.equal(outcome.manifest.parentRunId, parent.runId);
+  assert.equal(outcome.manifest.resetSeed.parentRunId, parent.runId);
 });
 
 test("runAgent: depth=2 in env → child env has depth=3", async () => {
