@@ -1151,6 +1151,7 @@ test("built-in code-review assignment resolves shared review tasks and preserves
   assert.match(orient.body ?? "", /assignment-summary\.md/);
   assert.equal(architecture.title, "Architecture & module boundaries");
   assert.match(architecture.body ?? "", /Review the module layout/);
+  assert.match(approval.body ?? "", /BLOCKED -- cannot approve/);
   assert.match(approval.body ?? "", /plan_coverage/);
   assert.match(approval.body ?? "", /silently during execution/);
 });

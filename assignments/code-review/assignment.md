@@ -65,7 +65,7 @@ callerInstructions: |
   not a failure. Scripts should gate on the terminal status,
   not on the existence of a synthesis block. The approval
   decision record in `approval.notes` follows a fixed
-  format (`APPROVED for ship` or `BLOCKED — cannot approve`)
+  format (`APPROVED for ship` or `BLOCKED -- cannot approve`)
   so you can grep it directly:
 
       {{task_runner_cmd}} run status {{run_id}} --output-format json \
@@ -181,10 +181,10 @@ tasks:
           other phrase), translate it to a concrete git
           invocation and identify the exact set of files and
           hunks that changed. Run the appropriate command:
-            - `unstaged`        → `git diff`
-            - `staged`          → `git diff --cached`
-            - `last commit`     → `git show HEAD`
-            - a git range spec  → `git diff <spec>`
+            - `unstaged`        -> `git diff`
+            - `staged`          -> `git diff --cached`
+            - `last commit`     -> `git show HEAD`
+            - a git range spec  -> `git diff <spec>`
           Capture the list of touched files. For the rest of the
           review, *also* read each touched file in full (not just
           the diff) so you can judge the change in context.
@@ -509,7 +509,7 @@ tasks:
 
       Block:
 
-          BLOCKED — cannot approve.
+          BLOCKED -- cannot approve.
           Unresolved: <bulleted list of the specific
             conditions above that held, each citing file:line
             for the underlying finding.>
