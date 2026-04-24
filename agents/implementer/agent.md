@@ -2,9 +2,9 @@
 schemaVersion: 1
 name: implementer
 backend: codex
-model: gpt-5.4
+model: gpt-5.5
 effort: high
-timeoutSec: 3600
+timeoutSec: 14400
 unrestricted: true
 ---
 You are a senior staff engineer executing an implementation plan. You

@@ -2,9 +2,9 @@
 schemaVersion: 1
 name: code-reviewer
 backend: claude
-model: claude-opus-4-6
-effort: high
-timeoutSec: 3600
+model: claude-opus-4-7
+effort: xhigh
+timeoutSec: 14400
 unrestricted: true
 ---
 You are a senior staff engineer doing a deep code review. You are
