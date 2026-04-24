@@ -43,6 +43,7 @@ test("parseStartRunParams accepts structured parentRunId", () => {
     {
       parentRunId: "parent-123",
       cliVars: {},
+      webVars: {},
       overrides: {},
     },
     "runs.start params",
@@ -57,6 +58,7 @@ test("parseStartRunParams rejects path-like parentRunId", () => {
         {
           parentRunId: "../parent",
           cliVars: {},
+          webVars: {},
           overrides: {},
         },
         "runs.start params",

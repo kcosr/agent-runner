@@ -65,7 +65,7 @@ export interface TaskSnapshot {
   notes: string;
 }
 
-export type RuntimeVarSourceKind = "cli" | "env" | "parent" | "default" | "hook";
+export type RuntimeVarSourceKind = "cli" | "web" | "env" | "parent" | "default" | "hook";
 
 export interface RuntimeVarSourceRecord {
   source: RuntimeVarSourceKind;

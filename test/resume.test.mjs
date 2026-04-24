@@ -871,7 +871,7 @@ test("resume: runAgent rejects overrides.cwd (backend sessions are cwd-bound)", 
   );
 });
 
-test("resume: runAgent rejects cliVars non-empty on resume", async () => {
+test("resume: runAgent rejects runtime vars on resume", async () => {
   const dir = tempDir();
   writeAgentAndAssignment(dir);
 
@@ -890,7 +890,7 @@ test("resume: runAgent rejects cliVars non-empty on resume", async () => {
     }),
   });
 
-  // Programmatic caller passes cliVars with content on resume —
+  // Programmatic caller passes runtime vars with content on resume —
   // currently a silent no-op because resume doesn't re-resolve vars.
   // runAgent must reject loudly.
   await withSharedRuntimeEnv(dir, async () => {
@@ -904,6 +904,7 @@ test("resume: runAgent rejects cliVars non-empty on resume", async () => {
           runAgent({
             loaded,
             cliVars: { forced: "value" },
+            webVars: {},
             backend: mockBackend(async () => {
               throw new Error("backend should not be invoked");
             }),
@@ -914,7 +915,7 @@ test("resume: runAgent rejects cliVars non-empty on resume", async () => {
           }),
         (err) => {
           assert.ok(err instanceof ResumeError);
-          assert.match(err.message, /--var cannot be combined with --resume-run/);
+          assert.match(err.message, /runtime vars cannot be combined with --resume-run/);
           return true;
         },
       );

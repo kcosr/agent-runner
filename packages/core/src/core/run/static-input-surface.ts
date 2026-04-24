@@ -312,7 +312,7 @@ export function resolveStaticInputSurface(
   });
 
   const assignmentInputs = Object.entries(loadedAssignment?.config.vars ?? {})
-    .filter(([, def]) => def.sources.includes("cli"))
+    .filter(([, def]) => def.sources.includes("web"))
     .map(([key, def]) => {
       const hasDefault = def.default !== undefined;
       return {

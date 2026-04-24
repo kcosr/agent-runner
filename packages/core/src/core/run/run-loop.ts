@@ -101,6 +101,7 @@ export interface RunOptions {
   loaded: LoadedAgent;
   loadedAssignment?: LoadedAssignment;
   cliVars: Record<string, string>;
+  webVars: Record<string, string>;
   parentRunId?: string | null;
   backend: Backend;
   callerCwd?: string;
@@ -581,6 +582,18 @@ function assertKnownCliVars(
   );
 }
 
+function assertKnownWebVars(
+  varsSchema: Record<string, VarDef>,
+  webVars: Record<string, string>,
+): void {
+  const declared = new Set(Object.keys(varsSchema));
+  const unknown = Object.keys(webVars).filter((key) => !declared.has(key));
+  if (unknown.length === 0) return;
+  throw new VarResolutionError(
+    `unknown web var key(s): ${unknown.join(", ")}. Declare them under assignment.vars or remove the extra web field(s).`,
+  );
+}
+
 export class LineageResolutionError extends VarResolutionError {
   constructor(message: string) {
     super(message);
@@ -682,6 +695,7 @@ function resolveFromParentLineage(
 function resolveVars(
   varsSchema: Record<string, VarDef>,
   cliVars: Record<string, string>,
+  webVars: Record<string, string>,
   lineageChain: LineageManifest[],
 ): ResolvedVarsResult {
   const values: Record<string, unknown> = {};
@@ -695,6 +709,14 @@ function resolveVars(
         if (cliVars[key] !== undefined) {
           value = cliVars[key];
           source = { source: "cli" };
+          break;
+        }
+        continue;
+      }
+      if (authoredSource === "web") {
+        if (webVars[key] !== undefined) {
+          value = webVars[key];
+          source = { source: "web" };
           break;
         }
         continue;
@@ -961,7 +983,9 @@ function collectNewTasks(
 }
 
 export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
-  const { loaded, loadedAssignment, cliVars, backend, overrides, resume } = opts;
+  const cliVars = opts.cliVars;
+  const webVars = opts.webVars ?? {};
+  const { loaded, loadedAssignment, backend, overrides, resume } = opts;
   const emitEvent = opts.emitEvent ?? (() => {});
   const emitAuditEnvelope = opts.emitAuditEnvelope ?? (() => {});
   const execution: RunExecution = opts.execution ?? {
@@ -1045,9 +1069,9 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     if (overrides?.launcher !== undefined) {
       throw new ResumeError("--launcher cannot be combined with --resume-run");
     }
-    if (Object.keys(cliVars).length > 0) {
+    if (Object.keys(cliVars).length > 0 || Object.keys(webVars).length > 0) {
       throw new ResumeError(
-        "--var cannot be combined with --resume-run — runtime vars are resolved from the assignment once at first write and frozen into the manifest; they are not re-resolved on resume.",
+        "--var and web-authored runtime vars cannot be combined with --resume-run — runtime vars are resolved from the assignment once at first write and frozen into the manifest; they are not re-resolved on resume.",
       );
     }
     if (overrides?.name !== undefined) {
@@ -1118,9 +1142,10 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const varsSchema = assignmentConfig?.vars ?? {};
   if (assignmentConfig) {
     assertKnownCliVars(varsSchema, cliVars);
+    assertKnownWebVars(varsSchema, webVars);
   }
   const lineageChain = reusesFrozenSetup ? [] : resolveLineageChain(parentRunId);
-  const resolvedVars = resolveVars(varsSchema, cliVars, lineageChain);
+  const resolvedVars = resolveVars(varsSchema, cliVars, webVars, lineageChain);
   let runtimeVars = reusesFrozenSetup
     ? { ...(resume?.manifest.runtimeVars ?? {}) }
     : resolvedVars.values;

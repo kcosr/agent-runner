@@ -131,6 +131,7 @@ export interface RunsStartParams {
   callerCwd?: string;
   parentRunId?: string;
   cliVars: Record<string, string>;
+  webVars: Record<string, string>;
   backendSessionId?: string;
   overrides: RunCommandOverrides;
 }

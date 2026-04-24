@@ -26,7 +26,7 @@ vars:
   range:
     type: string
     required: false
-    sources: [cli]
+    sources: [cli, web]
     default: full
     description: |
       What scope to review. One of:
@@ -40,7 +40,7 @@ vars:
   implementation_run_id:
     type: string
     required: true
-    sources: [cli]
+    sources: [cli, web]
     description: |
       Canonical task-runner run id for the implementation run
       being reviewed. The reviewer reads the implementation run's

@@ -410,7 +410,7 @@ body {
   }
 
   .shell {
-    grid-template-columns: 52px 1fr;
+    grid-template-columns: 1fr;
   }
 
   .new-run-page {

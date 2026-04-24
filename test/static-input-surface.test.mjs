@@ -163,7 +163,7 @@ lockedFields: [cwd, maxRetries, message]
 vars:
   cli_default:
     type: string
-    sources: [cli]
+    sources: [cli, web]
     default: alpha
   env_only:
     type: string
@@ -174,17 +174,17 @@ vars:
   mixed_default:
     type: enum
     values: [small, large]
-    sources: [cli, env]
+    sources: [cli, web, env]
     default: large
   cli_prepare_required:
     type: string
     required: true
     requiredAt: prepare
-    sources: [cli]
+    sources: [cli, web]
   cli_initial_required:
     type: boolean
     required: true
-    sources: [cli]
+    sources: [cli, web]
 ---
 Fixture assignment.
 `,

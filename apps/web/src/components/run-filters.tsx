@@ -9,6 +9,7 @@ import {
   EMPTY_DASHBOARD_STRUCTURED_FILTERS,
   hasActiveDashboardStructuredFilters,
 } from "../lib/settings.js";
+import { TopbarPrimaryNav } from "./app-shell.js";
 import {
   AlertIcon,
   ArchiveIcon,
@@ -137,6 +138,7 @@ export function RunFilters({
 
   return (
     <header className="topbar">
+      <TopbarPrimaryNav />
       <span className="page-title">
         Runs
         {preferences.showArchived ? (

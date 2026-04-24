@@ -1,6 +1,6 @@
 import { Outlet, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
-import { AppShell } from "../components/app-shell.js";
+import { AppShell, TopbarPrimaryNav } from "../components/app-shell.js";
 import { SettingsLayout } from "../components/settings/settings-layout.js";
 import { SettingsSidebarNav } from "../components/settings/settings-sidebar-nav.js";
 import { resolveSettingsShortcutCommand } from "../lib/shortcuts.js";
@@ -32,6 +32,7 @@ export function SettingsLayoutRoute() {
       }
       toolbar={
         <header className="topbar">
+          <TopbarPrimaryNav />
           <span className="page-title">Settings</span>
           <span className="page-title-meta">Local dashboard preferences</span>
         </header>

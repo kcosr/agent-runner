@@ -378,6 +378,7 @@ export function parseStartRunParams(value: unknown, label: string): RunsStartPar
     parentRunId: optionalRunIdString(record.parentRunId, "parentRunId"),
     backendSessionId: optionalString(record.backendSessionId, "backendSessionId"),
     cliVars: stringRecord(record.cliVars, "cliVars"),
+    webVars: stringRecord(record.webVars, "webVars"),
     overrides: optionalOverrides(record.overrides),
   };
 }

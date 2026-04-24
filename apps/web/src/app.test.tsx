@@ -1099,6 +1099,14 @@ function getCloseDetailButton() {
   return closeButton;
 }
 
+function getSidebarNavigation() {
+  const sidebar = document.querySelector("aside.sidebar");
+  if (!(sidebar instanceof HTMLElement)) {
+    throw new Error("expected desktop sidebar navigation");
+  }
+  return within(sidebar);
+}
+
 function getBoardColumn(name: string) {
   const headingName = new RegExp(`^${escapeRegExp(name)}(?: \\(\\d+\\))?$`);
   const column = screen.getByRole("heading", { name: headingName }).closest("article");
@@ -4005,10 +4013,12 @@ describe("web app", () => {
     await renderApp();
     await findRunCard("Build dashboard");
 
-    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(getSidebarNavigation().getByRole("button", { name: "Settings" }));
 
     expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Settings", current: "page" })).toBeInTheDocument();
+    expect(
+      getSidebarNavigation().getByRole("button", { name: "Settings", current: "page" }),
+    ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /Keybindings/ }));
     expect(await screen.findByRole("heading", { name: "Keybindings" })).toBeInTheDocument();
@@ -4022,10 +4032,12 @@ describe("web app", () => {
     expect(screen.getByLabelText("Shortcut: Ctrl + Shift + E")).toBeInTheDocument();
     expect(screen.getByText("Toggle notes-only filter")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Runs" }));
+    await user.click(getSidebarNavigation().getByRole("button", { name: "Runs" }));
 
     expect(await screen.findByPlaceholderText("Search runs")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Runs", current: "page" })).toBeInTheDocument();
+    expect(
+      getSidebarNavigation().getByRole("button", { name: "Runs", current: "page" }),
+    ).toBeInTheDocument();
   });
 
   it("leaves settings on escape after opening them from the runs dashboard", async () => {
@@ -4038,7 +4050,7 @@ describe("web app", () => {
     await renderApp();
     await findRunCard("Build dashboard");
 
-    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(getSidebarNavigation().getByRole("button", { name: "Settings" }));
     expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
 
     await user.keyboard("{Escape}");
@@ -4754,7 +4766,7 @@ describe("web app", () => {
     expect(getBoardColumn("Error")).toBeInTheDocument();
     expect(getBoardColumn("Aborted")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(getSidebarNavigation().getByRole("button", { name: "Settings" }));
     expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
 
     const collapseFailureStates = screen.getByRole("checkbox", {
@@ -4803,14 +4815,14 @@ describe("web app", () => {
     queryClient.clear();
     await renderApp();
     await findRunCard("Build dashboard");
-    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(getSidebarNavigation().getByRole("button", { name: "Settings" }));
     expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Show archived runs" })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "Sort by recent updates" })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "Visible focus indicators" })).toBeChecked();
     expect(document.querySelector(".app")).toHaveAttribute("data-focus-indicators", "on");
 
-    await user.click(screen.getByRole("button", { name: "Runs" }));
+    await user.click(getSidebarNavigation().getByRole("button", { name: "Runs" }));
     expect(await screen.findByTitle("Archived dashboard")).toBeInTheDocument();
     expect(getBoardColumn("Error")).toBeInTheDocument();
     expect(getBoardColumn("Aborted")).toBeInTheDocument();
@@ -4914,7 +4926,7 @@ describe("web app", () => {
       showPinnedOnly: true,
     });
 
-    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(getSidebarNavigation().getByRole("button", { name: "Settings" }));
     expect(screen.getByRole("checkbox", { name: "Show pinned runs only" })).toBeChecked();
   });
 
@@ -5255,7 +5267,7 @@ describe("web app", () => {
     expect(document.querySelector(".app")).toHaveAttribute("data-focus-indicators", "off");
     expect(screen.getByRole("button", { name: "Restore defaults" })).toBeDisabled();
 
-    await user.click(screen.getByRole("button", { name: "Runs" }));
+    await user.click(getSidebarNavigation().getByRole("button", { name: "Runs" }));
 
     expect(await screen.findByPlaceholderText("Search runs")).toBeInTheDocument();
     expect(screen.queryByTitle("Archived dashboard")).not.toBeInTheDocument();
@@ -5468,7 +5480,7 @@ describe("web app", () => {
     expect(drawer.style.getPropertyValue("--drawer-width")).toBe("540px");
     expect(getBoardColumn("Running")).toHaveAttribute("data-collapsed", "false");
 
-    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(getSidebarNavigation().getByRole("button", { name: "Settings" }));
     expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Sort by recent updates" })).not.toBeChecked();
   });
@@ -6587,7 +6599,7 @@ describe("web app", () => {
     await renderApp();
     await user.click(await findRunCard("Passive keyboard run"));
 
-    const settingsButton = screen.getByRole("button", { name: "Settings" });
+    const settingsButton = getSidebarNavigation().getByRole("button", { name: "Settings" });
     settingsButton.focus();
     expect(settingsButton).toHaveFocus();
 
@@ -8656,7 +8668,7 @@ describe("web app", () => {
     await renderApp();
 
     expect(await findRunCard("Existing run")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "New Run" }));
+    await user.click(getSidebarNavigation().getByRole("button", { name: "New Run" }));
 
     expect(await screen.findByRole("heading", { name: "New Run" })).toBeInTheDocument();
     expect(screen.queryByText("Initialized")).not.toBeInTheDocument();

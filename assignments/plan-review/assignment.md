@@ -5,12 +5,12 @@ vars:
   plan_draft:
     type: string
     required: true
-    sources: [cli]
+    sources: [cli, web]
     description: Absolute path to the draft assignment file being reviewed.
   planning_run_id:
     type: string
     required: true
-    sources: [cli]
+    sources: [cli, web]
     description: |
       Canonical run id for the planning run whose task notes
       contain the captured brief, contract, assumptions, and

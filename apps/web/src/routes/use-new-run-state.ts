@@ -52,7 +52,7 @@ function fieldIsMeaningfulContextField(field: RunInputField, drafts: FieldDrafts
   if (field.key !== "cwd") {
     return false;
   }
-  return !isEmptyValue(fieldValue(field, drafts));
+  return field.editable || !isEmptyValue(fieldValue(field, drafts));
 }
 
 function fieldIsMissing(field: RunInputField, drafts: FieldDrafts): boolean {
@@ -112,7 +112,7 @@ function buildStartPayload(
   drafts: FieldDrafts,
 ) {
   const overrides: Record<string, unknown> = {};
-  const cliVars: Record<string, string> = {};
+  const webVars: Record<string, string> = {};
 
   for (const field of surface.runSettings) {
     if (!field.editable) {
@@ -132,13 +132,13 @@ function buildStartPayload(
     if (submitted === undefined || submitted === authored) {
       continue;
     }
-    cliVars[field.key] = String(submitted);
+    webVars[field.key] = String(submitted);
   }
 
   return {
     agent: selectedAgent,
     assignment: selectedAssignment,
-    cliVars,
+    webVars,
     overrides,
   };
 }

@@ -227,6 +227,12 @@ pre {
   flex: 1;
 }
 
+.mobile-topbar-nav {
+  display: none;
+  align-items: center;
+  gap: 6px;
+}
+
 /* ─── main ───────────────────────────────────────────── */
 .main {
   display: flex;
@@ -1409,6 +1415,16 @@ pre {
   }
   .topbar {
     padding: 0 12px;
+  }
+  .mobile-topbar-nav {
+    display: inline-flex;
+  }
+  .mobile-topbar-nav .nav-item.active::before {
+    display: none;
+  }
+  .topbar > .page-title,
+  .topbar > .page-title-meta {
+    display: none;
   }
   .field.search {
     width: 140px;
