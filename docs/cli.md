@@ -35,6 +35,9 @@ All commands accept `--help` / `-h`.
 Commands reject flags they do not consume — unknown flag combinations
 error out rather than being silently ignored.
 
+Reusable named task definitions are not a first-class CLI kind in this
+pass. They are loaded through assignment `tasks:` refs only.
+
 `--connect-host` requires connected mode via `--connect` or
 `TASK_RUNNER_CONNECT`. When present, the CLI keeps the logical daemon URL
 for user-facing output, but tunnels the actual WebSocket/HTTP traffic
@@ -101,6 +104,13 @@ Flags:
   daemon accepts it.
 
 Positional args are joined with spaces into the message body.
+
+Assignment task refs follow the same explicit loader model:
+
+- bare strings are named task refs under `${TASK_RUNNER_CONFIG_DIR}/tasks`
+- only absolute paths and strings beginning with `./` or `../` are path
+  refs
+- slashful ids such as `review/reuse` are named refs, not implicit paths
 
 ## `init`
 
