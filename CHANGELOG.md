@@ -9,7 +9,7 @@
   `totalSessionCount`, `maxAttemptsPerSession`, and `sessions`; the old
   public `attempts`, `maxAttempts`, and `sessionCount` fields are
   removed. Use `scripts/migrate-manifests-v11.mjs` to promote schema v10
-  manifests.
+  manifests. ([#94](https://github.com/kcosr/task-runner/pull/94))
 - Assignment task string refs now treat only absolute paths and strings
   beginning with `./` or `../` as file paths. Bare slashful strings such
   as `review/reuse` now resolve as named task ids under `tasks/`, and
@@ -188,6 +188,7 @@
 - Attempt-phase hooks now receive and match `attemptIndexInSession` for
   the zero-based attempt position inside the current session; monotonic
   run-wide attempt identity is exposed separately as `attemptNumber`.
+  ([#94](https://github.com/kcosr/task-runner/pull/94))
 - `plan-feature` now accepts optional `worktree_base_ref` so generated
   implementation worktrees can be based on refs other than `origin/main`,
   enabling pre-merge end-to-end testing from feature branches. ([#93](https://github.com/kcosr/task-runner/pull/93))
