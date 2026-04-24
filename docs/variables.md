@@ -32,6 +32,11 @@ tasks: [...]
 ---
 ```
 
+`implementation_run_id` is specific to the implementation-path
+`code-review` assignment, where the reviewer checks a completed
+implementation run for plan coverage. Direct reviews use
+`code-review-direct` and only need `range`.
+
 ### Schema
 
 ```ts
@@ -203,6 +208,15 @@ task-runner run \
   --assignment code-review \
   --var range=main..HEAD \
   --var implementation_run_id=abc123
+```
+
+For a direct review that is not tied to an implementation run:
+
+```bash
+task-runner run \
+  --agent code-reviewer \
+  --assignment code-review-direct \
+  --var range=unstaged
 ```
 
 `--var` is repeatable. Values are split on the first `=`, so

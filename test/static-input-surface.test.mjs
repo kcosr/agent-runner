@@ -8,8 +8,18 @@ import { withRuntimeRoots } from "./helpers/runtime-paths.mjs";
 
 const REPO_ROOT = new URL("..", import.meta.url).pathname;
 const PLANNER_AGENT_PATH = new URL("../agents/planner/agent.md", import.meta.url).pathname;
+const CODE_REVIEWER_AGENT_PATH = new URL("../agents/code-reviewer/agent.md", import.meta.url)
+  .pathname;
 const PLAN_FEATURE_ASSIGNMENT_PATH = new URL(
   "../assignments/plan-feature/assignment.md",
+  import.meta.url,
+).pathname;
+const CODE_REVIEW_ASSIGNMENT_PATH = new URL(
+  "../assignments/code-review/assignment.md",
+  import.meta.url,
+).pathname;
+const CODE_REVIEW_DIRECT_ASSIGNMENT_PATH = new URL(
+  "../assignments/code-review-direct/assignment.md",
   import.meta.url,
 ).pathname;
 
@@ -62,8 +72,8 @@ test("static input surface: built-in planner + plan-feature surfaces the documen
 
   assert.equal(backend.value, "codex");
   assert.equal(backend.source, "agent");
-  assert.equal(timeoutSec.value, 3600);
-  assert.equal(timeoutSec.source, "schema_default");
+  assert.equal(timeoutSec.value, 14400);
+  assert.equal(timeoutSec.source, "agent");
   assert.equal(unrestricted.value, true);
   assert.equal(unrestricted.source, "agent");
   assert.equal(maxRetries.value, 4);
@@ -74,14 +84,14 @@ test("static input surface: built-in planner + plan-feature surfaces the documen
   assert.equal(message.source, "available_override");
 
   assert.equal(model.editable, true);
-  assert.equal(model.valueStatus, "delegated");
-  assert.equal(model.source, "available_override");
-  assert.equal(model.value, null);
+  assert.equal(model.valueStatus, "concrete");
+  assert.equal(model.source, "agent");
+  assert.equal(model.value, "gpt-5.5");
 
   assert.equal(effort.editable, true);
-  assert.equal(effort.valueStatus, "delegated");
-  assert.equal(effort.source, "available_override");
-  assert.equal(effort.value, null);
+  assert.equal(effort.valueStatus, "concrete");
+  assert.equal(effort.source, "agent");
+  assert.equal(effort.value, "high");
 
   assert.deepEqual(
     surface.assignmentInputs.map((field) => field.key),
@@ -90,6 +100,35 @@ test("static input surface: built-in planner + plan-feature surfaces the documen
   assert.equal(fieldByKey(surface.assignmentInputs, "worktree_slug").required, true);
   assert.ok(!surface.assignmentInputs.some((field) => field.key === "worktree_path"));
   assert.ok(!surface.assignmentInputs.some((field) => field.key === "repo_root"));
+});
+
+test("static input surface: review assignments expose the correct CLI/Web inputs", () => {
+  const loadedAgent = loadAgentConfig(CODE_REVIEWER_AGENT_PATH, REPO_ROOT);
+  const implementationReview = resolveStaticInputSurface(
+    loadedAgent,
+    loadAssignmentConfig(CODE_REVIEW_ASSIGNMENT_PATH, REPO_ROOT),
+  );
+  const directReview = resolveStaticInputSurface(
+    loadedAgent,
+    loadAssignmentConfig(CODE_REVIEW_DIRECT_ASSIGNMENT_PATH, REPO_ROOT),
+  );
+
+  assert.deepEqual(
+    implementationReview.assignmentInputs.map((field) => field.key),
+    ["range", "implementation_run_id"],
+  );
+  assert.equal(fieldByKey(implementationReview.assignmentInputs, "range").value, "full");
+  assert.equal(
+    fieldByKey(implementationReview.assignmentInputs, "implementation_run_id").required,
+    true,
+  );
+
+  assert.deepEqual(
+    directReview.assignmentInputs.map((field) => field.key),
+    ["range"],
+  );
+  assert.equal(fieldByKey(directReview.assignmentInputs, "range").value, "full");
+  assert.ok(!directReview.assignmentInputs.some((field) => field.key === "implementation_run_id"));
 });
 
 test("static input surface: launcher path and inline definitions preserve authored values", () =>

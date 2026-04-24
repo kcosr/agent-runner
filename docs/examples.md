@@ -1,8 +1,9 @@
 # Examples
 
-This repo ships a small library of reusable agents and assignments under
-`agents/` and `assignments/`. Every one is a plain markdown file you can
-copy, read, or pass directly via `--agent` / `--assignment`.
+This repo ships a small library of reusable agents, assignments, and
+shared task definitions under `agents/`, `assignments/`, and `tasks/`.
+Every agent and assignment is a plain markdown file you can copy, read,
+or pass directly via `--agent` / `--assignment`.
 
 ## Bundled agents
 
@@ -149,13 +150,29 @@ descendant worktree inheritance wiring.
   - `implementation_run_id` (string, required) — implementation run
     whose task state the reviewer cross-checks.
 
-Structured 14-dimension review with an explicit ship / no-ship
-decision. Covers architecture, concurrency, error handling, state
+Implementation-run review with an explicit ship / no-ship decision.
+Requires `implementation_run_id`, checks the implementation run's task
+state for plan coverage, and reuses the shared `review/...` task
+definitions for architecture, concurrency, error handling, state
 machine, resources, security, type safety, simplification/duplication,
-test coverage, documentation accuracy, and plan coverage. Produces a
-top-findings synthesis and an approval task whose exit code carries the
-decision. On resume, performs a delta re-review over the prior findings
-and recent changes rather than a full re-walk.
+test coverage, and documentation accuracy. Produces a top-findings
+synthesis and an approval task whose exit code carries the decision. On
+resume, performs a delta re-review over the prior findings and recent
+changes rather than a full re-walk.
+
+### `code-review-direct`
+
+- Path: `assignments/code-review-direct/assignment.md`
+- Vars:
+  - `range` (string, optional, default `full`) — git range to review
+    (`full`, `unstaged`, `staged`, `last commit`, `HEAD~N..HEAD`,
+    `main..<branch>`, etc.).
+
+Direct/user/Web UI code review for work that is not tied to an
+implementation run. It has no `implementation_run_id`, no plan-coverage
+task, and no lineage attachment lookup. It reuses the same shared
+`review/...` dimension tasks as `code-review`, then produces a direct
+synthesis and approval decision.
 
 ### `doc-review`
 
@@ -173,7 +190,7 @@ subagents for parallelism.
 |-------|-------------------|-------|
 | `planner` | `plan-feature` | Produces an executable plan and a summary; uses nested `plan-review` and blocks for caller approval before delayed implementer creation. |
 | `implementer` | generated plan assignment | Created by `plan-feature` after approval; inspect `run brief` and then execute with `run --resume-run`. |
-| `code-reviewer` | `plan-review` or `code-review` | Nested review surfaces (both assignments). |
+| `code-reviewer` | `plan-review`, `code-review`, or `code-review-direct` | Nested and direct review surfaces. |
 | `doc-reviewer` | `doc-review` | Review-only, writes no files. |
 | any | `repo-orientation` / `familiarize` | Quick or deep onboarding before other work. |
 | any | `test` | Smoke-check for installation or a new agent/backend combination. |
@@ -193,11 +210,12 @@ subagents for parallelism.
   link runs with `run add-dep`.
 - **Attachments as handoff** — planning artifacts attached to the
   planning run and later discovered via `attachment list --scope family`.
-- **Multiple delta re-reviews** — `plan-review` and `code-review` both
-  switch into delta mode on resume.
-- **Subagent delegation** — `plan-feature`, `code-review`, `doc-review`,
-  `familiarize` allow independent tasks to be parallelized while
-  synthesis tasks stay in the main context.
+- **Multiple delta re-reviews** — `plan-review`, `code-review`, and
+  `code-review-direct` switch into delta mode on resume.
+- **Subagent delegation** — `plan-feature`, `code-review`,
+  `code-review-direct`, `doc-review`, and `familiarize` allow
+  independent tasks to be parallelized while synthesis tasks stay in the
+  main context.
 
 ## Using a bundled definition
 

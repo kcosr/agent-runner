@@ -88,9 +88,28 @@ const BUILTIN_PLAN_TEMPLATE_PATH = resolvePath(
 const BUILTIN_PLAN_REVIEW_PATH = resolvePath(
   new URL("../assignments/plan-review/assignment.md", import.meta.url).pathname,
 );
+const BUILTIN_CODE_REVIEW_PATH = resolvePath(
+  new URL("../assignments/code-review/assignment.md", import.meta.url).pathname,
+);
+const BUILTIN_CODE_REVIEW_DIRECT_PATH = resolvePath(
+  new URL("../assignments/code-review-direct/assignment.md", import.meta.url).pathname,
+);
 const BUILTIN_IMPLEMENTER_AGENT_PATH = resolvePath(
   new URL("../agents/implementer/agent.md", import.meta.url).pathname,
 );
+
+const SHARED_REVIEW_TASK_IDS = [
+  "review/architecture",
+  "review/concurrency",
+  "review/error-handling",
+  "review/state-machine",
+  "review/resources",
+  "review/security",
+  "review/types-schema",
+  "review/simplification-and-duplication",
+  "review/test-coverage",
+  "review/docs-drift",
+];
 
 test("loadAgentConfig parses a minimal agent.md from TASK_RUNNER_CONFIG_DIR", () =>
   withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
@@ -1055,6 +1074,33 @@ Assignment body.
     assert.equal(loaded.config.tasks[0].title, "External reuse pass");
   }));
 
+test("built-in shared review task files are valid config-root named task definitions", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    writeTask(
+      configDir,
+      "review/architecture",
+      readFileSync(new URL("../tasks/review/architecture.md", import.meta.url), "utf8"),
+    );
+    writeAssignment(
+      configDir,
+      "uses-shared-review-task",
+      `---
+schemaVersion: 1
+name: uses-shared-review-task
+tasks:
+  - review/architecture
+---
+Assignment body.
+`,
+    );
+
+    const loaded = loadAssignmentConfig("uses-shared-review-task", rootDir);
+    assert.equal(loaded.config.tasks[0].id, "review/architecture");
+    assert.equal(loaded.config.tasks[0].title, "Architecture & module boundaries");
+    assert.match(loaded.config.tasks[0].body, /Review the module layout/);
+    assert.match(loaded.config.tasks[0].body, /review\/simplification-and-duplication/);
+  }));
+
 test("loadAssignmentConfig hard-fails when a referenced named task is missing", () =>
   withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
     writeAssignment(
@@ -1080,6 +1126,65 @@ Assignment body.
       },
     );
   }));
+
+test("built-in code-review assignment resolves shared review tasks and preserves implementation-run gates", () => {
+  const loaded = loadAssignmentConfig(BUILTIN_CODE_REVIEW_PATH);
+
+  assert.deepEqual(
+    loaded.config.tasks.map((task) => task.id),
+    ["orient", ...SHARED_REVIEW_TASK_IDS, "plan_coverage", "synthesis", "approval"],
+  );
+  assert.deepEqual(loaded.config.vars.implementation_run_id?.sources, ["cli", "web"]);
+  assert.equal(loaded.config.vars.implementation_run_id?.required, true);
+  assert.equal(loaded.config.vars.range?.default, "full");
+  assert.deepEqual(loaded.config.vars.range?.sources, ["cli", "web"]);
+
+  const orient = loaded.config.tasks.find((task) => task.id === "orient");
+  const architecture = loaded.config.tasks.find((task) => task.id === "review/architecture");
+  const planCoverage = loaded.config.tasks.find((task) => task.id === "plan_coverage");
+  const approval = loaded.config.tasks.find((task) => task.id === "approval");
+
+  assert.ok(orient);
+  assert.ok(architecture);
+  assert.ok(planCoverage);
+  assert.ok(approval);
+  assert.match(orient.body ?? "", /assignment-summary\.md/);
+  assert.equal(architecture.title, "Architecture & module boundaries");
+  assert.match(architecture.body ?? "", /Review the module layout/);
+  assert.match(approval.body ?? "", /plan_coverage/);
+  assert.match(approval.body ?? "", /silently during execution/);
+});
+
+test("built-in code-review-direct assignment resolves shared review tasks without implementation-run gates", () => {
+  const loaded = loadAssignmentConfig(BUILTIN_CODE_REVIEW_DIRECT_PATH);
+
+  assert.deepEqual(
+    loaded.config.tasks.map((task) => task.id),
+    ["orient", ...SHARED_REVIEW_TASK_IDS, "synthesis", "approval"],
+  );
+  assert.deepEqual(Object.keys(loaded.config.vars), ["range"]);
+  assert.equal(loaded.config.vars.range?.default, "full");
+  assert.deepEqual(loaded.config.vars.range?.sources, ["cli", "web"]);
+  assert.equal(
+    loaded.config.tasks.some((task) => task.id === "plan_coverage"),
+    false,
+  );
+  assert.equal(loaded.config.vars.implementation_run_id, undefined);
+
+  const orient = loaded.config.tasks.find((task) => task.id === "orient");
+  const synthesis = loaded.config.tasks.find((task) => task.id === "synthesis");
+  const approval = loaded.config.tasks.find((task) => task.id === "approval");
+
+  assert.ok(orient);
+  assert.ok(synthesis);
+  assert.ok(approval);
+  assert.match(orient.body ?? "", /direct\/ad hoc/);
+  assert.match(orient.body ?? "", /no `implementation_run_id`/);
+  assert.match(synthesis.body ?? "", /top 10 highest-leverage findings/);
+  assert.match(synthesis.body ?? "", /review\/architecture.*review\/docs-drift/s);
+  assert.match(approval.body ?? "", /BLOCKED -- cannot approve/);
+  assert.doesNotMatch(approval.body ?? "", /plan_coverage/);
+});
 
 test("built-in plan-feature assignment uses cwd instead of repo_path for canonical repo context", () => {
   const loaded = loadAssignmentConfig(BUILTIN_PLAN_FEATURE_PATH);

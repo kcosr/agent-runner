@@ -60,6 +60,9 @@
 
 ### Added
 
+- Added shared review task definitions under `tasks/review/` and a
+  bundled `code-review-direct` assignment for user-launched or Web UI
+  code reviews that are not tied to an implementation run.
 - Added reusable named task definitions under
   `${TASK_RUNNER_CONFIG_DIR}/tasks/<task-id>.md`, plus mixed assignment
   `tasks:` authoring that can combine named refs, explicit path refs,
@@ -176,6 +179,9 @@
 
 ### Changed
 
+- Future `code-review` runs now use shared review-dimension task ids under
+  `review/...` while keeping `plan_coverage` as the implementation-run
+  plan check. Existing run manifests keep their frozen old task ids.
 - Direct path loads outside `TASK_RUNNER_CONFIG_DIR` may now use authored
   agent, assignment, task, and launcher identities that differ from their
   filesystem-derived canonical ids. Config-root named definitions still
