@@ -44,7 +44,7 @@ implementation run for plan coverage. Direct reviews use
   type?: "string" | "number" | "boolean" | "enum"   // default: "string"
   required?: boolean                                 // default: false
   requiredAt?: "initial" | "prepare"                 // default: "initial"
-  sources?: ("cli" | "web" | "env" | "parent")[]     // default: ["cli"]
+  sources?: ("cli" | "web" | "env" | "parent")[]     // default: ["cli", "web"]
   envName?: string                                   // default: same as key
   default?: unknown                                  // must match type
   description?: string

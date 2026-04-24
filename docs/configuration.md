@@ -38,7 +38,9 @@ only when they are absolute or begin with `./` or `../`.
 The bundled repo also ships shared review task definitions under
 `tasks/review/`; bundled assignments reference those files with named
 refs such as `review/architecture`, resolved from
-`${TASK_RUNNER_CONFIG_DIR}/tasks`.
+`${TASK_RUNNER_CONFIG_DIR}/tasks`. If you copy the bundled
+`code-review` assignments into another config directory, copy
+`tasks/review/` with them so those named refs continue to resolve.
 
 ### State directory
 
