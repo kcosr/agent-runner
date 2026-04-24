@@ -250,6 +250,20 @@ test("migrate-manifests-v11 reports malformed attempt logs and exits nonzero", (
   assert.match(result.stdout, /attempt number does not match attempt record/);
 });
 
+test("migrate-manifests-v11 rejects attempt log paths that escape the workspace", () => {
+  const root = tempDir();
+  const manifest = baseV10Manifest();
+  manifest.attemptRecords[0].logPath = "../outside.json";
+  const runDir = writeManifest(root, "demo", "run-v10", manifest);
+  writeAttemptLogs(runDir);
+
+  const result = spawnSync("node", [SCRIPT_PATH, "--root", root], { encoding: "utf8" });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /ERROR\s+runs\/demo\/run-v10\/run\.json:/);
+  assert.match(result.stdout, /\.\.\/outside\.json escapes workspace/);
+});
+
 test("migrate-manifests-v11 rejects malformed current session attempt numbers", () => {
   const root = tempDir();
   const manifest = baseV10Manifest();

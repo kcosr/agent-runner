@@ -2,7 +2,7 @@
 
 import { mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
 function usage() {
@@ -216,7 +216,11 @@ function normalizeAttemptRecords(parsed) {
 }
 
 function normalizeAttemptLog(workspaceDir, manifestRunId, record) {
-  const logPath = join(workspaceDir, record.logPath);
+  const workspaceRoot = resolve(workspaceDir);
+  const logPath = resolve(workspaceRoot, record.logPath);
+  if (logPath !== workspaceRoot && !logPath.startsWith(`${workspaceRoot}${sep}`)) {
+    throw new Error(`${record.logPath} escapes workspace ${workspaceDir}`);
+  }
   const raw = readFileSync(logPath, "utf8");
   const parsed = JSON.parse(raw);
   if (!isObjectRecord(parsed)) {
@@ -298,10 +302,6 @@ function normalizeManifest(parsed, workspaceDir) {
   return { kind: "target", next, logs };
 }
 
-function repoFromManifestPath(manifestPath) {
-  return basename(dirname(dirname(manifestPath)));
-}
-
 function* manifestPaths(runsRoot, repoFilter) {
   for (const repoEntry of readdirSync(runsRoot, { withFileTypes: true })) {
     if (!repoEntry.isDirectory()) continue;
@@ -328,7 +328,6 @@ function run() {
   const summary = { ok: 0, dry: 0, write: 0, skip: 0, error: 0 };
 
   for (const manifestPath of manifestPaths(runsRoot, repoFilter)) {
-    const repo = repoFromManifestPath(manifestPath);
     const rel = manifestPath.slice(opts.root.length + 1);
     try {
       const parsed = JSON.parse(readFileSync(manifestPath, "utf8"));
@@ -352,11 +351,11 @@ function run() {
         );
         continue;
       }
-      if (manifestChanged) {
-        atomicWriteJson(manifestPath, result.next);
-      }
       for (const log of changedLogs) {
         atomicWriteJson(log.path, log.next);
+      }
+      if (manifestChanged) {
+        atomicWriteJson(manifestPath, result.next);
       }
       summary.write += 1;
       process.stdout.write(

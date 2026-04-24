@@ -537,6 +537,107 @@ test("command services: getRunTimelineHistory reads schema v2 attempt logs", asy
   });
 });
 
+test("command services: getRunTimelineHistory degrades malformed attempt logs per attempt", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+  const attemptsDir = join(outcome.workspaceDir, "attempts");
+  mkdirSync(attemptsDir, { recursive: true });
+
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.sessions = [
+      {
+        sessionIndex: 0,
+        startedAt: "2026-04-15T01:00:00.000Z",
+        endedAt: "2026-04-15T01:03:00.000Z",
+        status: "success",
+        exitCode: 0,
+        message: null,
+        brief: manifest.brief,
+        firstAttemptNumber: 1,
+        lastAttemptNumber: 3,
+        maxAttemptsPerSession: manifest.maxAttemptsPerSession,
+        backendSessionIdAtStart: null,
+        backendSessionIdAtEnd: null,
+      },
+    ];
+    manifest.totalSessionCount = 1;
+    manifest.attemptRecords = [
+      {
+        attemptNumber: 1,
+        sessionIndex: 0,
+        attemptIndexInSession: 0,
+        startedAt: "2026-04-15T01:00:00.000Z",
+        endedAt: "2026-04-15T01:01:00.000Z",
+        prompt: "Missing log",
+        sessionIdAtStart: null,
+        sessionIdCaptured: null,
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        transcript: "Missing transcript",
+        logPath: "attempts/01.json",
+        tasksAfter: manifest.finalTasks,
+        invalidStatuses: [],
+      },
+      {
+        attemptNumber: 2,
+        sessionIndex: 0,
+        attemptIndexInSession: 1,
+        startedAt: "2026-04-15T01:01:00.000Z",
+        endedAt: "2026-04-15T01:02:00.000Z",
+        prompt: "Corrupt log",
+        sessionIdAtStart: null,
+        sessionIdCaptured: null,
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        transcript: "Corrupt transcript",
+        logPath: "attempts/02.json",
+        tasksAfter: manifest.finalTasks,
+        invalidStatuses: [],
+      },
+      {
+        attemptNumber: 3,
+        sessionIndex: 0,
+        attemptIndexInSession: 2,
+        startedAt: "2026-04-15T01:02:00.000Z",
+        endedAt: "2026-04-15T01:03:00.000Z",
+        prompt: "Escaping log",
+        sessionIdAtStart: null,
+        sessionIdCaptured: null,
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        transcript: "Escaping transcript",
+        logPath: "../outside.json",
+        tasksAfter: manifest.finalTasks,
+        invalidStatuses: [],
+      },
+    ];
+    manifest.totalAttemptCount = manifest.attemptRecords.length;
+  });
+  writeFileSync(join(attemptsDir, "02.json"), "{not valid json");
+
+  await withSharedRuntimeEnv(dir, async () => {
+    const history = getRunTimelineHistory(outcome.runId);
+    assert.equal(history.runId, outcome.runId);
+    assert.equal(history.attempts.length, 3);
+    assert.deepEqual(
+      history.attempts.map((attempt) => [
+        attempt.attemptNumber,
+        attempt.transcript,
+        attempt.notices,
+      ]),
+      [
+        [1, "Missing transcript", ""],
+        [2, "Corrupt transcript", ""],
+        [3, "Escaping transcript", ""],
+      ],
+    );
+  });
+});
+
 test("command services: listDefinitions and showDefinition return typed config results", async () => {
   const dir = tempDir();
   writeBundle(dir);
