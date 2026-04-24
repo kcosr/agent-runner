@@ -642,6 +642,27 @@ function isRunManifest(value: unknown): value is RunManifest {
   if (typeof obj.brief !== "string") return false;
   if (!Array.isArray(obj.resolvedHooks)) return false;
   if (!Array.isArray(obj.hookAudits)) return false;
+  if (
+    obj.hookAudits.some((audit) => {
+      if (!audit || typeof audit !== "object") {
+        return true;
+      }
+      const record = audit as Record<string, unknown>;
+      return (
+        typeof record.phase !== "string" ||
+        typeof record.hookId !== "string" ||
+        typeof record.startedAt !== "string" ||
+        typeof record.endedAt !== "string" ||
+        typeof record.outcome !== "string" ||
+        (record.sessionIndex !== null && typeof record.sessionIndex !== "number") ||
+        (record.attemptNumber !== null && typeof record.attemptNumber !== "number") ||
+        (record.taskId !== null && typeof record.taskId !== "string") ||
+        (record.summary !== null && typeof record.summary !== "string")
+      );
+    })
+  ) {
+    return false;
+  }
 
   // Arrays.
   if (!Array.isArray(obj.attemptRecords)) return false;

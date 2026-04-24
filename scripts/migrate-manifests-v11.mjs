@@ -215,6 +215,30 @@ function normalizeAttemptRecords(parsed) {
     });
 }
 
+function normalizeHookAudits(parsed) {
+  return cloneArray(parsed.hookAudits).map((audit, index) => {
+    if (!isObjectRecord(audit)) {
+      throw new Error(`hookAudits[${index}] must be an object`);
+    }
+    const { attempt: _oldAttempt, ...rest } = audit;
+    return {
+      ...rest,
+      phase: requireString(audit.phase, `hookAudits[${index}].phase`),
+      hookId: requireString(audit.hookId, `hookAudits[${index}].hookId`),
+      startedAt: requireString(audit.startedAt, `hookAudits[${index}].startedAt`),
+      endedAt: requireString(audit.endedAt, `hookAudits[${index}].endedAt`),
+      outcome: requireString(audit.outcome, `hookAudits[${index}].outcome`),
+      sessionIndex: optionalNumberOrNull(audit.sessionIndex, `hookAudits[${index}].sessionIndex`),
+      attemptNumber: optionalNumberOrNull(
+        audit.attemptNumber !== undefined ? audit.attemptNumber : audit.attempt,
+        `hookAudits[${index}].attemptNumber`,
+      ),
+      taskId: optionalStringOrNull(audit.taskId, `hookAudits[${index}].taskId`),
+      summary: optionalStringOrNull(audit.summary, `hookAudits[${index}].summary`),
+    };
+  });
+}
+
 function normalizeAttemptLog(workspaceDir, manifestRunId, record) {
   const workspaceRoot = resolve(workspaceDir);
   const logPath = resolve(workspaceRoot, record.logPath);
@@ -280,6 +304,7 @@ function normalizeManifest(parsed, workspaceDir) {
       : requireNumber(parsed.maxAttempts, "maxAttempts");
   const sessions = normalizeSessions(parsed, maxAttemptsPerSession);
   const attemptRecords = normalizeAttemptRecords(parsed);
+  const hookAudits = normalizeHookAudits(parsed);
   const {
     attempts: _oldAttempts,
     maxAttempts: _oldMaxAttempts,
@@ -295,6 +320,7 @@ function normalizeManifest(parsed, workspaceDir) {
     resetSeed: normalizeResetSeed(parsed, maxAttemptsPerSession),
     sessions,
     attemptRecords,
+    hookAudits,
   };
   const logs = attemptRecords.map((record) =>
     normalizeAttemptLog(workspaceDir, next.runId, record),

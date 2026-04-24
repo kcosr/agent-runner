@@ -67,7 +67,19 @@ function baseV10Manifest(runId = "run-v10") {
     brief: "brief",
     resolvedHooks: [],
     hookState: {},
-    hookAudits: [],
+    hookAudits: [
+      {
+        phase: "beforeAttempt",
+        hookId: "beforeAttempt:0:command",
+        startedAt: "2026-04-24T00:00:00.000Z",
+        endedAt: "2026-04-24T00:00:01.000Z",
+        outcome: "continue",
+        sessionIndex: 0,
+        attempt: 1,
+        taskId: null,
+        summary: null,
+      },
+    ],
     callerInstructions: null,
     resetSeed: {
       backend: "claude",
@@ -219,6 +231,8 @@ test("migrate-manifests-v11 writes v10 manifest and attempt log promotion", () =
   assert.equal(manifest.sessions[0].firstAttemptNumber, 1);
   assert.equal(manifest.sessions[0].lastAttemptNumber, 2);
   assert.equal(manifest.sessions[0].maxAttemptsPerSession, 3);
+  assert.equal(manifest.hookAudits[0].attemptNumber, 1);
+  assert.equal("attempt" in manifest.hookAudits[0], false);
   const log = readJson(join(runDir, "attempts", "02.json"));
   assert.equal(log.schemaVersion, 2);
   assert.equal(log.runId, "run-v10");
@@ -226,6 +240,23 @@ test("migrate-manifests-v11 writes v10 manifest and attempt log promotion", () =
   assert.equal(log.attemptIndexInSession, 1);
   assert.equal(log.stdout, "stdout-2");
   assert.equal(log.stderr, "stderr-2");
+});
+
+test("migrate-manifests-v11 canonicalizes legacy hook audit attempt fields on v11 manifests", () => {
+  const root = tempDir();
+  const manifest = baseV10Manifest("run-v11");
+  manifest.schemaVersion = 11;
+  const runDir = writeManifest(root, "demo", "run-v11", manifest);
+  writeAttemptLogs(runDir);
+
+  const stdout = execFileSync("node", [SCRIPT_PATH, "--root", root, "--write"], {
+    encoding: "utf8",
+  });
+
+  assert.match(stdout, /WRITE\s+runs\/demo\/run-v11\/run\.json: canonicalized schemaVersion 11/);
+  const migrated = readJson(join(runDir, "run.json"));
+  assert.equal(migrated.hookAudits[0].attemptNumber, 1);
+  assert.equal("attempt" in migrated.hookAudits[0], false);
 });
 
 test("migrate-manifests-v11 reports malformed attempt logs and exits nonzero", () => {
