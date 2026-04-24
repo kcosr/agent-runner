@@ -24,11 +24,11 @@ test("deriveRepoKey uses the repo basename instead of the full parent path", () 
   assert.equal(deriveRepoKey(process.cwd()), "task-runner");
 });
 
-test("isPathArg recognizes slash-bearing args and dot-slash relative paths only", () => {
+test("isPathArg recognizes only explicit path prefixes and absolute paths", () => {
   assert.equal(isPathArg("code-review"), false);
   assert.equal(isPathArg("./assignments/code-review/assignment.md"), true);
   assert.equal(isPathArg("../assignments/code-review/assignment.md"), true);
-  assert.equal(isPathArg("assignments/code-review/assignment.md"), true);
+  assert.equal(isPathArg("assignments/code-review/assignment.md"), false);
   assert.equal(isPathArg(".\\assignments\\code-review\\assignment.md"), false);
 });
 

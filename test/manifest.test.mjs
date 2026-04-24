@@ -45,7 +45,7 @@ Work on the repo. Plan at {{assignment_path}}.
 
 const CODEX_AGENT = `---
 schemaVersion: 1
-name: codex-agent
+name: three
 backend: codex
 ---
 Codex agent prompt.

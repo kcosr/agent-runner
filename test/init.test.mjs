@@ -196,7 +196,7 @@ Work on \${BODY_TARGET}.
       AGENT_MODEL: "claude-sonnet-4-6",
       AGENT_TIMEOUT: "120",
       AGENT_TARGET: "staging",
-      ASSIGNMENT_NAME: "env-two-work",
+      ASSIGNMENT_NAME: "two-work",
       MAX_RETRIES: "4",
       ASSIGNMENT_CWD: "env-repo",
       MESSAGE_TEXT: "ship-it",
@@ -210,7 +210,7 @@ Work on \${BODY_TARGET}.
 
   assert.equal(outcome.manifest.model, "claude-sonnet-4-6");
   assert.equal(outcome.manifest.timeoutSec, 120);
-  assert.equal(outcome.manifest.assignment?.name, "env-two-work");
+  assert.equal(outcome.manifest.assignment?.name, "two-work");
   assert.equal(outcome.manifest.cwd, join(dir, "env-repo"));
   assert.equal(outcome.manifest.message, "ship-it");
   assert.equal(outcome.manifest.maxAttempts, 5);

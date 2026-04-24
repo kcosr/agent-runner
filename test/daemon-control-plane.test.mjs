@@ -4653,7 +4653,7 @@ command: ssh
       (err) =>
         err instanceof DaemonRpcError &&
         err.code === -32003 &&
-        /must match launcher file id/.test(err.message),
+        /must match canonical id/.test(err.message),
     );
 
     const invalidLauncherHttp = await httpJson(
@@ -4662,7 +4662,7 @@ command: ssh
     );
     assert.equal(invalidLauncherHttp.status, 422);
     assert.equal(invalidLauncherHttp.body.error.code, "INVALID_COMMAND");
-    assert.match(invalidLauncherHttp.body.error.message, /must match launcher file id/);
+    assert.match(invalidLauncherHttp.body.error.message, /must match canonical id/);
   } finally {
     await client.close();
     await daemon.stop();
