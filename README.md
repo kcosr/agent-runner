@@ -207,7 +207,9 @@ task-runner serve
 same daemon and is not a standalone app. The runs board supports
 exact-match filters for repo, agent, backend, and lineage family, and
 run cards expose a `Family` chip that scopes the board to one run
-family.
+family. The dashboard also includes a dedicated full-screen `New Run`
+flow at `/runs/new` that resolves the static run input surface from the
+daemon before enabling `Initialize` and `Start now`.
 
 ### Hooked assignment
 

@@ -59,6 +59,12 @@
   the static fresh-run input surface for core consumers, including
   authored run-setting metadata and CLI-capable assignment inputs.
   ([#89](https://github.com/kcosr/task-runner/pull/89))
+- Added `GET /api/run-input-surface` so daemon/browser clients can fetch
+  the static fresh-run resolver output over HTTP before initializing or
+  starting a run.
+- Added a dedicated `/runs/new` web dashboard route with resolver-driven
+  Context, Task, and Execution sections plus gated `Initialize` and
+  `Start now` actions.
 - Added daemon HTTP definition routes for agents, assignments, and
   launchers (`GET /api/agents|assignments|launchers` plus detail
   variants with optional `cwd`), and browser API client support for
