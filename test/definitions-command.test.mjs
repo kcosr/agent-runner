@@ -17,7 +17,7 @@ import { withRuntimeRoots } from "./helpers/runtime-paths.mjs";
 
 const AGENT_BODY = `---
 schemaVersion: 1
-name: test-agent
+name: __NAME__
 backend: claude
 model: claude-sonnet-4-6
 ---
@@ -26,7 +26,7 @@ You are a test agent.
 
 const ASSIGNMENT_BODY = `---
 schemaVersion: 1
-name: test-work
+name: __NAME__
 tasks:
   - id: t1
     title: Do the thing
@@ -42,13 +42,13 @@ Work instructions.
 function writeAgent(baseDir, name, body) {
   const dir = join(baseDir, "agents", name);
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "agent.md"), body);
+  writeFileSync(join(dir, "agent.md"), body.replace("__NAME__", name));
 }
 
 function writeAssignment(baseDir, name, body) {
   const dir = join(baseDir, "assignments", name);
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "assignment.md"), body);
+  writeFileSync(join(dir, "assignment.md"), body.replace("__NAME__", name));
 }
 
 function writeLauncher(baseDir, name, body, ext = ".yaml") {
@@ -123,9 +123,9 @@ test("show-style agent and assignment loads resolve bare names from the config r
     const agent = loadAgentConfig("demo", rootDir);
     const assignment = loadAssignmentConfig("demo", rootDir);
 
-    assert.equal(agent.config.name, "test-agent");
+    assert.equal(agent.config.name, "demo");
     assert.ok(agent.instructions.includes("test agent"));
-    assert.equal(assignment.config.name, "test-work");
+    assert.equal(assignment.config.name, "demo");
     assert.equal(assignment.config.tasks[0].id, "t1");
     assert.ok(assignment.instructions.includes("Work instructions."));
   }));
@@ -151,6 +151,48 @@ args: [FOO=bar]
     assert.equal(loadAgentConfig(agentPath).sourcePath, agentPath);
     assert.equal(loadAssignmentConfig(assignmentPath).sourcePath, assignmentPath);
     assert.equal(loadLauncherConfig(launcherPath).sourcePath, launcherPath);
+  }));
+
+test("show-style bare-name loads accept slashful canonical ids for nested agents and assignments", () =>
+  withRuntimeRoots("task-runner-def-test-", ({ rootDir, configDir }) => {
+    writeAgent(
+      configDir,
+      "reviewers/code",
+      `---
+schemaVersion: 1
+name: reviewers/code
+backend: claude
+---
+Nested reviewer.
+`,
+    );
+    writeAssignment(
+      configDir,
+      "review/reuse",
+      `---
+schemaVersion: 1
+name: review/reuse
+tasks:
+  - id: nested-task
+    title: Nested task
+---
+Nested assignment.
+`,
+    );
+
+    const agent = loadAgentConfig("reviewers/code", rootDir);
+    const assignment = loadAssignmentConfig("review/reuse", rootDir);
+
+    assert.equal(agent.config.name, "reviewers/code");
+    assert.equal(assignment.config.name, "review/reuse");
+    assert.deepEqual(
+      listAgents().map((entry) => entry.name),
+      ["reviewers/code"],
+    );
+    assert.deepEqual(
+      listAssignments().map((entry) => entry.name),
+      ["review/reuse"],
+    );
   }));
 
 test("assignment var schema accepts `sources` and rejects legacy or malformed source definitions", () =>

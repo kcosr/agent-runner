@@ -8,6 +8,9 @@ export const UNKNOWN_REPO_KEY = "unknown";
 
 type DefinitionKind = "agent" | "assignment";
 const HOOK_FILENAME_CANDIDATES = ["hook.ts", "hook.mts", "hook.js", "hook.mjs"] as const;
+export type StringRef =
+  | { kind: "path"; ref: string; path: string }
+  | { kind: "name"; ref: string; name: string };
 
 function nonEmpty(value: string | undefined): string | undefined {
   return value && value.length > 0 ? value : undefined;
@@ -30,7 +33,7 @@ function resolvedHome(env: NodeJS.ProcessEnv): string {
 }
 
 export function isPathArg(arg: string): boolean {
-  return arg.includes("/") || arg.startsWith("./");
+  return isAbsolute(arg) || arg.startsWith("./") || arg.startsWith("../");
 }
 
 export function resolveTaskRunnerConfigDir(env: NodeJS.ProcessEnv = process.env): string {
@@ -69,6 +72,10 @@ export function resolveDefinitionRoot(
 
 export function resolveHooksRoot(env: NodeJS.ProcessEnv = process.env): string {
   return join(resolveTaskRunnerConfigDir(env), "hooks");
+}
+
+export function resolveTasksRoot(env: NodeJS.ProcessEnv = process.env): string {
+  return join(resolveTaskRunnerConfigDir(env), "tasks");
 }
 
 export function resolveLaunchersRoot(env: NodeJS.ProcessEnv = process.env): string {
@@ -144,4 +151,20 @@ export function resolveUnknownRunsDir(env: NodeJS.ProcessEnv = process.env): str
 
 export function resolveInputPath(arg: string, cwd: string): string {
   return isAbsolute(arg) ? arg : resolve(cwd, arg);
+}
+
+export function resolveStringRef(arg: string, cwd: string): StringRef {
+  if (isPathArg(arg)) {
+    return {
+      kind: "path",
+      ref: arg,
+      path: resolveInputPath(arg, cwd),
+    };
+  }
+
+  return {
+    kind: "name",
+    ref: arg,
+    name: arg,
+  };
 }

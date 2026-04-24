@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve as resolvePath } from "node:path";
+import { dirname, join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
 import {
   AgentConfigError,
@@ -11,7 +11,9 @@ import {
   DefinitionListError,
   LauncherConfigError,
   LauncherNotFoundError,
+  listAgentDefinitions,
   listAgents,
+  listAssignmentDefinitions,
   listAssignments,
   listLaunchers,
   loadAgentConfig,
@@ -25,7 +27,7 @@ import { withEnv, withRuntimeRoots } from "./helpers/runtime-paths.mjs";
 
 const MINIMAL_AGENT = `---
 schemaVersion: 1
-name: demo
+name: __NAME__
 backend: claude
 ---
 You are an assistant.
@@ -33,7 +35,7 @@ You are an assistant.
 
 const MINIMAL_ASSIGNMENT = `---
 schemaVersion: 1
-name: demo-work
+name: __NAME__
 tasks:
   - id: t1
     title: Do the thing
@@ -50,7 +52,7 @@ function writeAgent(baseDir, name, body) {
   const agentDir = join(baseDir, "agents", name);
   mkdirSync(agentDir, { recursive: true });
   const path = join(agentDir, "agent.md");
-  writeFileSync(path, body);
+  writeFileSync(path, body.replace("__NAME__", name));
   return path;
 }
 
@@ -58,6 +60,13 @@ function writeAssignment(baseDir, name, body) {
   const dir = join(baseDir, "assignments", name);
   mkdirSync(dir, { recursive: true });
   const path = join(dir, "assignment.md");
+  writeFileSync(path, body.replace("__NAME__", name));
+  return path;
+}
+
+function writeTask(baseDir, name, body) {
+  const path = join(baseDir, "tasks", `${name}.md`);
+  mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, body);
   return path;
 }
@@ -879,6 +888,147 @@ test("loadAssignmentConfig parses a minimal assignment.md from TASK_RUNNER_CONFI
     assert.ok(loaded.instructions.includes("{{assignment_path}}"));
   }));
 
+test("loadAssignmentConfig resolves named and explicit task refs into plain task objects", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    writeTask(
+      configDir,
+      "orient",
+      `---
+schemaVersion: 1
+title: Orient repo
+---
+Read README.md.
+`,
+    );
+    writeTask(
+      configDir,
+      "review/reuse",
+      `---
+schemaVersion: 1
+id: review/reuse
+title: Reuse pass
+---
+Check reusable pieces.
+`,
+    );
+    const assignmentDir = join(configDir, "assignments", "mixed-refs");
+    mkdirSync(join(assignmentDir, "local"), { recursive: true });
+    const localTaskPath = join(assignmentDir, "local", "checklist.md");
+    writeFileSync(
+      localTaskPath,
+      `---
+schemaVersion: 1
+title: Relative checklist
+---
+Review local checklist.
+`,
+    );
+    const absoluteTaskPath = join(rootDir, "absolute-task.md");
+    writeFileSync(
+      absoluteTaskPath,
+      `---
+schemaVersion: 1
+title: Absolute checklist
+---
+Review absolute checklist.
+`,
+    );
+    writeAssignment(
+      configDir,
+      "mixed-refs",
+      `---
+schemaVersion: 1
+name: mixed-refs
+tasks:
+  - orient
+  - review/reuse
+  - ./local/checklist.md
+  - ${absoluteTaskPath}
+  - id: inline-task
+    title: Inline task
+    body: Inline body
+---
+Assignment body.
+`,
+    );
+
+    const loaded = loadAssignmentConfig("mixed-refs", rootDir);
+    assert.deepEqual(
+      loaded.config.tasks.map((task) => ({ id: task.id, title: task.title, body: task.body })),
+      [
+        { id: "orient", title: "Orient repo", body: "Read README.md." },
+        { id: "review/reuse", title: "Reuse pass", body: "Check reusable pieces." },
+        { id: "checklist", title: "Relative checklist", body: "Review local checklist." },
+        { id: "absolute-task", title: "Absolute checklist", body: "Review absolute checklist." },
+        { id: "inline-task", title: "Inline task", body: "Inline body" },
+      ],
+    );
+  }));
+
+test("loadAssignmentConfig hard-fails when a referenced task id mismatches its canonical file id", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    writeTask(
+      configDir,
+      "review/reuse",
+      `---
+schemaVersion: 1
+id: review/wrong
+title: Reuse pass
+---
+Check reusable pieces.
+`,
+    );
+    writeAssignment(
+      configDir,
+      "task-mismatch",
+      `---
+schemaVersion: 1
+name: task-mismatch
+tasks:
+  - review/reuse
+---
+Assignment body.
+`,
+    );
+
+    assert.throws(
+      () => loadAssignmentConfig("task-mismatch", rootDir),
+      (error) => {
+        assert.ok(error instanceof AssignmentConfigError);
+        assert.match(error.message, /tasks\[0\]/);
+        assert.match(error.message, /review\/reuse/);
+        assert.match(error.message, /must match canonical id "review\/reuse"/);
+        return true;
+      },
+    );
+  }));
+
+test("loadAssignmentConfig hard-fails when a referenced named task is missing", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    writeAssignment(
+      configDir,
+      "missing-task",
+      `---
+schemaVersion: 1
+name: missing-task
+tasks:
+  - does/not/exist
+---
+Assignment body.
+`,
+    );
+
+    assert.throws(
+      () => loadAssignmentConfig("missing-task", rootDir),
+      (error) => {
+        assert.ok(error instanceof AssignmentConfigError);
+        assert.match(error.message, /does\/not\/exist/);
+        assert.match(error.message, /task reference/);
+        return true;
+      },
+    );
+  }));
+
 test("built-in plan-feature assignment uses cwd instead of repo_path for canonical repo context", () => {
   const loaded = loadAssignmentConfig(BUILTIN_PLAN_FEATURE_PATH);
   assert.equal(loaded.config.vars.repo_path, undefined);
@@ -1108,6 +1258,74 @@ test("listAssignments returns empty array when no assignments exist", () =>
   withRuntimeRoots("task-runner-loader-", () => {
     const entries = listAssignments();
     assert.deepEqual(entries, []);
+  }));
+
+test("listAgentDefinitions and listAssignmentDefinitions warn-skip identity mismatches and bad task refs", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    writeAgent(
+      configDir,
+      "reviewers/code",
+      `---
+schemaVersion: 1
+name: wrong-agent-name
+backend: claude
+---
+body
+`,
+    );
+    writeTask(
+      configDir,
+      "review/reuse",
+      `---
+schemaVersion: 1
+id: review/wrong
+title: Reuse review
+---
+Task body.
+`,
+    );
+    writeAssignment(
+      configDir,
+      "review/reuse",
+      `---
+schemaVersion: 1
+name: review/reuse
+tasks:
+  - review/reuse
+---
+Assignment body.
+`,
+    );
+
+    const agentResult = listAgentDefinitions();
+    const assignmentResult = listAssignmentDefinitions();
+
+    assert.deepEqual(agentResult.entries, []);
+    assert.equal(agentResult.warnings.length, 1);
+    assert.match(agentResult.warnings[0], /wrong-agent-name/);
+    assert.match(agentResult.warnings[0], /reviewers\/code/);
+
+    assert.deepEqual(assignmentResult.entries, []);
+    assert.equal(assignmentResult.warnings.length, 1);
+    assert.match(assignmentResult.warnings[0], /review\/reuse/);
+    assert.match(assignmentResult.warnings[0], /Invalid task config/);
+
+    assert.throws(
+      () => loadAgentConfig("reviewers/code", rootDir),
+      (error) => {
+        assert.ok(error instanceof AgentConfigError);
+        assert.match(error.message, /must match canonical id "reviewers\/code"/);
+        return true;
+      },
+    );
+    assert.throws(
+      () => loadAssignmentConfig("review/reuse", rootDir),
+      (error) => {
+        assert.ok(error instanceof AssignmentConfigError);
+        assert.match(error.message, /Invalid task config/);
+        return true;
+      },
+    );
   }));
 
 test("listAgents skips directories without agent.md", () =>
@@ -1349,7 +1567,7 @@ command:
     assert.equal(result.warnings.length, 3);
     assert.match(result.warnings[0], /Invalid launcher config/);
     assert.match(result.warnings.join("\n"), /built-in direct launcher/);
-    assert.match(result.warnings.join("\n"), /must match launcher file id/);
+    assert.match(result.warnings.join("\n"), /must match canonical id/);
   }));
 
 test("loadLauncherConfig supports direct, named files, and targeted path loads", () =>
@@ -1403,7 +1621,7 @@ command: ssh
       () => loadLauncherConfig(mismatchPath, rootDir),
       (error) => {
         assert.ok(error instanceof LauncherConfigError);
-        assert.match(error.message, /must match launcher file id/);
+        assert.match(error.message, /must match canonical id/);
         return true;
       },
     );

@@ -15,6 +15,8 @@ ${TASK_RUNNER_CONFIG_DIR}/
 ├── agents/
 │   └── <agent-name>/
 │       └── agent.md
+├── tasks/
+│   └── <task-id>.md
 ├── launchers/
 │   └── <launcher-name>.yaml
 ├── hooks/
@@ -192,12 +194,59 @@ lockedFields: []                    # optional lockable fields
 
 Task definitions must match:
 
-- `id`: `[A-Za-z0-9._:-]+`, max 128 chars, unique within the assignment
+- `id`: `[A-Za-z0-9._:/-]+`, max 128 chars, unique within the assignment
 - `title`: 1–200 chars, single line
 - `body`: optional free-form markdown
 - `hooks`: optional task-local `taskTransition` hook entries using the
   same `builtin` / `name` / `path`, `when`, and `with` authoring shape
   as root `hooks.taskTransition[]`
+
+Assignments may also mix reusable task refs with inline task objects:
+
+- bare strings such as `orient` or `review/reuse` resolve as named task
+  refs under `${TASK_RUNNER_CONFIG_DIR}/tasks`
+- only absolute paths and strings beginning with `./` or `../` resolve
+  as explicit task file paths
+- inline objects stay local to the assignment
+
+Named task definitions are markdown files under
+`${TASK_RUNNER_CONFIG_DIR}/tasks/<task-id>.md`:
+
+```md
+---
+schemaVersion: 1
+id: review/reuse
+title: Reuse review
+hooks: []
+---
+Read the shared review checklist.
+```
+
+- the canonical task id is the slash-relative file key under `tasks/`
+  without the `.md` suffix
+- frontmatter `id`, when present, must match that canonical id
+- the markdown body becomes the resolved task `body`
+- `loadAssignmentConfig()` resolves named and path refs into the normal
+  plain task objects before runtime; later `{{var}}` interpolation still
+  happens during run construction
+- named tasks are loader-only in this pass; there is no top-level
+  `task-runner list tasks` or `show task` definition surface
+
+Canonical identity comes from the on-disk key for every authored
+definition:
+
+- agents: slash-relative directory under `agents/`
+- assignments: slash-relative directory under `assignments/`
+- tasks: slash-relative file under `tasks/`
+- launchers: slash-relative file under `launchers/`
+
+Discovery warns and skips definitions whose authored internal id does
+not match that canonical key. Direct named/path loads of the skipped
+definition still fail clearly.
+
+Launcher follow-up remains aligned with the same explicit reference
+model: launcher strings should keep meaning named launchers unless they
+are absolute paths or begin with `./` or `../`.
 
 ### Body
 
@@ -437,6 +486,10 @@ task-runner show assignment <name|path>
 
 These surfaces render the parsed frontmatter, interpolation hooks, and task
 list for human review.
+
+Reusable named task definitions are intentionally not a first-class
+`list/show` CLI kind yet. They are inspected through assignment loading
+and rendering only.
 
 ## Authoring hook modules
 

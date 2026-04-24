@@ -4,6 +4,11 @@
 
 ### Breaking Changes
 
+- Assignment task string refs now treat only absolute paths and strings
+  beginning with `./` or `../` as file paths. Bare slashful strings such
+  as `review/reuse` now resolve as named task ids under `tasks/`, and
+  authored task ids may now include `/` for nested canonical ids.
+  ([#91](https://github.com/kcosr/task-runner/pull/91))
 - Hot-cut task-transition hook targeting: use task-local
   `tasks[].hooks[]` or native `hooks.taskTransition[].when.taskId|taskIds`
   to select guarded tasks, and stop authoring
@@ -55,6 +60,11 @@
 
 ### Added
 
+- Added reusable named task definitions under
+  `${TASK_RUNNER_CONFIG_DIR}/tasks/<task-id>.md`, plus mixed assignment
+  `tasks:` authoring that can combine named refs, explicit path refs,
+  and inline task objects while keeping task resolution loader-only.
+  ([#91](https://github.com/kcosr/task-runner/pull/91))
 - Added `@task-runner/core/core/run/static-input-surface.js` to resolve
   the static fresh-run input surface for core consumers, including
   authored run-setting metadata and CLI-capable assignment inputs.

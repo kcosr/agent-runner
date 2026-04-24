@@ -11,8 +11,8 @@ import { setPiSessionName } from "../../backends/pi.js";
 import {
   type DefinitionEntry,
   type DefinitionKind,
-  listAgents,
-  listAssignments,
+  listAgentDefinitions,
+  listAssignmentDefinitions,
   listLaunchers,
   loadAgentConfig,
   loadAssignmentConfig,
@@ -712,10 +712,19 @@ export function listDefinitions(kind: DefinitionKind): DefinitionListResult {
       warnings: result.warnings,
     };
   }
+  if (kind === "agent") {
+    const result = listAgentDefinitions();
+    return {
+      kind,
+      entries: result.entries,
+      warnings: result.warnings,
+    };
+  }
+  const result = listAssignmentDefinitions();
   return {
     kind,
-    entries: kind === "agent" ? listAgents() : listAssignments(),
-    warnings: [],
+    entries: result.entries,
+    warnings: result.warnings,
   };
 }
 

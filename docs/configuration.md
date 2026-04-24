@@ -21,6 +21,7 @@ Contains named agent and assignment definitions:
 ```text
 ${TASK_RUNNER_CONFIG_DIR}/
 ├── agents/<agent-name>/agent.md
+├── tasks/<task-id>.md
 ├── launchers/<launcher-name>.yaml
 ├── hooks/<hook-name>/hook.(ts|mts|js|mjs)
 └── assignments/<assignment-name>/
@@ -29,6 +30,11 @@ ${TASK_RUNNER_CONFIG_DIR}/
 ```
 
 See [agents-and-assignments.md](agents-and-assignments.md).
+
+Assignment `tasks:` entries may mix inline objects, named task refs such
+as `review/reuse`, and explicit path refs. Bare strings resolve only
+from `${TASK_RUNNER_CONFIG_DIR}/tasks`; strings are treated as paths
+only when they are absolute or begin with `./` or `../`.
 
 ### State directory
 

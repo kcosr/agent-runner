@@ -160,19 +160,31 @@ const baseHookEntrySchema = <TWhen extends z.ZodTypeAny>(whenSchema: TWhen) =>
 const attemptHookEntrySchema = baseHookEntrySchema(attemptHookWhenSchema);
 const taskTransitionHookEntrySchema = baseHookEntrySchema(taskTransitionHookWhenSchema);
 
-export const taskDefSchema = z.object({
-  id: z
-    .string()
-    .regex(/^[A-Za-z0-9._:-]+$/, "task id must match [A-Za-z0-9._:-]+")
-    .max(128),
+const taskIdSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9._:/-]+$/, "task id must match [A-Za-z0-9._:/-]+")
+  .max(128);
+
+const taskMetadataSchema = z.object({
   title: z
     .string()
     .min(1)
     .max(200)
     .refine((value) => !/[\r\n]/.test(value), "task title must be a single line"),
-  body: z.string().optional().default(""),
   hooks: z.array(taskTransitionHookEntrySchema).default([]),
 });
+
+export const taskDefSchema = taskMetadataSchema.extend({
+  id: taskIdSchema,
+  body: z.string().optional().default(""),
+});
+
+export const taskDefinitionConfigSchema = taskMetadataSchema.extend({
+  schemaVersion: z.literal(1),
+  id: taskIdSchema.optional(),
+});
+
+export const authoredAssignmentTaskEntrySchema = z.union([z.string().trim().min(1), taskDefSchema]);
 
 export const assignmentHooksSchema = z
   .object({
@@ -281,28 +293,48 @@ export type LauncherInlineConfig = z.infer<typeof launcherInlineConfigSchema>;
 // No backend/model/effort/etc. Those live on agents.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const assignmentConfigSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    name: z.string().min(1),
-    cwd: z.string().trim().min(1).optional(),
-    message: z.string().optional(),
-    maxRetries: z.number().int().min(0).max(20).default(DEFAULT_MAX_RETRIES),
-    // Documentation surface for the human / script invoking
-    // task-runner, NOT part of the prompt sent to the backend.
-    // Printed to stderr on fresh `run` and `init` (never on
-    // --resume-run). Interpolated against runtime vars and the
-    // runner-injected vars ({{run_id}}, {{assignment_path}},
-    // {{assignment_name}}, {{config_dir}}, {{state_dir}},
-    // {{task_runner_cmd}}, etc.).
-    // Frozen into `manifest.callerInstructions` at first write so
-    // `status --output-format json --field callerInstructions` can
-    // always re-fetch it.
-    callerInstructions: z.string().optional(),
-    vars: z.record(z.string(), varDefSchema).default({}),
+const assignmentConfigBaseSchema = z.object({
+  schemaVersion: z.literal(1),
+  name: z.string().min(1),
+  cwd: z.string().trim().min(1).optional(),
+  message: z.string().optional(),
+  maxRetries: z.number().int().min(0).max(20).default(DEFAULT_MAX_RETRIES),
+  // Documentation surface for the human / script invoking
+  // task-runner, NOT part of the prompt sent to the backend.
+  // Printed to stderr on fresh `run` and `init` (never on
+  // --resume-run). Interpolated against runtime vars and the
+  // runner-injected vars ({{run_id}}, {{assignment_path}},
+  // {{assignment_name}}, {{config_dir}}, {{state_dir}},
+  // {{task_runner_cmd}}, etc.).
+  // Frozen into `manifest.callerInstructions` at first write so
+  // `status --output-format json --field callerInstructions` can
+  // always re-fetch it.
+  callerInstructions: z.string().optional(),
+  vars: z.record(z.string(), varDefSchema).default({}),
+  hooks: assignmentHooksSchema,
+  lockedFields: z.array(z.enum(LOCKABLE_FIELDS)).default([]),
+});
+
+export const authoredAssignmentConfigSchema = assignmentConfigBaseSchema
+  .extend({
+    tasks: z.array(authoredAssignmentTaskEntrySchema).max(100).default([]),
+  })
+  .refine(
+    (c) => {
+      const ids = new Set<string>();
+      for (const task of c.tasks) {
+        if (typeof task === "string") continue;
+        if (ids.has(task.id)) return false;
+        ids.add(task.id);
+      }
+      return true;
+    },
+    { message: "task ids must be unique", path: ["tasks"] },
+  );
+
+export const assignmentConfigSchema = assignmentConfigBaseSchema
+  .extend({
     tasks: z.array(taskDefSchema).max(100).default([]),
-    hooks: assignmentHooksSchema,
-    lockedFields: z.array(z.enum(LOCKABLE_FIELDS)).default([]),
   })
   .refine(
     (c) => {
@@ -317,10 +349,13 @@ export const assignmentConfigSchema = z
   );
 
 export type AssignmentConfig = z.infer<typeof assignmentConfigSchema>;
+export type AuthoredAssignmentConfig = z.infer<typeof authoredAssignmentConfigSchema>;
 export type AssignmentHookEntry = z.infer<typeof hookEntrySelectorSchema> & {
   when?: unknown | null;
 };
 export type AssignmentHooks = z.infer<typeof assignmentHooksSchema>;
+export type AuthoredAssignmentTaskEntry = z.infer<typeof authoredAssignmentTaskEntrySchema>;
 export type TaskDef = z.infer<typeof taskDefSchema>;
+export type TaskDefinitionConfig = z.infer<typeof taskDefinitionConfigSchema>;
 export type TaskTransitionHookEntry = z.infer<typeof taskTransitionHookEntrySchema>;
 export type VarDef = z.infer<typeof varDefSchema>;

@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { VarResolutionError, runAgent } from "../packages/core/dist/core/run/run-loop.js";
@@ -67,6 +67,12 @@ function writeAssignment(baseDir, name, body) {
   const dir = join(baseDir, "assignments", name);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "assignment.md"), body);
+}
+
+function writeTask(baseDir, name, body) {
+  const path = join(baseDir, "tasks", `${name}.md`);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, body);
 }
 
 function ackBackend(onAssignmentPath) {
@@ -183,4 +189,87 @@ test("unknown CLI vars are rejected when the assignment declares a schema", asyn
       return true;
     },
   );
+});
+
+test("referenced named task bodies still interpolate {{var}} values during run construction", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "interp", INTERP_AGENT);
+  writeTask(
+    dir,
+    "review/reuse",
+    `---
+schemaVersion: 1
+title: Review {{repo_path}}
+---
+Use scope {{scope}} inside {{repo_path}}.
+`,
+  );
+  writeAssignment(
+    dir,
+    "named-task-work",
+    `---
+schemaVersion: 1
+name: named-task-work
+maxRetries: 1
+vars:
+  repo_path:
+    type: string
+    required: true
+    sources: [cli]
+  scope:
+    type: string
+    required: false
+    sources: [cli]
+    default: full
+tasks:
+  - review/reuse
+---
+Work on {{repo_path}}.
+`,
+  );
+
+  const outcome = await withSharedRuntimeEnv(dir, async () => {
+    let assignmentPath = null;
+    const loaded = loadAgentConfig("interp", dir);
+    const loadedAssignment = loadAssignmentConfig("named-task-work", dir);
+    const backend = {
+      id: "mock",
+      async invoke(ctx) {
+        const manifest = readManifestForPrompt(ctx.prompt);
+        assignmentPath = manifest.assignmentPath;
+        updateTasksForPrompt(ctx.prompt, {
+          "review/reuse": { status: "completed" },
+        });
+        return {
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+          aborted: false,
+          sessionId: "sess-named-task",
+          transcript: "done",
+          rawStdout: "",
+          rawStderr: "",
+        };
+      },
+    };
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      return await runAgent({
+        loaded,
+        loadedAssignment,
+        cliVars: { repo_path: "/tmp/named-repo", scope: "staged" },
+        backend,
+        stderr: () => {},
+        stdout: () => {},
+      }).then((result) => ({ ...result, assignmentPath }));
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+
+  const task = outcome.manifest.finalTasks["review/reuse"];
+  assert.equal(task.title, "Review /tmp/named-repo");
+  assert.equal(task.body, "Use scope staged inside /tmp/named-repo.");
+  assert.doesNotMatch(task.body, /\{\{/);
 });

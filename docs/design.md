@@ -78,6 +78,25 @@ Assignments are markdown definitions in the config tree or direct paths
 supplied by the caller. They are inputs to run creation, not a live
 workspace surface.
 
+Assignment `tasks:` authoring is loader-centric. The authored list may
+mix inline task objects, named task refs under
+`${TASK_RUNNER_CONFIG_DIR}/tasks/<task-id>.md`, and explicit task file
+paths. `loadAssignmentConfig()` resolves those refs into the existing
+plain task shape before run creation; runtime still performs later
+`{{var}}` interpolation against the resolved tasks during brief
+construction.
+
+Canonical definition identity comes from the on-disk key:
+
+- agents: slash-relative directory under `agents/`
+- assignments: slash-relative directory under `assignments/`
+- tasks: slash-relative file under `tasks/`
+- launchers: slash-relative file under `launchers/`
+
+Discovery warns and skips definitions whose authored internal id does
+not match that canonical key, while direct named/path loads of the same
+definition still fail clearly.
+
 ### Run
 
 A run is a frozen execution record in:
@@ -253,6 +272,8 @@ blocked with the rest completed or blocked → `blocked`; otherwise
 1. resolves agent and assignment definitions
    (parse frontmatter, apply config-time `${...}` env interpolation on
    allowed scalar surfaces, then schema-validate)
+   Named and explicit-path task refs are resolved here, before runtime
+   interpolation.
 2. resolves cwd: `--cwd` → assignment `cwd` → caller cwd
 3. resolves vars in authored `sources` order (`cli`, `env`, `parent`)
    and applies `default` / `required` only after every source fails
