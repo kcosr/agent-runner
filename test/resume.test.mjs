@@ -925,6 +925,57 @@ test("resume: runAgent rejects runtime vars on resume", async () => {
   });
 });
 
+test("resume: runAgent rejects web-authored runtime vars on resume", async () => {
+  const dir = tempDir();
+  writeAgentAndAssignment(dir);
+
+  const first = await runIn(dir, {
+    backend: mockBackend(async (ctx) => {
+      completeAllTasksFromPrompt(ctx.prompt);
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "sess-web-vars-test",
+        transcript: "done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    }),
+  });
+
+  await withSharedRuntimeEnv(dir, async () => {
+    const target = resolveResumeTarget(first.runId, dir);
+    const loaded = loadAgentConfig("three", dir);
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      await assert.rejects(
+        async () =>
+          runAgent({
+            loaded,
+            cliVars: {},
+            webVars: { forced: "value" },
+            backend: mockBackend(async () => {
+              throw new Error("backend should not be invoked");
+            }),
+            overrides: { message: "continue" },
+            resume: target,
+            stderr: () => {},
+            stdout: () => {},
+          }),
+        (err) => {
+          assert.ok(err instanceof ResumeError);
+          assert.match(err.message, /runtime vars cannot be combined with --resume-run/);
+          return true;
+        },
+      );
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+});
+
 test("resume: text summary includes the resume-run hint with the run id", async () => {
   const dir = tempDir();
   writeAgentAndAssignment(dir);

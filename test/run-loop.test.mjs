@@ -227,7 +227,11 @@ async function runWithMock(baseDir, mockInvoke, overrides = {}, options = {}) {
   });
 }
 
-async function initWithOptions(baseDir, assignmentName, { cliVars = {}, parentRunId = null } = {}) {
+async function initWithOptions(
+  baseDir,
+  assignmentName,
+  { cliVars = {}, webVars = {}, parentRunId = null } = {},
+) {
   return withSharedRuntimeEnv(baseDir, async () => {
     const loaded = loadAgentConfig("three", baseDir);
     const loadedAssignment = loadAssignmentConfig(assignmentName, baseDir);
@@ -238,6 +242,7 @@ async function initWithOptions(baseDir, assignmentName, { cliVars = {}, parentRu
         loaded,
         loadedAssignment,
         cliVars,
+        webVars,
         parentRunId,
         backend: {
           id: "claude",
@@ -1365,6 +1370,58 @@ Child.
 
   const frozenChild = JSON.parse(readFileSync(join(child.workspaceDir, "run.json"), "utf8"));
   assert.equal(frozenChild.runtimeVars.lineage_value, "middle-value");
+});
+
+test("web vars resolve in authored source order and reject unknown web keys", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  writeAssignment(
+    dir,
+    "web-vars",
+    `---
+schemaVersion: 1
+name: web-vars
+vars:
+  browser_value:
+    type: string
+    required: true
+    sources: [web]
+  precedence_value:
+    type: string
+    required: true
+    sources: [cli, web]
+tasks:
+  - id: t1
+    title: Resolve web vars
+---
+Resolve vars.
+`,
+  );
+
+  const initialized = await initWithOptions(dir, "web-vars", {
+    cliVars: { precedence_value: "cli-wins" },
+    webVars: {
+      browser_value: "from-web",
+      precedence_value: "web-loses",
+    },
+  });
+
+  assert.equal(initialized.manifest.runtimeVars.browser_value, "from-web");
+  assert.equal(initialized.manifest.runtimeVarSources.browser_value.source, "web");
+  assert.equal(initialized.manifest.runtimeVars.precedence_value, "cli-wins");
+  assert.equal(initialized.manifest.runtimeVarSources.precedence_value.source, "cli");
+
+  await assert.rejects(
+    () =>
+      initWithOptions(dir, "web-vars", {
+        webVars: { undeclared_key: "value" },
+      }),
+    (error) => {
+      assert.ok(error instanceof VarResolutionError);
+      assert.match(error.message, /unknown web var key\(s\): undeclared_key/);
+      return true;
+    },
+  );
 });
 
 test("lineage vars support inherited cwd interpolation from parent worktree_path", async () => {
