@@ -179,6 +179,9 @@
 
 ### Changed
 
+- `plan-feature` now accepts optional `worktree_base_ref` so generated
+  implementation worktrees can be based on refs other than `origin/main`,
+  enabling pre-merge end-to-end testing from feature branches.
 - Future `code-review` runs now use shared review-dimension task ids under
   `review/...` while keeping `plan_coverage` as the implementation-run
   plan check. Existing run manifests keep their frozen old task ids.
@@ -196,9 +199,8 @@
   messages, add `All` / `Hooks` / `Tasks` / `Run` filters, and show an
   explicit empty-filter state. ([#87](https://github.com/kcosr/task-runner/pull/87))
 - Built-in implementer assignments now start from `repo_root` and use a
-  first-attempt `git-worktree` hook plus explicit `git fetch origin
-  --prune && git merge --ff-only origin/main` sync instead of creating
-  worktrees during `prepare`.
+  first-attempt `git-worktree` hook plus explicit base-ref sync instead
+  of creating worktrees during `prepare`.
   ([#86](https://github.com/kcosr/task-runner/pull/86))
 - Assignment vars now default omitted `sources` to both `cli` and
   `web`, and authored source order can now include the explicit `web`

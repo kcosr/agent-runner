@@ -255,8 +255,8 @@ runtime's `jiti` loader, so hook authors do not need to precompile them.
 
 When a run launches a descendant `task-runner` process, the child run
 automatically freezes `parentRunId`. Author descendant assignments with
-`sources: [parent]` for values like `worktree_path` instead of manually
-repeating `--var` flags.
+`sources: [parent]` for values like `worktree_path` or a validated
+`worktree_base_ref` instead of manually repeating `--var` flags.
 
 Task-completion guards that depend on spawned child runs can stay fully
 declarative. For example, this blocks `peer_review` from being marked

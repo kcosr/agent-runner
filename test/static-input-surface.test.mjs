@@ -95,9 +95,13 @@ test("static input surface: built-in planner + plan-feature surfaces the documen
 
   assert.deepEqual(
     surface.assignmentInputs.map((field) => field.key),
-    ["worktree_slug"],
+    ["worktree_slug", "worktree_base_ref"],
   );
+  const baseRef = fieldByKey(surface.assignmentInputs, "worktree_base_ref");
   assert.equal(fieldByKey(surface.assignmentInputs, "worktree_slug").required, true);
+  assert.notEqual(baseRef.required, true);
+  assert.equal(baseRef.source, "var_default");
+  assert.equal(baseRef.value, "origin/main");
   assert.ok(!surface.assignmentInputs.some((field) => field.key === "worktree_path"));
   assert.ok(!surface.assignmentInputs.some((field) => field.key === "repo_root"));
 });

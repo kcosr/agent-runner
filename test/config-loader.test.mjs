@@ -1191,10 +1191,18 @@ test("built-in plan-feature assignment uses cwd instead of repo_path for canonic
   const loaded = loadAssignmentConfig(BUILTIN_PLAN_FEATURE_PATH);
   assert.equal(loaded.config.vars.repo_path, undefined);
   assert.deepEqual(loaded.config.vars.worktree_slug?.sources, ["cli", "web"]);
+  assert.deepEqual(loaded.config.vars.worktree_base_ref?.sources, ["cli", "web"]);
+  assert.equal(loaded.config.vars.worktree_base_ref?.required, false);
+  assert.equal(loaded.config.vars.worktree_base_ref?.default, "origin/main");
   assert.equal(loaded.config.hooks.prepare[0]?.path, "hooks/derive-worktree-vars.ts");
   assert.match(loaded.instructions, /`{{cwd}}`/);
   assert.ok((loaded.config.callerInstructions ?? "").includes("--assignment plan-feature"));
   assert.match(loaded.config.callerInstructions ?? "", /--var worktree_slug=<git-safe-slug>/);
+  assert.match(
+    loaded.config.callerInstructions ?? "",
+    /--var worktree_base_ref=origin\/<feature-branch>/,
+  );
+  assert.match(loaded.config.callerInstructions ?? "", /`worktree_base_ref` is optional/);
 
   const taskIds = loaded.config.tasks.map((task) => task.id);
   assert.ok(taskIds.includes("create_initialized_implementer_run"));
@@ -1236,10 +1244,17 @@ test("built-in plan-feature template emits implement-prefixed assignment names",
   assert.match(template, /^name: implement-<<KEBAB_FEATURE_SLUG>>$/m);
   assert.doesNotMatch(template, /^name: plan-<<KEBAB_FEATURE_SLUG>>$/m);
   assert.match(template, /^cwd: "\{\{repo_root\}\}"$/m);
-  assert.match(template, /sources: \[parent\]/);
+  assert.match(
+    template,
+    /worktree_base_ref:\n\s+type: string\n\s+required: true\n\s+sources: \[parent\]/,
+  );
   assert.match(template, /builtin: git-worktree/);
   assert.match(template, /attemptInSession: \[0\]/);
+  assert.match(template, /from: "\{\{worktree_base_ref\}\}"/);
+  assert.match(template, /git merge --ff-only "\{\{worktree_base_ref\}\}"/);
   assert.match(template, /collision: reuse/);
+  assert.doesNotMatch(template, /from: main/);
+  assert.doesNotMatch(template, /git merge --ff-only origin\/main/);
   assert.match(template, /run ready {{run_id}}/);
   assert.match(template, /run --resume-run {{run_id}}/);
   assert.doesNotMatch(template, /passive backend/i);
@@ -1260,7 +1275,12 @@ test("built-in plan-review tracks immediate-init revision handoff and terminal p
   assert.doesNotMatch(structureTask.body ?? "", /final_commit/);
   assert.match(workflowTask.body ?? "", /creates the implementer run during the/);
   assert.match(workflowTask.body ?? "", /does \*\*not\*\* force/);
-  assert.match(workflowTask.body ?? "", /repo_root`, `worktree_slug`, and `worktree_path` vars/);
+  assert.match(
+    workflowTask.body ?? "",
+    /repo_root`, `worktree_slug`, `worktree_path`, and\s+`worktree_base_ref` vars/,
+  );
+  assert.match(structureTask.body ?? "", /worktree_base_ref/);
+  assert.doesNotMatch(structureTask.body ?? "", /origin\/main/);
   assert.match(workflowTask.body ?? "", /`cwd: "\{\{repo_root\}\}"`/);
   assert.match(workflowTask.body ?? "", /refresh the planning run's/);
   assert.match(workflowTask.body ?? "", /init --run-id <implementer-run-id>/);

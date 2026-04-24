@@ -269,8 +269,9 @@ brief at run creation.
 Variable authoring is order-preserving. Use `sources: [...]` to declare
 explicit precedence across `cli`, `env`, and `parent`. Nested runs
 launched from a worker automatically carry `parentRunId`, so descendant
-assignments can inherit values such as `worktree_path` from the nearest
-ancestor without manual `--var` handoff.
+assignments can inherit values such as `worktree_path` and
+`worktree_base_ref` from the nearest ancestor without manual `--var`
+handoff.
 
 Assignments are markdown definitions, not a live workspace surface. Task
 state is canonical in the run manifest — not in the assignment file.
@@ -385,7 +386,7 @@ Built-in hooks:
 
 - `git-worktree` runs in `prepare` and `beforeAttempt`. It ensures a git
   worktree, switches the run `cwd` to that path, and in `prepare` also
-  projects `worktree_path` into runtime vars.
+  projects worktree runtime vars such as `worktree_path`.
 - `command` runs in every phase. `mode: status` treats exit code `0` as
   success and a non-zero exit code as block/reject. `mode: json`
   requires exit code `0` and parses a full hook result from stdout;

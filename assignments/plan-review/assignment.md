@@ -90,11 +90,12 @@ tasks:
           push_branch_and_create_pr
         - the scaffold/setup task explicitly requires the
           implementer to confirm the inherited `repo_root`,
-          `worktree_slug`, and `worktree_path` values, ensure
-          the repo root is clean before execution, and verify
-          that the assignment's first-attempt hooks create or
-          reuse the target worktree and fast-forward it to
-          `origin/main` before backend work begins
+          `worktree_slug`, `worktree_path`, and `worktree_base_ref`
+          values, ensure the repo root is clean before execution,
+          and verify that the assignment's first-attempt hooks create
+          or reuse the target worktree from the inherited
+          `worktree_base_ref` and fast-forward/merge to that same ref
+          before backend work begins
         - every code-bearing task has a concrete `**Done when:**`
           block with test-backed completion criteria
         - every task body has concrete file paths, commands, or
@@ -114,13 +115,13 @@ tasks:
 
       In the draft, verify:
         - the generated implementer draft declares inherited
-          `repo_root`, `worktree_slug`, and `worktree_path` vars
-          with `sources: [parent]`
+          `repo_root`, `worktree_slug`, `worktree_path`, and
+          `worktree_base_ref` vars with `sources: [parent]`
         - the generated implementer draft sets
           `cwd: "{{repo_root}}"` and uses a `git-worktree`
-          first-attempt hook wired to `repo_root`, `worktree_slug`, and
-          `worktree_path` rather than recomputing them inside task
-          prose
+          first-attempt hook wired to `repo_root`, `worktree_slug`,
+          `worktree_path`, and `worktree_base_ref` rather than
+          recomputing them inside task prose
         - the generated implementer draft guards
           `apply_review_fixes` with a task-local
           `require-children-success` hook (or an equivalent
@@ -164,9 +165,10 @@ tasks:
           clutter or redundant `Plan` / `Review` /
           `Implementation` wording
         - the creation flow requires the planner to confirm the
-          target repo-root cwd plus the requested `worktree_slug`
-          / derived sibling `worktree_path` before running `init`,
-          rather than guessing from some other environment
+          target repo-root cwd plus the requested `worktree_slug`,
+          derived sibling `worktree_path`, and inherited
+          `worktree_base_ref` before running `init`, rather than
+          guessing from some other environment
         - the creation and handoff flow explains that nested child
           runs auto-link back to the implementer/planning lineage
           and should inherit worktree vars through

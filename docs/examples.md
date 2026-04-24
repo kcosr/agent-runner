@@ -110,8 +110,13 @@ Notable feature uses:
   summary are attached to the planning run and later discovered by
   implementation via `attachment list --scope family`.
 - **Lineage-backed inheritance**: planner-created child runs auto-link to
-  the planning run and can inherit vars such as `worktree_path` through
-  `sources: [parent]` instead of repeating `--var`.
+  the planning run and can inherit vars such as `worktree_path` and
+  `worktree_base_ref` through `sources: [parent]` instead of repeating
+  `--var`.
+- **Configurable implementation base ref**: `worktree_base_ref` defaults
+  to `origin/main`, but callers can override it for pre-merge
+  end-to-end tests that should create generated implementation worktrees
+  from another ref.
 - **Approval-gated delayed creation**: the planning run prepares the
   draft/summary/handoff first, then blocks on
   `create_implementer_run_after_approval` until the caller resumes the

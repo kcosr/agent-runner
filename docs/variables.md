@@ -71,14 +71,19 @@ If every authored source fails, task-runner then applies `default`, then
 without repeating `--var` flags.
 
 Prepare hooks run after the initial resolution pass and can add or mutate
-runtime vars such as `worktree_path`. Fresh-run interpolation is then
-recomputed against the final runtime namespace so descendant assignments
-can author patterns like:
+runtime vars such as `worktree_path` and validated base refs such as
+`worktree_base_ref`. Fresh-run interpolation is then recomputed against
+the final runtime namespace so descendant assignments can author patterns
+like:
 
 ```yaml
 cwd: "{{worktree_path}}"
 vars:
   worktree_path:
+    type: string
+    required: true
+    sources: [parent]
+  worktree_base_ref:
     type: string
     required: true
     sources: [parent]
