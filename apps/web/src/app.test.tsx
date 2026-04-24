@@ -1508,14 +1508,20 @@ describe("web app", () => {
     timelineSource.emitOpen();
 
     expect(screen.getByRole("button", { name: "Attempts" })).toBeInTheDocument();
-    expect(await screen.findByRole("tab", { name: /Attempt 1/ })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /Attempt 2/ })).toBeInTheDocument();
-    expect(screen.queryByText("Session 1")).not.toBeInTheDocument();
+    const sessionTabs = await screen.findByRole("tablist", { name: "Sessions" });
+    expect(within(sessionTabs).getByRole("tab", { name: "Session 1" })).toHaveTextContent("1");
+    expect(within(sessionTabs).getByRole("tab", { name: "Session 2" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.queryByText(/initial run/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/follow-up/i)).not.toBeInTheDocument();
 
     const detail = screen.getByLabelText("Run detail");
     const stickyControls = detail.querySelector(".timeline-sticky-controls");
     expect(stickyControls).not.toBeNull();
-    expect(stickyControls?.querySelector('[role="tablist"][aria-label="Attempts"]')).not.toBeNull();
+    expect(stickyControls?.querySelector('[role="tablist"][aria-label="Sessions"]')).not.toBeNull();
+    expect(stickyControls?.querySelector('[role="tablist"][aria-label="Attempts"]')).toBeNull();
     expect(
       stickyControls?.querySelector('[role="tablist"][aria-label="Attempt view"]'),
     ).not.toBeNull();
@@ -1775,7 +1781,7 @@ describe("web app", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByRole("tab", { name: /Attempt 3/ })).toHaveAttribute(
+      expect(screen.getByRole("tab", { name: "Session 3" })).toHaveAttribute(
         "aria-selected",
         "true",
       );

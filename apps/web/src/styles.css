@@ -1245,20 +1245,23 @@ body {
 
 .timeline-attempt-tabs {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  flex: 1 1 auto;
+  gap: 6px;
+  min-width: 0;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
 }
 
-.timeline-session-group {
+.timeline-attempt-row {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   min-width: 0;
 }
 
-.timeline-session-header {
-  flex: 1 0 100%;
+.timeline-attempt-row__label {
+  flex: 0 0 64px;
   color: var(--muted-foreground);
   font-size: 12px;
   font-weight: 600;
@@ -1266,20 +1269,19 @@ body {
 
 .timeline-attempt-tab {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
+  justify-content: center;
+  gap: 6px;
+  min-width: 34px;
+  min-height: 28px;
+  padding: 4px 10px;
   border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--background);
   color: var(--muted-foreground);
   font-family: var(--mono);
   font-size: 12px;
-}
-
-.timeline-attempt-tab__meta {
-  color: var(--muted-foreground);
-  font-family: var(--font-sans);
 }
 
 .timeline-attempt-tab.active {

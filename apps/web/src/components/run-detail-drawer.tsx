@@ -52,12 +52,6 @@ type AuditFilter = "all" | "hooks" | "tasks" | "run";
 
 const TIMELINE_BOTTOM_THRESHOLD_PX = 24;
 
-function formatSessionSummary(session: RunSessionSummary): string {
-  return `${session.attemptCount} / ${session.maxAttemptsPerSession} attempts (Session ${
-    session.sessionIndex + 1
-  }, ${session.status})`;
-}
-
 function dependencyCandidateTitle(run: RunSummary) {
   return run.name ?? run.assignmentName ?? "Unnamed";
 }
@@ -116,17 +110,14 @@ function summaryRows(run: RunDetail) {
   if (run.endedAt !== null && run.exitCode !== null) {
     rows.push(["Exit code", String(run.exitCode)]);
   }
-  rows.push(
-    ["Attempts", `${run.totalAttemptCount} total`],
-    ["Sessions", String(run.totalSessionCount)],
-    ["Retry budget", `${run.maxAttemptsPerSession} per session`],
-  );
-  if (run.currentSession) {
-    rows.push(["Current session", formatSessionSummary(run.currentSession)]);
-  } else if (run.lastSession) {
-    rows.push(["Last session", formatSessionSummary(run.lastSession)]);
+  const lastSession = run.currentSession ?? run.lastSession;
+  if (lastSession) {
+    rows.push([
+      "Sessions",
+      `${run.totalSessionCount} (${lastSession.attemptCount}/${lastSession.maxAttemptsPerSession})`,
+    ]);
   } else {
-    rows.push(["Current session", "none"]);
+    rows.push(["Sessions", "none"]);
   }
 
   return rows;
@@ -556,6 +547,12 @@ export function RunDetailDrawer({
   const selectedAttemptResponse = selectedAttemptRecord?.transcript ?? "";
   const selectedAttemptDiagnostics = selectedAttemptRecord?.notices ?? "";
   const selectedAttemptLive = selectedAttemptRecord?.live ?? false;
+  const selectedSessionIndex = selectedAttemptRecord?.sessionIndex ?? null;
+  const selectedTimelineSession =
+    selectedSessionIndex === null
+      ? null
+      : (timelineSessions.find((session) => session.sessionIndex === selectedSessionIndex) ?? null);
+  const selectedSessionAttempts = selectedTimelineSession?.attempts ?? [];
 
   function startNameEdit() {
     if (actionsLocked) {
@@ -1945,7 +1942,7 @@ export function RunDetailDrawer({
                 ) : null}
 
                 {timelineState.isLoading && timelineAttempts.length === 0 ? (
-                  <p className="muted-inline">Loading timeline history…</p>
+                  <p className="muted-inline">Loading attempt history…</p>
                 ) : null}
 
                 {!timelineState.isLoading &&
@@ -1959,72 +1956,117 @@ export function RunDetailDrawer({
                     <div className="timeline-sticky-controls">
                       {selectedPendingAttempt || timelineAttempts.length > 1 ? (
                         <div className="timeline-attempts">
-                          <div
-                            className="timeline-attempt-tabs"
-                            role="tablist"
-                            aria-label="Attempts"
-                          >
-                            {selectedPendingAttempt ? (
-                              <button
-                                aria-selected={true}
-                                className="timeline-attempt-tab active"
-                                onClick={() => setSelectedAttempt("pending")}
-                                role="tab"
-                                type="button"
+                          {selectedPendingAttempt ? (
+                            <div className="timeline-attempt-row">
+                              <span className="timeline-attempt-row__label">Attempts</span>
+                              <div
+                                className="timeline-attempt-tabs"
+                                role="tablist"
+                                aria-label="Attempts"
                               >
-                                <span>Pending</span>
-                              </button>
-                            ) : (
-                              timelineSessions.map((session) => {
-                                const sessionStatus = session.summary?.status ?? "running";
-                                const attemptCount =
-                                  session.summary?.attemptCount ?? session.attempts.length;
-                                const maxAttempts =
-                                  session.summary?.maxAttemptsPerSession ??
-                                  run.maxAttemptsPerSession;
-                                const sessionKind =
-                                  session.sessionIndex === 0 ? "initial run" : "follow-up";
-                                return (
+                                <button
+                                  aria-selected={true}
+                                  className="timeline-attempt-tab active"
+                                  onClick={() => setSelectedAttempt("pending")}
+                                  role="tab"
+                                  type="button"
+                                >
+                                  <span>Pending</span>
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              {timelineSessions.length > 1 ? (
+                                <div className="timeline-attempt-row">
+                                  <span className="timeline-attempt-row__label">Sessions</span>
                                   <div
-                                    className="timeline-session-group"
-                                    key={session.sessionIndex}
+                                    className="timeline-attempt-tabs"
+                                    role="tablist"
+                                    aria-label="Sessions"
                                   >
-                                    <div className="timeline-session-header">
-                                      {`Session ${
-                                        session.sessionIndex + 1
-                                      } - ${sessionKind} - ${attemptCount} / ${maxAttempts} attempts - ${sessionStatus}`}
-                                    </div>
-                                    {session.attempts.map((attempt) => (
-                                      <button
-                                        aria-selected={
-                                          selectedAttemptRecord?.attemptNumber ===
-                                          attempt.attemptNumber
-                                        }
-                                        className={
-                                          selectedAttemptRecord?.attemptNumber ===
-                                          attempt.attemptNumber
-                                            ? "timeline-attempt-tab active"
-                                            : "timeline-attempt-tab"
-                                        }
-                                        key={attempt.attemptNumber}
-                                        onClick={() => setSelectedAttempt(attempt.attemptNumber)}
-                                        role="tab"
-                                        type="button"
-                                      >
-                                        <span>{`Attempt ${attempt.attemptNumber}`}</span>
-                                        <span className="timeline-attempt-tab__meta">
-                                          {`Session attempt ${attempt.attemptIndexInSession + 1}`}
-                                        </span>
-                                        {attempt.live ? (
-                                          <span aria-hidden="true" className="timeline-live-dot" />
-                                        ) : null}
-                                      </button>
-                                    ))}
+                                    {timelineSessions.map((session) => {
+                                      const sessionNumber = session.sessionIndex + 1;
+                                      const sessionLatestAttempt =
+                                        session.attempts[session.attempts.length - 1] ?? null;
+                                      return (
+                                        <button
+                                          aria-label={`Session ${sessionNumber}`}
+                                          aria-selected={
+                                            selectedSessionIndex === session.sessionIndex
+                                          }
+                                          className={
+                                            selectedSessionIndex === session.sessionIndex
+                                              ? "timeline-attempt-tab active"
+                                              : "timeline-attempt-tab"
+                                          }
+                                          key={session.sessionIndex}
+                                          onClick={() => {
+                                            if (sessionLatestAttempt) {
+                                              setSelectedAttempt(
+                                                sessionLatestAttempt.attemptNumber,
+                                              );
+                                            }
+                                          }}
+                                          role="tab"
+                                          type="button"
+                                        >
+                                          <span>{sessionNumber}</span>
+                                        </button>
+                                      );
+                                    })}
                                   </div>
-                                );
-                              })
-                            )}
-                          </div>
+                                </div>
+                              ) : null}
+
+                              {selectedSessionAttempts.length > 1 ? (
+                                <div className="timeline-attempt-row">
+                                  <span className="timeline-attempt-row__label">Attempts</span>
+                                  <div
+                                    className="timeline-attempt-tabs"
+                                    role="tablist"
+                                    aria-label="Attempts"
+                                  >
+                                    {selectedSessionAttempts.map((attempt) => {
+                                      const sessionNumber = attempt.sessionIndex + 1;
+                                      const attemptNumber = attempt.attemptIndexInSession + 1;
+                                      const label = `Session ${sessionNumber} attempt ${attemptNumber}, run attempt ${attempt.attemptNumber}${
+                                        attempt.live ? ", live" : ""
+                                      }`;
+                                      return (
+                                        <button
+                                          aria-label={label}
+                                          aria-selected={
+                                            selectedAttemptRecord?.attemptNumber ===
+                                            attempt.attemptNumber
+                                          }
+                                          className={
+                                            selectedAttemptRecord?.attemptNumber ===
+                                            attempt.attemptNumber
+                                              ? "timeline-attempt-tab active"
+                                              : "timeline-attempt-tab"
+                                          }
+                                          key={attempt.attemptNumber}
+                                          onClick={() => setSelectedAttempt(attempt.attemptNumber)}
+                                          role="tab"
+                                          title={label}
+                                          type="button"
+                                        >
+                                          <span>{attemptNumber}</span>
+                                          {attempt.live ? (
+                                            <span
+                                              aria-hidden="true"
+                                              className="timeline-live-dot"
+                                            />
+                                          ) : null}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              ) : null}
+                            </>
+                          )}
                         </div>
                       ) : null}
 
