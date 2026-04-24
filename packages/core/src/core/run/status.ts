@@ -11,8 +11,10 @@ export type RunCompletionStatus =
 
 export interface RunCompletionSummary {
   status: RunCompletionStatus;
-  attempts: number;
-  maxAttempts: number;
+  sessionAttemptCount: number;
+  maxAttemptsPerSession: number;
+  totalAttemptCount: number;
+  totalSessionCount: number;
   tasksCompleted: number;
   tasksTotal: number;
   assignmentPath: string;

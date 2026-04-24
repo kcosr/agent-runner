@@ -164,8 +164,9 @@ export type RunEvent =
     }
   | {
       type: "attempt_started";
-      attempt: number;
+      attemptNumber: number;
       sessionIndex: number;
+      attemptIndexInSession: number;
       startedAt: string;
       prompt: string;
     }
@@ -306,9 +307,9 @@ function checkLockedFieldsFromManifest(
     ["message", overrides?.message, manifest.message],
     ["timeoutSec", overrides?.timeoutSec, manifest.timeoutSec],
     ["unrestricted", overrides?.unrestricted, manifest.unrestricted],
-    // maxRetries is stored on the manifest as maxAttempts (= retries + 1)
+    // maxRetries is stored on the manifest as maxAttemptsPerSession (= retries + 1)
     // so the error message subtracts back to the authored value.
-    ["maxRetries", overrides?.maxRetries, manifest.maxAttempts - 1],
+    ["maxRetries", overrides?.maxRetries, manifest.maxAttemptsPerSession - 1],
     ["tasks", addedTasks.length > 0 ? addedTasks : undefined, undefined],
   ];
 
@@ -332,9 +333,9 @@ function buildResumeSessionManifest(
     timeoutSec: number;
     assignmentPath: string;
     workspaceDir: string;
-    maxAttempts: number;
+    maxAttemptsPerSession: number;
     execution: RunExecution;
-    sessionCount: number;
+    totalSessionCount: number;
   },
 ): RunManifest {
   return {
@@ -352,12 +353,12 @@ function buildResumeSessionManifest(
     endedAt: null,
     status: "running",
     exitCode: null,
-    maxAttempts: overrides.maxAttempts,
+    maxAttemptsPerSession: overrides.maxAttemptsPerSession,
     execution: overrides.execution,
     finalTasks: {},
     tasksCompleted: 0,
     tasksTotal: 0,
-    sessionCount: overrides.sessionCount,
+    totalSessionCount: overrides.totalSessionCount,
   };
 }
 
@@ -1178,7 +1179,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   // loaded), fall back to a hard default of 3 to match the assignment
   // schema's own default.
   const maxRetries = resolveFreshRunMaxRetries(overrides?.maxRetries, loadedAssignment);
-  const maxAttempts = maxRetries + 1;
+  const maxAttemptsPerSession = maxRetries + 1;
 
   if (isResume) {
     const hasMessage = Boolean(message && message.trim().length > 0);
@@ -1302,7 +1303,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       ]),
     );
     const prepareManifest: RunManifest = {
-      schemaVersion: 10,
+      schemaVersion: 11,
       runId,
       repo,
       agent: {
@@ -1340,8 +1341,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       dependencyRunIds: [],
       parentRunId,
       exitCode: null,
-      attempts: 0,
-      maxAttempts,
+      totalAttemptCount: 0,
+      maxAttemptsPerSession,
       tasksCompleted: 0,
       tasksTotal: tasks.size,
       backendSessionId: opts.bootstrapBackendSessionId ?? null,
@@ -1373,7 +1374,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         parentRunId,
         unrestricted,
         timeoutSec,
-        maxAttempts,
+        maxAttemptsPerSession,
         brief: "",
         runtimeVars: { ...runtimeVars },
         runtimeVarSources: cloneRuntimeVarSources(runtimeVarSources),
@@ -1383,7 +1384,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       }),
       attachments: [],
       finalTasks: snapshotTasks(tasks),
-      sessionCount: isInitialize ? 0 : 1,
+      totalSessionCount: 0,
       sessions: [],
       attemptRecords: [],
     };
@@ -1513,13 +1514,13 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       timeoutSec,
       assignmentPath,
       workspaceDir,
-      maxAttempts,
+      maxAttemptsPerSession,
       execution,
-      sessionCount: priorSessionCount + 1,
+      totalSessionCount: priorSessionCount + 1,
     });
   } else if (priorReady && resume) {
     // Start-after-ready: the manifest was persisted by `init`. Flip it
-    // to "running", promote sessionCount to 1, and preserve the brief.
+    // to "running", promote totalSessionCount to 1, and preserve the brief.
     manifest = {
       ...resume.manifest,
       brief: initialPrompt,
@@ -1527,7 +1528,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       endedAt: null,
       status: "running",
       exitCode: null,
-      sessionCount: 1,
+      totalSessionCount: 1,
       execution,
     };
   } else {
@@ -1554,7 +1555,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     const frozenCallerInstructions =
       rawCallerInstructions.length > 0 ? interpolate(rawCallerInstructions, injectedVars) : null;
     manifest = {
-      schemaVersion: 10,
+      schemaVersion: 11,
       runId,
       repo,
       agent: {
@@ -1596,8 +1597,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       dependencyRunIds: [],
       parentRunId,
       exitCode: null,
-      attempts: 0,
-      maxAttempts,
+      totalAttemptCount: 0,
+      maxAttemptsPerSession,
       tasksCompleted: 0,
       tasksTotal: tasks.size,
       // If the caller imported an existing backend session, persist it
@@ -1633,7 +1634,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         parentRunId,
         unrestricted,
         timeoutSec,
-        maxAttempts,
+        maxAttemptsPerSession,
         brief: initialPrompt,
         runtimeVars: { ...runtimeVars },
         runtimeVarSources: cloneRuntimeVarSources(runtimeVarSources),
@@ -1643,7 +1644,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       }),
       attachments: hookAttachments.map((attachment) => ({ ...attachment })),
       finalTasks: {},
-      sessionCount: isInitialize ? 0 : 1,
+      totalSessionCount: 0,
       sessions: [],
       attemptRecords: [],
     };
@@ -1712,8 +1713,10 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     return {
       summary: {
         status: "initialized",
-        attempts: 0,
-        maxAttempts,
+        sessionAttemptCount: 0,
+        maxAttemptsPerSession,
+        totalAttemptCount: 0,
+        totalSessionCount: 0,
         tasksCompleted: 0,
         tasksTotal: tasks.size,
         assignmentPath,
@@ -1765,9 +1768,9 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
           timeoutSec,
           assignmentPath,
           workspaceDir,
-          maxAttempts,
+          maxAttemptsPerSession,
           execution,
-          sessionCount: priorSessionCount + 1,
+          totalSessionCount: priorSessionCount + 1,
         });
       } else {
         manifest = {
@@ -1777,7 +1780,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
           endedAt: null,
           status: "running",
           exitCode: null,
-          sessionCount: 1,
+          totalSessionCount: 1,
           execution,
         };
       }
@@ -1792,13 +1795,15 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         exitCode: null,
         message: priorReady ? latest.message : message,
         brief: initialPrompt,
-        firstAttempt: null,
-        lastAttempt: null,
-        maxAttempts,
+        firstAttemptNumber: null,
+        lastAttemptNumber: null,
+        maxAttemptsPerSession,
         backendSessionIdAtStart: latest.backendSessionId,
         backendSessionIdAtEnd: null,
       };
       manifest.sessions.push(sessionRecord);
+      manifest.totalAttemptCount = manifest.attemptRecords.length;
+      manifest.totalSessionCount = manifest.sessions.length;
       writeManifest(workspaceDir, manifest);
       emitAuditEnvelope(
         appendRunStartedEvent({
@@ -1820,13 +1825,15 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       exitCode: null,
       message: message,
       brief: initialPrompt,
-      firstAttempt: null,
-      lastAttempt: null,
-      maxAttempts,
+      firstAttemptNumber: null,
+      lastAttemptNumber: null,
+      maxAttemptsPerSession,
       backendSessionIdAtStart: opts.bootstrapBackendSessionId ?? null,
       backendSessionIdAtEnd: null,
     };
     manifest.sessions.push(sessionRecord);
+    manifest.totalAttemptCount = manifest.attemptRecords.length;
+    manifest.totalSessionCount = manifest.sessions.length;
     refreshManifestAttachments(manifest);
     writeManifest(workspaceDir, manifest);
     withTaskStateLock(workspaceDir, () => {
@@ -1882,14 +1889,16 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   let sawRunAbort = false;
   let sawResumeRejected = false;
   let pendingAttempt: {
-    attempt: number;
+    attemptNumber: number;
+    attemptIndexInSession: number;
     startedAt: string;
     prompt: string;
     sessionIdAtStart: string | null;
   } | null = null;
   const includeStdoutInAttemptLog = captureFullAttemptLogs();
   const persistAttemptRecord = (record: {
-    attempt: number;
+    attemptNumber: number;
+    attemptIndexInSession: number;
     startedAt: string;
     endedAt: string;
     prompt: string;
@@ -1910,10 +1919,11 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       | undefined;
   }): void => {
     const logPath = writeAttemptLog(workspaceDir, {
-      schemaVersion: 1,
+      schemaVersion: 2,
       runId,
-      attempt: record.attempt,
+      attemptNumber: record.attemptNumber,
       sessionIndex,
+      attemptIndexInSession: record.attemptIndexInSession,
       startedAt: record.startedAt,
       endedAt: record.endedAt,
       stdout: includeStdoutInAttemptLog ? record.rawStdout : "",
@@ -1924,8 +1934,9 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       syncManifestTaskState(manifest, tasks);
       refreshManifestAttachments(manifest);
       const attemptRecord: AttemptRecord = {
-        attempt: record.attempt,
+        attemptNumber: record.attemptNumber,
         sessionIndex,
+        attemptIndexInSession: record.attemptIndexInSession,
         startedAt: record.startedAt,
         endedAt: record.endedAt,
         prompt: record.prompt,
@@ -1940,12 +1951,12 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         invalidStatuses: record.invalidStatuses,
       };
       manifest.attemptRecords.push(attemptRecord);
-      manifest.attempts = manifest.attemptRecords.length;
+      manifest.totalAttemptCount = manifest.attemptRecords.length;
 
-      if (sessionRecord.firstAttempt === null) {
-        sessionRecord.firstAttempt = record.attempt;
+      if (sessionRecord.firstAttemptNumber === null) {
+        sessionRecord.firstAttemptNumber = record.attemptNumber;
       }
-      sessionRecord.lastAttempt = record.attempt;
+      sessionRecord.lastAttemptNumber = record.attemptNumber;
 
       tryRefreshMutableManifestMetadata(manifest);
       writeManifest(workspaceDir, manifest);
@@ -1955,7 +1966,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
           manifest,
           context: lifecycleContext,
           sessionIndex,
-          attempt: record.attempt,
+          attemptNumber: record.attemptNumber,
           exitCode: record.exitCode,
           signal: record.signal,
           timedOut: record.timedOut,
@@ -1972,7 +1983,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
             nextBackendSessionId: record.backendSessionUpdate.nextBackendSessionId,
             reason: "backend_capture",
             sessionIndex,
-            attempt: record.attempt,
+            attemptNumber: record.attemptNumber,
           }),
         );
       }
@@ -1982,8 +1993,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     phase: "beforeAttempt" | "afterAttempt" | "afterExit",
     options: {
       sessionIndex: number;
-      attemptInSession: number;
-      attempt: number | null;
+      attemptIndexInSession: number;
+      attemptNumber: number | null;
       retriesRemaining: number;
       attemptResult?: {
         exitCode: number | null;
@@ -2022,17 +2033,18 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   };
 
   try {
-    while (sessionAttempts < maxAttempts && !terminal) {
+    while (sessionAttempts < maxAttemptsPerSession && !terminal) {
       tryRefreshMutableManifestMetadata(manifest);
       name = manifest.name;
       sessionAttempts++;
       const globalAttemptNumber = priorAttemptCount + sessionAttempts;
+      const attemptIndexInSession = sessionAttempts - 1;
       const { hookResult: beforeAttemptResult, attemptPrompt: beforeAttemptPrompt } =
         await runLockedAttemptHooks("beforeAttempt", {
           sessionIndex,
-          attemptInSession: sessionAttempts - 1,
-          attempt: globalAttemptNumber,
-          retriesRemaining: maxAttempts - sessionAttempts,
+          attemptIndexInSession,
+          attemptNumber: globalAttemptNumber,
+          retriesRemaining: maxAttemptsPerSession - sessionAttempts,
         });
       currentPrompt = beforeAttemptResult.followUpPrompt ?? beforeAttemptPrompt;
       cwd = manifest.cwd;
@@ -2048,15 +2060,17 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       const attemptStartedAt = new Date().toISOString();
       emitEvent({
         type: "attempt_started",
-        attempt: globalAttemptNumber,
+        attemptNumber: globalAttemptNumber,
         sessionIndex,
+        attemptIndexInSession,
         startedAt: attemptStartedAt,
         prompt: currentPrompt,
       });
 
       const sessionIdAtStart = sessionId;
       pendingAttempt = {
-        attempt: globalAttemptNumber,
+        attemptNumber: globalAttemptNumber,
+        attemptIndexInSession,
         startedAt: attemptStartedAt,
         prompt: currentPrompt,
         sessionIdAtStart,
@@ -2116,7 +2130,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         unknownInFile: [],
       };
       persistAttemptRecord({
-        attempt: globalAttemptNumber,
+        attemptNumber: globalAttemptNumber,
+        attemptIndexInSession,
         startedAt: attemptStartedAt,
         endedAt: attemptEndedAt,
         prompt: currentPrompt,
@@ -2134,9 +2149,9 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       const { hookResult: afterAttemptResult, attemptPrompt: afterAttemptPrompt } =
         await runLockedAttemptHooks("afterAttempt", {
           sessionIndex,
-          attemptInSession: sessionAttempts - 1,
-          attempt: globalAttemptNumber,
-          retriesRemaining: maxAttempts - sessionAttempts,
+          attemptIndexInSession,
+          attemptNumber: globalAttemptNumber,
+          retriesRemaining: maxAttemptsPerSession - sessionAttempts,
           attemptResult: {
             exitCode: invokeResult.exitCode,
             signal: invokeResult.signal,
@@ -2160,7 +2175,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         break;
       }
       if (afterAttemptResult.status === "reinvoke") {
-        if (sessionAttempts >= maxAttempts) {
+        if (sessionAttempts >= maxAttemptsPerSession) {
           terminal = { status: "exhausted", exitCode: 1 };
           break;
         }
@@ -2218,7 +2233,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         terminal = { status: "blocked", exitCode: 2 };
         break;
       }
-      if (sessionAttempts >= maxAttempts) {
+      if (sessionAttempts >= maxAttemptsPerSession) {
         terminal = { status: "exhausted", exitCode: 1 };
         break;
       }
@@ -2246,7 +2261,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     if (pendingAttempt) {
       try {
         persistAttemptRecord({
-          attempt: pendingAttempt.attempt,
+          attemptNumber: pendingAttempt.attemptNumber,
+          attemptIndexInSession: pendingAttempt.attemptIndexInSession,
           startedAt: pendingAttempt.startedAt,
           endedAt: new Date().toISOString(),
           prompt: pendingAttempt.prompt,
@@ -2329,8 +2345,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   try {
     await runLockedAttemptHooks("afterExit", {
       sessionIndex,
-      attemptInSession: sessionAttempts === 0 ? 0 : sessionAttempts - 1,
-      attempt: pendingAttempt?.attempt ?? null,
+      attemptIndexInSession: sessionAttempts === 0 ? 0 : sessionAttempts - 1,
+      attemptNumber: pendingAttempt?.attemptNumber ?? null,
       retriesRemaining: 0,
     });
   } catch {
@@ -2339,8 +2355,10 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
   const summary: RunCompletionSummary = {
     status: terminal.status,
-    attempts: sessionAttempts,
-    maxAttempts,
+    sessionAttemptCount: sessionAttempts,
+    maxAttemptsPerSession,
+    totalAttemptCount: manifest.totalAttemptCount,
+    totalSessionCount: manifest.totalSessionCount,
     tasksCompleted,
     tasksTotal: orderedTasks.length,
     assignmentPath,

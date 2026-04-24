@@ -252,8 +252,8 @@ test("command services: passive backend session mutations update only metadata a
     manifest.archivedAt = "2026-04-17T10:00:00.000Z";
     manifest.endedAt = "2026-04-17T09:59:00.000Z";
     manifest.exitCode = 0;
-    manifest.attempts = 2;
-    manifest.sessionCount = 1;
+    manifest.totalAttemptCount = 2;
+    manifest.totalSessionCount = 1;
     manifest.backendSessionId = "thread-original";
     manifest.sessions = [
       {
@@ -264,17 +264,18 @@ test("command services: passive backend session mutations update only metadata a
         exitCode: 0,
         message: "seed message",
         brief: "seed brief",
-        firstAttempt: 1,
-        lastAttempt: 2,
-        maxAttempts: 3,
+        firstAttemptNumber: 1,
+        lastAttemptNumber: 2,
+        maxAttemptsPerSession: 3,
         backendSessionIdAtStart: null,
         backendSessionIdAtEnd: "thread-original",
       },
     ];
     manifest.attemptRecords = [
       {
-        attempt: 1,
+        attemptNumber: 1,
         sessionIndex: 0,
+        attemptIndexInSession: 0,
         startedAt: "2026-04-17T09:00:00.000Z",
         endedAt: "2026-04-17T09:10:00.000Z",
         prompt: "prompt 1",
@@ -297,8 +298,8 @@ test("command services: passive backend session mutations update only metadata a
     archivedAt: before.archivedAt,
     endedAt: before.endedAt,
     exitCode: before.exitCode,
-    attempts: before.attempts,
-    sessionCount: before.sessionCount,
+    totalAttemptCount: before.totalAttemptCount,
+    totalSessionCount: before.totalSessionCount,
     sessions: before.sessions,
     attemptRecords: before.attemptRecords,
     finalTasks: before.finalTasks,
@@ -357,8 +358,8 @@ test("command services: passive backend session mutations update only metadata a
       archivedAt: after.archivedAt,
       endedAt: after.endedAt,
       exitCode: after.exitCode,
-      attempts: after.attempts,
-      sessionCount: after.sessionCount,
+      totalAttemptCount: after.totalAttemptCount,
+      totalSessionCount: after.totalSessionCount,
       sessions: after.sessions,
       attemptRecords: after.attemptRecords,
       finalTasks: after.finalTasks,
@@ -425,19 +426,36 @@ async function startCodexRenameServer(options = {}) {
   };
 }
 
-test("command services: getRunTimelineHistory degrades missing, corrupt, or escaping attempt logs", async () => {
+test("command services: getRunTimelineHistory reads schema v2 attempt logs", async () => {
   const dir = tempDir();
   writeBundle(dir);
   const outcome = await initRun(dir);
   const attemptsDir = join(outcome.workspaceDir, "attempts");
   mkdirSync(attemptsDir, { recursive: true });
-  writeFileSync(join(attemptsDir, "02.json"), "{\n");
 
   patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.sessions = [
+      {
+        sessionIndex: 0,
+        startedAt: "2026-04-15T01:00:00.000Z",
+        endedAt: "2026-04-15T01:05:00.000Z",
+        status: "success",
+        exitCode: 0,
+        message: null,
+        brief: manifest.brief,
+        firstAttemptNumber: 1,
+        lastAttemptNumber: 3,
+        maxAttemptsPerSession: manifest.maxAttemptsPerSession,
+        backendSessionIdAtStart: null,
+        backendSessionIdAtEnd: null,
+      },
+    ];
+    manifest.totalSessionCount = 1;
     manifest.attemptRecords = [
       {
-        attempt: 1,
+        attemptNumber: 1,
         sessionIndex: 0,
+        attemptIndexInSession: 0,
         startedAt: "2026-04-15T01:00:00.000Z",
         endedAt: "2026-04-15T01:01:00.000Z",
         prompt: "Attempt one",
@@ -452,8 +470,9 @@ test("command services: getRunTimelineHistory degrades missing, corrupt, or esca
         invalidStatuses: [],
       },
       {
-        attempt: 2,
+        attemptNumber: 2,
         sessionIndex: 0,
+        attemptIndexInSession: 1,
         startedAt: "2026-04-15T01:02:00.000Z",
         endedAt: "2026-04-15T01:03:00.000Z",
         prompt: "Attempt two",
@@ -468,8 +487,9 @@ test("command services: getRunTimelineHistory degrades missing, corrupt, or esca
         invalidStatuses: [],
       },
       {
-        attempt: 3,
+        attemptNumber: 3,
         sessionIndex: 0,
+        attemptIndexInSession: 2,
         startedAt: "2026-04-15T01:04:00.000Z",
         endedAt: "2026-04-15T01:05:00.000Z",
         prompt: "Attempt three",
@@ -479,13 +499,30 @@ test("command services: getRunTimelineHistory degrades missing, corrupt, or esca
         signal: null,
         timedOut: false,
         transcript: "Third output",
-        logPath: "../outside.json",
+        logPath: "attempts/03.json",
         tasksAfter: manifest.finalTasks,
         invalidStatuses: [],
       },
     ];
-    manifest.attempts = manifest.attemptRecords.length;
+    manifest.totalAttemptCount = manifest.attemptRecords.length;
   });
+  for (const attemptNumber of [1, 2, 3]) {
+    writeFileSync(
+      join(attemptsDir, `${String(attemptNumber).padStart(2, "0")}.json`),
+      `${JSON.stringify({
+        schemaVersion: 2,
+        runId: outcome.runId,
+        attemptNumber,
+        sessionIndex: 0,
+        attemptIndexInSession: attemptNumber - 1,
+        prompt: `Attempt ${["one", "two", "three"][attemptNumber - 1]}`,
+        stdout: "",
+        stderr: "",
+        transcript: `${["First", "Second", "Third"][attemptNumber - 1]} output`,
+        notices: "",
+      })}\n`,
+    );
+  }
 
   await withSharedRuntimeEnv(dir, async () => {
     const history = getRunTimelineHistory(outcome.runId);
@@ -497,6 +534,107 @@ test("command services: getRunTimelineHistory degrades missing, corrupt, or esca
     assert.equal(history.attempts[1]?.notices, "");
     assert.equal(history.attempts[2]?.transcript, "Third output");
     assert.equal(history.attempts[2]?.notices, "");
+  });
+});
+
+test("command services: getRunTimelineHistory degrades malformed attempt logs per attempt", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+  const attemptsDir = join(outcome.workspaceDir, "attempts");
+  mkdirSync(attemptsDir, { recursive: true });
+
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.sessions = [
+      {
+        sessionIndex: 0,
+        startedAt: "2026-04-15T01:00:00.000Z",
+        endedAt: "2026-04-15T01:03:00.000Z",
+        status: "success",
+        exitCode: 0,
+        message: null,
+        brief: manifest.brief,
+        firstAttemptNumber: 1,
+        lastAttemptNumber: 3,
+        maxAttemptsPerSession: manifest.maxAttemptsPerSession,
+        backendSessionIdAtStart: null,
+        backendSessionIdAtEnd: null,
+      },
+    ];
+    manifest.totalSessionCount = 1;
+    manifest.attemptRecords = [
+      {
+        attemptNumber: 1,
+        sessionIndex: 0,
+        attemptIndexInSession: 0,
+        startedAt: "2026-04-15T01:00:00.000Z",
+        endedAt: "2026-04-15T01:01:00.000Z",
+        prompt: "Missing log",
+        sessionIdAtStart: null,
+        sessionIdCaptured: null,
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        transcript: "Missing transcript",
+        logPath: "attempts/01.json",
+        tasksAfter: manifest.finalTasks,
+        invalidStatuses: [],
+      },
+      {
+        attemptNumber: 2,
+        sessionIndex: 0,
+        attemptIndexInSession: 1,
+        startedAt: "2026-04-15T01:01:00.000Z",
+        endedAt: "2026-04-15T01:02:00.000Z",
+        prompt: "Corrupt log",
+        sessionIdAtStart: null,
+        sessionIdCaptured: null,
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        transcript: "Corrupt transcript",
+        logPath: "attempts/02.json",
+        tasksAfter: manifest.finalTasks,
+        invalidStatuses: [],
+      },
+      {
+        attemptNumber: 3,
+        sessionIndex: 0,
+        attemptIndexInSession: 2,
+        startedAt: "2026-04-15T01:02:00.000Z",
+        endedAt: "2026-04-15T01:03:00.000Z",
+        prompt: "Escaping log",
+        sessionIdAtStart: null,
+        sessionIdCaptured: null,
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        transcript: "Escaping transcript",
+        logPath: "../outside.json",
+        tasksAfter: manifest.finalTasks,
+        invalidStatuses: [],
+      },
+    ];
+    manifest.totalAttemptCount = manifest.attemptRecords.length;
+  });
+  writeFileSync(join(attemptsDir, "02.json"), "{not valid json");
+
+  await withSharedRuntimeEnv(dir, async () => {
+    const history = getRunTimelineHistory(outcome.runId);
+    assert.equal(history.runId, outcome.runId);
+    assert.equal(history.attempts.length, 3);
+    assert.deepEqual(
+      history.attempts.map((attempt) => [
+        attempt.attemptNumber,
+        attempt.transcript,
+        attempt.notices,
+      ]),
+      [
+        [1, "Missing transcript", ""],
+        [2, "Corrupt transcript", ""],
+        [3, "Escaping transcript", ""],
+      ],
+    );
   });
 });
 
@@ -616,8 +754,9 @@ test("command services: readStatus and timeline history resolve bare run ids acr
     manifest.endedAt = null;
     manifest.attemptRecords = [
       {
-        attempt: 1,
+        attemptNumber: 1,
         sessionIndex: 0,
+        attemptIndexInSession: 0,
         startedAt: "2026-04-15T01:00:00.000Z",
         endedAt: "2026-04-15T01:01:00.000Z",
         prompt: "Attempt one",
@@ -632,8 +771,41 @@ test("command services: readStatus and timeline history resolve bare run ids acr
         invalidStatuses: [],
       },
     ];
-    manifest.attempts = 1;
+    manifest.totalAttemptCount = 1;
+    manifest.sessions = [
+      {
+        sessionIndex: 0,
+        startedAt: "2026-04-15T01:00:00.000Z",
+        endedAt: "2026-04-15T01:01:00.000Z",
+        status: "success",
+        exitCode: 0,
+        message: null,
+        brief: manifest.brief,
+        firstAttemptNumber: 1,
+        lastAttemptNumber: 1,
+        maxAttemptsPerSession: manifest.maxAttemptsPerSession,
+        backendSessionIdAtStart: null,
+        backendSessionIdAtEnd: null,
+      },
+    ];
+    manifest.totalSessionCount = 1;
   });
+  mkdirSync(join(relocatedWorkspaceDir, "attempts"), { recursive: true });
+  writeFileSync(
+    join(relocatedWorkspaceDir, "attempts", "01.json"),
+    `${JSON.stringify({
+      schemaVersion: 2,
+      runId: outcome.runId,
+      attemptNumber: 1,
+      sessionIndex: 0,
+      attemptIndexInSession: 0,
+      prompt: "Attempt one",
+      stdout: "",
+      stderr: "",
+      transcript: "First output",
+      notices: "",
+    })}\n`,
+  );
 
   await withSharedRuntimeEnv(dir, async () => {
     const status = readStatus(outcome.runId);
@@ -708,7 +880,7 @@ test("command services: readStatus and listRuns project hook detail and hook cou
         endedAt: "2026-04-20T10:00:01.000Z",
         outcome: "continue",
         sessionIndex: null,
-        attempt: null,
+        attemptNumber: null,
         taskId: null,
         summary: null,
       },

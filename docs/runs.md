@@ -11,7 +11,7 @@ ${TASK_RUNNER_STATE_DIR}/runs/<repo>/<run-id>/
 
 ```text
 <workspace>/
-├── run.json               # canonical manifest (schema version 10)
+├── run.json               # canonical manifest (schema version 11)
 ├── run-events.jsonl       # append-only audit history with monotonic cursors
 ├── assignment-seed.md     # only when the run started from an assignment file
 ├── attempts/
@@ -38,12 +38,12 @@ The manifest is the source of truth. Important fields:
 
 | Field | Purpose |
 |-------|---------|
-| `schemaVersion` | currently `10`; older manifests are not silently upgraded |
+| `schemaVersion` | currently `11`; older manifests are not silently upgraded |
 | `runId`, `repo`, `cwd` | identity and scope |
 | `agent` | frozen `{ name, sourcePath, instructions }` |
 | `assignment` | frozen `{ name, sourcePath, workspacePath }` or `null` |
 | `backend`, `model`, `effort` | resolved runtime config |
-| `timeoutSec`, `maxAttempts`, `unrestricted` | per-attempt limits |
+| `timeoutSec`, `maxAttemptsPerSession`, `unrestricted` | per-attempt limits |
 | `lockedFields` | union of agent + assignment locks, frozen |
 | `message` | default run message (from CLI positional or assignment) |
 | `name` | user-provided display name (mutable via `run set-name`) |
@@ -61,12 +61,21 @@ The manifest is the source of truth. Important fields:
 | `dependencyRunIds` | upstream runs that must succeed before execution |
 | `parentRunId` | direct lineage edge to the parent run when this run was launched from another run |
 | `attachments` | metadata for files under `attachments/` |
-| `attempts`, `attemptRecords` | per-attempt execution log |
-| `sessionCount`, `sessions` | session-level summaries |
+| `totalAttemptCount`, `attemptRecords` | per-attempt execution log |
+| `totalSessionCount`, `sessions` | session-level summaries |
 | `runtimeVars` | frozen resolved vars |
 | `runtimeVarSources` | frozen provenance for each resolved var |
 | `resetSeed` | snapshot used by `run reset` |
 | `execution` | `{ hostMode: "embedded" \| "daemon", controller }`; for daemon runs, `controller.daemonInstanceId` links back to the daemon instance |
+
+## Run/session/attempt model
+
+A run is the durable lifecycle record. Each backend execution window is a
+session: the fresh execution creates session `0`, and each resume creates
+the next session. Attempts are backend invocations within a session.
+`maxAttemptsPerSession` is the per-session retry budget. Attempt numbers
+are monotonic across the run, while `attemptIndexInSession` is zero-based
+within its session.
 
 ## Lifecycle states
 
@@ -174,7 +183,7 @@ task-runner run clear-deps <id>
 ### Reset
 
 `run reset` restores the initialized-state seed from `manifest.resetSeed`
-(model, effort, name, dependencies, timeoutSec, maxAttempts, brief, final
+(model, effort, name, dependencies, timeoutSec, maxAttemptsPerSession, brief, final
 task snapshot). Attempt and session history, endedAt, exitCode, and the
 live status are cleared. Existing `run-events.jsonl` history is preserved
 and reset appends one more diagnostic record instead of truncating the file.
@@ -208,7 +217,7 @@ dependency readiness.
 ### set-backend-session / clear-backend-session
 
 Passive-only metadata mutations. Update `manifest.backendSessionId` without
-changing task state, lifecycle status, attempts, archive state, or
+changing task state, lifecycle status, attempt history, archive state, or
 dependency projections.
 
 ### Dependencies

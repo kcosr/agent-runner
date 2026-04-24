@@ -169,9 +169,9 @@ test("resolveResumeTarget rejects a manifest with a session missing brief", () =
       status: "success",
       exitCode: 0,
       message: null,
-      firstAttempt: 1,
-      lastAttempt: 1,
-      maxAttempts: 4,
+      firstAttemptNumber: 1,
+      lastAttemptNumber: 1,
+      maxAttemptsPerSession: 4,
       backendSessionIdAtStart: null,
       backendSessionIdAtEnd: null,
     },
@@ -188,14 +188,14 @@ test("resolveResumeTarget rejects a manifest with a session missing brief", () =
   );
 });
 
-test("resolveResumeTarget accepts a well-formed v10 manifest from the unknown bucket", () => {
+test("resolveResumeTarget accepts a well-formed v11 manifest from the unknown bucket", () => {
   const dir = tempDir();
   const workspaceDir = join(dir, "runs", "unknown", "wellformed");
   writeManifest(dir, "unknown", "wellformed", baseManifest("wellformed", workspaceDir));
 
   const resolved = withStateRoot(dir, () => resolveResumeTarget("wellformed", dir));
   assert.equal(resolved.manifest.runId, "wellformed");
-  assert.equal(resolved.manifest.schemaVersion, 10);
+  assert.equal(resolved.manifest.schemaVersion, 11);
 });
 
 test("resume/list/find ignore legacy assignmentPath capture when workspaceDir matches", () => {
@@ -226,7 +226,7 @@ test("resume/list/find ignore legacy assignmentPath capture when workspaceDir ma
 
 function baseManifest(runId, workspaceDir) {
   return {
-    schemaVersion: 10,
+    schemaVersion: 11,
     runId,
     repo: "unknown",
     agent: {
@@ -256,8 +256,8 @@ function baseManifest(runId, workspaceDir) {
     status: "success",
     dependencyRunIds: [],
     exitCode: 0,
-    attempts: 1,
-    maxAttempts: 4,
+    totalAttemptCount: 1,
+    maxAttemptsPerSession: 4,
     tasksCompleted: 1,
     tasksTotal: 1,
     backendSessionId: "sess-base",
@@ -291,7 +291,7 @@ function baseManifest(runId, workspaceDir) {
       dependencyRunIds: [],
       unrestricted: false,
       timeoutSec: 3600,
-      maxAttempts: 4,
+      maxAttemptsPerSession: 4,
       brief: "seed prompt",
       runtimeVars: {},
       hookState: {},
@@ -315,7 +315,7 @@ function baseManifest(runId, workspaceDir) {
         notes: "",
       },
     },
-    sessionCount: 1,
+    totalSessionCount: 1,
     sessions: [],
     attemptRecords: [],
   };

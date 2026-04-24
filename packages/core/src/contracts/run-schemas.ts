@@ -27,6 +27,7 @@ import type {
   RunNameResult,
   RunNoteResult,
   RunPinnedResult,
+  RunSessionSummary,
   RunStatus,
   RunSummary,
   RunTaskMutationCapabilities,
@@ -138,9 +139,24 @@ const hookAuditRecordSchema = z.object({
   endedAt: z.string(),
   outcome: z.string(),
   sessionIndex: z.number().nullable(),
-  attempt: z.number().nullable(),
+  attemptNumber: z.number().nullable(),
   taskId: z.string().nullable(),
   summary: z.string().nullable(),
+});
+
+const runSessionSummarySchema: z.ZodType<RunSessionSummary> = z.object({
+  sessionIndex: z.number(),
+  status: runStatusSchema,
+  startedAt: z.string(),
+  endedAt: z.string().nullable(),
+  exitCode: z.number().nullable(),
+  message: z.string().nullable(),
+  firstAttemptNumber: z.number().nullable(),
+  lastAttemptNumber: z.number().nullable(),
+  attemptCount: z.number(),
+  maxAttemptsPerSession: z.number(),
+  backendSessionIdAtStart: z.string().nullable(),
+  backendSessionIdAtEnd: z.string().nullable(),
 });
 
 export const attachmentListEntrySchema: z.ZodType<AttachmentListEntry> =
@@ -183,6 +199,11 @@ export const runSummarySchema: z.ZodType<RunSummary> = z.object({
   cwd: z.string(),
   startedAt: z.string(),
   endedAt: z.string().nullable(),
+  totalAttemptCount: z.number(),
+  totalSessionCount: z.number(),
+  maxAttemptsPerSession: z.number(),
+  currentSession: runSessionSummarySchema.nullable(),
+  lastSession: runSessionSummarySchema.nullable(),
   tasksCompleted: z.number(),
   tasksTotal: z.number(),
   attachmentCount: z.number(),
@@ -227,9 +248,12 @@ export const runDetailSchema: z.ZodType<RunDetail> = z.object({
   startedAt: z.string(),
   endedAt: z.string().nullable(),
   exitCode: z.number().nullable(),
-  attempts: z.number(),
-  maxAttempts: z.number(),
-  sessionCount: z.number(),
+  totalAttemptCount: z.number(),
+  totalSessionCount: z.number(),
+  maxAttemptsPerSession: z.number(),
+  sessions: z.array(runSessionSummarySchema),
+  currentSession: runSessionSummarySchema.nullable(),
+  lastSession: runSessionSummarySchema.nullable(),
   tasksCompleted: z.number(),
   tasksTotal: z.number(),
   attachments: z.array(runAttachmentSchema),
@@ -318,8 +342,9 @@ export const runTimelineEventSchema = z
   .passthrough() as z.ZodType<RunTimelineEvent>;
 
 export const runTimelineAttemptSchema: z.ZodType<RunTimelineAttempt> = z.object({
-  attempt: z.number().int().positive(),
+  attemptNumber: z.number().int().positive(),
   sessionIndex: z.number().int().nonnegative(),
+  attemptIndexInSession: z.number().int().nonnegative(),
   startedAt: z.string(),
   endedAt: z.string().nullable(),
   prompt: z.string(),
@@ -349,7 +374,7 @@ export const runAuditEventSchema: z.ZodType<RunAuditEvent> = z.object({
   hostMode: z.enum(["embedded", "daemon"]),
   controllerInstanceId: z.string().optional(),
   sessionIndex: z.number().int().nonnegative().optional(),
-  attempt: z.number().int().nonnegative().optional(),
+  attemptNumber: z.number().int().nonnegative().optional(),
   fields: z.record(z.string(), z.unknown()),
 });
 

@@ -457,7 +457,7 @@ Audit active assignment.
       hookId: record.hookId,
       outcome: record.outcome,
       sessionIndex: record.sessionIndex ?? null,
-      attempt: record.attempt ?? null,
+      attemptNumber: record.attemptNumber ?? null,
       taskId: record.taskId ?? null,
       summary: record.summary ?? null,
     })),
@@ -467,7 +467,7 @@ Audit active assignment.
         hookId: "prepare:0:audit-prepare",
         outcome: "continue",
         sessionIndex: null,
-        attempt: null,
+        attemptNumber: null,
         taskId: null,
         summary: null,
       },
@@ -476,7 +476,7 @@ Audit active assignment.
         hookId: "beforeAttempt:0:audit-before",
         outcome: "continue",
         sessionIndex: 0,
-        attempt: 1,
+        attemptNumber: 1,
         taskId: null,
         summary: null,
       },
@@ -485,7 +485,7 @@ Audit active assignment.
         hookId: "afterAttempt:0:audit-after",
         outcome: "continue",
         sessionIndex: 0,
-        attempt: 1,
+        attemptNumber: 1,
         taskId: null,
         summary: null,
       },
@@ -759,7 +759,7 @@ test("command and task mutations append compact records, preserve history on res
   assert.equal(records[finishedIndex].source, "system");
   assert.equal(records[finishedIndex].terminalStatus, "blocked");
   assert.equal(records[finishedIndex].sessionIndex, undefined);
-  assert.equal(records[finishedIndex].attempt, undefined);
+  assert.equal(records[finishedIndex].attemptNumber, undefined);
 
   runCli(["run", "archive", init.runId], { cwd: dir });
   runCli(["run", "delete", init.runId], { cwd: dir });
@@ -828,7 +828,7 @@ Audit passive assignment.
       hookId: hookEvents[0].hookId,
       outcome: hookEvents[0].outcome,
       sessionIndex: hookEvents[0].sessionIndex ?? null,
-      attempt: hookEvents[0].attempt ?? null,
+      attemptNumber: hookEvents[0].attemptNumber ?? null,
       taskId: hookEvents[0].taskId ?? null,
       summary: hookEvents[0].summary ?? null,
       source: hookEvents[0].source,
@@ -838,7 +838,7 @@ Audit passive assignment.
       hookId: "taskTransition:0:audit-task-transition",
       outcome: "accepted",
       sessionIndex: null,
-      attempt: null,
+      attemptNumber: null,
       taskId: "t1",
       summary: null,
       source: "task_command",
@@ -878,7 +878,7 @@ test("audit append failure after attempt persistence does not duplicate the atte
 
   const manifest = JSON.parse(readFileSync(join(workspaceDir, "run.json"), "utf8"));
   assert.equal(manifest.attemptRecords.length, 1);
-  assert.equal(manifest.attempts, 1);
+  assert.equal(manifest.totalAttemptCount, 1);
   assert.equal(manifest.attemptRecords[0].exitCode, 0);
 });
 

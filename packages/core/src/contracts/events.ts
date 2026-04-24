@@ -24,8 +24,9 @@ export type RunTimelineEvent = RunEvent;
 
 // One normalized attempt snapshot in the per-run timeline history response.
 export interface RunTimelineAttempt {
-  attempt: number;
+  attemptNumber: number;
   sessionIndex: number;
+  attemptIndexInSession: number;
   startedAt: string;
   endedAt: string | null;
   prompt: string;

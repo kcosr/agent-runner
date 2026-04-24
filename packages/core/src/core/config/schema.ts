@@ -120,7 +120,7 @@ const attemptWhenValueSchema = z.union([
 const attemptHookWhenSchema = z
   .object({
     sessionIndex: attemptWhenValueSchema.optional(),
-    attemptInSession: attemptWhenValueSchema.optional(),
+    attemptIndexInSession: attemptWhenValueSchema.optional(),
   })
   .strict();
 

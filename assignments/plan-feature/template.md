@@ -24,7 +24,7 @@ hooks:
     - builtin: git-worktree
       when:
         sessionIndex: [0]
-        attemptInSession: [0]
+        attemptIndexInSession: [0]
       with:
         repo: "{{repo_root}}"
         from: "{{worktree_base_ref}}"
@@ -34,7 +34,7 @@ hooks:
     - builtin: command
       when:
         sessionIndex: [0]
-        attemptInSession: [0]
+        attemptIndexInSession: [0]
       with:
         mode: status
         command: git
@@ -45,7 +45,7 @@ hooks:
     - builtin: command
       when:
         sessionIndex: [0]
-        attemptInSession: [0]
+        attemptIndexInSession: [0]
       with:
         mode: status
         command: git

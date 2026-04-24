@@ -118,8 +118,8 @@ function patchManifest(workspaceDir, mutator) {
 function markRunRunning(workspaceDir) {
   patchManifest(workspaceDir, (manifest) => {
     manifest.status = "running";
-    manifest.attempts = Math.max(manifest.attempts, 1);
-    manifest.sessionCount = Math.max(manifest.sessionCount, 1);
+    manifest.totalAttemptCount = Math.max(manifest.totalAttemptCount, 1);
+    manifest.totalSessionCount = Math.max(manifest.totalSessionCount, 1);
   });
 }
 
@@ -128,7 +128,7 @@ function markRunSuccessful(workspaceDir) {
     manifest.status = "success";
     manifest.endedAt ??= "2026-04-21T12:05:00.000Z";
     manifest.exitCode = 0;
-    manifest.attempts = Math.max(manifest.attempts, 1);
+    manifest.totalAttemptCount = Math.max(manifest.totalAttemptCount, 1);
     manifest.tasksCompleted = manifest.tasksTotal;
     for (const task of Object.values(manifest.finalTasks)) {
       task.status = "completed";
@@ -154,8 +154,10 @@ function emitRunFinished(emitEvent, runId, status = "success") {
     type: "run_finished",
     summary: {
       status,
-      attempts: 1,
-      maxAttempts: 1,
+      sessionAttemptCount: 1,
+      totalAttemptCount: 1,
+      maxAttemptsPerSession: 1,
+      totalSessionCount: 1,
       tasksCompleted: 1,
       tasksTotal: 1,
       assignmentPath: "/tmp/fake/assignment-seed.md",
@@ -1588,9 +1590,9 @@ test("daemon run projections expose explicit abort capability from local ownersh
         startedAt: "2026-04-13T05:00:00.000Z",
         endedAt: null,
         exitCode: null,
-        attempts: 1,
-        maxAttempts: 1,
-        sessionCount: 1,
+        totalAttemptCount: 1,
+        maxAttemptsPerSession: 1,
+        totalSessionCount: 1,
         tasksCompleted: 0,
         tasksTotal: 1,
         activeTask: null,
@@ -1685,9 +1687,16 @@ test("daemon run projections expose explicit abort capability from local ownersh
         assignmentPath: "/tmp/fake/assignment-seed.md",
         name: "Daemon-owned run",
         cwd: "/tmp/fake",
-        sessionIndex: 1,
+        sessionIndex: 0,
       });
-      emitEvent({ type: "attempt_started", attempt: 1 });
+      emitEvent({
+        type: "attempt_started",
+        attemptNumber: 1,
+        sessionIndex: 0,
+        attemptIndexInSession: 0,
+        startedAt: "2026-04-13T05:00:01.000Z",
+        prompt: "Abort prompt",
+      });
       await new Promise((resolve) => {
         abortSignal.addEventListener(
           "abort",
@@ -1697,8 +1706,10 @@ test("daemon run projections expose explicit abort capability from local ownersh
               type: "run_finished",
               summary: {
                 status: "aborted",
-                attempts: 1,
-                maxAttempts: 1,
+                sessionAttemptCount: 1,
+                totalAttemptCount: 1,
+                maxAttemptsPerSession: 1,
+                totalSessionCount: 1,
                 tasksCompleted: 0,
                 tasksTotal: 1,
                 assignmentPath: "/tmp/fake/assignment-seed.md",
@@ -1788,9 +1799,9 @@ test("daemon projects active run detail as live while it owns the run", async ()
         startedAt: "2026-04-13T05:00:00.000Z",
         endedAt: null,
         exitCode: null,
-        attempts: 1,
-        maxAttempts: 1,
-        sessionCount: 1,
+        totalAttemptCount: 1,
+        maxAttemptsPerSession: 1,
+        totalSessionCount: 1,
         tasksCompleted: 0,
         tasksTotal: 1,
         activeTask: null,
@@ -1901,8 +1912,10 @@ test("daemon projects active run detail as live while it owns the run", async ()
               type: "run_finished",
               summary: {
                 status: "aborted",
-                attempts: 1,
-                maxAttempts: 1,
+                sessionAttemptCount: 1,
+                totalAttemptCount: 1,
+                maxAttemptsPerSession: 1,
+                totalSessionCount: 1,
                 tasksCompleted: 0,
                 tasksTotal: 1,
                 assignmentPath: "/tmp/fake/assignment-seed.md",
@@ -1993,9 +2006,9 @@ test("daemon HTTP projections preserve hook summary and detail fields", async ()
         startedAt: "2026-04-20T10:00:00.000Z",
         endedAt: null,
         exitCode: null,
-        attempts: 0,
-        maxAttempts: 1,
-        sessionCount: 0,
+        totalAttemptCount: 0,
+        maxAttemptsPerSession: 1,
+        totalSessionCount: 0,
         tasksCompleted: 0,
         tasksTotal: 1,
         attachments: [],
@@ -2018,7 +2031,7 @@ test("daemon HTTP projections preserve hook summary and detail fields", async ()
             endedAt: "2026-04-20T10:00:01.000Z",
             outcome: "continue",
             sessionIndex: null,
-            attempt: null,
+            attemptNumber: null,
             taskId: null,
             summary: null,
           },
@@ -2161,9 +2174,9 @@ test("daemon subscriptions fan out run events and abort active runs", async () =
         startedAt: "2026-04-13T05:00:00.000Z",
         endedAt: status === "aborted" ? "2026-04-13T05:05:00.000Z" : null,
         exitCode: status === "aborted" ? 130 : null,
-        attempts: 1,
-        maxAttempts: 1,
-        sessionCount: 1,
+        totalAttemptCount: 1,
+        maxAttemptsPerSession: 1,
+        totalSessionCount: 1,
         tasksCompleted: 0,
         tasksTotal: 0,
         attachments: [],
@@ -2200,8 +2213,10 @@ test("daemon subscriptions fan out run events and abort active runs", async () =
       const runId = "daemon-live-run";
       const summary = {
         status: "aborted",
-        attempts: 1,
-        maxAttempts: 1,
+        sessionAttemptCount: 1,
+        totalAttemptCount: 1,
+        maxAttemptsPerSession: 1,
+        totalSessionCount: 1,
         tasksCompleted: 0,
         tasksTotal: 0,
         assignmentPath: "/tmp/fake/assignment-seed.md",
@@ -2218,7 +2233,14 @@ test("daemon subscriptions fan out run events and abort active runs", async () =
         cwd: process.cwd(),
         sessionIndex: null,
       });
-      emitEvent({ type: "attempt_started", attempt: 1 });
+      emitEvent({
+        type: "attempt_started",
+        attemptNumber: 1,
+        sessionIndex: 0,
+        attemptIndexInSession: 0,
+        startedAt: "2026-04-13T05:00:01.000Z",
+        prompt: "Abort prompt",
+      });
       await new Promise((resolve) => {
         abortSignal.addEventListener(
           "abort",
@@ -2309,9 +2331,9 @@ test("daemon republishes summary and detail projections when a run retries", asy
         startedAt: "2026-04-13T05:00:00.000Z",
         endedAt: status === "success" ? "2026-04-13T05:05:00.000Z" : null,
         exitCode: status === "success" ? 0 : null,
-        attempts: status === "success" ? 2 : 1,
-        maxAttempts: 2,
-        sessionCount: 1,
+        totalAttemptCount: status === "success" ? 2 : 1,
+        maxAttemptsPerSession: 2,
+        totalSessionCount: 1,
         tasksCompleted,
         tasksTotal: 2,
         attachments: [],
@@ -2406,8 +2428,9 @@ test("daemon republishes summary and detail projections when a run retries", asy
       });
       emitEvent({
         type: "attempt_started",
-        attempt: 1,
+        attemptNumber: 1,
         sessionIndex: 0,
+        attemptIndexInSession: 0,
         startedAt: "2026-04-13T05:00:01.000Z",
         prompt: "Attempt one",
       });
@@ -2425,8 +2448,10 @@ test("daemon republishes summary and detail projections when a run retries", asy
         type: "run_finished",
         summary: {
           status: "success",
-          attempts: 2,
-          maxAttempts: 2,
+          sessionAttemptCount: 2,
+          totalAttemptCount: 2,
+          maxAttemptsPerSession: 2,
+          totalSessionCount: 1,
           tasksCompleted: 2,
           tasksTotal: 2,
           assignmentPath: "/tmp/fake/assignment-seed.md",
@@ -3075,9 +3100,9 @@ test("daemon SSE streams split summary, detail, and timeline subscriptions", asy
         startedAt: "2026-04-13T05:00:00.000Z",
         endedAt: status === "aborted" ? "2026-04-13T05:05:00.000Z" : null,
         exitCode: status === "aborted" ? 130 : null,
-        attempts: 1,
-        maxAttempts: 1,
-        sessionCount: 1,
+        totalAttemptCount: 1,
+        maxAttemptsPerSession: 1,
+        totalSessionCount: 1,
         tasksCompleted: 0,
         tasksTotal: 1,
         attachments: [],
@@ -3184,8 +3209,9 @@ test("daemon SSE streams split summary, detail, and timeline subscriptions", asy
       });
       emitEvent({
         type: "attempt_started",
-        attempt: 1,
+        attemptNumber: 1,
         sessionIndex: 0,
+        attemptIndexInSession: 0,
         startedAt: "2026-04-13T05:00:01.000Z",
         prompt: "SSE prompt",
       });
@@ -3200,8 +3226,10 @@ test("daemon SSE streams split summary, detail, and timeline subscriptions", asy
               type: "run_finished",
               summary: {
                 status: "aborted",
-                attempts: 1,
-                maxAttempts: 1,
+                sessionAttemptCount: 1,
+                totalAttemptCount: 1,
+                maxAttemptsPerSession: 1,
+                totalSessionCount: 1,
                 tasksCompleted: 0,
                 tasksTotal: 0,
                 assignmentPath: "/tmp/fake/assignment-seed.md",
@@ -3273,8 +3301,9 @@ test("daemon serves timeline history and cursored timeline replay over HTTP and 
     runId,
     attempts: [
       {
-        attempt: 1,
+        attemptNumber: 1,
         sessionIndex: 0,
+        attemptIndexInSession: 0,
         startedAt: "2026-04-13T05:00:00.000Z",
         endedAt: "2026-04-13T05:02:00.000Z",
         prompt: "Initial prompt",
@@ -3322,9 +3351,9 @@ test("daemon serves timeline history and cursored timeline replay over HTTP and 
         startedAt: "2026-04-13T05:00:00.000Z",
         endedAt: null,
         exitCode: null,
-        attempts: 1,
-        maxAttempts: 3,
-        sessionCount: 1,
+        totalAttemptCount: status === "running" ? 2 : 1,
+        maxAttemptsPerSession: 3,
+        totalSessionCount: status === "running" ? 2 : 1,
         tasksCompleted: 1,
         tasksTotal: 1,
         attachments: [],
@@ -3420,8 +3449,9 @@ test("daemon serves timeline history and cursored timeline replay over HTTP and 
       });
       emitEvent({
         type: "attempt_started",
-        attempt: 2,
+        attemptNumber: 2,
         sessionIndex: 1,
+        attemptIndexInSession: 0,
         startedAt: "2026-04-13T05:03:00.000Z",
         prompt: "Resume prompt",
       });
@@ -3438,8 +3468,10 @@ test("daemon serves timeline history and cursored timeline replay over HTTP and 
               type: "run_finished",
               summary: {
                 status: "aborted",
-                attempts: 2,
-                maxAttempts: 3,
+                sessionAttemptCount: 1,
+                totalAttemptCount: 2,
+                maxAttemptsPerSession: 3,
+                totalSessionCount: 2,
                 tasksCompleted: 1,
                 tasksTotal: 1,
                 assignmentPath: "/tmp/fake/assignment-seed.md",
@@ -3557,9 +3589,9 @@ test("daemon serves audit history and cursored audit replay over HTTP and websoc
         startedAt: "2026-04-13T05:00:00.000Z",
         endedAt: null,
         exitCode: null,
-        attempts: 1,
-        maxAttempts: 3,
-        sessionCount: 1,
+        totalAttemptCount: 1,
+        maxAttemptsPerSession: 3,
+        totalSessionCount: 1,
         tasksCompleted: 0,
         tasksTotal: 1,
         attachments: [],
@@ -3721,8 +3753,10 @@ test("daemon serves audit history and cursored audit replay over HTTP and websoc
               type: "run_finished",
               summary: {
                 status: "aborted",
-                attempts: 1,
-                maxAttempts: 1,
+                sessionAttemptCount: 1,
+                totalAttemptCount: 1,
+                maxAttemptsPerSession: 1,
+                totalSessionCount: 1,
                 tasksCompleted: 1,
                 tasksTotal: 1,
                 assignmentPath: "/tmp/fake/assignment-seed.md",
@@ -3861,8 +3895,10 @@ test("daemon close aborts active runs and releases connected clients", async () 
               type: "run_finished",
               summary: {
                 status: "aborted",
-                attempts: 1,
-                maxAttempts: 1,
+                sessionAttemptCount: 1,
+                totalAttemptCount: 1,
+                maxAttemptsPerSession: 1,
+                totalSessionCount: 1,
                 tasksCompleted: 0,
                 tasksTotal: 0,
                 assignmentPath: "/tmp/fake/assignment-seed.md",

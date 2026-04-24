@@ -117,6 +117,15 @@ timeline stream (`RunTimelineEnvelope`). The drawer surfaces:
   top-level drawer section tabs stay on one line and scroll horizontally
   instead of wrapping.
 
+A run is the durable lifecycle record. Each backend execution window is a
+session: the fresh execution creates session `0`, and each resume creates
+the next session. Attempts are backend invocations within a session.
+`maxAttemptsPerSession` is the per-session retry budget. Attempt numbers
+are monotonic across the run, while `attemptIndexInSession` is zero-based
+within its session. The Attempts tab groups timeline rows by session and
+labels each row with its monotonic attempt number plus session-local
+attempt position.
+
 ## Live projections
 
 The dashboard consumes four independent streams:

@@ -30,7 +30,7 @@ function buildManifest(overrides = {}) {
   };
 
   return {
-    schemaVersion: 10,
+    schemaVersion: 11,
     runId: "run123",
     repo: "demo-repo",
     agent: {
@@ -67,8 +67,8 @@ function buildManifest(overrides = {}) {
     dependencyRunIds: [],
     parentRunId: null,
     exitCode: null,
-    attempts: 0,
-    maxAttempts: 2,
+    totalAttemptCount: 0,
+    maxAttemptsPerSession: 2,
     tasksCompleted: Object.values(finalTasks).filter((task) => task.status === "completed").length,
     tasksTotal: Object.keys(finalTasks).length,
     backendSessionId: null,
@@ -114,7 +114,7 @@ function buildManifest(overrides = {}) {
       parentRunId: null,
       unrestricted: false,
       timeoutSec: 3600,
-      maxAttempts: 2,
+      maxAttemptsPerSession: 2,
       brief: "Prepared handoff prompt.",
       runtimeVars: {},
       runtimeVarSources: {},
@@ -123,7 +123,7 @@ function buildManifest(overrides = {}) {
       finalTasks,
     },
     finalTasks,
-    sessionCount: 0,
+    totalSessionCount: 0,
     sessions: [],
     attemptRecords: [],
     ...overrides,
@@ -160,6 +160,11 @@ test("run contracts: toRunSummary maps listed manifest rows to the neutral summa
     cwd: "/repo",
     startedAt: "2026-04-12T10:00:00.000Z",
     endedAt: "2026-04-12T10:05:00.000Z",
+    totalAttemptCount: 0,
+    totalSessionCount: 0,
+    maxAttemptsPerSession: 2,
+    currentSession: null,
+    lastSession: null,
     tasksCompleted: 1,
     tasksTotal: 2,
     attachmentCount: 0,
@@ -217,7 +222,7 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
     status: "success",
     endedAt: "2026-04-12T10:05:00.000Z",
     exitCode: 0,
-    attempts: 1,
+    totalAttemptCount: 1,
     backendSessionId: "sess-123",
   });
 
@@ -274,9 +279,12 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
     startedAt: "2026-04-12T10:00:00.000Z",
     endedAt: "2026-04-12T10:05:00.000Z",
     exitCode: 0,
-    attempts: 1,
-    maxAttempts: 2,
-    sessionCount: 0,
+    totalAttemptCount: 1,
+    totalSessionCount: 0,
+    maxAttemptsPerSession: 2,
+    sessions: [],
+    currentSession: null,
+    lastSession: null,
     tasksCompleted: 1,
     tasksTotal: 2,
     attachments: [],
@@ -317,7 +325,7 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
   });
 });
 
-test("run contracts: toRunDetail normalizes legacy hook fields missing from older manifests", () => {
+test("run contracts: toRunDetail projects hook descriptors and audit attemptNumber", () => {
   const manifest = buildManifest({
     resolvedHooks: [
       {
@@ -337,7 +345,7 @@ test("run contracts: toRunDetail normalizes legacy hook fields missing from olde
         endedAt: "2026-04-12T10:00:01.000Z",
         outcome: "continue",
         sessionIndex: null,
-        attempt: null,
+        attemptNumber: null,
         taskId: null,
       },
     ],
@@ -367,7 +375,7 @@ test("run contracts: toRunDetail normalizes legacy hook fields missing from olde
       endedAt: "2026-04-12T10:00:01.000Z",
       outcome: "continue",
       sessionIndex: null,
-      attempt: null,
+      attemptNumber: null,
       taskId: null,
       summary: null,
     },
@@ -713,7 +721,7 @@ test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mu
       archivedAt: "2026-04-12T11:00:00.000Z",
       endedAt: "2026-04-12T10:05:00.000Z",
       exitCode: 0,
-      attempts: 1,
+      totalAttemptCount: 1,
     }),
   );
   assert.deepEqual(archived, {

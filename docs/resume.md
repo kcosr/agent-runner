@@ -111,10 +111,15 @@ stored `manifest.brief` is reused verbatim.
 ## Retry nudges
 
 Within a single `run` invocation, task-runner may retry the backend up to
-`maxAttempts` times. If tasks remain incomplete at the end of an attempt,
-the retry prompt points the worker back at the task CLI and identifies the
-incomplete tasks. This is not a resume — it is a retry inside the same
-session.
+`maxAttemptsPerSession` times. A run is the durable lifecycle record. Each
+backend execution window is a session: the fresh execution creates session
+`0`, and each resume creates the next session. Attempts are backend
+invocations within a session. `maxAttemptsPerSession` is the per-session
+retry budget. Attempt numbers are monotonic across the run, while
+`attemptIndexInSession` is zero-based within its session. If tasks remain
+incomplete at the end of an attempt, the retry prompt points the worker
+back at the task CLI and identifies the incomplete tasks. This is not a
+resume — it is a retry inside the same session.
 
 ## Reset vs resume
 

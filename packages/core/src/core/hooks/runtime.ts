@@ -62,7 +62,7 @@ interface HookExecutionState {
 
 interface HookAuditContext {
   sessionIndex: number | null;
-  attempt: number | null;
+  attemptNumber: number | null;
   taskId: string | null;
 }
 
@@ -110,7 +110,7 @@ function buildAuditRecord(
     endedAt,
     outcome,
     sessionIndex: context.sessionIndex,
-    attempt: context.attempt,
+    attemptNumber: context.attemptNumber,
     taskId: context.taskId,
     summary,
   };
@@ -136,7 +136,7 @@ function recordHookAudit(
     startedAt: audit.startedAt,
     endedAt: audit.endedAt,
     sessionIndex: audit.sessionIndex,
-    attempt: audit.attempt,
+    attemptNumber: audit.attemptNumber,
     taskId: audit.taskId,
     summary: audit.summary,
   });
@@ -341,7 +341,7 @@ function matchesTaskTransitionWhen(
 function matchesAttemptWhen(
   descriptor: ResolvedHookDescriptor,
   sessionIndex: number,
-  attemptInSession: number,
+  attemptIndexInSession: number,
 ): boolean {
   const when = descriptor.when;
   if (!when) {
@@ -371,10 +371,10 @@ function matchesAttemptWhen(
     }
   }
 
-  if (attemptWhen.attemptInSession !== undefined) {
-    const configured = attemptWhen.attemptInSession;
+  if (attemptWhen.attemptIndexInSession !== undefined) {
+    const configured = attemptWhen.attemptIndexInSession;
     if (typeof configured === "number" && Number.isInteger(configured) && configured >= 0) {
-      if (configured !== attemptInSession) {
+      if (configured !== attemptIndexInSession) {
         return false;
       }
     } else if (
@@ -383,12 +383,12 @@ function matchesAttemptWhen(
         (value) => typeof value === "number" && Number.isInteger(value) && value >= 0,
       )
     ) {
-      if (!configured.includes(attemptInSession)) {
+      if (!configured.includes(attemptIndexInSession)) {
         return false;
       }
     } else {
       throw new HookRuntimeError(
-        `hook ${descriptor.hookId} when.attemptInSession must be a non-negative integer or array of non-negative integers`,
+        `hook ${descriptor.hookId} when.attemptIndexInSession must be a non-negative integer or array of non-negative integers`,
       );
     }
   }
@@ -419,7 +419,7 @@ function attemptContext(
   descriptor: ResolvedHookDescriptor,
   state: HookExecutionState,
   sessionIndex: number,
-  attemptInSession: number,
+  attemptIndexInSession: number,
   retriesRemaining: number,
   attemptResult?: AttemptResultSnapshot,
 ): AttemptHookContext {
@@ -445,9 +445,9 @@ function attemptContext(
       note: state.manifest.note,
       pinned: state.manifest.pinned,
       backendSessionId: state.manifest.backendSessionId,
-      attempts: state.manifest.attempts,
-      maxAttempts: state.manifest.maxAttempts,
-      sessionCount: state.manifest.sessionCount,
+      totalAttemptCount: state.manifest.totalAttemptCount,
+      maxAttemptsPerSession: state.manifest.maxAttemptsPerSession,
+      totalSessionCount: state.manifest.totalSessionCount,
     },
     vars: { ...state.manifest.runtimeVars },
     state: { ...state.manifest.hookState },
@@ -458,7 +458,7 @@ function attemptContext(
     attemptResult,
     retriesRemaining,
     sessionIndex,
-    attemptInSession,
+    attemptIndexInSession,
   };
 }
 
@@ -469,7 +469,7 @@ function prepareContext(
   initialLockedFields: LockableField[],
 ): PrepareHookContext {
   return {
-    ...attemptContext(descriptor, state, 0, 0, state.manifest.maxAttempts - 1),
+    ...attemptContext(descriptor, state, 0, 0, state.manifest.maxAttemptsPerSession - 1),
     phase: "prepare",
     defaultInitialPrompt,
     currentInitialPrompt: state.initialPrompt,
@@ -486,9 +486,9 @@ function taskTransitionContext(
     ...attemptContext(
       descriptor,
       state,
-      state.manifest.sessionCount,
+      state.manifest.totalSessionCount,
       0,
-      state.manifest.maxAttempts,
+      state.manifest.maxAttemptsPerSession,
     ),
     phase: "taskTransition",
     transition,
@@ -518,7 +518,7 @@ export async function runPrepareHooks(
           descriptor,
           "skipped",
           null,
-          { sessionIndex: null, attempt: null, taskId: null },
+          { sessionIndex: null, attemptNumber: null, taskId: null },
           startedAt,
           new Date().toISOString(),
         );
@@ -536,7 +536,7 @@ export async function runPrepareHooks(
         descriptor,
         hookResult.action,
         null,
-        { sessionIndex: null, attempt: null, taskId: null },
+        { sessionIndex: null, attemptNumber: null, taskId: null },
         startedAt,
         new Date().toISOString(),
       );
@@ -546,7 +546,7 @@ export async function runPrepareHooks(
         descriptor,
         "error",
         error instanceof Error ? error.message : String(error),
-        { sessionIndex: null, attempt: null, taskId: null },
+        { sessionIndex: null, attemptNumber: null, taskId: null },
         startedAt,
         new Date().toISOString(),
       );
@@ -560,14 +560,14 @@ export async function runAttemptHooks(
   state: HookExecutionState,
   options: {
     sessionIndex: number;
-    attemptInSession: number;
-    attempt: number | null;
+    attemptIndexInSession: number;
+    attemptNumber: number | null;
     retriesRemaining: number;
     attemptResult?: AttemptResultSnapshot;
   },
 ): Promise<AttemptPhaseResult> {
   for (const descriptor of state.manifest.resolvedHooks.filter((entry) => entry.phase === phase)) {
-    if (!matchesAttemptWhen(descriptor, options.sessionIndex, options.attemptInSession)) {
+    if (!matchesAttemptWhen(descriptor, options.sessionIndex, options.attemptIndexInSession)) {
       continue;
     }
     const startedAt = new Date().toISOString();
@@ -580,7 +580,7 @@ export async function runAttemptHooks(
           descriptor,
           state,
           options.sessionIndex,
-          options.attemptInSession,
+          options.attemptIndexInSession,
           options.retriesRemaining,
           options.attemptResult,
         ),
@@ -591,7 +591,11 @@ export async function runAttemptHooks(
           descriptor,
           "skipped",
           null,
-          { sessionIndex: options.sessionIndex, attempt: options.attempt, taskId: null },
+          {
+            sessionIndex: options.sessionIndex,
+            attemptNumber: options.attemptNumber,
+            taskId: null,
+          },
           startedAt,
           new Date().toISOString(),
         );
@@ -603,7 +607,7 @@ export async function runAttemptHooks(
         descriptor,
         result.action,
         result.action === "block" ? result.reason : null,
-        { sessionIndex: options.sessionIndex, attempt: options.attempt, taskId: null },
+        { sessionIndex: options.sessionIndex, attemptNumber: options.attemptNumber, taskId: null },
         startedAt,
         new Date().toISOString(),
       );
@@ -626,7 +630,7 @@ export async function runAttemptHooks(
         descriptor,
         "error",
         error instanceof Error ? error.message : String(error),
-        { sessionIndex: options.sessionIndex, attempt: options.attempt, taskId: null },
+        { sessionIndex: options.sessionIndex, attemptNumber: options.attemptNumber, taskId: null },
         startedAt,
         new Date().toISOString(),
       );
@@ -681,7 +685,7 @@ export async function runTaskTransitionHooks(
           descriptor,
           "skipped",
           null,
-          { sessionIndex: null, attempt: null, taskId: options.taskId },
+          { sessionIndex: null, attemptNumber: null, taskId: options.taskId },
           startedAt,
           new Date().toISOString(),
         );
@@ -693,7 +697,7 @@ export async function runTaskTransitionHooks(
         descriptor,
         result.accept ? "accepted" : "rejected",
         result.accept ? null : result.reason,
-        { sessionIndex: null, attempt: null, taskId: options.taskId },
+        { sessionIndex: null, attemptNumber: null, taskId: options.taskId },
         startedAt,
         new Date().toISOString(),
       );
@@ -709,7 +713,7 @@ export async function runTaskTransitionHooks(
         descriptor,
         "error",
         error instanceof Error ? error.message : String(error),
-        { sessionIndex: null, attempt: null, taskId: options.taskId },
+        { sessionIndex: null, attemptNumber: null, taskId: options.taskId },
         startedAt,
         new Date().toISOString(),
       );

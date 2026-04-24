@@ -136,12 +136,12 @@ function readManifest(workspaceDir) {
   return JSON.parse(readFileSync(join(workspaceDir, "run.json"), "utf8"));
 }
 
-test("manifest schemaVersion is 10 and captures repo", async () => {
+test("manifest schemaVersion is 11 and captures repo", async () => {
   const dir = tempDir();
   writeAgent(dir, "canonical-claude", CLAUDE_AGENT);
   writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
   const outcome = await freshRun(dir, { initialize: true });
-  assert.equal(outcome.manifest.schemaVersion, 10);
+  assert.equal(outcome.manifest.schemaVersion, 11);
   assert.equal(outcome.manifest.repo, "unknown");
   assert.equal(outcome.manifest.archivedAt, null);
 });
@@ -376,15 +376,15 @@ test("schemaVersion mismatch: resume rejects a v1 manifest with a clear error", 
     endedAt: null,
     status: "success",
     exitCode: 0,
-    attempts: 1,
-    maxAttempts: 4,
+    totalAttemptCount: 1,
+    maxAttemptsPerSession: 4,
     tasksCompleted: 0,
     tasksTotal: 0,
     backendSessionId: "sess-old",
     runtimeVars: {},
     brief: null,
     finalTasks: {},
-    sessionCount: 1,
+    totalSessionCount: 1,
     sessions: [],
     attemptRecords: [],
   };
@@ -395,7 +395,7 @@ test("schemaVersion mismatch: resume rejects a v1 manifest with a clear error", 
       () => resolveResumeTarget("stale01", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 1/);
-        assert.match(err.message, /requires schemaVersion 10/);
+        assert.match(err.message, /requires schemaVersion 11/);
         return true;
       },
     );
@@ -426,8 +426,8 @@ test("schemaVersion mismatch: resume rejects a v2 manifest with a clear error", 
     endedAt: null,
     status: "success",
     exitCode: 0,
-    attempts: 1,
-    maxAttempts: 4,
+    totalAttemptCount: 1,
+    maxAttemptsPerSession: 4,
     tasksCompleted: 0,
     tasksTotal: 0,
     backendSessionId: "sess-old",
@@ -435,7 +435,7 @@ test("schemaVersion mismatch: resume rejects a v2 manifest with a clear error", 
     brief: null,
     callerInstructions: null,
     finalTasks: {},
-    sessionCount: 1,
+    totalSessionCount: 1,
     sessions: [],
     attemptRecords: [],
   };
@@ -446,7 +446,7 @@ test("schemaVersion mismatch: resume rejects a v2 manifest with a clear error", 
       () => resolveResumeTarget("stale02", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 2/);
-        assert.match(err.message, /requires schemaVersion 10/);
+        assert.match(err.message, /requires schemaVersion 11/);
         return true;
       },
     );
@@ -477,8 +477,8 @@ test("schemaVersion mismatch: resume rejects a v7 manifest with a clear error", 
     endedAt: null,
     status: "success",
     exitCode: 0,
-    attempts: 1,
-    maxAttempts: 4,
+    totalAttemptCount: 1,
+    maxAttemptsPerSession: 4,
     tasksCompleted: 0,
     tasksTotal: 0,
     backendSessionId: "sess-old",
@@ -486,7 +486,7 @@ test("schemaVersion mismatch: resume rejects a v7 manifest with a clear error", 
     brief: null,
     callerInstructions: null,
     finalTasks: {},
-    sessionCount: 1,
+    totalSessionCount: 1,
     sessions: [],
     attemptRecords: [],
     archivedAt: null,
@@ -498,7 +498,60 @@ test("schemaVersion mismatch: resume rejects a v7 manifest with a clear error", 
       () => resolveResumeTarget("stale07", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 7/);
-        assert.match(err.message, /requires schemaVersion 10/);
+        assert.match(err.message, /requires schemaVersion 11/);
+        return true;
+      },
+    );
+  });
+});
+
+test("schemaVersion mismatch: resume rejects a v10 manifest with the v11 migration hint", async () => {
+  const dir = tempDir();
+  const workspaceDir = join(dir, "runs", "unknown", "stale10");
+  mkdirSync(workspaceDir, { recursive: true });
+  const v10Manifest = {
+    schemaVersion: 10,
+    runId: "stale10",
+    agent: { name: "old", sourcePath: "/tmp/agent.md", instructions: "" },
+    assignment: null,
+    backend: "claude",
+    model: null,
+    effort: null,
+    message: null,
+    name: null,
+    unrestricted: false,
+    cwd: dir,
+    lockedFields: [],
+    timeoutSec: 3600,
+    assignmentPath: join(workspaceDir, "assignment.md"),
+    workspaceDir,
+    startedAt: "2024-01-01T00:00:00Z",
+    endedAt: null,
+    status: "success",
+    exitCode: 0,
+    attempts: 1,
+    maxAttempts: 4,
+    tasksCompleted: 0,
+    tasksTotal: 0,
+    backendSessionId: "sess-old",
+    runtimeVars: {},
+    brief: null,
+    callerInstructions: null,
+    finalTasks: {},
+    sessionCount: 0,
+    sessions: [],
+    attemptRecords: [],
+    archivedAt: null,
+  };
+  writeFileSync(join(workspaceDir, "run.json"), `${JSON.stringify(v10Manifest, null, 2)}\n`);
+
+  await withSharedRuntimeEnv(dir, async () => {
+    assert.throws(
+      () => resolveResumeTarget("stale10", dir),
+      (err) => {
+        assert.match(err.message, /schemaVersion 10/);
+        assert.match(err.message, /requires schemaVersion 11/);
+        assert.match(err.message, /scripts\/migrate-manifests-v11\.mjs/);
         return true;
       },
     );

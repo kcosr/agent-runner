@@ -277,7 +277,7 @@ export function formatAuditEvent(
       return {
         message: [
           text("Recorded attempt "),
-          code(event.attempt ?? "?"),
+          code(event.attemptNumber ?? "?"),
           text(" in session "),
           code(event.sessionIndex ?? 0),
           text(" with exit code "),

@@ -293,8 +293,9 @@ function applyTimelineEnvelope(record: ActiveRunRecord, envelope: RunTimelineEnv
   switch (envelope.event.type) {
     case "attempt_started":
       record.currentAttempt = {
-        attempt: envelope.event.attempt,
+        attemptNumber: envelope.event.attemptNumber,
         sessionIndex: envelope.event.sessionIndex,
+        attemptIndexInSession: envelope.event.attemptIndexInSession,
         startedAt: envelope.event.startedAt,
         endedAt: null,
         prompt: envelope.event.prompt,
@@ -601,7 +602,7 @@ export async function serveDaemon(
         found: true,
         taskCount: Array.isArray(detail.tasks) ? detail.tasks.length : null,
         dependencyCount: Array.isArray(detail.dependencies) ? detail.dependencies.length : null,
-        attemptCount: detail.attempts ?? null,
+        attemptCount: detail.totalAttemptCount,
       });
       return detail;
     } catch (err) {

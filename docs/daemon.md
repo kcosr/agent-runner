@@ -331,6 +331,14 @@ pin, and attachment mutations surface through the same summary/detail
 channels above, while attempt lifecycle hooks still appear through the
 normal timeline envelopes.
 
+A run is the durable lifecycle record. Each backend execution window is a
+session: the fresh execution creates session `0`, and each resume creates
+the next session. Attempts are backend invocations within a session.
+`maxAttemptsPerSession` is the per-session retry budget. Attempt numbers
+are monotonic across the run, while `attemptIndexInSession` is zero-based
+within its session. Timeline attempt rows expose the monotonic
+`attemptNumber`, `sessionIndex`, and `attemptIndexInSession`.
+
 ### Per-run audit
 
 - History (bootstrap): `GET /api/runs/:runId/audit` →
@@ -352,8 +360,9 @@ The contracts shared between CLI, daemon, and web are in
 `packages/core/src/contracts/`:
 
 - `RunSummary` — board projection, includes `dependencyState`,
-  `activeTask`, `pinned`, `notePresent`, `hookCount`, and
-  `capabilities`.
+  `activeTask`, `pinned`, `notePresent`, `totalAttemptCount`,
+  `totalSessionCount`, `maxAttemptsPerSession`, current/last session
+  summaries, `hookCount`, and `capabilities`.
 - `RunDetail` — drawer projection: tasks, dependencies, dependents,
   attachments, locked fields, runtime vars, session history, backend
   session, full `note`, `pinned`, `resolvedHooks`, `hookState`, and

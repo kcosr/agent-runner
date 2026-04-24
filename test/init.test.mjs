@@ -134,7 +134,7 @@ test("init: persists workspace seed and manifest without invoking the backend", 
   assert.equal(outcome.exitCode, 0);
   assert.equal(outcome.summary.status, "initialized");
   assert.equal(outcome.manifest.status, "initialized");
-  assert.equal(outcome.manifest.sessionCount, 0);
+  assert.equal(outcome.manifest.totalSessionCount, 0);
   assert.equal(outcome.manifest.sessions.length, 0);
   assert.equal(outcome.manifest.attemptRecords.length, 0);
   assert.equal(outcome.manifest.backendSessionId, null);
@@ -213,7 +213,7 @@ Work on \${BODY_TARGET}.
   assert.equal(outcome.manifest.assignment?.name, "two-work");
   assert.equal(outcome.manifest.cwd, join(dir, "env-repo"));
   assert.equal(outcome.manifest.message, "ship-it");
-  assert.equal(outcome.manifest.maxAttempts, 5);
+  assert.equal(outcome.manifest.maxAttemptsPerSession, 5);
   assert.equal(outcome.manifest.callerInstructions, "Review ${CALLER_TARGET}");
   assert.equal(outcome.manifest.agent.instructions, "Agent role for ${AGENT_TARGET}.");
   assert.ok(outcome.manifest.brief.includes("Work on ${BODY_TARGET}."));
@@ -297,7 +297,7 @@ test("execute-after-init: uses stored brief verbatim", async () => {
   assert.equal(second.workspaceDir, init.workspaceDir, "same workspace");
   assert.equal(second.manifest.status, "success");
   // Session 0, not session 1 — init never created a session.
-  assert.equal(second.manifest.sessionCount, 1);
+  assert.equal(second.manifest.totalSessionCount, 1);
   assert.equal(second.manifest.sessions.length, 1);
   assert.equal(second.manifest.sessions[0].sessionIndex, 0);
   assert.equal(second.manifest.sessions[0].backendSessionIdAtStart, null);
@@ -345,7 +345,7 @@ test("execute-after-init: reset seed survives execution and restores initialized
   assert.equal(reset.brief, init.manifest.brief);
   assert.equal(reset.finalTasks.t1.status, "pending");
   assert.equal(reset.finalTasks.t2.status, "pending");
-  assert.equal(reset.sessionCount, 0);
+  assert.equal(reset.totalSessionCount, 0);
   assert.deepEqual(reset.sessions, []);
   assert.deepEqual(reset.attemptRecords, []);
   assert.equal(reset.backendSessionId, null);
@@ -390,7 +390,7 @@ test("init overwrite: reinitializing an initialized run-id clears stale workspac
   staleManifest.tasksTotal = 2;
   staleManifest.finalTasks.t1.status = "completed";
   staleManifest.finalTasks.t2.status = "completed";
-  staleManifest.sessionCount = 1;
+  staleManifest.totalSessionCount = 1;
   staleManifest.sessions = [
     {
       sessionIndex: 0,
@@ -400,24 +400,30 @@ test("init overwrite: reinitializing an initialized run-id clears stale workspac
       exitCode: 0,
       message: "stale",
       brief: "stale",
-      firstAttempt: 1,
-      lastAttempt: 1,
-      maxAttempts: 2,
+      firstAttemptNumber: 1,
+      lastAttemptNumber: 1,
+      maxAttemptsPerSession: 2,
       backendSessionIdAtStart: null,
       backendSessionIdAtEnd: "sess-stale",
     },
   ];
   staleManifest.attemptRecords = [
     {
-      attempt: 1,
+      attemptNumber: 1,
       sessionIndex: 0,
+      attemptIndexInSession: 0,
       startedAt: "2026-04-12T10:00:00.000Z",
       endedAt: "2026-04-12T10:01:00.000Z",
       prompt: "stale prompt",
       sessionIdAtStart: null,
-      sessionIdAtEnd: "sess-stale",
+      sessionIdCaptured: "sess-stale",
       exitCode: 0,
+      signal: null,
+      timedOut: false,
+      transcript: "stale",
       logPath: "attempts/01.json",
+      tasksAfter: staleManifest.finalTasks,
+      invalidStatuses: [],
     },
   ];
   staleManifest.backendSessionId = "sess-stale";
@@ -444,7 +450,7 @@ test("init overwrite: reinitializing an initialized run-id clears stale workspac
   assert.equal(overwritten.manifest.tasksCompleted, 0);
   assert.equal(overwritten.manifest.finalTasks.t1.status, "pending");
   assert.equal(overwritten.manifest.finalTasks.t2.status, "pending");
-  assert.equal(overwritten.manifest.sessionCount, 0);
+  assert.equal(overwritten.manifest.totalSessionCount, 0);
   assert.deepEqual(overwritten.manifest.sessions, []);
   assert.deepEqual(overwritten.manifest.attemptRecords, []);
   assert.equal(overwritten.manifest.backendSessionId, null);

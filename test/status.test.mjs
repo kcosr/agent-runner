@@ -324,8 +324,8 @@ test("renderRunStatus shows ready promotion and execution hints separately", asy
         status: "initialized",
         endedAt: null,
         exitCode: null,
-        attempts: 0,
-        sessionCount: 0,
+        totalAttemptCount: 0,
+        totalSessionCount: 0,
         sessions: [],
         attemptRecords: [],
         backendSessionId: null,
@@ -344,8 +344,8 @@ test("renderRunStatus shows ready promotion and execution hints separately", asy
         status: "ready",
         endedAt: null,
         exitCode: null,
-        attempts: 0,
-        sessionCount: 0,
+        totalAttemptCount: 0,
+        totalSessionCount: 0,
         sessions: [],
         attemptRecords: [],
         backendSessionId: null,
@@ -450,35 +450,35 @@ test("run status --field projects RunDetail fields and rejects removed manifest-
   );
   assert.equal(projected.tasks[0].id, "t1");
 
-  const effectiveStatus = JSON.parse(
-    execFileSync(
-      "node",
-      [
-        CLI_PATH,
-        "run",
-        "status",
-        outcome.runId,
-        "--output-format",
-        "json",
-        "--field",
-        "effectiveStatus",
-      ],
-      {
-        cwd: dir,
-        env: { ...process.env, ...sharedRuntimeEnv(dir) },
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-      },
-    ),
-  );
-  assert.equal(effectiveStatus.effectiveStatus, "success");
+  for (const [field, expected] of [
+    ["effectiveStatus", "success"],
+    ["totalAttemptCount", 1],
+    ["maxAttemptsPerSession", 2],
+    ["totalSessionCount", 1],
+  ]) {
+    const projectedField = JSON.parse(
+      execFileSync(
+        "node",
+        [CLI_PATH, "run", "status", outcome.runId, "--output-format", "json", "--field", field],
+        {
+          cwd: dir,
+          env: { ...process.env, ...sharedRuntimeEnv(dir) },
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      ),
+    );
+    assert.equal(projectedField[field], expected);
+  }
 
-  const failed = runCliExpectFail(
-    ["run", "status", outcome.runId, "--output-format", "json", "--field", "finalTasks"],
-    { cwd: dir },
-  );
-  assert.equal(failed.status, 3);
-  assert.match(failed.stderr, /unknown status field\(s\): finalTasks/);
+  for (const field of ["attempts", "maxAttempts", "sessionCount", "finalTasks"]) {
+    const failed = runCliExpectFail(
+      ["run", "status", outcome.runId, "--output-format", "json", "--field", field],
+      { cwd: dir },
+    );
+    assert.equal(failed.status, 3);
+    assert.match(failed.stderr, new RegExp(`unknown status field\\(s\\): ${field}`));
+  }
 });
 
 test("run status --field capabilities exposes the current run capability contract", async () => {

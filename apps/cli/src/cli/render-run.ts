@@ -78,14 +78,20 @@ function renderSummary(summary: RunCompletionSummary): string {
 
   if (summary.status === "aborted") {
     lines.push(`Tasks completed: ${summary.tasksCompleted}/${summary.tasksTotal}`);
-    lines.push(`Attempts: ${summary.attempts}/${summary.maxAttempts}`);
+    lines.push(
+      `Session attempts: ${summary.sessionAttemptCount} / ${summary.maxAttemptsPerSession}`,
+    );
+    lines.push(`Total attempts: ${summary.totalAttemptCount}`);
+    lines.push(`Sessions: ${summary.totalSessionCount}`);
     lines.push("");
     appendResumeHint(lines, summary, taskRunnerCmd, "Run was interrupted by the user. To resume:");
     return `${lines.join("\n")}\n`;
   }
 
   lines.push(`Tasks completed: ${summary.tasksCompleted}/${summary.tasksTotal}`);
-  lines.push(`Attempts: ${summary.attempts}/${summary.maxAttempts}`);
+  lines.push(`Session attempts: ${summary.sessionAttemptCount} / ${summary.maxAttemptsPerSession}`);
+  lines.push(`Total attempts: ${summary.totalAttemptCount}`);
+  lines.push(`Sessions: ${summary.totalSessionCount}`);
 
   if (summary.tasks.length > 0) {
     lines.push("");
@@ -139,7 +145,9 @@ export function renderRunEvent(event: RunEvent): RenderedRunChunk[] {
       return stderr(`${lines.join("\n")}\n\n`);
     }
     case "attempt_started":
-      return stderr(`── attempt ${event.attempt} ──\n`);
+      return stderr(
+        `-- attempt ${event.attemptNumber} (session ${event.sessionIndex + 1}, session attempt ${event.attemptIndexInSession + 1}) --\n`,
+      );
     case "agent_message_delta":
       return stdout(event.text);
     case "backend_notice":

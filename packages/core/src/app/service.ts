@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { join, resolve, sep } from "node:path";
+import { resolve, sep } from "node:path";
 import type { DefinitionEntry } from "../config/loader.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../config/loader.js";
 import type {
@@ -170,8 +170,9 @@ function readAttemptLogForRecord(
 ): AttemptLog {
   const finish = startDebugPerfTimer("runs.read_attempt_log", {
     runId,
-    attempt: record.attempt,
+    attemptNumber: record.attemptNumber,
     sessionIndex: record.sessionIndex,
+    attemptIndexInSession: record.attemptIndexInSession,
     logPath: record.logPath,
   });
   try {
@@ -185,6 +186,17 @@ function readAttemptLogForRecord(
     }
     const raw = readFileSync(absoluteLogPath, "utf8");
     const parsed = JSON.parse(raw) as AttemptLog;
+    if (
+      parsed.schemaVersion !== 2 ||
+      parsed.runId !== runId ||
+      parsed.attemptNumber !== record.attemptNumber ||
+      parsed.sessionIndex !== record.sessionIndex ||
+      parsed.attemptIndexInSession !== record.attemptIndexInSession
+    ) {
+      throw new Error(
+        `attempt log ${record.logPath} does not match schemaVersion 2 record identity`,
+      );
+    }
     finish({
       fallback: false,
       stderrBytes: parsed.stderr.length,
@@ -192,11 +204,12 @@ function readAttemptLogForRecord(
     });
     return parsed;
   } catch {
-    const fallback = {
-      schemaVersion: 1 as const,
+    const fallback: AttemptLog = {
+      schemaVersion: 2,
       runId,
-      attempt: record.attempt,
+      attemptNumber: record.attemptNumber,
       sessionIndex: record.sessionIndex,
+      attemptIndexInSession: record.attemptIndexInSession,
       startedAt: record.startedAt,
       endedAt: record.endedAt,
       stdout: "",
@@ -218,8 +231,9 @@ function toRunTimelineAttempt(
 ): RunTimelineAttempt {
   const log = readAttemptLogForRecord(runId, workspaceDir, record);
   return {
-    attempt: record.attempt,
+    attemptNumber: record.attemptNumber,
     sessionIndex: record.sessionIndex,
+    attemptIndexInSession: record.attemptIndexInSession,
     startedAt: record.startedAt,
     endedAt: record.endedAt,
     prompt: record.prompt,
