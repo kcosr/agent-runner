@@ -181,12 +181,12 @@
 
 - `plan-feature` now accepts optional `worktree_base_ref` so generated
   implementation worktrees can be based on refs other than `origin/main`,
-  enabling pre-merge end-to-end testing from feature branches.
+  enabling pre-merge end-to-end testing from feature branches. ([#93](https://github.com/kcosr/task-runner/pull/93))
 - Built-in code-review assignments now reference shared review tasks by
-  named task refs such as `review/architecture`.
+  named task refs such as `review/architecture`. ([#93](https://github.com/kcosr/task-runner/pull/93))
 - Future `code-review` runs now use shared review-dimension task ids under
   `review/...` while keeping `plan_coverage` as the implementation-run
-  plan check. Existing run manifests keep their frozen old task ids.
+  plan check. Existing run manifests keep their frozen old task ids. ([#93](https://github.com/kcosr/task-runner/pull/93))
 - Direct path loads outside `TASK_RUNNER_CONFIG_DIR` may now use authored
   agent, assignment, task, and launcher identities that differ from their
   filesystem-derived canonical ids. Config-root named definitions still
