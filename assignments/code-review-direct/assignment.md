@@ -74,16 +74,16 @@ tasks:
       modules, whether this is full-codebase or ranged, and -- if scoped --
       the concrete set of files and hunks under review. This is context for
       the rest of the review, not a finding section.
-  - ../../tasks/review/architecture.md
-  - ../../tasks/review/concurrency.md
-  - ../../tasks/review/error-handling.md
-  - ../../tasks/review/state-machine.md
-  - ../../tasks/review/resources.md
-  - ../../tasks/review/security.md
-  - ../../tasks/review/types-schema.md
-  - ../../tasks/review/simplification-and-duplication.md
-  - ../../tasks/review/test-coverage.md
-  - ../../tasks/review/docs-drift.md
+  - review/architecture
+  - review/concurrency
+  - review/error-handling
+  - review/state-machine
+  - review/resources
+  - review/security
+  - review/types-schema
+  - review/simplification-and-duplication
+  - review/test-coverage
+  - review/docs-drift
   - id: synthesis
     title: Direct review synthesis
     body: |

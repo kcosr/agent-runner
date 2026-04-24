@@ -36,9 +36,9 @@ as `review/reuse`, and explicit path refs. Bare strings resolve only
 from `${TASK_RUNNER_CONFIG_DIR}/tasks`; strings are treated as paths
 only when they are absolute or begin with `./` or `../`.
 The bundled repo also ships shared review task definitions under
-`tasks/review/`; bundled assignments reference those files with explicit
-relative path refs so direct repo-path usage does not require a config-root
-fallback.
+`tasks/review/`; bundled assignments reference those files with named
+refs such as `review/architecture`, resolved from
+`${TASK_RUNNER_CONFIG_DIR}/tasks`.
 
 ### State directory
 

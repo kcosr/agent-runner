@@ -227,8 +227,7 @@ is handled natively by task-local placement or task-transition
 
 The built-in `git-worktree` hook runs in `prepare` and `beforeAttempt`.
 It creates or reuses a worktree, switches the run cwd to that path, and
-in `prepare` also projects worktree runtime vars such as
-`worktree_path`.
+in `prepare` also projects `worktree_path` into runtime vars.
 
 Declarative `when` support remains narrow: attempt-phase hooks support
 `when.sessionIndex` and `when.attemptInSession`, while task-transition

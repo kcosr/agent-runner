@@ -18,7 +18,9 @@ vars:
       Git ref used as the base for generated implementation
       worktrees. Defaults to origin/main. Override for pre-merge
       end-to-end testing from a feature branch, for example
-      origin/my-feature-branch.
+      origin/my-feature-branch. Must match
+      [A-Za-z0-9][A-Za-z0-9._/-]* so generated git commands
+      receive a shell-safe ref value.
 hooks:
   prepare:
     - path: hooks/derive-worktree-vars.ts

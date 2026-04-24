@@ -182,6 +182,8 @@
 - `plan-feature` now accepts optional `worktree_base_ref` so generated
   implementation worktrees can be based on refs other than `origin/main`,
   enabling pre-merge end-to-end testing from feature branches.
+- Built-in code-review assignments now reference shared review tasks by
+  named task refs such as `review/architecture`.
 - Future `code-review` runs now use shared review-dimension task ids under
   `review/...` while keeping `plan_coverage` as the implementation-run
   plan check. Existing run manifests keep their frozen old task ids.

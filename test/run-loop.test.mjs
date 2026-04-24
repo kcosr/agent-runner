@@ -114,6 +114,9 @@ Codex agent prompt.
 const BUILTIN_PLAN_FEATURE_PATH = resolvePath(
   new URL("../assignments/plan-feature/assignment.md", import.meta.url).pathname,
 );
+const BUILTIN_PLAN_TEMPLATE_PATH = resolvePath(
+  new URL("../assignments/plan-feature/template.md", import.meta.url).pathname,
+);
 
 function tempDir() {
   return mkdtempSync(join(tmpdir(), "task-runner-run-"));
@@ -1199,6 +1202,12 @@ async function initBuiltInPlanFeature(baseDir, repoDir, cliVars) {
   });
 }
 
+function filledPlanFeatureTemplateAssignment() {
+  return readFileSync(BUILTIN_PLAN_TEMPLATE_PATH, "utf8")
+    .replaceAll("<<KEBAB_FEATURE_SLUG>>", "template-lineage")
+    .replace(/<<PLACEHOLDER_[A-Z_]+>>/g, "placeholder");
+}
+
 test("built-in plan-feature prepare hook freezes repo_root, worktree_path, and default worktree_base_ref", async () => {
   const dir = tempDir();
   writeAgent(dir, "three", THREE_AGENT);
@@ -1233,6 +1242,54 @@ test("built-in plan-feature prepare hook preserves explicit worktree_base_ref", 
   assert.equal(initialized.manifest.runtimeVarSources.worktree_base_ref.source, "cli");
 });
 
+test("built-in plan-feature template inherits worktree_base_ref into resolved hook configs", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  writeAssignment(dir, "implement-template-lineage", filledPlanFeatureTemplateAssignment());
+  const repoDir = initGitRepo(dir);
+
+  const planner = await initBuiltInPlanFeature(dir, repoDir, {
+    worktree_slug: "feature-slug",
+    worktree_base_ref: "origin/feature/foo",
+  });
+  const child = await initWithOptions(dir, "implement-template-lineage", {
+    parentRunId: planner.runId,
+  });
+
+  assert.equal(child.manifest.parentRunId, planner.runId);
+  assert.equal(child.manifest.runtimeVars.worktree_base_ref, "origin/feature/foo");
+  assert.equal(child.manifest.runtimeVarSources.worktree_base_ref.source, "parent");
+  assert.equal(
+    child.manifest.runtimeVarSources.worktree_base_ref.inheritedFromRunId,
+    planner.runId,
+  );
+
+  const worktreeHook = child.manifest.resolvedHooks.find(
+    (hook) => hook.source.builtin === "git-worktree",
+  );
+  assert.ok(worktreeHook);
+  assert.equal(worktreeHook.config.from, "origin/feature/foo");
+
+  const commandHooks = child.manifest.resolvedHooks.filter(
+    (hook) => hook.source.builtin === "command",
+  );
+  assert.deepEqual(
+    commandHooks.map((hook) => hook.config),
+    [
+      {
+        mode: "status",
+        command: "git",
+        args: ["fetch", "origin", "--prune"],
+      },
+      {
+        mode: "status",
+        command: "git",
+        args: ["merge", "--ff-only", "--", "origin/feature/foo"],
+      },
+    ],
+  );
+});
+
 test("built-in plan-feature prepare hook rejects an empty worktree_slug", async () => {
   const dir = tempDir();
   writeAgent(dir, "three", THREE_AGENT);
@@ -1265,6 +1322,7 @@ test("built-in plan-feature prepare hook rejects regex-failing worktree_slug val
 
 test("built-in plan-feature prepare hook rejects shell-unsafe worktree_base_ref values", async () => {
   const unsafeRefs = [
+    "",
     "origin/feature foo",
     "origin/feature;rm",
     "origin/$(whoami)",

@@ -37,10 +37,23 @@ hooks:
         attemptInSession: [0]
       with:
         mode: status
-        command: bash
+        command: git
         args:
-          - -lc
-          - git fetch origin --prune && git merge --ff-only "{{worktree_base_ref}}"
+          - fetch
+          - origin
+          - --prune
+    - builtin: command
+      when:
+        sessionIndex: [0]
+        attemptInSession: [0]
+      with:
+        mode: status
+        command: git
+        args:
+          - merge
+          - --ff-only
+          - --
+          - "{{worktree_base_ref}}"
 maxRetries: 4
 lockedFields:
   - tasks

@@ -386,7 +386,7 @@ Built-in hooks:
 
 - `git-worktree` runs in `prepare` and `beforeAttempt`. It ensures a git
   worktree, switches the run `cwd` to that path, and in `prepare` also
-  projects worktree runtime vars such as `worktree_path`.
+  projects `worktree_path` into runtime vars.
 - `command` runs in every phase. `mode: status` treats exit code `0` as
   success and a non-zero exit code as block/reject. `mode: json`
   requires exit code `0` and parses a full hook result from stdout;

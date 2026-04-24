@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { resolveStaticInputSurface } from "../packages/core/dist/core/run/static-input-surface.js";
-import { withRuntimeRoots } from "./helpers/runtime-paths.mjs";
+import { withEnv, withRuntimeRoots } from "./helpers/runtime-paths.mjs";
 
 const REPO_ROOT = new URL("..", import.meta.url).pathname;
 const PLANNER_AGENT_PATH = new URL("../agents/planner/agent.md", import.meta.url).pathname;
@@ -106,34 +106,37 @@ test("static input surface: built-in planner + plan-feature surfaces the documen
   assert.ok(!surface.assignmentInputs.some((field) => field.key === "repo_root"));
 });
 
-test("static input surface: review assignments expose the correct CLI/Web inputs", () => {
-  const loadedAgent = loadAgentConfig(CODE_REVIEWER_AGENT_PATH, REPO_ROOT);
-  const implementationReview = resolveStaticInputSurface(
-    loadedAgent,
-    loadAssignmentConfig(CODE_REVIEW_ASSIGNMENT_PATH, REPO_ROOT),
-  );
-  const directReview = resolveStaticInputSurface(
-    loadedAgent,
-    loadAssignmentConfig(CODE_REVIEW_DIRECT_ASSIGNMENT_PATH, REPO_ROOT),
-  );
+test("static input surface: review assignments expose the correct CLI/Web inputs", () =>
+  withEnv({ TASK_RUNNER_CONFIG_DIR: REPO_ROOT }, () => {
+    const loadedAgent = loadAgentConfig(CODE_REVIEWER_AGENT_PATH, REPO_ROOT);
+    const implementationReview = resolveStaticInputSurface(
+      loadedAgent,
+      loadAssignmentConfig(CODE_REVIEW_ASSIGNMENT_PATH, REPO_ROOT),
+    );
+    const directReview = resolveStaticInputSurface(
+      loadedAgent,
+      loadAssignmentConfig(CODE_REVIEW_DIRECT_ASSIGNMENT_PATH, REPO_ROOT),
+    );
 
-  assert.deepEqual(
-    implementationReview.assignmentInputs.map((field) => field.key),
-    ["range", "implementation_run_id"],
-  );
-  assert.equal(fieldByKey(implementationReview.assignmentInputs, "range").value, "full");
-  assert.equal(
-    fieldByKey(implementationReview.assignmentInputs, "implementation_run_id").required,
-    true,
-  );
+    assert.deepEqual(
+      implementationReview.assignmentInputs.map((field) => field.key),
+      ["range", "implementation_run_id"],
+    );
+    assert.equal(fieldByKey(implementationReview.assignmentInputs, "range").value, "full");
+    assert.equal(
+      fieldByKey(implementationReview.assignmentInputs, "implementation_run_id").required,
+      true,
+    );
 
-  assert.deepEqual(
-    directReview.assignmentInputs.map((field) => field.key),
-    ["range"],
-  );
-  assert.equal(fieldByKey(directReview.assignmentInputs, "range").value, "full");
-  assert.ok(!directReview.assignmentInputs.some((field) => field.key === "implementation_run_id"));
-});
+    assert.deepEqual(
+      directReview.assignmentInputs.map((field) => field.key),
+      ["range"],
+    );
+    assert.equal(fieldByKey(directReview.assignmentInputs, "range").value, "full");
+    assert.ok(
+      !directReview.assignmentInputs.some((field) => field.key === "implementation_run_id"),
+    );
+  }));
 
 test("static input surface: launcher path and inline definitions preserve authored values", () =>
   withRuntimeRoots("task-runner-static-input-launchers-", ({ rootDir, configDir }) => {
