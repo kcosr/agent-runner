@@ -918,7 +918,7 @@ Work.
   );
 });
 
-test("attempt hooks honor when.sessionIndex and when.attemptInSession across retries and resumed sessions", async () => {
+test("attempt hooks honor when.sessionIndex and when.attemptIndexInSession across retries and resumed sessions", async () => {
   const dir = tempDir();
   writeAgent(dir, "three", THREE_AGENT);
   writeNamedHook(
@@ -930,7 +930,7 @@ test("attempt hooks honor when.sessionIndex and when.attemptInSession across ret
     return {
       action: "continue",
       mutate: {
-        note: "session-" + ctx.sessionIndex + "-attempt-" + ctx.attemptInSession,
+        note: "session-" + ctx.sessionIndex + "-attempt-" + ctx.attemptIndexInSession,
         state: { beforeAttemptCount: (ctx.state.beforeAttemptCount ?? 0) + 1 },
       },
     };
@@ -950,7 +950,7 @@ hooks:
     - name: session-zero-first-attempt-only
       when:
         sessionIndex: [0]
-        attemptInSession: [0]
+        attemptIndexInSession: [0]
 tasks:
   - id: t1
     title: First
@@ -1125,7 +1125,7 @@ hooks:
     - builtin: git-worktree
       when:
         sessionIndex: [0]
-        attemptInSession: [0]
+        attemptIndexInSession: [0]
       with:
         repo: ${JSON.stringify(repoDir)}
         from: main
@@ -1857,8 +1857,9 @@ test("attempt_started events include prompt and session metadata for timeline co
 
   const attemptStarted = events.find((event) => event.type === "attempt_started");
   assert.ok(attemptStarted, "expected attempt_started event");
-  assert.equal(attemptStarted.attempt, 1);
+  assert.equal(attemptStarted.attemptNumber, 1);
   assert.equal(attemptStarted.sessionIndex, 0);
+  assert.equal(attemptStarted.attemptIndexInSession, 0);
   assert.equal(attemptStarted.prompt, seenPrompt);
   assert.match(attemptStarted.startedAt, /^\d{4}-\d{2}-\d{2}T/);
 });
@@ -2142,9 +2143,12 @@ test("happy path: mock marks all tasks completed in one attempt → exit 0", asy
   assert.equal(outcome.exitCode, 0);
   assert.equal(outcome.summary.status, "success");
   assert.equal(outcome.summary.tasksCompleted, 3);
-  assert.equal(outcome.summary.attempts, 1);
-  assert.ok(stderr.includes("── attempt 1 ──"), "divider on stderr");
-  assert.ok(!stdout.includes("── attempt 1 ──"), "divider not on stdout");
+  assert.equal(outcome.summary.totalAttemptCount, 1);
+  assert.ok(stderr.includes("-- attempt 1 (session 1, session attempt 1) --"), "divider on stderr");
+  assert.ok(
+    !stdout.includes("-- attempt 1 (session 1, session attempt 1) --"),
+    "divider not on stdout",
+  );
   assert.ok(stderr.includes("Task results:"), "summary shows task results section");
 });
 
@@ -2175,7 +2179,7 @@ test("retry path: first attempt leaves one incomplete, second completes → exit
 
   assert.equal(invocations, 2);
   assert.equal(outcome.exitCode, 0);
-  assert.equal(outcome.summary.attempts, 2);
+  assert.equal(outcome.summary.totalAttemptCount, 2);
   assert.equal(outcome.attemptTranscripts.length, 2);
   assert.ok(lastPrompt.includes("Remaining tasks:"), "retry prompt should be the nudge");
   assert.ok(lastPrompt.includes("t3 (status: pending)"));
@@ -2232,7 +2236,7 @@ test("exhausted path: never completes → exit 1 after maxRetries+1 attempts", a
   assert.equal(invocations, 3, "maxRetries=2 → 3 total attempts");
   assert.equal(outcome.exitCode, 1);
   assert.equal(outcome.summary.status, "exhausted");
-  assert.equal(outcome.summary.attempts, 3);
+  assert.equal(outcome.summary.totalAttemptCount, 3);
 });
 
 test("session resume: first attempt session ID passed on retry", async () => {

@@ -4,6 +4,12 @@
 
 ### Breaking Changes
 
+- Manifest schema version is now `11`. Runs now store explicit
+  run/session/attempt state with `totalAttemptCount`,
+  `totalSessionCount`, `maxAttemptsPerSession`, and `sessions`; the old
+  public `attempts`, `maxAttempts`, and `sessionCount` fields are
+  removed. Use `scripts/migrate-manifests-v11.mjs` to promote schema v10
+  manifests.
 - Assignment task string refs now treat only absolute paths and strings
   beginning with `./` or `../` as file paths. Bare slashful strings such
   as `review/reuse` now resolve as named task ids under `tasks/`, and
@@ -133,7 +139,7 @@
   hook executions while keeping manifest `hookAudits` as the richer
   detail projection surface. ([#66](https://github.com/kcosr/task-runner/pull/66))
 - Added narrow declarative `when.sessionIndex` and
-  `when.attemptInSession` support for attempt-phase hooks. `git-worktree`
+  `when.attemptIndexInSession` support for attempt-phase hooks. `git-worktree`
   can now also run during `beforeAttempt`, so assignments can lazily
   create or reuse worktrees on the first execution attempt instead of at
   init time.
@@ -179,6 +185,9 @@
 
 ### Changed
 
+- Attempt-phase hooks now receive and match `attemptIndexInSession` for
+  the zero-based attempt position inside the current session; monotonic
+  run-wide attempt identity is exposed separately as `attemptNumber`.
 - `plan-feature` now accepts optional `worktree_base_ref` so generated
   implementation worktrees can be based on refs other than `origin/main`,
   enabling pre-merge end-to-end testing from feature branches. ([#93](https://github.com/kcosr/task-runner/pull/93))

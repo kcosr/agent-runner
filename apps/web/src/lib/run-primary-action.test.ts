@@ -3,10 +3,10 @@ import { describe, expect, it } from "vitest";
 import { getRunPrimaryAction } from "./run-primary-action.js";
 
 function makeRun(
-  overrides: Partial<Pick<RunDetail, "attempts" | "capabilities" | "status">> = {},
-): Pick<RunDetail, "attempts" | "capabilities" | "status"> {
+  overrides: Partial<Pick<RunDetail, "totalAttemptCount" | "capabilities" | "status">> = {},
+): Pick<RunDetail, "totalAttemptCount" | "capabilities" | "status"> {
   return {
-    attempts: 0,
+    totalAttemptCount: 0,
     status: "ready",
     capabilities: {
       canArchive: true,

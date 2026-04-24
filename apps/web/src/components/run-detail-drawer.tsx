@@ -4,7 +4,7 @@ import type {
   RunAttachment,
 } from "@task-runner/core/contracts/attachments.js";
 import type { RunAuditEvent } from "@task-runner/core/contracts/events.js";
-import type { RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
+import type { RunDetail, RunSessionSummary, RunSummary } from "@task-runner/core/contracts/runs.js";
 import {
   type ChangeEvent,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -51,6 +51,12 @@ type DataTab = "vars" | "hookState";
 type AuditFilter = "all" | "hooks" | "tasks" | "run";
 
 const TIMELINE_BOTTOM_THRESHOLD_PX = 24;
+
+function formatSessionSummary(session: RunSessionSummary): string {
+  return `${session.attemptCount} / ${session.maxAttemptsPerSession} attempts (Session ${
+    session.sessionIndex + 1
+  }, ${session.status})`;
+}
 
 function dependencyCandidateTitle(run: RunSummary) {
   return run.name ?? run.assignmentName ?? "Unnamed";
@@ -111,9 +117,17 @@ function summaryRows(run: RunDetail) {
     rows.push(["Exit code", String(run.exitCode)]);
   }
   rows.push(
-    ["Attempts", `${run.attempts} / ${run.maxAttempts}`],
-    ["Sessions", String(run.sessionCount)],
+    ["Attempts", `${run.totalAttemptCount} total`],
+    ["Sessions", String(run.totalSessionCount)],
+    ["Retry budget", `${run.maxAttemptsPerSession} per session`],
   );
+  if (run.currentSession) {
+    rows.push(["Current session", formatSessionSummary(run.currentSession)]);
+  } else if (run.lastSession) {
+    rows.push(["Last session", formatSessionSummary(run.lastSession)]);
+  } else {
+    rows.push(["Current session", "none"]);
+  }
 
   return rows;
 }
@@ -411,7 +425,7 @@ export function RunDetailDrawer({
   const [dataTab, setDataTab] = useState<DataTab>("vars");
   const [auditFilter, setAuditFilter] = useState<AuditFilter>("all");
   const [timelineTab, setTimelineTab] = useState<TimelineTab>(
-    (run.status === "initialized" || run.status === "ready") && run.attempts === 0
+    (run.status === "initialized" || run.status === "ready") && run.totalAttemptCount === 0
       ? "message"
       : "response",
   );
@@ -514,18 +528,31 @@ export function RunDetailDrawer({
       (candidate) => candidate.runId.toLowerCase() === normalizedDependencyDraft.toLowerCase(),
     )?.runId;
   const timelineAttempts = timelineState.history?.attempts ?? [];
+  const timelineSessions = Array.from(
+    timelineAttempts.reduce((groups, attempt) => {
+      const attempts = groups.get(attempt.sessionIndex) ?? [];
+      attempts.push(attempt);
+      groups.set(attempt.sessionIndex, attempts);
+      return groups;
+    }, new Map<number, typeof timelineAttempts>()),
+    ([sessionIndex, attempts]) => ({
+      sessionIndex,
+      attempts: [...attempts].sort((a, b) => a.attemptNumber - b.attemptNumber),
+      summary: run.sessions.find((session) => session.sessionIndex === sessionIndex) ?? null,
+    }),
+  ).sort((a, b) => a.sessionIndex - b.sessionIndex);
   const pendingAttemptAvailable =
     (run.status === "initialized" || run.status === "ready") &&
-    run.attempts === 0 &&
+    run.totalAttemptCount === 0 &&
     timelineAttempts.length === 0;
   const selectedAttemptRecord =
     (typeof selectedAttempt === "number"
-      ? timelineAttempts.find((attempt) => attempt.attempt === selectedAttempt)
+      ? timelineAttempts.find((attempt) => attempt.attemptNumber === selectedAttempt)
       : null) ??
     timelineAttempts[timelineAttempts.length - 1] ??
     null;
   const selectedPendingAttempt = pendingAttemptAvailable && selectedAttemptRecord === null;
-  const selectedAttemptNumber = selectedAttemptRecord?.attempt ?? null;
+  const selectedAttemptNumber = selectedAttemptRecord?.attemptNumber ?? null;
   const selectedAttemptResponse = selectedAttemptRecord?.transcript ?? "";
   const selectedAttemptDiagnostics = selectedAttemptRecord?.notices ?? "";
   const selectedAttemptLive = selectedAttemptRecord?.live ?? false;
@@ -665,12 +692,12 @@ export function RunDetailDrawer({
   }, [resumeDialogOpen, showResumeMessageField]);
 
   useEffect(() => {
-    const availableAttempts = new Set(timelineAttempts.map((attempt) => attempt.attempt));
+    const availableAttempts = new Set(timelineAttempts.map((attempt) => attempt.attemptNumber));
     if (selectedAttempt === "pending") {
       if (pendingAttemptAvailable) {
         return;
       }
-      setSelectedAttempt(timelineAttempts[timelineAttempts.length - 1]?.attempt ?? null);
+      setSelectedAttempt(timelineAttempts[timelineAttempts.length - 1]?.attemptNumber ?? null);
       return;
     }
     if (selectedAttempt !== null && availableAttempts.has(selectedAttempt)) {
@@ -680,11 +707,11 @@ export function RunDetailDrawer({
       setSelectedAttempt("pending");
       return;
     }
-    setSelectedAttempt(timelineAttempts[timelineAttempts.length - 1]?.attempt ?? null);
+    setSelectedAttempt(timelineAttempts[timelineAttempts.length - 1]?.attemptNumber ?? null);
   }, [pendingAttemptAvailable, selectedAttempt, timelineAttempts]);
 
   useEffect(() => {
-    const latestAttempt = timelineAttempts[timelineAttempts.length - 1]?.attempt ?? null;
+    const latestAttempt = timelineAttempts[timelineAttempts.length - 1]?.attemptNumber ?? null;
     if (activeSection !== "events") {
       latestAttemptRef.current = latestAttempt;
       return;
@@ -1948,25 +1975,54 @@ export function RunDetailDrawer({
                                 <span>Pending</span>
                               </button>
                             ) : (
-                              timelineAttempts.map((attempt) => (
-                                <button
-                                  aria-selected={selectedAttemptRecord?.attempt === attempt.attempt}
-                                  className={
-                                    selectedAttemptRecord?.attempt === attempt.attempt
-                                      ? "timeline-attempt-tab active"
-                                      : "timeline-attempt-tab"
-                                  }
-                                  key={attempt.attempt}
-                                  onClick={() => setSelectedAttempt(attempt.attempt)}
-                                  role="tab"
-                                  type="button"
-                                >
-                                  <span>{attempt.attempt}</span>
-                                  {attempt.live ? (
-                                    <span aria-hidden="true" className="timeline-live-dot" />
-                                  ) : null}
-                                </button>
-                              ))
+                              timelineSessions.map((session) => {
+                                const sessionStatus = session.summary?.status ?? "running";
+                                const attemptCount =
+                                  session.summary?.attemptCount ?? session.attempts.length;
+                                const maxAttempts =
+                                  session.summary?.maxAttemptsPerSession ??
+                                  run.maxAttemptsPerSession;
+                                const sessionKind =
+                                  session.sessionIndex === 0 ? "initial run" : "follow-up";
+                                return (
+                                  <div
+                                    className="timeline-session-group"
+                                    key={session.sessionIndex}
+                                  >
+                                    <div className="timeline-session-header">
+                                      {`Session ${
+                                        session.sessionIndex + 1
+                                      } - ${sessionKind} - ${attemptCount} / ${maxAttempts} attempts - ${sessionStatus}`}
+                                    </div>
+                                    {session.attempts.map((attempt) => (
+                                      <button
+                                        aria-selected={
+                                          selectedAttemptRecord?.attemptNumber ===
+                                          attempt.attemptNumber
+                                        }
+                                        className={
+                                          selectedAttemptRecord?.attemptNumber ===
+                                          attempt.attemptNumber
+                                            ? "timeline-attempt-tab active"
+                                            : "timeline-attempt-tab"
+                                        }
+                                        key={attempt.attemptNumber}
+                                        onClick={() => setSelectedAttempt(attempt.attemptNumber)}
+                                        role="tab"
+                                        type="button"
+                                      >
+                                        <span>{`Attempt ${attempt.attemptNumber}`}</span>
+                                        <span className="timeline-attempt-tab__meta">
+                                          {`Session attempt ${attempt.attemptIndexInSession + 1}`}
+                                        </span>
+                                        {attempt.live ? (
+                                          <span aria-hidden="true" className="timeline-live-dot" />
+                                        ) : null}
+                                      </button>
+                                    ))}
+                                  </div>
+                                );
+                              })
                             )}
                           </div>
                         </div>

@@ -28,7 +28,9 @@ describe("applyEnvelope", () => {
       cursor: 1,
       event: {
         type: "attempt_started",
-        attempt: 1,
+        attemptNumber: 1,
+
+        attemptIndexInSession: 0,
         sessionIndex: 0,
         startedAt: "2026-04-15T10:00:00.000Z",
         prompt: "Write output",
@@ -39,7 +41,9 @@ describe("applyEnvelope", () => {
     expect(result.history.lastCursor).toBe(1);
     expect(result.history.attempts).toEqual([
       {
-        attempt: 1,
+        attemptNumber: 1,
+
+        attemptIndexInSession: 0,
         sessionIndex: 0,
         startedAt: "2026-04-15T10:00:00.000Z",
         endedAt: null,
@@ -58,7 +62,9 @@ describe("applyEnvelope", () => {
       makeHistory({
         attempts: [
           {
-            attempt: 1,
+            attemptNumber: 1,
+
+            attemptIndexInSession: 0,
             sessionIndex: 0,
             startedAt: "2026-04-15T10:00:00.000Z",
             endedAt: null,
@@ -91,7 +97,9 @@ describe("applyEnvelope", () => {
       makeHistory({
         attempts: [
           {
-            attempt: 1,
+            attemptNumber: 1,
+
+            attemptIndexInSession: 0,
             sessionIndex: 0,
             startedAt: "2026-04-15T10:00:00.000Z",
             endedAt: null,
@@ -154,7 +162,9 @@ describe("applyEnvelope", () => {
       makeHistory({
         attempts: [
           {
-            attempt: 1,
+            attemptNumber: 1,
+
+            attemptIndexInSession: 0,
             sessionIndex: 0,
             startedAt: "2026-04-15T10:00:00.000Z",
             endedAt: null,
@@ -175,8 +185,10 @@ describe("applyEnvelope", () => {
           type: "run_finished",
           summary: {
             status: "success",
-            attempts: 1,
-            maxAttempts: 3,
+            sessionAttemptCount: 1,
+            maxAttemptsPerSession: 3,
+            totalAttemptCount: 1,
+            totalSessionCount: 1,
             tasksCompleted: 1,
             tasksTotal: 1,
             assignmentPath: "/tmp/assignment.md",

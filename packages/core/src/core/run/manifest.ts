@@ -33,16 +33,17 @@ export type ManifestStatus =
 const ATTEMPT_LOG_DIR = "attempts";
 const MANIFEST_FILENAME = "run.json";
 
-export function attemptLogRelativePath(attempt: number): string {
-  const padded = String(attempt).padStart(2, "0");
+export function attemptLogRelativePath(attemptNumber: number): string {
+  const padded = String(attemptNumber).padStart(2, "0");
   return `${ATTEMPT_LOG_DIR}/${padded}.json`;
 }
 
 export interface AttemptLog {
-  schemaVersion: 1;
+  schemaVersion: 2;
   runId: string;
-  attempt: number;
+  attemptNumber: number;
   sessionIndex: number;
+  attemptIndexInSession: number;
   startedAt: string;
   endedAt: string;
   stdout: string;
@@ -50,7 +51,7 @@ export interface AttemptLog {
 }
 
 export function writeAttemptLog(workspaceDir: string, log: AttemptLog): string {
-  const relPath = attemptLogRelativePath(log.attempt);
+  const relPath = attemptLogRelativePath(log.attemptNumber);
   const absPath = join(workspaceDir, relPath);
   mkdirSync(dirname(absPath), { recursive: true });
   writeTextFileAtomic(absPath, `${JSON.stringify(log, null, 2)}\n`);
@@ -90,7 +91,7 @@ export interface RunResetSeed {
   parentRunId: string | null;
   unrestricted: boolean;
   timeoutSec: number;
-  maxAttempts: number;
+  maxAttemptsPerSession: number;
   brief: string;
   runtimeVars: Record<string, unknown>;
   runtimeVarSources: Record<string, RuntimeVarSourceRecord>;
@@ -100,8 +101,9 @@ export interface RunResetSeed {
 }
 
 export interface AttemptRecord {
-  attempt: number;
+  attemptNumber: number;
   sessionIndex: number;
+  attemptIndexInSession: number;
   startedAt: string;
   endedAt: string;
   prompt: string;
@@ -124,9 +126,9 @@ export interface SessionRecord {
   exitCode: number | null;
   message: string | null;
   brief: string;
-  firstAttempt: number | null;
-  lastAttempt: number | null;
-  maxAttempts: number;
+  firstAttemptNumber: number | null;
+  lastAttemptNumber: number | null;
+  maxAttemptsPerSession: number;
   backendSessionIdAtStart: string | null;
   backendSessionIdAtEnd: string | null;
 }
@@ -160,13 +162,13 @@ export interface AssignmentInfo {
 // `timeoutSec` are all captured at init / fresh-run time and preserved
 // across all subsequent sessions.
 //
-// schemaVersion: 10 is the current manifest-canonical generation. Manifests written
+// schemaVersion: 11 is the current manifest-canonical generation. Manifests written
 // by earlier task-runner versions are not resumable by this version —
 // `isRunManifest` rejects them and
 // `resolveResumeTarget` surfaces a clear error telling the caller to
-// create a fresh run.
+// run the manifest migration.
 export interface RunManifest {
-  schemaVersion: 10;
+  schemaVersion: 11;
   runId: string;
   repo: string;
   agent: {
@@ -208,8 +210,8 @@ export interface RunManifest {
   dependencyRunIds: string[];
   parentRunId: string | null;
   exitCode: number | null;
-  attempts: number;
-  maxAttempts: number;
+  totalAttemptCount: number;
+  maxAttemptsPerSession: number;
   tasksCompleted: number;
   tasksTotal: number;
   backendSessionId: string | null;
@@ -237,7 +239,7 @@ export interface RunManifest {
   resetSeed: RunResetSeed;
   attachments: RunAttachment[];
   finalTasks: Record<string, TaskSnapshot>;
-  sessionCount: number;
+  totalSessionCount: number;
   sessions: SessionRecord[];
   attemptRecords: AttemptRecord[];
 }
@@ -307,11 +309,11 @@ export function applyRunResetSeed(manifest: RunManifest): void {
   manifest.parentRunId = seed.parentRunId;
   manifest.unrestricted = seed.unrestricted;
   manifest.timeoutSec = seed.timeoutSec;
-  manifest.maxAttempts = seed.maxAttempts;
+  manifest.maxAttemptsPerSession = seed.maxAttemptsPerSession;
   manifest.endedAt = null;
   manifest.status = "initialized";
   manifest.exitCode = null;
-  manifest.attempts = 0;
+  manifest.totalAttemptCount = 0;
   manifest.backendSessionId = null;
   manifest.brief = seed.brief;
   manifest.runtimeVars = { ...seed.runtimeVars };
@@ -323,7 +325,7 @@ export function applyRunResetSeed(manifest: RunManifest): void {
     (task) => task.status === "completed",
   ).length;
   manifest.tasksTotal = Object.keys(manifest.finalTasks).length;
-  manifest.sessionCount = 0;
+  manifest.totalSessionCount = 0;
   manifest.sessions = [];
   manifest.attemptRecords = [];
 }
@@ -431,11 +433,16 @@ function readManifestCandidate(candidate: string): RunManifest {
     typeof parsed === "object" &&
     "schemaVersion" in parsed &&
     typeof (parsed as { schemaVersion: unknown }).schemaVersion === "number" &&
-    (parsed as { schemaVersion: number }).schemaVersion !== 10
+    (parsed as { schemaVersion: number }).schemaVersion !== 11
   ) {
     const version = (parsed as { schemaVersion: number }).schemaVersion;
+    if (version === 10) {
+      throw new ResumeError(
+        `manifest at ${candidate} has schemaVersion 10; this version of task-runner requires schemaVersion 11. Run scripts/migrate-manifests-v11.mjs to migrate existing workspaces.`,
+      );
+    }
     throw new ResumeError(
-      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 10. Manifests from earlier versions cannot be resumed — create a fresh run (task-runner init / run).`,
+      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 11.`,
     );
   }
   if (!isRunManifest(parsed)) {
@@ -591,7 +598,7 @@ export function findRunManifestsById(
 function isRunManifest(value: unknown): value is RunManifest {
   if (!value || typeof value !== "object") return false;
   const obj = value as Record<string, unknown>;
-  if (obj.schemaVersion !== 10) return false;
+  if (obj.schemaVersion !== 11) return false;
   if (typeof obj.runId !== "string") return false;
   if (typeof obj.repo !== "string") return false;
 
@@ -627,11 +634,11 @@ function isRunManifest(value: unknown): value is RunManifest {
   }
   if (typeof obj.timeoutSec !== "number") return false;
   if (typeof obj.unrestricted !== "boolean") return false;
-  if (typeof obj.attempts !== "number") return false;
-  if (typeof obj.maxAttempts !== "number") return false;
+  if (typeof obj.totalAttemptCount !== "number") return false;
+  if (typeof obj.maxAttemptsPerSession !== "number") return false;
   if (typeof obj.tasksCompleted !== "number") return false;
   if (typeof obj.tasksTotal !== "number") return false;
-  if (typeof obj.sessionCount !== "number") return false;
+  if (typeof obj.totalSessionCount !== "number") return false;
   if (typeof obj.brief !== "string") return false;
   if (!Array.isArray(obj.resolvedHooks)) return false;
   if (!Array.isArray(obj.hookAudits)) return false;
@@ -639,6 +646,59 @@ function isRunManifest(value: unknown): value is RunManifest {
   // Arrays.
   if (!Array.isArray(obj.attemptRecords)) return false;
   if (!Array.isArray(obj.sessions)) return false;
+  if (
+    obj.attemptRecords.some((attempt) => {
+      if (!attempt || typeof attempt !== "object") {
+        return true;
+      }
+      const record = attempt as Record<string, unknown>;
+      return (
+        typeof record.attemptNumber !== "number" ||
+        typeof record.sessionIndex !== "number" ||
+        typeof record.attemptIndexInSession !== "number" ||
+        typeof record.startedAt !== "string" ||
+        typeof record.endedAt !== "string" ||
+        typeof record.prompt !== "string" ||
+        (record.sessionIdAtStart !== null && typeof record.sessionIdAtStart !== "string") ||
+        (record.sessionIdCaptured !== null && typeof record.sessionIdCaptured !== "string") ||
+        (record.exitCode !== null && typeof record.exitCode !== "number") ||
+        (record.signal !== null && typeof record.signal !== "string") ||
+        typeof record.timedOut !== "boolean" ||
+        (record.transcript !== null && typeof record.transcript !== "string") ||
+        typeof record.logPath !== "string" ||
+        !record.tasksAfter ||
+        typeof record.tasksAfter !== "object" ||
+        !Array.isArray(record.invalidStatuses)
+      );
+    })
+  ) {
+    return false;
+  }
+  if (
+    obj.sessions.some((session) => {
+      if (!session || typeof session !== "object") {
+        return true;
+      }
+      const record = session as Record<string, unknown>;
+      return (
+        typeof record.sessionIndex !== "number" ||
+        typeof record.startedAt !== "string" ||
+        (record.endedAt !== null && typeof record.endedAt !== "string") ||
+        !isManifestStatus(record.status) ||
+        (record.exitCode !== null && typeof record.exitCode !== "number") ||
+        (record.message !== null && typeof record.message !== "string") ||
+        typeof record.brief !== "string" ||
+        (record.firstAttemptNumber !== null && typeof record.firstAttemptNumber !== "number") ||
+        (record.lastAttemptNumber !== null && typeof record.lastAttemptNumber !== "number") ||
+        typeof record.maxAttemptsPerSession !== "number" ||
+        (record.backendSessionIdAtStart !== null &&
+          typeof record.backendSessionIdAtStart !== "string") ||
+        (record.backendSessionIdAtEnd !== null && typeof record.backendSessionIdAtEnd !== "string")
+      );
+    })
+  ) {
+    return false;
+  }
   if (!Array.isArray(obj.lockedFields)) return false;
   if (!Array.isArray(obj.attachments)) return false;
   if (
@@ -718,7 +778,7 @@ function isRunManifest(value: unknown): value is RunManifest {
   }
   if (typeof resetSeed.unrestricted !== "boolean") return false;
   if (typeof resetSeed.timeoutSec !== "number") return false;
-  if (typeof resetSeed.maxAttempts !== "number") return false;
+  if (typeof resetSeed.maxAttemptsPerSession !== "number") return false;
   if (typeof resetSeed.brief !== "string") return false;
   if (!resetSeed.runtimeVars || typeof resetSeed.runtimeVars !== "object") return false;
   if (
@@ -743,16 +803,6 @@ function isRunManifest(value: unknown): value is RunManifest {
   if (execution.hostMode !== "embedded" && execution.hostMode !== "daemon") return false;
   if (!execution.controller || typeof execution.controller !== "object") return false;
   const controller = execution.controller as Record<string, unknown>;
-  if (
-    obj.sessions.some((session) => {
-      if (!session || typeof session !== "object") {
-        return true;
-      }
-      return typeof (session as Record<string, unknown>).brief !== "string";
-    })
-  ) {
-    return false;
-  }
   if (controller.kind === "embedded") {
     return execution.hostMode === "embedded";
   }

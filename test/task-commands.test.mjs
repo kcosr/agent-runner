@@ -812,7 +812,7 @@ test("run reset: restores the original initialized task snapshot after task muta
   assert.equal(manifest.finalTasks.t1.notes, "");
   assert.equal(manifest.tasksCompleted, 0);
   assert.equal(manifest.tasksTotal, 2);
-  assert.equal(manifest.sessionCount, 0);
+  assert.equal(manifest.totalSessionCount, 0);
   assert.deepEqual(manifest.sessions, []);
   assert.deepEqual(manifest.attemptRecords, []);
 
@@ -828,8 +828,8 @@ test("run reset: json output restores initialized state and removes attempt arti
     manifest.status = "success";
     manifest.endedAt = "2026-04-12T15:00:00.000Z";
     manifest.exitCode = 0;
-    manifest.attempts = 2;
-    manifest.maxAttempts = 9;
+    manifest.totalAttemptCount = 2;
+    manifest.maxAttemptsPerSession = 9;
     manifest.model = "override-model";
     manifest.effort = "max";
     manifest.name = "override session";
@@ -839,7 +839,7 @@ test("run reset: json output restores initialized state and removes attempt arti
     manifest.finalTasks.t1.status = "completed";
     manifest.finalTasks.t1.notes = "Done.";
     manifest.tasksCompleted = 1;
-    manifest.sessionCount = 1;
+    manifest.totalSessionCount = 1;
     manifest.sessions = [
       {
         sessionIndex: 0,
@@ -849,17 +849,18 @@ test("run reset: json output restores initialized state and removes attempt arti
         exitCode: 0,
         message: null,
         brief: manifest.brief,
-        firstAttempt: 1,
-        lastAttempt: 2,
-        maxAttempts: 9,
+        firstAttemptNumber: 1,
+        lastAttemptNumber: 2,
+        maxAttemptsPerSession: 9,
         backendSessionIdAtStart: null,
         backendSessionIdAtEnd: "sess-after-run",
       },
     ];
     manifest.attemptRecords = [
       {
-        attempt: 1,
+        attemptNumber: 1,
         sessionIndex: 0,
+        attemptIndexInSession: 0,
         startedAt: "2026-04-12T14:00:00.000Z",
         endedAt: "2026-04-12T14:30:00.000Z",
         prompt: manifest.brief,
@@ -874,8 +875,9 @@ test("run reset: json output restores initialized state and removes attempt arti
         invalidStatuses: [],
       },
       {
-        attempt: 2,
+        attemptNumber: 2,
         sessionIndex: 0,
+        attemptIndexInSession: 1,
         startedAt: "2026-04-12T14:30:00.000Z",
         endedAt: "2026-04-12T15:00:00.000Z",
         prompt: "retry",
@@ -892,7 +894,21 @@ test("run reset: json output restores initialized state and removes attempt arti
     ];
   });
   mkdirSync(join(outcome.workspaceDir, "attempts"), { recursive: true });
-  writeFileSync(join(outcome.workspaceDir, "attempts", "01.json"), "{}\n");
+  writeFileSync(
+    join(outcome.workspaceDir, "attempts", "01.json"),
+    `${JSON.stringify({
+      schemaVersion: 2,
+      runId: outcome.runId,
+      attemptNumber: 1,
+      sessionIndex: 0,
+      attemptIndexInSession: 0,
+      prompt: outcome.manifest.brief,
+      stdout: "",
+      stderr: "",
+      transcript: "attempt 1",
+      notices: "",
+    })}\n`,
+  );
 
   const out = runCli(["run", "reset", outcome.runId, "--output-format", "json"], { cwd: dir });
   assert.deepEqual(JSON.parse(out), { runId: outcome.runId, status: "initialized" });
@@ -901,8 +917,8 @@ test("run reset: json output restores initialized state and removes attempt arti
   assert.equal(manifest.status, "initialized");
   assert.equal(manifest.endedAt, null);
   assert.equal(manifest.exitCode, null);
-  assert.equal(manifest.attempts, 0);
-  assert.equal(manifest.maxAttempts, 2);
+  assert.equal(manifest.totalAttemptCount, 0);
+  assert.equal(manifest.maxAttemptsPerSession, 2);
   assert.equal(manifest.model, "claude-sonnet-4-6");
   assert.equal(manifest.effort, null);
   assert.equal(manifest.name, null);
@@ -912,7 +928,7 @@ test("run reset: json output restores initialized state and removes attempt arti
   assert.ok(manifest.brief);
   assert.equal(manifest.finalTasks.t1.status, "pending");
   assert.equal(manifest.finalTasks.t1.notes, "");
-  assert.equal(manifest.sessionCount, 0);
+  assert.equal(manifest.totalSessionCount, 0);
   assert.deepEqual(manifest.sessions, []);
   assert.deepEqual(manifest.attemptRecords, []);
   assert.equal(existsSync(join(outcome.workspaceDir, "attempts")), false);

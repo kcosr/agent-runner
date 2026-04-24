@@ -117,7 +117,7 @@ test("abort: backend signals aborted; run terminates with status=aborted, exit 1
   assert.equal(outcome.manifest.sessions.length, 1);
   assert.equal(outcome.manifest.sessions[0].status, "aborted");
   assert.equal(outcome.manifest.sessions[0].exitCode, 130);
-  assert.equal(outcome.manifest.attempts, 1);
+  assert.equal(outcome.manifest.totalAttemptCount, 1);
 });
 
 test("abort: aborted run is resumable from the same workspace", async () => {

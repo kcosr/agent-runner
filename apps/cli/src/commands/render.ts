@@ -10,6 +10,7 @@ import type {
   RunDetail,
   RunNoteResult,
   RunPinnedResult,
+  RunSessionSummary,
 } from "@task-runner/core/contracts/runs.js";
 import type {
   DefinitionDetailsResult,
@@ -33,6 +34,15 @@ export interface SystemStatusResult {
   hostMode: HostMode;
   connectUrl: string | null;
   daemon: DaemonInfo | null;
+}
+
+function formatRunSessionSummary(label: string, session: RunSessionSummary | null): string {
+  if (!session) {
+    return `${label}: none`;
+  }
+  return `${label}: ${session.attemptCount} / ${session.maxAttemptsPerSession} attempts (session ${
+    session.sessionIndex + 1
+  }, ${session.status})`;
 }
 
 export function renderRunStatus(detail: RunDetail): string {
@@ -77,9 +87,17 @@ export function renderRunStatus(detail: RunDetail): string {
   if (detail.backend === "passive") {
     lines.push(`Tasks completed: ${detail.tasksCompleted}/${detail.tasksTotal}`);
   } else {
-    lines.push(
-      `Tasks completed: ${detail.tasksCompleted}/${detail.tasksTotal}    Attempts: ${detail.attempts}/${detail.maxAttempts}    Sessions: ${detail.sessionCount}`,
-    );
+    lines.push(`Tasks completed: ${detail.tasksCompleted}/${detail.tasksTotal}`);
+    lines.push(`Attempts: ${detail.totalAttemptCount} total`);
+    lines.push(`Sessions: ${detail.totalSessionCount}`);
+    lines.push(`Retry budget: ${detail.maxAttemptsPerSession} per session`);
+    if (detail.currentSession) {
+      lines.push(formatRunSessionSummary("Current session", detail.currentSession));
+    } else if (detail.lastSession) {
+      lines.push(formatRunSessionSummary("Last session", detail.lastSession));
+    } else {
+      lines.push(formatRunSessionSummary("Current session", null));
+    }
   }
   lines.push(
     `Dependencies: ${detail.dependencies.length === 0 ? "ready (0 total)" : `${detail.dependencies.filter((dependency) => dependency.satisfied).length}/${detail.dependencies.length} satisfied`}`,
@@ -350,7 +368,7 @@ function formatRunAuditEventLine(event: RunAuditHistory["events"][number]["event
       ])}`;
     case "run.attempt_recorded":
       return `${event.type}${formatAuditDetails([
-        ["attempt", event.attempt],
+        ["attemptNumber", event.attemptNumber],
         ["exitCode", event.fields.exitCode],
         ["timedOut", event.fields.timedOut],
       ])}`;

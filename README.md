@@ -222,7 +222,7 @@ hooks:
     - builtin: git-worktree
       when:
         sessionIndex: [0]
-        attemptInSession: [0]
+        attemptIndexInSession: [0]
       with:
         repo: "{{cwd}}"
         from: main
@@ -231,7 +231,7 @@ hooks:
     - builtin: command
       when:
         sessionIndex: [0]
-        attemptInSession: [0]
+        attemptIndexInSession: [0]
       with:
         mode: status
         command: bash

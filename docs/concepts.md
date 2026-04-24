@@ -52,8 +52,16 @@ file, an immutable `assignment-seed.md` snapshot is also stored for audit.
 Lifecycle states:
 
 - `initialized` — created by `init`, awaiting execution
+- `ready` — approved for execution, awaiting first start
 - `running` — actively executing
 - `success` | `blocked` | `exhausted` | `aborted` | `error` — terminal states
+
+A run is the durable lifecycle record. Each backend execution window is a
+session: the fresh execution creates session `0`, and each resume creates
+the next session. Attempts are backend invocations within a session.
+`maxAttemptsPerSession` is the per-session retry budget. Attempt numbers
+are monotonic across the run, while `attemptIndexInSession` is zero-based
+within its session.
 
 Runs can be archived, reset, or deleted (archived-only). See
 [runs.md](runs.md) and [resume.md](resume.md).

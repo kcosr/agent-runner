@@ -11,7 +11,7 @@ export interface HookSourceDescriptor {
 
 export type AttemptHookWhen = {
   sessionIndex?: number | number[];
-  attemptInSession?: number | number[];
+  attemptIndexInSession?: number | number[];
 };
 
 export type TaskTransitionSource = "run-loop" | "task-set" | "task-append-notes" | "task-add";
@@ -43,7 +43,7 @@ export interface HookAuditRecord {
   endedAt: string;
   outcome: string;
   sessionIndex: number | null;
-  attempt: number | null;
+  attemptNumber: number | null;
   taskId: string | null;
   summary: string | null;
 }
@@ -118,9 +118,9 @@ export interface HookContextRun {
   note: string | null;
   pinned: boolean;
   backendSessionId: string | null;
-  attempts: number;
-  maxAttempts: number;
-  sessionCount: number;
+  totalAttemptCount: number;
+  maxAttemptsPerSession: number;
+  totalSessionCount: number;
 }
 
 export interface HookContextTasks {
@@ -169,7 +169,7 @@ export interface AttemptHookContext extends HookContextBase {
   };
   retriesRemaining: number;
   sessionIndex: number;
-  attemptInSession: number;
+  attemptIndexInSession: number;
 }
 
 export interface TaskTransitionHookContext extends HookContextBase {

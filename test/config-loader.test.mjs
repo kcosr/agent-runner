@@ -1252,7 +1252,7 @@ test("built-in plan-feature template emits implement-prefixed assignment names",
     /worktree_base_ref:\n\s+type: string\n\s+required: true\n\s+sources: \[parent\]/,
   );
   assert.match(template, /builtin: git-worktree/);
-  assert.match(template, /attemptInSession: \[0\]/);
+  assert.match(template, /attemptIndexInSession: \[0\]/);
   assert.match(template, /from: "\{\{worktree_base_ref\}\}"/);
   assert.match(template, /command: git\n\s+args:\n\s+- fetch\n\s+- origin\n\s+- --prune/);
   assert.match(

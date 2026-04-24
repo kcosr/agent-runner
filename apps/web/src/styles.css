@@ -1249,6 +1249,21 @@ body {
   gap: 8px;
 }
 
+.timeline-session-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.timeline-session-header {
+  flex: 1 0 100%;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .timeline-attempt-tab {
   display: inline-flex;
   align-items: center;
@@ -1260,6 +1275,11 @@ body {
   color: var(--muted-foreground);
   font-family: var(--mono);
   font-size: 12px;
+}
+
+.timeline-attempt-tab__meta {
+  color: var(--muted-foreground);
+  font-family: var(--font-sans);
 }
 
 .timeline-attempt-tab.active {

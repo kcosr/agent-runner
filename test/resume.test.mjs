@@ -206,7 +206,7 @@ test("resume: happy path — original blocks, resume completes, same workspace",
 
   assert.equal(first.exitCode, 2);
   assert.equal(first.manifest.status, "blocked");
-  assert.equal(first.manifest.sessionCount, 1);
+  assert.equal(first.manifest.totalSessionCount, 1);
   assert.equal(first.manifest.sessions.length, 1);
   assert.equal(first.manifest.sessions[0].status, "blocked");
   assert.equal(first.manifest.backendSessionId, "sess-original");
@@ -241,7 +241,7 @@ test("resume: happy path — original blocks, resume completes, same workspace",
   assert.equal(second.runId, first.runId, "same slug");
   assert.equal(second.workspaceDir, first.workspaceDir, "same workspace");
   assert.equal(second.manifest.status, "success");
-  assert.equal(second.manifest.sessionCount, 2);
+  assert.equal(second.manifest.totalSessionCount, 2);
   assert.equal(second.manifest.sessions.length, 2);
   assert.equal(second.manifest.sessions[0].status, "blocked");
   assert.equal(second.manifest.sessions[1].status, "success");
@@ -269,9 +269,9 @@ test("resume: attempt numbers are monotonic across sessions", async () => {
       };
     }),
   });
-  assert.equal(first.manifest.attempts, 3);
+  assert.equal(first.manifest.totalAttemptCount, 3);
   assert.equal(first.manifest.status, "exhausted");
-  assert.equal(first.manifest.attemptRecords.at(-1).attempt, 3);
+  assert.equal(first.manifest.attemptRecords.at(-1).attemptNumber, 3);
 
   // Resume — succeed on first attempt
   const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.runId, dir));
@@ -297,14 +297,14 @@ test("resume: attempt numbers are monotonic across sessions", async () => {
     resume: target,
   });
 
-  assert.equal(second.manifest.attempts, 4);
+  assert.equal(second.manifest.totalAttemptCount, 4);
   assert.equal(second.manifest.attemptRecords.length, 4);
-  assert.equal(second.manifest.attemptRecords.at(-1).attempt, 4);
+  assert.equal(second.manifest.attemptRecords.at(-1).attemptNumber, 4);
   assert.equal(second.manifest.attemptRecords.at(-1).sessionIndex, 1);
   assert.equal(second.manifest.attemptRecords[0].sessionIndex, 0);
 
   const log4 = JSON.parse(readFileSync(join(second.workspaceDir, "attempts", "04.json"), "utf8"));
-  assert.equal(log4.attempt, 4);
+  assert.equal(log4.attemptNumber, 4);
   assert.equal(log4.sessionIndex, 1);
   assert.equal(log4.stdout, "");
 });

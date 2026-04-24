@@ -23,6 +23,21 @@ export interface RunActiveTask {
   title: string;
 }
 
+export interface RunSessionSummary {
+  sessionIndex: number;
+  status: RunStatus;
+  startedAt: string;
+  endedAt: string | null;
+  exitCode: number | null;
+  message: string | null;
+  firstAttemptNumber: number | null;
+  lastAttemptNumber: number | null;
+  attemptCount: number;
+  maxAttemptsPerSession: number;
+  backendSessionIdAtStart: string | null;
+  backendSessionIdAtEnd: string | null;
+}
+
 export interface RunSummary {
   runId: string;
   parentRunId: string | null;
@@ -41,6 +56,11 @@ export interface RunSummary {
   cwd: string;
   startedAt: string;
   endedAt: string | null;
+  totalAttemptCount: number;
+  totalSessionCount: number;
+  maxAttemptsPerSession: number;
+  currentSession: RunSessionSummary | null;
+  lastSession: RunSessionSummary | null;
   tasksCompleted: number;
   tasksTotal: number;
   attachmentCount: number;
@@ -119,9 +139,12 @@ export interface RunDetail {
   startedAt: string;
   endedAt: string | null;
   exitCode: number | null;
-  attempts: number;
-  maxAttempts: number;
-  sessionCount: number;
+  totalAttemptCount: number;
+  totalSessionCount: number;
+  maxAttemptsPerSession: number;
+  sessions: RunSessionSummary[];
+  currentSession: RunSessionSummary | null;
+  lastSession: RunSessionSummary | null;
   tasksCompleted: number;
   tasksTotal: number;
   attachments: RunAttachment[];
@@ -214,6 +237,47 @@ function deriveActiveTask(tasks: Record<string, TaskSnapshot>): RunActiveTask | 
   };
 }
 
+function toRunSessionSummaries(manifest: RunManifest): RunSessionSummary[] {
+  const attemptsBySession = new Map<number, number>();
+  for (const attempt of manifest.attemptRecords) {
+    attemptsBySession.set(
+      attempt.sessionIndex,
+      (attemptsBySession.get(attempt.sessionIndex) ?? 0) + 1,
+    );
+  }
+
+  return [...manifest.sessions]
+    .sort((a, b) => a.sessionIndex - b.sessionIndex)
+    .map((session) => ({
+      sessionIndex: session.sessionIndex,
+      status: session.status,
+      startedAt: session.startedAt,
+      endedAt: session.endedAt,
+      exitCode: session.exitCode,
+      message: session.message,
+      firstAttemptNumber: session.firstAttemptNumber,
+      lastAttemptNumber: session.lastAttemptNumber,
+      attemptCount: attemptsBySession.get(session.sessionIndex) ?? 0,
+      maxAttemptsPerSession: session.maxAttemptsPerSession,
+      backendSessionIdAtStart: session.backendSessionIdAtStart,
+      backendSessionIdAtEnd: session.backendSessionIdAtEnd,
+    }));
+}
+
+function deriveCurrentSession(
+  manifest: RunManifest,
+  sessions: RunSessionSummary[],
+): RunSessionSummary | null {
+  if (manifest.status !== "running") {
+    return null;
+  }
+  return sessions.find((session) => session.status === "running") ?? null;
+}
+
+function deriveLastSession(sessions: RunSessionSummary[]): RunSessionSummary | null {
+  return sessions.at(-1) ?? null;
+}
+
 function isArchived(manifest: RunManifest): boolean {
   return manifest.archivedAt !== null;
 }
@@ -302,6 +366,7 @@ export function toRunSummary(
 ): RunSummary {
   const resolvedDependencyState =
     dependencyState ?? deriveDependencyState(entry.manifest, relatedManifests);
+  const sessions = toRunSessionSummaries(entry.manifest);
   return {
     runId: entry.manifest.runId,
     parentRunId: entry.manifest.parentRunId,
@@ -320,6 +385,11 @@ export function toRunSummary(
     cwd: entry.manifest.cwd,
     startedAt: entry.manifest.startedAt,
     endedAt: entry.manifest.endedAt,
+    totalAttemptCount: entry.manifest.totalAttemptCount,
+    totalSessionCount: entry.manifest.totalSessionCount,
+    maxAttemptsPerSession: entry.manifest.maxAttemptsPerSession,
+    currentSession: deriveCurrentSession(entry.manifest, sessions),
+    lastSession: deriveLastSession(sessions),
     tasksCompleted: entry.manifest.tasksCompleted,
     tasksTotal: entry.manifest.tasksTotal,
     attachmentCount: entry.manifest.attachments.length,
@@ -376,6 +446,7 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
   const relatedManifests =
     result.relatedManifests ?? new Map<string, RunManifest>([[manifest.runId, manifest]]);
   const dependencyState = deriveDependencyState(manifest, relatedManifests);
+  const sessions = toRunSessionSummaries(manifest);
   return {
     runId: manifest.runId,
     parentRunId: manifest.parentRunId,
@@ -410,9 +481,12 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
     startedAt: manifest.startedAt,
     endedAt: manifest.endedAt,
     exitCode: manifest.exitCode,
-    attempts: manifest.attempts,
-    maxAttempts: manifest.maxAttempts,
-    sessionCount: manifest.sessionCount,
+    totalAttemptCount: manifest.totalAttemptCount,
+    totalSessionCount: manifest.totalSessionCount,
+    maxAttemptsPerSession: manifest.maxAttemptsPerSession,
+    sessions,
+    currentSession: deriveCurrentSession(manifest, sessions),
+    lastSession: deriveLastSession(sessions),
     tasksCompleted: manifest.tasksCompleted,
     tasksTotal: manifest.tasksTotal,
     attachments: manifest.attachments.map((attachment) => ({ ...attachment })),
@@ -433,7 +507,7 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
       endedAt: audit.endedAt,
       outcome: audit.outcome,
       sessionIndex: audit.sessionIndex,
-      attempt: audit.attempt,
+      attemptNumber: audit.attemptNumber,
       taskId: audit.taskId,
       summary: audit.summary ?? null,
     })),
@@ -443,7 +517,8 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
     activeTask: deriveActiveTask(manifest.finalTasks),
     message: manifest.message,
     pendingPrompt:
-      (manifest.status === "initialized" || manifest.status === "ready") && manifest.attempts === 0
+      (manifest.status === "initialized" || manifest.status === "ready") &&
+      manifest.totalAttemptCount === 0
         ? manifest.brief
         : null,
     callerInstructions: manifest.callerInstructions,

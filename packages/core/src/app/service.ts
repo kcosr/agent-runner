@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { join, resolve, sep } from "node:path";
+import { resolve, sep } from "node:path";
 import type { DefinitionEntry } from "../config/loader.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../config/loader.js";
 import type {
@@ -170,45 +170,32 @@ function readAttemptLogForRecord(
 ): AttemptLog {
   const finish = startDebugPerfTimer("runs.read_attempt_log", {
     runId,
-    attempt: record.attempt,
+    attemptNumber: record.attemptNumber,
     sessionIndex: record.sessionIndex,
+    attemptIndexInSession: record.attemptIndexInSession,
     logPath: record.logPath,
   });
-  try {
-    const workspaceRoot = resolve(workspaceDir);
-    const absoluteLogPath = resolve(workspaceRoot, record.logPath);
-    if (
-      absoluteLogPath !== workspaceRoot &&
-      !absoluteLogPath.startsWith(`${workspaceRoot}${sep}`)
-    ) {
-      throw new Error("attempt log path escapes workspace");
-    }
-    const raw = readFileSync(absoluteLogPath, "utf8");
-    const parsed = JSON.parse(raw) as AttemptLog;
-    finish({
-      fallback: false,
-      stderrBytes: parsed.stderr.length,
-      stdoutBytes: parsed.stdout.length,
-    });
-    return parsed;
-  } catch {
-    const fallback = {
-      schemaVersion: 1 as const,
-      runId,
-      attempt: record.attempt,
-      sessionIndex: record.sessionIndex,
-      startedAt: record.startedAt,
-      endedAt: record.endedAt,
-      stdout: "",
-      stderr: "",
-    };
-    finish({
-      fallback: true,
-      stderrBytes: 0,
-      stdoutBytes: 0,
-    });
-    return fallback;
+  const workspaceRoot = resolve(workspaceDir);
+  const absoluteLogPath = resolve(workspaceRoot, record.logPath);
+  if (absoluteLogPath !== workspaceRoot && !absoluteLogPath.startsWith(`${workspaceRoot}${sep}`)) {
+    throw new Error("attempt log path escapes workspace");
   }
+  const raw = readFileSync(absoluteLogPath, "utf8");
+  const parsed = JSON.parse(raw) as AttemptLog;
+  if (
+    parsed.schemaVersion !== 2 ||
+    parsed.runId !== runId ||
+    parsed.attemptNumber !== record.attemptNumber ||
+    parsed.sessionIndex !== record.sessionIndex ||
+    parsed.attemptIndexInSession !== record.attemptIndexInSession
+  ) {
+    throw new Error(`attempt log ${record.logPath} does not match schemaVersion 2 record identity`);
+  }
+  finish({
+    stderrBytes: parsed.stderr.length,
+    stdoutBytes: parsed.stdout.length,
+  });
+  return parsed;
 }
 
 function toRunTimelineAttempt(
@@ -218,8 +205,9 @@ function toRunTimelineAttempt(
 ): RunTimelineAttempt {
   const log = readAttemptLogForRecord(runId, workspaceDir, record);
   return {
-    attempt: record.attempt,
+    attemptNumber: record.attemptNumber,
     sessionIndex: record.sessionIndex,
+    attemptIndexInSession: record.attemptIndexInSession,
     startedAt: record.startedAt,
     endedAt: record.endedAt,
     prompt: record.prompt,

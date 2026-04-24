@@ -43,7 +43,7 @@ const RUN_EVENT_SHARED_KEYS = new Set([
   "hostMode",
   "controllerInstanceId",
   "sessionIndex",
-  "attempt",
+  "attemptNumber",
 ]);
 
 export type RunEventRecordSource = (typeof RUN_EVENT_SOURCES)[number];
@@ -73,7 +73,7 @@ interface RunEventBaseRecord {
   hostMode: RunExecutionHostMode;
   controllerInstanceId?: string;
   sessionIndex?: number;
-  attempt?: number;
+  attemptNumber?: number;
 }
 
 export interface PersistedRunEventV1 extends RunEventBaseRecord {
@@ -94,7 +94,7 @@ export interface RunAuditEvent {
   hostMode: RunExecutionHostMode;
   controllerInstanceId?: string;
   sessionIndex?: number;
-  attempt?: number;
+  attemptNumber?: number;
   fields: Record<string, unknown>;
 }
 
@@ -218,7 +218,7 @@ function parsePersistedRunEventV2(value: unknown): PersistedRunEventV2 | null {
   if (!isOptionalNonNegativeInteger(value.sessionIndex)) {
     return null;
   }
-  if (!isOptionalNonNegativeInteger(value.attempt)) {
+  if (!isOptionalNonNegativeInteger(value.attemptNumber)) {
     return null;
   }
   return value as PersistedRunEventV2;
@@ -243,7 +243,7 @@ function toRunAuditEnvelope(record: PersistedRunEventV2): RunAuditEnvelope {
         ? { controllerInstanceId: record.controllerInstanceId }
         : {}),
       ...(record.sessionIndex !== undefined ? { sessionIndex: record.sessionIndex } : {}),
-      ...(record.attempt !== undefined ? { attempt: record.attempt } : {}),
+      ...(record.attemptNumber !== undefined ? { attemptNumber: record.attemptNumber } : {}),
       fields,
     },
   };
@@ -318,7 +318,7 @@ function appendRunEvent(params: {
   eventType: RunEventType;
   context: RunEventWriteContext;
   sessionIndex?: number;
-  attempt?: number;
+  attemptNumber?: number;
   fields?: Record<string, unknown>;
 }): RunAuditEnvelope {
   const cursor =
@@ -338,7 +338,7 @@ function appendRunEvent(params: {
       ? { controllerInstanceId: params.context.controllerInstanceId }
       : {}),
     ...(params.sessionIndex !== undefined ? { sessionIndex: params.sessionIndex } : {}),
-    ...(params.attempt !== undefined ? { attempt: params.attempt } : {}),
+    ...(params.attemptNumber !== undefined ? { attemptNumber: params.attemptNumber } : {}),
     ...(params.fields ?? {}),
   };
   appendTextFileDurable(runEventsPath(params.workspaceDir), `${JSON.stringify(record)}\n`);
@@ -398,7 +398,7 @@ export function appendRunBackendSessionUpdatedEvent(params: {
   nextBackendSessionId: string | null;
   reason: BackendSessionUpdateReason;
   sessionIndex?: number;
-  attempt?: number;
+  attemptNumber?: number;
 }): RunAuditEnvelope {
   return appendRunEvent({
     workspaceDir: params.manifest.workspaceDir,
@@ -406,7 +406,7 @@ export function appendRunBackendSessionUpdatedEvent(params: {
     eventType: "run.backend_session_updated",
     context: params.context,
     sessionIndex: params.sessionIndex,
-    attempt: params.attempt,
+    attemptNumber: params.attemptNumber,
     fields: {
       previousBackendSessionId: params.previousBackendSessionId,
       nextBackendSessionId: params.nextBackendSessionId,
@@ -419,7 +419,7 @@ export function appendRunAttemptRecordedEvent(params: {
   manifest: Pick<RunManifest, "workspaceDir" | "runId">;
   context: RunEventWriteContext;
   sessionIndex: number;
-  attempt: number;
+  attemptNumber: number;
   exitCode: number | null;
   signal: string | null;
   timedOut: boolean;
@@ -432,7 +432,7 @@ export function appendRunAttemptRecordedEvent(params: {
     eventType: "run.attempt_recorded",
     context: params.context,
     sessionIndex: params.sessionIndex,
-    attempt: params.attempt,
+    attemptNumber: params.attemptNumber,
     fields: {
       exitCode: params.exitCode,
       signal: params.signal,
@@ -452,7 +452,7 @@ export function appendRunHookRecordedEvent(params: {
   startedAt: string;
   endedAt: string;
   sessionIndex?: number | null;
-  attempt?: number | null;
+  attemptNumber?: number | null;
   taskId?: string | null;
   summary?: string | null;
 }): RunAuditEnvelope {
@@ -464,7 +464,9 @@ export function appendRunHookRecordedEvent(params: {
     ...(params.sessionIndex !== null && params.sessionIndex !== undefined
       ? { sessionIndex: params.sessionIndex }
       : {}),
-    ...(params.attempt !== null && params.attempt !== undefined ? { attempt: params.attempt } : {}),
+    ...(params.attemptNumber !== null && params.attemptNumber !== undefined
+      ? { attemptNumber: params.attemptNumber }
+      : {}),
     fields: {
       phase: params.phase,
       hookId: params.hookId,

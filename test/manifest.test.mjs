@@ -136,8 +136,8 @@ test("manifest: run.json is written and matches outcome.manifest", async () => {
 
   assert.equal(onDisk.status, "success");
   assert.equal(onDisk.exitCode, 0);
-  assert.equal(onDisk.attempts, 1);
-  assert.equal(onDisk.maxAttempts, 3);
+  assert.equal(onDisk.totalAttemptCount, 1);
+  assert.equal(onDisk.maxAttemptsPerSession, 3);
   assert.equal(onDisk.tasksCompleted, 3);
   assert.equal(onDisk.tasksTotal, 3);
   assert.equal(onDisk.backendSessionId, "sess-abc-123");
@@ -158,9 +158,10 @@ test("manifest: run.json is written and matches outcome.manifest", async () => {
   const logPath = join(outcome.workspaceDir, "attempts", "01.json");
   assert.ok(existsSync(logPath), "attempts/01.json exists");
   const log = JSON.parse(readFileSync(logPath, "utf8"));
-  assert.equal(log.schemaVersion, 1);
+  assert.equal(log.schemaVersion, 2);
   assert.equal(log.runId, outcome.runId);
-  assert.equal(log.attempt, 1);
+  assert.equal(log.attemptNumber, 1);
+  assert.equal(log.attemptIndexInSession, 0);
   assert.equal(log.stdout, "");
   assert.equal(log.stderr, "raw stderr text");
 });
@@ -257,7 +258,7 @@ test("manifest: attempt records snapshot state after each attempt", async () => 
 
   assert.equal(outcome.exitCode, 0);
   const m = outcome.manifest;
-  assert.equal(m.attempts, 2);
+  assert.equal(m.totalAttemptCount, 2);
   assert.equal(m.attemptRecords.length, 2);
 
   assert.equal(m.attemptRecords[0].logPath, "attempts/01.json");
@@ -266,8 +267,8 @@ test("manifest: attempt records snapshot state after each attempt", async () => 
   const log2 = JSON.parse(readFileSync(join(outcome.workspaceDir, "attempts", "02.json"), "utf8"));
   assert.equal(log1.stdout, "");
   assert.equal(log2.stdout, "");
-  assert.equal(log1.attempt, 1);
-  assert.equal(log2.attempt, 2);
+  assert.equal(log1.attemptNumber, 1);
+  assert.equal(log2.attemptNumber, 2);
 
   assert.equal(m.attemptRecords[0].tasksAfter.t1.status, "completed");
   assert.equal(m.attemptRecords[0].tasksAfter.t2.status, "pending");
@@ -394,7 +395,7 @@ test("manifest: exhausted run records all attempts", async () => {
 
   assert.equal(outcome.manifest.status, "exhausted");
   assert.equal(outcome.manifest.exitCode, 1);
-  assert.equal(outcome.manifest.attempts, 3);
+  assert.equal(outcome.manifest.totalAttemptCount, 3);
   assert.equal(outcome.manifest.attemptRecords.length, 3);
   assert.equal(outcome.manifest.tasksCompleted, 0);
   assert.equal(outcome.manifest.finalTasks.t1.status, "pending");
@@ -431,11 +432,11 @@ test("manifest: thrown backend launch errors still settle the run as error", asy
   assert.equal(onDisk.status, "error");
   assert.equal(onDisk.exitCode, 4);
   assert.match(onDisk.endedAt, /^\d{4}-\d{2}-\d{2}T/);
-  assert.equal(onDisk.attempts, 1);
+  assert.equal(onDisk.totalAttemptCount, 1);
   assert.equal(onDisk.attemptRecords.length, 1);
   assert.equal(onDisk.sessions[0].status, "error");
-  assert.equal(onDisk.sessions[0].firstAttempt, 1);
-  assert.equal(onDisk.sessions[0].lastAttempt, 1);
+  assert.equal(onDisk.sessions[0].firstAttemptNumber, 1);
+  assert.equal(onDisk.sessions[0].lastAttemptNumber, 1);
 
   const log = JSON.parse(readFileSync(join(workspaceDir, "attempts", "01.json"), "utf8"));
   assert.equal(log.stdout, "");

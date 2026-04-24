@@ -87,7 +87,7 @@ Flags:
 - `--effort <level>` — one of `off`, `minimal`, `low`, `medium`, `high`,
   `xhigh`, `max`.
 - `--timeout-sec <n>` — positive integer per-attempt wall-clock budget.
-- `--max-retries <n>` — non-negative integer; `maxAttempts = retries + 1`.
+- `--max-retries <n>` — non-negative integer; `maxAttemptsPerSession = retries + 1`.
 - `--unrestricted` — pass the backend's safety-bypass flag.
 - `--name <name>` — set the persisted display name.
 - `--var <key>=<value>` — repeatable. Split on the first `=`. Forbidden
@@ -104,6 +104,13 @@ Flags:
   daemon accepts it.
 
 Positional args are joined with spaces into the message body.
+
+A run is the durable lifecycle record. Each backend execution window is a
+session: the fresh execution creates session `0`, and each resume creates
+the next session. Attempts are backend invocations within a session.
+`maxAttemptsPerSession` is the per-session retry budget. Attempt numbers
+are monotonic across the run, while `attemptIndexInSession` is zero-based
+within its session.
 
 Assignment task refs follow the same explicit loader model:
 

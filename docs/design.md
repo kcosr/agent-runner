@@ -111,7 +111,7 @@ The canonical record is `run.json`. Important persisted fields:
 - frozen assignment metadata (or `null` for chat-style runs)
 - `repo`, `cwd`
 - `backend`, `model`, `effort`, `backendSpecific`, `timeoutSec`,
-  `unrestricted`, `maxAttempts`, `launcher`
+  `unrestricted`, `maxAttemptsPerSession`, `launcher`
 - `lockedFields` (union of agent and assignment locks)
 - `status`, `exitCode`
 - `startedAt`, `endedAt`, `archivedAt`
@@ -132,6 +132,13 @@ The canonical record is `run.json`. Important persisted fields:
 - `runtimeVarSources` (frozen var provenance for projection-time redaction)
 - `resetSeed` (snapshot used by `run reset`)
 - `execution` (host mode and controller)
+
+A run is the durable lifecycle record. Each backend execution window is a
+session: the fresh execution creates session `0`, and each resume creates
+the next session. Attempts are backend invocations within a session.
+`maxAttemptsPerSession` is the per-session retry budget. Attempt numbers
+are monotonic across the run, while `attemptIndexInSession` is zero-based
+within its session.
 
 If the run started from an assignment file, task-runner also stores
 `assignment-seed.md` as an immutable audit snapshot. Runs created by
@@ -230,7 +237,7 @@ It creates or reuses a worktree, switches the run cwd to that path, and
 in `prepare` also projects `worktree_path` into runtime vars.
 
 Declarative `when` support remains narrow: attempt-phase hooks support
-`when.sessionIndex` and `when.attemptInSession`, while task-transition
+`when.sessionIndex` and `when.attemptIndexInSession`, while task-transition
 hooks support `when.taskId`, `when.taskIds`, `when.fromStatus`,
 `when.toStatus`, and `when.source`.
 
@@ -422,7 +429,7 @@ Rules:
 
 `run set-backend-session` / `run clear-backend-session` are
 passive-only metadata mutations. They update `manifest.backendSessionId`
-without changing task state, lifecycle status, attempts, archive state,
+without changing task state, lifecycle status, attempt history, archive state,
 or dependency projections.
 
 Dependency mutations are only allowed on `initialized` runs.

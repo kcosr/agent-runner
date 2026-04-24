@@ -348,7 +348,7 @@ Resolution rules:
 Supported `when` filters are intentionally narrow:
 
 - attempt phases (`beforeAttempt`, `afterAttempt`, `afterExit`) support
-  `when.sessionIndex` and `when.attemptInSession`, each as one integer or
+  `when.sessionIndex` and `when.attemptIndexInSession`, each as one integer or
   an array of integers. Session index `0` is the first execution session;
   attempt-in-session `0` is the first backend attempt within that
   execution session.

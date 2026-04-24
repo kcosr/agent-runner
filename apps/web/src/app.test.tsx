@@ -136,6 +136,37 @@ function makeRun(
     cwd: "/tmp/task-runner",
     startedAt: "2026-04-13T05:00:00.000Z",
     endedAt: null,
+    totalAttemptCount: 1,
+    totalSessionCount: 1,
+    maxAttemptsPerSession: 3,
+    currentSession: {
+      sessionIndex: 0,
+      status: "running",
+      startedAt: "2026-04-13T05:00:00.000Z",
+      endedAt: null,
+      exitCode: null,
+      message: null,
+      firstAttemptNumber: 1,
+      lastAttemptNumber: 1,
+      attemptCount: 1,
+      maxAttemptsPerSession: 3,
+      backendSessionIdAtStart: "thread-1",
+      backendSessionIdAtEnd: null,
+    },
+    lastSession: {
+      sessionIndex: 0,
+      status: "running",
+      startedAt: "2026-04-13T05:00:00.000Z",
+      endedAt: null,
+      exitCode: null,
+      message: null,
+      firstAttemptNumber: 1,
+      lastAttemptNumber: 1,
+      attemptCount: 1,
+      maxAttemptsPerSession: 3,
+      backendSessionIdAtStart: "thread-1",
+      backendSessionIdAtEnd: null,
+    },
     tasksCompleted: 1,
     tasksTotal: 4,
     attachmentCount: 0,
@@ -242,9 +273,53 @@ function makeDetail(
     startedAt: "2026-04-13T05:00:00.000Z",
     endedAt: null,
     exitCode: null,
-    attempts: 1,
-    maxAttempts: 3,
-    sessionCount: 1,
+    totalAttemptCount: 1,
+    totalSessionCount: 1,
+    maxAttemptsPerSession: 3,
+    sessions: [
+      {
+        sessionIndex: 0,
+        status: "running",
+        startedAt: "2026-04-13T05:00:00.000Z",
+        endedAt: null,
+        exitCode: null,
+        message: null,
+        firstAttemptNumber: 1,
+        lastAttemptNumber: 1,
+        attemptCount: 1,
+        maxAttemptsPerSession: 3,
+        backendSessionIdAtStart: "thread-1",
+        backendSessionIdAtEnd: null,
+      },
+    ],
+    currentSession: {
+      sessionIndex: 0,
+      status: "running",
+      startedAt: "2026-04-13T05:00:00.000Z",
+      endedAt: null,
+      exitCode: null,
+      message: null,
+      firstAttemptNumber: 1,
+      lastAttemptNumber: 1,
+      attemptCount: 1,
+      maxAttemptsPerSession: 3,
+      backendSessionIdAtStart: "thread-1",
+      backendSessionIdAtEnd: null,
+    },
+    lastSession: {
+      sessionIndex: 0,
+      status: "running",
+      startedAt: "2026-04-13T05:00:00.000Z",
+      endedAt: null,
+      exitCode: null,
+      message: null,
+      firstAttemptNumber: 1,
+      lastAttemptNumber: 1,
+      attemptCount: 1,
+      maxAttemptsPerSession: 3,
+      backendSessionIdAtStart: "thread-1",
+      backendSessionIdAtEnd: null,
+    },
     tasksCompleted: 1,
     tasksTotal: 4,
     attachments: [],
@@ -546,6 +621,11 @@ function installFetchMock(
             cwd: detail.cwd,
             startedAt: detail.startedAt,
             endedAt: detail.endedAt,
+            totalAttemptCount: detail.totalAttemptCount,
+            totalSessionCount: detail.totalSessionCount,
+            maxAttemptsPerSession: detail.maxAttemptsPerSession,
+            currentSession: detail.currentSession,
+            lastSession: detail.lastSession,
             tasksCompleted: detail.tasksCompleted,
             tasksTotal: detail.tasksTotal,
             attachmentCount: detail.attachments.length,
@@ -793,8 +873,11 @@ function installFetchMock(
         detail.effectiveStatus = "initialized";
         detail.isLive = false;
         detail.backendSessionId = null;
-        detail.attempts = 0;
-        detail.sessionCount = 0;
+        detail.totalAttemptCount = 0;
+        detail.totalSessionCount = 0;
+        detail.sessions = [];
+        detail.currentSession = null;
+        detail.lastSession = null;
         detail.endedAt = null;
         detail.exitCode = null;
         detail.activeTask = null;
@@ -1384,7 +1467,9 @@ describe("web app", () => {
           lastCursor: 3,
           attempts: [
             {
-              attempt: 1,
+              attemptNumber: 1,
+
+              attemptIndexInSession: 0,
               sessionIndex: 0,
               startedAt: "2026-04-13T05:00:00.000Z",
               endedAt: "2026-04-13T05:02:00.000Z",
@@ -1396,7 +1481,9 @@ describe("web app", () => {
               live: false,
             },
             {
-              attempt: 2,
+              attemptNumber: 2,
+
+              attemptIndexInSession: 0,
               sessionIndex: 1,
               startedAt: "2026-04-13T05:03:00.000Z",
               endedAt: null,
@@ -1421,8 +1508,8 @@ describe("web app", () => {
     timelineSource.emitOpen();
 
     expect(screen.getByRole("button", { name: "Attempts" })).toBeInTheDocument();
-    expect(await screen.findByRole("tab", { name: "1" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "2" })).toBeInTheDocument();
+    expect(await screen.findByRole("tab", { name: /Attempt 1/ })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Attempt 2/ })).toBeInTheDocument();
     expect(screen.queryByText("Session 1")).not.toBeInTheDocument();
 
     const detail = screen.getByLabelText("Run detail");
@@ -1517,8 +1604,8 @@ describe("web app", () => {
           effectiveStatus: "initialized",
           isLive: false,
           activeTask: null,
-          attempts: 0,
-          sessionCount: 0,
+          totalAttemptCount: 0,
+          totalSessionCount: 0,
           message: "Review this handoff before launch.",
           pendingPrompt: "## Prepared prompt",
         }),
@@ -1563,8 +1650,8 @@ describe("web app", () => {
         status: "running",
         effectiveStatus: "running",
         isLive: true,
-        attempts: 1,
-        sessionCount: 1,
+        totalAttemptCount: 1,
+        totalSessionCount: 1,
         message: "Review this handoff before launch.",
         pendingPrompt: null,
       }),
@@ -1586,7 +1673,9 @@ describe("web app", () => {
       cursor: 1,
       event: {
         type: "attempt_started",
-        attempt: 1,
+        attemptNumber: 1,
+
+        attemptIndexInSession: 0,
         sessionIndex: 0,
         startedAt: "2026-04-13T05:00:00.000Z",
         prompt: "## Attempt prompt",
@@ -1628,7 +1717,9 @@ describe("web app", () => {
           lastCursor: 2,
           attempts: [
             {
-              attempt: 1,
+              attemptNumber: 1,
+
+              attemptIndexInSession: 0,
               sessionIndex: 0,
               startedAt: "2026-04-13T05:00:00.000Z",
               endedAt: "2026-04-13T05:02:00.000Z",
@@ -1640,7 +1731,9 @@ describe("web app", () => {
               live: false,
             },
             {
-              attempt: 2,
+              attemptNumber: 2,
+
+              attemptIndexInSession: 0,
               sessionIndex: 1,
               startedAt: "2026-04-13T05:03:00.000Z",
               endedAt: null,
@@ -1672,7 +1765,9 @@ describe("web app", () => {
       cursor: 3,
       event: {
         type: "attempt_started",
-        attempt: 3,
+        attemptNumber: 3,
+
+        attemptIndexInSession: 0,
         sessionIndex: 2,
         startedAt: "2026-04-13T05:04:00.000Z",
         prompt: "## Third prompt",
@@ -1680,7 +1775,10 @@ describe("web app", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByRole("tab", { name: "3" })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("tab", { name: /Attempt 3/ })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
     });
     expect(screen.getByRole("tab", { name: "Response" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByText("Waiting for live response text…")).toBeInTheDocument();
@@ -1696,7 +1794,9 @@ describe("web app", () => {
           lastCursor: 1,
           attempts: [
             {
-              attempt: 1,
+              attemptNumber: 1,
+
+              attemptIndexInSession: 0,
               sessionIndex: 0,
               startedAt: "2026-04-13T05:00:00.000Z",
               endedAt: "2026-04-13T05:02:00.000Z",
@@ -1743,7 +1843,9 @@ describe("web app", () => {
           lastCursor: 1,
           attempts: [
             {
-              attempt: 1,
+              attemptNumber: 1,
+
+              attemptIndexInSession: 0,
               sessionIndex: 0,
               startedAt: "2026-04-13T05:00:00.000Z",
               endedAt: "2026-04-13T05:02:00.000Z",
@@ -2329,7 +2431,9 @@ describe("web app", () => {
       lastCursor: 1,
       attempts: [
         {
-          attempt: 1,
+          attemptNumber: 1,
+
+          attemptIndexInSession: 0,
           sessionIndex: 0,
           startedAt: "2026-04-13T05:00:00.000Z",
           endedAt: null,
@@ -6457,7 +6561,7 @@ describe("web app", () => {
             effectiveStatus: "ready",
             isLive: false,
             backendSessionId: null,
-            attempts: 0,
+            totalAttemptCount: 0,
             name: "Ready from keyboard",
             assignment: {
               name: "Ready from keyboard",
@@ -6905,7 +7009,7 @@ describe("web app", () => {
         backendSessionId: null,
         endedAt: null,
         activeTask: null,
-        attempts: 0,
+        totalAttemptCount: 0,
         tasks: [
           {
             id: "setup",

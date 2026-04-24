@@ -84,8 +84,9 @@ export function applyEnvelope(
           attempt.live ? { ...attempt, live: false } : attempt,
         );
         next.attempts.push({
-          attempt: envelope.event.attempt,
+          attemptNumber: envelope.event.attemptNumber,
           sessionIndex: envelope.event.sessionIndex,
+          attemptIndexInSession: envelope.event.attemptIndexInSession,
           startedAt: envelope.event.startedAt,
           endedAt: null,
           prompt: envelope.event.prompt,
