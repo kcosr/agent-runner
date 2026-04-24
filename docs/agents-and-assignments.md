@@ -224,7 +224,11 @@ Read the shared review checklist.
 
 - the canonical task id is the slash-relative file key under `tasks/`
   without the `.md` suffix
-- frontmatter `id`, when present, must match that canonical id
+- frontmatter `id`, when present on a config-root named task, must match
+  that canonical id
+- explicit task file paths outside the config root may use an authored
+  `id` that differs from the filesystem-derived id; that authored `id`
+  becomes the resolved task id for that direct-path load
 - the markdown body becomes the resolved task `body`
 - `loadAssignmentConfig()` resolves named and path refs into the normal
   plain task objects before runtime; later `{{var}}` interpolation still
@@ -240,9 +244,17 @@ definition:
 - tasks: slash-relative file under `tasks/`
 - launchers: slash-relative file under `launchers/`
 
-Discovery warns and skips definitions whose authored internal id does
-not match that canonical key. Direct named/path loads of the skipped
-definition still fail clearly.
+Discovery warns and skips config-root definitions whose authored
+internal id does not match that canonical key. Direct named/path loads of
+those skipped config-root definitions still fail clearly.
+
+Direct path loads outside `TASK_RUNNER_CONFIG_DIR` are one-off file loads,
+not named config-root discovery. They may use authored agent,
+assignment, task, and launcher identities that differ from the
+filesystem-derived fallback id; when an outside-root task `id` or launcher
+`name` is present, that authored value is the loaded identity. This keeps
+generated drafts and other one-off definition files usable without adding
+them to the named-definition namespace.
 
 Launcher follow-up remains aligned with the same explicit reference
 model: launcher strings should keep meaning named launchers unless they

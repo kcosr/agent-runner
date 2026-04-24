@@ -759,6 +759,17 @@ function canonicalDefinitionIdFromPath(kind: CanonicalDefinitionKind, sourcePath
   );
 }
 
+function isWithinCanonicalDefinitionRoot(
+  kind: CanonicalDefinitionKind,
+  sourcePath: string,
+): boolean {
+  if (kind === "agent" || kind === "assignment") {
+    return relativePathWithinRoot(dirname(sourcePath), resolveDefinitionRoot(kind)) !== null;
+  }
+  const root = kind === "task" ? resolveTasksRoot() : resolveLaunchersRoot();
+  return relativePathWithinRoot(sourcePath, root) !== null;
+}
+
 function formatIdentityMismatch(
   fieldName: string,
   authoredValue: string,
@@ -830,16 +841,18 @@ function loadLauncherDefinitionFromPath(
       `  - name: "${DIRECT_LAUNCHER_NAME}" is reserved for the built-in direct launcher`,
     );
   }
-  if (config.name !== undefined && config.name !== canonicalName) {
+  const withinRoot = isWithinCanonicalDefinitionRoot("launcher", sourcePath);
+  if (config.name !== undefined && config.name !== canonicalName && withinRoot) {
     throw new LauncherConfigError(
       sourcePath,
       formatIdentityMismatch("name", config.name, canonicalName, options.strictIdentity),
     );
   }
+  const resolvedName = !withinRoot && config.name !== undefined ? config.name : canonicalName;
 
   return {
     kind: "prefix",
-    name: canonicalName,
+    name: resolvedName,
     command: config.command,
     args: [...config.args],
     sourcePath,
@@ -947,15 +960,17 @@ function loadTaskDefinitionFromPath(
   const loaded = loadDefinitionConfig("task", sourcePath, raw, taskDefinitionConfigSchema);
 
   const canonicalId = canonicalDefinitionIdFromPath("task", sourcePath);
-  if (loaded.config.id !== undefined && loaded.config.id !== canonicalId) {
+  const withinRoot = isWithinCanonicalDefinitionRoot("task", sourcePath);
+  if (loaded.config.id !== undefined && loaded.config.id !== canonicalId && withinRoot) {
     throw new TaskConfigError(
       sourcePath,
       formatIdentityMismatch("id", loaded.config.id, canonicalId, options.strictIdentity),
     );
   }
+  const resolvedId = !withinRoot && loaded.config.id !== undefined ? loaded.config.id : canonicalId;
 
   return {
-    id: canonicalId,
+    id: resolvedId,
     title: loaded.config.title,
     body: loaded.instructions,
     hooks: loaded.config.hooks,
@@ -999,7 +1014,10 @@ function loadAgentDefinitionFromPath(
   const raw = readFileSync(sourcePath, "utf8");
   const loaded = loadDefinitionConfig("agent", sourcePath, raw, agentConfigSchema);
   const canonicalName = canonicalDefinitionIdFromPath("agent", sourcePath);
-  if (loaded.config.name !== canonicalName) {
+  if (
+    loaded.config.name !== canonicalName &&
+    isWithinCanonicalDefinitionRoot("agent", sourcePath)
+  ) {
     throw new AgentConfigError(
       sourcePath,
       formatIdentityMismatch("name", loaded.config.name, canonicalName, options.strictIdentity),
@@ -1032,7 +1050,10 @@ function loadAssignmentDefinitionFromPath(
     authoredAssignmentConfigSchema,
   );
   const canonicalName = canonicalDefinitionIdFromPath("assignment", sourcePath);
-  if (authored.config.name !== canonicalName) {
+  if (
+    authored.config.name !== canonicalName &&
+    isWithinCanonicalDefinitionRoot("assignment", sourcePath)
+  ) {
     throw new AssignmentConfigError(
       sourcePath,
       formatIdentityMismatch("name", authored.config.name, canonicalName, options.strictIdentity),
