@@ -114,6 +114,9 @@ Codex agent prompt.
 const BUILTIN_PLAN_FEATURE_PATH = resolvePath(
   new URL("../assignments/plan-feature/assignment.md", import.meta.url).pathname,
 );
+const BUILTIN_PLAN_TEMPLATE_PATH = resolvePath(
+  new URL("../assignments/plan-feature/template.md", import.meta.url).pathname,
+);
 
 function tempDir() {
   return mkdtempSync(join(tmpdir(), "task-runner-run-"));
@@ -1199,7 +1202,13 @@ async function initBuiltInPlanFeature(baseDir, repoDir, cliVars) {
   });
 }
 
-test("built-in plan-feature prepare hook freezes repo_root and sibling worktree_path from worktree_slug", async () => {
+function filledPlanFeatureTemplateAssignment() {
+  return readFileSync(BUILTIN_PLAN_TEMPLATE_PATH, "utf8")
+    .replaceAll("<<KEBAB_FEATURE_SLUG>>", "template-lineage")
+    .replace(/<<PLACEHOLDER_[A-Z_]+>>/g, "placeholder");
+}
+
+test("built-in plan-feature prepare hook freezes repo_root, worktree_path, and default worktree_base_ref", async () => {
   const dir = tempDir();
   writeAgent(dir, "three", THREE_AGENT);
   const repoDir = initGitRepo(dir);
@@ -1215,6 +1224,70 @@ test("built-in plan-feature prepare hook freezes repo_root and sibling worktree_
   assert.equal(initialized.manifest.runtimeVarSources.repo_root.source, "hook");
   assert.equal(initialized.manifest.runtimeVars.worktree_path, join(dir, "repo-feature-slug"));
   assert.equal(initialized.manifest.runtimeVarSources.worktree_path.source, "hook");
+  assert.equal(initialized.manifest.runtimeVars.worktree_base_ref, "origin/main");
+  assert.equal(initialized.manifest.runtimeVarSources.worktree_base_ref.source, "default");
+});
+
+test("built-in plan-feature prepare hook preserves explicit worktree_base_ref", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  const repoDir = initGitRepo(dir);
+
+  const initialized = await initBuiltInPlanFeature(dir, repoDir, {
+    worktree_slug: "feature-slug",
+    worktree_base_ref: "origin/feature/foo",
+  });
+
+  assert.equal(initialized.manifest.runtimeVars.worktree_base_ref, "origin/feature/foo");
+  assert.equal(initialized.manifest.runtimeVarSources.worktree_base_ref.source, "cli");
+});
+
+test("built-in plan-feature template inherits worktree_base_ref into resolved hook configs", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", THREE_AGENT);
+  writeAssignment(dir, "implement-template-lineage", filledPlanFeatureTemplateAssignment());
+  const repoDir = initGitRepo(dir);
+
+  const planner = await initBuiltInPlanFeature(dir, repoDir, {
+    worktree_slug: "feature-slug",
+    worktree_base_ref: "origin/feature/foo",
+  });
+  const child = await initWithOptions(dir, "implement-template-lineage", {
+    parentRunId: planner.runId,
+  });
+
+  assert.equal(child.manifest.parentRunId, planner.runId);
+  assert.equal(child.manifest.runtimeVars.worktree_base_ref, "origin/feature/foo");
+  assert.equal(child.manifest.runtimeVarSources.worktree_base_ref.source, "parent");
+  assert.equal(
+    child.manifest.runtimeVarSources.worktree_base_ref.inheritedFromRunId,
+    planner.runId,
+  );
+
+  const worktreeHook = child.manifest.resolvedHooks.find(
+    (hook) => hook.source.builtin === "git-worktree",
+  );
+  assert.ok(worktreeHook);
+  assert.equal(worktreeHook.config.from, "origin/feature/foo");
+
+  const commandHooks = child.manifest.resolvedHooks.filter(
+    (hook) => hook.source.builtin === "command",
+  );
+  assert.deepEqual(
+    commandHooks.map((hook) => hook.config),
+    [
+      {
+        mode: "status",
+        command: "git",
+        args: ["fetch", "origin", "--prune"],
+      },
+      {
+        mode: "status",
+        command: "git",
+        args: ["merge", "--ff-only", "--", "origin/feature/foo"],
+      },
+    ],
+  );
 });
 
 test("built-in plan-feature prepare hook rejects an empty worktree_slug", async () => {
@@ -1245,6 +1318,34 @@ test("built-in plan-feature prepare hook rejects regex-failing worktree_slug val
       error instanceof Error &&
       /worktree_slug must match \[A-Za-z0-9\]\[A-Za-z0-9._-\]\*/.test(error.message),
   );
+});
+
+test("built-in plan-feature prepare hook rejects shell-unsafe worktree_base_ref values", async () => {
+  const unsafeRefs = [
+    "",
+    "origin/feature foo",
+    "origin/feature;rm",
+    "origin/$(whoami)",
+    "origin/feature&&main",
+    "origin/feature|main",
+    "origin/feature>main",
+    "origin/'feature",
+  ];
+
+  for (const unsafeRef of unsafeRefs) {
+    const dir = tempDir();
+    writeAgent(dir, "three", THREE_AGENT);
+    const repoDir = initGitRepo(dir);
+
+    await assert.rejects(
+      () =>
+        initBuiltInPlanFeature(dir, repoDir, {
+          worktree_slug: "feature-slug",
+          worktree_base_ref: unsafeRef,
+        }),
+      (error) => error instanceof Error && /worktree_base_ref must match/.test(error.message),
+    );
+  }
 });
 
 test("lineage vars resolve in authored source order, use nearest ancestors, and freeze inherited values", async () => {

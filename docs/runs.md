@@ -103,7 +103,7 @@ If a run launches another `task-runner` process from inside a worker, the
 child run automatically freezes `parentRunId` and can inherit parent vars
 through assignment `sources: [parent]`. This is how planner →
 implementer → descendant worktree flows reuse values such as
-`worktree_path` without repeating `--var` flags.
+`worktree_path` and `worktree_base_ref` without repeating `--var` flags.
 
 ### Init, then execute later
 

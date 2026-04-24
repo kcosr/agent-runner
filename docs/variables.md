@@ -32,6 +32,11 @@ tasks: [...]
 ---
 ```
 
+`implementation_run_id` is specific to the implementation-path
+`code-review` assignment, where the reviewer checks a completed
+implementation run for plan coverage. Direct reviews use
+`code-review-direct` and only need `range`.
+
 ### Schema
 
 ```ts
@@ -39,7 +44,7 @@ tasks: [...]
   type?: "string" | "number" | "boolean" | "enum"   // default: "string"
   required?: boolean                                 // default: false
   requiredAt?: "initial" | "prepare"                 // default: "initial"
-  sources?: ("cli" | "env" | "parent")[]             // default: ["cli"]
+  sources?: ("cli" | "web" | "env" | "parent")[]     // default: ["cli", "web"]
   envName?: string                                   // default: same as key
   default?: unknown                                  // must match type
   description?: string
@@ -66,14 +71,19 @@ If every authored source fails, task-runner then applies `default`, then
 without repeating `--var` flags.
 
 Prepare hooks run after the initial resolution pass and can add or mutate
-runtime vars such as `worktree_path`. Fresh-run interpolation is then
-recomputed against the final runtime namespace so descendant assignments
-can author patterns like:
+runtime vars such as `worktree_path` and validated base refs such as
+`worktree_base_ref`. Fresh-run interpolation is then recomputed against
+the final runtime namespace so descendant assignments can author patterns
+like:
 
 ```yaml
 cwd: "{{worktree_path}}"
 vars:
   worktree_path:
+    type: string
+    required: true
+    sources: [parent]
+  worktree_base_ref:
     type: string
     required: true
     sources: [parent]
@@ -203,6 +213,15 @@ task-runner run \
   --assignment code-review \
   --var range=main..HEAD \
   --var implementation_run_id=abc123
+```
+
+For a direct review that is not tied to an implementation run:
+
+```bash
+task-runner run \
+  --agent code-reviewer \
+  --assignment code-review-direct \
+  --var range=unstaged
 ```
 
 `--var` is repeatable. Values are split on the first `=`, so

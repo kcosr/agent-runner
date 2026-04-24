@@ -60,6 +60,9 @@
 
 ### Added
 
+- Added shared review task definitions under `tasks/review/` and a
+  bundled `code-review-direct` assignment for user-launched or Web UI
+  code reviews that are not tied to an implementation run.
 - Added reusable named task definitions under
   `${TASK_RUNNER_CONFIG_DIR}/tasks/<task-id>.md`, plus mixed assignment
   `tasks:` authoring that can combine named refs, explicit path refs,
@@ -176,6 +179,14 @@
 
 ### Changed
 
+- `plan-feature` now accepts optional `worktree_base_ref` so generated
+  implementation worktrees can be based on refs other than `origin/main`,
+  enabling pre-merge end-to-end testing from feature branches. ([#93](https://github.com/kcosr/task-runner/pull/93))
+- Built-in code-review assignments now reference shared review tasks by
+  named task refs such as `review/architecture`. ([#93](https://github.com/kcosr/task-runner/pull/93))
+- Future `code-review` runs now use shared review-dimension task ids under
+  `review/...` while keeping `plan_coverage` as the implementation-run
+  plan check. Existing run manifests keep their frozen old task ids. ([#93](https://github.com/kcosr/task-runner/pull/93))
 - Direct path loads outside `TASK_RUNNER_CONFIG_DIR` may now use authored
   agent, assignment, task, and launcher identities that differ from their
   filesystem-derived canonical ids. Config-root named definitions still
@@ -190,9 +201,8 @@
   messages, add `All` / `Hooks` / `Tasks` / `Run` filters, and show an
   explicit empty-filter state. ([#87](https://github.com/kcosr/task-runner/pull/87))
 - Built-in implementer assignments now start from `repo_root` and use a
-  first-attempt `git-worktree` hook plus explicit `git fetch origin
-  --prune && git merge --ff-only origin/main` sync instead of creating
-  worktrees during `prepare`.
+  first-attempt `git-worktree` hook plus explicit base-ref sync instead
+  of creating worktrees during `prepare`.
   ([#86](https://github.com/kcosr/task-runner/pull/86))
 - Assignment vars now default omitted `sources` to both `cli` and
   `web`, and authored source order can now include the explicit `web`

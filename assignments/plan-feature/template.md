@@ -15,6 +15,10 @@ vars:
     type: string
     required: true
     sources: [parent]
+  worktree_base_ref:
+    type: string
+    required: true
+    sources: [parent]
 hooks:
   beforeAttempt:
     - builtin: git-worktree
@@ -23,7 +27,7 @@ hooks:
         attemptInSession: [0]
       with:
         repo: "{{repo_root}}"
-        from: main
+        from: "{{worktree_base_ref}}"
         branch: "{{worktree_slug}}"
         path: "{{worktree_path}}"
         collision: reuse
@@ -33,10 +37,23 @@ hooks:
         attemptInSession: [0]
       with:
         mode: status
-        command: bash
+        command: git
         args:
-          - -lc
-          - git fetch origin --prune && git merge --ff-only origin/main
+          - fetch
+          - origin
+          - --prune
+    - builtin: command
+      when:
+        sessionIndex: [0]
+        attemptInSession: [0]
+      with:
+        mode: status
+        command: git
+        args:
+          - merge
+          - --ff-only
+          - --
+          - "{{worktree_base_ref}}"
 maxRetries: 4
 lockedFields:
   - tasks
@@ -245,11 +262,12 @@ tasks:
       <<PLACEHOLDER_SCAFFOLD_STEPS>>
 
       Typical content: confirm the inherited `repo_root`,
-      `worktree_slug`, and `worktree_path` values are the
-      intended target, confirm the repo root is clean before
-      first execution, and verify the assignment's first
-      attempt creates or reuses the worktree and fast-forwards
-      it to `origin/main` before backend work begins. If the
+      `worktree_slug`, `worktree_path`, and `worktree_base_ref`
+      values are the intended target, confirm the repo root is clean
+      before first execution, and verify the assignment's first
+      attempt creates or reuses the worktree from `worktree_base_ref`
+      and fast-forwards/merges to that same ref before backend work
+      begins. If the
       repo root is dirty, the target worktree cannot be
       created, or the first-attempt fast-forward would fail,
       mark the task `blocked` and stop rather than starting

@@ -255,8 +255,8 @@ runtime's `jiti` loader, so hook authors do not need to precompile them.
 
 When a run launches a descendant `task-runner` process, the child run
 automatically freezes `parentRunId`. Author descendant assignments with
-`sources: [parent]` for values like `worktree_path` instead of manually
-repeating `--var` flags.
+`sources: [parent]` for values like `worktree_path` or a validated
+`worktree_base_ref` instead of manually repeating `--var` flags.
 
 Task-completion guards that depend on spawned child runs can stay fully
 declarative. For example, this blocks `peer_review` from being marked
@@ -414,7 +414,12 @@ Agents (under `agents/`):
 Assignments (under `assignments/`):
 
 - `repo-orientation`, `test`, `plan-feature`, `plan-review`,
-  `code-review`, `doc-review`, `familiarize`
+  `code-review`, `code-review-direct`, `doc-review`, `familiarize`
+
+Shared task definitions (under `tasks/`):
+
+- reusable `review/architecture` through `review/docs-drift`
+  code-review dimensions used by both code-review assignments
 
 Walkthrough in [docs/examples.md](docs/examples.md).
 

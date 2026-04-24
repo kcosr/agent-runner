@@ -46,6 +46,20 @@ import {
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import { withEnv, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
+const REPO_ROOT = new URL("..", import.meta.url).pathname;
+const SHARED_REVIEW_TASK_IDS = [
+  "review/architecture",
+  "review/concurrency",
+  "review/error-handling",
+  "review/state-machine",
+  "review/resources",
+  "review/security",
+  "review/types-schema",
+  "review/simplification-and-duplication",
+  "review/test-coverage",
+  "review/docs-drift",
+];
+
 const AGENT = `---
 schemaVersion: 1
 name: svc-agent
@@ -524,6 +538,28 @@ args: [worker]
     assert.equal(launcher.loaded.kind, "prefix");
   });
 });
+
+test("command services: showDefinition resolves built-in code-review named task refs", () =>
+  withEnv(
+    {
+      TASK_RUNNER_CONFIG_DIR: REPO_ROOT,
+      TASK_RUNNER_CONNECT: undefined,
+      TASK_RUNNER_LISTEN: undefined,
+    },
+    () => {
+      const implementationReview = showDefinition("assignment", "code-review");
+      const directReview = showDefinition("assignment", "code-review-direct");
+
+      assert.deepEqual(
+        implementationReview.loaded.config.tasks.map((task) => task.id),
+        ["orient", ...SHARED_REVIEW_TASK_IDS, "plan_coverage", "synthesis", "approval"],
+      );
+      assert.deepEqual(
+        directReview.loaded.config.tasks.map((task) => task.id),
+        ["orient", ...SHARED_REVIEW_TASK_IDS, "synthesis", "approval"],
+      );
+    },
+  ));
 
 test("command services: readStatus reads canonical task state for running runs", async () => {
   const dir = tempDir();

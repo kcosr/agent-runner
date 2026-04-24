@@ -96,7 +96,8 @@ Assignments can declare typed variables with ordered
 creation, frozen in `manifest.runtimeVars`, and annotated in
 `manifest.runtimeVarSources`. Nested runs launched from workers
 automatically link to their parent run, so descendant assignments can
-inherit values such as `worktree_path` without repeating `--var` flags.
+inherit values such as `worktree_path` and `worktree_base_ref` without
+repeating `--var` flags.
 Read surfaces redact env-backed values even though the frozen manifest
 keeps the concrete value for descendant resolution. `{{var}}` references
 are interpolated into titles, bodies, and instructions.

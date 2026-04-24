@@ -111,6 +111,8 @@ Assignment task refs follow the same explicit loader model:
 - only absolute paths and strings beginning with `./` or `../` are path
   refs
 - slashful ids such as `review/reuse` are named refs, not implicit paths
+- bundled assignments that need shared review tasks use named refs such
+  as `review/architecture`
 
 ## `init`
 

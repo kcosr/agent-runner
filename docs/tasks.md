@@ -8,7 +8,7 @@ CLI, never through workspace files.
 
 ```ts
 {
-  id: string       // [A-Za-z0-9._:-]+, max 128 chars
+  id: string       // [A-Za-z0-9._:/-]+, max 128 chars
   title: string    // 1-200 chars, single line
   body: string     // optional; free-form markdown
   status: "pending" | "in_progress" | "completed" | "blocked"

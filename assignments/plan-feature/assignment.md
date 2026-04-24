@@ -9,6 +9,18 @@ vars:
     description: |
       Git-safe slug used to derive the sibling implementer
       worktree path and branch name.
+  worktree_base_ref:
+    type: string
+    required: false
+    sources: [cli, web]
+    default: origin/main
+    description: |
+      Git ref used as the base for generated implementation
+      worktrees. Defaults to origin/main. Override for pre-merge
+      end-to-end testing from a feature branch, for example
+      origin/my-feature-branch. Must match
+      [A-Za-z0-9][A-Za-z0-9._/-]* so generated git commands
+      receive a shell-safe ref value.
 hooks:
   prepare:
     - path: hooks/derive-worktree-vars.ts
@@ -29,7 +41,12 @@ callerInstructions: |
         --agent <your-planner-agent> \
         --assignment plan-feature \
         --var worktree_slug=<git-safe-slug> \
+        --var worktree_base_ref=origin/<feature-branch> \
         "$(cat /tmp/feature-brief.md)"
+
+  `worktree_base_ref` is optional. Omit it for normal main-based
+  planning; pass it only when pre-merge end-to-end testing should
+  generate implementation worktrees from another safe git ref.
 
   Use the bundled `planner` agent or another unrestricted
   general-purpose agent. The planner doesn't need special role
@@ -69,16 +86,16 @@ callerInstructions: |
        itself as `assignment-seed.md` and
        `assignment-summary.md` so the caller can review them
        directly from the run.
-    5. Freezes the planning run's repo-root cwd plus a sibling
-       `worktree_path` derived from `worktree_slug` during the
-       initial pass, then runs `init` immediately to create the
-       implementer run in `initialized` state. The generated
-       implementer and reviewer flows inherit those vars through
-       lineage instead of retyping them as CLI handoff flags. The
-       planning artifacts stay attached to the planning run; later
-       implementer and reviewer flows can discover them through
-       family-scoped attachment listing when they need supplemental
-       context.
+    5. Freezes the planning run's repo-root cwd, sibling
+       `worktree_path` derived from `worktree_slug`, and
+       `worktree_base_ref` during the initial pass, then runs `init`
+       immediately to create the implementer run in `initialized`
+       state. The generated implementer and reviewer flows inherit
+       those vars through lineage instead of retyping them as CLI
+       handoff flags. The planning artifacts stay attached to the
+       planning run; later implementer and reviewer flows can
+       discover them through family-scoped attachment listing when
+       they need supplemental context.
        If the caller later resumes the planning run with
        requested plan changes after that `init`, the planner
        must revise the draft and summary, refresh the planning
@@ -925,16 +942,18 @@ tasks:
       draft before handing it back again.
 
       Before running `init`, confirm that the planning run is
-      rooted at the target repo and that the requested
+      rooted at the target repo, that the requested
       `worktree_slug` is the one you intend to freeze into the
-      sibling worktree path. Do not guess a different cwd or
-      override the derived path ad hoc.
+      sibling worktree path, and that inherited `worktree_base_ref`
+      is the intended base for generated implementation worktrees.
+      Do not guess a different cwd, override the derived path ad hoc,
+      or replace the inherited base ref in the generated handoff.
 
       If the approved draft declares descendant vars with
-      `sources: [parent]` (for example `worktree_path`), rely on
-      lineage inheritance. Do not add redundant `--var` flags
-      just to re-pass values that already exist on the planning
-      run.
+      `sources: [parent]` (for example `worktree_path` or
+      `worktree_base_ref`), rely on lineage inheritance. Do not add
+      redundant `--var` flags just to re-pass values that already
+      exist on the planning run.
 
       For the first creation, run:
 

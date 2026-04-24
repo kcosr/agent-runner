@@ -29,8 +29,8 @@ ${TASK_RUNNER_CONFIG_DIR}/
             └── local-hook.mts
 ```
 
-Bundled examples live in this repo under `agents/` and `assignments/`. See
-[examples.md](examples.md).
+Bundled examples live in this repo under `agents/`, `assignments/`, and
+shared task definitions under `tasks/`. See [examples.md](examples.md).
 
 CLI references to agents and assignments accept either a bare name (resolved
 against the config dir) or a path to a specific `agent.md` / `assignment.md`.
@@ -269,8 +269,9 @@ brief at run creation.
 Variable authoring is order-preserving. Use `sources: [...]` to declare
 explicit precedence across `cli`, `env`, and `parent`. Nested runs
 launched from a worker automatically carry `parentRunId`, so descendant
-assignments can inherit values such as `worktree_path` from the nearest
-ancestor without manual `--var` handoff.
+assignments can inherit values such as `worktree_path` and
+`worktree_base_ref` from the nearest ancestor without manual `--var`
+handoff.
 
 Assignments are markdown definitions, not a live workspace surface. Task
 state is canonical in the run manifest — not in the assignment file.
