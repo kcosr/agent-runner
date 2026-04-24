@@ -61,15 +61,15 @@
   ([#89](https://github.com/kcosr/task-runner/pull/89))
 - Added `GET /api/run-input-surface` so daemon/browser clients can fetch
   the static fresh-run resolver output over HTTP before initializing or
-  starting a run.
+  starting a run. ([#90](https://github.com/kcosr/task-runner/pull/90))
 - Added a dedicated `/runs/new` web dashboard route with resolver-driven
   Context, Task, and Execution sections plus gated `Initialize` and
-  `Start now` actions.
+  `Start now` actions. ([#90](https://github.com/kcosr/task-runner/pull/90))
 - Added daemon HTTP definition routes for agents, assignments, and
   launchers (`GET /api/agents|assignments|launchers` plus detail
   variants with optional `cwd`), and browser API client support for
   definition reads plus fresh-run `init` / `start` requests with
-  explicit `callerCwd`.
+  explicit `callerCwd`. ([#90](https://github.com/kcosr/task-runner/pull/90))
 - Added opt-in daemon perf diagnostics behind `TASK_RUNNER_DEBUG_PERF`
   for request timing, projection timing, task-state lock timing, and
   event-loop telemetry, plus `TASK_RUNNER_DEBUG_PERF_INTERVAL_MS` to
@@ -179,6 +179,15 @@
   --prune && git merge --ff-only origin/main` sync instead of creating
   worktrees during `prepare`.
   ([#86](https://github.com/kcosr/task-runner/pull/86))
+- Assignment vars now default omitted `sources` to both `cli` and
+  `web`, and authored source order can now include the explicit `web`
+  runtime source for browser-submitted values.
+  ([#90](https://github.com/kcosr/task-runner/pull/90))
+- Changed daemon fresh-run start/init contracts so browser HTTP requests
+  carry only `webVars` while connected CLI RPC requests carry only
+  `cliVars`; the daemon now normalizes each transport into the shared
+  internal run request at the boundary.
+  ([#90](https://github.com/kcosr/task-runner/pull/90))
 
 ### Fixed
 
@@ -189,6 +198,10 @@
 - Fixed shared `RunDetail` projections to normalize missing legacy hook
   `taskScopeId` and `summary` fields before serving older manifests to
   the web dashboard. ([#87](https://github.com/kcosr/task-runner/pull/87))
+- Fixed the mobile web shell for the new run flow so phone-sized
+  viewports keep the main content visible, avoid bottom-nav overlap, and
+  surface primary navigation in the top bar.
+  ([#90](https://github.com/kcosr/task-runner/pull/90))
 
 ### Removed
 
