@@ -8805,7 +8805,6 @@ describe("web app", () => {
     )?.[1];
     expect(initRequest).toBeDefined();
     expect(JSON.parse((initRequest as RequestInit).body as string)).toMatchObject({
-      cliVars: {},
       webVars: { plan: "Implement the new route." },
     });
     expect((await screen.findAllByText("Initialized run")).length).toBeGreaterThan(0);
@@ -8868,7 +8867,6 @@ describe("web app", () => {
     )?.[1];
     expect(startRequest).toBeDefined();
     expect(JSON.parse((startRequest as RequestInit).body as string)).toMatchObject({
-      cliVars: {},
       webVars: { plan: "Start immediately." },
     });
     expect((await screen.findAllByText("Started run")).length).toBeGreaterThan(0);

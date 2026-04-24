@@ -138,7 +138,6 @@ function buildStartPayload(
   return {
     agent: selectedAgent,
     assignment: selectedAssignment,
-    cliVars: {},
     webVars,
     overrides,
   };

@@ -35,13 +35,16 @@ import type {
   updateTask,
 } from "@task-runner/core/app/service.js";
 import type {
+  CliRunsStartParams,
   DaemonInfo,
   DefinitionGetParams,
   RunInputSurfaceParams,
   RunsListParams,
   RunsResumeParams,
-  RunsStartParams,
+  WebRunsStartParams,
 } from "./protocol.js";
+
+type InternalStartRunRequest = Parameters<DaemonHandlers["startRun"]>[0];
 
 export interface DaemonHandlers {
   getRun: typeof getRun;
@@ -82,7 +85,7 @@ export interface DaemonHandlers {
 
 export interface DaemonOperationContext extends DaemonHandlers {
   daemonInfo: DaemonInfo;
-  startManagedRun(request: RunsStartParams): Promise<{ runId: string }>;
+  startManagedRun(request: InternalStartRunRequest): Promise<{ runId: string }>;
   resumeManagedRun(request: RunsResumeParams): Promise<{ runId: string }>;
   abortRun(target: string): { runId: string; accepted: true };
 }
@@ -109,14 +112,36 @@ export function createDaemonOperations(ctx: DaemonOperationContext) {
     getRunBrief(target: string) {
       return { brief: ctx.getRunBrief(target) };
     },
-    initRun(request: RunsStartParams) {
-      return ctx.initRun(request).then((run) => ({ run }));
+    initCliRun(request: CliRunsStartParams) {
+      return ctx
+        .initRun({
+          ...request,
+          webVars: {},
+        })
+        .then((run) => ({ run }));
+    },
+    initWebRun(request: WebRunsStartParams) {
+      return ctx
+        .initRun({
+          ...request,
+          cliVars: {},
+        })
+        .then((run) => ({ run }));
     },
     readyRun(target: string) {
       return { run: ctx.readyRun(target) };
     },
-    startRun(request: RunsStartParams) {
-      return ctx.startManagedRun(request);
+    startCliRun(request: CliRunsStartParams) {
+      return ctx.startManagedRun({
+        ...request,
+        webVars: {},
+      });
+    },
+    startWebRun(request: WebRunsStartParams) {
+      return ctx.startManagedRun({
+        ...request,
+        cliVars: {},
+      });
     },
     resumeRun(request: RunsResumeParams) {
       return ctx.resumeManagedRun(request);

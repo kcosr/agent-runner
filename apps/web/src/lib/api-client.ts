@@ -69,7 +69,6 @@ type RunsStartRequest = Pick<
   | "callerCwd"
   | "parentRunId"
   | "backendSessionId"
-  | "cliVars"
   | "webVars"
   | "overrides"
 >;

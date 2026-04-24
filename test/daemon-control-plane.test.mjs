@@ -1475,10 +1475,9 @@ test("daemon HTTP rejects oversized JSON request bodies", async () => {
     const server = await serveDaemon(listenUrl);
     try {
       const oversizedPayload = JSON.stringify({
-        cliVars: {
+        webVars: {
           blob: "x".repeat(1024 * 1024),
         },
-        webVars: {},
         overrides: {},
       });
       const response = await fetch(new URL("/api/runs", httpBaseUrl), {
@@ -1719,7 +1718,7 @@ test("daemon run projections expose explicit abort capability from local ownersh
   const client = await DaemonClient.connect(listenUrl);
   try {
     daemonInstanceId = (await client.call("daemon.info")).daemonInstanceId;
-    const started = await client.call("runs.start", { cliVars: {}, webVars: {}, overrides: {} });
+    const started = await client.call("runs.start", { cliVars: {}, overrides: {} });
     assert.equal(started.runId, runId);
 
     const list = await client.call("runs.list", {});
@@ -1924,7 +1923,7 @@ test("daemon projects active run detail as live while it owns the run", async ()
     const started = await httpJson(httpBaseUrl, "/api/runs", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ cliVars: {}, webVars: {}, overrides: {} }),
+      body: JSON.stringify({ webVars: {}, overrides: {} }),
     });
     assert.equal(started.status, 200);
     assert.equal(started.body.runId, runId);
@@ -2243,7 +2242,6 @@ test("daemon subscriptions fan out run events and abort active runs", async () =
   try {
     const started = await clientA.call("runs.start", {
       cliVars: {},
-      webVars: {},
       overrides: {},
     });
     assert.equal(started.runId, "daemon-live-run");
@@ -2446,7 +2444,7 @@ test("daemon republishes summary and detail projections when a run retries", asy
     const started = await httpJson(httpBaseUrl, "/api/runs", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ cliVars: {}, webVars: {}, overrides: {} }),
+      body: JSON.stringify({ webVars: {}, overrides: {} }),
     });
     assert.equal(started.status, 200);
     assert.equal(started.body.runId, runId);
@@ -3227,7 +3225,7 @@ test("daemon SSE streams split summary, detail, and timeline subscriptions", asy
     const started = await httpJson(httpBaseUrl, "/api/runs", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ cliVars: {}, webVars: {}, overrides: {} }),
+      body: JSON.stringify({ webVars: {}, overrides: {} }),
     });
     assert.equal(started.status, 200);
     assert.equal(started.body.runId, runId);
@@ -3461,7 +3459,7 @@ test("daemon serves timeline history and cursored timeline replay over HTTP and 
   const started = await httpJson(httpBaseUrl, "/api/runs", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ cliVars: {}, webVars: {}, overrides: {} }),
+    body: JSON.stringify({ webVars: {}, overrides: {} }),
   });
   assert.equal(started.status, 200);
   assert.equal(started.body.runId, runId);
@@ -3745,7 +3743,7 @@ test("daemon serves audit history and cursored audit replay over HTTP and websoc
   const started = await httpJson(httpBaseUrl, "/api/runs", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ cliVars: {}, webVars: {}, overrides: {} }),
+    body: JSON.stringify({ webVars: {}, overrides: {} }),
   });
   assert.equal(started.status, 200);
   assert.equal(started.body.runId, runId);
@@ -3883,7 +3881,7 @@ test("daemon close aborts active runs and releases connected clients", async () 
 
   const client = await DaemonClient.connect(listenUrl);
   try {
-    const started = await client.call("runs.start", { cliVars: {}, webVars: {}, overrides: {} });
+    const started = await client.call("runs.start", { cliVars: {}, overrides: {} });
     assert.equal(started.runId, "daemon-close-run");
     await server.close();
     assert.equal(aborted, true);
@@ -3961,7 +3959,6 @@ test("daemon validates override payloads before calling shared services", async 
       () =>
         client.call("runs.start", {
           cliVars: {},
-          webVars: {},
           overrides: { bogus: "value" },
         }),
       /overrides\.bogus is not supported/,
@@ -3970,7 +3967,6 @@ test("daemon validates override payloads before calling shared services", async 
       () =>
         client.call("runs.start", {
           cliVars: {},
-          webVars: {},
           overrides: { timeoutSec: 1.5 },
         }),
       /overrides\.timeoutSec must be a positive integer/,
@@ -3979,7 +3975,6 @@ test("daemon validates override payloads before calling shared services", async 
       () =>
         client.call("runs.start", {
           cliVars: {},
-          webVars: {},
           overrides: { maxRetries: 1.5 },
         }),
       /overrides\.maxRetries must be a non-negative integer/,
@@ -4005,7 +4000,6 @@ test("daemon parses and forwards cursor backend overrides", async () => {
   try {
     const started = await client.call("runs.start", {
       cliVars: {},
-      webVars: {},
       overrides: { backend: "cursor" },
     });
     assert.equal(started.runId, "daemon-cursor-backend");
@@ -4034,7 +4028,6 @@ test("daemon runs.start keeps callerCwd separate from overrides.cwd", async () =
     const started = await client.call("runs.start", {
       callerCwd,
       cliVars: {},
-      webVars: {},
       overrides: {},
     });
     assert.equal(started.runId, "daemon-start-cwd");
@@ -4066,7 +4059,6 @@ test("daemon HTTP run start keeps callerCwd separate from overrides.cwd", async 
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         callerCwd,
-        cliVars: {},
         webVars: {},
         overrides: {},
       }),
@@ -4397,7 +4389,6 @@ test("daemon HTTP init uses the remote caller cwd when the agent omits cwd", asy
         agent: join(daemonDir, "agents", "daemon-agent", "agent.md"),
         assignment: join(daemonDir, "assignments", "daemon-work", "assignment.md"),
         callerCwd: clientDir,
-        cliVars: {},
         webVars: {},
         overrides: {},
       }),
@@ -4431,7 +4422,6 @@ test("daemon HTTP supports a browser definition-to-init flow with explicit calle
         agent: agentDefinition.body.agent.config.name,
         assignment: "daemon-work",
         callerCwd: clientDir,
-        cliVars: {},
         webVars: {},
         overrides: {},
       }),
@@ -4456,7 +4446,6 @@ test("daemon HTTP init rejects malformed backendSpecific codex transport overrid
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        cliVars: {},
         webVars: {},
         overrides: {
           backendSpecific: {
@@ -4490,7 +4479,6 @@ test("daemon HTTP init rejects malformed launcher overrides", async () => {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        cliVars: {},
         webVars: {},
         overrides: {
           launcher: 42,
@@ -4549,7 +4537,6 @@ test("daemon RPC start rejects malformed backendSpecific codex transport overrid
     await assert.rejects(
       client.call("runs.start", {
         cliVars: {},
-        webVars: {},
         overrides: {
           backendSpecific: {
             codex: {
@@ -4612,7 +4599,6 @@ args: [prod, --]
       assignment: join(daemonDir, "assignments", "daemon-work", "assignment.md"),
       callerCwd: clientDir,
       cliVars: {},
-      webVars: {},
       overrides: {
         launcher: "ssh-wrap",
       },

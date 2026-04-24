@@ -1492,7 +1492,6 @@ describe("api client", () => {
       agent: "planner",
       assignment: "daemon-work",
       callerCwd: "/tmp/browser-cwd",
-      cliVars: {},
       webVars: { plan: "web-init" },
       overrides: {
         cwd: "/tmp/override-cwd",
@@ -1612,8 +1611,6 @@ describe("api client", () => {
     const startBody = JSON.parse((startRequest as RequestInit).body as string);
     expect(initBody.callerCwd).toBe("/tmp/browser-cwd");
     expect(startBody.callerCwd).toBe("/tmp/browser-cwd");
-    expect(initBody.cliVars).toEqual({});
-    expect(startBody.cliVars).toEqual({});
     expect(initBody.webVars).toEqual({ plan: "web-init" });
     expect(startBody.webVars).toEqual({ plan: "web-init" });
     expect(initBody.overrides.cwd).toBe("/tmp/override-cwd");

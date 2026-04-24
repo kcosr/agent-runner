@@ -930,7 +930,6 @@ async function startOrResumeDaemonRun(
         parentRunId: resolveParentRunId(parsed),
         backendSessionId: parsed.backendSessionId,
         cliVars: parsed.vars,
-        webVars: {},
         overrides: resolvedDaemonOverrides(parsed),
       });
 }
@@ -2034,7 +2033,6 @@ async function runExecuteCommandDaemon(
         parentRunId: resolveParentRunId(parsed),
         backendSessionId: parsed.backendSessionId,
         cliVars: parsed.vars,
-        webVars: {},
         overrides: resolvedDaemonOverrides(parsed),
       });
       if (isJson) {

@@ -123,17 +123,23 @@ export interface DefinitionGetParams {
 
 export type { RunInputSurfaceParams };
 
-export interface RunsStartParams {
+interface RunsStartBaseParams {
   runId?: string;
   agent?: string;
   assignment?: string;
   definitionCwd?: string;
   callerCwd?: string;
   parentRunId?: string;
-  cliVars: Record<string, string>;
-  webVars: Record<string, string>;
   backendSessionId?: string;
   overrides: RunCommandOverrides;
+}
+
+export interface CliRunsStartParams extends RunsStartBaseParams {
+  cliVars: Record<string, string>;
+}
+
+export interface WebRunsStartParams extends RunsStartBaseParams {
+  webVars: Record<string, string>;
 }
 
 export interface RunsResumeParams {

@@ -9,6 +9,7 @@ import type { RunListScopeFilter } from "@task-runner/core/core/commands/service
 import { isNamedLauncherOverride } from "@task-runner/core/core/config/launchers.js";
 import { trimRunName } from "@task-runner/core/util/run-name.js";
 import type {
+  CliRunsStartParams,
   RunInputSurfaceParams,
   RunSetBackendSessionParams,
   RunSetNameParams,
@@ -16,7 +17,7 @@ import type {
   RunSetPinnedParams,
   RunsListParams,
   RunsResumeParams,
-  RunsStartParams,
+  WebRunsStartParams,
 } from "./protocol.js";
 
 export class RequestValidationError extends Error {
@@ -367,7 +368,7 @@ export function optionalOverrides(value: unknown): RunCommandOverrides {
   };
 }
 
-export function parseStartRunParams(value: unknown, label: string): RunsStartParams {
+function parseStartRunBaseParams(value: unknown, label: string) {
   const record = asRecord(value, label);
   return {
     runId: optionalString(record.runId, "runId"),
@@ -377,9 +378,23 @@ export function parseStartRunParams(value: unknown, label: string): RunsStartPar
     callerCwd: optionalString(record.callerCwd, "callerCwd"),
     parentRunId: optionalRunIdString(record.parentRunId, "parentRunId"),
     backendSessionId: optionalString(record.backendSessionId, "backendSessionId"),
-    cliVars: stringRecord(record.cliVars, "cliVars"),
-    webVars: stringRecord(record.webVars, "webVars"),
     overrides: optionalOverrides(record.overrides),
+  };
+}
+
+export function parseCliStartRunParams(value: unknown, label: string): CliRunsStartParams {
+  const record = asRecord(value, label);
+  return {
+    ...parseStartRunBaseParams(record, label),
+    cliVars: stringRecord(record.cliVars, "cliVars"),
+  };
+}
+
+export function parseWebStartRunParams(value: unknown, label: string): WebRunsStartParams {
+  const record = asRecord(value, label);
+  return {
+    ...parseStartRunBaseParams(record, label),
+    webVars: stringRecord(record.webVars, "webVars"),
   };
 }
 

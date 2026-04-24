@@ -104,13 +104,13 @@ import {
   asRecord,
   optionalEnum,
   optionalString,
+  parseCliStartRunParams,
   parseResumeRunParams,
   parseRunSetBackendSessionParams,
   parseRunSetNameParams,
   parseRunSetNoteParams,
   parseRunSetPinnedParams,
   parseRunsListParams,
-  parseStartRunParams,
   requiredRunIdString,
   requiredString,
 } from "./request-parsing.js";
@@ -2017,13 +2017,13 @@ export async function serveDaemon(
           return;
         }
         case "runs.init": {
-          const parsed = parseStartRunParams(params, "runs.init params");
-          sendJson(ws, resultResponse(request.id, await operations.initRun(parsed)));
+          const parsed = parseCliStartRunParams(params, "runs.init params");
+          sendJson(ws, resultResponse(request.id, await operations.initCliRun(parsed)));
           return;
         }
         case "runs.start": {
-          const parsed = parseStartRunParams(params, "runs.start params");
-          sendJson(ws, resultResponse(request.id, await operations.startRun(parsed)));
+          const parsed = parseCliStartRunParams(params, "runs.start params");
+          sendJson(ws, resultResponse(request.id, await operations.startCliRun(parsed)));
           return;
         }
         case "runs.resume": {
