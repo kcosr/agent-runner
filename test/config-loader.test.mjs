@@ -876,6 +876,26 @@ test("resolveAgentPath accepts a direct path", () => {
   assert.equal(resolved, agentPath);
 });
 
+test("direct agent paths outside the config root may use authored names", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir }) => {
+    const dir = join(rootDir, "external-agents", "worker");
+    mkdirSync(dir, { recursive: true });
+    const agentPath = join(dir, "agent.md");
+    writeFileSync(
+      agentPath,
+      `---
+schemaVersion: 1
+name: direct-worker
+backend: claude
+---
+External direct-path agent.
+`,
+    );
+
+    const loaded = loadAgentConfig(agentPath, rootDir);
+    assert.equal(loaded.config.name, "direct-worker");
+  }));
+
 test("loadAssignmentConfig parses a minimal assignment.md from TASK_RUNNER_CONFIG_DIR", () =>
   withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
     writeAssignment(configDir, "demo-work", MINIMAL_ASSIGNMENT);
@@ -1001,6 +1021,38 @@ Assignment body.
         return true;
       },
     );
+  }));
+
+test("direct task paths outside the config root may use authored ids", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    const externalTaskPath = join(rootDir, "external-tasks", "review", "reuse.md");
+    mkdirSync(dirname(externalTaskPath), { recursive: true });
+    writeFileSync(
+      externalTaskPath,
+      `---
+schemaVersion: 1
+id: review/reuse
+title: External reuse pass
+---
+Check external reusable pieces.
+`,
+    );
+    writeAssignment(
+      configDir,
+      "external-task-ref",
+      `---
+schemaVersion: 1
+name: external-task-ref
+tasks:
+  - ${externalTaskPath}
+---
+Assignment body.
+`,
+    );
+
+    const loaded = loadAssignmentConfig("external-task-ref", rootDir);
+    assert.equal(loaded.config.tasks[0].id, "review/reuse");
+    assert.equal(loaded.config.tasks[0].title, "External reuse pass");
   }));
 
 test("loadAssignmentConfig hard-fails when a referenced named task is missing", () =>
@@ -1137,6 +1189,30 @@ test("resolveAssignmentPath accepts a direct path", () => {
   const resolved = resolveAssignmentPath(assignmentPath, dir);
   assert.equal(resolved, assignmentPath);
 });
+
+test("direct assignment paths outside the config root may use authored names", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir }) => {
+    const draftDir = join(rootDir, "drafts", "task-runner");
+    mkdirSync(draftDir, { recursive: true });
+    const assignmentPath = join(draftDir, "plan-feature-abcd.md");
+    writeFileSync(
+      assignmentPath,
+      `---
+schemaVersion: 1
+name: implement-feature
+maxRetries: 4
+tasks:
+  - id: t1
+    title: Draft task
+---
+Draft assignment body.
+`,
+    );
+
+    const loaded = loadAssignmentConfig(assignmentPath, rootDir);
+    assert.equal(loaded.config.name, "implement-feature");
+    assert.equal(loaded.config.tasks[0].id, "t1");
+  }));
 
 test("assignment schema rejects duplicate task ids", () =>
   withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
@@ -1632,6 +1708,25 @@ command: ssh
         return true;
       },
     );
+  }));
+
+test("direct launcher paths outside the config root may use authored names", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir }) => {
+    const launcherDir = join(rootDir, "external-launchers");
+    mkdirSync(launcherDir, { recursive: true });
+    const launcherPath = join(launcherDir, "ssh-wrapper.yaml");
+    writeFileSync(
+      launcherPath,
+      `schemaVersion: 1
+name: external-ssh
+command: ssh
+args: [worker]
+`,
+    );
+
+    const loaded = loadLauncherConfig(launcherPath, rootDir);
+    assert.equal(loaded.name, "external-ssh");
+    assert.equal(loaded.config.name, "external-ssh");
   }));
 
 test("listLaunchers throws DefinitionListError when launcher root is unreadable", () =>

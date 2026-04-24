@@ -176,6 +176,11 @@
 
 ### Changed
 
+- Direct path loads outside `TASK_RUNNER_CONFIG_DIR` may now use authored
+  agent, assignment, task, and launcher identities that differ from their
+  filesystem-derived canonical ids. Config-root named definitions still
+  require authored identities to match their canonical path ids.
+  ([#92](https://github.com/kcosr/task-runner/pull/92))
 - Task-transition hooks now match natively on `taskId`, `taskIds`,
   `fromStatus`, `toStatus`, and `source`; unmatched hooks are skipped
   without emitting accepted `run.hook_recorded` audit rows, and
