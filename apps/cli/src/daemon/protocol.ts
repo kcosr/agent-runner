@@ -13,6 +13,10 @@ import type {
   RunTimelineHistory,
 } from "@task-runner/core/contracts/events.js";
 import type {
+  RunInputSurfaceParams,
+  RunInputSurfaceResult,
+} from "@task-runner/core/contracts/run-input-surface.js";
+import type {
   RunArchiveResult,
   RunBackendSessionResult,
   RunDependenciesResult,
@@ -117,16 +121,25 @@ export interface DefinitionGetParams {
   cwd?: string;
 }
 
-export interface RunsStartParams {
+export type { RunInputSurfaceParams };
+
+interface RunsStartBaseParams {
   runId?: string;
   agent?: string;
   assignment?: string;
   definitionCwd?: string;
   callerCwd?: string;
   parentRunId?: string;
-  cliVars: Record<string, string>;
   backendSessionId?: string;
   overrides: RunCommandOverrides;
+}
+
+export interface CliRunsStartParams extends RunsStartBaseParams {
+  cliVars: Record<string, string>;
+}
+
+export interface WebRunsStartParams extends RunsStartBaseParams {
+  webVars: Record<string, string>;
 }
 
 export interface RunsResumeParams {
@@ -240,6 +253,8 @@ export interface AssignmentResult {
 export interface LauncherResult {
   launcher: DefinitionDetail;
 }
+
+export type { RunInputSurfaceResult };
 
 export interface RunArchiveRpcResult {
   result: RunArchiveResult;

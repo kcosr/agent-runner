@@ -882,7 +882,7 @@ test("loadAssignmentConfig parses a minimal assignment.md from TASK_RUNNER_CONFI
 test("built-in plan-feature assignment uses cwd instead of repo_path for canonical repo context", () => {
   const loaded = loadAssignmentConfig(BUILTIN_PLAN_FEATURE_PATH);
   assert.equal(loaded.config.vars.repo_path, undefined);
-  assert.deepEqual(loaded.config.vars.worktree_slug?.sources, ["cli"]);
+  assert.deepEqual(loaded.config.vars.worktree_slug?.sources, ["cli", "web"]);
   assert.equal(loaded.config.hooks.prepare[0]?.path, "hooks/derive-worktree-vars.ts");
   assert.match(loaded.instructions, /`{{cwd}}`/);
   assert.ok((loaded.config.callerInstructions ?? "").includes("--assignment plan-feature"));

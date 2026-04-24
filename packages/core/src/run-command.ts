@@ -42,6 +42,7 @@ export interface ExecuteRunCommandOptions {
   resumeRun?: string;
   backendSessionId?: string;
   cliVars: Record<string, string>;
+  webVars: Record<string, string>;
   overrides: NonNullable<RunOptions["overrides"]>;
   execution?: RunExecution;
   abortSignal?: AbortSignal;
@@ -61,6 +62,7 @@ function validateResumeOverrides(
   manifest: RunManifest,
   opts: ExecuteRunCommandOptions,
 ): string | null {
+  const webVars = opts.webVars ?? {};
   if (manifest.archivedAt !== null) {
     return `cannot resume archived run ${manifest.runId} — unarchive it first with ${resolveTaskRunnerCommand()} run unarchive ${manifest.runId}`;
   }
@@ -93,6 +95,9 @@ function validateResumeOverrides(
   }
   if (Object.keys(opts.cliVars).length > 0) {
     return "--var cannot be combined with --resume-run — runtime vars are resolved from the assignment at first write and frozen into the manifest; they are not re-resolved on resume, so passing --var would silently no-op. Edit the assignment and create a fresh run if vars need to change.";
+  }
+  if (Object.keys(webVars).length > 0) {
+    return "web-authored vars cannot be combined with --resume-run — runtime vars are resolved from the assignment at first write and frozen into the manifest; they are not re-resolved on resume. Start a fresh run if web inputs need to change.";
   }
   if (manifest.backend === "passive") {
     return passiveRunError(manifest.agent.name, manifest.runId);
@@ -145,6 +150,7 @@ function validateInitOverwriteTarget(manifest: RunManifest): string | null {
 }
 
 export async function executeRunCommand(opts: ExecuteRunCommandOptions): Promise<RunOutcome> {
+  const webVars = opts.webVars ?? {};
   const isInitOverwrite = opts.initialize && opts.resumeRun !== undefined;
 
   let resumeTarget: ReturnType<typeof resolveResumeTarget> | undefined;
@@ -219,6 +225,7 @@ export async function executeRunCommand(opts: ExecuteRunCommandOptions): Promise
     loaded,
     loadedAssignment,
     cliVars: opts.cliVars,
+    webVars,
     parentRunId: opts.parentRunId,
     backend,
     callerCwd: opts.callerCwd,

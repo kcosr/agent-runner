@@ -88,6 +88,7 @@ async function initRun(baseDir, agentName = "daemon-agent", options = {}) {
         loaded,
         loadedAssignment,
         cliVars: {},
+        webVars: {},
         parentRunId: options.parentRunId ?? null,
         backend: {
           id: loaded.config.backend,
@@ -1474,7 +1475,7 @@ test("daemon HTTP rejects oversized JSON request bodies", async () => {
     const server = await serveDaemon(listenUrl);
     try {
       const oversizedPayload = JSON.stringify({
-        cliVars: {
+        webVars: {
           blob: "x".repeat(1024 * 1024),
         },
         overrides: {},
@@ -1922,7 +1923,7 @@ test("daemon projects active run detail as live while it owns the run", async ()
     const started = await httpJson(httpBaseUrl, "/api/runs", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ cliVars: {}, overrides: {} }),
+      body: JSON.stringify({ webVars: {}, overrides: {} }),
     });
     assert.equal(started.status, 200);
     assert.equal(started.body.runId, runId);
@@ -2239,7 +2240,10 @@ test("daemon subscriptions fan out run events and abort active runs", async () =
   const seenA = [];
   const seenB = [];
   try {
-    const started = await clientA.call("runs.start", { cliVars: {}, overrides: {} });
+    const started = await clientA.call("runs.start", {
+      cliVars: {},
+      overrides: {},
+    });
     assert.equal(started.runId, "daemon-live-run");
     await clientA.subscribe({ channel: "run_timeline", runId: started.runId }, (msg) => {
       if (msg.method === "run.timeline") {
@@ -2440,7 +2444,7 @@ test("daemon republishes summary and detail projections when a run retries", asy
     const started = await httpJson(httpBaseUrl, "/api/runs", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ cliVars: {}, overrides: {} }),
+      body: JSON.stringify({ webVars: {}, overrides: {} }),
     });
     assert.equal(started.status, 200);
     assert.equal(started.body.runId, runId);
@@ -3221,7 +3225,7 @@ test("daemon SSE streams split summary, detail, and timeline subscriptions", asy
     const started = await httpJson(httpBaseUrl, "/api/runs", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ cliVars: {}, overrides: {} }),
+      body: JSON.stringify({ webVars: {}, overrides: {} }),
     });
     assert.equal(started.status, 200);
     assert.equal(started.body.runId, runId);
@@ -3455,7 +3459,7 @@ test("daemon serves timeline history and cursored timeline replay over HTTP and 
   const started = await httpJson(httpBaseUrl, "/api/runs", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ cliVars: {}, overrides: {} }),
+    body: JSON.stringify({ webVars: {}, overrides: {} }),
   });
   assert.equal(started.status, 200);
   assert.equal(started.body.runId, runId);
@@ -3739,7 +3743,7 @@ test("daemon serves audit history and cursored audit replay over HTTP and websoc
   const started = await httpJson(httpBaseUrl, "/api/runs", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ cliVars: {}, overrides: {} }),
+    body: JSON.stringify({ webVars: {}, overrides: {} }),
   });
   assert.equal(started.status, 200);
   assert.equal(started.body.runId, runId);
@@ -4055,7 +4059,7 @@ test("daemon HTTP run start keeps callerCwd separate from overrides.cwd", async 
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         callerCwd,
-        cliVars: {},
+        webVars: {},
         overrides: {},
       }),
     });
@@ -4385,7 +4389,7 @@ test("daemon HTTP init uses the remote caller cwd when the agent omits cwd", asy
         agent: join(daemonDir, "agents", "daemon-agent", "agent.md"),
         assignment: join(daemonDir, "assignments", "daemon-work", "assignment.md"),
         callerCwd: clientDir,
-        cliVars: {},
+        webVars: {},
         overrides: {},
       }),
     });
@@ -4418,7 +4422,7 @@ test("daemon HTTP supports a browser definition-to-init flow with explicit calle
         agent: agentDefinition.body.agent.config.name,
         assignment: "daemon-work",
         callerCwd: clientDir,
-        cliVars: {},
+        webVars: {},
         overrides: {},
       }),
     });
@@ -4442,7 +4446,7 @@ test("daemon HTTP init rejects malformed backendSpecific codex transport overrid
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        cliVars: {},
+        webVars: {},
         overrides: {
           backendSpecific: {
             codex: {
@@ -4475,7 +4479,7 @@ test("daemon HTTP init rejects malformed launcher overrides", async () => {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        cliVars: {},
+        webVars: {},
         overrides: {
           launcher: 42,
         },
@@ -4757,6 +4761,109 @@ args: [prod, --]
     }
   } finally {
     await client.close();
+    await daemon.stop();
+  }
+});
+
+test("daemon HTTP exposes the run input surface route with validation and direct-path support", async () => {
+  const daemonDir = tempDir();
+  writeAgent(daemonDir, "daemon-agent", AGENT);
+  writeAssignment(
+    daemonDir,
+    "new-run-work",
+    `---
+schemaVersion: 1
+name: new-run-work
+cwd: packages/core
+message: Ship the resolver-backed UI.
+maxRetries: 2
+vars:
+  plan:
+    type: string
+    description: Short feature brief.
+    required: true
+    sources: [cli, web]
+tasks:
+  - id: t1
+    title: First
+---
+New run work.
+`,
+  );
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  const daemon = await startCliDaemon(daemonDir, listenUrl);
+  try {
+    const success = await httpJson(
+      httpBaseUrl,
+      "/api/run-input-surface?agent=daemon-agent&assignment=new-run-work",
+    );
+    assert.equal(success.status, 200);
+    assert.deepEqual(
+      success.body.inputSurface.runSettings.map((field) => field.key),
+      [
+        "cwd",
+        "backend",
+        "launcher",
+        "model",
+        "effort",
+        "message",
+        "name",
+        "timeoutSec",
+        "unrestricted",
+        "maxRetries",
+      ],
+    );
+    assert.equal(success.body.inputSurface.runSettings[0].section, "context");
+    assert.equal(success.body.inputSurface.runSettings[1].section, "execution");
+    assert.equal(success.body.inputSurface.assignmentInputs[0].key, "plan");
+    assert.equal(success.body.inputSurface.assignmentInputs[0].section, "task");
+    assert.equal(success.body.inputSurface.assignmentInputs[0].required, true);
+    assert.equal(success.body.inputSurface.assignmentInputs[0].value, null);
+
+    const directAgent = encodeURIComponent("./agents/daemon-agent/agent.md");
+    const directAssignment = encodeURIComponent("./assignments/new-run-work/assignment.md");
+    const directPath = await httpJson(
+      httpBaseUrl,
+      `/api/run-input-surface?agent=${directAgent}&assignment=${directAssignment}&cwd=${encodeURIComponent(daemonDir)}`,
+    );
+    assert.equal(directPath.status, 200);
+    assert.deepEqual(directPath.body, success.body);
+
+    const missingAgent = await httpJson(
+      httpBaseUrl,
+      "/api/run-input-surface?assignment=new-run-work",
+    );
+    const emptyAssignment = await httpJson(
+      httpBaseUrl,
+      "/api/run-input-surface?agent=daemon-agent&assignment=",
+    );
+    const malformed = await httpJson(
+      httpBaseUrl,
+      "/api/run-input-surface?agent=daemon-agent&assignment=%E0%A4%A",
+    );
+    assert.equal(missingAgent.status, 400);
+    assert.equal(emptyAssignment.status, 400);
+    assert.equal(malformed.status, 400);
+    assert.equal(missingAgent.body.error.code, "INVALID_REQUEST");
+    assert.equal(emptyAssignment.body.error.code, "INVALID_REQUEST");
+    assert.equal(malformed.body.error.code, "INVALID_REQUEST");
+
+    const unknownAgent = await httpJson(
+      httpBaseUrl,
+      "/api/run-input-surface?agent=missing-agent&assignment=new-run-work",
+    );
+    const unknownAssignment = await httpJson(
+      httpBaseUrl,
+      "/api/run-input-surface?agent=daemon-agent&assignment=missing-work",
+    );
+    assert.equal(unknownAgent.status, 404);
+    assert.equal(unknownAssignment.status, 404);
+    assert.equal(unknownAgent.body.error.code, "NOT_FOUND");
+    assert.equal(unknownAssignment.body.error.code, "NOT_FOUND");
+  } finally {
     await daemon.stop();
   }
 });

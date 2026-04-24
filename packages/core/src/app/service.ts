@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import type { DefinitionEntry } from "../config/loader.js";
+import { loadAgentConfig, loadAssignmentConfig } from "../config/loader.js";
 import type {
   AttachmentListEntry,
   AttachmentListOptions,
@@ -13,6 +14,7 @@ import type {
   RunTimelineAttempt,
   RunTimelineHistory,
 } from "../contracts/events.js";
+import type { RunInputSurface, RunInputSurfaceParams } from "../contracts/run-input-surface.js";
 import type {
   RunArchiveResult,
   RunBackendSessionResult,
@@ -68,6 +70,7 @@ import type { RunEventOrigin } from "../core/run/run-events.js";
 import type { RunAuditEnvelope } from "../core/run/run-events.js";
 import { readRunAuditHistory } from "../core/run/run-events.js";
 import type { RunEvent, RunOutcome } from "../core/run/run-loop.js";
+import { resolveStaticInputSurface } from "../core/run/static-input-surface.js";
 import { executeRunCommand } from "../run-command.js";
 import { startDebugPerfTimer } from "../util/debug-perf.js";
 
@@ -113,6 +116,7 @@ export interface StartRunRequest {
   parentRunId?: string | null;
   backendSessionId?: string;
   cliVars: Record<string, string>;
+  webVars: Record<string, string>;
   overrides: RunCommandOverrides;
   execution?: RunExecution;
   abortSignal?: AbortSignal;
@@ -342,6 +346,13 @@ export function getDefinition(
   return toDefinitionDetail(showDefinition(kind, target, cwd));
 }
 
+export function getRunInputSurface(params: RunInputSurfaceParams): RunInputSurface {
+  return resolveStaticInputSurface(
+    loadAgentConfig(params.agent, params.cwd),
+    loadAssignmentConfig(params.assignment, params.cwd),
+  );
+}
+
 export function archive(
   target: string,
   auditContext?: MutationAuditContext,
@@ -512,6 +523,7 @@ export async function initRun(request: StartRunRequest): Promise<RunDetail> {
     parentRunId: request.parentRunId,
     backendSessionId: request.backendSessionId,
     cliVars: request.cliVars,
+    webVars: request.webVars,
     overrides: request.overrides,
     execution: request.execution,
     abortSignal: request.abortSignal,
@@ -531,6 +543,7 @@ export function startRun(request: StartRunRequest): Promise<RunOutcome> {
     parentRunId: request.parentRunId,
     backendSessionId: request.backendSessionId,
     cliVars: request.cliVars,
+    webVars: request.webVars,
     overrides: request.overrides,
     execution: request.execution,
     abortSignal: request.abortSignal,
@@ -544,6 +557,7 @@ export function resumeRun(request: ResumeRunRequest): Promise<RunOutcome> {
     initialize: false,
     resumeRun: request.target,
     cliVars: {},
+    webVars: {},
     parentRunId: request.parentRunId,
     overrides: request.overrides,
     execution: request.execution,

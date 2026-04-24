@@ -5,7 +5,7 @@ vars:
   worktree_slug:
     type: string
     required: true
-    sources: [cli]
+    sources: [cli, web]
     description: |
       Git-safe slug used to derive the sibling implementer
       worktree path and branch name.

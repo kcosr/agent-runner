@@ -7,6 +7,8 @@ import type {
   RunAttachmentRemoveResult,
 } from "@task-runner/core/contracts/attachments.js";
 import type { RunAuditHistory, RunTimelineHistory } from "@task-runner/core/contracts/events.js";
+import { runInputSurfaceSchema } from "@task-runner/core/contracts/run-input-surface-schemas.js";
+import type { RunInputSurface } from "@task-runner/core/contracts/run-input-surface.js";
 import {
   attachmentListEntrySchema,
   runArchiveResultSchema,
@@ -67,7 +69,7 @@ type RunsStartRequest = Pick<
   | "callerCwd"
   | "parentRunId"
   | "backendSessionId"
-  | "cliVars"
+  | "webVars"
   | "overrides"
 >;
 
@@ -455,6 +457,19 @@ async function readDefinitionDetail(
   );
 }
 
+async function readRunInputSurface(response: Response): Promise<RunInputSurface> {
+  if (!response.ok) {
+    return await readError(response);
+  }
+  return parseField(
+    await parseResponseJson(response, "Run input surface"),
+    response.status,
+    "inputSurface",
+    runInputSurfaceSchema as SafeParseSchema<RunInputSurface>,
+    "Run input surface",
+  );
+}
+
 async function readAbortResult(response: Response): Promise<void> {
   if (!response.ok) {
     return await readError(response);
@@ -512,6 +527,24 @@ function definitionPath(
   return joinPath(config.apiBasePath, `/${kind}${suffix}`);
 }
 
+function runInputSurfacePath(
+  config: AppRuntimeConfig,
+  input: {
+    agent: string;
+    assignment: string;
+    cwd?: string;
+  },
+): string {
+  const params = new URLSearchParams({
+    agent: input.agent,
+    assignment: input.assignment,
+  });
+  if (input.cwd !== undefined) {
+    params.set("cwd", input.cwd);
+  }
+  return joinPath(config.apiBasePath, `/run-input-surface?${params.toString()}`);
+}
+
 export function createApiClient(config: AppRuntimeConfig) {
   return {
     async listAgents(): Promise<DefinitionListResult> {
@@ -561,6 +594,20 @@ export function createApiClient(config: AppRuntimeConfig) {
         signal: options.signal,
       });
       return await readDefinitionDetail(response, "launcher", "Launcher detail");
+    },
+    async getRunInputSurface(
+      input: {
+        agent: string;
+        assignment: string;
+        cwd?: string;
+      },
+      options: RequestOptions = {},
+    ): Promise<RunInputSurface> {
+      const response = await fetch(runInputSurfacePath(config, input), {
+        headers: { accept: "application/json" },
+        signal: options.signal,
+      });
+      return await readRunInputSurface(response);
     },
     async listRuns(options: ListRunsOptions = {}): Promise<RunSummary[]> {
       const params = new URLSearchParams({ includeArchived: "true" });

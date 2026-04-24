@@ -32,7 +32,7 @@ function validateHookSourceSelector(
   }
 }
 
-export const VAR_SOURCES = ["cli", "env", "parent"] as const;
+export const VAR_SOURCES = ["cli", "web", "env", "parent"] as const;
 export type VarSource = (typeof VAR_SOURCES)[number];
 export const EFFORT_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 export const DEFAULT_AGENT_TIMEOUT_SEC = 3600;
@@ -68,7 +68,7 @@ export const varDefSchema = z
     type: z.enum(["string", "number", "boolean", "enum"]).default("string"),
     required: z.boolean().default(false),
     requiredAt: z.enum(["initial", "prepare"]).default("initial"),
-    sources: z.array(z.enum(VAR_SOURCES)).nonempty().default(["cli"]),
+    sources: z.array(z.enum(VAR_SOURCES)).nonempty().default(["cli", "web"]),
     envName: z.string().optional(),
     default: z.unknown().optional(),
     description: z.string().optional(),

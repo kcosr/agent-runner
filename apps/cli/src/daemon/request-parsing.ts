@@ -9,13 +9,15 @@ import type { RunListScopeFilter } from "@task-runner/core/core/commands/service
 import { isNamedLauncherOverride } from "@task-runner/core/core/config/launchers.js";
 import { trimRunName } from "@task-runner/core/util/run-name.js";
 import type {
+  CliRunsStartParams,
+  RunInputSurfaceParams,
   RunSetBackendSessionParams,
   RunSetNameParams,
   RunSetNoteParams,
   RunSetPinnedParams,
   RunsListParams,
   RunsResumeParams,
-  RunsStartParams,
+  WebRunsStartParams,
 } from "./protocol.js";
 
 export class RequestValidationError extends Error {
@@ -366,7 +368,7 @@ export function optionalOverrides(value: unknown): RunCommandOverrides {
   };
 }
 
-export function parseStartRunParams(value: unknown, label: string): RunsStartParams {
+function parseStartRunBaseParams(value: unknown, label: string) {
   const record = asRecord(value, label);
   return {
     runId: optionalString(record.runId, "runId"),
@@ -376,8 +378,23 @@ export function parseStartRunParams(value: unknown, label: string): RunsStartPar
     callerCwd: optionalString(record.callerCwd, "callerCwd"),
     parentRunId: optionalRunIdString(record.parentRunId, "parentRunId"),
     backendSessionId: optionalString(record.backendSessionId, "backendSessionId"),
-    cliVars: stringRecord(record.cliVars, "cliVars"),
     overrides: optionalOverrides(record.overrides),
+  };
+}
+
+export function parseCliStartRunParams(value: unknown, label: string): CliRunsStartParams {
+  const record = asRecord(value, label);
+  return {
+    ...parseStartRunBaseParams(record, label),
+    cliVars: stringRecord(record.cliVars, "cliVars"),
+  };
+}
+
+export function parseWebStartRunParams(value: unknown, label: string): WebRunsStartParams {
+  const record = asRecord(value, label);
+  return {
+    ...parseStartRunBaseParams(record, label),
+    webVars: stringRecord(record.webVars, "webVars"),
   };
 }
 
@@ -460,5 +477,44 @@ export function parseRunsListParams(value: unknown, label: string): RunsListPara
   return {
     includeArchived: optionalBoolean(record.includeArchived, `${label}.includeArchived`),
     scope: parseRunListScope(record.scope, `${label}.scope`),
+  };
+}
+
+function decodeQueryComponent(value: string, label: string): string {
+  try {
+    return decodeURIComponent(value.replace(/\+/g, "%20"));
+  } catch {
+    throw new RequestValidationError(`${label} must be valid percent-encoded text`);
+  }
+}
+
+function queryEntries(search: string): Map<string, string> {
+  const entries = new Map<string, string>();
+  const trimmed = search.startsWith("?") ? search.slice(1) : search;
+  if (trimmed.length === 0) {
+    return entries;
+  }
+  for (const pair of trimmed.split("&")) {
+    if (pair.length === 0) {
+      continue;
+    }
+    const separatorIndex = pair.indexOf("=");
+    const rawKey = separatorIndex === -1 ? pair : pair.slice(0, separatorIndex);
+    const rawValue = separatorIndex === -1 ? "" : pair.slice(separatorIndex + 1);
+    const decodedKey = decodeQueryComponent(rawKey, "query parameter name");
+    entries.set(
+      decodedKey,
+      decodeQueryComponent(rawValue, `value for query parameter '${decodedKey}'`),
+    );
+  }
+  return entries;
+}
+
+export function parseRunInputSurfaceQuery(search: string): RunInputSurfaceParams {
+  const entries = queryEntries(search);
+  return {
+    agent: requiredNonEmptyString(entries.get("agent"), "agent"),
+    assignment: requiredNonEmptyString(entries.get("assignment"), "assignment"),
+    cwd: optionalNonEmptyString(entries.get("cwd"), "cwd"),
   };
 }

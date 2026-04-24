@@ -18,7 +18,7 @@ import type {
   RunSetNoteParams,
   RunSetPinnedParams,
   RunsListParams,
-  RunsStartParams,
+  WebRunsStartParams,
 } from "./protocol.js";
 import {
   RequestValidationError,
@@ -29,11 +29,12 @@ import {
   optionalString,
   parseAttachmentScopeQueryValue,
   parseBooleanQueryValue,
+  parseRunInputSurfaceQuery,
   parseRunSetBackendSessionParams,
   parseRunSetNameParams,
   parseRunSetNoteParams,
   parseRunSetPinnedParams,
-  parseStartRunParams,
+  parseWebStartRunParams,
   requiredHeaderString,
   requiredRunIdString,
   requiredString,
@@ -115,6 +116,13 @@ const routes: RouteDefinition[] = [
   },
   {
     method: "GET",
+    pattern: ["api", "run-input-surface"],
+    handler: (_req, res, ctx, _params, url) => {
+      sendJson(res, 200, ctx.operations.getRunInputSurface(parseRunInputSurfaceQuery(url.search)));
+    },
+  },
+  {
+    method: "GET",
     pattern: ["api", "launchers"],
     handler: (_req, res, ctx) => {
       sendJson(res, 200, ctx.operations.listLaunchers());
@@ -165,14 +173,14 @@ const routes: RouteDefinition[] = [
     method: "POST",
     pattern: ["api", "runs", "init"],
     handler: async (req, res, ctx) => {
-      sendJson(res, 200, await ctx.operations.initRun(await parseStartRunBody(req)));
+      sendJson(res, 200, await ctx.operations.initWebRun(await parseStartRunBody(req)));
     },
   },
   {
     method: "POST",
     pattern: ["api", "runs"],
     handler: async (req, res, ctx) => {
-      sendJson(res, 200, await ctx.operations.startRun(await parseStartRunBody(req)));
+      sendJson(res, 200, await ctx.operations.startWebRun(await parseStartRunBody(req)));
     },
   },
   {
@@ -562,8 +570,8 @@ export async function handleHttpRequest(
   }
 }
 
-async function parseStartRunBody(req: IncomingMessage): Promise<RunsStartParams> {
-  return parseStartRunParams(await readJsonBody(req), "request body");
+async function parseStartRunBody(req: IncomingMessage): Promise<WebRunsStartParams> {
+  return parseWebStartRunParams(await readJsonBody(req), "request body");
 }
 
 async function parseResumeRunBody(req: IncomingMessage): Promise<ResumeRunBody> {

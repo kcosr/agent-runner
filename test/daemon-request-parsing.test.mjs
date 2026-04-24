@@ -3,8 +3,9 @@ import { test } from "node:test";
 import {
   RequestValidationError,
   optionalOverrides,
+  parseCliStartRunParams,
   parseResumeRunParams,
-  parseStartRunParams,
+  parseWebStartRunParams,
 } from "../apps/cli/dist/daemon/request-parsing.js";
 
 test("optionalOverrides accepts launcher string refs", () => {
@@ -38,8 +39,8 @@ test("optionalOverrides rejects malformed launcher overrides", () => {
   );
 });
 
-test("parseStartRunParams accepts structured parentRunId", () => {
-  const parsed = parseStartRunParams(
+test("parseCliStartRunParams accepts structured parentRunId", () => {
+  const parsed = parseCliStartRunParams(
     {
       parentRunId: "parent-123",
       cliVars: {},
@@ -50,10 +51,10 @@ test("parseStartRunParams accepts structured parentRunId", () => {
   assert.equal(parsed.parentRunId, "parent-123");
 });
 
-test("parseStartRunParams rejects path-like parentRunId", () => {
+test("parseCliStartRunParams rejects path-like parentRunId", () => {
   assert.throws(
     () =>
-      parseStartRunParams(
+      parseCliStartRunParams(
         {
           parentRunId: "../parent",
           cliVars: {},
@@ -66,6 +67,46 @@ test("parseStartRunParams rejects path-like parentRunId", () => {
       assert.match(error.message, /parentRunId must be a run id, not a path/);
       return true;
     },
+  );
+});
+
+test("parseWebStartRunParams accepts structured parentRunId", () => {
+  const parsed = parseWebStartRunParams(
+    {
+      parentRunId: "parent-123",
+      webVars: {},
+      overrides: {},
+    },
+    "request body",
+  );
+  assert.equal(parsed.parentRunId, "parent-123");
+});
+
+test("parseCliStartRunParams requires cliVars", () => {
+  assert.throws(
+    () =>
+      parseCliStartRunParams(
+        {
+          webVars: {},
+          overrides: {},
+        },
+        "runs.start params",
+      ),
+    /cliVars must be an object/,
+  );
+});
+
+test("parseWebStartRunParams requires webVars", () => {
+  assert.throws(
+    () =>
+      parseWebStartRunParams(
+        {
+          cliVars: {},
+          overrides: {},
+        },
+        "request body",
+      ),
+    /webVars must be an object/,
   );
 });
 

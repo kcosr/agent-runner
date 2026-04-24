@@ -1,3 +1,9 @@
+import type {
+  RunInputField,
+  RunInputFieldKind,
+  RunInputFieldSource,
+  RunInputSurface,
+} from "../../contracts/run-input-surface.js";
 import { BACKEND_IDS } from "../backends/types.js";
 import type { LoadedAgent, LoadedAssignment } from "../config/loaded.js";
 import {
@@ -9,41 +15,6 @@ import {
   type LockableField,
   type VarDef,
 } from "../config/schema.js";
-
-export interface StaticInputSurface {
-  runSettings: StaticInputField[];
-  assignmentInputs: StaticInputField[];
-}
-
-export interface StaticInputField {
-  key: string;
-  label: string;
-  description?: string;
-  section: "run_setting" | "assignment_input";
-  inputKind:
-    | "string"
-    | "number"
-    | "boolean"
-    | "enum"
-    | "textarea"
-    | "launcher"
-    | "model"
-    | "effort";
-  valueStatus: "concrete" | "unset" | "delegated";
-  value?: unknown;
-  editable: boolean;
-  locked: boolean;
-  hiddenWhenUnset: boolean;
-  source:
-    | "agent"
-    | "assignment"
-    | "schema_default"
-    | "run_loop_default"
-    | "available_override"
-    | "var_default";
-  required?: boolean;
-  enumValues?: string[];
-}
 
 type StaticRunSettingKey =
   | "cwd"
@@ -60,8 +31,8 @@ type StaticRunSettingKey =
 interface StaticFieldMetadata {
   key: StaticRunSettingKey;
   label: string;
-  description?: string;
-  inputKind: StaticInputField["inputKind"];
+  description: string;
+  inputKind: RunInputFieldKind;
   enumValues?: string[];
 }
 
@@ -146,15 +117,15 @@ function isLockableField(key: string): key is LockableField {
 
 function buildField(
   metadata: StaticFieldMetadata,
-  resolved: Pick<StaticInputField, "valueStatus" | "value" | "source">,
+  resolved: Pick<RunInputField, "valueStatus" | "value" | "source">,
   editable: boolean,
   locked: boolean,
-): StaticInputField {
+): RunInputField {
   return {
     key: metadata.key,
     label: metadata.label,
     description: metadata.description,
-    section: "run_setting",
+    section: metadata.key === "cwd" || metadata.key === "name" ? "context" : "execution",
     inputKind: metadata.inputKind,
     valueStatus: resolved.valueStatus,
     value: resolved.value,
@@ -195,7 +166,7 @@ function humanizeKey(key: string): string {
     .join(" ");
 }
 
-function inputKindForVar(def: VarDef): StaticInputField["inputKind"] {
+function inputKindForVar(def: VarDef): RunInputFieldKind {
   switch (def.type) {
     case "number":
       return "number";
@@ -210,8 +181,8 @@ function inputKindForVar(def: VarDef): StaticInputField["inputKind"] {
 
 function valueField<T>(
   value: T,
-  source: StaticInputField["source"],
-): Pick<StaticInputField, "valueStatus" | "value" | "source"> {
+  source: RunInputFieldSource,
+): Pick<RunInputField, "valueStatus" | "value" | "source"> {
   return {
     valueStatus: "concrete",
     value,
@@ -219,16 +190,18 @@ function valueField<T>(
   };
 }
 
-function unsetField(): Pick<StaticInputField, "valueStatus" | "source"> {
+function unsetField(): Pick<RunInputField, "valueStatus" | "value" | "source"> {
   return {
     valueStatus: "unset",
+    value: null,
     source: "available_override",
   };
 }
 
-function delegatedField(): Pick<StaticInputField, "valueStatus" | "source"> {
+function delegatedField(): Pick<RunInputField, "valueStatus" | "value" | "source"> {
   return {
     valueStatus: "delegated",
+    value: null,
     source: "available_override",
   };
 }
@@ -243,7 +216,7 @@ export function resolveFreshRunMaxRetries(
 export function resolveStaticInputSurface(
   loaded: LoadedAgent,
   loadedAssignment?: LoadedAssignment,
-): StaticInputSurface {
+): RunInputSurface {
   const lockedFields = resolveLockedFields(loaded, loadedAssignment);
   const runSettings = RUN_SETTING_METADATA.map((metadata) => {
     const locked = isLockableField(metadata.key) ? lockedFields.has(metadata.key) : false;
@@ -339,17 +312,17 @@ export function resolveStaticInputSurface(
   });
 
   const assignmentInputs = Object.entries(loadedAssignment?.config.vars ?? {})
-    .filter(([, def]) => def.sources.includes("cli"))
+    .filter(([, def]) => def.sources.includes("web"))
     .map(([key, def]) => {
       const hasDefault = def.default !== undefined;
       return {
         key,
         label: humanizeKey(key),
-        description: def.description,
-        section: "assignment_input" as const,
+        description: def.description ?? "",
+        section: "task" as const,
         inputKind: inputKindForVar(def),
         valueStatus: hasDefault ? ("concrete" as const) : ("unset" as const),
-        value: hasDefault ? def.default : undefined,
+        value: hasDefault ? def.default : null,
         editable: true,
         locked: false,
         hiddenWhenUnset: false,

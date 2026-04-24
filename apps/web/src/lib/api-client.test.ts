@@ -1332,6 +1332,157 @@ describe("api client", () => {
     );
   });
 
+  it("parses run input surface payloads", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              inputSurface: {
+                runSettings: [
+                  {
+                    key: "backend",
+                    label: "Backend",
+                    description: "Execution backend.",
+                    section: "execution",
+                    inputKind: "enum",
+                    valueStatus: "concrete",
+                    value: "codex",
+                    editable: false,
+                    locked: true,
+                    hiddenWhenUnset: false,
+                    source: "agent",
+                    required: true,
+                    enumValues: ["codex", "claude"],
+                  },
+                ],
+                assignmentInputs: [
+                  {
+                    key: "plan",
+                    label: "Plan",
+                    description: "Short feature brief.",
+                    section: "task",
+                    inputKind: "string",
+                    valueStatus: "unset",
+                    value: null,
+                    editable: true,
+                    locked: false,
+                    hiddenWhenUnset: false,
+                    source: "available_override",
+                    required: true,
+                  },
+                ],
+              },
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+
+    const api = createApiClient(config);
+
+    await expect(
+      api.getRunInputSurface({ agent: "planner", assignment: "plan-feature" }),
+    ).resolves.toEqual({
+      runSettings: [expect.objectContaining({ key: "backend", value: "codex" })],
+      assignmentInputs: [expect.objectContaining({ key: "plan", value: null, required: true })],
+    });
+  });
+
+  it("rejects invalid run input surface payloads", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              inputSurface: {
+                runSettings: [{ key: "backend" }],
+                assignmentInputs: [],
+              },
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+
+    const api = createApiClient(config);
+
+    await expect(
+      api.getRunInputSurface({ agent: "planner", assignment: "plan-feature" }),
+    ).rejects.toMatchObject({
+      code: "INVALID_RESPONSE",
+      name: "ApiError",
+      status: 200,
+    });
+  });
+
+  it("propagates daemon errors from run input surface requests", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              error: {
+                code: "NOT_FOUND",
+                message: "resource not found",
+              },
+            }),
+            { status: 404 },
+          ),
+      ),
+    );
+
+    const api = createApiClient(config);
+
+    await expect(
+      api.getRunInputSurface({ agent: "missing", assignment: "plan-feature" }),
+    ).rejects.toMatchObject({
+      code: "NOT_FOUND",
+      message: "resource not found",
+      name: "ApiError",
+      status: 404,
+    });
+  });
+
+  it("encodes direct-path run input surface targets and forwards cwd", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            inputSurface: {
+              runSettings: [],
+              assignmentInputs: [],
+            },
+          }),
+          { status: 200 },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createApiClient(config);
+
+    await expect(
+      api.getRunInputSurface({
+        agent: "./agents/planner/agent.md",
+        assignment: "./assignments/plan-feature/assignment.md",
+        cwd: "/tmp/config-root",
+      }),
+    ).resolves.toEqual({
+      runSettings: [],
+      assignmentInputs: [],
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/run-input-surface?agent=.%2Fagents%2Fplanner%2Fagent.md&assignment=.%2Fassignments%2Fplan-feature%2Fassignment.md&cwd=%2Ftmp%2Fconfig-root",
+      expect.objectContaining({
+        headers: { accept: "application/json" },
+      }),
+    );
+  });
+
   it("keeps callerCwd explicit in initRun and startRun request bodies", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -1341,7 +1492,7 @@ describe("api client", () => {
       agent: "planner",
       assignment: "daemon-work",
       callerCwd: "/tmp/browser-cwd",
-      cliVars: { plan: "web-init" },
+      webVars: { plan: "web-init" },
       overrides: {
         cwd: "/tmp/override-cwd",
         message: "Start planning.",
@@ -1460,6 +1611,8 @@ describe("api client", () => {
     const startBody = JSON.parse((startRequest as RequestInit).body as string);
     expect(initBody.callerCwd).toBe("/tmp/browser-cwd");
     expect(startBody.callerCwd).toBe("/tmp/browser-cwd");
+    expect(initBody.webVars).toEqual({ plan: "web-init" });
+    expect(startBody.webVars).toEqual({ plan: "web-init" });
     expect(initBody.overrides.cwd).toBe("/tmp/override-cwd");
     expect(startBody.overrides.cwd).toBe("/tmp/override-cwd");
   });

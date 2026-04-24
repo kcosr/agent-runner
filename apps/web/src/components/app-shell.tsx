@@ -3,6 +3,67 @@ import type { ReactNode } from "react";
 import { useDashboardPreferences } from "../lib/settings.js";
 import { FileIcon, GridIcon, SettingsIcon } from "./icons.js";
 
+function PrimaryNavButtons({
+  activeSection,
+  creatingRun,
+  navigate,
+}: {
+  activeSection: "runs" | "settings";
+  creatingRun: boolean;
+  navigate: ReturnType<typeof useNavigate>;
+}) {
+  return (
+    <>
+      <button
+        aria-current={activeSection === "runs" && !creatingRun ? "page" : undefined}
+        className={activeSection === "runs" && !creatingRun ? "nav-item active" : "nav-item"}
+        onClick={() => void navigate({ to: "/" })}
+        title="Runs"
+        type="button"
+      >
+        <GridIcon aria-hidden="true" />
+      </button>
+      <button
+        aria-current={creatingRun ? "page" : undefined}
+        className={creatingRun ? "nav-item active" : "nav-item"}
+        onClick={() => void navigate({ to: "/runs/new" })}
+        title="New Run"
+        type="button"
+      >
+        <FileIcon aria-hidden="true" />
+      </button>
+      <button
+        aria-current={activeSection === "settings" ? "page" : undefined}
+        className={activeSection === "settings" ? "nav-item active" : "nav-item"}
+        onClick={() => void navigate({ to: "/settings/general" })}
+        title="Settings"
+        type="button"
+      >
+        <SettingsIcon aria-hidden="true" />
+      </button>
+    </>
+  );
+}
+
+export function TopbarPrimaryNav() {
+  const navigate = useNavigate();
+  const pathname = useRouterState({
+    select: (state) => state.location.pathname,
+  });
+  const activeSection = pathname.startsWith("/settings") ? "settings" : "runs";
+  const creatingRun = pathname === "/runs/new";
+
+  return (
+    <div aria-label="Primary navigation" className="mobile-topbar-nav">
+      <PrimaryNavButtons
+        activeSection={activeSection}
+        creatingRun={creatingRun}
+        navigate={navigate}
+      />
+    </div>
+  );
+}
+
 export function AppShell({
   topNotices,
   bottomNotices,
@@ -22,6 +83,7 @@ export function AppShell({
     select: (state) => state.location.pathname,
   });
   const activeSection = pathname.startsWith("/settings") ? "settings" : "runs";
+  const creatingRun = pathname === "/runs/new";
 
   return (
     <div className="app" data-focus-indicators={preferences.visibleFocusIndicators ? "on" : "off"}>
@@ -30,34 +92,12 @@ export function AppShell({
           <span aria-label="task-runner" className="brand-mark">
             tr
           </span>
-          <button
-            aria-current={activeSection === "runs" ? "page" : undefined}
-            className={activeSection === "runs" ? "nav-item active" : "nav-item"}
-            onClick={() => void navigate({ to: "/" })}
-            title="Runs"
-            type="button"
-          >
-            <GridIcon aria-hidden="true" />
-          </button>
-          <button
-            aria-disabled="true"
-            className="nav-item"
-            disabled
-            title="Definitions (deferred in phase 1)"
-            type="button"
-          >
-            <FileIcon aria-hidden="true" />
-          </button>
+          <PrimaryNavButtons
+            activeSection={activeSection}
+            creatingRun={creatingRun}
+            navigate={navigate}
+          />
           <span className="nav-spacer" />
-          <button
-            aria-current={activeSection === "settings" ? "page" : undefined}
-            className={activeSection === "settings" ? "nav-item active" : "nav-item"}
-            onClick={() => void navigate({ to: "/settings/general" })}
-            title="Settings"
-            type="button"
-          >
-            <SettingsIcon aria-hidden="true" />
-          </button>
         </aside>
         <div className="main">
           {toolbar}
