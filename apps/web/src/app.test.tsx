@@ -8120,6 +8120,12 @@ describe("web app", () => {
 
     await user.click(screen.getByRole("button", { name: /^Preview notes\.md$/ }));
     expect(await screen.findByRole("heading", { name: "Notes" })).toBeInTheDocument();
+    const frontmatterCode = screen.getByText((_, element) => {
+      return (
+        element?.tagName === "CODE" && element.textContent === "title: Notes\nsource: attachment\n"
+      );
+    });
+    expect(frontmatterCode.closest("pre")).not.toBeNull();
     expect(await screen.findByLabelText("Mermaid diagram")).toBeInTheDocument();
     expect(renderMermaid).toHaveBeenCalledWith(
       expect.stringMatching(/^mermaid-/),

@@ -21,6 +21,7 @@ const MERMAID_CONFIG = {
   suppressErrorRendering: true,
   theme: "neutral",
 } as const;
+const FRONTMATTER_PATTERN = /^---[ \t]*\r?\n([\s\S]*?)\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/;
 
 let mermaidApiPromise: Promise<MermaidApi> | null = null;
 
@@ -36,6 +37,26 @@ function loadMermaidApi(): Promise<MermaidApi> {
 
 function normalizeMermaidCode(value: ReactNode): string {
   return Children.toArray(value).join("").replace(/\n$/, "");
+}
+
+function codeFenceFor(code: string): string {
+  const longestBacktickRun = (code.match(/`+/g) ?? []).reduce(
+    (longest, run) => Math.max(longest, run.length),
+    0,
+  );
+  return "`".repeat(Math.max(3, longestBacktickRun + 1));
+}
+
+function renderLeadingFrontmatterAsCodeBlock(text: string): string {
+  const match = FRONTMATTER_PATTERN.exec(text);
+  if (!match) {
+    return text;
+  }
+  const yaml = match[1] ?? "";
+  const body = text.slice(match[0].length).replace(/^\r?\n/, "");
+  const fence = codeFenceFor(yaml);
+  const frontmatterBlock = `${fence}yaml\n${yaml}\n${fence}`;
+  return body.length > 0 ? `${frontmatterBlock}\n\n${body}` : frontmatterBlock;
 }
 
 function readMermaidBlock(children: ReactNode): string | null {
@@ -165,11 +186,23 @@ const components: Components = {
   },
 };
 
-function MarkdownContentInner({ text, className }: { text: string; className?: string }) {
+function MarkdownContentInner({
+  text,
+  className,
+  renderFrontmatterAsCodeBlock = false,
+}: {
+  text: string;
+  className?: string;
+  renderFrontmatterAsCodeBlock?: boolean;
+}) {
+  const renderedText = renderFrontmatterAsCodeBlock
+    ? renderLeadingFrontmatterAsCodeBlock(text)
+    : text;
+
   return (
     <div className={className ? `markdown ${className}` : "markdown"}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
-        {text}
+        {renderedText}
       </ReactMarkdown>
     </div>
   );

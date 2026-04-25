@@ -356,7 +356,7 @@ export function AttachmentPreviewDrawer({
           ) : previewMediaType === "text/markdown" ? (
             <section aria-label="Attachment preview content" className="drawer-panel">
               <div className="drawer-panel-card attachment-preview-content">
-                <MarkdownContent text={textPreview?.text ?? ""} />
+                <MarkdownContent renderFrontmatterAsCodeBlock text={textPreview?.text ?? ""} />
               </div>
             </section>
           ) : (
