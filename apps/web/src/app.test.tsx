@@ -1293,7 +1293,7 @@ function getBoardColumnTitles() {
   );
 }
 
-function defineElementMetric(element: Element, key: string, value: number | (() => void)) {
+function defineElementMetric(element: Element, key: string, value: unknown) {
   Object.defineProperty(element, key, {
     configurable: true,
     value,
