@@ -14,6 +14,7 @@ ${TASK_RUNNER_STATE_DIR}/runs/<repo>/<run-id>/
 ├── run.json               # canonical manifest (schema version 12)
 ├── run-events.jsonl       # append-only audit history with monotonic cursors
 ├── assignment-seed.md     # only when the run started from an assignment file
+├── agent-seed.md          # only when the run started from an agent file
 ├── attempts/
 │   ├── 00.json
 │   └── 01.json
@@ -22,9 +23,12 @@ ${TASK_RUNNER_STATE_DIR}/runs/<repo>/<run-id>/
         └── <file>
 ```
 
-`assignment-seed.md` is an immutable audit snapshot of the assignment at
-run-creation time. It is *not* a work surface — task state is canonical in
-`run.json.finalTasks`. Runs created by current code also include
+`assignment-seed.md` and `agent-seed.md` are immutable audit snapshots of
+the assignment and agent at run-creation time. They are *not* work
+surfaces — task state is canonical in `run.json.finalTasks`. Older
+initialized runs created before agent snapshots were persisted can be
+backfilled with `scripts/migrate-agent-seeds.mjs`. Runs created by
+current code also include
 `run-events.jsonl`; older workspaces may still need
 `scripts/migrate-run-events-v2.mjs` before the audit history has canonical
 cursors. The file records compact lifecycle/task provenance, including
@@ -232,6 +236,7 @@ task-runner attachment list <run-id> [--scope run|family]
 
 ```bash
 task-runner run ready <id>
+task-runner run reconfigure <id> [--var key=value ...] [--message-file <path> | <message...>]
 task-runner run reset <id>
 task-runner run archive <id>
 task-runner run unarchive <id>
@@ -264,6 +269,20 @@ live status are cleared. Existing `run-events.jsonl` history is preserved
 and reset appends one more diagnostic record instead of truncating the file.
 Only non-running runs can be reset. `manifest.schedule` is preserved
 across manual reset because it is not part of the reset seed.
+
+### Reconfigure
+
+`run reconfigure` patches runtime vars and/or the initial message on an
+unarchived `initialized` run. The mutation rerenders the composed brief
+and reset seed while preserving frozen identity/runtime fields including
+agent, assignment, backend, cwd, tasks, schedule, launcher, hooks, and
+backend-specific Codex transport.
+
+The operation is all-or-nothing. Validation failures, required-var
+failures, locked `message` / rendered task fields, and prepare/render
+errors leave the previous manifest unchanged. Accepted changes append a
+`run.reconfigured` audit row that records changed var keys and whether
+the message changed, not var values or message text.
 
 ### Archive, unarchive, delete
 
@@ -331,12 +350,14 @@ The daemon and CLI expose a `RunCapabilities` boolean block on each run so
 clients do not reimplement lifecycle gates:
 
 - `canArchive`, `canUnarchive`, `canReset`, `canDelete`, `canReady`,
-  `canResume`, `canAbort`
+  `canResume`, `canAbort`, `canReconfigure`
 - `taskMutation.canSetStatus`, `taskMutation.canEditNotes`,
   `taskMutation.canAdd`
 
 When `canAbort` is `false`, the `abortReason` field explains why
 (`"already_terminal"` or `"not_active_in_daemon"`).
+When `canReconfigure` is `false`, `reconfigureReason` is `"archived"`
+or `"not_initialized"` when applicable.
 
 ## Resume
 

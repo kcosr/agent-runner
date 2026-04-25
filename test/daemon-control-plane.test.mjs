@@ -17,6 +17,7 @@ import { test } from "node:test";
 import WebSocket, { WebSocketServer } from "ws";
 import { DaemonClient, DaemonRpcError } from "../apps/cli/dist/daemon/client.js";
 import { deriveHttpBaseUrl } from "../apps/cli/dist/daemon/config.js";
+import { daemonReconfigureRun } from "../apps/cli/dist/daemon/http-client.js";
 import { serveDaemon } from "../apps/cli/dist/daemon/server.js";
 import { streamEvents } from "../apps/cli/dist/daemon/sse.js";
 import { getRun as getRunDetail } from "../packages/core/dist/app/service.js";
@@ -45,6 +46,14 @@ backend: passive
 Passive daemon agent.
 `;
 
+const CODEX_AGENT = `---
+schemaVersion: 1
+name: codex-daemon-agent
+backend: codex
+---
+Codex daemon agent for {{target}}.
+`;
+
 const ASSIGNMENT = `---
 schemaVersion: 1
 name: daemon-work
@@ -54,6 +63,22 @@ tasks:
     title: First
 ---
 Daemon assignment.
+`;
+
+const RECONFIG_ASSIGNMENT = `---
+schemaVersion: 1
+name: reconfig-work
+message: original message
+vars:
+  target:
+    type: string
+    required: true
+tasks:
+  - id: t1
+    title: Handle {{target}}
+    body: Message for {{target}}.
+---
+Reconfig assignment for {{target}}.
 `;
 
 function tempDir() {
@@ -657,6 +682,7 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
         canResume: false,
         canAbort: false,
         abortReason: "not_active_in_daemon",
+        canReconfigure: true,
         taskMutation: {
           canSetStatus: true,
           canEditNotes: true,
@@ -5083,6 +5109,125 @@ test("serve and --connect route CLI commands remotely and fail clearly when no d
     } finally {
       await client.close();
     }
+  } finally {
+    await daemon.stop();
+  }
+});
+
+test("daemon reconfigure surfaces support CLI and HTTP without replacing frozen codex transport", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "codex-daemon-agent", CODEX_AGENT);
+  writeAssignment(dir, "reconfig-work", RECONFIG_ASSIGNMENT);
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const daemon = await startCliDaemon(dir, listenUrl);
+  try {
+    const initialized = JSON.parse(
+      runCli(
+        [
+          "init",
+          "--connect",
+          listenUrl,
+          "--agent",
+          "codex-daemon-agent",
+          "--assignment",
+          "reconfig-work",
+          "--var",
+          "target=alpha",
+          "--output-format",
+          "json",
+        ],
+        {
+          cwd: dir,
+          env: { TASK_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/" },
+        },
+      ),
+    );
+    const originalManifest = readManifest(initialized.workspaceDir);
+    assert.deepEqual(originalManifest.backendSpecific, {
+      codex: {
+        transport: {
+          type: "ws",
+          url: "ws://127.0.0.1:4773/",
+        },
+      },
+    });
+
+    const cliReconfigured = JSON.parse(
+      runCli(
+        [
+          "run",
+          "reconfigure",
+          initialized.runId,
+          "--connect",
+          listenUrl,
+          "--var",
+          "target=beta",
+          "--output-format",
+          "json",
+        ],
+        {
+          cwd: dir,
+          env: { TASK_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4884/" },
+        },
+      ),
+    );
+    assert.equal(cliReconfigured.runId, initialized.runId);
+    assert.equal(cliReconfigured.runtimeVars.target, "beta");
+
+    const afterCliManifest = readManifest(initialized.workspaceDir);
+    assert.equal(afterCliManifest.finalTasks.t1.title, "Handle beta");
+    assert.equal(afterCliManifest.backendSpecific.codex.transport.url, "ws://127.0.0.1:4773/");
+
+    const httpReconfigured = await daemonReconfigureRun(listenUrl, initialized.runId, {
+      vars: { target: "gamma" },
+      message: "HTTP replacement message",
+    });
+    assert.equal(httpReconfigured.runtimeVars.target, "gamma");
+    assert.equal(httpReconfigured.message, "HTTP replacement message");
+
+    const afterHttpManifest = readManifest(initialized.workspaceDir);
+    assert.equal(afterHttpManifest.finalTasks.t1.title, "Handle gamma");
+    assert.equal(afterHttpManifest.message, "HTTP replacement message");
+    assert.equal(afterHttpManifest.backendSpecific.codex.transport.url, "ws://127.0.0.1:4773/");
+
+    const rejected = await httpJson(
+      deriveHttpBaseUrl(listenUrl),
+      `/api/runs/${initialized.runId}/reconfigure`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ vars: { target: "delta" }, backend: "codex" }),
+      },
+    );
+    assert.equal(rejected.status, 400);
+    assert.match(rejected.body.error.message, /request body\.backend is not supported/);
+
+    const unknownVar = await httpJson(
+      deriveHttpBaseUrl(listenUrl),
+      `/api/runs/${initialized.runId}/reconfigure`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ vars: { missing: "delta" } }),
+      },
+    );
+    assert.equal(unknownVar.status, 400);
+    assert.match(unknownVar.body.error.message, /unknown --var key\(s\): missing/);
+
+    markRunReady(initialized.workspaceDir);
+    const notInitialized = await httpJson(
+      deriveHttpBaseUrl(listenUrl),
+      `/api/runs/${initialized.runId}/reconfigure`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ message: "late" }),
+      },
+    );
+    assert.equal(notInitialized.status, 409);
+    assert.match(notInitialized.body.error.message, /unless it is initialized/);
   } finally {
     await daemon.stop();
   }

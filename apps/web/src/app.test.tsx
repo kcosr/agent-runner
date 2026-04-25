@@ -192,6 +192,7 @@ function makeRun(
       canResume: true,
       canAbort: false,
       abortReason: "not_active_in_daemon",
+      canReconfigure: false,
       taskMutation: {
         canAdd: false,
         canEditNotes: false,
@@ -364,6 +365,7 @@ function makeDetail(
       canResume: true,
       canAbort: false,
       abortReason: "not_active_in_daemon",
+      canReconfigure: false,
       taskMutation: {
         canAdd: false,
         canEditNotes: false,
@@ -842,6 +844,32 @@ function installFetchMock(
       }
       detail.schedule = null;
       syncScheduleState(detail);
+      syncRunSummary(runId);
+      return new Response(JSON.stringify({ run: detail }), { status: 200 });
+    }
+
+    const reconfigureMatch = /\/api\/runs\/([^/]+)\/reconfigure$/.exec(url);
+    if (reconfigureMatch && init?.method === "POST") {
+      const runId = decodeURIComponent(reconfigureMatch[1] ?? "");
+      const body =
+        typeof init.body === "string" && init.body.length > 0
+          ? (JSON.parse(init.body) as { vars?: Record<string, string>; message?: string })
+          : {};
+      const detail = state.details[runId];
+      if (!detail) {
+        return new Response(JSON.stringify({ error: { message: "missing", code: "not_found" } }), {
+          status: 404,
+        });
+      }
+      if (body.vars !== undefined) {
+        detail.runtimeVars = {
+          ...detail.runtimeVars,
+          ...body.vars,
+        };
+      }
+      if ("message" in body) {
+        detail.message = body.message ?? null;
+      }
       syncRunSummary(runId);
       return new Response(JSON.stringify({ run: detail }), { status: 200 });
     }
@@ -2458,6 +2486,255 @@ describe("web app", () => {
     );
     expect(within(hookStateTable).getByRole("rowheader", { name: "lastRun" })).toBeInTheDocument();
     expect(within(hookStateTable).getByText(/\{\s+"status": "ready"\s+\}/s)).toBeInTheDocument();
+  });
+
+  it("edits reconfigurable vars and omits unchanged redacted values", async () => {
+    const reconfigureBodies: Array<{ vars?: Record<string, string>; message?: string }> = [];
+    installFetchMock(
+      {
+        runs: [
+          makeRun({
+            status: "initialized",
+            totalAttemptCount: 0,
+            totalSessionCount: 0,
+            currentSession: null,
+            lastSession: null,
+            capabilities: {
+              canArchive: true,
+              canReady: true,
+              canResume: false,
+              canReconfigure: true,
+            },
+          }),
+        ],
+        details: {
+          "run-1": makeDetail({
+            status: "initialized",
+            isLive: false,
+            totalAttemptCount: 0,
+            totalSessionCount: 0,
+            sessions: [],
+            currentSession: null,
+            lastSession: null,
+            activeTask: null,
+            runtimeVars: {
+              target: "alpha",
+              secret: {
+                redacted: true,
+                source: "env",
+                envName: "SECRET_TOKEN",
+              },
+            },
+            capabilities: {
+              canArchive: true,
+              canReady: true,
+              canResume: false,
+              canReconfigure: true,
+            },
+          }),
+        },
+      },
+      {
+        handleRequest: (url, init) => {
+          if (url.endsWith("/api/runs/run-1/reconfigure") && init?.method === "POST") {
+            reconfigureBodies.push(JSON.parse(init.body as string));
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+    await user.click(screen.getByRole("button", { name: "Data" }));
+
+    const dataPanel = screen.getByLabelText("Data");
+    await user.click(within(dataPanel).getByRole("button", { name: "Edit run vars" }));
+    await user.clear(within(dataPanel).getByLabelText("Value for target"));
+    await user.type(within(dataPanel).getByLabelText("Value for target"), "beta");
+    expect(within(dataPanel).getByLabelText("Value for secret")).toBeDisabled();
+
+    await user.click(within(dataPanel).getByRole("button", { name: "Save vars" }));
+
+    await waitFor(() => expect(within(dataPanel).getByText("beta")).toBeInTheDocument());
+    expect(reconfigureBodies).toEqual([{ vars: { target: "beta" } }]);
+  });
+
+  it("edits the initial run message only when reconfigure is available", async () => {
+    const reconfigureBodies: Array<{ vars?: Record<string, string>; message?: string }> = [];
+    installFetchMock(
+      {
+        runs: [
+          makeRun({
+            status: "initialized",
+            totalAttemptCount: 0,
+            totalSessionCount: 0,
+            currentSession: null,
+            lastSession: null,
+            capabilities: {
+              canArchive: true,
+              canReady: true,
+              canResume: false,
+              canReconfigure: true,
+            },
+          }),
+        ],
+        details: {
+          "run-1": makeDetail({
+            status: "initialized",
+            isLive: false,
+            totalAttemptCount: 0,
+            totalSessionCount: 0,
+            sessions: [],
+            currentSession: null,
+            lastSession: null,
+            activeTask: null,
+            message: "Initial message",
+            capabilities: {
+              canArchive: true,
+              canReady: true,
+              canResume: false,
+              canReconfigure: true,
+            },
+          }),
+        },
+      },
+      {
+        handleRequest: (url, init) => {
+          if (url.endsWith("/api/runs/run-1/reconfigure") && init?.method === "POST") {
+            reconfigureBodies.push(JSON.parse(init.body as string));
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+    await user.click(screen.getByRole("button", { name: /^Attempts\b/ }));
+
+    const attemptsPanel = screen.getByRole("region", { name: "Attempts" });
+    expect(within(attemptsPanel).getByRole("button", { name: "Edit run message" })).toBeEnabled();
+    await user.click(within(attemptsPanel).getByRole("button", { name: "Edit run message" }));
+    await user.clear(within(attemptsPanel).getByLabelText("Message"));
+    await user.type(within(attemptsPanel).getByLabelText("Message"), "Updated message");
+    await user.click(within(attemptsPanel).getByRole("button", { name: "Save message" }));
+
+    await waitFor(() =>
+      expect(within(attemptsPanel).getByText("Updated message")).toBeInTheDocument(),
+    );
+    expect(reconfigureBodies).toEqual([{ message: "Updated message" }]);
+  });
+
+  it("keeps reconfigure drafts open when the server rejects a save", async () => {
+    installFetchMock(
+      {
+        runs: [
+          makeRun({
+            status: "initialized",
+            totalAttemptCount: 0,
+            totalSessionCount: 0,
+            currentSession: null,
+            lastSession: null,
+            capabilities: {
+              canArchive: true,
+              canReady: true,
+              canResume: false,
+              canReconfigure: true,
+            },
+          }),
+        ],
+        details: {
+          "run-1": makeDetail({
+            status: "initialized",
+            isLive: false,
+            totalAttemptCount: 0,
+            totalSessionCount: 0,
+            sessions: [],
+            currentSession: null,
+            lastSession: null,
+            activeTask: null,
+            runtimeVars: {
+              target: "alpha",
+            },
+            capabilities: {
+              canArchive: true,
+              canReady: true,
+              canResume: false,
+              canReconfigure: true,
+            },
+          }),
+        },
+      },
+      {
+        handleRequest: (url, init) => {
+          if (url.endsWith("/api/runs/run-1/reconfigure") && init?.method === "POST") {
+            return new Response(
+              JSON.stringify({ error: { message: "server validation failed", code: "invalid" } }),
+              { status: 400 },
+            );
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+    await user.click(screen.getByRole("button", { name: "Data" }));
+
+    const dataPanel = screen.getByLabelText("Data");
+    await user.click(within(dataPanel).getByRole("button", { name: "Edit run vars" }));
+    await user.clear(within(dataPanel).getByLabelText("Value for target"));
+    await user.type(within(dataPanel).getByLabelText("Value for target"), "beta");
+    await user.click(within(dataPanel).getByRole("button", { name: "Save vars" }));
+
+    expect(await screen.findByText("server validation failed")).toBeInTheDocument();
+    expect(within(dataPanel).getByLabelText("Value for target")).toHaveValue("beta");
+    expect(within(dataPanel).getByRole("button", { name: "Save vars" })).toBeInTheDocument();
+  });
+
+  it("hides run reconfigure edit affordances when the capability is unavailable", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          status: "initialized",
+          totalAttemptCount: 0,
+          totalSessionCount: 0,
+          currentSession: null,
+          lastSession: null,
+        }),
+      ],
+      details: {
+        "run-1": makeDetail({
+          status: "initialized",
+          isLive: false,
+          totalAttemptCount: 0,
+          totalSessionCount: 0,
+          sessions: [],
+          currentSession: null,
+          lastSession: null,
+          activeTask: null,
+          message: "Initial message",
+          runtimeVars: {
+            target: "alpha",
+          },
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+    await user.click(screen.getByRole("button", { name: "Data" }));
+
+    expect(screen.queryByRole("button", { name: "Edit run vars" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^Attempts\b/ }));
+    expect(screen.queryByRole("button", { name: "Edit run message" })).not.toBeInTheDocument();
   });
 
   it("shows empty states for missing vars and hook state data", async () => {

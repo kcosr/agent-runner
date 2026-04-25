@@ -319,6 +319,7 @@ export function RunsDashboardRoute() {
           onRemoveDependency={state.runActions.removeDependency}
           onRemoveAttachment={state.runActions.removeAttachment}
           onReset={state.runActions.reset}
+          onReconfigure={state.runActions.reconfigure}
           onRename={state.runActions.rename}
           onResumeMessageDraftChange={state.setResumeMessageDraft}
           onResumeMessageExpandedChange={state.setResumeMessageExpanded}

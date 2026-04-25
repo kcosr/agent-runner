@@ -196,6 +196,8 @@ test("run contracts: toRunSummary maps listed manifest rows to the neutral summa
       canResume: true,
       canAbort: false,
       abortReason: "already_terminal",
+      canReconfigure: false,
+      reconfigureReason: "not_initialized",
       taskMutation: {
         canSetStatus: false,
         canEditNotes: true,
@@ -245,6 +247,8 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
     canResume: true,
     canAbort: false,
     abortReason: "already_terminal",
+    canReconfigure: false,
+    reconfigureReason: "not_initialized",
     taskMutation: {
       canSetStatus: false,
       canEditNotes: true,
@@ -712,6 +716,8 @@ test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mu
     canResume: false,
     canAbort: false,
     abortReason: "not_active_in_daemon",
+    canReconfigure: true,
+    reconfigureReason: undefined,
     taskMutation: {
       canSetStatus: true,
       canEditNotes: true,
@@ -733,6 +739,8 @@ test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mu
     canResume: true,
     canAbort: false,
     abortReason: "not_active_in_daemon",
+    canReconfigure: false,
+    reconfigureReason: "not_initialized",
     taskMutation: {
       canSetStatus: false,
       canEditNotes: true,
@@ -769,6 +777,8 @@ test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mu
     canResume: false,
     canAbort: false,
     abortReason: "already_terminal",
+    canReconfigure: false,
+    reconfigureReason: "archived",
     taskMutation: {
       canSetStatus: false,
       canEditNotes: true,
@@ -790,6 +800,8 @@ test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mu
     canResume: false,
     canAbort: false,
     abortReason: "not_active_in_daemon",
+    canReconfigure: false,
+    reconfigureReason: "not_initialized",
     taskMutation: {
       canSetStatus: true,
       canEditNotes: true,
@@ -905,6 +917,8 @@ test("run contracts: passive summaries and details derive effectiveStatus from t
     canResume: false,
     canAbort: false,
     abortReason: "not_active_in_daemon",
+    canReconfigure: true,
+    reconfigureReason: undefined,
     taskMutation: {
       canSetStatus: true,
       canEditNotes: true,

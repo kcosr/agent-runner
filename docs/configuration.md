@@ -150,6 +150,11 @@ The current manifest schema is version `12`. Older manifests are not
 silently upgraded at runtime — resuming a run with an older schema fails
 with a clear error. The repo ships migration scripts under `scripts/`:
 
+- `scripts/migrate-agent-seeds.mjs` — backfills missing `agent-seed.md`
+  files for initialized runs created before agent snapshots were
+  persisted; dry-run by default, `--write` for in-place creation,
+  supports repeated `--repo <name>` and `--file <path>` filters plus
+  `--root <path>`
 - `scripts/migrate-manifests-v12.mjs` — v11 → v12 (adds `schedule:
   null`; supports repeated `--file <path>` targets for single-manifest
   migrations)

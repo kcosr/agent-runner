@@ -27,6 +27,7 @@ const RUN_EVENT_TYPES = [
   "run.aborted",
   "run.resume_rejected",
   "run.reset",
+  "run.reconfigured",
   "run.archived",
   "run.unarchived",
   "run.renamed",
@@ -604,6 +605,26 @@ export function appendRunResetEvent(params: {
     context: params.context,
     fields: {
       previousStatus: params.previousStatus,
+    },
+  });
+}
+
+export function appendRunReconfiguredEvent(params: {
+  manifest: Pick<RunManifest, "workspaceDir" | "runId">;
+  context: RunEventWriteContext;
+  // Audit metadata intentionally records changed keys and a boolean only,
+  // never runtime var values or message text.
+  changedVarKeys: string[];
+  messageChanged: boolean;
+}): RunAuditEnvelope {
+  return appendRunEvent({
+    workspaceDir: params.manifest.workspaceDir,
+    runId: params.manifest.runId,
+    eventType: "run.reconfigured",
+    context: params.context,
+    fields: {
+      changedVarKeys: [...params.changedVarKeys],
+      messageChanged: params.messageChanged,
     },
   });
 }

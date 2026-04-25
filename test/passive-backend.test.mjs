@@ -515,6 +515,7 @@ test("passive status json exposes passive task-mutation capabilities and no resu
     canAbort: false,
     abortReason: "not_active_in_daemon",
     canResume: false,
+    canReconfigure: true,
     taskMutation: {
       canSetStatus: true,
       canEditNotes: true,

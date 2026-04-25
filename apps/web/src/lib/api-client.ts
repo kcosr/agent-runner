@@ -25,6 +25,7 @@ import {
   runTimelineHistorySchema,
 } from "@task-runner/core/contracts/run-schemas.js";
 import type {
+  ReconfigureRunPatch as ReconfigureRunPatchContract,
   RunArchiveResult,
   RunBackendSessionResult,
   RunDeleteResult,
@@ -43,6 +44,8 @@ import {
 } from "@task-runner/core/core/config/schema.js";
 import type { ScheduleInput } from "@task-runner/core/core/run/schedule.js";
 import { z } from "zod";
+
+export type { ReconfigureRunPatch } from "@task-runner/core/contracts/runs.js";
 
 export class ApiError extends Error {
   constructor(
@@ -761,6 +764,20 @@ export function createApiClient(config: AppRuntimeConfig) {
         {
           method: "POST",
           headers: { accept: "application/json" },
+        },
+      );
+      return await readRun(response);
+    },
+    async reconfigureRun(runId: string, patch: ReconfigureRunPatchContract): Promise<RunDetail> {
+      const response = await fetch(
+        joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/reconfigure`),
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json",
+          },
+          body: JSON.stringify(patch),
         },
       );
       return await readRun(response);

@@ -26,6 +26,7 @@ import type { LoadedAgent, LoadedAssignment } from "../config/loaded.js";
 import type { LockableField, VarDef } from "../config/schema.js";
 import { resolveAssignmentHooks } from "../hooks/loader.js";
 import { createHookExecutionState, runAttemptHooks, runPrepareHooks } from "../hooks/runtime.js";
+import type { ResolvedHookDescriptor } from "../hooks/types.js";
 import { resolveFreshLauncherConfig } from "./launchers.js";
 import {
   type AttemptRecord,
@@ -43,6 +44,7 @@ import {
   findRunManifestsById,
   resolveResumeTarget,
   snapshotTasks,
+  workspaceAgentPath,
   workspaceAssignmentPath,
   writeAttemptLog,
   writeManifest,
@@ -136,6 +138,8 @@ export interface RunOptions {
   emitEvent?: (event: RunEvent) => void;
   emitAuditEnvelope?: (envelope: RunAuditEnvelope) => void;
   resumeFailureDetector?: (result: BackendInvokeResult) => boolean;
+  stageInitialize?: boolean;
+  resolvedHooksOverride?: ResolvedHookDescriptor[];
 }
 
 export interface RunOutcome {
@@ -475,6 +479,15 @@ function copyFrozenAssignmentSeed(sourceManifest: RunManifest, targetAssignmentP
   }
   mkdirSync(dirname(targetAssignmentPath), { recursive: true });
   copyFileSync(sourceManifest.assignmentPath, targetAssignmentPath);
+}
+
+function copyFrozenAgentSeed(sourceManifest: RunManifest, targetWorkspaceDir: string): void {
+  if (sourceManifest.agent.sourcePath === null) {
+    return;
+  }
+  const targetAgentPath = workspaceAgentPath(targetWorkspaceDir);
+  mkdirSync(dirname(targetAgentPath), { recursive: true });
+  copyFileSync(workspaceAgentPath(sourceManifest.workspaceDir), targetAgentPath);
 }
 
 function buildRecurringCloneManifest(params: {
@@ -1402,7 +1415,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const resolvedHookDescriptors =
     isResume || priorReady
       ? (resume?.manifest.resolvedHooks ?? [])
-      : resolveAssignmentHooks(loadedAssignment, injectedVars);
+      : (opts.resolvedHooksOverride ?? resolveAssignmentHooks(loadedAssignment, injectedVars));
   const initialSchedule =
     !isResume && !priorReady
       ? (() => {
@@ -1822,6 +1835,30 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     };
   }
 
+  if (isInitialize && opts.stageInitialize === true) {
+    syncManifestTaskState(manifest, tasks);
+    return {
+      summary: {
+        status: "initialized",
+        sessionAttemptCount: 0,
+        maxAttemptsPerSession,
+        totalAttemptCount: 0,
+        totalSessionCount: 0,
+        tasksCompleted: 0,
+        tasksTotal: tasks.size,
+        assignmentPath,
+        tasks: Array.from(tasks.values()),
+        runId,
+      },
+      exitCode: 0,
+      attemptTranscripts: [],
+      runId,
+      assignmentPath,
+      workspaceDir,
+      manifest,
+    };
+  }
+
   if (isReinitialize) {
     rmSync(`${workspaceDir}/attempts`, { recursive: true, force: true });
     rmSync(`${workspaceDir}/attachments`, { recursive: true, force: true });
@@ -1831,6 +1868,12 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     copyFileSync(loadedAssignment.sourcePath, `${workspaceDir}/assignment-seed.md`);
   } else if (isReinitialize) {
     rmSync(`${workspaceDir}/assignment-seed.md`, { force: true });
+  }
+
+  if ((resume === undefined || isReinitialize) && loaded.sourcePath) {
+    copyFileSync(loaded.sourcePath, workspaceAgentPath(workspaceDir));
+  } else if (isReinitialize) {
+    rmSync(workspaceAgentPath(workspaceDir), { force: true });
   }
 
   const lifecycleContext = lifecycleRunEventContext(execution);
@@ -2594,6 +2637,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         now: new Date().toISOString(),
       });
       mkdirSync(cloneManifest.workspaceDir, { recursive: true });
+      copyFrozenAgentSeed(latest, cloneManifest.workspaceDir);
       copyFrozenAssignmentSeed(latest, cloneManifest.assignmentPath);
       copySeedAttachments(latest, cloneManifest);
       writeManifest(cloneManifest.workspaceDir, cloneManifest);

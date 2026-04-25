@@ -19,6 +19,7 @@ import type {
   RunSetNoteParams,
   RunSetPinnedParams,
   RunsListParams,
+  RunsReconfigureParams,
   WebRunsStartParams,
 } from "./protocol.js";
 import {
@@ -36,6 +37,7 @@ import {
   parseRunSetNameParams,
   parseRunSetNoteParams,
   parseRunSetPinnedParams,
+  parseRunsReconfigureParams,
   parseWebStartRunParams,
   requiredHeaderString,
   requiredRunIdString,
@@ -255,6 +257,19 @@ const routes: RouteDefinition[] = [
     pattern: ["api", "runs", ":runId", "reset"],
     handler: (_req, res, ctx, params) => {
       sendJson(res, 200, ctx.operations.resetRun(routeParam(params, "runId")));
+    },
+  },
+  {
+    method: "POST",
+    pattern: ["api", "runs", ":runId", "reconfigure"],
+    handler: async (req, res, ctx, params) => {
+      sendJson(
+        res,
+        200,
+        await ctx.operations.reconfigureRun(
+          await parseRunReconfigureBody(req, routeParam(params, "runId")),
+        ),
+      );
     },
   },
   {
@@ -644,6 +659,20 @@ async function parseRunScheduleBody(
 ): Promise<RunScheduleParams> {
   const body = asRecord(await readJsonBody(req), "request body");
   return parseRunScheduleParams({ target: runId, schedule: body }, "request body");
+}
+
+async function parseRunReconfigureBody(
+  req: IncomingMessage,
+  runId: string,
+): Promise<RunsReconfigureParams> {
+  const body = asRecord(await readJsonBody(req), "request body");
+  const allowedKeys = new Set(["vars", "message"]);
+  for (const key of Object.keys(body)) {
+    if (!allowedKeys.has(key)) {
+      throw new RequestValidationError(`request body.${key} is not supported`);
+    }
+  }
+  return parseRunsReconfigureParams({ target: runId, ...body }, "request body");
 }
 
 function splitPath(pathname: string): string[] {

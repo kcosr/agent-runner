@@ -7,7 +7,8 @@ import type {
   RunAttachmentRemoveResult,
 } from "@task-runner/core/contracts/attachments.js";
 import type { RunAuditHistory } from "@task-runner/core/contracts/events.js";
-import { runAuditHistorySchema } from "@task-runner/core/contracts/run-schemas.js";
+import { runAuditHistorySchema, runDetailSchema } from "@task-runner/core/contracts/run-schemas.js";
+import type { ReconfigureRunPatch, RunDetail } from "@task-runner/core/contracts/runs.js";
 import { resolveAttachmentOutputPath } from "@task-runner/core/core/run/attachments.js";
 import { deriveHttpBaseUrl } from "./config.js";
 
@@ -103,6 +104,37 @@ function parseRunAuditHistory(value: unknown): RunAuditHistory {
     throw new Error("invalid run audit history payload from daemon");
   }
   return parsed.data;
+}
+
+function parseRunDetail(value: unknown): RunDetail {
+  const record = asRecord(value);
+  const parsed = runDetailSchema.safeParse(record?.run);
+  if (!parsed.success) {
+    throw new Error("invalid run detail payload from daemon");
+  }
+  return parsed.data;
+}
+
+export async function daemonReconfigureRun(
+  connectUrl: string,
+  runId: string,
+  patch: ReconfigureRunPatch,
+): Promise<RunDetail> {
+  const response = await fetch(
+    joinPath(deriveHttpBaseUrl(connectUrl), `/api/runs/${encodeURIComponent(runId)}/reconfigure`),
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json",
+      },
+      body: JSON.stringify(patch),
+    },
+  );
+  if (!response.ok) {
+    return await readError(response);
+  }
+  return parseRunDetail(await readJson(response));
 }
 
 export async function daemonGetRunAuditHistory(

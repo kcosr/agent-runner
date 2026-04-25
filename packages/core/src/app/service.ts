@@ -28,6 +28,7 @@ import type {
   RunTaskSummary,
 } from "../contracts/runs.js";
 import { toRunDetail } from "../contracts/runs.js";
+import type { ReconfigureRunPatch } from "../contracts/runs.js";
 import type { BackendId, BackendSpecificConfig } from "../core/backends/types.js";
 import {
   type RunListFilter,
@@ -69,6 +70,7 @@ import type { LoadedLauncherDefinition } from "../core/config/launchers.js";
 import type { AgentConfig, AssignmentConfig } from "../core/config/schema.js";
 import type { AttemptLog, AttemptRecord } from "../core/run/manifest.js";
 import { type RunExecution, resolveResumeTarget } from "../core/run/manifest.js";
+import { reconfigureInitializedRun } from "../core/run/reconfigure.js";
 import type { RunEventOrigin } from "../core/run/run-events.js";
 import type { RunAuditEnvelope } from "../core/run/run-events.js";
 import { readRunAuditHistory } from "../core/run/run-events.js";
@@ -482,6 +484,15 @@ export function removeDependency(target: string, dependencyRunId: string): RunDe
 
 export function clearDependencies(target: string): RunDependenciesResult {
   return clearRunDependencies(target);
+}
+
+export function reconfigureRun(
+  target: string,
+  patch: ReconfigureRunPatch,
+  auditContext?: MutationAuditContext,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
+): Promise<RunDetail> {
+  return reconfigureInitializedRun(target, patch, auditContext, emitAuditEnvelope);
 }
 
 export function removeRunAttachment(

@@ -110,6 +110,7 @@ All routes are under `/api/`.
 | `POST` | `/api/runs/init` | Initialize a run |
 | `POST` | `/api/runs` | Start a run |
 | `POST` | `/api/runs/:runId/ready` | Promote initialized run to ready |
+| `POST` | `/api/runs/:runId/reconfigure` | Patch vars/message on an initialized run |
 | `POST` | `/api/runs/:runId/resume` | Resume an initialized/terminal run |
 | `POST` | `/api/runs/:runId/abort` | Abort an active run |
 | `POST` | `/api/runs/:runId/archive` | Archive |
@@ -174,6 +175,18 @@ or:
 Exactly one of `at`, `delay`, or `cron` is accepted. `timezone`,
 `mode`, and `continueOnFailure` are valid only with `cron`. Clearing is
 limited to one-time schedules; recurring schedules are disabled instead.
+
+Reconfigure request bodies accept only `vars` and `message`:
+
+```json
+{ "vars": { "target": "next" }, "message": "Updated initial ask" }
+```
+
+The HTTP and WebSocket surfaces share the core initialized-only,
+all-or-nothing behavior. Locked `message`/task fields and stale lifecycle
+state are conflicts; unknown body keys are invalid requests.
+Omit `message` to keep the current value; send `"message": ""` to replace
+it with an empty message. `null` is rejected.
 
 ### Definitions
 
@@ -271,6 +284,7 @@ Error codes:
 
 - `runs.list`, `runs.get`, `runs.brief`, `runs.timelineHistory`
 - `runs.init`, `runs.start`, `runs.ready`, `runs.resume`, `runs.abort`
+- `runs.reconfigure`
 - `runs.archive`, `runs.unarchive`, `runs.reset`, `runs.delete`
 - `runs.setName`, `runs.setNote`, `runs.setPinned`
 - `runs.setBackendSession`, `runs.clearBackendSession`
@@ -426,8 +440,9 @@ The contracts shared between CLI, daemon, and web are in
   session, full `note`, `pinned`, `resolvedHooks`, `hookState`, and
   `hookAudits`.
 - `RunCapabilities` — lifecycle gates: `canArchive`, `canUnarchive`,
-  `canReset`, `canDelete`, `canResume`, `canAbort` (+ `abortReason`),
-  and `taskMutation` sub-booleans.
+  `canReset`, `canDelete`, `canReady`, `canResume`, `canAbort`
+  (+ `abortReason`), `canReconfigure` (+ `reconfigureReason`), and
+  `taskMutation` sub-booleans.
 - `RunTimelineHistory` / `RunTimelineEnvelope` — per-run execution
   timeline.
 

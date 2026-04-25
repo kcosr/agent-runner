@@ -28,6 +28,7 @@ import {
   getTaskList,
   initRun,
   readyRun,
+  reconfigureRun,
   removeDependency,
   removeRunAttachment,
   renameRun,
@@ -141,6 +142,7 @@ import {
   parseRunSetNoteParams,
   parseRunSetPinnedParams,
   parseRunsListParams,
+  parseRunsReconfigureParams,
   requiredRunIdString,
   requiredString,
 } from "./request-parsing.js";
@@ -454,6 +456,7 @@ export async function serveDaemon(
     addRunAttachmentFromStream,
     removeRunAttachment,
     reset,
+    reconfigureRun,
     updateTask,
     appendNotes,
     createTask,
@@ -2026,6 +2029,10 @@ export async function serveDaemon(
       withPublishedMutation(target, () => app.reset(target, mutationAuditContext, publishAudit), {
         inferDependentFanout: true,
       }),
+    reconfigureRun: (target, patch) =>
+      withPublishedMutationAsync(target, () =>
+        app.reconfigureRun(target, patch, mutationAuditContext, publishAudit),
+      ),
     updateTask: (target, taskId, updates) =>
       withPublishedMutationAsync(
         target,
@@ -2362,6 +2369,11 @@ export async function serveDaemon(
             ),
           );
           return;
+        case "runs.reconfigure": {
+          const parsed = parseRunsReconfigureParams(params, "runs.reconfigure params");
+          sendJson(ws, resultResponse(request.id, await operations.reconfigureRun(parsed)));
+          return;
+        }
         case "runs.delete":
           sendJson(
             ws,

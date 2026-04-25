@@ -19,6 +19,7 @@ import type {
   RunSetNoteParams,
   RunSetPinnedParams,
   RunsListParams,
+  RunsReconfigureParams,
   RunsResumeParams,
   WebRunsStartParams,
 } from "./protocol.js";
@@ -452,6 +453,21 @@ export function parseRunReadyParams(value: unknown, label: string): RunReadyPara
   return {
     target: requiredString(record.target, `${label}.target`),
     schedule: optionalScheduleInput(record.schedule, `${label}.schedule`),
+  };
+}
+
+export function parseRunsReconfigureParams(value: unknown, label: string): RunsReconfigureParams {
+  const record = asRecord(value, label);
+  const allowedKeys = new Set(["target", "vars", "message"]);
+  for (const key of Object.keys(record)) {
+    if (!allowedKeys.has(key)) {
+      throw new RequestValidationError(`${label}.${key} is not supported`);
+    }
+  }
+  return {
+    target: requiredRunIdString(record.target, `${label}.target`),
+    vars: record.vars === undefined ? undefined : stringRecord(record.vars, `${label}.vars`),
+    message: optionalString(record.message, `${label}.message`),
   };
 }
 

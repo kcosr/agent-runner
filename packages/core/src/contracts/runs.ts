@@ -90,6 +90,12 @@ export interface RunTaskMutationCapabilities {
 }
 
 export type RunAbortReason = "already_terminal" | "not_active_in_daemon";
+export type RunReconfigureUnavailableReason = "archived" | "not_initialized";
+
+export interface ReconfigureRunPatch {
+  vars?: Record<string, string>;
+  message?: string;
+}
 
 export interface RunCapabilities {
   canArchive: boolean;
@@ -100,6 +106,14 @@ export interface RunCapabilities {
   canResume: boolean;
   canAbort: boolean;
   abortReason?: RunAbortReason;
+  /**
+   * True only for unarchived initialized runs. Reconfigure can patch
+   * runtime vars and the initial message; it never changes frozen
+   * identity/runtime fields such as agent, assignment, cwd, tasks,
+   * launcher, hooks, or backend-specific transport.
+   */
+  canReconfigure: boolean;
+  reconfigureReason?: RunReconfigureUnavailableReason;
   taskMutation: RunTaskMutationCapabilities;
 }
 
@@ -449,6 +463,7 @@ export function deriveRunCapabilities(
 ): RunCapabilities {
   const canAbort = false;
   const archived = isArchived(manifest);
+  const canReconfigure = !archived && manifest.status === "initialized";
   const nonPassive = manifest.backend !== "passive";
   const dependencyBlockedReadyRun = isReadyRunBlockedOnDependencies(
     manifest.status,
@@ -472,6 +487,8 @@ export function deriveRunCapabilities(
       : isTerminalStatus(manifest.status)
         ? "already_terminal"
         : "not_active_in_daemon",
+    canReconfigure,
+    reconfigureReason: canReconfigure ? undefined : archived ? "archived" : "not_initialized",
     taskMutation: deriveTaskMutationCapabilities(manifest),
   };
 }

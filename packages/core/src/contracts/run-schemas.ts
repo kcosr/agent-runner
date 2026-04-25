@@ -27,6 +27,7 @@ import type {
   RunNameResult,
   RunNoteResult,
   RunPinnedResult,
+  RunReconfigureUnavailableReason,
   RunSchedule,
   RunScheduleState,
   RunSessionSummary,
@@ -112,6 +113,10 @@ const runAbortReasonSchema: z.ZodType<RunAbortReason> = z.enum([
   "already_terminal",
   "not_active_in_daemon",
 ]);
+const runReconfigureUnavailableReasonSchema: z.ZodType<RunReconfigureUnavailableReason> = z.enum([
+  "archived",
+  "not_initialized",
+]);
 
 export const runCapabilitiesSchema: z.ZodType<RunCapabilities> = z.object({
   canArchive: z.boolean(),
@@ -122,6 +127,8 @@ export const runCapabilitiesSchema: z.ZodType<RunCapabilities> = z.object({
   canResume: z.boolean(),
   canAbort: z.boolean(),
   abortReason: runAbortReasonSchema.optional(),
+  canReconfigure: z.boolean(),
+  reconfigureReason: runReconfigureUnavailableReasonSchema.optional(),
   taskMutation: runTaskMutationCapabilitiesSchema,
 });
 

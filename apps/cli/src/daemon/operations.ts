@@ -23,6 +23,7 @@ import type {
   getTaskList,
   initRun,
   readyRun,
+  reconfigureRun,
   removeDependency,
   removeRunAttachment,
   renameRun,
@@ -45,6 +46,7 @@ import type {
   RunReadyParams,
   RunScheduleParams,
   RunsListParams,
+  RunsReconfigureParams,
   RunsResumeParams,
   WebRunsStartParams,
 } from "./protocol.js";
@@ -82,6 +84,7 @@ export interface DaemonHandlers {
   addRunAttachmentFromStream: typeof addRunAttachmentFromStream;
   removeRunAttachment: typeof removeRunAttachment;
   reset: typeof reset;
+  reconfigureRun: typeof reconfigureRun;
   updateTask: typeof updateTask;
   appendNotes: typeof appendNotes;
   createTask: typeof createTask;
@@ -213,6 +216,14 @@ export function createDaemonOperations(ctx: DaemonOperationContext) {
     },
     resetRun(target: string) {
       return { run: ctx.reset(target) };
+    },
+    async reconfigureRun(params: RunsReconfigureParams) {
+      return {
+        run: await ctx.reconfigureRun(params.target, {
+          vars: params.vars,
+          message: params.message,
+        }),
+      };
     },
     listTasks(target: string) {
       return { tasks: ctx.getTaskList(target) };

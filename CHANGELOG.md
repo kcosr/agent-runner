@@ -71,6 +71,17 @@
 
 ### Added
 
+- Added initialized-run reconfigure support across core, CLI, daemon
+  HTTP/RPC, web dashboard, shared `RunCapabilities.canReconfigure`, and
+  `run.reconfigured` audit rows. `task-runner run reconfigure <id>` can
+  patch vars and/or the initial message all-or-nothing, and
+  `--message-file` now supplies UTF-8 message text for `run`, `init`,
+  resume, and reconfigure.
+  ([#97](https://github.com/kcosr/task-runner/pull/97))
+- Added `scripts/migrate-agent-seeds.mjs` to backfill missing
+  `agent-seed.md` files for initialized runs created before frozen agent
+  snapshots were persisted.
+  ([#97](https://github.com/kcosr/task-runner/pull/97))
 - Added scheduled runs with one-time and cron recurrence support across
   assignment config, `init` / `run ready`, `run schedule` CLI commands,
   daemon HTTP/RPC APIs, audit events, and web dashboard indicators and

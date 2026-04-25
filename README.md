@@ -145,9 +145,19 @@ task-runner init \
   --agent ./agents/implementer/agent.md \
   --assignment ./assignments/repo-orientation/assignment.md
 
+task-runner run reconfigure <run-id> \
+  --var target=next \
+  --message-file ./handoff.md
+
 task-runner run ready <run-id>
 task-runner run --resume-run <run-id>
 ```
+
+`run reconfigure` is only for unarchived `initialized` runs. It patches
+runtime vars and/or the initial message, rerenders the brief and reset
+seed all-or-nothing, and preserves frozen identity/runtime fields such
+as agent, assignment, launcher, hooks, tasks, cwd, and backend-specific
+Codex transport.
 
 ### Schedule a run
 
@@ -359,6 +369,7 @@ root.
 | `attachment add\|list\|download\|remove` | Attachment management |
 | `list agents\|assignments\|launchers\|runs` | Enumerate definitions and runs |
 | `show agent\|assignment\|launcher` | Render a single definition |
+| `run reconfigure` | Patch vars/message on an unarchived initialized run |
 | `run reset\|archive\|unarchive\|delete` | Lifecycle mutations |
 | `run schedule [set]\|enable\|disable\|clear` | Schedule mutations |
 | `run set-name` | Set/clear persisted display name |
@@ -378,6 +389,9 @@ Key rules:
 - `run status --output-format json` returns the shared `RunDetail` DTO, including full `note` text plus `pinned`.
 - Text `run status` surfaces note/pin metadata compactly (`Pinned: yes`, `Note: present`) and never prints the note body.
 - Run notes are human metadata only: they persist on the run but are not auto-injected into worker briefs or backend prompts.
+- `--message-file <path>` reads UTF-8 message text for fresh `run`,
+  `init`, `run --resume-run`, and `run reconfigure`; it cannot be
+  combined with positional message text.
 - `list runs` defaults to the caller's cwd; use `--cwd`, `--repo`, or
   `--global` to scope otherwise; `--include-archived` adds archived
   runs.

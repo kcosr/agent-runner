@@ -1342,6 +1342,7 @@ body {
   gap: 10px;
 }
 
+.drawer-data-actions,
 .dependency-summary,
 .dependency-add-row,
 .dependency-row {
@@ -1353,6 +1354,104 @@ body {
 
 .dependency-summary {
   flex-wrap: wrap;
+}
+
+.drawer-data-actions {
+  min-height: 28px;
+}
+
+.reconfigure-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.reconfigure-form--message {
+  padding: 2px 0;
+}
+
+.runtime-var-editor-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.runtime-var-editor-row {
+  display: grid;
+  grid-template-columns: minmax(9rem, 0.8fr) minmax(12rem, 1.4fr) auto;
+  gap: 10px;
+  align-items: start;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--card) 88%, var(--background));
+}
+
+.runtime-var-key-field,
+.runtime-var-value-field {
+  display: flex;
+  height: auto;
+  min-width: 0;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.runtime-var-key-field input,
+.runtime-var-value-field textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+  outline: none;
+}
+
+.runtime-var-key-field input {
+  height: 34px;
+  padding: 0 10px;
+}
+
+.runtime-var-value-field textarea {
+  display: block;
+  min-height: 64px;
+  padding: 8px 10px;
+  resize: vertical;
+}
+
+.runtime-var-key-readonly {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.runtime-var-key-readonly code {
+  overflow-wrap: anywhere;
+}
+
+.runtime-var-redacted-toggle {
+  grid-column: 2 / 4;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.runtime-var-remove {
+  align-self: center;
+}
+
+.timeline-section-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
 }
 
 .dependency-summary > span:first-child {
@@ -1613,6 +1712,14 @@ body {
   .dependency-row:not(.dependency-row--interactive) > .dependency-actions {
     width: 100%;
     justify-content: center;
+  }
+
+  .runtime-var-editor-row {
+    grid-template-columns: 1fr;
+  }
+
+  .runtime-var-redacted-toggle {
+    grid-column: auto;
   }
 }
 

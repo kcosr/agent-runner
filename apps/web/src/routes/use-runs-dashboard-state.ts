@@ -11,7 +11,7 @@ import type {
 } from "@task-runner/core/contracts/runs.js";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { BoardColumn } from "../components/run-column.js";
-import { createApiClient, isNotFoundError } from "../lib/api-client.js";
+import { type ReconfigureRunPatch, createApiClient, isNotFoundError } from "../lib/api-client.js";
 import { queryClient, runQueryKeys } from "../lib/query.js";
 import { useRunAuditState } from "../lib/run-audit.js";
 import { useRunEvents } from "../lib/run-events.js";
@@ -52,6 +52,7 @@ export type RunActionPending =
   | "pin"
   | "backend-session"
   | "schedule"
+  | "reconfigure"
   | "upload-attachment"
   | "remove-attachment"
   | "download-attachment"
@@ -842,6 +843,28 @@ export function useRunsDashboardState() {
       }
     },
   });
+  const reconfigureMutation = useMutation({
+    mutationFn: ({ patch, runId }: { runId: string; patch: ReconfigureRunPatch }) =>
+      api.reconfigureRun(runId, patch),
+    onError: (error: Error) => {
+      setActionError(error.message);
+    },
+    onSuccess: async (detail) => {
+      setActionError(undefined);
+      queryClient.setQueryData(runQueryKeys.detail(detail.runId), detail);
+      syncRunSummaryFromDetail(detail);
+      markRunTouched(detail.runId);
+      if (
+        shouldInvalidateSimpleRunMutation(detail.runId, {
+          detailRunId,
+          summaryStreamStale,
+          detailStreamStale: detailStreamStaleRef.current,
+        })
+      ) {
+        await invalidateRunQueries(detail.runId);
+      }
+    },
+  });
   const addDependencyMutation = useMutation({
     mutationFn: ({ runId, dependencyRunId }: { runId: string; dependencyRunId: string }) =>
       api.addDependency(runId, dependencyRunId),
@@ -949,19 +972,21 @@ export function useRunsDashboardState() {
                         ? "backend-session"
                         : scheduleMutation.isPending
                           ? "schedule"
-                          : uploadAttachmentMutation.isPending
-                            ? "upload-attachment"
-                            : removeAttachmentMutation.isPending
-                              ? "remove-attachment"
-                              : downloadAttachmentMutation.isPending
-                                ? "download-attachment"
-                                : addDependencyMutation.isPending
-                                  ? "add-dependency"
-                                  : removeDependencyMutation.isPending
-                                    ? "remove-dependency"
-                                    : clearDependenciesMutation.isPending
-                                      ? "clear-dependencies"
-                                      : undefined;
+                          : reconfigureMutation.isPending
+                            ? "reconfigure"
+                            : uploadAttachmentMutation.isPending
+                              ? "upload-attachment"
+                              : removeAttachmentMutation.isPending
+                                ? "remove-attachment"
+                                : downloadAttachmentMutation.isPending
+                                  ? "download-attachment"
+                                  : addDependencyMutation.isPending
+                                    ? "add-dependency"
+                                    : removeDependencyMutation.isPending
+                                      ? "remove-dependency"
+                                      : clearDependenciesMutation.isPending
+                                        ? "clear-dependencies"
+                                        : undefined;
   const selectedRunDetailReady =
     detailRunId !== undefined &&
     detailRunId === selectedRunId &&
@@ -1239,6 +1264,9 @@ export function useRunsDashboardState() {
       },
       setScheduleEnabled: async (runId: string, enabled: boolean) => {
         await scheduleMutation.mutateAsync({ runId, enabled });
+      },
+      reconfigure: async (runId: string, patch: ReconfigureRunPatch) => {
+        await reconfigureMutation.mutateAsync({ runId, patch });
       },
       uploadAttachment: async (runId: string, file: File) => {
         await uploadAttachmentMutation.mutateAsync({ runId, file });
