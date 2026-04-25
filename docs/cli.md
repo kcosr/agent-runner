@@ -334,6 +334,10 @@ changes: agent, assignment, backend, cwd, tasks, schedule, launcher,
 hooks, and backend-specific Codex transport remain the frozen values
 from the initialized run.
 
+Exit codes are `0` for success, `2` when the run id is not found, `3`
+for invalid input/lifecycle/var/lock/prepare failures, and `4` for
+unexpected runtime errors.
+
 ### Schedule
 
 ```bash

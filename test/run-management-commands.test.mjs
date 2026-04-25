@@ -446,6 +446,43 @@ test("run reconfigure accepts --message-file and rejects message-file conflicts 
   assert.equal(readFileSync(join(outcome.workspaceDir, "run.json"), "utf8"), before);
 });
 
+test("run reconfigure embedded maps lifecycle and var validation errors to exit 3", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "run-mgmt-agent", AGENT);
+  writeAssignment(
+    dir,
+    "run-mgmt-work",
+    `---
+schemaVersion: 1
+name: run-mgmt-work
+vars:
+  target:
+    type: string
+    default: alpha
+tasks:
+  - id: t1
+    title: Ship {{target}}
+---
+Work.
+`,
+  );
+  const outcome = await initRun(dir);
+  const unknownVar = runCliExpectFail(["run", "reconfigure", outcome.runId, "--var", "missing=x"], {
+    cwd: dir,
+  });
+  assert.equal(unknownVar.status, 3);
+  assert.match(unknownVar.stderr, /unknown --var key\(s\): missing/);
+
+  patchManifest(outcome.workspaceDir, (manifest) => {
+    manifest.archivedAt = "2026-04-25T19:00:00.000Z";
+  });
+  const archived = runCliExpectFail(["run", "reconfigure", outcome.runId, "new message"], {
+    cwd: dir,
+  });
+  assert.equal(archived.status, 3);
+  assert.match(archived.stderr, /cannot reconfigure archived run/);
+});
+
 test("init --message-file reports unreadable files before creating a run", () => {
   const dir = tempDir();
   writeAgent(dir, "run-mgmt-agent", AGENT);

@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { reconfigureRun } from "../packages/core/dist/app/service.js";
+import { addRunAttachmentFromFile, reconfigureRun } from "../packages/core/dist/app/service.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { readyRun } from "../packages/core/dist/core/commands/service.js";
 import { readRunAuditHistory } from "../packages/core/dist/core/run/run-events.js";
@@ -76,7 +76,7 @@ schemaVersion: 1
 name: agent
 backend: codex
 ---
-Agent for {{target}}.
+Agent for {{target}} on {{branch}}.
 `,
   );
   writeAssignment(
@@ -111,6 +111,15 @@ Assignment for {{target}} on {{branch}}.
       cliVars: { target: "alpha", branch: "main" },
     }),
   );
+  const initialManifest = readManifest(init.workspaceDir);
+  const evidencePath = join(dir, "evidence.txt");
+  writeFileSync(evidencePath, "keep this attachment\n");
+  const attachment = await withSharedRuntimeEnv(dir, () =>
+    addRunAttachmentFromFile(init.runId, {
+      sourcePath: evidencePath,
+      name: "evidence.txt",
+    }),
+  );
 
   const detail = await withEnv({ TASK_RUNNER_CODEX_WS_URL: "ws://changed.example/ws" }, () =>
     withSharedRuntimeEnv(dir, () =>
@@ -129,14 +138,25 @@ Assignment for {{target}} on {{branch}}.
   assert.equal(manifest.message, "replacement message\n");
   assert.equal(manifest.runtimeVars.target, "alpha");
   assert.equal(manifest.runtimeVars.branch, "release");
+  assert.equal(manifest.cwd, initialManifest.cwd);
+  assert.equal(manifest.resetSeed.cwd, initialManifest.cwd);
   assert.equal(manifest.finalTasks.t1.title, "Ship alpha");
   assert.equal(manifest.finalTasks.t1.body, "Use release.");
-  assert.ok(manifest.brief.includes("Agent for alpha."));
+  assert.ok(manifest.brief.includes("Agent for alpha on release."));
+  assert.equal(manifest.agent.instructions, "Agent for alpha on release.");
   assert.ok(manifest.brief.includes("Assignment for alpha on release."));
   assert.ok(manifest.brief.endsWith("replacement message"));
   assert.equal(manifest.callerInstructions, "Caller sees alpha on release.");
   assert.equal(manifest.resetSeed.message, "replacement message\n");
   assert.equal(manifest.resetSeed.finalTasks.t1.body, "Use release.");
+  assert.equal(manifest.attachments.length, 1);
+  assert.equal(manifest.attachments[0].id, attachment.id);
+  assert.equal(manifest.resetSeed.attachments.length, 1);
+  assert.equal(manifest.resetSeed.attachments[0].id, attachment.id);
+  assert.equal(
+    readFileSync(join(init.workspaceDir, manifest.attachments[0].relativePath), "utf8"),
+    "keep this attachment\n",
+  );
   assert.deepEqual(manifest.backendSpecific, initialTransport);
   assert.deepEqual(manifest.resetSeed.backendSpecific, initialTransport);
   assert.equal(reconfigured.event.type, "run.reconfigured");

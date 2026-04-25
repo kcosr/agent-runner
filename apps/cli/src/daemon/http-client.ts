@@ -8,14 +8,9 @@ import type {
 } from "@task-runner/core/contracts/attachments.js";
 import type { RunAuditHistory } from "@task-runner/core/contracts/events.js";
 import { runAuditHistorySchema, runDetailSchema } from "@task-runner/core/contracts/run-schemas.js";
-import type { RunDetail } from "@task-runner/core/contracts/runs.js";
+import type { ReconfigureRunPatch, RunDetail } from "@task-runner/core/contracts/runs.js";
 import { resolveAttachmentOutputPath } from "@task-runner/core/core/run/attachments.js";
 import { deriveHttpBaseUrl } from "./config.js";
-
-export interface ReconfigureRunPatch {
-  vars?: Record<string, string>;
-  message?: string;
-}
 
 interface ErrorEnvelope {
   error?: {

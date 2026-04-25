@@ -398,6 +398,10 @@ export function workspaceAssignmentPath(workspaceDir: string): string {
   return join(workspaceDir, "assignment-seed.md");
 }
 
+export function workspaceAgentPath(workspaceDir: string): string {
+  return join(workspaceDir, "agent-seed.md");
+}
+
 export class ResumeError extends Error {
   constructor(message: string) {
     super(message);

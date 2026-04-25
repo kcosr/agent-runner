@@ -44,6 +44,7 @@ import {
   findRunManifestsById,
   resolveResumeTarget,
   snapshotTasks,
+  workspaceAgentPath,
   workspaceAssignmentPath,
   writeAttemptLog,
   writeManifest,
@@ -478,6 +479,15 @@ function copyFrozenAssignmentSeed(sourceManifest: RunManifest, targetAssignmentP
   }
   mkdirSync(dirname(targetAssignmentPath), { recursive: true });
   copyFileSync(sourceManifest.assignmentPath, targetAssignmentPath);
+}
+
+function copyFrozenAgentSeed(sourceManifest: RunManifest, targetWorkspaceDir: string): void {
+  if (sourceManifest.agent.sourcePath === null) {
+    return;
+  }
+  const targetAgentPath = workspaceAgentPath(targetWorkspaceDir);
+  mkdirSync(dirname(targetAgentPath), { recursive: true });
+  copyFileSync(workspaceAgentPath(sourceManifest.workspaceDir), targetAgentPath);
 }
 
 function buildRecurringCloneManifest(params: {
@@ -1860,6 +1870,12 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     rmSync(`${workspaceDir}/assignment-seed.md`, { force: true });
   }
 
+  if ((resume === undefined || isReinitialize) && loaded.sourcePath) {
+    copyFileSync(loaded.sourcePath, workspaceAgentPath(workspaceDir));
+  } else if (isReinitialize) {
+    rmSync(workspaceAgentPath(workspaceDir), { force: true });
+  }
+
   const lifecycleContext = lifecycleRunEventContext(execution);
   const appendRunCreatedAudit = (targetManifest: RunManifest): void => {
     emitAuditEnvelope(
@@ -2621,6 +2637,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         now: new Date().toISOString(),
       });
       mkdirSync(cloneManifest.workspaceDir, { recursive: true });
+      copyFrozenAgentSeed(latest, cloneManifest.workspaceDir);
       copyFrozenAssignmentSeed(latest, cloneManifest.assignmentPath);
       copySeedAttachments(latest, cloneManifest);
       writeManifest(cloneManifest.workspaceDir, cloneManifest);

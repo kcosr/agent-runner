@@ -1,8 +1,8 @@
 import { copyFileSync, rmSync } from "node:fs";
 import { isDeepStrictEqual } from "node:util";
 import { resolveBackend } from "../../backends/registry.js";
-import { loadAssignmentConfig } from "../../config/loader.js";
-import type { RunDetail } from "../../contracts/runs.js";
+import { loadAgentConfig, loadAssignmentConfig } from "../../config/loader.js";
+import type { ReconfigureRunPatch, RunDetail } from "../../contracts/runs.js";
 import { toRunDetail } from "../../contracts/runs.js";
 import { cloneBackendSpecificConfig } from "../backends/types.js";
 import { cloneResolvedLauncherConfig } from "../config/launchers.js";
@@ -15,7 +15,9 @@ import {
   type RunManifest,
   buildRunResetSeed,
   cloneRuntimeVarSources,
+  readManifest,
   resolveResumeTarget,
+  workspaceAgentPath,
   writeManifest,
 } from "./manifest.js";
 import {
@@ -26,12 +28,7 @@ import {
   commandRunEventContext,
 } from "./run-events.js";
 import { LockedFieldError, VarResolutionError, runAgent } from "./run-loop.js";
-import { withTaskStateLock } from "./workspace-state.js";
-
-export interface ReconfigureRunPatch {
-  vars?: Record<string, string>;
-  message?: string;
-}
+import { withTaskStateLockAsync } from "./workspace-state.js";
 
 type AuditEnvelopeEmitter = (envelope: RunAuditEnvelope) => void;
 
@@ -101,6 +98,12 @@ function buildLoadedAgent(manifest: RunManifest): LoadedAgent {
   const loaded = loadedAgentFromManifest(manifest);
   return {
     ...loaded,
+    instructions:
+      manifest.agent.sourcePath === null
+        ? loaded.instructions
+        : loadAgentConfig(workspaceAgentPath(manifest.workspaceDir)).instructions,
+    sourcePath:
+      manifest.agent.sourcePath === null ? null : workspaceAgentPath(manifest.workspaceDir),
     config: {
       ...loaded.config,
       lockedFields: [],
@@ -195,6 +198,7 @@ function restoreFrozenManifestFields(
     note: previous.note,
     pinned: previous.pinned,
     unrestricted: previous.unrestricted,
+    cwd: previous.cwd,
     lockedFields: [...previous.lockedFields],
     timeoutSec: previous.timeoutSec,
     dependencyRunIds: [...previous.dependencyRunIds],
@@ -203,6 +207,7 @@ function restoreFrozenManifestFields(
     backendSessionId: previous.backendSessionId,
     maxAttemptsPerSession: previous.maxAttemptsPerSession,
     execution: previous.execution,
+    attachments: previous.attachments.map((attachment) => ({ ...attachment })),
   };
 
   const runtimeVarSources = cloneRuntimeVarSources(next.runtimeVarSources);
@@ -219,6 +224,7 @@ function restoreFrozenManifestFields(
     effort: restored.effort,
     backendSpecific: cloneBackendSpecificConfig(restored.backendSpecific),
     launcher: cloneResolvedLauncherConfig(restored.launcher),
+    cwd: restored.cwd,
     lockedFields: [...restored.lockedFields],
     message: restored.message,
     name: restored.name,
@@ -255,25 +261,22 @@ function persistReconfiguredManifest(
     rmSync(manifest.assignmentPath, { force: true });
   }
 
-  withTaskStateLock(resolved.workspaceDir, () => {
-    writeManifest(resolved.workspaceDir, manifest);
-    const envelope = appendRunReconfiguredEvent({
-      manifest,
-      context: commandRunEventContext(auditOrigin),
-      changedVarKeys: auditFields.changedVarKeys,
-      messageChanged: auditFields.messageChanged,
-    });
-    emitAuditEnvelope?.(envelope);
+  writeManifest(resolved.workspaceDir, manifest);
+  const envelope = appendRunReconfiguredEvent({
+    manifest,
+    context: commandRunEventContext(auditOrigin),
+    changedVarKeys: auditFields.changedVarKeys,
+    messageChanged: auditFields.messageChanged,
   });
+  emitAuditEnvelope?.(envelope);
 }
 
-export async function reconfigureInitializedRun(
-  target: string,
+async function reconfigureResolvedRun(
+  resolved: ResolvedResumeTarget,
   patch: ReconfigureRunPatch,
-  auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
-  emitAuditEnvelope?: AuditEnvelopeEmitter,
+  auditOrigin: RunEventOrigin,
+  emitAuditEnvelope: AuditEnvelopeEmitter | undefined,
 ): Promise<RunDetail> {
-  const resolved = resolveResumeTarget(target);
   const previous = resolved.manifest;
   if (previous.archivedAt !== null) {
     throw new ResumeError(`cannot reconfigure archived run ${previous.runId}`);
@@ -339,4 +342,24 @@ export async function reconfigureInitializedRun(
     },
   );
   return toRunDetail({ manifest, isLive: false });
+}
+
+export async function reconfigureInitializedRun(
+  target: string,
+  patch: ReconfigureRunPatch,
+  auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
+): Promise<RunDetail> {
+  const resolved = resolveResumeTarget(target);
+  return await withTaskStateLockAsync(resolved.workspaceDir, async () =>
+    reconfigureResolvedRun(
+      {
+        workspaceDir: resolved.workspaceDir,
+        manifest: readManifest(resolved.workspaceDir),
+      },
+      patch,
+      auditOrigin,
+      emitAuditEnvelope,
+    ),
+  );
 }

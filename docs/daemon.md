@@ -185,6 +185,8 @@ Reconfigure request bodies accept only `vars` and `message`:
 The HTTP and WebSocket surfaces share the core initialized-only,
 all-or-nothing behavior. Locked `message`/task fields and stale lifecycle
 state are conflicts; unknown body keys are invalid requests.
+Omit `message` to keep the current value; send `"message": ""` to replace
+it with an empty message. `null` is rejected.
 
 ### Definitions
 

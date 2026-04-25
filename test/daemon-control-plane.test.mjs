@@ -5203,6 +5203,31 @@ test("daemon reconfigure surfaces support CLI and HTTP without replacing frozen 
     );
     assert.equal(rejected.status, 400);
     assert.match(rejected.body.error.message, /request body\.backend is not supported/);
+
+    const unknownVar = await httpJson(
+      deriveHttpBaseUrl(listenUrl),
+      `/api/runs/${initialized.runId}/reconfigure`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ vars: { missing: "delta" } }),
+      },
+    );
+    assert.equal(unknownVar.status, 400);
+    assert.match(unknownVar.body.error.message, /unknown --var key\(s\): missing/);
+
+    markRunReady(initialized.workspaceDir);
+    const notInitialized = await httpJson(
+      deriveHttpBaseUrl(listenUrl),
+      `/api/runs/${initialized.runId}/reconfigure`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ message: "late" }),
+      },
+    );
+    assert.equal(notInitialized.status, 409);
+    assert.match(notInitialized.body.error.message, /unless it is initialized/);
   } finally {
     await daemon.stop();
   }

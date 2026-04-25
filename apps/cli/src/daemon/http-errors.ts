@@ -11,6 +11,7 @@ import {
   ConflictError,
   TaskNotFoundError,
 } from "@task-runner/core/core/commands/service.js";
+import { HookRuntimeError } from "@task-runner/core/core/hooks/runtime.js";
 import {
   AttachmentError,
   AttachmentNotFoundError,
@@ -72,6 +73,7 @@ export function isKnownControlPlaneError(err: unknown): boolean {
     err instanceof LockedFieldError ||
     err instanceof InvalidAddedTaskError ||
     err instanceof EmptyPromptError ||
+    err instanceof HookRuntimeError ||
     err instanceof RecursionDepthError ||
     err instanceof InvalidBackendSessionError ||
     err instanceof ScheduleValidationError
@@ -98,8 +100,16 @@ export function toHttpError(err: unknown): HttpError {
   if (err instanceof ConflictError) {
     return new HttpError(409, "CONFLICT", err.message, err);
   }
-  if (err instanceof ReconfigureLockedFieldError) {
+  if (
+    err instanceof ReconfigureLockedFieldError ||
+    err instanceof LockedFieldError ||
+    err instanceof ResumeError ||
+    err instanceof HookRuntimeError
+  ) {
     return new HttpError(409, "CONFLICT", err.message, err);
+  }
+  if (err instanceof VarResolutionError) {
+    return new HttpError(400, "INVALID_REQUEST", err.message, err);
   }
   if (isKnownControlPlaneError(err)) {
     return new HttpError(

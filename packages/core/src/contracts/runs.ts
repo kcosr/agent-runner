@@ -92,6 +92,11 @@ export interface RunTaskMutationCapabilities {
 export type RunAbortReason = "already_terminal" | "not_active_in_daemon";
 export type RunReconfigureUnavailableReason = "archived" | "not_initialized";
 
+export interface ReconfigureRunPatch {
+  vars?: Record<string, string>;
+  message?: string;
+}
+
 export interface RunCapabilities {
   canArchive: boolean;
   canUnarchive: boolean;

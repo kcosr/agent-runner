@@ -60,8 +60,10 @@ import {
   type RunListFilter,
   isCommandError,
 } from "@task-runner/core/core/commands/service.js";
+import { HookRuntimeError } from "@task-runner/core/core/hooks/runtime.js";
 import { AttachmentError } from "@task-runner/core/core/run/attachments.js";
 import { RunNotFoundError } from "@task-runner/core/core/run/manifest.js";
+import { ReconfigureLockedFieldError } from "@task-runner/core/core/run/reconfigure.js";
 import { readParentRunIdFromEnv } from "@task-runner/core/core/run/recursion-guard.js";
 import {
   EmptyPromptError,
@@ -305,7 +307,13 @@ function exitCommandFailure(err: unknown, connectUrl?: string): never {
     err instanceof AssignmentConfigError ||
     err instanceof LauncherNotFoundError ||
     err instanceof LauncherConfigError ||
-    err instanceof DefinitionListError
+    err instanceof DefinitionListError ||
+    err instanceof RunCommandError ||
+    err instanceof VarResolutionError ||
+    err instanceof LockedFieldError ||
+    err instanceof ReconfigureLockedFieldError ||
+    err instanceof ResumeError ||
+    err instanceof HookRuntimeError
   ) {
     process.stderr.write(`task-runner: ${errorMessage(err)}\n`);
     process.exit(3);
