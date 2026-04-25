@@ -1707,6 +1707,22 @@ export async function serveDaemon(
     }
   };
 
+  const queueRunCreatedProjection = (runId: string): void => {
+    const timer = setTimeout(() => {
+      try {
+        refreshManifestIndexEntry(runId);
+        publishMutationResult(runId, {
+          summary: getProjectedSummary(runId),
+          detail: getProjectedDetail(runId),
+        });
+        queueScheduleEvaluation?.(runId);
+      } catch (error) {
+        publishScheduleRecovery(runId, error);
+      }
+    }, 0);
+    timer.unref?.();
+  };
+
   const removeSubscriptionsByOwner = (owner: object): void => {
     for (const [id, subscription] of summarySubscriptions) {
       if (subscription.owner === owner) {
@@ -1792,16 +1808,7 @@ export async function serveDaemon(
       (envelope) => {
         publishAudit(envelope);
         if (envelope.event.type === "run.created") {
-          try {
-            refreshManifestIndexEntry(envelope.runId);
-            publishMutationResult(envelope.runId, {
-              summary: getProjectedSummary(envelope.runId),
-              detail: getProjectedDetail(envelope.runId),
-            });
-            queueScheduleEvaluation?.(envelope.runId);
-          } catch (error) {
-            publishScheduleRecovery(envelope.runId, error);
-          }
+          queueRunCreatedProjection(envelope.runId);
         }
       },
     )
