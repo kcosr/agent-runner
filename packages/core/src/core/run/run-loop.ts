@@ -26,6 +26,7 @@ import type { LoadedAgent, LoadedAssignment } from "../config/loaded.js";
 import type { LockableField, VarDef } from "../config/schema.js";
 import { resolveAssignmentHooks } from "../hooks/loader.js";
 import { createHookExecutionState, runAttemptHooks, runPrepareHooks } from "../hooks/runtime.js";
+import type { ResolvedHookDescriptor } from "../hooks/types.js";
 import { resolveFreshLauncherConfig } from "./launchers.js";
 import {
   type AttemptRecord,
@@ -136,6 +137,8 @@ export interface RunOptions {
   emitEvent?: (event: RunEvent) => void;
   emitAuditEnvelope?: (envelope: RunAuditEnvelope) => void;
   resumeFailureDetector?: (result: BackendInvokeResult) => boolean;
+  stageInitialize?: boolean;
+  resolvedHooksOverride?: ResolvedHookDescriptor[];
 }
 
 export interface RunOutcome {
@@ -1402,7 +1405,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const resolvedHookDescriptors =
     isResume || priorReady
       ? (resume?.manifest.resolvedHooks ?? [])
-      : resolveAssignmentHooks(loadedAssignment, injectedVars);
+      : (opts.resolvedHooksOverride ?? resolveAssignmentHooks(loadedAssignment, injectedVars));
   const initialSchedule =
     !isResume && !priorReady
       ? (() => {
@@ -1819,6 +1822,30 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       totalSessionCount: 0,
       sessions: [],
       attemptRecords: [],
+    };
+  }
+
+  if (isInitialize && opts.stageInitialize === true) {
+    syncManifestTaskState(manifest, tasks);
+    return {
+      summary: {
+        status: "initialized",
+        sessionAttemptCount: 0,
+        maxAttemptsPerSession,
+        totalAttemptCount: 0,
+        totalSessionCount: 0,
+        tasksCompleted: 0,
+        tasksTotal: tasks.size,
+        assignmentPath,
+        tasks: Array.from(tasks.values()),
+        runId,
+      },
+      exitCode: 0,
+      attemptTranscripts: [],
+      runId,
+      assignmentPath,
+      workspaceDir,
+      manifest,
     };
   }
 

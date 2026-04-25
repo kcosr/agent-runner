@@ -1,0 +1,429 @@
+import { strict as assert } from "node:assert";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test } from "node:test";
+import { reconfigureRun } from "../packages/core/dist/app/service.js";
+import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
+import { readyRun } from "../packages/core/dist/core/commands/service.js";
+import { readRunAuditHistory } from "../packages/core/dist/core/run/run-events.js";
+import { LockedFieldError, runAgent } from "../packages/core/dist/core/run/run-loop.js";
+import { sharedRuntimeEnv, withEnv, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
+
+function tempDir() {
+  return mkdtempSync(join(tmpdir(), "task-runner-reconfigure-"));
+}
+
+function writeAgent(baseDir, name, body) {
+  const dir = join(baseDir, "agents", name);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "agent.md"), body);
+}
+
+function writeAssignment(baseDir, name, body) {
+  const dir = join(baseDir, "assignments", name);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "assignment.md"), body);
+}
+
+function writeScript(baseDir, name, body) {
+  const path = join(baseDir, name);
+  writeFileSync(path, body);
+  return path;
+}
+
+function readManifest(workspaceDir) {
+  return JSON.parse(readFileSync(join(workspaceDir, "run.json"), "utf8"));
+}
+
+function writeManifest(workspaceDir, manifest) {
+  writeFileSync(join(workspaceDir, "run.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+function mockBackend(id = "claude") {
+  return {
+    id,
+    invoke: async () => {
+      throw new Error("backend should not be invoked while reconfiguring initialized runs");
+    },
+  };
+}
+
+async function initRunIn(baseDir, opts = {}) {
+  return withSharedRuntimeEnv(baseDir, async () => {
+    const loaded = loadAgentConfig(opts.agentName ?? "agent", baseDir);
+    const loadedAssignment = loadAssignmentConfig(opts.assignmentName ?? "work", baseDir);
+    return await runAgent({
+      loaded,
+      loadedAssignment,
+      cliVars: opts.cliVars ?? {},
+      webVars: {},
+      backend: mockBackend(opts.backendId ?? loaded.config.backend),
+      initialize: true,
+      callerCwd: baseDir,
+      overrides: opts.overrides,
+    });
+  });
+}
+
+test("reconfigure: patches initialized vars and message, rerenders frozen surfaces, preserves codex transport, and audits keys only", async () => {
+  const dir = tempDir();
+  writeAgent(
+    dir,
+    "agent",
+    `---
+schemaVersion: 1
+name: agent
+backend: codex
+---
+Agent for {{target}}.
+`,
+  );
+  writeAssignment(
+    dir,
+    "work",
+    `---
+schemaVersion: 1
+name: work
+cwd: worktrees/{{branch}}
+message: original message
+callerInstructions: Caller sees {{target}} on {{branch}}.
+vars:
+  target:
+    type: string
+    required: true
+  branch:
+    type: string
+    required: true
+tasks:
+  - id: t1
+    title: Ship {{target}}
+    body: Use {{branch}}.
+---
+Assignment for {{target}} on {{branch}}.
+`,
+  );
+
+  const initialTransport = { codex: { transport: { type: "ws", url: "ws://initial.example/ws" } } };
+  const init = await withEnv({ TASK_RUNNER_CODEX_WS_URL: "ws://initial.example/ws" }, () =>
+    initRunIn(dir, {
+      backendId: "codex",
+      cliVars: { target: "alpha", branch: "main" },
+    }),
+  );
+
+  const detail = await withEnv({ TASK_RUNNER_CODEX_WS_URL: "ws://changed.example/ws" }, () =>
+    withSharedRuntimeEnv(dir, () =>
+      reconfigureRun(init.runId, {
+        vars: { branch: "release" },
+        message: "replacement message\n",
+      }),
+    ),
+  );
+  const manifest = readManifest(init.workspaceDir);
+  const history = readRunAuditHistory({ workspaceDir: init.workspaceDir, runId: init.runId });
+  const reconfigured = history.events.at(-1);
+
+  assert.equal(detail.runId, init.runId);
+  assert.equal(manifest.status, "initialized");
+  assert.equal(manifest.message, "replacement message\n");
+  assert.equal(manifest.runtimeVars.target, "alpha");
+  assert.equal(manifest.runtimeVars.branch, "release");
+  assert.equal(manifest.finalTasks.t1.title, "Ship alpha");
+  assert.equal(manifest.finalTasks.t1.body, "Use release.");
+  assert.ok(manifest.brief.includes("Agent for alpha."));
+  assert.ok(manifest.brief.includes("Assignment for alpha on release."));
+  assert.ok(manifest.brief.endsWith("replacement message"));
+  assert.equal(manifest.callerInstructions, "Caller sees alpha on release.");
+  assert.equal(manifest.resetSeed.message, "replacement message\n");
+  assert.equal(manifest.resetSeed.finalTasks.t1.body, "Use release.");
+  assert.deepEqual(manifest.backendSpecific, initialTransport);
+  assert.deepEqual(manifest.resetSeed.backendSpecific, initialTransport);
+  assert.equal(reconfigured.event.type, "run.reconfigured");
+  assert.deepEqual(reconfigured.event.fields, {
+    changedVarKeys: ["branch"],
+    messageChanged: true,
+  });
+});
+
+test("reconfigure: empty and unchanged-message patches are no-ops", async () => {
+  const dir = tempDir();
+  writeAgent(
+    dir,
+    "agent",
+    `---
+schemaVersion: 1
+name: agent
+backend: claude
+---
+Agent.
+`,
+  );
+  writeAssignment(
+    dir,
+    "work",
+    `---
+schemaVersion: 1
+name: work
+message: keep me
+vars:
+  target:
+    type: string
+    required: true
+tasks:
+  - id: t1
+    title: First {{target}}
+---
+Work {{target}}.
+`,
+  );
+  const init = await initRunIn(dir, { cliVars: { target: "alpha" } });
+  const before = readFileSync(join(init.workspaceDir, "run.json"), "utf8");
+  const beforeHistory = readRunAuditHistory({ workspaceDir: init.workspaceDir, runId: init.runId });
+
+  await withSharedRuntimeEnv(dir, () => reconfigureRun(init.runId, {}));
+  await withSharedRuntimeEnv(dir, () => reconfigureRun(init.runId, { message: "keep me" }));
+  await withSharedRuntimeEnv(dir, () => reconfigureRun(init.runId, { vars: { target: "alpha" } }));
+
+  assert.equal(readFileSync(join(init.workspaceDir, "run.json"), "utf8"), before);
+  assert.deepEqual(
+    readRunAuditHistory({ workspaceDir: init.workspaceDir, runId: init.runId }),
+    beforeHistory,
+  );
+});
+
+test("reconfigure: rejects archived and non-initialized runs", async () => {
+  const dir = tempDir();
+  writeAgent(
+    dir,
+    "agent",
+    `---
+schemaVersion: 1
+name: agent
+backend: claude
+---
+Agent.
+`,
+  );
+  writeAssignment(
+    dir,
+    "work",
+    `---
+schemaVersion: 1
+name: work
+tasks:
+  - id: t1
+    title: First
+---
+Work.
+`,
+  );
+  const init = await initRunIn(dir);
+
+  await withSharedRuntimeEnv(dir, () => readyRun(init.runId));
+  await assert.rejects(
+    () => withSharedRuntimeEnv(dir, () => reconfigureRun(init.runId, { message: "late" })),
+    /cannot reconfigure run .* unless it is initialized/,
+  );
+
+  const manifest = readManifest(init.workspaceDir);
+  manifest.status = "initialized";
+  manifest.archivedAt = "2026-04-25T19:00:00.000Z";
+  writeManifest(init.workspaceDir, manifest);
+  await assert.rejects(
+    () => withSharedRuntimeEnv(dir, () => reconfigureRun(init.runId, { message: "archived" })),
+    /cannot reconfigure archived run/,
+  );
+});
+
+test("reconfigure: var validation failure preserves the previous manifest", async () => {
+  const dir = tempDir();
+  writeAgent(
+    dir,
+    "agent",
+    `---
+schemaVersion: 1
+name: agent
+backend: claude
+---
+Agent.
+`,
+  );
+  writeAssignment(
+    dir,
+    "work",
+    `---
+schemaVersion: 1
+name: work
+vars:
+  count:
+    type: number
+    required: true
+tasks:
+  - id: t1
+    title: Count {{count}}
+---
+Work {{count}}.
+`,
+  );
+  const init = await initRunIn(dir, { cliVars: { count: "1" } });
+  const before = readFileSync(join(init.workspaceDir, "run.json"), "utf8");
+
+  await assert.rejects(
+    () => withSharedRuntimeEnv(dir, () => reconfigureRun(init.runId, { vars: { count: "many" } })),
+    /var "count": expected number, got "many"/,
+  );
+  assert.equal(readFileSync(join(init.workspaceDir, "run.json"), "utf8"), before);
+});
+
+test("reconfigure: required-var failure preserves the previous manifest", async () => {
+  const dir = tempDir();
+  writeAgent(
+    dir,
+    "agent",
+    `---
+schemaVersion: 1
+name: agent
+backend: claude
+---
+Agent.
+`,
+  );
+  writeAssignment(
+    dir,
+    "work",
+    `---
+schemaVersion: 1
+name: work
+tasks:
+  - id: t1
+    title: First
+---
+Work.
+`,
+  );
+  const init = await initRunIn(dir);
+  const before = readFileSync(join(init.workspaceDir, "run.json"), "utf8");
+  writeFileSync(
+    init.assignmentPath,
+    `---
+schemaVersion: 1
+name: work
+vars:
+  missing:
+    type: string
+    required: true
+tasks:
+  - id: t1
+    title: First
+---
+Work.
+`,
+  );
+
+  await assert.rejects(
+    () => withSharedRuntimeEnv(dir, () => reconfigureRun(init.runId, { message: "new" })),
+    /missing required initial var: missing/,
+  );
+  assert.equal(readFileSync(join(init.workspaceDir, "run.json"), "utf8"), before);
+});
+
+test("reconfigure: prepare render failure preserves the previous manifest", async () => {
+  const dir = tempDir();
+  const scriptPath = writeScript(
+    dir,
+    "prepare.mjs",
+    'process.stdout.write(JSON.stringify({ action: "continue" }));\n',
+  );
+  writeAgent(
+    dir,
+    "agent",
+    `---
+schemaVersion: 1
+name: agent
+backend: claude
+---
+Agent.
+`,
+  );
+  writeAssignment(
+    dir,
+    "work",
+    `---
+schemaVersion: 1
+name: work
+hooks:
+  prepare:
+    - builtin: command
+      with:
+        mode: json
+        command: ${JSON.stringify(process.execPath)}
+        args:
+          - ${JSON.stringify(scriptPath)}
+tasks:
+  - id: t1
+    title: First
+---
+Work.
+`,
+  );
+  const init = await initRunIn(dir);
+  const before = readFileSync(join(init.workspaceDir, "run.json"), "utf8");
+  writeFileSync(scriptPath, 'process.stdout.write("{bad");\n');
+
+  await assert.rejects(
+    () => withSharedRuntimeEnv(dir, () => reconfigureRun(init.runId, { message: "new" })),
+    /malformed JSON output/,
+  );
+  assert.equal(readFileSync(join(init.workspaceDir, "run.json"), "utf8"), before);
+});
+
+test("reconfigure: locked message and locked rendered task fields reject without mutation", async () => {
+  const dir = tempDir();
+  writeAgent(
+    dir,
+    "agent",
+    `---
+schemaVersion: 1
+name: agent
+backend: claude
+---
+Agent.
+`,
+  );
+  writeAssignment(
+    dir,
+    "work",
+    `---
+schemaVersion: 1
+name: work
+message: fixed
+lockedFields: [message, tasks]
+vars:
+  target:
+    type: string
+    default: alpha
+tasks:
+  - id: t1
+    title: Ship {{target}}
+---
+Work.
+`,
+  );
+  const init = await initRunIn(dir);
+  const before = readFileSync(join(init.workspaceDir, "run.json"), "utf8");
+
+  await assert.rejects(
+    () => withSharedRuntimeEnv(dir, () => reconfigureRun(init.runId, { message: "new" })),
+    (err) =>
+      err instanceof LockedFieldError &&
+      err.message.startsWith("cannot override locked field: message"),
+  );
+  assert.equal(readFileSync(join(init.workspaceDir, "run.json"), "utf8"), before);
+
+  await assert.rejects(
+    () => withSharedRuntimeEnv(dir, () => reconfigureRun(init.runId, { vars: { target: "beta" } })),
+    /cannot reconfigure locked field: tasks/,
+  );
+  assert.equal(readFileSync(join(init.workspaceDir, "run.json"), "utf8"), before);
+});

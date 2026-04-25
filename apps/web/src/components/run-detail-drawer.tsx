@@ -12,12 +12,14 @@ import type {
 } from "@task-runner/core/contracts/runs.js";
 import {
   type ChangeEvent,
+  type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   useEffect,
   useRef,
   useState,
 } from "react";
+import type { ReconfigureRunPatch } from "../lib/api-client.js";
 import { type AuditMessagePart, formatAuditEvent } from "../lib/audit-formatter.js";
 import {
   formatBytes,
@@ -63,6 +65,15 @@ type AttemptSelection = number | "pending" | null;
 type SummaryRow = readonly [label: string, value: string];
 type DataTab = "vars" | "hookState";
 type AuditFilter = "all" | "hooks" | "tasks" | "run";
+interface RuntimeVarDraftRow {
+  id: string;
+  key: string;
+  value: string;
+  originalKey: string | null;
+  originalValue: string;
+  redacted: boolean;
+  replaceRedacted: boolean;
+}
 
 const TIMELINE_BOTTOM_THRESHOLD_PX = 24;
 
@@ -141,6 +152,15 @@ function isStructuredDataValue(value: unknown): value is Record<string, unknown>
   return typeof value === "object" && value !== null;
 }
 
+function isRedactedRuntimeVarValue(value: unknown): boolean {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    (value as { redacted?: unknown }).redacted === true
+  );
+}
+
 function formatScalarDataValue(value: unknown) {
   if (typeof value === "string") {
     return value;
@@ -148,7 +168,33 @@ function formatScalarDataValue(value: unknown) {
   if (value === undefined) {
     return "undefined";
   }
-  return JSON.stringify(value);
+  return JSON.stringify(value) ?? String(value);
+}
+
+function editableRuntimeVarValue(value: unknown): string {
+  if (isRedactedRuntimeVarValue(value)) {
+    return "";
+  }
+  if (isStructuredDataValue(value)) {
+    return JSON.stringify(value, null, 2);
+  }
+  return formatScalarDataValue(value);
+}
+
+function createRuntimeVarDraftRows(data: Record<string, unknown>): RuntimeVarDraftRow[] {
+  return Object.entries(data).map(([key, value]) => {
+    const redacted = isRedactedRuntimeVarValue(value);
+    const originalValue = editableRuntimeVarValue(value);
+    return {
+      id: `existing:${key}`,
+      key,
+      value: originalValue,
+      originalKey: key,
+      originalValue,
+      redacted,
+      replaceRedacted: false,
+    };
+  });
 }
 
 function ReadOnlyDataEntries({
@@ -393,6 +439,7 @@ export function RunDetailDrawer({
   onRemoveDependency,
   onRemoveAttachment,
   onReset,
+  onReconfigure,
   onRename,
   onResumeMessageDraftChange,
   onResumeMessageExpandedChange,
@@ -434,6 +481,7 @@ export function RunDetailDrawer({
   onRemoveDependency: (dependencyRunId: string) => Promise<void>;
   onRemoveAttachment: (attachmentId: string) => Promise<void>;
   onReset: () => void;
+  onReconfigure: (patch: ReconfigureRunPatch) => Promise<void>;
   onRename: (name: string | null) => Promise<void>;
   onResumeMessageDraftChange: (value: string) => void;
   onResumeMessageExpandedChange: (expanded: boolean) => void;
@@ -470,8 +518,13 @@ export function RunDetailDrawer({
   );
   const [editingName, setEditingName] = useState(false);
   const [editingBackendSession, setEditingBackendSession] = useState(false);
+  const [editingRuntimeVars, setEditingRuntimeVars] = useState(false);
+  const [editingRunMessage, setEditingRunMessage] = useState(false);
   const [nameDraft, setNameDraft] = useState(run.name ?? "");
   const [backendSessionDraft, setBackendSessionDraft] = useState(run.backendSessionId ?? "");
+  const [runtimeVarDraftRows, setRuntimeVarDraftRows] = useState<RuntimeVarDraftRow[]>([]);
+  const [runtimeVarDraftError, setRuntimeVarDraftError] = useState<string | undefined>();
+  const [runMessageDraft, setRunMessageDraft] = useState(run.message ?? "");
   const [confirmingAttachmentId, setConfirmingAttachmentId] = useState<string | null>(null);
   const [confirmingReset, setConfirmingReset] = useState(false);
   const [confirmingAbort, setConfirmingAbort] = useState(false);
@@ -486,9 +539,11 @@ export function RunDetailDrawer({
   const resumeMessageRef = useRef<HTMLTextAreaElement | null>(null);
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
   const backendSessionInputRef = useRef<HTMLInputElement | null>(null);
+  const runtimeVarNewIdRef = useRef(0);
   const backendSessionId = run.backendSessionId;
   const isPassiveRun = run.backend === "passive";
   const canEditBackendSession = isPassiveRun;
+  const canReconfigure = run.capabilities.canReconfigure;
   const actionsLocked = actionPending !== undefined;
   const primaryAction = getRunPrimaryAction(run);
   const resumePending = actionPending === "resume";
@@ -502,6 +557,7 @@ export function RunDetailDrawer({
   const notePending = actionPending === "note";
   const pinPending = actionPending === "pin";
   const backendSessionPending = actionPending === "backend-session";
+  const reconfigurePending = actionPending === "reconfigure";
   const resetPending = actionPending === "reset";
   const abortPending = actionPending === "abort";
   const uploadAttachmentPending = actionPending === "upload-attachment";
@@ -604,6 +660,18 @@ export function RunDetailDrawer({
       ? null
       : (timelineSessions.find((session) => session.sessionIndex === selectedSessionIndex) ?? null);
   const selectedSessionAttempts = selectedTimelineSession?.attempts ?? [];
+  const editRunMessageButton = canReconfigure ? (
+    <button
+      aria-label="Edit run message"
+      className="icon-btn icon-btn--small drawer-title-edit-trigger"
+      disabled={actionsLocked}
+      onClick={startRunMessageEdit}
+      title="Edit run message"
+      type="button"
+    >
+      <PencilIcon aria-hidden="true" />
+    </button>
+  ) : null;
 
   function startNameEdit() {
     if (actionsLocked) {
@@ -704,6 +772,132 @@ export function RunDetailDrawer({
     }
   }
 
+  function startRuntimeVarsEdit() {
+    if (actionsLocked || !canReconfigure) {
+      return;
+    }
+    setRuntimeVarDraftRows(createRuntimeVarDraftRows(run.runtimeVars));
+    setRuntimeVarDraftError(undefined);
+    setEditingRuntimeVars(true);
+  }
+
+  function cancelRuntimeVarsEdit() {
+    if (reconfigurePending) {
+      return;
+    }
+    setRuntimeVarDraftRows(createRuntimeVarDraftRows(run.runtimeVars));
+    setRuntimeVarDraftError(undefined);
+    setEditingRuntimeVars(false);
+  }
+
+  function addRuntimeVarDraftRow() {
+    if (reconfigurePending) {
+      return;
+    }
+    runtimeVarNewIdRef.current += 1;
+    setRuntimeVarDraftRows((current) => [
+      ...current,
+      {
+        id: `new:${runtimeVarNewIdRef.current}`,
+        key: "",
+        value: "",
+        originalKey: null,
+        originalValue: "",
+        redacted: false,
+        replaceRedacted: false,
+      },
+    ]);
+  }
+
+  function updateRuntimeVarDraftRow(
+    rowId: string,
+    update: Partial<Pick<RuntimeVarDraftRow, "key" | "replaceRedacted" | "value">>,
+  ) {
+    setRuntimeVarDraftRows((current) =>
+      current.map((row) => (row.id === rowId ? { ...row, ...update } : row)),
+    );
+  }
+
+  function removeRuntimeVarDraftRow(rowId: string) {
+    if (reconfigurePending) {
+      return;
+    }
+    setRuntimeVarDraftRows((current) => current.filter((row) => row.id !== rowId));
+  }
+
+  async function submitRuntimeVarsEdit(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
+    if (reconfigurePending) {
+      return;
+    }
+    const seenKeys = new Set<string>();
+    const vars: Record<string, string> = {};
+    for (const row of runtimeVarDraftRows) {
+      const key = row.key.trim();
+      if (row.originalKey === null && key.length === 0 && row.value.length === 0) {
+        continue;
+      }
+      if (key.length === 0) {
+        setRuntimeVarDraftError("Variable keys cannot be empty.");
+        return;
+      }
+      if (seenKeys.has(key)) {
+        setRuntimeVarDraftError(`Variable "${key}" is duplicated.`);
+        return;
+      }
+      seenKeys.add(key);
+      if (row.redacted) {
+        if (row.replaceRedacted) {
+          vars[key] = row.value;
+        }
+        continue;
+      }
+      if (row.originalKey === null || row.value !== row.originalValue) {
+        vars[key] = row.value;
+      }
+    }
+    setRuntimeVarDraftError(undefined);
+    if (Object.keys(vars).length === 0) {
+      setEditingRuntimeVars(false);
+      return;
+    }
+    try {
+      await onReconfigure({ vars });
+      setEditingRuntimeVars(false);
+    } catch {
+      // actionError is surfaced by the shared mutation handler.
+    }
+  }
+
+  function startRunMessageEdit() {
+    if (actionsLocked || !canReconfigure) {
+      return;
+    }
+    setRunMessageDraft(run.message ?? "");
+    setEditingRunMessage(true);
+  }
+
+  function cancelRunMessageEdit() {
+    if (reconfigurePending) {
+      return;
+    }
+    setRunMessageDraft(run.message ?? "");
+    setEditingRunMessage(false);
+  }
+
+  async function submitRunMessageEdit(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
+    if (reconfigurePending) {
+      return;
+    }
+    try {
+      await onReconfigure({ message: runMessageDraft });
+      setEditingRunMessage(false);
+    } catch {
+      // actionError is surfaced by the shared mutation handler.
+    }
+  }
+
   async function submitScheduleEnabled(enabled: boolean) {
     if (schedulePending || run.schedule === null) {
       return;
@@ -749,6 +943,19 @@ export function RunDetailDrawer({
       backendSessionInputRef.current?.focus();
     }
   }, [editingBackendSession]);
+
+  useEffect(() => {
+    if (!editingRunMessage) {
+      setRunMessageDraft(run.message ?? "");
+    }
+  }, [editingRunMessage, run.message]);
+
+  useEffect(() => {
+    if (!canReconfigure) {
+      setEditingRuntimeVars(false);
+      setEditingRunMessage(false);
+    }
+  }, [canReconfigure]);
 
   useEffect(() => {
     if (!resumeDialogOpen) {
@@ -1862,11 +2069,132 @@ export function RunDetailDrawer({
                 </div>
 
                 {dataTab === "vars" ? (
-                  <ReadOnlyDataEntries
-                    data={run.runtimeVars}
-                    emptyMessage="No vars"
-                    tableLabel="Vars"
-                  />
+                  <>
+                    <div className="drawer-data-actions">
+                      <span className="muted-inline">
+                        {Object.keys(run.runtimeVars).length === 0
+                          ? "0 vars"
+                          : `${Object.keys(run.runtimeVars).length} vars`}
+                      </span>
+                      {canReconfigure && !editingRuntimeVars ? (
+                        <button
+                          aria-label="Edit run vars"
+                          className="icon-btn icon-btn--small drawer-title-edit-trigger"
+                          disabled={actionsLocked}
+                          onClick={startRuntimeVarsEdit}
+                          title="Edit run vars"
+                          type="button"
+                        >
+                          <PencilIcon aria-hidden="true" />
+                        </button>
+                      ) : null}
+                    </div>
+                    {editingRuntimeVars ? (
+                      <form className="reconfigure-form" onSubmit={submitRuntimeVarsEdit}>
+                        <div className="runtime-var-editor-list">
+                          {runtimeVarDraftRows.map((row) => (
+                            <div className="runtime-var-editor-row" key={row.id}>
+                              {row.originalKey === null ? (
+                                <label className="field runtime-var-key-field">
+                                  <span>Key</span>
+                                  <input
+                                    disabled={reconfigurePending}
+                                    onChange={(event) =>
+                                      updateRuntimeVarDraftRow(row.id, {
+                                        key: event.target.value,
+                                      })
+                                    }
+                                    placeholder="name"
+                                    value={row.key}
+                                  />
+                                </label>
+                              ) : (
+                                <div className="runtime-var-key-readonly">
+                                  <span className="meta-label">Key</span>
+                                  <code>{row.key}</code>
+                                </div>
+                              )}
+                              <label className="field runtime-var-value-field">
+                                <span>Value</span>
+                                <textarea
+                                  aria-label={`Value for ${row.key || "new variable"}`}
+                                  disabled={
+                                    reconfigurePending || (row.redacted && !row.replaceRedacted)
+                                  }
+                                  onChange={(event) =>
+                                    updateRuntimeVarDraftRow(row.id, {
+                                      value: event.target.value,
+                                    })
+                                  }
+                                  placeholder={row.redacted ? "Redacted" : "Value"}
+                                  value={row.value}
+                                />
+                              </label>
+                              {row.redacted ? (
+                                <label className="runtime-var-redacted-toggle">
+                                  <input
+                                    checked={row.replaceRedacted}
+                                    disabled={reconfigurePending}
+                                    onChange={(event) =>
+                                      updateRuntimeVarDraftRow(row.id, {
+                                        replaceRedacted: event.target.checked,
+                                      })
+                                    }
+                                    type="checkbox"
+                                  />
+                                  <span>Replace redacted value</span>
+                                </label>
+                              ) : null}
+                              {row.originalKey === null ? (
+                                <button
+                                  aria-label="Remove new var"
+                                  className="icon-btn icon-btn--destructive runtime-var-remove"
+                                  disabled={reconfigurePending}
+                                  onClick={() => removeRuntimeVarDraftRow(row.id)}
+                                  title="Remove new var"
+                                  type="button"
+                                >
+                                  <TrashIcon aria-hidden="true" />
+                                </button>
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
+                        {runtimeVarDraftError ? (
+                          <div className="notice" data-tone="error">
+                            <span className="notice__message">{runtimeVarDraftError}</span>
+                          </div>
+                        ) : null}
+                        <div className="drawer-confirm-actions">
+                          <button
+                            className="btn"
+                            disabled={reconfigurePending}
+                            onClick={addRuntimeVarDraftRow}
+                            type="button"
+                          >
+                            Add var
+                          </button>
+                          <button className="btn" disabled={reconfigurePending} type="submit">
+                            {reconfigurePending ? "Saving..." : "Save vars"}
+                          </button>
+                          <button
+                            className="btn"
+                            disabled={reconfigurePending}
+                            onClick={cancelRuntimeVarsEdit}
+                            type="button"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </form>
+                    ) : (
+                      <ReadOnlyDataEntries
+                        data={run.runtimeVars}
+                        emptyMessage="No vars"
+                        tableLabel="Vars"
+                      />
+                    )}
+                  </>
                 ) : (
                   <ReadOnlyDataEntries
                     data={run.hookState}
@@ -2225,12 +2553,44 @@ export function RunDetailDrawer({
                       ref={timelineContentScrollRef}
                     >
                       {timelineTab === "message" ? (
-                        run.message ? (
-                          <section aria-label="Run message">
-                            <MarkdownContent className="timeline-content" text={run.message} />
-                          </section>
+                        editingRunMessage ? (
+                          <form
+                            className="reconfigure-form reconfigure-form--message"
+                            onSubmit={submitRunMessageEdit}
+                          >
+                            <label className="resume-dialog__field" htmlFor="run-message-edit">
+                              Message
+                            </label>
+                            <textarea
+                              className="resume-dialog__textarea"
+                              disabled={reconfigurePending}
+                              id="run-message-edit"
+                              onChange={(event) => setRunMessageDraft(event.target.value)}
+                              value={runMessageDraft}
+                            />
+                            <div className="drawer-confirm-actions">
+                              <button className="btn" disabled={reconfigurePending} type="submit">
+                                {reconfigurePending ? "Saving..." : "Save message"}
+                              </button>
+                              <button
+                                className="btn"
+                                disabled={reconfigurePending}
+                                onClick={cancelRunMessageEdit}
+                                type="button"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </form>
                         ) : (
-                          <p className="task-empty">No message was provided for this run.</p>
+                          <section aria-label="Run message">
+                            <div className="timeline-section-actions">{editRunMessageButton}</div>
+                            {run.message ? (
+                              <MarkdownContent className="timeline-content" text={run.message} />
+                            ) : (
+                              <p className="task-empty">No message was provided for this run.</p>
+                            )}
+                          </section>
                         )
                       ) : timelineTab === "prompt" ? (
                         selectedPendingAttempt ? (

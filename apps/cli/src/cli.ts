@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import {
   type RunCommandOverrides,
@@ -24,6 +24,7 @@ import {
   getTaskList,
   initRun,
   readyRun,
+  reconfigureRun,
   removeDependency,
   removeRunAttachment,
   renameRun,
@@ -136,6 +137,7 @@ Commands:
   run status <id>         Read a run and print its current status.
   run audit <id>          Read the persisted audit history for a run.
   run brief <id>          Print the canonical worker handoff for a run.
+  run reconfigure <id>    Patch vars/message for an initialized run.
   run ready <id|path>     Promote an initialized run into ready state.
   run schedule <id|path>  Set a run schedule with --at, --delay, or --cron.
   run schedule enable <id|path>
@@ -222,6 +224,8 @@ Execution options:
   --var <key>=<value>     Set an input variable (repeatable).
                           Nested child runs usually inherit parent-owned
                           vars through assignment \`sources: [parent]\`.
+  --message-file <path>   Read UTF-8 message text from a file instead of
+                          positional message text.
   --add-task <title>      Append a task to the run's task list.
   --cwd <path>            Override the run cwd, or scope list runs to a cwd.
   --backend <id>          Override the agent's backend.
@@ -373,6 +377,22 @@ function resolvedOverrides(parsed: ParsedArgs) {
     ...overridesFromParsedArgs(parsed),
     cwd: parsed.cwd ? resolveInputPath(parsed.cwd, process.cwd()) : undefined,
   };
+}
+
+function resolveMessageFile(parsed: ParsedArgs): void {
+  if (parsed.messageFile === undefined) {
+    return;
+  }
+  if (parsed.message !== undefined) {
+    throw new CommandError("--message-file cannot be combined with a positional message");
+  }
+  try {
+    parsed.message = readFileSync(resolveInputPath(parsed.messageFile, process.cwd()), "utf8");
+  } catch (err) {
+    throw new CommandError(
+      `cannot read --message-file ${parsed.messageFile}: ${errorMessage(err)}`,
+    );
+  }
 }
 
 function synthesizeClientBackendSpecificOverride(): BackendSpecificConfig | undefined {
@@ -739,6 +759,77 @@ async function runRunBrief(parsed: ParsedArgs, connect?: DaemonConnectContext): 
   }
 }
 
+function buildReconfigurePatch(parsed: ParsedArgs): {
+  vars?: Record<string, string>;
+  message?: string;
+} {
+  const patch: {
+    vars?: Record<string, string>;
+    message?: string;
+  } = {};
+  if (Object.keys(parsed.vars).length > 0) {
+    patch.vars = { ...parsed.vars };
+  }
+  if (parsed.message !== undefined) {
+    patch.message = parsed.message;
+  }
+  return patch;
+}
+
+async function runReconfigureCommand(
+  parsed: ParsedArgs,
+  connect?: DaemonConnectContext,
+): Promise<never> {
+  try {
+    if (parsed.fields.length > 0) {
+      throw new CommandError("run reconfigure does not support --field");
+    }
+    const unsupported = unsupportedFlagsForGroupedCommand(parsed, {
+      allowVars: true,
+      allowMessageFile: true,
+    });
+    if (unsupported.length > 0) {
+      process.stderr.write(
+        `task-runner: run reconfigure only supports <run-id>, --var, --message-file, positional message, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+      );
+      process.exit(3);
+    }
+    const target = normalizeRunIdTarget(parsed.positionals[0], "run reconfigure");
+    if (!target) {
+      process.stderr.write("task-runner: run reconfigure requires a run id\n");
+      process.stderr.write(
+        "Usage: task-runner run reconfigure <id> [--var key=value ...] [--message-file <path> | <message...>] [--output-format text|json]\n",
+      );
+      process.exit(3);
+    }
+    resolveMessageFile(parsed);
+    const patch = buildReconfigurePatch(parsed);
+    const run =
+      connect === undefined
+        ? await reconfigureRun(target, patch)
+        : await withDaemonClient(connect, (client) =>
+            client
+              .call<{ run: ReturnType<typeof getRun> }>("runs.reconfigure", {
+                target,
+                ...patch,
+              })
+              .then((result) => result.run),
+          );
+    if (parsed.outputFormat === "json") {
+      writeJson(run);
+    } else {
+      process.stdout.write(`task-runner: reconfigured run ${run.runId}\n`);
+    }
+    process.exit(0);
+  } catch (err) {
+    if (err instanceof RunNotFoundError) {
+      process.stderr.write(`task-runner: ${err.message}\n`);
+      process.exit(2);
+    }
+    exitCommandFailure(err, connect?.connectUrl);
+  }
+}
+
 async function runListCommand(parsed: ParsedArgs, connect?: DaemonConnectContext): Promise<never> {
   const kindArg = parsed.subcommand;
   if (
@@ -924,6 +1015,8 @@ function unsupportedFlagsForGroupedCommand(
     allowLimit?: boolean;
     allowIncludeArchived?: boolean;
     allowRunListScope?: boolean;
+    allowVars?: boolean;
+    allowMessageFile?: boolean;
     allowClear?: boolean;
     allowAttachmentName?: boolean;
     allowAttachmentMimeType?: boolean;
@@ -939,7 +1032,7 @@ function unsupportedFlagsForGroupedCommand(
   if (parsed.runId !== undefined) unsupported.push("--run-id");
   if (parsed.backendSessionId !== undefined) unsupported.push("--backend-session-id");
   if (parsed.parentRun !== undefined) unsupported.push("--parent-run");
-  if (Object.keys(parsed.vars).length > 0) unsupported.push("--var");
+  if (!opts.allowVars && Object.keys(parsed.vars).length > 0) unsupported.push("--var");
   if (!opts.allowRunListScope && parsed.cwd !== undefined) unsupported.push("--cwd");
   if (!opts.allowRunListScope && parsed.repo !== undefined) unsupported.push("--repo");
   if (!opts.allowRunListScope && parsed.global) unsupported.push("--global");
@@ -984,6 +1077,8 @@ function unsupportedFlagsForGroupedCommand(
     unsupported.push("--scope");
   if (!opts.allowLimit && parsed.limit !== undefined) unsupported.push("--limit");
   if (parsed.addedTasks.length > 0) unsupported.push("--add-task");
+  if (!opts.allowMessageFile && parsed.messageFile !== undefined)
+    unsupported.push("--message-file");
   if (parsed.detach) unsupported.push("--detach");
   if (parsed.listen !== undefined) unsupported.push("--listen");
   if (!opts.allowIncludeArchived && parsed.includeArchived) unsupported.push("--include-archived");
@@ -2142,6 +2237,7 @@ async function runExecuteCommandEmbedded(parsed: ParsedArgs): Promise<never> {
     if (hasRunScheduleFlags(parsed)) {
       throw new RunCommandError("--at, --delay, and --cron are only valid with run schedule");
     }
+    resolveMessageFile(parsed);
     if (isInitCommand) {
       const run = await initRun({
         runId: normalizeTarget(parsed.runId) ?? parsed.runId,
@@ -2193,6 +2289,7 @@ async function runExecuteCommandEmbedded(parsed: ParsedArgs): Promise<never> {
       err instanceof AssignmentNotFoundError ||
       err instanceof AssignmentConfigError ||
       err instanceof RunCommandError ||
+      isCommandError(err) ||
       err instanceof VarResolutionError ||
       err instanceof LockedFieldError ||
       err instanceof ResumeError ||
@@ -2237,6 +2334,7 @@ async function runExecuteCommandDaemon(
     if (hasRunScheduleFlags(parsed)) {
       throw new RunCommandError("--at, --delay, and --cron are only valid with run schedule");
     }
+    resolveMessageFile(parsed);
     if (isInitCommand) {
       const result = await client.call<{ run: ReturnType<typeof getRun> }>("runs.init", {
         runId: normalizeTarget(parsed.runId) ?? parsed.runId,
@@ -2464,6 +2562,9 @@ async function main(): Promise<void> {
     }
     if (parsed.subcommand === "brief") {
       await runRunBrief(parsed, daemonConnect);
+    }
+    if (parsed.subcommand === "reconfigure") {
+      await runReconfigureCommand(parsed, daemonConnect);
     }
     if (parsed.subcommand === "reset") {
       await runResetCommand(parsed, daemonConnect);

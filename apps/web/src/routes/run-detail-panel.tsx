@@ -4,6 +4,7 @@ import type { RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js"
 import type { CSSProperties } from "react";
 import { AttachmentPreviewDrawer } from "../components/attachment-preview-drawer.js";
 import { RunDetailDrawer } from "../components/run-detail-drawer.js";
+import type { ReconfigureRunPatch } from "../lib/api-client.js";
 import { isNotFoundError } from "../lib/api-client.js";
 import type { RunAuditState } from "../lib/run-audit.js";
 import type { RunTimelineState } from "../lib/run-timeline.js";
@@ -36,6 +37,7 @@ export function RunDetailPanel({
   onRemoveDependency,
   onRemoveAttachment,
   onReset,
+  onReconfigure,
   onRename,
   onResumeMessageDraftChange,
   onResumeMessageExpandedChange,
@@ -83,6 +85,7 @@ export function RunDetailPanel({
   onRemoveDependency: (runId: string, dependencyRunId: string) => Promise<void>;
   onRemoveAttachment: (runId: string, attachmentId: string) => Promise<void>;
   onReset: (runId: string) => void;
+  onReconfigure: (runId: string, patch: ReconfigureRunPatch) => Promise<void>;
   onRename: (runId: string, name: string | null) => Promise<void>;
   onResumeMessageDraftChange: (value: string) => void;
   onResumeMessageExpandedChange: (expanded: boolean) => void;
@@ -252,6 +255,7 @@ export function RunDetailPanel({
       }
       onRemoveAttachment={(attachmentId) => onRemoveAttachment(selectedRun.runId, attachmentId)}
       onReset={() => onReset(selectedRun.runId)}
+      onReconfigure={(patch) => onReconfigure(selectedRun.runId, patch)}
       onRename={(name) => onRename(selectedRun.runId, name)}
       onResumeMessageDraftChange={onResumeMessageDraftChange}
       onResumeMessageExpandedChange={onResumeMessageExpandedChange}

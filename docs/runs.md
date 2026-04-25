@@ -232,6 +232,7 @@ task-runner attachment list <run-id> [--scope run|family]
 
 ```bash
 task-runner run ready <id>
+task-runner run reconfigure <id> [--var key=value ...] [--message-file <path> | <message...>]
 task-runner run reset <id>
 task-runner run archive <id>
 task-runner run unarchive <id>
@@ -264,6 +265,20 @@ live status are cleared. Existing `run-events.jsonl` history is preserved
 and reset appends one more diagnostic record instead of truncating the file.
 Only non-running runs can be reset. `manifest.schedule` is preserved
 across manual reset because it is not part of the reset seed.
+
+### Reconfigure
+
+`run reconfigure` patches runtime vars and/or the initial message on an
+unarchived `initialized` run. The mutation rerenders the composed brief
+and reset seed while preserving frozen identity/runtime fields including
+agent, assignment, backend, cwd, tasks, schedule, launcher, hooks, and
+backend-specific Codex transport.
+
+The operation is all-or-nothing. Validation failures, required-var
+failures, locked `message` / rendered task fields, and prepare/render
+errors leave the previous manifest unchanged. Accepted changes append a
+`run.reconfigured` audit row that records changed var keys and whether
+the message changed, not var values or message text.
 
 ### Archive, unarchive, delete
 
@@ -331,12 +346,14 @@ The daemon and CLI expose a `RunCapabilities` boolean block on each run so
 clients do not reimplement lifecycle gates:
 
 - `canArchive`, `canUnarchive`, `canReset`, `canDelete`, `canReady`,
-  `canResume`, `canAbort`
+  `canResume`, `canAbort`, `canReconfigure`
 - `taskMutation.canSetStatus`, `taskMutation.canEditNotes`,
   `taskMutation.canAdd`
 
 When `canAbort` is `false`, the `abortReason` field explains why
 (`"already_terminal"` or `"not_active_in_daemon"`).
+When `canReconfigure` is `false`, `reconfigureReason` is `"archived"`
+or `"not_initialized"` when applicable.
 
 ## Resume
 

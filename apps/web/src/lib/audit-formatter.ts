@@ -111,6 +111,12 @@ function asString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string")
+    : [];
+}
+
 function punctuationSuffix(value: string): string {
   return /[.!?]$/.test(value) ? "" : ".";
 }
@@ -352,6 +358,23 @@ export function formatAuditEvent(
       return {
         message: [text("Reset run from "), status(fields.previousStatus ?? "unknown"), text(".")],
       };
+    case "run.reconfigured": {
+      const changedVarKeys = asStringArray(fields.changedVarKeys);
+      const suffix: AuditMessagePart[] = [];
+      if (changedVarKeys.length > 0) {
+        suffix.push(text(" vars "), code(changedVarKeys.join(", ")));
+      }
+      if (fields.messageChanged === true) {
+        suffix.push(text(suffix.length > 0 ? " and message" : " message"));
+      }
+      return {
+        message: [
+          text("Reconfigured run"),
+          ...(suffix.length > 0 ? suffix : [text(" with no rendered input changes")]),
+          text("."),
+        ],
+      };
+    }
     case "run.archived":
       return {
         message: [text("Archived run.")],

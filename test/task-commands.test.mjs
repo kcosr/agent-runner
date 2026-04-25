@@ -312,6 +312,8 @@ test("task set: allowed while manifest status=running", async () => {
     canResume: false,
     canAbort: false,
     abortReason: "not_active_in_daemon",
+    canReconfigure: false,
+    reconfigureReason: "not_initialized",
     taskMutation: {
       canSetStatus: true,
       canEditNotes: true,
@@ -696,6 +698,8 @@ test("task append-notes: allowed while manifest status=running", async () => {
     canResume: false,
     canAbort: false,
     abortReason: "not_active_in_daemon",
+    canReconfigure: false,
+    reconfigureReason: "not_initialized",
     taskMutation: {
       canSetStatus: true,
       canEditNotes: true,
@@ -1192,6 +1196,8 @@ test("task set: rejects status changes on a terminal non-passive run", async () 
     canResume: true,
     canAbort: false,
     abortReason: "already_terminal",
+    canReconfigure: false,
+    reconfigureReason: "not_initialized",
     taskMutation: {
       canSetStatus: false,
       canEditNotes: true,

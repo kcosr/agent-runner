@@ -74,6 +74,11 @@ type RunsStartRequest = Pick<
   | "overrides"
 >;
 
+export interface ReconfigureRunPatch {
+  vars?: Record<string, string>;
+  message?: string;
+}
+
 interface RequestOptions {
   signal?: AbortSignal;
 }
@@ -761,6 +766,20 @@ export function createApiClient(config: AppRuntimeConfig) {
         {
           method: "POST",
           headers: { accept: "application/json" },
+        },
+      );
+      return await readRun(response);
+    },
+    async reconfigureRun(runId: string, patch: ReconfigureRunPatch): Promise<RunDetail> {
+      const response = await fetch(
+        joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/reconfigure`),
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json",
+          },
+          body: JSON.stringify(patch),
         },
       );
       return await readRun(response);

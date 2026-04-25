@@ -17,6 +17,7 @@ function makeRun(
       canResume: true,
       canAbort: false,
       abortReason: "not_active_in_daemon",
+      canReconfigure: false,
       taskMutation: {
         canSetStatus: false,
         canEditNotes: true,

@@ -395,6 +395,15 @@ config plus explicit schedule overrides at that boundary. After the run
 is `ready`, schedule changes go through `run schedule` mutations rather
 than ready-start overrides.
 
+Reconfigure is a narrower initialized-only mutation for changing
+runtime vars and/or the initial message without changing run identity.
+It uses the frozen agent, assignment, hooks, launcher, tasks, cwd,
+schedule, and backend-specific config already stored on the manifest,
+rerenders the brief/reset seed, and commits the replacement manifest
+only after validation and prepare/rendering succeed. It appends
+`run.reconfigured` with changed var keys and a message-changed boolean,
+not secret values or message text.
+
 ### Resume
 
 Resume is manifest-based. Source agent and assignment files are not
@@ -559,8 +568,9 @@ reuse the existing summary/detail/timeline publication flow.
 Shared run capabilities remain the canonical UX gate for lifecycle
 actions. `RunCapabilities` includes `canArchive`, `canUnarchive`,
 `canReset`, `canDelete`, `canReady`, `canResume`, `canAbort`, and the
-`taskMutation` sub-booleans. Browser and daemon clients should use those
-booleans directly instead of reproducing lifecycle state checks locally.
+initialized-only `canReconfigure` gate, plus the `taskMutation`
+sub-booleans. Browser and daemon clients should use those booleans
+directly instead of reproducing lifecycle state checks locally.
 
 Passive backend-session editing is an explicit detail-surface mutation,
 not a summary mutation: the daemon publishes a fresh `RunDetail` after

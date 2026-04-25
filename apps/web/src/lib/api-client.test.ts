@@ -6,6 +6,91 @@ const config = {
   runSummaryEventsPath: "/api/events/run-summaries",
 };
 
+function makeRunDetail(overrides: Record<string, unknown> = {}) {
+  return {
+    runId: "run-1",
+    parentRunId: null,
+    repo: "task-runner",
+    status: "initialized",
+    effectiveStatus: "initialized",
+    archivedAt: null,
+    note: null,
+    pinned: false,
+    isLive: false,
+    workspaceDir: "/tmp/task-runner/.state/run-1",
+    assignmentPath: "/tmp/task-runner/assignment.md",
+    agent: {
+      name: "implementer",
+      sourcePath: null,
+    },
+    assignment: {
+      name: "Build dashboard",
+      sourcePath: "/tmp/assignment.md",
+      workspacePath: "/tmp/task-runner/assignment.md",
+    },
+    backend: "codex",
+    model: "gpt-5.4",
+    effort: "high",
+    name: "Build dashboard",
+    backendSessionId: null,
+    cwd: "/tmp/task-runner",
+    unrestricted: false,
+    timeoutSec: 3600,
+    startedAt: "2026-04-13T05:00:00.000Z",
+    endedAt: null,
+    exitCode: null,
+    totalAttemptCount: 0,
+    totalSessionCount: 0,
+    maxAttemptsPerSession: 3,
+    sessions: [],
+    currentSession: null,
+    lastSession: null,
+    tasksCompleted: 0,
+    tasksTotal: 1,
+    attachments: [],
+    dependencies: [],
+    dependents: [],
+    schedule: null,
+    scheduleState: "none",
+    tasks: [
+      {
+        id: "build",
+        title: "Build UI",
+        body: "Ship the web UI",
+        status: "pending",
+        notes: "",
+      },
+    ],
+    activeTask: null,
+    message: "Initial message",
+    pendingPrompt: null,
+    callerInstructions: null,
+    lockedFields: [],
+    runtimeVars: {},
+    execution: {
+      hostMode: "embedded",
+      controller: { kind: "embedded" },
+    },
+    capabilities: {
+      canArchive: true,
+      canUnarchive: false,
+      canReset: true,
+      canDelete: false,
+      canReady: true,
+      canResume: false,
+      canAbort: false,
+      abortReason: "not_active_in_daemon",
+      canReconfigure: true,
+      taskMutation: {
+        canAdd: true,
+        canEditNotes: true,
+        canSetStatus: true,
+      },
+    },
+    ...overrides,
+  };
+}
+
 describe("api client", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -93,6 +178,7 @@ describe("api client", () => {
                     canResume: true,
                     canAbort: false,
                     abortReason: "not_active_in_daemon",
+                    canReconfigure: false,
                     taskMutation: {
                       canAdd: false,
                       canEditNotes: false,
@@ -201,6 +287,7 @@ describe("api client", () => {
                     canResume: false,
                     canAbort: false,
                     abortReason: "not_active_in_daemon",
+                    canReconfigure: true,
                     taskMutation: {
                       canAdd: true,
                       canEditNotes: true,
@@ -233,6 +320,9 @@ describe("api client", () => {
         },
         schedule: null,
         scheduleState: "none",
+        capabilities: expect.objectContaining({
+          canReconfigure: true,
+        }),
       }),
     ]);
   });
@@ -364,6 +454,7 @@ describe("api client", () => {
                 canResume: true,
                 canAbort: false,
                 abortReason: "not_active_in_daemon",
+                canReconfigure: false,
                 taskMutation: {
                   canAdd: false,
                   canEditNotes: false,
@@ -458,6 +549,7 @@ describe("api client", () => {
                   canResume: true,
                   canAbort: false,
                   abortReason: "not_active_in_daemon",
+                  canReconfigure: false,
                   taskMutation: {
                     canAdd: true,
                     canEditNotes: true,
@@ -570,6 +662,7 @@ describe("api client", () => {
                   canResume: true,
                   canAbort: false,
                   abortReason: "not_active_in_daemon",
+                  canReconfigure: false,
                   taskMutation: {
                     canAdd: true,
                     canEditNotes: true,
@@ -699,6 +792,7 @@ describe("api client", () => {
                 canResume: true,
                 canAbort: false,
                 abortReason: "not_active_in_daemon",
+                canReconfigure: false,
                 taskMutation: {
                   canAdd: true,
                   canEditNotes: true,
@@ -724,6 +818,54 @@ describe("api client", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/runs/run-1/reset", {
       method: "POST",
       headers: { accept: "application/json" },
+    });
+  });
+
+  it("posts reconfigureRun patches and parses the returned detail", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            run: makeRunDetail({
+              message: "Replacement message",
+              runtimeVars: {
+                target: "beta",
+              },
+            }),
+          }),
+          { status: 200 },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createApiClient(config);
+
+    await expect(
+      api.reconfigureRun("run-1", {
+        vars: { target: "beta" },
+        message: "Replacement message",
+      }),
+    ).resolves.toMatchObject({
+      runId: "run-1",
+      message: "Replacement message",
+      runtimeVars: {
+        target: "beta",
+      },
+      capabilities: expect.objectContaining({
+        canReconfigure: true,
+      }),
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/runs/run-1/reconfigure", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json",
+      },
+      body: JSON.stringify({
+        vars: { target: "beta" },
+        message: "Replacement message",
+      }),
     });
   });
 
@@ -1698,6 +1840,7 @@ describe("api client", () => {
                 canResume: true,
                 canAbort: false,
                 abortReason: "not_active_in_daemon",
+                canReconfigure: false,
                 taskMutation: {
                   canAdd: true,
                   canEditNotes: true,

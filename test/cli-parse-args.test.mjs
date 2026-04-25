@@ -160,6 +160,37 @@ test("parseArgs: run brief parses as a grouped run subcommand", () => {
   assert.deepEqual(parsed.positionals, ["abc123"]);
 });
 
+test("parseArgs: run reconfigure parses run id, vars, message file, and output format", () => {
+  const parsed = parseArgs(
+    argv(
+      "run",
+      "reconfigure",
+      "abc123",
+      "--var",
+      "branch=main",
+      "--message-file",
+      "/tmp/brief.md",
+      "--output-format",
+      "json",
+    ),
+  );
+  assert.equal(parsed.command, "run");
+  assert.equal(parsed.subcommand, "reconfigure");
+  assert.deepEqual(parsed.positionals, ["abc123"]);
+  assert.deepEqual(parsed.vars, { branch: "main" });
+  assert.equal(parsed.messageFile, "/tmp/brief.md");
+  assert.equal(parsed.message, undefined);
+  assert.equal(parsed.outputFormat, "json");
+});
+
+test("parseArgs: run reconfigure joins message tokens after the run id", () => {
+  const parsed = parseArgs(argv("run", "reconfigure", "abc123", "replace", "the", "brief"));
+  assert.equal(parsed.command, "run");
+  assert.equal(parsed.subcommand, "reconfigure");
+  assert.deepEqual(parsed.positionals, ["abc123", "replace", "the", "brief"]);
+  assert.equal(parsed.message, "replace the brief");
+});
+
 test("parseArgs: run audit parses grouped subcommand and --limit", () => {
   const parsed = parseArgs(
     argv("run", "audit", "abc123", "--limit", "25", "--output-format", "json"),

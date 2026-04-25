@@ -752,6 +752,8 @@ test("command services: readStatus reads canonical task state for running runs",
       canResume: false,
       canAbort: false,
       abortReason: "not_active_in_daemon",
+      canReconfigure: false,
+      reconfigureReason: "not_initialized",
       taskMutation: {
         canSetStatus: true,
         canEditNotes: true,
@@ -1473,6 +1475,8 @@ test("command services: listRuns supports exact cwd scope, repo scope, and unsco
       canResume: false,
       canAbort: false,
       abortReason: "not_active_in_daemon",
+      canReconfigure: true,
+      reconfigureReason: undefined,
       taskMutation: {
         canSetStatus: true,
         canEditNotes: true,
@@ -1494,6 +1498,8 @@ test("command services: listRuns supports exact cwd scope, repo scope, and unsco
       canResume: false,
       canAbort: false,
       abortReason: "not_active_in_daemon",
+      canReconfigure: false,
+      reconfigureReason: "archived",
       taskMutation: {
         canSetStatus: true,
         canEditNotes: true,

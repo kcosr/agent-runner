@@ -68,6 +68,7 @@ task-runner run \
   [--backend-session-id <id>] \
   [--resume-run <id|path>] \
   [--detach] \
+  [--message-file <path>] \
   [<message tokens...>]
 ```
 
@@ -103,8 +104,11 @@ Flags:
   forbidden in combination with this; see [resume.md](resume.md).
 - `--detach` — daemon mode only; dispatch the run and exit after the
   daemon accepts it.
+- `--message-file <path>` — read UTF-8 message text from a file instead
+  of positional message text.
 
 Positional args are joined with spaces into the message body.
+`--message-file` cannot be combined with positional message text.
 
 A run is the durable lifecycle record. Each backend execution window is a
 session: the fresh execution creates session `0`, and each resume creates
@@ -138,6 +142,7 @@ task-runner init \
   [--schedule-at <iso> | --schedule-delay <duration> | --schedule-cron <expr>] \
   [--schedule-timezone <iana>] [--schedule-mode reuse|reset|clone] \
   [--schedule-continue-on-failure] \
+  [--message-file <path>] \
   [<message tokens...>]
 ```
 
@@ -307,6 +312,7 @@ task list.
 ### Lifecycle
 
 ```bash
+task-runner run reconfigure <id> [--var key=value ...] [--message-file <path> | <message...>]
 task-runner run ready    <id|path> [--schedule-at <iso> | --schedule-delay <duration> | --schedule-cron <expr>]
 task-runner run reset     <id|path>
 task-runner run archive   <id|path>
@@ -318,6 +324,15 @@ task-runner run delete    <id|path>    # archived only
 initialized-to-ready transition. A scheduled run remains in `ready`
 until the daemon observes it as due, but a caller can still start it
 manually with `run --resume-run <id|path>`.
+
+`run reconfigure` is only valid for unarchived initialized runs. It
+patches runtime vars and/or the initial message, then rerenders the
+brief and reset seed as one atomic mutation. If var validation, required
+inputs, locked fields, or prepare/rendering fail, the existing manifest
+is left unchanged. Reconfigure does not support identity/runtime
+changes: agent, assignment, backend, cwd, tasks, schedule, launcher,
+hooks, and backend-specific Codex transport remain the frozen values
+from the initialized run.
 
 ### Schedule
 

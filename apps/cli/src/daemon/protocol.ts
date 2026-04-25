@@ -83,6 +83,11 @@ export interface RunReadyParams extends RunTargetParams {
   schedule?: ScheduleInput;
 }
 
+export interface RunsReconfigureParams extends RunTargetParams {
+  vars?: Record<string, string>;
+  message?: string;
+}
+
 export interface RunScheduleParams extends RunTargetParams {
   schedule: ScheduleInput;
 }

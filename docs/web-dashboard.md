@@ -120,9 +120,13 @@ timeline stream (`RunTimelineEnvelope`). The drawer surfaces:
 - Dependencies tab: upstream and downstream runs (`RunDependencyDetail`).
 - Data tab: read-only `Vars` and `Hook state` subtabs exposing
   `RunDetail.runtimeVars` and `RunDetail.hookState`. Scalar values render
-  inline; objects and arrays render as pretty JSON blocks.
+  inline; objects and arrays render as pretty JSON blocks. When
+  `canReconfigure` is true, initialized runs can edit vars inline;
+  redacted values are omitted from the patch unless explicitly replaced.
 - Attempts tab: attempt history plus prompt/response/diagnostics detail
-  for non-passive runs from the timeline stream. On narrow layouts, the
+  for non-passive runs from the timeline stream. On initialized runs with
+  `canReconfigure`, the message tab can edit the initial run message.
+  Failed saves keep drafts open with the daemon error visible. On narrow layouts, the
   top-level drawer section tabs stay on one line and scroll horizontally
   instead of wrapping.
 
@@ -176,6 +180,7 @@ Every action button consults the run's `RunCapabilities`:
 | Delete | `canDelete` (archived only) |
 | Primary action (`Ready`, `Start`, or `Resume`) | `canReady` for `Ready`; `canResume` for `Start` / `Resume` |
 | Abort | `canAbort` (with `abortReason` when disabled) |
+| Edit vars/message | `canReconfigure` |
 | Edit backend session | passive runs only |
 | Add/remove dependency | initialized runs only |
 | Enable/disable schedule | existing schedule |

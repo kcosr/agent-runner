@@ -7,6 +7,7 @@ import {
   parseResumeRunParams,
   parseRunReadyParams,
   parseRunScheduleParams,
+  parseRunsReconfigureParams,
   parseWebStartRunParams,
 } from "../apps/cli/dist/daemon/request-parsing.js";
 
@@ -153,6 +154,48 @@ test("parseRunReadyParams accepts schedule and rejects unknown keys", () => {
   assert.throws(
     () => parseRunReadyParams({ target: "run-123", extra: true }, "runs.ready params"),
     /runs\.ready params\.extra is not supported/,
+  );
+});
+
+test("parseRunsReconfigureParams accepts vars and message only", () => {
+  const parsed = parseRunsReconfigureParams(
+    {
+      target: "run-123",
+      vars: { flavor: "mint" },
+      message: "Re-render this run.",
+    },
+    "runs.reconfigure params",
+  );
+  assert.deepEqual(parsed, {
+    target: "run-123",
+    vars: { flavor: "mint" },
+    message: "Re-render this run.",
+  });
+
+  assert.throws(
+    () =>
+      parseRunsReconfigureParams(
+        { target: "run-123", vars: { flavor: "mint" }, backend: "codex" },
+        "runs.reconfigure params",
+      ),
+    /runs\.reconfigure params\.backend is not supported/,
+  );
+  assert.throws(
+    () =>
+      parseRunsReconfigureParams(
+        { target: "run-123", vars: { flavor: 7 } },
+        "runs.reconfigure params",
+      ),
+    /runs\.reconfigure params\.vars\.flavor must be a string/,
+  );
+  assert.throws(
+    () =>
+      parseRunsReconfigureParams({ target: "run-123", message: null }, "runs.reconfigure params"),
+    /runs\.reconfigure params\.message must be a string/,
+  );
+  assert.throws(
+    () => parseRunsReconfigureParams({ target: "../run-123", vars: {} }, "runs.reconfigure params"),
+    /runs\.reconfigure params\.target must be a run id, not a path/,
   );
 });
 

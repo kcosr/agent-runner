@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
@@ -56,6 +56,22 @@ function writeAssignment(baseDir, name, body) {
   writeFileSync(join(dir, "assignment.md"), body);
 }
 
+function writeFakeClaude(baseDir) {
+  const path = join(baseDir, "fake-claude.mjs");
+  writeFileSync(
+    path,
+    `#!/usr/bin/env node
+process.stdout.write(JSON.stringify({
+  type: "result",
+  session_id: "sess-cli-message-file",
+  result: "ok"
+}) + "\\n");
+`,
+  );
+  chmodSync(path, 0o755);
+  return path;
+}
+
 async function initRun(baseDir, agentName = "run-mgmt-agent") {
   return withSharedRuntimeEnv(baseDir, async () => {
     const loaded = loadAgentConfig(agentName, baseDir);
@@ -86,7 +102,7 @@ async function initRun(baseDir, agentName = "run-mgmt-agent") {
 function runCli(args, opts = {}) {
   return execFileSync("node", [CLI_PATH, ...args], {
     cwd: opts.cwd ?? process.cwd(),
-    env: { ...process.env, ...sharedRuntimeEnv(opts.cwd ?? process.cwd()) },
+    env: { ...process.env, ...sharedRuntimeEnv(opts.cwd ?? process.cwd()), ...(opts.env ?? {}) },
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -96,7 +112,7 @@ function runCliExpectFail(args, opts = {}) {
   try {
     execFileSync("node", [CLI_PATH, ...args], {
       cwd: opts.cwd ?? process.cwd(),
-      env: { ...process.env, ...sharedRuntimeEnv(opts.cwd ?? process.cwd()) },
+      env: { ...process.env, ...sharedRuntimeEnv(opts.cwd ?? process.cwd()), ...(opts.env ?? {}) },
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -228,6 +244,7 @@ test("list runs scopes to cwd by default and supports explicit cwd, repo, global
     canAbort: false,
     abortReason: "not_active_in_daemon",
     canResume: false,
+    canReconfigure: true,
     taskMutation: {
       canSetStatus: true,
       canEditNotes: true,
@@ -243,6 +260,8 @@ test("list runs scopes to cwd by default and supports explicit cwd, repo, global
     canAbort: false,
     abortReason: "not_active_in_daemon",
     canResume: false,
+    canReconfigure: false,
+    reconfigureReason: "archived",
     taskMutation: {
       canSetStatus: true,
       canEditNotes: true,
@@ -315,6 +334,138 @@ test("run ready promotes initialized runs and returns text and json results", as
 
   manifest = readManifest(second.workspaceDir);
   assert.equal(manifest.status, "ready");
+});
+
+test("init --message-file stores UTF-8 file content as the run message", () => {
+  const dir = tempDir();
+  writeAgent(dir, "run-mgmt-agent", AGENT);
+  writeAssignment(dir, "run-mgmt-work", ASSIGNMENT);
+  const messagePath = join(dir, "message.md");
+  writeFileSync(messagePath, "file message\nwith newline\n");
+
+  const json = runCli(
+    [
+      "init",
+      "--agent",
+      "run-mgmt-agent",
+      "--assignment",
+      "run-mgmt-work",
+      "--message-file",
+      messagePath,
+      "--output-format",
+      "json",
+    ],
+    { cwd: dir },
+  );
+  const detail = JSON.parse(json);
+
+  assert.equal(detail.message, "file message\nwith newline\n");
+  assert.equal(readManifest(detail.workspaceDir).message, "file message\nwith newline\n");
+});
+
+test("run and run --resume-run accept --message-file as the backend message", () => {
+  const dir = tempDir();
+  writeAgent(dir, "run-mgmt-agent", AGENT);
+  writeAssignment(
+    dir,
+    "empty-work",
+    `---
+schemaVersion: 1
+name: empty-work
+---
+Work.
+`,
+  );
+  const fakeClaude = writeFakeClaude(dir);
+  const firstMessage = join(dir, "first.md");
+  const secondMessage = join(dir, "second.md");
+  writeFileSync(firstMessage, "fresh file message\n");
+  writeFileSync(secondMessage, "resume file message\n");
+
+  const first = JSON.parse(
+    runCli(
+      [
+        "run",
+        "--agent",
+        "run-mgmt-agent",
+        "--assignment",
+        "empty-work",
+        "--message-file",
+        firstMessage,
+        "--output-format",
+        "json",
+      ],
+      { cwd: dir, env: { TASK_RUNNER_CLAUDE_BIN: fakeClaude } },
+    ),
+  );
+  assert.equal(first.message, "fresh file message\n");
+  assert.equal(first.status, "success");
+
+  const second = JSON.parse(
+    runCli(
+      [
+        "run",
+        "--resume-run",
+        first.runId,
+        "--message-file",
+        secondMessage,
+        "--output-format",
+        "json",
+      ],
+      { cwd: dir, env: { TASK_RUNNER_CLAUDE_BIN: fakeClaude } },
+    ),
+  );
+  assert.equal(second.sessions.at(-1).message, "resume file message\n");
+  assert.equal(second.status, "success");
+});
+
+test("run reconfigure accepts --message-file and rejects message-file conflicts before mutation", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "run-mgmt-agent", AGENT);
+  writeAssignment(dir, "run-mgmt-work", ASSIGNMENT);
+  const outcome = await initRun(dir);
+  const messagePath = join(dir, "new-message.md");
+  writeFileSync(messagePath, "replacement from file\n");
+
+  const text = runCli(["run", "reconfigure", outcome.runId, "--message-file", messagePath], {
+    cwd: dir,
+  });
+  assert.equal(text, `task-runner: reconfigured run ${outcome.runId}\n`);
+  assert.equal(readManifest(outcome.workspaceDir).message, "replacement from file\n");
+
+  const before = readFileSync(join(outcome.workspaceDir, "run.json"), "utf8");
+  const conflict = runCliExpectFail(
+    ["run", "reconfigure", outcome.runId, "--message-file", messagePath, "positional"],
+    { cwd: dir },
+  );
+  assert.equal(conflict.status, 3);
+  assert.match(
+    conflict.stderr,
+    /task-runner: --message-file cannot be combined with a positional message/,
+  );
+  assert.equal(readFileSync(join(outcome.workspaceDir, "run.json"), "utf8"), before);
+});
+
+test("init --message-file reports unreadable files before creating a run", () => {
+  const dir = tempDir();
+  writeAgent(dir, "run-mgmt-agent", AGENT);
+  writeAssignment(dir, "run-mgmt-work", ASSIGNMENT);
+  const missing = join(dir, "missing.md");
+
+  const failure = runCliExpectFail(
+    [
+      "init",
+      "--agent",
+      "run-mgmt-agent",
+      "--assignment",
+      "run-mgmt-work",
+      "--message-file",
+      missing,
+    ],
+    { cwd: dir },
+  );
+  assert.equal(failure.status, 3);
+  assert.match(failure.stderr, /task-runner: cannot read --message-file .*missing\.md:/);
 });
 
 test("run schedule sets, toggles, clears, and run ready accepts schedule flags", async () => {

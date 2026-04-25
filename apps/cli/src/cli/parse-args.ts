@@ -42,6 +42,7 @@ export interface ParsedArgs {
   outputFormat: OutputFormat;
   outputFormatExplicit: boolean;
   message?: string;
+  messageFile?: string;
   positionals: string[];
   addedTasks: string[];
   fields: string[];
@@ -113,6 +114,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     (args[0] === "status" ||
       args[0] === "audit" ||
       args[0] === "brief" ||
+      args[0] === "reconfigure" ||
       args[0] === "ready" ||
       args[0] === "schedule" ||
       args[0] === "reset" ||
@@ -178,6 +180,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
       const next = args.shift();
       if (next === undefined) throw new Error("--add-task requires a task title");
       result.addedTasks.push(next);
+    } else if (arg === "--message-file") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--message-file requires a value");
+      if (next.trim().length === 0) throw new Error("--message-file cannot be empty");
+      result.messageFile = next;
     } else if (arg === "--cwd") {
       const next = args.shift();
       if (next === undefined) throw new Error("--cwd requires a value");
@@ -378,7 +385,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
   }
 
   result.positionals = positional;
-  if (positional.length > 0) {
+  if (result.command === "run" && result.subcommand === "reconfigure") {
+    if (positional.length > 1) {
+      result.message = positional.slice(1).join(" ");
+    }
+  } else if (positional.length > 0) {
     result.message = positional.join(" ");
   }
 

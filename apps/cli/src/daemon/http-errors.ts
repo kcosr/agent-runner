@@ -17,6 +17,7 @@ import {
 } from "@task-runner/core/core/run/attachments.js";
 import { RunLineageError } from "@task-runner/core/core/run/lineage.js";
 import { ResumeError, RunNotFoundError } from "@task-runner/core/core/run/manifest.js";
+import { ReconfigureLockedFieldError } from "@task-runner/core/core/run/reconfigure.js";
 import {
   EmptyPromptError,
   InvalidAddedTaskError,
@@ -58,6 +59,7 @@ export function isKnownControlPlaneError(err: unknown): boolean {
     err instanceof TaskNotFoundError ||
     err instanceof RunNotFoundError ||
     err instanceof ResumeError ||
+    err instanceof ReconfigureLockedFieldError ||
     err instanceof UnknownBackendError ||
     err instanceof AgentNotFoundError ||
     err instanceof AgentConfigError ||
@@ -94,6 +96,9 @@ export function toHttpError(err: unknown): HttpError {
     return new HttpError(404, "NOT_FOUND", "resource not found", err);
   }
   if (err instanceof ConflictError) {
+    return new HttpError(409, "CONFLICT", err.message, err);
+  }
+  if (err instanceof ReconfigureLockedFieldError) {
     return new HttpError(409, "CONFLICT", err.message, err);
   }
   if (isKnownControlPlaneError(err)) {
