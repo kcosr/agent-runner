@@ -228,7 +228,7 @@
 
 - Markdown attachment previews now render leading YAML frontmatter as a
   preformatted code block instead of mixing it into the rendered Markdown
-  body.
+  body. ([#95](https://github.com/kcosr/task-runner/pull/95))
 - The run detail timeline no longer flashes the stale-data warning on
   normal terminal-event reconciliation; terminal reloads now happen
   silently while real stream breakage still surfaces the warning.
