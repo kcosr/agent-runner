@@ -1293,7 +1293,9 @@ function getBoardColumnTitles() {
   );
 }
 
-function defineElementMetric(element: Element, key: string, value: unknown) {
+type ElementMetricValue = number | ReturnType<typeof vi.fn> | (() => unknown);
+
+function defineElementMetric(element: Element, key: string, value: ElementMetricValue) {
   Object.defineProperty(element, key, {
     configurable: true,
     value,
