@@ -1012,13 +1012,22 @@ export function setRunScheduleEnabled(
       throw new ScheduleMutationError(`run ${resolved.manifest.runId} has no schedule to toggle`);
     }
     const previousSchedule = resolved.manifest.schedule;
-    resolved.manifest.schedule =
+    const result =
       enabled && previousSchedule.recurrence !== null
-        ? advanceRecurringSchedule(previousSchedule).schedule
+        ? advanceRecurringSchedule(previousSchedule)
         : {
-            ...previousSchedule,
-            enabled,
+            schedule: {
+              ...previousSchedule,
+              enabled,
+            },
+            disabledReason: null,
           };
+    if (enabled && result.disabledReason !== null) {
+      throw new ScheduleMutationError(
+        `cannot enable schedule for run ${resolved.manifest.runId}: ${result.disabledReason}`,
+      );
+    }
+    resolved.manifest.schedule = result.schedule;
     schedule = resolved.manifest.schedule;
     writeManifest(resolved.workspaceDir, resolved.manifest);
     emitPersistedAudit(
@@ -1033,6 +1042,7 @@ export function setRunScheduleEnabled(
             manifest: resolved.manifest,
             context: commandRunEventContext(auditOrigin),
             schedule: resolved.manifest.schedule,
+            reason: result.disabledReason ?? undefined,
           }),
     );
   });
@@ -1790,12 +1800,19 @@ export function addTask(
 
 export function isCommandError(
   err: unknown,
-): err is CommandError | ResumeError | AttachmentError | RunLineageError | ScheduleValidationError {
+): err is
+  | CommandError
+  | ResumeError
+  | AttachmentError
+  | RunLineageError
+  | ScheduleValidationError
+  | LockedFieldError {
   return (
     err instanceof CommandError ||
     err instanceof ResumeError ||
     err instanceof AttachmentError ||
     err instanceof RunLineageError ||
-    err instanceof ScheduleValidationError
+    err instanceof ScheduleValidationError ||
+    err instanceof LockedFieldError
   );
 }

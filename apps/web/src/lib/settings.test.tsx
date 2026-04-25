@@ -54,6 +54,16 @@ function SettingsProbe() {
       <button
         onClick={() =>
           updatePreferences({
+            showScheduledOnly: true,
+          })
+        }
+        type="button"
+      >
+        Enable scheduled only
+      </button>
+      <button
+        onClick={() =>
+          updatePreferences({
             visibleFocusIndicators: true,
           })
         }
@@ -134,6 +144,7 @@ describe("DashboardSettingsProvider", () => {
         collapseFailureStates: true,
         showArchived: false,
         showNotesOnly: false,
+        showScheduledOnly: false,
         showPinnedOnly: false,
         sortByRecentUpdates: false,
         auditNewestFirst: false,
@@ -195,6 +206,7 @@ describe("DashboardSettingsProvider", () => {
         collapseFailureStates: false,
         showArchived: true,
         showNotesOnly: false,
+        showScheduledOnly: false,
         showPinnedOnly: false,
         sortByRecentUpdates: true,
         auditNewestFirst: false,
@@ -309,6 +321,7 @@ describe("DashboardSettingsProvider", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Enable archived" }));
     fireEvent.click(screen.getByRole("button", { name: "Enable notes only" }));
+    fireEvent.click(screen.getByRole("button", { name: "Enable scheduled only" }));
     fireEvent.click(screen.getByRole("button", { name: "Enable pinned only" }));
     fireEvent.click(screen.getByRole("button", { name: "Enable recent updates sort" }));
     fireEvent.click(screen.getByRole("button", { name: "Enable visible focus indicators" }));
@@ -321,6 +334,7 @@ describe("DashboardSettingsProvider", () => {
         collapseFailureStates: true,
         showArchived: true,
         showNotesOnly: true,
+        showScheduledOnly: true,
         showPinnedOnly: true,
         sortByRecentUpdates: true,
         auditNewestFirst: false,
@@ -355,6 +369,7 @@ describe("DashboardSettingsProvider", () => {
         collapseFailureStates: true,
         showArchived: false,
         showNotesOnly: false,
+        showScheduledOnly: false,
         showPinnedOnly: false,
         sortByRecentUpdates: false,
         auditNewestFirst: false,
@@ -381,6 +396,7 @@ describe("DashboardSettingsProvider", () => {
         collapseFailureStates: true,
         showArchived: false,
         showNotesOnly: false,
+        showScheduledOnly: false,
         showPinnedOnly: false,
         sortByRecentUpdates: false,
         auditNewestFirst: false,

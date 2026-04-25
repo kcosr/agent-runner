@@ -3029,6 +3029,7 @@ test("daemon scheduler marks startup-overdue one-time schedules missed without s
       },
     });
     try {
+      assert.equal(readManifest(run.workspaceDir).schedule, null);
       await waitForValue(
         () => (readManifest(run.workspaceDir).schedule === null ? true : null),
         "startup-overdue schedule to clear",
@@ -3100,6 +3101,136 @@ test("daemon scheduler rebuilds future timers after schedule mutations and start
         assert.ok(
           audit.body.history.events.some((event) => event.event.type === "run.schedule_due"),
         );
+      } finally {
+        await client.close();
+        await server.close();
+      }
+    },
+  );
+});
+
+test("daemon scheduler rejects manual starts while a scheduled start is pending", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const run = await initRun(dir);
+  markRunReady(run.workspaceDir);
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  let resumeCalls = 0;
+  let releaseScheduledStart;
+  let resolveScheduledStart;
+  const scheduledStartSeen = new Promise((resolve) => {
+    resolveScheduledStart = resolve;
+  });
+
+  await withEnv(
+    {
+      ...sharedRuntimeEnv(dir),
+      TASK_RUNNER_MIN_SCHEDULE_DELAY_SEC: "1",
+    },
+    async () => {
+      const server = await serveDaemon(listenUrl, {
+        async resumeRun({ target, emitEvent }) {
+          resumeCalls += 1;
+          assert.equal(target, run.runId);
+          resolveScheduledStart();
+          await new Promise((resolve) => {
+            releaseScheduledStart = resolve;
+          });
+          markRunRunning(run.workspaceDir);
+          emitRunStarted(emitEvent, target, dir);
+          return { runId: target };
+        },
+      });
+      const client = await DaemonClient.connect(listenUrl);
+      try {
+        await client.call("runs.setSchedule", {
+          target: run.runId,
+          schedule: { delay: "1s" },
+        });
+        await scheduledStartSeen;
+
+        await assert.rejects(
+          () => client.call("runs.resume", { target: run.runId, overrides: {} }),
+          (err) =>
+            err instanceof DaemonRpcError &&
+            err.code === -32003 &&
+            err.message === `run ${run.runId} has a scheduled start in progress`,
+        );
+        await assert.rejects(
+          () => client.call("runs.ready", { target: run.runId }),
+          (err) =>
+            err instanceof DaemonRpcError &&
+            err.code === -32003 &&
+            err.message === `run ${run.runId} has a scheduled start in progress`,
+        );
+        assert.equal(resumeCalls, 1);
+
+        releaseScheduledStart();
+        const running = await waitForRunStatus(httpBaseUrl, run.runId, "running");
+        assert.equal(running.runId, run.runId);
+      } finally {
+        releaseScheduledStart?.();
+        await client.close();
+        await server.close();
+      }
+    },
+  );
+});
+
+test("daemon scheduler records failed starts without immediately requeueing the same due schedule", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const run = await initRun(dir);
+  markRunReady(run.workspaceDir);
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  let resumeCalls = 0;
+
+  await withEnv(
+    {
+      ...sharedRuntimeEnv(dir),
+      TASK_RUNNER_MIN_SCHEDULE_DELAY_SEC: "1",
+    },
+    async () => {
+      const server = await serveDaemon(listenUrl, {
+        async resumeRun() {
+          resumeCalls += 1;
+          throw new Error("synthetic scheduled start failure");
+        },
+      });
+      const client = await DaemonClient.connect(listenUrl);
+      try {
+        await client.call("runs.setSchedule", {
+          target: run.runId,
+          schedule: { delay: "1s" },
+        });
+
+        await waitForValue(async () => {
+          const audit = await httpJson(httpBaseUrl, `/api/runs/${run.runId}/audit`);
+          return audit.body.history.events.find(
+            (event) => event.event.type === "run.schedule_failed",
+          );
+        }, "schedule failure audit event");
+
+        await sleep(1_500);
+        const manifest = readManifest(run.workspaceDir);
+        assert.equal(resumeCalls, 1);
+        assert.equal(manifest.status, "ready");
+        assert.equal(manifest.schedule.enabled, true);
+        const audit = await httpJson(httpBaseUrl, `/api/runs/${run.runId}/audit`);
+        const failed = audit.body.history.events.filter(
+          (event) => event.event.type === "run.schedule_failed",
+        );
+        assert.equal(failed.length, 1);
+        assert.equal(failed[0].event.fields.reason, "start_failed");
+        assert.match(failed[0].event.fields.error, /synthetic scheduled start failure/);
       } finally {
         await client.close();
         await server.close();

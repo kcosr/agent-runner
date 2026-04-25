@@ -14,6 +14,7 @@ import {
   AlertIcon,
   ArchiveIcon,
   ChevronsRightLeftIcon,
+  ClockIcon,
   FilterIcon,
   NotepadTextIcon,
   PinIcon,
@@ -145,6 +146,9 @@ export function RunFilters({
           <span className="page-title-meta">including archived</span>
         ) : null}
         {preferences.showNotesOnly ? <span className="page-title-meta">notes only</span> : null}
+        {preferences.showScheduledOnly ? (
+          <span className="page-title-meta">scheduled only</span>
+        ) : null}
         {preferences.showPinnedOnly ? <span className="page-title-meta">pinned only</span> : null}
         {preferences.structuredFilters.family ? (
           <span className="page-title-meta">family {preferences.structuredFilters.family}</span>
@@ -317,6 +321,17 @@ export function RunFilters({
           type="button"
         >
           <AlertIcon aria-hidden="true" />
+        </button>
+
+        <button
+          aria-label="Show scheduled runs only"
+          aria-pressed={preferences.showScheduledOnly}
+          className="icon-btn"
+          onClick={() => updatePreferences({ showScheduledOnly: !preferences.showScheduledOnly })}
+          title="Show scheduled runs only"
+          type="button"
+        >
+          <ClockIcon aria-hidden="true" />
         </button>
 
         <button

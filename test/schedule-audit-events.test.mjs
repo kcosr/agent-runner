@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import {
   appendRunScheduleAdvancedEvent,
+  appendRunScheduleFailedEvent,
   appendRunScheduleSetEvent,
   readRunAuditHistory,
   systemRunEventContext,
@@ -46,14 +47,25 @@ test("schedule audit helpers append typed schedule events and reason fields", ()
     schedule: nextSchedule,
     reason: "overdue_on_startup",
   });
+  appendRunScheduleFailedEvent({
+    manifest: manifest(workspaceDir),
+    context: systemRunEventContext(),
+    schedule: nextSchedule,
+    reason: "start_failed",
+    error: "synthetic schedule failure",
+  });
 
   const history = readRunAuditHistory({ workspaceDir, runId: "run-schedule" });
 
-  assert.equal(history.events.length, 2);
+  assert.equal(history.events.length, 3);
   assert.equal(history.events[0].event.type, "run.schedule_set");
   assert.deepEqual(history.events[0].event.fields.schedule, schedule);
   assert.equal(history.events[1].event.type, "run.schedule_advanced");
   assert.deepEqual(history.events[1].event.fields.previousSchedule, schedule);
   assert.deepEqual(history.events[1].event.fields.schedule, nextSchedule);
   assert.equal(history.events[1].event.fields.reason, "overdue_on_startup");
+  assert.equal(history.events[2].event.type, "run.schedule_failed");
+  assert.deepEqual(history.events[2].event.fields.schedule, nextSchedule);
+  assert.equal(history.events[2].event.fields.reason, "start_failed");
+  assert.equal(history.events[2].event.fields.error, "synthetic schedule failure");
 });

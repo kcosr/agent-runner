@@ -30,6 +30,12 @@ const BOARD_PREFERENCE_ROWS: PreferenceRowDefinition[] = [
     description: "Include archived runs in the board and counts until you hide them again.",
   },
   {
+    key: "showScheduledOnly",
+    title: "Show scheduled runs only",
+    description:
+      "Keep only scheduled runs visible on the board until you turn the filter back off.",
+  },
+  {
     key: "showPinnedOnly",
     title: "Show pinned runs only",
     description: "Keep only pinned runs visible on the board until you turn the filter back off.",

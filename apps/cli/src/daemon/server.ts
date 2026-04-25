@@ -92,6 +92,7 @@ import {
   appendRunScheduleAdvancedEvent,
   appendRunScheduleDisabledEvent,
   appendRunScheduleDueEvent,
+  appendRunScheduleFailedEvent,
   appendRunScheduleMissedEvent,
   appendRunScheduleSkippedEvent,
   systemRunEventContext,
@@ -409,9 +410,11 @@ export async function serveDaemon(
   const pendingScheduleStarts = new Set<string>();
   const scheduleTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const pendingScheduleEvaluationTargets = new Set<string>();
+  const runCreatedProjectionTimers = new Set<ReturnType<typeof setTimeout>>();
   let manifestIndexInitialized = false;
   let fullScheduleEvaluationPending = false;
   let scheduleEvaluationQueued = false;
+  let scheduleEvaluationTimer: ReturnType<typeof setTimeout> | null = null;
   const recentTimelineBuffers = new Map<string, RecentTimelineRecord>();
   const recentAuditBuffers = new Map<string, RecentAuditRecord>();
   const sockets = new Set<Socket>();
@@ -927,7 +930,7 @@ export async function serveDaemon(
 
     pendingDependencyAutoStarts.add(runId);
     try {
-      await operations.resumeRun({
+      await resumeManagedRun({
         target: runId,
         overrides: {},
       });
@@ -973,9 +976,28 @@ export async function serveDaemon(
   const scheduleAuditContext = () => systemRunEventContext(mutationAuditContext);
 
   const publishScheduleRecovery = (runId: string, error: unknown): void => {
+    const formattedError = formatAutoStartError(error);
     console.error(
-      `task-runner daemon: schedule evaluation failed for run ${runId}: ${formatAutoStartError(error)}`,
+      `task-runner daemon: schedule evaluation failed for run ${runId}: ${formattedError}`,
     );
+    const entry = manifestEntriesByRunId.get(runId);
+    if (entry) {
+      try {
+        publishAudit(
+          appendRunScheduleFailedEvent({
+            manifest: entry.manifest,
+            context: scheduleAuditContext(),
+            schedule: entry.manifest.schedule,
+            reason: "start_failed",
+            error: formattedError,
+          }),
+        );
+      } catch (auditError) {
+        console.error(
+          `task-runner daemon: failed to publish schedule failure audit for run ${runId}: ${formatAutoStartError(auditError)}`,
+        );
+      }
+    }
     try {
       publishMutationResult(runId, {
         summary: getProjectedSummary(runId),
@@ -1159,6 +1181,7 @@ export async function serveDaemon(
       return;
     }
     pendingScheduleStarts.add(entry.manifest.runId);
+    let started = false;
     try {
       publishAudit(
         appendRunScheduleDueEvent({
@@ -1171,13 +1194,16 @@ export async function serveDaemon(
         summary: getProjectedSummary(entry.manifest.runId),
         detail: getProjectedDetail(entry.manifest.runId),
       });
-      await operations.resumeRun({
+      await resumeManagedRun({
         target: entry.manifest.runId,
         overrides,
       });
+      started = true;
     } finally {
       pendingScheduleStarts.delete(entry.manifest.runId);
-      queueScheduleEvaluation?.(entry.manifest.runId);
+      if (started) {
+        queueScheduleEvaluation?.(entry.manifest.runId);
+      }
     }
   };
 
@@ -1281,14 +1307,15 @@ export async function serveDaemon(
       return;
     }
     scheduleEvaluationQueued = true;
-    const timer = setTimeout(() => {
+    scheduleEvaluationTimer = setTimeout(() => {
+      scheduleEvaluationTimer = null;
       scheduleEvaluationQueued = false;
       const targets = fullScheduleEvaluationPending ? null : [...pendingScheduleEvaluationTargets];
       fullScheduleEvaluationPending = false;
       pendingScheduleEvaluationTargets.clear();
       void evaluateSchedules(targets, { startup: false });
     }, 0);
-    timer.unref?.();
+    scheduleEvaluationTimer.unref?.();
   };
 
   const publishSummary = (summary: RunSummary): void => {
@@ -1718,8 +1745,11 @@ export async function serveDaemon(
         queueScheduleEvaluation?.(runId);
       } catch (error) {
         publishScheduleRecovery(runId, error);
+      } finally {
+        runCreatedProjectionTimers.delete(timer);
       }
     }, 0);
+    runCreatedProjectionTimers.add(timer);
     timer.unref?.();
   };
 
@@ -1873,6 +1903,34 @@ export async function serveDaemon(
     return { runId: target, accepted: true };
   };
 
+  const assertNoPendingScheduleStart = (target: string): void => {
+    if (pendingScheduleStarts.has(target)) {
+      throw new ConflictError(`run ${target} has a scheduled start in progress`);
+    }
+  };
+
+  const startManagedRun = (request: Parameters<DaemonHandlers["startRun"]>[0]) =>
+    executeManagedRun("start", (emitEvent, abortSignal, emitAuditEnvelope) =>
+      app.startRun({
+        ...request,
+        execution: daemonExecution(daemonInstanceId),
+        abortSignal,
+        emitEvent,
+        emitAuditEnvelope,
+      }),
+    );
+
+  const resumeManagedRun = (request: Parameters<DaemonHandlers["resumeRun"]>[0]) =>
+    executeManagedRun("resume", (emitEvent, abortSignal, emitAuditEnvelope) =>
+      app.resumeRun({
+        ...request,
+        execution: daemonExecution(daemonInstanceId),
+        abortSignal,
+        emitEvent,
+        emitAuditEnvelope,
+      }),
+    );
+
   operations = createDaemonOperations({
     ...app,
     getRun: getDaemonRun,
@@ -1891,6 +1949,7 @@ export async function serveDaemon(
       return run;
     },
     readyRun: (target, input = {}) => {
+      assertNoPendingScheduleStart(target);
       const mutation = applyPublishedMutation(
         target,
         () => app.readyRun(target, input, mutationAuditContext, publishAudit),
@@ -1994,26 +2053,11 @@ export async function serveDaemon(
       version,
       startedAt,
     },
-    startManagedRun: (request) =>
-      executeManagedRun("start", (emitEvent, abortSignal, emitAuditEnvelope) =>
-        app.startRun({
-          ...request,
-          execution: daemonExecution(daemonInstanceId),
-          abortSignal,
-          emitEvent,
-          emitAuditEnvelope,
-        }),
-      ),
-    resumeManagedRun: (request) =>
-      executeManagedRun("resume", (emitEvent, abortSignal, emitAuditEnvelope) =>
-        app.resumeRun({
-          ...request,
-          execution: daemonExecution(daemonInstanceId),
-          abortSignal,
-          emitEvent,
-          emitAuditEnvelope,
-        }),
-      ),
+    startManagedRun,
+    resumeManagedRun: (request) => {
+      assertNoPendingScheduleStart(request.target);
+      return resumeManagedRun(request);
+    },
     abortRun,
   });
 
@@ -2028,7 +2072,7 @@ export async function serveDaemon(
     }
   };
   rebuildManifestIndex();
-  void evaluateSchedules(null, { startup: true });
+  await evaluateSchedules(null, { startup: true });
 
   const eventLoopHistogram = debugPerfEnabled() ? monitorEventLoopDelay({ resolution: 20 }) : null;
   let previousEventLoopUtilization = debugPerfEnabled()
@@ -2712,6 +2756,17 @@ export async function serveDaemon(
         clearTimeout(timer);
       }
       scheduleTimers.clear();
+      if (scheduleEvaluationTimer !== null) {
+        clearTimeout(scheduleEvaluationTimer);
+        scheduleEvaluationTimer = null;
+      }
+      scheduleEvaluationQueued = false;
+      fullScheduleEvaluationPending = false;
+      pendingScheduleEvaluationTargets.clear();
+      for (const timer of runCreatedProjectionTimers) {
+        clearTimeout(timer);
+      }
+      runCreatedProjectionTimers.clear();
       for (const ws of wsClients) {
         ws.terminate();
       }

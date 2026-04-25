@@ -37,6 +37,7 @@ const RUN_EVENT_TYPES = [
   "run.schedule_due",
   "run.schedule_missed",
   "run.schedule_skipped",
+  "run.schedule_failed",
   "run.schedule_advanced",
   "run.schedule_consumed",
   "task.added",
@@ -72,6 +73,7 @@ export type ScheduleDecisionReason =
   | "already_active"
   | "archived"
   | "not_ready"
+  | "start_failed"
   | "minimum_interval_violation";
 
 export interface RunEventOrigin {
@@ -655,6 +657,7 @@ function appendRunScheduleEvent(params: {
   schedule?: RunSchedule | null;
   previousSchedule?: RunSchedule | null;
   reason?: ScheduleDecisionReason;
+  error?: string;
 }): RunAuditEnvelope {
   return appendRunEvent({
     workspaceDir: params.manifest.workspaceDir,
@@ -667,6 +670,7 @@ function appendRunScheduleEvent(params: {
         : {}),
       ...(params.schedule !== undefined ? { schedule: params.schedule } : {}),
       ...(params.reason !== undefined ? { reason: params.reason } : {}),
+      ...(params.error !== undefined ? { error: params.error } : {}),
     },
   });
 }
@@ -750,6 +754,19 @@ export function appendRunScheduleSkippedEvent(params: {
   return appendRunScheduleEvent({
     ...params,
     eventType: "run.schedule_skipped",
+  });
+}
+
+export function appendRunScheduleFailedEvent(params: {
+  manifest: Pick<RunManifest, "workspaceDir" | "runId">;
+  context: RunEventWriteContext;
+  schedule: RunSchedule | null;
+  reason: ScheduleDecisionReason;
+  error: string;
+}): RunAuditEnvelope {
+  return appendRunScheduleEvent({
+    ...params,
+    eventType: "run.schedule_failed",
   });
 }
 

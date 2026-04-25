@@ -27,6 +27,7 @@ import {
   clearRunDependencies,
   clearRunSchedule,
   downloadAttachment,
+  isCommandError,
   listAttachments,
   listDefinitions,
   listRuns,
@@ -1253,6 +1254,7 @@ test("command services: schedule mutation rules honor locks and allow recurring 
       () => setRunSchedule(locked.runId, { at: "2099-04-25T12:00:00.000Z" }),
       (err) =>
         err instanceof LockedFieldError &&
+        isCommandError(err) &&
         /cannot override locked field: schedule/.test(err.message),
     );
 
@@ -1266,6 +1268,7 @@ test("command services: schedule mutation rules honor locks and allow recurring 
       () => clearRunSchedule(locked.runId),
       (err) =>
         err instanceof LockedFieldError &&
+        isCommandError(err) &&
         /cannot override locked field: schedule/.test(err.message),
     );
 
@@ -1327,6 +1330,41 @@ test("command services: enabling a paused recurring schedule re-arms the next ru
     assert.equal(manifest.schedule.enabled, true);
     assert.equal(manifest.schedule.recurrence.mode, "reuse");
     assert.notEqual(manifest.schedule.runAt, "2026-04-25T13:23:00.000Z");
+  });
+});
+
+test("command services: enabling a paused recurring schedule reports interval violations", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const target = await initRun(dir);
+
+  await withSharedRuntimeEnv(dir, async () => {
+    setRunSchedule(target.runId, {
+      cron: "0 * * * *",
+      timezone: "UTC",
+      mode: "reuse",
+    });
+
+    patchManifest(target.workspaceDir, (manifest) => {
+      manifest.schedule = {
+        ...manifest.schedule,
+        enabled: false,
+        runAt: "2026-04-25T13:23:00.000Z",
+      };
+    });
+
+    await withEnv({ TASK_RUNNER_MIN_RECURRENCE_INTERVAL_SEC: "7200" }, async () => {
+      assert.throws(
+        () => setRunScheduleEnabled(target.runId, true),
+        (err) =>
+          err instanceof CommandError &&
+          /cannot enable schedule .*minimum_interval_violation/.test(err.message),
+      );
+    });
+
+    const manifest = readManifest(target.workspaceDir);
+    assert.equal(manifest.schedule.enabled, false);
+    assert.equal(manifest.schedule.runAt, "2026-04-25T13:23:00.000Z");
   });
 });
 

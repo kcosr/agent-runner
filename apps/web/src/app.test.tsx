@@ -34,6 +34,7 @@ const DEFAULT_DASHBOARD_PREFERENCES = {
   collapseFailureStates: true,
   showArchived: false,
   showNotesOnly: false,
+  showScheduledOnly: false,
   showPinnedOnly: false,
   sortByRecentUpdates: false,
   auditNewestFirst: false,
@@ -2878,6 +2879,77 @@ describe("web app", () => {
     ).toBeInTheDocument();
   });
 
+  it("filters board-visible runs to scheduled only and persists the quick toggle", async () => {
+    const schedule = {
+      enabled: true,
+      runAt: "2099-04-25T12:00:00.000Z",
+      recurrence: null,
+    };
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "run-scheduled",
+          assignmentName: "Scheduled dashboard",
+          name: "Scheduled dashboard",
+          schedule,
+          scheduleState: "future",
+        }),
+        makeRun({
+          runId: "run-plain",
+          assignmentName: "Plain dashboard",
+          name: "Plain dashboard",
+          schedule: null,
+          scheduleState: "none",
+        }),
+      ],
+      details: {
+        "run-scheduled": makeDetail({
+          runId: "run-scheduled",
+          assignment: {
+            name: "Scheduled dashboard",
+            sourcePath: "/tmp/scheduled-a.md",
+            workspacePath: "/tmp/scheduled-b.md",
+          },
+          schedule,
+          scheduleState: "future",
+        }),
+        "run-plain": makeDetail({
+          runId: "run-plain",
+          assignment: {
+            name: "Plain dashboard",
+            sourcePath: "/tmp/plain-a.md",
+            workspacePath: "/tmp/plain-b.md",
+          },
+          schedule: null,
+          scheduleState: "none",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    const view = await renderApp();
+    await findRunCard("Scheduled dashboard");
+    expect(screen.getByRole("button", { name: /plain dashboard/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /show scheduled runs only/i }));
+
+    expect(await findRunCard("Scheduled dashboard")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /plain dashboard/i })).not.toBeInTheDocument();
+    expect(screen.getByText("scheduled only")).toBeInTheDocument();
+
+    const stored = window.localStorage.getItem("task-runner:web:dashboard-preferences");
+    expect(stored ? JSON.parse(stored) : null).toMatchObject({
+      showScheduledOnly: true,
+    });
+
+    view.unmount();
+    queryClient.clear();
+
+    await renderApp();
+    expect(await findRunCard("Scheduled dashboard")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /plain dashboard/i })).not.toBeInTheDocument();
+  });
+
   it("renders recurring schedule detail and enables or disables schedules from the drawer", async () => {
     const schedule = {
       enabled: false,
@@ -5091,6 +5163,9 @@ describe("web app", () => {
       name: "Collapse failure states",
     });
     const showArchived = screen.getByRole("checkbox", { name: "Show archived runs" });
+    const showScheduledOnly = screen.getByRole("checkbox", {
+      name: "Show scheduled runs only",
+    });
     const showPinnedOnly = screen.getByRole("checkbox", { name: "Show pinned runs only" });
     const sortByRecentUpdates = screen.getByRole("checkbox", { name: "Sort by recent updates" });
     const visibleFocusIndicators = screen.getByRole("checkbox", {
@@ -5101,6 +5176,7 @@ describe("web app", () => {
     expect(screen.queryByRole("checkbox", { name: "Hide empty columns" })).not.toBeInTheDocument();
     expect(collapseFailureStates).not.toBeChecked();
     expect(showArchived).toBeChecked();
+    expect(showScheduledOnly).not.toBeChecked();
     expect(showPinnedOnly).not.toBeChecked();
     expect(sortByRecentUpdates).not.toBeChecked();
     expect(visibleFocusIndicators).not.toBeChecked();
@@ -5117,6 +5193,7 @@ describe("web app", () => {
       collapseFailureStates: false,
       showArchived: true,
       showNotesOnly: false,
+      showScheduledOnly: false,
       showPinnedOnly: false,
       sortByRecentUpdates: true,
       auditNewestFirst: false,
@@ -5443,6 +5520,11 @@ describe("web app", () => {
   });
 
   it("uses Ctrl+Shift shortcuts for board filters without replacing plain selected-run actions", async () => {
+    const schedule = {
+      enabled: true,
+      runAt: "2099-04-25T12:00:00.000Z",
+      recurrence: null,
+    };
     installFetchMock({
       runs: [
         makeRun({
@@ -5457,6 +5539,13 @@ describe("web app", () => {
           assignmentName: "Plain run",
           name: "Plain run",
           notePresent: false,
+        }),
+        makeRun({
+          runId: "run-scheduled",
+          assignmentName: "Scheduled run",
+          name: "Scheduled run",
+          schedule,
+          scheduleState: "future",
         }),
         makeRun({
           runId: "run-archived",
@@ -5488,6 +5577,16 @@ describe("web app", () => {
           },
           note: null,
         }),
+        "run-scheduled": makeDetail({
+          runId: "run-scheduled",
+          assignment: {
+            name: "Scheduled run",
+            sourcePath: "/tmp/scheduled-run-a.md",
+            workspacePath: "/tmp/scheduled-run-b.md",
+          },
+          schedule,
+          scheduleState: "future",
+        }),
         "run-archived": makeDetail({
           runId: "run-archived",
           assignment: {
@@ -5506,6 +5605,20 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Pinned noted"));
+
+    await user.keyboard("{Control>}{Shift>}s{/Shift}{/Control}");
+    expect(screen.getByRole("button", { name: /show scheduled runs only/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(await findRunCard("Scheduled run")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /plain run/i })).not.toBeInTheDocument();
+
+    await user.keyboard("{Control>}{Shift>}s{/Shift}{/Control}");
+    expect(screen.getByRole("button", { name: /show scheduled runs only/i })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
 
     await user.keyboard("{Control>}{Shift>}n{/Shift}{/Control}");
     expect(screen.getByRole("button", { name: /show runs with notes only/i })).toHaveAttribute(
@@ -5620,6 +5733,7 @@ describe("web app", () => {
       collapseFailureStates: true,
       showArchived: true,
       showNotesOnly: false,
+      showScheduledOnly: false,
       showPinnedOnly: false,
       sortByRecentUpdates: false,
       auditNewestFirst: false,
@@ -5661,6 +5775,7 @@ describe("web app", () => {
       collapseFailureStates: true,
       showArchived: true,
       showNotesOnly: false,
+      showScheduledOnly: false,
       showPinnedOnly: false,
       sortByRecentUpdates: false,
       auditNewestFirst: false,

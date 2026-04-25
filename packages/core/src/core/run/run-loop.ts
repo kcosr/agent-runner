@@ -70,10 +70,16 @@ import {
   appendRunRetryingEvent,
   appendRunScheduleAdvancedEvent,
   appendRunScheduleConsumedEvent,
+  appendRunScheduleDisabledEvent,
   appendRunStartedEvent,
   lifecycleRunEventContext,
 } from "./run-events.js";
-import { type ScheduleInput, advanceRecurringSchedule, resolveScheduleInput } from "./schedule.js";
+import {
+  type ScheduleInput,
+  ScheduleValidationError,
+  advanceRecurringSchedule,
+  resolveScheduleInput,
+} from "./schedule.js";
 import { resolveFreshRunMaxRetries } from "./static-input-surface.js";
 import type { RunCompletionStatus, RunCompletionSummary } from "./status.js";
 
@@ -2542,11 +2548,11 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       manifest = latest;
       return null;
     }
-    if (finalTerminal.status === "ready") {
-      manifest = latest;
-      return null;
-    }
-    if (finalTerminal.status !== "success" && !schedule.recurrence.continueOnFailure) {
+    if (
+      finalTerminal.status !== "success" &&
+      finalTerminal.status !== "ready" &&
+      !schedule.recurrence.continueOnFailure
+    ) {
       manifest = latest;
       return null;
     }
@@ -2560,9 +2566,25 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       },
     };
     const scheduleReadyForAdvance = new Date(schedule.runAt).getTime() <= recurrenceNow.getTime();
-    const advanced = scheduleReadyForAdvance
-      ? advanceRecurringSchedule(schedule, recurrenceNow)
-      : { schedule, disabledReason: null };
+    let advanced: ReturnType<typeof advanceRecurringSchedule>;
+    if (scheduleReadyForAdvance) {
+      try {
+        advanced = advanceRecurringSchedule(schedule, recurrenceNow);
+      } catch (error) {
+        if (!(error instanceof ScheduleValidationError)) {
+          throw error;
+        }
+        advanced = {
+          schedule: {
+            ...schedule,
+            enabled: false,
+          },
+          disabledReason: "minimum_interval_violation",
+        };
+      }
+    } else {
+      advanced = { schedule, disabledReason: null };
+    }
     const reason = advanced.disabledReason === null ? undefined : advanced.disabledReason;
 
     if (schedule.recurrence.mode === "clone") {
@@ -2586,7 +2608,16 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
           passive: cloneManifest.backend === "passive",
         }),
       );
-      if (scheduleReadyForAdvance) {
+      if (scheduleReadyForAdvance && advanced.disabledReason) {
+        emitAuditEnvelope(
+          appendRunScheduleDisabledEvent({
+            manifest: cloneManifest,
+            context: lifecycleContext,
+            schedule: advanced.schedule,
+            reason,
+          }),
+        );
+      } else if (scheduleReadyForAdvance) {
         emitAuditEnvelope(
           appendRunScheduleAdvancedEvent({
             manifest: cloneManifest,
@@ -2616,15 +2647,26 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     latest.exitCode = null;
     latest.endedAt = null;
     writeManifest(workspaceDir, latest);
-    emitAuditEnvelope(
-      appendRunScheduleAdvancedEvent({
-        manifest: latest,
-        context: lifecycleContext,
-        previousSchedule,
-        schedule: advanced.schedule,
-        reason,
-      }),
-    );
+    if (scheduleReadyForAdvance && advanced.disabledReason) {
+      emitAuditEnvelope(
+        appendRunScheduleDisabledEvent({
+          manifest: latest,
+          context: lifecycleContext,
+          schedule: advanced.schedule,
+          reason,
+        }),
+      );
+    } else if (scheduleReadyForAdvance) {
+      emitAuditEnvelope(
+        appendRunScheduleAdvancedEvent({
+          manifest: latest,
+          context: lifecycleContext,
+          previousSchedule,
+          schedule: advanced.schedule,
+          reason,
+        }),
+      );
+    }
     manifest = latest;
     return { manifest: latest, promoted: true };
   });

@@ -41,6 +41,12 @@ const SHORTCUT_SECTIONS: readonly ShortcutSection[] = [
         title: "Toggle Filters",
       },
       {
+        description: "Toggle the board filter that keeps only scheduled runs visible.",
+        keys: ["Ctrl", "Shift", "S"],
+        macKeys: ["Cmd", "Shift", "S"],
+        title: "Toggle scheduled-only filter",
+      },
+      {
         description: "Toggle the board filter that keeps only pinned runs visible.",
         keys: ["Ctrl", "Shift", "P"],
         macKeys: ["Cmd", "Shift", "P"],

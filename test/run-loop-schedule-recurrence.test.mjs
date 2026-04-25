@@ -7,6 +7,7 @@ import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/con
 import { readyRun, setRunSchedule } from "../packages/core/dist/core/commands/service.js";
 import { loadedAgentFromManifest } from "../packages/core/dist/core/config/loaded.js";
 import { resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js";
+import { readRunAuditHistory } from "../packages/core/dist/core/run/run-events.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import {
   completeAllTasksFromPrompt,
@@ -167,6 +168,30 @@ test("run-loop schedules: early recurring manual run leaves runAt untouched and 
   assert.equal(after.exitCode, null);
   assert.equal(after.endedAt, null);
   assert.equal(after.schedule.runAt, before);
+  const audit = readRunAuditHistory({ workspaceDir: init.workspaceDir, runId: init.runId });
+  assert.equal(
+    audit.events.some((event) => event.event.type === "run.schedule_advanced"),
+    false,
+  );
+});
+
+test("run-loop schedules: due recurring ready promotion advances runAt", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const init = await initRun(dir, {
+    schedule: { cron: "*/5 * * * *", timezone: "UTC", mode: "reuse" },
+  });
+  readyInitializedRun(dir, init.runId);
+  setDue(init.workspaceDir);
+  const before = readManifest(init.workspaceDir).schedule.runAt;
+
+  const outcome = await runReady(dir, init.runId, () => {});
+  const after = readManifest(init.workspaceDir);
+
+  assert.equal(outcome.summary.status, "ready");
+  assert.equal(after.status, "ready");
+  assert.notEqual(after.schedule.runAt, before);
+  assert.ok(new Date(after.schedule.runAt).getTime() > new Date(before).getTime());
 });
 
 test("run-loop schedules: future clone recurrence moves schedule to clone", async () => {

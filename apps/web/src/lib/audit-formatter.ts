@@ -424,6 +424,16 @@ export function formatAuditEvent(
           text(")."),
         ],
       };
+    case "run.schedule_failed":
+      return {
+        message: [
+          text("Schedule failed for "),
+          code(scheduleRunAt(fields.schedule)),
+          text(" ("),
+          code(formatScheduleReason(fields.reason)),
+          text(")."),
+        ],
+      };
     case "run.schedule_advanced":
       return {
         message: [

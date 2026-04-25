@@ -474,6 +474,9 @@ export function useRunsDashboardState() {
         if (preferences.showNotesOnly && !run.notePresent) {
           return false;
         }
+        if (preferences.showScheduledOnly && run.schedule === null) {
+          return false;
+        }
         if (preferences.showPinnedOnly && !run.pinned) {
           return false;
         }
@@ -482,6 +485,7 @@ export function useRunsDashboardState() {
     [
       preferences.showArchived,
       preferences.showNotesOnly,
+      preferences.showScheduledOnly,
       preferences.showPinnedOnly,
       preferences.structuredFilters,
       runs,

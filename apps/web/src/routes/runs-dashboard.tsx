@@ -12,6 +12,7 @@ import { RunsBoardPanel } from "./runs-board-panel.js";
 import { useRunsDashboardState } from "./use-runs-dashboard-state.js";
 
 const BOARD_FILTER_PREFERENCE_KEYS = {
+  "ui.toggleScheduledOnly": "showScheduledOnly",
   "ui.togglePinnedOnly": "showPinnedOnly",
   "ui.toggleNotesOnly": "showNotesOnly",
   "ui.toggleArchived": "showArchived",

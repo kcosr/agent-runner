@@ -6,6 +6,7 @@ export interface DashboardPreferences {
   collapseFailureStates: boolean;
   showArchived: boolean;
   showNotesOnly: boolean;
+  showScheduledOnly: boolean;
   showPinnedOnly: boolean;
   sortByRecentUpdates: boolean;
   auditNewestFirst: boolean;
@@ -79,6 +80,7 @@ export const DEFAULT_DASHBOARD_PREFERENCES: DashboardPreferences = {
   collapseFailureStates: true,
   showArchived: false,
   showNotesOnly: false,
+  showScheduledOnly: false,
   showPinnedOnly: false,
   sortByRecentUpdates: false,
   auditNewestFirst: false,
@@ -188,6 +190,10 @@ function parseStoredDashboardPreferences(value: unknown): DashboardPreferences {
       typeof record.showNotesOnly === "boolean"
         ? record.showNotesOnly
         : DEFAULT_DASHBOARD_PREFERENCES.showNotesOnly,
+    showScheduledOnly:
+      typeof record.showScheduledOnly === "boolean"
+        ? record.showScheduledOnly
+        : DEFAULT_DASHBOARD_PREFERENCES.showScheduledOnly,
     showPinnedOnly:
       typeof record.showPinnedOnly === "boolean"
         ? record.showPinnedOnly
