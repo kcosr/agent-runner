@@ -77,6 +77,9 @@
   patch vars and/or the initial message all-or-nothing, and
   `--message-file` now supplies UTF-8 message text for `run`, `init`,
   resume, and reconfigure.
+- Added `scripts/migrate-agent-seeds.mjs` to backfill missing
+  `agent-seed.md` files for initialized runs created before frozen agent
+  snapshots were persisted.
 - Added scheduled runs with one-time and cron recurrence support across
   assignment config, `init` / `run ready`, `run schedule` CLI commands,
   daemon HTTP/RPC APIs, audit events, and web dashboard indicators and

@@ -14,6 +14,7 @@ ${TASK_RUNNER_STATE_DIR}/runs/<repo>/<run-id>/
 ├── run.json               # canonical manifest (schema version 12)
 ├── run-events.jsonl       # append-only audit history with monotonic cursors
 ├── assignment-seed.md     # only when the run started from an assignment file
+├── agent-seed.md          # only when the run started from an agent file
 ├── attempts/
 │   ├── 00.json
 │   └── 01.json
@@ -22,9 +23,12 @@ ${TASK_RUNNER_STATE_DIR}/runs/<repo>/<run-id>/
         └── <file>
 ```
 
-`assignment-seed.md` is an immutable audit snapshot of the assignment at
-run-creation time. It is *not* a work surface — task state is canonical in
-`run.json.finalTasks`. Runs created by current code also include
+`assignment-seed.md` and `agent-seed.md` are immutable audit snapshots of
+the assignment and agent at run-creation time. They are *not* work
+surfaces — task state is canonical in `run.json.finalTasks`. Older
+initialized runs created before agent snapshots were persisted can be
+backfilled with `scripts/migrate-agent-seeds.mjs`. Runs created by
+current code also include
 `run-events.jsonl`; older workspaces may still need
 `scripts/migrate-run-events-v2.mjs` before the audit history has canonical
 cursors. The file records compact lifecycle/task provenance, including

@@ -1380,7 +1380,7 @@ body {
   display: grid;
   grid-template-columns: minmax(9rem, 0.8fr) minmax(12rem, 1.4fr) auto;
   gap: 10px;
-  align-items: end;
+  align-items: start;
   padding: 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -1389,11 +1389,38 @@ body {
 
 .runtime-var-key-field,
 .runtime-var-value-field {
+  display: flex;
+  height: auto;
   min-width: 0;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.runtime-var-key-field input,
+.runtime-var-value-field textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+  outline: none;
+}
+
+.runtime-var-key-field input {
+  height: 34px;
+  padding: 0 10px;
 }
 
 .runtime-var-value-field textarea {
-  min-height: 44px;
+  display: block;
+  min-height: 64px;
+  padding: 8px 10px;
   resize: vertical;
 }
 
