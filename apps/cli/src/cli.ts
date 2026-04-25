@@ -9,6 +9,7 @@ import {
   archive,
   clearBackendSession,
   clearDependencies,
+  clearRunSchedule,
   createTask,
   deleteArchivedRun,
   downloadRunAttachment,
@@ -28,6 +29,8 @@ import {
   renameRun,
   reset,
   resumeRun,
+  setRunSchedule,
+  setRunScheduleEnabled,
   startRun,
   unarchive,
   updateRunBackendSession,
@@ -69,6 +72,7 @@ import {
   type RunEvent,
   VarResolutionError,
 } from "@task-runner/core/core/run/run-loop.js";
+import type { ScheduleInput } from "@task-runner/core/core/run/schedule.js";
 import {
   ResumeError,
   RunCommandError,
@@ -93,6 +97,10 @@ import {
   renderRunList,
   renderRunReady,
   renderRunRemoveDependency,
+  renderRunScheduleCleared,
+  renderRunScheduleDisabled,
+  renderRunScheduleEnabled,
+  renderRunScheduleSet,
   renderRunSetBackendSession,
   renderRunSetName,
   renderRunSetNote,
@@ -126,6 +134,13 @@ Commands:
   run audit <id>          Read the persisted audit history for a run.
   run brief <id>          Print the canonical worker handoff for a run.
   run ready <id|path>     Promote an initialized run into ready state.
+  run schedule <id|path>  Set a run schedule with --at, --delay, or --cron.
+  run schedule enable <id|path>
+                          Enable an existing schedule.
+  run schedule disable <id|path>
+                          Disable an existing schedule.
+  run schedule clear <id|path>
+                          Clear a one-time schedule.
   run reset <id|path>     Restore a non-running run to initialized state.
   run archive <id|path>   Mark a non-running run as archived.
   run unarchive <id|path> Clear a run's archive marker.
@@ -214,6 +229,20 @@ Execution options:
   --max-retries <n>       Override the max number of retries.
   --unrestricted          Bypass the backend's approval prompts.
   --name <name>           Set the persisted run display name.
+  --schedule-at <iso>     (init, run ready) Schedule a one-time run.
+  --schedule-delay <dur>  (init, run ready) Schedule after a duration.
+  --schedule-cron <expr>  (init, run ready) Schedule a recurring run.
+  --schedule-timezone <tz>
+                          Timezone for --schedule-cron.
+  --schedule-mode <m>     Recurrence mode: reuse, reset, or clone.
+  --schedule-continue-on-failure
+                          Continue recurring schedules after failures.
+  --at <iso>              (run schedule) Set one-time schedule timestamp.
+  --delay <duration>      (run schedule) Set schedule relative to now.
+  --cron <expr>           (run schedule) Set recurring cron schedule.
+  --timezone <tz>         (run schedule) Timezone for --cron.
+  --mode <m>              (run schedule) Recurrence mode.
+  --continue-on-failure   (run schedule) Continue recurrence after failures.
   --clear                 (run set-name) Clear the persisted run name.
   --detach                (run only, daemon mode only) Dispatch and exit
                           after the daemon accepts the run.
@@ -362,6 +391,71 @@ function resolvedDaemonOverrides(parsed: ParsedArgs): RunCommandOverrides {
   return {
     ...resolvedOverrides(parsed),
     backendSpecific: synthesizeClientBackendSpecificOverride(),
+  };
+}
+
+function hasScheduleInitFlags(parsed: ParsedArgs): boolean {
+  return (
+    parsed.scheduleAt !== undefined ||
+    parsed.scheduleDelay !== undefined ||
+    parsed.scheduleCron !== undefined ||
+    parsed.scheduleTimezone !== undefined ||
+    parsed.scheduleMode !== undefined ||
+    parsed.scheduleContinueOnFailure !== undefined
+  );
+}
+
+function hasRunScheduleFlags(parsed: ParsedArgs): boolean {
+  return (
+    parsed.at !== undefined ||
+    parsed.delay !== undefined ||
+    parsed.cron !== undefined ||
+    parsed.timezone !== undefined ||
+    parsed.mode !== undefined ||
+    parsed.continueOnFailure !== undefined
+  );
+}
+
+function buildScheduleInputFromInitFlags(parsed: ParsedArgs): ScheduleInput | undefined {
+  if (!hasScheduleInitFlags(parsed)) {
+    return undefined;
+  }
+  return {
+    at: parsed.scheduleAt,
+    delay: parsed.scheduleDelay,
+    cron: parsed.scheduleCron,
+    timezone: parsed.scheduleTimezone,
+    mode: parsed.scheduleMode,
+    continueOnFailure: parsed.scheduleContinueOnFailure,
+  };
+}
+
+function buildScheduleInputFromRunScheduleFlags(parsed: ParsedArgs): ScheduleInput {
+  const sourceCount =
+    Number(parsed.at !== undefined) +
+    Number(parsed.delay !== undefined) +
+    Number(parsed.cron !== undefined);
+  if (sourceCount !== 1) {
+    throw new CommandError("run schedule requires exactly one of --at, --delay, or --cron");
+  }
+  if (parsed.cron === undefined) {
+    if (parsed.timezone !== undefined) {
+      throw new CommandError("--timezone is valid only with --cron");
+    }
+    if (parsed.mode !== undefined) {
+      throw new CommandError("--mode is valid only with --cron");
+    }
+    if (parsed.continueOnFailure !== undefined) {
+      throw new CommandError("--continue-on-failure is valid only with --cron");
+    }
+  }
+  return {
+    at: parsed.at,
+    delay: parsed.delay,
+    cron: parsed.cron,
+    timezone: parsed.timezone,
+    mode: parsed.mode,
+    continueOnFailure: parsed.continueOnFailure,
   };
 }
 
@@ -831,6 +925,8 @@ function unsupportedFlagsForGroupedCommand(
     allowAttachmentName?: boolean;
     allowAttachmentMimeType?: boolean;
     allowAttachmentScope?: boolean;
+    allowScheduleInitFlags?: boolean;
+    allowRunScheduleFlags?: boolean;
   } = {},
 ): string[] {
   const unsupported: string[] = [];
@@ -851,6 +947,25 @@ function unsupportedFlagsForGroupedCommand(
   if (parsed.unrestricted !== undefined) unsupported.push("--unrestricted");
   if (parsed.maxRetries !== undefined) unsupported.push("--max-retries");
   if (parsed.name !== undefined) unsupported.push("--name");
+  if (!opts.allowScheduleInitFlags && parsed.scheduleAt !== undefined)
+    unsupported.push("--schedule-at");
+  if (!opts.allowScheduleInitFlags && parsed.scheduleDelay !== undefined)
+    unsupported.push("--schedule-delay");
+  if (!opts.allowScheduleInitFlags && parsed.scheduleCron !== undefined)
+    unsupported.push("--schedule-cron");
+  if (!opts.allowScheduleInitFlags && parsed.scheduleTimezone !== undefined)
+    unsupported.push("--schedule-timezone");
+  if (!opts.allowScheduleInitFlags && parsed.scheduleMode !== undefined)
+    unsupported.push("--schedule-mode");
+  if (!opts.allowScheduleInitFlags && parsed.scheduleContinueOnFailure !== undefined)
+    unsupported.push("--schedule-continue-on-failure");
+  if (!opts.allowRunScheduleFlags && parsed.at !== undefined) unsupported.push("--at");
+  if (!opts.allowRunScheduleFlags && parsed.delay !== undefined) unsupported.push("--delay");
+  if (!opts.allowRunScheduleFlags && parsed.cron !== undefined) unsupported.push("--cron");
+  if (!opts.allowRunScheduleFlags && parsed.timezone !== undefined) unsupported.push("--timezone");
+  if (!opts.allowRunScheduleFlags && parsed.mode !== undefined) unsupported.push("--mode");
+  if (!opts.allowRunScheduleFlags && parsed.continueOnFailure !== undefined)
+    unsupported.push("--continue-on-failure");
   if (!opts.allowClear && parsed.clear) unsupported.push("--clear");
   if (!opts.allowFields && parsed.fields.length > 0) unsupported.push("--field");
   if (parsed.taskStatus !== undefined) unsupported.push("--status");
@@ -1239,27 +1354,110 @@ async function runReadyCommand(parsed: ParsedArgs, connect?: DaemonConnectContex
     );
     process.exit(3);
   }
-  const unsupported = unsupportedFlagsForGroupedCommand(parsed);
+  const unsupported = unsupportedFlagsForGroupedCommand(parsed, { allowScheduleInitFlags: true });
   if (unsupported.length > 0) {
     process.stderr.write(
-      `task-runner: run ready only supports <id-or-path>, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+      `task-runner: run ready only supports <id-or-path>, --connect, --output-format, and --schedule-* flags (got ${unsupported.join(", ")})\n`,
     );
+    process.exit(3);
+  }
+  const schedule = buildScheduleInputFromInitFlags(parsed);
+
+  try {
+    const result =
+      connect === undefined
+        ? readyRun(target, { schedule })
+        : await withDaemonClient(connect, (client) =>
+            client
+              .call<{ run: ReturnType<typeof readyRun> }>("runs.ready", { target, schedule })
+              .then((r) => r.run),
+          );
+    if (parsed.outputFormat === "json") {
+      writeJson(result);
+    } else {
+      process.stdout.write(renderRunReady(result));
+    }
+    process.exit(0);
+  } catch (err) {
+    exitCommandFailure(err, connect?.connectUrl);
+  }
+}
+
+async function runScheduleCommand(
+  parsed: ParsedArgs,
+  connect?: DaemonConnectContext,
+): Promise<never> {
+  const [actionOrRunArg, runArg, extra] = parsed.positionals;
+  const action =
+    actionOrRunArg === "enable" || actionOrRunArg === "disable" || actionOrRunArg === "clear"
+      ? actionOrRunArg
+      : "set";
+  const target = normalizeTarget(action === "set" ? actionOrRunArg : runArg);
+  if (!target) {
+    process.stderr.write("task-runner: run schedule requires <id-or-path>\n");
+    process.exit(3);
+  }
+  if (extra !== undefined) {
+    process.stderr.write(
+      `task-runner: run schedule takes at most two positionals; got extra "${extra}"\n`,
+    );
+    process.exit(3);
+  }
+  const unsupported = unsupportedFlagsForGroupedCommand(parsed, { allowRunScheduleFlags: true });
+  if (unsupported.length > 0) {
+    process.stderr.write(
+      `task-runner: run schedule only supports <id-or-path>, enable|disable|clear, --connect, --output-format, and schedule flags (got ${unsupported.join(", ")})\n`,
+    );
+    process.exit(3);
+  }
+  if (action !== "set" && hasRunScheduleFlags(parsed)) {
+    process.stderr.write(`task-runner: run schedule ${action} does not accept schedule flags\n`);
     process.exit(3);
   }
 
   try {
     const result =
-      connect === undefined
-        ? readyRun(target)
-        : await withDaemonClient(connect, (client) =>
-            client
-              .call<{ run: ReturnType<typeof readyRun> }>("runs.ready", { target })
-              .then((r) => r.run),
-          );
+      action === "set"
+        ? connect === undefined
+          ? setRunSchedule(target, { schedule: buildScheduleInputFromRunScheduleFlags(parsed) })
+          : await withDaemonClient(connect, (client) =>
+              client
+                .call<{ run: ReturnType<typeof setRunSchedule> }>("runs.setSchedule", {
+                  target,
+                  schedule: buildScheduleInputFromRunScheduleFlags(parsed),
+                })
+                .then((r) => r.run),
+            )
+        : action === "clear"
+          ? connect === undefined
+            ? clearRunSchedule(target)
+            : await withDaemonClient(connect, (client) =>
+                client
+                  .call<{ run: ReturnType<typeof clearRunSchedule> }>("runs.clearSchedule", {
+                    target,
+                  })
+                  .then((r) => r.run),
+              )
+          : connect === undefined
+            ? setRunScheduleEnabled(target, { enabled: action === "enable" })
+            : await withDaemonClient(connect, (client) =>
+                client
+                  .call<{ run: ReturnType<typeof setRunScheduleEnabled> }>(
+                    action === "enable" ? "runs.enableSchedule" : "runs.disableSchedule",
+                    { target },
+                  )
+                  .then((r) => r.run),
+              );
     if (parsed.outputFormat === "json") {
-      writeJson({ runId: result.runId, status: result.status });
+      writeJson(result);
+    } else if (action === "set") {
+      process.stdout.write(renderRunScheduleSet(result));
+    } else if (action === "clear") {
+      process.stdout.write(renderRunScheduleCleared(result));
+    } else if (action === "enable") {
+      process.stdout.write(renderRunScheduleEnabled(result));
     } else {
-      process.stdout.write(renderRunReady(result));
+      process.stdout.write(renderRunScheduleDisabled(result));
     }
     process.exit(0);
   } catch (err) {
@@ -1935,6 +2133,12 @@ async function runExecuteCommandEmbedded(parsed: ParsedArgs): Promise<never> {
     if (isInitCommand && parsed.resumeRun !== undefined) {
       throw new RunCommandError("init cannot be combined with --resume-run");
     }
+    if (!isInitCommand && hasScheduleInitFlags(parsed)) {
+      throw new RunCommandError("--schedule-* flags are only valid with init and run ready");
+    }
+    if (hasRunScheduleFlags(parsed)) {
+      throw new RunCommandError("--at, --delay, and --cron are only valid with run schedule");
+    }
     if (isInitCommand) {
       const run = await initRun({
         runId: normalizeTarget(parsed.runId) ?? parsed.runId,
@@ -2022,6 +2226,12 @@ async function runExecuteCommandDaemon(
     }
     if (isInitCommand && parsed.resumeRun !== undefined) {
       throw new RunCommandError("init cannot be combined with --resume-run");
+    }
+    if (!isInitCommand && hasScheduleInitFlags(parsed)) {
+      throw new RunCommandError("--schedule-* flags are only valid with init and run ready");
+    }
+    if (hasRunScheduleFlags(parsed)) {
+      throw new RunCommandError("--at, --delay, and --cron are only valid with run schedule");
     }
     if (isInitCommand) {
       const result = await client.call<{ run: ReturnType<typeof getRun> }>("runs.init", {
@@ -2256,6 +2466,9 @@ async function main(): Promise<void> {
     }
     if (parsed.subcommand === "ready") {
       await runReadyCommand(parsed, daemonConnect);
+    }
+    if (parsed.subcommand === "schedule") {
+      await runScheduleCommand(parsed, daemonConnect);
     }
     if (parsed.subcommand === "archive") {
       await runArchiveToggleCommand(parsed, daemonConnect, "archive");

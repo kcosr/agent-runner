@@ -136,6 +136,44 @@ function markRunSuccessful(workspaceDir) {
   });
 }
 
+function markRunReady(workspaceDir) {
+  patchManifest(workspaceDir, (manifest) => {
+    manifest.status = "ready";
+    manifest.endedAt = null;
+    manifest.exitCode = null;
+  });
+}
+
+function setManifestSchedule(workspaceDir, schedule) {
+  patchManifest(workspaceDir, (manifest) => {
+    manifest.schedule = schedule;
+  });
+}
+
+function oneTimeSchedule(runAt) {
+  return {
+    enabled: true,
+    runAt: runAt.toISOString(),
+    recurrence: null,
+  };
+}
+
+function recurringSchedule(runAt, expression = "* * * * *") {
+  return {
+    enabled: true,
+    runAt: runAt.toISOString(),
+    recurrence: {
+      schedule: {
+        type: "cron",
+        expression,
+        timezone: "UTC",
+      },
+      mode: "reuse",
+      continueOnFailure: false,
+    },
+  };
+}
+
 function emitRunStarted(emitEvent, runId, cwd) {
   emitEvent({
     type: "run_started",
@@ -750,6 +788,22 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
         changed: true,
       });
 
+      const scheduled = await client.call("runs.setSchedule", {
+        target: init.runId,
+        schedule: { at: "2026-04-25T12:00:00.000Z" },
+      });
+      assert.equal(scheduled.run.schedule.runAt, "2026-04-25T12:00:00.000Z");
+
+      const disabledSchedule = await client.call("runs.disableSchedule", {
+        target: init.runId,
+      });
+      assert.equal(disabledSchedule.run.schedule.enabled, false);
+
+      const clearedSchedule = await client.call("runs.clearSchedule", {
+        target: init.runId,
+      });
+      assert.equal(clearedSchedule.run.schedule, null);
+
       const tasks = await client.call("tasks.list", { target: init.runId });
       assert.equal(tasks.tasks.length, 1);
       assert.equal(tasks.tasks[0].id, "t1");
@@ -919,6 +973,36 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
       });
       assert.equal(detail.body.run.capabilities.canAbort, false);
       assert.equal(detail.body.run.capabilities.abortReason, "not_active_in_daemon");
+
+      const scheduled = await httpJson(httpBaseUrl, `/api/runs/${init.runId}/schedule`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ at: "2026-04-25T12:00:00.000Z" }),
+      });
+      assert.equal(scheduled.status, 200);
+      assert.equal(scheduled.body.run.schedule.runAt, "2026-04-25T12:00:00.000Z");
+
+      const disabledSchedule = await httpJson(
+        httpBaseUrl,
+        `/api/runs/${init.runId}/schedule/disable`,
+        { method: "POST" },
+      );
+      assert.equal(disabledSchedule.status, 200);
+      assert.equal(disabledSchedule.body.run.schedule.enabled, false);
+
+      const badSchedule = await httpJson(httpBaseUrl, `/api/runs/${init.runId}/schedule`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ at: "2026-04-25T12:00:00.000Z", extra: true }),
+      });
+      assert.equal(badSchedule.status, 400);
+      assert.match(badSchedule.body.error.message, /request body\.schedule\.extra/);
+
+      const clearedSchedule = await httpJson(httpBaseUrl, `/api/runs/${init.runId}/schedule`, {
+        method: "DELETE",
+      });
+      assert.equal(clearedSchedule.status, 200);
+      assert.equal(clearedSchedule.body.run.schedule, null);
 
       const childDetail = await httpJson(httpBaseUrl, `/api/runs/${child.runId}`);
       assert.equal(childDetail.status, 200);
@@ -2784,6 +2868,71 @@ test("daemon suppresses duplicate dependency auto-start attempts while one is al
   });
 });
 
+test("daemon scheduler treats pending dependency auto-starts as already active", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const source = await initRun(dir);
+  const dependent = await initRun(dir);
+  markRunSuccessful(source.workspaceDir);
+  runCli(["run", "add-dep", dependent.runId, source.runId], { cwd: dir });
+  runCli(["run", "ready", dependent.runId], { cwd: dir });
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  let autoStartCalls = 0;
+  let releaseAutoStart;
+  let resolveFirstCall;
+  const firstCallSeen = new Promise((resolve) => {
+    resolveFirstCall = resolve;
+  });
+
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl, {
+      readyRun(target) {
+        return getRunDetail(target);
+      },
+      async resumeRun({ target, emitEvent }) {
+        autoStartCalls += 1;
+        assert.equal(target, dependent.runId);
+        resolveFirstCall();
+        await new Promise((resolve) => {
+          releaseAutoStart = resolve;
+        });
+        markRunRunning(dependent.workspaceDir);
+        emitRunStarted(emitEvent, target, dir);
+        return { runId: target };
+      },
+    });
+    const client = await DaemonClient.connect(listenUrl);
+    try {
+      await firstCallSeen;
+      setManifestSchedule(dependent.workspaceDir, oneTimeSchedule(new Date(Date.now() - 1_000)));
+      await client.call("runs.setNote", {
+        target: dependent.runId,
+        note: "trigger schedule scan while dependency auto-start is pending",
+      });
+      await waitForValue(
+        () => (readManifest(dependent.workspaceDir).schedule === null ? true : null),
+        "pending dependency duplicate schedule to clear",
+      );
+      assert.equal(autoStartCalls, 1);
+      const audit = await httpJson(httpBaseUrl, `/api/runs/${dependent.runId}/audit`);
+      const missed = audit.body.history.events.find(
+        (event) => event.event.type === "run.schedule_missed",
+      );
+      assert.equal(missed?.event.fields.reason, "already_active");
+      releaseAutoStart();
+      const running = await waitForRunStatus(httpBaseUrl, dependent.runId, "running");
+      assert.equal(running.runId, dependent.runId);
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+});
+
 test("daemon clears pending dependency auto-start markers after resume failures", async () => {
   const dir = tempDir();
   writeAgent(dir, "daemon-agent", AGENT);
@@ -2854,6 +3003,289 @@ test("daemon clears pending dependency auto-start markers after resume failures"
       await retryServer.close();
     }
   });
+});
+
+test("daemon scheduler marks startup-overdue one-time schedules missed without starting", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const run = await initRun(dir);
+  markRunReady(run.workspaceDir);
+  setManifestSchedule(run.workspaceDir, oneTimeSchedule(new Date(Date.now() - 60_000)));
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  let resumeCalls = 0;
+
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl, {
+      async resumeRun() {
+        resumeCalls += 1;
+        throw new Error("startup-overdue schedule should not start");
+      },
+    });
+    try {
+      await waitForValue(
+        () => (readManifest(run.workspaceDir).schedule === null ? true : null),
+        "startup-overdue schedule to clear",
+      );
+      const detail = await httpJson(httpBaseUrl, `/api/runs/${run.runId}`);
+      assert.equal(detail.status, 200);
+      assert.equal(detail.body.run.status, "ready");
+      assert.equal(detail.body.run.schedule, null);
+      const audit = await httpJson(httpBaseUrl, `/api/runs/${run.runId}/audit`);
+      const missed = audit.body.history.events.find(
+        (event) => event.event.type === "run.schedule_missed",
+      );
+      assert.equal(missed?.event.fields.reason, "overdue_on_startup");
+      assert.equal(resumeCalls, 0);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+test("daemon scheduler rebuilds future timers after schedule mutations and starts due runs", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const run = await initRun(dir);
+  markRunReady(run.workspaceDir);
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  let resumeCalls = 0;
+  let resolveStarted;
+  const started = new Promise((resolve) => {
+    resolveStarted = resolve;
+  });
+
+  await withEnv(
+    {
+      ...sharedRuntimeEnv(dir),
+      TASK_RUNNER_MIN_SCHEDULE_DELAY_SEC: "1",
+    },
+    async () => {
+      const server = await serveDaemon(listenUrl, {
+        async resumeRun({ target, emitEvent }) {
+          resumeCalls += 1;
+          assert.equal(target, run.runId);
+          patchManifest(run.workspaceDir, (manifest) => {
+            manifest.status = "running";
+            manifest.schedule = null;
+          });
+          emitRunStarted(emitEvent, target, dir);
+          resolveStarted();
+          return { runId: target };
+        },
+      });
+      const client = await DaemonClient.connect(listenUrl);
+      try {
+        const scheduled = await client.call("runs.setSchedule", {
+          target: run.runId,
+          schedule: { delay: "1s" },
+        });
+        assert.equal(scheduled.run.scheduleState, "future");
+
+        await started;
+        const running = await waitForRunStatus(httpBaseUrl, run.runId, "running");
+        assert.equal(running.schedule, null);
+        assert.equal(resumeCalls, 1);
+        const audit = await httpJson(httpBaseUrl, `/api/runs/${run.runId}/audit`);
+        assert.ok(
+          audit.body.history.events.some((event) => event.event.type === "run.schedule_due"),
+        );
+      } finally {
+        await client.close();
+        await server.close();
+      }
+    },
+  );
+});
+
+test("daemon scheduler misses due one-time schedules that are not runnable", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const blocker = await initRun(dir);
+  const dependencyBlocked = await initRun(dir);
+  const archived = await initRun(dir);
+  const notReady = await initRun(dir);
+  const runAt = new Date(Date.now() + 1_000);
+
+  markRunReady(dependencyBlocked.workspaceDir);
+  markRunReady(archived.workspaceDir);
+  patchManifest(dependencyBlocked.workspaceDir, (manifest) => {
+    manifest.dependencyRunIds = [blocker.runId];
+    manifest.schedule = oneTimeSchedule(runAt);
+  });
+  patchManifest(archived.workspaceDir, (manifest) => {
+    manifest.archivedAt = new Date().toISOString();
+    manifest.schedule = oneTimeSchedule(runAt);
+  });
+  setManifestSchedule(notReady.workspaceDir, oneTimeSchedule(runAt));
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl, {
+      async resumeRun() {
+        throw new Error("non-runnable schedules should not start");
+      },
+    });
+    try {
+      await waitForValue(
+        () =>
+          [dependencyBlocked, archived, notReady].every(
+            (candidate) => readManifest(candidate.workspaceDir).schedule === null,
+          )
+            ? true
+            : null,
+        { toString: () => "non-runnable schedules to clear" },
+      );
+
+      const expected = new Map([
+        [dependencyBlocked.runId, "dependencies_unmet"],
+        [archived.runId, "archived"],
+        [notReady.runId, "not_ready"],
+      ]);
+      for (const [runId, reason] of expected) {
+        const audit = await httpJson(httpBaseUrl, `/api/runs/${runId}/audit`);
+        const missed = audit.body.history.events.find(
+          (event) => event.event.type === "run.schedule_missed",
+        );
+        assert.equal(missed?.event.fields.reason, reason);
+      }
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+test("daemon scheduler suppresses duplicate starts while a scheduled run is active", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const run = await initRun(dir);
+  markRunReady(run.workspaceDir);
+  setManifestSchedule(run.workspaceDir, oneTimeSchedule(new Date(Date.now() + 80)));
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  let resumeCalls = 0;
+  let resolveStarted;
+  let releaseRun;
+  const started = new Promise((resolve) => {
+    resolveStarted = resolve;
+  });
+  const release = new Promise((resolve) => {
+    releaseRun = resolve;
+  });
+
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl, {
+      async resumeRun({ target, emitEvent }) {
+        resumeCalls += 1;
+        assert.equal(target, run.runId);
+        markRunRunning(run.workspaceDir);
+        emitRunStarted(emitEvent, target, dir);
+        resolveStarted();
+        await release;
+        return { runId: target };
+      },
+    });
+    const client = await DaemonClient.connect(listenUrl);
+    try {
+      await started;
+      setManifestSchedule(run.workspaceDir, oneTimeSchedule(new Date(Date.now() - 1_000)));
+      await client.call("runs.setNote", { target: run.runId, note: "trigger schedule scan" });
+      await waitForValue(
+        () => (readManifest(run.workspaceDir).schedule === null ? true : null),
+        "active duplicate schedule to clear",
+      );
+      assert.equal(resumeCalls, 1);
+      const audit = await httpJson(httpBaseUrl, `/api/runs/${run.runId}/audit`);
+      const missed = audit.body.history.events.find(
+        (event) => event.event.type === "run.schedule_missed",
+      );
+      assert.equal(missed?.event.fields.reason, "already_active");
+    } finally {
+      releaseRun();
+      await client.close();
+      await server.close();
+    }
+  });
+});
+
+test("daemon scheduler advances missed recurring schedules and disables invalid recurrence intervals", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const hourly = await initRun(dir);
+  const tooFrequent = await initRun(dir);
+  markRunReady(hourly.workspaceDir);
+  markRunReady(tooFrequent.workspaceDir);
+  const originalHourlySchedule = recurringSchedule(new Date(Date.now() - 3_600_000), "0 * * * *");
+  setManifestSchedule(hourly.workspaceDir, originalHourlySchedule);
+  setManifestSchedule(tooFrequent.workspaceDir, recurringSchedule(new Date(Date.now() - 60_000)));
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+
+  await withEnv(
+    {
+      ...sharedRuntimeEnv(dir),
+      TASK_RUNNER_MIN_RECURRENCE_INTERVAL_SEC: "120",
+    },
+    async () => {
+      const server = await serveDaemon(listenUrl, {
+        async resumeRun() {
+          throw new Error("startup-overdue recurring schedule should not start");
+        },
+      });
+      try {
+        await waitForValue(() => {
+          const hourlySchedule = readManifest(hourly.workspaceDir).schedule;
+          const frequentSchedule = readManifest(tooFrequent.workspaceDir).schedule;
+          return hourlySchedule?.runAt !== originalHourlySchedule.runAt &&
+            frequentSchedule?.enabled === false
+            ? true
+            : null;
+        }, "recurring schedules to advance or disable");
+
+        const hourlyManifest = readManifest(hourly.workspaceDir);
+        const frequentManifest = readManifest(tooFrequent.workspaceDir);
+        assert.equal(hourlyManifest.schedule.enabled, true);
+        assert.ok(new Date(hourlyManifest.schedule.runAt).getTime() > Date.now());
+        assert.equal(frequentManifest.schedule.enabled, false);
+
+        const hourlyAudit = await httpJson(httpBaseUrl, `/api/runs/${hourly.runId}/audit`);
+        assert.ok(
+          hourlyAudit.body.history.events.some(
+            (event) =>
+              event.event.type === "run.schedule_advanced" &&
+              event.event.fields.reason === "overdue_on_startup",
+          ),
+        );
+        const frequentAudit = await httpJson(httpBaseUrl, `/api/runs/${tooFrequent.runId}/audit`);
+        assert.ok(
+          frequentAudit.body.history.events.some(
+            (event) =>
+              event.event.type === "run.schedule_disabled" &&
+              event.event.fields.reason === "minimum_interval_violation",
+          ),
+        );
+      } finally {
+        await server.close();
+      }
+    },
+  );
 });
 
 test("daemon note and pin mutations publish summary and detail updates", async () => {

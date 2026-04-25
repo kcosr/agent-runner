@@ -1,5 +1,5 @@
 import { copyFileSync, mkdirSync, readFileSync, rmSync } from "node:fs";
-import { isAbsolute, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { TaskState, TaskStatus } from "../../assignment/model.js";
 import { resolveBackend } from "../../backends/registry.js";
 import {
@@ -33,9 +33,11 @@ import {
   ResumeError,
   type RunExecution,
   type RunManifest,
+  type RunSchedule,
   type RuntimeVarSourceRecord,
   type SessionRecord,
   type TaskSnapshot,
+  applyRunResetSeed,
   buildRunResetSeed,
   cloneRuntimeVarSources,
   findRunManifestsById,
@@ -66,9 +68,12 @@ import {
   appendRunFinishedEvent,
   appendRunResumeRejectedEvent,
   appendRunRetryingEvent,
+  appendRunScheduleAdvancedEvent,
+  appendRunScheduleConsumedEvent,
   appendRunStartedEvent,
   lifecycleRunEventContext,
 } from "./run-events.js";
+import { type ScheduleInput, advanceRecurringSchedule, resolveScheduleInput } from "./schedule.js";
 import { resolveFreshRunMaxRetries } from "./static-input-surface.js";
 import type { RunCompletionStatus, RunCompletionSummary } from "./status.js";
 
@@ -95,6 +100,7 @@ export interface RunOverrides {
   unrestricted?: boolean;
   maxRetries?: number;
   addedTasks?: string[];
+  schedule?: ScheduleInput;
 }
 
 export interface RunOptions {
@@ -270,6 +276,7 @@ function checkLockedFields(
     ["unrestricted", overrides?.unrestricted, agentConfig.unrestricted],
     ["maxRetries", overrides?.maxRetries, assignmentConfig?.maxRetries],
     ["tasks", addedTasks.length > 0 ? addedTasks : undefined, assignmentConfig?.tasks ?? []],
+    ["schedule", overrides?.schedule, assignmentConfig?.schedule],
     [
       "instructions",
       assignmentInstructions.trim().length > 0 ? assignmentInstructions : undefined,
@@ -311,6 +318,7 @@ function checkLockedFieldsFromManifest(
     // so the error message subtracts back to the authored value.
     ["maxRetries", overrides?.maxRetries, manifest.maxAttemptsPerSession - 1],
     ["tasks", addedTasks.length > 0 ? addedTasks : undefined, undefined],
+    ["schedule", overrides?.schedule, manifest.schedule],
   ];
 
   for (const [key, value, currentValue] of overrideEntries) {
@@ -389,6 +397,7 @@ function refreshMutableManifestMetadata(manifest: RunManifest): void {
   manifest.name = latest.name;
   manifest.note = latest.note;
   manifest.pinned = latest.pinned;
+  manifest.schedule = latest.schedule;
   manifest.resetSeed.name = latest.resetSeed.name;
   manifest.resetSeed.note = latest.resetSeed.note;
   manifest.resetSeed.pinned = latest.resetSeed.pinned;
@@ -402,6 +411,152 @@ function tryRefreshMutableManifestMetadata(manifest: RunManifest): void {
     // Mutable metadata refresh is best-effort; keep the in-memory fields if
     // the manifest cannot be re-read transiently.
   }
+}
+
+function cloneRunSchedule(schedule: RunSchedule | null): RunSchedule | null {
+  if (schedule === null) return null;
+  return {
+    enabled: schedule.enabled,
+    runAt: schedule.runAt,
+    recurrence:
+      schedule.recurrence === null
+        ? null
+        : {
+            schedule: { ...schedule.recurrence.schedule },
+            mode: schedule.recurrence.mode,
+            continueOnFailure: schedule.recurrence.continueOnFailure,
+          },
+  };
+}
+
+function cloneTaskSnapshotRecord(
+  tasks: Record<string, TaskSnapshot>,
+): Record<string, TaskSnapshot> {
+  return Object.fromEntries(Object.entries(tasks).map(([taskId, task]) => [taskId, { ...task }]));
+}
+
+function consumeOneTimeScheduleForManualStart(
+  manifest: RunManifest,
+  lifecycleContext: ReturnType<typeof lifecycleRunEventContext>,
+  emitAuditEnvelope: (envelope: RunAuditEnvelope) => void,
+): void {
+  const schedule = manifest.schedule;
+  if (schedule === null || schedule.recurrence !== null) {
+    return;
+  }
+  manifest.schedule = null;
+  emitAuditEnvelope(
+    appendRunScheduleConsumedEvent({
+      manifest,
+      context: lifecycleContext,
+      schedule,
+    }),
+  );
+}
+
+function copySeedAttachments(sourceManifest: RunManifest, targetManifest: RunManifest): void {
+  for (const attachment of targetManifest.attachments) {
+    const sourcePath = join(sourceManifest.workspaceDir, attachment.relativePath);
+    const targetPath = join(targetManifest.workspaceDir, attachment.relativePath);
+    mkdirSync(dirname(targetPath), { recursive: true });
+    copyFileSync(sourcePath, targetPath);
+  }
+}
+
+function copyFrozenAssignmentSeed(sourceManifest: RunManifest, targetAssignmentPath: string): void {
+  if (sourceManifest.assignment === null) {
+    return;
+  }
+  mkdirSync(dirname(targetAssignmentPath), { recursive: true });
+  copyFileSync(sourceManifest.assignmentPath, targetAssignmentPath);
+}
+
+function buildRecurringCloneManifest(params: {
+  sourceManifest: RunManifest;
+  schedule: RunSchedule;
+  now: string;
+}): RunManifest {
+  const { sourceManifest, schedule, now } = params;
+  const seed = sourceManifest.resetSeed;
+  const runId = shortId();
+  const workspaceDir = resolveRunWorkspaceDirForRepo(sourceManifest.repo, runId);
+  const assignmentPath = workspaceAssignmentPath(workspaceDir);
+  const finalTasks = cloneTaskSnapshotRecord(seed.finalTasks);
+  return {
+    schemaVersion: 12,
+    runId,
+    repo: sourceManifest.repo,
+    agent: {
+      name: sourceManifest.agent.name,
+      sourcePath: sourceManifest.agent.sourcePath,
+      instructions: sourceManifest.agent.instructions,
+    },
+    assignment:
+      sourceManifest.assignment === null
+        ? null
+        : {
+            ...sourceManifest.assignment,
+            workspacePath: assignmentPath,
+          },
+    backend: seed.backend,
+    model: seed.model,
+    effort: seed.effort,
+    backendSpecific: cloneBackendSpecificConfig(seed.backendSpecific),
+    launcher: cloneResolvedLauncherConfig(seed.launcher),
+    message: seed.message,
+    name: seed.name,
+    note: seed.note,
+    pinned: seed.pinned,
+    unrestricted: seed.unrestricted,
+    cwd: seed.cwd,
+    lockedFields: [...seed.lockedFields],
+    timeoutSec: seed.timeoutSec,
+    assignmentPath,
+    workspaceDir,
+    startedAt: now,
+    endedAt: null,
+    archivedAt: null,
+    status: "ready",
+    dependencyRunIds: [...seed.dependencyRunIds],
+    parentRunId: seed.parentRunId,
+    schedule: cloneRunSchedule(schedule),
+    exitCode: 0,
+    totalAttemptCount: 0,
+    maxAttemptsPerSession: seed.maxAttemptsPerSession,
+    tasksCompleted: Object.values(finalTasks).filter((task) => task.status === "completed").length,
+    tasksTotal: Object.keys(finalTasks).length,
+    backendSessionId: null,
+    runtimeVars: { ...seed.runtimeVars },
+    runtimeVarSources: cloneRuntimeVarSources(seed.runtimeVarSources),
+    execution: sourceManifest.execution,
+    brief: seed.brief,
+    resolvedHooks: sourceManifest.resolvedHooks.map((descriptor) => ({
+      ...descriptor,
+      source: { ...descriptor.source },
+      when: descriptor.when ? { ...descriptor.when } : null,
+    })),
+    hookState: { ...seed.hookState },
+    hookAudits: [],
+    callerInstructions: sourceManifest.callerInstructions,
+    resetSeed: buildRunResetSeed({
+      ...seed,
+      backendSpecific: cloneBackendSpecificConfig(seed.backendSpecific),
+      launcher: cloneResolvedLauncherConfig(seed.launcher),
+      lockedFields: [...seed.lockedFields],
+      dependencyRunIds: [...seed.dependencyRunIds],
+      parentRunId: seed.parentRunId,
+      runtimeVars: { ...seed.runtimeVars },
+      runtimeVarSources: cloneRuntimeVarSources(seed.runtimeVarSources),
+      hookState: { ...seed.hookState },
+      attachments: seed.attachments.map((attachment) => ({ ...attachment })),
+      finalTasks,
+    }),
+    attachments: seed.attachments.map((attachment) => ({ ...attachment })),
+    finalTasks,
+    totalSessionCount: 0,
+    sessions: [],
+    attemptRecords: [],
+  };
 }
 
 function resolveFreshRunCwd(
@@ -1093,6 +1248,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       if (overrides?.maxRetries !== undefined) forbidden.push("--max-retries");
       if (overrides?.unrestricted !== undefined) forbidden.push("--unrestricted");
       if (overrides?.name !== undefined) forbidden.push("--name");
+      if (overrides?.schedule !== undefined) forbidden.push("--schedule-*");
       if (forbidden.length > 0) {
         throw new ResumeError(
           `starting a ready run does not accept ${forbidden.join(", ")} — init froze these at creation. If you need different values, reinitialize the run first.`,
@@ -1240,6 +1396,13 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     isResume || priorReady
       ? (resume?.manifest.resolvedHooks ?? [])
       : resolveAssignmentHooks(loadedAssignment, injectedVars);
+  const initialSchedule =
+    !isResume && !priorReady
+      ? (() => {
+          const scheduleInput = overrides?.schedule ?? assignmentConfig?.schedule;
+          return scheduleInput === undefined ? null : resolveScheduleInput(scheduleInput);
+        })()
+      : null;
 
   const priorHadTasks = Boolean(
     isResume && resume && Object.keys(resume.manifest.finalTasks).length > 0,
@@ -1303,7 +1466,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       ]),
     );
     const prepareManifest: RunManifest = {
-      schemaVersion: 11,
+      schemaVersion: 12,
       runId,
       repo,
       agent: {
@@ -1340,6 +1503,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       status: isInitialize ? "initialized" : "running",
       dependencyRunIds: [],
       parentRunId,
+      schedule: initialSchedule,
       exitCode: null,
       totalAttemptCount: 0,
       maxAttemptsPerSession,
@@ -1555,7 +1719,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     const frozenCallerInstructions =
       rawCallerInstructions.length > 0 ? interpolate(rawCallerInstructions, injectedVars) : null;
     manifest = {
-      schemaVersion: 11,
+      schemaVersion: 12,
       runId,
       repo,
       agent: {
@@ -1596,6 +1760,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       status: isInitialize ? "initialized" : "running",
       dependencyRunIds: [],
       parentRunId,
+      schedule: initialSchedule,
       exitCode: null,
       totalAttemptCount: 0,
       maxAttemptsPerSession,
@@ -1785,6 +1950,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         };
       }
 
+      consumeOneTimeScheduleForManualStart(manifest, lifecycleContext, emitAuditEnvelope);
       syncManifestTaskState(manifest, tasks);
       refreshManifestAttachments(manifest);
       sessionRecord = {
@@ -1816,6 +1982,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       );
     });
   } else {
+    consumeOneTimeScheduleForManualStart(manifest, lifecycleContext, emitAuditEnvelope);
     syncManifestTaskState(manifest, tasks);
     sessionRecord = {
       sessionIndex,
@@ -2174,6 +2341,15 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         terminal = { status: "blocked", exitCode: 2 };
         break;
       }
+      if (
+        manifest.schedule !== null &&
+        tasks.size > 0 &&
+        countBy(tasks, (t) => t.status === "completed") < tasks.size &&
+        countBy(tasks, (t) => t.status === "blocked") === 0
+      ) {
+        terminal = { status: "ready", exitCode: 0 };
+        break;
+      }
       if (afterAttemptResult.status === "reinvoke") {
         if (sessionAttempts >= maxAttemptsPerSession) {
           terminal = { status: "exhausted", exitCode: 1 };
@@ -2233,6 +2409,10 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         terminal = { status: "blocked", exitCode: 2 };
         break;
       }
+      if (manifest.schedule !== null) {
+        terminal = { status: "ready", exitCode: 0 };
+        break;
+      }
       if (sessionAttempts >= maxAttemptsPerSession) {
         terminal = { status: "exhausted", exitCode: 1 };
         break;
@@ -2290,6 +2470,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   if (!terminal) {
     terminal = { status: "error", exitCode: 4 };
   }
+  let finalTerminal = terminal;
 
   let orderedTasks: TaskState[] = [];
   let tasksCompleted = 0;
@@ -2301,13 +2482,13 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     tasksCompleted = manifest.tasksCompleted;
     refreshManifestAttachments(manifest);
 
-    sessionRecord.status = terminal.status;
-    sessionRecord.exitCode = terminal.exitCode;
+    sessionRecord.status = finalTerminal.status;
+    sessionRecord.exitCode = finalTerminal.exitCode;
     sessionRecord.endedAt = endedAt;
     sessionRecord.backendSessionIdAtEnd = manifest.backendSessionId;
 
-    manifest.status = terminal.status;
-    manifest.exitCode = terminal.exitCode;
+    manifest.status = finalTerminal.status;
+    manifest.exitCode = finalTerminal.exitCode;
     manifest.endedAt = endedAt;
     tryRefreshMutableManifestMetadata(manifest);
     writeManifest(workspaceDir, manifest);
@@ -2333,8 +2514,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       appendRunFinishedEvent({
         manifest,
         context: lifecycleContext,
-        terminalStatus: terminal.status,
-        exitCode: terminal.exitCode,
+        terminalStatus: finalTerminal.status,
+        exitCode: finalTerminal.exitCode,
         tasksCompleted: manifest.tasksCompleted,
         tasksTotal: manifest.tasksTotal,
         sessionIndex,
@@ -2353,8 +2534,102 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     // afterExit failures are warning-only; preserve the terminal result.
   }
 
+  const recurrenceResult = withTaskStateLock(workspaceDir, () => {
+    const latest = resolveResumeTarget(workspaceDir).manifest;
+    const schedule = latest.schedule;
+    if (schedule === null || schedule.recurrence === null) {
+      manifest = latest;
+      return null;
+    }
+    if (finalTerminal.status === "ready") {
+      manifest = latest;
+      return null;
+    }
+    if (finalTerminal.status !== "success" && !schedule.recurrence.continueOnFailure) {
+      manifest = latest;
+      return null;
+    }
+    const recurrenceNow = new Date();
+    if (new Date(schedule.runAt).getTime() > recurrenceNow.getTime()) {
+      latest.status = "ready";
+      latest.exitCode = 0;
+      latest.endedAt = null;
+      writeManifest(workspaceDir, latest);
+      manifest = latest;
+      return { manifest: latest, promoted: true };
+    }
+
+    const previousSchedule = cloneRunSchedule(schedule);
+    if (previousSchedule === null) {
+      manifest = latest;
+      return null;
+    }
+    const advanced = advanceRecurringSchedule(schedule, recurrenceNow);
+    const reason = advanced.disabledReason === null ? undefined : advanced.disabledReason;
+
+    if (schedule.recurrence.mode === "clone") {
+      const cloneManifest = buildRecurringCloneManifest({
+        sourceManifest: latest,
+        schedule: advanced.schedule,
+        now: new Date().toISOString(),
+      });
+      mkdirSync(cloneManifest.workspaceDir, { recursive: true });
+      copyFrozenAssignmentSeed(latest, cloneManifest.assignmentPath);
+      copySeedAttachments(latest, cloneManifest);
+      writeManifest(cloneManifest.workspaceDir, cloneManifest);
+      emitAuditEnvelope(
+        appendRunCreatedEvent({
+          manifest: cloneManifest,
+          context: lifecycleContext,
+          agentName: cloneManifest.agent.name,
+          assignmentName: cloneManifest.assignment?.name ?? null,
+          passive: cloneManifest.backend === "passive",
+        }),
+      );
+      emitAuditEnvelope(
+        appendRunScheduleAdvancedEvent({
+          manifest: cloneManifest,
+          context: lifecycleContext,
+          previousSchedule,
+          schedule: advanced.schedule,
+          reason,
+        }),
+      );
+      manifest = latest;
+      return { manifest: latest, promoted: false };
+    }
+
+    if (schedule.recurrence.mode === "reset") {
+      applyRunResetSeed(latest);
+    }
+    latest.schedule = advanced.schedule;
+    latest.status = "ready";
+    latest.exitCode = 0;
+    latest.endedAt = null;
+    writeManifest(workspaceDir, latest);
+    emitAuditEnvelope(
+      appendRunScheduleAdvancedEvent({
+        manifest: latest,
+        context: lifecycleContext,
+        previousSchedule,
+        schedule: advanced.schedule,
+        reason,
+      }),
+    );
+    manifest = latest;
+    return { manifest: latest, promoted: true };
+  });
+
+  if (recurrenceResult?.promoted) {
+    manifest = recurrenceResult.manifest;
+    finalTerminal = { status: "ready", exitCode: 0 };
+    tasks = rebuildTasksFromAssignmentAndSnapshot(undefined, manifest.finalTasks, false);
+    orderedTasks = Array.from(tasks.values());
+    tasksCompleted = manifest.tasksCompleted;
+  }
+
   const summary: RunCompletionSummary = {
-    status: terminal.status,
+    status: finalTerminal.status,
     sessionAttemptCount: sessionAttempts,
     maxAttemptsPerSession,
     totalAttemptCount: manifest.totalAttemptCount,
@@ -2373,7 +2648,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
   return {
     summary,
-    exitCode: terminal.exitCode,
+    exitCode: finalTerminal.exitCode,
     attemptTranscripts,
     runId,
     assignmentPath,

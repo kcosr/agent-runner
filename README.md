@@ -4,9 +4,9 @@
 state in a manifest-canonical workspace. It supports embedded CLI
 execution, active backend invocation, passive sidecar operation, a local
 daemon, a browser dashboard, resumable runs, attachments, dependencies,
-launcher prefixes for subprocess backends, a first-class `run brief`
-surface for handing a run to a worker, and `task-runner run audit` for
-reading durable run audit history.
+scheduled runs, launcher prefixes for subprocess backends, a first-class
+`run brief` surface for handing a run to a worker, and `task-runner run
+audit` for reading durable run audit history.
 
 - Task state is canonical in `run.json`.
 - `run-events.jsonl` is a per-run append-only audit trail with monotonic
@@ -149,6 +149,37 @@ task-runner run ready <run-id>
 task-runner run --resume-run <run-id>
 ```
 
+### Schedule a run
+
+```bash
+task-runner init \
+  --agent ./agents/implementer/agent.md \
+  --assignment ./assignments/repo-orientation/assignment.md \
+  --schedule-delay 30m
+
+task-runner run ready <run-id>
+```
+
+Scheduled runs remain in `ready` until their schedule is due. One-time
+schedules use `--schedule-at <iso>` or `--schedule-delay <duration>`;
+recurring schedules use `--schedule-cron <expr>` with optional
+`--schedule-timezone <iana>`, `--schedule-mode reuse|reset|clone`, and
+`--schedule-continue-on-failure`.
+
+Existing runs can be changed with:
+
+```bash
+task-runner run schedule <run-id> --cron "0 9 * * *" --timezone UTC --mode clone
+task-runner run schedule disable <run-id>
+task-runner run schedule enable <run-id>
+task-runner run schedule clear <run-id>
+```
+
+`run schedule clear` is for one-time schedules only; disable recurring
+schedules when they should stop firing. Manual start is still allowed:
+starting a one-time scheduled run consumes the schedule, while starting a
+recurring run before its `runAt` leaves the next recurrence intact.
+
 ### Launcher-backed subprocess runs
 
 ```yaml
@@ -207,9 +238,12 @@ task-runner serve
 same daemon and is not a standalone app. The runs board supports
 exact-match filters for repo, agent, backend, and lineage family, and
 run cards expose a `Family` chip that scopes the board to one run
-family. The dashboard also includes a dedicated full-screen `New Run`
-flow at `/runs/new` that resolves the static run input surface from the
-daemon before enabling `Initialize` and `Start now`.
+family. Scheduled runs show a compact clock indicator on cards, and the
+detail drawer exposes the next run time plus enable/disable controls
+and one-time schedule clearing. The dashboard also includes a dedicated
+full-screen `New Run` flow at `/runs/new` that resolves the static run
+input surface from the daemon before enabling `Initialize` and `Start
+now`.
 
 ### Hooked assignment
 
@@ -326,6 +360,7 @@ root.
 | `list agents\|assignments\|launchers\|runs` | Enumerate definitions and runs |
 | `show agent\|assignment\|launcher` | Render a single definition |
 | `run reset\|archive\|unarchive\|delete` | Lifecycle mutations |
+| `run schedule [set]\|enable\|disable\|clear` | Schedule mutations |
 | `run set-name` | Set/clear persisted display name |
 | `run set-note\|clear-note` | Set/clear persisted human note metadata |
 | `run pin\|unpin` | Set/clear persisted pin metadata |
@@ -398,6 +433,8 @@ The rest are focused topic pages:
 | `TASK_RUNNER_CODEX_WS_URL` | Default websocket transport for fresh Codex runs when no explicit `backendSpecific.codex.transport` was authored |
 | `TASK_RUNNER_CURSOR_BIN` | Cursor CLI binary |
 | `TASK_RUNNER_FULL_ATTEMPT_LOGS` | Keep full stdout in per-attempt log records |
+| `TASK_RUNNER_MIN_SCHEDULE_DELAY_SEC` | Minimum accepted one-time schedule delay (default `300`) |
+| `TASK_RUNNER_MIN_RECURRENCE_INTERVAL_SEC` | Minimum accepted recurring schedule interval, sampled across cron occurrences (default `300`) |
 | `TASK_RUNNER_PI_BIN` | Pi CLI binary |
 | `PI_HOME` | Pi session storage root (default `~/.pi`) |
 | `TASK_RUNNER_MAX_CALL_DEPTH` | Recursion cap (default `1`) |

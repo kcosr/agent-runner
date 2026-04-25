@@ -176,6 +176,8 @@ function makeRun(
       satisfied: 0,
       unsatisfied: 0,
     },
+    schedule: null,
+    scheduleState: "none",
     activeTask: {
       id: "build",
       title: "Build UI",
@@ -325,6 +327,8 @@ function makeDetail(
     attachments: [],
     dependencies: [],
     dependents: [],
+    schedule: null,
+    scheduleState: "none",
     tasks: [
       {
         id: "orient",
@@ -598,6 +602,17 @@ function installFetchMock(
     );
   }
 
+  function syncScheduleState(detail: RunDetail) {
+    detail.scheduleState =
+      detail.schedule === null
+        ? "none"
+        : !detail.schedule.enabled
+          ? "paused"
+          : new Date(detail.schedule.runAt).getTime() <= Date.now()
+            ? "due"
+            : "future";
+  }
+
   function syncRunSummary(runId: string) {
     const detail = state.details[runId];
     if (!detail) {
@@ -628,6 +643,8 @@ function installFetchMock(
             lastSession: detail.lastSession,
             tasksCompleted: detail.tasksCompleted,
             tasksTotal: detail.tasksTotal,
+            schedule: detail.schedule,
+            scheduleState: detail.scheduleState,
             attachmentCount: detail.attachments.length,
             activeTask: detail.activeTask,
             execution: detail.execution,
@@ -792,6 +809,40 @@ function installFetchMock(
         lastCursor: 0,
       };
       return new Response(JSON.stringify({ history }), { status: 200 });
+    }
+
+    const scheduleToggleMatch = /\/api\/runs\/([^/]+)\/schedule\/(enable|disable)$/.exec(url);
+    if (scheduleToggleMatch && init?.method === "POST") {
+      const runId = decodeURIComponent(scheduleToggleMatch[1] ?? "");
+      const action = scheduleToggleMatch[2];
+      const detail = state.details[runId];
+      if (!detail?.schedule) {
+        return new Response(JSON.stringify({ error: { message: "missing", code: "not_found" } }), {
+          status: 404,
+        });
+      }
+      detail.schedule = {
+        ...detail.schedule,
+        enabled: action === "enable",
+      };
+      syncScheduleState(detail);
+      syncRunSummary(runId);
+      return new Response(JSON.stringify({ run: detail }), { status: 200 });
+    }
+
+    const scheduleMatch = /\/api\/runs\/([^/]+)\/schedule$/.exec(url);
+    if (scheduleMatch && init?.method === "DELETE") {
+      const runId = decodeURIComponent(scheduleMatch[1] ?? "");
+      const detail = state.details[runId];
+      if (!detail?.schedule) {
+        return new Response(JSON.stringify({ error: { message: "missing", code: "not_found" } }), {
+          status: 404,
+        });
+      }
+      detail.schedule = null;
+      syncScheduleState(detail);
+      syncRunSummary(runId);
+      return new Response(JSON.stringify({ run: detail }), { status: 200 });
     }
 
     const archiveMatch = /\/api\/runs\/([^/]+)\/(archive|unarchive|reset|ready|resume|abort)$/.exec(
@@ -2765,6 +2816,158 @@ describe("web app", () => {
     expect(within(card).getByLabelText("1 of 3 dependencies satisfied")).toBeInTheDocument();
     expect(within(card).getByText("1/3")).toBeInTheDocument();
     expect(within(card).getByLabelText("2 attachments")).toBeInTheDocument();
+  });
+
+  it("shows compact schedule indicators on run cards", async () => {
+    const futureSchedule = {
+      enabled: true,
+      runAt: "2099-04-25T12:00:00.000Z",
+      recurrence: null,
+    };
+    const pausedSchedule = {
+      ...futureSchedule,
+      enabled: false,
+      runAt: "2099-04-26T12:00:00.000Z",
+    };
+    const dueSchedule = {
+      ...futureSchedule,
+      runAt: "2020-04-25T12:00:00.000Z",
+    };
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "scheduled-future",
+          name: "Future schedule",
+          assignmentName: "Future schedule",
+          schedule: futureSchedule,
+          scheduleState: "future",
+        }),
+        makeRun({
+          runId: "scheduled-paused",
+          name: "Paused schedule",
+          assignmentName: "Paused schedule",
+          schedule: pausedSchedule,
+          scheduleState: "paused",
+        }),
+        makeRun({
+          runId: "scheduled-due",
+          name: "Due schedule",
+          assignmentName: "Due schedule",
+          schedule: dueSchedule,
+          scheduleState: "due",
+        }),
+      ],
+      details: {
+        "scheduled-future": makeDetail({ runId: "scheduled-future", schedule: futureSchedule }),
+        "scheduled-paused": makeDetail({ runId: "scheduled-paused", schedule: pausedSchedule }),
+        "scheduled-due": makeDetail({ runId: "scheduled-due", schedule: dueSchedule }),
+      },
+    });
+
+    await renderApp();
+
+    const futureIndicator = within(await findRunCard("Future schedule")).getByLabelText(
+      "Scheduled run: scheduled",
+    );
+    expect(futureIndicator).toHaveAttribute("title", "Scheduled run: scheduled");
+    expect(
+      within(await findRunCard("Paused schedule")).getByLabelText("Scheduled run: paused"),
+    ).toBeInTheDocument();
+    expect(
+      within(await findRunCard("Due schedule")).getByLabelText("Scheduled run: due"),
+    ).toBeInTheDocument();
+  });
+
+  it("renders recurring schedule detail and enables or disables schedules from the drawer", async () => {
+    const schedule = {
+      enabled: false,
+      runAt: "2099-04-25T12:00:00.000Z",
+      recurrence: {
+        schedule: {
+          type: "cron" as const,
+          expression: "30 9 * * *",
+          timezone: "UTC",
+        },
+        mode: "clone" as const,
+        continueOnFailure: true,
+      },
+    };
+    const detail = makeDetail({
+      schedule,
+      scheduleState: "paused",
+    });
+    const fetchMock = installFetchMock({
+      runs: [makeRun({ schedule, scheduleState: "paused" })],
+      details: { "run-1": detail },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+
+    const scheduleRegion = await screen.findByLabelText("Schedule");
+    expect(within(scheduleRegion).getAllByText("Paused")).toHaveLength(2);
+    expect(within(scheduleRegion).getByText("At 09:30 AM")).toBeInTheDocument();
+    expect(within(scheduleRegion).getByText("30 9 * * *")).toBeInTheDocument();
+    expect(within(scheduleRegion).getByText("UTC")).toBeInTheDocument();
+    expect(within(scheduleRegion).getByText("Clone run")).toBeInTheDocument();
+    expect(within(scheduleRegion).getByText("Yes")).toBeInTheDocument();
+
+    const enableButton = within(scheduleRegion).getByRole("button", { name: "Enable" });
+    enableButton.focus();
+    expect(enableButton).toHaveFocus();
+    await user.click(enableButton);
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/runs/run-1/schedule/enable", {
+        method: "POST",
+        headers: { accept: "application/json" },
+      }),
+    );
+    expect(await within(scheduleRegion).findByRole("button", { name: "Disable" })).toBeEnabled();
+
+    const clearButton = within(scheduleRegion).getByRole("button", { name: "Clear" });
+    expect(clearButton).toBeDisabled();
+    expect(clearButton).toHaveAttribute("aria-disabled", "true");
+    expect(clearButton).toHaveAttribute(
+      "title",
+      "Recurring schedules can be disabled but not cleared",
+    );
+  });
+
+  it("clears one-time schedules from the detail drawer", async () => {
+    const schedule = {
+      enabled: true,
+      runAt: "2099-04-25T12:00:00.000Z",
+      recurrence: null,
+    };
+    const fetchMock = installFetchMock({
+      runs: [makeRun({ schedule, scheduleState: "future" })],
+      details: {
+        "run-1": makeDetail({
+          schedule,
+          scheduleState: "future",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+
+    const scheduleRegion = await screen.findByLabelText("Schedule");
+    expect(within(scheduleRegion).getByText("One-time")).toBeInTheDocument();
+    const clearButton = within(scheduleRegion).getByRole("button", { name: "Clear" });
+    clearButton.focus();
+    expect(clearButton).toHaveFocus();
+    await user.click(clearButton);
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/runs/run-1/schedule", {
+        method: "DELETE",
+        headers: { accept: "application/json" },
+      }),
+    );
+    await waitFor(() => expect(screen.queryByLabelText("Schedule")).not.toBeInTheDocument());
   });
 
   it("falls back to document copy when clipboard access is unavailable", async () => {

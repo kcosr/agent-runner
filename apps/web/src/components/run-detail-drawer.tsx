@@ -4,7 +4,12 @@ import type {
   RunAttachment,
 } from "@task-runner/core/contracts/attachments.js";
 import type { RunAuditEvent } from "@task-runner/core/contracts/events.js";
-import type { RunDetail, RunSessionSummary, RunSummary } from "@task-runner/core/contracts/runs.js";
+import type {
+  RunDetail,
+  RunSchedule,
+  RunSessionSummary,
+  RunSummary,
+} from "@task-runner/core/contracts/runs.js";
 import {
   type ChangeEvent,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -14,7 +19,15 @@ import {
   useState,
 } from "react";
 import { type AuditMessagePart, formatAuditEvent } from "../lib/audit-formatter.js";
-import { formatBytes, formatTimestamp, formatTimestampWithRelative } from "../lib/format.js";
+import {
+  formatBytes,
+  formatScheduleKind,
+  formatScheduleMode,
+  formatScheduleRecurrence,
+  formatScheduleState,
+  formatTimestamp,
+  formatTimestampWithRelative,
+} from "../lib/format.js";
 import type { RunAuditState } from "../lib/run-audit.js";
 import { getRunPrimaryAction } from "../lib/run-primary-action.js";
 import type { RunTimelineState } from "../lib/run-timeline.js";
@@ -29,6 +42,7 @@ import {
   ArchiveIcon,
   CheckIcon,
   ChevronIcon,
+  ClockIcon,
   CloseIcon,
   CollapseIcon,
   CopyIcon,
@@ -200,6 +214,36 @@ function SummaryLongRow({
   );
 }
 
+function ScheduleDetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="schedule-detail-row">
+      <span className="meta-label">{label}</span>
+      <span className="meta-value">{value}</span>
+    </div>
+  );
+}
+
+function scheduleRows(schedule: RunSchedule, state: RunDetail["scheduleState"]): SummaryRow[] {
+  const rows: SummaryRow[] = [
+    ["Status", schedule.enabled ? "Enabled" : "Paused"],
+    ["Schedule state", formatScheduleState(state)],
+    ["Next run", formatTimestampWithRelative(schedule.runAt)],
+    ["Kind", formatScheduleKind(schedule)],
+  ];
+
+  if (schedule.recurrence !== null) {
+    rows.push(
+      ["Recurrence", formatScheduleRecurrence(schedule)],
+      ["Cron", schedule.recurrence.schedule.expression],
+      ["Timezone", schedule.recurrence.schedule.timezone],
+      ["Mode", formatScheduleMode(schedule.recurrence.mode)],
+      ["Continue on failure", schedule.recurrence.continueOnFailure ? "Yes" : "No"],
+    );
+  }
+
+  return rows;
+}
+
 function isScrolledToBottom(element: HTMLElement) {
   return (
     element.scrollHeight - element.scrollTop - element.clientHeight <= TIMELINE_BOTTOM_THRESHOLD_PX
@@ -355,6 +399,8 @@ export function RunDetailDrawer({
   onSetNote,
   onSetBackendSession,
   onSetPinned,
+  onClearSchedule,
+  onSetScheduleEnabled,
   onSelectSection,
   onSubmitResume,
   onTriggerPrimaryAction,
@@ -394,6 +440,8 @@ export function RunDetailDrawer({
   onSetNote: (note: string | null) => Promise<void>;
   onSetBackendSession: (backendSessionId: string) => Promise<void>;
   onSetPinned: (pinned: boolean) => Promise<void>;
+  onClearSchedule: () => Promise<void>;
+  onSetScheduleEnabled: (enabled: boolean) => Promise<void>;
   onSelectSection: (section: DrawerDetailSection) => void;
   onSubmitResume: () => Promise<void>;
   onTriggerPrimaryAction: () => Promise<void>;
@@ -471,6 +519,9 @@ export function RunDetailDrawer({
   const addDependencyPending = actionPending === "add-dependency";
   const removeDependencyPending = actionPending === "remove-dependency";
   const clearDependenciesPending = actionPending === "clear-dependencies";
+  const schedulePending = actionPending === "schedule";
+  const schedule = run.schedule;
+  const canClearSchedule = schedule !== null && schedule.recurrence === null;
   useHorizontalWheelGuard(drawerRef);
   useEffect(() => {
     if (!isFullscreen) {
@@ -648,6 +699,28 @@ export function RunDetailDrawer({
     try {
       await onClearBackendSession();
       setEditingBackendSession(false);
+    } catch {
+      // actionError is surfaced by the shared mutation handler.
+    }
+  }
+
+  async function submitScheduleEnabled(enabled: boolean) {
+    if (schedulePending || run.schedule === null) {
+      return;
+    }
+    try {
+      await onSetScheduleEnabled(enabled);
+    } catch {
+      // actionError is surfaced by the shared mutation handler.
+    }
+  }
+
+  async function submitScheduleClear() {
+    if (schedulePending || !canClearSchedule) {
+      return;
+    }
+    try {
+      await onClearSchedule();
     } catch {
       // actionError is surfaced by the shared mutation handler.
     }
@@ -1423,6 +1496,46 @@ export function RunDetailDrawer({
               </SummaryLongRow>
             ) : null}
           </section>
+
+          {schedule !== null ? (
+            <section aria-label="Schedule" className="schedule-detail">
+              <div className="schedule-detail__header">
+                <div className="schedule-detail__title">
+                  <ClockIcon aria-hidden="true" />
+                  <span>Schedule</span>
+                </div>
+                <div className="schedule-detail__actions">
+                  <button
+                    className="btn"
+                    disabled={actionsLocked}
+                    onClick={() => void submitScheduleEnabled(!schedule.enabled)}
+                    type="button"
+                  >
+                    {schedulePending ? "Saving..." : schedule.enabled ? "Disable" : "Enable"}
+                  </button>
+                  <button
+                    aria-disabled={!canClearSchedule || actionsLocked}
+                    className="btn"
+                    disabled={!canClearSchedule || actionsLocked}
+                    onClick={() => void submitScheduleClear()}
+                    title={
+                      canClearSchedule
+                        ? "Clear one-time schedule"
+                        : "Recurring schedules can be disabled but not cleared"
+                    }
+                    type="button"
+                  >
+                    {schedulePending ? "Clearing..." : "Clear"}
+                  </button>
+                </div>
+              </div>
+              <div className="schedule-detail__grid">
+                {scheduleRows(schedule, run.scheduleState).map(([label, value]) => (
+                  <ScheduleDetailRow key={label} label={label} value={value} />
+                ))}
+              </div>
+            </section>
+          ) : null}
 
           {actionError ? (
             <div className="notice" data-tone="error">

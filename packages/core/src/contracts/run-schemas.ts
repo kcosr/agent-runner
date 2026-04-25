@@ -27,6 +27,8 @@ import type {
   RunNameResult,
   RunNoteResult,
   RunPinnedResult,
+  RunSchedule,
+  RunScheduleState,
   RunSessionSummary,
   RunStatus,
   RunSummary,
@@ -46,8 +48,29 @@ const RUN_STATUSES = [
 ] as const;
 
 const TASK_STATUSES = ["pending", "in_progress", "completed", "blocked"] as const;
+const RUN_SCHEDULE_STATES = ["none", "paused", "future", "due"] as const;
 
 export const runStatusSchema: z.ZodType<RunStatus> = z.enum(RUN_STATUSES);
+
+export const runScheduleStateSchema: z.ZodType<RunScheduleState> = z.enum(RUN_SCHEDULE_STATES);
+
+const runScheduleModeSchema = z.enum(["reuse", "reset", "clone"]);
+
+export const runScheduleSchema: z.ZodType<RunSchedule> = z.object({
+  enabled: z.boolean(),
+  runAt: z.string(),
+  recurrence: z
+    .object({
+      schedule: z.object({
+        type: z.literal("cron"),
+        expression: z.string(),
+        timezone: z.string(),
+      }),
+      mode: runScheduleModeSchema,
+      continueOnFailure: z.boolean(),
+    })
+    .nullable(),
+});
 
 export const runTaskSummarySchema: z.ZodType<RunTaskSummary> = z.object({
   id: z.string(),
@@ -209,6 +232,8 @@ export const runSummarySchema: z.ZodType<RunSummary> = z.object({
   attachmentCount: z.number(),
   hookCount: z.number().optional(),
   dependencyState: runDependencyStateSchema,
+  schedule: runScheduleSchema.nullable(),
+  scheduleState: runScheduleStateSchema,
   activeTask: runActiveTaskSchema.nullable(),
   execution: runExecutionSchema,
   capabilities: runCapabilitiesSchema,
@@ -264,6 +289,8 @@ export const runDetailSchema: z.ZodType<RunDetail> = z.object({
   hookAudits: z.array(hookAuditRecordSchema).optional(),
   dependencies: z.array(runDependencyDetailSchema),
   dependents: z.array(runDependencyDetailSchema),
+  schedule: runScheduleSchema.nullable(),
+  scheduleState: runScheduleStateSchema,
   tasks: z.array(runTaskSummarySchema),
   activeTask: runActiveTaskSchema.nullable(),
   message: z.string().nullable(),

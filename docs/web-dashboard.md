@@ -60,6 +60,9 @@ Each card shows:
 - `Family` chip when `familyRootRunId` is present; clicking it scopes
   the board to that lineage family.
 - Pin toggle plus note affordance.
+- Compact schedule indicator when `schedule` is present. Future
+  schedules render as normal, paused schedules as muted, and due
+  schedules as warning.
 - Dependency readiness icon (warning if unsatisfied).
 - Attachment count.
 - Active task label when the run is running (from the derived
@@ -94,6 +97,12 @@ timeline stream (`RunTimelineEnvelope`). The drawer surfaces:
   `Workspace`, and passive `Backend session` rows with inline copy/edit
   affordances. Completed runs also surface `Ended` and `Exit code`
   directly in the summary.
+- Schedule section when the run has a schedule. It shows enabled/paused
+  state, derived schedule state, next run time, one-time versus
+  recurring kind, humanized recurrence, raw cron, timezone, recurrence
+  mode, and continue-on-failure. The drawer can enable/disable existing
+  schedules and clear one-time schedules; recurring schedules can be
+  disabled but not cleared.
 - Notes tab: rendered markdown by default, explicit Preview/Edit toggle,
   save/cancel flow, and the same shared note mutation used by the card
   editor.
@@ -169,6 +178,8 @@ Every action button consults the run's `RunCapabilities`:
 | Abort | `canAbort` (with `abortReason` when disabled) |
 | Edit backend session | passive runs only |
 | Add/remove dependency | initialized runs only |
+| Enable/disable schedule | existing schedule |
+| Clear schedule | one-time schedule only |
 | Task status dropdown | `taskMutation.canSetStatus` |
 | Task notes input | `taskMutation.canEditNotes` |
 | Add task button | `taskMutation.canAdd` |

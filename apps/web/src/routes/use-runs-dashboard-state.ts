@@ -51,6 +51,7 @@ export type RunActionPending =
   | "note"
   | "pin"
   | "backend-session"
+  | "schedule"
   | "upload-attachment"
   | "remove-attachment"
   | "download-attachment"
@@ -346,6 +347,14 @@ function syncRunSummaryFromDetail(detail: RunDetail) {
             endedAt: detail.endedAt,
             tasksCompleted: detail.tasksCompleted,
             tasksTotal: detail.tasksTotal,
+            dependencyState: {
+              ready: detail.dependencies.every((dependency) => dependency.satisfied),
+              total: detail.dependencies.length,
+              satisfied: detail.dependencies.filter((dependency) => dependency.satisfied).length,
+              unsatisfied: detail.dependencies.filter((dependency) => !dependency.satisfied).length,
+            },
+            schedule: detail.schedule,
+            scheduleState: detail.scheduleState,
             attachmentCount: detail.attachments.length,
             familyRootRunId: run.familyRootRunId,
             activeTask: detail.activeTask,
@@ -805,6 +814,30 @@ export function useRunsDashboardState() {
       await invalidateRunDetailQuery(result.runId);
     },
   });
+  const scheduleMutation = useMutation({
+    mutationFn: ({ enabled, runId }: { runId: string; enabled?: boolean }) =>
+      enabled === undefined
+        ? api.clearRunSchedule(runId)
+        : api.setRunScheduleEnabled(runId, enabled),
+    onError: (error: Error) => {
+      setActionError(error.message);
+    },
+    onSuccess: async (detail) => {
+      setActionError(undefined);
+      queryClient.setQueryData(runQueryKeys.detail(detail.runId), detail);
+      syncRunSummaryFromDetail(detail);
+      markRunTouched(detail.runId);
+      if (
+        shouldInvalidateSimpleRunMutation(detail.runId, {
+          detailRunId,
+          summaryStreamStale,
+          detailStreamStale: detailStreamStaleRef.current,
+        })
+      ) {
+        await invalidateRunQueries(detail.runId);
+      }
+    },
+  });
   const addDependencyMutation = useMutation({
     mutationFn: ({ runId, dependencyRunId }: { runId: string; dependencyRunId: string }) =>
       api.addDependency(runId, dependencyRunId),
@@ -910,19 +943,21 @@ export function useRunsDashboardState() {
                       ? "pin"
                       : backendSessionMutation.isPending
                         ? "backend-session"
-                        : uploadAttachmentMutation.isPending
-                          ? "upload-attachment"
-                          : removeAttachmentMutation.isPending
-                            ? "remove-attachment"
-                            : downloadAttachmentMutation.isPending
-                              ? "download-attachment"
-                              : addDependencyMutation.isPending
-                                ? "add-dependency"
-                                : removeDependencyMutation.isPending
-                                  ? "remove-dependency"
-                                  : clearDependenciesMutation.isPending
-                                    ? "clear-dependencies"
-                                    : undefined;
+                        : scheduleMutation.isPending
+                          ? "schedule"
+                          : uploadAttachmentMutation.isPending
+                            ? "upload-attachment"
+                            : removeAttachmentMutation.isPending
+                              ? "remove-attachment"
+                              : downloadAttachmentMutation.isPending
+                                ? "download-attachment"
+                                : addDependencyMutation.isPending
+                                  ? "add-dependency"
+                                  : removeDependencyMutation.isPending
+                                    ? "remove-dependency"
+                                    : clearDependenciesMutation.isPending
+                                      ? "clear-dependencies"
+                                      : undefined;
   const selectedRunDetailReady =
     detailRunId !== undefined &&
     detailRunId === selectedRunId &&
@@ -1189,11 +1224,17 @@ export function useRunsDashboardState() {
       clearBackendSession: async (runId: string) => {
         await backendSessionMutation.mutateAsync({ runId, clear: true });
       },
+      clearSchedule: async (runId: string) => {
+        await scheduleMutation.mutateAsync({ runId });
+      },
       resume: async (runId: string, message?: string) => {
         await resumeMutation.mutateAsync({ runId, message });
       },
       setBackendSession: async (runId: string, backendSessionId: string) => {
         await backendSessionMutation.mutateAsync({ runId, backendSessionId });
+      },
+      setScheduleEnabled: async (runId: string, enabled: boolean) => {
+        await scheduleMutation.mutateAsync({ runId, enabled });
       },
       uploadAttachment: async (runId: string, file: File) => {
         await uploadAttachmentMutation.mutateAsync({ runId, file });

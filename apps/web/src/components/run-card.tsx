@@ -11,6 +11,7 @@ import type { DashboardStructuredFilters } from "../lib/settings.js";
 import type { RunActionPending } from "../routes/use-runs-dashboard-state.js";
 import {
   AttachmentIcon,
+  ClockIcon,
   CloseIcon,
   DependencyIcon,
   GroupIcon,
@@ -116,6 +117,18 @@ export function RunCard({
       ? "meta-indicator meta-indicator--warning"
       : "meta-indicator meta-indicator--success";
   const showAttachmentIndicator = run.attachmentCount > 0;
+  const scheduleIndicatorClass = [
+    "meta-indicator",
+    run.scheduleState === "due"
+      ? "meta-indicator--warning"
+      : run.scheduleState === "paused"
+        ? "meta-indicator--muted"
+        : "meta-indicator--neutral",
+  ].join(" ");
+  const scheduleIndicatorLabel =
+    run.schedule === null
+      ? null
+      : `Scheduled run: ${run.scheduleState === "future" ? "scheduled" : run.scheduleState}`;
   const repoFilterActive = structuredFilters.repo === run.repo;
   const agentFilterActive = structuredFilters.agent === run.agentName;
   const backendFilterActive = structuredFilters.backend === run.backend;
@@ -456,6 +469,15 @@ export function RunCard({
                 title={`${run.attachmentCount} attachment${run.attachmentCount === 1 ? "" : "s"}`}
               >
                 <AttachmentIcon aria-hidden="true" />
+              </span>
+            ) : null}
+            {run.schedule !== null && scheduleIndicatorLabel !== null ? (
+              <span
+                aria-label={scheduleIndicatorLabel}
+                className={scheduleIndicatorClass}
+                title={scheduleIndicatorLabel}
+              >
+                <ClockIcon aria-hidden="true" />
               </span>
             ) : null}
           </div>

@@ -188,14 +188,14 @@ test("resolveResumeTarget rejects a manifest with a session missing brief", () =
   );
 });
 
-test("resolveResumeTarget accepts a well-formed v11 manifest from the unknown bucket", () => {
+test("resolveResumeTarget accepts a well-formed v12 manifest from the unknown bucket", () => {
   const dir = tempDir();
   const workspaceDir = join(dir, "runs", "unknown", "wellformed");
   writeManifest(dir, "unknown", "wellformed", baseManifest("wellformed", workspaceDir));
 
   const resolved = withStateRoot(dir, () => resolveResumeTarget("wellformed", dir));
   assert.equal(resolved.manifest.runId, "wellformed");
-  assert.equal(resolved.manifest.schemaVersion, 11);
+  assert.equal(resolved.manifest.schemaVersion, 12);
 });
 
 test("resume/list/find ignore legacy assignmentPath capture when workspaceDir matches", () => {
@@ -226,7 +226,7 @@ test("resume/list/find ignore legacy assignmentPath capture when workspaceDir ma
 
 function baseManifest(runId, workspaceDir) {
   return {
-    schemaVersion: 11,
+    schemaVersion: 12,
     runId,
     repo: "unknown",
     agent: {
@@ -255,6 +255,7 @@ function baseManifest(runId, workspaceDir) {
     archivedAt: null,
     status: "success",
     dependencyRunIds: [],
+    schedule: null,
     exitCode: 0,
     totalAttemptCount: 1,
     maxAttemptsPerSession: 4,

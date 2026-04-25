@@ -136,14 +136,15 @@ function readManifest(workspaceDir) {
   return JSON.parse(readFileSync(join(workspaceDir, "run.json"), "utf8"));
 }
 
-test("manifest schemaVersion is 11 and captures repo", async () => {
+test("manifest schemaVersion is 12 and captures repo", async () => {
   const dir = tempDir();
   writeAgent(dir, "canonical-claude", CLAUDE_AGENT);
   writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
   const outcome = await freshRun(dir, { initialize: true });
-  assert.equal(outcome.manifest.schemaVersion, 11);
+  assert.equal(outcome.manifest.schemaVersion, 12);
   assert.equal(outcome.manifest.repo, "unknown");
   assert.equal(outcome.manifest.archivedAt, null);
+  assert.equal(outcome.manifest.schedule, null);
 });
 
 test("resolveResumeTarget treats missing archivedAt on current manifests as unarchived", async () => {
@@ -395,7 +396,7 @@ test("schemaVersion mismatch: resume rejects a v1 manifest with a clear error", 
       () => resolveResumeTarget("stale01", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 1/);
-        assert.match(err.message, /requires schemaVersion 11/);
+        assert.match(err.message, /requires schemaVersion 12/);
         return true;
       },
     );
@@ -446,7 +447,7 @@ test("schemaVersion mismatch: resume rejects a v2 manifest with a clear error", 
       () => resolveResumeTarget("stale02", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 2/);
-        assert.match(err.message, /requires schemaVersion 11/);
+        assert.match(err.message, /requires schemaVersion 12/);
         return true;
       },
     );
@@ -498,14 +499,14 @@ test("schemaVersion mismatch: resume rejects a v7 manifest with a clear error", 
       () => resolveResumeTarget("stale07", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 7/);
-        assert.match(err.message, /requires schemaVersion 11/);
+        assert.match(err.message, /requires schemaVersion 12/);
         return true;
       },
     );
   });
 });
 
-test("schemaVersion mismatch: resume rejects a v10 manifest with the v11 migration hint", async () => {
+test("schemaVersion mismatch: resume rejects a v10 manifest with a clear error", async () => {
   const dir = tempDir();
   const workspaceDir = join(dir, "runs", "unknown", "stale10");
   mkdirSync(workspaceDir, { recursive: true });
@@ -550,8 +551,7 @@ test("schemaVersion mismatch: resume rejects a v10 manifest with the v11 migrati
       () => resolveResumeTarget("stale10", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 10/);
-        assert.match(err.message, /requires schemaVersion 11/);
-        assert.match(err.message, /scripts\/migrate-manifests-v11\.mjs/);
+        assert.match(err.message, /requires schemaVersion 12/);
         return true;
       },
     );

@@ -25,6 +25,7 @@ import {
   archiveRun,
   clearRunBackendSession,
   clearRunDependencies,
+  clearRunSchedule,
   downloadAttachment,
   listAttachments,
   listDefinitions,
@@ -38,12 +39,14 @@ import {
   setRunName,
   setRunNote,
   setRunPinned,
+  setRunSchedule,
+  setRunScheduleEnabled,
   setTask,
   showDefinition,
   showTask,
   unarchiveRun,
 } from "../packages/core/dist/core/commands/service.js";
-import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
+import { LockedFieldError, runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import { withEnv, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 const REPO_ROOT = new URL("..", import.meta.url).pathname;
@@ -103,6 +106,21 @@ tasks:
     title: Only
 ---
 Locked service test assignment.
+`;
+
+const LOCKED_SCHEDULE_ASSIGNMENT = `---
+schemaVersion: 1
+name: svc-locked-schedule-work
+maxRetries: 1
+lockedFields:
+  - schedule
+schedule:
+  delay: 30m
+tasks:
+  - id: t1
+    title: Only
+---
+Locked schedule service test assignment.
 `;
 
 function tempDir() {
@@ -1177,6 +1195,81 @@ test("command services: readyRun promotes initialized runs and tightens task and
         new RegExp(`cannot add dependencies unless run ${target.runId} is initialized`).test(
           err.message,
         ),
+    );
+  });
+});
+
+test("command services: schedule mutations persist schedule state and audit through ready", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const target = await initRun(dir);
+
+  await withSharedRuntimeEnv(dir, async () => {
+    const scheduled = setRunSchedule(target.runId, {
+      at: "2026-04-25T12:00:00.000Z",
+    });
+    assert.equal(scheduled.schedule.runAt, "2026-04-25T12:00:00.000Z");
+    assert.equal(scheduled.scheduleState, "future");
+
+    const disabled = setRunScheduleEnabled(target.runId, false);
+    assert.equal(disabled.schedule.enabled, false);
+    assert.equal(disabled.scheduleState, "paused");
+
+    const cleared = clearRunSchedule(target.runId);
+    assert.equal(cleared.schedule, null);
+    assert.equal(cleared.scheduleState, "none");
+
+    const ready = readyRun(target.runId, {
+      cron: "0 9 * * *",
+      timezone: "UTC",
+      mode: "reset",
+      continueOnFailure: true,
+    });
+    assert.equal(ready.status, "ready");
+    assert.equal(ready.schedule.recurrence.schedule.expression, "0 9 * * *");
+    assert.equal(ready.schedule.recurrence.mode, "reset");
+    assert.equal(ready.schedule.recurrence.continueOnFailure, true);
+
+    const manifest = readManifest(target.workspaceDir);
+    assert.deepEqual(manifest.schedule, ready.schedule);
+  });
+});
+
+test("command services: schedule mutation rules honor locks and recurring clear policy", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  writeAssignment(dir, "svc-locked-schedule-work", LOCKED_SCHEDULE_ASSIGNMENT);
+  const locked = await initRun(dir, "svc-locked-schedule-work");
+  const recurring = await initRun(dir);
+
+  await withSharedRuntimeEnv(dir, async () => {
+    assert.throws(
+      () => setRunSchedule(locked.runId, { at: "2026-04-25T12:00:00.000Z" }),
+      (err) =>
+        err instanceof LockedFieldError &&
+        /cannot override locked field: schedule/.test(err.message),
+    );
+
+    const disabled = setRunScheduleEnabled(locked.runId, false);
+    assert.equal(disabled.schedule.enabled, false);
+
+    const enabled = setRunScheduleEnabled(locked.runId, true);
+    assert.equal(enabled.schedule.enabled, true);
+
+    assert.throws(
+      () => clearRunSchedule(locked.runId),
+      (err) =>
+        err instanceof LockedFieldError &&
+        /cannot override locked field: schedule/.test(err.message),
+    );
+
+    setRunSchedule(recurring.runId, {
+      cron: "0 9 * * *",
+      timezone: "UTC",
+    });
+    assert.throws(
+      () => clearRunSchedule(recurring.runId),
+      (err) => err instanceof CommandError && /cannot clear recurring schedule/.test(err.message),
     );
   });
 });

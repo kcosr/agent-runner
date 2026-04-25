@@ -7,8 +7,9 @@ import {
   resolveDependencies,
   resolveDependents,
 } from "../core/run/dependencies.js";
-import type { RunExecution, TaskSnapshot } from "../core/run/manifest.js";
+import type { RunExecution, RunSchedule, TaskSnapshot } from "../core/run/manifest.js";
 import type { ListedRunManifest, ManifestStatus, RunManifest } from "../core/run/manifest.js";
+import { type RunScheduleState, deriveScheduleState } from "../core/run/schedule.js";
 import { deriveEffectiveStatus } from "../core/run/status.js";
 import type { RunAttachment } from "./attachments.js";
 
@@ -17,6 +18,7 @@ import type { RunAttachment } from "./attachments.js";
 // from it without doing filesystem, env, or process work.
 export type RunStatus = ManifestStatus;
 export type { RunDependencyDetail, RunDependencyState } from "../core/run/dependencies.js";
+export type { RunSchedule, RunScheduleState };
 
 export interface RunActiveTask {
   id: string;
@@ -66,6 +68,8 @@ export interface RunSummary {
   attachmentCount: number;
   hookCount?: number;
   dependencyState: RunDependencyState;
+  schedule: RunSchedule | null;
+  scheduleState: RunScheduleState;
   activeTask: RunActiveTask | null;
   execution: RunExecution;
   capabilities: RunCapabilities;
@@ -153,6 +157,8 @@ export interface RunDetail {
   hookAudits?: HookAuditRecord[];
   dependencies: RunDependencyDetail[];
   dependents: RunDependencyDetail[];
+  schedule: RunSchedule | null;
+  scheduleState: RunScheduleState;
   tasks: RunTaskSummary[];
   activeTask: RunActiveTask | null;
   message: string | null;
@@ -209,6 +215,13 @@ export type { RunAttachment, RunAttachmentRemoveResult } from "./attachments.js"
 
 export interface RunActionTarget {
   target: string;
+}
+
+export interface DaemonAutoRunnableInput {
+  manifest: Pick<RunManifest, "status" | "schedule" | "archivedAt" | "backend">;
+  dependencyState: Pick<RunDependencyState, "unsatisfied">;
+  activeInDaemon: boolean;
+  now?: Date;
 }
 
 function toRunTaskSummary(task: TaskSnapshot): RunTaskSummary {
@@ -312,6 +325,25 @@ export function isTerminalStatus(status: RunStatus): boolean {
   );
 }
 
+export function scheduleIsDueOrAbsent(
+  schedule: RunSchedule | null,
+  now: Date = new Date(),
+): boolean {
+  const state = deriveScheduleState(schedule, now);
+  return state === "none" || state === "due";
+}
+
+export function isDaemonAutoRunnableReadyRun(input: DaemonAutoRunnableInput): boolean {
+  return (
+    input.manifest.status === "ready" &&
+    input.dependencyState.unsatisfied === 0 &&
+    scheduleIsDueOrAbsent(input.manifest.schedule, input.now) &&
+    !input.activeInDaemon &&
+    input.manifest.archivedAt === null &&
+    input.manifest.backend !== "passive"
+  );
+}
+
 export function deriveTaskMutationCapabilities(manifest: RunManifest): RunTaskMutationCapabilities {
   const tasksLocked = manifest.lockedFields.includes("tasks");
 
@@ -367,6 +399,7 @@ export function toRunSummary(
   const resolvedDependencyState =
     dependencyState ?? deriveDependencyState(entry.manifest, relatedManifests);
   const sessions = toRunSessionSummaries(entry.manifest);
+  const scheduleState = deriveScheduleState(entry.manifest.schedule);
   return {
     runId: entry.manifest.runId,
     parentRunId: entry.manifest.parentRunId,
@@ -395,6 +428,8 @@ export function toRunSummary(
     attachmentCount: entry.manifest.attachments.length,
     hookCount: entry.manifest.resolvedHooks.length,
     dependencyState: resolvedDependencyState,
+    schedule: entry.manifest.schedule,
+    scheduleState,
     activeTask: deriveActiveTask(entry.manifest.finalTasks),
     execution: entry.manifest.execution,
     capabilities: deriveRunCapabilities(entry.manifest, resolvedDependencyState),
@@ -447,6 +482,7 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
     result.relatedManifests ?? new Map<string, RunManifest>([[manifest.runId, manifest]]);
   const dependencyState = deriveDependencyState(manifest, relatedManifests);
   const sessions = toRunSessionSummaries(manifest);
+  const scheduleState = deriveScheduleState(manifest.schedule);
   return {
     runId: manifest.runId,
     parentRunId: manifest.parentRunId,
@@ -513,6 +549,8 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
     })),
     dependencies: result.dependencies ?? resolveDependencies(manifest, relatedManifests),
     dependents: result.dependents ?? resolveDependents(manifest, relatedManifests),
+    schedule: manifest.schedule,
+    scheduleState,
     tasks: Object.values(manifest.finalTasks).map(toRunTaskSummary),
     activeTask: deriveActiveTask(manifest.finalTasks),
     message: manifest.message,

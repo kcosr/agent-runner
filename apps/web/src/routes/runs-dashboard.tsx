@@ -314,6 +314,7 @@ export function RunsDashboardRoute() {
           onReplaceAttachmentPreview={state.replaceSelectedRunAttachmentPreview}
           onSelectRun={state.openRun}
           onClearBackendSession={state.runActions.clearBackendSession}
+          onClearSchedule={state.runActions.clearSchedule}
           onRemoveDependency={state.runActions.removeDependency}
           onRemoveAttachment={state.runActions.removeAttachment}
           onReset={state.runActions.reset}
@@ -323,6 +324,7 @@ export function RunsDashboardRoute() {
           onSetNote={state.runActions.setNote}
           onSetBackendSession={state.runActions.setBackendSession}
           onSetPinned={state.runActions.setPinned}
+          onSetScheduleEnabled={state.runActions.setScheduleEnabled}
           onSelectDetailSection={state.updateSelectedRunDetailSection}
           onSubmitResume={state.submitSelectedRunResume}
           onTriggerPrimaryAction={state.triggerSelectedRunPrimaryAction}

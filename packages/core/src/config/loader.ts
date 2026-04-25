@@ -232,6 +232,21 @@ function classifyAssignmentSurface(path: PathSegment[]): InterpolationSurface {
     return { mode: "exact", scalarKind: "string", allowLiteral: false };
   }
 
+  if (path.length === 2 && path[0] === "schedule" && typeof path[1] === "string") {
+    switch (path[1]) {
+      case "at":
+      case "delay":
+      case "cron":
+      case "timezone":
+      case "mode":
+        return { mode: "exact", scalarKind: "string", allowLiteral: false };
+      case "continueOnFailure":
+        return { mode: "exact", scalarKind: "boolean", allowLiteral: false };
+      default:
+        return { mode: "disabled" };
+    }
+  }
+
   if (path.length === 2 && path[0] === "tasks" && typeof path[1] === "number") {
     return { mode: "exact", scalarKind: "string", allowLiteral: false };
   }

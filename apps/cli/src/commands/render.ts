@@ -24,6 +24,7 @@ import type {
   TaskListResult,
   TaskMutationResult,
 } from "@task-runner/core/core/commands/service.js";
+import { formatSchedule } from "@task-runner/core/core/run/schedule.js";
 import { resolveTaskRunnerCommand } from "@task-runner/core/task-runner-command.js";
 import type { HostMode } from "../daemon/config.js";
 import type { DaemonInfo } from "../daemon/protocol.js";
@@ -101,6 +102,9 @@ export function renderRunStatus(detail: RunDetail): string {
   }
   lines.push(
     `Dependencies: ${detail.dependencies.length === 0 ? "ready (0 total)" : `${detail.dependencies.filter((dependency) => dependency.satisfied).length}/${detail.dependencies.length} satisfied`}`,
+  );
+  lines.push(
+    `Schedule: ${detail.schedule === null ? "none" : `${formatSchedule(detail.schedule)} (${detail.scheduleState})`}`,
   );
   lines.push(`Attachments: ${detail.attachments.length}`);
 
@@ -182,6 +186,29 @@ export function renderRunStatus(detail: RunDetail): string {
   }
 
   return `${lines.join("\n")}\n`;
+}
+
+function renderScheduleMutation(verb: string, detail: RunDetail): string {
+  if (detail.schedule === null) {
+    return `task-runner: ${verb} schedule for run ${detail.runId}\n`;
+  }
+  return `task-runner: ${verb} schedule for run ${detail.runId}: ${formatSchedule(detail.schedule)} (next ${detail.schedule.runAt}, ${detail.scheduleState})\n`;
+}
+
+export function renderRunScheduleSet(detail: RunDetail): string {
+  return renderScheduleMutation("set", detail);
+}
+
+export function renderRunScheduleEnabled(detail: RunDetail): string {
+  return renderScheduleMutation("enabled", detail);
+}
+
+export function renderRunScheduleDisabled(detail: RunDetail): string {
+  return renderScheduleMutation("disabled", detail);
+}
+
+export function renderRunScheduleCleared(detail: RunDetail): string {
+  return renderScheduleMutation("cleared", detail);
 }
 
 export function renderSystemStatus(result: SystemStatusResult): string {
@@ -283,7 +310,8 @@ export function renderRunReset(result: RunResetResult): string {
 }
 
 export function renderRunReady(result: RunDetail): string {
-  return `task-runner: promoted run ${result.runId} to ready\n`;
+  const schedule = result.schedule === null ? "" : `schedule: ${formatSchedule(result.schedule)}\n`;
+  return `task-runner: promoted run ${result.runId} to ready\n${schedule}`;
 }
 
 export function renderRunList(result: RunListResult): string {

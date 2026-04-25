@@ -7,6 +7,7 @@ import type {
   RunExecution,
   RunExecutionHostMode,
   RunManifest,
+  RunSchedule,
 } from "./manifest.js";
 
 export const RUN_EVENTS_FILENAME = "run-events.jsonl";
@@ -29,6 +30,15 @@ const RUN_EVENT_TYPES = [
   "run.archived",
   "run.unarchived",
   "run.renamed",
+  "run.schedule_set",
+  "run.schedule_cleared",
+  "run.schedule_enabled",
+  "run.schedule_disabled",
+  "run.schedule_due",
+  "run.schedule_missed",
+  "run.schedule_skipped",
+  "run.schedule_advanced",
+  "run.schedule_consumed",
   "task.added",
   "task.updated",
 ] as const;
@@ -55,6 +65,14 @@ export type BackendSessionUpdateReason =
   | "passive_set"
   | "passive_clear"
   | "reset_clear";
+
+export type ScheduleDecisionReason =
+  | "dependencies_unmet"
+  | "overdue_on_startup"
+  | "already_active"
+  | "archived"
+  | "not_ready"
+  | "minimum_interval_violation";
 
 export interface RunEventOrigin {
   hostMode: RunExecutionHostMode;
@@ -506,7 +524,7 @@ export function appendRunFinishedEvent(params: {
   context: RunEventWriteContext;
   terminalStatus: Extract<
     ManifestStatus,
-    "success" | "blocked" | "exhausted" | "aborted" | "error"
+    "ready" | "success" | "blocked" | "exhausted" | "aborted" | "error"
   >;
   exitCode: number | null;
   tasksCompleted: number;
@@ -627,6 +645,135 @@ export function appendRunRenamedEvent(params: {
       previousName: params.previousName,
       nextName: params.nextName,
     },
+  });
+}
+
+function appendRunScheduleEvent(params: {
+  manifest: Pick<RunManifest, "workspaceDir" | "runId">;
+  context: RunEventWriteContext;
+  eventType: Extract<RunEventType, `run.schedule_${string}`>;
+  schedule?: RunSchedule | null;
+  previousSchedule?: RunSchedule | null;
+  reason?: ScheduleDecisionReason;
+}): RunAuditEnvelope {
+  return appendRunEvent({
+    workspaceDir: params.manifest.workspaceDir,
+    runId: params.manifest.runId,
+    eventType: params.eventType,
+    context: params.context,
+    fields: {
+      ...(params.previousSchedule !== undefined
+        ? { previousSchedule: params.previousSchedule }
+        : {}),
+      ...(params.schedule !== undefined ? { schedule: params.schedule } : {}),
+      ...(params.reason !== undefined ? { reason: params.reason } : {}),
+    },
+  });
+}
+
+export function appendRunScheduleSetEvent(params: {
+  manifest: Pick<RunManifest, "workspaceDir" | "runId">;
+  context: RunEventWriteContext;
+  schedule: RunSchedule;
+  previousSchedule: RunSchedule | null;
+}): RunAuditEnvelope {
+  return appendRunScheduleEvent({
+    ...params,
+    eventType: "run.schedule_set",
+  });
+}
+
+export function appendRunScheduleClearedEvent(params: {
+  manifest: Pick<RunManifest, "workspaceDir" | "runId">;
+  context: RunEventWriteContext;
+  previousSchedule: RunSchedule;
+}): RunAuditEnvelope {
+  return appendRunScheduleEvent({
+    ...params,
+    eventType: "run.schedule_cleared",
+    schedule: null,
+  });
+}
+
+export function appendRunScheduleEnabledEvent(params: {
+  manifest: Pick<RunManifest, "workspaceDir" | "runId">;
+  context: RunEventWriteContext;
+  schedule: RunSchedule;
+}): RunAuditEnvelope {
+  return appendRunScheduleEvent({
+    ...params,
+    eventType: "run.schedule_enabled",
+  });
+}
+
+export function appendRunScheduleDisabledEvent(params: {
+  manifest: Pick<RunManifest, "workspaceDir" | "runId">;
+  context: RunEventWriteContext;
+  schedule: RunSchedule;
+  reason?: ScheduleDecisionReason;
+}): RunAuditEnvelope {
+  return appendRunScheduleEvent({
+    ...params,
+    eventType: "run.schedule_disabled",
+  });
+}
+
+export function appendRunScheduleDueEvent(params: {
+  manifest: Pick<RunManifest, "workspaceDir" | "runId">;
+  context: RunEventWriteContext;
+  schedule: RunSchedule;
+}): RunAuditEnvelope {
+  return appendRunScheduleEvent({
+    ...params,
+    eventType: "run.schedule_due",
+  });
+}
+
+export function appendRunScheduleMissedEvent(params: {
+  manifest: Pick<RunManifest, "workspaceDir" | "runId">;
+  context: RunEventWriteContext;
+  schedule: RunSchedule;
+  reason: ScheduleDecisionReason;
+}): RunAuditEnvelope {
+  return appendRunScheduleEvent({
+    ...params,
+    eventType: "run.schedule_missed",
+  });
+}
+
+export function appendRunScheduleSkippedEvent(params: {
+  manifest: Pick<RunManifest, "workspaceDir" | "runId">;
+  context: RunEventWriteContext;
+  schedule: RunSchedule;
+  reason: ScheduleDecisionReason;
+}): RunAuditEnvelope {
+  return appendRunScheduleEvent({
+    ...params,
+    eventType: "run.schedule_skipped",
+  });
+}
+
+export function appendRunScheduleAdvancedEvent(params: {
+  manifest: Pick<RunManifest, "workspaceDir" | "runId">;
+  context: RunEventWriteContext;
+  schedule: RunSchedule;
+  previousSchedule: RunSchedule;
+  reason?: ScheduleDecisionReason;
+}): RunAuditEnvelope {
+  return appendRunScheduleEvent({
+    ...params,
+    eventType: "run.schedule_advanced",
+  });
+}
+
+export function appendRunScheduleConsumedEvent(params: {
+  manifest: Pick<RunManifest, "workspaceDir" | "runId">;
+  context: RunEventWriteContext;
+  schedule: RunSchedule;
+}): RunAuditEnvelope {
+  return appendRunScheduleEvent({
+    ...params,
+    eventType: "run.schedule_consumed",
   });
 }
 

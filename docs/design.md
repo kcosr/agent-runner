@@ -20,7 +20,7 @@ explicit concepts:
 - caller-facing documentation stays separate from worker-facing
   instructions
 
-The current manifest schema is version `10`. Older manifest shapes are not
+The current manifest schema is version `12`. Older manifest shapes are not
 silently upgraded or dual-read at runtime.
 
 ## Non-goals
@@ -71,6 +71,7 @@ An assignment definition provides reusable work:
 - `tasks`
 - optional default `message`
 - optional `callerInstructions`
+- optional `schedule`
 - assignment instructions (markdown body)
 - `maxRetries`, `lockedFields`
 
@@ -115,6 +116,7 @@ The canonical record is `run.json`. Important persisted fields:
 - `lockedFields` (union of agent and assignment locks)
 - `status`, `exitCode`
 - `startedAt`, `endedAt`, `archivedAt`
+- `schedule` (`RunSchedule | null`)
 - `finalTasks` (canonical task state)
 - `tasksCompleted`, `tasksTotal`
 - `brief` (composed worker handoff)
@@ -147,6 +149,12 @@ still lack it. The file is append-only diagnostic history for major
 lifecycle/task mutations, survives `run reset`, is surfaced through
 `task-runner run audit <run-id>` plus daemon audit APIs, and is never
 used to reconstruct canonical state.
+
+Scheduling is manifest-canonical. The persisted contract is
+`manifest.schedule`, not an external queue or daemon-local database.
+Projection surfaces derive `scheduleState` (`none`, `paused`, `future`,
+or `due`) from `manifest.schedule` and the current time. `scheduleState`
+is not persisted, migrated, or accepted as input.
 
 ## Brief and caller instructions
 
@@ -326,6 +334,67 @@ task-runner run --resume-run <run-id>
 starting the backend. The subsequent first `run --resume-run` reuses the
 stored `manifest.brief` verbatim as the execution handoff.
 
+`run ready` may also attach a schedule with one of `--schedule-at`,
+`--schedule-delay`, or `--schedule-cron`. The run remains `ready` until
+the schedule is due. A manual start is still legal: one-time schedules
+are consumed before execution, while recurring schedules keep their
+current `runAt` if they are manually started early.
+
+### Scheduling
+
+Schedules are frozen into `manifest.schedule` at initialization/ready
+time or through explicit schedule mutation commands. The input contract
+is a flat shape with exactly one of `at`, `delay`, or `cron`.
+`timezone`, `mode`, and `continueOnFailure` are cron-only. Assignment
+frontmatter may author the same schedule shape, and `schedule` is a
+lockable field.
+
+One-time schedules persist as:
+
+```ts
+{ enabled: true, runAt: string, recurrence: null }
+```
+
+Recurring schedules persist the next `runAt` plus:
+
+```ts
+{
+  schedule: { type: "cron", expression: string, timezone: string },
+  mode: "reuse" | "reset" | "clone",
+  continueOnFailure: boolean
+}
+```
+
+The schedule guardrails are enforced at trust boundaries:
+
+- `TASK_RUNNER_MIN_SCHEDULE_DELAY_SEC` rejects too-soon one-time
+  schedules
+- `TASK_RUNNER_MIN_RECURRENCE_INTERVAL_SEC` rejects too-frequent cron
+  schedules and disables an already-persisted recurrence if a later
+  advancement violates the same minimum
+- cron recurrence interval checks use a bounded sample of future
+  occurrences
+
+Recurring completion is determined by the persisted `mode`:
+
+- `reuse` advances `runAt` on the existing run
+- `reset` resets the existing run from its frozen `resetSeed`, then
+  advances `runAt`
+- `clone` creates a new ready child run from the frozen reset seed and
+  frozen `assignment-seed.md`, then attaches the advanced schedule to
+  the clone
+
+Failures stop recurrence unless `continueOnFailure` is true. Reset,
+resume, and clone do not re-read current source definitions for schedule
+data. This is a hot-cut schema-v12 contract; there is no compatibility
+fallback or dual-shape parser for earlier manifest scheduling shapes.
+
+Reinitialize is allowed only while a run is still `initialized`. It
+rebuilds the initial manifest and applies assignment-authored schedule
+config plus explicit schedule overrides at that boundary. After the run
+is `ready`, schedule changes go through `run schedule` mutations rather
+than ready-start overrides.
+
 ### Resume
 
 Resume is manifest-based. Source agent and assignment files are not
@@ -356,7 +425,8 @@ See [resume.md](resume.md).
 `run reset <id|path>` restores the initialized-state seed stored in the
 manifest for non-running runs. Reset does not re-read current source
 definitions. It reuses the frozen launcher and other initialized
-runtime config captured in the reset seed.
+runtime config captured in the reset seed. Manual reset preserves
+`manifest.schedule`; reset-seed data does not overwrite it.
 
 ### Delete archived runs
 
@@ -425,6 +495,7 @@ Rules:
 - `task-runner attachment add|remove`
 - `task-runner run reset|archive|unarchive|delete|set-name|`
   `set-backend-session|clear-backend-session`
+- `task-runner run schedule [set]|enable|disable|clear`
 - `task-runner run add-dep|remove-dep|clear-deps`
 
 `run set-backend-session` / `run clear-backend-session` are
@@ -444,6 +515,14 @@ Dependency mutations are only allowed on `initialized` runs.
 
 CLI commands can route through the daemon with `--connect` or
 `TASK_RUNNER_CONNECT`.
+
+The daemon evaluates schedules from manifests on startup and after
+schedule mutations, ready/reset/archive/unarchive changes, dependency
+changes, and run completion. Future schedules are armed with timers.
+Due schedules found during daemon startup are treated as missed/skipped
+instead of being started immediately: one-time schedules are cleared
+with an audit reason, while recurring schedules advance to the next
+eligible occurrence. This avoids replaying stale work after downtime.
 
 Live subscriptions are split by responsibility instead of sharing one
 mixed event bus:

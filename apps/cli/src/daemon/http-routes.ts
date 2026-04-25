@@ -13,6 +13,7 @@ import { HttpError } from "./http-errors.js";
 import { readJsonBody, sendBuffer, sendError, sendJson } from "./http-serializers.js";
 import type { DaemonOperations } from "./operations.js";
 import type {
+  RunScheduleParams,
   RunSetBackendSessionParams,
   RunSetNameParams,
   RunSetNoteParams,
@@ -30,6 +31,7 @@ import {
   parseAttachmentScopeQueryValue,
   parseBooleanQueryValue,
   parseRunInputSurfaceQuery,
+  parseRunScheduleParams,
   parseRunSetBackendSessionParams,
   parseRunSetNameParams,
   parseRunSetNoteParams,
@@ -202,7 +204,36 @@ const routes: RouteDefinition[] = [
     method: "POST",
     pattern: ["api", "runs", ":runId", "ready"],
     handler: (_req, res, ctx, params) => {
-      sendJson(res, 200, ctx.operations.readyRun(routeParam(params, "runId")));
+      sendJson(res, 200, ctx.operations.readyRun({ target: routeParam(params, "runId") }));
+    },
+  },
+  {
+    method: "PUT",
+    pattern: ["api", "runs", ":runId", "schedule"],
+    handler: async (req, res, ctx, params) => {
+      const body = await parseRunScheduleBody(req, routeParam(params, "runId"));
+      sendJson(res, 200, ctx.operations.setRunSchedule(body));
+    },
+  },
+  {
+    method: "DELETE",
+    pattern: ["api", "runs", ":runId", "schedule"],
+    handler: (_req, res, ctx, params) => {
+      sendJson(res, 200, ctx.operations.clearRunSchedule(routeParam(params, "runId")));
+    },
+  },
+  {
+    method: "POST",
+    pattern: ["api", "runs", ":runId", "schedule", "enable"],
+    handler: (_req, res, ctx, params) => {
+      sendJson(res, 200, ctx.operations.setRunScheduleEnabled(routeParam(params, "runId"), true));
+    },
+  },
+  {
+    method: "POST",
+    pattern: ["api", "runs", ":runId", "schedule", "disable"],
+    handler: (_req, res, ctx, params) => {
+      sendJson(res, 200, ctx.operations.setRunScheduleEnabled(routeParam(params, "runId"), false));
     },
   },
   {
@@ -605,6 +636,14 @@ async function parseRunSetBackendSessionBody(
 ): Promise<RunSetBackendSessionParams> {
   const body = asRecord(await readJsonBody(req), "request body");
   return parseRunSetBackendSessionParams({ ...body, target: runId }, "request body");
+}
+
+async function parseRunScheduleBody(
+  req: IncomingMessage,
+  runId: string,
+): Promise<RunScheduleParams> {
+  const body = asRecord(await readJsonBody(req), "request body");
+  return parseRunScheduleParams({ target: runId, schedule: body }, "request body");
 }
 
 function splitPath(pathname: string): string[] {

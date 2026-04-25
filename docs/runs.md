@@ -11,7 +11,7 @@ ${TASK_RUNNER_STATE_DIR}/runs/<repo>/<run-id>/
 
 ```text
 <workspace>/
-├── run.json               # canonical manifest (schema version 11)
+├── run.json               # canonical manifest (schema version 12)
 ├── run-events.jsonl       # append-only audit history with monotonic cursors
 ├── assignment-seed.md     # only when the run started from an assignment file
 ├── attempts/
@@ -38,7 +38,7 @@ The manifest is the source of truth. Important fields:
 
 | Field | Purpose |
 |-------|---------|
-| `schemaVersion` | currently `11`; older manifests are not silently upgraded |
+| `schemaVersion` | currently `12`; older manifests are not silently upgraded |
 | `runId`, `repo`, `cwd` | identity and scope |
 | `agent` | frozen `{ name, sourcePath, instructions }` |
 | `assignment` | frozen `{ name, sourcePath, workspacePath }` or `null` |
@@ -49,6 +49,7 @@ The manifest is the source of truth. Important fields:
 | `name` | user-provided display name (mutable via `run set-name`) |
 | `note` | optional markdown note for humans (mutable via `run set-note`) |
 | `pinned` | persisted board-order hint for summaries and the web dashboard |
+| `schedule` | persisted `RunSchedule` or `null`; source of truth for delayed and recurring execution |
 | `status` | current lifecycle state |
 | `startedAt`, `endedAt` | ISO 8601 timestamps |
 | `archivedAt` | ISO timestamp when archived, else `null` |
@@ -67,6 +68,11 @@ The manifest is the source of truth. Important fields:
 | `runtimeVarSources` | frozen provenance for each resolved var |
 | `resetSeed` | snapshot used by `run reset` |
 | `execution` | `{ hostMode: "embedded" \| "daemon", controller }`; for daemon runs, `controller.daemonInstanceId` links back to the daemon instance |
+
+`RunSummary` and `RunDetail` also expose derived `scheduleState`:
+`none`, `paused`, `future`, or `due`. It is recomputed from
+`manifest.schedule` and the current time; it is not stored in
+`run.json`.
 
 ## Run/session/attempt model
 
@@ -132,6 +138,67 @@ does not dump the worker brief to stdout — fetch it explicitly with
 promoted with `task-runner run ready <run-id>` before the first
 `run --resume-run`.
 
+`init` and `run ready` accept schedule input through `--schedule-at
+<iso>`, `--schedule-delay <duration>`, or `--schedule-cron <expr>`.
+Exactly one source is required when schedule flags are present.
+`--schedule-timezone`, `--schedule-mode reuse|reset|clone`, and
+`--schedule-continue-on-failure` are valid only with `--schedule-cron`.
+Schedule flags are rejected on resume and ready-start after the run's
+initial ready transition has frozen the schedule contract.
+
+## Scheduled runs
+
+A scheduled run stays in `ready` while `scheduleState` is `future` or
+`paused`. The daemon starts an enabled ready run when `scheduleState`
+becomes `due` and all normal runnability gates pass. Manual start is
+still allowed for ready scheduled runs:
+
+- starting a one-time scheduled run consumes `manifest.schedule` before
+  execution
+- starting a recurring run before its `runAt` leaves `runAt` unchanged,
+  and completion returns the run to `ready` for the pending recurrence
+
+Schedule input can also be changed after creation:
+
+```bash
+task-runner run schedule <id|path> --at <iso>
+task-runner run schedule <id|path> --delay 30m
+task-runner run schedule <id|path> --cron "0 9 * * *" --timezone UTC --mode clone
+task-runner run schedule enable <id|path>
+task-runner run schedule disable <id|path>
+task-runner run schedule clear <id|path>
+```
+
+`run schedule clear` removes one-time schedules only. Recurring
+schedules must be disabled instead, so their recurrence definition stays
+auditable.
+
+One-time schedules below `TASK_RUNNER_MIN_SCHEDULE_DELAY_SEC` are
+rejected; recurring schedules below
+`TASK_RUNNER_MIN_RECURRENCE_INTERVAL_SEC` are rejected at input and are
+disabled if a later recurrence advance violates the same guardrail. Both
+defaults are `300` seconds. Cron validation samples bounded future
+occurrences rather than scanning indefinitely.
+
+Recurring completion behavior depends on `schedule.recurrence.mode`:
+
+- `reuse` advances `runAt` on the same run and returns it to `ready`
+- `reset` restores the same run from its frozen `resetSeed`, advances
+  `runAt`, and returns it to `ready`
+- `clone` creates a new ready child run from the frozen reset seed and
+  frozen `assignment-seed.md`, then attaches the advanced recurrence to
+  that clone
+
+Failed recurring executions stop the schedule unless
+`continueOnFailure` is `true`. `reset` and `clone` never re-read current
+agent or assignment source files; they use the frozen manifest/reset
+seed contract.
+
+Reinitializing an initialized run applies assignment-authored schedule
+config and explicit schedule overrides to the replacement initial
+manifest. Once a run has been promoted to `ready`, start/resume uses the
+frozen manifest schedule and rejects new `--schedule-*` input.
+
 ## Read surfaces
 
 ```bash
@@ -152,6 +219,8 @@ task-runner attachment list <run-id> [--scope run|family]
   audit envelopes.
 - `run status --output-format json` returns the shared `RunDetail` DTO.
 - `RunSummary` and `RunDetail` include `parentRunId` when lineage exists.
+- `RunSummary` and `RunDetail` include persisted `schedule` plus derived
+  `scheduleState`.
 - `RunDetail` includes full `note` plus `pinned`; `RunSummary` includes
   `notePresent` plus `pinned`.
 - Text `run status` may show `Pinned: yes` and `Note: present`, but does
@@ -178,6 +247,12 @@ task-runner run clear-backend-session <id>              # passive only
 task-runner run add-dep <id> <dep-run-id>
 task-runner run remove-dep <id> <dep-run-id>
 task-runner run clear-deps <id>
+task-runner run schedule <id|path> --at <iso>
+task-runner run schedule <id|path> --delay <duration>
+task-runner run schedule <id|path> --cron <expr> [--timezone <iana>] [--mode reuse|reset|clone] [--continue-on-failure]
+task-runner run schedule enable <id|path>
+task-runner run schedule disable <id|path>
+task-runner run schedule clear <id|path>
 ```
 
 ### Reset
@@ -187,7 +262,8 @@ task-runner run clear-deps <id>
 task snapshot). Attempt and session history, endedAt, exitCode, and the
 live status are cleared. Existing `run-events.jsonl` history is preserved
 and reset appends one more diagnostic record instead of truncating the file.
-Only non-running runs can be reset.
+Only non-running runs can be reset. `manifest.schedule` is preserved
+across manual reset because it is not part of the reset seed.
 
 ### Archive, unarchive, delete
 

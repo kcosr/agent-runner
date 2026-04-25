@@ -3,6 +3,7 @@ import type { ManifestStatus, RunManifest } from "./manifest.js";
 
 export type RunCompletionStatus =
   | "initialized"
+  | "ready"
   | "success"
   | "blocked"
   | "exhausted"
