@@ -1241,6 +1241,12 @@ test("command services: schedule mutation rules honor locks and recurring clear 
   writeAssignment(dir, "svc-locked-schedule-work", LOCKED_SCHEDULE_ASSIGNMENT);
   const locked = await initRun(dir, "svc-locked-schedule-work");
   const recurring = await initRun(dir);
+  const terminal = await initRun(dir);
+  patchManifest(terminal.workspaceDir, (manifest) => {
+    manifest.status = "success";
+    manifest.endedAt = "2026-04-25T12:00:00.000Z";
+    manifest.exitCode = 0;
+  });
 
   await withSharedRuntimeEnv(dir, async () => {
     assert.throws(
@@ -1271,6 +1277,24 @@ test("command services: schedule mutation rules honor locks and recurring clear 
       () => clearRunSchedule(recurring.runId),
       (err) => err instanceof CommandError && /cannot clear recurring schedule/.test(err.message),
     );
+
+    assert.throws(
+      () =>
+        setRunSchedule(terminal.runId, {
+          cron: "0 9 * * *",
+          timezone: "UTC",
+        }),
+      (err) =>
+        err instanceof CommandError &&
+        new RegExp(`cannot set recurring schedule for terminal run ${terminal.runId}`).test(
+          err.message,
+        ),
+    );
+
+    const oneTime = setRunSchedule(terminal.runId, {
+      at: "2099-01-01T00:00:00.000Z",
+    });
+    assert.equal(oneTime.schedule.recurrence, null);
   });
 });
 

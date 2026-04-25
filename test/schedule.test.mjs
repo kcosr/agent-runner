@@ -41,6 +41,17 @@ test("schedule resolves delay inputs relative to the supplied clock", () => {
   assert.equal(schedule.recurrence, null);
 });
 
+test("schedule rejects oversized delay inputs with validation errors", () => {
+  assert.throws(
+    () => parseDurationMs("999999999999999999999 days"),
+    (err) => err instanceof ScheduleValidationError && /too large/.test(err.message),
+  );
+  assert.throws(
+    () => resolveScheduleInput({ delay: "9999999999999999 days" }, { now, env: relaxedEnv }),
+    (err) => err instanceof ScheduleValidationError && /too large/.test(err.message),
+  );
+});
+
 test("schedule rejects invalid one-time input and guardrail failures", () => {
   assert.throws(
     () => resolveScheduleInput({}, { now, env: relaxedEnv }),

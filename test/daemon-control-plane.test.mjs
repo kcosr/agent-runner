@@ -3105,6 +3105,94 @@ test("daemon scheduler rebuilds future timers after schedule mutations and start
   );
 });
 
+test("daemon scheduler indexes clones created while a run is active", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const source = await initRun(dir);
+  markRunReady(source.workspaceDir);
+  const cloneRunId = "daemon-clone-indexed";
+  const cloneWorkspaceDir = join(source.workspaceDir, "..", cloneRunId);
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  const resumeTargets = [];
+  let resolveCloneStarted;
+  const cloneStarted = new Promise((resolve) => {
+    resolveCloneStarted = resolve;
+  });
+
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl, {
+      async resumeRun({ target, emitEvent, emitAuditEnvelope }) {
+        resumeTargets.push(target);
+        if (target === source.runId) {
+          const sourceManifest = readManifest(source.workspaceDir);
+          mkdirSync(cloneWorkspaceDir, { recursive: true });
+          writeFileSync(
+            join(cloneWorkspaceDir, "run.json"),
+            `${JSON.stringify(
+              {
+                ...sourceManifest,
+                runId: cloneRunId,
+                workspaceDir: cloneWorkspaceDir,
+                assignmentPath: join(cloneWorkspaceDir, "assignment-seed.md"),
+                status: "ready",
+                startedAt: new Date().toISOString(),
+                endedAt: null,
+                exitCode: null,
+                schedule: oneTimeSchedule(new Date(Date.now() - 1_000)),
+              },
+              null,
+              2,
+            )}\n`,
+          );
+          emitAuditEnvelope({
+            runId: cloneRunId,
+            cursor: 1,
+            event: {
+              type: "run.created",
+              recordedAt: new Date().toISOString(),
+              source: "daemon",
+              hostMode: "daemon",
+              fields: {
+                agentName: "daemon-agent",
+                assignmentName: "daemon-work",
+                passive: false,
+              },
+            },
+          });
+          markRunRunning(source.workspaceDir);
+          emitRunStarted(emitEvent, target, dir);
+          return { runId: target };
+        }
+
+        assert.equal(target, cloneRunId);
+        patchManifest(cloneWorkspaceDir, (manifest) => {
+          manifest.status = "running";
+          manifest.schedule = null;
+        });
+        emitRunStarted(emitEvent, target, dir);
+        resolveCloneStarted();
+        return { runId: target };
+      },
+    });
+    const client = await DaemonClient.connect(listenUrl);
+    try {
+      await client.call("runs.resume", { target: source.runId, overrides: {} });
+      await cloneStarted;
+      const running = await waitForRunStatus(httpBaseUrl, cloneRunId, "running");
+      assert.equal(running.runId, cloneRunId);
+      assert.equal(running.schedule, null);
+      assert.deepEqual(resumeTargets, [source.runId, cloneRunId]);
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+});
+
 test("daemon scheduler misses due one-time schedules that are not runnable", async () => {
   const dir = tempDir();
   writeAgent(dir, "daemon-agent", AGENT);
@@ -3228,11 +3316,17 @@ test("daemon scheduler advances missed recurring schedules and disables invalid 
   writeAssignment(dir, "daemon-work", ASSIGNMENT);
   const hourly = await initRun(dir);
   const tooFrequent = await initRun(dir);
+  const corrupt = await initRun(dir);
   markRunReady(hourly.workspaceDir);
   markRunReady(tooFrequent.workspaceDir);
+  markRunReady(corrupt.workspaceDir);
   const originalHourlySchedule = recurringSchedule(new Date(Date.now() - 3_600_000), "0 * * * *");
   setManifestSchedule(hourly.workspaceDir, originalHourlySchedule);
   setManifestSchedule(tooFrequent.workspaceDir, recurringSchedule(new Date(Date.now() - 60_000)));
+  setManifestSchedule(
+    corrupt.workspaceDir,
+    recurringSchedule(new Date(Date.now() - 60_000), "not cron"),
+  );
 
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
@@ -3253,17 +3347,21 @@ test("daemon scheduler advances missed recurring schedules and disables invalid 
         await waitForValue(() => {
           const hourlySchedule = readManifest(hourly.workspaceDir).schedule;
           const frequentSchedule = readManifest(tooFrequent.workspaceDir).schedule;
+          const corruptSchedule = readManifest(corrupt.workspaceDir).schedule;
           return hourlySchedule?.runAt !== originalHourlySchedule.runAt &&
-            frequentSchedule?.enabled === false
+            frequentSchedule?.enabled === false &&
+            corruptSchedule?.enabled === false
             ? true
             : null;
         }, "recurring schedules to advance or disable");
 
         const hourlyManifest = readManifest(hourly.workspaceDir);
         const frequentManifest = readManifest(tooFrequent.workspaceDir);
+        const corruptManifest = readManifest(corrupt.workspaceDir);
         assert.equal(hourlyManifest.schedule.enabled, true);
         assert.ok(new Date(hourlyManifest.schedule.runAt).getTime() > Date.now());
         assert.equal(frequentManifest.schedule.enabled, false);
+        assert.equal(corruptManifest.schedule.enabled, false);
 
         const hourlyAudit = await httpJson(httpBaseUrl, `/api/runs/${hourly.runId}/audit`);
         assert.ok(
@@ -3276,6 +3374,14 @@ test("daemon scheduler advances missed recurring schedules and disables invalid 
         const frequentAudit = await httpJson(httpBaseUrl, `/api/runs/${tooFrequent.runId}/audit`);
         assert.ok(
           frequentAudit.body.history.events.some(
+            (event) =>
+              event.event.type === "run.schedule_disabled" &&
+              event.event.fields.reason === "minimum_interval_violation",
+          ),
+        );
+        const corruptAudit = await httpJson(httpBaseUrl, `/api/runs/${corrupt.runId}/audit`);
+        assert.ok(
+          corruptAudit.body.history.events.some(
             (event) =>
               event.event.type === "run.schedule_disabled" &&
               event.event.fields.reason === "minimum_interval_violation",

@@ -24,6 +24,7 @@ export interface RecurrenceAdvanceResult {
 const DEFAULT_MIN_SCHEDULE_DELAY_SEC = 300;
 const DEFAULT_MIN_RECURRENCE_INTERVAL_SEC = 300;
 const RECURRENCE_SAMPLE_SIZE = 10;
+const MAX_DATE_MS = 8_640_000_000_000_000;
 const DURATION_PATTERN =
   /^([1-9][0-9]*)\s*(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days)$/i;
 
@@ -232,7 +233,11 @@ function resolveDelay(value: string | undefined, now: Date): Date {
   if (value === undefined) {
     throw new ScheduleValidationError("delay is required");
   }
-  return new Date(now.getTime() + parseDurationMs(value));
+  const runAtMs = now.getTime() + parseDurationMs(value);
+  if (!Number.isFinite(runAtMs) || runAtMs > MAX_DATE_MS) {
+    throw new ScheduleValidationError(`schedule delay "${value}" is too large`);
+  }
+  return new Date(runAtMs);
 }
 
 export function parseDurationMs(value: string): number {
@@ -245,11 +250,22 @@ export function parseDurationMs(value: string): number {
     throw new ScheduleValidationError(`invalid schedule delay "${value}"`);
   }
   const amount = Number(rawAmount);
+  if (!Number.isSafeInteger(amount)) {
+    throw new ScheduleValidationError(`schedule delay "${value}" is too large`);
+  }
   const unit = rawUnit.toLowerCase();
-  if (unit.startsWith("s")) return amount * 1000;
-  if (unit.startsWith("m")) return amount * 60 * 1000;
-  if (unit.startsWith("h")) return amount * 60 * 60 * 1000;
-  return amount * 24 * 60 * 60 * 1000;
+  const multiplier = unit.startsWith("s")
+    ? 1000
+    : unit.startsWith("m")
+      ? 60 * 1000
+      : unit.startsWith("h")
+        ? 60 * 60 * 1000
+        : 24 * 60 * 60 * 1000;
+  const durationMs = amount * multiplier;
+  if (!Number.isSafeInteger(durationMs)) {
+    throw new ScheduleValidationError(`schedule delay "${value}" is too large`);
+  }
+  return durationMs;
 }
 
 function enforceMinimumScheduleDelay(
@@ -258,7 +274,12 @@ function enforceMinimumScheduleDelay(
   env: NodeJS.ProcessEnv = process.env,
 ): void {
   const minimum = getMinimumScheduleDelaySec(env);
-  const delaySec = (runAt.getTime() - now.getTime()) / 1000;
+  const runAtMs = runAt.getTime();
+  const nowMs = now.getTime();
+  if (!Number.isFinite(runAtMs) || !Number.isFinite(nowMs)) {
+    throw new ScheduleValidationError("invalid schedule timestamp");
+  }
+  const delaySec = (runAtMs - nowMs) / 1000;
   if (delaySec < minimum) {
     throw new ScheduleValidationError(
       `schedule delay ${Math.floor(delaySec)}s is below minimum ${minimum}s`,

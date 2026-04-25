@@ -95,6 +95,7 @@ import {
 } from "@task-runner/core/core/run/run-events.js";
 import type { RunEvent } from "@task-runner/core/core/run/run-loop.js";
 import {
+  ScheduleValidationError,
   advanceRecurringSchedule,
   deriveScheduleState,
 } from "@task-runner/core/core/run/schedule.js";
@@ -1067,7 +1068,21 @@ export async function serveDaemon(
         return;
       }
       const previousSchedule = latest.schedule;
-      const advanced = advanceRecurringSchedule(previousSchedule, now);
+      let advanced: ReturnType<typeof advanceRecurringSchedule>;
+      try {
+        advanced = advanceRecurringSchedule(previousSchedule, now);
+      } catch (error) {
+        if (!(error instanceof ScheduleValidationError)) {
+          throw error;
+        }
+        advanced = {
+          schedule: {
+            ...previousSchedule,
+            enabled: false,
+          },
+          disabledReason: "minimum_interval_violation",
+        };
+      }
       latest.schedule = advanced.schedule;
       writeManifest(entry.workspaceDir, latest);
       rememberManifestIndexEntry({ ...entry, manifest: latest });
@@ -1753,6 +1768,18 @@ export async function serveDaemon(
       abortController.signal,
       (envelope) => {
         publishAudit(envelope);
+        if (envelope.event.type === "run.created") {
+          try {
+            refreshManifestIndexEntry(envelope.runId);
+            publishMutationResult(envelope.runId, {
+              summary: getProjectedSummary(envelope.runId),
+              detail: getProjectedDetail(envelope.runId),
+            });
+            queueScheduleEvaluation?.(envelope.runId);
+          } catch (error) {
+            publishScheduleRecovery(envelope.runId, error);
+          }
+        }
       },
     )
       .then((outcome) => {

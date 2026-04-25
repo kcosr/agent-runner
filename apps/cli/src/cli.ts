@@ -72,7 +72,10 @@ import {
   type RunEvent,
   VarResolutionError,
 } from "@task-runner/core/core/run/run-loop.js";
-import type { ScheduleInput } from "@task-runner/core/core/run/schedule.js";
+import {
+  type ScheduleInput,
+  ScheduleValidationError,
+} from "@task-runner/core/core/run/schedule.js";
 import {
   ResumeError,
   RunCommandError,
@@ -2197,7 +2200,8 @@ async function runExecuteCommandEmbedded(parsed: ParsedArgs): Promise<never> {
       err instanceof InvalidRunNameError ||
       err instanceof EmptyPromptError ||
       err instanceof RecursionDepthError ||
-      err instanceof InvalidBackendSessionError
+      err instanceof InvalidBackendSessionError ||
+      err instanceof ScheduleValidationError
     ) {
       process.stderr.write(`task-runner: ${err.message}\n`);
       if (err instanceof RunCommandError && err.showHelp) {

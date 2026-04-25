@@ -163,7 +163,37 @@ test("run-loop schedules: early recurring manual run leaves runAt untouched and 
   assert.equal(outcome.summary.status, "ready");
   assert.equal(outcome.exitCode, 0);
   assert.equal(after.status, "ready");
+  assert.equal(after.exitCode, null);
+  assert.equal(after.endedAt, null);
   assert.equal(after.schedule.runAt, before);
+});
+
+test("run-loop schedules: future clone recurrence moves schedule to clone", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const source = await initRun(dir, {
+    schedule: { cron: "*/5 * * * *", timezone: "UTC", mode: "clone" },
+  });
+  readyInitializedRun(dir, source.runId);
+  const before = readManifest(source.workspaceDir).schedule;
+
+  await runReady(dir, source.runId, (ctx) => completeAllTasksFromPrompt(ctx.prompt, dir));
+
+  const sourceAfter = readManifest(source.workspaceDir);
+  const manifests = repoManifests(dir, source.manifest.repo);
+  const cloneManifest = manifests.find(
+    (manifest) =>
+      manifest.runId !== source.runId &&
+      manifest.status === "ready" &&
+      manifest.schedule?.runAt === before.runAt,
+  );
+
+  assert.equal(sourceAfter.status, "success");
+  assert.equal(sourceAfter.schedule, null);
+  assert.ok(cloneManifest);
+  assert.equal(cloneManifest.exitCode, null);
+  assert.equal(cloneManifest.endedAt, null);
+  assert.deepEqual(cloneManifest.schedule, before);
 });
 
 test("run-loop schedules: running schedule mutations are refreshed before retry or exhaustion", async () => {
@@ -275,7 +305,9 @@ test("run-loop schedules: reuse, reset, and clone recurrence modes use frozen re
   );
   assert.ok(cloneManifest);
   assert.equal(readManifest(clone.workspaceDir).status, "success");
+  assert.equal(readManifest(clone.workspaceDir).schedule, null);
   assert.equal(cloneManifest.status, "ready");
+  assert.equal(cloneManifest.exitCode, null);
   assert.equal(cloneManifest.totalAttemptCount, 0);
   assert.equal(cloneManifest.totalSessionCount, 0);
   assert.equal(cloneManifest.schedule.recurrence.mode, "clone");

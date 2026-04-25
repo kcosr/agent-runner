@@ -41,6 +41,7 @@ import {
   canResetRun,
   canUnarchiveRun,
   deriveTaskMutationCapabilities,
+  isTerminalStatus,
   toRunArchiveResult,
   toRunBackendSessionResult,
   toRunDependenciesResult,
@@ -112,7 +113,11 @@ import {
   taskCommandRunEventContext,
 } from "../run/run-events.js";
 import { LockedFieldError } from "../run/run-loop.js";
-import { type ScheduleInput, resolveScheduleInput } from "../run/schedule.js";
+import {
+  type ScheduleInput,
+  ScheduleValidationError,
+  resolveScheduleInput,
+} from "../run/schedule.js";
 import { derivePassiveTerminalStatus } from "../run/status.js";
 import {
   loadWorkspaceTaskMap,
@@ -945,6 +950,11 @@ export function setRunSchedule(
     requireScheduleDefinitionUnlocked(resolved.manifest);
     const previousSchedule = resolved.manifest.schedule;
     const schedule = resolveScheduleInput(scheduleInput);
+    if (schedule.recurrence !== null && isTerminalStatus(resolved.manifest.status)) {
+      throw new ScheduleMutationError(
+        `cannot set recurring schedule for terminal run ${resolved.manifest.runId}`,
+      );
+    }
     resolved.manifest.schedule = schedule;
     writeManifest(resolved.workspaceDir, resolved.manifest);
     emitPersistedAudit(
@@ -1780,11 +1790,12 @@ export function addTask(
 
 export function isCommandError(
   err: unknown,
-): err is CommandError | ResumeError | AttachmentError | RunLineageError {
+): err is CommandError | ResumeError | AttachmentError | RunLineageError | ScheduleValidationError {
   return (
     err instanceof CommandError ||
     err instanceof ResumeError ||
     err instanceof AttachmentError ||
-    err instanceof RunLineageError
+    err instanceof RunLineageError ||
+    err instanceof ScheduleValidationError
   );
 }

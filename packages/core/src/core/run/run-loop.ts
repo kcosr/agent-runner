@@ -520,7 +520,7 @@ function buildRecurringCloneManifest(params: {
     dependencyRunIds: [...seed.dependencyRunIds],
     parentRunId: seed.parentRunId,
     schedule: cloneRunSchedule(schedule),
-    exitCode: 0,
+    exitCode: null,
     totalAttemptCount: 0,
     maxAttemptsPerSession: seed.maxAttemptsPerSession,
     tasksCompleted: Object.values(finalTasks).filter((task) => task.status === "completed").length,
@@ -2488,8 +2488,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     sessionRecord.backendSessionIdAtEnd = manifest.backendSessionId;
 
     manifest.status = finalTerminal.status;
-    manifest.exitCode = finalTerminal.exitCode;
-    manifest.endedAt = endedAt;
+    manifest.exitCode = finalTerminal.status === "ready" ? null : finalTerminal.exitCode;
+    manifest.endedAt = finalTerminal.status === "ready" ? null : endedAt;
     tryRefreshMutableManifestMetadata(manifest);
     writeManifest(workspaceDir, manifest);
     if (sawRunAbort) {
@@ -2537,7 +2537,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const recurrenceResult = withTaskStateLock(workspaceDir, () => {
     const latest = resolveResumeTarget(workspaceDir).manifest;
     const schedule = latest.schedule;
-    if (schedule === null || schedule.recurrence === null) {
+    if (schedule === null || schedule.recurrence === null || !schedule.enabled) {
       manifest = latest;
       return null;
     }
@@ -2550,21 +2550,18 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       return null;
     }
     const recurrenceNow = new Date();
-    if (new Date(schedule.runAt).getTime() > recurrenceNow.getTime()) {
-      latest.status = "ready";
-      latest.exitCode = 0;
-      latest.endedAt = null;
-      writeManifest(workspaceDir, latest);
-      manifest = latest;
-      return { manifest: latest, promoted: true };
-    }
-
-    const previousSchedule = cloneRunSchedule(schedule);
-    if (previousSchedule === null) {
-      manifest = latest;
-      return null;
-    }
-    const advanced = advanceRecurringSchedule(schedule, recurrenceNow);
+    const previousSchedule: RunSchedule = {
+      ...schedule,
+      recurrence: {
+        schedule: { ...schedule.recurrence.schedule },
+        mode: schedule.recurrence.mode,
+        continueOnFailure: schedule.recurrence.continueOnFailure,
+      },
+    };
+    const scheduleReadyForAdvance = new Date(schedule.runAt).getTime() <= recurrenceNow.getTime();
+    const advanced = scheduleReadyForAdvance
+      ? advanceRecurringSchedule(schedule, recurrenceNow)
+      : { schedule, disabledReason: null };
     const reason = advanced.disabledReason === null ? undefined : advanced.disabledReason;
 
     if (schedule.recurrence.mode === "clone") {
@@ -2577,6 +2574,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       copyFrozenAssignmentSeed(latest, cloneManifest.assignmentPath);
       copySeedAttachments(latest, cloneManifest);
       writeManifest(cloneManifest.workspaceDir, cloneManifest);
+      latest.schedule = null;
+      writeManifest(workspaceDir, latest);
       emitAuditEnvelope(
         appendRunCreatedEvent({
           manifest: cloneManifest,
@@ -2586,13 +2585,22 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
           passive: cloneManifest.backend === "passive",
         }),
       );
+      if (scheduleReadyForAdvance) {
+        emitAuditEnvelope(
+          appendRunScheduleAdvancedEvent({
+            manifest: cloneManifest,
+            context: lifecycleContext,
+            previousSchedule,
+            schedule: advanced.schedule,
+            reason,
+          }),
+        );
+      }
       emitAuditEnvelope(
-        appendRunScheduleAdvancedEvent({
-          manifest: cloneManifest,
+        appendRunScheduleConsumedEvent({
+          manifest: latest,
           context: lifecycleContext,
-          previousSchedule,
-          schedule: advanced.schedule,
-          reason,
+          schedule: previousSchedule,
         }),
       );
       manifest = latest;
@@ -2604,7 +2612,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     }
     latest.schedule = advanced.schedule;
     latest.status = "ready";
-    latest.exitCode = 0;
+    latest.exitCode = null;
     latest.endedAt = null;
     writeManifest(workspaceDir, latest);
     emitAuditEnvelope(
