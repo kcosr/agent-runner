@@ -32,6 +32,7 @@ export function RunDetailPanel({
   onReplaceAttachmentPreview,
   onSelectRun,
   onClearBackendSession,
+  onClearSchedule,
   onRemoveDependency,
   onRemoveAttachment,
   onReset,
@@ -41,6 +42,7 @@ export function RunDetailPanel({
   onSetNote,
   onSetBackendSession,
   onSetPinned,
+  onSetScheduleEnabled,
   onSelectDetailSection,
   onSubmitResume,
   onTriggerPrimaryAction,
@@ -77,6 +79,7 @@ export function RunDetailPanel({
   onReplaceAttachmentPreview: (attachmentOwnerRunId: string, attachmentId: string) => void;
   onSelectRun: (runId: string) => void;
   onClearBackendSession: (runId: string) => Promise<void>;
+  onClearSchedule: (runId: string) => Promise<void>;
   onRemoveDependency: (runId: string, dependencyRunId: string) => Promise<void>;
   onRemoveAttachment: (runId: string, attachmentId: string) => Promise<void>;
   onReset: (runId: string) => void;
@@ -86,6 +89,7 @@ export function RunDetailPanel({
   onSetNote: (runId: string, note: string | null) => Promise<void>;
   onSetBackendSession: (runId: string, backendSessionId: string) => Promise<void>;
   onSetPinned: (runId: string, pinned: boolean) => Promise<void>;
+  onSetScheduleEnabled: (runId: string, enabled: boolean) => Promise<void>;
   onSelectDetailSection: (section: DrawerDetailSection) => void;
   onSubmitResume: () => Promise<void>;
   onTriggerPrimaryAction: () => Promise<void>;
@@ -242,6 +246,7 @@ export function RunDetailPanel({
       onOpenAttachmentPreview={onOpenAttachmentPreview}
       onSelectRun={onSelectRun}
       onClearBackendSession={() => onClearBackendSession(selectedRun.runId)}
+      onClearSchedule={() => onClearSchedule(selectedRun.runId)}
       onRemoveDependency={(dependencyRunId) =>
         onRemoveDependency(selectedRun.runId, dependencyRunId)
       }
@@ -255,6 +260,7 @@ export function RunDetailPanel({
         onSetBackendSession(selectedRun.runId, backendSessionId)
       }
       onSetPinned={(pinned) => onSetPinned(selectedRun.runId, pinned)}
+      onSetScheduleEnabled={(enabled) => onSetScheduleEnabled(selectedRun.runId, enabled)}
       onSelectSection={onSelectDetailSection}
       onSubmitResume={onSubmitResume}
       onTriggerPrimaryAction={onTriggerPrimaryAction}

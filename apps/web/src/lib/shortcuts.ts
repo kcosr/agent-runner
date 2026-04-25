@@ -6,6 +6,7 @@ export type RunsShortcutCommand =
   | "board.moveDown"
   | "board.moveLeft"
   | "board.moveRight"
+  | "ui.toggleScheduledOnly"
   | "ui.togglePinnedOnly"
   | "ui.toggleNotesOnly"
   | "ui.toggleArchived"
@@ -54,13 +55,18 @@ export type BoardDirection = "up" | "down" | "left" | "right";
 
 type BoardFilterShortcutCommand = Extract<
   RunsShortcutCommand,
-  "ui.togglePinnedOnly" | "ui.toggleNotesOnly" | "ui.toggleArchived" | "ui.toggleHideEmptyColumns"
+  | "ui.toggleScheduledOnly"
+  | "ui.togglePinnedOnly"
+  | "ui.toggleNotesOnly"
+  | "ui.toggleArchived"
+  | "ui.toggleHideEmptyColumns"
 >;
 
 const BOARD_FILTER_SHORTCUTS: readonly {
   command: BoardFilterShortcutCommand;
   key: string;
 }[] = [
+  { command: "ui.toggleScheduledOnly", key: "s" },
   { command: "ui.togglePinnedOnly", key: "p" },
   { command: "ui.toggleNotesOnly", key: "n" },
   { command: "ui.toggleArchived", key: "a" },

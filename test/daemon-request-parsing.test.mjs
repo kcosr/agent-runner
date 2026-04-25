@@ -5,11 +5,27 @@ import {
   optionalOverrides,
   parseCliStartRunParams,
   parseResumeRunParams,
+  parseRunReadyParams,
+  parseRunScheduleParams,
   parseWebStartRunParams,
 } from "../apps/cli/dist/daemon/request-parsing.js";
 
 test("optionalOverrides accepts launcher string refs", () => {
   assert.equal(optionalOverrides({ launcher: "shared" }).launcher, "shared");
+});
+
+test("optionalOverrides accepts structured schedule overrides", () => {
+  assert.deepEqual(
+    optionalOverrides({ schedule: { cron: "0 9 * * *", timezone: "UTC" } }).schedule,
+    {
+      cron: "0 9 * * *",
+      timezone: "UTC",
+      at: undefined,
+      delay: undefined,
+      mode: undefined,
+      continueOnFailure: undefined,
+    },
+  );
 });
 
 test("optionalOverrides rejects malformed launcher overrides", () => {
@@ -121,4 +137,41 @@ test("parseResumeRunParams accepts optional parentRunId", () => {
   );
   assert.equal(parsed.target, "run-123");
   assert.equal(parsed.parentRunId, "parent-123");
+});
+
+test("parseRunReadyParams accepts schedule and rejects unknown keys", () => {
+  const parsed = parseRunReadyParams(
+    {
+      target: "run-123",
+      schedule: { delay: "10m" },
+    },
+    "runs.ready params",
+  );
+  assert.equal(parsed.target, "run-123");
+  assert.equal(parsed.schedule.delay, "10m");
+
+  assert.throws(
+    () => parseRunReadyParams({ target: "run-123", extra: true }, "runs.ready params"),
+    /runs\.ready params\.extra is not supported/,
+  );
+});
+
+test("parseRunScheduleParams requires schedule and rejects unknown schedule keys", () => {
+  const parsed = parseRunScheduleParams(
+    {
+      target: "run-123",
+      schedule: { at: "2026-04-25T12:00:00.000Z" },
+    },
+    "runs.setSchedule params",
+  );
+  assert.equal(parsed.schedule.at, "2026-04-25T12:00:00.000Z");
+
+  assert.throws(
+    () =>
+      parseRunScheduleParams(
+        { target: "run-123", schedule: { at: "2026-04-25T12:00:00.000Z", extra: true } },
+        "runs.setSchedule params",
+      ),
+    /runs\.setSchedule params\.schedule\.extra is not supported/,
+  );
 });

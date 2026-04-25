@@ -1,3 +1,7 @@
+import type { RunSchedule, RunScheduleState } from "@task-runner/core/contracts/runs.js";
+import type { RunScheduleMode } from "@task-runner/core/core/run/manifest.js";
+import { humanizeCronExpression } from "@task-runner/core/core/run/schedule.js";
+
 export function formatTimestamp(value: string | null): string {
   if (!value) {
     return "Not available";
@@ -42,6 +46,43 @@ export function truncateEnd(value: string, max = 44): string {
     return value;
   }
   return `${value.slice(0, Math.max(0, max - 3))}...`;
+}
+
+export function formatScheduleState(state: RunScheduleState): string {
+  switch (state) {
+    case "none":
+      return "Not scheduled";
+    case "paused":
+      return "Paused";
+    case "future":
+      return "Scheduled";
+    case "due":
+      return "Due";
+  }
+}
+
+export function formatScheduleKind(schedule: RunSchedule): string {
+  return schedule.recurrence === null ? "One-time" : "Recurring";
+}
+
+export function formatScheduleMode(mode: RunScheduleMode): string {
+  switch (mode) {
+    case "reuse":
+      return "Reuse run";
+    case "reset":
+      return "Reset run";
+    case "clone":
+      return "Clone run";
+    default:
+      return mode;
+  }
+}
+
+export function formatScheduleRecurrence(schedule: RunSchedule): string {
+  if (schedule.recurrence === null) {
+    return "One-time";
+  }
+  return humanizeCronExpression(schedule.recurrence.schedule.expression);
 }
 
 const BYTE_UNITS = ["B", "KB", "MB", "GB", "TB"] as const;

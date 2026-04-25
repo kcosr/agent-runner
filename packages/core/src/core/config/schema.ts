@@ -213,9 +213,55 @@ export const LOCKABLE_FIELDS = [
   "unrestricted",
   "maxRetries",
   "tasks",
+  "schedule",
 ] as const;
 
 export type LockableField = (typeof LOCKABLE_FIELDS)[number];
+
+export const scheduleConfigSchema = z
+  .object({
+    at: z.string().trim().min(1).optional(),
+    delay: z.string().trim().min(1).optional(),
+    cron: z.string().trim().min(1).optional(),
+    timezone: z.string().trim().min(1).optional(),
+    mode: z.enum(["reuse", "reset", "clone"]).optional(),
+    continueOnFailure: z.boolean().optional(),
+  })
+  .strict()
+  .superRefine((schedule, ctx) => {
+    const sourceCount = [schedule.at, schedule.delay, schedule.cron].filter(
+      (value) => value !== undefined,
+    ).length;
+    if (sourceCount !== 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "schedule must define exactly one of `at`, `delay`, or `cron`",
+      });
+    }
+    if (schedule.cron === undefined) {
+      if (schedule.timezone !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["timezone"],
+          message: "schedule.timezone is valid only with `cron`",
+        });
+      }
+      if (schedule.mode !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["mode"],
+          message: "schedule.mode is valid only with `cron`",
+        });
+      }
+      if (schedule.continueOnFailure !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["continueOnFailure"],
+          message: "schedule.continueOnFailure is valid only with `cron`",
+        });
+      }
+    }
+  });
 
 export const codexTransportConfigSchema: z.ZodType<CodexTransportConfig> = z.union([
   z
@@ -298,6 +344,7 @@ const assignmentConfigBaseSchema = z.object({
   name: z.string().min(1),
   cwd: z.string().trim().min(1).optional(),
   message: z.string().optional(),
+  schedule: scheduleConfigSchema.optional(),
   maxRetries: z.number().int().min(0).max(20).default(DEFAULT_MAX_RETRIES),
   // Documentation surface for the human / script invoking
   // task-runner, NOT part of the prompt sent to the backend.

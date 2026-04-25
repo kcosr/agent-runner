@@ -25,6 +25,7 @@ import {
   RecursionDepthError,
   VarResolutionError,
 } from "@task-runner/core/core/run/run-loop.js";
+import { ScheduleValidationError } from "@task-runner/core/core/run/schedule.js";
 import { RunCommandError, UnknownBackendError } from "@task-runner/core/run-command.js";
 import { RequestValidationError } from "./request-parsing.js";
 
@@ -70,7 +71,8 @@ export function isKnownControlPlaneError(err: unknown): boolean {
     err instanceof InvalidAddedTaskError ||
     err instanceof EmptyPromptError ||
     err instanceof RecursionDepthError ||
-    err instanceof InvalidBackendSessionError
+    err instanceof InvalidBackendSessionError ||
+    err instanceof ScheduleValidationError
   );
 }
 

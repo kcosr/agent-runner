@@ -161,6 +161,11 @@ name: repo-orientation              # required
 cwd: /absolute/or/relative/path     # optional; defaults to caller cwd
 message: optional default message   # optional
 maxRetries: 3                       # optional int 0-20, default 3
+schedule:                           # optional delayed/recurring start
+  cron: "0 9 * * *"                 # exactly one of at, delay, cron
+  timezone: UTC                     # cron-only, default local timezone
+  mode: clone                       # cron-only: reuse, reset, clone
+  continueOnFailure: false          # cron-only
 callerInstructions: |               # optional; not sent to backend
   Operator docs for this assignment.
 vars:                               # optional variable schema
@@ -235,6 +240,21 @@ Read the shared review checklist.
   happens during run construction
 - named tasks are loader-only in this pass; there is no top-level
   `task-runner list tasks` or `show task` definition surface
+
+Assignment schedules use the same input shape as CLI/API schedule
+requests. Define exactly one of:
+
+- `at`: absolute ISO timestamp for a one-time schedule
+- `delay`: duration such as `30m`, `2h`, or `1d` for a one-time schedule
+- `cron`: recurring cron expression
+
+`timezone`, `mode`, and `continueOnFailure` are valid only with `cron`.
+`mode` controls recurring completion behavior: `reuse` advances the same
+run, `reset` resets the same run from its frozen reset seed, and `clone`
+creates a ready child run from the frozen seed. Schedule fields support
+the same scalar interpolation used by other config values; interpolation
+does not replace the schedule object as a blob. Resume, reset, and clone
+reuse the frozen manifest schedule and do not re-read assignment source.
 
 Canonical identity comes from the on-disk key for every authored
 definition:
@@ -418,12 +438,16 @@ The set of fields that can be locked is shared between the two schemas:
 | `message` | assignment |
 | `maxRetries` | assignment |
 | `tasks` | assignment |
+| `schedule` | assignment |
 
 Either side can lock any field. In practice you usually lock what your
 definition owns — an agent locks `model` / `effort` / `unrestricted`; an
-assignment locks `tasks` / `cwd` / `message`. A locked `tasks` set on an
-assignment, for example, prevents `--add-task` CLI overrides and prevents
-the runtime from dropping or reordering the list.
+assignment locks `tasks` / `cwd` / `message` / `schedule`. A locked
+`tasks` set on an assignment, for example, prevents `--add-task` CLI
+overrides and prevents the runtime from dropping or reordering the list.
+A locked `schedule` rejects CLI/API replacement at initialization, ready
+promotion, `run schedule` set, and one-time clear. Enable/disable can
+still pause or resume the already-authored schedule definition.
 
 Violations raise `LockedFieldError` with the current value shown.
 

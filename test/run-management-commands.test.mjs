@@ -310,13 +310,133 @@ test("run ready promotes initialized runs and returns text and json results", as
 
   const second = await initRun(dir);
   const json = runCli(["run", "ready", second.runId, "--output-format", "json"], { cwd: dir });
-  assert.deepEqual(JSON.parse(json), {
-    runId: second.runId,
-    status: "ready",
-  });
+  assert.equal(JSON.parse(json).runId, second.runId);
+  assert.equal(JSON.parse(json).status, "ready");
 
   manifest = readManifest(second.workspaceDir);
   assert.equal(manifest.status, "ready");
+});
+
+test("run schedule sets, toggles, clears, and run ready accepts schedule flags", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "run-mgmt-agent", AGENT);
+  writeAssignment(dir, "run-mgmt-work", ASSIGNMENT);
+  const outcome = await initRun(dir);
+
+  const setText = runCli(["run", "schedule", outcome.runId, "--at", "2099-04-25T12:00:00.000Z"], {
+    cwd: dir,
+  });
+  assert.match(setText, /set schedule/);
+  assert.equal(readManifest(outcome.workspaceDir).schedule.runAt, "2099-04-25T12:00:00.000Z");
+
+  const disableJson = JSON.parse(
+    runCli(["run", "schedule", "disable", outcome.runId, "--output-format", "json"], {
+      cwd: dir,
+    }),
+  );
+  assert.equal(disableJson.schedule.enabled, false);
+
+  const clearText = runCli(["run", "schedule", "clear", outcome.runId], { cwd: dir });
+  assert.match(clearText, /cleared schedule/);
+  assert.equal(readManifest(outcome.workspaceDir).schedule, null);
+
+  const recurring = await initRun(dir);
+  runCli(
+    [
+      "run",
+      "schedule",
+      recurring.runId,
+      "--cron",
+      "0 * * * *",
+      "--timezone",
+      "UTC",
+      "--mode",
+      "reuse",
+    ],
+    { cwd: dir },
+  );
+  patchManifest(recurring.workspaceDir, (manifest) => {
+    manifest.schedule = {
+      ...manifest.schedule,
+      enabled: false,
+      runAt: "2026-04-25T13:23:00.000Z",
+    };
+  });
+  const enabledRecurring = JSON.parse(
+    runCli(["run", "schedule", "enable", recurring.runId, "--output-format", "json"], {
+      cwd: dir,
+    }),
+  );
+  assert.equal(enabledRecurring.schedule.enabled, true);
+  assert.equal(enabledRecurring.schedule.recurrence.mode, "reuse");
+  assert.notEqual(enabledRecurring.schedule.runAt, "2026-04-25T13:23:00.000Z");
+
+  const ready = await initRun(dir);
+  const readyJson = JSON.parse(
+    runCli(
+      [
+        "run",
+        "ready",
+        ready.runId,
+        "--schedule-cron",
+        "0 9 * * *",
+        "--schedule-timezone",
+        "UTC",
+        "--schedule-mode",
+        "clone",
+        "--schedule-continue-on-failure",
+        "--output-format",
+        "json",
+      ],
+      { cwd: dir },
+    ),
+  );
+  assert.equal(readyJson.status, "ready");
+  assert.equal(readyJson.schedule.recurrence.schedule.expression, "0 9 * * *");
+  assert.equal(readyJson.schedule.recurrence.mode, "clone");
+  assert.equal(readyJson.schedule.recurrence.continueOnFailure, true);
+
+  const recurringClearText = runCli(["run", "schedule", "clear", ready.runId], { cwd: dir });
+  assert.match(recurringClearText, /cleared schedule/);
+  assert.equal(readManifest(ready.workspaceDir).schedule, null);
+
+  runCli(["run", "reset", ready.runId], { cwd: dir });
+  const resetManifest = readManifest(ready.workspaceDir);
+  assert.equal(resetManifest.status, "initialized");
+  assert.equal(resetManifest.schedule, null);
+});
+
+test("run schedule validates required target and schedule flag combinations", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "run-mgmt-agent", AGENT);
+  writeAssignment(dir, "run-mgmt-work", ASSIGNMENT);
+  const outcome = await initRun(dir);
+
+  let result = runCliExpectFail(["run", "schedule"], { cwd: dir });
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /run schedule requires <id-or-path>/);
+
+  result = runCliExpectFail(["run", "schedule", outcome.runId], { cwd: dir });
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /requires exactly one of --at, --delay, or --cron/);
+
+  result = runCliExpectFail(
+    ["run", "schedule", outcome.runId, "--at", "2026-04-25T12:00:00.000Z", "--cron", "0 9 * * *"],
+    {
+      cwd: dir,
+    },
+  );
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /requires exactly one of --at, --delay, or --cron/);
+
+  result = runCliExpectFail(
+    ["run", "schedule", outcome.runId, "--delay", "30m", "--timezone", "UTC"],
+    {
+      cwd: dir,
+    },
+  );
+  assert.equal(result.status, 3);
+  assert.match(result.stderr, /--timezone is valid only with --cron/);
 });
 
 test("run set-name updates, clears, and preserves reset seed", async () => {

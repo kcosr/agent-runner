@@ -25,6 +25,18 @@ export interface ParsedArgs {
   unrestricted?: boolean;
   maxRetries?: number;
   name?: string;
+  scheduleAt?: string;
+  scheduleDelay?: string;
+  scheduleCron?: string;
+  scheduleTimezone?: string;
+  scheduleMode?: "reuse" | "reset" | "clone";
+  scheduleContinueOnFailure?: boolean;
+  at?: string;
+  delay?: string;
+  cron?: string;
+  timezone?: string;
+  mode?: "reuse" | "reset" | "clone";
+  continueOnFailure?: boolean;
   clear?: boolean;
   detach?: boolean;
   outputFormat: OutputFormat;
@@ -56,6 +68,7 @@ const EFFORT_VALUES = ["off", "minimal", "low", "medium", "high", "xhigh", "max"
 const OUTPUT_FORMATS = ["text", "json"] as const;
 const BACKEND_VALUES = BACKEND_IDS;
 const ATTACHMENT_SCOPE_VALUES = ["run", "family"] as const;
+const SCHEDULE_MODE_VALUES = ["reuse", "reset", "clone"] as const;
 export function parseArgs(argv: string[]): ParsedArgs {
   const args = argv.slice(2);
   const result: ParsedArgs = {
@@ -101,6 +114,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       args[0] === "audit" ||
       args[0] === "brief" ||
       args[0] === "ready" ||
+      args[0] === "schedule" ||
       args[0] === "reset" ||
       args[0] === "archive" ||
       args[0] === "unarchive" ||
@@ -228,6 +242,56 @@ export function parseArgs(argv: string[]): ParsedArgs {
           throw new Error("--name cannot be empty");
         }
       }
+    } else if (arg === "--schedule-at") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--schedule-at requires a value");
+      result.scheduleAt = next;
+    } else if (arg === "--schedule-delay") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--schedule-delay requires a value");
+      result.scheduleDelay = next;
+    } else if (arg === "--schedule-cron") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--schedule-cron requires a value");
+      result.scheduleCron = next;
+    } else if (arg === "--schedule-timezone") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--schedule-timezone requires a value");
+      result.scheduleTimezone = next;
+    } else if (arg === "--schedule-mode") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--schedule-mode requires a value");
+      if (!(SCHEDULE_MODE_VALUES as readonly string[]).includes(next)) {
+        throw new Error(`--schedule-mode must be one of: ${SCHEDULE_MODE_VALUES.join(", ")}`);
+      }
+      result.scheduleMode = next as (typeof SCHEDULE_MODE_VALUES)[number];
+    } else if (arg === "--schedule-continue-on-failure") {
+      result.scheduleContinueOnFailure = true;
+    } else if (arg === "--at") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--at requires a value");
+      result.at = next;
+    } else if (arg === "--delay") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--delay requires a value");
+      result.delay = next;
+    } else if (arg === "--cron") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--cron requires a value");
+      result.cron = next;
+    } else if (arg === "--timezone") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--timezone requires a value");
+      result.timezone = next;
+    } else if (arg === "--mode") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--mode requires a value");
+      if (!(SCHEDULE_MODE_VALUES as readonly string[]).includes(next)) {
+        throw new Error(`--mode must be one of: ${SCHEDULE_MODE_VALUES.join(", ")}`);
+      }
+      result.mode = next as (typeof SCHEDULE_MODE_VALUES)[number];
+    } else if (arg === "--continue-on-failure") {
+      result.continueOnFailure = true;
     } else if (arg === "--mime-type") {
       const next = args.shift();
       if (next === undefined) throw new Error("--mime-type requires a value");
@@ -334,5 +398,21 @@ export function overridesFromParsedArgs(parsed: ParsedArgs) {
     unrestricted: parsed.unrestricted,
     maxRetries: parsed.maxRetries,
     addedTasks: parsed.addedTasks.length > 0 ? parsed.addedTasks : undefined,
+    schedule:
+      parsed.scheduleAt !== undefined ||
+      parsed.scheduleDelay !== undefined ||
+      parsed.scheduleCron !== undefined ||
+      parsed.scheduleTimezone !== undefined ||
+      parsed.scheduleMode !== undefined ||
+      parsed.scheduleContinueOnFailure !== undefined
+        ? {
+            at: parsed.scheduleAt,
+            delay: parsed.scheduleDelay,
+            cron: parsed.scheduleCron,
+            timezone: parsed.scheduleTimezone,
+            mode: parsed.scheduleMode,
+            continueOnFailure: parsed.scheduleContinueOnFailure,
+          }
+        : undefined,
   };
 }

@@ -34,6 +34,7 @@ const DEFAULT_DASHBOARD_PREFERENCES = {
   collapseFailureStates: true,
   showArchived: false,
   showNotesOnly: false,
+  showScheduledOnly: false,
   showPinnedOnly: false,
   sortByRecentUpdates: false,
   auditNewestFirst: false,
@@ -176,6 +177,8 @@ function makeRun(
       satisfied: 0,
       unsatisfied: 0,
     },
+    schedule: null,
+    scheduleState: "none",
     activeTask: {
       id: "build",
       title: "Build UI",
@@ -325,6 +328,8 @@ function makeDetail(
     attachments: [],
     dependencies: [],
     dependents: [],
+    schedule: null,
+    scheduleState: "none",
     tasks: [
       {
         id: "orient",
@@ -598,6 +603,17 @@ function installFetchMock(
     );
   }
 
+  function syncScheduleState(detail: RunDetail) {
+    detail.scheduleState =
+      detail.schedule === null
+        ? "none"
+        : !detail.schedule.enabled
+          ? "paused"
+          : new Date(detail.schedule.runAt).getTime() <= Date.now()
+            ? "due"
+            : "future";
+  }
+
   function syncRunSummary(runId: string) {
     const detail = state.details[runId];
     if (!detail) {
@@ -628,6 +644,8 @@ function installFetchMock(
             lastSession: detail.lastSession,
             tasksCompleted: detail.tasksCompleted,
             tasksTotal: detail.tasksTotal,
+            schedule: detail.schedule,
+            scheduleState: detail.scheduleState,
             attachmentCount: detail.attachments.length,
             activeTask: detail.activeTask,
             execution: detail.execution,
@@ -792,6 +810,40 @@ function installFetchMock(
         lastCursor: 0,
       };
       return new Response(JSON.stringify({ history }), { status: 200 });
+    }
+
+    const scheduleToggleMatch = /\/api\/runs\/([^/]+)\/schedule\/(enable|disable)$/.exec(url);
+    if (scheduleToggleMatch && init?.method === "POST") {
+      const runId = decodeURIComponent(scheduleToggleMatch[1] ?? "");
+      const action = scheduleToggleMatch[2];
+      const detail = state.details[runId];
+      if (!detail?.schedule) {
+        return new Response(JSON.stringify({ error: { message: "missing", code: "not_found" } }), {
+          status: 404,
+        });
+      }
+      detail.schedule = {
+        ...detail.schedule,
+        enabled: action === "enable",
+      };
+      syncScheduleState(detail);
+      syncRunSummary(runId);
+      return new Response(JSON.stringify({ run: detail }), { status: 200 });
+    }
+
+    const scheduleMatch = /\/api\/runs\/([^/]+)\/schedule$/.exec(url);
+    if (scheduleMatch && init?.method === "DELETE") {
+      const runId = decodeURIComponent(scheduleMatch[1] ?? "");
+      const detail = state.details[runId];
+      if (!detail?.schedule) {
+        return new Response(JSON.stringify({ error: { message: "missing", code: "not_found" } }), {
+          status: 404,
+        });
+      }
+      detail.schedule = null;
+      syncScheduleState(detail);
+      syncRunSummary(runId);
+      return new Response(JSON.stringify({ run: detail }), { status: 200 });
     }
 
     const archiveMatch = /\/api\/runs\/([^/]+)\/(archive|unarchive|reset|ready|resume|abort)$/.exec(
@@ -2765,6 +2817,234 @@ describe("web app", () => {
     expect(within(card).getByLabelText("1 of 3 dependencies satisfied")).toBeInTheDocument();
     expect(within(card).getByText("1/3")).toBeInTheDocument();
     expect(within(card).getByLabelText("2 attachments")).toBeInTheDocument();
+  });
+
+  it("shows compact schedule indicators on run cards", async () => {
+    const futureSchedule = {
+      enabled: true,
+      runAt: "2099-04-25T12:00:00.000Z",
+      recurrence: null,
+    };
+    const pausedSchedule = {
+      ...futureSchedule,
+      enabled: false,
+      runAt: "2099-04-26T12:00:00.000Z",
+    };
+    const dueSchedule = {
+      ...futureSchedule,
+      runAt: "2020-04-25T12:00:00.000Z",
+    };
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "scheduled-future",
+          name: "Future schedule",
+          assignmentName: "Future schedule",
+          schedule: futureSchedule,
+          scheduleState: "future",
+        }),
+        makeRun({
+          runId: "scheduled-paused",
+          name: "Paused schedule",
+          assignmentName: "Paused schedule",
+          schedule: pausedSchedule,
+          scheduleState: "paused",
+        }),
+        makeRun({
+          runId: "scheduled-due",
+          name: "Due schedule",
+          assignmentName: "Due schedule",
+          schedule: dueSchedule,
+          scheduleState: "due",
+        }),
+      ],
+      details: {
+        "scheduled-future": makeDetail({ runId: "scheduled-future", schedule: futureSchedule }),
+        "scheduled-paused": makeDetail({ runId: "scheduled-paused", schedule: pausedSchedule }),
+        "scheduled-due": makeDetail({ runId: "scheduled-due", schedule: dueSchedule }),
+      },
+    });
+
+    await renderApp();
+
+    const futureIndicator = within(await findRunCard("Future schedule")).getByLabelText(
+      "Scheduled run: scheduled",
+    );
+    expect(futureIndicator).toHaveAttribute("title", "Scheduled run: scheduled");
+    expect(
+      within(await findRunCard("Paused schedule")).getByLabelText("Scheduled run: paused"),
+    ).toBeInTheDocument();
+    expect(
+      within(await findRunCard("Due schedule")).getByLabelText("Scheduled run: due"),
+    ).toBeInTheDocument();
+  });
+
+  it("filters board-visible runs to scheduled only and persists the quick toggle", async () => {
+    const schedule = {
+      enabled: true,
+      runAt: "2099-04-25T12:00:00.000Z",
+      recurrence: null,
+    };
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "run-scheduled",
+          assignmentName: "Scheduled dashboard",
+          name: "Scheduled dashboard",
+          schedule,
+          scheduleState: "future",
+        }),
+        makeRun({
+          runId: "run-plain",
+          assignmentName: "Plain dashboard",
+          name: "Plain dashboard",
+          schedule: null,
+          scheduleState: "none",
+        }),
+      ],
+      details: {
+        "run-scheduled": makeDetail({
+          runId: "run-scheduled",
+          assignment: {
+            name: "Scheduled dashboard",
+            sourcePath: "/tmp/scheduled-a.md",
+            workspacePath: "/tmp/scheduled-b.md",
+          },
+          schedule,
+          scheduleState: "future",
+        }),
+        "run-plain": makeDetail({
+          runId: "run-plain",
+          assignment: {
+            name: "Plain dashboard",
+            sourcePath: "/tmp/plain-a.md",
+            workspacePath: "/tmp/plain-b.md",
+          },
+          schedule: null,
+          scheduleState: "none",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    const view = await renderApp();
+    await findRunCard("Scheduled dashboard");
+    expect(screen.getByRole("button", { name: /plain dashboard/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /show scheduled runs only/i }));
+
+    expect(await findRunCard("Scheduled dashboard")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /plain dashboard/i })).not.toBeInTheDocument();
+    expect(screen.getByText("scheduled only")).toBeInTheDocument();
+
+    const stored = window.localStorage.getItem("task-runner:web:dashboard-preferences");
+    expect(stored ? JSON.parse(stored) : null).toMatchObject({
+      showScheduledOnly: true,
+    });
+
+    view.unmount();
+    queryClient.clear();
+
+    await renderApp();
+    expect(await findRunCard("Scheduled dashboard")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /plain dashboard/i })).not.toBeInTheDocument();
+  });
+
+  it("renders recurring schedule detail and enables or disables schedules from the drawer", async () => {
+    const schedule = {
+      enabled: false,
+      runAt: "2099-04-25T12:00:00.000Z",
+      recurrence: {
+        schedule: {
+          type: "cron" as const,
+          expression: "30 9 * * *",
+          timezone: "UTC",
+        },
+        mode: "clone" as const,
+        continueOnFailure: true,
+      },
+    };
+    const detail = makeDetail({
+      schedule,
+      scheduleState: "paused",
+    });
+    const fetchMock = installFetchMock({
+      runs: [makeRun({ schedule, scheduleState: "paused" })],
+      details: { "run-1": detail },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+
+    const scheduleRegion = await screen.findByLabelText("Schedule");
+    expect(within(scheduleRegion).getAllByText("Paused")).toHaveLength(2);
+    expect(within(scheduleRegion).getByText("At 09:30 AM")).toBeInTheDocument();
+    expect(within(scheduleRegion).getByText("30 9 * * *")).toBeInTheDocument();
+    expect(within(scheduleRegion).getByText("UTC")).toBeInTheDocument();
+    expect(within(scheduleRegion).getByText("Clone run")).toBeInTheDocument();
+    expect(within(scheduleRegion).getByText("Yes")).toBeInTheDocument();
+
+    const enableButton = within(scheduleRegion).getByRole("button", { name: "Enable" });
+    enableButton.focus();
+    expect(enableButton).toHaveFocus();
+    await user.click(enableButton);
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/runs/run-1/schedule/enable", {
+        method: "POST",
+        headers: { accept: "application/json" },
+      }),
+    );
+    expect(await within(scheduleRegion).findByRole("button", { name: "Disable" })).toBeEnabled();
+
+    const clearButton = within(scheduleRegion).getByRole("button", { name: "Clear" });
+    clearButton.focus();
+    expect(clearButton).toHaveFocus();
+    await user.click(clearButton);
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/runs/run-1/schedule", {
+        method: "DELETE",
+        headers: { accept: "application/json" },
+      }),
+    );
+    await waitFor(() => expect(screen.queryByLabelText("Schedule")).not.toBeInTheDocument());
+  });
+
+  it("clears one-time schedules from the detail drawer", async () => {
+    const schedule = {
+      enabled: true,
+      runAt: "2099-04-25T12:00:00.000Z",
+      recurrence: null,
+    };
+    const fetchMock = installFetchMock({
+      runs: [makeRun({ schedule, scheduleState: "future" })],
+      details: {
+        "run-1": makeDetail({
+          schedule,
+          scheduleState: "future",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+
+    const scheduleRegion = await screen.findByLabelText("Schedule");
+    expect(within(scheduleRegion).getByText("One-time")).toBeInTheDocument();
+    const clearButton = within(scheduleRegion).getByRole("button", { name: "Clear" });
+    clearButton.focus();
+    expect(clearButton).toHaveFocus();
+    await user.click(clearButton);
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/runs/run-1/schedule", {
+        method: "DELETE",
+        headers: { accept: "application/json" },
+      }),
+    );
+    await waitFor(() => expect(screen.queryByLabelText("Schedule")).not.toBeInTheDocument());
   });
 
   it("falls back to document copy when clipboard access is unavailable", async () => {
@@ -4883,6 +5163,9 @@ describe("web app", () => {
       name: "Collapse failure states",
     });
     const showArchived = screen.getByRole("checkbox", { name: "Show archived runs" });
+    const showScheduledOnly = screen.getByRole("checkbox", {
+      name: "Show scheduled runs only",
+    });
     const showPinnedOnly = screen.getByRole("checkbox", { name: "Show pinned runs only" });
     const sortByRecentUpdates = screen.getByRole("checkbox", { name: "Sort by recent updates" });
     const visibleFocusIndicators = screen.getByRole("checkbox", {
@@ -4893,6 +5176,7 @@ describe("web app", () => {
     expect(screen.queryByRole("checkbox", { name: "Hide empty columns" })).not.toBeInTheDocument();
     expect(collapseFailureStates).not.toBeChecked();
     expect(showArchived).toBeChecked();
+    expect(showScheduledOnly).not.toBeChecked();
     expect(showPinnedOnly).not.toBeChecked();
     expect(sortByRecentUpdates).not.toBeChecked();
     expect(visibleFocusIndicators).not.toBeChecked();
@@ -4909,6 +5193,7 @@ describe("web app", () => {
       collapseFailureStates: false,
       showArchived: true,
       showNotesOnly: false,
+      showScheduledOnly: false,
       showPinnedOnly: false,
       sortByRecentUpdates: true,
       auditNewestFirst: false,
@@ -5235,6 +5520,11 @@ describe("web app", () => {
   });
 
   it("uses Ctrl+Shift shortcuts for board filters without replacing plain selected-run actions", async () => {
+    const schedule = {
+      enabled: true,
+      runAt: "2099-04-25T12:00:00.000Z",
+      recurrence: null,
+    };
     installFetchMock({
       runs: [
         makeRun({
@@ -5249,6 +5539,13 @@ describe("web app", () => {
           assignmentName: "Plain run",
           name: "Plain run",
           notePresent: false,
+        }),
+        makeRun({
+          runId: "run-scheduled",
+          assignmentName: "Scheduled run",
+          name: "Scheduled run",
+          schedule,
+          scheduleState: "future",
         }),
         makeRun({
           runId: "run-archived",
@@ -5280,6 +5577,16 @@ describe("web app", () => {
           },
           note: null,
         }),
+        "run-scheduled": makeDetail({
+          runId: "run-scheduled",
+          assignment: {
+            name: "Scheduled run",
+            sourcePath: "/tmp/scheduled-run-a.md",
+            workspacePath: "/tmp/scheduled-run-b.md",
+          },
+          schedule,
+          scheduleState: "future",
+        }),
         "run-archived": makeDetail({
           runId: "run-archived",
           assignment: {
@@ -5298,6 +5605,20 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Pinned noted"));
+
+    await user.keyboard("{Control>}{Shift>}s{/Shift}{/Control}");
+    expect(screen.getByRole("button", { name: /show scheduled runs only/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(await findRunCard("Scheduled run")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /plain run/i })).not.toBeInTheDocument();
+
+    await user.keyboard("{Control>}{Shift>}s{/Shift}{/Control}");
+    expect(screen.getByRole("button", { name: /show scheduled runs only/i })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
 
     await user.keyboard("{Control>}{Shift>}n{/Shift}{/Control}");
     expect(screen.getByRole("button", { name: /show runs with notes only/i })).toHaveAttribute(
@@ -5412,6 +5733,7 @@ describe("web app", () => {
       collapseFailureStates: true,
       showArchived: true,
       showNotesOnly: false,
+      showScheduledOnly: false,
       showPinnedOnly: false,
       sortByRecentUpdates: false,
       auditNewestFirst: false,
@@ -5453,6 +5775,7 @@ describe("web app", () => {
       collapseFailureStates: true,
       showArchived: true,
       showNotesOnly: false,
+      showScheduledOnly: false,
       showPinnedOnly: false,
       sortByRecentUpdates: false,
       auditNewestFirst: false,

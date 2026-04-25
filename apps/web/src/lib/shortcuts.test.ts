@@ -163,6 +163,18 @@ describe("resolveRunsShortcutCommand", () => {
         {
           altKey: false,
           ctrlKey: true,
+          key: "s",
+          metaKey: false,
+          shiftKey: true,
+        },
+        context,
+      ),
+    ).toBe("ui.toggleScheduledOnly");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: true,
           key: "p",
           metaKey: false,
           shiftKey: true,
@@ -257,6 +269,18 @@ describe("resolveRunsShortcutCommand", () => {
   });
 
   it("supports the Cmd+Shift filter namespace while leaving plain letter shortcuts on run actions", () => {
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "s",
+          metaKey: true,
+          shiftKey: true,
+        },
+        context,
+      ),
+    ).toBe("ui.toggleScheduledOnly");
     expect(
       resolveRunsShortcutCommand(
         {

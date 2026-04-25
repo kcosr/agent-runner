@@ -2089,6 +2089,11 @@ body {
   color: var(--muted-foreground);
 }
 
+.meta-indicator--muted {
+  background: var(--muted);
+  color: var(--muted-foreground);
+}
+
 .meta-indicator svg {
   width: 12px;
   height: 12px;
@@ -2239,6 +2244,58 @@ body {
 .drawer-title-edit-trigger svg {
   width: 13px;
   height: 13px;
+}
+
+.schedule-detail {
+  margin: 8px 18px 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--card) 82%, var(--background));
+}
+
+.schedule-detail__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.schedule-detail__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-weight: 700;
+}
+
+.schedule-detail__title svg {
+  width: 15px;
+  height: 15px;
+}
+
+.schedule-detail__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.schedule-detail__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+}
+
+.schedule-detail-row {
+  min-width: 0;
+}
+
+.schedule-detail-row .meta-value {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .drawer-head--preview {

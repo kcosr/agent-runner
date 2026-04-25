@@ -67,7 +67,7 @@ function validateResumeOverrides(
     return `cannot resume archived run ${manifest.runId} — unarchive it first with ${resolveTaskRunnerCommand()} run unarchive ${manifest.runId}`;
   }
 
-  const priorReady = manifest.status === "ready";
+  const priorReady = manifest.status === "ready" && manifest.sessions.length === 0;
 
   if (opts.agent !== undefined) {
     return "--agent cannot be combined with --resume-run (the agent is fixed on the run; under the manifest-canonical design, resume reads it from run.json instead of reloading agent.md)";

@@ -280,6 +280,9 @@ test("loadAssignmentConfig resolves typed fields, whole-field prose envs, and en
         ASSIGNMENT_NAME: "env-work",
         ASSIGNMENT_CWD: "packages/core",
         MAX_RETRIES: "7",
+        SCHEDULE_CRON: "*/5 * * * *",
+        SCHEDULE_TZ: "UTC",
+        SCHEDULE_CONTINUE: "true",
         DEFAULT_RETRIES: "5",
         MESSAGE_TEXT: "Ship deployments",
         CALLER_TEXT: "Review staging first",
@@ -299,6 +302,11 @@ cwd: \${ASSIGNMENT_CWD}
 maxRetries: \${MAX_RETRIES}
 message: \${MESSAGE_TEXT}
 callerInstructions: \${CALLER_TEXT}
+schedule:
+  cron: \${SCHEDULE_CRON}
+  timezone: \${SCHEDULE_TZ}
+  mode: reuse
+  continueOnFailure: \${SCHEDULE_CONTINUE}
 vars:
   retries:
     type: number
@@ -320,6 +328,12 @@ tasks:
         assert.equal(loaded.config.maxRetries, 7);
         assert.equal(loaded.config.message, "Ship deployments");
         assert.equal(loaded.config.callerInstructions, "Review staging first");
+        assert.deepEqual(loaded.config.schedule, {
+          cron: "*/5 * * * *",
+          timezone: "UTC",
+          mode: "reuse",
+          continueOnFailure: true,
+        });
         assert.equal(loaded.config.vars.retries.default, "5");
         assert.equal(loaded.config.vars.retries.description, "Uses staging");
         assert.equal(loaded.config.tasks[0].title, "Release deployments");
@@ -361,6 +375,55 @@ body
     assert.equal(loaded.config.hooks.prepare.length, 1);
     assert.equal(loaded.config.hooks.prepare[0].name, "named-prepare");
     assert.equal(loaded.config.hooks.taskTransition[0].path, "./hooks/guard.mts");
+  }));
+
+test("loadAssignmentConfig rejects invalid schedule field combinations", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    writeAssignment(
+      configDir,
+      "bad-schedule",
+      `---
+schemaVersion: 1
+name: bad-schedule
+schedule:
+  at: "2026-04-25T00:10:00.000Z"
+  timezone: UTC
+---
+body
+`,
+    );
+
+    assert.throws(
+      () => loadAssignmentConfig("bad-schedule", rootDir),
+      (err) => {
+        assert.ok(err instanceof AssignmentConfigError);
+        assert.match(err.message, /schedule\.timezone/);
+        assert.match(err.message, /valid only with `cron`/);
+        return true;
+      },
+    );
+  }));
+
+test("loadAssignmentConfig accepts schedule as a lockable field", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    writeAssignment(
+      configDir,
+      "locked-schedule",
+      `---
+schemaVersion: 1
+name: locked-schedule
+lockedFields: [schedule]
+schedule:
+  delay: 30m
+---
+body
+`,
+    );
+
+    const loaded = loadAssignmentConfig("locked-schedule", rootDir);
+
+    assert.deepEqual(loaded.config.lockedFields, ["schedule"]);
+    assert.deepEqual(loaded.config.schedule, { delay: "30m" });
   }));
 
 test("loadAssignmentConfig accepts task-local task-transition hooks", () =>
@@ -769,6 +832,25 @@ body
     expectedEnv: /TASKS/,
   },
   {
+    name: "loadAssignmentConfig rejects env blob replacement for schedule",
+    writer: (configDir) =>
+      writeAssignment(
+        configDir,
+        "blob-schedule",
+        `---
+schemaVersion: 1
+name: blob-schedule
+schedule: \${SCHEDULE}
+---
+body
+`,
+      ),
+    load: loadAssignmentConfig,
+    id: "blob-schedule",
+    expectedPath: /assignment\.schedule/,
+    expectedEnv: /SCHEDULE/,
+  },
+  {
     name: "loadAssignmentConfig rejects env blob replacement for lockedFields",
     writer: (configDir) =>
       writeAssignment(
@@ -794,6 +876,7 @@ body
         {
           CODEX_SETTINGS: '{"codex":{"transport":{"type":"ws","url":"ws://127.0.0.1:4773/"}}}',
           TASKS: '[{"id":"t1","title":"Injected"}]',
+          SCHEDULE: '{"delay":"30m"}',
           LOCKS: '["backend"]',
         },
         () => {

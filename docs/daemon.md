@@ -109,6 +109,7 @@ All routes are under `/api/`.
 | `GET` | `/api/runs/:runId` | Full `RunDetail` (including frozen hook descriptors/state/audits when present) |
 | `POST` | `/api/runs/init` | Initialize a run |
 | `POST` | `/api/runs` | Start a run |
+| `POST` | `/api/runs/:runId/ready` | Promote initialized run to ready |
 | `POST` | `/api/runs/:runId/resume` | Resume an initialized/terminal run |
 | `POST` | `/api/runs/:runId/abort` | Abort an active run |
 | `POST` | `/api/runs/:runId/archive` | Archive |
@@ -123,6 +124,10 @@ All routes are under `/api/`.
 | `POST` | `/api/runs/:runId/dependencies` | Add a dependency |
 | `DELETE` | `/api/runs/:runId/dependencies/:depRunId` | Remove a dependency |
 | `POST` | `/api/runs/:runId/dependencies/clear` | Clear all dependencies |
+| `PUT` | `/api/runs/:runId/schedule` | Set a one-time or recurring schedule |
+| `DELETE` | `/api/runs/:runId/schedule` | Clear a one-time schedule |
+| `POST` | `/api/runs/:runId/schedule/enable` | Enable an existing schedule |
+| `POST` | `/api/runs/:runId/schedule/disable` | Disable an existing schedule |
 
 `familyOf=<run-id>` resolves the target run's lineage root and returns
 every run that shares that root. It is mutually exclusive with `cwd`,
@@ -148,6 +153,27 @@ the WebSocket methods:
 Browser callers should send an explicit `callerCwd` on `POST
 /api/runs/init` and `POST /api/runs`. The daemon keeps `callerCwd`
 distinct from `overrides.cwd`; it is not a browser-only alias.
+
+Schedule bodies use the same flat input contract as the CLI:
+
+```json
+{ "delay": "30m" }
+```
+
+or:
+
+```json
+{
+  "cron": "0 9 * * *",
+  "timezone": "UTC",
+  "mode": "clone",
+  "continueOnFailure": false
+}
+```
+
+Exactly one of `at`, `delay`, or `cron` is accepted. `timezone`,
+`mode`, and `continueOnFailure` are valid only with `cron`. Clearing is
+limited to one-time schedules; recurring schedules are disabled instead.
 
 ### Definitions
 
@@ -244,11 +270,18 @@ Error codes:
 **Runs**
 
 - `runs.list`, `runs.get`, `runs.brief`, `runs.timelineHistory`
-- `runs.init`, `runs.start`, `runs.resume`, `runs.abort`
+- `runs.init`, `runs.start`, `runs.ready`, `runs.resume`, `runs.abort`
 - `runs.archive`, `runs.unarchive`, `runs.reset`, `runs.delete`
 - `runs.setName`, `runs.setNote`, `runs.setPinned`
 - `runs.setBackendSession`, `runs.clearBackendSession`
 - `runs.addDependency`, `runs.removeDependency`, `runs.clearDependencies`
+- `runs.setSchedule`, `runs.clearSchedule`, `runs.enableSchedule`,
+  `runs.disableSchedule`
+
+`runs.ready` accepts optional `schedule` params so connected CLI
+`task-runner run ready --schedule-*` can promote and schedule in one
+mutation. The HTTP ready route is a promotion-only endpoint; browser
+callers set schedules through the explicit schedule routes.
 
 **Tasks**
 
@@ -269,6 +302,30 @@ Valid `channel` values: `"run_summary"`, `"run_detail"`,
 `"run_timeline"`, `"run_audit"`. Detail, timeline, and audit require a
 `runId`.
 
+## Schedule evaluation
+
+The daemon does not keep a separate scheduling database. It scans
+manifest `schedule` fields on startup, arms timers for future enabled
+schedules, and re-evaluates affected runs after schedule mutations,
+ready/reset/archive/unarchive changes, dependency changes, and run
+completion.
+
+Startup intentionally does not immediately launch overdue work. If an
+enabled schedule is already due when the daemon starts, the occurrence
+is treated as missed/skipped with an audit record:
+
+- one-time schedules are cleared
+- recurring schedules are advanced to the next occurrence
+- recurrence is disabled if advancing violates
+  `TASK_RUNNER_MIN_RECURRENCE_INTERVAL_SEC`
+
+For normal due schedules, the daemon uses the same runnability checks as
+manual start. It skips and audits schedules when dependencies are unmet,
+the run is archived, the run is already active or pending start, the run
+is not `ready`, or the backend is passive. Runnable due schedules start
+through the daemon-managed resume path, so duplicate starts are
+suppressed by the same active/pending sets used for manual daemon work.
+
 ## Event projections
 
 Live state is split into four independent channels; each has a matching
@@ -287,7 +344,8 @@ HTTP SSE route and WebSocket notification method.
 
 Drives board cards. The global summary stream is projection-only — it
 never carries transcript deltas. `RunSummary` now includes persisted
-`pinned`, derived `notePresent`, `hookCount`, and `familyRootRunId` so
+`pinned`, derived `notePresent`, `hookCount`, `familyRootRunId`,
+persisted `schedule`, and derived `scheduleState` so
 cards and filters can react without fetching full detail.
 
 ### Per-run detail

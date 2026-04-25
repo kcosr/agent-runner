@@ -12,6 +12,7 @@ import { RunsBoardPanel } from "./runs-board-panel.js";
 import { useRunsDashboardState } from "./use-runs-dashboard-state.js";
 
 const BOARD_FILTER_PREFERENCE_KEYS = {
+  "ui.toggleScheduledOnly": "showScheduledOnly",
   "ui.togglePinnedOnly": "showPinnedOnly",
   "ui.toggleNotesOnly": "showNotesOnly",
   "ui.toggleArchived": "showArchived",
@@ -314,6 +315,7 @@ export function RunsDashboardRoute() {
           onReplaceAttachmentPreview={state.replaceSelectedRunAttachmentPreview}
           onSelectRun={state.openRun}
           onClearBackendSession={state.runActions.clearBackendSession}
+          onClearSchedule={state.runActions.clearSchedule}
           onRemoveDependency={state.runActions.removeDependency}
           onRemoveAttachment={state.runActions.removeAttachment}
           onReset={state.runActions.reset}
@@ -323,6 +325,7 @@ export function RunsDashboardRoute() {
           onSetNote={state.runActions.setNote}
           onSetBackendSession={state.runActions.setBackendSession}
           onSetPinned={state.runActions.setPinned}
+          onSetScheduleEnabled={state.runActions.setScheduleEnabled}
           onSelectDetailSection={state.updateSelectedRunDetailSection}
           onSubmitResume={state.submitSelectedRunResume}
           onTriggerPrimaryAction={state.triggerSelectedRunPrimaryAction}

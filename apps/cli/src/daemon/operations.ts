@@ -5,6 +5,7 @@ import type {
   archive,
   clearBackendSession,
   clearDependencies,
+  clearRunSchedule,
   createTask,
   deleteArchivedRun,
   getAttachment,
@@ -27,6 +28,8 @@ import type {
   renameRun,
   reset,
   resumeRun,
+  setRunSchedule,
+  setRunScheduleEnabled,
   startRun,
   unarchive,
   updateRunBackendSession,
@@ -39,6 +42,8 @@ import type {
   DaemonInfo,
   DefinitionGetParams,
   RunInputSurfaceParams,
+  RunReadyParams,
+  RunScheduleParams,
   RunsListParams,
   RunsResumeParams,
   WebRunsStartParams,
@@ -71,6 +76,9 @@ export interface DaemonHandlers {
   addDependency: typeof addDependency;
   removeDependency: typeof removeDependency;
   clearDependencies: typeof clearDependencies;
+  setRunSchedule: typeof setRunSchedule;
+  clearRunSchedule: typeof clearRunSchedule;
+  setRunScheduleEnabled: typeof setRunScheduleEnabled;
   addRunAttachmentFromStream: typeof addRunAttachmentFromStream;
   removeRunAttachment: typeof removeRunAttachment;
   reset: typeof reset;
@@ -128,8 +136,8 @@ export function createDaemonOperations(ctx: DaemonOperationContext) {
         })
         .then((run) => ({ run }));
     },
-    readyRun(target: string) {
-      return { run: ctx.readyRun(target) };
+    readyRun(params: RunReadyParams) {
+      return { run: ctx.readyRun(params.target, { schedule: params.schedule }) };
     },
     startCliRun(request: CliRunsStartParams) {
       return ctx.startManagedRun({
@@ -178,6 +186,15 @@ export function createDaemonOperations(ctx: DaemonOperationContext) {
     },
     clearDependencies(target: string) {
       return { result: ctx.clearDependencies(target) };
+    },
+    setRunSchedule(params: RunScheduleParams) {
+      return { run: ctx.setRunSchedule(params.target, { schedule: params.schedule }) };
+    },
+    clearRunSchedule(target: string) {
+      return { run: ctx.clearRunSchedule(target) };
+    },
+    setRunScheduleEnabled(target: string, enabled: boolean) {
+      return { run: ctx.setRunScheduleEnabled(target, { enabled }) };
     },
     listAttachments(target: string, options?: { scope?: "run" | "family" }) {
       return { attachments: ctx.getAttachmentList(target, options) };

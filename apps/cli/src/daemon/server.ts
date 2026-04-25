@@ -3,12 +3,14 @@ import { createServer } from "node:http";
 import { type Socket, createServer as createNetServer } from "node:net";
 import { monitorEventLoopDelay, performance } from "node:perf_hooks";
 import {
+  type RunCommandOverrides,
   addDependency,
   addRunAttachmentFromStream,
   appendNotes,
   archive,
   clearBackendSession,
   clearDependencies,
+  clearRunSchedule,
   createTask,
   deleteArchivedRun,
   getAttachment,
@@ -31,6 +33,8 @@ import {
   renameRun,
   reset,
   resumeRun,
+  setRunSchedule,
+  setRunScheduleEnabled,
   startRun,
   unarchive,
   updateRunBackendSession,
@@ -57,12 +61,18 @@ import type {
   RunStatus,
   RunSummary,
 } from "@task-runner/core/contracts/runs.js";
-import { isTerminalStatus, toRunDetail } from "@task-runner/core/contracts/runs.js";
+import {
+  deriveRunCapabilities,
+  isDaemonAutoRunnableReadyRun,
+  isTerminalStatus,
+  toRunDetail,
+} from "@task-runner/core/contracts/runs.js";
 import {
   ConflictError,
   refreshRunSnapshotAfterTaskStateSettles,
 } from "@task-runner/core/core/commands/service.js";
 import {
+  deriveDependencyState,
   resolveDependencies,
   resolveDependentsFromManifests,
 } from "@task-runner/core/core/run/dependencies.js";
@@ -72,9 +82,27 @@ import {
   RunNotFoundError,
   findRunManifestsById,
   listRunManifests,
+  readManifest,
   resolveResumeTarget,
+  writeManifest,
 } from "@task-runner/core/core/run/manifest.js";
+import { hasIncompleteTasks } from "@task-runner/core/core/run/resume-policy.js";
+import {
+  type ScheduleDecisionReason,
+  appendRunScheduleAdvancedEvent,
+  appendRunScheduleDisabledEvent,
+  appendRunScheduleDueEvent,
+  appendRunScheduleFailedEvent,
+  appendRunScheduleMissedEvent,
+  appendRunScheduleSkippedEvent,
+  systemRunEventContext,
+} from "@task-runner/core/core/run/run-events.js";
 import type { RunEvent } from "@task-runner/core/core/run/run-loop.js";
+import {
+  ScheduleValidationError,
+  advanceRecurringSchedule,
+  deriveScheduleState,
+} from "@task-runner/core/core/run/schedule.js";
 import { withTaskStateLock } from "@task-runner/core/core/run/workspace-state.js";
 import {
   debugPerfEnabled,
@@ -106,6 +134,8 @@ import {
   optionalString,
   parseCliStartRunParams,
   parseResumeRunParams,
+  parseRunReadyParams,
+  parseRunScheduleParams,
   parseRunSetBackendSessionParams,
   parseRunSetNameParams,
   parseRunSetNoteParams,
@@ -169,6 +199,8 @@ interface SubscriptionHandle {
 
 const MAX_TIMELINE_BUFFER_EVENTS = 1_000;
 const COMPLETED_TIMELINE_BUFFER_TTL_MS = 5_000;
+const MAX_SCHEDULE_TIMER_DELAY_MS = 2_147_483_647;
+const SCHEDULED_RESUME_MESSAGE = "Resuming after scheduled delay.";
 
 function roundMetric(value: number): number {
   return Math.round(value * 1_000) / 1_000;
@@ -375,12 +407,20 @@ export async function serveDaemon(
   const manifestEntriesByRunId = new Map<string, ListedRunManifest>();
   const dependentRunIdsByRunId = new Map<string, Set<string>>();
   const pendingDependencyAutoStarts = new Set<string>();
+  const pendingScheduleStarts = new Set<string>();
+  const scheduleTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const pendingScheduleEvaluationTargets = new Set<string>();
+  const runCreatedProjectionTimers = new Set<ReturnType<typeof setTimeout>>();
   let manifestIndexInitialized = false;
+  let fullScheduleEvaluationPending = false;
+  let scheduleEvaluationQueued = false;
+  let scheduleEvaluationTimer: ReturnType<typeof setTimeout> | null = null;
   const recentTimelineBuffers = new Map<string, RecentTimelineRecord>();
   const recentAuditBuffers = new Map<string, RecentAuditRecord>();
   const sockets = new Set<Socket>();
   const wsClients = new Set<WebSocket>();
   let queueReadyDependencyAutoStartSweep: (() => void) | null = null;
+  let queueScheduleEvaluation: ((target?: string) => void) | null = null;
   let operations: ReturnType<typeof createDaemonOperations> | null = null;
 
   const app: DaemonHandlers = {
@@ -408,6 +448,9 @@ export async function serveDaemon(
     addDependency,
     removeDependency,
     clearDependencies,
+    setRunSchedule,
+    clearRunSchedule,
+    setRunScheduleEnabled,
     addRunAttachmentFromStream,
     removeRunAttachment,
     reset,
@@ -790,29 +833,39 @@ export async function serveDaemon(
     active: Map<string, ActiveRunRecord>,
     pendingAutoStart: ReadonlySet<string>,
   ): boolean =>
-    manifest.manifest.status === "ready" &&
-    manifest.manifest.archivedAt === null &&
-    manifest.manifest.backend !== "passive" &&
-    manifest.manifest.dependencyRunIds.length > 0 &&
     detail !== null &&
-    detail.dependencies.every((dependency) => dependency.satisfied) &&
-    !active.has(manifest.manifest.runId) &&
-    !pendingAutoStart.has(manifest.manifest.runId);
+    manifest.manifest.dependencyRunIds.length > 0 &&
+    isDaemonAutoRunnableReadyRun({
+      manifest: manifest.manifest,
+      dependencyState: {
+        unsatisfied: detail.dependencies.filter((dependency) => !dependency.satisfied).length,
+      },
+      activeInDaemon:
+        active.has(manifest.manifest.runId) ||
+        pendingAutoStart.has(manifest.manifest.runId) ||
+        pendingScheduleStarts.has(manifest.manifest.runId),
+    });
 
   const shouldAutoStartReadyDependencySummary = (
     summary: RunSummary | null,
     active: Map<string, ActiveRunRecord>,
     pendingAutoStart: ReadonlySet<string>,
   ): boolean =>
-    // Fast-path mirror of shouldAutoStartReadyDependencyRun; keep conditions in sync.
     summary !== null &&
-    summary.status === "ready" &&
-    summary.archivedAt === null &&
-    summary.backend !== "passive" &&
     summary.dependencyState.total > 0 &&
-    summary.dependencyState.unsatisfied === 0 &&
-    !active.has(summary.runId) &&
-    !pendingAutoStart.has(summary.runId);
+    isDaemonAutoRunnableReadyRun({
+      manifest: {
+        status: summary.status,
+        schedule: summary.schedule,
+        archivedAt: summary.archivedAt,
+        backend: summary.backend,
+      },
+      dependencyState: summary.dependencyState,
+      activeInDaemon:
+        active.has(summary.runId) ||
+        pendingAutoStart.has(summary.runId) ||
+        pendingScheduleStarts.has(summary.runId),
+    });
 
   const formatAutoStartError = (error: unknown): string =>
     error instanceof Error ? (error.stack ?? error.message) : String(error);
@@ -877,7 +930,7 @@ export async function serveDaemon(
 
     pendingDependencyAutoStarts.add(runId);
     try {
-      await operations.resumeRun({
+      await resumeManagedRun({
         target: runId,
         overrides: {},
       });
@@ -898,6 +951,371 @@ export async function serveDaemon(
     void tryAutoStartDependencyRun(runId, provided).catch((error) => {
       publishAutoStartRecovery(runId, error);
     });
+  };
+
+  const clearScheduleTimer = (runId: string): void => {
+    const timer = scheduleTimers.get(runId);
+    if (!timer) {
+      return;
+    }
+    clearTimeout(timer);
+    scheduleTimers.delete(runId);
+  };
+
+  const armScheduleTimer = (runId: string, runAt: string, now: Date): void => {
+    clearScheduleTimer(runId);
+    const delayMs = Math.max(0, new Date(runAt).getTime() - now.getTime());
+    const timer = setTimeout(
+      () => queueScheduleEvaluation?.(runId),
+      Math.min(delayMs, MAX_SCHEDULE_TIMER_DELAY_MS),
+    );
+    timer.unref?.();
+    scheduleTimers.set(runId, timer);
+  };
+
+  const scheduleAuditContext = () => systemRunEventContext(mutationAuditContext);
+
+  const publishScheduleRecovery = (runId: string, error: unknown): void => {
+    const formattedError = formatAutoStartError(error);
+    console.error(
+      `task-runner daemon: schedule evaluation failed for run ${runId}: ${formattedError}`,
+    );
+    const entry = manifestEntriesByRunId.get(runId);
+    if (entry) {
+      try {
+        publishAudit(
+          appendRunScheduleFailedEvent({
+            manifest: entry.manifest,
+            context: scheduleAuditContext(),
+            schedule: entry.manifest.schedule,
+            reason: "start_failed",
+            error: formattedError,
+          }),
+        );
+      } catch (auditError) {
+        console.error(
+          `task-runner daemon: failed to publish schedule failure audit for run ${runId}: ${formatAutoStartError(auditError)}`,
+        );
+      }
+    }
+    try {
+      publishMutationResult(runId, {
+        summary: getProjectedSummary(runId),
+        detail: getProjectedDetail(runId),
+      });
+    } catch (publishError) {
+      console.error(
+        `task-runner daemon: failed to publish schedule recovery for run ${runId}: ${formatAutoStartError(publishError)}`,
+      );
+    }
+  };
+
+  const dependencyStateForScheduledRun = (manifest: RunManifest) =>
+    deriveDependencyState(
+      manifest,
+      new Map(
+        Array.from(manifestEntriesByRunId.values(), (entry) => [
+          entry.manifest.runId,
+          entry.manifest,
+        ]),
+      ),
+    );
+
+  const scheduledRunActiveInDaemon = (runId: string): boolean =>
+    activeRuns.has(runId) ||
+    pendingScheduleStarts.has(runId) ||
+    pendingDependencyAutoStarts.has(runId);
+
+  const scheduleSkipReason = (
+    entry: ListedRunManifest,
+    dependencyState: ReturnType<typeof dependencyStateForScheduledRun>,
+  ): ScheduleDecisionReason | null => {
+    if (entry.manifest.archivedAt !== null) {
+      return "archived";
+    }
+    if (entry.manifest.status !== "ready" || entry.manifest.backend === "passive") {
+      return "not_ready";
+    }
+    if (dependencyState.unsatisfied > 0) {
+      return "dependencies_unmet";
+    }
+    return null;
+  };
+
+  const scheduledResumeOverrides = (manifest: RunManifest) =>
+    hasIncompleteTasks(manifest.finalTasks) ? {} : { message: SCHEDULED_RESUME_MESSAGE };
+
+  const mutateDueOneTimeSchedule = (
+    entry: ListedRunManifest,
+    reason: ScheduleDecisionReason,
+    now: Date,
+  ): boolean => {
+    let changed = false;
+    withTaskStateLock(entry.workspaceDir, () => {
+      const latest = readManifest(entry.workspaceDir);
+      if (
+        latest.schedule === null ||
+        latest.schedule.recurrence !== null ||
+        deriveScheduleState(latest.schedule, now) !== "due"
+      ) {
+        rememberManifestIndexEntry({ ...entry, manifest: latest });
+        return;
+      }
+      const missedSchedule = latest.schedule;
+      latest.schedule = null;
+      writeManifest(entry.workspaceDir, latest);
+      rememberManifestIndexEntry({ ...entry, manifest: latest });
+      publishAudit(
+        appendRunScheduleMissedEvent({
+          manifest: latest,
+          context: scheduleAuditContext(),
+          schedule: missedSchedule,
+          reason,
+        }),
+      );
+      changed = true;
+    });
+    return changed;
+  };
+
+  const mutateDueRecurringSchedule = (
+    entry: ListedRunManifest,
+    reason: ScheduleDecisionReason,
+    now: Date,
+  ): boolean => {
+    let changed = false;
+    withTaskStateLock(entry.workspaceDir, () => {
+      const latest = readManifest(entry.workspaceDir);
+      if (
+        latest.schedule === null ||
+        latest.schedule.recurrence === null ||
+        deriveScheduleState(latest.schedule, now) !== "due"
+      ) {
+        rememberManifestIndexEntry({ ...entry, manifest: latest });
+        return;
+      }
+      const previousSchedule = latest.schedule;
+      let advanced: ReturnType<typeof advanceRecurringSchedule>;
+      try {
+        advanced = advanceRecurringSchedule(previousSchedule, now);
+      } catch (error) {
+        if (!(error instanceof ScheduleValidationError)) {
+          throw error;
+        }
+        advanced = {
+          schedule: {
+            ...previousSchedule,
+            enabled: false,
+          },
+          disabledReason: "minimum_interval_violation",
+        };
+      }
+      latest.schedule = advanced.schedule;
+      writeManifest(entry.workspaceDir, latest);
+      rememberManifestIndexEntry({ ...entry, manifest: latest });
+      publishAudit(
+        appendRunScheduleSkippedEvent({
+          manifest: latest,
+          context: scheduleAuditContext(),
+          schedule: previousSchedule,
+          reason,
+        }),
+      );
+      if (advanced.disabledReason) {
+        publishAudit(
+          appendRunScheduleDisabledEvent({
+            manifest: latest,
+            context: scheduleAuditContext(),
+            schedule: latest.schedule,
+            reason: advanced.disabledReason,
+          }),
+        );
+      } else {
+        publishAudit(
+          appendRunScheduleAdvancedEvent({
+            manifest: latest,
+            context: scheduleAuditContext(),
+            previousSchedule,
+            schedule: latest.schedule,
+            reason,
+          }),
+        );
+      }
+      changed = true;
+    });
+    return changed;
+  };
+
+  const skipDueSchedule = (
+    entry: ListedRunManifest,
+    reason: ScheduleDecisionReason,
+    now: Date,
+  ): void => {
+    const schedule = entry.manifest.schedule;
+    if (schedule === null) {
+      return;
+    }
+    const changed =
+      schedule.recurrence === null
+        ? mutateDueOneTimeSchedule(entry, reason, now)
+        : mutateDueRecurringSchedule(entry, reason, now);
+    if (!changed) {
+      return;
+    }
+    publishMutationResult(entry.manifest.runId, {
+      summary: getProjectedSummary(entry.manifest.runId),
+      detail: getProjectedDetail(entry.manifest.runId),
+    });
+    queueScheduleEvaluation?.(entry.manifest.runId);
+  };
+
+  const startDueScheduledRun = async (
+    entry: ListedRunManifest,
+    overrides: RunCommandOverrides = {},
+  ): Promise<void> => {
+    if (operations === null || pendingScheduleStarts.has(entry.manifest.runId)) {
+      return;
+    }
+    const schedule = entry.manifest.schedule;
+    if (schedule === null) {
+      return;
+    }
+    pendingScheduleStarts.add(entry.manifest.runId);
+    let started = false;
+    try {
+      publishAudit(
+        appendRunScheduleDueEvent({
+          manifest: entry.manifest,
+          context: scheduleAuditContext(),
+          schedule,
+        }),
+      );
+      publishMutationResult(entry.manifest.runId, {
+        summary: getProjectedSummary(entry.manifest.runId),
+        detail: getProjectedDetail(entry.manifest.runId),
+      });
+      await resumeManagedRun({
+        target: entry.manifest.runId,
+        overrides,
+      });
+      started = true;
+    } finally {
+      pendingScheduleStarts.delete(entry.manifest.runId);
+      if (started) {
+        queueScheduleEvaluation?.(entry.manifest.runId);
+      }
+    }
+  };
+
+  const evaluateScheduledRun = async (runId: string, options: { startup: boolean }) => {
+    let entry: ListedRunManifest;
+    try {
+      entry = refreshManifestIndexEntry(runId);
+    } catch (error) {
+      if (error instanceof RunNotFoundError) {
+        clearScheduleTimer(runId);
+        return;
+      }
+      throw error;
+    }
+
+    const schedule = entry.manifest.schedule;
+    if (schedule === null || !schedule.enabled) {
+      clearScheduleTimer(runId);
+      return;
+    }
+    const now = new Date();
+    const scheduleState = deriveScheduleState(schedule, now);
+    if (scheduleState === "future") {
+      armScheduleTimer(runId, schedule.runAt, now);
+      return;
+    }
+    if (scheduleState !== "due") {
+      clearScheduleTimer(runId);
+      return;
+    }
+
+    clearScheduleTimer(runId);
+    if (options.startup) {
+      skipDueSchedule(entry, "overdue_on_startup", now);
+      return;
+    }
+
+    if (scheduledRunActiveInDaemon(entry.manifest.runId)) {
+      return;
+    }
+
+    const dependencyState = dependencyStateForScheduledRun(entry.manifest);
+    const capabilities = deriveRunCapabilities(entry.manifest, dependencyState);
+    if (
+      schedule.recurrence === null &&
+      entry.manifest.status !== "ready" &&
+      capabilities.canResume
+    ) {
+      await startDueScheduledRun(entry, scheduledResumeOverrides(entry.manifest));
+      return;
+    }
+
+    const reason = scheduleSkipReason(entry, dependencyState);
+    if (reason !== null) {
+      skipDueSchedule(entry, reason, now);
+      return;
+    }
+    if (
+      !isDaemonAutoRunnableReadyRun({
+        manifest: entry.manifest,
+        dependencyState,
+        activeInDaemon: false,
+        now,
+      })
+    ) {
+      skipDueSchedule(entry, "not_ready", now);
+      return;
+    }
+
+    await startDueScheduledRun(
+      entry,
+      schedule.recurrence?.mode === "reuse" && entry.manifest.sessions.length > 0
+        ? scheduledResumeOverrides(entry.manifest)
+        : {},
+    );
+  };
+
+  const evaluateSchedules = async (targets: string[] | null, options: { startup: boolean }) => {
+    const runIds =
+      targets ??
+      Array.from(manifestEntriesByRunId.values(), (entry) => entry.manifest.runId).sort((a, b) =>
+        a.localeCompare(b),
+      );
+    for (const runId of runIds) {
+      try {
+        await evaluateScheduledRun(runId, options);
+      } catch (error) {
+        publishScheduleRecovery(runId, error);
+      }
+    }
+  };
+
+  queueScheduleEvaluation = (target?: string): void => {
+    if (target === undefined) {
+      fullScheduleEvaluationPending = true;
+      pendingScheduleEvaluationTargets.clear();
+    } else if (!fullScheduleEvaluationPending) {
+      pendingScheduleEvaluationTargets.add(target);
+    }
+    if (scheduleEvaluationQueued) {
+      return;
+    }
+    scheduleEvaluationQueued = true;
+    scheduleEvaluationTimer = setTimeout(() => {
+      scheduleEvaluationTimer = null;
+      scheduleEvaluationQueued = false;
+      const targets = fullScheduleEvaluationPending ? null : [...pendingScheduleEvaluationTargets];
+      fullScheduleEvaluationPending = false;
+      pendingScheduleEvaluationTargets.clear();
+      void evaluateSchedules(targets, { startup: false });
+    }, 0);
+    scheduleEvaluationTimer.unref?.();
   };
 
   const publishSummary = (summary: RunSummary): void => {
@@ -1069,6 +1487,7 @@ export async function serveDaemon(
         summary: dependentSummary,
         detail: dependentDetail,
       });
+      queueScheduleEvaluation?.(dependentRunId);
     }
     finish({
       summaryPublished: summary !== null,
@@ -1096,6 +1515,7 @@ export async function serveDaemon(
 
   const publishRunDeletion = (runId: string): void => {
     const dependents = dependentRunIds(runId);
+    clearScheduleTimer(runId);
     removeManifestIndexEntry(runId);
     dependentRunIdsByRunId.delete(runId);
     publishSummaryRemoval(runId);
@@ -1132,6 +1552,7 @@ export async function serveDaemon(
       publishDependentSummaries: shouldPublishDependentSummaries(previous, detail),
       publishDependentDetails: shouldPublishDependentDetails(previous, detail),
     });
+    queueScheduleEvaluation?.(runId);
     return {
       result,
       summary,
@@ -1166,6 +1587,7 @@ export async function serveDaemon(
       publishDependentSummaries: shouldPublishDependentSummaries(previous, current),
       publishDependentDetails: shouldPublishDependentDetails(previous, current),
     });
+    queueScheduleEvaluation?.(runId);
     return result;
   };
 
@@ -1180,6 +1602,7 @@ export async function serveDaemon(
     if (active) {
       active.detail = detail;
     }
+    queueScheduleEvaluation?.(runId);
     return result;
   };
 
@@ -1311,6 +1734,25 @@ export async function serveDaemon(
     }
   };
 
+  const queueRunCreatedProjection = (runId: string): void => {
+    const timer = setTimeout(() => {
+      try {
+        refreshManifestIndexEntry(runId);
+        publishMutationResult(runId, {
+          summary: getProjectedSummary(runId),
+          detail: getProjectedDetail(runId),
+        });
+        queueScheduleEvaluation?.(runId);
+      } catch (error) {
+        publishScheduleRecovery(runId, error);
+      } finally {
+        runCreatedProjectionTimers.delete(timer);
+      }
+    }, 0);
+    runCreatedProjectionTimers.add(timer);
+    timer.unref?.();
+  };
+
   const removeSubscriptionsByOwner = (owner: object): void => {
     for (const [id, subscription] of summarySubscriptions) {
       if (subscription.owner === owner) {
@@ -1395,6 +1837,9 @@ export async function serveDaemon(
       abortController.signal,
       (envelope) => {
         publishAudit(envelope);
+        if (envelope.event.type === "run.created") {
+          queueRunCreatedProjection(envelope.runId);
+        }
       },
     )
       .then((outcome) => {
@@ -1439,6 +1884,7 @@ export async function serveDaemon(
             publishDependentSummaries: shouldPublishDependentSummaries(previous, current),
             publishDependentDetails: shouldPublishDependentDetails(previous, current),
           });
+          queueScheduleEvaluation?.(runId);
         }
         resolveDone?.();
       });
@@ -1457,6 +1903,34 @@ export async function serveDaemon(
     return { runId: target, accepted: true };
   };
 
+  const assertNoPendingScheduleStart = (target: string): void => {
+    if (pendingScheduleStarts.has(target)) {
+      throw new ConflictError(`run ${target} has a scheduled start in progress`);
+    }
+  };
+
+  const startManagedRun = (request: Parameters<DaemonHandlers["startRun"]>[0]) =>
+    executeManagedRun("start", (emitEvent, abortSignal, emitAuditEnvelope) =>
+      app.startRun({
+        ...request,
+        execution: daemonExecution(daemonInstanceId),
+        abortSignal,
+        emitEvent,
+        emitAuditEnvelope,
+      }),
+    );
+
+  const resumeManagedRun = (request: Parameters<DaemonHandlers["resumeRun"]>[0]) =>
+    executeManagedRun("resume", (emitEvent, abortSignal, emitAuditEnvelope) =>
+      app.resumeRun({
+        ...request,
+        execution: daemonExecution(daemonInstanceId),
+        abortSignal,
+        emitEvent,
+        emitAuditEnvelope,
+      }),
+    );
+
   operations = createDaemonOperations({
     ...app,
     getRun: getDaemonRun,
@@ -1471,12 +1945,14 @@ export async function serveDaemon(
         execution: daemonExecution(daemonInstanceId),
       });
       publishRunProjections(run.runId);
+      queueScheduleEvaluation?.(run.runId);
       return run;
     },
-    readyRun: (target) => {
+    readyRun: (target, input = {}) => {
+      assertNoPendingScheduleStart(target);
       const mutation = applyPublishedMutation(
         target,
-        () => app.readyRun(target, mutationAuditContext, publishAudit),
+        () => app.readyRun(target, input, mutationAuditContext, publishAudit),
         {
           inferDependentFanout: true,
         },
@@ -1487,6 +1963,18 @@ export async function serveDaemon(
       });
       return mutation.result;
     },
+    setRunSchedule: (target, input) =>
+      withPublishedMutation(target, () =>
+        app.setRunSchedule(target, input, mutationAuditContext, publishAudit),
+      ),
+    clearRunSchedule: (target) =>
+      withPublishedMutation(target, () =>
+        app.clearRunSchedule(target, mutationAuditContext, publishAudit),
+      ),
+    setRunScheduleEnabled: (target, input) =>
+      withPublishedMutation(target, () =>
+        app.setRunScheduleEnabled(target, input, mutationAuditContext, publishAudit),
+      ),
     archive: (target) =>
       withPublishedMutation(target, () => app.archive(target, mutationAuditContext, publishAudit), {
         inferDependentFanout: true,
@@ -1565,26 +2053,11 @@ export async function serveDaemon(
       version,
       startedAt,
     },
-    startManagedRun: (request) =>
-      executeManagedRun("start", (emitEvent, abortSignal, emitAuditEnvelope) =>
-        app.startRun({
-          ...request,
-          execution: daemonExecution(daemonInstanceId),
-          abortSignal,
-          emitEvent,
-          emitAuditEnvelope,
-        }),
-      ),
-    resumeManagedRun: (request) =>
-      executeManagedRun("resume", (emitEvent, abortSignal, emitAuditEnvelope) =>
-        app.resumeRun({
-          ...request,
-          execution: daemonExecution(daemonInstanceId),
-          abortSignal,
-          emitEvent,
-          emitAuditEnvelope,
-        }),
-      ),
+    startManagedRun,
+    resumeManagedRun: (request) => {
+      assertNoPendingScheduleStart(request.target);
+      return resumeManagedRun(request);
+    },
     abortRun,
   });
 
@@ -1599,6 +2072,7 @@ export async function serveDaemon(
     }
   };
   rebuildManifestIndex();
+  await evaluateSchedules(null, { startup: true });
 
   const eventLoopHistogram = debugPerfEnabled() ? monitorEventLoopDelay({ resolution: 20 }) : null;
   let previousEventLoopUtilization = debugPerfEnabled()
@@ -1810,13 +2284,47 @@ export async function serveDaemon(
           );
           return;
         }
-        case "runs.ready":
+        case "runs.ready": {
+          const parsed = parseRunReadyParams(params, "runs.ready params");
+          sendJson(ws, resultResponse(request.id, operations.readyRun(parsed)));
+          return;
+        }
+        case "runs.setSchedule": {
+          const parsed = parseRunScheduleParams(params, "runs.setSchedule params");
+          sendJson(ws, resultResponse(request.id, operations.setRunSchedule(parsed)));
+          return;
+        }
+        case "runs.clearSchedule":
           sendJson(
             ws,
             resultResponse(
               request.id,
-              operations.readyRun(
-                requiredString(asRecord(params, "runs.ready params").target, "target"),
+              operations.clearRunSchedule(
+                requiredString(asRecord(params, "runs.clearSchedule params").target, "target"),
+              ),
+            ),
+          );
+          return;
+        case "runs.enableSchedule":
+          sendJson(
+            ws,
+            resultResponse(
+              request.id,
+              operations.setRunScheduleEnabled(
+                requiredString(asRecord(params, "runs.enableSchedule params").target, "target"),
+                true,
+              ),
+            ),
+          );
+          return;
+        case "runs.disableSchedule":
+          sendJson(
+            ws,
+            resultResponse(
+              request.id,
+              operations.setRunScheduleEnabled(
+                requiredString(asRecord(params, "runs.disableSchedule params").target, "target"),
+                false,
               ),
             ),
           );
@@ -2244,6 +2752,21 @@ export async function serveDaemon(
         clearTimeout(record.cleanupTimer);
       }
       recentAuditBuffers.clear();
+      for (const timer of scheduleTimers.values()) {
+        clearTimeout(timer);
+      }
+      scheduleTimers.clear();
+      if (scheduleEvaluationTimer !== null) {
+        clearTimeout(scheduleEvaluationTimer);
+        scheduleEvaluationTimer = null;
+      }
+      scheduleEvaluationQueued = false;
+      fullScheduleEvaluationPending = false;
+      pendingScheduleEvaluationTargets.clear();
+      for (const timer of runCreatedProjectionTimers) {
+        clearTimeout(timer);
+      }
+      runCreatedProjectionTimers.clear();
       for (const ws of wsClients) {
         ws.terminate();
       }

@@ -19,6 +19,7 @@ All commands accept `--help` / `-h`.
 | `list agents\|assignments\|launchers\|runs` | Enumerate definitions and runs |
 | `show agent\|assignment\|launcher` | Render a single definition |
 | `run reset\|archive\|unarchive\|delete` | Lifecycle mutations |
+| `run schedule [set]\|enable\|disable\|clear` | Schedule mutations |
 | `run set-name\|set-backend-session\|clear-backend-session` | Metadata mutations |
 | `run add-dep\|remove-dep\|clear-deps` | Dependency graph mutations |
 
@@ -134,6 +135,9 @@ task-runner init \
   [--cwd <path>] [--backend <id>] [--model <id>] [--effort <level>] \
   [--unrestricted] [--name <name>] [--var key=value ...] \
   [--add-task <title> ...] [--backend-session-id <id>] \
+  [--schedule-at <iso> | --schedule-delay <duration> | --schedule-cron <expr>] \
+  [--schedule-timezone <iana>] [--schedule-mode reuse|reset|clone] \
+  [--schedule-continue-on-failure] \
   [<message tokens...>]
 ```
 
@@ -148,6 +152,12 @@ Launcher precedence on fresh run/init is:
 
 In connected mode the daemon resolves named launchers against its own
 config root, then freezes the result into the manifest and reset seed.
+
+Schedule flags are accepted on `init` and `run ready`. Exactly one of
+`--schedule-at`, `--schedule-delay`, or `--schedule-cron` is required
+when scheduling. `--schedule-timezone`, `--schedule-mode`, and
+`--schedule-continue-on-failure` are cron-only. Schedule flags are
+rejected on fresh `run`, `run --resume-run`, and ready-start execution.
 
 ## `serve`
 
@@ -190,9 +200,11 @@ task-runner run status <run-id> [--output-format json] [--field <name> ...]
 - `--output-format json` returns the shared `RunDetail` DTO.
 - `--field <name>` — repeatable. Projects top-level JSON fields.
 - JSON detail includes `parentRunId` when the run belongs to a lineage.
-- JSON detail now includes `note` and `pinned`.
+- JSON detail includes `note`, `pinned`, persisted `schedule`, and
+  derived `scheduleState`.
 - Text output may show `Pinned: yes` and `Note: present`, but it never
-  prints the note markdown body.
+  prints the note markdown body. It prints `Schedule: none` or the
+  formatted schedule plus derived state.
 
 ## `run brief <run-id>`
 
@@ -295,12 +307,39 @@ task list.
 ### Lifecycle
 
 ```bash
-task-runner run ready    <id|path>
+task-runner run ready    <id|path> [--schedule-at <iso> | --schedule-delay <duration> | --schedule-cron <expr>]
 task-runner run reset     <id|path>
 task-runner run archive   <id|path>
 task-runner run unarchive <id|path>
 task-runner run delete    <id|path>    # archived only
 ```
+
+`run ready` can attach or replace the run's schedule during the
+initialized-to-ready transition. A scheduled run remains in `ready`
+until the daemon observes it as due, but a caller can still start it
+manually with `run --resume-run <id|path>`.
+
+### Schedule
+
+```bash
+task-runner run schedule <id|path> --at <iso>
+task-runner run schedule <id|path> --delay <duration>
+task-runner run schedule <id|path> --cron <expr> \
+  [--timezone <iana>] [--mode reuse|reset|clone] [--continue-on-failure]
+task-runner run schedule enable <id|path>
+task-runner run schedule disable <id|path>
+task-runner run schedule clear <id|path>
+```
+
+The default `run schedule` action is `set`; `run schedule set <id|path>
+...` is also accepted. Set requires exactly one of `--at`, `--delay`, or
+`--cron`. `--timezone`, `--mode`, and `--continue-on-failure` are valid
+only with `--cron`. `clear` removes one-time schedules only; recurring
+schedules must be disabled.
+
+One-time schedules stay subject to `TASK_RUNNER_MIN_SCHEDULE_DELAY_SEC`.
+Recurring schedules are validated with `TASK_RUNNER_MIN_RECURRENCE_INTERVAL_SEC`
+and can run in `reuse`, `reset`, or `clone` mode.
 
 ### Metadata
 
@@ -355,6 +394,8 @@ Recognized by the CLI:
 - `TASK_RUNNER_CLAUDE_BIN`, `TASK_RUNNER_CODEX_BIN`,
   `TASK_RUNNER_CODEX_WS_URL`, `TASK_RUNNER_CURSOR_BIN`,
   `TASK_RUNNER_PI_BIN`, `PI_HOME`
+- `TASK_RUNNER_MIN_SCHEDULE_DELAY_SEC`,
+  `TASK_RUNNER_MIN_RECURRENCE_INTERVAL_SEC`
 - `TASK_RUNNER_CALL_DEPTH`, `TASK_RUNNER_MAX_CALL_DEPTH`
 
 See [configuration.md](configuration.md).

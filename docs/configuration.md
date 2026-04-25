@@ -91,6 +91,13 @@ Both can be overridden on the CLI via `--listen` (on `serve`) and
 `--connect` (on client commands). SSH-assisted connected mode uses
 `--connect-host` and `--connect-local-port`. See [daemon.md](daemon.md).
 
+### Scheduling
+
+| Variable | Effect |
+|----------|--------|
+| `TASK_RUNNER_MIN_SCHEDULE_DELAY_SEC` | Minimum allowed one-time schedule delay in seconds (default `300`) |
+| `TASK_RUNNER_MIN_RECURRENCE_INTERVAL_SEC` | Minimum observed interval allowed for recurring schedules in seconds (default `300`) |
+
 ### Backends
 
 | Variable | Effect |
@@ -139,10 +146,15 @@ values using `runtimeVarSources`.
 
 ## Manifest upgrades
 
-The current manifest schema is version `10`. Older manifests are not
+The current manifest schema is version `12`. Older manifests are not
 silently upgraded at runtime — resuming a run with an older schema fails
 with a clear error. The repo ships migration scripts under `scripts/`:
 
+- `scripts/migrate-manifests-v12.mjs` — v11 → v12 (adds `schedule:
+  null`; supports repeated `--file <path>` targets for single-manifest
+  migrations)
+- `scripts/migrate-manifests-v11.mjs` — v10 → v11 (normalizes session
+  and attempt records plus hook audits)
 - `scripts/migrate-manifests-v10.mjs` — v9 → v10 (freezes launcher
   capture plus `callerInstructions`)
 - `scripts/migrate-manifests-v6.mjs` — v5 → v6 (adds `attachments: []`)
@@ -162,10 +174,8 @@ with a clear error. The repo ships migration scripts under `scripts/`:
   default, `--write` for in-place rewrite, supports repeated `--repo
   <name>` filters plus `--root <path>`)
 
-Schema v10 adds frozen launcher state on both `manifest.launcher` and
-`manifest.resetSeed.launcher`. Resume and reset use that frozen value
-instead of re-resolving current launcher files or daemon/client
-overrides.
+Schema v12 adds canonical `schedule` state. New runs can store one-time
+and recurring schedules directly on the manifest.
 
 Run the scripts explicitly; or recreate affected runs if an upgrade path
 isn't important. New manifests and new audit-event files are always

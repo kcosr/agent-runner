@@ -29,6 +29,7 @@ import type {
 } from "@task-runner/core/contracts/runs.js";
 import type { DefinitionListResult } from "@task-runner/core/core/commands/service.js";
 import type { RunListFilter } from "@task-runner/core/core/commands/service.js";
+import type { ScheduleInput } from "@task-runner/core/core/run/schedule.js";
 
 export type RunEventChannel = "run_summary" | "run_detail" | "run_timeline" | "run_audit";
 
@@ -76,6 +77,14 @@ export type RunsListParams = RunListFilter;
 
 export interface RunTargetParams {
   target: string;
+}
+
+export interface RunReadyParams extends RunTargetParams {
+  schedule?: ScheduleInput;
+}
+
+export interface RunScheduleParams extends RunTargetParams {
+  schedule: ScheduleInput;
 }
 
 export interface RunSetNameParams extends RunTargetParams {

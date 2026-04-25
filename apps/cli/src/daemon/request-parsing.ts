@@ -7,10 +7,13 @@ import type {
 import { BACKEND_IDS, isWsOrWssUrl } from "@task-runner/core/core/backends/types.js";
 import type { RunListScopeFilter } from "@task-runner/core/core/commands/service.js";
 import { isNamedLauncherOverride } from "@task-runner/core/core/config/launchers.js";
+import type { ScheduleInput } from "@task-runner/core/core/run/schedule.js";
 import { trimRunName } from "@task-runner/core/util/run-name.js";
 import type {
   CliRunsStartParams,
   RunInputSurfaceParams,
+  RunReadyParams,
+  RunScheduleParams,
   RunSetBackendSessionParams,
   RunSetNameParams,
   RunSetNoteParams,
@@ -314,6 +317,35 @@ function optionalBackendSpecific(value: unknown, label: string): BackendSpecific
   };
 }
 
+export function optionalScheduleInput(value: unknown, label: string): ScheduleInput | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const record = asRecord(value, label);
+  const allowedKeys = new Set(["at", "delay", "cron", "timezone", "mode", "continueOnFailure"]);
+  for (const key of Object.keys(record)) {
+    if (!allowedKeys.has(key)) {
+      throw new RequestValidationError(`${label}.${key} is not supported`);
+    }
+  }
+  return {
+    at: optionalString(record.at, `${label}.at`),
+    delay: optionalString(record.delay, `${label}.delay`),
+    cron: optionalString(record.cron, `${label}.cron`),
+    timezone: optionalString(record.timezone, `${label}.timezone`),
+    mode: optionalEnum(record.mode, `${label}.mode`, ["reuse", "reset", "clone"]),
+    continueOnFailure: optionalBoolean(record.continueOnFailure, `${label}.continueOnFailure`),
+  };
+}
+
+function requiredScheduleInput(value: unknown, label: string): ScheduleInput {
+  const schedule = optionalScheduleInput(value, label);
+  if (schedule === undefined) {
+    throw new RequestValidationError(`${label} is required`);
+  }
+  return schedule;
+}
+
 export function optionalOverrides(value: unknown): RunCommandOverrides {
   if (value === undefined) {
     return {};
@@ -332,6 +364,7 @@ export function optionalOverrides(value: unknown): RunCommandOverrides {
     "maxRetries",
     "addedTasks",
     "backendSpecific",
+    "schedule",
   ]);
   for (const key of Object.keys(record)) {
     if (!allowedKeys.has(key)) {
@@ -365,6 +398,7 @@ export function optionalOverrides(value: unknown): RunCommandOverrides {
     maxRetries: optionalNonNegativeInteger(record.maxRetries, "overrides.maxRetries"),
     addedTasks: optionalStringArray(record.addedTasks, "overrides.addedTasks"),
     backendSpecific: optionalBackendSpecific(record.backendSpecific, "overrides.backendSpecific"),
+    schedule: optionalScheduleInput(record.schedule, "overrides.schedule"),
   };
 }
 
@@ -404,6 +438,34 @@ export function parseResumeRunParams(value: unknown, label: string): RunsResumeP
     target: requiredString(record.target, `${label}.target`),
     parentRunId: optionalRunIdString(record.parentRunId, `${label}.parentRunId`),
     overrides: optionalOverrides(record.overrides),
+  };
+}
+
+export function parseRunReadyParams(value: unknown, label: string): RunReadyParams {
+  const record = asRecord(value, label);
+  const allowedKeys = new Set(["target", "schedule"]);
+  for (const key of Object.keys(record)) {
+    if (!allowedKeys.has(key)) {
+      throw new RequestValidationError(`${label}.${key} is not supported`);
+    }
+  }
+  return {
+    target: requiredString(record.target, `${label}.target`),
+    schedule: optionalScheduleInput(record.schedule, `${label}.schedule`),
+  };
+}
+
+export function parseRunScheduleParams(value: unknown, label: string): RunScheduleParams {
+  const record = asRecord(value, label);
+  const allowedKeys = new Set(["target", "schedule"]);
+  for (const key of Object.keys(record)) {
+    if (!allowedKeys.has(key)) {
+      throw new RequestValidationError(`${label}.${key} is not supported`);
+    }
+  }
+  return {
+    target: requiredString(record.target, `${label}.target`),
+    schedule: requiredScheduleInput(record.schedule, `${label}.schedule`),
   };
 }
 

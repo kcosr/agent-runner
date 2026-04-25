@@ -125,6 +125,31 @@ describe("formatAuditEvent", () => {
     ]);
   });
 
+  it("formats schedule audit events with reason text", () => {
+    const formatted = formatAuditEvent({
+      type: "run.schedule_missed",
+      recordedAt: "2026-04-21T16:09:00.000Z",
+      source: "daemon",
+      hostMode: "daemon",
+      fields: {
+        schedule: {
+          enabled: true,
+          runAt: "2026-04-25T15:00:00.000Z",
+          recurrence: null,
+        },
+        reason: "dependencies_unmet",
+      },
+    });
+
+    expect(formatted.message).toEqual([
+      { type: "text", text: "Missed schedule for " },
+      { type: "code", text: "2026-04-25T15:00:00.000Z" },
+      { type: "text", text: " (" },
+      { type: "code", text: "dependencies unmet" },
+      { type: "text", text: ")." },
+    ]);
+  });
+
   it("falls back to the raw task id when a hook task cannot be resolved", () => {
     const formatted = formatAuditEvent({
       type: "run.hook_recorded",

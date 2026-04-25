@@ -80,6 +80,33 @@ function nullableCode(value: unknown, fallback = "none"): AuditMessagePart {
   return code(value ?? fallback);
 }
 
+function scheduleRunAt(value: unknown): string {
+  if (!value || typeof value !== "object") {
+    return "unknown";
+  }
+  const schedule = value as Record<string, unknown>;
+  return typeof schedule.runAt === "string" ? schedule.runAt : "unknown";
+}
+
+function formatScheduleReason(value: unknown): string {
+  switch (value) {
+    case "dependencies_unmet":
+      return "dependencies unmet";
+    case "overdue_on_startup":
+      return "overdue on startup";
+    case "already_active":
+      return "already active";
+    case "archived":
+      return "archived";
+    case "not_ready":
+      return "not ready";
+    case "minimum_interval_violation":
+      return "minimum interval violation";
+    default:
+      return String(value ?? "unknown");
+  }
+}
+
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
@@ -342,6 +369,84 @@ export function formatAuditEvent(
           nullableCode(fields.nextName, "unnamed"),
           text("."),
         ],
+      };
+    case "run.schedule_set":
+      return {
+        message: [text("Set schedule for "), code(scheduleRunAt(fields.schedule)), text(".")],
+      };
+    case "run.schedule_cleared":
+      return {
+        message: [
+          text("Cleared schedule that was set for "),
+          code(scheduleRunAt(fields.previousSchedule)),
+          text("."),
+        ],
+      };
+    case "run.schedule_enabled":
+      return {
+        message: [text("Enabled schedule for "), code(scheduleRunAt(fields.schedule)), text(".")],
+      };
+    case "run.schedule_disabled":
+      return {
+        message: [
+          text("Disabled schedule for "),
+          code(scheduleRunAt(fields.schedule)),
+          text(" ("),
+          code(formatScheduleReason(fields.reason)),
+          text(")."),
+        ],
+      };
+    case "run.schedule_due":
+      return {
+        message: [
+          text("Schedule became due for "),
+          code(scheduleRunAt(fields.schedule)),
+          text("."),
+        ],
+      };
+    case "run.schedule_missed":
+      return {
+        message: [
+          text("Missed schedule for "),
+          code(scheduleRunAt(fields.schedule)),
+          text(" ("),
+          code(formatScheduleReason(fields.reason)),
+          text(")."),
+        ],
+      };
+    case "run.schedule_skipped":
+      return {
+        message: [
+          text("Skipped schedule for "),
+          code(scheduleRunAt(fields.schedule)),
+          text(" ("),
+          code(formatScheduleReason(fields.reason)),
+          text(")."),
+        ],
+      };
+    case "run.schedule_failed":
+      return {
+        message: [
+          text("Schedule failed for "),
+          code(scheduleRunAt(fields.schedule)),
+          text(" ("),
+          code(formatScheduleReason(fields.reason)),
+          text(")."),
+        ],
+      };
+    case "run.schedule_advanced":
+      return {
+        message: [
+          text("Advanced schedule from "),
+          code(scheduleRunAt(fields.previousSchedule)),
+          text(" to "),
+          code(scheduleRunAt(fields.schedule)),
+          text(fields.reason === undefined ? "." : ` (${formatScheduleReason(fields.reason)}).`),
+        ],
+      };
+    case "run.schedule_consumed":
+      return {
+        message: [text("Consumed schedule for "), code(scheduleRunAt(fields.schedule)), text(".")],
       };
     case "task.added":
       return {

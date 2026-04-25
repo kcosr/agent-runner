@@ -39,6 +39,7 @@ import {
   archiveRun,
   clearRunBackendSession,
   clearRunDependencies,
+  clearRunSchedule as clearRunScheduleCommand,
   deleteRun,
   downloadAttachment,
   listAttachments,
@@ -57,6 +58,8 @@ import {
   setRunName,
   setRunNote,
   setRunPinned,
+  setRunSchedule as setRunScheduleCommand,
+  setRunScheduleEnabled as setRunScheduleEnabledCommand,
   setTask,
   showDefinition,
   showTask,
@@ -70,6 +73,7 @@ import type { RunEventOrigin } from "../core/run/run-events.js";
 import type { RunAuditEnvelope } from "../core/run/run-events.js";
 import { readRunAuditHistory } from "../core/run/run-events.js";
 import type { RunEvent, RunOutcome } from "../core/run/run-loop.js";
+import type { ScheduleInput } from "../core/run/schedule.js";
 import { resolveStaticInputSurface } from "../core/run/static-input-surface.js";
 import { executeRunCommand } from "../run-command.js";
 import { startDebugPerfTimer } from "../util/debug-perf.js";
@@ -105,6 +109,7 @@ export interface RunCommandOverrides {
   unrestricted?: boolean;
   maxRetries?: number;
   addedTasks?: string[];
+  schedule?: ScheduleInput;
 }
 
 export interface StartRunRequest {
@@ -396,10 +401,37 @@ export function reset(
 
 export function readyRun(
   target: string,
+  input: { schedule?: ScheduleInput } = {},
   auditContext?: MutationAuditContext,
   emitAuditEnvelope?: AuditEnvelopeEmitter,
 ): RunDetail {
-  return markRunReady(target, auditContext, emitAuditEnvelope);
+  return markRunReady(target, input.schedule, auditContext, emitAuditEnvelope);
+}
+
+export function setRunSchedule(
+  target: string,
+  input: { schedule: ScheduleInput },
+  auditContext?: MutationAuditContext,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
+): RunDetail {
+  return setRunScheduleCommand(target, input.schedule, auditContext, emitAuditEnvelope);
+}
+
+export function clearRunSchedule(
+  target: string,
+  auditContext?: MutationAuditContext,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
+): RunDetail {
+  return clearRunScheduleCommand(target, auditContext, emitAuditEnvelope);
+}
+
+export function setRunScheduleEnabled(
+  target: string,
+  input: { enabled: boolean },
+  auditContext?: MutationAuditContext,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
+): RunDetail {
+  return setRunScheduleEnabledCommand(target, input.enabled, auditContext, emitAuditEnvelope);
 }
 
 export function deleteArchivedRun(target: string): RunDeleteResult {

@@ -1,4 +1,9 @@
-import type { RunAuditEnvelope, RunAuditEvent, RunAuditHistory } from "../core/run/run-events.js";
+import type {
+  RunAuditEnvelope,
+  RunAuditEvent,
+  RunAuditHistory,
+  ScheduleDecisionReason,
+} from "../core/run/run-events.js";
 import type { RunEvent } from "../core/run/run-loop.js";
 import type { RunDetail, RunSummary } from "./runs.js";
 
@@ -51,4 +56,4 @@ export interface RunTimelineEnvelope {
   event: RunTimelineEvent;
 }
 
-export type { RunAuditEnvelope, RunAuditEvent, RunAuditHistory };
+export type { RunAuditEnvelope, RunAuditEvent, RunAuditHistory, ScheduleDecisionReason };

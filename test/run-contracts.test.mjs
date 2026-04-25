@@ -2,6 +2,8 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import {
   deriveRunCapabilities,
+  isDaemonAutoRunnableReadyRun,
+  scheduleIsDueOrAbsent,
   toRunArchiveResult,
   toRunBackendSessionResult,
   toRunDependenciesResult,
@@ -30,7 +32,7 @@ function buildManifest(overrides = {}) {
   };
 
   return {
-    schemaVersion: 11,
+    schemaVersion: 12,
     runId: "run123",
     repo: "demo-repo",
     agent: {
@@ -66,6 +68,7 @@ function buildManifest(overrides = {}) {
     status: "initialized",
     dependencyRunIds: [],
     parentRunId: null,
+    schedule: null,
     exitCode: null,
     totalAttemptCount: 0,
     maxAttemptsPerSession: 2,
@@ -175,6 +178,8 @@ test("run contracts: toRunSummary maps listed manifest rows to the neutral summa
       satisfied: 0,
       unsatisfied: 0,
     },
+    schedule: null,
+    scheduleState: "none",
     activeTask: null,
     execution: {
       hostMode: "embedded",
@@ -293,6 +298,8 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
     hookAudits: [],
     dependencies: [],
     dependents: [],
+    schedule: null,
+    scheduleState: "none",
     tasks: [
       {
         id: "t1",
@@ -400,6 +407,35 @@ test("run contracts: toRunDetail exposes pendingPrompt for ready zero-attempt ru
   });
 
   assert.equal(detail.pendingPrompt, "Prepared handoff prompt.");
+});
+
+test("run contracts: schedules project onto summary/detail with derived state", () => {
+  const schedule = {
+    enabled: true,
+    runAt: "2026-04-12T09:00:00.000Z",
+    recurrence: {
+      schedule: {
+        type: "cron",
+        expression: "0 9 * * *",
+        timezone: "UTC",
+      },
+      mode: "clone",
+      continueOnFailure: false,
+    },
+  };
+  const manifest = buildManifest({ schedule });
+
+  const summary = toRunSummary({
+    repo: "demo-repo",
+    workspaceDir: manifest.workspaceDir,
+    manifest,
+  });
+  const detail = toRunDetail({ manifest, isLive: false });
+
+  assert.deepEqual(summary.schedule, schedule);
+  assert.equal(summary.scheduleState, "due");
+  assert.deepEqual(detail.schedule, schedule);
+  assert.equal(detail.scheduleState, "due");
 });
 
 test("run contracts: toRunDetail redacts inherited env vars from runtimeVarSources", () => {
@@ -787,6 +823,43 @@ test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mu
     canEditNotes: true,
     canAdd: false,
   });
+});
+
+test("run contracts: shared schedule gate helper controls daemon auto-runnability only", () => {
+  const futureSchedule = {
+    enabled: true,
+    runAt: "2099-01-01T00:00:00.000Z",
+    recurrence: null,
+  };
+  const dueSchedule = {
+    ...futureSchedule,
+    runAt: "2000-01-01T00:00:00.000Z",
+  };
+  const dependencyState = { unsatisfied: 0 };
+
+  assert.equal(scheduleIsDueOrAbsent(null), true);
+  assert.equal(scheduleIsDueOrAbsent(futureSchedule), false);
+  assert.equal(scheduleIsDueOrAbsent(dueSchedule), true);
+  assert.equal(
+    isDaemonAutoRunnableReadyRun({
+      manifest: buildManifest({ status: "ready", schedule: futureSchedule }),
+      dependencyState,
+      activeInDaemon: false,
+    }),
+    false,
+  );
+  assert.equal(
+    isDaemonAutoRunnableReadyRun({
+      manifest: buildManifest({ status: "ready", schedule: dueSchedule }),
+      dependencyState,
+      activeInDaemon: false,
+    }),
+    true,
+  );
+  assert.equal(
+    deriveRunCapabilities(buildManifest({ status: "ready", schedule: futureSchedule })).canResume,
+    true,
+  );
 });
 
 test("run contracts: passive summaries and details derive effectiveStatus from task snapshots", () => {

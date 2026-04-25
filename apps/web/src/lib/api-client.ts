@@ -41,6 +41,7 @@ import {
   assignmentConfigSchema,
   launcherDefinitionSchema,
 } from "@task-runner/core/core/config/schema.js";
+import type { ScheduleInput } from "@task-runner/core/core/run/schedule.js";
 import { z } from "zod";
 
 export class ApiError extends Error {
@@ -767,6 +768,43 @@ export function createApiClient(config: AppRuntimeConfig) {
     async readyRun(runId: string): Promise<RunDetail> {
       const response = await fetch(
         joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/ready`),
+        {
+          method: "POST",
+          headers: { accept: "application/json" },
+        },
+      );
+      return await readRun(response);
+    },
+    async setRunSchedule(runId: string, schedule: ScheduleInput): Promise<RunDetail> {
+      const response = await fetch(
+        joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/schedule`),
+        {
+          method: "PUT",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json",
+          },
+          body: JSON.stringify(schedule),
+        },
+      );
+      return await readRun(response);
+    },
+    async clearRunSchedule(runId: string): Promise<RunDetail> {
+      const response = await fetch(
+        joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/schedule`),
+        {
+          method: "DELETE",
+          headers: { accept: "application/json" },
+        },
+      );
+      return await readRun(response);
+    },
+    async setRunScheduleEnabled(runId: string, enabled: boolean): Promise<RunDetail> {
+      const response = await fetch(
+        joinPath(
+          config.apiBasePath,
+          `/runs/${encodeURIComponent(runId)}/schedule/${enabled ? "enable" : "disable"}`,
+        ),
         {
           method: "POST",
           headers: { accept: "application/json" },

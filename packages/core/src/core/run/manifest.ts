@@ -155,6 +155,26 @@ export interface AssignmentInfo {
   workspacePath: string;
 }
 
+export type RunScheduleMode = "reuse" | "reset" | "clone";
+
+export interface CronSchedule {
+  type: "cron";
+  expression: string;
+  timezone: string;
+}
+
+export interface RunScheduleRecurrence {
+  schedule: CronSchedule;
+  mode: RunScheduleMode;
+  continueOnFailure: boolean;
+}
+
+export interface RunSchedule {
+  enabled: boolean;
+  runAt: string;
+  recurrence: RunScheduleRecurrence | null;
+}
+
 // The manifest is the canonical record of a run. Post-creation, task-runner
 // never re-reads the agent's source file — every field needed to resume or
 // inspect a run comes from here. That means first-write freezes a snapshot
@@ -162,13 +182,13 @@ export interface AssignmentInfo {
 // `timeoutSec` are all captured at init / fresh-run time and preserved
 // across all subsequent sessions.
 //
-// schemaVersion: 11 is the current manifest-canonical generation. Manifests written
+// schemaVersion: 12 is the current manifest-canonical generation. Manifests written
 // by earlier task-runner versions are not resumable by this version —
 // `isRunManifest` rejects them and
 // `resolveResumeTarget` surfaces a clear error telling the caller to
 // run the manifest migration.
 export interface RunManifest {
-  schemaVersion: 11;
+  schemaVersion: 12;
   runId: string;
   repo: string;
   agent: {
@@ -209,6 +229,7 @@ export interface RunManifest {
   status: ManifestStatus;
   dependencyRunIds: string[];
   parentRunId: string | null;
+  schedule: RunSchedule | null;
   exitCode: number | null;
   totalAttemptCount: number;
   maxAttemptsPerSession: number;
@@ -343,6 +364,27 @@ function isManifestStatus(value: unknown): value is ManifestStatus {
   );
 }
 
+function isValidRunSchedule(value: unknown): value is RunSchedule | null {
+  if (value === null) return true;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const schedule = value as Record<string, unknown>;
+  if (typeof schedule.enabled !== "boolean") return false;
+  if (typeof schedule.runAt !== "string") return false;
+  if (Number.isNaN(new Date(schedule.runAt).getTime())) return false;
+  if (schedule.recurrence === null) return true;
+  if (!schedule.recurrence || typeof schedule.recurrence !== "object") return false;
+  const recurrence = schedule.recurrence as Record<string, unknown>;
+  if (recurrence.mode !== "reuse" && recurrence.mode !== "reset" && recurrence.mode !== "clone") {
+    return false;
+  }
+  if (typeof recurrence.continueOnFailure !== "boolean") return false;
+  if (!recurrence.schedule || typeof recurrence.schedule !== "object") return false;
+  const cron = recurrence.schedule as Record<string, unknown>;
+  return (
+    cron.type === "cron" && typeof cron.expression === "string" && typeof cron.timezone === "string"
+  );
+}
+
 export function writeManifest(workspaceDir: string, manifest: RunManifest): void {
   const path = join(workspaceDir, MANIFEST_FILENAME);
   writeTextFileAtomic(path, `${JSON.stringify(manifest, null, 2)}\n`);
@@ -433,16 +475,16 @@ function readManifestCandidate(candidate: string): RunManifest {
     typeof parsed === "object" &&
     "schemaVersion" in parsed &&
     typeof (parsed as { schemaVersion: unknown }).schemaVersion === "number" &&
-    (parsed as { schemaVersion: number }).schemaVersion !== 11
+    (parsed as { schemaVersion: number }).schemaVersion !== 12
   ) {
     const version = (parsed as { schemaVersion: number }).schemaVersion;
-    if (version === 10) {
+    if (version === 11) {
       throw new ResumeError(
-        `manifest at ${candidate} has schemaVersion 10; this version of task-runner requires schemaVersion 11. Run scripts/migrate-manifests-v11.mjs to migrate existing workspaces.`,
+        `manifest at ${candidate} has schemaVersion 11; this version of task-runner requires schemaVersion 12. Run scripts/migrate-manifests-v12.mjs to migrate existing workspaces.`,
       );
     }
     throw new ResumeError(
-      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 11.`,
+      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 12.`,
     );
   }
   if (!isRunManifest(parsed)) {
@@ -598,7 +640,7 @@ export function findRunManifestsById(
 function isRunManifest(value: unknown): value is RunManifest {
   if (!value || typeof value !== "object") return false;
   const obj = value as Record<string, unknown>;
-  if (obj.schemaVersion !== 11) return false;
+  if (obj.schemaVersion !== 12) return false;
   if (typeof obj.runId !== "string") return false;
   if (typeof obj.repo !== "string") return false;
 
@@ -632,6 +674,7 @@ function isRunManifest(value: unknown): value is RunManifest {
   ) {
     return false;
   }
+  if (!isValidRunSchedule(obj.schedule)) return false;
   if (typeof obj.timeoutSec !== "number") return false;
   if (typeof obj.unrestricted !== "boolean") return false;
   if (typeof obj.totalAttemptCount !== "number") return false;

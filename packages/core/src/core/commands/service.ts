@@ -41,6 +41,7 @@ import {
   canResetRun,
   canUnarchiveRun,
   deriveTaskMutationCapabilities,
+  isTerminalStatus,
   toRunArchiveResult,
   toRunBackendSessionResult,
   toRunDependenciesResult,
@@ -83,6 +84,7 @@ import {
   ResumeError,
   type RunManifest,
   RunNotFoundError,
+  type RunSchedule,
   type TaskSnapshot,
   findRunManifestsById,
   listRunManifests,
@@ -99,6 +101,10 @@ import {
   appendRunReadyEvent,
   appendRunRenamedEvent,
   appendRunResetEvent,
+  appendRunScheduleClearedEvent,
+  appendRunScheduleDisabledEvent,
+  appendRunScheduleEnabledEvent,
+  appendRunScheduleSetEvent,
   appendRunUnarchivedEvent,
   appendTaskAddedEvent,
   appendTaskUpdatedEvent,
@@ -106,6 +112,13 @@ import {
   systemRunEventContext,
   taskCommandRunEventContext,
 } from "../run/run-events.js";
+import { LockedFieldError } from "../run/run-loop.js";
+import {
+  type ScheduleInput,
+  ScheduleValidationError,
+  advanceRecurringSchedule,
+  resolveScheduleInput,
+} from "../run/schedule.js";
 import { derivePassiveTerminalStatus } from "../run/status.js";
 import {
   loadWorkspaceTaskMap,
@@ -252,6 +265,13 @@ export class TaskNotFoundError extends CommandError {
   constructor(runId: string, taskId: string) {
     super(`task "${taskId}" not found in run ${runId}`);
     this.name = "TaskNotFoundError";
+  }
+}
+
+export class ScheduleMutationError extends CommandError {
+  constructor(message: string) {
+    super(message);
+    this.name = "ScheduleMutationError";
   }
 }
 
@@ -869,6 +889,7 @@ export function resetRun(
 
 export function readyRun(
   target: string,
+  scheduleInput?: ScheduleInput,
   auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
   emitAuditEnvelope?: AuditEnvelopeEmitter,
 ): RunDetail {
@@ -876,8 +897,15 @@ export function readyRun(
   withTaskStateLock(resolved.workspaceDir, () => {
     resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
     requireReadyableRun(resolved.manifest);
+    if (scheduleInput !== undefined && resolved.manifest.lockedFields.includes("schedule")) {
+      throw new LockedFieldError("schedule", resolved.manifest.schedule);
+    }
     const previousStatus = resolved.manifest.status;
+    const previousSchedule = resolved.manifest.schedule;
     resolved.manifest.status = "ready";
+    if (scheduleInput !== undefined) {
+      resolved.manifest.schedule = resolveScheduleInput(scheduleInput);
+    }
     writeManifest(resolved.workspaceDir, resolved.manifest);
     emitPersistedAudit(
       emitAuditEnvelope,
@@ -887,7 +915,140 @@ export function readyRun(
         previousStatus,
       }),
     );
+    if (scheduleInput !== undefined && resolved.manifest.schedule !== null) {
+      emitPersistedAudit(
+        emitAuditEnvelope,
+        appendRunScheduleSetEvent({
+          manifest: resolved.manifest,
+          context: commandRunEventContext(auditOrigin),
+          previousSchedule,
+          schedule: resolved.manifest.schedule,
+        }),
+      );
+    }
   });
+  return toRunDetail({ manifest: resolved.manifest, isLive: false });
+}
+
+function requireScheduleDefinitionUnlocked(manifest: RunManifest): void {
+  if (manifest.lockedFields.includes("schedule")) {
+    throw new LockedFieldError("schedule", manifest.schedule);
+  }
+}
+
+export function setRunSchedule(
+  target: string,
+  scheduleInput: ScheduleInput,
+  auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
+): RunDetail {
+  const resolved = resolveRun(target);
+  withTaskStateLock(resolved.workspaceDir, () => {
+    resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
+    if (resolved.manifest.archivedAt !== null) {
+      throw new ScheduleMutationError(`cannot schedule archived run ${resolved.manifest.runId}`);
+    }
+    requireScheduleDefinitionUnlocked(resolved.manifest);
+    const previousSchedule = resolved.manifest.schedule;
+    const schedule = resolveScheduleInput(scheduleInput);
+    if (schedule.recurrence !== null && isTerminalStatus(resolved.manifest.status)) {
+      throw new ScheduleMutationError(
+        `cannot set recurring schedule for terminal run ${resolved.manifest.runId}`,
+      );
+    }
+    resolved.manifest.schedule = schedule;
+    writeManifest(resolved.workspaceDir, resolved.manifest);
+    emitPersistedAudit(
+      emitAuditEnvelope,
+      appendRunScheduleSetEvent({
+        manifest: resolved.manifest,
+        context: commandRunEventContext(auditOrigin),
+        previousSchedule,
+        schedule,
+      }),
+    );
+  });
+  return toRunDetail({ manifest: resolved.manifest, isLive: false });
+}
+
+export function clearRunSchedule(
+  target: string,
+  auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
+): RunDetail {
+  const resolved = resolveRun(target);
+  withTaskStateLock(resolved.workspaceDir, () => {
+    resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
+    requireScheduleDefinitionUnlocked(resolved.manifest);
+    const previousSchedule = resolved.manifest.schedule;
+    if (previousSchedule === null) {
+      throw new ScheduleMutationError(`run ${resolved.manifest.runId} has no schedule to clear`);
+    }
+    resolved.manifest.schedule = null;
+    writeManifest(resolved.workspaceDir, resolved.manifest);
+    emitPersistedAudit(
+      emitAuditEnvelope,
+      appendRunScheduleClearedEvent({
+        manifest: resolved.manifest,
+        context: commandRunEventContext(auditOrigin),
+        previousSchedule,
+      }),
+    );
+  });
+  return toRunDetail({ manifest: resolved.manifest, isLive: false });
+}
+
+export function setRunScheduleEnabled(
+  target: string,
+  enabled: boolean,
+  auditOrigin: RunEventOrigin = EMBEDDED_RUN_EVENT_ORIGIN,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
+): RunDetail {
+  const resolved = resolveRun(target);
+  let schedule: RunSchedule | null = null;
+  withTaskStateLock(resolved.workspaceDir, () => {
+    resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
+    if (resolved.manifest.schedule === null) {
+      throw new ScheduleMutationError(`run ${resolved.manifest.runId} has no schedule to toggle`);
+    }
+    const previousSchedule = resolved.manifest.schedule;
+    const result =
+      enabled && previousSchedule.recurrence !== null
+        ? advanceRecurringSchedule(previousSchedule)
+        : {
+            schedule: {
+              ...previousSchedule,
+              enabled,
+            },
+            disabledReason: null,
+          };
+    if (enabled && result.disabledReason !== null) {
+      throw new ScheduleMutationError(
+        `cannot enable schedule for run ${resolved.manifest.runId}: ${result.disabledReason}`,
+      );
+    }
+    resolved.manifest.schedule = result.schedule;
+    schedule = resolved.manifest.schedule;
+    writeManifest(resolved.workspaceDir, resolved.manifest);
+    emitPersistedAudit(
+      emitAuditEnvelope,
+      resolved.manifest.schedule.enabled
+        ? appendRunScheduleEnabledEvent({
+            manifest: resolved.manifest,
+            context: commandRunEventContext(auditOrigin),
+            schedule: resolved.manifest.schedule,
+          })
+        : appendRunScheduleDisabledEvent({
+            manifest: resolved.manifest,
+            context: commandRunEventContext(auditOrigin),
+            schedule: resolved.manifest.schedule,
+            reason: result.disabledReason ?? undefined,
+          }),
+    );
+  });
+  if (schedule === null) {
+    throw new ScheduleMutationError(`run ${resolved.manifest.runId} has no schedule to toggle`);
+  }
   return toRunDetail({ manifest: resolved.manifest, isLive: false });
 }
 
@@ -1639,11 +1800,19 @@ export function addTask(
 
 export function isCommandError(
   err: unknown,
-): err is CommandError | ResumeError | AttachmentError | RunLineageError {
+): err is
+  | CommandError
+  | ResumeError
+  | AttachmentError
+  | RunLineageError
+  | ScheduleValidationError
+  | LockedFieldError {
   return (
     err instanceof CommandError ||
     err instanceof ResumeError ||
     err instanceof AttachmentError ||
-    err instanceof RunLineageError
+    err instanceof RunLineageError ||
+    err instanceof ScheduleValidationError ||
+    err instanceof LockedFieldError
   );
 }
