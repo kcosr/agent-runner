@@ -211,6 +211,7 @@
   mode. ([#96](https://github.com/kcosr/task-runner/pull/96))
 - Updated the web tooling stack to Vite 8, `@vitejs/plugin-react` 6, and
   Vitest 4, and raised the documented Node.js floor to 20.19+ or 22.12+.
+  ([#98](https://github.com/kcosr/task-runner/pull/98))
 - Attempt-phase hooks now receive and match `attemptIndexInSession` for
   the zero-based attempt position inside the current session; monotonic
   run-wide attempt identity is exposed separately as `attemptNumber`.
