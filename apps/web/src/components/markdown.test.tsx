@@ -60,4 +60,20 @@ describe("MarkdownContent", () => {
     expect(wrapper).not.toBeNull();
     expect(wrapper?.firstElementChild).toBe(table);
   });
+
+  it("renders leading frontmatter as a fenced YAML code block when requested", () => {
+    const { container } = render(
+      <MarkdownContent
+        renderFrontmatterAsCodeBlock
+        text={"---\ntitle: Notes\nsource: attachment\n---\n# Body"}
+      />,
+    );
+
+    const frontmatterCode = container.querySelector("pre code");
+
+    expect(frontmatterCode).not.toBeNull();
+    expect(frontmatterCode?.textContent).toBe("title: Notes\nsource: attachment\n");
+    expect(screen.getByRole("heading", { name: "Body" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "title: Notes" })).not.toBeInTheDocument();
+  });
 });
