@@ -8,6 +8,7 @@
   `schedule` manifest data (`RunSchedule | null`), and summary/detail
   DTOs expose derived `scheduleState` instead of accepting compatibility
   scheduling shapes from older manifests.
+  ([#96](https://github.com/kcosr/task-runner/pull/96))
 - Manifest schema version is now `11`. Runs now store explicit
   run/session/attempt state with `totalAttemptCount`,
   `totalSessionCount`, `maxAttemptsPerSession`, and `sessions`; the old
@@ -73,7 +74,7 @@
 - Added scheduled runs with one-time and cron recurrence support across
   assignment config, `init` / `run ready`, `run schedule` CLI commands,
   daemon HTTP/RPC APIs, audit events, and web dashboard indicators and
-  controls.
+  controls. ([#96](https://github.com/kcosr/task-runner/pull/96))
 - Added shared review task definitions under `tasks/review/` and a
   bundled `code-review-direct` assignment for user-launched or Web UI
   code reviews that are not tied to an implementation run.
@@ -196,7 +197,7 @@
 - Ready runs can now be schedule-gated: the daemon starts due schedules,
   skips overdue startup occurrences instead of replaying stale work, and
   recurring schedules advance according to `reuse`, `reset`, or `clone`
-  mode.
+  mode. ([#96](https://github.com/kcosr/task-runner/pull/96))
 - Attempt-phase hooks now receive and match `attemptIndexInSession` for
   the zero-based attempt position inside the current session; monotonic
   run-wide attempt identity is exposed separately as `attemptNumber`.
