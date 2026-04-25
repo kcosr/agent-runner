@@ -128,6 +128,57 @@ test("executeRunCommand allows ready runs to start without a follow-up message",
     );
   }));
 
+test("executeRunCommand treats ready runs with prior sessions as resumes for message validation", async () =>
+  withRuntimeRoots("task-runner-run-command-", async () => {
+    const outcome = await executeRunCommand({
+      initialize: true,
+      cliVars: {},
+      overrides: {
+        backend: "claude",
+        message: "Seed a recurring reuse run.",
+      },
+    });
+
+    patchManifest(outcome.workspaceDir, (manifest) => {
+      manifest.status = "ready";
+      manifest.totalSessionCount = 1;
+      manifest.sessions = [
+        {
+          sessionIndex: 0,
+          firstAttemptNumber: 1,
+          lastAttemptNumber: 1,
+          startedAt: "2026-04-25T13:00:00.000Z",
+          endedAt: "2026-04-25T13:01:00.000Z",
+          status: "success",
+          exitCode: 0,
+          message: null,
+          brief: manifest.brief,
+          maxAttemptsPerSession: manifest.maxAttemptsPerSession,
+          backendSessionIdAtStart: null,
+          backendSessionIdAtEnd: null,
+        },
+      ];
+      manifest.totalAttemptCount = 1;
+      manifest.backendSessionId = null;
+    });
+
+    await assert.rejects(
+      () =>
+        executeRunCommand({
+          initialize: false,
+          resumeRun: outcome.runId,
+          cliVars: {},
+          overrides: {
+            message: "Resuming after scheduled delay.",
+          },
+        }),
+      (err) =>
+        err instanceof ResumeError &&
+        /captured no backend session id/.test(err.message) &&
+        !/starting a ready run does not accept message/.test(err.message),
+    );
+  }));
+
 test("executeRunCommand allows empty resume preflight when incomplete tasks remain", async () =>
   withRuntimeRoots("task-runner-run-command-", async () => {
     const outcome = await executeRunCommand({

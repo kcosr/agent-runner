@@ -1164,7 +1164,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
   const isInitialize = opts.initialize === true;
   const isReinitialize = isInitialize && Boolean(resume);
-  const priorReady = !isInitialize && resume?.manifest.status === "ready";
+  const priorReady =
+    !isInitialize && resume?.manifest.status === "ready" && resume.manifest.sessions.length === 0;
   const isResume = Boolean(resume) && !isReinitialize && !priorReady;
 
   if (resume && resume.manifest.archivedAt !== null) {

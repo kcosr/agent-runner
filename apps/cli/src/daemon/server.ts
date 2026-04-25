@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import { type Socket, createServer as createNetServer } from "node:net";
 import { monitorEventLoopDelay, performance } from "node:perf_hooks";
 import {
+  type RunCommandOverrides,
   addDependency,
   addRunAttachmentFromStream,
   appendNotes,
@@ -61,6 +62,7 @@ import type {
   RunSummary,
 } from "@task-runner/core/contracts/runs.js";
 import {
+  deriveRunCapabilities,
   isDaemonAutoRunnableReadyRun,
   isTerminalStatus,
   toRunDetail,
@@ -84,6 +86,7 @@ import {
   resolveResumeTarget,
   writeManifest,
 } from "@task-runner/core/core/run/manifest.js";
+import { hasIncompleteTasks } from "@task-runner/core/core/run/resume-policy.js";
 import {
   type ScheduleDecisionReason,
   appendRunScheduleAdvancedEvent,
@@ -196,6 +199,7 @@ interface SubscriptionHandle {
 const MAX_TIMELINE_BUFFER_EVENTS = 1_000;
 const COMPLETED_TIMELINE_BUFFER_TTL_MS = 5_000;
 const MAX_SCHEDULE_TIMER_DELAY_MS = 2_147_483_647;
+const SCHEDULED_RESUME_MESSAGE = "Resuming after scheduled delay.";
 
 function roundMetric(value: number): number {
   return Math.round(value * 1_000) / 1_000;
@@ -995,17 +999,15 @@ export async function serveDaemon(
       ),
     );
 
+  const scheduledRunActiveInDaemon = (runId: string): boolean =>
+    activeRuns.has(runId) ||
+    pendingScheduleStarts.has(runId) ||
+    pendingDependencyAutoStarts.has(runId);
+
   const scheduleSkipReason = (
     entry: ListedRunManifest,
     dependencyState: ReturnType<typeof dependencyStateForScheduledRun>,
   ): ScheduleDecisionReason | null => {
-    if (
-      activeRuns.has(entry.manifest.runId) ||
-      pendingScheduleStarts.has(entry.manifest.runId) ||
-      pendingDependencyAutoStarts.has(entry.manifest.runId)
-    ) {
-      return "already_active";
-    }
     if (entry.manifest.archivedAt !== null) {
       return "archived";
     }
@@ -1017,6 +1019,9 @@ export async function serveDaemon(
     }
     return null;
   };
+
+  const scheduledResumeOverrides = (manifest: RunManifest) =>
+    hasIncompleteTasks(manifest.finalTasks) ? {} : { message: SCHEDULED_RESUME_MESSAGE };
 
   const mutateDueOneTimeSchedule = (
     entry: ListedRunManifest,
@@ -1142,7 +1147,10 @@ export async function serveDaemon(
     queueScheduleEvaluation?.(entry.manifest.runId);
   };
 
-  const startDueScheduledRun = async (entry: ListedRunManifest): Promise<void> => {
+  const startDueScheduledRun = async (
+    entry: ListedRunManifest,
+    overrides: RunCommandOverrides = {},
+  ): Promise<void> => {
     if (operations === null || pendingScheduleStarts.has(entry.manifest.runId)) {
       return;
     }
@@ -1165,7 +1173,7 @@ export async function serveDaemon(
       });
       await operations.resumeRun({
         target: entry.manifest.runId,
-        overrides: {},
+        overrides,
       });
     } finally {
       pendingScheduleStarts.delete(entry.manifest.runId);
@@ -1190,7 +1198,6 @@ export async function serveDaemon(
       clearScheduleTimer(runId);
       return;
     }
-
     const now = new Date();
     const scheduleState = deriveScheduleState(schedule, now);
     if (scheduleState === "future") {
@@ -1208,7 +1215,21 @@ export async function serveDaemon(
       return;
     }
 
+    if (scheduledRunActiveInDaemon(entry.manifest.runId)) {
+      return;
+    }
+
     const dependencyState = dependencyStateForScheduledRun(entry.manifest);
+    const capabilities = deriveRunCapabilities(entry.manifest, dependencyState);
+    if (
+      schedule.recurrence === null &&
+      entry.manifest.status !== "ready" &&
+      capabilities.canResume
+    ) {
+      await startDueScheduledRun(entry, scheduledResumeOverrides(entry.manifest));
+      return;
+    }
+
     const reason = scheduleSkipReason(entry, dependencyState);
     if (reason !== null) {
       skipDueSchedule(entry, reason, now);
@@ -1218,10 +1239,7 @@ export async function serveDaemon(
       !isDaemonAutoRunnableReadyRun({
         manifest: entry.manifest,
         dependencyState,
-        activeInDaemon:
-          activeRuns.has(entry.manifest.runId) ||
-          pendingScheduleStarts.has(entry.manifest.runId) ||
-          pendingDependencyAutoStarts.has(entry.manifest.runId),
+        activeInDaemon: false,
         now,
       })
     ) {
@@ -1229,7 +1247,12 @@ export async function serveDaemon(
       return;
     }
 
-    await startDueScheduledRun(entry);
+    await startDueScheduledRun(
+      entry,
+      schedule.recurrence?.mode === "reuse" && entry.manifest.sessions.length > 0
+        ? scheduledResumeOverrides(entry.manifest)
+        : {},
+    );
   };
 
   const evaluateSchedules = async (targets: string[] | null, options: { startup: boolean }) => {

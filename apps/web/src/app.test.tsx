@@ -2926,12 +2926,17 @@ describe("web app", () => {
     expect(await within(scheduleRegion).findByRole("button", { name: "Disable" })).toBeEnabled();
 
     const clearButton = within(scheduleRegion).getByRole("button", { name: "Clear" });
-    expect(clearButton).toBeDisabled();
-    expect(clearButton).toHaveAttribute("aria-disabled", "true");
-    expect(clearButton).toHaveAttribute(
-      "title",
-      "Recurring schedules can be disabled but not cleared",
+    clearButton.focus();
+    expect(clearButton).toHaveFocus();
+    await user.click(clearButton);
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/runs/run-1/schedule", {
+        method: "DELETE",
+        headers: { accept: "application/json" },
+      }),
     );
+    await waitFor(() => expect(screen.queryByLabelText("Schedule")).not.toBeInTheDocument());
   });
 
   it("clears one-time schedules from the detail drawer", async () => {

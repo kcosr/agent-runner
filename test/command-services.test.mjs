@@ -1206,9 +1206,9 @@ test("command services: schedule mutations persist schedule state and audit thro
 
   await withSharedRuntimeEnv(dir, async () => {
     const scheduled = setRunSchedule(target.runId, {
-      at: "2026-04-25T12:00:00.000Z",
+      at: "2099-04-25T12:00:00.000Z",
     });
-    assert.equal(scheduled.schedule.runAt, "2026-04-25T12:00:00.000Z");
+    assert.equal(scheduled.schedule.runAt, "2099-04-25T12:00:00.000Z");
     assert.equal(scheduled.scheduleState, "future");
 
     const disabled = setRunScheduleEnabled(target.runId, false);
@@ -1235,7 +1235,7 @@ test("command services: schedule mutations persist schedule state and audit thro
   });
 });
 
-test("command services: schedule mutation rules honor locks and recurring clear policy", async () => {
+test("command services: schedule mutation rules honor locks and allow recurring clears", async () => {
   const dir = tempDir();
   writeBundle(dir);
   writeAssignment(dir, "svc-locked-schedule-work", LOCKED_SCHEDULE_ASSIGNMENT);
@@ -1250,7 +1250,7 @@ test("command services: schedule mutation rules honor locks and recurring clear 
 
   await withSharedRuntimeEnv(dir, async () => {
     assert.throws(
-      () => setRunSchedule(locked.runId, { at: "2026-04-25T12:00:00.000Z" }),
+      () => setRunSchedule(locked.runId, { at: "2099-04-25T12:00:00.000Z" }),
       (err) =>
         err instanceof LockedFieldError &&
         /cannot override locked field: schedule/.test(err.message),
@@ -1273,10 +1273,9 @@ test("command services: schedule mutation rules honor locks and recurring clear 
       cron: "0 9 * * *",
       timezone: "UTC",
     });
-    assert.throws(
-      () => clearRunSchedule(recurring.runId),
-      (err) => err instanceof CommandError && /cannot clear recurring schedule/.test(err.message),
-    );
+    const recurringCleared = clearRunSchedule(recurring.runId);
+    assert.equal(recurringCleared.schedule, null);
+    assert.equal(recurringCleared.scheduleState, "none");
 
     assert.throws(
       () =>
@@ -1295,6 +1294,39 @@ test("command services: schedule mutation rules honor locks and recurring clear 
       at: "2099-01-01T00:00:00.000Z",
     });
     assert.equal(oneTime.schedule.recurrence, null);
+  });
+});
+
+test("command services: enabling a paused recurring schedule re-arms the next run time", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const target = await initRun(dir);
+
+  await withSharedRuntimeEnv(dir, async () => {
+    setRunSchedule(target.runId, {
+      cron: "0 * * * *",
+      timezone: "UTC",
+      mode: "reuse",
+    });
+
+    patchManifest(target.workspaceDir, (manifest) => {
+      manifest.schedule = {
+        ...manifest.schedule,
+        enabled: false,
+        runAt: "2026-04-25T13:23:00.000Z",
+      };
+    });
+
+    const enabled = setRunScheduleEnabled(target.runId, true);
+    assert.equal(enabled.schedule.enabled, true);
+    assert.equal(enabled.schedule.recurrence.mode, "reuse");
+    assert.notEqual(enabled.schedule.runAt, "2026-04-25T13:23:00.000Z");
+    assert.equal(enabled.scheduleState, "future");
+
+    const manifest = readManifest(target.workspaceDir);
+    assert.equal(manifest.schedule.enabled, true);
+    assert.equal(manifest.schedule.recurrence.mode, "reuse");
+    assert.notEqual(manifest.schedule.runAt, "2026-04-25T13:23:00.000Z");
   });
 });
 

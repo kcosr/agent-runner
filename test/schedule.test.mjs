@@ -10,6 +10,10 @@ import {
 } from "../packages/core/dist/core/run/schedule.js";
 
 const now = new Date("2026-04-25T00:00:00.000Z");
+const defaultGuardrailEnv = {
+  TASK_RUNNER_MIN_SCHEDULE_DELAY_SEC: "300",
+  TASK_RUNNER_MIN_RECURRENCE_INTERVAL_SEC: "300",
+};
 const relaxedEnv = {
   TASK_RUNNER_MIN_SCHEDULE_DELAY_SEC: "1",
   TASK_RUNNER_MIN_RECURRENCE_INTERVAL_SEC: "60",
@@ -61,16 +65,23 @@ test("schedule rejects invalid one-time input and guardrail failures", () => {
     () => resolveScheduleInput({ at: "bad" }, { now, env: relaxedEnv }),
     /invalid schedule timestamp/,
   );
-  assert.throws(() => resolveScheduleInput({ delay: "10 seconds" }, { now }), /below minimum 300s/);
   assert.throws(
-    () => resolveScheduleInput({ at: "2026-04-25T00:10:00.000Z", timezone: "UTC" }, { now }),
+    () => resolveScheduleInput({ delay: "10 seconds" }, { now, env: defaultGuardrailEnv }),
+    /below minimum 300s/,
+  );
+  assert.throws(
+    () =>
+      resolveScheduleInput(
+        { at: "2026-04-25T00:10:00.000Z", timezone: "UTC" },
+        { now, env: defaultGuardrailEnv },
+      ),
     /timezone is valid only with cron/,
   );
 });
 
 test("schedule resolves cron input with timezone defaults and mode defaults", () => {
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-  const schedule = resolveScheduleInput({ cron: "*/5 * * * *" }, { now });
+  const schedule = resolveScheduleInput({ cron: "*/5 * * * *" }, { now, env: defaultGuardrailEnv });
 
   assert.equal(schedule.enabled, true);
   assert.equal(schedule.runAt, "2026-04-25T00:05:00.000Z");
@@ -87,15 +98,23 @@ test("schedule resolves cron input with timezone defaults and mode defaults", ()
 
 test("schedule validates cron timezone and recurrence interval guardrails", () => {
   assert.throws(
-    () => resolveScheduleInput({ cron: "not cron", timezone: "UTC" }, { now }),
+    () => resolveScheduleInput({ cron: "not cron", timezone: "UTC" }, { now, env: relaxedEnv }),
     ScheduleValidationError,
   );
   assert.throws(
-    () => resolveScheduleInput({ cron: "*/5 * * * *", timezone: "No/Such_Zone" }, { now }),
+    () =>
+      resolveScheduleInput(
+        { cron: "*/5 * * * *", timezone: "No/Such_Zone" },
+        { now, env: relaxedEnv },
+      ),
     /invalid schedule timezone/,
   );
   assert.throws(
-    () => resolveScheduleInput({ cron: "* * * * *", timezone: "UTC" }, { now }),
+    () =>
+      resolveScheduleInput(
+        { cron: "* * * * *", timezone: "UTC" },
+        { now, env: defaultGuardrailEnv },
+      ),
     /below minimum 300s/,
   );
 });
@@ -103,7 +122,7 @@ test("schedule validates cron timezone and recurrence interval guardrails", () =
 test("schedule samples recurrence advancement with a bounded occurrence count", () => {
   const schedule = resolveScheduleInput(
     { cron: "0 22 * * *", timezone: "America/New_York", mode: "reuse" },
-    { now },
+    { now, env: defaultGuardrailEnv },
   );
   const sample = sampleFutureOccurrences(schedule.recurrence, new Date(schedule.runAt));
 
@@ -126,7 +145,7 @@ test("schedule disables existing recurrence that violates the minimum interval",
     },
   };
 
-  const result = advanceRecurringSchedule(schedule, now);
+  const result = advanceRecurringSchedule(schedule, now, defaultGuardrailEnv);
 
   assert.equal(result.disabledReason, "minimum_interval_violation");
   assert.equal(result.schedule.enabled, false);

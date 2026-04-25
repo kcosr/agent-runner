@@ -104,7 +104,7 @@ async function initRun(baseDir, overrides = {}, options = {}) {
   });
 }
 
-async function runReady(baseDir, runId, invoke) {
+async function runReady(baseDir, runId, invoke, overrides = {}) {
   return await withSharedRuntimeEnv(baseDir, async () => {
     const target = resolveResumeTarget(runId);
     return await runAgent({
@@ -113,6 +113,7 @@ async function runReady(baseDir, runId, invoke) {
       webVars: {},
       backend: backend(invoke),
       resume: target,
+      overrides,
     });
   });
 }
@@ -254,6 +255,56 @@ test("run-loop schedules: recurring failures stop or continue according to conti
   assert.equal(continued.summary.status, "ready");
   assert.equal(manifest.status, "ready");
   assert.notEqual(manifest.schedule.runAt, previousRunAt);
+});
+
+test("run-loop schedules: recurring reuse resumes increment session indexes after ready promotion", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const init = await initRun(dir, {
+    schedule: {
+      cron: "*/5 * * * *",
+      timezone: "UTC",
+      mode: "reuse",
+      continueOnFailure: true,
+    },
+  });
+  readyInitializedRun(dir, init.runId);
+  setDue(init.workspaceDir);
+
+  const first = await runReady(dir, init.runId, (ctx) => {
+    completeAllTasksFromPrompt(ctx.prompt, dir);
+  });
+  const firstManifest = readManifest(init.workspaceDir);
+
+  assert.equal(first.summary.status, "ready");
+  assert.equal(firstManifest.status, "ready");
+  assert.equal(firstManifest.totalSessionCount, 1);
+  assert.deepEqual(
+    firstManifest.sessions.map((session) => session.sessionIndex),
+    [0],
+  );
+  assert.deepEqual(
+    firstManifest.attemptRecords.map((attempt) => attempt.sessionIndex),
+    [0],
+  );
+
+  setDue(init.workspaceDir);
+  const second = await runReady(dir, init.runId, () => {}, {
+    message: "Resuming after scheduled delay.",
+  });
+  const secondManifest = readManifest(init.workspaceDir);
+
+  assert.equal(second.summary.status, "ready");
+  assert.equal(secondManifest.status, "ready");
+  assert.equal(secondManifest.totalSessionCount, 2);
+  assert.deepEqual(
+    secondManifest.sessions.map((session) => session.sessionIndex),
+    [0, 1],
+  );
+  assert.deepEqual(
+    secondManifest.attemptRecords.map((attempt) => attempt.sessionIndex),
+    [0, 1],
+  );
 });
 
 test("run-loop schedules: reuse, reset, and clone recurrence modes use frozen reset state", async () => {

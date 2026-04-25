@@ -323,11 +323,11 @@ test("run schedule sets, toggles, clears, and run ready accepts schedule flags",
   writeAssignment(dir, "run-mgmt-work", ASSIGNMENT);
   const outcome = await initRun(dir);
 
-  const setText = runCli(["run", "schedule", outcome.runId, "--at", "2026-04-25T12:00:00.000Z"], {
+  const setText = runCli(["run", "schedule", outcome.runId, "--at", "2099-04-25T12:00:00.000Z"], {
     cwd: dir,
   });
   assert.match(setText, /set schedule/);
-  assert.equal(readManifest(outcome.workspaceDir).schedule.runAt, "2026-04-25T12:00:00.000Z");
+  assert.equal(readManifest(outcome.workspaceDir).schedule.runAt, "2099-04-25T12:00:00.000Z");
 
   const disableJson = JSON.parse(
     runCli(["run", "schedule", "disable", outcome.runId, "--output-format", "json"], {
@@ -339,6 +339,37 @@ test("run schedule sets, toggles, clears, and run ready accepts schedule flags",
   const clearText = runCli(["run", "schedule", "clear", outcome.runId], { cwd: dir });
   assert.match(clearText, /cleared schedule/);
   assert.equal(readManifest(outcome.workspaceDir).schedule, null);
+
+  const recurring = await initRun(dir);
+  runCli(
+    [
+      "run",
+      "schedule",
+      recurring.runId,
+      "--cron",
+      "0 * * * *",
+      "--timezone",
+      "UTC",
+      "--mode",
+      "reuse",
+    ],
+    { cwd: dir },
+  );
+  patchManifest(recurring.workspaceDir, (manifest) => {
+    manifest.schedule = {
+      ...manifest.schedule,
+      enabled: false,
+      runAt: "2026-04-25T13:23:00.000Z",
+    };
+  });
+  const enabledRecurring = JSON.parse(
+    runCli(["run", "schedule", "enable", recurring.runId, "--output-format", "json"], {
+      cwd: dir,
+    }),
+  );
+  assert.equal(enabledRecurring.schedule.enabled, true);
+  assert.equal(enabledRecurring.schedule.recurrence.mode, "reuse");
+  assert.notEqual(enabledRecurring.schedule.runAt, "2026-04-25T13:23:00.000Z");
 
   const ready = await initRun(dir);
   const readyJson = JSON.parse(
@@ -365,11 +396,14 @@ test("run schedule sets, toggles, clears, and run ready accepts schedule flags",
   assert.equal(readyJson.schedule.recurrence.mode, "clone");
   assert.equal(readyJson.schedule.recurrence.continueOnFailure, true);
 
+  const recurringClearText = runCli(["run", "schedule", "clear", ready.runId], { cwd: dir });
+  assert.match(recurringClearText, /cleared schedule/);
+  assert.equal(readManifest(ready.workspaceDir).schedule, null);
+
   runCli(["run", "reset", ready.runId], { cwd: dir });
   const resetManifest = readManifest(ready.workspaceDir);
   assert.equal(resetManifest.status, "initialized");
-  assert.equal(resetManifest.schedule.recurrence.schedule.expression, "0 9 * * *");
-  assert.equal(resetManifest.schedule.recurrence.mode, "clone");
+  assert.equal(resetManifest.schedule, null);
 });
 
 test("run schedule validates required target and schedule flag combinations", async () => {

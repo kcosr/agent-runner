@@ -521,7 +521,7 @@ export function RunDetailDrawer({
   const clearDependenciesPending = actionPending === "clear-dependencies";
   const schedulePending = actionPending === "schedule";
   const schedule = run.schedule;
-  const canClearSchedule = schedule !== null && schedule.recurrence === null;
+  const canClearSchedule = schedule !== null;
   useHorizontalWheelGuard(drawerRef);
   useEffect(() => {
     if (!isFullscreen) {
@@ -716,7 +716,7 @@ export function RunDetailDrawer({
   }
 
   async function submitScheduleClear() {
-    if (schedulePending || !canClearSchedule) {
+    if (schedulePending || schedule === null) {
       return;
     }
     try {
@@ -1518,11 +1518,7 @@ export function RunDetailDrawer({
                     className="btn"
                     disabled={!canClearSchedule || actionsLocked}
                     onClick={() => void submitScheduleClear()}
-                    title={
-                      canClearSchedule
-                        ? "Clear one-time schedule"
-                        : "Recurring schedules can be disabled but not cleared"
-                    }
+                    title="Clear schedule"
                     type="button"
                   >
                     {schedulePending ? "Clearing..." : "Clear"}

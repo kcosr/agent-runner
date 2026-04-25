@@ -7,12 +7,13 @@ import { isDeepStrictEqual } from "node:util";
 
 function usage() {
   return [
-    "Usage: node scripts/migrate-manifests-v12.mjs [--root <path>] [--repo <name>]... [--write]",
+    "Usage: node scripts/migrate-manifests-v12.mjs [--root <path>] [--repo <name>]... [--file <path>]... [--write]",
     "",
     "Dry-run by default. Use --write to update manifests in place.",
     "Migrates schemaVersion 11 manifests to 12 by adding schedule: null.",
     "Pass a state root such as ~/.local/state/task-runner with --root.",
     "Use repeated --repo filters to limit migration to selected repo buckets.",
+    "Use repeated --file paths to migrate only specific run.json manifests.",
   ].join("\n");
 }
 
@@ -20,6 +21,7 @@ function parseArgs(argv) {
   let root = join(homedir(), ".local/state/task-runner");
   let write = false;
   const repos = [];
+  const files = [];
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -41,6 +43,13 @@ function parseArgs(argv) {
       index += 1;
       continue;
     }
+    if (arg === "--file") {
+      const value = argv[index + 1];
+      if (!value) throw new Error("--file requires a path");
+      files.push(resolve(value));
+      index += 1;
+      continue;
+    }
     if (arg === "--help" || arg === "-h") {
       process.stdout.write(`${usage()}\n`);
       process.exit(0);
@@ -48,7 +57,11 @@ function parseArgs(argv) {
     throw new Error(`unknown argument: ${arg}`);
   }
 
-  return { root, write, repos };
+  if (files.length > 0 && repos.length > 0) {
+    throw new Error("--file cannot be combined with --repo");
+  }
+
+  return { root, write, repos, files };
 }
 
 function atomicWriteJson(path, value) {
@@ -115,9 +128,39 @@ function listRunDirs(root, repo) {
   }
 }
 
+function migrateManifestFile(manifestPath, label, write) {
+  const before = readManifest(manifestPath);
+  const after = migrateManifest(before);
+  if (isDeepStrictEqual(before, after)) {
+    process.stdout.write(`OK    ${label}: already canonical schemaVersion 12\n`);
+    return;
+  }
+  if (write) {
+    atomicWriteJson(manifestPath, after);
+    process.stdout.write(`WRITE ${label}: promoted to schemaVersion 12\n`);
+    return;
+  }
+  process.stdout.write(`DRY   ${label}: would promote to schemaVersion 12\n`);
+}
+
 function main() {
-  const { root, write, repos } = parseArgs(process.argv.slice(2));
+  const { root, write, repos, files } = parseArgs(process.argv.slice(2));
   let failures = 0;
+  if (files.length > 0) {
+    for (const file of files) {
+      try {
+        migrateManifestFile(file, file, write);
+      } catch (err) {
+        failures += 1;
+        process.stdout.write(`ERROR ${file}: ${err.message}\n`);
+      }
+    }
+    if (failures > 0) {
+      process.exitCode = 1;
+    }
+    return;
+  }
+
   const buckets = listRepoBuckets(root, repos);
 
   for (const repo of buckets) {
@@ -128,18 +171,7 @@ function main() {
         .split("\\")
         .join("/");
       try {
-        const before = readManifest(manifestPath);
-        const after = migrateManifest(before);
-        if (isDeepStrictEqual(before, after)) {
-          process.stdout.write(`OK    ${relativePath}: already canonical schemaVersion 12\n`);
-          continue;
-        }
-        if (write) {
-          atomicWriteJson(manifestPath, after);
-          process.stdout.write(`WRITE ${relativePath}: promoted to schemaVersion 12\n`);
-        } else {
-          process.stdout.write(`DRY   ${relativePath}: would promote to schemaVersion 12\n`);
-        }
+        migrateManifestFile(manifestPath, relativePath, write);
       } catch (err) {
         failures += 1;
         process.stdout.write(`ERROR ${relativePath}: ${err.message}\n`);

@@ -132,6 +132,42 @@ test("migrate-manifests-v12 writes v11 manifest promotion", () => {
   assert.equal("schedule" in manifest.resetSeed, false);
 });
 
+test("migrate-manifests-v12 can target one manifest file", () => {
+  const root = tempDir();
+  const runDir = writeManifest(root, "demo", "run-v11", baseV11Manifest());
+  const otherRunDir = writeManifest(
+    root,
+    "demo",
+    "other-run-v11",
+    baseV11Manifest("other-run-v11"),
+  );
+  const manifestPath = join(runDir, "run.json");
+
+  const stdout = execFileSync("node", [SCRIPT_PATH, "--file", manifestPath, "--write"], {
+    encoding: "utf8",
+  });
+
+  assert.match(stdout, new RegExp(`WRITE\\s+${manifestPath}: promoted to schemaVersion 12`));
+  assert.equal(readJson(manifestPath).schemaVersion, 12);
+  assert.equal(readJson(manifestPath).schedule, null);
+  assert.equal(readJson(join(otherRunDir, "run.json")).schemaVersion, 11);
+  assert.equal("schedule" in readJson(join(otherRunDir, "run.json")), false);
+});
+
+test("migrate-manifests-v12 rejects file and repo filters together", () => {
+  const root = tempDir();
+  const runDir = writeManifest(root, "demo", "run-v11", baseV11Manifest());
+
+  const result = spawnSync(
+    "node",
+    [SCRIPT_PATH, "--file", join(runDir, "run.json"), "--repo", "demo"],
+    { encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /--file cannot be combined with --repo/);
+});
+
 test("schemaVersion 11 manifest is rejected with v12 migration hint", () => {
   const root = tempDir();
   writeManifest(root, "unknown", "run-v11", baseV11Manifest("run-v11"));

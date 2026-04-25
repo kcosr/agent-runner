@@ -116,6 +116,7 @@ import { LockedFieldError } from "../run/run-loop.js";
 import {
   type ScheduleInput,
   ScheduleValidationError,
+  advanceRecurringSchedule,
   resolveScheduleInput,
 } from "../run/schedule.js";
 import { derivePassiveTerminalStatus } from "../run/status.js";
@@ -983,11 +984,6 @@ export function clearRunSchedule(
     if (previousSchedule === null) {
       throw new ScheduleMutationError(`run ${resolved.manifest.runId} has no schedule to clear`);
     }
-    if (previousSchedule.recurrence !== null) {
-      throw new ScheduleMutationError(
-        `cannot clear recurring schedule for run ${resolved.manifest.runId}; disable it instead`,
-      );
-    }
     resolved.manifest.schedule = null;
     writeManifest(resolved.workspaceDir, resolved.manifest);
     emitPersistedAudit(
@@ -1015,15 +1011,19 @@ export function setRunScheduleEnabled(
     if (resolved.manifest.schedule === null) {
       throw new ScheduleMutationError(`run ${resolved.manifest.runId} has no schedule to toggle`);
     }
-    resolved.manifest.schedule = {
-      ...resolved.manifest.schedule,
-      enabled,
-    };
+    const previousSchedule = resolved.manifest.schedule;
+    resolved.manifest.schedule =
+      enabled && previousSchedule.recurrence !== null
+        ? advanceRecurringSchedule(previousSchedule).schedule
+        : {
+            ...previousSchedule,
+            enabled,
+          };
     schedule = resolved.manifest.schedule;
     writeManifest(resolved.workspaceDir, resolved.manifest);
     emitPersistedAudit(
       emitAuditEnvelope,
-      enabled
+      resolved.manifest.schedule.enabled
         ? appendRunScheduleEnabledEvent({
             manifest: resolved.manifest,
             context: commandRunEventContext(auditOrigin),
