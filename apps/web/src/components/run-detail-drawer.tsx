@@ -43,7 +43,6 @@ import { DrawerResizeHandle } from "./drawer-resize-handle.js";
 import {
   ArchiveIcon,
   CheckIcon,
-  ChevronIcon,
   ClockIcon,
   CloseIcon,
   CollapseIcon,
@@ -427,7 +426,6 @@ export function RunDetailDrawer({
   onArchive,
   onClearDependencies,
   onClose,
-  onCloseResumeDialog,
   onCopy,
   onDelete,
   groupAttachmentsQuery,
@@ -441,23 +439,18 @@ export function RunDetailDrawer({
   onReset,
   onReconfigure,
   onRename,
-  onResumeMessageDraftChange,
-  onResumeMessageExpandedChange,
   onSetNote,
   onSetBackendSession,
   onSetPinned,
   onClearSchedule,
   onSetScheduleEnabled,
   onSelectSection,
-  onSubmitResume,
   onTriggerPrimaryAction,
   auditState,
   timelineState,
   onUnarchive,
   onUploadAttachment,
   resumeDialogOpen,
-  resumeMessageDraft,
-  resumeMessageExpanded,
   run,
 }: {
   activeSection: DrawerDetailSection;
@@ -469,7 +462,6 @@ export function RunDetailDrawer({
   onArchive: () => void;
   onClearDependencies: () => Promise<void>;
   onClose: () => void;
-  onCloseResumeDialog: () => void;
   onCopy: (value: string, label: string) => void;
   onDelete: () => void;
   groupAttachmentsQuery: UseQueryResult<AttachmentListEntry[], Error>;
@@ -483,20 +475,15 @@ export function RunDetailDrawer({
   onReset: () => void;
   onReconfigure: (patch: ReconfigureRunPatch) => Promise<void>;
   onRename: (name: string | null) => Promise<void>;
-  onResumeMessageDraftChange: (value: string) => void;
-  onResumeMessageExpandedChange: (expanded: boolean) => void;
   onSetNote: (note: string | null) => Promise<void>;
   onSetBackendSession: (backendSessionId: string) => Promise<void>;
   onSetPinned: (pinned: boolean) => Promise<void>;
   onClearSchedule: () => Promise<void>;
   onSetScheduleEnabled: (enabled: boolean) => Promise<void>;
   onSelectSection: (section: DrawerDetailSection) => void;
-  onSubmitResume: () => Promise<void>;
   onTriggerPrimaryAction: () => Promise<void>;
   auditState: RunAuditState;
   resumeDialogOpen: boolean;
-  resumeMessageDraft: string;
-  resumeMessageExpanded: boolean;
   timelineState: RunTimelineState;
   onUnarchive: () => void;
   onUploadAttachment: (file: File) => Promise<void>;
@@ -535,8 +522,6 @@ export function RunDetailDrawer({
   const resize = useDrawerResize();
   const { drawerStyle, isFullscreen, toggleFullscreen } = resize;
   const nameInputRef = useRef<HTMLInputElement | null>(null);
-  const resumeDisclosureButtonRef = useRef<HTMLButtonElement | null>(null);
-  const resumeMessageRef = useRef<HTMLTextAreaElement | null>(null);
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
   const backendSessionInputRef = useRef<HTMLInputElement | null>(null);
   const runtimeVarNewIdRef = useRef(0);
@@ -548,11 +533,7 @@ export function RunDetailDrawer({
   const primaryAction = getRunPrimaryAction(run);
   const resumePending = actionPending === "resume";
   const readyPending = actionPending === "ready";
-  const trimmedResumeMessage = resumeMessageDraft.trim();
-  const hasIncompleteTasks = run.tasks.some((task) => task.status !== "completed");
   const startableRun = primaryAction === "start";
-  const resumeRequiresMessage = !hasIncompleteTasks;
-  const showResumeMessageField = resumeRequiresMessage || resumeMessageExpanded;
   const renamePending = actionPending === "rename";
   const notePending = actionPending === "note";
   const pinPending = actionPending === "pin";
@@ -958,17 +939,6 @@ export function RunDetailDrawer({
   }, [canReconfigure]);
 
   useEffect(() => {
-    if (!resumeDialogOpen) {
-      return;
-    }
-    if (showResumeMessageField) {
-      resumeMessageRef.current?.focus();
-      return;
-    }
-    resumeDisclosureButtonRef.current?.focus();
-  }, [resumeDialogOpen, showResumeMessageField]);
-
-  useEffect(() => {
     const availableAttempts = new Set(timelineAttempts.map((attempt) => attempt.attemptNumber));
     if (selectedAttempt === "pending") {
       if (pendingAttemptAvailable) {
@@ -1305,28 +1275,6 @@ export function RunDetailDrawer({
       return;
     }
     timelineResponseAtBottomRef.current = isScrolledToBottom(element);
-  }
-
-  function handleResumeMessageKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      onCloseResumeDialog();
-      return;
-    }
-    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-      event.preventDefault();
-      event.stopPropagation();
-      void onSubmitResume();
-    }
-  }
-
-  function handleResumeDialogKeyDown(event: ReactKeyboardEvent<HTMLDialogElement>) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      onCloseResumeDialog();
-    }
   }
 
   function handleDrawerKeyDownCapture(event: ReactKeyboardEvent<HTMLElement>) {
@@ -2657,98 +2605,6 @@ export function RunDetailDrawer({
           ) : null}
         </div>
       </aside>
-      {resumeDialogOpen ? (
-        <dialog
-          aria-labelledby="resume-run-dialog-title"
-          className="resume-dialog-backdrop"
-          onCancel={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            onCloseResumeDialog();
-          }}
-          onClick={(event) => {
-            if (event.target === event.currentTarget) {
-              onCloseResumeDialog();
-            }
-          }}
-          onKeyDown={handleResumeDialogKeyDown}
-          open
-        >
-          <div className="resume-dialog">
-            <div className="resume-dialog__header">
-              <h3 className="resume-dialog__title" id="resume-run-dialog-title">
-                Resume run
-              </h3>
-              <p className="resume-dialog__copy">
-                {resumeRequiresMessage
-                  ? "Send a follow-up message describing what the run should do next."
-                  : "Resume immediately or include an optional follow-up message."}
-              </p>
-            </div>
-            {!resumeRequiresMessage ? (
-              <div className="resume-dialog__disclosure">
-                <button
-                  aria-controls="resume-run-message-panel"
-                  aria-expanded={resumeMessageExpanded}
-                  className="resume-dialog__disclosure-toggle"
-                  disabled={resumePending}
-                  onClick={() => onResumeMessageExpandedChange(!resumeMessageExpanded)}
-                  ref={resumeDisclosureButtonRef}
-                  type="button"
-                >
-                  <span>Optional message</span>
-                  <ChevronIcon
-                    aria-hidden="true"
-                    className={
-                      resumeMessageExpanded
-                        ? "resume-dialog__disclosure-icon expanded"
-                        : "resume-dialog__disclosure-icon"
-                    }
-                  />
-                </button>
-              </div>
-            ) : null}
-            {showResumeMessageField ? (
-              <div id="resume-run-message-panel">
-                <label className="resume-dialog__field" htmlFor="resume-run-message">
-                  {resumeRequiresMessage ? "Message" : "Optional message"}
-                </label>
-                <textarea
-                  className="resume-dialog__textarea"
-                  disabled={resumePending}
-                  id="resume-run-message"
-                  onChange={(event) => onResumeMessageDraftChange(event.target.value)}
-                  onKeyDown={handleResumeMessageKeyDown}
-                  placeholder="Describe the follow-up work for this resume..."
-                  ref={resumeMessageRef}
-                  rows={6}
-                  value={resumeMessageDraft}
-                />
-              </div>
-            ) : null}
-            <div className="resume-dialog__actions">
-              <button
-                className="btn"
-                disabled={resumePending}
-                onClick={onCloseResumeDialog}
-                type="button"
-              >
-                Cancel
-              </button>
-              <button
-                className="btn btn-primary"
-                disabled={
-                  resumePending || (resumeRequiresMessage && trimmedResumeMessage.length === 0)
-                }
-                onClick={() => void onSubmitResume()}
-                type="button"
-              >
-                {resumePending ? "Resuming..." : "Send"}
-              </button>
-            </div>
-          </div>
-        </dialog>
-      ) : null}
     </>
   );
 }

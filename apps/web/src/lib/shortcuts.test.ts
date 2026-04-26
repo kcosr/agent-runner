@@ -562,7 +562,12 @@ describe("resolveRunsShortcutCommand", () => {
     ).toBeNull();
   });
 
-  it("blocks non-Escape dashboard shortcuts while the drawer is fullscreen except fullscreen toggle", () => {
+  it("allows Enter primary action but blocks other dashboard shortcuts while the drawer is fullscreen", () => {
+    const fullscreenContext = {
+      ...context,
+      drawerFullscreen: true,
+    };
+
     expect(
       resolveRunsShortcutCommand(
         {
@@ -572,10 +577,31 @@ describe("resolveRunsShortcutCommand", () => {
           metaKey: false,
           shiftKey: false,
         },
+        fullscreenContext,
+      ),
+    ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
         {
-          ...context,
-          drawerFullscreen: true,
+          altKey: false,
+          ctrlKey: true,
+          key: "f",
+          metaKey: false,
+          shiftKey: true,
         },
+        fullscreenContext,
+      ),
+    ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: true,
+          key: "f",
+          metaKey: false,
+          shiftKey: false,
+        },
+        fullscreenContext,
       ),
     ).toBeNull();
     expect(
@@ -587,42 +613,21 @@ describe("resolveRunsShortcutCommand", () => {
           metaKey: false,
           shiftKey: false,
         },
-        {
-          ...context,
-          drawerFullscreen: true,
-        },
+        fullscreenContext,
       ),
     ).toBe("ui.toggleDrawerFullscreen");
     expect(
       resolveRunsShortcutCommand(
         {
           altKey: false,
-          ctrlKey: true,
-          key: "f",
-          metaKey: false,
-          shiftKey: true,
-        },
-        {
-          ...context,
-          drawerFullscreen: true,
-        },
-      ),
-    ).toBeNull();
-    expect(
-      resolveRunsShortcutCommand(
-        {
-          altKey: false,
-          ctrlKey: true,
-          key: "f",
+          ctrlKey: false,
+          key: "Enter",
           metaKey: false,
           shiftKey: false,
         },
-        {
-          ...context,
-          drawerFullscreen: true,
-        },
+        fullscreenContext,
       ),
-    ).toBeNull();
+    ).toBe("run.primaryAction");
     expect(
       resolveRunsShortcutCommand(
         {
@@ -633,8 +638,8 @@ describe("resolveRunsShortcutCommand", () => {
           shiftKey: false,
         },
         {
-          ...context,
-          drawerFullscreen: true,
+          ...fullscreenContext,
+          selectedRunPrimaryActionAvailable: false,
         },
       ),
     ).toBeNull();
@@ -647,12 +652,24 @@ describe("resolveRunsShortcutCommand", () => {
           metaKey: false,
           shiftKey: false,
         },
-        {
-          ...context,
-          drawerFullscreen: true,
-        },
+        fullscreenContext,
       ),
     ).toBe("ui.toggleDrawerFullscreen");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "Escape",
+          metaKey: false,
+          shiftKey: false,
+        },
+        {
+          ...fullscreenContext,
+          resumeDialogOpen: true,
+        },
+      ),
+    ).toBeNull();
   });
 
   it("does not emit run.primaryAction when the selected run action is unavailable", () => {

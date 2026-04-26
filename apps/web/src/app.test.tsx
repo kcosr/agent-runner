@@ -4220,7 +4220,7 @@ describe("web app", () => {
     await renderApp();
 
     await user.click(await findRunCard("Initialized fullscreen"));
-    await user.click(screen.getByRole("button", { name: "Expand drawer to full width" }));
+    await user.click(await screen.findByRole("button", { name: "Expand drawer to full width" }));
 
     expect(screen.getByRole("button", { name: "Exit full-width drawer" })).toHaveAttribute(
       "aria-pressed",
@@ -4244,8 +4244,18 @@ describe("web app", () => {
     );
 
     await user.keyboard("{Enter}");
-    expect(screen.queryByRole("dialog", { name: "Resume run" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "Resume run" })).toBeInTheDocument();
     expect(resumeBody).toBeUndefined();
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Resume run" })).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: "Exit full-width drawer" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByLabelText("Run detail")).toBeInTheDocument();
 
     await user.keyboard("{Escape}");
     expect(screen.getByRole("button", { name: "Expand drawer to full width" })).toHaveAttribute(
@@ -6086,6 +6096,16 @@ describe("web app", () => {
     expect(css).toMatch(/\n\.tabs\s*\{[\s\S]*min-height:\s*41px;[\s\S]*\}/);
   });
 
+  it("layers the resume dialog above fullscreen drawers", () => {
+    const css = readFileSync(join(process.cwd(), "src", "styles.css"), "utf8");
+    const resumeDialogLayer = /\.resume-dialog-backdrop\s*\{[\s\S]*?z-index:\s*(\d+);/.exec(css);
+    const fullscreenDrawerLayer = /\.drawer--fullscreen\s*\{[\s\S]*?z-index:\s*(\d+);/.exec(css);
+
+    expect(resumeDialogLayer).not.toBeNull();
+    expect(fullscreenDrawerLayer).not.toBeNull();
+    expect(Number(resumeDialogLayer?.[1])).toBeGreaterThan(Number(fullscreenDrawerLayer?.[1]));
+  });
+
   it("clamps the transient drawer width to the current viewport", async () => {
     installFetchMock({
       runs: [makeRun()],
@@ -7076,7 +7096,7 @@ describe("web app", () => {
     expect(screen.getByRole("button", { name: "Resume" })).toBeInTheDocument();
   });
 
-  it("shows Ready for initialized runs and promotes without opening the dialog", async () => {
+  it("shows Ready for initialized runs and promotes from fullscreen Enter without opening the dialog", async () => {
     let readyRequested = false;
     const fetchMock = installFetchMock(
       {
@@ -7139,8 +7159,10 @@ describe("web app", () => {
 
     const readyButton = await screen.findByRole("button", { name: "Ready" });
     expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
+    expect(readyButton).toBeInTheDocument();
 
-    await user.click(readyButton);
+    await user.click(await screen.findByRole("button", { name: "Expand drawer to full width" }));
+    await user.keyboard("{Enter}");
 
     expect(screen.queryByRole("dialog", { name: "Resume run" })).not.toBeInTheDocument();
     await waitFor(() => {
@@ -7148,7 +7170,7 @@ describe("web app", () => {
     });
   });
 
-  it("starts selected ready runs with Enter without opening the resume dialog", async () => {
+  it("starts selected ready runs with fullscreen Enter without opening the resume dialog", async () => {
     let resumeBody: { overrides?: { message?: string } } | undefined;
     installFetchMock(
       {
@@ -7215,6 +7237,7 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Ready from keyboard"));
+    await user.click(screen.getByRole("button", { name: "Expand drawer to full width" }));
 
     await user.keyboard("{Enter}");
 
@@ -8880,6 +8903,7 @@ describe("web app", () => {
   });
 
   it("navigates attachment previews with buttons and fullscreen arrow keys", async () => {
+    let resumeRequestCount = 0;
     installFetchMock(
       {
         runs: [makeRun({ runId: "run-1", name: "Attachment run" })],
@@ -8927,6 +8951,9 @@ describe("web app", () => {
               headers: { "content-type": "text/plain; charset=utf-8" },
             });
           }
+          if (/\/api\/runs\/run-1\/resume$/.test(url)) {
+            resumeRequestCount += 1;
+          }
           return undefined;
         },
       },
@@ -8944,6 +8971,19 @@ describe("web app", () => {
 
     await user.click(screen.getByRole("button", { name: "Next attachment: beta.txt" }));
     expect(await screen.findByText("beta body")).toBeInTheDocument();
+    screen.getByLabelText("Attachment preview").focus();
+
+    await user.keyboard("{Enter}");
+    expect(await screen.findByRole("dialog", { name: "Resume run" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Attachment preview")).toBeInTheDocument();
+    expect(screen.getByText("beta body")).toBeInTheDocument();
+    expect(resumeRequestCount).toBe(0);
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Resume run" })).not.toBeInTheDocument();
+    });
+    expect(screen.getByLabelText("Attachment preview")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Expand drawer to full width" }));
     expect(screen.getByRole("button", { name: "Exit full-width drawer" })).toBeInTheDocument();
@@ -8954,6 +8994,20 @@ describe("web app", () => {
 
     await user.keyboard("{ArrowLeft}");
     expect(await screen.findByText("beta body")).toBeInTheDocument();
+    screen.getByLabelText("Attachment preview").focus();
+
+    await user.keyboard("{Enter}");
+    expect(await screen.findByRole("dialog", { name: "Resume run" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Attachment preview")).toBeInTheDocument();
+    expect(screen.getByText("beta body")).toBeInTheDocument();
+    expect(resumeRequestCount).toBe(0);
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Resume run" })).not.toBeInTheDocument();
+    });
+    expect(screen.getByLabelText("Attachment preview")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Exit full-width drawer" })).toBeInTheDocument();
   });
 
   it("keeps image preview failures on the existing inline error copy", async () => {

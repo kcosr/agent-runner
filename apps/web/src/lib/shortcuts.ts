@@ -214,9 +214,20 @@ export function resolveRunsShortcutCommand(
 
   if (context.drawerFullscreen) {
     if (normalizeEventKey(event.key) === "escape") {
-      if (context.selectedRunId) {
+      if (context.selectedRunId && !context.resumeDialogOpen) {
         return "ui.toggleDrawerFullscreen";
       }
+    }
+    if (
+      matchesShortcut(event, { key: "enter" }) &&
+      !context.typingTarget &&
+      !context.searchFocused &&
+      !context.modalOpen &&
+      !context.resumeDialogOpen &&
+      context.selectedRunId &&
+      context.selectedRunPrimaryActionAvailable
+    ) {
+      return "run.primaryAction";
     }
     return null;
   }

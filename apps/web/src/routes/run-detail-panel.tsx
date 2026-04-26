@@ -3,6 +3,7 @@ import type { AttachmentListEntry } from "@task-runner/core/contracts/attachment
 import type { RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
 import type { CSSProperties } from "react";
 import { AttachmentPreviewDrawer } from "../components/attachment-preview-drawer.js";
+import { ResumeRunDialog } from "../components/resume-run-dialog.js";
 import { RunDetailDrawer } from "../components/run-detail-drawer.js";
 import type { ReconfigureRunPatch } from "../lib/api-client.js";
 import { isNotFoundError } from "../lib/api-client.js";
@@ -51,6 +52,7 @@ export function RunDetailPanel({
   onUnarchive,
   onUploadAttachment,
   resumeDialogOpen,
+  resumeRequiresMessage,
   resumeMessageDraft,
   resumeMessageExpanded,
   detailSettling,
@@ -99,6 +101,7 @@ export function RunDetailPanel({
   onUnarchive: (runId: string) => void;
   onUploadAttachment: (runId: string, file: File) => Promise<void>;
   resumeDialogOpen: boolean;
+  resumeRequiresMessage: boolean;
   resumeMessageDraft: string;
   resumeMessageExpanded: boolean;
   detailSettling: boolean;
@@ -168,6 +171,20 @@ export function RunDetailPanel({
       ownerRunId: candidate.ownerRunId,
     })),
   ];
+  const resumeDialog = resumeDialogOpen ? (
+    <ResumeRunDialog
+      actionError={actionError}
+      actionPending={actionPending}
+      onClose={onCloseResumeDialog}
+      onMessageDraftChange={onResumeMessageDraftChange}
+      onMessageExpandedChange={onResumeMessageExpandedChange}
+      onSubmit={onSubmitResume}
+      resumeRequiresMessage={resumeRequiresMessage}
+      resumeMessageDraft={resumeMessageDraft}
+      resumeMessageExpanded={resumeMessageExpanded}
+    />
+  ) : null;
+
   if (drawerView?.mode === "attachment") {
     const currentAttachmentIndex = attachmentEntries.findIndex(
       ({ attachment, ownerRunId }) =>
@@ -186,96 +203,100 @@ export function RunDetailPanel({
               candidate.ownerRunId === drawerView.attachmentOwnerRunId,
           );
     return (
-      <AttachmentPreviewDrawer
-        actionPending={actionPending}
-        attachment={attachment}
-        attachmentId={drawerView.attachmentId}
-        attachmentLookupError={
-          drawerView.attachmentOwnerRunId === selectedRun.runId
-            ? undefined
-            : selectedRunGroupAttachmentsQuery.error?.message
-        }
-        attachmentLookupPending={
-          drawerView.attachmentOwnerRunId !== selectedRun.runId &&
-          selectedRunGroupAttachmentsQuery.isPending
-        }
-        onBack={onBackToAttachments}
-        onClose={onClose}
-        onDownload={(attachmentId, name) =>
-          onDownloadAttachment(drawerView.attachmentOwnerRunId, attachmentId, name)
-        }
-        onNextAttachment={
-          nextAttachment
-            ? () =>
-                onReplaceAttachmentPreview(nextAttachment.ownerRunId, nextAttachment.attachment.id)
-            : undefined
-        }
-        onPreviousAttachment={
-          previousAttachment
-            ? () =>
-                onReplaceAttachmentPreview(
-                  previousAttachment.ownerRunId,
-                  previousAttachment.attachment.id,
-                )
-            : undefined
-        }
-        nextAttachmentName={nextAttachment?.attachment.name}
-        previousAttachmentName={previousAttachment?.attachment.name}
-        runId={drawerView.attachmentOwnerRunId}
-      />
+      <>
+        <AttachmentPreviewDrawer
+          actionPending={actionPending}
+          attachment={attachment}
+          attachmentId={drawerView.attachmentId}
+          attachmentLookupError={
+            drawerView.attachmentOwnerRunId === selectedRun.runId
+              ? undefined
+              : selectedRunGroupAttachmentsQuery.error?.message
+          }
+          attachmentLookupPending={
+            drawerView.attachmentOwnerRunId !== selectedRun.runId &&
+            selectedRunGroupAttachmentsQuery.isPending
+          }
+          onBack={onBackToAttachments}
+          onClose={onClose}
+          onDownload={(attachmentId, name) =>
+            onDownloadAttachment(drawerView.attachmentOwnerRunId, attachmentId, name)
+          }
+          onNextAttachment={
+            nextAttachment
+              ? () =>
+                  onReplaceAttachmentPreview(
+                    nextAttachment.ownerRunId,
+                    nextAttachment.attachment.id,
+                  )
+              : undefined
+          }
+          onPreviousAttachment={
+            previousAttachment
+              ? () =>
+                  onReplaceAttachmentPreview(
+                    previousAttachment.ownerRunId,
+                    previousAttachment.attachment.id,
+                  )
+              : undefined
+          }
+          nextAttachmentName={nextAttachment?.attachment.name}
+          previousAttachmentName={previousAttachment?.attachment.name}
+          resumeDialogOpen={resumeDialogOpen}
+          runId={drawerView.attachmentOwnerRunId}
+        />
+        {resumeDialog}
+      </>
     );
   }
 
   return (
-    <RunDetailDrawer
-      activeSection={drawerView?.detailSection ?? "tasks"}
-      dependencyCandidateRuns={runs}
-      onAddDependency={(dependencyRunId) => onAddDependency(selectedRun.runId, dependencyRunId)}
-      actionError={actionError}
-      actionPending={actionPending}
-      key={selectedRun.runId}
-      onAbort={() => onAbort(selectedRun.runId)}
-      onArchive={() => onArchive(selectedRun.runId)}
-      onClearDependencies={() => onClearDependencies(selectedRun.runId)}
-      onClose={onClose}
-      onCloseResumeDialog={onCloseResumeDialog}
-      onCopy={(value, label) => void onCopy(value, label)}
-      onDelete={() => onDelete(selectedRun.runId)}
-      groupAttachmentsQuery={selectedRunGroupAttachmentsQuery}
-      onDownloadAttachment={(ownerRunId, attachmentId, name) =>
-        onDownloadAttachment(ownerRunId, attachmentId, name)
-      }
-      onOpenResumeDialog={onOpenResumeDialog}
-      onOpenAttachmentPreview={onOpenAttachmentPreview}
-      onSelectRun={onSelectRun}
-      onClearBackendSession={() => onClearBackendSession(selectedRun.runId)}
-      onClearSchedule={() => onClearSchedule(selectedRun.runId)}
-      onRemoveDependency={(dependencyRunId) =>
-        onRemoveDependency(selectedRun.runId, dependencyRunId)
-      }
-      onRemoveAttachment={(attachmentId) => onRemoveAttachment(selectedRun.runId, attachmentId)}
-      onReset={() => onReset(selectedRun.runId)}
-      onReconfigure={(patch) => onReconfigure(selectedRun.runId, patch)}
-      onRename={(name) => onRename(selectedRun.runId, name)}
-      onResumeMessageDraftChange={onResumeMessageDraftChange}
-      onResumeMessageExpandedChange={onResumeMessageExpandedChange}
-      onSetNote={(note) => onSetNote(selectedRun.runId, note)}
-      onSetBackendSession={(backendSessionId) =>
-        onSetBackendSession(selectedRun.runId, backendSessionId)
-      }
-      onSetPinned={(pinned) => onSetPinned(selectedRun.runId, pinned)}
-      onSetScheduleEnabled={(enabled) => onSetScheduleEnabled(selectedRun.runId, enabled)}
-      onSelectSection={onSelectDetailSection}
-      onSubmitResume={onSubmitResume}
-      onTriggerPrimaryAction={onTriggerPrimaryAction}
-      auditState={auditState}
-      timelineState={timelineState}
-      onUnarchive={() => onUnarchive(selectedRun.runId)}
-      onUploadAttachment={(file) => onUploadAttachment(selectedRun.runId, file)}
-      resumeDialogOpen={resumeDialogOpen}
-      resumeMessageDraft={resumeMessageDraft}
-      resumeMessageExpanded={resumeMessageExpanded}
-      run={selectedRun}
-    />
+    <>
+      <RunDetailDrawer
+        activeSection={drawerView?.detailSection ?? "tasks"}
+        dependencyCandidateRuns={runs}
+        onAddDependency={(dependencyRunId) => onAddDependency(selectedRun.runId, dependencyRunId)}
+        actionError={actionError}
+        actionPending={actionPending}
+        key={selectedRun.runId}
+        onAbort={() => onAbort(selectedRun.runId)}
+        onArchive={() => onArchive(selectedRun.runId)}
+        onClearDependencies={() => onClearDependencies(selectedRun.runId)}
+        onClose={onClose}
+        onCopy={(value, label) => void onCopy(value, label)}
+        onDelete={() => onDelete(selectedRun.runId)}
+        groupAttachmentsQuery={selectedRunGroupAttachmentsQuery}
+        onDownloadAttachment={(ownerRunId, attachmentId, name) =>
+          onDownloadAttachment(ownerRunId, attachmentId, name)
+        }
+        onOpenResumeDialog={onOpenResumeDialog}
+        onOpenAttachmentPreview={onOpenAttachmentPreview}
+        onSelectRun={onSelectRun}
+        onClearBackendSession={() => onClearBackendSession(selectedRun.runId)}
+        onClearSchedule={() => onClearSchedule(selectedRun.runId)}
+        onRemoveDependency={(dependencyRunId) =>
+          onRemoveDependency(selectedRun.runId, dependencyRunId)
+        }
+        onRemoveAttachment={(attachmentId) => onRemoveAttachment(selectedRun.runId, attachmentId)}
+        onReset={() => onReset(selectedRun.runId)}
+        onReconfigure={(patch) => onReconfigure(selectedRun.runId, patch)}
+        onRename={(name) => onRename(selectedRun.runId, name)}
+        onSetNote={(note) => onSetNote(selectedRun.runId, note)}
+        onSetBackendSession={(backendSessionId) =>
+          onSetBackendSession(selectedRun.runId, backendSessionId)
+        }
+        onSetPinned={(pinned) => onSetPinned(selectedRun.runId, pinned)}
+        onSetScheduleEnabled={(enabled) => onSetScheduleEnabled(selectedRun.runId, enabled)}
+        onSelectSection={onSelectDetailSection}
+        onTriggerPrimaryAction={onTriggerPrimaryAction}
+        auditState={auditState}
+        timelineState={timelineState}
+        onUnarchive={() => onUnarchive(selectedRun.runId)}
+        onUploadAttachment={(file) => onUploadAttachment(selectedRun.runId, file)}
+        resumeDialogOpen={resumeDialogOpen}
+        run={selectedRun}
+      />
+      {resumeDialog}
+    </>
   );
 }

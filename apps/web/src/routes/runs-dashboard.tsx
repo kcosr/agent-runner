@@ -333,6 +333,7 @@ export function RunsDashboardRoute() {
           onUnarchive={state.runActions.unarchive}
           onUploadAttachment={state.runActions.uploadAttachment}
           resumeDialogOpen={state.resumeDialogOpen}
+          resumeRequiresMessage={state.selectedRunResumeRequiresMessage}
           resumeMessageDraft={state.resumeMessageDraft}
           resumeMessageExpanded={state.resumeMessageExpanded}
           detailSettling={state.detailSettling}

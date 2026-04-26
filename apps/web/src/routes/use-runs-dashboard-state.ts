@@ -1044,6 +1044,7 @@ export function useRunsDashboardState() {
     if (selectedRunPrimaryAction !== "resume" || actionPending !== undefined) {
       return;
     }
+    setActionError(undefined);
     setResumeMessageExpanded(selectedRunResumeRequiresMessage);
     setResumeDialogOpen(true);
   }
@@ -1216,6 +1217,7 @@ export function useRunsDashboardState() {
     filterOptions,
     hasActiveStructuredFilters: hasActiveDashboardStructuredFilters(preferences.structuredFilters),
     resumeDialogOpen,
+    selectedRunResumeRequiresMessage,
     resumeMessageDraft,
     resumeMessageExpanded,
     runActions: {
