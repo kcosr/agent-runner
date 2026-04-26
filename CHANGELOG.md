@@ -261,6 +261,9 @@
 
 ### Fixed
 
+- Broke the hook loader/registry circular import by moving
+  `HookConfigError` into a shared hook errors module.
+  ([#102](https://github.com/kcosr/task-runner/pull/102))
 - Cleaned high-confidence unused exports/types and declared direct `zod`
   dependencies for the CLI and web workspaces.
 - Codex backend streams now ignore child/subagent thread turn events when
