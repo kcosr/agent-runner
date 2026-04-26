@@ -74,7 +74,7 @@
 - Added Codex WebSocket-over-UDS transport via `{ type: "uds", path:
   "/absolute/socket/path" }` and `TASK_RUNNER_CODEX_UDS_PATH`, with
   fast-fail conflict detection when both Codex UDS and websocket env
-  defaults are set.
+  defaults are set. ([#104](https://github.com/kcosr/task-runner/pull/104))
 - Added a Knip baseline via `npm run check:knip` for unused files,
   exports, exported types, and dependency metadata.
 - Added initialized-run reconfigure support across core, CLI, daemon
