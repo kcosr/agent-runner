@@ -265,9 +265,10 @@
 
 ### Fixed
 
-- Dashboard Resume and run-note dialogs now use native modal dialog
-  behavior so Escape/back dismissal, focus trapping, and fullscreen drawer
-  stacking behave consistently.
+- Dashboard Resume and run-note dialogs, plus the mobile Filters panel,
+  now use native modal dialog behavior so Escape/back dismissal, focus
+  trapping, and fullscreen drawer stacking behave consistently.
+  ([#106](https://github.com/kcosr/task-runner/pull/106))
 - Broke the hook loader/registry circular import by moving
   `HookConfigError` into a shared hook errors module.
   ([#102](https://github.com/kcosr/task-runner/pull/102))
