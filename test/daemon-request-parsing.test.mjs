@@ -61,8 +61,8 @@ test("optionalOverrides accepts deferred Codex transport env values", () => {
       },
     }).codexTransportEnv,
     {
-      udsPath: " /tmp/codex.sock ",
-      wsUrl: " ws://127.0.0.1:4773/ ",
+      udsPath: "/tmp/codex.sock",
+      wsUrl: "ws://127.0.0.1:4773/",
     },
   );
 });
@@ -132,6 +132,24 @@ test("optionalOverrides rejects malformed deferred Codex transport env values", 
         },
       }),
     /overrides\.codexTransportEnv\.socketPath is not supported/,
+  );
+  assert.throws(
+    () =>
+      optionalOverrides({
+        codexTransportEnv: {
+          udsPath: "relative.sock",
+        },
+      }),
+    /overrides\.codexTransportEnv\.udsPath must be an absolute socket path/,
+  );
+  assert.throws(
+    () =>
+      optionalOverrides({
+        codexTransportEnv: {
+          wsUrl: "https://example.com",
+        },
+      }),
+    /overrides\.codexTransportEnv\.wsUrl must be an absolute ws:\/\/ or wss:\/\/ URL/,
   );
 });
 

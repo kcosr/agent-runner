@@ -339,6 +339,8 @@ function openUdsTransport(path: string): Promise<Transport> {
       new WebSocket("ws://localhost/rpc", {
         createConnection: () => createConnection({ path }),
       }),
+    // UDS connection failures already surface through the invoke catch path
+    // with the original socket error; avoid duplicating them as stderr frames.
     reportErrorsToStderr: false,
   });
 }

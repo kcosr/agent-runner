@@ -472,9 +472,11 @@ init time and then reused on resume:
 1. Agent frontmatter `backendSpecific.codex.transport`
 2. Connected/daemon-only request override
    `overrides.backendSpecific.codex.transport`
-3. `TASK_RUNNER_CODEX_UDS_PATH` or `TASK_RUNNER_CODEX_WS_URL` from the
-   connected client or daemon process
-4. `{ type: "stdio" }`
+3. `TASK_RUNNER_CODEX_UDS_PATH` or `TASK_RUNNER_CODEX_WS_URL` forwarded by
+   the connected client
+4. `TASK_RUNNER_CODEX_UDS_PATH` or `TASK_RUNNER_CODEX_WS_URL` from the daemon
+   process environment
+5. `{ type: "stdio" }`
 
 UDS transport uses WebSocket-over-UDS for Codex app-server, not raw UDS
 bytes, and `path` must be absolute. If both UDS and WS env vars are set

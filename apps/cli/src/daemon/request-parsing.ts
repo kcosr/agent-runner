@@ -246,10 +246,11 @@ export function parseAttachmentScopeQueryValue(
 }
 
 function validateAbsoluteCodexWsUrl(value: string, label: string): string {
-  if (!isWsOrWssUrl(value)) {
+  const trimmed = value.trim();
+  if (!isWsOrWssUrl(trimmed)) {
     throw new RequestValidationError(`${label} must be an absolute ws:// or wss:// URL`);
   }
-  return value;
+  return trimmed;
 }
 
 function validateAbsoluteCodexUdsPath(value: string, label: string): string {
@@ -355,8 +356,12 @@ function optionalCodexTransportEnv(
   const env: CodexTransportEnvValues = {};
   const udsPath = optionalNonEmptyString(record.udsPath, `${label}.udsPath`);
   const wsUrl = optionalNonEmptyString(record.wsUrl, `${label}.wsUrl`);
-  if (udsPath !== undefined) env.udsPath = udsPath;
-  if (wsUrl !== undefined) env.wsUrl = wsUrl;
+  if (udsPath !== undefined) {
+    env.udsPath = validateAbsoluteCodexUdsPath(udsPath, `${label}.udsPath`);
+  }
+  if (wsUrl !== undefined) {
+    env.wsUrl = validateAbsoluteCodexWsUrl(wsUrl, `${label}.wsUrl`);
+  }
   return env;
 }
 

@@ -599,16 +599,45 @@ function resolveFreshRunCwd(
   return resolutionBase;
 }
 
-function codexTransportFromEnv(): CodexTransportConfig | undefined {
-  return codexTransportFromEnvValues({
-    udsPath: process.env.TASK_RUNNER_CODEX_UDS_PATH,
-    wsUrl: process.env.TASK_RUNNER_CODEX_WS_URL,
-  });
-}
-
 function captureFullAttemptLogs(env: NodeJS.ProcessEnv = process.env): boolean {
   const raw = env.TASK_RUNNER_FULL_ATTEMPT_LOGS?.trim().toLowerCase();
   return raw === "1" || raw === "true" || raw === "on" || raw === "yes";
+}
+
+function resolveFreshCodexTransport(
+  agentConfig: LoadedAgent["config"],
+  overrides: RunOverrides | undefined,
+  execution: RunExecution,
+): CodexTransportConfig {
+  const authoredTransport = agentConfig.backendSpecific?.codex?.transport;
+  if (authoredTransport) {
+    return { ...authoredTransport };
+  }
+
+  const overrideTransport =
+    execution.hostMode === "daemon" ? overrides?.backendSpecific?.codex?.transport : undefined;
+  if (overrideTransport) {
+    return { ...overrideTransport };
+  }
+
+  if (execution.hostMode === "daemon" && overrides?.codexTransportEnv) {
+    // Connected clients forward unresolved env pairs only so authored/request
+    // transports can win before codexTransportFromEnvValues reports conflicts.
+    const clientEnvTransport = codexTransportFromEnvValues(overrides.codexTransportEnv);
+    if (clientEnvTransport) {
+      return clientEnvTransport;
+    }
+  }
+
+  const envTransport = codexTransportFromEnvValues({
+    udsPath: process.env.TASK_RUNNER_CODEX_UDS_PATH,
+    wsUrl: process.env.TASK_RUNNER_CODEX_WS_URL,
+  });
+  if (envTransport) {
+    return envTransport;
+  }
+
+  return { type: "stdio" };
 }
 
 function resolveFreshBackendSpecific(
@@ -621,50 +650,10 @@ function resolveFreshBackendSpecific(
     return undefined;
   }
 
-  const authoredTransport = agentConfig.backendSpecific?.codex?.transport;
-  if (authoredTransport) {
-    return {
-      codex: {
-        transport: { ...authoredTransport },
-      },
-    };
-  }
-
-  const overrideTransport =
-    execution.hostMode === "daemon" ? overrides?.backendSpecific?.codex?.transport : undefined;
-  if (overrideTransport) {
-    return {
-      codex: {
-        transport: { ...overrideTransport },
-      },
-    };
-  }
-
-  if (execution.hostMode === "daemon" && overrides?.codexTransportEnv) {
-    const clientEnvTransport = codexTransportFromEnvValues(overrides.codexTransportEnv);
-    if (clientEnvTransport) {
-      return {
-        codex: {
-          transport: clientEnvTransport,
-        },
-      };
-    }
-  }
-
-  const envTransport = codexTransportFromEnv();
-  if (envTransport) {
-    return {
-      codex: {
-        transport: envTransport,
-      },
-    };
-  }
-
+  const transport = resolveFreshCodexTransport(agentConfig, overrides, execution);
   return {
     codex: {
-      transport: {
-        type: "stdio",
-      },
+      transport: { ...transport },
     },
   };
 }

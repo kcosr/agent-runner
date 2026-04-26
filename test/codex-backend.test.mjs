@@ -401,3 +401,26 @@ test("codexBackend invokes Codex over a Unix domain socket WebSocket transport",
     await codexServer.close();
   }
 });
+
+test("codexBackend surfaces UDS connection failures clearly", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "task-runner-codex-missing-uds-"));
+  const socketPath = join(dir, "missing.sock");
+
+  try {
+    const result = await codexBackend.invoke({
+      ...baseCtx,
+      backendSpecific: {
+        codex: {
+          transport: { type: "uds", path: socketPath },
+        },
+      },
+    });
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.sessionId, null);
+    assert.match(result.rawStderr, /connect|ENOENT/);
+    assert.match(result.rawStderr, /missing\.sock/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
