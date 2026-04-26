@@ -480,10 +480,14 @@ Walkthrough in [docs/examples.md](docs/examples.md).
 npm install
 npm run build
 npm run lint
+npm run format
 npm run test:node
 npm run test:web
 npm run check
 ```
+
+`npm run lint` runs Oxlint with warnings denied. `npm run format`
+applies Biome formatting.
 
 Primary entry points:
 

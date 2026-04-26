@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, createApiClient } from "./api-client.js";
+import { createApiClient } from "./api-client.js";
 
 const config = {
   apiBasePath: "/api",

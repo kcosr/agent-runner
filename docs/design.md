@@ -656,6 +656,9 @@ npm test
 npm run check
 ```
 
+`npm run lint` runs Oxlint with warnings denied. Biome remains the
+formatter through `npm run format`.
+
 The root `check` pipeline is:
 
 1. `npm run build`

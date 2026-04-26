@@ -1,6 +1,5 @@
 import { basename } from "node:path";
-import type { TaskState, TaskStatus } from "../../assignment/model.js";
-import type { RunAttachment } from "../../contracts/attachments.js";
+import type { TaskState } from "../../assignment/model.js";
 import { shortId } from "../../util/short-id.js";
 import type { LockableField } from "../config/schema.js";
 import {

@@ -11,7 +11,6 @@ import { AD_HOC_AGENT_NAME } from "../core/config/loaded.js";
 import type { LoadedAgent, LoadedAssignment } from "../core/config/loaded.js";
 import {
   type AuthoredAssignmentConfig,
-  type LauncherDefinitionConfig,
   type TaskDef,
   agentConfigSchema,
   assignmentConfigSchema,

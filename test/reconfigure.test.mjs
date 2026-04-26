@@ -8,7 +8,7 @@ import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/con
 import { readyRun } from "../packages/core/dist/core/commands/service.js";
 import { readRunAuditHistory } from "../packages/core/dist/core/run/run-events.js";
 import { LockedFieldError, runAgent } from "../packages/core/dist/core/run/run-loop.js";
-import { sharedRuntimeEnv, withEnv, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
+import { withEnv, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 function tempDir() {
   return mkdtempSync(join(tmpdir(), "task-runner-reconfigure-"));

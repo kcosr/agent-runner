@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, mkdirSync, rmSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { TaskState, TaskStatus } from "../../assignment/model.js";
 import { resolveBackend } from "../../backends/registry.js";
@@ -1324,7 +1324,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const lineageChain = reusesFrozenSetup ? [] : resolveLineageChain(parentRunId);
   const resolvedVars = resolveVars(varsSchema, cliVars, webVars, lineageChain);
   let runtimeVars = reusesFrozenSetup
-    ? { ...(resume?.manifest.runtimeVars ?? {}) }
+    ? { ...resume?.manifest.runtimeVars }
     : resolvedVars.values;
   let runtimeVarSources = reusesFrozenSetup
     ? cloneRuntimeVarSources(resume?.manifest.runtimeVarSources ?? {})
@@ -1428,7 +1428,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     isResume && resume && Object.keys(resume.manifest.finalTasks).length > 0,
   );
   const overrideName = normalizeRunName(overrides?.name);
-  let hookState = isResume || priorReady ? { ...(resume?.manifest.hookState ?? {}) } : {};
+  let hookState = isResume || priorReady ? { ...resume?.manifest.hookState } : {};
   let hookAttachments =
     isResume || priorReady
       ? (resume?.manifest.attachments.map((attachment) => ({ ...attachment })) ?? [])

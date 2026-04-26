@@ -105,7 +105,6 @@ export function advanceRecurringSchedule(
   const minimumObservedIntervalSec = smallestObservedIntervalSec(
     schedule.recurrence,
     nextRunAt,
-    env,
   );
   if (minimumObservedIntervalSec < getMinimumRecurrenceIntervalSec(env)) {
     return {
@@ -162,7 +161,7 @@ export function validateRecurrenceMinimumInterval(
   startAt: Date,
   env: NodeJS.ProcessEnv = process.env,
 ): number {
-  const observed = smallestObservedIntervalSec(recurrence, startAt, env);
+  const observed = smallestObservedIntervalSec(recurrence, startAt);
   const minimum = getMinimumRecurrenceIntervalSec(env);
   if (observed < minimum) {
     throw new ScheduleValidationError(
@@ -175,9 +174,8 @@ export function validateRecurrenceMinimumInterval(
 function smallestObservedIntervalSec(
   recurrence: RunScheduleRecurrence,
   startAt: Date,
-  env: NodeJS.ProcessEnv,
 ): number {
-  const dates = sampleFutureOccurrences(recurrence, startAt, env);
+  const dates = sampleFutureOccurrences(recurrence, startAt);
   let smallest = Number.POSITIVE_INFINITY;
   for (let index = 1; index < dates.length; index += 1) {
     const current = dates[index];
@@ -194,7 +192,6 @@ function smallestObservedIntervalSec(
 export function sampleFutureOccurrences(
   recurrence: RunScheduleRecurrence,
   startAt: Date,
-  env: NodeJS.ProcessEnv = process.env,
 ): Date[] {
   try {
     const interval = CronExpressionParser.parse(recurrence.schedule.expression, {

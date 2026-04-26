@@ -9,8 +9,8 @@
   "scripts": {
     "setup": "npm install",
     "build": "npm run build -w @task-runner/core && npm run build -w @task-runner/web && npm run build -w task-runner && node -e \"require('node:fs').chmodSync('apps/cli/dist/cli.js', 0o755)\"",
-    "lint": "biome check .",
-    "lint:fix": "biome check --write .",
+    "lint": "oxlint . --deny-warnings",
+    "lint:fix": "oxlint . --fix --deny-warnings",
     "format": "biome format --write .",
     "lint-staged": "lint-staged",
     "test:node": "node --test \"test/**/*.test.mjs\"",
@@ -40,6 +40,7 @@
     "husky": "^9.1.7",
     "jsdom": "^26.1.0",
     "lint-staged": "^15.2.0",
+    "oxlint": "^1.61.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "rimraf": "^6.0.1",

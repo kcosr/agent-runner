@@ -360,7 +360,7 @@ function appendRunEvent(params: {
       : {}),
     ...(params.sessionIndex !== undefined ? { sessionIndex: params.sessionIndex } : {}),
     ...(params.attemptNumber !== undefined ? { attemptNumber: params.attemptNumber } : {}),
-    ...(params.fields ?? {}),
+    ...params.fields,
   };
   appendTextFileDurable(runEventsPath(params.workspaceDir), `${JSON.stringify(record)}\n`);
   return toRunAuditEnvelope(record);

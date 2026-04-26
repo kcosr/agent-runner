@@ -214,7 +214,7 @@ function makeRun(
     ...overrides,
     capabilities: {
       ...base.capabilities,
-      ...(overrides.capabilities ?? {}),
+      ...overrides.capabilities,
     },
     execution: overrides.execution ?? base.execution,
   } as RunSummary;
@@ -387,7 +387,7 @@ function makeDetail(
     ...overrides,
     capabilities: {
       ...base.capabilities,
-      ...(overrides.capabilities ?? {}),
+      ...overrides.capabilities,
     },
     execution: overrides.execution ?? base.execution,
   } as RunDetail;
@@ -7078,7 +7078,7 @@ describe("web app", () => {
 
   it("shows Ready for initialized runs and promotes without opening the dialog", async () => {
     let readyRequested = false;
-    const fetchMock = installFetchMock(
+    installFetchMock(
       {
         runs: [
           makeRun({
@@ -7322,7 +7322,7 @@ describe("web app", () => {
 
   it("shows an optional-message disclosure for incomplete-task resumes and can send without a message", async () => {
     let resumeBody: { overrides?: { message?: string } } | undefined;
-    const fetchMock = installFetchMock(
+    installFetchMock(
       {
         runs: [makeRun({ runId: "resumable", assignmentName: "Resumable run", status: "success" })],
         details: {
@@ -7740,7 +7740,7 @@ describe("web app", () => {
       },
       {
         handleRequest: (url) => {
-          if (/\/api\/runs\/run-1\/attachments\/att-md\/content$/.test(url)) {
+          if (url.endsWith("/api/runs/run-1/attachments/att-md/content")) {
             return new Response(attachmentMermaidMarkdown, {
               status: 200,
               headers: { "content-type": "text/markdown; charset=utf-8" },
@@ -8168,7 +8168,6 @@ describe("web app", () => {
       },
     });
 
-    const user = userEvent.setup();
     await renderApp();
     await findRunCard("Newest run");
     expect(getColumnRunNames("Running")).toEqual(["Newest run", "Older run"]);
@@ -8292,7 +8291,6 @@ describe("web app", () => {
       },
     });
 
-    const user = userEvent.setup();
     await renderApp();
     await findRunCard("Existing run");
 
@@ -8380,7 +8378,6 @@ describe("web app", () => {
         },
       });
 
-      const user = userEvent.setup();
       await renderApp();
       await findRunCard("Newest run");
 
@@ -8513,7 +8510,7 @@ describe("web app", () => {
       },
       {
         handleRequest: (url) => {
-          if (/\/api\/runs\/run-1\/attachments\/att-md\/content$/.test(url)) {
+          if (url.endsWith("/api/runs/run-1/attachments/att-md/content")) {
             return new Response("# Markdown preview", {
               status: 200,
               headers: { "content-type": "text/markdown; charset=utf-8" },
@@ -8634,7 +8631,7 @@ describe("web app", () => {
       },
       {
         handleRequest: (url, init) => {
-          if (/\/api\/runs\/run-1\/dependencies$/.test(url) && init?.method === "POST") {
+          if (url.endsWith("/api/runs/run-1/dependencies") && init?.method === "POST") {
             const body =
               typeof init.body === "string" && init.body.length > 0
                 ? (JSON.parse(init.body) as { dependencyRunId?: string })
@@ -8696,13 +8693,13 @@ describe("web app", () => {
       },
       {
         handleRequest: (url) => {
-          if (/\/api\/runs\/run-1\/attachments\/att-md\/content$/.test(url)) {
+          if (url.endsWith("/api/runs/run-1/attachments/att-md/content")) {
             return new Response(attachmentMermaidMarkdown, {
               status: 200,
               headers: { "content-type": "text/markdown; charset=utf-8" },
             });
           }
-          if (/\/api\/runs\/run-1\/attachments\/att-log\/content$/.test(url)) {
+          if (url.endsWith("/api/runs/run-1/attachments/att-log/content")) {
             return new Response("line one\nline two", {
               status: 200,
               headers: { "content-type": "text/plain; charset=utf-8" },
@@ -8771,7 +8768,7 @@ describe("web app", () => {
       },
       {
         handleRequest: (url) => {
-          if (/\/api\/runs\/run-1\/attachments\/att-svg\/content$/.test(url)) {
+          if (url.endsWith("/api/runs/run-1/attachments/att-svg/content")) {
             return new Response(
               '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>',
               {
@@ -8780,7 +8777,7 @@ describe("web app", () => {
               },
             );
           }
-          if (/\/api\/runs\/run-1\/attachments\/att-png\/content$/.test(url)) {
+          if (url.endsWith("/api/runs/run-1/attachments/att-png/content")) {
             return new Response(new Uint8Array([137, 80, 78, 71]), {
               status: 200,
               headers: { "content-type": "image/png" },
@@ -8847,7 +8844,7 @@ describe("web app", () => {
       },
       {
         handleRequest: (url) => {
-          if (/\/api\/runs\/run-1\/attachments\/att-log\/content$/.test(url)) {
+          if (url.endsWith("/api/runs/run-1/attachments/att-log/content")) {
             return new Response("line one\nline two", {
               status: 200,
               headers: { "content-type": "text/plain; charset=utf-8" },
@@ -8909,19 +8906,19 @@ describe("web app", () => {
       },
       {
         handleRequest: (url) => {
-          if (/\/api\/runs\/run-1\/attachments\/att-alpha\/content$/.test(url)) {
+          if (url.endsWith("/api/runs/run-1/attachments/att-alpha/content")) {
             return new Response("alpha body", {
               status: 200,
               headers: { "content-type": "text/plain; charset=utf-8" },
             });
           }
-          if (/\/api\/runs\/run-1\/attachments\/att-beta\/content$/.test(url)) {
+          if (url.endsWith("/api/runs/run-1/attachments/att-beta/content")) {
             return new Response("beta body", {
               status: 200,
               headers: { "content-type": "text/plain; charset=utf-8" },
             });
           }
-          if (/\/api\/runs\/run-1\/attachments\/att-gamma\/content$/.test(url)) {
+          if (url.endsWith("/api/runs/run-1/attachments/att-gamma/content")) {
             return new Response("gamma body", {
               status: 200,
               headers: { "content-type": "text/plain; charset=utf-8" },
@@ -8976,7 +8973,7 @@ describe("web app", () => {
       },
       {
         handleRequest: (url) => {
-          if (/\/api\/runs\/run-1\/attachments\/att-image\/content$/.test(url)) {
+          if (url.endsWith("/api/runs/run-1/attachments/att-image/content")) {
             return new Response(JSON.stringify({ error: { message: "preview failed" } }), {
               status: 500,
               headers: { "content-type": "application/json" },
@@ -9031,7 +9028,7 @@ describe("web app", () => {
       },
       {
         handleRequest: (url) => {
-          if (/\/api\/runs\/run-1\/attachments\/att-md\/content$/.test(url)) {
+          if (url.endsWith("/api/runs/run-1/attachments/att-md/content")) {
             return new Promise<Response>((resolve) => {
               resolvePreview = resolve;
             });
@@ -9101,7 +9098,7 @@ describe("web app", () => {
       },
       {
         handleRequest: (url) => {
-          if (/\/api\/runs\/run-1\/attachments\/att-md\/content$/.test(url)) {
+          if (url.endsWith("/api/runs/run-1/attachments/att-md/content")) {
             return new Response(JSON.stringify({ error: { message: "preview failed" } }), {
               status: 500,
               headers: { "content-type": "application/json" },
@@ -9216,7 +9213,7 @@ describe("web app", () => {
       },
       {
         handleRequest: (url) => {
-          if (/\/api\/runs\/run-1\/attachments\?scope=family$/.test(url)) {
+          if (url.endsWith("/api/runs/run-1/attachments?scope=family")) {
             return new Response(
               JSON.stringify({
                 attachments: [
@@ -9233,7 +9230,7 @@ describe("web app", () => {
               { status: 200 },
             );
           }
-          if (/\/api\/runs\/run-2\/attachments\/att-peer\/content$/.test(url)) {
+          if (url.endsWith("/api/runs/run-2/attachments/att-peer/content")) {
             return new Response("family attachment body", {
               status: 200,
               headers: { "content-type": "text/plain; charset=utf-8" },
@@ -9314,7 +9311,7 @@ describe("web app", () => {
       },
       {
         handleRequest: (url) => {
-          if (/\/api\/runs\/run-1\/attachments\?scope=family$/.test(url)) {
+          if (url.endsWith("/api/runs/run-1/attachments?scope=family")) {
             return new Response(
               JSON.stringify({
                 attachments: [

@@ -102,7 +102,7 @@ async function initRun(baseDir, agentName = "run-mgmt-agent") {
 function runCli(args, opts = {}) {
   return execFileSync("node", [CLI_PATH, ...args], {
     cwd: opts.cwd ?? process.cwd(),
-    env: { ...process.env, ...sharedRuntimeEnv(opts.cwd ?? process.cwd()), ...(opts.env ?? {}) },
+    env: { ...process.env, ...sharedRuntimeEnv(opts.cwd ?? process.cwd()), ...opts.env },
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -112,7 +112,7 @@ function runCliExpectFail(args, opts = {}) {
   try {
     execFileSync("node", [CLI_PATH, ...args], {
       cwd: opts.cwd ?? process.cwd(),
-      env: { ...process.env, ...sharedRuntimeEnv(opts.cwd ?? process.cwd()), ...(opts.env ?? {}) },
+      env: { ...process.env, ...sharedRuntimeEnv(opts.cwd ?? process.cwd()), ...opts.env },
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
     });

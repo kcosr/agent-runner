@@ -1,6 +1,5 @@
 import { readFileSync } from "node:fs";
 import { resolve, sep } from "node:path";
-import type { DefinitionEntry } from "../config/loader.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../config/loader.js";
 import type {
   AttachmentListEntry,

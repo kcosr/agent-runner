@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
@@ -10,13 +10,6 @@ import { toRunDetail } from "../packages/core/dist/contracts/runs.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import { deriveEffectiveStatus } from "../packages/core/dist/core/run/status.js";
 import { setTaskStatusesForPrompt, sharedRuntimeEnv, withEnv } from "./helpers/runtime-paths.mjs";
-
-function patchManifest(workspaceDir, mutator) {
-  const manifestPath = join(workspaceDir, "run.json");
-  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-  mutator(manifest);
-  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-}
 
 const STATUS_AGENT = `---
 schemaVersion: 1

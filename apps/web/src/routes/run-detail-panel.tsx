@@ -28,7 +28,6 @@ export function RunDetailPanel({
   onCopy,
   onDelete,
   onDownloadAttachment,
-  onOpenResumeDialog,
   onOpenAttachmentPreview,
   onReplaceAttachmentPreview,
   onSelectRun,
@@ -76,7 +75,6 @@ export function RunDetailPanel({
   onCopy: (value: string, label: string) => Promise<void>;
   onDelete: (runId: string) => void;
   onDownloadAttachment: (runId: string, attachmentId: string, name: string) => Promise<void>;
-  onOpenResumeDialog: () => void;
   onOpenAttachmentPreview: (attachmentOwnerRunId: string, attachmentId: string) => void;
   onReplaceAttachmentPreview: (attachmentOwnerRunId: string, attachmentId: string) => void;
   onSelectRun: (runId: string) => void;
@@ -245,7 +243,6 @@ export function RunDetailPanel({
       onDownloadAttachment={(ownerRunId, attachmentId, name) =>
         onDownloadAttachment(ownerRunId, attachmentId, name)
       }
-      onOpenResumeDialog={onOpenResumeDialog}
       onOpenAttachmentPreview={onOpenAttachmentPreview}
       onSelectRun={onSelectRun}
       onClearBackendSession={() => onClearBackendSession(selectedRun.runId)}

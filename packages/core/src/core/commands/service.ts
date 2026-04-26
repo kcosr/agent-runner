@@ -1,5 +1,5 @@
-import { copyFileSync, existsSync, readFileSync, rmSync, statSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { copyFileSync, existsSync, rmSync, statSync } from "node:fs";
+import { basename, resolve } from "node:path";
 import {
   type TaskState,
   type TaskStatus,
@@ -36,10 +36,8 @@ import {
   type RunPinnedResult,
   type RunSummary,
   type RunTaskMutationCapabilities,
-  canArchiveRun,
   canDeleteRun,
   canResetRun,
-  canUnarchiveRun,
   deriveTaskMutationCapabilities,
   isTerminalStatus,
   toRunArchiveResult,

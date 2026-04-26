@@ -16,7 +16,6 @@ import {
   listRunManifests,
   resolveResumeTarget,
 } from "./core/run/manifest.js";
-import { readParentRunIdFromEnv } from "./core/run/recursion-guard.js";
 import { hasIncompleteTasks, missingResumeInputMessage } from "./core/run/resume-policy.js";
 import type { RunAuditEnvelope } from "./core/run/run-events.js";
 import { type RunEvent, type RunOptions, type RunOutcome, runAgent } from "./core/run/run-loop.js";

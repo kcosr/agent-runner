@@ -1002,7 +1002,7 @@ Work.
         cliVars: {},
         backend: {
           id: "claude",
-          invoke: async (ctx) => {
+          invoke: async () => {
             const manifest = JSON.parse(
               readFileSync(join(target.workspaceDir, "run.json"), "utf8"),
             );

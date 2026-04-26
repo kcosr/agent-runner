@@ -799,11 +799,9 @@ test("run reset: restores the original initialized task snapshot after task muta
     ["task", "set", outcome.runId, "t1", "--status", "in_progress", "--notes", "Working on it"],
     { cwd: dir },
   );
-  const added = JSON.parse(
-    runCli(["task", "add", outcome.runId, "--title", "Temporary", "--output-format", "json"], {
-      cwd: dir,
-    }),
-  );
+  runCli(["task", "add", outcome.runId, "--title", "Temporary", "--output-format", "json"], {
+    cwd: dir,
+  });
 
   const out = runCli(["run", "reset", outcome.runId], { cwd: dir });
   assert.match(out, new RegExp(`reset run ${outcome.runId} to initialized state`));

@@ -86,7 +86,7 @@ async function runCommand(
 function parseJsonResult<T>(stdout: string, label: string): T {
   try {
     return JSON.parse(stdout) as T;
-  } catch (error) {
+  } catch {
     throw new Error(`${label}: malformed JSON output`);
   }
 }

@@ -443,7 +443,7 @@ class FakeSseResponse extends EventEmitter {
 function runCli(args, opts = {}) {
   return execFileSync("node", [CLI_PATH, ...args], {
     cwd: opts.cwd ?? process.cwd(),
-    env: { ...process.env, ...sharedRuntimeEnv(opts.cwd ?? process.cwd()), ...(opts.env ?? {}) },
+    env: { ...process.env, ...sharedRuntimeEnv(opts.cwd ?? process.cwd()), ...opts.env },
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -466,7 +466,7 @@ function runCliExpectFail(args, opts = {}) {
 async function runCliAsync(args, opts = {}) {
   const child = spawn("node", [CLI_PATH, ...args], {
     cwd: opts.cwd ?? process.cwd(),
-    env: { ...process.env, ...sharedRuntimeEnv(opts.cwd ?? process.cwd()), ...(opts.env ?? {}) },
+    env: { ...process.env, ...sharedRuntimeEnv(opts.cwd ?? process.cwd()), ...opts.env },
     stdio: ["ignore", "pipe", "pipe"],
   });
 
@@ -6397,7 +6397,7 @@ test("daemon-target CLI rejects --detach without daemon mode", () => {
   assert.equal(failure.stdout, "");
   assert.match(
     failure.stderr,
-    /--detach requires daemon-connected run execution \(\-\-connect or TASK_RUNNER_CONNECT\)/,
+    /--detach requires daemon-connected run execution \(--connect or TASK_RUNNER_CONNECT\)/,
   );
 });
 

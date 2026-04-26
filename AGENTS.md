@@ -14,7 +14,7 @@ This file is a lightweight, internal onboarding note for agents working in this 
 
 - TypeScript, ESM modules, Node CLI.
 - Source of truth lives in `apps/cli/src/` and `packages/core/src/`; distributable output is generated into workspace `dist/` directories via `npm run build`.
-- Formatting and linting are handled by Biome (`biome.json`); pre-commit runs `lint-staged`.
+- Linting is handled by Oxlint (`.oxlintrc.json`); formatting is handled by Biome (`biome.json`); pre-commit runs `lint-staged`.
 - Keep edits ASCII-only unless a file already uses Unicode.
 - Prefer small, focused changes that preserve the existing CLI and manifest invariants.
 - Prefer end-state implementations over transitional ones.
@@ -44,7 +44,8 @@ Repeated checks remain legitimate when:
 - Run `npm install` to install dependencies.
 - Run `npm run build` when you change anything under `apps/cli/src/`, `packages/core/src/`, or otherwise affect generated workspace `dist/` output.
 - Run `npm test` for functional changes.
-- Run `npm run lint` to check formatting and lint rules.
+- Run `npm run lint` to check Oxlint rules with warnings denied.
+- Run `npm run format` to apply Biome formatting.
 - Run `npm run check` to run the standard verification pipeline (`build`, `lint`, `test`).
 - Do not commit `dist/`; build artifacts are generated locally and during packaging.
 - If you cannot run the relevant checks, call that out explicitly.

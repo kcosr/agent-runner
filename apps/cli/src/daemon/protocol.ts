@@ -1,5 +1,4 @@
 import type { DefinitionDetail, RunCommandOverrides } from "@task-runner/core/app/service.js";
-import type { DefinitionEntry } from "@task-runner/core/config/loader.js";
 import type {
   AttachmentListEntry,
   RunAttachment,
