@@ -10,7 +10,7 @@
   `scripts/migrate-manifests-v13.mjs` before resuming schema v12 runs.
   Rollbacks after migration require restoring compatible code or
   recreating/downgrading those runs because older code rejects v13
-  manifests.
+  manifests. ([#107](https://github.com/kcosr/task-runner/pull/107))
 - Manifest schema version is now `12`. Runs now require first-class
   `schedule` manifest data (`RunSchedule | null`), and summary/detail
   DTOs expose derived `scheduleState` instead of accepting compatibility
@@ -81,7 +81,7 @@
 - Added `backendArgs.<backend>.extraArgs` in agent frontmatter for
   backend-owned CLI flags. Fresh runs and init resolve only the selected
   backend's args, freeze them into local `run.json`, and keep normal
-  status DTOs closed.
+  status DTOs closed. ([#107](https://github.com/kcosr/task-runner/pull/107))
 - Added Codex WebSocket-over-UDS transport via `{ type: "uds", path:
   "/absolute/socket/path" }` and `TASK_RUNNER_CODEX_UDS_PATH`, with
   fast-fail conflict detection when both Codex UDS and websocket env
