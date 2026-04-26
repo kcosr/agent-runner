@@ -36,6 +36,7 @@
   --destructive-foreground: #b91c1c;
 
   --status-tint-alpha: 0.08;
+  --filters-backdrop: rgba(15, 23, 42, 0.24);
   --modal-backdrop: rgba(0, 0, 0, 0.28);
   --shadow-card: 0 1px 0 rgba(0, 0, 0, 0.02);
   --shadow-drawer: -8px 0 32px rgba(0, 0, 0, 0.08);
@@ -1441,7 +1442,10 @@ pre {
     display: inline;
   }
   .filters-backdrop {
-    background: rgba(15, 23, 42, 0.24);
+    background: var(--filters-backdrop);
+  }
+  .filters-panel::backdrop {
+    background: var(--filters-backdrop);
   }
   .filters-panel {
     position: fixed;

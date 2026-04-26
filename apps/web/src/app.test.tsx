@@ -3553,6 +3553,7 @@ describe("web app", () => {
     await renderApp();
     await findRunCard("Repo A Codex");
     const filtersDialog = await openFilters(user);
+    expect(filtersDialog).not.toHaveAttribute("data-modal");
 
     expect(
       within(screen.getByRole("combobox", { name: "Backend" }))
@@ -3590,6 +3591,38 @@ describe("web app", () => {
     expect(await findRunCard("Repo A Codex")).toBeInTheDocument();
     expect(await findRunCard("Repo A Passive")).toBeInTheDocument();
     expect(await findRunCard("Repo B Claude")).toBeInTheDocument();
+  });
+
+  it("uses native modal dismissal for filters on mobile", async () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn().mockImplementation((query: string) => ({
+        addEventListener: vi.fn(),
+        addListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+        matches: query === "(max-width: 900px)",
+        media: query,
+        onchange: null,
+        removeEventListener: vi.fn(),
+        removeListener: vi.fn(),
+      })),
+    );
+    installFetchMock({
+      runs: [makeRun()],
+      details: {},
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await findRunCard("Build dashboard");
+
+    const filtersDialog = await openFilters(user);
+    expect(filtersDialog).toHaveAttribute("data-modal", "true");
+
+    nativeCancel(filtersDialog);
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Filters" })).not.toBeInTheDocument();
+    });
   });
 
   it("persists structured filters across reloads while keeping search transient", async () => {
