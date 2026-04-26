@@ -262,6 +262,36 @@ async function invokeCodexTurnNoiseServer(codexServer) {
   }
 }
 
+async function startMalformedJsonCodexServer() {
+  const server = new WebSocketServer({ port: 0 });
+
+  server.on("connection", (socket) => {
+    socket.on("message", () => {
+      socket.send("{not-json");
+    });
+  });
+
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("failed to bind malformed JSON Codex test server");
+  }
+
+  return {
+    url: `ws://127.0.0.1:${address.port}/`,
+    async close() {
+      for (const client of server.clients) {
+        client.terminate();
+      }
+      await new Promise((resolve, reject) => {
+        server.close((err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+    },
+  };
+}
+
 async function startCodexUdsServer(socketName = "codex.sock") {
   const dir = mkdtempSync(join(tmpdir(), "task-runner-codex-uds-"));
   const socketPath = join(dir, socketName);
@@ -369,6 +399,28 @@ test("codexBackend ignores same-thread child turn notifications before parent tu
       childBeforeTurnStartResult: true,
     }),
   );
+});
+
+test("codexBackend rejects pending calls when a transport frame is malformed JSON", async () => {
+  const codexServer = await startMalformedJsonCodexServer();
+
+  try {
+    const result = await codexBackend.invoke({
+      ...baseCtx,
+      backendSpecific: {
+        codex: {
+          transport: { type: "ws", url: codexServer.url },
+        },
+      },
+    });
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.sessionId, null);
+    assert.match(result.rawStderr, /malformed JSON-RPC/);
+    assert.match(result.rawStderr, /Unexpected token|Expected property name/);
+  } finally {
+    await codexServer.close();
+  }
 });
 
 test("codexBackend invokes Codex over a Unix domain socket WebSocket transport", async () => {

@@ -3983,6 +3983,35 @@ test("daemon client ignores malformed subscription notifications and still deliv
   }
 });
 
+test("daemon client rejects pending calls when a frame is malformed JSON", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const wsServer = new WebSocketServer({ host: "127.0.0.1", port });
+
+  wsServer.on("connection", (ws) => {
+    ws.on("message", () => {
+      ws.send("{not-json");
+    });
+  });
+
+  const client = await DaemonClient.connect(listenUrl);
+  try {
+    await assert.rejects(
+      client.call("runs.list", {}),
+      (err) =>
+        err instanceof DaemonRpcError &&
+        err.code === -32700 &&
+        /malformed JSON-RPC/.test(err.message),
+    );
+  } finally {
+    await client.close().catch(() => {});
+    for (const socket of wsServer.clients) {
+      socket.terminate();
+    }
+    await new Promise((resolve) => wsServer.close(() => resolve()));
+  }
+});
+
 test("daemon SSE streams split summary, detail, and timeline subscriptions", async () => {
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;

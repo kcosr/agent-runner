@@ -395,7 +395,16 @@ function createClient(transport: Transport, opts: CreateClientOptions = {}): Cod
     let parsed: unknown;
     try {
       parsed = JSON.parse(line);
-    } catch {
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      const error = new Error(
+        `codex ${transport.descriptor} emitted malformed JSON-RPC: ${detail}`,
+      );
+      for (const [, entry] of pending) {
+        entry.reject(error);
+      }
+      pending.clear();
+      void transport.close().catch(() => {});
       return;
     }
     if (!isRecord(parsed)) return;
