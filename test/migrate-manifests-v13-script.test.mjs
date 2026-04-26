@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
@@ -173,6 +173,20 @@ test("migrate-manifests-v13 writes cleanup and preserves other fields", () => {
     readJson(otherPath).attemptRecords.some((record) => "tasksAfter" in record),
     true,
   );
+
+  const cleanedText = readFileSync(manifestPath, "utf8");
+  const cleanedMtimeMs = statSync(manifestPath).mtimeMs;
+  const rerunStdout = execFileSync("node", [SCRIPT_PATH, "--file", manifestPath, "--write"], {
+    encoding: "utf8",
+  });
+
+  assert.match(rerunStdout, new RegExp(`OK\\s+${manifestPath}: no tasksAfter fields found`));
+  assert.match(
+    rerunStdout,
+    /Summary: manifests cleaned=0 attempt records cleaned=0 bytes saved=0 errors=0/,
+  );
+  assert.equal(readFileSync(manifestPath, "utf8"), cleanedText);
+  assert.equal(statSync(manifestPath).mtimeMs, cleanedMtimeMs);
 });
 
 test("migrate-manifests-v13 reports no-op manifests as OK", () => {
