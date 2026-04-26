@@ -79,9 +79,18 @@ Connected-mode runtime selection stays explicit:
 - if the client passes `--parent-run <run-id>` or has
   `TASK_RUNNER_PARENT_RUN_ID` set, fresh `run` / `init` requests
   synthesize structured `parentRunId`
-- if the client has `TASK_RUNNER_CODEX_WS_URL` set, `run`, `init`, and
-  `resume` synthesize
-  `overrides.backendSpecific.codex.transport = { type: "ws", url }`
+- if the client has exactly one of `TASK_RUNNER_CODEX_UDS_PATH` or
+  `TASK_RUNNER_CODEX_WS_URL` set, fresh `run` / `init` requests
+  synthesize `overrides.backendSpecific.codex.transport` as either
+  `{ type: "uds", path }` or `{ type: "ws", url }`
+- `TASK_RUNNER_CODEX_UDS_PATH` must be an absolute socket path, and
+  `TASK_RUNNER_CODEX_WS_URL` must be an absolute `ws://` or `wss://` URL
+- if both Codex transport env vars are set locally, fresh `run` / `init`
+  requests forward them for daemon-side resolution so authored transport
+  can still win; if no higher-precedence transport is authored or
+  explicitly overridden, the daemon fails before creating the run
+- resume requests do not forward Codex transport env because resume reuses
+  the frozen manifest transport
 - if the client passes `--launcher <name>`, the daemon resolves that
   named launcher against its own config root and freezes the result into
   the manifest
@@ -89,9 +98,16 @@ Connected-mode runtime selection stays explicit:
   boundary before any run is created
 - malformed launcher overrides are rejected at the same request boundary
 
-That special case exists only for Codex transport selection. Launcher
-override handling is still explicit and named-only; no generic
-daemon-side env passthrough exists for other backends.
+The UDS transport shape is `{ type: "uds", path:
+"/absolute/socket/path" }`. It is WebSocket-over-UDS for Codex app-server,
+not raw UDS bytes. The forwarded `TASK_RUNNER_CODEX_UDS_PATH` is
+interpreted from the daemon process filesystem namespace, so connected
+mode only works when the daemon can access that absolute socket path.
+
+That special case exists only for Codex transport selection.
+`TASK_RUNNER_CODEX_UDS_PATH` is not a generic env passthrough mechanism,
+and launcher override handling is still explicit and named-only; no
+generic daemon-side env passthrough exists for other backends.
 
 ## HTTP API
 

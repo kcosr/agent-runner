@@ -201,6 +201,7 @@ function classifyAgentSurface(path: PathSegment[]): InterpolationSurface {
     switch (path[3]) {
       case "type":
       case "url":
+      case "path":
         return { mode: "exact", scalarKind: "string", allowLiteral: false };
       default:
         return { mode: "disabled" };

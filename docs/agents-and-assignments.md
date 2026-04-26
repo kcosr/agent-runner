@@ -77,14 +77,16 @@ exactly one of:
 
 - `{ type: "stdio" }`
 - `{ type: "ws", url: "<absolute ws:// or wss:// URL>" }`
+- `{ type: "uds", path: "/absolute/socket/path" }`
 
 Other backends do not accept `backendSpecific`, and this pass does not
 add generic backend-specific env passthrough.
 
 Frontmatter scalar values are resolved for `${...}` env expressions before
 schema validation. Typed surfaces such as `name`, `backend`, `model`,
-`timeoutSec`, `unrestricted`, and `backendSpecific.codex.transport.url`
-require the whole value to be exactly one env expression:
+`timeoutSec`, `unrestricted`, `backendSpecific.codex.transport.url`, and
+`backendSpecific.codex.transport.path` require the whole value to be
+exactly one env expression:
 
 ```yaml
 ---
@@ -470,8 +472,14 @@ init time and then reused on resume:
 1. Agent frontmatter `backendSpecific.codex.transport`
 2. Connected/daemon-only request override
    `overrides.backendSpecific.codex.transport`
-3. `TASK_RUNNER_CODEX_WS_URL`
+3. `TASK_RUNNER_CODEX_UDS_PATH` or `TASK_RUNNER_CODEX_WS_URL` from the
+   connected client or daemon process
 4. `{ type: "stdio" }`
+
+UDS transport uses WebSocket-over-UDS for Codex app-server, not raw UDS
+bytes, and `path` must be absolute. If both UDS and WS env vars are set
+with no higher-precedence transport, Task Runner fails fast. Resume does
+not re-read these env vars because the transport is already frozen.
 
 Once frozen into the manifest, later env drift does not change the run's
 Codex transport.

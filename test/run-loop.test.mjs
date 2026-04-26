@@ -1901,29 +1901,34 @@ test("codex embedded runs freeze frontmatter transport ahead of client env", asy
   writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
 
   let seenBackendSpecific;
-  const { outcome } = await withEnv({ TASK_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/" }, () =>
-    runWithMock(
-      dir,
-      async (ctx) => {
-        seenBackendSpecific = ctx.backendSpecific;
-        setTaskStatusesForPrompt(ctx.prompt, {
-          t1: "completed",
-          t2: "completed",
-          t3: "completed",
-        });
-        return {
-          exitCode: 0,
-          signal: null,
-          timedOut: false,
-          sessionId: null,
-          transcript: "done",
-          rawStdout: "",
-          rawStderr: "",
-        };
-      },
-      {},
-      { agentName: "codex-stdio-agent", backendId: "codex" },
-    ),
+  const { outcome } = await withEnv(
+    {
+      TASK_RUNNER_CODEX_UDS_PATH: "/tmp/ignored-codex.sock",
+      TASK_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/",
+    },
+    () =>
+      runWithMock(
+        dir,
+        async (ctx) => {
+          seenBackendSpecific = ctx.backendSpecific;
+          setTaskStatusesForPrompt(ctx.prompt, {
+            t1: "completed",
+            t2: "completed",
+            t3: "completed",
+          });
+          return {
+            exitCode: 0,
+            signal: null,
+            timedOut: false,
+            sessionId: null,
+            transcript: "done",
+            rawStdout: "",
+            rawStderr: "",
+          };
+        },
+        {},
+        { agentName: "codex-stdio-agent", backendId: "codex" },
+      ),
   );
 
   assert.deepEqual(seenBackendSpecific, {
@@ -1943,16 +1948,131 @@ test("codex daemon runs prefer forwarded transport over daemon env", async () =>
   writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
 
   let seenBackendSpecific;
-  const { outcome } = await withEnv({ TASK_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/" }, () =>
+  const { outcome } = await withEnv(
+    {
+      TASK_RUNNER_CODEX_UDS_PATH: "/tmp/daemon-env-codex.sock",
+      TASK_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/",
+    },
+    () =>
+      runWithMock(
+        dir,
+        async (ctx) => {
+          seenBackendSpecific = ctx.backendSpecific;
+          setTaskStatusesForPrompt(ctx.prompt, {
+            t1: "completed",
+            t2: "completed",
+            t3: "completed",
+          });
+          return {
+            exitCode: 0,
+            signal: null,
+            timedOut: false,
+            sessionId: null,
+            transcript: "done",
+            rawStdout: "",
+            rawStderr: "",
+          };
+        },
+        {
+          backendSpecific: {
+            codex: {
+              transport: {
+                type: "ws",
+                url: "ws://client.example/socket",
+              },
+            },
+          },
+        },
+        {
+          agentName: "codex-agent",
+          backendId: "codex",
+          execution: {
+            hostMode: "daemon",
+            controller: {
+              kind: "daemon",
+              daemonInstanceId: "daemon-test",
+            },
+          },
+        },
+      ),
+  );
+
+  assert.deepEqual(seenBackendSpecific, {
+    codex: {
+      transport: {
+        type: "ws",
+        url: "ws://client.example/socket",
+      },
+    },
+  });
+  assert.deepEqual(outcome.manifest.backendSpecific, seenBackendSpecific);
+});
+
+test("codex daemon runs defer conflicting forwarded env until after authored transport precedence", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "codex-stdio-agent", CODEX_STDIO_AGENT);
+  writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
+
+  let seenBackendSpecific;
+  const { outcome } = await runWithMock(
+    dir,
+    async (ctx) => {
+      seenBackendSpecific = ctx.backendSpecific;
+      setTaskStatusesForPrompt(ctx.prompt, {
+        t1: "completed",
+        t2: "completed",
+        t3: "completed",
+      });
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: null,
+        transcript: "done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    },
+    {
+      codexTransportEnv: {
+        udsPath: "/tmp/client-codex.sock",
+        wsUrl: "ws://client.example/socket",
+      },
+    },
+    {
+      agentName: "codex-stdio-agent",
+      backendId: "codex",
+      execution: {
+        hostMode: "daemon",
+        controller: {
+          kind: "daemon",
+          daemonInstanceId: "daemon-test",
+        },
+      },
+    },
+  );
+
+  assert.deepEqual(seenBackendSpecific, {
+    codex: {
+      transport: {
+        type: "stdio",
+      },
+    },
+  });
+  assert.deepEqual(outcome.manifest.backendSpecific, seenBackendSpecific);
+});
+
+test("codex daemon runs reject conflicting forwarded Codex env without higher precedence", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "codex-agent", CODEX_AGENT);
+  writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
+
+  let invoked = false;
+  await assert.rejects(
     runWithMock(
       dir,
-      async (ctx) => {
-        seenBackendSpecific = ctx.backendSpecific;
-        setTaskStatusesForPrompt(ctx.prompt, {
-          t1: "completed",
-          t2: "completed",
-          t3: "completed",
-        });
+      async () => {
+        invoked = true;
         return {
           exitCode: 0,
           signal: null,
@@ -1964,13 +2084,9 @@ test("codex daemon runs prefer forwarded transport over daemon env", async () =>
         };
       },
       {
-        backendSpecific: {
-          codex: {
-            transport: {
-              type: "ws",
-              url: "ws://client.example/socket",
-            },
-          },
+        codexTransportEnv: {
+          udsPath: "/tmp/client-codex.sock",
+          wsUrl: "ws://client.example/socket",
         },
       },
       {
@@ -1985,17 +2101,9 @@ test("codex daemon runs prefer forwarded transport over daemon env", async () =>
         },
       },
     ),
+    /TASK_RUNNER_CODEX_UDS_PATH and TASK_RUNNER_CODEX_WS_URL cannot both be set/,
   );
-
-  assert.deepEqual(seenBackendSpecific, {
-    codex: {
-      transport: {
-        type: "ws",
-        url: "ws://client.example/socket",
-      },
-    },
-  });
-  assert.deepEqual(outcome.manifest.backendSpecific, seenBackendSpecific);
+  assert.equal(invoked, false);
 });
 
 test("codex embedded runs reject malformed TASK_RUNNER_CODEX_WS_URL before freezing transport", async () => {
@@ -2025,6 +2133,73 @@ test("codex embedded runs reject malformed TASK_RUNNER_CODEX_WS_URL before freez
       ),
     ),
     /TASK_RUNNER_CODEX_WS_URL must be an absolute ws:\/\/ or wss:\/\/ URL/,
+  );
+  assert.equal(invoked, false);
+});
+
+test("codex embedded runs reject malformed TASK_RUNNER_CODEX_UDS_PATH before freezing transport", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "codex-agent", CODEX_AGENT);
+  writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
+
+  let invoked = false;
+  await assert.rejects(
+    withEnv({ TASK_RUNNER_CODEX_UDS_PATH: "relative.sock" }, () =>
+      runWithMock(
+        dir,
+        async () => {
+          invoked = true;
+          return {
+            exitCode: 0,
+            signal: null,
+            timedOut: false,
+            sessionId: null,
+            transcript: "done",
+            rawStdout: "",
+            rawStderr: "",
+          };
+        },
+        {},
+        { agentName: "codex-agent", backendId: "codex" },
+      ),
+    ),
+    /TASK_RUNNER_CODEX_UDS_PATH must be an absolute socket path/,
+  );
+  assert.equal(invoked, false);
+});
+
+test("codex embedded runs reject conflicting Codex transport env before freezing transport", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "codex-agent", CODEX_AGENT);
+  writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
+
+  let invoked = false;
+  await assert.rejects(
+    withEnv(
+      {
+        TASK_RUNNER_CODEX_UDS_PATH: "/tmp/codex.sock",
+        TASK_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/",
+      },
+      () =>
+        runWithMock(
+          dir,
+          async () => {
+            invoked = true;
+            return {
+              exitCode: 0,
+              signal: null,
+              timedOut: false,
+              sessionId: null,
+              transcript: "done",
+              rawStdout: "",
+              rawStderr: "",
+            };
+          },
+          {},
+          { agentName: "codex-agent", backendId: "codex" },
+        ),
+    ),
+    /TASK_RUNNER_CODEX_UDS_PATH and TASK_RUNNER_CODEX_WS_URL cannot both be set/,
   );
   assert.equal(invoked, false);
 });
@@ -2380,7 +2555,7 @@ Agent prompt.
   assert.deepEqual(outcome.manifest.resetSeed.launcher, outcome.manifest.launcher);
 });
 
-test("fresh runs keep passive and codex websocket execution on direct launcher", async () => {
+test("fresh runs keep passive and external codex transports on direct launcher", async () => {
   const dir = tempDir();
   writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
   writeLauncher(
@@ -2408,8 +2583,25 @@ backendSpecific:
 Agent prompt.
 `,
   );
+  writeAgent(
+    dir,
+    "codex-uds-launcher-agent",
+    `---
+schemaVersion: 1
+name: codex-uds-launcher-agent
+backend: codex
+launcher: shared
+backendSpecific:
+  codex:
+    transport:
+      type: uds
+      path: /tmp/codex.sock
+---
+Agent prompt.
+`,
+  );
 
-  const { outcome } = await runWithMock(
+  const { outcome: wsOutcome } = await runWithMock(
     dir,
     async () => ({
       exitCode: 0,
@@ -2424,11 +2616,32 @@ Agent prompt.
     { agentName: "codex-ws-launcher-agent", backendId: "codex" },
   );
 
-  assert.deepEqual(outcome.manifest.launcher, {
+  assert.deepEqual(wsOutcome.manifest.launcher, {
     kind: "direct",
     name: "direct",
   });
-  assert.deepEqual(outcome.manifest.resetSeed.launcher, outcome.manifest.launcher);
+  assert.deepEqual(wsOutcome.manifest.resetSeed.launcher, wsOutcome.manifest.launcher);
+
+  const { outcome: udsOutcome } = await runWithMock(
+    dir,
+    async () => ({
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      sessionId: "thread-uds",
+      transcript: "done",
+      rawStdout: "",
+      rawStderr: "",
+    }),
+    {},
+    { agentName: "codex-uds-launcher-agent", backendId: "codex" },
+  );
+
+  assert.deepEqual(udsOutcome.manifest.launcher, {
+    kind: "direct",
+    name: "direct",
+  });
+  assert.deepEqual(udsOutcome.manifest.resetSeed.launcher, udsOutcome.manifest.launcher);
 });
 
 test("daemon-owned fresh runs resolve named launcher overrides on the authoritative host", async () => {

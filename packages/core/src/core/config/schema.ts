@@ -3,6 +3,7 @@ import {
   BACKEND_IDS,
   type BackendSpecificConfig,
   type CodexTransportConfig,
+  isAbsoluteUdsSocketPath,
   isWsOrWssUrl,
 } from "../backends/types.js";
 
@@ -277,6 +278,16 @@ export const codexTransportConfigSchema: z.ZodType<CodexTransportConfig> = z.uni
         .trim()
         .min(1)
         .refine(isWsOrWssUrl, "url must be an absolute ws:// or wss:// URL"),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("uds"),
+      path: z
+        .string()
+        .trim()
+        .min(1)
+        .refine(isAbsoluteUdsSocketPath, "path must be an absolute socket path"),
     })
     .strict(),
 ]);

@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { WebSocketServer } from "ws";
 import {
@@ -6,6 +10,7 @@ import {
   buildCodexThreadParams,
   buildCodexTurnStartPayload,
   codexBackend,
+  normalizeCodexUdsPath,
   normalizeCodexWsUrl,
   resolveCodexTransportConfig,
 } from "../packages/core/dist/backends/codex.js";
@@ -81,11 +86,30 @@ test("resolveCodexTransportConfig: normalizes explicit websocket transport", () 
   );
 });
 
+test("resolveCodexTransportConfig: normalizes explicit UDS transport", () => {
+  assert.deepEqual(
+    resolveCodexTransportConfig({
+      backendSpecific: {
+        codex: {
+          transport: { type: "uds", path: " /tmp/codex.sock " },
+        },
+      },
+    }),
+    { type: "uds", path: "/tmp/codex.sock" },
+  );
+});
+
 test("resolveCodexTransportConfig: rejects missing frozen transport", () => {
   assert.throws(
     () => resolveCodexTransportConfig({ backendSpecific: undefined }),
     /backendSpecific\.codex\.transport/,
   );
+});
+
+test("normalizeCodexUdsPath: rejects malformed socket paths before transport open", () => {
+  assert.throws(() => normalizeCodexUdsPath("relative/socket"), /absolute socket path/);
+  assert.throws(() => normalizeCodexUdsPath("~/codex.sock"), /absolute socket path/);
+  assert.throws(() => normalizeCodexUdsPath("unix:///tmp/codex.sock"), /absolute socket path/);
 });
 
 test("normalizeCodexWsUrl: rejects malformed or non-websocket URLs before transport open", () => {
@@ -221,7 +245,7 @@ async function invokeCodexTurnNoiseServer(codexServer) {
       emit: (event) => emitted.push(event),
     });
 
-    assert.equal(result.exitCode, 0);
+    assert.equal(result.exitCode, 0, `${result.rawStderr}\n${result.rawStdout}`);
     assert.equal(result.sessionId, "parent-thread");
     assert.match(result.transcript, /parent output/);
     assert.match(result.transcript, /parent final/);
@@ -238,6 +262,102 @@ async function invokeCodexTurnNoiseServer(codexServer) {
   }
 }
 
+async function startCodexUdsServer(socketName = "codex.sock") {
+  const dir = mkdtempSync(join(tmpdir(), "task-runner-codex-uds-"));
+  const socketPath = join(dir, socketName);
+  const server = createServer();
+  const wsServer = new WebSocketServer({ server });
+  const threadId = "uds-thread";
+  const turnId = "uds-turn";
+
+  wsServer.on("connection", (socket) => {
+    const notify = (method, params) => {
+      socket.send(JSON.stringify({ jsonrpc: "2.0", method, params }));
+    };
+
+    socket.on("message", (data) => {
+      const message = JSON.parse(data.toString("utf8"));
+      if (message.method === "initialize") {
+        socket.send(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: {} }));
+        return;
+      }
+      if (message.method === "initialized") {
+        return;
+      }
+      if (message.method === "thread/start") {
+        socket.send(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: { thread: { id: threadId } },
+          }),
+        );
+        return;
+      }
+      if (message.method === "turn/start") {
+        socket.send(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: { turn: { id: turnId } },
+          }),
+        );
+        setTimeout(() => {
+          notify("item/agentMessage/delta", {
+            threadId,
+            turnId,
+            itemId: "uds-message",
+            delta: "UDS output",
+          });
+          notify("item/completed", {
+            threadId,
+            turnId,
+            item: { type: "agentMessage", text: "UDS final" },
+          });
+          notify("turn/completed", {
+            threadId,
+            turn: { id: turnId, status: "completed" },
+          });
+        }, 25);
+        return;
+      }
+      if (message.method === "turn/interrupt") {
+        socket.send(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: {} }));
+      }
+    });
+  });
+
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(socketPath, () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+
+  return {
+    path: socketPath,
+    async close() {
+      for (const client of wsServer.clients) {
+        client.terminate();
+      }
+      await new Promise((resolve, reject) => {
+        wsServer.close((err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+      await new Promise((resolve, reject) => {
+        server.close((err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+      rmSync(dir, { recursive: true, force: true });
+    },
+  };
+}
+
 test("codexBackend ignores child thread turn completion while waiting for the parent turn", async () => {
   await invokeCodexTurnNoiseServer(await startCodexTurnNoiseServer());
 });
@@ -249,4 +369,35 @@ test("codexBackend ignores same-thread child turn notifications before parent tu
       childBeforeTurnStartResult: true,
     }),
   );
+});
+
+test("codexBackend invokes Codex over a Unix domain socket WebSocket transport", async () => {
+  const codexServer = await startCodexUdsServer("codex socket:1.sock");
+  const emitted = [];
+
+  try {
+    const result = await codexBackend.invoke({
+      ...baseCtx,
+      backendSpecific: {
+        codex: {
+          transport: { type: "uds", path: codexServer.path },
+        },
+      },
+      emit: (event) => emitted.push(event),
+    });
+
+    assert.equal(result.exitCode, 0, `${result.rawStderr}\n${result.rawStdout}`);
+    assert.equal(result.sessionId, "uds-thread");
+    assert.match(result.transcript, /UDS output/);
+    assert.match(result.transcript, /UDS final/);
+    assert.equal(
+      emitted
+        .filter((event) => event.type === "agent_message_delta")
+        .map((event) => event.text)
+        .join(""),
+      "UDS output",
+    );
+  } finally {
+    await codexServer.close();
+  }
 });

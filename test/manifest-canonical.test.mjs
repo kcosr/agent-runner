@@ -41,6 +41,32 @@ backend: codex
 Your role: walk the checklist for {{cwd}}.
 `;
 
+const CODEX_UDS_AGENT = `---
+schemaVersion: 1
+name: canonical-codex-uds
+backend: codex
+backendSpecific:
+  codex:
+    transport:
+      type: uds
+      path: /tmp/codex.sock
+---
+Your role: walk the checklist for {{cwd}}.
+`;
+
+const CODEX_WS_AGENT = `---
+schemaVersion: 1
+name: canonical-codex-ws
+backend: codex
+backendSpecific:
+  codex:
+    transport:
+      type: ws
+      url: ws://127.0.0.1:4773
+---
+Your role: walk the checklist for {{cwd}}.
+`;
+
 const BASIC_ASSIGNMENT = `---
 schemaVersion: 1
 name: canonical-work
@@ -269,7 +295,7 @@ test("loadedAgentFromManifest reconstructs LoadedAgent from frozen fields", asyn
   assert.equal(loaded.sourcePath, join(dir, "agents", "canonical-claude", "agent.md"));
 });
 
-test("loadedAgentFromManifest reconstructs frozen backendSpecific transport", async () => {
+test("loadedAgentFromManifest reconstructs frozen backendSpecific stdio transport", async () => {
   const dir = tempDir();
   writeAgent(dir, "canonical-codex", CODEX_AGENT);
   writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
@@ -303,6 +329,88 @@ test("loadedAgentFromManifest reconstructs frozen backendSpecific transport", as
     codex: {
       transport: {
         type: "stdio",
+      },
+    },
+  });
+});
+
+test("loadedAgentFromManifest reconstructs frozen backendSpecific UDS transport", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "canonical-codex-uds", CODEX_UDS_AGENT);
+  writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
+  const outcome = await freshRun(dir, {
+    agentName: "canonical-codex-uds",
+    backend: {
+      id: "codex",
+      async invoke(ctx) {
+        assert.deepEqual(ctx.backendSpecific, {
+          codex: {
+            transport: {
+              type: "uds",
+              path: "/tmp/codex.sock",
+            },
+          },
+        });
+        return {
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+          sessionId: null,
+          transcript: "done",
+          rawStdout: "",
+          rawStderr: "",
+        };
+      },
+    },
+  });
+
+  const loaded = loadedAgentFromManifest(outcome.manifest);
+  assert.deepEqual(loaded.config.backendSpecific, {
+    codex: {
+      transport: {
+        type: "uds",
+        path: "/tmp/codex.sock",
+      },
+    },
+  });
+});
+
+test("loadedAgentFromManifest reconstructs frozen backendSpecific websocket transport", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "canonical-codex-ws", CODEX_WS_AGENT);
+  writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
+  const outcome = await freshRun(dir, {
+    agentName: "canonical-codex-ws",
+    backend: {
+      id: "codex",
+      async invoke(ctx) {
+        assert.deepEqual(ctx.backendSpecific, {
+          codex: {
+            transport: {
+              type: "ws",
+              url: "ws://127.0.0.1:4773",
+            },
+          },
+        });
+        return {
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+          sessionId: null,
+          transcript: "done",
+          rawStdout: "",
+          rawStderr: "",
+        };
+      },
+    },
+  });
+
+  const loaded = loadedAgentFromManifest(outcome.manifest);
+  assert.deepEqual(loaded.config.backendSpecific, {
+    codex: {
+      transport: {
+        type: "ws",
+        url: "ws://127.0.0.1:4773",
       },
     },
   });

@@ -1,4 +1,5 @@
 import { type ChildProcess, spawn } from "node:child_process";
+import { createConnection } from "node:net";
 import { WebSocket } from "ws";
 import type {
   Backend,
@@ -10,7 +11,7 @@ import type {
   ValidateSessionContext,
   ValidateSessionResult,
 } from "../core/backends/types.js";
-import { isWsOrWssUrl } from "../core/backends/types.js";
+import { isAbsoluteUdsSocketPath, isWsOrWssUrl } from "../core/backends/types.js";
 import { resolveTaskRunnerCommand } from "../task-runner-command.js";
 import { buildSpawnCommand } from "../util/spawn.js";
 import {
@@ -236,9 +237,13 @@ function openStdioTransport(
 // WebSocket transport
 // ─────────────────────────────────────────────────────────────────────────────
 
-function openWsTransport(url: string): Promise<Transport> {
+function openWebSocketTransport(args: {
+  descriptor: string;
+  createWebSocket: () => WebSocket;
+  reportErrorsToStderr: boolean;
+}): Promise<Transport> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(url);
+    const ws = args.createWebSocket();
 
     let messageHandler: ((line: string) => void) | null = null;
     let stderrHandler: ((text: string) => void) | null = null;
@@ -261,7 +266,7 @@ function openWsTransport(url: string): Promise<Transport> {
     ws.on("open", () => {
       opened = true;
       resolve({
-        descriptor: `ws:${url}`,
+        descriptor: args.descriptor,
         send(line: string) {
           if (closed || ws.readyState !== WebSocket.OPEN) return;
           ws.send(line);
@@ -294,7 +299,9 @@ function openWsTransport(url: string): Promise<Transport> {
       }
     });
     ws.on("error", (err) => {
-      stderrHandler?.(`ws error: ${err.message}\n`);
+      if (args.reportErrorsToStderr) {
+        stderrHandler?.(`ws error: ${err.message}\n`);
+      }
       if (!opened) {
         finishOpenFailure(`ws error: ${err.message}`, err);
         return;
@@ -314,6 +321,25 @@ function openWsTransport(url: string): Promise<Transport> {
       }
       finishTransportClose(code, closeReason);
     });
+  });
+}
+
+function openWsTransport(url: string): Promise<Transport> {
+  return openWebSocketTransport({
+    descriptor: `ws:${url}`,
+    createWebSocket: () => new WebSocket(url),
+    reportErrorsToStderr: true,
+  });
+}
+
+function openUdsTransport(path: string): Promise<Transport> {
+  return openWebSocketTransport({
+    descriptor: `uds:${path}`,
+    createWebSocket: () =>
+      new WebSocket("ws://localhost/rpc", {
+        createConnection: () => createConnection({ path }),
+      }),
+    reportErrorsToStderr: false,
   });
 }
 
@@ -754,7 +780,14 @@ const CODEX_AUTH_FAILURE_MARKERS = [
 ] as const;
 
 function cloneCodexTransportConfig(transport: CodexTransportConfig): CodexTransportConfig {
-  return transport.type === "ws" ? { type: "ws", url: transport.url } : { type: "stdio" };
+  switch (transport.type) {
+    case "stdio":
+      return { type: "stdio" };
+    case "ws":
+      return { type: "ws", url: transport.url };
+    case "uds":
+      return { type: "uds", path: transport.path };
+  }
 }
 
 export function normalizeCodexWsUrl(url: string): string {
@@ -764,6 +797,14 @@ export function normalizeCodexWsUrl(url: string): string {
     );
   }
   return new URL(url).toString();
+}
+
+export function normalizeCodexUdsPath(path: string): string {
+  const trimmed = path.trim();
+  if (!isAbsoluteUdsSocketPath(trimmed)) {
+    throw new Error(`codex UDS transport requires an absolute socket path, received "${path}"`);
+  }
+  return trimmed;
 }
 
 export function resolveCodexTransportConfig(ctx: {
@@ -781,6 +822,12 @@ export function resolveCodexTransportConfig(ctx: {
       url: normalizeCodexWsUrl(transport.url),
     };
   }
+  if (transport.type === "uds") {
+    return {
+      type: "uds",
+      path: normalizeCodexUdsPath(transport.path),
+    };
+  }
   return cloneCodexTransportConfig(transport);
 }
 
@@ -788,6 +835,9 @@ async function openTransport(ctx: BackendInvokeContext): Promise<Transport> {
   const transport = resolveCodexTransportConfig(ctx);
   if (transport.type === "ws") {
     return openWsTransport(transport.url);
+  }
+  if (transport.type === "uds") {
+    return openUdsTransport(transport.path);
   }
   return openStdioTransport(ctx.cwd, ctx.env, ctx.unrestricted ?? false, ctx.launcher);
 }

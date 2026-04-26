@@ -29,6 +29,112 @@ test("optionalOverrides accepts structured schedule overrides", () => {
   );
 });
 
+test("optionalOverrides accepts UDS codex transport overrides", () => {
+  assert.deepEqual(
+    optionalOverrides({
+      backendSpecific: {
+        codex: {
+          transport: {
+            type: "uds",
+            path: " /tmp/codex.sock ",
+          },
+        },
+      },
+    }).backendSpecific,
+    {
+      codex: {
+        transport: {
+          type: "uds",
+          path: "/tmp/codex.sock",
+        },
+      },
+    },
+  );
+});
+
+test("optionalOverrides accepts deferred Codex transport env values", () => {
+  assert.deepEqual(
+    optionalOverrides({
+      codexTransportEnv: {
+        udsPath: " /tmp/codex.sock ",
+        wsUrl: " ws://127.0.0.1:4773/ ",
+      },
+    }).codexTransportEnv,
+    {
+      udsPath: " /tmp/codex.sock ",
+      wsUrl: " ws://127.0.0.1:4773/ ",
+    },
+  );
+});
+
+test("optionalOverrides rejects malformed UDS codex transport overrides", () => {
+  assert.throws(
+    () =>
+      optionalOverrides({
+        backendSpecific: {
+          codex: {
+            transport: {
+              type: "uds",
+              path: "relative.sock",
+            },
+          },
+        },
+      }),
+    /overrides\.backendSpecific\.codex\.transport\.path must be an absolute socket path/,
+  );
+  assert.throws(
+    () =>
+      optionalOverrides({
+        backendSpecific: {
+          codex: {
+            transport: {
+              type: "uds",
+              path: "/tmp/codex.sock",
+              url: "ws://127.0.0.1:4773/",
+            },
+          },
+        },
+      }),
+    /overrides\.backendSpecific\.codex\.transport\.url is not supported for uds transport/,
+  );
+  assert.throws(
+    () =>
+      optionalOverrides({
+        backendSpecific: {
+          codex: {
+            transport: {
+              type: "ws",
+              url: "ws://127.0.0.1:4773/",
+              path: "/tmp/codex.sock",
+            },
+          },
+        },
+      }),
+    /overrides\.backendSpecific\.codex\.transport\.path is not supported for ws transport/,
+  );
+});
+
+test("optionalOverrides rejects malformed deferred Codex transport env values", () => {
+  assert.throws(
+    () =>
+      optionalOverrides({
+        codexTransportEnv: {
+          udsPath: "",
+        },
+      }),
+    /overrides\.codexTransportEnv\.udsPath cannot be empty/,
+  );
+  assert.throws(
+    () =>
+      optionalOverrides({
+        codexTransportEnv: {
+          socketPath: "/tmp/codex.sock",
+        },
+      }),
+    /overrides\.codexTransportEnv\.socketPath is not supported/,
+  );
+});
+
 test("optionalOverrides rejects malformed launcher overrides", () => {
   assert.throws(
     () => optionalOverrides({ launcher: "" }),

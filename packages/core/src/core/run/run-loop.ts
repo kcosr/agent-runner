@@ -11,7 +11,11 @@ import {
 import { resolveTaskRunnerCommand } from "../../task-runner-command.js";
 import { normalizeOptionalRunName } from "../../util/run-name.js";
 import { shortId } from "../../util/short-id.js";
-import { cloneBackendSpecificConfig, isWsOrWssUrl } from "../backends/types.js";
+import {
+  type CodexTransportEnvValues,
+  cloneBackendSpecificConfig,
+  codexTransportFromEnvValues,
+} from "../backends/types.js";
 import type {
   Backend,
   BackendEvent,
@@ -102,6 +106,7 @@ export interface RunOverrides {
   model?: string;
   effort?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   backendSpecific?: BackendSpecificConfig;
+  codexTransportEnv?: CodexTransportEnvValues;
   message?: string;
   name?: string;
   timeoutSec?: number;
@@ -595,17 +600,10 @@ function resolveFreshRunCwd(
 }
 
 function codexTransportFromEnv(): CodexTransportConfig | undefined {
-  const wsUrl = process.env.TASK_RUNNER_CODEX_WS_URL?.trim();
-  if (!wsUrl) {
-    return undefined;
-  }
-  if (!isWsOrWssUrl(wsUrl)) {
-    throw new Error("TASK_RUNNER_CODEX_WS_URL must be an absolute ws:// or wss:// URL");
-  }
-  return {
-    type: "ws",
-    url: wsUrl,
-  };
+  return codexTransportFromEnvValues({
+    udsPath: process.env.TASK_RUNNER_CODEX_UDS_PATH,
+    wsUrl: process.env.TASK_RUNNER_CODEX_WS_URL,
+  });
 }
 
 function captureFullAttemptLogs(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -640,6 +638,17 @@ function resolveFreshBackendSpecific(
         transport: { ...overrideTransport },
       },
     };
+  }
+
+  if (execution.hostMode === "daemon" && overrides?.codexTransportEnv) {
+    const clientEnvTransport = codexTransportFromEnvValues(overrides.codexTransportEnv);
+    if (clientEnvTransport) {
+      return {
+        codex: {
+          transport: clientEnvTransport,
+        },
+      };
+    }
   }
 
   const envTransport = codexTransportFromEnv();

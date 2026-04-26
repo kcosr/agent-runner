@@ -1,3 +1,4 @@
+import { isAbsolute } from "node:path";
 import type { ResolvedLauncherConfig } from "../config/launchers.js";
 
 export const BACKEND_IDS = ["claude", "codex", "cursor", "pi", "passive"] as const;
@@ -5,7 +6,15 @@ export type BackendId = (typeof BACKEND_IDS)[number];
 
 export type EffortLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
-export type CodexTransportConfig = { type: "stdio" } | { type: "ws"; url: string };
+export type CodexTransportConfig =
+  | { type: "stdio" }
+  | { type: "ws"; url: string }
+  | { type: "uds"; path: string };
+
+export interface CodexTransportEnvValues {
+  udsPath?: string;
+  wsUrl?: string;
+}
 
 export interface BackendSpecificConfig {
   codex?: {
@@ -20,6 +29,40 @@ export function isWsOrWssUrl(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+export function isAbsoluteUdsSocketPath(value: string): boolean {
+  const trimmed = value.trim();
+  return trimmed.length > 0 && isAbsolute(trimmed);
+}
+
+export function codexTransportFromEnvValues(
+  env: CodexTransportEnvValues,
+): CodexTransportConfig | undefined {
+  const udsPath = env.udsPath?.trim();
+  const wsUrl = env.wsUrl?.trim();
+  if (udsPath && wsUrl) {
+    throw new Error("TASK_RUNNER_CODEX_UDS_PATH and TASK_RUNNER_CODEX_WS_URL cannot both be set");
+  }
+  if (udsPath) {
+    if (!isAbsoluteUdsSocketPath(udsPath)) {
+      throw new Error("TASK_RUNNER_CODEX_UDS_PATH must be an absolute socket path");
+    }
+    return {
+      type: "uds",
+      path: udsPath,
+    };
+  }
+  if (!wsUrl) {
+    return undefined;
+  }
+  if (!isWsOrWssUrl(wsUrl)) {
+    throw new Error("TASK_RUNNER_CODEX_WS_URL must be an absolute ws:// or wss:// URL");
+  }
+  return {
+    type: "ws",
+    url: wsUrl,
+  };
 }
 
 export function cloneBackendSpecificConfig(

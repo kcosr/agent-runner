@@ -516,3 +516,92 @@ test("manifest: codex runs persist the stdio default transport in run metadata a
   });
   assert.deepEqual(onDisk.resetSeed.backendSpecific, onDisk.backendSpecific);
 });
+
+test("manifest: codex runs persist UDS transport in run metadata and reset seed", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", CODEX_AGENT);
+  writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
+
+  const outcome = await withEnv(
+    { TASK_RUNNER_CODEX_UDS_PATH: "/tmp/codex.sock", TASK_RUNNER_CODEX_WS_URL: undefined },
+    () =>
+      runWithMock(
+        dir,
+        async (ctx) => {
+          updateTasksForPrompt(ctx.prompt, {
+            t1: { status: "completed" },
+            t2: { status: "completed" },
+            t3: { status: "completed" },
+          });
+          assert.deepEqual(ctx.backendSpecific, {
+            codex: {
+              transport: {
+                type: "uds",
+                path: "/tmp/codex.sock",
+              },
+            },
+          });
+          return {
+            exitCode: 0,
+            signal: null,
+            timedOut: false,
+            sessionId: null,
+            transcript: "done",
+            rawStdout: "",
+            rawStderr: "",
+          };
+        },
+        { __backendId: "codex" },
+      ),
+  );
+
+  const onDisk = JSON.parse(readFileSync(join(outcome.workspaceDir, "run.json"), "utf8"));
+  assert.deepEqual(onDisk.backendSpecific, {
+    codex: {
+      transport: {
+        type: "uds",
+        path: "/tmp/codex.sock",
+      },
+    },
+  });
+  assert.deepEqual(onDisk.resetSeed.backendSpecific, onDisk.backendSpecific);
+});
+
+test("manifest: malformed persisted UDS transport is rejected", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", CODEX_AGENT);
+  writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
+
+  const outcome = await withEnv({ TASK_RUNNER_CODEX_UDS_PATH: "/tmp/codex.sock" }, () =>
+    runWithMock(
+      dir,
+      async (ctx) => {
+        updateTasksForPrompt(ctx.prompt, {
+          t1: { status: "completed" },
+          t2: { status: "completed" },
+          t3: { status: "completed" },
+        });
+        return {
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+          sessionId: null,
+          transcript: "done",
+          rawStdout: "",
+          rawStderr: "",
+        };
+      },
+      { __backendId: "codex" },
+    ),
+  );
+
+  const manifestPath = join(outcome.workspaceDir, "run.json");
+  const onDisk = JSON.parse(readFileSync(manifestPath, "utf8"));
+  onDisk.backendSpecific.codex.transport.path = "relative.sock";
+  writeFileSync(manifestPath, `${JSON.stringify(onDisk, null, 2)}\n`);
+
+  assert.throws(
+    () => withSharedRuntimeEnv(dir, () => resolveResumeTarget(outcome.runId, dir)),
+    /does not look like a task-runner run\.json/,
+  );
+});

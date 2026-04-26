@@ -6183,7 +6183,7 @@ test("daemon-target CLI detaches resume runs and supports json output", async ()
   }
 });
 
-test("daemon-target CLI forwards local TASK_RUNNER_CODEX_WS_URL as a structured resume override", async () => {
+test("daemon-target CLI does not forward local Codex transport env on resume requests", async () => {
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
   const wsServer = new WebSocketServer({ host: "127.0.0.1", port });
@@ -6225,14 +6225,8 @@ test("daemon-target CLI forwards local TASK_RUNNER_CODEX_WS_URL as a structured 
       },
     );
     assert.equal(result.code, 0);
-    assert.deepEqual(requests[0].params.overrides.backendSpecific, {
-      codex: {
-        transport: {
-          type: "ws",
-          url: "ws://127.0.0.1:4773/",
-        },
-      },
-    });
+    assert.equal(requests[0].params.overrides.backendSpecific, undefined);
+    assert.equal(requests[0].params.overrides.codexTransportEnv, undefined);
   } finally {
     for (const client of wsServer.clients) {
       client.terminate();
@@ -6337,6 +6331,163 @@ test("daemon-target CLI forwards local TASK_RUNNER_CODEX_WS_URL as a structured 
         },
       },
     });
+  } finally {
+    for (const client of wsServer.clients) {
+      client.terminate();
+    }
+    await new Promise((resolve) => wsServer.close(() => resolve()));
+  }
+});
+
+test("daemon-target CLI forwards local TASK_RUNNER_CODEX_UDS_PATH as structured run/init overrides", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const wsServer = new WebSocketServer({ host: "127.0.0.1", port });
+  const requests = [];
+  if (wsServer.address() === null) {
+    await new Promise((resolve) => wsServer.once("listening", resolve));
+  }
+
+  wsServer.on("connection", (ws) => {
+    ws.on("message", (payload) => {
+      const request = JSON.parse(payload.toString());
+      requests.push(request);
+      if (request.method === "runs.init") {
+        ws.send(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: request.id,
+            result: {
+              run: {
+                runId: "init-run",
+              },
+            },
+          }),
+        );
+        return;
+      }
+      ws.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: request.id,
+          result: { runId: `${request.method}-run` },
+        }),
+      );
+    });
+  });
+
+  try {
+    const env = {
+      TASK_RUNNER_CODEX_UDS_PATH: "/tmp/codex.sock",
+    };
+    const start = await runCliAsync(
+      [
+        "run",
+        "--connect",
+        listenUrl,
+        "--detach",
+        "--agent",
+        "daemon-agent",
+        "--assignment",
+        "daemon-work",
+      ],
+      { env },
+    );
+    const resume = await runCliAsync(
+      [
+        "run",
+        "--connect",
+        listenUrl,
+        "--detach",
+        "--resume-run",
+        "abc123",
+        "--output-format",
+        "json",
+      ],
+      { env },
+    );
+    const init = await runCliAsync(
+      ["init", "--connect", listenUrl, "--agent", "daemon-agent", "--output-format", "json"],
+      { env },
+    );
+
+    assert.equal(start.code, 0);
+    assert.equal(resume.code, 0);
+    assert.equal(init.code, 0);
+    assert.deepEqual(
+      requests.map((request) => request.method),
+      ["runs.start", "runs.resume", "runs.init"],
+    );
+    for (const request of [requests[0], requests[2]]) {
+      assert.deepEqual(request.params.overrides.backendSpecific, {
+        codex: {
+          transport: {
+            type: "uds",
+            path: "/tmp/codex.sock",
+          },
+        },
+      });
+    }
+    assert.equal(requests[1].params.overrides.backendSpecific, undefined);
+    assert.equal(requests[1].params.overrides.codexTransportEnv, undefined);
+  } finally {
+    for (const client of wsServer.clients) {
+      client.terminate();
+    }
+    await new Promise((resolve) => wsServer.close(() => resolve()));
+  }
+});
+
+test("daemon-target CLI forwards conflicting local Codex transport env for daemon-side precedence resolution", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const wsServer = new WebSocketServer({ host: "127.0.0.1", port });
+  const requests = [];
+  if (wsServer.address() === null) {
+    await new Promise((resolve) => wsServer.once("listening", resolve));
+  }
+
+  wsServer.on("connection", (ws) => {
+    ws.on("message", (payload) => {
+      const request = JSON.parse(payload.toString());
+      requests.push(request);
+      ws.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: request.id,
+          result: { runId: "unexpected-run" },
+        }),
+      );
+    });
+  });
+
+  try {
+    const result = await runCliAsync(
+      [
+        "run",
+        "--connect",
+        listenUrl,
+        "--detach",
+        "--agent",
+        "daemon-agent",
+        "--assignment",
+        "daemon-work",
+      ],
+      {
+        env: {
+          TASK_RUNNER_CODEX_UDS_PATH: "/tmp/codex.sock",
+          TASK_RUNNER_CODEX_WS_URL: "ws://127.0.0.1:4773/",
+        },
+      },
+    );
+
+    assert.equal(result.code, 0);
+    assert.equal(result.stderr, "");
+    assert.deepEqual(requests[0].params.overrides.codexTransportEnv, {
+      udsPath: "/tmp/codex.sock",
+      wsUrl: "ws://127.0.0.1:4773/",
+    });
+    assert.equal(requests[0].params.overrides.backendSpecific, undefined);
   } finally {
     for (const client of wsServer.clients) {
       client.terminate();

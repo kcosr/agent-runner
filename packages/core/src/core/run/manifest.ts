@@ -14,6 +14,7 @@ import { writeTextFileAtomic } from "../../util/write-file-atomic.js";
 import {
   type BackendSpecificConfig,
   cloneBackendSpecificConfig,
+  isAbsoluteUdsSocketPath,
   isWsOrWssUrl,
 } from "../backends/types.js";
 import { type ResolvedLauncherConfig, cloneResolvedLauncherConfig } from "../config/launchers.js";
@@ -947,6 +948,12 @@ function isValidCodexTransport(value: unknown): boolean {
       return false;
     }
     return isWsOrWssUrl(record.url);
+  }
+  if (record.type === "uds") {
+    if (Object.keys(record).some((key) => key !== "type" && key !== "path")) {
+      return false;
+    }
+    return typeof record.path === "string" && isAbsoluteUdsSocketPath(record.path);
   }
   return false;
 }

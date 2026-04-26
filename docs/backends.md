@@ -7,7 +7,7 @@ binding semantics.
 | Backend   | Binary / Transport                   | Session handle        |
 |-----------|--------------------------------------|-----------------------|
 | `claude`  | `claude` CLI (`--print`, streaming)  | session UUID on disk  |
-| `codex`   | `codex app-server` (stdio or WS)     | thread id             |
+| `codex`   | `codex app-server` (stdio, WS, UDS)  | thread id             |
 | `cursor`  | `cursor-agent` CLI                   | session id (deferred) |
 | `pi`      | `pi` CLI (`--mode rpc`)              | session id + cwd hdr  |
 | `passive` | none                                 | free-form string      |
@@ -36,7 +36,7 @@ display name. Session state is bound to the resolved cwd.
 
 Launchers are subprocess-only. They wrap the spawned backend command for
 `claude`, `cursor`, `pi`, and Codex stdio. They do not apply to the
-`passive` backend or Codex websocket transport.
+`passive` backend, Codex websocket transport, or Codex UDS transport.
 
 ## `claude`
 
@@ -59,22 +59,37 @@ Launchers are subprocess-only. They wrap the spawned backend command for
     [--dangerously-bypass-approvals-and-sandbox]`.
   - `{ type: "ws", url }` connects to a remote Codex app-server over an
     absolute `ws://` or `wss://` URL.
+  - `{ type: "uds", path: "/absolute/socket/path" }` connects to a Codex
+    app-server over WebSocket-over-Unix-domain-socket, where `path` must
+    be an absolute socket path. This is still the Codex app-server
+    WebSocket protocol, not raw UDS bytes.
 - Fresh-run precedence:
   - Embedded CLI: agent frontmatter
     `backendSpecific.codex.transport` →
-    `TASK_RUNNER_CODEX_WS_URL` →
+    `TASK_RUNNER_CODEX_UDS_PATH` or `TASK_RUNNER_CODEX_WS_URL` →
     stdio default.
   - Connected / daemon-owned CLI: agent frontmatter
     `backendSpecific.codex.transport` →
     daemon request override
     `overrides.backendSpecific.codex.transport` →
-    daemon process `TASK_RUNNER_CODEX_WS_URL` →
+    client-provided `TASK_RUNNER_CODEX_UDS_PATH` or
+    `TASK_RUNNER_CODEX_WS_URL` →
+    daemon process `TASK_RUNNER_CODEX_UDS_PATH` or
+    `TASK_RUNNER_CODEX_WS_URL` →
     stdio default.
-- The connected CLI only synthesizes that daemon override for Codex, and
-  only from the caller's local `TASK_RUNNER_CODEX_WS_URL`. This does not
-  add generic env passthrough and does not affect other backends.
-- Codex stdio honors the resolved launcher prefix; Codex websocket does
-  not because there is no local subprocess to wrap.
+- `TASK_RUNNER_CODEX_UDS_PATH` and `TASK_RUNNER_CODEX_WS_URL` are
+  Codex-specific defaults, not generic daemon env passthrough. If both are
+  set and no higher-precedence transport was authored or explicitly
+  overridden, the
+  run fails fast.
+- The connected CLI only forwards Codex transport intent for fresh
+  `run`/`init`, and only from the caller's local
+  `TASK_RUNNER_CODEX_UDS_PATH` / `TASK_RUNNER_CODEX_WS_URL`. It does not
+  forward transport env on resume because resume reuses the frozen
+  manifest transport. The daemon must be able to access a forwarded UDS
+  socket path from its own filesystem namespace.
+- Codex stdio honors the resolved launcher prefix; Codex websocket and
+  UDS keep `direct` because there is no local subprocess to wrap.
 - Uses JSON-RPC 2.0 with a thread/turn model:
   `thread/start`, `thread/resume`, `thread/read`, `turn/start`,
   `thread/name/set`.
@@ -143,6 +158,7 @@ without perturbing task state.
 |--------------------------------|--------|
 | `TASK_RUNNER_CLAUDE_BIN`       | Claude CLI binary (default `claude`) |
 | `TASK_RUNNER_CODEX_BIN`        | Codex stdio binary (default `codex`) |
+| `TASK_RUNNER_CODEX_UDS_PATH`   | Fresh Codex runs use this absolute socket path as the default WebSocket-over-UDS transport when no explicit `backendSpecific.codex.transport` was authored |
 | `TASK_RUNNER_CODEX_WS_URL`     | Fresh Codex runs use this as the default websocket transport when no explicit `backendSpecific.codex.transport` was authored |
 | `TASK_RUNNER_CURSOR_BIN`       | Cursor CLI binary (default `cursor-agent`) |
 | `TASK_RUNNER_PI_BIN`           | Pi CLI binary (default `pi`) |
