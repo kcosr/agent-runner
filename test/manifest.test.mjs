@@ -230,7 +230,7 @@ test("manifest: TASK_RUNNER_FULL_ATTEMPT_LOGS opt-in preserves stdout in attempt
   assert.equal(log.stderr, "raw stderr text");
 });
 
-test("manifest: attempt records snapshot state after each attempt", async () => {
+test("manifest: attempt records capture attempt logs and session ids", async () => {
   const dir = tempDir();
   writeAgentAndAssignment(dir);
 
@@ -270,15 +270,9 @@ test("manifest: attempt records snapshot state after each attempt", async () => 
   assert.equal(log1.attemptNumber, 1);
   assert.equal(log2.attemptNumber, 2);
 
-  assert.equal(m.attemptRecords[0].tasksAfter.t1.status, "completed");
-  assert.equal(m.attemptRecords[0].tasksAfter.t2.status, "pending");
-  assert.equal(m.attemptRecords[0].tasksAfter.t3.status, "pending");
   assert.equal(m.attemptRecords[0].sessionIdAtStart, null);
   assert.equal(m.attemptRecords[0].sessionIdCaptured, "sess-multi");
 
-  assert.equal(m.attemptRecords[1].tasksAfter.t1.status, "completed");
-  assert.equal(m.attemptRecords[1].tasksAfter.t2.status, "completed");
-  assert.equal(m.attemptRecords[1].tasksAfter.t3.status, "completed");
   assert.equal(m.attemptRecords[1].sessionIdAtStart, "sess-multi");
 });
 
@@ -308,7 +302,6 @@ test("manifest: blocked run records status and captures final state", async () =
   assert.equal(outcome.manifest.finalTasks.t1.notes, "still investigating");
   assert.equal(outcome.manifest.finalTasks.t2.status, "blocked");
   assert.equal(outcome.manifest.finalTasks.t2.notes, "could not reach the server");
-  assert.equal(outcome.manifest.attemptRecords[0]?.tasksAfter.t1.status, "in_progress");
 });
 
 test("manifest: fresh runs persist the frozen launcher in run and reset seed state", async () => {
@@ -400,7 +393,6 @@ test("manifest: exhausted run records all attempts", async () => {
   assert.equal(outcome.manifest.tasksCompleted, 0);
   assert.equal(outcome.manifest.finalTasks.t1.status, "pending");
   assert.equal(outcome.manifest.finalTasks.t1.notes, "attempt 3 in flight");
-  assert.equal(outcome.manifest.attemptRecords[2]?.tasksAfter.t1.status, "in_progress");
 });
 
 test("manifest: thrown backend launch errors still settle the run as error", async () => {

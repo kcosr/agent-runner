@@ -170,6 +170,11 @@ with a clear error. The repo ships migration scripts under `scripts/`:
 - `scripts/migrate-manifests-v12.mjs` — v11 → v12 (adds `schedule:
   null`; supports repeated `--file <path>` targets for single-manifest
   migrations)
+- `scripts/migrate-manifests-v13.mjs` — cleanup migration only, with no
+  schema-version bump (strips redundant
+  `attemptRecords[].tasksAfter` snapshots from existing manifests; dry-run
+  by default, `--write` to apply, supports repeated `--repo <name>` and
+  `--file <path>` filters plus `--root <path>`)
 - `scripts/migrate-manifests-v11.mjs` — v10 → v11 (normalizes session
   and attempt records plus hook audits)
 - `scripts/migrate-manifests-v10.mjs` — v9 → v10 (freezes launcher

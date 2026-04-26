@@ -875,7 +875,6 @@ test("run reset: json output restores initialized state and removes attempt arti
         timedOut: false,
         transcript: "attempt 1",
         logPath: "attempts/01.json",
-        tasksAfter: manifest.finalTasks,
         invalidStatuses: [],
       },
       {
@@ -892,7 +891,6 @@ test("run reset: json output restores initialized state and removes attempt arti
         timedOut: false,
         transcript: "attempt 2",
         logPath: "attempts/02.json",
-        tasksAfter: manifest.finalTasks,
         invalidStatuses: [],
       },
     ];

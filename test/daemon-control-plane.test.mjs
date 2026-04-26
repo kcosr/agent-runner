@@ -3379,7 +3379,6 @@ test("daemon scheduler resumes recurring reuse runs with a synthetic message aft
         timedOut: false,
         transcript: "done",
         logPath: "attempts/01.json",
-        tasksAfter: manifest.finalTasks,
         invalidStatuses: [],
       },
     ];

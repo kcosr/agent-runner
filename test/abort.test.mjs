@@ -176,7 +176,6 @@ test("abort: terminal persistence clears stale in-progress tasks for non-passive
   assert.equal(aborted.manifest.finalTasks.t1.status, "pending");
   assert.equal(aborted.manifest.finalTasks.t1.notes, "Halfway done");
   assert.equal(aborted.manifest.finalTasks.t2.status, "completed");
-  assert.equal(aborted.manifest.attemptRecords[0]?.tasksAfter.t1.status, "in_progress");
 });
 
 test("abort: backend can pass abortSignal through ctx without crashing", async () => {

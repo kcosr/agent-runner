@@ -115,7 +115,6 @@ export interface AttemptRecord {
   timedOut: boolean;
   transcript: string | null;
   logPath: string; // relative to workspaceDir, e.g. "attempts/01.json"
-  tasksAfter: Record<string, TaskSnapshot>;
   invalidStatuses: InvalidStatusReport[];
 }
 
@@ -735,8 +734,6 @@ function isRunManifest(value: unknown): value is RunManifest {
         typeof record.timedOut !== "boolean" ||
         (record.transcript !== null && typeof record.transcript !== "string") ||
         typeof record.logPath !== "string" ||
-        !record.tasksAfter ||
-        typeof record.tasksAfter !== "object" ||
         !Array.isArray(record.invalidStatuses)
       );
     })

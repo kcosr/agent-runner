@@ -171,7 +171,12 @@ function normalizeAttemptRecords(parsed) {
       if (!isObjectRecord(record)) {
         throw new Error(`attemptRecords[${index}] must be an object`);
       }
-      const { attempt: _oldAttempt, attemptIndexInSession: _oldIndex, ...rest } = record;
+      const {
+        attempt: _oldAttempt,
+        attemptIndexInSession: _oldIndex,
+        tasksAfter: _oldTasksAfter,
+        ...rest
+      } = record;
       const attemptNumber =
         typeof record.attemptNumber === "number"
           ? record.attemptNumber
@@ -203,7 +208,6 @@ function normalizeAttemptRecords(parsed) {
           typeof record.logPath === "string"
             ? record.logPath
             : attemptLogRelativePath(attemptNumber),
-        tasksAfter: cloneRecord(record.tasksAfter),
         invalidStatuses: cloneArray(record.invalidStatuses),
       };
     })
