@@ -295,9 +295,9 @@ blocked with the rest completed or blocked → `blocked`; otherwise
 4. enforces locked fields
 5. captures `repo` from the resolved cwd and creates the run workspace
 6. resolves backend-specific runtime config (for Codex transport:
-   frontmatter → daemon request override → env → stdio default)
+   frontmatter → daemon request override → UDS/WS env → stdio default)
 7. resolves launcher precedence (`--launcher` override → agent launcher →
-   `direct`, with passive and Codex websocket forced to `direct`)
+   `direct`, with passive and Codex websocket/UDS forced to `direct`)
 8. freezes the initial manifest
 9. composes and stores `brief`
 10. invokes the backend, or leaves the run initialized if the backend is
@@ -452,14 +452,23 @@ fresh-run/init time and stores it on both `manifest.backendSpecific` and
 
 - Embedded fresh runs resolve:
   frontmatter `backendSpecific.codex.transport` →
-  `TASK_RUNNER_CODEX_WS_URL` →
+  `TASK_RUNNER_CODEX_UDS_PATH` or `TASK_RUNNER_CODEX_WS_URL` →
   `{ type: "stdio" }`
 - Connected / daemon-owned fresh runs resolve:
   frontmatter `backendSpecific.codex.transport` →
   daemon request override
   `overrides.backendSpecific.codex.transport` →
-  daemon process `TASK_RUNNER_CODEX_WS_URL` →
+  client-provided `TASK_RUNNER_CODEX_UDS_PATH` or
+  `TASK_RUNNER_CODEX_WS_URL` →
+  daemon process `TASK_RUNNER_CODEX_UDS_PATH` or
+  `TASK_RUNNER_CODEX_WS_URL` →
   `{ type: "stdio" }`
+
+The transport union is exactly `{ type: "stdio" }`, `{ type: "ws", url:
+"<absolute ws:// or wss:// URL>" }`, or `{ type: "uds", path:
+"/absolute/socket/path" }`. UDS is WebSocket-over-UDS for Codex
+app-server, not raw socket bytes. If both UDS and WS env vars are set
+without a higher-precedence transport, resolution fails fast.
 
 This is an explicit Codex-only contract. There is no generic
 backend-specific env passthrough layer for other backends.
@@ -476,7 +485,7 @@ The resolved launcher is stored on both `manifest.launcher` and
   daemon host.
 - The built-in `direct` launcher is always available and reserved.
 - Launchers only affect subprocess-backed execution. Passive runs and
-  Codex websocket transport keep `direct`.
+  Codex websocket/UDS transport keep `direct`.
 
 ## Public command contract
 

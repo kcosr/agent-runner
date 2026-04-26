@@ -104,6 +104,7 @@ Both can be overridden on the CLI via `--listen` (on `serve`) and
 |----------|--------|
 | `TASK_RUNNER_CLAUDE_BIN` | Claude CLI binary (default `claude`) |
 | `TASK_RUNNER_CODEX_BIN` | Codex stdio binary (default `codex`) |
+| `TASK_RUNNER_CODEX_UDS_PATH` | Fresh Codex runs use this absolute socket path for WebSocket-over-UDS when no explicit `backendSpecific.codex.transport` was authored; daemon-connected CLI calls forward it only as a Codex-specific structured override |
 | `TASK_RUNNER_CODEX_WS_URL` | Fresh Codex runs use this websocket URL when no explicit `backendSpecific.codex.transport` was authored; daemon-connected CLI calls forward it only as a Codex-specific structured override |
 | `TASK_RUNNER_CURSOR_BIN` | Cursor CLI binary (default `cursor-agent`) |
 | `TASK_RUNNER_FULL_ATTEMPT_LOGS` | Keep full stdout in per-attempt log records instead of the default compact stderr/metadata-only capture |
@@ -112,10 +113,21 @@ Both can be overridden on the CLI via `--listen` (on `serve`) and
 
 See [backends.md](backends.md).
 
-`TASK_RUNNER_CODEX_WS_URL` is not a generic daemon env passthrough knob.
-Only Codex reads it, and only during fresh-run transport resolution.
-Malformed values are rejected unless they are absolute `ws://` or
-`wss://` URLs.
+`TASK_RUNNER_CODEX_UDS_PATH` and `TASK_RUNNER_CODEX_WS_URL` are not
+generic daemon env passthrough knobs. Only Codex reads them, and only
+during fresh-run transport resolution. In connected mode they are
+forwarded for fresh `run` / `init` only; resume reuses the frozen manifest
+transport. Malformed UDS values are rejected unless they are absolute
+socket paths; malformed websocket values are rejected unless they are
+absolute `ws://` or `wss://` URLs. If both env vars are set and no
+higher-precedence transport is authored or explicitly overridden, Task
+Runner fails fast instead of guessing.
+
+The authored Codex transport union is exactly `{ type: "stdio" }`,
+`{ type: "ws", url: "<absolute ws:// or wss:// URL>" }`, or
+`{ type: "uds", path: "/absolute/socket/path" }`. UDS uses the Codex
+app-server WebSocket protocol over the Unix-domain socket rather than raw
+UDS bytes.
 
 `TASK_RUNNER_FULL_ATTEMPT_LOGS` is an opt-in local debugging knob. When
 unset, per-attempt records keep stderr and structured metadata but omit

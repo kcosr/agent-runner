@@ -20,6 +20,14 @@ model: claude-sonnet-4-6
 Agent role instructions.
 `;
 
+const CODEX_AGENT = `---
+schemaVersion: 1
+name: two
+backend: codex
+---
+Codex role instructions.
+`;
+
 const TWO_ASSIGNMENT = `---
 schemaVersion: 1
 name: two-work
@@ -70,15 +78,15 @@ function writeAgentAndAssignment(baseDir) {
   writeAssignment(baseDir, "two-work", TWO_ASSIGNMENT);
 }
 
-function mockBackend(handler) {
-  return { id: "mock", invoke: handler };
+function mockBackend(handler, id = "mock") {
+  return { id, invoke: handler };
 }
 
 function withSharedRuntimeEnv(baseDir, fn) {
   return withEnv(sharedRuntimeEnv(baseDir), fn);
 }
 
-async function initIn(baseDir, { cliVars, overrides } = {}) {
+async function initIn(baseDir, { backendId, cliVars, overrides } = {}) {
   return withSharedRuntimeEnv(baseDir, async () => {
     const loaded = loadAgentConfig("two", baseDir);
     const loadedAssignment = loadAssignmentConfig("two-work", baseDir);
@@ -91,7 +99,7 @@ async function initIn(baseDir, { cliVars, overrides } = {}) {
         cliVars: cliVars ?? {},
         backend: mockBackend(async () => {
           throw new Error("backend should not be invoked during init");
-        }),
+        }, backendId),
         initialize: true,
         callerCwd: baseDir,
         overrides,
@@ -151,6 +159,26 @@ test("init: persists workspace seed and manifest without invoking the backend", 
   assert.ok(outcome.manifest.brief.includes("Agent role instructions."));
   assert.ok(outcome.manifest.brief.includes(`Work on ${join(dir, "repo-root")}.`));
   assert.ok(outcome.manifest.brief.endsWith("the-ask"));
+});
+
+test("init: freezes UDS codex transport into manifest and reset seed", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "two", CODEX_AGENT);
+  writeAssignment(dir, "two-work", TWO_ASSIGNMENT);
+
+  const outcome = await withEnv({ TASK_RUNNER_CODEX_UDS_PATH: "/tmp/codex.sock" }, () =>
+    initIn(dir, { backendId: "codex" }),
+  );
+
+  assert.deepEqual(outcome.manifest.backendSpecific, {
+    codex: {
+      transport: {
+        type: "uds",
+        path: "/tmp/codex.sock",
+      },
+    },
+  });
+  assert.deepEqual(outcome.manifest.resetSeed.backendSpecific, outcome.manifest.backendSpecific);
 });
 
 test("init freezes config-time env interpolation into manifest state and runtime var coercion", async () => {

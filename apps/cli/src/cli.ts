@@ -54,7 +54,10 @@ import {
   resolveTaskRunnerConfigDir,
   resolveTaskRunnerStateDir,
 } from "@task-runner/core/config/runtime-paths.js";
-import type { BackendSpecificConfig } from "@task-runner/core/core/backends/types.js";
+import {
+  type BackendSpecificConfig,
+  codexTransportFromEnvValues,
+} from "@task-runner/core/core/backends/types.js";
 import {
   CommandError,
   type RunListFilter,
@@ -403,25 +406,45 @@ function resolveMessageFile(parsed: ParsedArgs): void {
   }
 }
 
-function synthesizeClientBackendSpecificOverride(): BackendSpecificConfig | undefined {
-  const codexWsUrl = process.env.TASK_RUNNER_CODEX_WS_URL;
-  if (!codexWsUrl) {
+function synthesizeClientCodexTransportOverrides():
+  | Pick<RunCommandOverrides, "backendSpecific" | "codexTransportEnv">
+  | undefined {
+  const udsPath = process.env.TASK_RUNNER_CODEX_UDS_PATH;
+  const wsUrl = process.env.TASK_RUNNER_CODEX_WS_URL;
+  const trimmedUdsPath = udsPath?.trim();
+  const trimmedWsUrl = wsUrl?.trim();
+  if (trimmedUdsPath && trimmedWsUrl) {
+    return {
+      codexTransportEnv: {
+        udsPath,
+        wsUrl,
+      },
+    };
+  }
+  let transport: ReturnType<typeof codexTransportFromEnvValues>;
+  try {
+    transport = codexTransportFromEnvValues({ udsPath, wsUrl });
+  } catch (err) {
+    throw new CommandError(err instanceof Error ? err.message : String(err));
+  }
+  if (!transport) {
     return undefined;
   }
   return {
-    codex: {
-      transport: {
-        type: "ws",
-        url: codexWsUrl,
+    backendSpecific: {
+      codex: {
+        transport,
       },
     },
   };
 }
 
 function resolvedDaemonOverrides(parsed: ParsedArgs): RunCommandOverrides {
+  const codexTransportOverrides =
+    parsed.resumeRun === undefined ? synthesizeClientCodexTransportOverrides() : {};
   return {
     ...resolvedOverrides(parsed),
-    backendSpecific: synthesizeClientBackendSpecificOverride(),
+    ...codexTransportOverrides,
   };
 }
 
@@ -1137,11 +1160,12 @@ function resolveRunListFilter(parsed: ParsedArgs): RunListFilter {
 async function startOrResumeDaemonRun(
   client: DaemonClient,
   parsed: ParsedArgs,
+  overrides: RunCommandOverrides = resolvedDaemonOverrides(parsed),
 ): Promise<{ runId: string }> {
   return parsed.resumeRun
     ? await client.call<{ runId: string }>("runs.resume", {
         target: normalizeTarget(parsed.resumeRun) ?? parsed.resumeRun,
-        overrides: resolvedDaemonOverrides(parsed),
+        overrides,
       })
     : await client.call<{ runId: string }>("runs.start", {
         agent: normalizeTarget(parsed.agent),
@@ -1151,7 +1175,7 @@ async function startOrResumeDaemonRun(
         parentRunId: resolveParentRunId(parsed),
         backendSessionId: parsed.backendSessionId,
         cliVars: parsed.vars,
-        overrides: resolvedDaemonOverrides(parsed),
+        overrides,
       });
 }
 
@@ -2325,6 +2349,7 @@ async function runExecuteCommandDaemon(
 ): Promise<never> {
   const isInitCommand = parsed.command === "init";
   const isJson = parsed.outputFormat === "json";
+  const daemonOverrides = resolvedDaemonOverrides(parsed);
 
   await withDaemonClient(connect, async (client) => {
     if (!isInitCommand && parsed.runId !== undefined) {
@@ -2353,7 +2378,7 @@ async function runExecuteCommandDaemon(
         parentRunId: resolveParentRunId(parsed),
         backendSessionId: parsed.backendSessionId,
         cliVars: parsed.vars,
-        overrides: resolvedDaemonOverrides(parsed),
+        overrides: daemonOverrides,
       });
       if (isJson) {
         writeJson(result.run);
@@ -2364,7 +2389,7 @@ async function runExecuteCommandDaemon(
     }
 
     if (parsed.detach) {
-      const startResult = await startOrResumeDaemonRun(client, parsed);
+      const startResult = await startOrResumeDaemonRun(client, parsed, daemonOverrides);
       renderDetachedRun(startResult.runId, parsed.outputFormat);
       process.exit(0);
     }
@@ -2417,7 +2442,7 @@ async function runExecuteCommandDaemon(
 
     let subscriptionId: string | undefined;
     try {
-      const startResult = await startOrResumeDaemonRun(client, parsed);
+      const startResult = await startOrResumeDaemonRun(client, parsed, daemonOverrides);
       activeRunId = startResult.runId;
       subscriptionId = await client.subscribe(
         {
@@ -2647,7 +2672,11 @@ async function main(): Promise<void> {
   }
 
   if (daemonConnect) {
-    await runExecuteCommandDaemon(parsed, daemonConnect);
+    try {
+      await runExecuteCommandDaemon(parsed, daemonConnect);
+    } catch (err) {
+      exitCommandFailure(err, daemonConnect.connectUrl);
+    }
   } else {
     await runExecuteCommandEmbedded(parsed);
   }

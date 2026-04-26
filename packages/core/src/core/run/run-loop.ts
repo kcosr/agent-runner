@@ -11,7 +11,11 @@ import {
 import { resolveTaskRunnerCommand } from "../../task-runner-command.js";
 import { normalizeOptionalRunName } from "../../util/run-name.js";
 import { shortId } from "../../util/short-id.js";
-import { cloneBackendSpecificConfig, isWsOrWssUrl } from "../backends/types.js";
+import {
+  type CodexTransportEnvValues,
+  cloneBackendSpecificConfig,
+  codexTransportFromEnvValues,
+} from "../backends/types.js";
 import type {
   Backend,
   BackendEvent,
@@ -102,6 +106,7 @@ export interface RunOverrides {
   model?: string;
   effort?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   backendSpecific?: BackendSpecificConfig;
+  codexTransportEnv?: CodexTransportEnvValues;
   message?: string;
   name?: string;
   timeoutSec?: number;
@@ -594,23 +599,45 @@ function resolveFreshRunCwd(
   return resolutionBase;
 }
 
-function codexTransportFromEnv(): CodexTransportConfig | undefined {
-  const wsUrl = process.env.TASK_RUNNER_CODEX_WS_URL?.trim();
-  if (!wsUrl) {
-    return undefined;
-  }
-  if (!isWsOrWssUrl(wsUrl)) {
-    throw new Error("TASK_RUNNER_CODEX_WS_URL must be an absolute ws:// or wss:// URL");
-  }
-  return {
-    type: "ws",
-    url: wsUrl,
-  };
-}
-
 function captureFullAttemptLogs(env: NodeJS.ProcessEnv = process.env): boolean {
   const raw = env.TASK_RUNNER_FULL_ATTEMPT_LOGS?.trim().toLowerCase();
   return raw === "1" || raw === "true" || raw === "on" || raw === "yes";
+}
+
+function resolveFreshCodexTransport(
+  agentConfig: LoadedAgent["config"],
+  overrides: RunOverrides | undefined,
+  execution: RunExecution,
+): CodexTransportConfig {
+  const authoredTransport = agentConfig.backendSpecific?.codex?.transport;
+  if (authoredTransport) {
+    return { ...authoredTransport };
+  }
+
+  const overrideTransport =
+    execution.hostMode === "daemon" ? overrides?.backendSpecific?.codex?.transport : undefined;
+  if (overrideTransport) {
+    return { ...overrideTransport };
+  }
+
+  if (execution.hostMode === "daemon" && overrides?.codexTransportEnv) {
+    // Connected clients forward unresolved env pairs only so authored/request
+    // transports can win before codexTransportFromEnvValues reports conflicts.
+    const clientEnvTransport = codexTransportFromEnvValues(overrides.codexTransportEnv);
+    if (clientEnvTransport) {
+      return clientEnvTransport;
+    }
+  }
+
+  const envTransport = codexTransportFromEnvValues({
+    udsPath: process.env.TASK_RUNNER_CODEX_UDS_PATH,
+    wsUrl: process.env.TASK_RUNNER_CODEX_WS_URL,
+  });
+  if (envTransport) {
+    return envTransport;
+  }
+
+  return { type: "stdio" };
 }
 
 function resolveFreshBackendSpecific(
@@ -623,39 +650,10 @@ function resolveFreshBackendSpecific(
     return undefined;
   }
 
-  const authoredTransport = agentConfig.backendSpecific?.codex?.transport;
-  if (authoredTransport) {
-    return {
-      codex: {
-        transport: { ...authoredTransport },
-      },
-    };
-  }
-
-  const overrideTransport =
-    execution.hostMode === "daemon" ? overrides?.backendSpecific?.codex?.transport : undefined;
-  if (overrideTransport) {
-    return {
-      codex: {
-        transport: { ...overrideTransport },
-      },
-    };
-  }
-
-  const envTransport = codexTransportFromEnv();
-  if (envTransport) {
-    return {
-      codex: {
-        transport: envTransport,
-      },
-    };
-  }
-
+  const transport = resolveFreshCodexTransport(agentConfig, overrides, execution);
   return {
     codex: {
-      transport: {
-        type: "stdio",
-      },
+      transport: { ...transport },
     },
   };
 }

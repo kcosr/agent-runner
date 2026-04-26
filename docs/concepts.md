@@ -117,7 +117,7 @@ See [variables.md](variables.md).
 A backend is the runtime that actually executes the worker:
 
 - `claude`
-- `codex` (stdio or WebSocket app-server)
+- `codex` (stdio, WebSocket app-server, or WebSocket-over-UDS app-server)
 - `cursor` (`cursor-agent`)
 - `pi`
 - `passive` — no backend invocation; the run is driven externally through

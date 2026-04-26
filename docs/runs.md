@@ -276,7 +276,7 @@ across manual reset because it is not part of the reset seed.
 unarchived `initialized` run. The mutation rerenders the composed brief
 and reset seed while preserving frozen identity/runtime fields including
 agent, assignment, backend, cwd, tasks, schedule, launcher, hooks, and
-backend-specific Codex transport.
+backend-specific Codex transport, including stdio, websocket, or UDS.
 
 The operation is all-or-nothing. Validation failures, required-var
 failures, locked `message` / rendered task fields, and prepare/render

@@ -31,7 +31,8 @@ export function launcherAppliesToBackend(
   if (backendId !== "codex") {
     return true;
   }
-  return backendSpecific?.codex?.transport?.type !== "ws";
+  const transportType = backendSpecific?.codex?.transport?.type;
+  return transportType !== "ws" && transportType !== "uds";
 }
 
 export function resolveFreshLauncherConfig(args: {

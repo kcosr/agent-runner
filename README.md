@@ -218,8 +218,8 @@ task-runner show launcher ssh-docker
 ```
 
 Launchers apply only to subprocess-backed execution (`claude`, `cursor`,
-`pi`, and Codex stdio). Passive runs and Codex websocket runs keep the
-built-in `direct` launcher.
+`pi`, and Codex stdio). Passive runs and Codex websocket/UDS runs keep
+the built-in `direct` launcher.
 
 ### Passive / externally driven run
 
@@ -345,10 +345,24 @@ transport intent. Connected mode does not forward arbitrary env vars, but
 it does synthesize structured daemon request fields for a small set of
 known caller-local inputs:
 
+- `TASK_RUNNER_CODEX_UDS_PATH` becomes a Codex-only
+  WebSocket-over-UDS transport override
 - `TASK_RUNNER_CODEX_WS_URL` becomes a Codex-only websocket transport
   override
 - `--parent-run <run-id>` or local `TASK_RUNNER_PARENT_RUN_ID` becomes
   request `parentRunId` for fresh `run` / `init`
+
+The Codex UDS transport shape is `{ type: "uds", path:
+"/absolute/socket/path" }`; it is WebSocket-over-UDS for Codex
+app-server, not raw UDS bytes. `TASK_RUNNER_CODEX_UDS_PATH` must be an
+absolute socket path and `TASK_RUNNER_CODEX_WS_URL` must be an absolute
+`ws://` or `wss://` URL. If both env vars are set and no higher-precedence
+transport was authored or explicitly overridden, task-runner fails fast
+instead of guessing. Connected mode forwards Codex transport env only for
+fresh `run` / `init`; resume reuses the frozen manifest transport. The
+daemon must be able to access the client-provided UDS path from its own
+filesystem namespace, and these env vars remain Codex-specific inputs,
+not generic daemon env passthrough.
 
 Named launcher lookup follows the same freeze-first model. Fresh runs
 resolve the final launcher once, store it on the manifest and reset
@@ -444,6 +458,7 @@ The rest are focused topic pages:
 | `TASK_RUNNER_PARENT_RUN_ID` | Default lineage parent for fresh runs when `--parent-run` is omitted |
 | `TASK_RUNNER_CLAUDE_BIN` | Claude CLI binary |
 | `TASK_RUNNER_CODEX_BIN` | Codex stdio binary |
+| `TASK_RUNNER_CODEX_UDS_PATH` | Default WebSocket-over-UDS transport socket path for fresh Codex runs when no explicit `backendSpecific.codex.transport` was authored |
 | `TASK_RUNNER_CODEX_WS_URL` | Default websocket transport for fresh Codex runs when no explicit `backendSpecific.codex.transport` was authored |
 | `TASK_RUNNER_CURSOR_BIN` | Cursor CLI binary |
 | `TASK_RUNNER_FULL_ATTEMPT_LOGS` | Keep full stdout in per-attempt log records |

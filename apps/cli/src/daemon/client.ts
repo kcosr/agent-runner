@@ -249,7 +249,13 @@ export class DaemonClient {
     let parsed: JsonRpcResponse | JsonRpcNotification;
     try {
       parsed = JSON.parse(raw) as JsonRpcResponse | JsonRpcNotification;
-    } catch {
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      const error = new DaemonRpcError(-32700, `daemon emitted malformed JSON-RPC: ${detail}`);
+      this.failPending(error);
+      if (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) {
+        this.ws.close(1002, "malformed JSON-RPC");
+      }
       return;
     }
 

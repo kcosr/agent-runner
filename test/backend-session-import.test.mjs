@@ -268,6 +268,77 @@ test("import (run): codex bootstrap validation receives daemon-forwarded transpo
   });
 });
 
+test("import (run): codex bootstrap validation accepts daemon-forwarded UDS transport", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "codex-import-agent", CODEX_IMPORT_AGENT);
+  writeAssignment(dir, "import-work", IMPORT_ASSIGNMENT);
+
+  const captured = {};
+  let validateCalls = 0;
+  const backend = {
+    ...importableBackend({
+      captured,
+      validate: async (vctx) => {
+        validateCalls++;
+        assert.deepEqual(vctx.backendSpecific, {
+          codex: {
+            transport: {
+              type: "uds",
+              path: "/tmp/client-codex.sock",
+            },
+          },
+        });
+        return { valid: true };
+      },
+    }),
+    id: "codex",
+  };
+
+  const outcome = await withEnv(
+    {
+      TASK_RUNNER_CODEX_UDS_PATH: "/tmp/daemon-codex.sock",
+      TASK_RUNNER_CODEX_WS_URL: "ws://daemon.example/socket",
+    },
+    () =>
+      runImportIn(
+        dir,
+        {
+          backend,
+          bootstrapBackendSessionId: "imported-codex-thread",
+          overrides: {
+            backendSpecific: {
+              codex: {
+                transport: {
+                  type: "uds",
+                  path: "/tmp/client-codex.sock",
+                },
+              },
+            },
+          },
+          execution: {
+            hostMode: "daemon",
+            controller: {
+              kind: "daemon",
+              daemonInstanceId: "daemon-test",
+            },
+          },
+        },
+        "codex-import-agent",
+      ),
+  );
+
+  assert.equal(validateCalls, 1);
+  assert.equal(captured.resumeSessionId, "imported-codex-thread");
+  assert.deepEqual(outcome.manifest.backendSpecific, {
+    codex: {
+      transport: {
+        type: "uds",
+        path: "/tmp/client-codex.sock",
+      },
+    },
+  });
+});
+
 function writePiSession(piHome, cwd, sessionId, headerCwd = cwd) {
   const bucketDir = join(piHome, "agent", "sessions", encodePiSessionDir(cwd));
   mkdirSync(bucketDir, { recursive: true });

@@ -425,6 +425,84 @@ test("resume: codex runs reuse the frozen transport instead of current env", asy
   assert.deepEqual(second.manifest.resetSeed.backendSpecific, initialTransport);
 });
 
+test("resume: codex UDS runs reuse frozen transport and ignore env drift", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "three", CODEX_AGENT);
+  writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
+
+  const initialTransport = {
+    codex: {
+      transport: {
+        type: "uds",
+        path: "/tmp/initial-codex.sock",
+      },
+    },
+  };
+
+  const first = await withEnv(
+    { TASK_RUNNER_CODEX_UDS_PATH: initialTransport.codex.transport.path },
+    () =>
+      runIn(dir, {
+        backend: {
+          id: "codex",
+          invoke: async (ctx) => {
+            assert.deepEqual(ctx.backendSpecific, initialTransport);
+            updateTasksForPrompt(ctx.prompt, {
+              t1: { status: "blocked", notes: "waiting on dependency" },
+            });
+            return {
+              exitCode: 0,
+              signal: null,
+              timedOut: false,
+              sessionId: "thr-codex-uds",
+              transcript: "blocked",
+              rawStdout: "",
+              rawStderr: "",
+            };
+          },
+        },
+      }),
+  );
+
+  const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.runId, dir));
+  const second = await withEnv(
+    {
+      TASK_RUNNER_CODEX_UDS_PATH: "/tmp/changed-codex.sock",
+      TASK_RUNNER_CODEX_WS_URL: "ws://changed.example/socket",
+    },
+    () =>
+      runIn(dir, {
+        backend: {
+          id: "codex",
+          invoke: async (ctx) => {
+            assert.equal(ctx.resumeSessionId, "thr-codex-uds");
+            assert.deepEqual(ctx.backendSpecific, initialTransport);
+            patchManifest(first.workspaceDir, (manifest) => {
+              manifest.finalTasks.t1.status = "completed";
+              manifest.finalTasks.t2.status = "completed";
+              manifest.finalTasks.t3.status = "completed";
+              manifest.tasksCompleted = 3;
+            });
+            return {
+              exitCode: 0,
+              signal: null,
+              timedOut: false,
+              sessionId: "thr-codex-uds",
+              transcript: "done",
+              rawStdout: "",
+              rawStderr: "",
+            };
+          },
+        },
+        overrides: { message: "dependency is back" },
+        resume: target,
+      }),
+  );
+
+  assert.deepEqual(second.manifest.backendSpecific, initialTransport);
+  assert.deepEqual(second.manifest.resetSeed.backendSpecific, initialTransport);
+});
+
 test("resume: rejects a target already marked running", async () => {
   const dir = tempDir();
   writeAgentAndAssignment(dir);

@@ -157,6 +157,8 @@ Launcher precedence on fresh run/init is:
 
 In connected mode the daemon resolves named launchers against its own
 config root, then freezes the result into the manifest and reset seed.
+Launchers apply to subprocess-backed execution only; passive runs and
+Codex websocket/UDS transports keep the built-in `direct` launcher.
 
 Schedule flags are accepted on `init` and `run ready`. Exactly one of
 `--schedule-at`, `--schedule-delay`, or `--schedule-cron` is required
@@ -411,8 +413,8 @@ Recognized by the CLI:
 - `TASK_RUNNER_CONFIG_DIR`, `TASK_RUNNER_STATE_DIR`
 - `TASK_RUNNER_LISTEN`, `TASK_RUNNER_CONNECT`
 - `TASK_RUNNER_CLAUDE_BIN`, `TASK_RUNNER_CODEX_BIN`,
-  `TASK_RUNNER_CODEX_WS_URL`, `TASK_RUNNER_CURSOR_BIN`,
-  `TASK_RUNNER_PI_BIN`, `PI_HOME`
+  `TASK_RUNNER_CODEX_UDS_PATH`, `TASK_RUNNER_CODEX_WS_URL`,
+  `TASK_RUNNER_CURSOR_BIN`, `TASK_RUNNER_PI_BIN`, `PI_HOME`
 - `TASK_RUNNER_MIN_SCHEDULE_DELAY_SEC`,
   `TASK_RUNNER_MIN_RECURRENCE_INTERVAL_SEC`
 - `TASK_RUNNER_CALL_DEPTH`, `TASK_RUNNER_MAX_CALL_DEPTH`

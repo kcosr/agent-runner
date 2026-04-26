@@ -231,6 +231,7 @@ test("loadAgentConfig resolves exact-match env fields and whole-body instruction
         AGENT_TIMEOUT: "90",
         AGENT_UNRESTRICTED: "true",
         CODEX_URL: "ws://127.0.0.1:4773/socket",
+        CODEX_UDS_PATH: "/tmp/codex.sock",
         BODY_TEXT: "Operate on the release board.",
       },
       () => {
@@ -247,8 +248,8 @@ unrestricted: \${AGENT_UNRESTRICTED}
 backendSpecific:
   codex:
     transport:
-      type: ws
-      url: \${CODEX_URL}
+      type: uds
+      path: \${CODEX_UDS_PATH}
 ---
 \${BODY_TEXT}
 `,
@@ -263,8 +264,8 @@ backendSpecific:
         assert.deepEqual(loaded.config.backendSpecific, {
           codex: {
             transport: {
-              type: "ws",
-              url: "ws://127.0.0.1:4773/socket",
+              type: "uds",
+              path: "/tmp/codex.sock",
             },
           },
         });
@@ -929,6 +930,36 @@ body
     });
   }));
 
+test("loadAgentConfig accepts UDS backendSpecific.codex.transport in agent frontmatter", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    writeAgent(
+      configDir,
+      "codex-uds-transport",
+      `---
+schemaVersion: 1
+name: codex-uds-transport
+backend: codex
+backendSpecific:
+  codex:
+    transport:
+      type: uds
+      path: /tmp/codex.sock
+---
+body
+`,
+    );
+
+    const loaded = loadAgentConfig("codex-uds-transport", rootDir);
+    assert.deepEqual(loaded.config.backendSpecific, {
+      codex: {
+        transport: {
+          type: "uds",
+          path: "/tmp/codex.sock",
+        },
+      },
+    });
+  }));
+
 test("loadAgentConfig rejects invalid backendSpecific.codex.transport values", () =>
   withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
     writeAgent(
@@ -954,6 +985,70 @@ body
       (err) => {
         assert.ok(err instanceof AgentConfigError);
         assert.match(err.message, /backendSpecific\.codex\.transport/);
+        return true;
+      },
+    );
+  }));
+
+test("loadAgentConfig rejects invalid UDS backendSpecific.codex.transport values", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    for (const [name, path] of [
+      ["relative-uds", "tmp/codex.sock"],
+      ["home-uds", "~/codex.sock"],
+      ["unix-url-uds", "unix:///tmp/codex.sock"],
+    ]) {
+      writeAgent(
+        configDir,
+        name,
+        `---
+schemaVersion: 1
+name: ${name}
+backend: codex
+backendSpecific:
+  codex:
+    transport:
+      type: uds
+      path: ${path}
+---
+body
+`,
+      );
+
+      assert.throws(
+        () => loadAgentConfig(name, rootDir),
+        (err) => {
+          assert.ok(err instanceof AgentConfigError);
+          assert.match(err.message, /backendSpecific\.codex\.transport/);
+          assert.match(err.message, /absolute socket path/);
+          return true;
+        },
+      );
+    }
+
+    writeAgent(
+      configDir,
+      "extra-uds",
+      `---
+schemaVersion: 1
+name: extra-uds
+backend: codex
+backendSpecific:
+  codex:
+    transport:
+      type: uds
+      path: /tmp/codex.sock
+      url: ws://127.0.0.1:4773/
+---
+body
+`,
+    );
+
+    assert.throws(
+      () => loadAgentConfig("extra-uds", rootDir),
+      (err) => {
+        assert.ok(err instanceof AgentConfigError);
+        assert.match(err.message, /backendSpecific\.codex\.transport/);
+        assert.match(err.message, /Unrecognized key/);
         return true;
       },
     );

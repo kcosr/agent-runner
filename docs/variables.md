@@ -119,7 +119,7 @@ Field surfaces are split explicitly:
   whole value. This includes scalar config such as `schemaVersion`,
   `name`, `backend`, `model`, `effort`, `timeoutSec`, `unrestricted`,
   `cwd`, `maxRetries`, task ids, lock entries, var metadata, and Codex
-  transport leaf fields.
+  transport leaf fields such as `url` and absolute UDS `path`.
 - String prose fields accept env interpolation only when the entire field
   value is exactly one `${...}` expression. This includes assignment
   `message`, `callerInstructions`, task titles and bodies, var
