@@ -8,6 +8,7 @@ import {
 } from "../../config/runtime-paths.js";
 import type { LoadedAssignment } from "../config/loaded.js";
 import type { HookPhase } from "../config/schema.js";
+import { HookConfigError } from "./errors.js";
 import { builtinHookModule } from "./registry.js";
 import type {
   HookModule,
@@ -16,12 +17,7 @@ import type {
   TaskTransitionHookWhen,
 } from "./types.js";
 
-export class HookConfigError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "HookConfigError";
-  }
-}
+export { HookConfigError };
 
 const jiti = createJiti(import.meta.url, {
   interopDefault: true,
