@@ -1,23 +1,12 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "ignoreIssues": {
-    "apps/cli/src/daemon/config.ts": ["exports"],
-    "apps/cli/src/daemon/protocol.ts": ["types"]
-  },
+  "tags": ["-@protocol"],
   "workspaces": {
     ".": {
       "entry": [
         "scripts/analyze-perf-log.mjs",
         "scripts/copy-web-assets.mjs",
         "scripts/migrate-agent-seeds.mjs",
-        "scripts/migrate-manifests-v6.mjs",
-        "scripts/migrate-manifests-v7.mjs",
-        "scripts/migrate-manifests-v8.mjs",
-        "scripts/migrate-manifests-v9.mjs",
-        "scripts/migrate-manifests-v10.mjs",
-        "scripts/migrate-manifests-v11.mjs",
-        "scripts/migrate-manifests-v12.mjs",
-        "scripts/migrate-run-events-v2.mjs",
         "scripts/task-list-markdown.mjs",
         "assignments/plan-feature/hooks/derive-worktree-vars.ts"
       ],
@@ -31,7 +20,6 @@
       "project": ["src/**/*.{ts,tsx}"]
     },
     "packages/core": {
-      "entry": ["src/{app,assignment,backends,config,contracts,core,util}/**/*.ts"],
       "project": ["src/**/*.ts"]
     }
   }

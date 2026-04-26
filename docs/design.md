@@ -653,6 +653,7 @@ Standard verification:
 npm run build
 npm run lint
 npm run format
+npm run format:check
 npm run check:knip
 npm test
 npm run check
@@ -662,10 +663,12 @@ The root `check` pipeline is:
 
 1. `npm run build`
 2. `npm run lint`
-3. `npm run test:node`
-4. `npm run test:web`
+3. `npm run format:check`
+4. `npm run test:node`
+5. `npm run test:web`
 
 `npm run lint` runs Biome linting only, with warnings treated as
-failures. `npm run format` owns Biome formatting, and `npm run
+failures. `npm run format` writes Biome formatting, `npm run
+format:check` verifies formatting without writing, and `npm run
 check:knip` runs the unused-file/export/dependency baseline separately
 from the standard `check` pipeline.

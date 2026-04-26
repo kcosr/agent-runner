@@ -481,6 +481,7 @@ npm install
 npm run build
 npm run lint
 npm run format
+npm run format:check
 npm run test:node
 npm run test:web
 npm run check:knip
@@ -488,9 +489,10 @@ npm run check
 ```
 
 `npm run lint` runs Biome linting with warnings treated as failures.
-`npm run format` runs Biome formatting, and `npm run check:knip` runs
-the unused-file/export/dependency baseline. `npm run check` keeps the
-standard build, lint, and test pipeline.
+`npm run format` writes Biome formatting, `npm run format:check` checks
+formatting without writing, and `npm run check:knip` runs the
+unused-file/export/dependency baseline. `npm run check` keeps the
+standard build, lint, format-check, and test pipeline.
 
 Primary entry points:
 

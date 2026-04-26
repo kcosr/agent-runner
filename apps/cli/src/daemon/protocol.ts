@@ -161,24 +161,22 @@ export interface RunsResumeParams {
   overrides: RunCommandOverrides;
 }
 
-interface RunsTimelineHistoryParams extends RunTargetParams {}
-interface RunsAuditHistoryParams extends RunTargetParams {
-  limit?: number;
-}
-
 export interface EventsSubscribeParams {
   channel: RunEventChannel;
   runId?: string;
 }
 
+/** @protocol */
 export interface EventsSubscribeResult {
   subscriptionId: string;
 }
 
+/** @protocol */
 export interface EventsUnsubscribeParams {
   subscriptionId: string;
 }
 
+/** @protocol */
 export interface EventsUnsubscribeResult {
   unsubscribed: true;
 }
@@ -215,96 +213,120 @@ export interface RunAuditNotificationParams {
   event: RunAuditEnvelope["event"];
 }
 
+/** @protocol */
 export interface RunsListResult {
   runs: RunSummary[];
 }
 
+/** @protocol */
 export interface RunResult {
   run: RunDetail;
 }
 
+/** @protocol */
 export interface RunBriefResult {
   brief: string;
 }
 
+/** @protocol */
 export interface RunsTimelineHistoryResult {
   history: RunTimelineHistory;
 }
 
+/** @protocol */
 export interface RunsAuditHistoryResult {
   history: RunAuditHistory;
 }
 
+/** @protocol */
 export interface TasksListResult {
   tasks: RunTaskSummary[];
 }
 
+/** @protocol */
 export interface TaskResult {
   task: RunTaskSummary;
 }
 
+/** @protocol */
 export interface AgentsListResult {
   agents: DefinitionListResult;
 }
 
+/** @protocol */
 export interface AssignmentsListResult {
   assignments: DefinitionListResult;
 }
 
+/** @protocol */
 export interface LaunchersListResult {
   launchers: DefinitionListResult;
 }
 
+/** @protocol */
 export interface AgentResult {
   agent: DefinitionDetail;
 }
 
+/** @protocol */
 export interface AssignmentResult {
   assignment: DefinitionDetail;
 }
 
+/** @protocol */
 export interface LauncherResult {
   launcher: DefinitionDetail;
 }
 
+/** @protocol */
 export type { RunInputSurfaceResult };
 
+/** @protocol */
 export interface RunArchiveRpcResult {
   result: RunArchiveResult;
 }
 
+/** @protocol */
 export interface RunSetNameRpcResult {
   result: RunNameResult;
 }
 
+/** @protocol */
 export interface RunSetNoteRpcResult {
   result: RunNoteResult;
 }
 
+/** @protocol */
 export interface RunSetPinnedRpcResult {
   result: RunPinnedResult;
 }
 
+/** @protocol */
 export interface RunBackendSessionRpcResult {
   result: RunBackendSessionResult;
 }
 
+/** @protocol */
 export interface RunDependenciesRpcResult {
   result: RunDependenciesResult;
 }
 
+/** @protocol */
 export interface RunsStartResult {
   runId: string;
 }
 
+/** @protocol */
 export interface AttachmentsListResult {
   attachments: AttachmentListEntry[];
 }
 
+/** @protocol */
 export interface AttachmentResult {
   attachment: RunAttachment;
 }
 
+/** @protocol */
 export interface AttachmentRemoveHttpResult {
   result: RunAttachmentRemoveResult;
 }

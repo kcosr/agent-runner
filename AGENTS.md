@@ -46,8 +46,9 @@ Repeated checks remain legitimate when:
 - Run `npm test` for functional changes.
 - Run `npm run lint` to check Biome lint rules with warnings treated as failures.
 - Run `npm run format` to apply Biome formatting.
+- Run `npm run format:check` to verify Biome formatting without writing.
 - Run `npm run check:knip` when dependency, export, or entry-point metadata changes.
-- Run `npm run check` to run the standard verification pipeline (`build`, `lint`, `test`).
+- Run `npm run check` to run the standard verification pipeline (`build`, `lint`, `format:check`, `test`).
 - Do not commit `dist/`; build artifacts are generated locally and during packaging.
 - If you cannot run the relevant checks, call that out explicitly.
 
