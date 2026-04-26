@@ -36,7 +36,7 @@ tasks:
   - id: t2
     title: Second
 ---
-Work on the repo. Assignment at {{assignment_path}}.
+Work on the repo. Assignment at {{cwd}}.
 `;
 
 // ─── chat-mode agent (no tasks, no assignment) ─────────────────────────────
@@ -68,7 +68,7 @@ tasks:
   - id: t1
     title: First
 ---
-Work on the repo. Assignment at {{assignment_path}}.
+Work on the repo. Assignment at {{cwd}}.
 `;
 
 function tempDir() {

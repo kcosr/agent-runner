@@ -519,7 +519,6 @@ function renderInitializedRun(detail: ReturnType<typeof getRun>): void {
     runId: detail.runId,
     agentName: detail.agent.name,
     assignmentSourcePath: detail.assignment?.sourcePath ?? null,
-    assignmentPath: detail.assignmentPath,
     name: detail.name,
     cwd: detail.cwd,
     passive: detail.backend === "passive",

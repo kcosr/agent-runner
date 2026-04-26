@@ -332,7 +332,7 @@ Work.
   const init = await initRunIn(dir);
   const before = readFileSync(join(init.workspaceDir, "run.json"), "utf8");
   writeFileSync(
-    init.assignmentPath,
+    join(init.workspaceDir, "assignment-seed.md"),
     `---
 schemaVersion: 1
 name: work

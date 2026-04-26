@@ -569,7 +569,7 @@ being frozen into the manifest:
 
 The syntax is `{{key}}` (whitespace permitted). Always-available variables
 include `run_id`, `cwd`, `config_dir`, `state_dir`, `assignment_name`,
-`assignment_path`, and `task_runner_cmd`. See [variables.md](variables.md).
+and `task_runner_cmd`. See [variables.md](variables.md).
 
 This runtime `{{key}}` interpolation is distinct from the config-time
 `${...}` env interpolation used while loading frontmatter.

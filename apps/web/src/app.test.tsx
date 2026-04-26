@@ -256,7 +256,6 @@ function makeDetail(
     pinned: false,
     isLive: true,
     workspaceDir: "/tmp/task-runner/.state/run-1",
-    assignmentPath: "/tmp/task-runner/assignment.md",
     agent: {
       name: "implementer",
       sourcePath: null,
@@ -264,7 +263,6 @@ function makeDetail(
     assignment: {
       name: "Build dashboard",
       sourcePath: "/tmp/assignment.md",
-      workspacePath: "/tmp/task-runner/assignment.md",
     },
     backend: "codex",
     model: "gpt-5.4",
@@ -1514,7 +1512,6 @@ describe("web app", () => {
           assignment: {
             name: "Planning run",
             sourcePath: "/tmp/planning-assignment.md",
-            workspacePath: "/tmp/task-runner/planning-assignment.md",
           },
         }),
         "run-child": makeDetail({
@@ -1523,7 +1520,6 @@ describe("web app", () => {
           assignment: {
             name: "Implementer run",
             sourcePath: "/tmp/implementer-assignment.md",
-            workspacePath: "/tmp/task-runner/implementer-assignment.md",
           },
           parentRunId: "run-parent",
         }),
@@ -2876,7 +2872,6 @@ describe("web app", () => {
           assignment: {
             name: "Passive active run",
             sourcePath: "/tmp/a.md",
-            workspacePath: "/tmp/b.md",
           },
           backend: "passive",
           status: "initialized",
@@ -2936,7 +2931,6 @@ describe("web app", () => {
           assignment: {
             name: "Passive active run",
             sourcePath: "/tmp/a.md",
-            workspacePath: "/tmp/b.md",
           },
           backend: "passive",
           status: "initialized",
@@ -3088,7 +3082,6 @@ describe("web app", () => {
           assignment: {
             name: "Indicator run",
             sourcePath: "/tmp/indicator-source.md",
-            workspacePath: "/tmp/indicator-workspace.md",
           },
         }),
       },
@@ -3191,7 +3184,6 @@ describe("web app", () => {
           assignment: {
             name: "Scheduled dashboard",
             sourcePath: "/tmp/scheduled-a.md",
-            workspacePath: "/tmp/scheduled-b.md",
           },
           schedule,
           scheduleState: "future",
@@ -3201,7 +3193,6 @@ describe("web app", () => {
           assignment: {
             name: "Plain dashboard",
             sourcePath: "/tmp/plain-a.md",
-            workspacePath: "/tmp/plain-b.md",
           },
           schedule: null,
           scheduleState: "none",
@@ -3799,7 +3790,6 @@ describe("web app", () => {
           assignment: {
             name: "Repo A Codex",
             sourcePath: "/tmp/repo-a-codex.md",
-            workspacePath: "/tmp/repo-a-codex.md",
           },
           backend: "codex",
           name: "Repo A Codex",
@@ -3814,7 +3804,6 @@ describe("web app", () => {
           assignment: {
             name: "Repo B Claude",
             sourcePath: "/tmp/repo-b-claude.md",
-            workspacePath: "/tmp/repo-b-claude.md",
           },
           backend: "claude",
           name: "Repo B Claude",
@@ -4115,7 +4104,6 @@ describe("web app", () => {
           assignment: {
             name: "Pending dashboard",
             sourcePath: "/tmp/pending-a.md",
-            workspacePath: "/tmp/pending-b.md",
           },
           name: "Pending dashboard",
           status: "initialized",
@@ -4125,7 +4113,6 @@ describe("web app", () => {
           assignment: {
             name: "Running dashboard",
             sourcePath: "/tmp/running-a.md",
-            workspacePath: "/tmp/running-b.md",
           },
           name: "Running dashboard",
         }),
@@ -4136,7 +4123,6 @@ describe("web app", () => {
           assignment: {
             name: "Completed dashboard",
             sourcePath: "/tmp/completed-a.md",
-            workspacePath: "/tmp/completed-b.md",
           },
           name: "Completed dashboard",
           status: "success",
@@ -4207,7 +4193,6 @@ describe("web app", () => {
             assignment: {
               name: "Initialized fullscreen",
               sourcePath: "/tmp/fullscreen-a.md",
-              workspacePath: "/tmp/fullscreen-b.md",
             },
             tasks: [
               {
@@ -4234,7 +4219,6 @@ describe("web app", () => {
             assignment: {
               name: "Neighbor fullscreen",
               sourcePath: "/tmp/fullscreen-c.md",
-              workspacePath: "/tmp/fullscreen-d.md",
             },
             name: "Neighbor fullscreen",
           }),
@@ -4346,7 +4330,6 @@ describe("web app", () => {
           assignment: {
             name: "Fullscreen toggle",
             sourcePath: "/tmp/fullscreen-toggle-a.md",
-            workspacePath: "/tmp/fullscreen-toggle-b.md",
           },
           name: "Fullscreen toggle",
         }),
@@ -4395,7 +4378,6 @@ describe("web app", () => {
           assignment: {
             name: "Running shortcuts",
             sourcePath: "/tmp/running-shortcuts-a.md",
-            workspacePath: "/tmp/running-shortcuts-b.md",
           },
           name: "Running shortcuts",
         }),
@@ -4406,7 +4388,6 @@ describe("web app", () => {
           assignment: {
             name: "Completed shortcuts",
             sourcePath: "/tmp/completed-shortcuts-a.md",
-            workspacePath: "/tmp/completed-shortcuts-b.md",
           },
           name: "Completed shortcuts",
           status: "success",
@@ -4468,7 +4449,6 @@ describe("web app", () => {
           assignment: {
             name: "Running shortcuts 1",
             sourcePath: "/tmp/running-shortcuts-1-a.md",
-            workspacePath: "/tmp/running-shortcuts-1-b.md",
           },
           name: "Running shortcuts 1",
         }),
@@ -4477,7 +4457,6 @@ describe("web app", () => {
           assignment: {
             name: "Running shortcuts 2",
             sourcePath: "/tmp/running-shortcuts-2-a.md",
-            workspacePath: "/tmp/running-shortcuts-2-b.md",
           },
           name: "Running shortcuts 2",
         }),
@@ -4486,7 +4465,6 @@ describe("web app", () => {
           assignment: {
             name: "Running shortcuts 3",
             sourcePath: "/tmp/running-shortcuts-3-a.md",
-            workspacePath: "/tmp/running-shortcuts-3-b.md",
           },
           name: "Running shortcuts 3",
         }),
@@ -4588,7 +4566,6 @@ describe("web app", () => {
           assignment: {
             name: "Running shortcuts 1",
             sourcePath: "/tmp/running-shortcuts-1-a.md",
-            workspacePath: "/tmp/running-shortcuts-1-b.md",
           },
           name: "Running shortcuts 1",
         }),
@@ -4597,7 +4574,6 @@ describe("web app", () => {
           assignment: {
             name: "Running shortcuts 2",
             sourcePath: "/tmp/running-shortcuts-2-a.md",
-            workspacePath: "/tmp/running-shortcuts-2-b.md",
           },
           name: "Running shortcuts 2",
         }),
@@ -4606,7 +4582,6 @@ describe("web app", () => {
           assignment: {
             name: "Running shortcuts 3",
             sourcePath: "/tmp/running-shortcuts-3-a.md",
-            workspacePath: "/tmp/running-shortcuts-3-b.md",
           },
           name: "Running shortcuts 3",
         }),
@@ -4685,7 +4660,6 @@ describe("web app", () => {
           assignment: {
             name: "Running shortcuts",
             sourcePath: "/tmp/running-shortcuts-a.md",
-            workspacePath: "/tmp/running-shortcuts-b.md",
           },
           name: "Running shortcuts",
         }),
@@ -4696,7 +4670,6 @@ describe("web app", () => {
           assignment: {
             name: "Completed shortcuts",
             sourcePath: "/tmp/completed-shortcuts-a.md",
-            workspacePath: "/tmp/completed-shortcuts-b.md",
           },
           name: "Completed shortcuts",
           status: "success",
@@ -4708,7 +4681,6 @@ describe("web app", () => {
           assignment: {
             name: "Blocked shortcuts",
             sourcePath: "/tmp/blocked-shortcuts-a.md",
-            workspacePath: "/tmp/blocked-shortcuts-b.md",
           },
           name: "Blocked shortcuts",
           status: "blocked",
@@ -4955,7 +4927,6 @@ describe("web app", () => {
           assignment: {
             name: "Assignment metadata",
             sourcePath: "/tmp/assignment.md",
-            workspacePath: "/tmp/task-runner/assignment.md",
           },
         }),
         "run-search": makeDetail({
@@ -4964,7 +4935,6 @@ describe("web app", () => {
           assignment: {
             name: "Different assignment",
             sourcePath: "/tmp/assignment.md",
-            workspacePath: "/tmp/task-runner/assignment.md",
           },
         }),
       },
@@ -5006,7 +4976,6 @@ describe("web app", () => {
           assignment: {
             name: "plan-feature",
             sourcePath: "/tmp/assignment.md",
-            workspacePath: "/tmp/task-runner/assignment.md",
           },
         }),
       },
@@ -5039,7 +5008,6 @@ describe("web app", () => {
           assignment: {
             name: "plan-feature",
             sourcePath: "/tmp/assignment.md",
-            workspacePath: "/tmp/task-runner/assignment.md",
           },
           activeTask: { id: "long-task", title: longTaskTitle },
         }),
@@ -5314,7 +5282,6 @@ describe("web app", () => {
           assignment: {
             name: "Passive run",
             sourcePath: "/tmp/a.md",
-            workspacePath: "/tmp/b.md",
           },
           backendSessionId: null,
           capabilities: { canResume: false },
@@ -5326,7 +5293,6 @@ describe("web app", () => {
           assignment: {
             name: "Codex run",
             sourcePath: "/tmp/a.md",
-            workspacePath: "/tmp/b.md",
           },
         }),
       },
@@ -5358,7 +5324,6 @@ describe("web app", () => {
           assignment: {
             name: "Passive run",
             sourcePath: "/tmp/a.md",
-            workspacePath: "/tmp/b.md",
           },
           backendSessionId: "thread-1",
           capabilities: { canResume: false },
@@ -5410,7 +5375,6 @@ describe("web app", () => {
           assignment: {
             name: "Passive run",
             sourcePath: "/tmp/a.md",
-            workspacePath: "/tmp/b.md",
           },
           backendSessionId: "thread-1",
           capabilities: { canResume: false },
@@ -5455,7 +5419,6 @@ describe("web app", () => {
           assignment: {
             name: "Passive run",
             sourcePath: "/tmp/a.md",
-            workspacePath: "/tmp/b.md",
           },
           backendSessionId: null,
           capabilities: { canResume: false },
@@ -5504,7 +5467,6 @@ describe("web app", () => {
           assignment: {
             name: "Archived passive run",
             sourcePath: "/tmp/a.md",
-            workspacePath: "/tmp/b.md",
           },
           capabilities: {
             canArchive: false,
@@ -5573,7 +5535,6 @@ describe("web app", () => {
           assignment: {
             name: "Archived dashboard",
             sourcePath: "/tmp/a.md",
-            workspacePath: "/tmp/b.md",
           },
           capabilities: {
             canArchive: false,
@@ -5714,7 +5675,6 @@ describe("web app", () => {
           assignment: {
             name: "Pinned running",
             sourcePath: "/tmp/pinned-running.md",
-            workspacePath: "/tmp/pinned-running-workspace.md",
           },
           startedAt: "2026-04-13T05:00:00.000Z",
         }),
@@ -5724,7 +5684,6 @@ describe("web app", () => {
           assignment: {
             name: "Newest running",
             sourcePath: "/tmp/newest-running.md",
-            workspacePath: "/tmp/newest-running-workspace.md",
           },
           startedAt: "2026-04-13T05:05:00.000Z",
         }),
@@ -5735,7 +5694,6 @@ describe("web app", () => {
           assignment: {
             name: "Pinned completed",
             sourcePath: "/tmp/pinned-completed.md",
-            workspacePath: "/tmp/pinned-completed-workspace.md",
           },
           startedAt: "2026-04-13T04:50:00.000Z",
           status: "success",
@@ -5746,7 +5704,6 @@ describe("web app", () => {
           assignment: {
             name: "Newest completed",
             sourcePath: "/tmp/newest-completed.md",
-            workspacePath: "/tmp/newest-completed-workspace.md",
           },
           startedAt: "2026-04-13T05:10:00.000Z",
           status: "success",
@@ -5798,7 +5755,6 @@ describe("web app", () => {
           assignment: {
             name: "Noted dashboard",
             sourcePath: "/tmp/noted-a.md",
-            workspacePath: "/tmp/noted-b.md",
           },
           note: "already tracked",
         }),
@@ -5807,7 +5763,6 @@ describe("web app", () => {
           assignment: {
             name: "Plain dashboard",
             sourcePath: "/tmp/plain-a.md",
-            workspacePath: "/tmp/plain-b.md",
           },
           note: null,
         }),
@@ -5845,7 +5800,6 @@ describe("web app", () => {
           assignment: {
             name: "Build dashboard",
             sourcePath: "/tmp/a.md",
-            workspacePath: "/tmp/b.md",
           },
         }),
       },
@@ -5879,7 +5833,6 @@ describe("web app", () => {
           assignment: {
             name: "Build dashboard",
             sourcePath: "/tmp/a.md",
-            workspacePath: "/tmp/b.md",
           },
         }),
       },
@@ -5946,7 +5899,6 @@ describe("web app", () => {
           assignment: {
             name: "Archive ready",
             sourcePath: "/tmp/archive-a.md",
-            workspacePath: "/tmp/archive-b.md",
           },
           capabilities: {
             canArchive: true,
@@ -6024,7 +5976,6 @@ describe("web app", () => {
           assignment: {
             name: "Pinned noted",
             sourcePath: "/tmp/pinned-noted-a.md",
-            workspacePath: "/tmp/pinned-noted-b.md",
           },
           note: "keep visible",
           pinned: true,
@@ -6034,7 +5985,6 @@ describe("web app", () => {
           assignment: {
             name: "Plain run",
             sourcePath: "/tmp/plain-run-a.md",
-            workspacePath: "/tmp/plain-run-b.md",
           },
           note: null,
         }),
@@ -6043,7 +5993,6 @@ describe("web app", () => {
           assignment: {
             name: "Scheduled run",
             sourcePath: "/tmp/scheduled-run-a.md",
-            workspacePath: "/tmp/scheduled-run-b.md",
           },
           schedule,
           scheduleState: "future",
@@ -6053,7 +6002,6 @@ describe("web app", () => {
           assignment: {
             name: "Archived noted",
             sourcePath: "/tmp/archived-noted-a.md",
-            workspacePath: "/tmp/archived-noted-b.md",
           },
           archivedAt: "2026-04-13T06:00:00.000Z",
           note: "archived note",
@@ -6992,7 +6940,6 @@ describe("web app", () => {
           assignment: {
             name: "Resumable run",
             sourcePath: "/tmp/a.md",
-            workspacePath: "/tmp/b.md",
           },
           capabilities: {
             canArchive: true,
@@ -7009,7 +6956,7 @@ describe("web app", () => {
           runId: "passive",
           status: "success",
           backend: "passive",
-          assignment: { name: "Passive run", sourcePath: "/tmp/a.md", workspacePath: "/tmp/b.md" },
+          assignment: { name: "Passive run", sourcePath: "/tmp/a.md" },
           capabilities: {
             canArchive: true,
             canUnarchive: false,
@@ -7054,7 +7001,6 @@ describe("web app", () => {
           assignment: {
             name: "Resumable run",
             sourcePath: "/tmp/a.md",
-            workspacePath: "/tmp/b.md",
           },
           capabilities: {
             canArchive: true,
@@ -7134,7 +7080,6 @@ describe("web app", () => {
           assignment: {
             name: "Archived run",
             sourcePath: "/tmp/a.md",
-            workspacePath: "/tmp/b.md",
           },
           capabilities: {
             canArchive: false,
@@ -7191,7 +7136,6 @@ describe("web app", () => {
           assignment: {
             name: "Resumable run",
             sourcePath: "/tmp/a.md",
-            workspacePath: "/tmp/b.md",
           },
           capabilities: {
             canArchive: true,
@@ -7236,7 +7180,6 @@ describe("web app", () => {
           assignment: {
             name: "Resumable run",
             sourcePath: "/tmp/a.md",
-            workspacePath: "/tmp/b.md",
           },
           capabilities: {
             canArchive: true,
@@ -7292,7 +7235,6 @@ describe("web app", () => {
             assignment: {
               name: "Resumable run",
               sourcePath: "/tmp/a.md",
-              workspacePath: "/tmp/b.md",
             },
             capabilities: {
               canArchive: true,
@@ -7358,7 +7300,6 @@ describe("web app", () => {
           assignment: {
             name: "Resumable run",
             sourcePath: "/tmp/a.md",
-            workspacePath: "/tmp/b.md",
           },
           capabilities: {
             canArchive: true,
@@ -7412,7 +7353,6 @@ describe("web app", () => {
             assignment: {
               name: "Initialized run",
               sourcePath: "/tmp/a.md",
-              workspacePath: "/tmp/b.md",
             },
             tasks: [
               {
@@ -7491,7 +7431,6 @@ describe("web app", () => {
             assignment: {
               name: "Ready from keyboard",
               sourcePath: "/tmp/keyboard-a.md",
-              workspacePath: "/tmp/keyboard-b.md",
             },
             tasks: [
               {
@@ -7564,7 +7503,6 @@ describe("web app", () => {
             assignment: {
               name: "Resumable from keyboard",
               sourcePath: "/tmp/resume-a.md",
-              workspacePath: "/tmp/resume-b.md",
             },
             capabilities: {
               canArchive: true,
@@ -7618,7 +7556,6 @@ describe("web app", () => {
           assignment: {
             name: "Passive keyboard run",
             sourcePath: "/tmp/passive-enter-a.md",
-            workspacePath: "/tmp/passive-enter-b.md",
           },
           capabilities: { canResume: false },
         }),
@@ -7650,7 +7587,6 @@ describe("web app", () => {
             assignment: {
               name: "Resumable run",
               sourcePath: "/tmp/a.md",
-              workspacePath: "/tmp/b.md",
             },
             capabilities: {
               canArchive: true,
@@ -7710,7 +7646,6 @@ describe("web app", () => {
           assignment: {
             name: "Resumable run",
             sourcePath: "/tmp/a.md",
-            workspacePath: "/tmp/b.md",
           },
           tasks: [
             {
@@ -7775,7 +7710,6 @@ describe("web app", () => {
             assignment: {
               name: "Resumable run",
               sourcePath: "/tmp/a.md",
-              workspacePath: "/tmp/b.md",
             },
             capabilities: {
               canArchive: true,
@@ -7837,7 +7771,6 @@ describe("web app", () => {
           assignment: {
             name: "Blocked run",
             sourcePath: "/tmp/a.md",
-            workspacePath: "/tmp/b.md",
           },
           tasks: [
             {
@@ -7980,7 +7913,6 @@ describe("web app", () => {
             assignment: {
               name: "Resumable run",
               sourcePath: "/tmp/a.md",
-              workspacePath: "/tmp/b.md",
             },
             capabilities: {
               canArchive: true,
@@ -8261,7 +8193,6 @@ describe("web app", () => {
           assignment: {
             name: "Original title",
             sourcePath: "/tmp/a.md",
-            workspacePath: "/tmp/b.md",
           },
         }),
       },
@@ -8279,7 +8210,7 @@ describe("web app", () => {
 
     state.runs = [makeRun({ assignmentName: "Updated from SSE" })];
     state.details["run-1"] = makeDetail({
-      assignment: { name: "Updated from SSE", sourcePath: "/tmp/a.md", workspacePath: "/tmp/b.md" },
+      assignment: { name: "Updated from SSE", sourcePath: "/tmp/a.md" },
     });
     source.emitMessage({ type: "summary_upsert", summary: state.runs[0] });
 
@@ -8310,7 +8241,6 @@ describe("web app", () => {
           assignment: {
             name: "Original title",
             sourcePath: "/tmp/a.md",
-            workspacePath: "/tmp/b.md",
           },
         }),
       },
@@ -8364,7 +8294,6 @@ describe("web app", () => {
           assignment: {
             name: "Original title",
             sourcePath: "/tmp/a.md",
-            workspacePath: "/tmp/b.md",
           },
         }),
       },
@@ -8391,7 +8320,6 @@ describe("web app", () => {
           assignment: {
             name: "Original title",
             sourcePath: "/tmp/a.md",
-            workspacePath: "/tmp/b.md",
           },
         }),
       },
@@ -8418,7 +8346,6 @@ describe("web app", () => {
           assignment: {
             name: "Original title",
             sourcePath: "/tmp/a.md",
-            workspacePath: "/tmp/b.md",
           },
         }),
       },
@@ -8468,7 +8395,6 @@ describe("web app", () => {
           assignment: {
             name: "Newest run",
             sourcePath: "/tmp/newer.md",
-            workspacePath: "/tmp/newer-workspace.md",
           },
           name: "Newest run",
           startedAt: "2026-04-13T05:05:00.000Z",
@@ -8478,7 +8404,6 @@ describe("web app", () => {
           assignment: {
             name: "Older run",
             sourcePath: "/tmp/older.md",
-            workspacePath: "/tmp/older-workspace.md",
           },
           name: "Older run",
           startedAt: "2026-04-13T05:00:00.000Z",
@@ -8539,7 +8464,6 @@ describe("web app", () => {
           assignment: {
             name: "Selected run",
             sourcePath: "/tmp/selected.md",
-            workspacePath: "/tmp/selected-workspace.md",
           },
           name: "Selected run",
           startedAt: "2026-04-13T05:00:00.000Z",
@@ -8549,7 +8473,6 @@ describe("web app", () => {
           assignment: {
             name: "Completed run",
             sourcePath: "/tmp/completed.md",
-            workspacePath: "/tmp/completed-workspace.md",
           },
           name: "Completed run",
           startedAt: "2026-04-13T05:04:00.000Z",
@@ -8572,7 +8495,6 @@ describe("web app", () => {
         assignment: {
           name: "Selected run",
           sourcePath: "/tmp/selected.md",
-          workspacePath: "/tmp/selected-workspace.md",
         },
         name: "Selected run",
         startedAt: "2026-04-13T05:00:00.000Z",
@@ -8602,7 +8524,6 @@ describe("web app", () => {
           assignment: {
             name: "Existing run",
             sourcePath: "/tmp/existing.md",
-            workspacePath: "/tmp/existing-workspace.md",
           },
           name: "Existing run",
           startedAt: "2026-04-13T05:05:00.000Z",
@@ -8680,7 +8601,6 @@ describe("web app", () => {
             assignment: {
               name: "Newest run",
               sourcePath: "/tmp/newer.md",
-              workspacePath: "/tmp/newer-workspace.md",
             },
             name: "Newest run",
             startedAt: "2026-04-13T05:05:00.000Z",
@@ -8690,7 +8610,6 @@ describe("web app", () => {
             assignment: {
               name: "Older run",
               sourcePath: "/tmp/older.md",
-              workspacePath: "/tmp/older-workspace.md",
             },
             name: "Older run",
             startedAt: "2026-04-13T05:00:00.000Z",
@@ -8815,7 +8734,6 @@ describe("web app", () => {
             assignment: {
               name: "Second run",
               sourcePath: "/tmp/a.md",
-              workspacePath: "/tmp/b.md",
             },
             tasks: [
               {
@@ -8883,7 +8801,6 @@ describe("web app", () => {
           assignment: {
             name: "Second run",
             sourcePath: "/tmp/a.md",
-            workspacePath: "/tmp/b.md",
           },
         }),
       },
@@ -8935,7 +8852,6 @@ describe("web app", () => {
             assignment: {
               name: "Current assignment",
               sourcePath: "/tmp/current.md",
-              workspacePath: "/tmp/current-workspace.md",
             },
             name: "Current run",
           }),
@@ -8944,7 +8860,6 @@ describe("web app", () => {
             assignment: {
               name: "Plan feature follow-up",
               sourcePath: "/tmp/dependency.md",
-              workspacePath: "/tmp/dependency-workspace.md",
             },
             name: "Dependency target",
           }),

@@ -52,7 +52,7 @@ tasks:
     title: Third
     body: Do the third thing.
 ---
-Work on the repo. Plan at {{assignment_path}}.
+Work on the repo. Plan at {{cwd}}.
 `;
 
 const EXPLICIT_RELATIVE_ASSIGNMENT = `---
@@ -70,7 +70,7 @@ tasks:
     title: Third
     body: Do the third thing.
 ---
-Work on the repo. Plan at {{assignment_path}}.
+Work on the repo. Plan at {{cwd}}.
 `;
 
 const THREE_ASSIGNMENT = `---
@@ -88,7 +88,7 @@ tasks:
     title: Third
     body: Do the third thing.
 ---
-Work on the repo. Plan at {{assignment_path}}.
+Work on the repo. Plan at {{cwd}}.
 `;
 
 const CODEX_AGENT = `---
@@ -519,7 +519,7 @@ tasks:
   - id: t2
     title: Second
 ---
-Work on the repo. Plan at {{assignment_path}}.
+Work on the repo. Plan at {{cwd}}.
 `,
   );
   writeNamedHook(
@@ -666,12 +666,23 @@ Work.
     `export default {
   name: "freeze-prepare",
   prepare(ctx) {
+    if ("assignmentPath" in ctx.run) {
+      throw new Error("ctx.run.assignmentPath should not exist");
+    }
+    if ("workspacePath" in ctx.assignment) {
+      throw new Error("ctx.assignment.workspacePath should not exist");
+    }
     return {
       action: "continue",
       mutate: {
         run: { cwd: ctx.run.cwd + "/prepared" },
         vars: { prepared_dir: ctx.run.cwd + "/prepared" },
-        state: { prepared: true },
+        state: {
+          prepared: true,
+          workspaceDir: ctx.run.workspaceDir,
+          assignmentName: ctx.assignment.name,
+          assignmentSourcePath: ctx.assignment.sourcePath,
+        },
         note: "prepared once",
       },
     };
@@ -701,6 +712,12 @@ Work.
   assert.equal(initManifest.runtimeVars.prepared_dir, join(dir, "prepared"));
   assert.equal(initManifest.note, "prepared once");
   assert.equal(initManifest.hookState.prepared, true);
+  assert.equal(initManifest.hookState.workspaceDir, initialized.outcome.workspaceDir);
+  assert.equal(initManifest.hookState.assignmentName, "three-work");
+  assert.equal(
+    initManifest.hookState.assignmentSourcePath,
+    join(dir, "assignments", "three-work", "assignment.md"),
+  );
   assert.equal(initManifest.resolvedHooks[0].source.name, "freeze-prepare");
   assert.match(initManifest.resolvedHooks[0].resolvedPath, /freeze-prepare\/hook\.ts$/);
 

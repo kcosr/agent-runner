@@ -5,11 +5,7 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { VarResolutionError, runAgent } from "../packages/core/dist/core/run/run-loop.js";
-import {
-  readManifestForPrompt,
-  updateTasksForPrompt,
-  withSharedRuntimeEnv,
-} from "./helpers/runtime-paths.mjs";
+import { updateTasksForPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
 const INTERP_AGENT = `---
 schemaVersion: 1
@@ -42,9 +38,31 @@ tasks:
   - id: t2
     title: Second task
     body: |
-      Also record the run id {{run_id}} and assignment path
-      {{assignment_path}}. Assignment name: {{assignment_name}}.
+      Also record the run id {{run_id}}. Assignment name: {{assignment_name}}.
       Config dir: {{config_dir}}. State dir: {{state_dir}}.
+---
+Work on {{repo_path}}.
+`;
+
+const REMOVED_ASSIGNMENT_PATH_ASSIGNMENT = `---
+schemaVersion: 1
+name: interp-work
+maxRetries: 1
+vars:
+  repo_path:
+    type: string
+    required: true
+    sources: [cli]
+tasks:
+  - id: t1
+    title: Review {{repo_path}}
+    body: |
+      Work against the repository at \`{{repo_path}}\`.
+  - id: t2
+    title: Removed assignment path var
+    body: |
+      Removed assignment path token stays literal: {{assignment_path}}.
+      Run id still resolves: {{run_id}}.
 ---
 Work on {{repo_path}}.
 `;
@@ -75,12 +93,10 @@ function writeTask(baseDir, name, body) {
   writeFileSync(path, body);
 }
 
-function ackBackend(onAssignmentPath) {
+function ackBackend() {
   return {
     id: "mock",
     async invoke(ctx) {
-      const manifest = readManifestForPrompt(ctx.prompt);
-      onAssignmentPath(manifest.assignmentPath);
       updateTasksForPrompt(ctx.prompt, {
         t1: { status: "completed" },
         t2: { status: "completed" },
@@ -101,7 +117,6 @@ function ackBackend(onAssignmentPath) {
 
 async function runIn(baseDir, cliVars) {
   return withSharedRuntimeEnv(baseDir, async () => {
-    let assignmentPath = null;
     const loaded = loadAgentConfig("interp", baseDir);
     const loadedAssignment = loadAssignmentConfig("interp-work", baseDir);
     const originalCwd = process.cwd();
@@ -111,13 +126,11 @@ async function runIn(baseDir, cliVars) {
         loaded,
         loadedAssignment,
         cliVars,
-        backend: ackBackend((path) => {
-          assignmentPath = path;
-        }),
+        backend: ackBackend(),
         stderr: () => {},
         stdout: () => {},
       });
-      return { ...outcome, assignmentPath };
+      return outcome;
     } finally {
       process.chdir(originalCwd);
     }
@@ -142,11 +155,26 @@ test("task title and body interpolate {{var}} refs from assignment vars", async 
   // Runner-injected vars also interpolate.
   const t2 = outcome.manifest.finalTasks.t2;
   assert.match(t2.body, new RegExp(`run id ${outcome.runId}`));
-  assert.ok(t2.body.includes(outcome.assignmentPath));
   assert.match(t2.body, /Assignment name: interp-work\./);
   assert.match(t2.body, new RegExp(`Config dir: ${escapeRegExp(dir)}\\.`));
   assert.match(t2.body, new RegExp(`State dir: ${escapeRegExp(dir)}\\.`));
   assert.doesNotMatch(t2.body, /\{\{/);
+});
+
+test("removed assignment_path variable is not injected into task bodies", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "interp", INTERP_AGENT);
+  writeAssignment(dir, "interp-work", REMOVED_ASSIGNMENT_PATH_ASSIGNMENT);
+
+  const outcome = await runIn(dir, { repo_path: "/tmp/fake-repo" });
+
+  const t2 = outcome.manifest.finalTasks.t2;
+  assert.match(t2.body, /Removed assignment path token stays literal: \{\{assignment_path\}\}\./);
+  assert.match(t2.body, new RegExp(`Run id still resolves: ${outcome.runId}\\.`));
+  assert.doesNotMatch(
+    t2.body,
+    new RegExp(escapeRegExp(join(outcome.workspaceDir, "assignment-seed.md"))),
+  );
 });
 
 test("task body var uses the assignment's default when no CLI value", async () => {
@@ -167,8 +195,7 @@ test("workspace assignment-seed.md is generated for interpolated task bodies", a
   writeAssignment(dir, "interp-work", INTERP_ASSIGNMENT);
 
   const outcome = await runIn(dir, { repo_path: "/tmp/fake-repo", scope: "staged" });
-  assert.equal(outcome.assignmentPath, join(outcome.workspaceDir, "assignment-seed.md"));
-  assert.equal(existsSync(outcome.assignmentPath), true);
+  assert.equal(existsSync(join(outcome.workspaceDir, "assignment-seed.md")), true);
   assert.match(
     outcome.manifest.finalTasks.t1.body,
     /Work against the repository at `\/tmp\/fake-repo`/,
@@ -229,14 +256,11 @@ Work on {{repo_path}}.
   );
 
   const outcome = await withSharedRuntimeEnv(dir, async () => {
-    let assignmentPath = null;
     const loaded = loadAgentConfig("interp", dir);
     const loadedAssignment = loadAssignmentConfig("named-task-work", dir);
     const backend = {
       id: "mock",
       async invoke(ctx) {
-        const manifest = readManifestForPrompt(ctx.prompt);
-        assignmentPath = manifest.assignmentPath;
         updateTasksForPrompt(ctx.prompt, {
           "review/reuse": { status: "completed" },
         });
@@ -262,7 +286,7 @@ Work on {{repo_path}}.
         backend,
         stderr: () => {},
         stdout: () => {},
-      }).then((result) => ({ ...result, assignmentPath }));
+      });
     } finally {
       process.chdir(originalCwd);
     }

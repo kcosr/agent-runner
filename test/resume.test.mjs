@@ -40,7 +40,7 @@ tasks:
     title: Third
     body: Do the third thing.
 ---
-Work on the repo. Plan at {{assignment_path}}.
+Work on the repo. Plan at {{cwd}}.
 `;
 
 const CODEX_AGENT = `---

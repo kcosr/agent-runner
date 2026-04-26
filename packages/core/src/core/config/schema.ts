@@ -382,8 +382,8 @@ const assignmentConfigBaseSchema = z.object({
   // task-runner, NOT part of the prompt sent to the backend.
   // Printed to stderr on fresh `run` and `init` (never on
   // --resume-run). Interpolated against runtime vars and the
-  // runner-injected vars ({{run_id}}, {{assignment_path}},
-  // {{assignment_name}}, {{config_dir}}, {{state_dir}},
+  // runner-injected vars ({{run_id}}, {{assignment_name}},
+  // {{config_dir}}, {{state_dir}},
   // {{task_runner_cmd}}, etc.).
   // Frozen into `manifest.callerInstructions` at first write so
   // `status --output-format json --field callerInstructions` can

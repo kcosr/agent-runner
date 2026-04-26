@@ -104,10 +104,10 @@ test("resolveResumeTarget rejects a manifest with finalTasks: null", () => {
   );
 });
 
-test("resolveResumeTarget rejects a manifest missing assignmentPath", () => {
+test("resolveResumeTarget rejects a v14 manifest carrying legacy assignmentPath", () => {
   const dir = tempDir();
   const manifest = baseManifest("corrupt2", join(dir, "runs", "unknown", "corrupt2"));
-  manifest.assignmentPath = undefined;
+  manifest.assignmentPath = join(dir, "runs", "unknown", "corrupt2", "assignment-seed.md");
   writeManifest(dir, "unknown", "corrupt2", manifest);
 
   assert.throws(
@@ -204,45 +204,48 @@ test("resolveResumeTarget rejects a manifest with a session missing brief", () =
   );
 });
 
-test("resolveResumeTarget accepts a well-formed v13 manifest from the unknown bucket", () => {
+test("resolveResumeTarget accepts a well-formed v14 manifest from the unknown bucket", () => {
   const dir = tempDir();
   const workspaceDir = join(dir, "runs", "unknown", "wellformed");
   writeManifest(dir, "unknown", "wellformed", baseManifest("wellformed", workspaceDir));
 
   const resolved = withStateRoot(dir, () => resolveResumeTarget("wellformed", dir));
   assert.equal(resolved.manifest.runId, "wellformed");
-  assert.equal(resolved.manifest.schemaVersion, 13);
+  assert.equal(resolved.manifest.schemaVersion, 14);
 });
 
-test("resume/list/find ignore legacy assignmentPath capture when workspaceDir matches", () => {
+test("resolveResumeTarget rejects a v14 manifest carrying legacy assignment.workspacePath", () => {
   const dir = tempDir();
-  const workspaceDir = join(dir, "runs", "unknown", "legacy-path");
-  const manifest = baseManifest("legacy-path", workspaceDir);
-  manifest.assignmentPath = join(workspaceDir, "assignment.md");
+  const workspaceDir = join(dir, "runs", "unknown", "legacy-workspace-path");
+  const manifest = baseManifest("legacy-workspace-path", workspaceDir);
   manifest.assignment = {
     name: "legacy-assignment",
     sourcePath: "/repo/assignments/legacy/assignment.md",
     workspacePath: join(workspaceDir, "assignment.md"),
   };
-  writeManifest(dir, "unknown", "legacy-path", manifest);
+  writeManifest(dir, "unknown", "legacy-workspace-path", manifest);
 
-  const resumed = withStateRoot(dir, () => resolveResumeTarget("legacy-path", dir));
-  assert.equal(resumed.workspaceDir, workspaceDir);
-
-  const listed = withStateRoot(dir, () => listRunManifests(process.env));
-  assert.deepEqual(
-    listed.map((entry) => entry.manifest.runId),
-    ["legacy-path"],
+  assert.throws(
+    () => withStateRoot(dir, () => resolveResumeTarget("legacy-workspace-path", dir)),
+    (err) => {
+      assert.ok(err instanceof ResumeError);
+      assert.match(err.message, /does not look like a task-runner run\.json/);
+      return true;
+    },
   );
 
-  const found = withStateRoot(dir, () => findRunManifestsById("legacy-path", process.env));
-  assert.equal(found.length, 1);
-  assert.equal(found[0]?.workspaceDir, workspaceDir);
+  const listed = withStateRoot(dir, () => listRunManifests(process.env));
+  assert.deepEqual(listed, []);
+
+  const found = withStateRoot(dir, () =>
+    findRunManifestsById("legacy-workspace-path", process.env),
+  );
+  assert.equal(found.length, 0);
 });
 
 function baseManifest(runId, workspaceDir) {
   return {
-    schemaVersion: 13,
+    schemaVersion: 14,
     runId,
     repo: "unknown",
     agent: {
@@ -265,7 +268,6 @@ function baseManifest(runId, workspaceDir) {
     cwd: process.cwd(),
     lockedFields: [],
     timeoutSec: 3600,
-    assignmentPath: join(workspaceDir, "assignment-seed.md"),
     workspaceDir,
     startedAt: "2026-04-11T16:00:00Z",
     endedAt: "2026-04-11T16:05:00Z",

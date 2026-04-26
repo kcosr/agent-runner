@@ -42,7 +42,7 @@ tasks:
     title: Second
     body: Do the second thing.
 ---
-Work on {{cwd}}. Plan at {{assignment_path}}.
+Work on {{cwd}}. Plan at {{cwd}}.
 `;
 
 function tempDir() {
@@ -151,8 +151,10 @@ test("init: persists workspace seed and manifest without invoking the backend", 
   assert.equal(outcome.manifest.cwd, join(dir, "repo-root"));
   assert.equal(outcome.manifest.repo, "unknown");
 
-  assert.equal(outcome.assignmentPath, join(outcome.workspaceDir, "assignment-seed.md"));
-  assert.ok(existsSync(outcome.assignmentPath), "workspace seed exists");
+  assert.equal("assignmentPath" in outcome.manifest, false);
+  assert.equal("workspacePath" in outcome.manifest.assignment, false);
+  assert.equal("assignmentPath" in outcome.summary, false);
+  assert.ok(existsSync(join(outcome.workspaceDir, "assignment-seed.md")), "workspace seed exists");
 
   // brief is stored verbatim
   assert.ok(outcome.manifest.brief, "brief is set");
@@ -411,7 +413,7 @@ test("init overwrite: reinitializing an initialized run-id clears stale workspac
   mkdirSync(attachmentsDir, { recursive: true });
   writeFileSync(join(attemptsDir, "01.json"), "{}\n");
   writeFileSync(join(attachmentsDir, "stale.txt"), "stale attachment\n");
-  writeFileSync(init.assignmentPath, "# stale assignment seed\n");
+  writeFileSync(join(init.workspaceDir, "assignment-seed.md"), "# stale assignment seed\n");
 
   const staleManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
   staleManifest.tasksCompleted = 2;
@@ -504,7 +506,9 @@ Agent role instructions.
   ]);
   assert.equal(existsSync(attemptsDir), false);
   assert.equal(existsSync(attachmentsDir), false);
-  assert.ok(readFileSync(overwritten.assignmentPath, "utf8").includes("Work on"));
+  assert.ok(
+    readFileSync(join(overwritten.workspaceDir, "assignment-seed.md"), "utf8").includes("Work on"),
+  );
 });
 
 test("init freezes launcher state and reset restores the frozen launcher", async () => {

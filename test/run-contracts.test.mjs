@@ -32,7 +32,7 @@ function buildManifest(overrides = {}) {
   };
 
   return {
-    schemaVersion: 13,
+    schemaVersion: 14,
     runId: "run123",
     repo: "demo-repo",
     agent: {
@@ -43,7 +43,6 @@ function buildManifest(overrides = {}) {
     assignment: {
       name: "demo-work",
       sourcePath: "/repo/assignments/demo/assignment.md",
-      workspacePath: "/state/runs/demo/run123/assignment-seed.md",
     },
     backend: "claude",
     model: "claude-sonnet-4-6",
@@ -61,7 +60,6 @@ function buildManifest(overrides = {}) {
     cwd: "/repo",
     lockedFields: ["backend"],
     timeoutSec: 3600,
-    assignmentPath: "/state/runs/demo/run123/assignment-seed.md",
     workspaceDir: "/state/runs/demo/run123",
     startedAt: "2026-04-12T10:00:00.000Z",
     endedAt: null,
@@ -267,7 +265,6 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
     archivedAt: null,
     isLive: true,
     workspaceDir: "/state/runs/demo/run123",
-    assignmentPath: "/state/runs/demo/run123/assignment-seed.md",
     agent: {
       name: "demo-agent",
       sourcePath: "/repo/agents/demo/agent.md",
@@ -275,7 +272,6 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
     assignment: {
       name: "demo-work",
       sourcePath: "/repo/assignments/demo/assignment.md",
-      workspacePath: "/state/runs/demo/run123/assignment-seed.md",
     },
     backend: "claude",
     model: "claude-sonnet-4-6",
@@ -520,7 +516,6 @@ test("run contracts: dependency summary/detail projection resolves readiness and
     assignment: {
       name: "Prerequisite assignment",
       sourcePath: "/repo/assignments/prerequisite/assignment.md",
-      workspacePath: "/state/runs/demo/run456/assignment-seed.md",
     },
     status: "success",
     endedAt: "2026-04-12T09:30:00.000Z",
@@ -531,7 +526,6 @@ test("run contracts: dependency summary/detail projection resolves readiness and
     assignment: {
       name: "Downstream assignment",
       sourcePath: "/repo/assignments/downstream/assignment.md",
-      workspacePath: "/state/runs/demo/run789/assignment-seed.md",
     },
     dependencyRunIds: ["run123"],
     startedAt: "2026-04-12T10:10:00.000Z",

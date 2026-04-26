@@ -450,6 +450,17 @@ test("run status --field projects RunDetail fields and rejects removed manifest-
   );
   assert.equal(projected.tasks[0].id, "t1");
 
+  const detail = JSON.parse(
+    execFileSync("node", [CLI_PATH, "run", "status", outcome.runId, "--output-format", "json"], {
+      cwd: dir,
+      env: { ...process.env, ...sharedRuntimeEnv(dir) },
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    }),
+  );
+  assert.equal("assignmentPath" in detail, false);
+  assert.equal("workspacePath" in detail.assignment, false);
+
   for (const [field, expected] of [
     ["effectiveStatus", "success"],
     ["totalAttemptCount", 1],
@@ -471,7 +482,7 @@ test("run status --field projects RunDetail fields and rejects removed manifest-
     assert.equal(projectedField[field], expected);
   }
 
-  for (const field of ["attempts", "maxAttempts", "sessionCount", "finalTasks"]) {
+  for (const field of ["attempts", "maxAttempts", "sessionCount", "finalTasks", "assignmentPath"]) {
     const failed = runCliExpectFail(
       ["run", "status", outcome.runId, "--output-format", "json", "--field", field],
       { cwd: dir },

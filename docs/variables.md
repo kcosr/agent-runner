@@ -147,7 +147,6 @@ ones:
 | `config_dir` | the resolved task-runner config root |
 | `state_dir` | the resolved task-runner state root |
 | `assignment_name` | the frozen assignment name, when the run has an assignment |
-| `assignment_path` | path to the workspace assignment seed |
 | `task_runner_cmd` | resolved CLI command for subcommand examples |
 
 These cannot be overridden by `--var`. When a run has no assignment,
