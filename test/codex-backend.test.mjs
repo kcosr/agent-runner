@@ -96,11 +96,13 @@ test("normalizeCodexWsUrl: rejects malformed or non-websocket URLs before transp
   );
 });
 
-async function startCodexTurnNoiseServer() {
+async function startCodexTurnNoiseServer({
+  childThreadId = "child-thread",
+  childBeforeTurnStartResult = false,
+} = {}) {
   const server = new WebSocketServer({ port: 0 });
   const parentThreadId = "parent-thread";
   const parentTurnId = "parent-turn";
-  const childThreadId = "child-thread";
   const childTurnId = "child-turn";
 
   server.on("connection", (socket) => {
@@ -128,35 +130,33 @@ async function startCodexTurnNoiseServer() {
         return;
       }
       if (message.method === "turn/start") {
-        socket.send(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            id: message.id,
-            result: { turn: { id: parentTurnId } },
-          }),
-        );
-
-        notify("turn/started", {
-          threadId: childThreadId,
-          turn: { id: childTurnId, status: "inProgress" },
-        });
-        notify("item/agentMessage/delta", {
-          threadId: childThreadId,
-          turnId: childTurnId,
-          itemId: "child-message",
-          delta: "child output",
-        });
-        notify("item/completed", {
-          threadId: childThreadId,
-          turnId: childTurnId,
-          item: { type: "agentMessage", text: "child final" },
-        });
-        notify("turn/completed", {
-          threadId: childThreadId,
-          turn: { id: childTurnId, status: "completed" },
-        });
-
-        setTimeout(() => {
+        const sendChildNotifications = () => {
+          if (childThreadId !== parentThreadId) {
+            notify("thread/started", {
+              thread: { id: childThreadId },
+            });
+          }
+          notify("turn/started", {
+            threadId: childThreadId,
+            turn: { id: childTurnId, status: "inProgress" },
+          });
+          notify("item/agentMessage/delta", {
+            threadId: childThreadId,
+            turnId: childTurnId,
+            itemId: "child-message",
+            delta: "child output",
+          });
+          notify("item/completed", {
+            threadId: childThreadId,
+            turnId: childTurnId,
+            item: { type: "agentMessage", text: "child final" },
+          });
+          notify("turn/completed", {
+            threadId: childThreadId,
+            turn: { id: childTurnId, status: "completed" },
+          });
+        };
+        const sendParentNotifications = () => {
           notify("item/agentMessage/delta", {
             threadId: parentThreadId,
             turnId: parentTurnId,
@@ -172,7 +172,19 @@ async function startCodexTurnNoiseServer() {
             threadId: parentThreadId,
             turn: { id: parentTurnId, status: "completed" },
           });
-        }, 25);
+        };
+
+        if (childBeforeTurnStartResult) sendChildNotifications();
+        socket.send(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: { turn: { id: parentTurnId } },
+          }),
+        );
+
+        if (!childBeforeTurnStartResult) sendChildNotifications();
+        setTimeout(sendParentNotifications, 25);
       }
     });
   });
@@ -195,8 +207,7 @@ async function startCodexTurnNoiseServer() {
   };
 }
 
-test("codexBackend ignores child thread turn completion while waiting for the parent turn", async () => {
-  const codexServer = await startCodexTurnNoiseServer();
+async function invokeCodexTurnNoiseServer(codexServer) {
   const emitted = [];
 
   try {
@@ -225,4 +236,17 @@ test("codexBackend ignores child thread turn completion while waiting for the pa
   } finally {
     await codexServer.close();
   }
+}
+
+test("codexBackend ignores child thread turn completion while waiting for the parent turn", async () => {
+  await invokeCodexTurnNoiseServer(await startCodexTurnNoiseServer());
+});
+
+test("codexBackend ignores same-thread child turn notifications before parent turn id resolves", async () => {
+  await invokeCodexTurnNoiseServer(
+    await startCodexTurnNoiseServer({
+      childThreadId: "parent-thread",
+      childBeforeTurnStartResult: true,
+    }),
+  );
 });

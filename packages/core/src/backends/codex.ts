@@ -488,6 +488,10 @@ function notificationTurnId(params: Record<string, unknown>): string | null {
   return isRecord(turn) && typeof turn.id === "string" ? turn.id : null;
 }
 
+function hasNotificationScope(params: Record<string, unknown>): boolean {
+  return notificationThreadId(params) !== null || notificationTurnId(params) !== null;
+}
+
 function acceptCurrentTurnNotification(
   state: AccumulatorState,
   params: Record<string, unknown>,
@@ -497,10 +501,7 @@ function acceptCurrentTurnNotification(
 
   const turnId = notificationTurnId(params);
   if (turnId === null) return false;
-  if (state.turnId !== null) return turnId === state.turnId;
-
-  setTurnId(state, turnId);
-  return true;
+  return state.turnId !== null && turnId === state.turnId;
 }
 
 export function waitForTurnId(state: AccumulatorState, timeoutMs: number): Promise<string | null> {
@@ -660,7 +661,7 @@ function handleNotification(state: AccumulatorState, method: string, params: unk
       return;
     }
     case "turn/started": {
-      acceptCurrentTurnNotification(state, params);
+      if (!acceptCurrentTurnNotification(state, params)) return;
       return;
     }
     case "item/agentMessage/delta": {
@@ -717,6 +718,7 @@ function handleNotification(state: AccumulatorState, method: string, params: unk
       return;
     }
     case "error": {
+      if (hasNotificationScope(params) && !acceptCurrentTurnNotification(state, params)) return;
       // Intermediate error notification — record but don't treat as terminal
       // unless followed by turn/completed with status=failed.
       if (typeof params.message === "string" && state.turnError === null) {
