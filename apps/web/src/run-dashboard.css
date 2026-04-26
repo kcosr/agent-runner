@@ -1023,6 +1023,10 @@ pre {
   margin: 0;
   padding: 24px;
   border: 0;
+  background: transparent;
+}
+
+.note-dialog-backdrop::backdrop {
   background: rgba(0, 0, 0, 0.28);
 }
 

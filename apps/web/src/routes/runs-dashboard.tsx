@@ -53,7 +53,7 @@ export function RunsDashboardRoute() {
       const drawerFullscreen =
         currentState.viewState.drawerFullscreen ||
         document.querySelector(".drawer--fullscreen") !== null;
-      const modalOpen = document.querySelector(".note-modal[open]") !== null;
+      const modalOpen = document.querySelector("dialog[open]") !== null;
 
       const command = resolveRunsShortcutCommand(event, {
         activeBoardColumnKey: currentState.activeBoardColumnKey,

@@ -1,6 +1,7 @@
 import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useRef } from "react";
 import type { RunActionPending } from "../routes/use-runs-dashboard-state.js";
 import { ChevronIcon } from "./icons.js";
+import { useNativeModalDialog } from "./native-dialog.js";
 
 export function ResumeRunDialog({
   actionError,
@@ -23,6 +24,7 @@ export function ResumeRunDialog({
   resumeMessageDraft: string;
   resumeMessageExpanded: boolean;
 }) {
+  const dialogRef = useNativeModalDialog(true);
   const resumeDisclosureButtonRef = useRef<HTMLButtonElement | null>(null);
   const resumeMessageRef = useRef<HTMLTextAreaElement | null>(null);
   const resumePending = actionPending === "resume";
@@ -51,25 +53,27 @@ export function ResumeRunDialog({
     }
   }
 
-  function handleResumeDialogKeyDown(event: ReactKeyboardEvent<HTMLDialogElement>) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      onClose();
-    }
-  }
-
   return (
     <dialog
       aria-labelledby="resume-run-dialog-title"
       className="resume-dialog-backdrop"
+      onCancel={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+      }}
       onClick={(event) => {
         if (event.target === event.currentTarget) {
           onClose();
         }
       }}
-      onKeyDown={handleResumeDialogKeyDown}
-      open
+      onKeyDown={(event) => {
+        if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
+          event.preventDefault();
+          onClose();
+        }
+      }}
+      ref={dialogRef}
     >
       <div className="resume-dialog">
         <div className="resume-dialog__header">

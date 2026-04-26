@@ -560,6 +560,51 @@ describe("resolveRunsShortcutCommand", () => {
         },
       ),
     ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "f",
+          metaKey: false,
+          shiftKey: false,
+        },
+        {
+          ...context,
+          modalOpen: true,
+        },
+      ),
+    ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: true,
+          key: "f",
+          metaKey: false,
+          shiftKey: false,
+        },
+        {
+          ...context,
+          modalOpen: true,
+        },
+      ),
+    ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "Escape",
+          metaKey: false,
+          shiftKey: false,
+        },
+        {
+          ...context,
+          modalOpen: true,
+        },
+      ),
+    ).toBeNull();
   });
 
   it("allows Enter primary action but blocks other dashboard shortcuts while the drawer is fullscreen", () => {

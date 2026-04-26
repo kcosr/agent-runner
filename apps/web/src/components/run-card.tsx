@@ -20,6 +20,7 @@ import {
   RunningIcon,
 } from "./icons.js";
 import { MarkdownContent } from "./markdown.js";
+import { useNativeModalDialog } from "./native-dialog.js";
 import { RunNoteEditor, usePreferredRunNoteEditorMode } from "./run-note-editor.js";
 import { StatusBadge } from "./status-badge.js";
 
@@ -106,6 +107,7 @@ export function RunCard({
   const previewFirstNoteMode = preferredNoteEditorMode === "preview";
   const [activeMotionRevision, setActiveMotionRevision] = useState<number | null>(null);
   const [noteDialogOpen, setNoteDialogOpen] = useState(false);
+  const noteDialogRef = useNativeModalDialog(noteDialogOpen);
   const [notePreviewOpen, setNotePreviewOpen] = useState(false);
   const progress =
     run.tasksTotal === 0 ? 0 : Math.round((run.tasksCompleted / run.tasksTotal) * 100);
@@ -227,23 +229,6 @@ export function RunCard({
     setNotePreviewOpen(false);
     setNoteDialogOpen(false);
   }, [clearNotePreviewCloseTimeout]);
-
-  useEffect(() => {
-    if (!noteDialogOpen || typeof window === "undefined") {
-      return;
-    }
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") {
-        return;
-      }
-      event.preventDefault();
-      closeNoteDialog();
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [closeNoteDialog, noteDialogOpen]);
 
   useEffect(() => {
     if (
@@ -602,7 +587,7 @@ export function RunCard({
               closeNoteDialog();
             }
           }}
-          open
+          ref={noteDialogRef}
         >
           <div className="note-dialog" role="document">
             <div className="note-dialog__header">

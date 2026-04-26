@@ -4,7 +4,7 @@ import type { RunAttachment } from "@task-runner/core/contracts/attachments.js";
 import type { RunAuditHistory, RunTimelineHistory } from "@task-runner/core/contracts/events.js";
 import type { RunInputSurface } from "@task-runner/core/contracts/run-input-surface.js";
 import type { RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./app.js";
@@ -1238,6 +1238,10 @@ async function findRunCard(name: string | RegExp) {
       timeout: 5000,
     },
   );
+}
+
+function nativeCancel(dialog: HTMLElement) {
+  fireEvent(dialog, new Event("cancel", { cancelable: true }));
 }
 
 async function openFilters(user: ReturnType<typeof userEvent.setup>) {
@@ -4244,10 +4248,10 @@ describe("web app", () => {
     );
 
     await user.keyboard("{Enter}");
-    expect(await screen.findByRole("dialog", { name: "Resume run" })).toBeInTheDocument();
+    const firstResumeDialog = await screen.findByRole("dialog", { name: "Resume run" });
     expect(resumeBody).toBeUndefined();
 
-    await user.keyboard("{Escape}");
+    nativeCancel(firstResumeDialog);
     await waitFor(() => {
       expect(screen.queryByRole("dialog", { name: "Resume run" })).not.toBeInTheDocument();
     });
@@ -5160,6 +5164,99 @@ describe("web app", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("closes the card note dialog on outside click", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    const card = await findRunCard("Build dashboard");
+    const cardContainer = card.closest(".card");
+    if (!cardContainer) {
+      throw new Error("expected card container");
+    }
+
+    await user.click(
+      within(cardContainer as HTMLElement).getByRole("button", {
+        name: /add note for run run-1/i,
+      }),
+    );
+    const noteDialog = await screen.findByRole("dialog", { name: "Build dashboard" });
+
+    fireEvent.click(noteDialog);
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Build dashboard" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("closes the card note dialog from editor Cancel", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    const card = await findRunCard("Build dashboard");
+    const cardContainer = card.closest(".card");
+    if (!cardContainer) {
+      throw new Error("expected card container");
+    }
+
+    await user.click(
+      within(cardContainer as HTMLElement).getByRole("button", {
+        name: /add note for run run-1/i,
+      }),
+    );
+    expect(await screen.findByRole("dialog", { name: "Build dashboard" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^cancel$/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Build dashboard" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("closes the card note dialog from no-op Save without sending a note request", async () => {
+    const fetchMock = installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    const card = await findRunCard("Build dashboard");
+    const cardContainer = card.closest(".card");
+    if (!cardContainer) {
+      throw new Error("expected card container");
+    }
+
+    await user.click(
+      within(cardContainer as HTMLElement).getByRole("button", {
+        name: /add note for run run-1/i,
+      }),
+    );
+    expect(await screen.findByRole("dialog", { name: "Build dashboard" })).toBeInTheDocument();
+
+    const callsBeforeSave = fetchMock.mock.calls.length;
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Build dashboard" })).not.toBeInTheDocument();
+    });
+    expect(
+      fetchMock.mock.calls
+        .slice(callsBeforeSave)
+        .some(([input]) => String(input).endsWith("/api/runs/run-1/note")),
+    ).toBe(false);
+  });
+
   it("shows backend-session editing only for passive runs and preserves the row when empty", async () => {
     installFetchMock({
       runs: [
@@ -5733,7 +5830,7 @@ describe("web app", () => {
     expect(callsAfter).toEqual(["/api/runs/run-1/pinned"]);
   });
 
-  it("opens the selected run note modal with n and toggles pin with p", async () => {
+  it("opens the selected run note modal with n, suppresses board shortcuts, and closes on native cancel", async () => {
     const fetchMock = installFetchMock({
       runs: [makeRun({ assignmentName: "Build dashboard" })],
       details: {
@@ -5756,8 +5853,18 @@ describe("web app", () => {
       name: /run note for build dashboard/i,
     });
     expect(noteInput).toHaveFocus();
+    const noteDialog = screen.getByRole("dialog", { name: "Build dashboard" });
 
-    await user.keyboard("{Escape}");
+    const callsBeforeSuppressedPin = fetchMock.mock.calls.length;
+    await user.keyboard("p");
+    expect(
+      fetchMock.mock.calls
+        .slice(callsBeforeSuppressedPin)
+        .some(([input]) => String(input).endsWith("/api/runs/run-1/pinned")),
+    ).toBe(false);
+    expect(noteDialog).toBeInTheDocument();
+
+    nativeCancel(noteDialog);
     await waitFor(() =>
       expect(
         screen.queryByRole("textbox", { name: /run note for build dashboard/i }),
@@ -7078,7 +7185,53 @@ describe("web app", () => {
     );
   });
 
-  it("keeps the drawer open when Escape closes the resume dialog", async () => {
+  it("closes a resume dialog on outside click without sending a request", async () => {
+    const fetchMock = installFetchMock({
+      runs: [makeRun({ runId: "resumable", assignmentName: "Resumable run", status: "success" })],
+      details: {
+        resumable: makeDetail({
+          runId: "resumable",
+          status: "success",
+          assignment: {
+            name: "Resumable run",
+            sourcePath: "/tmp/a.md",
+            workspacePath: "/tmp/b.md",
+          },
+          capabilities: {
+            canArchive: true,
+            canUnarchive: false,
+            canResume: true,
+            taskMutation: {
+              canAdd: false,
+              canEditNotes: false,
+              canSetStatus: false,
+            },
+          },
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Resumable run"));
+    await user.click(await screen.findByRole("button", { name: "Resume" }));
+
+    const resumeDialog = await screen.findByRole("dialog", { name: "Resume run" });
+    const callsBeforeClose = fetchMock.mock.calls.length;
+
+    fireEvent.click(resumeDialog);
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Resume run" })).not.toBeInTheDocument();
+    });
+    expect(
+      fetchMock.mock.calls
+        .slice(callsBeforeClose)
+        .some(([input]) => String(input).endsWith("/api/runs/resumable/resume")),
+    ).toBe(false);
+  });
+
+  it("keeps the drawer open when native cancel closes the resume dialog", async () => {
     installFetchMock({
       runs: [makeRun({ runId: "resumable", assignmentName: "Resumable run", status: "success" })],
       details: {
@@ -7110,9 +7263,9 @@ describe("web app", () => {
     await user.click(await findRunCard("Resumable run"));
     await user.click(await screen.findByRole("button", { name: "Resume" }));
 
-    expect(await screen.findByRole("dialog", { name: "Resume run" })).toBeInTheDocument();
+    const resumeDialog = await screen.findByRole("dialog", { name: "Resume run" });
 
-    await user.keyboard("{Escape}");
+    nativeCancel(resumeDialog);
 
     await waitFor(() => {
       expect(screen.queryByRole("dialog", { name: "Resume run" })).not.toBeInTheDocument();
@@ -9004,7 +9157,7 @@ describe("web app", () => {
     expect(screen.getByText("beta body")).toBeInTheDocument();
     expect(resumeRequestCount).toBe(0);
 
-    await user.keyboard("{Escape}");
+    nativeCancel(screen.getByRole("dialog", { name: "Resume run" }));
     await waitFor(() => {
       expect(screen.queryByRole("dialog", { name: "Resume run" })).not.toBeInTheDocument();
     });
@@ -9027,7 +9180,7 @@ describe("web app", () => {
     expect(screen.getByText("beta body")).toBeInTheDocument();
     expect(resumeRequestCount).toBe(0);
 
-    await user.keyboard("{Escape}");
+    nativeCancel(screen.getByRole("dialog", { name: "Resume run" }));
     await waitFor(() => {
       expect(screen.queryByRole("dialog", { name: "Resume run" })).not.toBeInTheDocument();
     });
