@@ -14,6 +14,7 @@ import { shortId } from "../../util/short-id.js";
 import {
   type CodexTransportEnvValues,
   cloneBackendSpecificConfig,
+  cloneResolvedBackendArgs,
   codexTransportFromEnvValues,
 } from "../backends/types.js";
 import type {
@@ -23,6 +24,7 @@ import type {
   BackendInvokeResult,
   BackendSpecificConfig,
   CodexTransportConfig,
+  ResolvedBackendArgs,
 } from "../backends/types.js";
 import { interpolate } from "../config/interpolate.js";
 import { type ResolvedLauncherConfig, cloneResolvedLauncherConfig } from "../config/launchers.js";
@@ -365,6 +367,7 @@ function buildResumeSessionManifest(
     ...base,
     model: overrides.model,
     effort: overrides.effort,
+    resolvedBackendArgs: cloneResolvedBackendArgs(base.resolvedBackendArgs),
     launcher: cloneResolvedLauncherConfig(overrides.launcher),
     brief: initialPrompt,
     name: overrides.name,
@@ -507,7 +510,7 @@ function buildRecurringCloneManifest(params: {
   const assignmentPath = workspaceAssignmentPath(workspaceDir);
   const finalTasks = cloneTaskSnapshotRecord(seed.finalTasks);
   return {
-    schemaVersion: 12,
+    schemaVersion: 13,
     runId,
     repo: sourceManifest.repo,
     agent: {
@@ -526,6 +529,7 @@ function buildRecurringCloneManifest(params: {
     model: seed.model,
     effort: seed.effort,
     backendSpecific: cloneBackendSpecificConfig(seed.backendSpecific),
+    resolvedBackendArgs: cloneResolvedBackendArgs(seed.resolvedBackendArgs),
     launcher: cloneResolvedLauncherConfig(seed.launcher),
     message: seed.message,
     name: seed.name,
@@ -565,6 +569,7 @@ function buildRecurringCloneManifest(params: {
     resetSeed: buildRunResetSeed({
       ...seed,
       backendSpecific: cloneBackendSpecificConfig(seed.backendSpecific),
+      resolvedBackendArgs: cloneResolvedBackendArgs(seed.resolvedBackendArgs),
       launcher: cloneResolvedLauncherConfig(seed.launcher),
       lockedFields: [...seed.lockedFields],
       dependencyRunIds: [...seed.dependencyRunIds],
@@ -656,6 +661,16 @@ function resolveFreshBackendSpecific(
       transport: { ...transport },
     },
   };
+}
+
+function resolveFreshBackendArgs(
+  backendId: BackendId,
+  agentConfig: LoadedAgent["config"],
+): ResolvedBackendArgs {
+  if (backendId === "passive") {
+    return [];
+  }
+  return cloneResolvedBackendArgs(agentConfig.backendArgs?.[backendId]?.extraArgs ?? []);
 }
 
 function resolveManifestBackendSpecific(manifest: RunManifest): BackendSpecificConfig | undefined {
@@ -1337,6 +1352,9 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const backendSpecific = reusesFrozenSetup
     ? resolveManifestBackendSpecific(resume.manifest)
     : resolveFreshBackendSpecific(effectiveBackendId, agentConfig, overrides, execution);
+  let resolvedBackendArgs = reusesFrozenSetup
+    ? cloneResolvedBackendArgs(resume.manifest.resolvedBackendArgs)
+    : resolveFreshBackendArgs(effectiveBackendId, agentConfig);
   const launcher = reusesFrozenSetup
     ? cloneResolvedLauncherConfig(resume.manifest.launcher)
     : resolveFreshLauncherConfig({
@@ -1390,6 +1408,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       cwd,
       env: process.env as Record<string, string>,
       backendSpecific: cloneBackendSpecificConfig(backendSpecific),
+      resolvedBackendArgs: cloneResolvedBackendArgs(resolvedBackendArgs),
     });
     if (!result.valid) {
       throw new InvalidBackendSessionError(opts.bootstrapBackendSessionId, result.reason);
@@ -1484,7 +1503,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       ]),
     );
     const prepareManifest: RunManifest = {
-      schemaVersion: 12,
+      schemaVersion: 13,
       runId,
       repo,
       agent: {
@@ -1504,6 +1523,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       model: model ?? null,
       effort: effort ?? null,
       backendSpecific: cloneBackendSpecificConfig(backendSpecific),
+      resolvedBackendArgs: cloneResolvedBackendArgs(resolvedBackendArgs),
       launcher: cloneResolvedLauncherConfig(launcher),
       message,
       name: overrideName,
@@ -1545,6 +1565,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         model: model ?? null,
         effort: effort ?? null,
         backendSpecific: cloneBackendSpecificConfig(backendSpecific),
+        resolvedBackendArgs: cloneResolvedBackendArgs(resolvedBackendArgs),
         launcher: cloneResolvedLauncherConfig(launcher),
         cwd,
         lockedFields: initialLockedFields,
@@ -1583,6 +1604,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     cwd = prepareState.manifest.cwd;
     repo = deriveRepoKey(cwd);
     effectiveBackendId = prepareState.manifest.backend as BackendId;
+    resolvedBackendArgs = resolveFreshBackendArgs(effectiveBackendId, agentConfig);
+    prepareState.manifest.resolvedBackendArgs = cloneResolvedBackendArgs(resolvedBackendArgs);
     currentBackend = resolveRuntimeBackend(effectiveBackendId, backend);
     model = prepareState.manifest.model ?? undefined;
     effort = (prepareState.manifest.effort ?? undefined) as RunOverrides["effort"];
@@ -1737,7 +1760,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     const frozenCallerInstructions =
       rawCallerInstructions.length > 0 ? interpolate(rawCallerInstructions, injectedVars) : null;
     manifest = {
-      schemaVersion: 12,
+      schemaVersion: 13,
       runId,
       repo,
       agent: {
@@ -1761,6 +1784,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       model: model ?? null,
       effort: effort ?? null,
       backendSpecific: cloneBackendSpecificConfig(backendSpecific),
+      resolvedBackendArgs: cloneResolvedBackendArgs(resolvedBackendArgs),
       launcher: cloneResolvedLauncherConfig(launcher),
       message,
       name,
@@ -1806,6 +1830,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         model: model ?? null,
         effort: effort ?? null,
         backendSpecific: cloneBackendSpecificConfig(backendSpecific),
+        resolvedBackendArgs: cloneResolvedBackendArgs(resolvedBackendArgs),
         launcher: cloneResolvedLauncherConfig(launcher),
         cwd,
         lockedFields: [...(hookLockedFields ?? frozenLockedFields)],
@@ -2303,6 +2328,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         model,
         effort,
         backendSpecific,
+        resolvedBackendArgs: cloneResolvedBackendArgs(manifest.resolvedBackendArgs),
         launcher,
         unrestricted,
         timeoutSec,

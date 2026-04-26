@@ -633,6 +633,7 @@ async function propagateRunNameChange(manifest: RunManifest): Promise<void> {
       cwd: manifest.cwd,
       env: process.env as Record<string, string>,
       backendSpecific: manifest.backendSpecific,
+      resolvedBackendArgs: manifest.resolvedBackendArgs,
       name: manifest.name,
     });
   }
@@ -641,6 +642,7 @@ async function propagateRunNameChange(manifest: RunManifest): Promise<void> {
       sessionId: manifest.backendSessionId,
       cwd: manifest.cwd,
       env: process.env as Record<string, string>,
+      resolvedBackendArgs: manifest.resolvedBackendArgs,
       name: manifest.name,
     });
   }

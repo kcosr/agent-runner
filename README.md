@@ -157,7 +157,7 @@ task-runner run --resume-run <run-id>
 runtime vars and/or the initial message, rerenders the brief and reset
 seed all-or-nothing, and preserves frozen identity/runtime fields such
 as agent, assignment, launcher, hooks, tasks, cwd, and backend-specific
-Codex transport.
+Codex transport, plus selected backend extra args.
 
 ### Schedule a run
 
@@ -220,6 +220,21 @@ task-runner show launcher ssh-docker
 Launchers apply only to subprocess-backed execution (`claude`, `cursor`,
 `pi`, and Codex stdio). Passive runs and Codex websocket/UDS runs keep
 the built-in `direct` launcher.
+
+Agents may also author backend-owned argv tokens:
+
+```yaml
+backendArgs:
+  claude:
+    extraArgs: ["--profile", "default"]
+  codex:
+    extraArgs: ["--model", "gpt-5.4"]
+```
+
+The selected backend's args are frozen into local `run.json` at run
+creation; status APIs do not expose them. Codex stdio receives the args
+when launching `app-server`, while Codex websocket/UDS transports connect
+to an already-running server and ignore them.
 
 ### Passive / externally driven run
 

@@ -30,6 +30,7 @@ All non-passive backends accept per-agent:
 - `timeoutSec` — per-attempt wall-clock budget
 - `unrestricted` — pass a safety bypass flag to the underlying CLI
 - `launcher` — optional subprocess prefix selection
+- `backendArgs.<backend>.extraArgs` — optional backend-owned argv tokens
 
 Every backend receives a `cwd`, a resume session id (when present), and a
 display name. Session state is bound to the resolved cwd.
@@ -38,12 +39,18 @@ Launchers are subprocess-only. They wrap the spawned backend command for
 `claude`, `cursor`, `pi`, and Codex stdio. They do not apply to the
 `passive` backend, Codex websocket transport, or Codex UDS transport.
 
+Backend args are also resolved once for the selected backend and frozen
+into the local run manifest. They are appended after task-runner's
+generated structured flags so duplicate backend-owned flags pass through
+to the underlying tool without task-runner validation. Normal status DTOs
+do not expose the frozen args.
+
 ## `claude`
 
 - Binary: `$TASK_RUNNER_CLAUDE_BIN` or `claude`.
 - Args: `--print --output-format stream-json --verbose
   [--model ...] [--effort ...] [--dangerously-skip-permissions]
-  [--name ...] [--resume <session-id>] <prompt>`
+  [--name ...] [--resume <session-id>] [extra args...] <prompt>`
 - Session id captured from JSON stream events.
 - Sessions are stored under Claude's project directory encoded from the
   cwd (`/` and `.` → `-`). Resume is validated against that on-disk path.
@@ -56,7 +63,7 @@ Launchers are subprocess-only. They wrap the spawned backend command for
   `backendSpecific.codex.transport` contract:
   - `{ type: "stdio" }` spawns `$TASK_RUNNER_CODEX_BIN` (default
     `codex`) with `app-server
-    [--dangerously-bypass-approvals-and-sandbox]`.
+    [--dangerously-bypass-approvals-and-sandbox] [extra args...]`.
   - `{ type: "ws", url }` connects to a remote Codex app-server over an
     absolute `ws://` or `wss://` URL.
   - `{ type: "uds", path: "/absolute/socket/path" }` connects to a Codex
@@ -90,6 +97,9 @@ Launchers are subprocess-only. They wrap the spawned backend command for
   socket path from its own filesystem namespace.
 - Codex stdio honors the resolved launcher prefix; Codex websocket and
   UDS keep `direct` because there is no local subprocess to wrap.
+- Codex websocket and UDS connect to an already-running app-server, so
+  `backendArgs.codex.extraArgs` are ignored for those transports. Author
+  app-server flags where that remote server is launched.
 - Uses JSON-RPC 2.0 with a thread/turn model:
   `thread/start`, `thread/resume`, `thread/read`, `turn/start`,
   `thread/name/set`.
@@ -109,7 +119,7 @@ Launchers are subprocess-only. They wrap the spawned backend command for
 - Binary: `$TASK_RUNNER_CURSOR_BIN` or `cursor-agent`.
 - Args: `-p --trust --output-format stream-json --stream-partial-output
   --workspace <cwd> [--model ...] [--force] [--resume <session-id>]
-  <prompt>`
+  [extra args...] <prompt>`
 - Session id extracted from JSON stream events.
 - No effort support.
 - No session-on-disk validation; resume validity is determined on first
@@ -119,7 +129,7 @@ Launchers are subprocess-only. They wrap the spawned backend command for
 
 - Binary: `$TASK_RUNNER_PI_BIN` or `pi`.
 - Args: `--mode rpc --no-themes [--model ...] [--thinking <effort>]
-  [--session <session-id>]`
+  [--session <session-id>] [extra args...]`
 - RPC commands: `get_state`, `set_session_name`, `prompt`. Events:
   `message_start`, `message_update`, `message_end`, `agent_end`,
   `extension_ui_request`, `extension_error`.
@@ -141,6 +151,9 @@ The passive backend is a null-object backend. It never invokes an
 external process. Passive runs can be initialized (`task-runner init`) or
 driven by an outer tool, and all task state is mutated through the task
 CLI. Calling `run --resume-run` on a passive run is rejected.
+
+`backendArgs.passive.extraArgs` is accepted by the agent schema but
+resolves to an empty frozen argv list because there is no backend process.
 
 Passive-only metadata mutations:
 

@@ -88,7 +88,7 @@ function mapEffortToPi(effort: EffortLevel): string | null {
 }
 
 export function buildPiArgs(
-  ctx: Pick<BackendInvokeContext, "effort" | "model" | "resumeSessionId">,
+  ctx: Pick<BackendInvokeContext, "effort" | "model" | "resolvedBackendArgs" | "resumeSessionId">,
 ): string[] {
   const args: string[] = [...PI_FIXED_ARGS];
   if (ctx.model) {
@@ -103,6 +103,7 @@ export function buildPiArgs(
   if (ctx.resumeSessionId) {
     args.push("--session", ctx.resumeSessionId);
   }
+  args.push(...ctx.resolvedBackendArgs);
   return args;
 }
 
@@ -650,6 +651,7 @@ export async function setPiSessionName(ctx: {
   sessionId: string;
   cwd: string;
   env?: Record<string, string>;
+  resolvedBackendArgs: string[];
   name: string | null;
 }): Promise<void> {
   if (ctx.name === null) {
@@ -664,6 +666,7 @@ export async function setPiSessionName(ctx: {
     prompt: "",
     cwd: ctx.cwd,
     env: ctx.env ?? (process.env as Record<string, string>),
+    resolvedBackendArgs: ctx.resolvedBackendArgs,
     timeoutSec: 60,
     resumeSessionId: renameTarget,
     emit: () => {},

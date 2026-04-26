@@ -20,7 +20,7 @@ explicit concepts:
 - caller-facing documentation stays separate from worker-facing
   instructions
 
-The current manifest schema is version `12`. Older manifest shapes are not
+The current manifest schema is version `13`. Older manifest shapes are not
 silently upgraded or dual-read at runtime.
 
 ## Non-goals
@@ -44,6 +44,7 @@ instructions:
 - `unrestricted`
 - optional `launcher`
 - optional `backendSpecific` runtime config
+- optional `backendArgs` entries keyed by backend id
 - `lockedFields`
 - role instructions (markdown body)
 
@@ -111,8 +112,9 @@ The canonical record is `run.json`. Important persisted fields:
 - frozen agent metadata
 - frozen assignment metadata (or `null` for chat-style runs)
 - `repo`, `cwd`
-- `backend`, `model`, `effort`, `backendSpecific`, `timeoutSec`,
-  `unrestricted`, `maxAttemptsPerSession`, `launcher`
+- `backend`, `model`, `effort`, `backendSpecific`,
+  `resolvedBackendArgs`, `timeoutSec`, `unrestricted`,
+  `maxAttemptsPerSession`, `launcher`
 - `lockedFields` (union of agent and assignment locks)
 - `status`, `exitCode`
 - `startedAt`, `endedAt`, `archivedAt`
@@ -296,11 +298,13 @@ blocked with the rest completed or blocked → `blocked`; otherwise
 5. captures `repo` from the resolved cwd and creates the run workspace
 6. resolves backend-specific runtime config (for Codex transport:
    frontmatter → daemon request override → UDS/WS env → stdio default)
-7. resolves launcher precedence (`--launcher` override → agent launcher →
+7. resolves the selected backend's authored `backendArgs` into frozen
+   `resolvedBackendArgs` (passive resolves to `[]`)
+8. resolves launcher precedence (`--launcher` override → agent launcher →
    `direct`, with passive and Codex websocket/UDS forced to `direct`)
-8. freezes the initial manifest
-9. composes and stores `brief`
-10. invokes the backend, or leaves the run initialized if the backend is
+9. freezes the initial manifest
+10. composes and stores `brief`
+11. invokes the backend, or leaves the run initialized if the backend is
    `passive`
 
 Nested `task-runner` invocations automatically carry
@@ -398,9 +402,10 @@ than ready-start overrides.
 Reconfigure is a narrower initialized-only mutation for changing
 runtime vars and/or the initial message without changing run identity.
 It uses the frozen agent, assignment, hooks, launcher, tasks, cwd,
-schedule, and backend-specific config already stored on the manifest,
-rerenders the brief/reset seed, and commits the replacement manifest
-only after validation and prepare/rendering succeed. It appends
+schedule, selected backend args, and backend-specific config already
+stored on the manifest, rerenders the brief/reset seed, and commits the
+replacement manifest only after validation and prepare/rendering succeed.
+It appends
 `run.reconfigured` with changed var keys and a message-changed boolean,
 not secret values or message text.
 
@@ -416,6 +421,8 @@ Important rules:
 - resume reuses the frozen `manifest.backendSpecific` runtime config; it
   does not re-resolve Codex transport from current env or new daemon
   request overrides
+- resume reuses the frozen `manifest.resolvedBackendArgs`; it does not
+  re-read current agent `backendArgs`
 - resume reuses the frozen `manifest.launcher`; `--launcher` is
   forbidden on resume and ready-start
 - incomplete-task resumes may omit a follow-up message (an implicit
@@ -472,6 +479,26 @@ without a higher-precedence transport, resolution fails fast.
 
 This is an explicit Codex-only contract. There is no generic
 backend-specific env passthrough layer for other backends.
+
+## Backend argument freezing
+
+Agent frontmatter may author `backendArgs.<backend>.extraArgs` arrays for
+backend-owned flags. The selected backend's args are resolved at
+fresh-run/init time, after prepare hooks have settled the final backend,
+and stored on `manifest.resolvedBackendArgs` and
+`manifest.resetSeed.resolvedBackendArgs`.
+
+The selected backend receives those args after task-runner's generated
+flags. Duplicate backend flags are passed through without validation so
+the underlying tool owns interpretation. Passive runs freeze `[]`; Codex
+stdio receives the args as `codex app-server ...`, while Codex websocket
+and UDS runs ignore them because task-runner is connecting to an existing
+app-server.
+
+`run.json` is a local audit record and stores the frozen args. Shared
+status projections and normal daemon/web DTOs do not expose them. Reset,
+resume, ready-start, reconfigure, and recurring reuse/clone flows use the
+frozen manifest or reset seed rather than current agent files.
 
 ## Launcher freezing
 

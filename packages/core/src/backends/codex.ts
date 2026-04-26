@@ -117,12 +117,16 @@ interface Transport {
 // Stdio transport — spawns `codex app-server --listen stdio://`
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function buildCodexAppServerArgs(unrestricted: boolean): string[] {
+export function buildCodexAppServerArgs(
+  unrestricted: boolean,
+  resolvedBackendArgs: string[],
+): string[] {
   const args: string[] = [];
   if (unrestricted) {
     args.push("--dangerously-bypass-approvals-and-sandbox");
   }
   args.push("app-server");
+  args.push(...resolvedBackendArgs);
   return args;
 }
 
@@ -130,12 +134,13 @@ function openStdioTransport(
   cwd: string,
   env: Record<string, string>,
   unrestricted: boolean,
+  resolvedBackendArgs: string[],
   launcher: BackendInvokeContext["launcher"],
 ): Transport {
   const binary = process.env.TASK_RUNNER_CODEX_BIN ?? "codex";
   const launched = buildSpawnCommand({
     command: binary,
-    args: buildCodexAppServerArgs(unrestricted),
+    args: buildCodexAppServerArgs(unrestricted, resolvedBackendArgs),
     launcher,
   });
   const child: ChildProcess = spawn(launched.command, launched.args, {
@@ -850,7 +855,13 @@ async function openTransport(ctx: BackendInvokeContext): Promise<Transport> {
   if (transport.type === "uds") {
     return openUdsTransport(transport.path);
   }
-  return openStdioTransport(ctx.cwd, ctx.env, ctx.unrestricted ?? false, ctx.launcher);
+  return openStdioTransport(
+    ctx.cwd,
+    ctx.env,
+    ctx.unrestricted ?? false,
+    ctx.resolvedBackendArgs,
+    ctx.launcher,
+  );
 }
 
 export function buildCodexThreadParams(
@@ -919,6 +930,7 @@ async function validateCodexSession(ctx: ValidateSessionContext): Promise<Valida
       cwd: ctx.cwd,
       env: ctx.env ?? (process.env as Record<string, string>),
       backendSpecific: ctx.backendSpecific,
+      resolvedBackendArgs: ctx.resolvedBackendArgs ?? [],
       timeoutSec: 60,
     });
     client = createClient(transport);
@@ -966,6 +978,7 @@ export async function setCodexThreadName(ctx: {
   cwd: string;
   env?: Record<string, string>;
   backendSpecific?: BackendSpecificConfig;
+  resolvedBackendArgs: string[];
   name: string | null;
 }): Promise<void> {
   let transport: Transport | undefined;
@@ -976,6 +989,7 @@ export async function setCodexThreadName(ctx: {
       cwd: ctx.cwd,
       env: ctx.env ?? (process.env as Record<string, string>),
       backendSpecific: ctx.backendSpecific,
+      resolvedBackendArgs: ctx.resolvedBackendArgs,
       timeoutSec: 60,
     });
     client = createClient(transport);

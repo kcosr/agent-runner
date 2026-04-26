@@ -75,6 +75,11 @@ test("reconfigure: patches initialized vars and message, rerenders frozen surfac
 schemaVersion: 1
 name: agent
 backend: codex
+backendArgs:
+  codex:
+    extraArgs:
+      - --frozen-codex-arg
+      - value
 ---
 Agent for {{target}} on {{branch}}.
 `,
@@ -159,6 +164,8 @@ Assignment for {{target}} on {{branch}}.
   );
   assert.deepEqual(manifest.backendSpecific, initialTransport);
   assert.deepEqual(manifest.resetSeed.backendSpecific, initialTransport);
+  assert.deepEqual(manifest.resolvedBackendArgs, ["--frozen-codex-arg", "value"]);
+  assert.deepEqual(manifest.resetSeed.resolvedBackendArgs, ["--frozen-codex-arg", "value"]);
   assert.equal(reconfigured.event.type, "run.reconfigured");
   assert.deepEqual(reconfigured.event.fields, {
     changedVarKeys: ["branch"],

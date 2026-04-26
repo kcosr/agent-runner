@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
@@ -29,179 +29,137 @@ function writeManifest(root, repo, runId, manifest) {
   return manifestPath;
 }
 
-function cleanupManifest() {
+function baseV12Manifest(runId = "run-v12") {
   return {
     schemaVersion: 12,
-    runId: "run-cleanup",
+    runId,
     repo: "demo",
-    transcript: "manifest transcript",
-    sessions: [
-      {
-        sessionIndex: 0,
-        startedAt: "2026-04-24T00:00:00.000Z",
-        endedAt: "2026-04-24T00:02:00.000Z",
-      },
-    ],
-    finalTasks: {
-      t1: { id: "t1", title: "One", status: "completed", notes: "" },
-    },
+    agent: { name: "agent", sourcePath: null, instructions: "work" },
+    assignment: null,
+    backend: "claude",
+    model: null,
+    effort: null,
+    launcher: { kind: "direct", name: "direct" },
+    message: null,
+    name: null,
+    note: null,
+    pinned: false,
+    unrestricted: false,
+    cwd: "/repo",
+    lockedFields: [],
+    timeoutSec: 10,
+    workspaceDir: "/state/run",
+    assignmentPath: "/state/run/assignment-seed.md",
+    startedAt: "2026-04-24T00:00:00.000Z",
+    endedAt: null,
+    archivedAt: null,
+    status: "ready",
+    dependencyRunIds: [],
+    parentRunId: null,
+    schedule: null,
+    exitCode: null,
+    totalAttemptCount: 0,
+    maxAttemptsPerSession: 3,
+    tasksCompleted: 0,
+    tasksTotal: 0,
+    backendSessionId: null,
+    runtimeVars: {},
+    runtimeVarSources: {},
+    execution: { hostMode: "embedded", controller: { kind: "embedded" } },
+    brief: "brief",
+    resolvedHooks: [],
+    hookState: {},
+    hookAudits: [],
+    callerInstructions: null,
     resetSeed: {
-      finalTasks: {
-        t1: { id: "t1", title: "One", status: "pending", notes: "" },
-      },
+      backend: "claude",
+      model: null,
+      effort: null,
+      launcher: { kind: "direct", name: "direct" },
+      cwd: "/repo",
+      lockedFields: [],
+      message: null,
+      name: null,
+      note: null,
+      pinned: false,
+      dependencyRunIds: [],
+      parentRunId: null,
+      unrestricted: false,
+      timeoutSec: 10,
+      maxAttemptsPerSession: 3,
+      brief: "brief",
+      runtimeVars: {},
+      runtimeVarSources: {},
+      hookState: {},
+      attachments: [],
+      finalTasks: {},
     },
-    attachments: [{ id: "att-1", name: "artifact.txt" }],
-    schedule: { enabled: true, runAt: "2026-04-24T00:00:00.000Z" },
-    hookState: { custom: true },
-    attemptRecords: [
-      {
-        attemptNumber: 1,
-        sessionIndex: 0,
-        attemptIndexInSession: 0,
-        startedAt: "2026-04-24T00:00:00.000Z",
-        endedAt: "2026-04-24T00:01:00.000Z",
-        prompt: "start",
-        sessionIdAtStart: null,
-        sessionIdCaptured: "thread-1",
-        exitCode: 1,
-        signal: null,
-        timedOut: false,
-        transcript: "try",
-        logPath: "attempts/01.json",
-        tasksAfter: {
-          t1: { id: "t1", title: "One", status: "pending", notes: "" },
-        },
-        invalidStatuses: [{ taskId: "t1", status: "waiting" }],
-      },
-      {
-        attemptNumber: 2,
-        sessionIndex: 0,
-        attemptIndexInSession: 1,
-        startedAt: "2026-04-24T00:01:00.000Z",
-        endedAt: "2026-04-24T00:02:00.000Z",
-        prompt: "again",
-        sessionIdAtStart: "thread-1",
-        sessionIdCaptured: "thread-1",
-        exitCode: 0,
-        signal: null,
-        timedOut: false,
-        transcript: "done",
-        logPath: "attempts/02.json",
-        tasksAfter: null,
-        invalidStatuses: [],
-      },
-      {
-        attemptNumber: 3,
-        sessionIndex: 0,
-        attemptIndexInSession: 2,
-        startedAt: "2026-04-24T00:02:00.000Z",
-        endedAt: "2026-04-24T00:03:00.000Z",
-        prompt: "already clean",
-        sessionIdAtStart: "thread-1",
-        sessionIdCaptured: "thread-1",
-        exitCode: 0,
-        signal: null,
-        timedOut: false,
-        transcript: "clean",
-        logPath: "attempts/03.json",
-        invalidStatuses: [],
-      },
-    ],
+    attachments: [],
+    finalTasks: {},
+    totalSessionCount: 0,
+    sessions: [],
+    attemptRecords: [],
   };
 }
 
-test("migrate-manifests-v13 dry-runs cleanup without writing", () => {
+test("migrate-manifests-v13 dry-runs v12 promotion without writing", () => {
   const root = tempDir();
-  const manifestPath = writeManifest(root, "demo", "run-cleanup", cleanupManifest());
-  const before = readFileSync(manifestPath, "utf8");
+  const manifestPath = writeManifest(root, "demo", "run-v12", baseV12Manifest());
 
   const stdout = execFileSync("node", [SCRIPT_PATH, "--root", root], { encoding: "utf8" });
 
-  assert.match(
-    stdout,
-    /DRY\s+runs\/demo\/run-cleanup\/run\.json: would remove tasksAfter from 2 attempt record\(s\), saving \d+ bytes/,
-  );
-  assert.match(
-    stdout,
-    /Summary: manifests cleaned=1 attempt records cleaned=2 bytes saved=\d+ errors=0/,
-  );
-  assert.equal(readFileSync(manifestPath, "utf8"), before);
+  assert.match(stdout, /DRY\s+runs\/demo\/run-v12\/run\.json: would promote to schemaVersion 13/);
+  const manifest = readJson(manifestPath);
+  assert.equal(manifest.schemaVersion, 12);
+  assert.equal("resolvedBackendArgs" in manifest, false);
+  assert.equal("resolvedBackendArgs" in manifest.resetSeed, false);
 });
 
-test("migrate-manifests-v13 writes cleanup and preserves other fields", () => {
+test("migrate-manifests-v13 writes v12 promotion", () => {
   const root = tempDir();
-  const manifestPath = writeManifest(root, "demo", "run-cleanup", cleanupManifest());
-  const otherPath = writeManifest(root, "demo", "other-run", cleanupManifest());
+  const manifestPath = writeManifest(root, "demo", "run-v12", baseV12Manifest());
+
+  const stdout = execFileSync("node", [SCRIPT_PATH, "--root", root, "--write"], {
+    encoding: "utf8",
+  });
+
+  assert.match(stdout, /WRITE\s+runs\/demo\/run-v12\/run\.json: promoted to schemaVersion 13/);
+  const manifest = readJson(manifestPath);
+  assert.equal(manifest.schemaVersion, 13);
+  assert.deepEqual(manifest.resolvedBackendArgs, []);
+  assert.deepEqual(manifest.resetSeed.resolvedBackendArgs, []);
+});
+
+test("migrate-manifests-v13 can target one manifest file", () => {
+  const root = tempDir();
+  const manifestPath = writeManifest(root, "demo", "run-v12", baseV12Manifest());
+  const otherPath = writeManifest(root, "demo", "other-run", baseV12Manifest("other-run"));
 
   const stdout = execFileSync("node", [SCRIPT_PATH, "--file", manifestPath, "--write"], {
     encoding: "utf8",
   });
 
-  assert.match(
-    stdout,
-    new RegExp(
-      `WRITE\\s+${manifestPath}: removed tasksAfter from 2 attempt record\\(s\\), saved \\d+ bytes`,
-    ),
-  );
-  assert.match(
-    stdout,
-    /Summary: manifests cleaned=1 attempt records cleaned=2 bytes saved=\d+ errors=0/,
-  );
-  const manifest = readJson(manifestPath);
-  assert.equal(
-    manifest.attemptRecords.some((record) => "tasksAfter" in record),
-    false,
-  );
-  assert.equal(manifest.attemptRecords[0].transcript, "try");
-  assert.equal(manifest.attemptRecords[0].logPath, "attempts/01.json");
-  assert.deepEqual(manifest.attemptRecords[0].invalidStatuses, [
-    { taskId: "t1", status: "waiting" },
-  ]);
-  assert.equal(manifest.attemptRecords[1].sessionIdAtStart, "thread-1");
-  assert.equal(manifest.attemptRecords[1].sessionIdCaptured, "thread-1");
-  assert.equal(manifest.attemptRecords[1].exitCode, 0);
-  assert.equal(manifest.attemptRecords[1].signal, null);
-  assert.equal(manifest.attemptRecords[1].timedOut, false);
-  assert.deepEqual(manifest.sessions, cleanupManifest().sessions);
-  assert.deepEqual(manifest.finalTasks, cleanupManifest().finalTasks);
-  assert.deepEqual(manifest.resetSeed, cleanupManifest().resetSeed);
-  assert.deepEqual(manifest.attachments, cleanupManifest().attachments);
-  assert.deepEqual(manifest.schedule, cleanupManifest().schedule);
-  assert.deepEqual(manifest.hookState, cleanupManifest().hookState);
-  assert.equal(readFileSync(manifestPath, "utf8").endsWith("\n"), true);
-  assert.equal(
-    readJson(otherPath).attemptRecords.some((record) => "tasksAfter" in record),
-    true,
-  );
-
-  const cleanedText = readFileSync(manifestPath, "utf8");
-  const cleanedMtimeMs = statSync(manifestPath).mtimeMs;
-  const rerunStdout = execFileSync("node", [SCRIPT_PATH, "--file", manifestPath, "--write"], {
-    encoding: "utf8",
-  });
-
-  assert.match(rerunStdout, new RegExp(`OK\\s+${manifestPath}: no tasksAfter fields found`));
-  assert.match(
-    rerunStdout,
-    /Summary: manifests cleaned=0 attempt records cleaned=0 bytes saved=0 errors=0/,
-  );
-  assert.equal(readFileSync(manifestPath, "utf8"), cleanedText);
-  assert.equal(statSync(manifestPath).mtimeMs, cleanedMtimeMs);
+  assert.match(stdout, new RegExp(`WRITE\\s+${manifestPath}: promoted to schemaVersion 13`));
+  assert.equal(readJson(manifestPath).schemaVersion, 13);
+  assert.equal(readJson(otherPath).schemaVersion, 12);
 });
 
 test("migrate-manifests-v13 reports no-op manifests as OK", () => {
   const root = tempDir();
-  writeManifest(root, "demo", "empty-attempts", { schemaVersion: 12, attemptRecords: [] });
-  writeManifest(root, "demo", "missing-attempts", { schemaVersion: 12 });
+  const canonical = {
+    ...baseV12Manifest("run-v13"),
+    schemaVersion: 13,
+    resolvedBackendArgs: [],
+    resetSeed: {
+      ...baseV12Manifest("run-v13").resetSeed,
+      resolvedBackendArgs: [],
+    },
+  };
+  writeManifest(root, "demo", "run-v13", canonical);
 
   const stdout = execFileSync("node", [SCRIPT_PATH, "--root", root], { encoding: "utf8" });
 
-  assert.match(stdout, /OK\s+runs\/demo\/empty-attempts\/run\.json: no tasksAfter fields found/);
-  assert.match(stdout, /OK\s+runs\/demo\/missing-attempts\/run\.json: no tasksAfter fields found/);
-  assert.match(
-    stdout,
-    /Summary: manifests cleaned=0 attempt records cleaned=0 bytes saved=0 errors=0/,
-  );
+  assert.match(stdout, /OK\s+runs\/demo\/run-v13\/run\.json: already canonical schemaVersion 13/);
 });
 
 test("migrate-manifests-v13 reports malformed manifests and continues", () => {
@@ -221,15 +179,11 @@ test("migrate-manifests-v13 reports malformed manifests and continues", () => {
     result.stdout,
     /ERROR\s+runs\/demo\/non-object\/run\.json: manifest must be an object/,
   );
-  assert.match(
-    result.stdout,
-    /Summary: manifests cleaned=0 attempt records cleaned=0 bytes saved=0 errors=2/,
-  );
 });
 
 test("migrate-manifests-v13 rejects file and repo filters together", () => {
   const root = tempDir();
-  const manifestPath = writeManifest(root, "demo", "run-cleanup", cleanupManifest());
+  const manifestPath = writeManifest(root, "demo", "run-v12", baseV12Manifest());
 
   const result = spawnSync("node", [SCRIPT_PATH, "--file", manifestPath, "--repo", "demo"], {
     encoding: "utf8",

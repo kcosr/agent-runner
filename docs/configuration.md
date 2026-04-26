@@ -158,7 +158,7 @@ values using `runtimeVarSources`.
 
 ## Manifest upgrades
 
-The current manifest schema is version `12`. Older manifests are not
+The current manifest schema is version `13`. Older manifests are not
 silently upgraded at runtime — resuming a run with an older schema fails
 with a clear error. The repo ships migration scripts under `scripts/`:
 
@@ -170,10 +170,9 @@ with a clear error. The repo ships migration scripts under `scripts/`:
 - `scripts/migrate-manifests-v12.mjs` — v11 → v12 (adds `schedule:
   null`; supports repeated `--file <path>` targets for single-manifest
   migrations)
-- `scripts/migrate-manifests-v13.mjs` — cleanup migration only, with no
-  schema-version bump (strips redundant
-  `attemptRecords[].tasksAfter` snapshots from existing manifests; dry-run
-  by default, `--write` to apply, supports repeated `--repo <name>` and
+- `scripts/migrate-manifests-v13.mjs` — v12 → v13 (adds
+  `resolvedBackendArgs: []` to manifests and reset seeds; dry-run by
+  default, `--write` to apply, supports repeated `--repo <name>` and
   `--file <path>` filters plus `--root <path>`)
 - `scripts/migrate-manifests-v11.mjs` — v10 → v11 (normalizes session
   and attempt records plus hook audits)
@@ -196,8 +195,12 @@ with a clear error. The repo ships migration scripts under `scripts/`:
   default, `--write` for in-place rewrite, supports repeated `--repo
   <name>` filters plus `--root <path>`)
 
-Schema v12 adds canonical `schedule` state. New runs can store one-time
-and recurring schedules directly on the manifest.
+Schema v13 adds frozen `resolvedBackendArgs` state. New runs store
+selected backend argv extras in local `run.json`; normal status DTOs do
+not expose them. Reverting this feature branch after users migrate
+manifests to v13 requires either restoring the branch or manually
+downgrading/recreating those runs, because older code will reject v13
+manifests.
 
 Run the scripts explicitly; or recreate affected runs if an upgrade path
 isn't important. New manifests and new audit-event files are always

@@ -67,6 +67,20 @@ test("optionalOverrides accepts deferred Codex transport env values", () => {
   );
 });
 
+test("optionalOverrides rejects backendArgs override surface", () => {
+  assert.throws(
+    () =>
+      optionalOverrides({
+        backendArgs: {
+          codex: {
+            extraArgs: ["--flag"],
+          },
+        },
+      }),
+    /overrides\.backendArgs is not supported/,
+  );
+});
+
 test("optionalOverrides rejects malformed UDS codex transport overrides", () => {
   assert.throws(
     () =>
@@ -303,6 +317,14 @@ test("parseRunsReconfigureParams accepts vars and message only", () => {
         "runs.reconfigure params",
       ),
     /runs\.reconfigure params\.backend is not supported/,
+  );
+  assert.throws(
+    () =>
+      parseRunsReconfigureParams(
+        { target: "run-123", vars: {}, resolvedBackendArgs: ["--flag"] },
+        "runs.reconfigure params",
+      ),
+    /runs\.reconfigure params\.resolvedBackendArgs is not supported/,
   );
   assert.throws(
     () =>

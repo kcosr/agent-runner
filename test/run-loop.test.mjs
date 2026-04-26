@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
-import { readStatus } from "../packages/core/dist/core/commands/service.js";
+import { readStatus, resetRun } from "../packages/core/dist/core/commands/service.js";
 import {
   findRunManifestsById,
   resolveResumeTarget,
@@ -109,6 +109,26 @@ backendSpecific:
       type: stdio
 ---
 Codex agent prompt.
+`;
+
+const BACKEND_ARGS_AGENT = `---
+schemaVersion: 1
+name: backend-args-agent
+backend: claude
+backendArgs:
+  claude:
+    extraArgs:
+      - --claude-extra
+      - value
+  codex:
+    extraArgs:
+      - --codex-extra
+      - value
+  passive:
+    extraArgs:
+      - --passive-extra
+---
+Backend args agent prompt.
 `;
 
 const BUILTIN_PLAN_FEATURE_PATH = resolvePath(
@@ -292,6 +312,191 @@ test("fresh runs use callerCwd when the assignment omits cwd", async () => {
   );
 
   assert.equal(seenCwd, callerDir);
+});
+
+test("fresh runs freeze selected backend args on manifest, resetSeed, and invoke context", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "backend-args-agent", BACKEND_ARGS_AGENT);
+  writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
+  let seenArgs = null;
+
+  const { outcome } = await runWithMock(
+    dir,
+    async (ctx) => {
+      seenArgs = ctx.resolvedBackendArgs;
+      setTaskStatusesForPrompt(ctx.prompt, {
+        t1: "completed",
+        t2: "completed",
+        t3: "completed",
+      });
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "claude-session",
+        transcript: "done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    },
+    {},
+    { agentName: "backend-args-agent", assignmentName: "three-work", backendId: "claude" },
+  );
+
+  assert.deepEqual(seenArgs, ["--claude-extra", "value"]);
+  assert.deepEqual(outcome.manifest.resolvedBackendArgs, ["--claude-extra", "value"]);
+  assert.deepEqual(outcome.manifest.resetSeed.resolvedBackendArgs, ["--claude-extra", "value"]);
+
+  const reset = withSharedRuntimeEnv(dir, () => resetRun(outcome.runId).manifest);
+  assert.deepEqual(reset.resolvedBackendArgs, ["--claude-extra", "value"]);
+  assert.deepEqual(reset.resetSeed.resolvedBackendArgs, ["--claude-extra", "value"]);
+});
+
+test("backend override activates the matching dormant backendArgs entry", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "backend-args-agent", BACKEND_ARGS_AGENT);
+  writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
+  let seenArgs = null;
+
+  const { outcome } = await runWithMock(
+    dir,
+    async (ctx) => {
+      seenArgs = ctx.resolvedBackendArgs;
+      setTaskStatusesForPrompt(ctx.prompt, {
+        t1: "completed",
+        t2: "completed",
+        t3: "completed",
+      });
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        sessionId: "codex-thread",
+        transcript: "done",
+        rawStdout: "",
+        rawStderr: "",
+      };
+    },
+    { backend: "codex" },
+    { agentName: "backend-args-agent", assignmentName: "three-work", backendId: "codex" },
+  );
+
+  assert.deepEqual(seenArgs, ["--codex-extra", "value"]);
+  assert.equal(outcome.manifest.backend, "codex");
+  assert.deepEqual(outcome.manifest.resolvedBackendArgs, ["--codex-extra", "value"]);
+});
+
+test("passive backendArgs are accepted but freeze as inert empty args", async () => {
+  const dir = tempDir();
+  writeAgent(
+    dir,
+    "passive-args-agent",
+    BACKEND_ARGS_AGENT.replace("name: backend-args-agent", "name: passive-args-agent").replace(
+      "backend: claude",
+      "backend: passive",
+    ),
+  );
+  writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
+
+  const outcome = await withSharedRuntimeEnv(dir, async () => {
+    const loaded = loadAgentConfig("passive-args-agent", dir);
+    const loadedAssignment = loadAssignmentConfig("three-work", dir);
+    return await runAgent({
+      loaded,
+      loadedAssignment,
+      cliVars: {},
+      webVars: {},
+      backend: {
+        id: "passive",
+        invoke: async () => {
+          throw new Error("passive backend should not invoke");
+        },
+      },
+      initialize: true,
+      callerCwd: dir,
+    });
+  });
+
+  assert.equal(outcome.manifest.backend, "passive");
+  assert.deepEqual(outcome.manifest.resolvedBackendArgs, []);
+  assert.deepEqual(outcome.manifest.resetSeed.resolvedBackendArgs, []);
+});
+
+test("resume reuses frozen backend args after agent config changes", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "backend-args-agent", BACKEND_ARGS_AGENT);
+  writeAssignment(dir, "three-work", THREE_ASSIGNMENT);
+
+  const first = await runWithMock(
+    dir,
+    async () => ({
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      sessionId: "claude-session",
+      transcript: "incomplete",
+      rawStdout: "",
+      rawStderr: "",
+    }),
+    {},
+    { agentName: "backend-args-agent", assignmentName: "three-work", backendId: "claude" },
+  );
+  assert.equal(first.outcome.manifest.status, "exhausted");
+  assert.deepEqual(first.outcome.manifest.resolvedBackendArgs, ["--claude-extra", "value"]);
+
+  writeAgent(
+    dir,
+    "backend-args-agent",
+    BACKEND_ARGS_AGENT.replace("--claude-extra", "--changed-claude-extra"),
+  );
+  const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(first.outcome.runId, dir));
+  let seenArgs = null;
+  const resumed = await withSharedRuntimeEnv(dir, async () => {
+    const loaded = loadAgentConfig("backend-args-agent", dir);
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      return await runAgent({
+        loaded,
+        cliVars: {},
+        webVars: {},
+        backend: {
+          id: "claude",
+          invoke: async (ctx) => {
+            seenArgs = ctx.resolvedBackendArgs;
+            const manifest = JSON.parse(
+              readFileSync(join(target.workspaceDir, "run.json"), "utf8"),
+            );
+            manifest.finalTasks.t1.status = "completed";
+            manifest.finalTasks.t2.status = "completed";
+            manifest.finalTasks.t3.status = "completed";
+            manifest.tasksCompleted = 3;
+            writeFileSync(
+              join(target.workspaceDir, "run.json"),
+              `${JSON.stringify(manifest, null, 2)}\n`,
+            );
+            return {
+              exitCode: 0,
+              signal: null,
+              timedOut: false,
+              sessionId: "claude-session",
+              transcript: "resumed",
+              rawStdout: "",
+              rawStderr: "",
+            };
+          },
+        },
+        resume: target,
+        overrides: { message: "resume with frozen args" },
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+
+  assert.deepEqual(seenArgs, ["--claude-extra", "value"]);
+  assert.deepEqual(resumed.manifest.resolvedBackendArgs, ["--claude-extra", "value"]);
+  assert.equal(resumed.manifest.status, "success");
 });
 
 test("runAgent freezes task-local task-transition hooks before assignment-level hooks", async () => {

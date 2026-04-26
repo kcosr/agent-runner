@@ -32,7 +32,7 @@ function buildManifest(overrides = {}) {
   };
 
   return {
-    schemaVersion: 12,
+    schemaVersion: 13,
     runId: "run123",
     repo: "demo-repo",
     agent: {
@@ -48,6 +48,7 @@ function buildManifest(overrides = {}) {
     backend: "claude",
     model: "claude-sonnet-4-6",
     effort: "medium",
+    resolvedBackendArgs: [],
     launcher: {
       kind: "direct",
       name: "direct",
@@ -103,6 +104,7 @@ function buildManifest(overrides = {}) {
       backend: "claude",
       model: "claude-sonnet-4-6",
       effort: "medium",
+      resolvedBackendArgs: [],
       launcher: {
         kind: "direct",
         name: "direct",
