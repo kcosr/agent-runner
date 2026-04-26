@@ -209,8 +209,9 @@
 
 - Split Biome scripts so `npm run lint` runs lint-only with warnings as
   failures, `npm run lint:fix` applies lint fixes, `npm run format`
-  writes formatting, and `npm run check` verifies formatting with
-  `format:check`.
+  writes formatting, `npm run imports:fix` applies import organization,
+  and `npm run check` verifies formatting and import organization with
+  `format:check` and `imports:check`.
 - Ready runs can now be schedule-gated: the daemon starts due schedules,
   skips overdue startup occurrences instead of replaying stale work, and
   recurring schedules advance according to `reuse`, `reset`, or `clone`
