@@ -3,18 +3,6 @@
   "organizeImports": {
     "enabled": true
   },
-  "linter": {
-    "enabled": true,
-    "rules": {
-      "recommended": true,
-      "complexity": {
-        "noForEach": "off"
-      },
-      "suspicious": {
-        "noAssignInExpressions": "off"
-      }
-    }
-  },
   "formatter": {
     "enabled": true,
     "indentStyle": "space",

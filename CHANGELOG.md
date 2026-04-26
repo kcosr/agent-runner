@@ -206,6 +206,7 @@
 ### Changed
 
 - Adopted Oxlint as the lint gate while keeping Biome for formatting.
+- Removed the unused environment parameter from the recurrence sampling helper.
 - Ready runs can now be schedule-gated: the daemon starts due schedules,
   skips overdue startup occurrences instead of replaying stale work, and
   recurring schedules advance according to `reuse`, `reset`, or `clone`

@@ -10,7 +10,7 @@
     "setup": "npm install",
     "build": "npm run build -w @task-runner/core && npm run build -w @task-runner/web && npm run build -w task-runner && node -e \"require('node:fs').chmodSync('apps/cli/dist/cli.js', 0o755)\"",
     "lint": "oxlint . --deny-warnings",
-    "lint:fix": "oxlint . --fix --deny-warnings",
+    "lint:fix": "oxlint . --fix",
     "format": "biome format --write .",
     "lint-staged": "lint-staged",
     "test:node": "node --test \"test/**/*.test.mjs\"",
