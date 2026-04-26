@@ -59,6 +59,9 @@ You can use `task-runner` in two main modes:
   (`claude`, `codex`, `cursor-agent`, `pi`). In this mode task-runner
   performs the run/retry loop itself and validates whether tasks were
   actually marked complete before the run is treated as done.
+  Backend-native capabilities like skills, subagents, MCP servers, and
+  custom slash commands continue to work; task-runner controls when and
+  how the backend is invoked, not what it does once running.
 
 Today the built-in validation is task-state based: did the worker
 actually complete the checklist it was given? Assignments can also
@@ -66,19 +69,19 @@ declare deterministic hooks that run at prepare time, around attempts,
 or during task transitions to block, re-invoke, mutate run metadata, or
 stage attachments before the run continues.
 
-## What task-runner is not
+## Scope and direction
 
-`task-runner` is not a polished chat-first UI for interacting with
-agents. It streams backend output and you can follow up on runs that are
-not currently active, but the product center is durable run state and
-structured execution — not chat bubbles, rich tool-call rendering, or a
-full conversational workspace.
+task-runner is an orchestration and state-tracking layer for agent runs,
+not an interactive coding environment. Upstream design and ideation
+happen elsewhere; task-runner takes a plan (or the requirements to
+produce one), runs it, and surfaces durable state, audit, and structured
+handoffs at each user gate. In practice it is used either as a sidecar
+for your existing interactive coding agents, or as a runner for
+prepared/background tasks that need a durable checklist and audit trail.
 
-In practice that means it is best used as either:
-
-- a sidecar for your existing interactive coding agents, or
-- a runner for prepared/background tasks that need a durable checklist
-  and audit trail.
+See [`docs/scope.md`](docs/scope.md) for the full product stance,
+including a triage heuristic for evaluating feature requests against
+scope.
 
 ## Install
 

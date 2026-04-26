@@ -78,6 +78,9 @@
 
 ### Added
 
+- Added product-scope guidance for evaluating task-runner feature
+  requests and linked it from the README and agent onboarding notes.
+  ([#108](https://github.com/kcosr/task-runner/pull/108))
 - Added `backendArgs.<backend>.extraArgs` in agent frontmatter for
   backend-owned CLI flags. Fresh runs and init resolve only the selected
   backend's args, freeze them into local `run.json`, and keep normal
