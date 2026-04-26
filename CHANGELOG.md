@@ -257,6 +257,7 @@
   accumulating transcript output and deciding whether the parent task-runner
   attempt has completed, preventing native subagent completion from prematurely
   ending the parent attempt.
+  ([#99](https://github.com/kcosr/task-runner/pull/99))
 - Markdown attachment previews now render leading YAML frontmatter as a
   preformatted code block instead of mixing it into the rendered Markdown
   body. ([#95](https://github.com/kcosr/task-runner/pull/95))
