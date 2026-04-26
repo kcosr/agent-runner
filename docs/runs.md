@@ -11,7 +11,7 @@ ${TASK_RUNNER_STATE_DIR}/runs/<repo>/<run-id>/
 
 ```text
 <workspace>/
-├── run.json               # canonical manifest (schema version 12)
+├── run.json               # canonical manifest (schema version 13)
 ├── run-events.jsonl       # append-only audit history with monotonic cursors
 ├── assignment-seed.md     # only when the run started from an assignment file
 ├── agent-seed.md          # only when the run started from an agent file
@@ -42,11 +42,12 @@ The manifest is the source of truth. Important fields:
 
 | Field | Purpose |
 |-------|---------|
-| `schemaVersion` | currently `12`; older manifests are not silently upgraded |
+| `schemaVersion` | currently `13`; older manifests are not silently upgraded |
 | `runId`, `repo`, `cwd` | identity and scope |
 | `agent` | frozen `{ name, sourcePath, instructions }` |
 | `assignment` | frozen `{ name, sourcePath, workspacePath }` or `null` |
 | `backend`, `model`, `effort` | resolved runtime config |
+| `backendSpecific`, `resolvedBackendArgs` | frozen backend-specific config and selected backend argv extras |
 | `timeoutSec`, `maxAttemptsPerSession`, `unrestricted` | per-attempt limits |
 | `lockedFields` | union of agent + assignment locks, frozen |
 | `message` | default run message (from CLI positional or assignment) |
@@ -77,6 +78,10 @@ The manifest is the source of truth. Important fields:
 `none`, `paused`, `future`, or `due`. It is recomputed from
 `manifest.schedule` and the current time; it is not stored in
 `run.json`.
+
+`resolvedBackendArgs` is intentionally local to `run.json`. It is used for
+backend invocation and audit/replay semantics, while normal CLI, daemon,
+and web status DTOs omit it.
 
 ## Run/session/attempt model
 
@@ -114,9 +119,10 @@ task-runner run \
 
 Fresh `run` resolves agent and assignment, resolves cwd
 (`--cwd` → assignment `cwd` → caller cwd), resolves variables, enforces
-locked fields, creates the workspace, freezes the manifest, composes the
-brief, and invokes the backend — except for passive runs, which stop after
-initialization.
+locked fields, creates the workspace, resolves the selected backend's
+extra argv, freezes the manifest, composes the brief, and invokes the
+backend — except for passive runs, which stop after initialization and
+freeze an empty backend-args list.
 
 If a run launches another `task-runner` process from inside a worker, the
 child run automatically freezes `parentRunId` and can inherit parent vars
@@ -263,10 +269,11 @@ task-runner run schedule clear <id|path>
 ### Reset
 
 `run reset` restores the initialized-state seed from `manifest.resetSeed`
-(model, effort, name, dependencies, timeoutSec, maxAttemptsPerSession, brief, final
-task snapshot). Attempt and session history, endedAt, exitCode, and the
-live status are cleared. Existing `run-events.jsonl` history is preserved
-and reset appends one more diagnostic record instead of truncating the file.
+(model, effort, name, dependencies, timeoutSec, maxAttemptsPerSession,
+backend-specific config, resolved backend args, brief, final task
+snapshot). Attempt and session history, endedAt, exitCode, and the live
+status are cleared. Existing `run-events.jsonl` history is preserved and
+reset appends one more diagnostic record instead of truncating the file.
 Only non-running runs can be reset. `manifest.schedule` is preserved
 across manual reset because it is not part of the reset seed.
 
@@ -276,7 +283,8 @@ across manual reset because it is not part of the reset seed.
 unarchived `initialized` run. The mutation rerenders the composed brief
 and reset seed while preserving frozen identity/runtime fields including
 agent, assignment, backend, cwd, tasks, schedule, launcher, hooks, and
-backend-specific Codex transport, including stdio, websocket, or UDS.
+backend-specific Codex transport, including stdio, websocket, or UDS, plus
+the selected backend's frozen args.
 
 The operation is all-or-nothing. Validation failures, required-var
 failures, locked `message` / rendered task fields, and prepare/render

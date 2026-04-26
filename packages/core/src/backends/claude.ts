@@ -54,6 +54,45 @@ function mapEffortToClaude(effort: EffortLevel): string | null {
 
 const normalizeClaudeModel = normalizeBackendModel;
 
+export function buildClaudeArgs(
+  ctx: Pick<
+    BackendInvokeContext,
+    | "effort"
+    | "model"
+    | "name"
+    | "prompt"
+    | "resolvedBackendArgs"
+    | "resumeSessionId"
+    | "unrestricted"
+  >,
+): string[] {
+  const args: string[] = ["--print", "--output-format", "stream-json", "--verbose"];
+
+  if (ctx.model) {
+    args.push("--model", normalizeClaudeModel(ctx.model));
+  }
+  if (ctx.effort) {
+    const mapped = mapEffortToClaude(ctx.effort);
+    if (mapped !== null) {
+      args.push("--effort", mapped);
+    }
+  }
+  if (ctx.unrestricted) {
+    args.push("--dangerously-skip-permissions");
+  }
+  if (ctx.name) {
+    args.push("--name", ctx.name);
+  }
+  if (ctx.resumeSessionId) {
+    args.push("--resume", ctx.resumeSessionId);
+  }
+  args.push(...ctx.resolvedBackendArgs);
+  if (ctx.prompt.trim().length > 0) {
+    args.push(ctx.prompt);
+  }
+  return args;
+}
+
 interface StreamState {
   sessionId: string | null;
   resultText: string;
@@ -212,29 +251,7 @@ export const claudeBackend: Backend = {
   id: "claude",
   validateSessionId: validateClaudeSession,
   async invoke(ctx: BackendInvokeContext): Promise<BackendInvokeResult> {
-    const args: string[] = ["--print", "--output-format", "stream-json", "--verbose"];
-
-    if (ctx.model) {
-      args.push("--model", normalizeClaudeModel(ctx.model));
-    }
-    if (ctx.effort) {
-      const mapped = mapEffortToClaude(ctx.effort);
-      if (mapped !== null) {
-        args.push("--effort", mapped);
-      }
-    }
-    if (ctx.unrestricted) {
-      args.push("--dangerously-skip-permissions");
-    }
-    if (ctx.name) {
-      args.push("--name", ctx.name);
-    }
-    if (ctx.resumeSessionId) {
-      args.push("--resume", ctx.resumeSessionId);
-    }
-    if (ctx.prompt.trim().length > 0) {
-      args.push(ctx.prompt);
-    }
+    const args = buildClaudeArgs(ctx);
 
     const state: StreamState = {
       sessionId: null,

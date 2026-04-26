@@ -5,6 +5,7 @@ import { test } from "node:test";
 // the args-building path. Here we just verify the canonical enum shape via the
 // schema so the mapping table has something to map against.
 
+import { buildClaudeArgs } from "../packages/core/dist/backends/claude.js";
 import { agentConfigSchema } from "../packages/core/dist/core/config/schema.js";
 
 test("canonical effort enum accepts all 7 values", () => {
@@ -45,4 +46,37 @@ test("backend enum accepts the supported backend ids", () => {
   assert.equal(agentConfigSchema.safeParse({ ...base, backend: "passive" }).success, true);
   assert.equal(agentConfigSchema.safeParse({ ...base, backend: "gemini" }).success, false);
   assert.equal(agentConfigSchema.safeParse({ ...base, backend: "" }).success, false);
+});
+
+test("buildClaudeArgs inserts backend args before prompt without conflict validation", () => {
+  assert.deepEqual(
+    buildClaudeArgs({
+      model: "anthropic/claude-sonnet-4-6",
+      effort: "xhigh",
+      unrestricted: true,
+      name: "Feature run",
+      resumeSessionId: "claude-session-1",
+      resolvedBackendArgs: ["--model", "opus", "--new-claude-flag"],
+      prompt: "Inspect the repo",
+    }),
+    [
+      "--print",
+      "--output-format",
+      "stream-json",
+      "--verbose",
+      "--model",
+      "claude-sonnet-4-6",
+      "--effort",
+      "max",
+      "--dangerously-skip-permissions",
+      "--name",
+      "Feature run",
+      "--resume",
+      "claude-session-1",
+      "--model",
+      "opus",
+      "--new-claude-flag",
+      "Inspect the repo",
+    ],
+  );
 });

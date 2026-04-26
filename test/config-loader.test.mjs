@@ -960,6 +960,146 @@ body
     });
   }));
 
+test("loadAgentConfig accepts backendArgs entries for multiple backends", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    writeAgent(
+      configDir,
+      "backend-args",
+      `---
+schemaVersion: 1
+name: backend-args
+backend: claude
+backendArgs:
+  claude:
+    extraArgs:
+      - --model
+      - opus
+  codex:
+    extraArgs:
+      - --experimental-codex-flag
+  passive:
+    extraArgs:
+      - --accepted-but-inert
+---
+body
+`,
+    );
+
+    const loaded = loadAgentConfig("backend-args", rootDir);
+    assert.deepEqual(loaded.config.backendArgs, {
+      claude: { extraArgs: ["--model", "opus"] },
+      codex: { extraArgs: ["--experimental-codex-flag"] },
+      passive: { extraArgs: ["--accepted-but-inert"] },
+    });
+  }));
+
+test("loadAgentConfig rejects malformed backendArgs values", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    for (const [name, backendArgs, pattern] of [
+      ["unknown-key", "gemini:\n    extraArgs: [--flag]", /backendArgs/],
+      ["missing-extra-args", "claude: {}", /backendArgs\.claude\.extraArgs/],
+      ["extra-field", "claude:\n    extraArgs: [--flag]\n    env: {}", /backendArgs\.claude/],
+      ["non-array", "claude:\n    extraArgs: --flag", /backendArgs\.claude\.extraArgs/],
+      ["empty-token", 'claude:\n    extraArgs: [""]', /extraArgs entries must be non-empty/],
+      ["blank-token", 'claude:\n    extraArgs: ["   "]', /extraArgs entries must be non-empty/],
+    ]) {
+      writeAgent(
+        configDir,
+        name,
+        `---
+schemaVersion: 1
+name: ${name}
+backend: claude
+backendArgs:
+  ${backendArgs}
+---
+body
+`,
+      );
+
+      assert.throws(
+        () => loadAgentConfig(name, rootDir),
+        (err) => {
+          assert.ok(err instanceof AgentConfigError);
+          assert.match(err.message, pattern);
+          return true;
+        },
+      );
+    }
+  }));
+
+test("loadAgentConfig applies exact env interpolation to backendArgs tokens only", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) =>
+    withEnv({ BACKEND_FLAG: "--from-env", FLAG_VALUE: "value" }, () => {
+      writeAgent(
+        configDir,
+        "backend-args-env",
+        `---
+schemaVersion: 1
+name: backend-args-env
+backend: cursor
+backendArgs:
+  cursor:
+    extraArgs:
+      - \${BACKEND_FLAG}
+      - \${FLAG_VALUE}
+---
+body
+`,
+      );
+      assert.deepEqual(loadAgentConfig("backend-args-env", rootDir).config.backendArgs, {
+        cursor: { extraArgs: ["--from-env", "value"] },
+      });
+
+      writeAgent(
+        configDir,
+        "backend-args-partial-env",
+        `---
+schemaVersion: 1
+name: backend-args-partial-env
+backend: cursor
+backendArgs:
+  cursor:
+    extraArgs:
+      - --flag=\${FLAG_VALUE}
+---
+body
+`,
+      );
+      assert.throws(
+        () => loadAgentConfig("backend-args-partial-env", rootDir),
+        (err) => {
+          assert.ok(err instanceof AgentConfigError);
+          assert.match(err.message, /agent\.backendArgs\.cursor\.extraArgs\[0\]/);
+          assert.match(err.message, /mismatch with field surface/);
+          return true;
+        },
+      );
+
+      writeAgent(
+        configDir,
+        "backend-args-blob-env",
+        `---
+schemaVersion: 1
+name: backend-args-blob-env
+backend: cursor
+backendArgs: \${BACKEND_ARGS}
+---
+body
+`,
+      );
+      assert.throws(
+        () => loadAgentConfig("backend-args-blob-env", rootDir),
+        (err) => {
+          assert.ok(err instanceof AgentConfigError);
+          assert.match(err.message, /agent\.backendArgs/);
+          assert.match(err.message, /mismatch with field surface/);
+          return true;
+        },
+      );
+    }),
+  ));
+
 test("loadAgentConfig rejects invalid backendSpecific.codex.transport values", () =>
   withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
     writeAgent(

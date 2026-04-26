@@ -56,6 +56,11 @@ backendSpecific:            # optional backend-specific runtime config
     transport:
       type: ws
       url: ws://127.0.0.1:4773/
+backendArgs:                # optional per-backend extra argv tokens
+  claude:
+    extraArgs: ["--profile", "default"]
+  codex:
+    extraArgs: ["--model", "gpt-5.4"]
 lockedFields: []            # optional list of lockable fields
 launcher: ssh-docker        # optional named launcher or inline object
 ---
@@ -82,10 +87,56 @@ exactly one of:
 Other backends do not accept `backendSpecific`, and this pass does not
 add generic backend-specific env passthrough.
 
+`backendArgs` lets an agent append backend-owned CLI flags without adding
+a new task-runner option. It is keyed by backend id, and each entry has an
+`extraArgs` string array:
+
+```yaml
+---
+schemaVersion: 1
+name: claude-extra
+backend: claude
+backendArgs:
+  claude:
+    extraArgs:
+      - --profile
+      - ${CLAUDE_PROFILE:-default}
+---
+```
+
+```yaml
+---
+schemaVersion: 1
+name: codex-extra
+backend: codex
+backendArgs:
+  codex:
+    extraArgs:
+      - --model
+      - gpt-5.4
+---
+```
+
+Backend keys must be one of `claude`, `codex`, `cursor`, `pi`, or
+`passive`; unknown keys and unknown entry fields are config errors.
+Tokens must be non-empty strings. Dormant entries are allowed, so an
+agent can carry both `claude` and `codex` entries and activate the
+selected one when `--backend` chooses that backend. Passive entries are
+accepted for schema symmetry but inert: passive runs resolve no backend
+argv.
+
+The selected backend's `extraArgs` are resolved at fresh-run/init time and
+frozen into `manifest.resolvedBackendArgs` and
+`manifest.resetSeed.resolvedBackendArgs`. Resume, reset, ready-start, and
+reconfigure reuse the frozen values instead of re-reading current agent
+frontmatter. Local `run.json` stores those frozen args; normal CLI,
+daemon, and web status DTOs do not expose them.
+
 Frontmatter scalar values are resolved for `${...}` env expressions before
 schema validation. Typed surfaces such as `name`, `backend`, `model`,
-`timeoutSec`, `unrestricted`, `backendSpecific.codex.transport.url`, and
-`backendSpecific.codex.transport.path` require the whole value to be
+`timeoutSec`, `unrestricted`, `backendSpecific.codex.transport.url`,
+`backendSpecific.codex.transport.path`, and individual
+`backendArgs.<backend>.extraArgs[]` tokens require the whole value to be
 exactly one env expression:
 
 ```yaml
@@ -101,8 +152,9 @@ backendSpecific:
 ```
 
 Partial `${...}` interpolation is rejected for those typed fields, so
-`name: "agent-${AGENT_NAME}"` fails at load time. `${...}` also cannot
-replace whole objects or arrays such as `backendSpecific`.
+`name: "agent-${AGENT_NAME}"` and `--flag=${VALUE}` fail at load time.
+`${...}` also cannot replace whole objects or arrays such as
+`backendSpecific` or `backendArgs`.
 
 ### Body
 
@@ -395,7 +447,8 @@ Hook mutation boundaries:
 
 - `prepare` may mutate run config (`cwd`, backend/model/effort,
   timeout/unrestricted, prompts, locked fields), runtime vars, hook
-  state, note/pin metadata, task patches, and attachments.
+  state, note/pin metadata, task patches, and attachments. Backend args
+  are resolved from the final selected backend after prepare changes.
 - non-prepare phases may mutate run config, hook state, note/pin
   metadata, task patches, and attachments, but not runtime vars.
 - task-transition hooks run transactionally around `task set`,

@@ -22,6 +22,13 @@ export interface BackendSpecificConfig {
   };
 }
 
+export interface BackendArgsEntry {
+  extraArgs: string[];
+}
+
+export type BackendArgsConfig = Partial<Record<BackendId, BackendArgsEntry>>;
+export type ResolvedBackendArgs = string[];
+
 export function isWsOrWssUrl(value: string): boolean {
   try {
     const parsed = new URL(value);
@@ -82,6 +89,28 @@ export function cloneBackendSpecificConfig(
   };
 }
 
+export function cloneBackendArgsConfig(
+  backendArgs: BackendArgsConfig | undefined,
+): BackendArgsConfig | undefined {
+  if (!backendArgs) {
+    return undefined;
+  }
+  const cloned: BackendArgsConfig = {};
+  for (const backendId of BACKEND_IDS) {
+    const entry = backendArgs[backendId];
+    if (entry) {
+      cloned[backendId] = {
+        extraArgs: cloneResolvedBackendArgs(entry.extraArgs),
+      };
+    }
+  }
+  return cloned;
+}
+
+export function cloneResolvedBackendArgs(args: ResolvedBackendArgs): ResolvedBackendArgs {
+  return [...args];
+}
+
 export type BackendEvent =
   | {
       type: "agent_message_delta";
@@ -99,6 +128,7 @@ export interface BackendInvokeContext {
   model?: string;
   effort?: EffortLevel;
   backendSpecific?: BackendSpecificConfig;
+  resolvedBackendArgs: ResolvedBackendArgs;
   launcher?: ResolvedLauncherConfig;
   unrestricted?: boolean;
   timeoutSec: number;
@@ -124,6 +154,7 @@ export interface ValidateSessionContext {
   cwd: string;
   env?: Record<string, string>;
   backendSpecific?: BackendSpecificConfig;
+  resolvedBackendArgs: ResolvedBackendArgs;
 }
 
 export type ValidateSessionResult = { valid: true } | { valid: false; reason: string };

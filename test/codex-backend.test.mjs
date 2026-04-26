@@ -19,17 +19,20 @@ const baseCtx = {
   cwd: "/repo",
   env: {},
   prompt: "ignored",
+  resolvedBackendArgs: [],
   timeoutSec: 60,
 };
 
 test("buildCodexAppServerArgs: default stdio launch uses app-server only", () => {
-  assert.deepEqual(buildCodexAppServerArgs(false), ["app-server"]);
+  assert.deepEqual(buildCodexAppServerArgs(false, []), ["app-server"]);
 });
 
 test("buildCodexAppServerArgs: unrestricted launch adds dangerous bypass flag", () => {
-  assert.deepEqual(buildCodexAppServerArgs(true), [
+  assert.deepEqual(buildCodexAppServerArgs(true, ["--model", "gpt-5.4"]), [
     "--dangerously-bypass-approvals-and-sandbox",
     "app-server",
+    "--model",
+    "gpt-5.4",
   ]);
 });
 

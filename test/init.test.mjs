@@ -457,6 +457,22 @@ test("init overwrite: reinitializing an initialized run-id clears stale workspac
   staleManifest.backend = "claude";
   staleManifest.resetSeed.backend = "claude";
   writeFileSync(manifestPath, `${JSON.stringify(staleManifest, null, 2)}\n`);
+  writeAgent(
+    dir,
+    "two",
+    `---
+schemaVersion: 1
+name: two
+backend: claude
+backendArgs:
+  claude:
+    extraArgs:
+      - --reinitialized
+      - value
+---
+Agent role instructions.
+`,
+  );
 
   const overwritten = await withSharedRuntimeEnv(dir, async () =>
     executeRunCommand({
@@ -481,6 +497,11 @@ test("init overwrite: reinitializing an initialized run-id clears stale workspac
   assert.deepEqual(overwritten.manifest.sessions, []);
   assert.deepEqual(overwritten.manifest.attemptRecords, []);
   assert.equal(overwritten.manifest.backendSessionId, null);
+  assert.deepEqual(overwritten.manifest.resolvedBackendArgs, ["--reinitialized", "value"]);
+  assert.deepEqual(overwritten.manifest.resetSeed.resolvedBackendArgs, [
+    "--reinitialized",
+    "value",
+  ]);
   assert.equal(existsSync(attemptsDir), false);
   assert.equal(existsSync(attachmentsDir), false);
   assert.ok(readFileSync(overwritten.assignmentPath, "utf8").includes("Work on"));

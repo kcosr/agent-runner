@@ -34,7 +34,10 @@ function findSessionId(value: unknown): string | null {
 export const normalizeCursorModel = normalizeBackendModel;
 
 export function buildCursorArgs(
-  ctx: Pick<BackendInvokeContext, "cwd" | "model" | "prompt" | "resumeSessionId" | "unrestricted">,
+  ctx: Pick<
+    BackendInvokeContext,
+    "cwd" | "model" | "prompt" | "resolvedBackendArgs" | "resumeSessionId" | "unrestricted"
+  >,
 ): string[] {
   const args = [
     "-p",
@@ -55,6 +58,7 @@ export function buildCursorArgs(
   if (ctx.resumeSessionId) {
     args.push("--resume", ctx.resumeSessionId);
   }
+  args.push(...ctx.resolvedBackendArgs);
   if (ctx.prompt.trim().length > 0) {
     args.push(ctx.prompt);
   }

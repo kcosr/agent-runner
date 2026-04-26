@@ -208,6 +208,16 @@ function classifyAgentSurface(path: PathSegment[]): InterpolationSurface {
     }
   }
 
+  if (
+    path.length === 4 &&
+    path[0] === "backendArgs" &&
+    typeof path[1] === "string" &&
+    path[2] === "extraArgs" &&
+    typeof path[3] === "number"
+  ) {
+    return { mode: "exact", scalarKind: "string", allowLiteral: false };
+  }
+
   return { mode: "disabled" };
 }
 

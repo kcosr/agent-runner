@@ -4,7 +4,7 @@ import { resolveBackend } from "../../backends/registry.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../../config/loader.js";
 import type { ReconfigureRunPatch, RunDetail } from "../../contracts/runs.js";
 import { toRunDetail } from "../../contracts/runs.js";
-import { cloneBackendSpecificConfig } from "../backends/types.js";
+import { cloneBackendSpecificConfig, cloneResolvedBackendArgs } from "../backends/types.js";
 import { cloneResolvedLauncherConfig } from "../config/launchers.js";
 import { loadedAgentFromManifest } from "../config/loaded.js";
 import type { LoadedAgent, LoadedAssignment } from "../config/loaded.js";
@@ -193,6 +193,7 @@ function restoreFrozenManifestFields(
     model: previous.model,
     effort: previous.effort,
     backendSpecific: cloneBackendSpecificConfig(previous.backendSpecific),
+    resolvedBackendArgs: cloneResolvedBackendArgs(previous.resolvedBackendArgs),
     launcher: cloneResolvedLauncherConfig(previous.launcher),
     name: previous.name,
     note: previous.note,
@@ -223,6 +224,7 @@ function restoreFrozenManifestFields(
     model: restored.model,
     effort: restored.effort,
     backendSpecific: cloneBackendSpecificConfig(restored.backendSpecific),
+    resolvedBackendArgs: cloneResolvedBackendArgs(restored.resolvedBackendArgs),
     launcher: cloneResolvedLauncherConfig(restored.launcher),
     cwd: restored.cwd,
     lockedFields: [...restored.lockedFields],

@@ -196,6 +196,7 @@ test("buildPiArgs wires rpc mode, thinking, and session id resume", () => {
     buildPiArgs({
       model: "openai/gpt-5.4",
       effort: "max",
+      resolvedBackendArgs: ["--duplicate", "--thinking", "low"],
       resumeSessionId: "pi-session-1",
     }),
     [
@@ -208,6 +209,9 @@ test("buildPiArgs wires rpc mode, thinking, and session id resume", () => {
       "xhigh",
       "--session",
       "pi-session-1",
+      "--duplicate",
+      "--thinking",
+      "low",
     ],
   );
 });
@@ -316,6 +320,7 @@ test("pi backend launches in rpc mode, captures streamed text, and persists tran
       },
       model: "openai/gpt-5.4",
       effort: "high",
+      resolvedBackendArgs: ["--new-pi-flag", "value"],
       resumeSessionId: "pi-prev-session",
       name: "Pi invoke name",
       timeoutSec: 10,
@@ -333,6 +338,8 @@ test("pi backend launches in rpc mode, captures streamed text, and persists tran
     "high",
     "--session",
     "pi-prev-session",
+    "--new-pi-flag",
+    "value",
   ]);
   assert.equal(readFileSync(cwdPath, "utf8"), dir);
   assert.deepEqual(JSON.parse(readFileSync(renameCallsPath, "utf8")), ["Pi invoke name"]);
@@ -358,6 +365,7 @@ test("pi backend rejects malformed rpc output", async () => {
             ...process.env,
             PI_TEST_RAW_STDOUT_LINE: "not-json\\n",
           },
+          resolvedBackendArgs: [],
           timeoutSec: 10,
         }),
       ),
@@ -388,6 +396,7 @@ test("pi backend auto-cancels dialog-style extension ui requests without hanging
             { type: "agent_end", messages: [] },
           ]),
         },
+        resolvedBackendArgs: [],
         timeoutSec: 10,
       }),
     ),
@@ -426,6 +435,7 @@ test("pi backend rejects when the process exits before agent_end", async () => {
               ]),
               PI_TEST_EXIT_AFTER_PROMPT: "1",
             },
+            resolvedBackendArgs: [],
             timeoutSec: 10,
           }),
         ),
@@ -445,6 +455,7 @@ test("pi backend rejects cleanly when the pi binary is missing", async () => {
           piBackend.invoke({
             prompt: "Inspect the repo",
             cwd: dir,
+            resolvedBackendArgs: [],
             timeoutSec: 10,
           }),
         ),

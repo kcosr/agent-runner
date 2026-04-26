@@ -78,6 +78,17 @@ test("parseArgs: --backend accepts cursor", () => {
   assert.equal(parsed.backend, "cursor");
 });
 
+test("parseArgs: backend arg override flags are not supported", () => {
+  assert.throws(
+    () => parseArgs(argv("run", "--agent", "x", "--backend-arg", "--flag")),
+    /Unknown flag: --backend-arg/,
+  );
+  assert.equal(
+    "backendArgs" in overridesFromParsedArgs(parseArgs(argv("run", "--agent", "x"))),
+    false,
+  );
+});
+
 test("parseArgs: --parent-run captures a fresh-run lineage parent", () => {
   const parsed = parseArgs(argv("run", "--agent", "x", "--parent-run", "parent-123"));
   assert.equal(parsed.parentRun, "parent-123");

@@ -3,16 +3,17 @@
 import { mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 
 function usage() {
   return [
     "Usage: node scripts/migrate-manifests-v13.mjs [--root <path>] [--repo <name>]... [--file <path>]... [--write]",
     "",
     "Dry-run by default. Use --write to update manifests in place.",
-    "Removes redundant attemptRecords[].tasksAfter fields from run.json manifests.",
+    "Migrates schemaVersion 12 manifests to 13 by adding resolvedBackendArgs: [].",
     "Pass a state root such as ~/.local/state/task-runner with --root.",
-    "Use repeated --repo filters to limit cleanup to selected repo buckets.",
-    "Use repeated --file paths to clean only specific run.json manifests.",
+    "Use repeated --repo filters to limit migration to selected repo buckets.",
+    "Use repeated --file paths to migrate only specific run.json manifests.",
   ].join("\n");
 }
 
@@ -63,21 +64,11 @@ function parseArgs(argv) {
   return { root, write, repos, files };
 }
 
-function detectIndent(raw) {
-  const match = raw.match(/^(?<indent>[ \t]+)"[^"]+":/m);
-  return match?.groups?.indent ?? 2;
-}
-
-function formatManifest(raw, manifest) {
-  const trailingNewline = raw.endsWith("\n") ? "\n" : "";
-  return `${JSON.stringify(manifest, null, detectIndent(raw))}${trailingNewline}`;
-}
-
-function atomicWriteText(path, text) {
+function atomicWriteJson(path, value) {
   const tmpDir = mkdtempSync(join(dirname(path), ".migrate-v13-"));
   const tmpPath = join(tmpDir, basename(path));
   try {
-    writeFileSync(tmpPath, text);
+    writeFileSync(tmpPath, `${JSON.stringify(value, null, 2)}\n`);
     renameSync(tmpPath, path);
   } finally {
     rmSync(tmpDir, { recursive: true, force: true });
@@ -85,60 +76,49 @@ function atomicWriteText(path, text) {
 }
 
 function readManifest(path) {
-  const raw = readFileSync(path, "utf8");
   try {
-    return { raw, manifest: JSON.parse(raw) };
+    return JSON.parse(readFileSync(path, "utf8"));
   } catch (err) {
     throw new Error(`invalid JSON: ${err.message}`);
   }
 }
 
-function cleanManifest(manifest) {
+function migrateManifest(manifest) {
   if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
     throw new Error("manifest must be an object");
   }
-  if (!Array.isArray(manifest.attemptRecords)) {
-    return 0;
+  if (manifest.schemaVersion === 13) {
+    return manifest;
   }
-
-  let cleanedAttempts = 0;
-  manifest.attemptRecords = manifest.attemptRecords.map((record) => {
-    if (
-      record &&
-      typeof record === "object" &&
-      !Array.isArray(record) &&
-      Object.hasOwn(record, "tasksAfter")
-    ) {
-      const { tasksAfter: _oldTasksAfter, ...cleanedRecord } = record;
-      cleanedAttempts += 1;
-      return cleanedRecord;
-    }
-    return record;
-  });
-  return cleanedAttempts;
-}
-
-function cleanManifestFile(manifestPath, label, write) {
-  const { raw, manifest } = readManifest(manifestPath);
-  const cleanedAttempts = cleanManifest(manifest);
-  if (cleanedAttempts === 0) {
-    process.stdout.write(`OK    ${label}: no tasksAfter fields found\n`);
-    return { manifestsCleaned: 0, attemptsCleaned: 0, bytesSaved: 0 };
-  }
-
-  const after = formatManifest(raw, manifest);
-  const bytesSaved = Buffer.byteLength(raw, "utf8") - Buffer.byteLength(after, "utf8");
-  if (write) {
-    atomicWriteText(manifestPath, after);
-    process.stdout.write(
-      `WRITE ${label}: removed tasksAfter from ${cleanedAttempts} attempt record(s), saved ${bytesSaved} bytes\n`,
-    );
-  } else {
-    process.stdout.write(
-      `DRY   ${label}: would remove tasksAfter from ${cleanedAttempts} attempt record(s), saving ${bytesSaved} bytes\n`,
+  if (manifest.schemaVersion !== 12) {
+    throw new Error(
+      `unsupported schemaVersion ${manifest.schemaVersion}; migrate to schemaVersion 12 first`,
     );
   }
-  return { manifestsCleaned: 1, attemptsCleaned: cleanedAttempts, bytesSaved };
+  if (
+    !manifest.resetSeed ||
+    typeof manifest.resetSeed !== "object" ||
+    Array.isArray(manifest.resetSeed)
+  ) {
+    throw new Error("schemaVersion 12 manifest is missing resetSeed object");
+  }
+  if ("resolvedBackendArgs" in manifest) {
+    throw new Error("schemaVersion 12 manifest must not already contain resolvedBackendArgs");
+  }
+  if ("resolvedBackendArgs" in manifest.resetSeed) {
+    throw new Error(
+      "schemaVersion 12 manifest must not already contain resetSeed.resolvedBackendArgs",
+    );
+  }
+  return {
+    ...manifest,
+    schemaVersion: 13,
+    resolvedBackendArgs: [],
+    resetSeed: {
+      ...manifest.resetSeed,
+      resolvedBackendArgs: [],
+    },
+  };
 }
 
 function listRepoBuckets(root, repoFilters) {
@@ -164,33 +144,34 @@ function listRunDirs(root, repo) {
   }
 }
 
-function addTotals(totals, result) {
-  totals.manifestsCleaned += result.manifestsCleaned;
-  totals.attemptsCleaned += result.attemptsCleaned;
-  totals.bytesSaved += result.bytesSaved;
-}
-
-function printSummary(totals) {
-  process.stdout.write(
-    `Summary: manifests cleaned=${totals.manifestsCleaned} attempt records cleaned=${totals.attemptsCleaned} bytes saved=${totals.bytesSaved} errors=${totals.errors}\n`,
-  );
+function migrateManifestFile(manifestPath, label, write) {
+  const before = readManifest(manifestPath);
+  const after = migrateManifest(before);
+  if (isDeepStrictEqual(before, after)) {
+    process.stdout.write(`OK    ${label}: already canonical schemaVersion 13\n`);
+    return;
+  }
+  if (write) {
+    atomicWriteJson(manifestPath, after);
+    process.stdout.write(`WRITE ${label}: promoted to schemaVersion 13\n`);
+    return;
+  }
+  process.stdout.write(`DRY   ${label}: would promote to schemaVersion 13\n`);
 }
 
 function main() {
   const { root, write, repos, files } = parseArgs(process.argv.slice(2));
-  const totals = { manifestsCleaned: 0, attemptsCleaned: 0, bytesSaved: 0, errors: 0 };
-
+  let failures = 0;
   if (files.length > 0) {
     for (const file of files) {
       try {
-        addTotals(totals, cleanManifestFile(file, file, write));
+        migrateManifestFile(file, file, write);
       } catch (err) {
-        totals.errors += 1;
+        failures += 1;
         process.stdout.write(`ERROR ${file}: ${err.message}\n`);
       }
     }
-    printSummary(totals);
-    if (totals.errors > 0) {
+    if (failures > 0) {
       process.exitCode = 1;
     }
     return;
@@ -204,16 +185,15 @@ function main() {
         .split("\\")
         .join("/");
       try {
-        addTotals(totals, cleanManifestFile(manifestPath, relativePath, write));
+        migrateManifestFile(manifestPath, relativePath, write);
       } catch (err) {
-        totals.errors += 1;
+        failures += 1;
         process.stdout.write(`ERROR ${relativePath}: ${err.message}\n`);
       }
     }
   }
 
-  printSummary(totals);
-  if (totals.errors > 0) {
+  if (failures > 0) {
     process.exitCode = 1;
   }
 }

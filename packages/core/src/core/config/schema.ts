@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   BACKEND_IDS,
+  type BackendArgsConfig,
   type BackendSpecificConfig,
   type CodexTransportConfig,
   isAbsoluteUdsSocketPath,
@@ -303,6 +304,25 @@ export const backendSpecificConfigSchema: z.ZodType<BackendSpecificConfig> = z
   })
   .strict();
 
+const backendArgsTokenSchema = z
+  .string()
+  .min(1)
+  .refine((value) => value.trim().length > 0, "extraArgs entries must be non-empty strings");
+
+const backendArgsEntrySchema = z
+  .object({
+    extraArgs: z.array(backendArgsTokenSchema),
+  })
+  .strict();
+
+export const backendArgsConfigSchema: z.ZodType<BackendArgsConfig> = z
+  .object(
+    Object.fromEntries(
+      BACKEND_IDS.map((backendId) => [backendId, backendArgsEntrySchema.optional()]),
+    ),
+  )
+  .strict();
+
 export const launcherInlineConfigSchema = z
   .object({
     command: z.string().trim().min(1),
@@ -334,6 +354,7 @@ export const agentConfigSchema = z.object({
   effort: z.enum(EFFORT_LEVELS).optional(),
   launcher: agentLauncherSchema.optional(),
   backendSpecific: backendSpecificConfigSchema.optional(),
+  backendArgs: backendArgsConfigSchema.optional(),
   timeoutSec: z.number().int().positive().default(DEFAULT_AGENT_TIMEOUT_SEC),
   unrestricted: z.boolean().default(DEFAULT_AGENT_UNRESTRICTED),
   lockedFields: z.array(z.enum(LOCKABLE_FIELDS)).default([]),
