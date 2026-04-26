@@ -478,6 +478,32 @@ function setTurnCompleted(state: AccumulatorState): void {
   state.resolveCompleted?.();
 }
 
+function notificationThreadId(params: Record<string, unknown>): string | null {
+  return typeof params.threadId === "string" ? params.threadId : null;
+}
+
+function notificationTurnId(params: Record<string, unknown>): string | null {
+  if (typeof params.turnId === "string") return params.turnId;
+  const turn = params.turn;
+  return isRecord(turn) && typeof turn.id === "string" ? turn.id : null;
+}
+
+function hasNotificationScope(params: Record<string, unknown>): boolean {
+  return notificationThreadId(params) !== null || notificationTurnId(params) !== null;
+}
+
+function acceptCurrentTurnNotification(
+  state: AccumulatorState,
+  params: Record<string, unknown>,
+): boolean {
+  const threadId = notificationThreadId(params);
+  if (state.threadId === null || threadId !== state.threadId) return false;
+
+  const turnId = notificationTurnId(params);
+  if (turnId === null) return false;
+  return state.turnId !== null && turnId === state.turnId;
+}
+
 export function waitForTurnId(state: AccumulatorState, timeoutMs: number): Promise<string | null> {
   if (state.turnId) return Promise.resolve(state.turnId);
   return new Promise((resolve) => {
@@ -629,19 +655,17 @@ function handleNotification(state: AccumulatorState, method: string, params: unk
   switch (method) {
     case "thread/started": {
       const thread = params.thread;
-      if (isRecord(thread) && typeof thread.id === "string") {
+      if (state.threadId === null && isRecord(thread) && typeof thread.id === "string") {
         state.threadId = thread.id;
       }
       return;
     }
     case "turn/started": {
-      const turn = params.turn;
-      if (isRecord(turn) && typeof turn.id === "string") {
-        setTurnId(state, turn.id);
-      }
+      if (!acceptCurrentTurnNotification(state, params)) return;
       return;
     }
     case "item/agentMessage/delta": {
+      if (!acceptCurrentTurnNotification(state, params)) return;
       const delta = typeof params.delta === "string" ? params.delta : "";
       if (delta.length === 0) return;
       const itemId = typeof params.itemId === "string" ? params.itemId : null;
@@ -662,6 +686,7 @@ function handleNotification(state: AccumulatorState, method: string, params: unk
       return;
     }
     case "item/completed": {
+      if (!acceptCurrentTurnNotification(state, params)) return;
       const item = params.item;
       if (isRecord(item)) {
         const type = typeof item.type === "string" ? item.type : "";
@@ -677,6 +702,7 @@ function handleNotification(state: AccumulatorState, method: string, params: unk
       return;
     }
     case "turn/completed": {
+      if (!acceptCurrentTurnNotification(state, params)) return;
       const turn = params.turn;
       if (isRecord(turn)) {
         const status = typeof turn.status === "string" ? turn.status : "unknown";
@@ -692,6 +718,7 @@ function handleNotification(state: AccumulatorState, method: string, params: unk
       return;
     }
     case "error": {
+      if (hasNotificationScope(params) && !acceptCurrentTurnNotification(state, params)) return;
       // Intermediate error notification — record but don't treat as terminal
       // unless followed by turn/completed with status=failed.
       if (typeof params.message === "string" && state.turnError === null) {
