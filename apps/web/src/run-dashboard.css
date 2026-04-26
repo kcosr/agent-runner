@@ -1451,12 +1451,15 @@ pre {
     position: fixed;
     right: 16px;
     left: 16px;
-    bottom: 16px;
-    top: auto;
+    top: max(96px, calc(env(safe-area-inset-top) + 72px));
+    bottom: auto;
     width: auto;
-    max-height: min(28rem, calc(100dvh - 32px));
+    max-height: min(
+      28rem,
+      calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 168px)
+    );
     overflow-y: auto;
-    border-radius: 20px;
+    border-radius: 18px;
   }
 
   .layout {
