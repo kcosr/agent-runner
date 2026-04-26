@@ -212,6 +212,7 @@
   writes formatting, `npm run imports:fix` applies import organization,
   and `npm run check` verifies formatting and import organization with
   `format:check` and `imports:check`.
+  ([#101](https://github.com/kcosr/task-runner/pull/101))
 - Ready runs can now be schedule-gated: the daemon starts due schedules,
   skips overdue startup occurrences instead of replaying stale work, and
   recurring schedules advance according to `reuse`, `reset`, or `clone`
