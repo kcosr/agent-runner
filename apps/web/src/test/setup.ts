@@ -15,6 +15,7 @@ Object.defineProperties(HTMLDialogElement.prototype, {
       this.removeAttribute("open");
       this.dispatchEvent(new Event("close"));
     },
+    writable: true,
   },
   showModal: {
     configurable: true,
@@ -24,5 +25,6 @@ Object.defineProperties(HTMLDialogElement.prototype, {
       }
       this.setAttribute("open", "");
     },
+    writable: true,
   },
 });

@@ -5185,6 +5185,14 @@ describe("web app", () => {
       }),
     );
     const noteDialog = await screen.findByRole("dialog", { name: "Build dashboard" });
+    const noteDialogSurface = noteDialog.querySelector(".note-dialog");
+    if (!noteDialogSurface) {
+      throw new Error("expected note dialog surface");
+    }
+
+    fireEvent.click(noteDialogSurface);
+
+    expect(screen.getByRole("dialog", { name: "Build dashboard" })).toBeInTheDocument();
 
     fireEvent.click(noteDialog);
 
@@ -7217,7 +7225,15 @@ describe("web app", () => {
     await user.click(await screen.findByRole("button", { name: "Resume" }));
 
     const resumeDialog = await screen.findByRole("dialog", { name: "Resume run" });
+    const resumeDialogSurface = resumeDialog.querySelector(".resume-dialog");
+    if (!resumeDialogSurface) {
+      throw new Error("expected resume dialog surface");
+    }
     const callsBeforeClose = fetchMock.mock.calls.length;
+
+    fireEvent.click(resumeDialogSurface);
+
+    expect(screen.getByRole("dialog", { name: "Resume run" })).toBeInTheDocument();
 
     fireEvent.click(resumeDialog);
 
@@ -7229,6 +7245,74 @@ describe("web app", () => {
         .slice(callsBeforeClose)
         .some(([input]) => String(input).endsWith("/api/runs/resumable/resume")),
     ).toBe(false);
+  });
+
+  it("keeps a resume dialog open while native close paths fire during pending resume", async () => {
+    let resolveResume: ((response: Response) => void) | undefined;
+    installFetchMock(
+      {
+        runs: [makeRun({ runId: "resumable", assignmentName: "Resumable run", status: "success" })],
+        details: {
+          resumable: makeDetail({
+            runId: "resumable",
+            status: "success",
+            assignment: {
+              name: "Resumable run",
+              sourcePath: "/tmp/a.md",
+              workspacePath: "/tmp/b.md",
+            },
+            capabilities: {
+              canArchive: true,
+              canUnarchive: false,
+              canResume: true,
+              taskMutation: {
+                canAdd: false,
+                canEditNotes: false,
+                canSetStatus: false,
+              },
+            },
+          }),
+        },
+      },
+      {
+        handleRequest: (url) => {
+          if (url.endsWith("/api/runs/resumable/resume")) {
+            return new Promise<Response>((resolve) => {
+              resolveResume = resolve;
+            });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Resumable run"));
+    await user.click(await screen.findByRole("button", { name: "Resume" }));
+
+    const resumeDialog = await screen.findByRole("dialog", { name: "Resume run" });
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => {
+      expect(within(resumeDialog).getByRole("button", { name: "Resuming..." })).toBeDisabled();
+    });
+    expect(within(resumeDialog).getByRole("button", { name: "Cancel" })).toBeDisabled();
+
+    nativeCancel(resumeDialog);
+    expect(screen.getByRole("dialog", { name: "Resume run" })).toBeInTheDocument();
+
+    fireEvent.click(resumeDialog);
+    expect(screen.getByRole("dialog", { name: "Resume run" })).toBeInTheDocument();
+
+    if (!resolveResume) {
+      throw new Error("expected pending resume request");
+    }
+    resolveResume(new Response(JSON.stringify({ runId: "resumable" }), { status: 200 }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Resume run" })).not.toBeInTheDocument();
+    });
   });
 
   it("keeps the drawer open when native cancel closes the resume dialog", async () => {

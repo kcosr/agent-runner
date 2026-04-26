@@ -684,6 +684,21 @@ describe("resolveRunsShortcutCommand", () => {
         },
         {
           ...fullscreenContext,
+          modalOpen: true,
+        },
+      ),
+    ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "Enter",
+          metaKey: false,
+          shiftKey: false,
+        },
+        {
+          ...fullscreenContext,
           selectedRunPrimaryActionAvailable: false,
         },
       ),
@@ -700,6 +715,21 @@ describe("resolveRunsShortcutCommand", () => {
         fullscreenContext,
       ),
     ).toBe("ui.toggleDrawerFullscreen");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "Escape",
+          metaKey: false,
+          shiftKey: false,
+        },
+        {
+          ...fullscreenContext,
+          modalOpen: true,
+        },
+      ),
+    ).toBeNull();
     expect(
       resolveRunsShortcutCommand(
         {

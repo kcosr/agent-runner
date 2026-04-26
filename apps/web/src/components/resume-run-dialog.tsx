@@ -24,7 +24,7 @@ export function ResumeRunDialog({
   resumeMessageDraft: string;
   resumeMessageExpanded: boolean;
 }) {
-  const dialogRef = useNativeModalDialog(true);
+  const { dialogProps, ref: dialogRef } = useNativeModalDialog(true, onClose);
   const resumeDisclosureButtonRef = useRef<HTMLButtonElement | null>(null);
   const resumeMessageRef = useRef<HTMLTextAreaElement | null>(null);
   const resumePending = actionPending === "resume";
@@ -57,22 +57,7 @@ export function ResumeRunDialog({
     <dialog
       aria-labelledby="resume-run-dialog-title"
       className="resume-dialog-backdrop"
-      onCancel={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        onClose();
-      }}
-      onClick={(event) => {
-        if (event.target === event.currentTarget) {
-          onClose();
-        }
-      }}
-      onKeyDown={(event) => {
-        if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
-          event.preventDefault();
-          onClose();
-        }
-      }}
+      {...dialogProps}
       ref={dialogRef}
     >
       <div className="resume-dialog">

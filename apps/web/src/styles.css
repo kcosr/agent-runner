@@ -483,7 +483,7 @@ body {
 }
 
 .resume-dialog-backdrop::backdrop {
-  background: rgba(0, 0, 0, 0.28);
+  background: var(--modal-backdrop);
 }
 
 .resume-dialog {

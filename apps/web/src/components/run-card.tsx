@@ -107,7 +107,6 @@ export function RunCard({
   const previewFirstNoteMode = preferredNoteEditorMode === "preview";
   const [activeMotionRevision, setActiveMotionRevision] = useState<number | null>(null);
   const [noteDialogOpen, setNoteDialogOpen] = useState(false);
-  const noteDialogRef = useNativeModalDialog(noteDialogOpen);
   const [notePreviewOpen, setNotePreviewOpen] = useState(false);
   const progress =
     run.tasksTotal === 0 ? 0 : Math.round((run.tasksCompleted / run.tasksTotal) * 100);
@@ -229,6 +228,10 @@ export function RunCard({
     setNotePreviewOpen(false);
     setNoteDialogOpen(false);
   }, [clearNotePreviewCloseTimeout]);
+  const { dialogProps: noteDialogProps, ref: noteDialogRef } = useNativeModalDialog(
+    true,
+    closeNoteDialog,
+  );
 
   useEffect(() => {
     if (
@@ -568,25 +571,7 @@ export function RunCard({
         <dialog
           aria-labelledby={noteTitleId}
           className="note-dialog-backdrop"
-          onCancel={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            closeNoteDialog();
-          }}
-          onClick={(event) => {
-            if (event.target === event.currentTarget) {
-              closeNoteDialog();
-            }
-          }}
-          onKeyDown={(event) => {
-            if (
-              event.target === event.currentTarget &&
-              (event.key === "Enter" || event.key === " ")
-            ) {
-              event.preventDefault();
-              closeNoteDialog();
-            }
-          }}
+          {...noteDialogProps}
           ref={noteDialogRef}
         >
           <div className="note-dialog" role="document">

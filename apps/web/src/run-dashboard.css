@@ -36,6 +36,7 @@
   --destructive-foreground: #b91c1c;
 
   --status-tint-alpha: 0.08;
+  --modal-backdrop: rgba(0, 0, 0, 0.28);
   --shadow-card: 0 1px 0 rgba(0, 0, 0, 0.02);
   --shadow-drawer: -8px 0 32px rgba(0, 0, 0, 0.08);
 
@@ -1027,7 +1028,7 @@ pre {
 }
 
 .note-dialog-backdrop::backdrop {
-  background: rgba(0, 0, 0, 0.28);
+  background: var(--modal-backdrop);
 }
 
 .note-dialog {
