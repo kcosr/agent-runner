@@ -305,7 +305,6 @@ test("command services: passive backend session mutations update only metadata a
         timedOut: false,
         transcript: "transcript 1",
         logPath: "attempts/01.json",
-        tasksAfter: manifest.finalTasks,
         invalidStatuses: [],
       },
     ];
@@ -485,7 +484,6 @@ test("command services: getRunTimelineHistory reads schema v2 attempt logs", asy
         timedOut: false,
         transcript: "First output",
         logPath: "attempts/01.json",
-        tasksAfter: manifest.finalTasks,
         invalidStatuses: [],
       },
       {
@@ -502,7 +500,6 @@ test("command services: getRunTimelineHistory reads schema v2 attempt logs", asy
         timedOut: false,
         transcript: "Second output",
         logPath: "attempts/02.json",
-        tasksAfter: manifest.finalTasks,
         invalidStatuses: [],
       },
       {
@@ -519,7 +516,6 @@ test("command services: getRunTimelineHistory reads schema v2 attempt logs", asy
         timedOut: false,
         transcript: "Third output",
         logPath: "attempts/03.json",
-        tasksAfter: manifest.finalTasks,
         invalidStatuses: [],
       },
     ];
@@ -596,7 +592,6 @@ test("command services: getRunTimelineHistory degrades malformed attempt logs pe
         timedOut: false,
         transcript: "Missing transcript",
         logPath: "attempts/01.json",
-        tasksAfter: manifest.finalTasks,
         invalidStatuses: [],
       },
       {
@@ -613,7 +608,6 @@ test("command services: getRunTimelineHistory degrades malformed attempt logs pe
         timedOut: false,
         transcript: "Corrupt transcript",
         logPath: "attempts/02.json",
-        tasksAfter: manifest.finalTasks,
         invalidStatuses: [],
       },
       {
@@ -630,7 +624,6 @@ test("command services: getRunTimelineHistory degrades malformed attempt logs pe
         timedOut: false,
         transcript: "Escaping transcript",
         logPath: "../outside.json",
-        tasksAfter: manifest.finalTasks,
         invalidStatuses: [],
       },
     ];
@@ -788,7 +781,6 @@ test("command services: readStatus and timeline history resolve bare run ids acr
         timedOut: false,
         transcript: "First output",
         logPath: "attempts/01.json",
-        tasksAfter: manifest.finalTasks,
         invalidStatuses: [],
       },
     ];

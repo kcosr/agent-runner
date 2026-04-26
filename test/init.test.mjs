@@ -450,7 +450,6 @@ test("init overwrite: reinitializing an initialized run-id clears stale workspac
       timedOut: false,
       transcript: "stale",
       logPath: "attempts/01.json",
-      tasksAfter: staleManifest.finalTasks,
       invalidStatuses: [],
     },
   ];

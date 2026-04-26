@@ -2162,7 +2162,6 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         timedOut: record.timedOut,
         transcript: record.transcript,
         logPath,
-        tasksAfter: manifest.finalTasks,
         invalidStatuses: record.invalidStatuses,
       };
       manifest.attemptRecords.push(attemptRecord);

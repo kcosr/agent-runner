@@ -71,6 +71,8 @@
 
 ### Added
 
+- Added `scripts/migrate-manifests-v13.mjs` to remove redundant
+  `attemptRecords[].tasksAfter` snapshots from existing manifests.
 - Added Codex WebSocket-over-UDS transport via `{ type: "uds", path:
   "/absolute/socket/path" }` and `TASK_RUNNER_CODEX_UDS_PATH`, with
   fast-fail conflict detection when both Codex UDS and websocket env
@@ -300,6 +302,8 @@
 
 ### Removed
 
+- Removed redundant per-attempt task snapshots from new
+  `attemptRecords`; `finalTasks` remains the canonical task state.
 - Removed the unreleased `git-sync-base` built-in hook in favor of
   explicit first-attempt fast-forward sync flows.
   ([#86](https://github.com/kcosr/task-runner/pull/86))

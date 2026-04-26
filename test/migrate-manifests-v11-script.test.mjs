@@ -228,6 +228,10 @@ test("migrate-manifests-v11 writes v10 manifest and attempt log promotion", () =
       [2, 0, 1],
     ],
   );
+  assert.equal(
+    manifest.attemptRecords.some((record) => "tasksAfter" in record),
+    false,
+  );
   assert.equal(manifest.sessions[0].firstAttemptNumber, 1);
   assert.equal(manifest.sessions[0].lastAttemptNumber, 2);
   assert.equal(manifest.sessions[0].maxAttemptsPerSession, 3);
