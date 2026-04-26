@@ -84,7 +84,7 @@ In practice that means it is best used as either:
 
 Requirements:
 
-- Node.js 20+
+- Node.js 20.19+ or 22.12+
 - a supported backend when you want live execution:
   - `claude`
   - `codex` (or a Codex app-server)
