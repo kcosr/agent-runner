@@ -311,7 +311,7 @@ const backendArgsTokenSchema = z
 
 const backendArgsEntrySchema = z
   .object({
-    extraArgs: z.array(backendArgsTokenSchema).default([]),
+    extraArgs: z.array(backendArgsTokenSchema),
   })
   .strict();
 

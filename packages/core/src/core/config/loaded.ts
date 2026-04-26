@@ -1,8 +1,4 @@
-import {
-  cloneBackendArgsConfig,
-  cloneBackendSpecificConfig,
-  cloneResolvedBackendArgs,
-} from "../backends/types.js";
+import { cloneBackendArgsConfig, cloneBackendSpecificConfig } from "../backends/types.js";
 import type { RunManifest } from "../run/manifest.js";
 import type { AgentLauncherReference } from "./launchers.js";
 import {
@@ -49,7 +45,7 @@ export function loadedAgentFromManifest(manifest: RunManifest): LoadedAgent {
     backendSpecific: cloneBackendSpecificConfig(manifest.backendSpecific),
     backendArgs: cloneBackendArgsConfig({
       [manifest.backend as AgentConfig["backend"]]: {
-        extraArgs: cloneResolvedBackendArgs(manifest.resolvedBackendArgs),
+        extraArgs: manifest.resolvedBackendArgs,
       },
     }),
     timeoutSec: manifest.timeoutSec,

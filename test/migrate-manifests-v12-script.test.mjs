@@ -168,7 +168,7 @@ test("migrate-manifests-v12 rejects file and repo filters together", () => {
   assert.match(result.stderr, /--file cannot be combined with --repo/);
 });
 
-test("schemaVersion 11 manifest is rejected with v12 migration hint", () => {
+test("schemaVersion 11 manifest is rejected by current code after v12 migration script scope", () => {
   const root = tempDir();
   writeManifest(root, "unknown", "run-v11", baseV11Manifest("run-v11"));
 
@@ -177,8 +177,7 @@ test("schemaVersion 11 manifest is rejected with v12 migration hint", () => {
       () => resolveResumeTarget("run-v11", root),
       (err) => {
         assert.match(err.message, /schemaVersion 11/);
-        assert.match(err.message, /requires schemaVersion 12/);
-        assert.match(err.message, /scripts\/migrate-manifests-v12\.mjs/);
+        assert.match(err.message, /requires schemaVersion 13/);
         return true;
       },
     );

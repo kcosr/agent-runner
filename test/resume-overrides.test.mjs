@@ -136,6 +136,22 @@ test("resolveResumeTarget rejects a manifest with runtimeVars: null", () => {
   );
 });
 
+test("resolveResumeTarget rejects blank persisted backend args", () => {
+  const dir = tempDir();
+  const manifest = baseManifest("corrupt-args", join(dir, "runs", "unknown", "corrupt-args"));
+  manifest.resolvedBackendArgs = ["--ok", "   "];
+  writeManifest(dir, "unknown", "corrupt-args", manifest);
+
+  assert.throws(
+    () => withStateRoot(dir, () => resolveResumeTarget("corrupt-args", dir)),
+    (err) => {
+      assert.ok(err instanceof ResumeError);
+      assert.match(err.message, /does not look like a task-runner run\.json/);
+      return true;
+    },
+  );
+});
+
 test("resolveResumeTarget rejects a manifest whose execution host and controller mismatch", () => {
   const dir = tempDir();
   const manifest = baseManifest("corrupt4", join(dir, "runs", "unknown", "corrupt4"));

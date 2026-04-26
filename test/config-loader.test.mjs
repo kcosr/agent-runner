@@ -993,32 +993,11 @@ body
     });
   }));
 
-test("loadAgentConfig treats omitted backendArgs.extraArgs as an empty entry", () =>
-  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
-    writeAgent(
-      configDir,
-      "backend-args-empty-entry",
-      `---
-schemaVersion: 1
-name: backend-args-empty-entry
-backend: passive
-backendArgs:
-  passive: {}
----
-body
-`,
-    );
-
-    const loaded = loadAgentConfig("backend-args-empty-entry", rootDir);
-    assert.deepEqual(loaded.config.backendArgs, {
-      passive: { extraArgs: [] },
-    });
-  }));
-
 test("loadAgentConfig rejects malformed backendArgs values", () =>
   withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
     for (const [name, backendArgs, pattern] of [
       ["unknown-key", "gemini:\n    extraArgs: [--flag]", /backendArgs/],
+      ["missing-extra-args", "claude: {}", /backendArgs\.claude\.extraArgs/],
       ["extra-field", "claude:\n    extraArgs: [--flag]\n    env: {}", /backendArgs\.claude/],
       ["non-array", "claude:\n    extraArgs: --flag", /backendArgs\.claude\.extraArgs/],
       ["empty-token", 'claude:\n    extraArgs: [""]', /extraArgs entries must be non-empty/],

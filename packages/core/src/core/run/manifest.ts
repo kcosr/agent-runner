@@ -888,7 +888,10 @@ function isRunManifest(value: unknown): value is RunManifest {
 }
 
 function isValidResolvedBackendArgs(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((entry) => typeof entry === "string");
+  return (
+    Array.isArray(value) &&
+    value.every((entry) => typeof entry === "string" && entry.trim().length > 0)
+  );
 }
 
 function isValidResolvedLauncherConfig(value: unknown): value is ResolvedLauncherConfig {

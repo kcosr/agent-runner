@@ -930,7 +930,7 @@ async function validateCodexSession(ctx: ValidateSessionContext): Promise<Valida
       cwd: ctx.cwd,
       env: ctx.env ?? (process.env as Record<string, string>),
       backendSpecific: ctx.backendSpecific,
-      resolvedBackendArgs: ctx.resolvedBackendArgs ?? [],
+      resolvedBackendArgs: ctx.resolvedBackendArgs,
       timeoutSec: 60,
     });
     client = createClient(transport);

@@ -8,7 +8,9 @@
   per-backend argv extras in `manifest.resolvedBackendArgs` and
   `manifest.resetSeed.resolvedBackendArgs`; use
   `scripts/migrate-manifests-v13.mjs` before resuming schema v12 runs.
-  Revert before users migrate, or older code will reject v13 manifests.
+  Rollbacks after migration require restoring compatible code or
+  recreating/downgrading those runs because older code rejects v13
+  manifests.
 - Manifest schema version is now `12`. Runs now require first-class
   `schedule` manifest data (`RunSchedule | null`), and summary/detail
   DTOs expose derived `scheduleState` instead of accepting compatibility

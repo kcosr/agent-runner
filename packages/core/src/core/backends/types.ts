@@ -23,7 +23,7 @@ export interface BackendSpecificConfig {
 }
 
 export interface BackendArgsEntry {
-  extraArgs?: string[];
+  extraArgs: string[];
 }
 
 export type BackendArgsConfig = Partial<Record<BackendId, BackendArgsEntry>>;
@@ -100,7 +100,7 @@ export function cloneBackendArgsConfig(
     const entry = backendArgs[backendId];
     if (entry) {
       cloned[backendId] = {
-        extraArgs: entry.extraArgs ? [...entry.extraArgs] : undefined,
+        extraArgs: cloneResolvedBackendArgs(entry.extraArgs),
       };
     }
   }
@@ -154,7 +154,7 @@ export interface ValidateSessionContext {
   cwd: string;
   env?: Record<string, string>;
   backendSpecific?: BackendSpecificConfig;
-  resolvedBackendArgs?: ResolvedBackendArgs;
+  resolvedBackendArgs: ResolvedBackendArgs;
 }
 
 export type ValidateSessionResult = { valid: true } | { valid: false; reason: string };
