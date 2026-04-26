@@ -20,6 +20,40 @@ import {
   PinIcon,
   SearchIcon,
 } from "./icons.js";
+import { useNativeModalDialog } from "./native-dialog.js";
+
+const MOBILE_FILTERS_MEDIA_QUERY = "(max-width: 900px)";
+
+function mediaQueryMatches(query: string) {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return false;
+  }
+  return window.matchMedia(query).matches;
+}
+
+function useMediaQuery(query: string) {
+  const [matches, setMatches] = useState(() => mediaQueryMatches(query));
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return;
+    }
+
+    const mediaQuery = window.matchMedia(query);
+    const update = () => setMatches(mediaQuery.matches);
+    update();
+
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", update);
+      return () => mediaQuery.removeEventListener("change", update);
+    }
+
+    mediaQuery.addListener(update);
+    return () => mediaQuery.removeListener(update);
+  }, [query]);
+
+  return matches;
+}
 
 export function RunFilters({
   preferences,
@@ -48,6 +82,7 @@ export function RunFilters({
   const lastHandledToggleVersionRef = useRef(toggleFiltersVersion ?? 0);
   const titleId = useId();
   const panelId = useId();
+  const mobileFilters = useMediaQuery(MOBILE_FILTERS_MEDIA_QUERY);
   const hasActiveStructuredFilter = hasActiveDashboardStructuredFilters(
     preferences.structuredFilters,
   );
@@ -61,6 +96,14 @@ export function RunFilters({
       triggerRef.current?.focus();
     });
   }, []);
+  const closeFiltersAndFocusTrigger = useCallback(
+    () => closeFilters({ focusTrigger: true }),
+    [closeFilters],
+  );
+  const { dialogProps: mobileFilterDialogProps, ref: mobileFilterDialogRef } = useNativeModalDialog(
+    filtersOpen && mobileFilters,
+    closeFiltersAndFocusTrigger,
+  );
 
   useEffect(() => {
     if (!filtersOpen) {
@@ -185,13 +228,21 @@ export function RunFilters({
 
           {filtersOpen ? (
             <>
-              <button
-                aria-label="Close filters"
-                className="filters-backdrop"
-                onClick={() => closeFilters()}
-                type="button"
-              />
-              <dialog aria-labelledby={titleId} className="filters-panel" id={panelId} open>
+              {mobileFilters ? null : (
+                <button
+                  aria-label="Close filters"
+                  className="filters-backdrop"
+                  onClick={() => closeFilters()}
+                  type="button"
+                />
+              )}
+              <dialog
+                aria-labelledby={titleId}
+                className="filters-panel"
+                id={panelId}
+                {...(mobileFilters ? mobileFilterDialogProps : { open: true })}
+                ref={mobileFilters ? mobileFilterDialogRef : undefined}
+              >
                 <div className="filters-panel__header">
                   <div>
                     <h2 className="filters-panel__title" id={titleId}>

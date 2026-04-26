@@ -216,16 +216,17 @@ The dashboard's shortcut system is customizable from
 | `F` | Toggle the detail drawer fullscreen |
 
 Shortcuts are suppressed while typing in inputs or when a modal dialog
-is open.
+is open. Native modal dialogs, including Resume and the run-note editor,
+handle Escape/back dismissal before dashboard shortcuts.
 
 When the detail drawer or attachment preview is fullscreen, `Enter`
 still triggers the selected run's primary action if one is available.
 Other dashboard shortcuts, including board movement, search, filters,
 notes, pinning, and archiving, remain suppressed in fullscreen drawer
 mode. If the primary action opens the Resume dialog, the dialog appears
-above the fullscreen drawer or preview surface. While the Resume dialog
-is open, the first `Esc` closes the dialog; later presses follow the
-existing fullscreen and drawer close behavior.
+above the fullscreen drawer or preview surface. While the Resume or
+run-note dialog is open, the first `Esc` closes the dialog; later presses
+follow the existing fullscreen and drawer close behavior.
 
 ## Preferences
 

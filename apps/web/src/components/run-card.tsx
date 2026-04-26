@@ -20,6 +20,7 @@ import {
   RunningIcon,
 } from "./icons.js";
 import { MarkdownContent } from "./markdown.js";
+import { useNativeModalDialog } from "./native-dialog.js";
 import { RunNoteEditor, usePreferredRunNoteEditorMode } from "./run-note-editor.js";
 import { StatusBadge } from "./status-badge.js";
 
@@ -227,23 +228,10 @@ export function RunCard({
     setNotePreviewOpen(false);
     setNoteDialogOpen(false);
   }, [clearNotePreviewCloseTimeout]);
-
-  useEffect(() => {
-    if (!noteDialogOpen || typeof window === "undefined") {
-      return;
-    }
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") {
-        return;
-      }
-      event.preventDefault();
-      closeNoteDialog();
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [closeNoteDialog, noteDialogOpen]);
+  const { dialogProps: noteDialogProps, ref: noteDialogRef } = useNativeModalDialog(
+    true,
+    closeNoteDialog,
+  );
 
   useEffect(() => {
     if (
@@ -583,26 +571,8 @@ export function RunCard({
         <dialog
           aria-labelledby={noteTitleId}
           className="note-dialog-backdrop"
-          onCancel={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            closeNoteDialog();
-          }}
-          onClick={(event) => {
-            if (event.target === event.currentTarget) {
-              closeNoteDialog();
-            }
-          }}
-          onKeyDown={(event) => {
-            if (
-              event.target === event.currentTarget &&
-              (event.key === "Enter" || event.key === " ")
-            ) {
-              event.preventDefault();
-              closeNoteDialog();
-            }
-          }}
-          open
+          {...noteDialogProps}
+          ref={noteDialogRef}
         >
           <div className="note-dialog" role="document">
             <div className="note-dialog__header">

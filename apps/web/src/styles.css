@@ -479,7 +479,11 @@ body {
   margin: 0;
   border: 0;
   padding: 24px;
-  background: rgba(0, 0, 0, 0.28);
+  background: transparent;
+}
+
+.resume-dialog-backdrop::backdrop {
+  background: var(--modal-backdrop);
 }
 
 .resume-dialog {

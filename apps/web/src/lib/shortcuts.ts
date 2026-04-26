@@ -218,12 +218,16 @@ export function resolveRunsShortcutCommand(
     matchesShortcut(event, { key: "f" }) &&
     !context.typingTarget &&
     !context.resumeDialogOpen &&
+    !context.modalOpen &&
     context.selectedRunId
   ) {
     return "ui.toggleDrawerFullscreen";
   }
 
   if (context.drawerFullscreen) {
+    if (context.modalOpen) {
+      return null;
+    }
     if (normalizeEventKey(event.key) === "escape") {
       if (context.selectedRunId && !context.resumeDialogOpen) {
         return "ui.toggleDrawerFullscreen";
@@ -232,6 +236,10 @@ export function resolveRunsShortcutCommand(
     if (matchesShortcut(event, { key: "enter" }) && canTriggerPrimaryAction(context)) {
       return "run.primaryAction";
     }
+    return null;
+  }
+
+  if (context.modalOpen) {
     return null;
   }
 
@@ -271,9 +279,6 @@ export function resolveRunsShortcutCommand(
     if (context.selectedRunId) {
       return "run.close";
     }
-    if (context.modalOpen) {
-      return null;
-    }
     if (context.hasActiveStructuredFilters) {
       return "ui.clearStructuredFilters";
     }
@@ -285,10 +290,6 @@ export function resolveRunsShortcutCommand(
   }
 
   if (context.typingTarget) {
-    return null;
-  }
-
-  if (context.modalOpen) {
     return null;
   }
 

@@ -560,6 +560,51 @@ describe("resolveRunsShortcutCommand", () => {
         },
       ),
     ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "f",
+          metaKey: false,
+          shiftKey: false,
+        },
+        {
+          ...context,
+          modalOpen: true,
+        },
+      ),
+    ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: true,
+          key: "f",
+          metaKey: false,
+          shiftKey: false,
+        },
+        {
+          ...context,
+          modalOpen: true,
+        },
+      ),
+    ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "Escape",
+          metaKey: false,
+          shiftKey: false,
+        },
+        {
+          ...context,
+          modalOpen: true,
+        },
+      ),
+    ).toBeNull();
   });
 
   it("allows Enter primary action but blocks other dashboard shortcuts while the drawer is fullscreen", () => {
@@ -639,6 +684,21 @@ describe("resolveRunsShortcutCommand", () => {
         },
         {
           ...fullscreenContext,
+          modalOpen: true,
+        },
+      ),
+    ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "Enter",
+          metaKey: false,
+          shiftKey: false,
+        },
+        {
+          ...fullscreenContext,
           selectedRunPrimaryActionAvailable: false,
         },
       ),
@@ -655,6 +715,21 @@ describe("resolveRunsShortcutCommand", () => {
         fullscreenContext,
       ),
     ).toBe("ui.toggleDrawerFullscreen");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "Escape",
+          metaKey: false,
+          shiftKey: false,
+        },
+        {
+          ...fullscreenContext,
+          modalOpen: true,
+        },
+      ),
+    ).toBeNull();
     expect(
       resolveRunsShortcutCommand(
         {

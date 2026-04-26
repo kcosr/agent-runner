@@ -36,6 +36,8 @@
   --destructive-foreground: #b91c1c;
 
   --status-tint-alpha: 0.08;
+  --filters-backdrop: rgba(15, 23, 42, 0.24);
+  --modal-backdrop: rgba(0, 0, 0, 0.28);
   --shadow-card: 0 1px 0 rgba(0, 0, 0, 0.02);
   --shadow-drawer: -8px 0 32px rgba(0, 0, 0, 0.08);
 
@@ -1023,7 +1025,11 @@ pre {
   margin: 0;
   padding: 24px;
   border: 0;
-  background: rgba(0, 0, 0, 0.28);
+  background: transparent;
+}
+
+.note-dialog-backdrop::backdrop {
+  background: var(--modal-backdrop);
 }
 
 .note-dialog {
@@ -1436,18 +1442,24 @@ pre {
     display: inline;
   }
   .filters-backdrop {
-    background: rgba(15, 23, 42, 0.24);
+    background: var(--filters-backdrop);
+  }
+  .filters-panel::backdrop {
+    background: var(--filters-backdrop);
   }
   .filters-panel {
     position: fixed;
     right: 16px;
     left: 16px;
-    bottom: 16px;
-    top: auto;
+    top: max(96px, calc(env(safe-area-inset-top) + 72px));
+    bottom: auto;
     width: auto;
-    max-height: min(28rem, calc(100dvh - 32px));
+    max-height: min(
+      28rem,
+      calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 168px)
+    );
     overflow-y: auto;
-    border-radius: 20px;
+    border-radius: 18px;
   }
 
   .layout {
