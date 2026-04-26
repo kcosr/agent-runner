@@ -1044,7 +1044,6 @@ export function useRunsDashboardState() {
     if (selectedRunPrimaryAction !== "resume" || actionPending !== undefined) {
       return;
     }
-    setActionError(undefined);
     setResumeMessageExpanded(selectedRunResumeRequiresMessage);
     setResumeDialogOpen(true);
   }
@@ -1194,7 +1193,6 @@ export function useRunsDashboardState() {
       }
       navigateToRunDetail(runId, options);
     },
-    openSelectedRunResumeDialog: openResumeDialog,
     openSelectedRunAttachmentPreview: (attachmentOwnerRunId: string, attachmentId: string) => {
       if (!selectedRunId) {
         return;

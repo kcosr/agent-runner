@@ -77,7 +77,7 @@ const SHORTCUT_SECTIONS: readonly ShortcutSection[] = [
       },
       {
         description:
-          "Trigger the selected run's primary action when one is available, including while detail or attachment preview is fullscreen.",
+          "Trigger the selected run's primary action when one is available, including while detail or attachment preview is fullscreen; Escape closes an open Resume dialog before changing fullscreen or drawer state.",
         keys: ["Enter"],
         title: "Run primary action",
       },

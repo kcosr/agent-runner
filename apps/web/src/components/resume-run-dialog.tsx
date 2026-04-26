@@ -63,11 +63,6 @@ export function ResumeRunDialog({
     <dialog
       aria-labelledby="resume-run-dialog-title"
       className="resume-dialog-backdrop"
-      onCancel={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        onClose();
-      }}
       onClick={(event) => {
         if (event.target === event.currentTarget) {
           onClose();

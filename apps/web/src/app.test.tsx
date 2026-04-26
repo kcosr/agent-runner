@@ -4257,6 +4257,30 @@ describe("web app", () => {
     );
     expect(screen.getByLabelText("Run detail")).toBeInTheDocument();
 
+    await user.keyboard("{Enter}");
+    const backdropDialog = await screen.findByRole("dialog", { name: "Resume run" });
+    await user.click(backdropDialog);
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Resume run" })).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: "Exit full-width drawer" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByLabelText("Run detail")).toBeInTheDocument();
+
+    await user.keyboard("{Enter}");
+    expect(await screen.findByRole("dialog", { name: "Resume run" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Resume run" })).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: "Exit full-width drawer" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByLabelText("Run detail")).toBeInTheDocument();
+
     await user.keyboard("{Escape}");
     expect(screen.getByRole("button", { name: "Expand drawer to full width" })).toHaveAttribute(
       "aria-pressed",
@@ -6103,7 +6127,8 @@ describe("web app", () => {
 
     expect(resumeDialogLayer).not.toBeNull();
     expect(fullscreenDrawerLayer).not.toBeNull();
-    expect(Number(resumeDialogLayer?.[1])).toBeGreaterThan(Number(fullscreenDrawerLayer?.[1]));
+    expect(resumeDialogLayer?.[1]).toBe("60");
+    expect(fullscreenDrawerLayer?.[1]).toBe("40");
   });
 
   it("clamps the transient drawer width to the current viewport", async () => {

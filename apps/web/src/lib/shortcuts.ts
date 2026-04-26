@@ -130,6 +130,17 @@ function resolveBoardFilterShortcut(
   return null;
 }
 
+function canTriggerPrimaryAction(context: RunsShortcutContext): boolean {
+  return (
+    !context.typingTarget &&
+    !context.searchFocused &&
+    !context.modalOpen &&
+    !context.resumeDialogOpen &&
+    Boolean(context.selectedRunId) &&
+    context.selectedRunPrimaryActionAvailable
+  );
+}
+
 export function resolveBoardEntryRunId(
   boardColumns: BoardColumn[],
   activeBoardColumnKey: string | null,
@@ -218,15 +229,7 @@ export function resolveRunsShortcutCommand(
         return "ui.toggleDrawerFullscreen";
       }
     }
-    if (
-      matchesShortcut(event, { key: "enter" }) &&
-      !context.typingTarget &&
-      !context.searchFocused &&
-      !context.modalOpen &&
-      !context.resumeDialogOpen &&
-      context.selectedRunId &&
-      context.selectedRunPrimaryActionAvailable
-    ) {
+    if (matchesShortcut(event, { key: "enter" }) && canTriggerPrimaryAction(context)) {
       return "run.primaryAction";
     }
     return null;
@@ -301,11 +304,7 @@ export function resolveRunsShortcutCommand(
   if (matchesShortcut(event, { key: "arrowright" })) {
     return "board.moveRight";
   }
-  if (
-    matchesShortcut(event, { key: "enter" }) &&
-    context.selectedRunId &&
-    context.selectedRunPrimaryActionAvailable
-  ) {
+  if (matchesShortcut(event, { key: "enter" }) && canTriggerPrimaryAction(context)) {
     return "run.primaryAction";
   }
   if (matchesShortcut(event, { key: "n" }) && context.selectedRunId) {

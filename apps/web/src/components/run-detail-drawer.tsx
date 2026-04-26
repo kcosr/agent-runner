@@ -430,7 +430,6 @@ export function RunDetailDrawer({
   onDelete,
   groupAttachmentsQuery,
   onDownloadAttachment,
-  onOpenResumeDialog,
   onOpenAttachmentPreview,
   onSelectRun,
   onClearBackendSession,
@@ -466,7 +465,6 @@ export function RunDetailDrawer({
   onDelete: () => void;
   groupAttachmentsQuery: UseQueryResult<AttachmentListEntry[], Error>;
   onDownloadAttachment: (ownerRunId: string, attachmentId: string, name: string) => Promise<void>;
-  onOpenResumeDialog: () => void;
   onOpenAttachmentPreview: (attachmentOwnerRunId: string, attachmentId: string) => void;
   onSelectRun: (runId: string) => void;
   onClearBackendSession: () => Promise<void>;
