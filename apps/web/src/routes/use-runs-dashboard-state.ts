@@ -1193,7 +1193,6 @@ export function useRunsDashboardState() {
       }
       navigateToRunDetail(runId, options);
     },
-    openSelectedRunResumeDialog: openResumeDialog,
     openSelectedRunAttachmentPreview: (attachmentOwnerRunId: string, attachmentId: string) => {
       if (!selectedRunId) {
         return;
@@ -1216,6 +1215,7 @@ export function useRunsDashboardState() {
     filterOptions,
     hasActiveStructuredFilters: hasActiveDashboardStructuredFilters(preferences.structuredFilters),
     resumeDialogOpen,
+    selectedRunResumeRequiresMessage,
     resumeMessageDraft,
     resumeMessageExpanded,
     runActions: {

@@ -55,6 +55,7 @@ export function AttachmentPreviewDrawer({
   onPreviousAttachment,
   nextAttachmentName,
   previousAttachmentName,
+  resumeDialogOpen,
   runId,
 }: {
   actionPending?: RunActionPending;
@@ -69,6 +70,7 @@ export function AttachmentPreviewDrawer({
   onPreviousAttachment?: () => void;
   nextAttachmentName?: string;
   previousAttachmentName?: string;
+  resumeDialogOpen: boolean;
   runId: string;
 }) {
   const drawerRef = useRef<HTMLElement | null>(null);
@@ -111,7 +113,7 @@ export function AttachmentPreviewDrawer({
     }
 
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.defaultPrevented || isEditableEventTarget(event.target)) {
+      if (resumeDialogOpen || event.defaultPrevented || isEditableEventTarget(event.target)) {
         return;
       }
 
@@ -138,7 +140,7 @@ export function AttachmentPreviewDrawer({
     return () => {
       window.removeEventListener("keydown", handleKeyDown, { capture: true });
     };
-  }, [isFullscreen, onNextAttachment, onPreviousAttachment, toggleFullscreen]);
+  }, [isFullscreen, onNextAttachment, onPreviousAttachment, resumeDialogOpen, toggleFullscreen]);
 
   useEffect(() => {
     if (previewQuery.data?.kind !== "image") {
@@ -168,7 +170,12 @@ export function AttachmentPreviewDrawer({
   }, []);
 
   function handleDrawerKeyDownCapture(event: ReactKeyboardEvent<HTMLElement>) {
-    if (!isFullscreen || event.defaultPrevented || isEditableEventTarget(event.target)) {
+    if (
+      !isFullscreen ||
+      resumeDialogOpen ||
+      event.defaultPrevented ||
+      isEditableEventTarget(event.target)
+    ) {
       return;
     }
     if (event.key !== "Escape") {

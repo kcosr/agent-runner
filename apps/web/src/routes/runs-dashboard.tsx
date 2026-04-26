@@ -310,7 +310,6 @@ export function RunsDashboardRoute() {
           onCopy={state.copyText}
           onDelete={state.runActions.delete}
           onDownloadAttachment={state.runActions.downloadAttachment}
-          onOpenResumeDialog={state.openSelectedRunResumeDialog}
           onOpenAttachmentPreview={state.openSelectedRunAttachmentPreview}
           onReplaceAttachmentPreview={state.replaceSelectedRunAttachmentPreview}
           onSelectRun={state.openRun}
@@ -333,6 +332,7 @@ export function RunsDashboardRoute() {
           onUnarchive={state.runActions.unarchive}
           onUploadAttachment={state.runActions.uploadAttachment}
           resumeDialogOpen={state.resumeDialogOpen}
+          resumeRequiresMessage={state.selectedRunResumeRequiresMessage}
           resumeMessageDraft={state.resumeMessageDraft}
           resumeMessageExpanded={state.resumeMessageExpanded}
           detailSettling={state.detailSettling}

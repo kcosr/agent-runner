@@ -21,7 +21,7 @@ type ShortcutSection = {
 const SHORTCUT_SECTIONS: readonly ShortcutSection[] = [
   {
     description:
-      "Available while the dashboard is visible and the detail drawer is not fullscreen.",
+      "Available while the dashboard is visible. Fullscreen drawers keep Enter and Escape active while suppressing board, search, filter, note, pin, and archive shortcuts.",
     shortcuts: [
       {
         description: "Move selection between runs on the board.",
@@ -76,7 +76,8 @@ const SHORTCUT_SECTIONS: readonly ShortcutSection[] = [
         title: "Exit search focus",
       },
       {
-        description: "Trigger the selected run's primary action when one is available.",
+        description:
+          "Trigger the selected run's primary action when one is available, including while detail or attachment preview is fullscreen; Escape closes an open Resume dialog before changing fullscreen or drawer state.",
         keys: ["Enter"],
         title: "Run primary action",
       },
