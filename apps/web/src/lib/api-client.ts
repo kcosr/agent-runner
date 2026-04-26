@@ -59,7 +59,7 @@ export class ApiError extends Error {
   }
 }
 
-export interface AttachmentContentResult {
+interface AttachmentContentResult {
   mediaType: string | null;
   text: string;
 }

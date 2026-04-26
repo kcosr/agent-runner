@@ -94,7 +94,7 @@ export interface DaemonHandlers {
   resumeRun: typeof resumeRun;
 }
 
-export interface DaemonOperationContext extends DaemonHandlers {
+interface DaemonOperationContext extends DaemonHandlers {
   daemonInfo: DaemonInfo;
   startManagedRun(request: InternalStartRunRequest): Promise<{ runId: string }>;
   resumeManagedRun(request: RunsResumeParams): Promise<{ runId: string }>;

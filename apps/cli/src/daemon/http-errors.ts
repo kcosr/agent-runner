@@ -31,7 +31,7 @@ import { ScheduleValidationError } from "@task-runner/core/core/run/schedule.js"
 import { RunCommandError, UnknownBackendError } from "@task-runner/core/run-command.js";
 import { RequestValidationError } from "./request-parsing.js";
 
-export interface HttpErrorEnvelope {
+interface HttpErrorEnvelope {
   error: {
     code: string;
     message: string;

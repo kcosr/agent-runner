@@ -24,11 +24,11 @@ export type AuditMessagePart =
       status: RunTaskSummary["status"];
     };
 
-export interface FormattedAuditEvent {
+interface FormattedAuditEvent {
   message: AuditMessagePart[];
 }
 
-export interface AuditFormatContext {
+interface AuditFormatContext {
   resolvedHooks?: ResolvedHookDescriptor[];
   tasks?: RunTaskSummary[];
 }

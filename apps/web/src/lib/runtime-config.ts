@@ -4,8 +4,6 @@ import {
 } from "@task-runner/core/contracts/app-config.js";
 import { createContext, useContext } from "react";
 
-export type { AppRuntimeConfig as RuntimeConfig };
-
 export class RuntimeConfigError extends Error {
   constructor(
     message: string,

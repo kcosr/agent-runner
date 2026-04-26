@@ -8,7 +8,7 @@ import {
 } from "./protocol.js";
 
 export type HostMode = "embedded" | "daemon";
-export interface DaemonConnectHostConfig {
+interface DaemonConnectHostConfig {
   host: string;
   localPort: number;
   targetHost: string;

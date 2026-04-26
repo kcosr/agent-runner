@@ -1,6 +1,6 @@
 import type { RunDetail } from "@task-runner/core/contracts/runs.js";
 
-export type RunPrimaryActionKind = "ready" | "start" | "resume";
+type RunPrimaryActionKind = "ready" | "start" | "resume";
 
 export function getRunPrimaryAction(
   run: Pick<RunDetail, "totalAttemptCount" | "capabilities" | "status">,

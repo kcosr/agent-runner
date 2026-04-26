@@ -85,17 +85,6 @@ export function ArchiveIcon(props: IconProps) {
   );
 }
 
-export function SortIcon(props: IconProps) {
-  return (
-    <IconBase {...props}>
-      <path d="M7 4v16" />
-      <path d="m4 7 3-3 3 3" />
-      <path d="M17 20V4" />
-      <path d="m14 17 3 3 3-3" />
-    </IconBase>
-  );
-}
-
 export function DependencyIcon(props: IconProps) {
   return (
     <IconBase {...props}>
@@ -130,26 +119,6 @@ export function PinIcon(props: IconProps) {
     <IconBase {...props}>
       <path d="M12 17v5" />
       <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
-    </IconBase>
-  );
-}
-
-export function MoreIcon(props: IconProps) {
-  return (
-    <IconBase {...props}>
-      <circle cx="12" cy="12" r="1" />
-      <circle cx="19" cy="12" r="1" />
-      <circle cx="5" cy="12" r="1" />
-    </IconBase>
-  );
-}
-
-export function ColumnMoreIcon(props: IconProps) {
-  return (
-    <IconBase {...props}>
-      <circle cx="12" cy="12" r="1" />
-      <circle cx="12" cy="5" r="1" />
-      <circle cx="12" cy="19" r="1" />
     </IconBase>
   );
 }

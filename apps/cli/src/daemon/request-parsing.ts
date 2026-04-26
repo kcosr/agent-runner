@@ -48,7 +48,7 @@ export function optionalString(value: unknown, label: string): string | undefine
   return value;
 }
 
-export function optionalNonEmptyString(value: unknown, label: string): string | undefined {
+function optionalNonEmptyString(value: unknown, label: string): string | undefined {
   const stringValue = optionalString(value, label);
   if (stringValue === undefined) {
     return undefined;
@@ -67,7 +67,7 @@ export function requiredString(value: unknown, label: string): string {
   return stringValue;
 }
 
-export function requiredNonEmptyString(value: unknown, label: string): string {
+function requiredNonEmptyString(value: unknown, label: string): string {
   const stringValue = requiredString(value, label);
   if (stringValue.trim().length === 0) {
     throw new RequestValidationError(`${label} cannot be empty`);
@@ -83,7 +83,7 @@ export function requiredRunIdString(value: unknown, label: string): string {
   return stringValue;
 }
 
-export function optionalRunIdString(value: unknown, label: string): string | undefined {
+function optionalRunIdString(value: unknown, label: string): string | undefined {
   const stringValue = optionalNonEmptyString(value, label);
   if (stringValue === undefined) {
     return undefined;
@@ -118,7 +118,7 @@ export function requiredHeaderString(value: string | string[] | undefined, label
   return stringValue;
 }
 
-export function requiredNullableRunName(value: unknown, label: string): string | null {
+function requiredNullableRunName(value: unknown, label: string): string | null {
   if (value === null) {
     return null;
   }
@@ -133,14 +133,14 @@ export function requiredNullableRunName(value: unknown, label: string): string |
   }
 }
 
-export function requiredNullableString(value: unknown, label: string): string | null {
+function requiredNullableString(value: unknown, label: string): string | null {
   if (value === null) {
     return null;
   }
   return requiredString(value, label);
 }
 
-export function requiredBoolean(value: unknown, label: string): boolean {
+function requiredBoolean(value: unknown, label: string): boolean {
   const bool = optionalBoolean(value, label);
   if (bool === undefined) {
     throw new RequestValidationError(`${label} is required`);
@@ -148,7 +148,7 @@ export function requiredBoolean(value: unknown, label: string): boolean {
   return bool;
 }
 
-export function stringRecord(value: unknown, label: string): Record<string, string> {
+function stringRecord(value: unknown, label: string): Record<string, string> {
   const record = asRecord(value, label);
   const result: Record<string, string> = {};
   for (const [key, entry] of Object.entries(record)) {
@@ -160,7 +160,7 @@ export function stringRecord(value: unknown, label: string): Record<string, stri
   return result;
 }
 
-export function optionalBoolean(value: unknown, label: string): boolean | undefined {
+function optionalBoolean(value: unknown, label: string): boolean | undefined {
   if (value === undefined) {
     return undefined;
   }
@@ -170,17 +170,7 @@ export function optionalBoolean(value: unknown, label: string): boolean | undefi
   return value;
 }
 
-export function optionalFiniteNumber(value: unknown, label: string): number | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new RequestValidationError(`${label} must be a finite number`);
-  }
-  return value;
-}
-
-export function optionalPositiveInteger(value: unknown, label: string): number | undefined {
+function optionalPositiveInteger(value: unknown, label: string): number | undefined {
   if (value === undefined) {
     return undefined;
   }
@@ -190,7 +180,7 @@ export function optionalPositiveInteger(value: unknown, label: string): number |
   return value;
 }
 
-export function optionalNonNegativeInteger(value: unknown, label: string): number | undefined {
+function optionalNonNegativeInteger(value: unknown, label: string): number | undefined {
   if (value === undefined) {
     return undefined;
   }
@@ -200,7 +190,7 @@ export function optionalNonNegativeInteger(value: unknown, label: string): numbe
   return value;
 }
 
-export function optionalStringArray(value: unknown, label: string): string[] | undefined {
+function optionalStringArray(value: unknown, label: string): string[] | undefined {
   if (value === undefined) {
     return undefined;
   }
@@ -318,7 +308,7 @@ function optionalBackendSpecific(value: unknown, label: string): BackendSpecific
   };
 }
 
-export function optionalScheduleInput(value: unknown, label: string): ScheduleInput | undefined {
+function optionalScheduleInput(value: unknown, label: string): ScheduleInput | undefined {
   if (value === undefined) {
     return undefined;
   }
@@ -520,7 +510,7 @@ export function parseRunSetBackendSessionParams(
   };
 }
 
-export function parseRunListScope(value: unknown, label: string): RunListScopeFilter | undefined {
+function parseRunListScope(value: unknown, label: string): RunListScopeFilter | undefined {
   if (value === undefined) {
     return undefined;
   }

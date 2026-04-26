@@ -480,10 +480,25 @@ Walkthrough in [docs/examples.md](docs/examples.md).
 npm install
 npm run build
 npm run lint
+npm run lint:fix
+npm run format
+npm run format:check
+npm run imports:fix
+npm run imports:check
 npm run test:node
 npm run test:web
+npm run check:knip
 npm run check
 ```
+
+`npm run lint` runs Biome linting with warnings treated as failures,
+and `npm run lint:fix` applies Biome lint autofixes. `npm run format`
+writes Biome formatting, `npm run format:check` checks formatting
+without writing, `npm run imports:fix` applies Biome import
+organization, and `npm run imports:check` verifies import organization
+without writing. `npm run check:knip` runs the unused-file/export/
+dependency baseline. `npm run check` keeps the standard build, lint,
+format-check, import-check, and test pipeline.
 
 Primary entry points:
 

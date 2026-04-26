@@ -12,7 +12,7 @@ export function sortRunsByStartedAtDesc(runs: RunSummary[]): RunSummary[] {
   return [...runs].sort(compareRunsByStartedAtDesc);
 }
 
-export function compareRunsByPinned(
+function compareRunsByPinned(
   left: Pick<RunSummary, "pinned">,
   right: Pick<RunSummary, "pinned">,
 ): number {
@@ -22,7 +22,7 @@ export function compareRunsByPinned(
   return left.pinned ? -1 : 1;
 }
 
-export function compareRunsByPinnedThen(
+function compareRunsByPinnedThen(
   left: RunSummary,
   right: RunSummary,
   compare: (left: RunSummary, right: RunSummary) => number,

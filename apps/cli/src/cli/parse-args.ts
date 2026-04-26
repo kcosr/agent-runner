@@ -2,7 +2,7 @@ import type { AttachmentScope } from "@task-runner/core/contracts/attachments.js
 import { BACKEND_IDS, type BackendId } from "@task-runner/core/core/backends/types.js";
 import { trimRunName } from "@task-runner/core/util/run-name.js";
 
-export type OutputFormat = "text" | "json";
+type OutputFormat = "text" | "json";
 
 export interface ParsedArgs {
   command: string;

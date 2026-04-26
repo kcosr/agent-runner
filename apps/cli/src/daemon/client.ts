@@ -48,7 +48,7 @@ type PendingCall = {
   reject: (error: unknown) => void;
 };
 
-export type DaemonSubscriptionNotification =
+type DaemonSubscriptionNotification =
   | ({ method: "run.summary" } & RunSummaryNotificationParams)
   | ({ method: "run.detail" } & RunDetailNotificationParams)
   | ({ method: "run.audit" } & RunAuditNotificationParams)

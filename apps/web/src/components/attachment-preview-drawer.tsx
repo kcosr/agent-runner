@@ -15,7 +15,7 @@ import { DrawerResizeHandle } from "./drawer-resize-handle.js";
 import { ChevronIcon, CloseIcon, CollapseIcon, DownloadIcon, ExpandIcon } from "./icons.js";
 import { MarkdownContent } from "./markdown.js";
 
-export function normalizeAttachmentMimeType(mimeType: string): string {
+function normalizeAttachmentMimeType(mimeType: string): string {
   return mimeType.split(";")[0]?.trim().toLowerCase() ?? "";
 }
 

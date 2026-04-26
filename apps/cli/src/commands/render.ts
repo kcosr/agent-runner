@@ -19,17 +19,15 @@ import type {
   RunDeleteResult,
   RunDependenciesResult,
   RunListResult,
-  RunResetResult,
   TaskDetailsResult,
   TaskListResult,
-  TaskMutationResult,
 } from "@task-runner/core/core/commands/service.js";
 import { formatSchedule } from "@task-runner/core/core/run/schedule.js";
 import { resolveTaskRunnerCommand } from "@task-runner/core/task-runner-command.js";
 import type { HostMode } from "../daemon/config.js";
 import type { DaemonInfo } from "../daemon/protocol.js";
 
-export interface SystemStatusResult {
+interface SystemStatusResult {
   configDir: string;
   stateDir: string;
   hostMode: HostMode;
@@ -305,10 +303,6 @@ export function renderDefinitionDetails(result: DefinitionDetailsResult): string
   return `${lines.join("\n")}\n`;
 }
 
-export function renderRunReset(result: RunResetResult): string {
-  return `task-runner: reset run ${result.manifest.runId} to initialized state\n`;
-}
-
 export function renderRunReady(result: RunDetail): string {
   const schedule = result.schedule === null ? "" : `schedule: ${formatSchedule(result.schedule)}\n`;
   return `task-runner: promoted run ${result.runId} to ready\n${schedule}`;
@@ -530,15 +524,7 @@ export function renderTaskDetails(result: TaskDetailsResult): string {
   return renderTaskSnapshot(result.task);
 }
 
-export function renderTaskMutation(result: TaskMutationResult): string {
-  return `task-runner: updated ${result.task.id} (status=${result.task.status}) in run ${result.manifest.runId}\n`;
-}
-
-export function renderTaskAdded(result: TaskMutationResult): string {
-  return `task-runner: added task ${result.task.id} "${result.task.title}" to run ${result.manifest.runId}\n`;
-}
-
-export function renderTaskSnapshot(task: TaskDetailsResult["task"]): string {
+function renderTaskSnapshot(task: TaskDetailsResult["task"]): string {
   return `id: ${task.id}\ntitle: ${task.title}\nstatus: ${task.status}\nbody:\n${task.body}\nnotes:\n${task.notes}\n`;
 }
 
