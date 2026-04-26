@@ -17,7 +17,7 @@ export class SshTunnelSetupError extends Error {
   }
 }
 
-export interface SshTunnelOptions {
+interface SshTunnelOptions {
   host: string;
   localPort: number;
   targetHost: string;

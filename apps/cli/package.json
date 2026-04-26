@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@task-runner/core": "*",
-    "ws": "^8.20.0"
+    "ws": "^8.20.0",
+    "zod": "^3.23.8"
   }
 }

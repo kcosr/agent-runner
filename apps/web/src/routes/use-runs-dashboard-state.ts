@@ -32,7 +32,7 @@ import {
 } from "../lib/settings.js";
 import { subscribeToRunDetailEvents } from "../lib/sse.js";
 
-export interface NoticeState {
+interface NoticeState {
   id: string;
   message: string;
   tone: "warning" | "error";

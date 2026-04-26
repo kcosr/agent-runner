@@ -71,6 +71,8 @@
 
 ### Added
 
+- Added a Knip baseline via `npm run check:knip` for unused files,
+  exports, exported types, and dependency metadata.
 - Added initialized-run reconfigure support across core, CLI, daemon
   HTTP/RPC, web dashboard, shared `RunCapabilities.canReconfigure`, and
   `run.reconfigured` audit rows. `task-runner run reconfigure <id>` can
@@ -205,6 +207,9 @@
 
 ### Changed
 
+- Split Biome scripts so `npm run lint` runs lint-only with warnings as
+  failures, `npm run lint:fix` applies lint fixes, and `npm run format`
+  owns formatting.
 - Ready runs can now be schedule-gated: the daemon starts due schedules,
   skips overdue startup occurrences instead of replaying stale work, and
   recurring schedules advance according to `reuse`, `reset`, or `clone`
@@ -253,6 +258,8 @@
 
 ### Fixed
 
+- Cleaned high-confidence unused exports/types and declared direct `zod`
+  dependencies for the CLI and web workspaces.
 - Codex backend streams now ignore child/subagent thread turn events when
   accumulating transcript output and deciding whether the parent task-runner
   attempt has completed, preventing native subagent completion from prematurely

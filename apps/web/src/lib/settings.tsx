@@ -70,10 +70,10 @@ export const DEFAULT_DRAWER_VIEW: RunDrawerView = {
 };
 
 export const DRAWER_WIDTH_MIN = 360;
-export const DRAWER_WIDTH_MAX = 2400;
-export const DRAWER_WIDTH_DEFAULT = 540;
-export const DRAWER_SIDEBAR_ALLOWANCE = 56;
-export const DRAWER_BOARD_MIN = 280;
+const DRAWER_WIDTH_MAX = 2400;
+const DRAWER_WIDTH_DEFAULT = 540;
+const DRAWER_SIDEBAR_ALLOWANCE = 56;
+const DRAWER_BOARD_MIN = 280;
 
 export const DEFAULT_DASHBOARD_PREFERENCES: DashboardPreferences = {
   hideEmptyColumns: true,
@@ -88,7 +88,7 @@ export const DEFAULT_DASHBOARD_PREFERENCES: DashboardPreferences = {
   structuredFilters: EMPTY_DASHBOARD_STRUCTURED_FILTERS,
 };
 
-export const DEFAULT_DASHBOARD_VIEW_STATE: DashboardViewState = {
+const DEFAULT_DASHBOARD_VIEW_STATE: DashboardViewState = {
   search: "",
   collapsedColumnKeys: [],
   drawerWidth: DRAWER_WIDTH_DEFAULT,
@@ -97,7 +97,7 @@ export const DEFAULT_DASHBOARD_VIEW_STATE: DashboardViewState = {
   activeBoardColumnKey: null,
 };
 
-export function clampDrawerWidth(value: number): number {
+function clampDrawerWidth(value: number): number {
   if (!Number.isFinite(value)) {
     return DRAWER_WIDTH_DEFAULT;
   }

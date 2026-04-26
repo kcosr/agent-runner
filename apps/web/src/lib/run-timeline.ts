@@ -20,7 +20,7 @@ export interface ApplyEnvelopeResult<THistory> {
   showStaleWarning?: boolean;
 }
 
-export interface CursoredEnvelope {
+interface CursoredEnvelope {
   cursor: number;
 }
 

@@ -13,25 +13,25 @@ import {
 } from "@task-runner/core/contracts/run-schemas.js";
 import type { z } from "zod";
 
-export interface SummaryEventsSubscriptionOptions {
+interface SummaryEventsSubscriptionOptions {
   onEvent: (payload: RunSummaryStreamEvent) => void;
   onOpen?: () => void;
   onStaleChange?: (stale: boolean) => void;
 }
 
-export interface DetailEventsSubscriptionOptions {
+interface DetailEventsSubscriptionOptions {
   onEvent: (payload: RunDetailStreamEvent) => void;
   onOpen?: () => void;
   onStaleChange?: (stale: boolean) => void;
 }
 
-export interface TimelineEventsSubscriptionOptions {
+interface TimelineEventsSubscriptionOptions {
   onEvent: (payload: RunTimelineEnvelope) => void;
   onOpen?: () => void;
   onStaleChange?: (stale: boolean) => void;
 }
 
-export interface AuditEventsSubscriptionOptions {
+interface AuditEventsSubscriptionOptions {
   onEvent: (payload: RunAuditEnvelope) => void;
   onOpen?: () => void;
   onStaleChange?: (stale: boolean) => void;

@@ -25,7 +25,3 @@ const CLASSES: Record<RunStatus, string> = {
 export function StatusBadge({ status }: { status: RunStatus }) {
   return <span className={CLASSES[status]}>{LABELS[status]}</span>;
 }
-
-export function statusLabel(status: RunStatus): string {
-  return LABELS[status];
-}

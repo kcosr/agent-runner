@@ -2,7 +2,7 @@ import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useEffect, useId, useRef, useState } from "react";
 import { MarkdownContent } from "./markdown.js";
 
-export type RunNoteEditorMode = "preview" | "edit";
+type RunNoteEditorMode = "preview" | "edit";
 
 const HOVERLESS_MEDIA_QUERY = "(hover: none)";
 const COARSE_POINTER_MEDIA_QUERY = "(pointer: coarse)";

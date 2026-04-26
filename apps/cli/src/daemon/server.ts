@@ -384,7 +384,7 @@ function bufferAuditEvent(record: ActiveRunRecord, envelope: RunAuditEnvelope): 
   }
 }
 
-export interface DaemonServerHandle {
+interface DaemonServerHandle {
   listenUrl: string;
   httpBaseUrl: string;
   startedAt: string;

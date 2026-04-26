@@ -1,7 +1,7 @@
 import type { BoardColumn } from "../components/run-column.js";
 import type { RunDrawerView } from "./settings.js";
 
-export type RunsShortcutCommand =
+type RunsShortcutCommand =
   | "board.moveUp"
   | "board.moveDown"
   | "board.moveLeft"
@@ -24,11 +24,9 @@ export type RunsShortcutCommand =
   | "ui.clearSearch"
   | "ui.focusSearch";
 
-export type SettingsShortcutCommand = "settings.close";
+type SettingsShortcutCommand = "settings.close";
 
-export type ShortcutCommand = RunsShortcutCommand | SettingsShortcutCommand;
-
-export interface ShortcutEventLike {
+interface ShortcutEventLike {
   altKey: boolean;
   ctrlKey: boolean;
   key: string;
@@ -36,7 +34,7 @@ export interface ShortcutEventLike {
   shiftKey: boolean;
 }
 
-export interface RunsShortcutContext {
+interface RunsShortcutContext {
   activeBoardColumnKey: string | null;
   boardColumns: BoardColumn[];
   drawerFullscreen: boolean;
@@ -51,7 +49,7 @@ export interface RunsShortcutContext {
   typingTarget: boolean;
 }
 
-export type BoardDirection = "up" | "down" | "left" | "right";
+type BoardDirection = "up" | "down" | "left" | "right";
 
 type BoardFilterShortcutCommand = Extract<
   RunsShortcutCommand,

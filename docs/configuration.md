@@ -186,6 +186,15 @@ Run the scripts explicitly; or recreate affected runs if an upgrade path
 isn't important. New manifests and new audit-event files are always
 created at the latest schema version.
 
+Other maintained root scripts are intentionally callable outside the
+normal CLI surface:
+
+- `scripts/analyze-perf-log.mjs` — summarizes `TASK_RUNNER_DEBUG_PERF`
+  output captured from local debugging sessions
+- `scripts/task-list-markdown.mjs` — renders
+  `task-runner task list <run-id> --output-format json` as Markdown,
+  using `TASK_RUNNER_BIN` when set or `task-runner` on `PATH`
+
 ## Git environment isolation
 
 When task-runner probes a cwd to derive the repo bucket, it clears all

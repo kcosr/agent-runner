@@ -8,7 +8,6 @@ import type {
 import type {
   RunAuditEnvelope,
   RunAuditHistory,
-  RunTimelineEnvelope,
   RunTimelineEvent,
   RunTimelineHistory,
 } from "@task-runner/core/contracts/events.js";
@@ -31,7 +30,7 @@ import type { DefinitionListResult } from "@task-runner/core/core/commands/servi
 import type { RunListFilter } from "@task-runner/core/core/commands/service.js";
 import type { ScheduleInput } from "@task-runner/core/core/run/schedule.js";
 
-export type RunEventChannel = "run_summary" | "run_detail" | "run_timeline" | "run_audit";
+type RunEventChannel = "run_summary" | "run_detail" | "run_timeline" | "run_audit";
 
 export const DEFAULT_DAEMON_URL = "ws://127.0.0.1:4773/";
 export const TASK_RUNNER_LISTEN_ENV = "TASK_RUNNER_LISTEN";
@@ -75,7 +74,7 @@ export interface DaemonInfo {
 
 export type RunsListParams = RunListFilter;
 
-export interface RunTargetParams {
+interface RunTargetParams {
   target: string;
 }
 
@@ -108,24 +107,24 @@ export interface RunSetBackendSessionParams extends RunTargetParams {
   backendSessionId: string;
 }
 
-export interface RunDependencyParams extends RunTargetParams {
+interface RunDependencyParams extends RunTargetParams {
   dependencyRunId: string;
 }
 
-export interface TaskTargetParams extends RunTargetParams {
+interface TaskTargetParams extends RunTargetParams {
   taskId: string;
 }
 
-export interface TaskSetParams extends TaskTargetParams {
+interface TaskSetParams extends TaskTargetParams {
   status?: "pending" | "in_progress" | "completed" | "blocked";
   notes?: string;
 }
 
-export interface TaskAppendNotesParams extends TaskTargetParams {
+interface TaskAppendNotesParams extends TaskTargetParams {
   text: string;
 }
 
-export interface TaskAddParams extends RunTargetParams {
+interface TaskAddParams extends RunTargetParams {
   title: string;
   body?: string;
 }
@@ -162,8 +161,8 @@ export interface RunsResumeParams {
   overrides: RunCommandOverrides;
 }
 
-export interface RunsTimelineHistoryParams extends RunTargetParams {}
-export interface RunsAuditHistoryParams extends RunTargetParams {
+interface RunsTimelineHistoryParams extends RunTargetParams {}
+interface RunsAuditHistoryParams extends RunTargetParams {
   limit?: number;
 }
 
@@ -309,11 +308,3 @@ export interface AttachmentResult {
 export interface AttachmentRemoveHttpResult {
   result: RunAttachmentRemoveResult;
 }
-
-export type RunTimelineNotification = RunTimelineEnvelope & {
-  subscriptionId: string;
-};
-
-export type RunAuditNotification = RunAuditEnvelope & {
-  subscriptionId: string;
-};

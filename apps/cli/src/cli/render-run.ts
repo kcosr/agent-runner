@@ -2,7 +2,7 @@ import type { RunEvent } from "@task-runner/core/core/run/run-loop.js";
 import type { RunCompletionSummary } from "@task-runner/core/core/run/status.js";
 import { resolveTaskRunnerCommand } from "@task-runner/core/task-runner-command.js";
 
-export interface RenderedRunChunk {
+interface RenderedRunChunk {
   stream: "stdout" | "stderr";
   text: string;
 }
