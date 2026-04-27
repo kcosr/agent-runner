@@ -151,10 +151,14 @@ test("list runs scopes to cwd by default and supports explicit cwd, repo, global
   patchManifest(first.workspaceDir, (manifest) => {
     manifest.startedAt = "2026-04-12T10:00:00.000Z";
     manifest.archivedAt = "2026-04-12T12:00:00.000Z";
+    manifest.runGroupId = first.runId;
+    manifest.resetSeed.runGroupId = first.runId;
   });
   patchManifest(second.workspaceDir, (manifest) => {
     manifest.startedAt = "2026-04-12T11:00:00.000Z";
     manifest.cwd = otherCwd;
+    manifest.runGroupId = first.runId;
+    manifest.resetSeed.runGroupId = first.runId;
   });
 
   const otherWorkspaceDir = join(dir, "runs", "other-repo", "oth123");
@@ -164,6 +168,8 @@ test("list runs scopes to cwd by default and supports explicit cwd, repo, global
   otherManifest.repo = "other-repo";
   otherManifest.cwd = join(dir, "other-repo-cwd");
   otherManifest.workspaceDir = otherWorkspaceDir;
+  otherManifest.runGroupId = otherManifest.runId;
+  otherManifest.resetSeed.runGroupId = otherManifest.runId;
   otherManifest.startedAt = "2026-04-12T09:00:00.000Z";
   otherManifest.archivedAt = null;
   writeFileSync(join(otherWorkspaceDir, "run.json"), `${JSON.stringify(otherManifest, null, 2)}\n`);
@@ -212,6 +218,15 @@ test("list runs scopes to cwd by default and supports explicit cwd, repo, global
       `^oth123 \\[initialized\\] name=<unnamed> 0/2 repo=other-repo agent=run-mgmt-agent assignment=run-mgmt-work cwd=${otherManifest.cwd.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}$`,
       "m",
     ),
+  );
+
+  const groupScopedJson = runCli(
+    ["list", "runs", "--group-id", first.runId, "--include-archived", "--output-format", "json"],
+    { cwd: dir },
+  );
+  assert.deepEqual(
+    JSON.parse(groupScopedJson).map((run) => run.runId),
+    [second.runId, first.runId],
   );
 
   const jsonOut = runCli(
@@ -277,11 +292,14 @@ test("list runs scopes to cwd by default and supports explicit cwd, repo, global
 
 test("list runs rejects conflicting scope flags with exit code 3", () => {
   const dir = tempDir();
-  const failure = runCliExpectFail(["list", "runs", "--cwd", dir, "--repo", "task-runner"], {
+  const failure = runCliExpectFail(["list", "runs", "--cwd", dir, "--group-id", "task-runner"], {
     cwd: dir,
   });
   assert.equal(failure.status, 3);
-  assert.match(failure.stderr, /list runs accepts only one of --cwd, --repo, or --global/);
+  assert.match(
+    failure.stderr,
+    /list runs accepts only one of --cwd, --repo, --global, or --group-id/,
+  );
 });
 
 test("run archive and run unarchive expose idempotent text and json results", async () => {

@@ -68,6 +68,7 @@ import {
 } from "@task-runner/core/core/commands/service.js";
 import { HookRuntimeError } from "@task-runner/core/core/hooks/runtime.js";
 import { AttachmentError } from "@task-runner/core/core/run/attachments.js";
+import { RunGroupValidationError, validateRunGroupId } from "@task-runner/core/core/run/groups.js";
 import { RunNotFoundError } from "@task-runner/core/core/run/manifest.js";
 import { ReconfigureLockedFieldError } from "@task-runner/core/core/run/reconfigure.js";
 import { readParentRunIdFromEnv } from "@task-runner/core/core/run/recursion-guard.js";
@@ -237,7 +238,8 @@ Execution options:
   --backend-session-id    Adopt an existing backend session id.
   --resume-run <id|path>  Continue an existing run by short id or path.
   --parent-run <run-id>   Set the lineage parent for a fresh run/init.
-  --group-id <group-id>   Set the explicit run group for a fresh run/init.
+  --group-id <group-id>   Set the explicit run group for a fresh run/init,
+                          or scope list runs to a run group.
   --run-id <id|path>      (init only) Overwrite an initialized run in place.
   --var <key>=<value>     Set an input variable (repeatable).
                           Nested child runs usually inherit parent-owned
@@ -329,7 +331,8 @@ function exitCommandFailure(err: unknown, connectUrl?: string): never {
     err instanceof LockedFieldError ||
     err instanceof ReconfigureLockedFieldError ||
     err instanceof ResumeError ||
-    err instanceof HookRuntimeError
+    err instanceof HookRuntimeError ||
+    err instanceof RunGroupValidationError
   ) {
     process.stderr.write(`task-runner: ${errorMessage(err)}\n`);
     process.exit(3);
@@ -885,7 +888,7 @@ async function runListCommand(parsed: ParsedArgs, connect?: DaemonConnectContext
       `task-runner: list requires a kind: agents, assignments, launchers, or runs${kindArg ? ` (got "${kindArg}")` : ""}\n`,
     );
     process.stderr.write(
-      "Usage: task-runner list <agents|assignments|launchers|runs> [--cwd <path> | --repo <name> | --global] [--include-archived] [--output-format json]\n",
+      "Usage: task-runner list <agents|assignments|launchers|runs> [--cwd <path> | --repo <name> | --global | --group-id <group-id>] [--include-archived] [--output-format json]\n",
     );
     process.exit(3);
   }
@@ -904,7 +907,7 @@ async function runListCommand(parsed: ParsedArgs, connect?: DaemonConnectContext
       });
       if (unsupported.length > 0) {
         process.stderr.write(
-          `task-runner: list runs only supports --cwd, --repo, --global, --connect, --include-archived, and --output-format (got ${unsupported.join(", ")})\n`,
+          `task-runner: list runs only supports --cwd, --repo, --global, --group-id, --connect, --include-archived, and --output-format (got ${unsupported.join(", ")})\n`,
         );
         process.exit(3);
       }
@@ -1076,7 +1079,7 @@ function unsupportedFlagsForGroupedCommand(
   if (parsed.runId !== undefined) unsupported.push("--run-id");
   if (parsed.backendSessionId !== undefined) unsupported.push("--backend-session-id");
   if (parsed.parentRun !== undefined) unsupported.push("--parent-run");
-  if (parsed.groupId !== undefined) unsupported.push("--group-id");
+  if (!opts.allowRunListScope && parsed.groupId !== undefined) unsupported.push("--group-id");
   if (!opts.allowDependencyRef && parsed.dependencyRun !== undefined) unsupported.push("--run");
   if (!opts.allowDependencyRef && parsed.dependencyGroupId !== undefined)
     unsupported.push("--group");
@@ -1137,9 +1140,10 @@ function resolveRunListFilter(parsed: ParsedArgs): RunListFilter {
   const explicitScopeCount =
     Number(parsed.cwd !== undefined) +
     Number(parsed.repo !== undefined) +
-    Number(parsed.global === true);
+    Number(parsed.global === true) +
+    Number(parsed.groupId !== undefined);
   if (explicitScopeCount > 1) {
-    throw new CommandError("list runs accepts only one of --cwd, --repo, or --global");
+    throw new CommandError("list runs accepts only one of --cwd, --repo, --global, or --group-id");
   }
   if (parsed.cwd !== undefined) {
     return {
@@ -1163,6 +1167,15 @@ function resolveRunListFilter(parsed: ParsedArgs): RunListFilter {
     return {
       includeArchived: parsed.includeArchived,
       scope: { kind: "global" },
+    };
+  }
+  if (parsed.groupId !== undefined) {
+    return {
+      includeArchived: parsed.includeArchived,
+      scope: {
+        kind: "group",
+        runGroupId: validateRunGroupId(parsed.groupId),
+      },
     };
   }
   return {
