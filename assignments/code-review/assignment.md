@@ -306,6 +306,16 @@ tasks:
           the diff contains that edit. If the task says "add
           tests covering the retry path", verify new tests
           exist for that path.
+        - Identify any changed shared paths in the task: parsers,
+          dispatchers, request/response builders, state reducers,
+          serializers, config loaders, lifecycle/workflow handlers,
+          database access layers, UI state transitions, or other
+          reused infrastructure. When the change reorders, hoists,
+          caches, centralizes, or splits parsing, normalization,
+          validation, state construction, lifecycle transitions, or
+          request/response projection, verify the task includes
+          representative sibling-behavior tests or cites existing
+          coverage that is sufficient.
         - If the Notes claim specific files/functions/tests/
           docs/CHANGELOG entries, verify each one is present in
           the diff.
@@ -370,6 +380,13 @@ tasks:
           task calls for, and that introduces non-trivial risk
           or surface area. Not all scope creep is a finding;
           trivial fixups along the way are expected.
+        - [MEDIUM] Missing sibling-regression coverage — a
+          code-bearing task changed a shared path but covered only
+          the new behavior, with no representative sibling-behavior
+          tests and no explicit citation that existing coverage is
+          sufficient. Raise to [HIGH] when the shared path carries
+          user-visible, persisted, security-sensitive, or
+          lifecycle-critical behavior.
         - [LOW] Plan drift — the plan text describes an
           approach that differs from what was implemented,
           even though the outcome is equivalent. Mostly

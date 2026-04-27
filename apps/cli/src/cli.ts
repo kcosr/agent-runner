@@ -2459,7 +2459,6 @@ async function runExecuteCommandDaemon(
 ): Promise<never> {
   const isInitCommand = parsed.command === "init";
   const isJson = parsed.outputFormat === "json";
-  const daemonOverrides = resolvedDaemonOverrides(parsed);
 
   await withDaemonClient(connect, async (client) => {
     if (!isInitCommand && parsed.runId !== undefined) {
@@ -2478,6 +2477,7 @@ async function runExecuteCommandDaemon(
       throw new RunCommandError("--at, --delay, and --cron are only valid with run schedule");
     }
     resolveMessageFile(parsed);
+    const daemonOverrides = resolvedDaemonOverrides(parsed);
     if (isInitCommand) {
       const result = await client.call<{ run: ReturnType<typeof getRun> }>("runs.init", {
         runId: normalizeTarget(parsed.runId) ?? parsed.runId,

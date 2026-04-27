@@ -325,6 +325,18 @@ tasks:
       the planner flagged. Update existing tests whose
       assumptions changed.
 
+      When `implement_core` changes a shared path — a parser,
+      dispatcher, request/response builder, state reducer,
+      serializer, config loader, lifecycle/workflow handler,
+      database access layer, UI state transition, or other reused
+      infrastructure — add, update, or explicitly cite existing
+      regression coverage for both the new behavior and
+      representative existing sibling behaviors that use the same
+      path. Pay special attention to changes that reorder, hoist,
+      cache, centralize, or split parsing, normalization,
+      validation, state construction, lifecycle transitions, or
+      request/response projection.
+
       Paste the test command and its exit code into Notes
       when done.
   - id: verify_surface_coverage
