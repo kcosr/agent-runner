@@ -317,16 +317,8 @@ writing the new docs. The exception: when a diagram would help,
 write the mermaid block fully in the notes so the human can
 paste it in directly.
 
-The canonical reference for what "good" looks like on a README
-is the one in this project's own `/home/kevin/worktrees/task-runner/README.md`.
-Its structure (elevator pitch → table of contents → why →
-features → install → quickstart → concepts → commands →
-backends / runtime flows → configuration reference → examples
-→ development → project layout → pointer to deeper docs → tone)
-is a reasonable default target for most tool-like projects.
-Cite it as a reference if it helps, but don't demand that every
-project match it verbatim — match its *spirit* (honest, runnable,
-reader-first, short where possible) not its exact sections.
+Judge the documentation by whether it serves the repo's own
+readers, not by matching an external template.
 
 A dimension with no real issues produces no findings in that
 task. Say "No issues found in this dimension" and move on.
