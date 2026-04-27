@@ -264,11 +264,11 @@ task-runner serve
 
 `task-runner serve` starts the local daemon. The web UI talks to that
 same daemon and is not a standalone app. The runs board supports
-exact-match filters for repo, agent, backend, and lineage family, and
-run cards expose a `Family` chip that scopes the board to one run
-family. Scheduled runs show a compact clock indicator on cards, and the
-detail drawer exposes the next run time plus enable/disable controls
-and one-time schedule clearing. The dashboard also includes a dedicated
+exact-match filters for repo, agent, backend, and run group, and run
+cards expose a run-group chip that scopes the board to that group.
+Scheduled runs show a compact clock indicator on cards, and the detail
+drawer exposes the next run time plus enable/disable controls and
+one-time schedule clearing. The dashboard also includes a dedicated
 full-screen `New Run` flow at `/runs/new` that resolves the static run
 input surface from the daemon before enabling `Initialize` and `Start
 now`.
@@ -369,6 +369,8 @@ known caller-local inputs:
   override
 - `--parent-run <run-id>` or local `TASK_RUNNER_PARENT_RUN_ID` becomes
   request `parentRunId` for fresh `run` / `init`
+- `--group-id <group-id>` or local `TASK_RUNNER_RUN_GROUP_ID` becomes
+  request `runGroupId` for fresh `run` / `init`
 
 The Codex UDS transport shape is `{ type: "uds", path:
 "/absolute/socket/path" }`; it is WebSocket-over-UDS for Codex
@@ -408,6 +410,7 @@ root.
 | `run set-note\|clear-note` | Set/clear persisted human note metadata |
 | `run pin\|unpin` | Set/clear persisted pin metadata |
 | `run set-backend-session\|clear-backend-session` | Passive-only session metadata |
+| `run set-group\|clear-group` | Set/clear a run's group |
 | `run add-dep\|remove-dep\|clear-deps` | Dependency graph mutations |
 
 See [docs/cli.md](docs/cli.md) for the full flag-by-flag reference.
@@ -427,9 +430,10 @@ Key rules:
 - `list runs` defaults to the caller's cwd; use `--cwd`, `--repo`, or
   `--global` to scope otherwise; `--include-archived` adds archived
   runs.
-- `attachment list` now defaults to `--scope family`, which anchors at
-  the target run and includes attachments from the entire lineage
-  family. Use `--scope run` for the target run only.
+- `list runs --group-id <group-id>` scopes to one run group.
+- `attachment list` defaults to `--scope group`, which includes
+  attachments owned by every run in the target run's group. Use
+  `--scope run` for the target run only.
 
 ## Documentation
 
@@ -445,7 +449,7 @@ The rest are focused topic pages:
 | [docs/variables.md](docs/variables.md) | Typed vars, resolution, interpolation, redaction |
 | [docs/resume.md](docs/resume.md) | Resume rules, ready-start, retry nudges |
 | [docs/dependencies.md](docs/dependencies.md) | Dependency graph and execution gate |
-| [docs/attachments.md](docs/attachments.md) | File handoff, family scope, limits |
+| [docs/attachments.md](docs/attachments.md) | File handoff, run group scope, limits |
 | [docs/backends.md](docs/backends.md) | Claude, Codex, Cursor, Pi, Passive |
 | [docs/configuration.md](docs/configuration.md) | Env vars, XDG roots, manifest upgrades |
 | [docs/cli.md](docs/cli.md) | Full CLI reference — every command and flag |
@@ -474,6 +478,7 @@ The rest are focused topic pages:
 | `TASK_RUNNER_CONNECT` | Route client commands through a daemon |
 | `TASK_RUNNER_LISTEN` | Daemon listen URL |
 | `TASK_RUNNER_PARENT_RUN_ID` | Default lineage parent for fresh runs when `--parent-run` is omitted |
+| `TASK_RUNNER_RUN_GROUP_ID` | Default run group for fresh runs when `--group-id` is omitted |
 | `TASK_RUNNER_CLAUDE_BIN` | Claude CLI binary |
 | `TASK_RUNNER_CODEX_BIN` | Codex stdio binary |
 | `TASK_RUNNER_CODEX_UDS_PATH` | Default WebSocket-over-UDS transport socket path for fresh Codex runs when no explicit `backendSpecific.codex.transport` was authored |

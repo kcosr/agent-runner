@@ -133,7 +133,8 @@ export function RunCard({
   const repoFilterActive = structuredFilters.repo === run.repo;
   const agentFilterActive = structuredFilters.agent === run.agentName;
   const backendFilterActive = structuredFilters.backend === run.backend;
-  const familyFilterActive = structuredFilters.family === run.familyRootRunId;
+  const groupFilterActive = structuredFilters.runGroupId === run.runGroupId;
+  const runIdLabel = run.runGroupId === run.runId ? run.runId : `${run.runGroupId}/${run.runId}`;
   const notePending = actionPending === "note";
   const pinPending = actionPending === "pin";
   const cardClassName = ["card", selected ? "selected" : null].filter(Boolean).join(" ");
@@ -390,19 +391,17 @@ export function RunCard({
       >
         <div className="card-header-block">
           <div className="card-row card-row--header">
-            <span className="run-id">{run.runId}</span>
-            {run.familyRootRunId !== null ? (
-              <span
-                aria-label={`Filter by family ${run.familyRootRunId}`}
-                className="card-family-filter"
-                data-active-filter={familyFilterActive ? "true" : undefined}
-                data-structured-filter-key="family"
-                data-structured-filter-value={run.familyRootRunId}
-                title={`Filter by run family ${run.familyRootRunId}`}
-              >
-                <GroupIcon aria-hidden="true" />
-              </span>
-            ) : null}
+            <span className="run-id">{runIdLabel}</span>
+            <span
+              aria-label={`Filter by run group ${run.runGroupId}`}
+              className="card-group-filter"
+              data-active-filter={groupFilterActive ? "true" : undefined}
+              data-structured-filter-key="runGroupId"
+              data-structured-filter-value={run.runGroupId}
+              title={`Filter by run group ${run.runGroupId}`}
+            >
+              <GroupIcon aria-hidden="true" />
+            </span>
             <span className="card-row-spacer" />
             <StatusBadge status={run.effectiveStatus} />
           </div>

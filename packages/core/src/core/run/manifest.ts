@@ -21,6 +21,7 @@ import {
 import { type ResolvedLauncherConfig, cloneResolvedLauncherConfig } from "../config/launchers.js";
 import type { LockableField } from "../config/schema.js";
 import type { HookAuditRecord, ResolvedHookDescriptor } from "../hooks/types.js";
+import { isValidRunGroupId } from "./groups.js";
 
 export type ManifestStatus =
   | "initialized"
@@ -90,7 +91,8 @@ export interface RunResetSeed {
   name: string | null;
   note: string | null;
   pinned: boolean;
-  dependencyRunIds: string[];
+  runGroupId: string;
+  dependencies: RunDependencyRef[];
   parentRunId: string | null;
   unrestricted: boolean;
   timeoutSec: number;
@@ -102,6 +104,16 @@ export interface RunResetSeed {
   attachments: RunAttachment[];
   finalTasks: Record<string, TaskSnapshot>;
 }
+
+export type RunDependencyRef =
+  | {
+      type: "run";
+      runId: string;
+    }
+  | {
+      type: "group";
+      groupId: string;
+    };
 
 export interface AttemptRecord {
   attemptNumber: number;
@@ -183,13 +195,13 @@ export interface RunSchedule {
 // `timeoutSec` are all captured at init / fresh-run time and preserved
 // across all subsequent sessions.
 //
-// schemaVersion: 14 is the current manifest-canonical generation. Manifests written
+// schemaVersion: 15 is the current manifest-canonical generation. Manifests written
 // by earlier task-runner versions are not resumable by this version —
 // `isRunManifest` rejects them and
 // `resolveResumeTarget` surfaces a clear error telling the caller to
 // run the manifest migration.
 export interface RunManifest {
-  schemaVersion: 14;
+  schemaVersion: 15;
   runId: string;
   repo: string;
   agent: {
@@ -228,7 +240,8 @@ export interface RunManifest {
   endedAt: string | null;
   archivedAt: string | null;
   status: ManifestStatus;
-  dependencyRunIds: string[];
+  runGroupId: string;
+  dependencies: RunDependencyRef[];
   parentRunId: string | null;
   schedule: RunSchedule | null;
   exitCode: number | null;
@@ -298,6 +311,16 @@ export function cloneRuntimeVarSources(
   return out;
 }
 
+export function cloneRunDependencyRefs(
+  dependencies: readonly RunDependencyRef[],
+): RunDependencyRef[] {
+  return dependencies.map((dependency) =>
+    dependency.type === "run"
+      ? { type: "run", runId: dependency.runId }
+      : { type: "group", groupId: dependency.groupId },
+  );
+}
+
 export function buildRunResetSeed(seed: RunResetSeed): RunResetSeed {
   return {
     ...seed,
@@ -305,7 +328,8 @@ export function buildRunResetSeed(seed: RunResetSeed): RunResetSeed {
     resolvedBackendArgs: cloneResolvedBackendArgs(seed.resolvedBackendArgs),
     launcher: cloneResolvedLauncherConfig(seed.launcher),
     lockedFields: [...seed.lockedFields],
-    dependencyRunIds: [...seed.dependencyRunIds],
+    runGroupId: seed.runGroupId,
+    dependencies: cloneRunDependencyRefs(seed.dependencies),
     parentRunId: seed.parentRunId,
     runtimeVars: { ...seed.runtimeVars },
     runtimeVarSources: cloneRuntimeVarSources(seed.runtimeVarSources),
@@ -329,7 +353,8 @@ export function applyRunResetSeed(manifest: RunManifest): void {
   manifest.name = seed.name;
   manifest.note = seed.note;
   manifest.pinned = seed.pinned;
-  manifest.dependencyRunIds = [...seed.dependencyRunIds];
+  manifest.runGroupId = seed.runGroupId;
+  manifest.dependencies = cloneRunDependencyRefs(seed.dependencies);
   manifest.parentRunId = seed.parentRunId;
   manifest.unrestricted = seed.unrestricted;
   manifest.timeoutSec = seed.timeoutSec;
@@ -447,6 +472,7 @@ function normalizeRunManifest(
   return {
     ...parsed,
     launcher: cloneResolvedLauncherConfig(parsed.launcher),
+    dependencies: cloneRunDependencyRefs(parsed.dependencies),
     archivedAt: parsed.archivedAt ?? null,
     note: parsed.note ?? null,
     pinned: parsed.pinned ?? false,
@@ -456,6 +482,7 @@ function normalizeRunManifest(
       ...parsed.resetSeed,
       launcher: cloneResolvedLauncherConfig(parsed.resetSeed.launcher),
       resolvedBackendArgs: cloneResolvedBackendArgs(parsed.resetSeed.resolvedBackendArgs),
+      dependencies: cloneRunDependencyRefs(parsed.resetSeed.dependencies),
       note: parsed.resetSeed.note ?? parsed.note ?? null,
       pinned: parsed.resetSeed.pinned ?? parsed.pinned ?? false,
       parentRunId: parsed.resetSeed.parentRunId ?? parsed.parentRunId ?? null,
@@ -483,16 +510,16 @@ function readManifestCandidate(candidate: string): RunManifest {
     typeof parsed === "object" &&
     "schemaVersion" in parsed &&
     typeof (parsed as { schemaVersion: unknown }).schemaVersion === "number" &&
-    (parsed as { schemaVersion: number }).schemaVersion !== 14
+    (parsed as { schemaVersion: number }).schemaVersion !== 15
   ) {
     const version = (parsed as { schemaVersion: number }).schemaVersion;
-    if (version === 13) {
+    if (version === 14) {
       throw new ResumeError(
-        `manifest at ${candidate} has schemaVersion 13; this version of task-runner requires schemaVersion 14. Run scripts/migrate-manifests-v14.mjs to migrate existing workspaces.`,
+        `manifest at ${candidate} has schemaVersion 14; this version of task-runner requires schemaVersion 15. Run scripts/migrate-manifests-v15.mjs to migrate existing workspaces.`,
       );
     }
     throw new ResumeError(
-      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 14. Run manifest migrations in order, ending with scripts/migrate-manifests-v14.mjs.`,
+      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 15. Run manifest migrations in order, ending with scripts/migrate-manifests-v15.mjs.`,
     );
   }
   if (!isRunManifest(parsed)) {
@@ -644,7 +671,7 @@ export function findRunManifestsById(
 function isRunManifest(value: unknown): value is RunManifest {
   if (!value || typeof value !== "object") return false;
   const obj = value as Record<string, unknown>;
-  if (obj.schemaVersion !== 14) return false;
+  if (obj.schemaVersion !== 15) return false;
   if (typeof obj.runId !== "string") return false;
   if (typeof obj.repo !== "string") return false;
 
@@ -658,12 +685,8 @@ function isRunManifest(value: unknown): value is RunManifest {
   if (typeof obj.workspaceDir !== "string") return false;
   if (typeof obj.startedAt !== "string") return false;
   if (!isManifestStatus(obj.status)) return false;
-  if (
-    !Array.isArray(obj.dependencyRunIds) ||
-    !obj.dependencyRunIds.every((runId) => typeof runId === "string")
-  ) {
-    return false;
-  }
+  if (!isValidRunGroupId(obj.runGroupId)) return false;
+  if (!isValidRunDependencyRefs(obj.dependencies)) return false;
   if (
     obj.parentRunId !== undefined &&
     obj.parentRunId !== null &&
@@ -831,12 +854,8 @@ function isRunManifest(value: unknown): value is RunManifest {
     return false;
   }
   if (resetSeed.pinned !== undefined && typeof resetSeed.pinned !== "boolean") return false;
-  if (
-    !Array.isArray(resetSeed.dependencyRunIds) ||
-    !resetSeed.dependencyRunIds.every((runId) => typeof runId === "string")
-  ) {
-    return false;
-  }
+  if (!isValidRunGroupId(resetSeed.runGroupId)) return false;
+  if (!isValidRunDependencyRefs(resetSeed.dependencies)) return false;
   if (
     resetSeed.parentRunId !== undefined &&
     resetSeed.parentRunId !== null &&
@@ -896,6 +915,25 @@ function isValidResolvedBackendArgs(value: unknown): value is string[] {
   return (
     Array.isArray(value) &&
     value.every((entry) => typeof entry === "string" && entry.trim().length > 0)
+  );
+}
+
+function isValidRunDependencyRefs(value: unknown): value is RunDependencyRef[] {
+  return (
+    Array.isArray(value) &&
+    value.every((dependency) => {
+      if (!dependency || typeof dependency !== "object" || Array.isArray(dependency)) {
+        return false;
+      }
+      const record = dependency as Record<string, unknown>;
+      if (record.type === "run") {
+        return typeof record.runId === "string";
+      }
+      if (record.type === "group") {
+        return isValidRunGroupId(record.groupId);
+      }
+      return false;
+    })
   );
 }
 

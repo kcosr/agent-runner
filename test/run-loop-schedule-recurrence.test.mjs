@@ -224,7 +224,7 @@ test("run-loop schedules: future clone recurrence moves schedule to clone", asyn
   assert.equal(sourceAfter.status, "success");
   assert.equal(sourceAfter.schedule, null);
   assert.ok(cloneManifest);
-  assert.equal(cloneManifest.schemaVersion, 14);
+  assert.equal(cloneManifest.schemaVersion, 15);
   assert.deepEqual(cloneManifest.assignment, {
     name: "scheduled-work",
     sourcePath: join(dir, "assignments", "scheduled-work", "assignment.md"),
@@ -397,7 +397,7 @@ test("run-loop schedules: reuse, reset, and clone recurrence modes use frozen re
   assert.ok(cloneManifest);
   assert.equal(readManifest(clone.workspaceDir).status, "success");
   assert.equal(readManifest(clone.workspaceDir).schedule, null);
-  assert.equal(cloneManifest.schemaVersion, 14);
+  assert.equal(cloneManifest.schemaVersion, 15);
   assert.deepEqual(cloneManifest.assignment, {
     name: "scheduled-work",
     sourcePath: join(dir, "assignments", "scheduled-work", "assignment.md"),

@@ -2,13 +2,16 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import type {
   RunArchiveResult,
+  RunDependencyRef,
   RunDetail,
+  RunGroupResult,
   RunNameResult,
   RunNoteResult,
   RunPinnedResult,
   RunStatus,
   RunSummary,
 } from "@task-runner/core/contracts/runs.js";
+import { deriveDependencyStateFromDetails } from "@task-runner/core/core/run/dependencies.js";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { BoardColumn } from "../components/run-column.js";
 import { type ReconfigureRunPatch, createApiClient, isNotFoundError } from "../lib/api-client.js";
@@ -51,6 +54,7 @@ export type RunActionPending =
   | "note"
   | "pin"
   | "backend-session"
+  | "set-group"
   | "schedule"
   | "reconfigure"
   | "upload-attachment"
@@ -348,16 +352,11 @@ function syncRunSummaryFromDetail(detail: RunDetail) {
             endedAt: detail.endedAt,
             tasksCompleted: detail.tasksCompleted,
             tasksTotal: detail.tasksTotal,
-            dependencyState: {
-              ready: detail.dependencies.every((dependency) => dependency.satisfied),
-              total: detail.dependencies.length,
-              satisfied: detail.dependencies.filter((dependency) => dependency.satisfied).length,
-              unsatisfied: detail.dependencies.filter((dependency) => !dependency.satisfied).length,
-            },
+            dependencyState: deriveDependencyStateFromDetails(detail.dependencies),
             schedule: detail.schedule,
             scheduleState: detail.scheduleState,
             attachmentCount: detail.attachments.length,
-            familyRootRunId: run.familyRootRunId,
+            runGroupId: detail.runGroupId,
             activeTask: detail.activeTask,
             execution: detail.execution,
             capabilities: detail.capabilities,
@@ -416,11 +415,11 @@ export function useRunsDashboardState() {
   const [resumeMessageDraft, setResumeMessageDraft] = useState("");
   const noticeTimersRef = useRef(new Map<string, number>());
   const detailStreamStaleRef = useRef(detailStreamStale);
-  const familyFilter = preferences.structuredFilters.family;
+  const runGroupFilter = preferences.structuredFilters.runGroupId;
 
   const runsQuery = useQuery({
-    queryKey: runQueryKeys.list(familyFilter),
-    queryFn: ({ signal }) => api.listRuns({ familyOf: familyFilter, signal }),
+    queryKey: runQueryKeys.list(runGroupFilter),
+    queryFn: ({ signal }) => api.listRuns({ runGroupId: runGroupFilter, signal }),
   });
 
   const selectedRunQuery = useQuery({
@@ -525,12 +524,12 @@ export function useRunsDashboardState() {
       ? attachmentsDetailDrawerView()
       : selectedStoredDrawerView);
   const selectedRunGroupAttachmentsQuery = useQuery({
-    queryKey: ["attachment-list", detailRunId, "family"],
+    queryKey: ["attachment-list", detailRunId, "group"],
     queryFn: async () => {
       if (!detailRunId) {
         throw new Error("Selected run id is required");
       }
-      return await api.listAttachments(detailRunId, { scope: "family" });
+      return await api.listAttachments(detailRunId, { scope: "group" });
     },
     enabled: Boolean(detailRunId),
     retry: false,
@@ -865,9 +864,32 @@ export function useRunsDashboardState() {
       }
     },
   });
+  const setGroupMutation = useMutation({
+    mutationFn: ({
+      clear,
+      runGroupId,
+      runId,
+    }: {
+      runId: string;
+      runGroupId?: string;
+      clear?: boolean;
+    }) => (clear ? api.clearRunGroup(runId) : api.setRunGroup(runId, runGroupId ?? "")),
+    onError: (error: Error) => {
+      setActionError(error.message);
+    },
+    onSuccess: async (result: RunGroupResult) => {
+      setActionError(undefined);
+      updateRunCaches(result.runId, {
+        detail: (run) => ({ ...run, runGroupId: result.runGroupId }),
+        summary: (run) => ({ ...run, runGroupId: result.runGroupId }),
+      });
+      markRunTouched(result.runId);
+      await invalidateRunQueries(result.runId);
+    },
+  });
   const addDependencyMutation = useMutation({
-    mutationFn: ({ runId, dependencyRunId }: { runId: string; dependencyRunId: string }) =>
-      api.addDependency(runId, dependencyRunId),
+    mutationFn: ({ dependency, runId }: { runId: string; dependency: RunDependencyRef }) =>
+      api.addDependency(runId, dependency),
     onError: (error: Error) => {
       setActionError(error.message);
     },
@@ -878,8 +900,8 @@ export function useRunsDashboardState() {
     },
   });
   const removeDependencyMutation = useMutation({
-    mutationFn: ({ runId, dependencyRunId }: { runId: string; dependencyRunId: string }) =>
-      api.removeDependency(runId, dependencyRunId),
+    mutationFn: ({ dependency, runId }: { runId: string; dependency: RunDependencyRef }) =>
+      api.removeDependency(runId, dependency),
     onError: (error: Error) => {
       setActionError(error.message);
     },
@@ -970,23 +992,25 @@ export function useRunsDashboardState() {
                       ? "pin"
                       : backendSessionMutation.isPending
                         ? "backend-session"
-                        : scheduleMutation.isPending
-                          ? "schedule"
-                          : reconfigureMutation.isPending
-                            ? "reconfigure"
-                            : uploadAttachmentMutation.isPending
-                              ? "upload-attachment"
-                              : removeAttachmentMutation.isPending
-                                ? "remove-attachment"
-                                : downloadAttachmentMutation.isPending
-                                  ? "download-attachment"
-                                  : addDependencyMutation.isPending
-                                    ? "add-dependency"
-                                    : removeDependencyMutation.isPending
-                                      ? "remove-dependency"
-                                      : clearDependenciesMutation.isPending
-                                        ? "clear-dependencies"
-                                        : undefined;
+                        : setGroupMutation.isPending
+                          ? "set-group"
+                          : scheduleMutation.isPending
+                            ? "schedule"
+                            : reconfigureMutation.isPending
+                              ? "reconfigure"
+                              : uploadAttachmentMutation.isPending
+                                ? "upload-attachment"
+                                : removeAttachmentMutation.isPending
+                                  ? "remove-attachment"
+                                  : downloadAttachmentMutation.isPending
+                                    ? "download-attachment"
+                                    : addDependencyMutation.isPending
+                                      ? "add-dependency"
+                                      : removeDependencyMutation.isPending
+                                        ? "remove-dependency"
+                                        : clearDependenciesMutation.isPending
+                                          ? "clear-dependencies"
+                                          : undefined;
   const selectedRunDetailReady =
     detailRunId !== undefined &&
     detailRunId === selectedRunId &&
@@ -1220,8 +1244,8 @@ export function useRunsDashboardState() {
     resumeMessageExpanded,
     runActions: {
       abort: (runId: string) => abortMutation.mutate(runId),
-      addDependency: async (runId: string, dependencyRunId: string) => {
-        await addDependencyMutation.mutateAsync({ runId, dependencyRunId });
+      addDependency: async (runId: string, dependency: RunDependencyRef) => {
+        await addDependencyMutation.mutateAsync({ runId, dependency });
       },
       archive: (runId: string) => archiveMutation.mutate(runId),
       clearDependencies: async (runId: string) => {
@@ -1234,8 +1258,8 @@ export function useRunsDashboardState() {
       downloadAttachment: async (runId: string, attachmentId: string, name: string) => {
         await downloadAttachmentMutation.mutateAsync({ runId, attachmentId, name });
       },
-      removeDependency: async (runId: string, dependencyRunId: string) => {
-        await removeDependencyMutation.mutateAsync({ runId, dependencyRunId });
+      removeDependency: async (runId: string, dependency: RunDependencyRef) => {
+        await removeDependencyMutation.mutateAsync({ runId, dependency });
       },
       removeAttachment: async (runId: string, attachmentId: string) => {
         await removeAttachmentMutation.mutateAsync({ runId, attachmentId });
@@ -1261,6 +1285,12 @@ export function useRunsDashboardState() {
       },
       setBackendSession: async (runId: string, backendSessionId: string) => {
         await backendSessionMutation.mutateAsync({ runId, backendSessionId });
+      },
+      setGroup: async (runId: string, runGroupId: string) => {
+        await setGroupMutation.mutateAsync({ runId, runGroupId });
+      },
+      clearGroup: async (runId: string) => {
+        await setGroupMutation.mutateAsync({ runId, clear: true });
       },
       setScheduleEnabled: async (runId: string, enabled: boolean) => {
         await scheduleMutation.mutateAsync({ runId, enabled });

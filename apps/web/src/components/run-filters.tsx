@@ -193,8 +193,8 @@ export function RunFilters({
           <span className="page-title-meta">scheduled only</span>
         ) : null}
         {preferences.showPinnedOnly ? <span className="page-title-meta">pinned only</span> : null}
-        {preferences.structuredFilters.family ? (
-          <span className="page-title-meta">family {preferences.structuredFilters.family}</span>
+        {preferences.structuredFilters.runGroupId ? (
+          <span className="page-title-meta">group {preferences.structuredFilters.runGroupId}</span>
         ) : null}
       </span>
       <span className="topbar-spacer" />
@@ -249,7 +249,8 @@ export function RunFilters({
                       Filters
                     </h2>
                     <p className="filters-panel__copy">
-                      Match exact repo, agent, and backend values from the current run list.
+                      Match exact run group, repo, agent, and backend values from the current run
+                      list.
                     </p>
                   </div>
                   <button
@@ -265,13 +266,13 @@ export function RunFilters({
                 <div className="filters-panel__body">
                   <div className="filters-panel__field">
                     <div aria-hidden="true" className="field filters-panel__field-label">
-                      <span className="field-label">Family</span>
+                      <span className="field-label">Run group</span>
                     </div>
                     <label className="field filters-panel__field-control">
                       <input
-                        aria-label="Family"
+                        aria-label="Run group"
                         readOnly
-                        value={preferences.structuredFilters.family ?? "Any"}
+                        value={preferences.structuredFilters.runGroupId ?? "Any"}
                       />
                     </label>
                   </div>

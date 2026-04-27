@@ -53,9 +53,9 @@ callerInstructions: |
   this same run for a delta re-review. The reviewer's synthesis
   in `synthesis.notes` is the ranked top-findings list; each
   individual task (`review/architecture`, `review/concurrency`, ...,
-  `review/docs-drift`, `plan_coverage`) carries the raw findings for its
-  dimension with severity tags. The final decision lives in
-  `approval.notes`.
+  `review/surface-completeness`, `plan_coverage`) carries the raw
+  findings for its dimension with severity tags. The final decision
+  lives in `approval.notes`.
 
   **Exit code carries the decision.** The run exits `success`
   (code 0) only if the reviewer approved the change in `approval`;
@@ -133,14 +133,14 @@ callerInstructions: |
   scope limitations — should also go in the follow-up.
 
   The reviewer has been instructed to do a **focused delta pass**
-  on resume, not a full 14-task re-walk. It will verify each prior
+  on resume, not a full 15-task re-walk. It will verify each prior
   finding's resolution status, scan for any new issues the fixes
   may have introduced, rewrite the `synthesis` task with a "Delta
   review" structure, and re-evaluate `approval` from scratch
   against the post-fix state. Tasks `review/architecture` through
-  `review/docs-drift`, plus `plan_coverage`, retain their original
-  findings as the audit trail from the first pass, so you can
-  always see how findings evolved across rounds. The `approval`
+  `review/surface-completeness`, plus `plan_coverage`, retain their
+  original findings as the audit trail from the first pass, so you
+  can always see how findings evolved across rounds. The `approval`
   block preserves the prior decision in its Notes history, so you
   can see what blocked the previous pass.
 
@@ -189,21 +189,21 @@ tasks:
           review, *also* read each touched file in full (not just
           the diff) so you can judge the change in context.
 
-      Third, inspect the implementation run's family-scoped
+      Third, inspect the implementation run's group-scoped
       attachment view and, if it includes an
       `assignment-summary.md` row from a planning run in the
-      same lineage family,
+      same run group,
       download it to a temp directory and review it for
       supplemental context. The summary is
       supplemental only; the authoritative review inputs remain
       the repository state, the requested scope, and
       `implementation_run_id`.
 
-          {{task_runner_cmd}} attachment list "{{implementation_run_id}}" --scope family --output-format json
+          {{task_runner_cmd}} attachment list "{{implementation_run_id}}" --scope group --output-format json
           mkdir -p /tmp/task-runner-review-artifacts-{{run_id}}
           {{task_runner_cmd}} attachment download <owner-run-id> <summary-attachment-id> /tmp/task-runner-review-artifacts-{{run_id}}/
 
-      In the family-scoped JSON output, find the row whose `name` is
+      In the group-scoped JSON output, find the row whose `name` is
       `assignment-summary.md` and use that row's `ownerRunId` plus
       `id` in the download command above. If no such row exists,
       continue without blocking.
@@ -222,6 +222,7 @@ tasks:
   - review/simplification-and-duplication
   - review/test-coverage
   - review/docs-drift
+  - review/surface-completeness
   - id: plan_coverage
     title: Plan coverage verification
     body: |
@@ -381,6 +382,46 @@ tasks:
       broken assumption is [HIGH] — cite the assumption and
       the place where the code contradicts it.
 
+      **Step 4b: verify the surface inventory was met.** If
+      the plan's orient task includes a **Surface Inventory**
+      block, treat that block as ground truth for what the
+      contract required. The implementer's per-task Notes
+      describe what was *done*; the inventory describes what
+      had to be done. Walk every inventory entry and confirm
+      the diff covers it end-to-end (declaration, consumer,
+      integration test) and that any symmetric peers and
+      removal twins are aligned. Report:
+
+        - [HIGH] Surface inventory entry with no consumer
+          in the diff, even if some implementer task's
+          Notes claim it was wired. Cite the inventory
+          entry name and the missing layer.
+        - [HIGH] Symmetric peer in the inventory that is
+          accepted on one transport but rejected or
+          ignored on another, with no plan note explaining
+          the asymmetry.
+        - [HIGH] Removal twin in the inventory still
+          referenced in the live runtime path. Do not flag
+          changelog entries, migration scripts, or
+          pre-existing legacy-version test fixtures.
+
+      An inventory consisting of the explicit "no surfaces"
+      statement is satisfied vacuously — there is nothing
+      to trace. A missing inventory on a feature that
+      obviously introduces user-facing surfaces is itself a
+      [MEDIUM] plan-coverage finding (`plan lacks Surface
+      Inventory for user-facing feature`); it means the
+      planner under-decomposed and the reviewer's
+      `review/surface-completeness` task is operating on
+      reviewer-derived rather than planner-asserted
+      surfaces.
+
+      The dedicated `review/surface-completeness` task does
+      the structural trace pass; this step folds its
+      findings into plan-coverage so missing inventory
+      coverage gates `approval` the same way other plan
+      gaps do.
+
       **Step 5: verify design-discipline constraints.** If the
       plan, repo guidance, or task notes say the change should
       be a hot cut with no compatibility layer, check for:
@@ -411,7 +452,7 @@ tasks:
     title: Top findings synthesis
     body: |
       Now read back through the notes you wrote on
-      `review/architecture` through `review/docs-drift`,
+      `review/architecture` through `review/surface-completeness`,
       plus `plan_coverage`, and build a single ranked list of the **top 10
       highest-leverage findings** from the entire review. Order
       by severity (CRITICAL first, then HIGH, MEDIUM, LOW) and
@@ -463,7 +504,7 @@ tasks:
       caller will resume for a delta pass after fixes.
 
         - Any finding at HIGH or CRITICAL severity from
-          `review/architecture` through `review/docs-drift`,
+          `review/architecture` through `review/surface-completeness`,
           plus `plan_coverage`, is unresolved in the current diff.
         - `plan_coverage` surfaced any HIGH or
           CRITICAL finding that is not resolved.
@@ -553,10 +594,10 @@ working the tasks yourself is usually faster.
 
 **Re-review after agreed-upon fixes.** If this run is resumed
 with a follow-up message asking you to re-check your prior
-findings, do **not** re-walk all 14 tasks from scratch. Instead:
+findings, do **not** re-walk all 15 tasks from scratch. Instead:
 
 1. Re-read your prior notes on `review/architecture` through
-   `review/docs-drift`, plus `plan_coverage` and
+   `review/surface-completeness`, plus `plan_coverage` and
    `synthesis` — those are your original findings and
    synthesis. Also re-read the prior `approval` decision
    record if it exists (the runner
@@ -604,10 +645,10 @@ findings, do **not** re-walk all 14 tasks from scratch. Instead:
    One sentence: ship, ship with changes, or block.
    ```
 6. You do not need to rewrite the Notes on `review/architecture`
-   through `review/docs-drift` or `plan_coverage` — leave the
-   original findings (including any plan-coverage findings)
-   intact there as an audit trail and put the delta in
-   `synthesis` only.
+   through `review/surface-completeness` or `plan_coverage` —
+   leave the original findings (including any plan-coverage
+   findings) intact there as an audit trail and put the delta
+   in `synthesis` only.
    Re-verify plan coverage against the post-fix diff as part of
    step 3 — a plan-coverage finding that was originally HIGH
    because scope was deferred becomes "resolved" once the

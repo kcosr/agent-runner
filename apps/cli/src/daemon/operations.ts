@@ -5,6 +5,7 @@ import type {
   archive,
   clearBackendSession,
   clearDependencies,
+  clearGroup,
   clearRunSchedule,
   createTask,
   deleteArchivedRun,
@@ -29,6 +30,7 @@ import type {
   renameRun,
   reset,
   resumeRun,
+  setGroup,
   setRunSchedule,
   setRunScheduleEnabled,
   startRun,
@@ -45,6 +47,7 @@ import type {
   RunInputSurfaceParams,
   RunReadyParams,
   RunScheduleParams,
+  RunSetGroupParams,
   RunsListParams,
   RunsReconfigureParams,
   RunsResumeParams,
@@ -75,6 +78,8 @@ export interface DaemonHandlers {
   updateRunPinned: typeof updateRunPinned;
   updateRunBackendSession: typeof updateRunBackendSession;
   clearBackendSession: typeof clearBackendSession;
+  setGroup: typeof setGroup;
+  clearGroup: typeof clearGroup;
   addDependency: typeof addDependency;
   removeDependency: typeof removeDependency;
   clearDependencies: typeof clearDependencies;
@@ -181,11 +186,17 @@ export function createDaemonOperations(ctx: DaemonOperationContext) {
     clearBackendSession(target: string) {
       return { result: ctx.clearBackendSession(target) };
     },
-    addDependency(target: string, dependencyRunId: string) {
-      return { result: ctx.addDependency(target, dependencyRunId) };
+    setGroup(params: RunSetGroupParams) {
+      return { result: ctx.setGroup(params.target, { runGroupId: params.runGroupId }) };
     },
-    removeDependency(target: string, dependencyRunId: string) {
-      return { result: ctx.removeDependency(target, dependencyRunId) };
+    clearGroup(target: string) {
+      return { result: ctx.clearGroup(target) };
+    },
+    addDependency(target: string, dependency: Parameters<typeof addDependency>[1]) {
+      return { result: ctx.addDependency(target, dependency) };
+    },
+    removeDependency(target: string, dependency: Parameters<typeof removeDependency>[1]) {
+      return { result: ctx.removeDependency(target, dependency) };
     },
     clearDependencies(target: string) {
       return { result: ctx.clearDependencies(target) };
@@ -199,7 +210,7 @@ export function createDaemonOperations(ctx: DaemonOperationContext) {
     setRunScheduleEnabled(target: string, enabled: boolean) {
       return { run: ctx.setRunScheduleEnabled(target, { enabled }) };
     },
-    listAttachments(target: string, options?: { scope?: "run" | "family" }) {
+    listAttachments(target: string, options?: { scope?: "run" | "group" }) {
       return { attachments: ctx.getAttachmentList(target, options) };
     },
     async addAttachment(target: string, input: Parameters<typeof addRunAttachmentFromStream>[1]) {

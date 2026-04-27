@@ -68,12 +68,12 @@ function applySummaryEvent(
   return current?.filter((run) => run.runId !== event.runId);
 }
 
-function hasFamilyFilter(queryKey: readonly unknown[]): boolean {
+function hasRunGroupFilter(queryKey: readonly unknown[]): boolean {
   const last = queryKey.at(-1);
   if (!last || typeof last !== "object" || Array.isArray(last)) {
     return false;
   }
-  return typeof (last as { familyRootRunId?: unknown }).familyRootRunId === "string";
+  return typeof (last as { runGroupId?: unknown }).runGroupId === "string";
 }
 
 export function RunEventsProvider({
@@ -149,11 +149,11 @@ export function RunEventsProvider({
           queryClient.setQueryData<RunSummary[] | undefined>(runQueryKeys.list(), (current) =>
             upsertSummary(current, payload.summary),
           );
-          const activeFamilyQueries = queryClient
+          const activeRunGroupQueries = queryClient
             .getQueryCache()
             .findAll({ queryKey: runQueryKeys.lists(), type: "active" })
-            .filter((query) => hasFamilyFilter(query.queryKey));
-          for (const query of activeFamilyQueries) {
+            .filter((query) => hasRunGroupFilter(query.queryKey));
+          for (const query of activeRunGroupQueries) {
             void queryClient.refetchQueries(
               { queryKey: query.queryKey, exact: true, type: "active" },
               { throwOnError: false },

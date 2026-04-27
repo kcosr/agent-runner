@@ -248,6 +248,13 @@ test("parseArgs: list runs captures --global scope", () => {
   assert.equal(parsed.global, true);
 });
 
+test("parseArgs: list runs captures --group-id scope", () => {
+  const parsed = parseArgs(argv("list", "runs", "--group-id", "group-123"));
+  assert.equal(parsed.command, "list");
+  assert.equal(parsed.subcommand, "runs");
+  assert.equal(parsed.groupId, "group-123");
+});
+
 test("parseArgs: list with no kind still parses (validation in handler)", () => {
   const parsed = parseArgs(argv("list"));
   assert.equal(parsed.command, "list");

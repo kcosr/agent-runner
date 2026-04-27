@@ -324,6 +324,8 @@ export function RunsDashboardRoute() {
           onResumeMessageExpandedChange={state.setResumeMessageExpanded}
           onSetNote={state.runActions.setNote}
           onSetBackendSession={state.runActions.setBackendSession}
+          onSetGroup={state.runActions.setGroup}
+          onClearGroup={state.runActions.clearGroup}
           onSetPinned={state.runActions.setPinned}
           onSetScheduleEnabled={state.runActions.setScheduleEnabled}
           onSelectDetailSection={state.updateSelectedRunDetailSection}

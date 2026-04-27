@@ -43,7 +43,7 @@ const DEFAULT_DASHBOARD_PREFERENCES = {
     repo: null,
     agent: null,
     backend: null,
-    family: null,
+    runGroupId: null,
   },
 };
 
@@ -122,7 +122,7 @@ function makeRun(
   const base = {
     runId: "run-1",
     parentRunId: null,
-    familyRootRunId: null,
+    runGroupId: "run-1",
     repo: "task-runner",
     status: "running",
     effectiveStatus: "running",
@@ -218,6 +218,9 @@ function makeRun(
     },
     execution: overrides.execution ?? base.execution,
   } as RunSummary;
+  if (overrides.runGroupId === undefined && overrides.runId !== undefined) {
+    run.runGroupId = overrides.runId;
+  }
   if (overrides.status !== undefined && !("effectiveStatus" in overrides)) {
     run.effectiveStatus = overrides.status;
   }
@@ -248,6 +251,7 @@ function makeDetail(
   const base = {
     runId: "run-1",
     parentRunId: null,
+    runGroupId: "run-1",
     repo: "task-runner",
     status: "running",
     effectiveStatus: "running",
@@ -389,6 +393,9 @@ function makeDetail(
     },
     execution: overrides.execution ?? base.execution,
   } as RunDetail;
+  if (overrides.runGroupId === undefined && overrides.runId !== undefined) {
+    detail.runGroupId = overrides.runId;
+  }
   if (overrides.status !== undefined && !("effectiveStatus" in overrides)) {
     detail.effectiveStatus = overrides.status;
   }
@@ -558,6 +565,7 @@ function installFetchMock(
     const detail = state.details[runId];
     if (!detail) {
       return {
+        type: "run",
         runId,
         name: null,
         status: null,
@@ -568,6 +576,7 @@ function installFetchMock(
       };
     }
     return {
+      type: "run",
       runId: detail.runId,
       name: detail.name,
       status: detail.status,
@@ -576,6 +585,27 @@ function installFetchMock(
       satisfied: detail.status === "success",
       missing: false,
     };
+  }
+
+  function dependentDetailFor(runId: string): RunDetail["dependents"][number] {
+    const dependency = dependencyDetailFor(runId);
+    return dependency.type === "run"
+      ? {
+          ...dependency,
+          via: "run",
+        }
+      : {
+          type: "run",
+          via: "group",
+          dependencyGroupId: dependency.groupId,
+          runId,
+          name: null,
+          status: null,
+          effectiveStatus: null,
+          archivedAt: null,
+          satisfied: dependency.satisfied,
+          missing: dependency.missing,
+        };
   }
 
   function syncDependencyState(runId: string) {
@@ -685,7 +715,14 @@ function installFetchMock(
     }
 
     if (url.includes("/api/runs?includeArchived=true")) {
-      return new Response(JSON.stringify({ runs: state.runs }), { status: 200 });
+      const queryStart = url.indexOf("?");
+      const query = queryStart === -1 ? "" : url.slice(queryStart + 1);
+      const runGroupId = new URLSearchParams(query).get("runGroupId");
+      const runs =
+        runGroupId === null
+          ? state.runs
+          : state.runs.filter((run) => run.runGroupId === runGroupId);
+      return new Response(JSON.stringify({ runs }), { status: 200 });
     }
 
     const attachmentsMatch = /\/api\/runs\/([^/]+)\/attachments$/.exec(url);
@@ -1114,31 +1151,114 @@ function installFetchMock(
       });
     }
 
+    const setGroupMatch = /\/api\/runs\/([^/]+)\/group$/.exec(url);
+    if (setGroupMatch && init?.method === "POST") {
+      const runId = decodeURIComponent(setGroupMatch[1] ?? "");
+      const body =
+        typeof init.body === "string" && init.body.length > 0
+          ? (JSON.parse(init.body) as { runGroupId?: string })
+          : {};
+      const detail = state.details[runId];
+      const runGroupId = body.runGroupId?.trim() ?? "";
+      if (!detail || runGroupId.length === 0) {
+        return new Response(JSON.stringify({ error: { message: "invalid", code: "invalid" } }), {
+          status: 400,
+        });
+      }
+      const previousRunGroupId = detail.runGroupId;
+      detail.runGroupId = runGroupId;
+      state.runs = state.runs.map((run) => (run.runId === runId ? { ...run, runGroupId } : run));
+      return new Response(
+        JSON.stringify({
+          result: {
+            runId,
+            runGroupId,
+            previousRunGroupId,
+            changed: previousRunGroupId !== runGroupId,
+          },
+        }),
+        { status: 200 },
+      );
+    }
+
+    const clearGroupMatch = /\/api\/runs\/([^/]+)\/group\/clear$/.exec(url);
+    if (clearGroupMatch && init?.method === "POST") {
+      const runId = decodeURIComponent(clearGroupMatch[1] ?? "");
+      const detail = state.details[runId];
+      if (!detail) {
+        return new Response(JSON.stringify({ error: { message: "missing", code: "not_found" } }), {
+          status: 404,
+        });
+      }
+      const previousRunGroupId = detail.runGroupId;
+      detail.runGroupId = runId;
+      state.runs = state.runs.map((run) =>
+        run.runId === runId ? { ...run, runGroupId: runId } : run,
+      );
+      return new Response(
+        JSON.stringify({
+          result: {
+            runId,
+            runGroupId: runId,
+            previousRunGroupId,
+            changed: previousRunGroupId !== runId,
+          },
+        }),
+        { status: 200 },
+      );
+    }
+
     const addDependencyMatch = /\/api\/runs\/([^/]+)\/dependencies$/.exec(url);
     if (addDependencyMatch && init?.method === "POST") {
       const runId = decodeURIComponent(addDependencyMatch[1] ?? "");
       const body =
         typeof init.body === "string" && init.body.length > 0
-          ? (JSON.parse(init.body) as { dependencyRunId?: string })
+          ? (JSON.parse(init.body) as { type?: string; runId?: string; groupId?: string })
           : {};
       const detail = state.details[runId];
-      if (!detail || !body.dependencyRunId) {
+      if (
+        !detail ||
+        (body.type !== "run" && body.type !== "group") ||
+        (body.type === "run" && !body.runId) ||
+        (body.type === "group" && !body.groupId)
+      ) {
         return new Response(JSON.stringify({ error: { message: "invalid", code: "invalid" } }), {
           status: 400,
         });
       }
-      const dependencyRunId = body.dependencyRunId;
-      detail.dependencies = [...detail.dependencies, dependencyDetailFor(dependencyRunId)];
-      const dependencyDetail = state.details[dependencyRunId];
-      if (dependencyDetail) {
-        dependencyDetail.dependents = [...dependencyDetail.dependents, dependencyDetailFor(runId)];
+      if (body.type === "run") {
+        const dependencyRunId = body.runId as string;
+        detail.dependencies = [...detail.dependencies, dependencyDetailFor(dependencyRunId)];
+        const dependencyDetail = state.details[dependencyRunId];
+        if (dependencyDetail) {
+          dependencyDetail.dependents = [...dependencyDetail.dependents, dependentDetailFor(runId)];
+        }
+      } else {
+        const dependencyGroupId = body.groupId as string;
+        detail.dependencies = [
+          ...detail.dependencies,
+          {
+            type: "group",
+            groupId: dependencyGroupId,
+            total: 2,
+            successful: 1,
+            unsatisfied: 1,
+            archivedExcluded: 0,
+            satisfied: false,
+            missing: false,
+          },
+        ];
       }
       syncDependencyState(runId);
       return new Response(
         JSON.stringify({
           result: {
             runId,
-            dependencyRunIds: detail.dependencies.map((dependency) => dependency.runId),
+            dependencies: detail.dependencies.map((dependency) =>
+              dependency.type === "run"
+                ? { type: "run", runId: dependency.runId }
+                : { type: "group", groupId: dependency.groupId },
+            ),
             changed: true,
           },
         }),
@@ -1146,23 +1266,39 @@ function installFetchMock(
       );
     }
 
-    const removeDependencyMatch = /\/api\/runs\/([^/]+)\/dependencies\/([^/]+)$/.exec(url);
+    const removeDependencyMatch = /\/api\/runs\/([^/]+)\/dependencies$/.exec(url);
     if (removeDependencyMatch && init?.method === "DELETE") {
       const runId = decodeURIComponent(removeDependencyMatch[1] ?? "");
-      const dependencyRunId = decodeURIComponent(removeDependencyMatch[2] ?? "");
+      const body =
+        typeof init.body === "string" && init.body.length > 0
+          ? (JSON.parse(init.body) as { type?: string; runId?: string; groupId?: string })
+          : {};
       const detail = state.details[runId];
-      if (!detail) {
+      if (
+        !detail ||
+        (body.type !== "run" && body.type !== "group") ||
+        (body.type === "run" && !body.runId) ||
+        (body.type === "group" && !body.groupId)
+      ) {
         return new Response(JSON.stringify({ error: { message: "missing", code: "not_found" } }), {
           status: 404,
         });
       }
-      detail.dependencies = detail.dependencies.filter(
-        (dependency) => dependency.runId !== dependencyRunId,
-      );
-      const dependencyDetail = state.details[dependencyRunId];
-      if (dependencyDetail) {
-        dependencyDetail.dependents = dependencyDetail.dependents.filter(
-          (dependent) => dependent.runId !== runId,
+      if (body.type === "run") {
+        const dependencyRunId = body.runId as string;
+        detail.dependencies = detail.dependencies.filter(
+          (dependency) => dependency.type !== "run" || dependency.runId !== dependencyRunId,
+        );
+        const dependencyDetail = state.details[dependencyRunId];
+        if (dependencyDetail) {
+          dependencyDetail.dependents = dependencyDetail.dependents.filter(
+            (dependent) => dependent.runId !== runId,
+          );
+        }
+      } else {
+        const dependencyGroupId = body.groupId as string;
+        detail.dependencies = detail.dependencies.filter(
+          (dependency) => dependency.type !== "group" || dependency.groupId !== dependencyGroupId,
         );
       }
       syncDependencyState(runId);
@@ -1170,7 +1306,11 @@ function installFetchMock(
         JSON.stringify({
           result: {
             runId,
-            dependencyRunIds: detail.dependencies.map((dependency) => dependency.runId),
+            dependencies: detail.dependencies.map((dependency) =>
+              dependency.type === "run"
+                ? { type: "run", runId: dependency.runId }
+                : { type: "group", groupId: dependency.groupId },
+            ),
             changed: true,
           },
         }),
@@ -1187,7 +1327,9 @@ function installFetchMock(
           status: 404,
         });
       }
-      const priorDependencyIds = detail.dependencies.map((dependency) => dependency.runId);
+      const priorDependencyIds = detail.dependencies
+        .filter((dependency) => dependency.type === "run")
+        .map((dependency) => dependency.runId);
       detail.dependencies = [];
       for (const dependencyRunId of priorDependencyIds) {
         const dependencyDetail = state.details[dependencyRunId];
@@ -1202,7 +1344,7 @@ function installFetchMock(
         JSON.stringify({
           result: {
             runId,
-            dependencyRunIds: [],
+            dependencies: [],
             changed: priorDependencyIds.length > 0,
           },
         }),
@@ -3665,7 +3807,7 @@ describe("web app", () => {
         repo: "repo-a",
         agent: null,
         backend: null,
-        family: null,
+        runGroupId: null,
       },
     });
 
@@ -3754,7 +3896,7 @@ describe("web app", () => {
         repo: null,
         agent: null,
         backend: null,
-        family: null,
+        runGroupId: null,
       },
     });
   });
@@ -3842,38 +3984,52 @@ describe("web app", () => {
     expect(screen.getByLabelText("Run detail")).toBeInTheDocument();
   });
 
-  it("renders family toggles in the card header and reapplies after clearing from filters", async () => {
-    const familyRuns = [
+  it("renders group toggles in the card header and reapplies after clearing from filters", async () => {
+    const groupRuns = [
       makeRun({
         runId: "run-root",
-        familyRootRunId: "run-root",
-        assignmentName: "Family root",
-        name: "Family root",
+        runGroupId: "run-root",
+        assignmentName: "Group root",
+        name: "Group root",
       }),
       makeRun({
         runId: "run-child",
         parentRunId: "run-root",
-        familyRootRunId: "run-root",
-        assignmentName: "Family child",
-        name: "Family child",
+        runGroupId: "run-root",
+        assignmentName: "Group child",
+        name: "Group child",
       }),
     ];
     const fetchMock = installFetchMock(
       {
         runs: [
-          ...familyRuns,
+          ...groupRuns,
           makeRun({
             runId: "run-outside",
             assignmentName: "Outside run",
             name: "Outside run",
           }),
         ],
-        details: {},
+        details: {
+          "run-root": makeDetail({
+            runId: "run-root",
+            runGroupId: "run-root",
+            assignment: { name: "Group root", sourcePath: "/tmp/group-root-assignment.md" },
+            name: "Group root",
+          }),
+          "run-child": makeDetail({
+            runId: "run-child",
+            parentRunId: "run-root",
+            runGroupId: "run-root",
+            assignment: { name: "Group child", sourcePath: "/tmp/group-child-assignment.md" },
+            name: "Group child",
+          }),
+        },
       },
       {
         handleRequest: (url) => {
-          if (url.includes("/api/runs?includeArchived=true&familyOf=run-root")) {
-            return new Response(JSON.stringify({ runs: familyRuns }), { status: 200 });
+          if (url.includes("/api/runs?includeArchived=true&runGroupId=run-root")) {
+            return new Response(JSON.stringify({ runs: groupRuns }), { status: 200 });
           }
           return undefined;
         },
@@ -3883,43 +4039,46 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
 
-    const rootCard = await findRunCard("Family root");
-    const childCard = await findRunCard("Family child");
-    expect(within(rootCard).getByLabelText("Filter by family run-root")).toBeInTheDocument();
-    expect(within(childCard).getByLabelText("Filter by family run-root")).toBeInTheDocument();
+    const rootCard = await findRunCard("Group root");
+    const childCard = await findRunCard("Group child");
+    expect(within(rootCard).getByText("run-root")).toBeInTheDocument();
+    expect(within(rootCard).queryByText("run-root/run-root")).not.toBeInTheDocument();
+    expect(within(childCard).getByText("run-root/run-child")).toBeInTheDocument();
+    expect(within(rootCard).getByLabelText("Filter by run group run-root")).toBeInTheDocument();
+    expect(within(childCard).getByLabelText("Filter by run group run-root")).toBeInTheDocument();
     expect(
-      within(await findRunCard("Outside run")).queryByLabelText(/filter by family/i),
-    ).not.toBeInTheDocument();
+      within(await findRunCard("Outside run")).getByLabelText("Filter by run group run-outside"),
+    ).toBeInTheDocument();
 
-    await user.click(within(childCard).getByLabelText("Filter by family run-root"));
+    await user.click(within(childCard).getByLabelText("Filter by run group run-root"));
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/runs?includeArchived=true&familyOf=run-root",
+        "/api/runs?includeArchived=true&runGroupId=run-root",
         expect.objectContaining({
           headers: { accept: "application/json" },
         }),
       ),
     );
-    expect(await findRunCard("Family root")).toBeInTheDocument();
-    expect(await findRunCard("Family child")).toBeInTheDocument();
+    expect(await findRunCard("Group root")).toBeInTheDocument();
+    expect(await findRunCard("Group child")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Outside run/i })).not.toBeInTheDocument();
 
     const stored = window.localStorage.getItem("task-runner:web:dashboard-preferences");
     expect(stored ? JSON.parse(stored) : null).toMatchObject({
       structuredFilters: {
-        family: "run-root",
+        runGroupId: "run-root",
       },
     });
 
     await openFilters(user);
-    expect(screen.getByRole("textbox", { name: "Family" })).toHaveValue("run-root");
+    expect(screen.getByRole("textbox", { name: "Run group" })).toHaveValue("run-root");
     await user.click(screen.getByRole("button", { name: "Clear" }));
 
     expect(await findRunCard("Outside run")).toBeInTheDocument();
 
     await user.click(
-      within(await findRunCard("Family child")).getByLabelText("Filter by family run-root"),
+      within(await findRunCard("Group child")).getByLabelText("Filter by run group run-root"),
     );
 
     await waitFor(() => {
@@ -3927,29 +4086,123 @@ describe("web app", () => {
     });
   });
 
-  it("composes the family filter with search, pinned, notes, and archived dashboard filters", async () => {
-    const familyRuns = [
+  it("filters by run group from the detail sidebar group id", async () => {
+    const groupRuns = [
       makeRun({
         runId: "run-root",
-        familyRootRunId: "run-root",
-        assignmentName: "Family root",
-        name: "Family root",
+        runGroupId: "run-root",
+        assignmentName: "Group root",
+        name: "Group root",
+      }),
+      makeRun({
+        runId: "run-child",
+        parentRunId: "run-root",
+        runGroupId: "run-root",
+        assignmentName: "Group child",
+        name: "Group child",
+      }),
+    ];
+    const fetchMock = installFetchMock({
+      runs: [
+        ...groupRuns,
+        makeRun({
+          runId: "run-outside",
+          assignmentName: "Outside run",
+          name: "Outside run",
+        }),
+      ],
+      details: {
+        "run-root": makeDetail({
+          runId: "run-root",
+          runGroupId: "run-root",
+          assignment: { name: "Group root", sourcePath: "/tmp/group-root-assignment.md" },
+          name: "Group root",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Group root"));
+
+    const drawer = await screen.findByLabelText("Run detail");
+    expect(within(drawer).getAllByText("run-root").length).toBeGreaterThan(0);
+    expect(within(drawer).queryByText("run-root/run-root")).not.toBeInTheDocument();
+
+    const groupFilterButton = within(drawer).getByRole("button", {
+      name: "Filter by run group run-root",
+    });
+    expect(groupFilterButton).toHaveAttribute("aria-pressed", "false");
+
+    await user.click(groupFilterButton);
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/runs?includeArchived=true&runGroupId=run-root",
+        expect.objectContaining({
+          headers: { accept: "application/json" },
+        }),
+      ),
+    );
+    expect(await findRunCard("Group root")).toBeInTheDocument();
+    expect(await findRunCard("Group child")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Outside run/i })).not.toBeInTheDocument();
+    expect(
+      within(drawer).getByRole("button", { name: "Filter by run group run-root" }),
+    ).toHaveAttribute("aria-pressed", "true");
+
+    const stored = window.localStorage.getItem("task-runner:web:dashboard-preferences");
+    expect(stored ? JSON.parse(stored) : null).toMatchObject({
+      structuredFilters: {
+        runGroupId: "run-root",
+      },
+    });
+
+    await user.click(within(drawer).getByRole("button", { name: "Filter by run group run-root" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/runs?includeArchived=true",
+        expect.objectContaining({
+          headers: { accept: "application/json" },
+        }),
+      ),
+    );
+    expect(await findRunCard("Outside run")).toBeInTheDocument();
+    expect(
+      within(drawer).getByRole("button", { name: "Filter by run group run-root" }),
+    ).toHaveAttribute("aria-pressed", "false");
+    const storedAfterToggle = window.localStorage.getItem("task-runner:web:dashboard-preferences");
+    expect(storedAfterToggle ? JSON.parse(storedAfterToggle) : null).toMatchObject({
+      structuredFilters: {
+        runGroupId: null,
+      },
+    });
+  });
+
+  it("composes the group filter with search, pinned, notes, and archived dashboard filters", async () => {
+    const groupRuns = [
+      makeRun({
+        runId: "run-root",
+        runGroupId: "run-root",
+        assignmentName: "Group root",
+        name: "Group root",
         notePresent: true,
       }),
       makeRun({
         runId: "run-child",
         parentRunId: "run-root",
-        familyRootRunId: "run-root",
-        assignmentName: "Family child",
-        name: "Family child",
+        runGroupId: "run-root",
+        assignmentName: "Group child",
+        name: "Group child",
         pinned: true,
       }),
       makeRun({
         runId: "run-archived",
         parentRunId: "run-root",
-        familyRootRunId: "run-root",
-        assignmentName: "Archived family",
-        name: "Archived family",
+        runGroupId: "run-root",
+        assignmentName: "Archived group",
+        name: "Archived group",
         archivedAt: "2026-04-13T06:00:00.000Z",
         notePresent: true,
         status: "success",
@@ -3959,7 +4212,7 @@ describe("web app", () => {
     installFetchMock(
       {
         runs: [
-          ...familyRuns,
+          ...groupRuns,
           makeRun({
             runId: "run-outside",
             assignmentName: "Outside run",
@@ -3972,8 +4225,8 @@ describe("web app", () => {
       },
       {
         handleRequest: (url) => {
-          if (url.includes("/api/runs?includeArchived=true&familyOf=run-root")) {
-            return new Response(JSON.stringify({ runs: familyRuns }), { status: 200 });
+          if (url.includes("/api/runs?includeArchived=true&runGroupId=run-root")) {
+            return new Response(JSON.stringify({ runs: groupRuns }), { status: 200 });
           }
           return undefined;
         },
@@ -3983,67 +4236,67 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(
-      within(await findRunCard("Family root")).getByLabelText("Filter by family run-root"),
+      within(await findRunCard("Group root")).getByLabelText("Filter by run group run-root"),
     );
 
     await user.type(screen.getByPlaceholderText("Search runs"), "child");
-    expect(await findRunCard("Family child")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Family root/i })).not.toBeInTheDocument();
+    expect(await findRunCard("Group child")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Group root/i })).not.toBeInTheDocument();
 
     await user.clear(screen.getByPlaceholderText("Search runs"));
     await user.click(screen.getByRole("button", { name: /show pinned runs only/i }));
-    expect(await findRunCard("Family child")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Family root/i })).not.toBeInTheDocument();
+    expect(await findRunCard("Group child")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Group root/i })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /show pinned runs only/i }));
     await user.click(screen.getByRole("button", { name: /show runs with notes only/i }));
-    expect(await findRunCard("Family root")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Family child/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Archived family/i })).not.toBeInTheDocument();
+    expect(await findRunCard("Group root")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Group child/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Archived group/i })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /show archived runs/i }));
-    expect(await findRunCard("Archived family")).toBeInTheDocument();
+    expect(await findRunCard("Archived group")).toBeInTheDocument();
   });
 
-  it("shows the board error panel for failing family queries and retries the same family scope", async () => {
-    let failFamilyFetch = true;
-    const familyRuns = [
+  it("shows the board error panel for failing group queries and retries the same group scope", async () => {
+    let failGroupFetch = true;
+    const groupRuns = [
       makeRun({
         runId: "run-root",
-        familyRootRunId: "run-root",
-        assignmentName: "Family root",
-        name: "Family root",
+        runGroupId: "run-root",
+        assignmentName: "Group root",
+        name: "Group root",
       }),
       makeRun({
         runId: "run-child",
         parentRunId: "run-root",
-        familyRootRunId: "run-root",
-        assignmentName: "Family child",
-        name: "Family child",
+        runGroupId: "run-root",
+        assignmentName: "Group child",
+        name: "Group child",
       }),
     ];
     const fetchMock = installFetchMock(
       {
-        runs: familyRuns,
+        runs: groupRuns,
         details: {},
       },
       {
         handleRequest: (url) => {
-          if (!url.includes("/api/runs?includeArchived=true&familyOf=run-root")) {
+          if (!url.includes("/api/runs?includeArchived=true&runGroupId=run-root")) {
             return undefined;
           }
-          if (failFamilyFetch) {
+          if (failGroupFetch) {
             return new Response(
               JSON.stringify({
                 error: {
                   code: "COMMAND_ERROR",
-                  message: 'family scope could not resolve parent run "missing-parent"',
+                  message: 'run group "missing-group" could not be loaded',
                 },
               }),
               { status: 422 },
             );
           }
-          return new Response(JSON.stringify({ runs: familyRuns }), { status: 200 });
+          return new Response(JSON.stringify({ runs: groupRuns }), { status: 200 });
         },
       },
     );
@@ -4051,22 +4304,20 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(
-      within(await findRunCard("Family root")).getByLabelText("Filter by family run-root"),
+      within(await findRunCard("Group root")).getByLabelText("Filter by run group run-root"),
     );
 
     expect(
       await screen.findByRole("heading", { name: "Run board failed to load" }, { timeout: 5_000 }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText(/family scope could not resolve parent run "missing-parent"/i),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/run group "missing-group" could not be loaded/i)).toBeInTheDocument();
 
-    failFamilyFetch = false;
+    failGroupFetch = false;
     await user.click(screen.getByRole("button", { name: "Retry board load" }));
 
-    expect(await findRunCard("Family child")).toBeInTheDocument();
+    expect(await findRunCard("Group child")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/runs?includeArchived=true&familyOf=run-root",
+      "/api/runs?includeArchived=true&runGroupId=run-root",
       expect.objectContaining({
         headers: { accept: "application/json" },
       }),
@@ -5498,6 +5749,63 @@ describe("web app", () => {
     );
   });
 
+  it("edits run groups for non-running runs and shows inline validation errors", async () => {
+    const postedGroups: string[] = [];
+    installFetchMock(
+      {
+        runs: [
+          makeRun({
+            runId: "run-1",
+            runGroupId: "group-a",
+            status: "initialized",
+            effectiveStatus: "initialized",
+            name: "Grouped run",
+          }),
+        ],
+        details: {
+          "run-1": makeDetail({
+            runId: "run-1",
+            runGroupId: "group-a",
+            status: "initialized",
+            effectiveStatus: "initialized",
+            name: "Grouped run",
+          }),
+        },
+      },
+      {
+        handleRequest: (url, init) => {
+          if (/\/api\/runs\/run-1\/group$/.test(url) && init?.method === "POST") {
+            const body =
+              typeof init.body === "string" && init.body.length > 0
+                ? (JSON.parse(init.body) as { runGroupId?: string })
+                : {};
+            if (body.runGroupId) {
+              postedGroups.push(body.runGroupId);
+            }
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Grouped run"));
+    await waitFor(() => expect(screen.getAllByText("group-a/run-1").length).toBeGreaterThan(0));
+
+    await user.click(screen.getByRole("button", { name: "Edit run group" }));
+    const groupInput = screen.getByRole("textbox", { name: "Run group" });
+    await user.clear(groupInput);
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(screen.getByText("Run group cannot be empty.")).toBeInTheDocument();
+
+    await user.type(groupInput, "group-b");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(postedGroups).toEqual(["group-b"]));
+    await waitFor(() => expect(screen.getAllByText("group-b/run-1").length).toBeGreaterThan(0));
+  });
+
   it("keeps toolbar toggles and settings rows synchronized through persisted preferences", async () => {
     installFetchMock({
       runs: [
@@ -5614,7 +5922,7 @@ describe("web app", () => {
         repo: null,
         agent: null,
         backend: null,
-        family: null,
+        runGroupId: null,
       },
     });
 
@@ -6151,7 +6459,7 @@ describe("web app", () => {
         repo: null,
         agent: null,
         backend: null,
-        family: null,
+        runGroupId: null,
       },
     });
   });
@@ -6193,7 +6501,7 @@ describe("web app", () => {
         repo: null,
         agent: null,
         backend: null,
-        family: null,
+        runGroupId: null,
       },
     });
   });
@@ -8870,10 +9178,10 @@ describe("web app", () => {
           if (/\/api\/runs\/run-1\/dependencies$/.test(url) && init?.method === "POST") {
             const body =
               typeof init.body === "string" && init.body.length > 0
-                ? (JSON.parse(init.body) as { dependencyRunId?: string })
+                ? (JSON.parse(init.body) as { type?: string; runId?: string })
                 : {};
-            if (body.dependencyRunId) {
-              postedDependencyIds.push(body.dependencyRunId);
+            if (body.type === "run" && body.runId) {
+              postedDependencyIds.push(body.runId);
             }
           }
           return undefined;
@@ -8902,6 +9210,92 @@ describe("web app", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("run-2", { selector: ".dependency-meta-id" })).toBeInTheDocument();
     expect(screen.getAllByText("running", { selector: ".badge" }).length).toBeGreaterThan(0);
+  });
+
+  it("adds typed group dependencies and renders group dependents", async () => {
+    const postedDependencies: unknown[] = [];
+    installFetchMock(
+      {
+        runs: [
+          makeRun({
+            runId: "run-1",
+            status: "initialized",
+            assignmentName: "Current assignment",
+            name: "Current run",
+          }),
+          makeRun({
+            runId: "group-member",
+            runGroupId: "shared-group",
+            assignmentName: "Shared member",
+            name: "Shared member",
+          }),
+        ],
+        details: {
+          "run-1": makeDetail({
+            runId: "run-1",
+            status: "initialized",
+            effectiveStatus: "initialized",
+            assignment: {
+              name: "Current assignment",
+              sourcePath: "/tmp/current.md",
+            },
+            name: "Current run",
+          }),
+          "group-member": makeDetail({
+            runId: "group-member",
+            runGroupId: "shared-group",
+            assignment: {
+              name: "Shared member",
+              sourcePath: "/tmp/shared.md",
+            },
+            name: "Shared member",
+            dependents: [
+              {
+                type: "run",
+                via: "group",
+                runId: "run-1",
+                dependencyGroupId: "shared-group",
+                name: "Current run",
+                status: "initialized",
+                effectiveStatus: "initialized",
+                archivedAt: null,
+                satisfied: false,
+                missing: false,
+              },
+            ],
+          }),
+        },
+      },
+      {
+        handleRequest: (url, init) => {
+          if (/\/api\/runs\/run-1\/dependencies$/.test(url) && init?.method === "POST") {
+            postedDependencies.push(
+              typeof init.body === "string" ? JSON.parse(init.body) : undefined,
+            );
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    await user.click(await findRunCard("Current run"));
+    await user.click(await screen.findByRole("button", { name: /^Dependencies\b/i }));
+    await user.click(screen.getByRole("tab", { name: "Run group" }));
+    await user.type(screen.getByLabelText("Dependency run group"), "shared-group");
+    await user.click(screen.getByRole("button", { name: /add dependency/i }));
+
+    await waitFor(() =>
+      expect(postedDependencies).toEqual([{ type: "group", groupId: "shared-group" }]),
+    );
+    expect(await screen.findByText("Run group shared-group")).toBeInTheDocument();
+    expect(screen.getByText("1/2 successful")).toBeInTheDocument();
+
+    await user.click(await findRunCard("Shared member"));
+    await user.click(await screen.findByRole("button", { name: /^Dependencies\b/i }));
+    expect(screen.getByText("via group shared-group")).toBeInTheDocument();
   });
 
   it("renders markdown and plain-text attachment previews in the drawer", async () => {
@@ -9461,7 +9855,7 @@ describe("web app", () => {
     anchorClick.mockRestore();
   });
 
-  it("shows family attachments with a source run id and uses ownerRunId for cross-run preview/download", async () => {
+  it("shows group attachments with a source run id and uses ownerRunId for cross-run preview/download", async () => {
     const fetchMock = installFetchMock(
       {
         runs: [makeRun({ runId: "run-1", name: "Attachment run" })],
@@ -9480,7 +9874,7 @@ describe("web app", () => {
       },
       {
         handleRequest: (url) => {
-          if (/\/api\/runs\/run-1\/attachments\?scope=family$/.test(url)) {
+          if (/\/api\/runs\/run-1\/attachments\?scope=group$/.test(url)) {
             return new Response(
               JSON.stringify({
                 attachments: [
@@ -9498,7 +9892,7 @@ describe("web app", () => {
             );
           }
           if (/\/api\/runs\/run-2\/attachments\/att-peer\/content$/.test(url)) {
-            return new Response("family attachment body", {
+            return new Response("group attachment body", {
               status: 200,
               headers: { "content-type": "text/plain; charset=utf-8" },
             });
@@ -9546,7 +9940,7 @@ describe("web app", () => {
     expect(anchorClick).toHaveBeenCalledTimes(1);
 
     await user.click(screen.getByRole("button", { name: /^Preview peer-notes\.md$/ }));
-    expect(await screen.findByText("family attachment body")).toBeInTheDocument();
+    expect(await screen.findByText("group attachment body")).toBeInTheDocument();
     expect(screen.getByText("run-2")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /^Download$/ }));
@@ -9556,7 +9950,7 @@ describe("web app", () => {
     anchorClick.mockRestore();
   });
 
-  it("switches to the source run when clicking a family attachment run id", async () => {
+  it("switches to the source run when clicking a group attachment run id", async () => {
     installFetchMock(
       {
         runs: [
@@ -9578,7 +9972,7 @@ describe("web app", () => {
       },
       {
         handleRequest: (url) => {
-          if (/\/api\/runs\/run-1\/attachments\?scope=family$/.test(url)) {
+          if (/\/api\/runs\/run-1\/attachments\?scope=group$/.test(url)) {
             return new Response(
               JSON.stringify({
                 attachments: [

@@ -106,13 +106,13 @@ function SettingsProbe() {
           updatePreferences((current) => ({
             structuredFilters: {
               ...current.structuredFilters,
-              family: current.structuredFilters.family === "run-root" ? null : "run-root",
+              runGroupId: current.structuredFilters.runGroupId === "run-root" ? null : "run-root",
             },
           }))
         }
         type="button"
       >
-        Toggle family filter
+        Toggle group filter
       </button>
     </div>
   );
@@ -153,7 +153,7 @@ describe("DashboardSettingsProvider", () => {
           repo: null,
           agent: null,
           backend: null,
-          family: null,
+          runGroupId: null,
         },
       }),
     );
@@ -182,7 +182,7 @@ describe("DashboardSettingsProvider", () => {
           repo: null,
           agent: null,
           backend: null,
-          family: null,
+          runGroupId: null,
         },
         drawerWidth: 1200,
       }),
@@ -215,7 +215,7 @@ describe("DashboardSettingsProvider", () => {
           repo: null,
           agent: null,
           backend: null,
-          family: null,
+          runGroupId: null,
         },
       }),
     );
@@ -232,7 +232,7 @@ describe("DashboardSettingsProvider", () => {
 
     expect(screen.getByTestId("preferences")).toHaveTextContent('"sortByRecentUpdates":true');
     expect(screen.getByTestId("preferences")).toHaveTextContent(
-      '"structuredFilters":{"repo":null,"agent":null,"backend":null,"family":null}',
+      '"structuredFilters":{"repo":null,"agent":null,"backend":null,"runGroupId":null}',
     );
     expect(screen.getByTestId("view-state")).toHaveTextContent('"drawerWidth":540');
   });
@@ -264,7 +264,7 @@ describe("DashboardSettingsProvider", () => {
     renderSettingsProbe();
 
     expect(screen.getByTestId("preferences")).toHaveTextContent(
-      '"structuredFilters":{"repo":"task-runner","agent":null,"backend":null,"family":null}',
+      '"structuredFilters":{"repo":"task-runner","agent":null,"backend":null,"runGroupId":null}',
     );
   });
 
@@ -277,7 +277,7 @@ describe("DashboardSettingsProvider", () => {
           repo: 42,
           agent: "   ",
           backend: false,
-          family: [],
+          runGroupId: [],
         },
       }),
     );
@@ -286,7 +286,7 @@ describe("DashboardSettingsProvider", () => {
 
     expect(screen.getByTestId("preferences")).toHaveTextContent('"showArchived":true');
     expect(screen.getByTestId("preferences")).toHaveTextContent(
-      '"structuredFilters":{"repo":null,"agent":null,"backend":null,"family":null}',
+      '"structuredFilters":{"repo":null,"agent":null,"backend":null,"runGroupId":null}',
     );
   });
 
@@ -343,7 +343,7 @@ describe("DashboardSettingsProvider", () => {
           repo: null,
           agent: null,
           backend: null,
-          family: null,
+          runGroupId: null,
         },
       }),
     );
@@ -378,7 +378,7 @@ describe("DashboardSettingsProvider", () => {
           repo: null,
           agent: null,
           backend: null,
-          family: null,
+          runGroupId: null,
         },
       }),
     );
@@ -405,7 +405,7 @@ describe("DashboardSettingsProvider", () => {
           repo: null,
           agent: null,
           backend: null,
-          family: null,
+          runGroupId: null,
         },
       }),
     );
@@ -414,14 +414,14 @@ describe("DashboardSettingsProvider", () => {
   it("supports functional preference updates against the latest structured-filter state", () => {
     renderSettingsProbe();
 
-    fireEvent.click(screen.getByRole("button", { name: "Toggle family filter" }));
+    fireEvent.click(screen.getByRole("button", { name: "Toggle group filter" }));
     expect(screen.getByTestId("preferences")).toHaveTextContent(
-      '"structuredFilters":{"repo":null,"agent":null,"backend":null,"family":"run-root"}',
+      '"structuredFilters":{"repo":null,"agent":null,"backend":null,"runGroupId":"run-root"}',
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Toggle family filter" }));
+    fireEvent.click(screen.getByRole("button", { name: "Toggle group filter" }));
     expect(screen.getByTestId("preferences")).toHaveTextContent(
-      '"structuredFilters":{"repo":null,"agent":null,"backend":null,"family":null}',
+      '"structuredFilters":{"repo":null,"agent":null,"backend":null,"runGroupId":null}',
     );
   });
 });

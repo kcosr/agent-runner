@@ -162,7 +162,7 @@ test("attachment commands add, list, download, and remove attachments", async ()
   assert.match(runCli(["attachment", "list", outcome.runId], { cwd: dir }), /No attachments\./);
 });
 
-test("attachment list defaults to family scope and supports explicit run scope", async () => {
+test("attachment list defaults to group scope and supports explicit run scope", async () => {
   const dir = tempDir();
   writeBundle(dir);
   const root = await initRun(dir);
@@ -187,28 +187,28 @@ test("attachment list defaults to family scope and supports explicit run scope",
   runCli(["attachment", "add", child.runId, childFile], { cwd: dir });
   runCli(["attachment", "add", different.runId, differentFile], { cwd: dir });
 
-  const family = JSON.parse(
+  const group = JSON.parse(
     runCli(["attachment", "list", target.runId, "--output-format", "json"], { cwd: dir }),
   );
   assert.deepEqual(
-    new Set(family.map((attachment) => attachment.ownerRunId)),
+    new Set(group.map((attachment) => attachment.ownerRunId)),
     new Set([root.runId, target.runId, peer.runId, child.runId]),
   );
   assert.equal(
-    family.some((attachment) => attachment.ownerRunId === different.runId),
+    group.some((attachment) => attachment.ownerRunId === different.runId),
     false,
   );
-  const familyText = runCli(["attachment", "list", target.runId], { cwd: dir });
+  const groupText = runCli(["attachment", "list", target.runId], { cwd: dir });
   assert.match(
-    familyText,
+    groupText,
     /target\.txt/,
     "default text output should still render the target attachment row",
   );
-  assert.match(familyText, new RegExp(`owner=${target.runId}`));
-  assert.match(familyText, new RegExp(`owner=${peer.runId}`));
-  assert.match(familyText, new RegExp(`owner=${child.runId}`));
-  assert.match(familyText, new RegExp(`owner=${root.runId}`));
-  assert.doesNotMatch(familyText, new RegExp(`owner=${different.runId}`));
+  assert.match(groupText, new RegExp(`owner=${target.runId}`));
+  assert.match(groupText, new RegExp(`owner=${peer.runId}`));
+  assert.match(groupText, new RegExp(`owner=${child.runId}`));
+  assert.match(groupText, new RegExp(`owner=${root.runId}`));
+  assert.doesNotMatch(groupText, new RegExp(`owner=${different.runId}`));
 
   const runOnly = JSON.parse(
     runCli(["attachment", "list", target.runId, "--scope", "run", "--output-format", "json"], {
@@ -225,7 +225,7 @@ test("attachment list defaults to family scope and supports explicit run scope",
   assert.doesNotMatch(runOnlyText, /owner=/);
 });
 
-test("attachment list falls back to target-only when the target family lineage is broken", async () => {
+test("attachment list still uses run group when the target parent lineage is broken", async () => {
   const dir = tempDir();
   writeBundle(dir);
   const root = await initRun(dir);
@@ -241,20 +241,20 @@ test("attachment list falls back to target-only when the target family lineage i
     manifest.parentRunId = "missing-parent";
   });
 
-  const family = JSON.parse(
+  const group = JSON.parse(
     runCli(["attachment", "list", target.runId, "--output-format", "json"], { cwd: dir }),
   );
   assert.deepEqual(
-    family.map((attachment) => attachment.ownerRunId),
-    [target.runId],
+    new Set(group.map((attachment) => attachment.ownerRunId)),
+    new Set([root.runId, target.runId]),
   );
-  const familyText = runCli(["attachment", "list", target.runId], { cwd: dir });
-  assert.match(familyText, /target\.txt/);
-  assert.match(familyText, new RegExp(`owner=${target.runId}`));
-  assert.doesNotMatch(familyText, new RegExp(`owner=${root.runId}`));
+  const groupText = runCli(["attachment", "list", target.runId], { cwd: dir });
+  assert.match(groupText, /target\.txt/);
+  assert.match(groupText, new RegExp(`owner=${target.runId}`));
+  assert.match(groupText, new RegExp(`owner=${root.runId}`));
 });
 
-test("attachment list ignores unrelated broken lineages when resolving family scope", async () => {
+test("attachment list ignores unrelated broken lineages when resolving group scope", async () => {
   const dir = tempDir();
   writeBundle(dir);
   const root = await initRun(dir);
@@ -276,18 +276,18 @@ test("attachment list ignores unrelated broken lineages when resolving family sc
     manifest.parentRunId = "missing-parent";
   });
 
-  const family = JSON.parse(
+  const group = JSON.parse(
     runCli(["attachment", "list", target.runId, "--output-format", "json"], { cwd: dir }),
   );
   assert.deepEqual(
-    new Set(family.map((attachment) => attachment.ownerRunId)),
+    new Set(group.map((attachment) => attachment.ownerRunId)),
     new Set([target.runId, peer.runId]),
   );
 
-  const familyText = runCli(["attachment", "list", target.runId], { cwd: dir });
-  assert.match(familyText, new RegExp(`owner=${target.runId}`));
-  assert.match(familyText, new RegExp(`owner=${peer.runId}`));
-  assert.doesNotMatch(familyText, new RegExp(`owner=${unrelatedChild.runId}`));
+  const groupText = runCli(["attachment", "list", target.runId], { cwd: dir });
+  assert.match(groupText, new RegExp(`owner=${target.runId}`));
+  assert.match(groupText, new RegExp(`owner=${peer.runId}`));
+  assert.doesNotMatch(groupText, new RegExp(`owner=${unrelatedChild.runId}`));
 });
 
 test("attachment download rejects an existing destination path", async () => {

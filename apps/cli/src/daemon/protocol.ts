@@ -19,7 +19,9 @@ import type {
   RunArchiveResult,
   RunBackendSessionResult,
   RunDependenciesResult,
+  RunDependencyRef,
   RunDetail,
+  RunGroupResult,
   RunNameResult,
   RunNoteResult,
   RunPinnedResult,
@@ -108,7 +110,11 @@ export interface RunSetBackendSessionParams extends RunTargetParams {
 }
 
 interface RunDependencyParams extends RunTargetParams {
-  dependencyRunId: string;
+  dependency: RunDependencyRef;
+}
+
+export interface RunSetGroupParams extends RunTargetParams {
+  runGroupId: string;
 }
 
 interface TaskTargetParams extends RunTargetParams {
@@ -143,6 +149,7 @@ interface RunsStartBaseParams {
   definitionCwd?: string;
   callerCwd?: string;
   parentRunId?: string;
+  runGroupId?: string;
   backendSessionId?: string;
   overrides: RunCommandOverrides;
 }
@@ -309,6 +316,11 @@ export interface RunBackendSessionRpcResult {
 /** @protocol */
 export interface RunDependenciesRpcResult {
   result: RunDependenciesResult;
+}
+
+/** @protocol */
+export interface RunGroupRpcResult {
+  result: RunGroupResult;
 }
 
 /** @protocol */

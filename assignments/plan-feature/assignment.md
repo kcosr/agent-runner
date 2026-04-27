@@ -94,7 +94,7 @@ callerInstructions: |
        those vars through lineage instead of retyping them as CLI
        handoff flags. The planning artifacts stay attached to the
        planning run; later implementer and reviewer flows can
-       discover them through family-scoped attachment listing when
+       discover them through group-scoped attachment listing when
        they need supplemental context.
        If the caller later resumes the planning run with
        requested plan changes after that `init`, the planner
@@ -526,6 +526,138 @@ tasks:
       dimension and targeted questions — same gate as
       `capture_feature`. It is better to catch a contract gap here
       than to let the implementer discover it.
+  - id: produce_surface_inventory
+    title: Produce the surface inventory
+    body: |
+      Some bug classes don't fall cleanly into any
+      review dimension. The most common: a feature is
+      "implemented" at one layer but never connected at
+      another — a CLI flag is parsed but never read, an
+      HTTP route is documented but has no handler, a UI
+      form field is collected but never POSTed, a config
+      key is loaded but never consulted. The surface is
+      *named* in user-visible text, but the data flow
+      stops short of completing the round trip. Unit
+      tests, lint, and docs checks all pass; the user
+      hits a silent dead end.
+
+      The defense is an explicit Surface Inventory: for
+      every named user-facing entity this feature
+      introduces, modifies, or removes, list the layers
+      it must travel and the symmetric peers it must
+      stay aligned with. The inventory becomes a
+      checklist the implementer must satisfy and the
+      reviewer can re-derive from the diff.
+
+      ## What counts as a surface element
+
+      A surface element is any named entity a user
+      types, clicks, or configures:
+        - CLI flag, positional, or subcommand name
+        - HTTP route or query/body parameter
+        - RPC method or RPC parameter key
+        - Environment variable
+        - Config-file key
+        - UI form field, button label, or preference key
+        - Public function / exported symbol whose name
+          appears in user-facing docs
+        - Persisted-data field that appears in
+          user-facing output
+
+      Surface elements are *names* the user encounters.
+      Internal helpers, private types, and unexported
+      implementation details are out of scope.
+
+      ## What the inventory looks like
+
+      For every surface element introduced, modified, or
+      removed by this feature, record:
+
+        - **Name** — the literal token the user sees
+          (`--foo`, `POST /bar`, `BAZ_ENV`, `pref.qux`).
+        - **Disposition** — `added`, `changed`, or
+          `removed`.
+        - **Layers it must traverse** — the sequence of
+          code locations where the value must be *read*,
+          not just declared. For a CLI flag this is
+          typically `parser → command handler → service
+          → projection → renderer`. List every layer the
+          value must be consumed at, including the test
+          layer. The implementer must land all of them;
+          the reviewer will trace each. Use file paths
+          relative to the target repo's root when you
+          can already name them; otherwise describe the
+          layer abstractly (e.g. "request handler",
+          "persistence layer") and the implementer will
+          fill in the specific path.
+        - **Symmetric peers** — if the same surface is
+          mirrored on another transport (CLI ↔ HTTP ↔
+          RPC ↔ UI), name each peer. Asymmetric peers
+          (one transport accepts the surface, another
+          rejects it) are almost always bugs unless the
+          contract explicitly says otherwise.
+        - **Removal twin** — for `removed` entries, the
+          old name being retired. The implementer must
+          ensure the old name appears nowhere in the
+          live runtime path after the change. (Tests
+          for older migration paths, changelog history,
+          and migration scripts can still reference it,
+          and the reviewer will not flag those.)
+
+      Render the inventory as a structured markdown list,
+      one block per surface element. An illustrative
+      shape (substitute the real layers for the target
+      project's structure):
+
+          - **Name**: `--example-flag`
+            **Disposition**: added
+            **Layers**:
+              - parser — produces a parsed flag value
+              - command handler — reads the parsed value
+                and passes it to the service
+              - service — accepts the filter and applies it
+              - integration test — exercises the flag
+                end-to-end from the CLI entry point
+            **Symmetric peers**: `GET /api/...?exampleFlag=...` (HTTP), `service.list { exampleFlag }` (RPC)
+            **Removal twin**: none
+
+      ## When the inventory is empty
+
+      For pure refactors with no user-visible surface
+      change, the correct answer is an explicitly empty
+      inventory. State in Notes:
+
+          No user-visible surfaces are introduced,
+          changed, or removed by this feature.
+
+      Do not produce a placeholder inventory just to
+      fill the section — the reviewer's
+      surface-completeness pass treats an explicit
+      "no surfaces" statement the same as zero entries.
+      Empty when truly empty, complete when not.
+
+      ## What goes into Notes
+
+      Paste the full inventory (or the explicit "no
+      surfaces" statement) into this task's Notes. It
+      will be copied verbatim into the generated plan's
+      `<<PLACEHOLDER_FEATURE_SURFACE_INVENTORY>>` marker
+      in `draft_plan` and into the human-facing summary's
+      `<<PLACEHOLDER_SURFACE_INVENTORY>>` marker in
+      `produce_summary`. The implementer reads it on
+      every fresh task attempt; the reviewer cross-checks
+      the diff against it in plan-coverage and
+      surface-completeness.
+
+      If you discover mid-task that a surface element is
+      ambiguous (does this flag appear on the CLI only,
+      or also on the HTTP API? Is this preference per-user
+      or global?), mark **this** task `blocked` with the
+      missing dimension and a targeted question — same
+      gate as `capture_feature`. The caller should answer
+      "where does this surface live?" before the
+      inventory is finalized; an under-decomposed
+      inventory produces under-implemented features.
   - id: draft_plan
     title: Draft the plan assignment file
     body: |
@@ -627,23 +759,24 @@ tasks:
           readers, heuristic detection, alias fields, or
           compatibility shims unless the caller explicitly
           requested that migration behavior.
-        - The `<<PLACEHOLDER_FEATURE_CONTRACT>>` and
+        - The `<<PLACEHOLDER_FEATURE_CONTRACT>>`,
+          `<<PLACEHOLDER_FEATURE_SURFACE_INVENTORY>>`, and
           `<<PLACEHOLDER_FEATURE_ASSUMPTIONS>>` blocks in the
           draft are the canonical copies. The later
-          `produce_summary` task will diff its own Contract and
-          Assumptions sections against these. If you edit the
-          draft after `produce_summary` has run, re-run the
-          summary step so the two stay in sync.
+          `produce_summary` task will diff its own Contract,
+          Surface Inventory, and Assumptions sections against
+          these. If you edit the draft after `produce_summary`
+          has run, re-run the summary step so the two stay in sync.
 
       Fill in every `<<PLACEHOLDER>>` marker with concrete,
       file-level detail from tasks `orient` through
-      `produce_contract_artifact`. Placeholders
+      `produce_surface_inventory`. Placeholders
       that remain are a draft-quality failure — they leak
       into the implementer's workspace and produce vague
       execution.
 
-      Three placeholders are load-bearing for the reviewer's
-      plan-coverage pass:
+      Four placeholders are load-bearing for the reviewer's
+      plan-coverage and surface-completeness passes:
         - `<<PLACEHOLDER_FEATURE_BRIEF>>` in the generated
           plan's first task — paste a 3-5 sentence summary
           of the feature from your `capture_feature` notes (what it is,
@@ -662,6 +795,17 @@ tasks:
           every listed exit code, every listed sample
           output. A missing or stale contract here makes
           plan-coverage weaker than it should be.
+        - `<<PLACEHOLDER_FEATURE_SURFACE_INVENTORY>>` in
+          the same task — paste the surface inventory
+          (or the explicit "no surfaces" statement) from
+          your `produce_surface_inventory` notes verbatim.
+          The implementer's `verify_surface_coverage` task
+          and the reviewer's `review/surface-completeness`
+          pass both consume this block as the canonical
+          list of surfaces that must be wired end-to-end.
+          A missing or partial inventory here is the
+          single most common upstream cause of advertised-
+          but-unwired bugs.
         - `<<PLACEHOLDER_FEATURE_ASSUMPTIONS>>` in the same
           task — paste the explicit assumptions list you
           captured in `capture_feature` as a bulleted list. The reviewer
@@ -850,6 +994,13 @@ tasks:
           Notes. Do not re-derive it; it must match the
           `<<PLACEHOLDER_FEATURE_CONTRACT>>` block you already
           pasted into the draft, character-for-character.
+        - `<<PLACEHOLDER_SURFACE_INVENTORY>>` — paste the
+          surface inventory **verbatim** from
+          `produce_surface_inventory` Notes. It must match
+          the `<<PLACEHOLDER_FEATURE_SURFACE_INVENTORY>>`
+          block in the draft, character-for-character. If
+          the inventory was the explicit "no surfaces"
+          statement, paste that line verbatim.
         - `<<PLACEHOLDER_SCHEMA>>` — for data/schema features,
           paste the before/after schema diff from
           `produce_contract_artifact`. For non-schema features,
@@ -877,13 +1028,18 @@ tasks:
           Must match `<<PLACEHOLDER_FEATURE_ASSUMPTIONS>>` in
           the draft.
 
-      Two consistency rules the reviewer and caller both rely
-      on:
+      Three consistency rules the reviewer and caller both
+      rely on:
 
         1. The Contract block in the summary must match the
            `<<PLACEHOLDER_FEATURE_CONTRACT>>` block in the draft
            verbatim. Diff them by eye before you finish.
-        2. The Open Assumptions block must match
+        2. The Surface Inventory block in the summary must
+           match the `<<PLACEHOLDER_FEATURE_SURFACE_INVENTORY>>`
+           block in the draft verbatim. Drift here means the
+           caller and implementer have different lists of
+           what must be wired end-to-end.
+        3. The Open Assumptions block must match
            `<<PLACEHOLDER_FEATURE_ASSUMPTIONS>>` in the draft.
            Drift here is a silent failure — the summary tells
            the caller one story and the implementer reads
@@ -899,8 +1055,9 @@ tasks:
       file. Unfilled placeholders are a draft-quality failure.
 
       Report the final summary path in this task's Notes, plus
-      a one-line confirmation that you diffed the Contract and
-      Assumptions blocks against the draft and they match.
+      a one-line confirmation that you diffed the Contract,
+      Surface Inventory, and Assumptions blocks against the
+      draft and they match.
   - id: attach_artifacts
     title: Attach the approved draft artifacts to the planning run
     body: |
@@ -1017,7 +1174,7 @@ tasks:
         and the same implementer run id was reinitialized from
         the updated draft
       - that later implementer and reviewer flows can discover
-        the planning artifacts with family-scoped attachment
+        the planning artifacts with group-scoped attachment
         listing rooted at the new run id
       - the post-init approval/execution handoff:
 
@@ -1063,7 +1220,7 @@ tasks:
           `assignment-summary.md` stay attached to the planning
           run rather than being duplicated onto the implementer
           run. Later implementer and reviewer flows should
-          discover them through family-scoped attachment listing.
+          discover them through group-scoped attachment listing.
         - If this handoff follows caller-requested plan changes
           after the initial-pass `init`, a note that the
           planning-run attachments were refreshed and the same
@@ -1136,7 +1293,10 @@ duplication scanning (`check_existing_code`) to native
 subagents if that would parallelize your work. Do not
 delegate `capture_feature` (the ambiguity gate must live in
 your own context), `produce_contract_artifact` (the contract
-is your deliverable), `draft_plan`, `review_draft`,
+is your deliverable), `produce_surface_inventory` (the
+inventory must be derived from the contract you wrote and
+will be reused by both implementer and reviewer),
+`draft_plan`, `review_draft`,
 `apply_review_fixes`, `attach_artifacts`,
 `create_initialized_implementer_run`, or `handoff` — those need to
 live in your own context.

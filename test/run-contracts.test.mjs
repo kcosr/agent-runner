@@ -32,8 +32,9 @@ function buildManifest(overrides = {}) {
   };
 
   return {
-    schemaVersion: 14,
+    schemaVersion: 15,
     runId: "run123",
+    runGroupId: "run123",
     repo: "demo-repo",
     agent: {
       name: "demo-agent",
@@ -65,7 +66,7 @@ function buildManifest(overrides = {}) {
     endedAt: null,
     archivedAt: null,
     status: "initialized",
-    dependencyRunIds: [],
+    dependencies: [],
     parentRunId: null,
     schedule: null,
     exitCode: null,
@@ -113,7 +114,8 @@ function buildManifest(overrides = {}) {
       name: "demo session",
       note: null,
       pinned: false,
-      dependencyRunIds: [],
+      runGroupId: "run123",
+      dependencies: [],
       parentRunId: null,
       unrestricted: false,
       timeoutSec: 3600,
@@ -148,7 +150,7 @@ test("run contracts: toRunSummary maps listed manifest rows to the neutral summa
   assert.deepEqual(summary, {
     runId: "run123",
     parentRunId: null,
-    familyRootRunId: null,
+    runGroupId: "run123",
     repo: "demo-repo",
     status: "success",
     effectiveStatus: "success",
@@ -207,21 +209,18 @@ test("run contracts: toRunSummary maps listed manifest rows to the neutral summa
   });
 });
 
-test("run contracts: toRunSummary carries an explicit family root id when provided", () => {
-  const manifest = buildManifest();
+test("run contracts: toRunSummary carries the manifest run group id", () => {
+  const manifest = buildManifest({
+    runGroupId: "shared-group",
+  });
 
-  const summary = toRunSummary(
-    {
-      repo: "demo-repo",
-      workspaceDir: manifest.workspaceDir,
-      manifest,
-    },
-    undefined,
-    undefined,
-    "run-root",
-  );
+  const summary = toRunSummary({
+    repo: "demo-repo",
+    workspaceDir: manifest.workspaceDir,
+    manifest,
+  });
 
-  assert.equal(summary.familyRootRunId, "run-root");
+  assert.equal(summary.runGroupId, "shared-group");
 });
 
 test("run contracts: toRunDetail maps status results to the neutral detail DTO", () => {
@@ -261,6 +260,7 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
   assert.deepEqual(detail, {
     runId: "run123",
     parentRunId: null,
+    runGroupId: "run123",
     repo: "demo-repo",
     status: "success",
     effectiveStatus: "success",
@@ -510,7 +510,10 @@ test("run contracts: note and pin metadata project through summary, detail, and 
 test("run contracts: dependency summary/detail projection resolves readiness and reverse edges", () => {
   const target = buildManifest({
     runId: "run123",
-    dependencyRunIds: ["run456", "missing-run"],
+    dependencies: [
+      { type: "run", runId: "run456" },
+      { type: "run", runId: "missing-run" },
+    ],
   });
   const dependency = buildManifest({
     runId: "run456",
@@ -529,7 +532,7 @@ test("run contracts: dependency summary/detail projection resolves readiness and
       name: "Downstream assignment",
       sourcePath: "/repo/assignments/downstream/assignment.md",
     },
-    dependencyRunIds: ["run123"],
+    dependencies: [{ type: "run", runId: "run123" }],
     startedAt: "2026-04-12T10:10:00.000Z",
   });
   const graph = new Map([
@@ -560,6 +563,7 @@ test("run contracts: dependency summary/detail projection resolves readiness and
   });
   assert.deepEqual(detail.dependencies, [
     {
+      type: "run",
       runId: "run456",
       name: "Prerequisite assignment",
       status: "success",
@@ -569,6 +573,7 @@ test("run contracts: dependency summary/detail projection resolves readiness and
       missing: false,
     },
     {
+      type: "run",
       runId: "missing-run",
       name: null,
       status: null,
@@ -580,6 +585,8 @@ test("run contracts: dependency summary/detail projection resolves readiness and
   ]);
   assert.deepEqual(detail.dependents, [
     {
+      type: "run",
+      via: "run",
       runId: "run789",
       name: "Downstream assignment",
       status: "initialized",
@@ -749,7 +756,7 @@ test("run contracts: deriveRunCapabilities reflects archive, resume, and task-mu
   const readyBlockedOnDependency = deriveRunCapabilities(
     buildManifest({
       status: "ready",
-      dependencyRunIds: ["dep-1"],
+      dependencies: [{ type: "run", runId: "dep-1" }],
     }),
     {
       unsatisfied: 1,
@@ -947,7 +954,7 @@ test("run contracts: toRunArchiveResult maps manifest-plus-change to the neutral
 
 test("run contracts: toRunDependenciesResult maps manifest-plus-change to the dependency DTO", () => {
   const manifest = buildManifest({
-    dependencyRunIds: ["run456"],
+    dependencies: [{ type: "run", runId: "run456" }],
   });
 
   assert.deepEqual(
@@ -957,7 +964,7 @@ test("run contracts: toRunDependenciesResult maps manifest-plus-change to the de
     }),
     {
       runId: "run123",
-      dependencyRunIds: ["run456"],
+      dependencies: [{ type: "run", runId: "run456" }],
       changed: true,
     },
   );

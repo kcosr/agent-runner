@@ -278,6 +278,21 @@ test("parseResumeRunParams accepts optional parentRunId", () => {
   assert.equal(parsed.parentRunId, "parent-123");
 });
 
+test("parseResumeRunParams rejects runGroupId", () => {
+  assert.throws(
+    () =>
+      parseResumeRunParams(
+        {
+          target: "run-123",
+          runGroupId: "group-123",
+          overrides: {},
+        },
+        "runs.resume params",
+      ),
+    /runs\.resume params\.runGroupId is not supported/,
+  );
+});
+
 test("parseRunReadyParams accepts schedule and rejects unknown keys", () => {
   const parsed = parseRunReadyParams(
     {

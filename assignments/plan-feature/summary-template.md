@@ -22,6 +22,10 @@
 
 <<PLACEHOLDER_CONTRACT>>
 
+## Surface Inventory
+
+<<PLACEHOLDER_SURFACE_INVENTORY>>
+
 ## Schema
 
 <<PLACEHOLDER_SCHEMA>>

@@ -49,8 +49,8 @@ tasks:
       Then summarize in Notes:
         - what feature the draft claims to implement
         - the draft's task shape at a high level
-        - the feature brief / contract / assumptions captured in
-          the planning run notes
+        - the feature brief / contract / surface inventory /
+          assumptions captured in the planning run notes
 
       This is context for the rest of the review, not a finding
       section.
@@ -65,6 +65,13 @@ tasks:
         - contract fields, flags, outputs, error cases, or
           assumptions that were captured by the planner but are
           missing or weakened in the draft
+        - Surface Inventory entries captured by the planner but
+          missing or weakened in the draft, including symmetric
+          peers or removal twins
+        - an explicit "no surfaces" inventory when the captured
+          contract plainly introduces, modifies, or removes
+          user-facing flags, routes, config keys, UI controls, or
+          documented public surfaces
         - new scope added by the draft that the planning evidence
           does not justify
         - instructions that quietly add fallback logic,
@@ -72,9 +79,9 @@ tasks:
           compatibility layers even though the planning evidence
           called for a hot cut
 
-      A draft that silently changes the contract, weakens it, or
-      sneaks in compatibility machinery the plan did not call for
-      is a HIGH-severity finding.
+      A draft that silently changes the contract, weakens the
+      Surface Inventory, or sneaks in compatibility machinery the
+      plan did not call for is a HIGH-severity finding.
   - id: review_task_structure
     title: Review task graph, ids, and verifiability
     body: |
@@ -101,6 +108,10 @@ tasks:
         - every task body has concrete file paths, commands, or
           evidence requirements rather than vague placeholders
         - no `<<PLACEHOLDER>>` markers remain anywhere in the draft
+        - the generated draft includes a Surface Inventory block in
+          the orientation task and a later task that verifies each
+          inventory entry's declaration/parser, consumer, and
+          integration test evidence
 
       A placeholder left in the draft, a code-bearing task with no
       meaningful `Done when:`, a missing first-attempt
@@ -199,7 +210,7 @@ tasks:
         - the generated implementer orientation tells the
           executor to read the run's tasks first and only then
           optionally discover and download
-          `assignment-summary.md` through family-scoped attachment
+          `assignment-summary.md` through group-scoped attachment
           listing for supplemental context
 
       Missing or incorrect workflow wiring is usually HIGH

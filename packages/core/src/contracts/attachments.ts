@@ -12,7 +12,7 @@ export interface AttachmentListEntry extends RunAttachment {
   ownerRunId: string;
 }
 
-export type AttachmentScope = "run" | "family";
+export type AttachmentScope = "run" | "group";
 
 export interface AttachmentListOptions {
   scope?: AttachmentScope;

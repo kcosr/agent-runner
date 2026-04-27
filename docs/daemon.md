@@ -72,6 +72,9 @@ UI and CLI stay in sync. `run --detach` only works in connected mode.
 Nested `task-runner` invocations launched by a worker also preserve
 lineage through `TASK_RUNNER_PARENT_RUN_ID`. Shared `RunSummary` /
 `RunDetail` payloads surface that edge as `parentRunId`.
+Nested invocations also preserve run grouping through
+`TASK_RUNNER_RUN_GROUP_ID`. Shared payloads surface that grouping key as
+`runGroupId`; it is independent of parent lineage.
 
 Connected-mode runtime selection stays explicit:
 
@@ -79,6 +82,9 @@ Connected-mode runtime selection stays explicit:
 - if the client passes `--parent-run <run-id>` or has
   `TASK_RUNNER_PARENT_RUN_ID` set, fresh `run` / `init` requests
   synthesize structured `parentRunId`
+- if the client passes `--group-id <group-id>` or has
+  `TASK_RUNNER_RUN_GROUP_ID` set, fresh `run` / `init` requests
+  synthesize structured `runGroupId`
 - if the client has exactly one of `TASK_RUNNER_CODEX_UDS_PATH` or
   `TASK_RUNNER_CODEX_WS_URL` set, fresh `run` / `init` requests
   synthesize `overrides.backendSpecific.codex.transport` as either
@@ -121,7 +127,7 @@ All routes are under `/api/`.
 
 | Method | Path | Effect |
 |--------|------|--------|
-| `GET` | `/api/runs` | List runs. Query: `includeArchived`, plus exactly one of `cwd`, `repo`, `global=true`, or `familyOf=<run-id>` |
+| `GET` | `/api/runs` | List runs. Query: `includeArchived`, plus exactly one of `cwd`, `repo`, `global=true`, or `runGroupId=<group-id>` |
 | `GET` | `/api/runs/:runId` | Full `RunDetail` (including frozen hook descriptors/state/audits when present) |
 | `POST` | `/api/runs/init` | Initialize a run |
 | `POST` | `/api/runs` | Start a run |
@@ -138,18 +144,19 @@ All routes are under `/api/`.
 | `POST` | `/api/runs/:runId/pinned` | Set pinned state (`boolean`) |
 | `POST` | `/api/runs/:runId/backend-session` | Set `backendSessionId` (passive only) |
 | `POST` | `/api/runs/:runId/backend-session/clear` | Clear `backendSessionId` (passive only) |
+| `POST` | `/api/runs/:runId/group` | Set run group (`{ runGroupId }`) |
+| `POST` | `/api/runs/:runId/group/clear` | Reset run to its singleton group |
 | `POST` | `/api/runs/:runId/dependencies` | Add a dependency |
-| `DELETE` | `/api/runs/:runId/dependencies/:depRunId` | Remove a dependency |
+| `DELETE` | `/api/runs/:runId/dependencies` | Remove a dependency (`{ type: "run", runId }` or `{ type: "group", groupId }`) |
 | `POST` | `/api/runs/:runId/dependencies/clear` | Clear all dependencies |
 | `PUT` | `/api/runs/:runId/schedule` | Set a one-time or recurring schedule |
 | `DELETE` | `/api/runs/:runId/schedule` | Clear a one-time schedule |
 | `POST` | `/api/runs/:runId/schedule/enable` | Enable an existing schedule |
 | `POST` | `/api/runs/:runId/schedule/disable` | Disable an existing schedule |
 
-`familyOf=<run-id>` resolves the target run's lineage root and returns
-every run that shares that root. It is mutually exclusive with `cwd`,
-`repo`, and `global=true`; empty `familyOf` values are rejected as
-invalid requests.
+`runGroupId=<group-id>` returns every run in that group. It is mutually
+exclusive with `cwd`, `repo`, and `global=true`; empty or malformed
+`runGroupId` values are rejected as invalid requests.
 
 Fresh-run HTTP requests reuse the same generic run-start contract as
 the WebSocket methods:
@@ -161,6 +168,7 @@ the WebSocket methods:
   "definitionCwd": "/repo",
   "callerCwd": "/repo",
   "parentRunId": "abcd12",
+  "runGroupId": "planning-wave",
   "backendSessionId": "session-123",
   "cliVars": {},
   "overrides": {}
@@ -245,7 +253,7 @@ List routes return the shared `DefinitionListResult` shape with
 
 | Method | Path | Effect |
 |--------|------|--------|
-| `GET` | `/api/runs/:runId/attachments` | List. Query: `scope=run\|family` (default `family`) |
+| `GET` | `/api/runs/:runId/attachments` | List. Query: `scope=run\|group` (default `group`) |
 | `POST` | `/api/runs/:runId/attachments` | Upload; requires `x-task-runner-attachment-name` header |
 | `DELETE` | `/api/runs/:runId/attachments/:attachmentId` | Delete |
 | `GET` | `/api/runs/:runId/attachments/:attachmentId/content` | Download; sets `content-disposition`, `x-task-runner-attachment-id`, `x-task-runner-sha256` |
@@ -304,6 +312,7 @@ Error codes:
 - `runs.archive`, `runs.unarchive`, `runs.reset`, `runs.delete`
 - `runs.setName`, `runs.setNote`, `runs.setPinned`
 - `runs.setBackendSession`, `runs.clearBackendSession`
+- `runs.setGroup`, `runs.clearGroup`
 - `runs.addDependency`, `runs.removeDependency`, `runs.clearDependencies`
 - `runs.setSchedule`, `runs.clearSchedule`, `runs.enableSchedule`,
   `runs.disableSchedule`
@@ -373,10 +382,10 @@ HTTP SSE route and WebSocket notification method.
   ```
 
 Drives board cards. The global summary stream is projection-only — it
-never carries transcript deltas. `RunSummary` now includes persisted
-`pinned`, derived `notePresent`, `hookCount`, `familyRootRunId`,
-persisted `schedule`, and derived `scheduleState` so
-cards and filters can react without fetching full detail.
+never carries transcript deltas. `RunSummary` includes persisted
+`pinned`, derived `notePresent`, `hookCount`, `runGroupId`, persisted
+`schedule`, and derived `scheduleState` so cards and filters can react
+without fetching full detail.
 
 ### Per-run detail
 
@@ -450,11 +459,11 @@ The contracts shared between CLI, daemon, and web are in
 - `RunSummary` — board projection, includes `dependencyState`,
   `activeTask`, `pinned`, `notePresent`, `totalAttemptCount`,
   `totalSessionCount`, `maxAttemptsPerSession`, current/last session
-  summaries, `hookCount`, and `capabilities`.
+  summaries, `runGroupId`, `hookCount`, and `capabilities`.
 - `RunDetail` — drawer projection: tasks, dependencies, dependents,
   attachments, locked fields, runtime vars, session history, backend
-  session, full `note`, `pinned`, `resolvedHooks`, `hookState`, and
-  `hookAudits`.
+  session, `runGroupId`, full `note`, `pinned`, `resolvedHooks`,
+  `hookState`, and `hookAudits`.
 - `RunCapabilities` — lifecycle gates: `canArchive`, `canUnarchive`,
   `canReset`, `canDelete`, `canReady`, `canResume`, `canAbort`
   (+ `abortReason`), `canReconfigure` (+ `reconfigureReason`), and

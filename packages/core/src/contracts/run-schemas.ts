@@ -22,8 +22,11 @@ import type {
   RunDeleteResult,
   RunDependenciesResult,
   RunDependencyDetail,
+  RunDependencyRef,
   RunDependencyState,
+  RunDependentDetail,
   RunDetail,
+  RunGroupResult,
   RunNameResult,
   RunNoteResult,
   RunPinnedResult,
@@ -201,7 +204,19 @@ export const runDependencyStateSchema: z.ZodType<RunDependencyState> = z.object(
   unsatisfied: z.number(),
 });
 
-export const runDependencyDetailSchema: z.ZodType<RunDependencyDetail> = z.object({
+export const runDependencyRefSchema: z.ZodType<RunDependencyRef> = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("run"),
+    runId: z.string(),
+  }),
+  z.object({
+    type: z.literal("group"),
+    groupId: z.string(),
+  }),
+]);
+
+const runDependencyRunDetailSchema = z.object({
+  type: z.literal("run"),
   runId: z.string(),
   name: z.string().nullable(),
   status: runStatusSchema.nullable(),
@@ -211,10 +226,37 @@ export const runDependencyDetailSchema: z.ZodType<RunDependencyDetail> = z.objec
   missing: z.boolean(),
 });
 
+export const runDependencyDetailSchema: z.ZodType<RunDependencyDetail> = z.discriminatedUnion(
+  "type",
+  [
+    runDependencyRunDetailSchema,
+    z.object({
+      type: z.literal("group"),
+      groupId: z.string(),
+      total: z.number(),
+      successful: z.number(),
+      unsatisfied: z.number(),
+      archivedExcluded: z.number(),
+      satisfied: z.boolean(),
+      missing: z.boolean(),
+    }),
+  ],
+);
+
+export const runDependentDetailSchema: z.ZodType<RunDependentDetail> = z.discriminatedUnion("via", [
+  runDependencyRunDetailSchema.extend({
+    via: z.literal("run"),
+  }),
+  runDependencyRunDetailSchema.extend({
+    via: z.literal("group"),
+    dependencyGroupId: z.string(),
+  }),
+]);
+
 export const runSummarySchema: z.ZodType<RunSummary> = z.object({
   runId: z.string(),
   parentRunId: z.string().nullable(),
-  familyRootRunId: z.string().nullable(),
+  runGroupId: z.string(),
   repo: z.string(),
   status: runStatusSchema,
   effectiveStatus: runStatusSchema,
@@ -249,6 +291,7 @@ export const runSummarySchema: z.ZodType<RunSummary> = z.object({
 export const runDetailSchema: z.ZodType<RunDetail> = z.object({
   runId: z.string(),
   parentRunId: z.string().nullable(),
+  runGroupId: z.string(),
   repo: z.string(),
   status: runStatusSchema,
   effectiveStatus: runStatusSchema,
@@ -294,7 +337,7 @@ export const runDetailSchema: z.ZodType<RunDetail> = z.object({
   hookState: z.record(z.string(), z.unknown()).optional(),
   hookAudits: z.array(hookAuditRecordSchema).optional(),
   dependencies: z.array(runDependencyDetailSchema),
-  dependents: z.array(runDependencyDetailSchema),
+  dependents: z.array(runDependentDetailSchema),
   schedule: runScheduleSchema.nullable(),
   scheduleState: runScheduleStateSchema,
   tasks: z.array(runTaskSummarySchema),
@@ -341,7 +384,14 @@ export const runBackendSessionResultSchema: z.ZodType<RunBackendSessionResult> =
 
 export const runDependenciesResultSchema: z.ZodType<RunDependenciesResult> = z.object({
   runId: z.string(),
-  dependencyRunIds: z.array(z.string()),
+  dependencies: z.array(runDependencyRefSchema),
+  changed: z.boolean(),
+});
+
+export const runGroupResultSchema: z.ZodType<RunGroupResult> = z.object({
+  runId: z.string(),
+  runGroupId: z.string(),
+  previousRunGroupId: z.string(),
   changed: z.boolean(),
 });
 

@@ -21,6 +21,7 @@ All commands accept `--help` / `-h`.
 | `run reset\|archive\|unarchive\|delete` | Lifecycle mutations |
 | `run schedule [set]\|enable\|disable\|clear` | Schedule mutations |
 | `run set-name\|set-backend-session\|clear-backend-session` | Metadata mutations |
+| `run set-group\|clear-group` | Run group mutations |
 | `run add-dep\|remove-dep\|clear-deps` | Dependency graph mutations |
 
 ## Global flags
@@ -63,6 +64,7 @@ task-runner run \
   [--max-retries <n>] \
   [--unrestricted] \
   [--name <name>] \
+  [--group-id <group-id>] \
   [--var <key>=<value> ...] \
   [--add-task <title> ...] \
   [--backend-session-id <id>] \
@@ -92,6 +94,8 @@ Flags:
 - `--max-retries <n>` — non-negative integer; `maxAttemptsPerSession = retries + 1`.
 - `--unrestricted` — pass the backend's safety-bypass flag.
 - `--name <name>` — set the persisted display name.
+- `--group-id <group-id>` — set the explicit run group for a fresh run.
+  Forbidden on resume and ready-start.
 - `--var <key>=<value>` — repeatable. Split on the first `=`. Forbidden
   on resume.
   Descendant runs usually should prefer assignment `sources: [parent]`
@@ -137,7 +141,7 @@ task-runner init \
   --agent <name|path> \
   --assignment <name|path> \
   [--cwd <path>] [--backend <id>] [--model <id>] [--effort <level>] \
-  [--unrestricted] [--name <name>] [--var key=value ...] \
+  [--unrestricted] [--name <name>] [--group-id <group-id>] [--var key=value ...] \
   [--add-task <title> ...] [--backend-session-id <id>] \
   [--schedule-at <iso> | --schedule-delay <duration> | --schedule-cron <expr>] \
   [--schedule-timezone <iana>] [--schedule-mode reuse|reset|clone] \
@@ -206,7 +210,8 @@ task-runner run status <run-id> [--output-format json] [--field <name> ...]
 - Run-id-only. Paths are not accepted.
 - `--output-format json` returns the shared `RunDetail` DTO.
 - `--field <name>` — repeatable. Projects top-level JSON fields.
-- JSON detail includes `parentRunId` when the run belongs to a lineage.
+- JSON detail includes `parentRunId` when the run belongs to a lineage
+  and always includes `runGroupId`.
 - JSON detail includes `note`, `pinned`, persisted `schedule`, and
   derived `scheduleState`.
 - Text output may show `Pinned: yes` and `Note: present`, but it never
@@ -272,7 +277,7 @@ Mutation rules depend on run state and backend type; see
 task-runner attachment add <run-id|path> <source-file> \
   [--name <text>] [--mime-type <type>]
 
-task-runner attachment list <run-id|path> [--scope run|family]
+task-runner attachment list <run-id|path> [--scope run|group]
 
 task-runner attachment download <run-id|path> <attachment-id> <output-path>
 
@@ -289,6 +294,7 @@ task-runner list assignments
 task-runner list launchers
 task-runner list runs \
   [--cwd <path> | --repo <name> | --global] \
+  [--group-id <group-id>] \
   [--include-archived]
 ```
 
@@ -296,6 +302,8 @@ task-runner list runs \
 - `--cwd <path>` filters by exact persisted cwd.
 - `--repo <name>` filters by repo bucket.
 - `--global` disables cwd scoping.
+- `--group-id <group-id>` filters by exact run group and is mutually
+  exclusive with `--cwd`, `--repo`, and `--global`.
 - `--include-archived` adds archived runs.
 
 ## `show`
@@ -371,6 +379,8 @@ task-runner run set-note <id|path> <markdown>
 task-runner run clear-note <id|path>
 task-runner run pin <id|path>
 task-runner run unpin <id|path>
+task-runner run set-group <id|path> <group-id>
+task-runner run clear-group <id|path>
 task-runner run set-backend-session   <id|path> <session-id>   # passive only
 task-runner run clear-backend-session <id|path>                # passive only
 ```
@@ -380,6 +390,8 @@ task-runner run clear-backend-session <id|path>                # passive only
 - `run clear-note` clears the note without a second positional.
 - `run pin` / `run unpin` toggle persisted pin metadata without moving a
   run across status columns.
+- `run set-group` and `run clear-group` apply to non-running runs. A
+  cleared group becomes the run's singleton group (`runGroupId === runId`).
 - Metadata mutations accept `--output-format text|json` and `--connect`.
 - Note text is never echoed back in text output; use JSON or the web UI
   to inspect the full stored note.
@@ -387,12 +399,15 @@ task-runner run clear-backend-session <id|path>                # passive only
 ### Dependencies
 
 ```bash
-task-runner run add-dep    <id> <dependency-run-id>
-task-runner run remove-dep <id> <dependency-run-id>
+task-runner run add-dep    <id> --run <dependency-run-id>
+task-runner run add-dep    <id> --group <group-id>
+task-runner run remove-dep <id> --run <dependency-run-id>
+task-runner run remove-dep <id> --group <group-id>
 task-runner run clear-deps <id>
 ```
 
-Dependency mutations are only allowed on `initialized` runs. See
+Dependency mutations are only allowed on `initialized` runs and require a
+typed ref for add/remove: exactly one of `--run` or `--group`. See
 [dependencies.md](dependencies.md).
 
 ## Exit codes
@@ -412,6 +427,7 @@ Recognized by the CLI:
 
 - `TASK_RUNNER_CONFIG_DIR`, `TASK_RUNNER_STATE_DIR`
 - `TASK_RUNNER_LISTEN`, `TASK_RUNNER_CONNECT`
+- `TASK_RUNNER_PARENT_RUN_ID`, `TASK_RUNNER_RUN_GROUP_ID`
 - `TASK_RUNNER_CLAUDE_BIN`, `TASK_RUNNER_CODEX_BIN`,
   `TASK_RUNNER_CODEX_UDS_PATH`, `TASK_RUNNER_CODEX_WS_URL`,
   `TASK_RUNNER_CURSOR_BIN`, `TASK_RUNNER_PI_BIN`, `PI_HOME`

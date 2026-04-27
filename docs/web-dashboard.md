@@ -37,9 +37,9 @@ A three-pane layout:
 
 The grouped **Filters** control opens an anchored popover on desktop and a
 sheet-style overlay on narrow/mobile layouts. It applies exact-match
-structured filters for repo, agent, backend, and lineage family, while
+structured filters for repo, agent, backend, and run group, while
 free-text search remains separate. Structured filter state persists
-across reloads, and the repo/agent/backend badges plus the `Family`
+across reloads, and the repo/agent/backend badges plus the run-group
 chip on run cards act as shortcuts that apply, replace, or clear those
 exact-match filters.
 
@@ -57,8 +57,8 @@ Each card shows:
 
 - Run name (or assignment name if unnamed).
 - Status badge and task progress (e.g. `3 / 7`).
-- `Family` chip when `familyRootRunId` is present; clicking it scopes
-  the board to that lineage family.
+- Run-group chip (`runGroupId/runId`); clicking it scopes the board to
+  that run group.
 - Pin toggle plus note affordance.
 - Compact schedule indicator when `schedule` is present. Future
   schedules render as normal, paused schedules as muted, and due
@@ -103,21 +103,24 @@ timeline stream (`RunTimelineEnvelope`). The drawer surfaces:
   mode, and continue-on-failure. The drawer can enable/disable existing
   schedules and clear one-time schedules; recurring schedules can be
   disabled but not cleared.
+- Run group metadata and editor. Non-running runs can be moved into a
+  different group or reset to their singleton group.
 - Notes tab: rendered markdown by default, explicit Preview/Edit toggle,
   save/cancel flow, and the same shared note mutation used by the card
   editor.
 - Tasks tab: expandable task rows with inline notes and status editing,
   gated by `taskMutation` capabilities.
-- Attachments tab: **Run** and **Group** sub-tabs. Group is read-only and
-  aggregates lineage-family attachments returned by
-  `attachment list --scope family`, including attachments owned by
-  ancestors, descendants, siblings, and cousins of the selected run.
-  In-app preview is available for `text/markdown` and `text/plain`
+- Attachments tab: one combined group-scoped list. Rows show
+  `ownerRunId`; selected-run attachments can be uploaded, previewed,
+  downloaded, and deleted, while attachments owned by other runs in the
+  group are read-only but still support preview and download. In-app
+  preview is available for `text/markdown` and `text/plain`
   attachments; fenced `mermaid` blocks render inline (with an inline
   error if a diagram fails to load). The attachment preview drawer is
   itself resizable (edge drag or keyboard handle) and supports the same
   full-width toggle as the detail drawer. See [attachments.md](attachments.md).
-- Dependencies tab: upstream and downstream runs (`RunDependencyDetail`).
+- Dependencies tab: upstream and downstream run and group dependency
+  details (`RunDependencyDetail` / `RunDependentDetail`).
 - Data tab: read-only `Vars` and `Hook state` subtabs exposing
   `RunDetail.runtimeVars` and `RunDetail.hookState`. Scalar values render
   inline; objects and arrays render as pretty JSON blocks. When
@@ -238,7 +241,7 @@ Preferences are persisted to `localStorage` and include:
 - Show archived runs.
 - Show runs with notes only.
 - Show pinned runs only.
-- Structured filters (repo, agent, backend, family).
+- Structured filters (repo, agent, backend, run group).
 - Visible focus indicators.
 - Detail drawer width.
 
