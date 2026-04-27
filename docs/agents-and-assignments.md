@@ -462,6 +462,11 @@ Built-in hooks:
 - `git-worktree` runs in `prepare` and `beforeAttempt`. It ensures a git
   worktree, switches the run `cwd` to that path, and in `prepare` also
   projects `worktree_path` into runtime vars.
+- `git-clone` runs in `prepare` only. It clones a remote or local Git URL
+  into a checkout, switches the run `cwd` to that checkout before the
+  manifest is first written, and projects clone metadata into runtime
+  vars. Resume and reset reuse the frozen cwd and vars; they do not
+  re-contact the remote.
 - `command` runs in every phase. `mode: status` treats exit code `0` as
   success and a non-zero exit code as block/reject. `mode: json`
   requires exit code `0` and parses a full hook result from stdout;
@@ -471,6 +476,36 @@ Built-in hooks:
   `success`. Scope it with task-local placement or native
   `when.taskId` / `when.taskIds`, and set `requireAny: true` only when
   the task must refuse completion until at least one child run exists.
+
+`git-clone` hook config uses snake_case fields only:
+
+```yaml
+hooks:
+  prepare:
+    - builtin: git-clone
+      with:
+        repo_url: git@github.com:org/repo.git
+        ref: feature-branch
+        path: /tmp/task-runner-review-checkout
+        remote_name: origin
+        depth: 1
+```
+
+- `repo_url` is required and must be a non-empty string.
+- `ref` is optional. Empty interpolated values are treated as omitted; when
+  omitted, git leaves the clone on the remote default branch.
+- `path` is optional. When omitted, the checkout path defaults to
+  `${TASK_RUNNER_STATE_DIR}/checkouts/<repo_slug>-<run_id>`, where the
+  slug is derived from the repo URL and sanitized to one filesystem-safe
+  path segment.
+- `remote_name` is optional and defaults to `origin`.
+- `depth` is optional and must be a positive integer.
+
+If the checkout path already exists and is non-empty, `git-clone` fails
+before cloning. On success it emits `repo_slug`, `checkout_path`,
+`commit_sha`, and `resolved_ref` when the ref can be determined reliably.
+Do not put credentials in `repo_url`: runtime vars are persisted in
+`run.json`. Use SSH agents or Git credential helpers instead.
 
 ## Locked fields
 

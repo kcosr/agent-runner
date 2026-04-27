@@ -170,7 +170,7 @@ the WebSocket methods:
   "parentRunId": "abcd12",
   "runGroupId": "planning-wave",
   "backendSessionId": "session-123",
-  "cliVars": {},
+  "webVars": {},
   "overrides": {}
 }
 ```
@@ -178,6 +178,35 @@ the WebSocket methods:
 Browser callers should send an explicit `callerCwd` on `POST
 /api/runs/init` and `POST /api/runs`. The daemon keeps `callerCwd`
 distinct from `overrides.cwd`; it is not a browser-only alias.
+
+Clone-based direct reviews use the same `POST /api/runs` or
+`POST /api/runs/init` shape with browser-sourced assignment vars in
+`webVars`:
+
+```json
+{
+  "agent": "code-reviewer",
+  "assignment": "code-review-clone",
+  "callerCwd": "/tmp",
+  "webVars": {
+    "repo_url": "git@github.com:org/repo.git",
+    "ref": "feature-branch",
+    "range": "origin/main..HEAD"
+  },
+  "overrides": {}
+}
+```
+
+The caller does not supply `cwd` or a repo slug for this workflow. The
+`git-clone` prepare hook clones the repo, switches the run cwd to the
+checkout before manifest freeze, and persists the clone metadata in
+runtime vars. Because arbitrary clone URLs cause network egress and disk
+writes on the daemon host, expose the daemon only inside a trusted local
+environment or protect remote access externally. The daemon has no built-in
+token auth. Do not embed credentials in `repo_url`; it is persisted in
+runtime vars. Use SSH agents or Git credential helpers instead. Future
+deployments that expose the daemon beyond localhost may also want repo URL
+allowlists.
 
 Schedule bodies use the same flat input contract as the CLI:
 

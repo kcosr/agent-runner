@@ -22,6 +22,10 @@ const CODE_REVIEW_DIRECT_ASSIGNMENT_PATH = new URL(
   "../assignments/code-review-direct/assignment.md",
   import.meta.url,
 ).pathname;
+const CODE_REVIEW_CLONE_ASSIGNMENT_PATH = new URL(
+  "../assignments/code-review-clone/assignment.md",
+  import.meta.url,
+).pathname;
 
 function writeAgent(baseDir, name, body) {
   const agentDir = join(baseDir, "agents", name);
@@ -117,6 +121,10 @@ test("static input surface: review assignments expose the correct CLI/Web inputs
       loadedAgent,
       loadAssignmentConfig(CODE_REVIEW_DIRECT_ASSIGNMENT_PATH, REPO_ROOT),
     );
+    const cloneReview = resolveStaticInputSurface(
+      loadedAgent,
+      loadAssignmentConfig(CODE_REVIEW_CLONE_ASSIGNMENT_PATH, REPO_ROOT),
+    );
 
     assert.deepEqual(
       implementationReview.assignmentInputs.map((field) => field.key),
@@ -136,6 +144,19 @@ test("static input surface: review assignments expose the correct CLI/Web inputs
     assert.ok(
       !directReview.assignmentInputs.some((field) => field.key === "implementation_run_id"),
     );
+
+    assert.deepEqual(
+      cloneReview.assignmentInputs.map((field) => field.key),
+      ["repo_url", "ref", "range"],
+    );
+    assert.equal(fieldByKey(cloneReview.assignmentInputs, "repo_url").required, true);
+    assert.equal(fieldByKey(cloneReview.assignmentInputs, "repo_url").source, "available_override");
+    assert.equal(fieldByKey(cloneReview.assignmentInputs, "repo_url").valueStatus, "unset");
+    assert.notEqual(fieldByKey(cloneReview.assignmentInputs, "ref").required, true);
+    assert.equal(fieldByKey(cloneReview.assignmentInputs, "ref").source, "available_override");
+    assert.equal(fieldByKey(cloneReview.assignmentInputs, "ref").valueStatus, "unset");
+    assert.notEqual(fieldByKey(cloneReview.assignmentInputs, "range").required, true);
+    assert.equal(fieldByKey(cloneReview.assignmentInputs, "range").value, "full");
   }));
 
 test("static input surface: launcher path and inline definitions preserve authored values", () =>

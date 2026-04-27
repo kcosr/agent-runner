@@ -95,6 +95,9 @@ const BUILTIN_CODE_REVIEW_PATH = resolvePath(
 const BUILTIN_CODE_REVIEW_DIRECT_PATH = resolvePath(
   new URL("../assignments/code-review-direct/assignment.md", import.meta.url).pathname,
 );
+const BUILTIN_CODE_REVIEW_CLONE_PATH = resolvePath(
+  new URL("../assignments/code-review-clone/assignment.md", import.meta.url).pathname,
+);
 const BUILTIN_IMPLEMENTER_AGENT_PATH = resolvePath(
   new URL("../agents/implementer/agent.md", import.meta.url).pathname,
 );
@@ -1505,6 +1508,53 @@ test("built-in code-review-direct assignment resolves shared review tasks withou
     assert.match(orient.body ?? "", /no `implementation_run_id`/);
     assert.match(synthesis.body ?? "", /top 10 highest-leverage findings/);
     assert.match(synthesis.body ?? "", /review\/architecture.*review\/surface-completeness/s);
+    assert.match(approval.body ?? "", /BLOCKED -- cannot approve/);
+    assert.doesNotMatch(approval.body ?? "", /plan_coverage/);
+  }));
+
+test("built-in code-review-clone assignment resolves clone hook and shared review tasks", () =>
+  withEnv({ TASK_RUNNER_CONFIG_DIR: REPO_ROOT }, () => {
+    const loaded = loadAssignmentConfig(BUILTIN_CODE_REVIEW_CLONE_PATH);
+
+    assert.deepEqual(
+      loaded.config.tasks.map((task) => task.id),
+      ["orient", ...SHARED_REVIEW_TASK_IDS, "synthesis", "approval"],
+    );
+    assert.deepEqual(Object.keys(loaded.config.vars), ["repo_url", "ref", "range"]);
+    assert.equal(loaded.config.vars.repo_url?.required, true);
+    assert.deepEqual(loaded.config.vars.repo_url?.sources, ["cli", "web"]);
+    assert.equal(loaded.config.vars.ref?.required, false);
+    assert.deepEqual(loaded.config.vars.ref?.sources, ["cli", "web"]);
+    assert.equal(loaded.config.vars.range?.required, false);
+    assert.equal(loaded.config.vars.range?.default, "full");
+    assert.deepEqual(loaded.config.vars.range?.sources, ["cli", "web"]);
+    assert.deepEqual(loaded.config.hooks.prepare, [
+      {
+        builtin: "git-clone",
+        with: {
+          repo_url: "{{repo_url}}",
+          ref: "{{ref}}",
+        },
+      },
+    ]);
+    assert.equal(
+      loaded.config.tasks.some((task) => task.id === "plan_coverage"),
+      false,
+    );
+    assert.equal(loaded.config.vars.implementation_run_id, undefined);
+
+    const orient = loaded.config.tasks.find((task) => task.id === "orient");
+    const architecture = loaded.config.tasks.find((task) => task.id === "review/architecture");
+    const approval = loaded.config.tasks.find((task) => task.id === "approval");
+
+    assert.ok(orient);
+    assert.ok(architecture);
+    assert.ok(approval);
+    assert.match(orient.body ?? "", /clone-based\s+direct\/ad hoc review/);
+    assert.match(orient.body ?? "", /{{repo_url}}/);
+    assert.match(orient.body ?? "", /{{commit_sha}}/);
+    assert.equal(architecture.title, "Architecture & module boundaries");
+    assert.match(architecture.body ?? "", /Review the module layout/);
     assert.match(approval.body ?? "", /BLOCKED -- cannot approve/);
     assert.doesNotMatch(approval.body ?? "", /plan_coverage/);
   }));

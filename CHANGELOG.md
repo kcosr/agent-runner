@@ -94,6 +94,8 @@
 
 ### Added
 
+- Added a clone-based direct code review workflow with a `git-clone`
+  prepare hook and bundled `code-review-clone` assignment.
 - Added first-class run groups across manifests, CLI, daemon APIs, and the
   web dashboard. Fresh child runs inherit the parent run group by default,
   `--group-id` overrides fresh run/init grouping, and

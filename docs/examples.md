@@ -179,6 +179,25 @@ task, and no lineage attachment lookup. It reuses the same shared
 `review/...` dimension tasks as `code-review`, then produces a direct
 synthesis and approval decision.
 
+### `code-review-clone`
+
+- Path: `assignments/code-review-clone/assignment.md`
+- Vars:
+  - `repo_url` (string, required) - Git SSH/HTTP URL to clone for
+    review. Do not embed credentials.
+  - `ref` (string, optional) - branch, tag, or commit to check out before
+    review.
+  - `range` (string, optional, default `full`) - git range to review
+    inside the cloned checkout (`full`, `unstaged`, `staged`,
+    `last commit`, `HEAD~N..HEAD`, `main..<branch>`, etc.).
+
+Clone-based direct/user/Web UI code review for work that is not already
+checked out on the local or daemon host. Its prepare hook clones
+`repo_url`, checks out `ref` when supplied, switches the run cwd to the
+checkout, and reuses the same shared `review/...` dimension tasks as
+`code-review-direct`. It has no `implementation_run_id` and no
+plan-coverage task.
+
 ### `doc-review`
 
 - Path: `assignments/doc-review/assignment.md`
@@ -195,7 +214,7 @@ subagents for parallelism.
 |-------|-------------------|-------|
 | `planner` | `plan-feature` | Produces an executable plan and a summary; uses nested `plan-review` and blocks for caller approval before delayed implementer creation. |
 | `implementer` | generated plan assignment | Created by `plan-feature` after approval; inspect `run brief` and then execute with `run --resume-run`. |
-| `code-reviewer` | `plan-review`, `code-review`, or `code-review-direct` | Nested and direct review surfaces. |
+| `code-reviewer` | `plan-review`, `code-review`, `code-review-direct`, or `code-review-clone` | Nested, direct, and clone-based direct review surfaces. |
 | `doc-reviewer` | `doc-review` | Review-only, writes no files. |
 | any | `repo-orientation` / `familiarize` | Quick or deep onboarding before other work. |
 | any | `test` | Smoke-check for installation or a new agent/backend combination. |
@@ -216,10 +235,12 @@ subagents for parallelism.
   dependencies.
 - **Attachments as handoff** — planning artifacts attached to the
   planning run and later discovered via `attachment list --scope group`.
-- **Multiple delta re-reviews** — `plan-review`, `code-review`, and
-  `code-review-direct` switch into delta mode on resume.
+- **Multiple delta re-reviews** — `plan-review`, `code-review`,
+  `code-review-direct`, and `code-review-clone` switch into delta mode on
+  resume.
 - **Subagent delegation** — `plan-feature`, `code-review`,
-  `code-review-direct`, `doc-review`, and `familiarize` allow
+  `code-review-direct`, `code-review-clone`, `doc-review`, and
+  `familiarize` allow
   independent tasks to be parallelized while synthesis tasks stay in the
   main context.
 
