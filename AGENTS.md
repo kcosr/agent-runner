@@ -52,28 +52,9 @@ Repeated checks remain legitimate when:
 - Run `npm run imports:fix` to apply Biome import organization.
 - Run `npm run imports:check` to verify Biome import organization without writing.
 - Run `npm run check:knip` when dependency, export, or entry-point metadata changes.
-- Run `npm run check` to run the standard verification pipeline (`build`, `lint`, `format:check`, `imports:check`, `test`).
+- Run `npm run check` to sync to `r10` and run the standard verification pipeline (`build`, `lint`, `format:check`, `imports:check`, `test`).
 - Do not commit `dist/`; build artifacts are generated locally and during packaging.
 - If you cannot run the relevant checks, call that out explicitly.
-
-### Host-specific remote verification
-
-When running on host `srv`, prefer running the full verification gate on
-`r10` instead of running it locally:
-
-```bash
-sh -c 'rsync -a --delete \
-  --exclude .git \
-  --exclude node_modules \
-  --exclude "apps/*/dist" \
-  --exclude "packages/*/dist" \
-  --exclude "apps/*/tsconfig.tsbuildinfo" \
-  --exclude "packages/*/tsconfig.tsbuildinfo" \
-  ../task-runner/ r10:task-runner/ && \
-  ssh r10 "cd task-runner && npm install && npm run build && npm run lint && npm run format:check && npm run imports:check && node --test --test-reporter=dot \"test/**/*.test.mjs\" && npm run test:web"'
-```
-
-On other hosts, use the normal local commands above.
 
 ## Changelog
 

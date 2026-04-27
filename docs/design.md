@@ -705,17 +705,18 @@ npm run format:check
 npm run imports:fix
 npm run imports:check
 npm run check:knip
+npm run test:all:local
 npm test
 npm run check
 ```
 
-The root `check` pipeline is:
+The root `test` and `check` pipelines sync the worktree to `r10` and run:
 
 1. `npm run build`
 2. `npm run lint`
 3. `npm run format:check`
 4. `npm run imports:check`
-5. `npm run test:node`
+5. `node --test --test-reporter=dot "test/**/*.test.mjs"`
 6. `npm run test:web`
 
 `npm run lint` runs Biome linting only, with warnings treated as
@@ -723,5 +724,6 @@ failures, and `npm run lint:fix` applies Biome lint autofixes. `npm run
 format` writes Biome formatting, `npm run format:check` verifies
 formatting without writing, `npm run imports:fix` applies Biome import
 organization, and `npm run imports:check` verifies import organization
-without writing. `npm run check:knip` runs the unused-file/export/
-dependency baseline separately from the standard `check` pipeline.
+without writing. `npm run test:all:local` runs Node and web tests locally.
+`npm run check:knip` runs the unused-file/export/dependency baseline
+separately from the standard `check` pipeline.

@@ -526,6 +526,7 @@ npm run imports:fix
 npm run imports:check
 npm run test:node
 npm run test:web
+npm run test:all:local
 npm run check:knip
 npm run check
 ```
@@ -535,9 +536,11 @@ and `npm run lint:fix` applies Biome lint autofixes. `npm run format`
 writes Biome formatting, `npm run format:check` checks formatting
 without writing, `npm run imports:fix` applies Biome import
 organization, and `npm run imports:check` verifies import organization
-without writing. `npm run check:knip` runs the unused-file/export/
-dependency baseline. `npm run check` keeps the standard build, lint,
-format-check, import-check, and test pipeline.
+without writing. `npm run test:all:local` runs the Node and web tests
+locally. `npm run check:knip` runs the unused-file/export/dependency
+baseline. `npm test` and `npm run check` sync the worktree to `r10` and
+run the standard build, lint, format-check, import-check, and test
+pipeline there.
 
 Primary entry points:
 
