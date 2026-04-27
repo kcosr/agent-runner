@@ -134,6 +134,7 @@ export function RunCard({
   const agentFilterActive = structuredFilters.agent === run.agentName;
   const backendFilterActive = structuredFilters.backend === run.backend;
   const groupFilterActive = structuredFilters.runGroupId === run.runGroupId;
+  const runIdLabel = run.runGroupId === run.runId ? run.runId : `${run.runGroupId}/${run.runId}`;
   const notePending = actionPending === "note";
   const pinPending = actionPending === "pin";
   const cardClassName = ["card", selected ? "selected" : null].filter(Boolean).join(" ");
@@ -390,9 +391,7 @@ export function RunCard({
       >
         <div className="card-header-block">
           <div className="card-row card-row--header">
-            <span className="run-id">
-              {run.runGroupId}/{run.runId}
-            </span>
+            <span className="run-id">{runIdLabel}</span>
             <span
               aria-label={`Filter by run group ${run.runGroupId}`}
               className="card-group-filter"

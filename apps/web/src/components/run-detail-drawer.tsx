@@ -36,7 +36,11 @@ import {
 import type { RunAuditState } from "../lib/run-audit.js";
 import { getRunPrimaryAction } from "../lib/run-primary-action.js";
 import type { RunTimelineState } from "../lib/run-timeline.js";
-import { type DrawerDetailSection, useDashboardPreferences } from "../lib/settings.js";
+import {
+  type DrawerDetailSection,
+  toggleDashboardStructuredFilter,
+  useDashboardPreferences,
+} from "../lib/settings.js";
 import { isEditableEventTarget } from "../lib/shortcuts.js";
 import { useDrawerResize } from "../lib/use-drawer-resize.js";
 import { useHorizontalWheelGuard } from "../lib/use-horizontal-wheel-guard.js";
@@ -563,6 +567,7 @@ export function RunDetailDrawer({
   const runtimeVarNewIdRef = useRef(0);
   const backendSessionId = run.backendSessionId;
   const groupPending = actionPending === "set-group";
+  const runIdLabel = run.runGroupId === run.runId ? run.runId : `${run.runGroupId}/${run.runId}`;
   const isPassiveRun = run.backend === "passive";
   const canEditBackendSession = isPassiveRun;
   const canEditRunGroup = run.status !== "running";
@@ -857,6 +862,16 @@ export function RunDetailDrawer({
     } catch (error) {
       setRunGroupDraftError(error instanceof Error ? error.message : "Run group update failed.");
     }
+  }
+
+  function toggleRunGroupFilter() {
+    updatePreferences((current) => ({
+      structuredFilters: toggleDashboardStructuredFilter(
+        current.structuredFilters,
+        "runGroupId",
+        run.runGroupId,
+      ),
+    }));
   }
 
   function startRuntimeVarsEdit() {
@@ -1459,9 +1474,7 @@ export function RunDetailDrawer({
         <DrawerResizeHandle label="Resize detail drawer" resize={resize} />
         <header className="drawer-head">
           <div className="drawer-title">
-            <span className="run-id-large">
-              {run.runGroupId}/{run.runId}
-            </span>
+            <span className="run-id-large">{runIdLabel}</span>
             <StatusBadge status={run.effectiveStatus} />
           </div>
           <div className="drawer-actions">
@@ -1846,9 +1859,15 @@ export function RunDetailDrawer({
                 </div>
               ) : (
                 <>
-                  <span className="meta-value meta-value--truncate mono" title={run.runGroupId}>
+                  <button
+                    aria-label={`Filter by run group ${run.runGroupId}`}
+                    className="meta-value meta-value--button meta-value--truncate mono"
+                    onClick={toggleRunGroupFilter}
+                    title={`Filter by run group ${run.runGroupId}`}
+                    type="button"
+                  >
                     {run.runGroupId}
-                  </span>
+                  </button>
                   <div className="meta-actions">
                     <button
                       aria-label="Copy run group id"

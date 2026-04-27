@@ -4010,7 +4010,21 @@ describe("web app", () => {
             name: "Outside run",
           }),
         ],
-        details: {},
+        details: {
+          "run-root": makeDetail({
+            runId: "run-root",
+            runGroupId: "run-root",
+            assignment: { name: "Group root", sourcePath: "/tmp/group-root-assignment.md" },
+            name: "Group root",
+          }),
+          "run-child": makeDetail({
+            runId: "run-child",
+            parentRunId: "run-root",
+            runGroupId: "run-root",
+            assignment: { name: "Group child", sourcePath: "/tmp/group-child-assignment.md" },
+            name: "Group child",
+          }),
+        },
       },
       {
         handleRequest: (url) => {
@@ -4027,6 +4041,9 @@ describe("web app", () => {
 
     const rootCard = await findRunCard("Group root");
     const childCard = await findRunCard("Group child");
+    expect(within(rootCard).getByText("run-root")).toBeInTheDocument();
+    expect(within(rootCard).queryByText("run-root/run-root")).not.toBeInTheDocument();
+    expect(within(childCard).getByText("run-root/run-child")).toBeInTheDocument();
     expect(within(rootCard).getByLabelText("Filter by run group run-root")).toBeInTheDocument();
     expect(within(childCard).getByLabelText("Filter by run group run-root")).toBeInTheDocument();
     expect(
@@ -4066,6 +4083,71 @@ describe("web app", () => {
 
     await waitFor(() => {
       expect(screen.queryByRole("button", { name: /Outside run/i })).not.toBeInTheDocument();
+    });
+  });
+
+  it("filters by run group from the detail sidebar group id", async () => {
+    const groupRuns = [
+      makeRun({
+        runId: "run-root",
+        runGroupId: "run-root",
+        assignmentName: "Group root",
+        name: "Group root",
+      }),
+      makeRun({
+        runId: "run-child",
+        parentRunId: "run-root",
+        runGroupId: "run-root",
+        assignmentName: "Group child",
+        name: "Group child",
+      }),
+    ];
+    const fetchMock = installFetchMock({
+      runs: [
+        ...groupRuns,
+        makeRun({
+          runId: "run-outside",
+          assignmentName: "Outside run",
+          name: "Outside run",
+        }),
+      ],
+      details: {
+        "run-root": makeDetail({
+          runId: "run-root",
+          runGroupId: "run-root",
+          assignment: { name: "Group root", sourcePath: "/tmp/group-root-assignment.md" },
+          name: "Group root",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Group root"));
+
+    const drawer = await screen.findByLabelText("Run detail");
+    expect(within(drawer).getAllByText("run-root").length).toBeGreaterThan(0);
+    expect(within(drawer).queryByText("run-root/run-root")).not.toBeInTheDocument();
+
+    await user.click(within(drawer).getByRole("button", { name: "Filter by run group run-root" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/runs?includeArchived=true&runGroupId=run-root",
+        expect.objectContaining({
+          headers: { accept: "application/json" },
+        }),
+      ),
+    );
+    expect(await findRunCard("Group root")).toBeInTheDocument();
+    expect(await findRunCard("Group child")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Outside run/i })).not.toBeInTheDocument();
+
+    const stored = window.localStorage.getItem("task-runner:web:dashboard-preferences");
+    expect(stored ? JSON.parse(stored) : null).toMatchObject({
+      structuredFilters: {
+        runGroupId: "run-root",
+      },
     });
   });
 

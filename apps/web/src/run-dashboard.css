@@ -1156,6 +1156,26 @@ pre {
   font-size: 11.5px;
   color: var(--muted-foreground);
 }
+
+.meta-value--button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.meta-value--button:hover {
+  color: var(--foreground);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.app[data-focus-indicators="on"] .meta-value--button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
 .meta-row .copy {
   display: inline-flex;
   width: 20px;
