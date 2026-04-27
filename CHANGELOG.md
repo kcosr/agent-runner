@@ -10,6 +10,7 @@
   `{{assignment_path}}` template variable. Assignment-backed runs still
   write `assignment-seed.md` as an internal workspace audit snapshot; use
   `scripts/migrate-manifests-v14.mjs` before resuming schema v13 runs.
+  ([#109](https://github.com/kcosr/task-runner/pull/109))
 - Manifest schema version is now `13`. Runs now freeze selected
   per-backend argv extras in `manifest.resolvedBackendArgs` and
   `manifest.resetSeed.resolvedBackendArgs`; use
