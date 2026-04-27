@@ -253,9 +253,10 @@
 
 ### Changed
 
-- `npm test` and `npm run check` now use the `r10` remote test gate when
-  running on host `srv`, with Node tests using the dot reporter. Other
-  hosts use the local concurrent Node/web test runner.
+- `npm test` and `npm run check` now use a remote test gate when
+  `TASK_RUNNER_TEST_REMOTE_HOST` is set, with Node tests using the dot
+  reporter. Without that env var, they use the local concurrent Node/web
+  test runner.
 - Daemon summary/detail projection refreshes now skip task-state filesystem
   locks by default to avoid stale-lock stalls; set
   `TASK_RUNNER_DAEMON_FILESYSTEM_LOCKS=true` to preserve locked daemon

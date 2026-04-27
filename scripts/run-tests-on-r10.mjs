@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { hostname } from "node:os";
 
-const remoteHost = "r10";
-const remoteDir = "task-runner";
+const remoteHost = process.env.TASK_RUNNER_TEST_REMOTE_HOST?.trim() ?? "";
+const remoteDir = process.env.TASK_RUNNER_TEST_REMOTE_DIR?.trim() || "task-runner";
 const remoteTarget = `${remoteHost}:${remoteDir}/`;
 const localTestScript = "scripts/run-tests-concurrently.mjs";
 
@@ -56,7 +55,7 @@ function run(command, args) {
   });
 }
 
-if (hostname() !== "srv") {
+if (!remoteHost) {
   const exitCode = await run(process.execPath, [localTestScript]);
   process.exit(exitCode);
 }

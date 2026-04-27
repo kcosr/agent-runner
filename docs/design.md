@@ -725,7 +725,8 @@ format` writes Biome formatting, `npm run format:check` verifies
 formatting without writing, `npm run imports:fix` applies Biome import
 organization, and `npm run imports:check` verifies import organization
 without writing. `npm run test:all:local` runs Node and web tests locally.
-On host `srv`, the root test gate syncs the worktree to `r10` and uses
-the dot reporter for Node tests; other hosts run tests locally.
+When `TASK_RUNNER_TEST_REMOTE_HOST` is set, the root test gate syncs the
+worktree to that remote host and uses the dot reporter for Node tests;
+otherwise tests run locally.
 `npm run check:knip` runs the unused-file/export/dependency baseline
 separately from the standard `check` pipeline.
