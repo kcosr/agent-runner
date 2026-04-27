@@ -568,6 +568,7 @@ export function RunDetailDrawer({
   const backendSessionId = run.backendSessionId;
   const groupPending = actionPending === "set-group";
   const runIdLabel = run.runGroupId === run.runId ? run.runId : `${run.runGroupId}/${run.runId}`;
+  const groupFilterActive = preferences.structuredFilters.runGroupId === run.runGroupId;
   const isPassiveRun = run.backend === "passive";
   const canEditBackendSession = isPassiveRun;
   const canEditRunGroup = run.status !== "running";
@@ -1861,7 +1862,9 @@ export function RunDetailDrawer({
                 <>
                   <button
                     aria-label={`Filter by run group ${run.runGroupId}`}
+                    aria-pressed={groupFilterActive}
                     className="meta-value meta-value--button meta-value--truncate mono"
+                    data-active-filter={groupFilterActive ? "true" : undefined}
                     onClick={toggleRunGroupFilter}
                     title={`Filter by run group ${run.runGroupId}`}
                     type="button"

@@ -4129,7 +4129,12 @@ describe("web app", () => {
     expect(within(drawer).getAllByText("run-root").length).toBeGreaterThan(0);
     expect(within(drawer).queryByText("run-root/run-root")).not.toBeInTheDocument();
 
-    await user.click(within(drawer).getByRole("button", { name: "Filter by run group run-root" }));
+    const groupFilterButton = within(drawer).getByRole("button", {
+      name: "Filter by run group run-root",
+    });
+    expect(groupFilterButton).toHaveAttribute("aria-pressed", "false");
+
+    await user.click(groupFilterButton);
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
@@ -4142,11 +4147,35 @@ describe("web app", () => {
     expect(await findRunCard("Group root")).toBeInTheDocument();
     expect(await findRunCard("Group child")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Outside run/i })).not.toBeInTheDocument();
+    expect(
+      within(drawer).getByRole("button", { name: "Filter by run group run-root" }),
+    ).toHaveAttribute("aria-pressed", "true");
 
     const stored = window.localStorage.getItem("task-runner:web:dashboard-preferences");
     expect(stored ? JSON.parse(stored) : null).toMatchObject({
       structuredFilters: {
         runGroupId: "run-root",
+      },
+    });
+
+    await user.click(within(drawer).getByRole("button", { name: "Filter by run group run-root" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/runs?includeArchived=true",
+        expect.objectContaining({
+          headers: { accept: "application/json" },
+        }),
+      ),
+    );
+    expect(await findRunCard("Outside run")).toBeInTheDocument();
+    expect(
+      within(drawer).getByRole("button", { name: "Filter by run group run-root" }),
+    ).toHaveAttribute("aria-pressed", "false");
+    const storedAfterToggle = window.localStorage.getItem("task-runner:web:dashboard-preferences");
+    expect(storedAfterToggle ? JSON.parse(storedAfterToggle) : null).toMatchObject({
+      structuredFilters: {
+        runGroupId: null,
       },
     });
   });
