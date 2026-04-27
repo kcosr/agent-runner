@@ -256,11 +256,12 @@
 - `npm test` and `npm run check` now use a remote test gate when
   `TASK_RUNNER_TEST_REMOTE_HOST` is set, with Node tests using the dot
   reporter. Without that env var, they use the local concurrent Node/web
-  test runner.
+  test runner. ([#112](https://github.com/kcosr/task-runner/pull/112))
 - Daemon summary/detail projection refreshes now skip task-state filesystem
   locks by default to avoid stale-lock stalls; set
   `TASK_RUNNER_DAEMON_FILESYSTEM_LOCKS=true` to preserve locked daemon
   projection reads when mixing daemon mode with standalone writers.
+  ([#112](https://github.com/kcosr/task-runner/pull/112))
 - Dependencies now accept explicit typed refs: `run add-dep --run
   <run-id>` for one upstream run or `run add-dep --group <group-id>` for
   all non-archived members of a group. Remove commands use the same
@@ -327,7 +328,9 @@
 
 - Test runtime isolation now preserves `TASK_RUNNER_DEBUG_PERF` and
   `TASK_RUNNER_DEBUG_PERF_INTERVAL_MS`, so perf diagnostics appear during
-  `npm run check` when enabled by the caller.
+  `npm run check` when enabled by the caller. Tests also clear
+  `TASK_RUNNER_RUN_GROUP_ID` so caller defaults do not leak into test
+  runs. ([#112](https://github.com/kcosr/task-runner/pull/112))
 - Dashboard Resume and run-note dialogs, plus the mobile Filters panel,
   now use native modal dialog behavior so Escape/back dismissal, focus
   trapping, and fullscreen drawer stacking behave consistently.

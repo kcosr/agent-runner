@@ -538,8 +538,8 @@ without writing, `npm run imports:fix` applies Biome import
 organization, and `npm run imports:check` verifies import organization
 without writing. `npm run test:all:local` runs the Node and web tests
 locally. `npm run check:knip` runs the unused-file/export/dependency
-baseline. `npm test` and `npm run check` run the standard build, lint,
-format-check, import-check, and test pipeline. Set
+baseline. `npm test` runs build plus tests, and `npm run check` runs
+build, lint, format-check, import-check, and tests. Set
 `TASK_RUNNER_TEST_REMOTE_HOST` to sync the worktree and run the test gate
 on a remote host; otherwise tests run locally.
 
