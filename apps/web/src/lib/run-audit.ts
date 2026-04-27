@@ -46,9 +46,11 @@ export function applyAuditEnvelope(
 
 export function useRunAuditState({
   config,
+  enabled,
   runId,
 }: {
   config: AppRuntimeConfig;
+  enabled: boolean;
   runId?: string;
 }): RunAuditState {
   const api = useMemo(() => createApiClient(config), [config]);
@@ -83,6 +85,8 @@ export function useRunAuditState({
       staleRef.current = false;
       bootstrappedRef.current = false;
       bufferRef.current = [];
+      reloadCountRef.current = 0;
+      previousRunIdRef.current = undefined;
       setState({ history: null, isLoading: false, stale: false });
       reloadRef.current = () => {};
       return;
@@ -162,11 +166,6 @@ export function useRunAuditState({
       }
     };
 
-    reloadRef.current = () => {
-      reloadCountRef.current = 0;
-      void loadHistory();
-    };
-
     const sameRunId = previousRunIdRef.current === runId;
     previousRunIdRef.current = runId;
     if (!sameRunId) {
@@ -175,9 +174,33 @@ export function useRunAuditState({
       bootstrappedRef.current = false;
       bufferRef.current = [];
       reloadCountRef.current = 0;
-      setState({ history: null, isLoading: true, stale: false });
-    } else {
-      setState((current) => ({ ...current, isLoading: true, error: undefined }));
+      setState({ history: null, isLoading: enabled, stale: false });
+    }
+
+    if (!enabled) {
+      reloadRef.current = () => {};
+      setState((current) => ({ ...current, isLoading: false }));
+      return () => {
+        disposed = true;
+        loadAbortControllerRef.current?.abort();
+        loadAbortControllerRef.current = null;
+      };
+    }
+
+    const shouldLoadHistory =
+      !bootstrappedRef.current || staleRef.current || historyRef.current === null;
+
+    reloadRef.current = () => {
+      reloadCountRef.current = 0;
+      void loadHistory();
+    };
+
+    if (sameRunId) {
+      setState((current) => ({
+        ...current,
+        error: shouldLoadHistory ? undefined : current.error,
+        isLoading: shouldLoadHistory,
+      }));
     }
 
     const unsubscribe = subscribeToRunAuditEvents(config, runId, {
@@ -225,7 +248,9 @@ export function useRunAuditState({
       },
     });
 
-    void loadHistory();
+    if (shouldLoadHistory) {
+      void loadHistory();
+    }
 
     return () => {
       disposed = true;
@@ -233,7 +258,7 @@ export function useRunAuditState({
       loadAbortControllerRef.current = null;
       unsubscribe();
     };
-  }, [api, config, runId]);
+  }, [api, config, enabled, runId]);
 
   return {
     ...state,
