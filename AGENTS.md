@@ -52,7 +52,7 @@ Repeated checks remain legitimate when:
 - Run `npm run imports:fix` to apply Biome import organization.
 - Run `npm run imports:check` to verify Biome import organization without writing.
 - Run `npm run check:knip` when dependency, export, or entry-point metadata changes.
-- Run `npm run check` to sync to `r10` and run the standard verification pipeline (`build`, `lint`, `format:check`, `imports:check`, `test`).
+- Run `npm run check` to run the standard verification pipeline (`build`, `lint`, `format:check`, `imports:check`, `test`). On host `srv`, the test gate automatically syncs to `r10`; other hosts run tests locally.
 - Do not commit `dist/`; build artifacts are generated locally and during packaging.
 - If you cannot run the relevant checks, call that out explicitly.
 

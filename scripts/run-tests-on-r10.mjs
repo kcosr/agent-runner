@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
+import { hostname } from "node:os";
 
 const remoteHost = "r10";
 const remoteDir = "task-runner";
 const remoteTarget = `${remoteHost}:${remoteDir}/`;
+const localTestScript = "scripts/run-tests-concurrently.mjs";
 
 const rsyncArgs = [
   "-a",
@@ -52,6 +54,11 @@ function run(command, args) {
       resolve(code ?? 1);
     });
   });
+}
+
+if (hostname() !== "srv") {
+  const exitCode = await run(process.execPath, [localTestScript]);
+  process.exit(exitCode);
 }
 
 let exitCode = await run("rsync", rsyncArgs);

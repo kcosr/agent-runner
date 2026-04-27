@@ -253,10 +253,9 @@
 
 ### Changed
 
-- `npm test` and `npm run check` now sync the worktree to `r10` and run
-  the full build/static/test gate there, with Node tests using the dot
-  reporter. Use `npm run test:all:local` for the previous local
-  concurrent Node/web test runner.
+- `npm test` and `npm run check` now use the `r10` remote test gate when
+  running on host `srv`, with Node tests using the dot reporter. Other
+  hosts use the local concurrent Node/web test runner.
 - Daemon summary/detail projection refreshes now skip task-state filesystem
   locks by default to avoid stale-lock stalls; set
   `TASK_RUNNER_DAEMON_FILESYSTEM_LOCKS=true` to preserve locked daemon

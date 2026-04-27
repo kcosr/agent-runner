@@ -710,7 +710,7 @@ npm test
 npm run check
 ```
 
-The root `test` and `check` pipelines sync the worktree to `r10` and run:
+The root `test` and `check` pipelines run:
 
 1. `npm run build`
 2. `npm run lint`
@@ -725,5 +725,7 @@ format` writes Biome formatting, `npm run format:check` verifies
 formatting without writing, `npm run imports:fix` applies Biome import
 organization, and `npm run imports:check` verifies import organization
 without writing. `npm run test:all:local` runs Node and web tests locally.
+On host `srv`, the root test gate syncs the worktree to `r10` and uses
+the dot reporter for Node tests; other hosts run tests locally.
 `npm run check:knip` runs the unused-file/export/dependency baseline
 separately from the standard `check` pipeline.
