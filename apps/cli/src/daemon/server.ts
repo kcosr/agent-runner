@@ -79,6 +79,7 @@ import {
 } from "@task-runner/core/core/run/dependencies.js";
 import {
   type ListedRunManifest,
+  ResumeError,
   type RunManifest,
   RunNotFoundError,
   findRunManifestsById,
@@ -628,7 +629,7 @@ export async function serveDaemon(
       });
       return summary;
     } catch (err) {
-      if (err instanceof RunNotFoundError) {
+      if (err instanceof RunNotFoundError || err instanceof ResumeError) {
         finish({ found: false });
         return null;
       }
@@ -652,7 +653,7 @@ export async function serveDaemon(
       });
       return detail;
     } catch (err) {
-      if (err instanceof RunNotFoundError) {
+      if (err instanceof RunNotFoundError || err instanceof ResumeError) {
         finish({ found: false });
         return null;
       }

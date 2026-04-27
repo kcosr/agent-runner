@@ -1,6 +1,14 @@
 #!/usr/bin/env node
 
-import { mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
@@ -117,6 +125,11 @@ function migrateManifest(manifest) {
       `unsupported schemaVersion ${manifest.schemaVersion}; migrate to schemaVersion 13 first`,
     );
   }
+  if (manifest.status === "running") {
+    throw new Error(
+      "schemaVersion 13 manifest is running; stop the run before migrating this workspace",
+    );
+  }
   if (manifest.assignment !== null) {
     if (!manifest.assignment || typeof manifest.assignment !== "object") {
       throw new Error("schemaVersion 13 manifest assignment must be an object or null");
@@ -151,7 +164,8 @@ function listRunDirs(root, repo) {
   try {
     return readdirSync(repoDir, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
-      .map((entry) => join(repoDir, entry.name));
+      .map((entry) => join(repoDir, entry.name))
+      .filter((runDir) => existsSync(join(runDir, "run.json")));
   } catch {
     return [];
   }

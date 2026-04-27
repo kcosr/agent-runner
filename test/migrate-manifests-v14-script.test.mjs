@@ -296,6 +296,39 @@ test("migrate-manifests-v14 reports canonical v14 manifests as OK", () => {
   assert.match(stdout, /OK\s+runs\/demo\/run-v14\/run\.json: already canonical schemaVersion 14/);
 });
 
+test("migrate-manifests-v14 skips run directories without manifests", () => {
+  const root = tempDir();
+  writeManifest(root, "demo", "run-v13", assignmentBackedManifest());
+  mkdirSync(join(root, "runs", "demo", "missing-manifest"), { recursive: true });
+
+  const stdout = execFileSync("node", [SCRIPT_PATH, "--root", root, "--write"], {
+    encoding: "utf8",
+  });
+
+  assert.match(stdout, /WRITE\s+runs\/demo\/run-v13\/run\.json: promoted to schemaVersion 14/);
+  assert.doesNotMatch(stdout, /missing-manifest/);
+});
+
+test("migrate-manifests-v14 rejects running v13 manifests without writing", () => {
+  const root = tempDir();
+  const manifestPath = writeManifest(root, "demo", "run-running", {
+    ...assignmentBackedManifest("run-running"),
+    status: "running",
+  });
+
+  const result = spawnSync("node", [SCRIPT_PATH, "--root", root, "--write"], {
+    encoding: "utf8",
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /ERROR\s+runs\/demo\/run-running\/run\.json:/);
+  assert.match(result.stdout, /schemaVersion 13 manifest is running/);
+  const manifest = readJson(manifestPath);
+  assert.equal(manifest.schemaVersion, 13);
+  assert.equal(manifest.status, "running");
+  assert.equal("assignmentPath" in manifest, true);
+});
+
 test("migrate-manifests-v14 rejects v14 manifests carrying legacy path fields", () => {
   const root = tempDir();
   const stale = assignmentBackedManifest("run-v14-stale");

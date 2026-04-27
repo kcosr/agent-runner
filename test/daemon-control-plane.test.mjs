@@ -22,6 +22,7 @@ import { serveDaemon } from "../apps/cli/dist/daemon/server.js";
 import { streamEvents } from "../apps/cli/dist/daemon/sse.js";
 import { getRun as getRunDetail } from "../packages/core/dist/app/service.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
+import { ResumeError } from "../packages/core/dist/core/run/manifest.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import { withTaskStateLock } from "../packages/core/dist/core/run/workspace-state.js";
 import { sharedRuntimeEnv, withEnv } from "./helpers/runtime-paths.mjs";
@@ -3823,6 +3824,50 @@ test("daemon note and pin mutations publish summary and detail updates", async (
       await server.close();
     }
   });
+});
+
+test("daemon mutation publishing suppresses stale-schema projection failures", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  const projectionError = new ResumeError(
+    "manifest at /tmp/stale/run.json has schemaVersion 13; this version of task-runner requires schemaVersion 14",
+  );
+
+  const server = await serveDaemon(listenUrl, {
+    updateRunNote(target, input) {
+      return {
+        runId: target,
+        note: input.note,
+        changed: true,
+      };
+    },
+    getRunSummary() {
+      throw projectionError;
+    },
+    getRun() {
+      throw projectionError;
+    },
+  });
+  try {
+    const noted = await httpJson(httpBaseUrl, "/api/runs/stale-run/note", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ note: "survives projection miss" }),
+    });
+
+    assert.equal(noted.status, 200);
+    assert.deepEqual(noted.body.result, {
+      runId: "stale-run",
+      note: "survives projection miss",
+      changed: true,
+    });
+
+    const daemon = await httpJson(httpBaseUrl, "/api/daemon");
+    assert.equal(daemon.status, 200);
+  } finally {
+    await server.close();
+  }
 });
 
 test("daemon websocket validates events.subscribe channel and runId rules", async () => {
