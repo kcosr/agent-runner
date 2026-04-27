@@ -1190,7 +1190,7 @@ function resolveRunListFilter(parsed: ParsedArgs): RunListFilter {
 async function startOrResumeDaemonRun(
   client: DaemonClient,
   parsed: ParsedArgs,
-  overrides: RunCommandOverrides = resolvedDaemonOverrides(parsed),
+  overrides: RunCommandOverrides,
 ): Promise<{ runId: string }> {
   return parsed.resumeRun
     ? await client.call<{ runId: string }>("runs.resume", {

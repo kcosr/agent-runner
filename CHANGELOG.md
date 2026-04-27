@@ -329,6 +329,10 @@
 
 ### Fixed
 
+- Daemon-connected fresh `init --message-file` and fresh
+  `run --message-file` now forward the file contents in
+  `overrides.message` instead of snapshotting overrides before the
+  client reads the file.
 - Test runtime isolation now preserves `TASK_RUNNER_DEBUG_PERF` and
   `TASK_RUNNER_DEBUG_PERF_INTERVAL_MS`, so perf diagnostics appear during
   `npm run check` when enabled by the caller. Tests also clear

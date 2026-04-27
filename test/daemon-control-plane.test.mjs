@@ -6137,6 +6137,75 @@ test("daemon-target CLI forwards init --message-file content as the daemon messa
   }
 });
 
+test("daemon-target CLI forwards positional init message as the daemon message override", async () => {
+  const dir = tempDir();
+  const message = "inline daemon message";
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const wsServer = new WebSocketServer({ host: "127.0.0.1", port });
+  const requests = [];
+  if (wsServer.address() === null) {
+    await new Promise((resolve) => wsServer.once("listening", resolve));
+  }
+
+  wsServer.on("connection", (ws) => {
+    ws.on("message", (payload) => {
+      const request = JSON.parse(payload.toString());
+      requests.push(request);
+      if (request.method === "runs.init") {
+        ws.send(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: request.id,
+            result: {
+              run: {
+                runId: "init-run",
+              },
+            },
+          }),
+        );
+        return;
+      }
+      ws.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: request.id,
+          error: {
+            code: -32004,
+            message: `unexpected method ${request.method}`,
+          },
+        }),
+      );
+    });
+  });
+
+  try {
+    const result = await runCliAsync(
+      [
+        "init",
+        "--connect",
+        listenUrl,
+        "--agent",
+        "daemon-agent",
+        "--output-format",
+        "json",
+        message,
+      ],
+      { cwd: dir },
+    );
+    assert.equal(result.code, 0);
+    assert.equal(result.stderr, "");
+    assert.equal(requests[0].method, "runs.init");
+    assert.equal(requests[0].params.overrides.message, message);
+  } finally {
+    for (const client of wsServer.clients) {
+      client.terminate();
+    }
+    await new Promise((resolve) => wsServer.close(() => resolve()));
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("daemon-target CLI forwards fresh run --message-file content as the daemon message override", async () => {
   const dir = tempDir();
   const message = "daemon start message\nwith exact spacing";
