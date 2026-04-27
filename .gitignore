@@ -9,6 +9,7 @@ dist/
 build/
 coverage/
 .nyc_output/
+.build-service/
 *.tsbuildinfo
 
 # Environment
