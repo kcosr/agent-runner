@@ -264,6 +264,7 @@ export const runDetailSchema: z.ZodType<RunDetail> = z.object({
       name: z.string(),
       sourcePath: z.string(),
     })
+    .strict()
     .nullable(),
   backend: z.string(),
   model: z.string().nullable(),

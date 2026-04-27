@@ -985,6 +985,8 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
       const detail = await httpJson(httpBaseUrl, `/api/runs/${init.runId}`);
       assert.equal(detail.status, 200);
       assert.equal(detail.body.run.assignment.name, "daemon-work");
+      assert.equal("assignmentPath" in detail.body.run, false);
+      assert.equal("workspacePath" in detail.body.run.assignment, false);
       assert.equal(detail.body.run.name, null);
       assert.equal(detail.body.run.status, "initialized");
       assert.equal(detail.body.run.effectiveStatus, "initialized");

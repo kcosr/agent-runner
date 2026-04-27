@@ -688,6 +688,29 @@ test("schemaVersion mismatch: resume rejects a v12 manifest with the v14 migrati
   });
 });
 
+test("schemaVersion mismatch: resume rejects a v13 manifest with the direct v14 migration hint", async () => {
+  const dir = tempDir();
+  const workspaceDir = join(dir, "runs", "unknown", "stale13");
+  mkdirSync(workspaceDir, { recursive: true });
+  writeFileSync(
+    join(workspaceDir, "run.json"),
+    `${JSON.stringify({ schemaVersion: 13, runId: "stale13", workspaceDir }, null, 2)}\n`,
+  );
+
+  await withSharedRuntimeEnv(dir, async () => {
+    assert.throws(
+      () => resolveResumeTarget("stale13", dir),
+      (err) => {
+        assert.match(err.message, /schemaVersion 13/);
+        assert.match(err.message, /requires schemaVersion 14/);
+        assert.match(err.message, /scripts\/migrate-manifests-v14\.mjs/);
+        assert.doesNotMatch(err.message, /migrations in order/);
+        return true;
+      },
+    );
+  });
+});
+
 test("resume manifest: model + timeoutSec preserved across an init-run cycle", async () => {
   const dir = tempDir();
   writeAgent(dir, "canonical-claude", CLAUDE_AGENT);

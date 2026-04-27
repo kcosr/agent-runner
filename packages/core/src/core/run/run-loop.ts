@@ -1869,14 +1869,18 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     rmSync(`${workspaceDir}/attachments`, { recursive: true, force: true });
   }
 
-  if (loadedAssignment?.sourcePath) {
-    copyFileSync(loadedAssignment.sourcePath, assignmentSeedPath);
+  if ((resume === undefined || isReinitialize) && loadedAssignment?.sourcePath) {
+    if (loadedAssignment.sourcePath !== assignmentSeedPath) {
+      copyFileSync(loadedAssignment.sourcePath, assignmentSeedPath);
+    }
   } else if (isReinitialize) {
     rmSync(assignmentSeedPath, { force: true });
   }
 
   if ((resume === undefined || isReinitialize) && loaded.sourcePath) {
-    copyFileSync(loaded.sourcePath, workspaceAgentPath(workspaceDir));
+    if (loaded.sourcePath !== workspaceAgentPath(workspaceDir)) {
+      copyFileSync(loaded.sourcePath, workspaceAgentPath(workspaceDir));
+    }
   } else if (isReinitialize) {
     rmSync(workspaceAgentPath(workspaceDir), { force: true });
   }

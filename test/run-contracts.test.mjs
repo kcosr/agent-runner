@@ -256,6 +256,8 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
     },
   });
   assert.equal("canMutateTasks" in detail.capabilities, false);
+  assert.equal("assignmentPath" in detail, false);
+  assert.equal("workspacePath" in detail.assignment, false);
   assert.deepEqual(detail, {
     runId: "run123",
     parentRunId: null,

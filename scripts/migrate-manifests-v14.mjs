@@ -22,6 +22,12 @@ function parseArgs(argv) {
   const repos = [];
   const files = [];
 
+  function readRequiredValue(index, flag, description) {
+    const value = argv[index + 1];
+    if (!value || value.startsWith("--")) throw new Error(`${flag} requires ${description}`);
+    return value;
+  }
+
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--write") {
@@ -29,22 +35,19 @@ function parseArgs(argv) {
       continue;
     }
     if (arg === "--root") {
-      const value = argv[index + 1];
-      if (!value) throw new Error("--root requires a path");
+      const value = readRequiredValue(index, "--root", "a path");
       root = resolve(value);
       index += 1;
       continue;
     }
     if (arg === "--repo") {
-      const value = argv[index + 1];
-      if (!value) throw new Error("--repo requires a bucket name");
+      const value = readRequiredValue(index, "--repo", "a bucket name");
       repos.push(value);
       index += 1;
       continue;
     }
     if (arg === "--file") {
-      const value = argv[index + 1];
-      if (!value) throw new Error("--file requires a path");
+      const value = readRequiredValue(index, "--file", "a path");
       files.push(resolve(value));
       index += 1;
       continue;
@@ -138,8 +141,8 @@ function listRepoBuckets(root, repoFilters) {
     return readdirSync(runsRoot, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name);
-  } catch {
-    return [];
+  } catch (err) {
+    throw new Error(`runs root ${runsRoot} does not exist or cannot be read: ${err.message}`);
   }
 }
 

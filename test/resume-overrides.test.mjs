@@ -120,6 +120,24 @@ test("resolveResumeTarget rejects a v14 manifest carrying legacy assignmentPath"
   );
 });
 
+test("resolveResumeTarget rejects a v14 manifest missing assignment", () => {
+  const dir = tempDir();
+  const { assignment: _assignment, ...manifest } = baseManifest(
+    "corrupt-missing-assignment",
+    join(dir, "runs", "unknown", "corrupt-missing-assignment"),
+  );
+  writeManifest(dir, "unknown", "corrupt-missing-assignment", manifest);
+
+  assert.throws(
+    () => withStateRoot(dir, () => resolveResumeTarget("corrupt-missing-assignment", dir)),
+    (err) => {
+      assert.ok(err instanceof ResumeError);
+      assert.match(err.message, /does not look like a task-runner run\.json/);
+      return true;
+    },
+  );
+});
+
 test("resolveResumeTarget rejects a manifest with runtimeVars: null", () => {
   const dir = tempDir();
   const manifest = baseManifest("corrupt3", join(dir, "runs", "unknown", "corrupt3"));

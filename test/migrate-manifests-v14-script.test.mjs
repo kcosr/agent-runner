@@ -31,9 +31,6 @@ function writeManifest(root, repo, runId, manifest) {
     repo,
     workspaceDir: dir,
   };
-  if (manifest.schemaVersion !== 14) {
-    next.assignmentPath = join(dir, "assignment-seed.md");
-  }
   writeJson(manifestPath, next);
   return manifestPath;
 }
@@ -227,6 +224,7 @@ test("migrate-manifests-v14 writes assignment-backed v13 manifests", () => {
 test("migrate-manifests-v14 preserves assignment null", () => {
   const root = tempDir();
   const manifestPath = writeManifest(root, "demo", "run-v13", baseV13Manifest());
+  const before = readJson(manifestPath);
 
   execFileSync("node", [SCRIPT_PATH, "--root", root, "--write"], { encoding: "utf8" });
 
@@ -234,6 +232,13 @@ test("migrate-manifests-v14 preserves assignment null", () => {
   assert.equal(manifest.schemaVersion, 14);
   assert.equal("assignmentPath" in manifest, false);
   assert.equal(manifest.assignment, null);
+  assert.deepEqual(manifest.schedule, before.schedule);
+  assert.deepEqual(manifest.resetSeed, before.resetSeed);
+  assert.deepEqual(manifest.attachments, before.attachments);
+  assert.deepEqual(manifest.sessions, before.sessions);
+  assert.deepEqual(manifest.attemptRecords, before.attemptRecords);
+  assert.deepEqual(manifest.runtimeVars, before.runtimeVars);
+  assert.deepEqual(manifest.finalTasks, before.finalTasks);
 });
 
 test("migrate-manifests-v14 can target repeated repo filters", () => {
@@ -304,6 +309,47 @@ test("migrate-manifests-v14 rejects v14 manifests carrying legacy path fields", 
   assert.match(
     result.stdout,
     /schemaVersion 14 manifest still contains legacy assignment seed path fields/,
+  );
+});
+
+test("migrate-manifests-v14 rejects workspacePath-only stale v14 manifests", () => {
+  const root = tempDir();
+  const { assignmentPath: _assignmentPath, ...stale } =
+    assignmentBackedManifest("run-v14-workspace-only");
+  stale.schemaVersion = 14;
+  writeManifest(root, "demo", "run-v14-workspace-only", stale);
+
+  const result = spawnSync("node", [SCRIPT_PATH, "--root", root], { encoding: "utf8" });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /ERROR\s+runs\/demo\/run-v14-workspace-only\/run\.json:/);
+  assert.match(
+    result.stdout,
+    /schemaVersion 14 manifest still contains legacy assignment seed path fields/,
+  );
+});
+
+test("migrate-manifests-v14 rejects malformed manifest JSON", () => {
+  const root = tempDir();
+  const runDir = join(root, "runs", "demo", "bad-json");
+  mkdirSync(runDir, { recursive: true });
+  writeFileSync(join(runDir, "run.json"), "{bad");
+
+  const result = spawnSync("node", [SCRIPT_PATH, "--root", root], { encoding: "utf8" });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /ERROR\s+runs\/demo\/bad-json\/run\.json: invalid JSON:/);
+});
+
+test("migrate-manifests-v14 reports a missing runs root", () => {
+  const root = join(tempDir(), "missing-state");
+
+  const result = spawnSync("node", [SCRIPT_PATH, "--root", root], { encoding: "utf8" });
+
+  assert.equal(result.status, 1);
+  assert.match(
+    result.stderr,
+    new RegExp(`runs root ${root}/runs does not exist or cannot be read`),
   );
 });
 

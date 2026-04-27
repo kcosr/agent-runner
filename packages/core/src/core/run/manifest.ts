@@ -867,6 +867,7 @@ function isRunManifest(value: unknown): value is RunManifest {
   // sourcePath is string | null (null for ad-hoc agents)
   if (agent.sourcePath !== null && typeof agent.sourcePath !== "string") return false;
 
+  if (!("assignment" in obj)) return false;
   if (obj.assignment !== null) {
     if (!obj.assignment || typeof obj.assignment !== "object" || Array.isArray(obj.assignment)) {
       return false;

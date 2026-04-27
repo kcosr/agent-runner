@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -52,7 +52,10 @@ function mockBackend(id = "claude") {
 async function initRunIn(baseDir, opts = {}) {
   return withSharedRuntimeEnv(baseDir, async () => {
     const loaded = loadAgentConfig(opts.agentName ?? "agent", baseDir);
-    const loadedAssignment = loadAssignmentConfig(opts.assignmentName ?? "work", baseDir);
+    const loadedAssignment =
+      opts.assignmentName === null
+        ? undefined
+        : loadAssignmentConfig(opts.assignmentName ?? "work", baseDir);
     return await runAgent({
       loaded,
       loadedAssignment,
@@ -217,6 +220,36 @@ Work {{target}}.
     readRunAuditHistory({ workspaceDir: init.workspaceDir, runId: init.runId }),
     beforeHistory,
   );
+});
+
+test("reconfigure: no-assignment runs derive and remove assignment seed snapshots", async () => {
+  const dir = tempDir();
+  writeAgent(
+    dir,
+    "agent",
+    `---
+schemaVersion: 1
+name: agent
+backend: claude
+---
+Agent.
+`,
+  );
+  const init = await initRunIn(dir, {
+    assignmentName: null,
+    overrides: { message: "initial message" },
+  });
+
+  assert.equal(readManifest(init.workspaceDir).assignment, null);
+  assert.equal(existsSync(join(init.workspaceDir, "assignment-seed.md")), false);
+
+  await withSharedRuntimeEnv(dir, () => reconfigureRun(init.runId, { message: "updated message" }));
+
+  const manifest = readManifest(init.workspaceDir);
+  assert.equal(manifest.assignment, null);
+  assert.equal(manifest.message, "updated message");
+  assert.equal(manifest.resetSeed.message, "updated message");
+  assert.equal(existsSync(join(init.workspaceDir, "assignment-seed.md")), false);
 });
 
 test("reconfigure: rejects archived and non-initialized runs", async () => {

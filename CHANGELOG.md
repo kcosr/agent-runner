@@ -6,7 +6,8 @@
 
 - Manifest schema version is now `14`. Run manifests, status DTOs, daemon
   responses, web fixtures, hook contexts, and runtime interpolation no
-  longer expose assignment seed path fields. Assignment-backed runs still
+  longer expose assignment seed path fields, including the
+  `{{assignment_path}}` template variable. Assignment-backed runs still
   write `assignment-seed.md` as an internal workspace audit snapshot; use
   `scripts/migrate-manifests-v14.mjs` before resuming schema v13 runs.
 - Manifest schema version is now `13`. Runs now freeze selected

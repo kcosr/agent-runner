@@ -568,6 +568,35 @@ describe("api client", () => {
     });
   });
 
+  it("rejects run-detail payloads with legacy assignment path fields", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              run: makeRunDetail({
+                assignment: {
+                  name: "Build dashboard",
+                  sourcePath: "/tmp/assignment.md",
+                  workspacePath: "/tmp/task-runner/.state/run-1/assignment-seed.md",
+                },
+              }),
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+
+    const api = createApiClient(config);
+
+    await expect(api.getRun("run-1")).rejects.toMatchObject({
+      code: "INVALID_RESPONSE",
+      name: "ApiError",
+      status: 200,
+    });
+  });
+
   it("parses hook projections from run detail payloads", async () => {
     vi.stubGlobal(
       "fetch",
