@@ -8,10 +8,12 @@
   require `runGroupId` plus typed `dependencies` refs (`run` or
   `group`); the former run-only dependency array is removed. Use
   `scripts/migrate-manifests-v15.mjs` before resuming schema v14 runs.
+  ([#111](https://github.com/kcosr/task-runner/pull/111))
 - Daemon, CLI, and web contracts now use run groups instead of
   lineage-root grouping. Consumers should use `runGroupId`, `run set-group`,
   `run clear-group`, `list runs --group-id`, and
   `attachment list --scope group`.
+  ([#111](https://github.com/kcosr/task-runner/pull/111))
 - Manifest schema version is now `14`. Run manifests, status DTOs, daemon
   responses, web fixtures, hook contexts, and runtime interpolation no
   longer expose assignment seed path fields, including the
@@ -96,12 +98,15 @@
   web dashboard. Fresh child runs inherit the parent run group by default,
   `--group-id` overrides fresh run/init grouping, and
   `run set-group` / `run clear-group` mutate non-running runs.
+  ([#111](https://github.com/kcosr/task-runner/pull/111))
 - Added group dependencies with `task-runner run add-dep --group
   <group-id>` and `run remove-dep --group <group-id>`, including cycle
   detection, daemon auto-start readiness, and web dashboard editing.
+  ([#111](https://github.com/kcosr/task-runner/pull/111))
 - Added `scripts/migrate-manifests-v15.mjs` to promote schema v14
   manifests to schema v15 by deriving `runGroupId` and converting
   run-only dependencies to typed run refs.
+  ([#111](https://github.com/kcosr/task-runner/pull/111))
 - Added product-scope guidance for evaluating task-runner feature
   requests and linked it from the README and agent onboarding notes.
   ([#108](https://github.com/kcosr/task-runner/pull/108))
