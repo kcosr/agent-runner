@@ -1763,7 +1763,18 @@ describe("web app", () => {
     expect(fetchCallCount(fetchMock, (url) => url.endsWith("/api/runs/run-1/timeline"))).toBe(1);
 
     await user.click(screen.getByRole("button", { name: /^Tasks\b/ }));
+    timelineSource.emitMessage({
+      runId: "run-1",
+      cursor: 2,
+      event: {
+        type: "agent_message_delta",
+        text: " while away",
+      },
+    });
     await user.click(screen.getByRole("button", { name: "Attempts" }));
+    expect(await screen.findByRole("region", { name: "Attempt response" })).toHaveTextContent(
+      "Deferred response while away",
+    );
     await waitFor(() => {
       expect(fetchCallCount(fetchMock, (url) => url.endsWith("/api/runs/run-1/timeline"))).toBe(1);
     });
@@ -1783,12 +1794,32 @@ describe("web app", () => {
     ).toBe(1);
 
     await user.click(screen.getByRole("button", { name: /^Tasks\b/ }));
+    auditSource.emitMessage({
+      runId: "run-1",
+      cursor: 2,
+      event: {
+        type: "task.added",
+        recordedAt: "2026-04-21T16:01:00.000Z",
+        source: "task_command",
+        hostMode: "embedded",
+        fields: {
+          taskId: "audit-while-away",
+          taskTitle: "Audit while away",
+        },
+      },
+    });
     await user.click(screen.getByRole("button", { name: /^Audit\b/ }));
     await waitFor(() => {
       expect(
         fetchCallCount(fetchMock, (url) => /\/api\/runs\/run-1\/audit(?:\?.*)?$/.test(url)),
       ).toBe(1);
     });
+    const updatedAuditPanel = await screen.findByLabelText("Audit");
+    expect(
+      within(within(updatedAuditPanel).getByRole("list", { name: "Audit events" })).getByText(
+        /Audit while away/,
+      ),
+    ).toBeInTheDocument();
   });
 
   it("renders attempt history in the attempts tab with nested scroll-follow behavior", async () => {

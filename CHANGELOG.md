@@ -253,8 +253,9 @@
 
 ### Changed
 
-- The web run detail drawer now loads Attempts timeline and Audit history
-  only when those tabs are opened.
+- The web run detail drawer now starts Attempts timeline and Audit history
+  loading only when those tabs are first opened, then keeps those streams
+  active while the run remains selected.
 - `npm test` and `npm run check` now use a remote test gate when
   `TASK_RUNNER_TEST_REMOTE_HOST` is set, with Node tests using the dot
   reporter. Without that env var, they use the local concurrent Node/web

@@ -42,6 +42,12 @@ interface NoticeState {
   autoDismissMs?: number;
 }
 
+interface HistoryActivationState {
+  audit: boolean;
+  runId?: string;
+  timeline: boolean;
+}
+
 export type RunActionPending =
   | "archive"
   | "unarchive"
@@ -413,6 +419,10 @@ export function useRunsDashboardState() {
   const [resumeDialogOpen, setResumeDialogOpen] = useState(false);
   const [resumeMessageExpanded, setResumeMessageExpanded] = useState(false);
   const [resumeMessageDraft, setResumeMessageDraft] = useState("");
+  const [historyActivation, setHistoryActivation] = useState<HistoryActivationState>({
+    audit: false,
+    timeline: false,
+  });
   const noticeTimersRef = useRef(new Map<string, number>());
   const detailStreamStaleRef = useRef(detailStreamStale);
   const runGroupFilter = preferences.structuredFilters.runGroupId;
@@ -447,14 +457,50 @@ export function useRunsDashboardState() {
       ? attachmentsDetailDrawerView()
       : selectedStoredDrawerView);
   const selectedViewMatchesDetailRun = detailRunId !== undefined && detailRunId === selectedRunId;
-  const timelineEnabled =
+  const timelineActive =
     selectedViewMatchesDetailRun &&
     selectedDrawerView?.mode === "detail" &&
     selectedDrawerView.detailSection === "events";
-  const auditEnabled =
+  const auditActive =
     selectedViewMatchesDetailRun &&
     selectedDrawerView?.mode === "detail" &&
     selectedDrawerView.detailSection === "audit";
+  const historyActivationMatchesDetailRun = historyActivation.runId === detailRunId;
+  const timelineEnabled =
+    timelineActive ||
+    (selectedViewMatchesDetailRun &&
+      historyActivationMatchesDetailRun &&
+      historyActivation.timeline);
+  const auditEnabled =
+    auditActive ||
+    (selectedViewMatchesDetailRun && historyActivationMatchesDetailRun && historyActivation.audit);
+
+  useEffect(() => {
+    setHistoryActivation((current) => {
+      if (!selectedViewMatchesDetailRun) {
+        return current.runId === undefined && !current.timeline && !current.audit
+          ? current
+          : { audit: false, timeline: false };
+      }
+
+      const base =
+        current.runId === detailRunId
+          ? current
+          : { audit: false, runId: detailRunId, timeline: false };
+      const next = {
+        audit: base.audit || auditActive,
+        runId: detailRunId,
+        timeline: base.timeline || timelineActive,
+      };
+
+      return next.audit === current.audit &&
+        next.runId === current.runId &&
+        next.timeline === current.timeline
+        ? current
+        : next;
+    });
+  }, [auditActive, detailRunId, selectedViewMatchesDetailRun, timelineActive]);
+
   const timelineState = useRunTimelineState({
     config,
     enabled: timelineEnabled,

@@ -87,7 +87,8 @@ be auto-hidden.
 ### Detail drawer
 
 Opening a run subscribes to its detail stream (`RunDetail`). Attempts
-timeline history and Audit history load only when those tabs are opened.
+timeline history and Audit history start only when those tabs are first
+opened, then keep their streams active while that run remains selected.
 The drawer surfaces:
 
 - Header: run id, editable display name, status badge, capability-gated
@@ -155,8 +156,9 @@ The dashboard consumes four independent streams:
 | `run_timeline` | `/api/runs/:runId/events/timeline` (+ `/timeline` history) | Attempts tab |
 
 The timeline and audit streams both use monotonically increasing cursors
-for ordering and reconnect safety after their tabs are opened. The detail
-drawer delays its initial fetch by a short debounce to avoid flashing
+for ordering and reconnect safety after their tabs are first opened. Those
+streams remain active while the run stays selected. The detail drawer delays
+its initial fetch by a short debounce to avoid flashing
 when the user is tabbing through cards quickly; a "settling" indicator
 appears until the first snapshot lands.
 
@@ -280,7 +282,8 @@ is no standalone web server in the shipped runtime.
    `summary_upsert` / `summary_removed` events and update the
    TanStack React Query cache.
 3. Selecting a run subscribes to its detail stream; opening Attempts or
-   Audit starts the corresponding history load and live stream.
+   Audit starts the corresponding history load and live stream, which remain
+   active while that run stays selected.
 4. User actions call the HTTP API; responses feed the cache and the
    daemon broadcasts matching detail/summary updates back to all
    subscribers.
