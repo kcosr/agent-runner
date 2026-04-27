@@ -216,8 +216,8 @@ hook persists:
 | `resolved_ref` | supplied `ref`, or the default branch/ref when it can be determined reliably |
 
 `code-review-clone` also persists the caller-supplied `repo_url` as a
-normal runtime var. Do not include credentials in that URL; use SSH agents
-or Git credential helpers instead.
+normal runtime var. HTTPS URLs with embedded userinfo are rejected before
+the manifest is written; use SSH agents or Git credential helpers instead.
 
 ## Resume and variables
 

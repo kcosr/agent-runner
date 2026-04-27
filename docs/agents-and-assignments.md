@@ -489,6 +489,7 @@ hooks:
         path: /tmp/task-runner-review-checkout
         remote_name: origin
         depth: 1
+        collision: reuse
 ```
 
 - `repo_url` is required and must be a non-empty string.
@@ -500,12 +501,19 @@ hooks:
   path segment.
 - `remote_name` is optional and defaults to `origin`.
 - `depth` is optional and must be a positive integer.
+- `collision` is optional and must be `fail`, `reuse`, or `replace`.
+  Custom `path` values default to `fail`; managed checkouts under
+  `${TASK_RUNNER_STATE_DIR}/checkouts/` default to `reuse` so initialized
+  reconfigure runs can fetch and check out a new `ref` without colliding
+  with the existing checkout.
 
-If the checkout path already exists and is non-empty, `git-clone` fails
-before cloning. On success it emits `repo_slug`, `checkout_path`,
-`commit_sha`, and `resolved_ref` when the ref can be determined reliably.
-Do not put credentials in `repo_url`: runtime vars are persisted in
-`run.json`. Use SSH agents or Git credential helpers instead.
+If the checkout path already exists and is non-empty, `git-clone` follows
+the configured collision policy before cloning. On success it emits
+`repo_slug`, `checkout_path`, `commit_sha`, and `resolved_ref` when the
+ref can be determined reliably. Managed checkout paths are removed when
+their run is deleted. Do not put credentials in `repo_url`: HTTPS URLs
+with embedded userinfo are rejected before the run manifest is written.
+Use SSH agents or Git credential helpers instead.
 
 ## Locked fields
 

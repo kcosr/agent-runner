@@ -203,10 +203,10 @@ checkout before manifest freeze, and persists the clone metadata in
 runtime vars. Because arbitrary clone URLs cause network egress and disk
 writes on the daemon host, expose the daemon only inside a trusted local
 environment or protect remote access externally. The daemon has no built-in
-token auth. Do not embed credentials in `repo_url`; it is persisted in
-runtime vars. Use SSH agents or Git credential helpers instead. Future
-deployments that expose the daemon beyond localhost may also want repo URL
-allowlists.
+token auth. HTTPS URLs with embedded userinfo are rejected before the run
+manifest is written; use SSH agents or Git credential helpers instead.
+Future deployments that expose the daemon beyond localhost may also want
+repo URL allowlists.
 
 Schedule bodies use the same flat input contract as the CLI:
 

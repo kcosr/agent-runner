@@ -142,8 +142,8 @@ task-runner run \
   --var range=origin/main..HEAD
 ```
 
-Do not embed credentials in `repo_url`; runtime vars are persisted in the
-run manifest. Use SSH agents or Git credential helpers for private repos.
+HTTPS URLs with embedded userinfo are rejected before the run manifest is
+written; use SSH agents or Git credential helpers for private repos.
 
 ## `init`
 

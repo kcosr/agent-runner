@@ -1,5 +1,5 @@
 import { copyFileSync, existsSync, readFileSync, rmSync, statSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import {
   type TaskState,
   type TaskStatus,
@@ -18,7 +18,7 @@ import {
   loadAssignmentConfig,
   loadLauncherConfig,
 } from "../../config/loader.js";
-import { isPathArg } from "../../config/runtime-paths.js";
+import { isPathArg, resolveTaskRunnerStateDir } from "../../config/runtime-paths.js";
 import type {
   AttachmentListEntry,
   AttachmentListOptions,
@@ -1108,11 +1108,36 @@ export function unarchiveRun(
   return setRunArchived(target, false, auditOrigin, emitAuditEnvelope);
 }
 
+function managedGitCloneCheckoutPath(manifest: RunManifest): string | null {
+  if (!manifest.resolvedHooks.some((hook) => hook.source.builtin === "git-clone")) {
+    return null;
+  }
+  const checkoutPath = manifest.runtimeVars.checkout_path;
+  if (typeof checkoutPath !== "string") {
+    return null;
+  }
+  const checkoutsRoot = resolve(resolveTaskRunnerStateDir(), "checkouts");
+  const resolvedCheckoutPath = resolve(checkoutPath);
+  const relativeCheckoutPath = relative(checkoutsRoot, resolvedCheckoutPath);
+  if (
+    relativeCheckoutPath.length === 0 ||
+    relativeCheckoutPath.startsWith("..") ||
+    isAbsolute(relativeCheckoutPath)
+  ) {
+    return null;
+  }
+  return resolvedCheckoutPath;
+}
+
 export function deleteRun(target: string): RunDeleteResult {
   const resolved = resolveRun(target);
   withTaskStateLock(resolved.workspaceDir, () => {
     resolved.manifest = resolveResumeTarget(resolved.workspaceDir).manifest;
     requireDeletableRun(resolved.manifest);
+    const checkoutPath = managedGitCloneCheckoutPath(resolved.manifest);
+    if (checkoutPath) {
+      rmSync(checkoutPath, { recursive: true, force: true });
+    }
     rmSync(resolved.workspaceDir, { recursive: true, force: true });
   });
   return { runId: resolved.manifest.runId };

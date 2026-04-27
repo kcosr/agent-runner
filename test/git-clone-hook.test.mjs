@@ -1,11 +1,27 @@
 import { strict as assert } from "node:assert";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { reconfigureRun } from "../packages/core/dist/app/service.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
+import {
+  archiveRun,
+  deleteRun,
+  readyRun,
+  resetRun,
+} from "../packages/core/dist/core/commands/service.js";
 import { deriveRepoSlug } from "../packages/core/dist/core/hooks/builtin-git-clone.js";
+import { resolveResumeTarget } from "../packages/core/dist/core/run/manifest.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import { setTaskStatusesForPrompt, withSharedRuntimeEnv } from "./helpers/runtime-paths.mjs";
 
@@ -126,6 +142,7 @@ async function runClone(baseDir, options = {}) {
         },
       },
       callerCwd: baseDir,
+      initialize: options.initialize ?? false,
     });
     return { outcome, backendInvoked, seen };
   });
@@ -188,6 +205,56 @@ test("git-clone prepare hook checks out supplied refs and records the selected c
   }
 });
 
+test("git-clone prepare hook rejects option-like config values and credential-bearing HTTPS URLs", async () => {
+  for (const [extraWith, cliVars, pattern] of [
+    ["", { repo_url: "--upload-pack=sh" }, /`repo_url` must not begin with '-'/],
+    ["", { repo_url: "https://token@example.com/org/repo.git" }, /embedded credentials/],
+    ["", { repo_url: "https://user:token@example.com/org/repo.git" }, /embedded credentials/],
+    [
+      "",
+      { repo_url: "file:///tmp/repo.git", ref: "--config=core.sshCommand=sh" },
+      /`ref` must not begin with '-'/,
+    ],
+    [
+      "        remote_name: --upload-pack=sh\n",
+      { repo_url: "file:///tmp/repo.git" },
+      /`remote_name` must not begin with '-'/,
+    ],
+  ]) {
+    const dir = tempDir();
+    try {
+      writeAgent(dir);
+      writeAssignment(dir, cloneAssignment(extraWith));
+      let backendInvoked = false;
+      await assert.rejects(
+        () =>
+          withSharedRuntimeEnv(dir, async () => {
+            const loaded = loadAgentConfig("reviewer", dir);
+            const loadedAssignment = loadAssignmentConfig("clone-review", dir);
+            await runAgent({
+              loaded,
+              loadedAssignment,
+              cliVars,
+              webVars: {},
+              backend: {
+                id: "claude",
+                async invoke() {
+                  backendInvoked = true;
+                  throw new Error("backend should not run");
+                },
+              },
+              callerCwd: dir,
+            });
+          }),
+        pattern,
+      );
+      assert.equal(backendInvoked, false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
+
 test("git-clone prepare failures block before backend invocation", async () => {
   const dir = tempDir();
   try {
@@ -222,6 +289,116 @@ test("git-clone prepare failures block before backend invocation", async () => {
       /git-clone path collision/,
     );
     assert.equal(backendInvoked, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("git-clone prepare hook reuses managed checkouts during initialized reconfigure", async () => {
+  const dir = tempDir();
+  try {
+    writeAgent(dir);
+    writeAssignment(dir, cloneAssignment());
+    const { repoDir, featureSha } = initSourceRepo(dir);
+
+    const { outcome } = await runClone(dir, {
+      cliVars: { repo_url: repoDir, ref: "main" },
+      initialize: true,
+    });
+    const checkoutPath = outcome.manifest.runtimeVars.checkout_path;
+    assert.equal(readFileSync(join(checkoutPath, "README.md"), "utf8"), "main\n");
+
+    await withSharedRuntimeEnv(dir, () =>
+      reconfigureRun(outcome.runId, {
+        vars: { ref: "feature" },
+      }),
+    );
+    const manifest = JSON.parse(readFileSync(join(outcome.workspaceDir, "run.json"), "utf8"));
+
+    assert.equal(manifest.runtimeVars.checkout_path, checkoutPath);
+    assert.equal(manifest.runtimeVars.commit_sha, featureSha);
+    assert.equal(manifest.runtimeVars.resolved_ref, "feature");
+    assert.equal(git(["rev-parse", "HEAD"], checkoutPath), featureSha);
+    assert.equal(readFileSync(join(checkoutPath, "README.md"), "utf8"), "feature\n");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("git-clone reset and ready-start reuse the frozen managed checkout", async () => {
+  const dir = tempDir();
+  try {
+    writeAgent(dir);
+    writeAssignment(dir, cloneAssignment());
+    const { repoDir, mainSha } = initSourceRepo(dir);
+
+    const { outcome } = await runClone(dir, {
+      cliVars: { repo_url: repoDir },
+    });
+    const checkoutPath = outcome.manifest.runtimeVars.checkout_path;
+
+    await withSharedRuntimeEnv(dir, () => {
+      resetRun(outcome.runId);
+      readyRun(outcome.runId);
+    });
+    const target = withSharedRuntimeEnv(dir, () => resolveResumeTarget(outcome.runId, dir));
+    let resumedCwd = null;
+    const resumed = await withSharedRuntimeEnv(dir, async () => {
+      const loaded = loadAgentConfig("reviewer", dir);
+      return await runAgent({
+        loaded,
+        loadedAssignment: undefined,
+        cliVars: {},
+        webVars: {},
+        backend: {
+          id: "claude",
+          async invoke(ctx) {
+            resumedCwd = ctx.cwd;
+            setTaskStatusesForPrompt(ctx.prompt, { t1: "completed" }, dir);
+            return {
+              exitCode: 0,
+              signal: null,
+              timedOut: false,
+              sessionId: "clone-resumed-session",
+              transcript: "done",
+              rawStdout: "",
+              rawStderr: "",
+            };
+          },
+        },
+        callerCwd: dir,
+        resume: target,
+      });
+    });
+
+    assert.equal(resumedCwd, checkoutPath);
+    assert.equal(resumed.manifest.status, "success");
+    assert.equal(git(["rev-parse", "HEAD"], checkoutPath), mainSha);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("git-clone managed checkouts are removed when the run is deleted", async () => {
+  const dir = tempDir();
+  try {
+    writeAgent(dir);
+    writeAssignment(dir, cloneAssignment());
+    const { repoDir } = initSourceRepo(dir);
+
+    const { outcome } = await runClone(dir, {
+      cliVars: { repo_url: repoDir },
+    });
+    const checkoutPath = outcome.manifest.runtimeVars.checkout_path;
+    assert.equal(existsSync(checkoutPath), true);
+
+    await withSharedRuntimeEnv(dir, () => {
+      archiveRun(outcome.runId);
+      deleteRun(outcome.runId);
+    });
+
+    assert.equal(existsSync(checkoutPath), false);
+    assert.equal(existsSync(outcome.workspaceDir), false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -331,7 +508,7 @@ test("git-clone prepare fails clearly for invalid slugs and missing refs", async
       /git-clone checkout failed/,
     );
     assert.equal(backendInvoked, false);
-    assert.equal(existsSync(join(missingRefDir, "checkouts")), true);
+    assert.deepEqual(readdirSync(join(missingRefDir, "checkouts")), []);
   } finally {
     rmSync(missingRefDir, { recursive: true, force: true });
   }

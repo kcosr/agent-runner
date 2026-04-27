@@ -6,7 +6,7 @@ vars:
     type: string
     required: true
     sources: [cli, web]
-    description: Git SSH/HTTP URL to clone for review. Do not embed credentials.
+    description: Git SSH/HTTP URL to clone for review. HTTPS URLs with embedded userinfo are rejected.
   ref:
     type: string
     required: false

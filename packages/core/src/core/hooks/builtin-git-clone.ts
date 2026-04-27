@@ -1,9 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { resolveTaskRunnerStateDir } from "../../config/runtime-paths.js";
 import { defineHook } from "../../hooks.js";
 import type { HookResult, PrepareHookContext } from "./types.js";
+
+type GitCloneCollisionMode = "fail" | "reuse" | "replace";
 
 interface GitCloneConfig {
   repoUrl: string;
@@ -11,9 +13,14 @@ interface GitCloneConfig {
   path?: string;
   remoteName: string;
   depth?: number;
+  collision: GitCloneCollisionMode;
 }
 
-const CONFIG_KEYS = new Set(["repo_url", "ref", "path", "remote_name", "depth"]);
+interface CheckoutTarget {
+  path: string;
+}
+
+const CONFIG_KEYS = new Set(["repo_url", "ref", "path", "remote_name", "depth", "collision"]);
 
 function gitEnv(): NodeJS.ProcessEnv {
   return Object.fromEntries(
@@ -29,6 +36,32 @@ function requiredString(record: Record<string, unknown>, key: string): string {
     throw new Error(`git-clone config validation failed: \`${key}\` must be a non-empty string`);
   }
   return value.trim();
+}
+
+function rejectLeadingDash(value: string, key: string): void {
+  if (value.startsWith("-")) {
+    throw new Error(`git-clone config validation failed: \`${key}\` must not begin with '-'`);
+  }
+}
+
+function validateRepoUrl(value: string): void {
+  rejectLeadingDash(value, "repo_url");
+  try {
+    const parsed = new URL(value);
+    if (
+      parsed.password ||
+      ((parsed.protocol === "http:" || parsed.protocol === "https:") && parsed.username)
+    ) {
+      throw new Error(
+        "git-clone config validation failed: `repo_url` must not include embedded credentials",
+      );
+    }
+  } catch (error) {
+    if (error instanceof TypeError) {
+      return;
+    }
+    throw error;
+  }
 }
 
 function optionalNonEmptyString(record: Record<string, unknown>, key: string): string | undefined {
@@ -57,7 +90,24 @@ function optionalRef(record: Record<string, unknown>): string | undefined {
     throw new Error("git-clone config validation failed: `ref` must be a string");
   }
   const trimmed = value.trim();
-  return trimmed.length === 0 ? undefined : trimmed;
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+  rejectLeadingDash(trimmed, "ref");
+  return trimmed;
+}
+
+function optionalCollision(record: Record<string, unknown>): GitCloneCollisionMode | undefined {
+  if (!("collision" in record)) {
+    return undefined;
+  }
+  const value = record.collision;
+  if (value !== "fail" && value !== "reuse" && value !== "replace") {
+    throw new Error(
+      "git-clone config validation failed: `collision` must be one of: fail, reuse, replace",
+    );
+  }
+  return value;
 }
 
 function gitCloneConfig(config: unknown): GitCloneConfig {
@@ -80,12 +130,18 @@ function gitCloneConfig(config: unknown): GitCloneConfig {
     throw new Error("git-clone config validation failed: `depth` must be a positive integer");
   }
 
+  const repoUrl = requiredString(record, "repo_url");
+  validateRepoUrl(repoUrl);
+  const path = optionalNonEmptyString(record, "path");
+  const remoteName = optionalNonEmptyString(record, "remote_name") ?? "origin";
+  rejectLeadingDash(remoteName, "remote_name");
   return {
-    repoUrl: requiredString(record, "repo_url"),
+    repoUrl,
     ref: optionalRef(record),
-    path: optionalNonEmptyString(record, "path"),
-    remoteName: optionalNonEmptyString(record, "remote_name") ?? "origin",
+    path,
+    remoteName,
     depth: depth as number | undefined,
+    collision: optionalCollision(record) ?? (path ? "fail" : "reuse"),
   };
 }
 
@@ -126,16 +182,24 @@ export function deriveRepoSlug(repoUrl: string): string {
   return slug;
 }
 
-function resolveCheckoutPath(config: GitCloneConfig, ctx: PrepareHookContext, repoSlug: string) {
+function resolveCheckoutTarget(
+  config: GitCloneConfig,
+  ctx: PrepareHookContext,
+  repoSlug: string,
+): CheckoutTarget {
   if (config.path) {
-    return isAbsolute(config.path) ? config.path : resolve(ctx.run.cwd, config.path);
+    return {
+      path: isAbsolute(config.path) ? config.path : resolve(ctx.run.cwd, config.path),
+    };
   }
-  return join(resolveTaskRunnerStateDir(), "checkouts", `${repoSlug}-${ctx.run.runId}`);
+  return {
+    path: join(resolveTaskRunnerStateDir(), "checkouts", `${repoSlug}-${ctx.run.runId}`),
+  };
 }
 
-function assertCheckoutPathAvailable(path: string): void {
+function checkoutPathState(path: string): "missing" | "empty" | "occupied" {
   if (!existsSync(path)) {
-    return;
+    return "missing";
   }
   const stat = statSync(path);
   if (!stat.isDirectory()) {
@@ -143,11 +207,7 @@ function assertCheckoutPathAvailable(path: string): void {
       `git-clone path collision: checkout path ${path} exists and is not a directory`,
     );
   }
-  if (readdirSync(path).length > 0) {
-    throw new Error(
-      `git-clone path collision: checkout path ${path} already exists and is non-empty`,
-    );
-  }
+  return readdirSync(path).length === 0 ? "empty" : "occupied";
 }
 
 function redactGitOutput(value: string): string {
@@ -193,7 +253,7 @@ function cloneArgs(config: GitCloneConfig, checkoutPath: string): string[] {
   if (config.depth !== undefined) {
     args.push("--depth", String(config.depth));
   }
-  args.push(config.repoUrl, checkoutPath);
+  args.push("--", config.repoUrl, checkoutPath);
   return args;
 }
 
@@ -202,7 +262,7 @@ function fetchArgs(config: GitCloneConfig, ref: string): string[] {
   if (config.depth !== undefined) {
     args.push("--depth", String(config.depth));
   }
-  args.push(config.remoteName, ref);
+  args.push("--", config.remoteName, ref);
   return args;
 }
 
@@ -211,7 +271,7 @@ function tagFetchArgs(config: GitCloneConfig, ref: string): string[] {
   if (config.depth !== undefined) {
     args.push("--depth", String(config.depth));
   }
-  args.push(config.remoteName, "tag", ref);
+  args.push("--", config.remoteName, "tag", ref);
   return args;
 }
 
@@ -244,7 +304,7 @@ function checkoutRef(config: GitCloneConfig, checkoutPath: string, ref: string):
     return;
   }
 
-  git(["checkout", "--detach", ref], checkoutPath, "checkout");
+  git(["checkout", "--detach", "--", ref], checkoutPath, "checkout");
 }
 
 function resolvedDefaultRef(checkoutPath: string): string | undefined {
@@ -257,11 +317,52 @@ function resolvedDefaultRef(checkoutPath: string): string | undefined {
 
 function cloneRepository(config: GitCloneConfig, checkoutPath: string): string {
   mkdirSync(dirname(checkoutPath), { recursive: true });
-  git(cloneArgs(config, checkoutPath), dirname(checkoutPath), "clone");
+  try {
+    git(cloneArgs(config, checkoutPath), dirname(checkoutPath), "clone");
+    if (config.ref) {
+      checkoutRef(config, checkoutPath, config.ref);
+    }
+    return git(["rev-parse", "HEAD"], checkoutPath, "rev-parse");
+  } catch (error) {
+    rmSync(checkoutPath, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+function existingRemoteUrl(config: GitCloneConfig, checkoutPath: string): string | undefined {
+  const remote = tryGit(["remote", "get-url", config.remoteName], checkoutPath);
+  return remote.ok ? remote.stdout : undefined;
+}
+
+function reuseRepository(config: GitCloneConfig, checkoutPath: string): string {
+  const insideWorkTree = tryGit(["rev-parse", "--is-inside-work-tree"], checkoutPath);
+  const remoteUrl = existingRemoteUrl(config, checkoutPath);
+  if (!insideWorkTree.ok || remoteUrl !== config.repoUrl) {
+    throw new Error(
+      `git-clone path collision: checkout path ${checkoutPath} already exists and is not a reusable clone of ${config.repoUrl}`,
+    );
+  }
   if (config.ref) {
     checkoutRef(config, checkoutPath, config.ref);
   }
   return git(["rev-parse", "HEAD"], checkoutPath, "rev-parse");
+}
+
+function prepareCheckoutPath(config: GitCloneConfig, target: CheckoutTarget): "clone" | "reuse" {
+  const state = checkoutPathState(target.path);
+  if (state === "missing" || state === "empty") {
+    return "clone";
+  }
+  if (config.collision === "replace") {
+    rmSync(target.path, { recursive: true, force: true });
+    return "clone";
+  }
+  if (config.collision === "reuse") {
+    return "reuse";
+  }
+  throw new Error(
+    `git-clone path collision: checkout path ${target.path} already exists and is non-empty`,
+  );
 }
 
 export default defineHook({
@@ -269,9 +370,12 @@ export default defineHook({
   prepare(ctx: PrepareHookContext): HookResult {
     const config = gitCloneConfig(ctx.config);
     const repoSlug = deriveRepoSlug(config.repoUrl);
-    const checkoutPath = resolveCheckoutPath(config, ctx, repoSlug);
-    assertCheckoutPathAvailable(checkoutPath);
-    const commitSha = cloneRepository(config, checkoutPath);
+    const target = resolveCheckoutTarget(config, ctx, repoSlug);
+    const checkoutPath = target.path;
+    const commitSha =
+      prepareCheckoutPath(config, target) === "reuse"
+        ? reuseRepository(config, checkoutPath)
+        : cloneRepository(config, checkoutPath);
     const resolvedRef = config.ref ?? resolvedDefaultRef(checkoutPath);
     const vars: Record<string, unknown> = {
       repo_slug: repoSlug,

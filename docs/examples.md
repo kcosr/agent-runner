@@ -184,7 +184,7 @@ synthesis and approval decision.
 - Path: `assignments/code-review-clone/assignment.md`
 - Vars:
   - `repo_url` (string, required) - Git SSH/HTTP URL to clone for
-    review. Do not embed credentials.
+    review. HTTPS URLs with embedded userinfo are rejected.
   - `ref` (string, optional) - branch, tag, or commit to check out before
     review.
   - `range` (string, optional, default `full`) - git range to review

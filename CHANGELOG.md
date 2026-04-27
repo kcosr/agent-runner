@@ -331,6 +331,10 @@
 
 ### Fixed
 
+- Hardened the `git-clone` hook against option-like clone inputs, rejected
+  credential-bearing HTTPS URLs before manifest persistence, made managed
+  checkouts reusable across initialized reconfigure runs, and removed managed
+  clone checkouts when runs are deleted.
 - Daemon-connected fresh `init --message-file` and fresh
   `run --message-file` now forward the file contents in
   `overrides.message` instead of snapshotting overrides before the
