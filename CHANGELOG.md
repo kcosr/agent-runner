@@ -253,6 +253,13 @@
 
 ### Changed
 
+- `npm test` and `npm run check` now run Node and web tests concurrently
+  after build/static validation, reducing wall-clock time while preserving
+  the same test suites.
+- Daemon summary/detail projection refreshes now skip task-state filesystem
+  locks by default to avoid stale-lock stalls; set
+  `TASK_RUNNER_DAEMON_FILESYSTEM_LOCKS=true` to preserve locked daemon
+  projection reads when mixing daemon mode with standalone writers.
 - Dependencies now accept explicit typed refs: `run add-dep --run
   <run-id>` for one upstream run or `run add-dep --group <group-id>` for
   all non-archived members of a group. Remove commands use the same
@@ -317,6 +324,9 @@
 
 ### Fixed
 
+- Test runtime isolation now preserves `TASK_RUNNER_DEBUG_PERF` and
+  `TASK_RUNNER_DEBUG_PERF_INTERVAL_MS`, so perf diagnostics appear during
+  `npm run check` when enabled by the caller.
 - Dashboard Resume and run-note dialogs, plus the mobile Filters panel,
   now use native modal dialog behavior so Escape/back dismissal, focus
   trapping, and fullscreen drawer stacking behave consistently.

@@ -69,6 +69,7 @@ import {
   isDaemonAutoRunnableReadyRun,
   isTerminalStatus,
   toRunDetail,
+  toRunSummary,
 } from "@task-runner/core/contracts/runs.js";
 import {
   ConflictError,
@@ -209,9 +210,15 @@ const MAX_TIMELINE_BUFFER_EVENTS = 1_000;
 const COMPLETED_TIMELINE_BUFFER_TTL_MS = 5_000;
 const MAX_SCHEDULE_TIMER_DELAY_MS = 2_147_483_647;
 const SCHEDULED_RESUME_MESSAGE = "Resuming after scheduled delay.";
+const TASK_RUNNER_DAEMON_FILESYSTEM_LOCKS_ENV = "TASK_RUNNER_DAEMON_FILESYSTEM_LOCKS";
 
 function roundMetric(value: number): number {
   return Math.round(value * 1_000) / 1_000;
+}
+
+function daemonFilesystemLocksEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const raw = env[TASK_RUNNER_DAEMON_FILESYSTEM_LOCKS_ENV]?.trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "on" || raw === "yes";
 }
 
 function daemonExecution(daemonInstanceId: string) {
@@ -407,6 +414,7 @@ export async function serveDaemon(
   const daemonInstanceId = `daemon-${shortId()}`;
   const mutationAuditContext = daemonMutationContext(daemonInstanceId);
   const version = packageVersion();
+  const useDaemonFilesystemLocks = daemonFilesystemLocksEnabled();
   const summarySubscriptions = new Map<string, SummarySubscriptionRecord>();
   const detailSubscriptions = new Map<string, DetailSubscriptionRecord>();
   const timelineSubscriptions = new Map<string, TimelineSubscriptionRecord>();
@@ -570,7 +578,9 @@ export async function serveDaemon(
   const refreshManifestIndexEntry = (target: string): ListedRunManifest => {
     ensureManifestIndex();
     const entry = resolveManifestTarget(target);
-    refreshRunSnapshotAfterTaskStateSettles(entry);
+    if (useDaemonFilesystemLocks) {
+      refreshRunSnapshotAfterTaskStateSettles(entry);
+    }
     rememberManifestIndexEntry(entry);
     return entry;
   };
@@ -630,12 +640,31 @@ export async function serveDaemon(
   const getDaemonRunList = (opts?: Parameters<typeof app.getRunList>[0]): RunSummary[] =>
     app.getRunList(opts).map((run: RunSummary) => withDaemonAbortCapability(run, activeRuns));
 
+  const dependencyGraphFromIndex = (): Map<string, RunManifest> =>
+    new Map(
+      Array.from(manifestEntriesByRunId.values(), (entry) => [
+        entry.manifest.runId,
+        entry.manifest,
+      ]),
+    );
+
+  const getIndexedRunSummary = (target: string): RunSummary => {
+    const entry = refreshManifestIndexEntry(target);
+    const dependencyGraph = dependencyGraphFromIndex();
+    dependencyGraph.set(entry.manifest.runId, entry.manifest);
+    const dependencyState = deriveDependencyState(entry.manifest, dependencyGraph);
+    return toRunSummary(entry, dependencyGraph, dependencyState);
+  };
+
   const getDaemonRunSummary = (target: string): RunSummary => {
     if (app.getRunSummary !== getRunSummary) {
       return withDaemonAbortCapability(app.getRunSummary(target), activeRuns);
     }
     try {
-      return withDaemonAbortCapability(app.getRunSummary(target), activeRuns);
+      const summary = useDaemonFilesystemLocks
+        ? app.getRunSummary(target)
+        : getIndexedRunSummary(target);
+      return withDaemonAbortCapability(summary, activeRuns);
     } catch (error) {
       if (!(error instanceof RunNotFoundError) || app.getRunList === getRunList) {
         throw error;
@@ -1053,14 +1082,6 @@ export async function serveDaemon(
       );
     }
   };
-
-  const dependencyGraphFromIndex = (): Map<string, RunManifest> =>
-    new Map(
-      Array.from(manifestEntriesByRunId.values(), (entry) => [
-        entry.manifest.runId,
-        entry.manifest,
-      ]),
-    );
 
   const dependencyStateForScheduledRun = (
     manifest: RunManifest,

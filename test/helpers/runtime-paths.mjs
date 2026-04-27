@@ -52,8 +52,7 @@ export function makeRuntimeRoots(prefix, options = {}) {
       TASK_RUNNER_CONNECT: undefined,
       TASK_RUNNER_LISTEN: undefined,
       TASK_RUNNER_PARENT_RUN_ID: undefined,
-      TASK_RUNNER_DEBUG_PERF: undefined,
-      TASK_RUNNER_DEBUG_PERF_INTERVAL_MS: undefined,
+      TASK_RUNNER_RUN_GROUP_ID: undefined,
     },
     cleanup,
   };
@@ -83,8 +82,7 @@ export function sharedRuntimeEnv(baseDir) {
     TASK_RUNNER_CONNECT: undefined,
     TASK_RUNNER_LISTEN: undefined,
     TASK_RUNNER_PARENT_RUN_ID: undefined,
-    TASK_RUNNER_DEBUG_PERF: undefined,
-    TASK_RUNNER_DEBUG_PERF_INTERVAL_MS: undefined,
+    TASK_RUNNER_RUN_GROUP_ID: undefined,
   };
 }
 

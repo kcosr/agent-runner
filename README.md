@@ -477,6 +477,7 @@ The rest are focused topic pages:
 | `TASK_RUNNER_STATE_DIR` | Run workspaces root |
 | `TASK_RUNNER_CONNECT` | Route client commands through a daemon |
 | `TASK_RUNNER_LISTEN` | Daemon listen URL |
+| `TASK_RUNNER_DAEMON_FILESYSTEM_LOCKS` | Set to `true` to make daemon projection refreshes wait on task-state filesystem locks |
 | `TASK_RUNNER_PARENT_RUN_ID` | Default lineage parent for fresh runs when `--parent-run` is omitted |
 | `TASK_RUNNER_RUN_GROUP_ID` | Default run group for fresh runs when `--group-id` is omitted |
 | `TASK_RUNNER_CLAUDE_BIN` | Claude CLI binary |
