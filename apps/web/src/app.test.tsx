@@ -1397,6 +1397,17 @@ function findEventSource(urlSuffix: string) {
   return instance;
 }
 
+function hasEventSource(urlSuffix: string) {
+  return MockEventSource.instances.some((candidate) => candidate.url.endsWith(urlSuffix));
+}
+
+function fetchCallCount(
+  fetchMock: ReturnType<typeof installFetchMock>,
+  predicate: (url: string) => boolean,
+) {
+  return fetchMock.mock.calls.filter(([url]) => predicate(String(url))).length;
+}
+
 function getCloseDetailButton() {
   const closeButtons = screen.getAllByRole("button", { name: /close detail/i });
   const closeButton = closeButtons[0];
@@ -1681,6 +1692,105 @@ describe("web app", () => {
     });
   });
 
+  it("defers attempts and audit history until their drawer tabs are opened", async () => {
+    const fetchMock = installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+      timelineHistories: {
+        "run-1": {
+          runId: "run-1",
+          lastCursor: 1,
+          attempts: [
+            {
+              attemptNumber: 1,
+              attemptIndexInSession: 0,
+              sessionIndex: 0,
+              startedAt: "2026-04-13T05:00:00.000Z",
+              endedAt: null,
+              prompt: "Deferred prompt",
+              transcript: "Deferred response",
+              notices: "",
+              exitCode: null,
+              timedOut: false,
+              live: true,
+            },
+          ],
+        },
+      },
+      auditHistories: {
+        "run-1": {
+          runId: "run-1",
+          lastCursor: 1,
+          events: [
+            {
+              runId: "run-1",
+              cursor: 1,
+              event: {
+                type: "task.added",
+                recordedAt: "2026-04-21T16:00:00.000Z",
+                source: "task_command",
+                hostMode: "embedded",
+                fields: {
+                  taskId: "lazy-history",
+                  taskTitle: "Lazy history task",
+                },
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+    expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
+
+    expect(fetchCallCount(fetchMock, (url) => url.endsWith("/api/runs/run-1/timeline"))).toBe(0);
+    expect(
+      fetchCallCount(fetchMock, (url) => /\/api\/runs\/run-1\/audit(?:\?.*)?$/.test(url)),
+    ).toBe(0);
+    expect(hasEventSource("/api/runs/run-1/events/timeline")).toBe(false);
+    expect(hasEventSource("/api/runs/run-1/events/audit")).toBe(false);
+
+    await user.click(screen.getByRole("button", { name: "Attempts" }));
+    const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
+    timelineSource.emitOpen();
+
+    expect(await screen.findByRole("region", { name: "Attempt response" })).toHaveTextContent(
+      "Deferred response",
+    );
+    expect(fetchCallCount(fetchMock, (url) => url.endsWith("/api/runs/run-1/timeline"))).toBe(1);
+
+    await user.click(screen.getByRole("button", { name: /^Tasks\b/ }));
+    await user.click(screen.getByRole("button", { name: "Attempts" }));
+    await waitFor(() => {
+      expect(fetchCallCount(fetchMock, (url) => url.endsWith("/api/runs/run-1/timeline"))).toBe(1);
+    });
+
+    await user.click(screen.getByRole("button", { name: /^Audit\b/ }));
+    const auditSource = findEventSource("/api/runs/run-1/events/audit");
+    auditSource.emitOpen();
+
+    const auditPanel = await screen.findByLabelText("Audit");
+    expect(
+      within(within(auditPanel).getByRole("list", { name: "Audit events" })).getByText(
+        /Lazy history task/,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      fetchCallCount(fetchMock, (url) => /\/api\/runs\/run-1\/audit(?:\?.*)?$/.test(url)),
+    ).toBe(1);
+
+    await user.click(screen.getByRole("button", { name: /^Tasks\b/ }));
+    await user.click(screen.getByRole("button", { name: /^Audit\b/ }));
+    await waitFor(() => {
+      expect(
+        fetchCallCount(fetchMock, (url) => /\/api\/runs\/run-1\/audit(?:\?.*)?$/.test(url)),
+      ).toBe(1);
+    });
+  });
+
   it("renders attempt history in the attempts tab with nested scroll-follow behavior", async () => {
     installFetchMock({
       runs: [makeRun()],
@@ -1762,7 +1872,7 @@ describe("web app", () => {
     });
     expect(scrollRegion.querySelector('[aria-label="Attempt response"]')).not.toBeNull();
 
-    await user.click(screen.getByRole("tab", { name: "Prompt" }));
+    await user.click(await screen.findByRole("tab", { name: "Prompt" }));
     const prompt = screen.getByRole("region", { name: "Attempt prompt" });
     expect(
       within(prompt).getByRole("heading", { level: 2, name: "Continue working" }),
@@ -1863,7 +1973,7 @@ describe("web app", () => {
     expect(screen.getByRole("tab", { name: "Diagnostics" })).toBeInTheDocument();
     expect(screen.getByText("Review this handoff before launch.")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("tab", { name: "Prompt" }));
+    await user.click(await screen.findByRole("tab", { name: "Prompt" }));
     expect(screen.getByRole("heading", { level: 2, name: "Prepared prompt" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Response" }));
@@ -1930,7 +2040,7 @@ describe("web app", () => {
       "Review this handoff before launch.",
     );
 
-    await user.click(screen.getByRole("tab", { name: "Prompt" }));
+    await user.click(await screen.findByRole("tab", { name: "Prompt" }));
     expect(screen.getByRole("heading", { level: 2, name: "Attempt prompt" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Diagnostics" }));
@@ -1987,7 +2097,7 @@ describe("web app", () => {
     const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
     timelineSource.emitOpen();
 
-    await user.click(screen.getByRole("tab", { name: "Prompt" }));
+    await user.click(await screen.findByRole("tab", { name: "Prompt" }));
     expect(screen.getByRole("heading", { level: 2, name: "Continue working" })).toBeInTheDocument();
 
     timelineSource.emitMessage({
@@ -2213,9 +2323,9 @@ describe("web app", () => {
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
 
+    await user.click(screen.getByRole("button", { name: /^Audit\b/ }));
     const auditSource = findEventSource("/api/runs/run-1/events/audit");
     auditSource.emitOpen();
-    await user.click(screen.getByRole("button", { name: /^Audit\b/ }));
 
     const auditPanel = await screen.findByLabelText("Audit");
     await waitFor(() =>
@@ -2332,9 +2442,9 @@ describe("web app", () => {
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
 
+    await user.click(screen.getByRole("button", { name: /^Audit\b/ }));
     const auditSource = findEventSource("/api/runs/run-1/events/audit");
     auditSource.emitOpen();
-    await user.click(screen.getByRole("button", { name: /^Audit\b/ }));
 
     const auditPanel = await screen.findByLabelText("Audit");
     const rows = within(
@@ -2446,9 +2556,9 @@ describe("web app", () => {
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
 
+    await user.click(screen.getByRole("button", { name: /^Audit\b/ }));
     const auditSource = findEventSource("/api/runs/run-1/events/audit");
     auditSource.emitOpen();
-    await user.click(screen.getByRole("button", { name: /^Audit\b/ }));
 
     const auditPanel = await screen.findByLabelText("Audit");
     const auditList = within(auditPanel).getByRole("list", { name: "Audit events" });
@@ -2558,9 +2668,9 @@ describe("web app", () => {
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
 
+    await user.click(screen.getByRole("button", { name: /^Audit\b/ }));
     const auditSource = findEventSource("/api/runs/run-1/events/audit");
     auditSource.emitOpen();
-    await user.click(screen.getByRole("button", { name: /^Audit\b/ }));
 
     const auditPanel = await screen.findByLabelText("Audit");
     await user.click(within(auditPanel).getByRole("tab", { name: "Run" }));
@@ -9129,16 +9239,20 @@ describe("web app", () => {
     await user.click(await findRunCard("Build dashboard"));
     expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
     await waitFor(() => {
-      expect(MockEventSource.instances).toHaveLength(4);
+      expect(findEventSource("/api/runs/run-1/events/detail")).toBeDefined();
     });
+    expect(hasEventSource("/api/runs/run-1/events/timeline")).toBe(false);
+    expect(hasEventSource("/api/runs/run-1/events/audit")).toBe(false);
 
     await user.click(getCloseDetailButton());
     await user.click(await findRunCard("Second run"));
 
     expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
     await waitFor(() => {
-      expect(MockEventSource.instances).toHaveLength(7);
+      expect(findEventSource("/api/runs/run-2/events/detail")).toBeDefined();
     });
+    expect(hasEventSource("/api/runs/run-2/events/timeline")).toBe(false);
+    expect(hasEventSource("/api/runs/run-2/events/audit")).toBe(false);
   });
 
   it("searches dependency candidates by assignment name and submits the selected run id", async () => {

@@ -433,13 +433,37 @@ export function useRunsDashboardState() {
     enabled: Boolean(detailRunId),
   });
   const selectedRunIsLive = detailRunId === selectedRunId && selectedRunQuery.data?.isLive === true;
+  const selectedStoredDrawerView =
+    selectedRunId !== undefined
+      ? (viewState.drawerViewsByRunId[selectedRunId] ?? DEFAULT_DRAWER_VIEW)
+      : undefined;
+  const routeAttachmentPreviewView =
+    selectedRunId && previewAttachmentOwnerRunId && previewAttachmentId
+      ? attachmentPreviewDrawerView(previewAttachmentOwnerRunId, previewAttachmentId)
+      : undefined;
+  const selectedDrawerView =
+    routeAttachmentPreviewView ??
+    (selectedStoredDrawerView?.mode === "attachment"
+      ? attachmentsDetailDrawerView()
+      : selectedStoredDrawerView);
+  const selectedViewMatchesDetailRun = detailRunId !== undefined && detailRunId === selectedRunId;
+  const timelineEnabled =
+    selectedViewMatchesDetailRun &&
+    selectedDrawerView?.mode === "detail" &&
+    selectedDrawerView.detailSection === "events";
+  const auditEnabled =
+    selectedViewMatchesDetailRun &&
+    selectedDrawerView?.mode === "detail" &&
+    selectedDrawerView.detailSection === "audit";
   const timelineState = useRunTimelineState({
     config,
+    enabled: timelineEnabled,
     runId: detailRunId,
     runIsLive: selectedRunIsLive,
   });
   const auditState = useRunAuditState({
     config,
+    enabled: auditEnabled,
     runId: detailRunId,
   });
 
@@ -510,19 +534,6 @@ export function useRunsDashboardState() {
   const boardColumns = preferences.hideEmptyColumns
     ? columns.filter((column) => column.runs.length > 0)
     : columns;
-  const selectedStoredDrawerView =
-    selectedRunId !== undefined
-      ? (viewState.drawerViewsByRunId[selectedRunId] ?? DEFAULT_DRAWER_VIEW)
-      : undefined;
-  const routeAttachmentPreviewView =
-    selectedRunId && previewAttachmentOwnerRunId && previewAttachmentId
-      ? attachmentPreviewDrawerView(previewAttachmentOwnerRunId, previewAttachmentId)
-      : undefined;
-  const selectedDrawerView =
-    routeAttachmentPreviewView ??
-    (selectedStoredDrawerView?.mode === "attachment"
-      ? attachmentsDetailDrawerView()
-      : selectedStoredDrawerView);
   const selectedRunGroupAttachmentsQuery = useQuery({
     queryKey: ["attachment-list", detailRunId, "group"],
     queryFn: async () => {

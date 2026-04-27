@@ -126,10 +126,12 @@ export function applyEnvelope(
 
 export function useRunTimelineState({
   config,
+  enabled,
   runId,
   runIsLive,
 }: {
   config: AppRuntimeConfig;
+  enabled: boolean;
   runId?: string;
   runIsLive: boolean;
 }): RunTimelineState {
@@ -164,6 +166,8 @@ export function useRunTimelineState({
       staleRef.current = false;
       bootstrappedRef.current = false;
       bufferRef.current = [];
+      reloadCountRef.current = 0;
+      previousRunIdRef.current = undefined;
       setState({ history: null, isLoading: false, stale: false });
       return;
     }
@@ -256,13 +260,33 @@ export function useRunTimelineState({
       bootstrappedRef.current = false;
       bufferRef.current = [];
       reloadCountRef.current = 0;
-      setState({ history: null, isLoading: true, stale: false });
-    } else {
-      setState((current) => ({ ...current, isLoading: true, error: undefined }));
+      setState({ history: null, isLoading: enabled, stale: false });
+    }
+
+    if (!enabled) {
+      setState((current) => ({ ...current, isLoading: false }));
+      return () => {
+        disposed = true;
+        loadAbortControllerRef.current?.abort();
+        loadAbortControllerRef.current = null;
+      };
+    }
+
+    const shouldLoadHistory =
+      !bootstrappedRef.current || staleRef.current || historyRef.current === null;
+
+    if (sameRunId) {
+      setState((current) => ({
+        ...current,
+        error: shouldLoadHistory ? undefined : current.error,
+        isLoading: shouldLoadHistory,
+      }));
     }
 
     if (!runIsLive) {
-      void loadHistory();
+      if (shouldLoadHistory) {
+        void loadHistory();
+      }
       return () => {
         disposed = true;
         loadAbortControllerRef.current?.abort();
@@ -323,7 +347,7 @@ export function useRunTimelineState({
       loadAbortControllerRef.current = null;
       unsubscribe();
     };
-  }, [api, config, runId, runIsLive]);
+  }, [api, config, enabled, runId, runIsLive]);
 
   return state;
 }
