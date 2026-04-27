@@ -3469,16 +3469,19 @@ describe("web app", () => {
       details: { "run-1": makeDetail() },
     });
 
-    Object.defineProperty(window.navigator, "clipboard", {
+    const user = userEvent.setup();
+
+    const navigatorWithoutClipboard = Object.create(navigator) as Navigator;
+    Object.defineProperty(navigatorWithoutClipboard, "clipboard", {
       configurable: true,
       value: undefined,
     });
+    vi.stubGlobal("navigator", navigatorWithoutClipboard);
     Object.defineProperty(document, "execCommand", {
       configurable: true,
       value: vi.fn(() => true),
     });
 
-    const user = userEvent.setup();
     await renderApp();
 
     await user.click(await findRunCard("Build dashboard"));
@@ -3486,15 +3489,14 @@ describe("web app", () => {
     await user.click(screen.getByRole("button", { name: /copy backend session id/i }));
 
     expect(await screen.findByText("Copied backend session id.")).toBeInTheDocument();
+    expect(document.execCommand).toHaveBeenCalledWith("copy");
     expect(document.querySelector(".notice-stack--bottom")).not.toBeNull();
 
-    await waitFor(
-      () => {
-        expect(screen.queryByText("Copied backend session id.")).not.toBeInTheDocument();
-        expect(document.querySelector(".notice-stack--bottom")).toBeNull();
-      },
-      { timeout: 5000 },
-    );
+    await user.click(screen.getByRole("button", { name: "Dismiss notice" }));
+    await waitFor(() => {
+      expect(screen.queryByText("Copied backend session id.")).not.toBeInTheDocument();
+      expect(document.querySelector(".notice-stack--bottom")).toBeNull();
+    });
   });
 
   it("collapses task details by default and expands them on click", async () => {
@@ -3639,7 +3641,9 @@ describe("web app", () => {
 
     await user.keyboard("{Control>}{Shift>}f{/Shift}{/Control}");
     expect(await screen.findByRole("dialog", { name: "Filters" })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Repo" })).toHaveFocus();
+    await waitFor(() => {
+      expect(screen.getByRole("combobox", { name: "Repo" })).toHaveFocus();
+    });
 
     await user.keyboard("{Control>}{Shift>}f{/Shift}{/Control}");
     await waitFor(() => {
@@ -3648,7 +3652,9 @@ describe("web app", () => {
 
     await user.keyboard("{Control>}{Shift>}f{/Shift}{/Control}");
     expect(await screen.findByRole("dialog", { name: "Filters" })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Repo" })).toHaveFocus();
+    await waitFor(() => {
+      expect(screen.getByRole("combobox", { name: "Repo" })).toHaveFocus();
+    });
   });
 
   it("applies exact-match structured filters and keeps options stable while filters are active", async () => {

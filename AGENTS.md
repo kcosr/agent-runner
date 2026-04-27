@@ -52,7 +52,7 @@ Repeated checks remain legitimate when:
 - Run `npm run imports:fix` to apply Biome import organization.
 - Run `npm run imports:check` to verify Biome import organization without writing.
 - Run `npm run check:knip` when dependency, export, or entry-point metadata changes.
-- Run `npm run check` to run the standard verification pipeline (`build`, `lint`, `format:check`, `imports:check`, `test`).
+- Run `npm run check` to run the standard verification pipeline (`build`, `lint`, `format:check`, `imports:check`, `test`). Set `TASK_RUNNER_TEST_REMOTE_HOST` to run the test gate on a remote host; otherwise tests run locally.
 - Do not commit `dist/`; build artifacts are generated locally and during packaging.
 - If you cannot run the relevant checks, call that out explicitly.
 

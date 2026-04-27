@@ -86,6 +86,7 @@ cannot find a git dir fall into an `unknown` bucket.
 | `TASK_RUNNER_CONNECT` | WebSocket URL the CLI should connect to instead of executing embedded |
 | `TASK_RUNNER_CONNECT_HOST` | SSH host the CLI should tunnel through before dialing `TASK_RUNNER_CONNECT` / `--connect` |
 | `TASK_RUNNER_CONNECT_LOCAL_PORT` | Loopback port to bind for `TASK_RUNNER_CONNECT_HOST`; defaults to the daemon port from `TASK_RUNNER_CONNECT` / `--connect` |
+| `TASK_RUNNER_DAEMON_FILESYSTEM_LOCKS` | Set to `true` to make daemon projection refreshes wait on task-state filesystem locks; by default daemon projections skip those locks to avoid stale-lock stalls |
 
 Both can be overridden on the CLI via `--listen` (on `serve`) and
 `--connect` (on client commands). SSH-assisted connected mode uses

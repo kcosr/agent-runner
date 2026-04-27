@@ -3552,7 +3552,40 @@ test("daemon scheduler indexes clones created while a run is active", async () =
   });
 });
 
-test("daemon defers run.created projection until task-state lock is released", async () => {
+test("daemon projections skip task-state filesystem locks by default", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const run = await initRun(dir);
+  const lockPath = join(run.workspaceDir, ".task-state.lock");
+  mkdirSync(lockPath);
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+
+  await withEnv(
+    {
+      ...sharedRuntimeEnv(dir),
+      TASK_RUNNER_DAEMON_FILESYSTEM_LOCKS: undefined,
+    },
+    async () => {
+      const server = await serveDaemon(listenUrl);
+      try {
+        const startedAt = Date.now();
+        const detail = await httpJson(httpBaseUrl, `/api/runs/${run.runId}`);
+        assert.equal(detail.status, 200);
+        assert.equal(detail.body.run.runId, run.runId);
+        assert.ok(Date.now() - startedAt < 2_000, "projection should not wait on stale locks");
+      } finally {
+        await server.close();
+        rmSync(lockPath, { recursive: true, force: true });
+      }
+    },
+  );
+});
+
+test("daemon can opt into deferring run.created projection until task-state lock is released", async () => {
   const dir = tempDir();
   writeAgent(dir, "daemon-agent", AGENT);
   writeAssignment(dir, "daemon-work", ASSIGNMENT);
@@ -3561,42 +3594,45 @@ test("daemon defers run.created projection until task-state lock is released", a
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
 
-  await withEnv(sharedRuntimeEnv(dir), async () => {
-    const server = await serveDaemon(listenUrl, {
-      async startRun({ emitEvent, emitAuditEnvelope }) {
-        withTaskStateLock(run.workspaceDir, () => {
-          emitAuditEnvelope({
-            runId: run.runId,
-            cursor: 2,
-            event: {
-              type: "run.created",
-              recordedAt: new Date().toISOString(),
-              source: "daemon",
-              hostMode: "daemon",
-              fields: {
-                agentName: "daemon-agent",
-                assignmentName: "daemon-work",
-                passive: false,
+  await withEnv(
+    { ...sharedRuntimeEnv(dir), TASK_RUNNER_DAEMON_FILESYSTEM_LOCKS: "true" },
+    async () => {
+      const server = await serveDaemon(listenUrl, {
+        async startRun({ emitEvent, emitAuditEnvelope }) {
+          withTaskStateLock(run.workspaceDir, () => {
+            emitAuditEnvelope({
+              runId: run.runId,
+              cursor: 2,
+              event: {
+                type: "run.created",
+                recordedAt: new Date().toISOString(),
+                source: "daemon",
+                hostMode: "daemon",
+                fields: {
+                  agentName: "daemon-agent",
+                  assignmentName: "daemon-work",
+                  passive: false,
+                },
               },
-            },
+            });
           });
-        });
-        markRunRunning(run.workspaceDir);
-        emitRunStarted(emitEvent, run.runId, dir);
-        return { runId: run.runId };
-      },
-    });
-    const client = await DaemonClient.connect(listenUrl);
-    try {
-      const startedAt = Date.now();
-      const started = await client.call("runs.start", { cliVars: {}, overrides: {} });
-      assert.equal(started.runId, run.runId);
-      assert.ok(Date.now() - startedAt < 2_000, "runs.start should not wait on its own lock");
-    } finally {
-      await client.close();
-      await server.close();
-    }
-  });
+          markRunRunning(run.workspaceDir);
+          emitRunStarted(emitEvent, run.runId, dir);
+          return { runId: run.runId };
+        },
+      });
+      const client = await DaemonClient.connect(listenUrl);
+      try {
+        const startedAt = Date.now();
+        const started = await client.call("runs.start", { cliVars: {}, overrides: {} });
+        assert.equal(started.runId, run.runId);
+        assert.ok(Date.now() - startedAt < 2_000, "runs.start should not wait on its own lock");
+      } finally {
+        await client.close();
+        await server.close();
+      }
+    },
+  );
 });
 
 test("daemon scheduler misses due one-time schedules that are not runnable", async () => {

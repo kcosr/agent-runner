@@ -477,6 +477,7 @@ The rest are focused topic pages:
 | `TASK_RUNNER_STATE_DIR` | Run workspaces root |
 | `TASK_RUNNER_CONNECT` | Route client commands through a daemon |
 | `TASK_RUNNER_LISTEN` | Daemon listen URL |
+| `TASK_RUNNER_DAEMON_FILESYSTEM_LOCKS` | Set to `true` to make daemon projection refreshes wait on task-state filesystem locks |
 | `TASK_RUNNER_PARENT_RUN_ID` | Default lineage parent for fresh runs when `--parent-run` is omitted |
 | `TASK_RUNNER_RUN_GROUP_ID` | Default run group for fresh runs when `--group-id` is omitted |
 | `TASK_RUNNER_CLAUDE_BIN` | Claude CLI binary |
@@ -525,6 +526,7 @@ npm run imports:fix
 npm run imports:check
 npm run test:node
 npm run test:web
+npm run test:all:local
 npm run check:knip
 npm run check
 ```
@@ -534,9 +536,12 @@ and `npm run lint:fix` applies Biome lint autofixes. `npm run format`
 writes Biome formatting, `npm run format:check` checks formatting
 without writing, `npm run imports:fix` applies Biome import
 organization, and `npm run imports:check` verifies import organization
-without writing. `npm run check:knip` runs the unused-file/export/
-dependency baseline. `npm run check` keeps the standard build, lint,
-format-check, import-check, and test pipeline.
+without writing. `npm run test:all:local` runs the Node and web tests
+locally. `npm run check:knip` runs the unused-file/export/dependency
+baseline. `npm test` runs build plus tests, and `npm run check` runs
+build, lint, format-check, import-check, and tests. Set
+`TASK_RUNNER_TEST_REMOTE_HOST` to sync the worktree and run the test gate
+on a remote host; otherwise tests run locally.
 
 Primary entry points:
 
