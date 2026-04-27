@@ -13,6 +13,11 @@ Specifically:
     cleanup) that aren't combinatorially covered
   - Tests that exercise the type but not the value (e.g.
     "calls succeed" without checking what they returned)
+  - Changed shared paths that test the new behavior but not
+    representative existing sibling behaviors using the same parser,
+    dispatcher, request/response builder, state reducer, serializer,
+    config loader, lifecycle/workflow handler, database access layer,
+    UI state transition, or other reused infrastructure
 
 If the project has a test command, run it once and report
 whether everything currently passes. If the scope is

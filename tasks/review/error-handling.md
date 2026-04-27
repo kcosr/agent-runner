@@ -21,3 +21,12 @@ Are errors actionable to a user (with file:line, suggested
 fix)? Are partial states left on disk if a write fails
 halfway? Look especially at any code that writes to disk
 and any code that parses external input.
+
+For changed shared paths, look for ordering and normalization bugs:
+values captured before validation/defaulting, state built before
+normalization, effects moved before guards, cached data computed
+before all sources are loaded, or request/response projections built
+before all fields are populated. This applies to parsers,
+dispatchers, request/response builders, state reducers, serializers,
+config loaders, lifecycle/workflow handlers, database access layers,
+UI state transitions, and other reused infrastructure.

@@ -20,6 +20,12 @@ Look for:
     runner state, a UI module calling a DB layer directly)
   - Asymmetries between sibling modules that suggest one is
     wrong
+  - Shared-path changes where existing sibling behaviors are left
+    implicit: parsers, dispatchers, request/response builders, state
+    reducers, serializers, config loaders, lifecycle/workflow
+    handlers, database access layers, UI state transitions, or other
+    reused infrastructure now serving more than the feature under
+    review
   - Circular dependencies
 
 If the scope is too small for this dimension to produce

@@ -335,6 +335,12 @@ tasks:
         - The function / class / module responsible
         - Existing behavior the feature must preserve
         - Existing tests covering the area (if any)
+        - Shared paths the change would touch: parsers,
+          dispatchers, request/response builders, state reducers,
+          serializers, config loaders, lifecycle/workflow handlers,
+          database access layers, UI state transitions, or other
+          reused infrastructure, plus representative existing sibling
+          behaviors that also flow through that path
 
       Read the identified files in full, not just skim. This
       is the context the generated plan's implementation
@@ -390,6 +396,12 @@ tasks:
         - New tests the feature will need — unit,
           integration, or end-to-end — and where they will
           live (file paths from `orient` conventions)
+        - For any shared path that will be reordered, hoisted,
+          cached, centralized, split, or otherwise changed around
+          parsing, normalization, validation, state construction,
+          lifecycle transitions, or request/response projection:
+          representative existing sibling behaviors to test, or the
+          exact existing coverage that is sufficient and can be cited
 
       Also capture the exact check command(s) the project
       uses to gate commits (e.g. `npm run check`,

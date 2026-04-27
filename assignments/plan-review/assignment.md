@@ -74,6 +74,12 @@ tasks:
           documented public surfaces
         - new scope added by the draft that the planning evidence
           does not justify
+        - shared-path changes that test only the new behavior while
+          omitting representative existing sibling behaviors flowing
+          through the same parser, dispatcher, request/response
+          builder, state reducer, serializer, config loader,
+          lifecycle/workflow handler, database access layer, UI state
+          transition, or other reused infrastructure
         - instructions that quietly add fallback logic,
           heuristics, alias fields, bridge routes, or
           compatibility layers even though the planning evidence
@@ -105,6 +111,10 @@ tasks:
           before backend work begins
         - every code-bearing task has a concrete `**Done when:**`
           block with test-backed completion criteria
+        - code-bearing tasks that change a shared path include
+          preservation tests for representative existing sibling
+          behaviors, or explicitly justify that existing coverage is
+          already sufficient
         - every task body has concrete file paths, commands, or
           evidence requirements rather than vague placeholders
         - no `<<PLACEHOLDER>>` markers remain anywhere in the draft
