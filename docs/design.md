@@ -20,7 +20,7 @@ explicit concepts:
 - caller-facing documentation stays separate from worker-facing
   instructions
 
-The current manifest schema is version `13`. Older manifest shapes are not
+The current manifest schema is version `14`. Older manifest shapes are not
 silently upgraded or dual-read at runtime.
 
 ## Non-goals
@@ -151,6 +151,9 @@ still lack it. The file is append-only diagnostic history for major
 lifecycle/task mutations, survives `run reset`, is surfaced through
 `task-runner run audit <run-id>` plus daemon audit APIs, and is never
 used to reconstruct canonical state.
+Manifest and DTO assignment metadata store identity only (`name` and
+`sourcePath`); the audit snapshot path is derived from the workspace and
+is not part of the public run contract.
 
 Scheduling is manifest-canonical. The persisted contract is
 `manifest.schedule`, not an external queue or daemon-local database.

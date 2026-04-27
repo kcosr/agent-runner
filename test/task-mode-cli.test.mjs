@@ -156,8 +156,9 @@ test("init stores a canonical brief and captures a workspace assignment seed", a
   assert.match(brief, new RegExp(`task set ${outcome.runId}`));
   assert.match(brief, new RegExp(`task append-notes ${outcome.runId}`));
   assert.match(brief, new RegExp(`run status ${outcome.runId}`));
-  assert.equal(outcome.assignmentPath, join(outcome.workspaceDir, "assignment-seed.md"));
-  assert.ok(existsSync(outcome.assignmentPath), "seed file captured");
+  assert.equal("assignmentPath" in outcome.manifest, false);
+  assert.equal("workspacePath" in outcome.manifest.assignment, false);
+  assert.ok(existsSync(join(outcome.workspaceDir, "assignment-seed.md")), "seed file captured");
 });
 
 test("run brief command prints the stored handoff and rejects path targets", async () => {
@@ -285,7 +286,7 @@ test("task-state persistence serializes concurrent writes into run.json only", a
 
   const manifest = readManifest(outcome.workspaceDir);
   assert.equal(manifest.finalTasks.t1.notes, "Serialized write");
-  assert.ok(existsSync(outcome.assignmentPath), "seed file captured");
+  assert.ok(existsSync(join(outcome.workspaceDir, "assignment-seed.md")), "seed file captured");
 });
 
 test("status and task commands wait for the task-state lock and read fresh snapshots", async () => {

@@ -255,7 +255,6 @@ export const runDetailSchema: z.ZodType<RunDetail> = z.object({
   archivedAt: z.string().nullable(),
   isLive: z.boolean(),
   workspaceDir: z.string(),
-  assignmentPath: z.string(),
   agent: z.object({
     name: z.string(),
     sourcePath: z.string().nullable(),
@@ -264,8 +263,8 @@ export const runDetailSchema: z.ZodType<RunDetail> = z.object({
     .object({
       name: z.string(),
       sourcePath: z.string(),
-      workspacePath: z.string(),
     })
+    .strict()
     .nullable(),
   backend: z.string(),
   model: z.string().nullable(),

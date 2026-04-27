@@ -154,7 +154,6 @@ export interface RunExecution {
 export interface AssignmentInfo {
   name: string;
   sourcePath: string;
-  workspacePath: string;
 }
 
 export type RunScheduleMode = "reuse" | "reset" | "clone";
@@ -184,13 +183,13 @@ export interface RunSchedule {
 // `timeoutSec` are all captured at init / fresh-run time and preserved
 // across all subsequent sessions.
 //
-// schemaVersion: 13 is the current manifest-canonical generation. Manifests written
+// schemaVersion: 14 is the current manifest-canonical generation. Manifests written
 // by earlier task-runner versions are not resumable by this version —
 // `isRunManifest` rejects them and
 // `resolveResumeTarget` surfaces a clear error telling the caller to
 // run the manifest migration.
 export interface RunManifest {
-  schemaVersion: 13;
+  schemaVersion: 14;
   runId: string;
   repo: string;
   agent: {
@@ -224,7 +223,6 @@ export interface RunManifest {
   lockedFields: LockableField[];
   // Per-attempt wall-clock budget in seconds. Frozen at first write.
   timeoutSec: number;
-  assignmentPath: string;
   workspaceDir: string;
   startedAt: string;
   endedAt: string | null;
@@ -485,16 +483,16 @@ function readManifestCandidate(candidate: string): RunManifest {
     typeof parsed === "object" &&
     "schemaVersion" in parsed &&
     typeof (parsed as { schemaVersion: unknown }).schemaVersion === "number" &&
-    (parsed as { schemaVersion: number }).schemaVersion !== 13
+    (parsed as { schemaVersion: number }).schemaVersion !== 14
   ) {
     const version = (parsed as { schemaVersion: number }).schemaVersion;
-    if (version === 12) {
+    if (version === 13) {
       throw new ResumeError(
-        `manifest at ${candidate} has schemaVersion 12; this version of task-runner requires schemaVersion 13. Run scripts/migrate-manifests-v13.mjs to migrate existing workspaces.`,
+        `manifest at ${candidate} has schemaVersion 13; this version of task-runner requires schemaVersion 14. Run scripts/migrate-manifests-v14.mjs to migrate existing workspaces.`,
       );
     }
     throw new ResumeError(
-      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 13.`,
+      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 14. Run manifest migrations in order, ending with scripts/migrate-manifests-v14.mjs.`,
     );
   }
   if (!isRunManifest(parsed)) {
@@ -527,8 +525,6 @@ export function resolveResumeTarget(
     if (!existsSync(candidate)) continue;
     const parsed = readManifestCandidate(candidate);
     const resolvedWorkspaceDir = dirname(candidate);
-    // workspaceDir is the discovery/resume identity anchor. assignmentPath is
-    // frozen audit metadata, not a lookup invariant.
     if (parsed.workspaceDir !== resolvedWorkspaceDir) {
       throw new ResumeError(
         `manifest at ${candidate} has workspaceDir "${parsed.workspaceDir}", but it was loaded from "${resolvedWorkspaceDir}"`,
@@ -575,8 +571,7 @@ export function listRunManifests(env: NodeJS.ProcessEnv = process.env): ListedRu
       if (!existsSync(candidate)) continue;
       try {
         const manifest = readManifestCandidate(candidate);
-        // workspaceDir anchors manifest identity during discovery. Persisted
-        // assignmentPath captures audit metadata and is not required to match.
+        // workspaceDir anchors manifest identity during discovery.
         if (manifest.workspaceDir !== workspaceDir) {
           continue;
         }
@@ -619,8 +614,7 @@ export function findRunManifestsById(
     }
     try {
       const manifest = readManifestCandidate(candidate);
-      // workspaceDir anchors manifest identity during discovery. Persisted
-      // assignmentPath captures audit metadata and is not required to match.
+      // workspaceDir anchors manifest identity during discovery.
       if (manifest.workspaceDir !== workspaceDir) {
         continue;
       }
@@ -650,17 +644,17 @@ export function findRunManifestsById(
 function isRunManifest(value: unknown): value is RunManifest {
   if (!value || typeof value !== "object") return false;
   const obj = value as Record<string, unknown>;
-  if (obj.schemaVersion !== 13) return false;
+  if (obj.schemaVersion !== 14) return false;
   if (typeof obj.runId !== "string") return false;
   if (typeof obj.repo !== "string") return false;
 
   // Top-level scalars required by downstream consumers.
+  if ("assignmentPath" in obj) return false;
   if (typeof obj.backend !== "string") return false;
   if (obj.name !== null && typeof obj.name !== "string") return false;
   if (obj.note !== undefined && obj.note !== null && typeof obj.note !== "string") return false;
   if (obj.pinned !== undefined && typeof obj.pinned !== "boolean") return false;
   if (typeof obj.cwd !== "string") return false;
-  if (typeof obj.assignmentPath !== "string") return false;
   if (typeof obj.workspaceDir !== "string") return false;
   if (typeof obj.startedAt !== "string") return false;
   if (!isManifestStatus(obj.status)) return false;
@@ -872,6 +866,17 @@ function isRunManifest(value: unknown): value is RunManifest {
   if (typeof agent.instructions !== "string") return false;
   // sourcePath is string | null (null for ad-hoc agents)
   if (agent.sourcePath !== null && typeof agent.sourcePath !== "string") return false;
+
+  if (!("assignment" in obj)) return false;
+  if (obj.assignment !== null) {
+    if (!obj.assignment || typeof obj.assignment !== "object" || Array.isArray(obj.assignment)) {
+      return false;
+    }
+    const assignment = obj.assignment as Record<string, unknown>;
+    if ("workspacePath" in assignment) return false;
+    if (typeof assignment.name !== "string") return false;
+    if (typeof assignment.sourcePath !== "string") return false;
+  }
 
   const execution = obj.execution as Record<string, unknown>;
   if (execution.hostMode !== "embedded" && execution.hostMode !== "daemon") return false;

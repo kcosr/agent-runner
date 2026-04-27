@@ -181,11 +181,3 @@ export function completeAllTasksFromPrompt(prompt, cwd = process.cwd()) {
     cwd,
   );
 }
-
-export function assignmentPathFromPrompt(prompt) {
-  const match = prompt.match(/\/\S+?\/assignment\.md/);
-  if (!match) {
-    throw new Error(`assignment.md path not found in prompt: ${prompt}`);
-  }
-  return match[0];
-}

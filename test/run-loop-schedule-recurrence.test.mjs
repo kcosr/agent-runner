@@ -1,5 +1,12 @@
 import { strict as assert } from "node:assert";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -217,6 +224,14 @@ test("run-loop schedules: future clone recurrence moves schedule to clone", asyn
   assert.equal(sourceAfter.status, "success");
   assert.equal(sourceAfter.schedule, null);
   assert.ok(cloneManifest);
+  assert.equal(cloneManifest.schemaVersion, 14);
+  assert.deepEqual(cloneManifest.assignment, {
+    name: "scheduled-work",
+    sourcePath: join(dir, "assignments", "scheduled-work", "assignment.md"),
+  });
+  assert.equal("assignmentPath" in cloneManifest, false);
+  assert.equal("workspacePath" in cloneManifest.assignment, false);
+  assert.equal(existsSync(join(cloneManifest.workspaceDir, "assignment-seed.md")), true);
   assert.equal(cloneManifest.exitCode, null);
   assert.equal(cloneManifest.endedAt, null);
   assert.deepEqual(cloneManifest.schedule, before);
@@ -382,6 +397,14 @@ test("run-loop schedules: reuse, reset, and clone recurrence modes use frozen re
   assert.ok(cloneManifest);
   assert.equal(readManifest(clone.workspaceDir).status, "success");
   assert.equal(readManifest(clone.workspaceDir).schedule, null);
+  assert.equal(cloneManifest.schemaVersion, 14);
+  assert.deepEqual(cloneManifest.assignment, {
+    name: "scheduled-work",
+    sourcePath: join(dir, "assignments", "scheduled-work", "assignment.md"),
+  });
+  assert.equal("assignmentPath" in cloneManifest, false);
+  assert.equal("workspacePath" in cloneManifest.assignment, false);
+  assert.equal(existsSync(join(cloneManifest.workspaceDir, "assignment-seed.md")), true);
   assert.equal(cloneManifest.status, "ready");
   assert.equal(cloneManifest.exitCode, null);
   assert.equal(cloneManifest.totalAttemptCount, 0);

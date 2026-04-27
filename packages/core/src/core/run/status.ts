@@ -18,7 +18,6 @@ export interface RunCompletionSummary {
   totalSessionCount: number;
   tasksCompleted: number;
   tasksTotal: number;
-  assignmentPath: string;
   tasks: TaskState[];
   runId: string;
 }

@@ -41,7 +41,7 @@ tasks:
     title: Do the thing
     body: First thing to do.
 ---
-Work on the repo. Plan at {{assignment_path}}.
+Work on the repo. Plan at {{cwd}}.
 `;
 
 function tempDir() {
@@ -1243,7 +1243,7 @@ test("loadAssignmentConfig parses a minimal assignment.md from TASK_RUNNER_CONFI
     assert.equal(loaded.config.tasks.length, 1);
     assert.equal(loaded.config.tasks[0].id, "t1");
     assert.equal(loaded.config.maxRetries, 3, "maxRetries defaults to 3 on assignment");
-    assert.ok(loaded.instructions.includes("{{assignment_path}}"));
+    assert.ok(loaded.instructions.includes("{{cwd}}"));
   }));
 
 test("loadAssignmentConfig resolves named and explicit task refs into plain task objects", () =>

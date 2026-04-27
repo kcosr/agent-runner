@@ -18,7 +18,6 @@ function makeRunDetail(overrides: Record<string, unknown> = {}) {
     pinned: false,
     isLive: false,
     workspaceDir: "/tmp/task-runner/.state/run-1",
-    assignmentPath: "/tmp/task-runner/assignment.md",
     agent: {
       name: "implementer",
       sourcePath: null,
@@ -26,7 +25,6 @@ function makeRunDetail(overrides: Record<string, unknown> = {}) {
     assignment: {
       name: "Build dashboard",
       sourcePath: "/tmp/assignment.md",
-      workspacePath: "/tmp/task-runner/assignment.md",
     },
     backend: "codex",
     model: "gpt-5.4",
@@ -364,7 +362,6 @@ describe("api client", () => {
               archivedAt: null,
               isLive: true,
               workspaceDir: "/tmp/run-1",
-              assignmentPath: "/tmp/run-1/assignment-seed.md",
               agent: { name: "implementer", sourcePath: null },
               assignment: null,
               backend: "codex",
@@ -500,7 +497,6 @@ describe("api client", () => {
                 archivedAt: null,
                 isLive: false,
                 workspaceDir: "/tmp/run-1",
-                assignmentPath: "/tmp/run-1/assignment-seed.md",
                 agent: { name: "implementer", sourcePath: null },
                 assignment: null,
                 backend: "codex",
@@ -572,6 +568,35 @@ describe("api client", () => {
     });
   });
 
+  it("rejects run-detail payloads with legacy assignment path fields", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              run: makeRunDetail({
+                assignment: {
+                  name: "Build dashboard",
+                  sourcePath: "/tmp/assignment.md",
+                  workspacePath: "/tmp/task-runner/.state/run-1/assignment-seed.md",
+                },
+              }),
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+
+    const api = createApiClient(config);
+
+    await expect(api.getRun("run-1")).rejects.toMatchObject({
+      code: "INVALID_RESPONSE",
+      name: "ApiError",
+      status: 200,
+    });
+  });
+
   it("parses hook projections from run detail payloads", async () => {
     vi.stubGlobal(
       "fetch",
@@ -588,7 +613,6 @@ describe("api client", () => {
                 archivedAt: null,
                 isLive: false,
                 workspaceDir: "/tmp/run-1",
-                assignmentPath: "/tmp/run-1/assignment-seed.md",
                 agent: { name: "implementer", sourcePath: null },
                 assignment: null,
                 backend: "codex",
@@ -743,7 +767,6 @@ describe("api client", () => {
               archivedAt: null,
               isLive: false,
               workspaceDir: "/tmp/run-1",
-              assignmentPath: "/tmp/run-1/assignment-seed.md",
               agent: { name: "implementer", sourcePath: null },
               assignment: null,
               backend: "codex",
@@ -1791,7 +1814,6 @@ describe("api client", () => {
               archivedAt: null,
               isLive: false,
               workspaceDir: "/tmp/run-1",
-              assignmentPath: "/tmp/run-1/assignment-seed.md",
               agent: { name: "planner", sourcePath: null },
               assignment: null,
               backend: "passive",

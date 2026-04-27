@@ -101,7 +101,6 @@ export type TaskTransitionResult =
 export interface HookContextAssignment {
   name: string;
   sourcePath: string | null;
-  workspacePath: string | null;
 }
 
 export interface HookContextRun {
@@ -113,7 +112,6 @@ export interface HookContextRun {
   effort: RunManifest["effort"];
   cwd: string;
   workspaceDir: string;
-  assignmentPath: string;
   name: string | null;
   note: string | null;
   pinned: boolean;

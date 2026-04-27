@@ -134,7 +134,6 @@ export interface RunDetail {
   archivedAt: string | null;
   isLive: boolean;
   workspaceDir: string;
-  assignmentPath: string;
   agent: {
     name: string;
     sourcePath: string | null;
@@ -142,7 +141,6 @@ export interface RunDetail {
   assignment: {
     name: string;
     sourcePath: string;
-    workspacePath: string;
   } | null;
   backend: string;
   model: string | null;
@@ -509,7 +507,6 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
     archivedAt: manifest.archivedAt,
     isLive: result.isLive,
     workspaceDir: manifest.workspaceDir,
-    assignmentPath: manifest.assignmentPath,
     agent: {
       name: manifest.agent.name,
       sourcePath: manifest.agent.sourcePath,
@@ -518,7 +515,6 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
       ? {
           name: manifest.assignment.name,
           sourcePath: manifest.assignment.sourcePath,
-          workspacePath: manifest.assignment.workspacePath,
         }
       : null,
     backend: manifest.backend,

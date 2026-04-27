@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
-import { readStatus, resetRun } from "../packages/core/dist/core/commands/service.js";
+import { readStatus, resetRun, setTask } from "../packages/core/dist/core/commands/service.js";
 import {
   findRunManifestsById,
   resolveResumeTarget,
@@ -52,7 +52,7 @@ tasks:
     title: Third
     body: Do the third thing.
 ---
-Work on the repo. Plan at {{assignment_path}}.
+Work on the repo. Plan at {{cwd}}.
 `;
 
 const EXPLICIT_RELATIVE_ASSIGNMENT = `---
@@ -70,7 +70,7 @@ tasks:
     title: Third
     body: Do the third thing.
 ---
-Work on the repo. Plan at {{assignment_path}}.
+Work on the repo. Plan at {{cwd}}.
 `;
 
 const THREE_ASSIGNMENT = `---
@@ -88,7 +88,7 @@ tasks:
     title: Third
     body: Do the third thing.
 ---
-Work on the repo. Plan at {{assignment_path}}.
+Work on the repo. Plan at {{cwd}}.
 `;
 
 const CODEX_AGENT = `---
@@ -519,7 +519,7 @@ tasks:
   - id: t2
     title: Second
 ---
-Work on the repo. Plan at {{assignment_path}}.
+Work on the repo. Plan at {{cwd}}.
 `,
   );
   writeNamedHook(
@@ -565,6 +565,68 @@ Work on the repo. Plan at {{assignment_path}}.
         name: "assignment-guard",
       },
     ],
+  );
+});
+
+test("taskTransition hooks receive canonical run and assignment context", async () => {
+  const dir = tempDir();
+  const assignmentPath = writeAssignment(
+    dir,
+    "transition-context-work",
+    `---
+schemaVersion: 1
+name: transition-context-work
+hooks:
+  taskTransition:
+    - name: transition-context
+tasks:
+  - id: t1
+    title: First
+---
+Work.
+`,
+  );
+  const evidencePath = join(dir, "transition-context.json");
+  writeAgent(dir, "three", THREE_AGENT);
+  writeNamedHook(
+    dir,
+    "transition-context",
+    `import { writeFileSync } from "node:fs";
+
+const evidencePath = ${JSON.stringify(evidencePath)};
+
+export default {
+  name: "transition-context",
+  taskTransition(ctx) {
+    if ("assignmentPath" in ctx.run) {
+      throw new Error("ctx.run.assignmentPath should not exist");
+    }
+    if ("workspacePath" in ctx.assignment) {
+      throw new Error("ctx.assignment.workspacePath should not exist");
+    }
+    writeFileSync(evidencePath, JSON.stringify({
+      workspaceDir: ctx.run.workspaceDir,
+      assignmentName: ctx.assignment.name,
+      assignmentSourcePath: ctx.assignment.sourcePath,
+    }));
+    return { accept: true };
+  },
+};
+`,
+  );
+
+  const initialized = await initWithOptions(dir, "transition-context-work");
+  await withSharedRuntimeEnv(dir, () => setTask(initialized.runId, "t1", { status: "completed" }));
+
+  const evidence = JSON.parse(readFileSync(evidencePath, "utf8"));
+  assert.equal(evidence.workspaceDir, initialized.workspaceDir);
+  assert.equal(evidence.assignmentName, "transition-context-work");
+  assert.equal(evidence.assignmentSourcePath, assignmentPath);
+  const manifest = JSON.parse(readFileSync(join(initialized.workspaceDir, "run.json"), "utf8"));
+  assert.ok(
+    manifest.hookAudits.some(
+      (audit) => audit.phase === "taskTransition" && audit.outcome === "accepted",
+    ),
   );
 });
 
@@ -666,12 +728,23 @@ Work.
     `export default {
   name: "freeze-prepare",
   prepare(ctx) {
+    if ("assignmentPath" in ctx.run) {
+      throw new Error("ctx.run.assignmentPath should not exist");
+    }
+    if ("workspacePath" in ctx.assignment) {
+      throw new Error("ctx.assignment.workspacePath should not exist");
+    }
     return {
       action: "continue",
       mutate: {
         run: { cwd: ctx.run.cwd + "/prepared" },
         vars: { prepared_dir: ctx.run.cwd + "/prepared" },
-        state: { prepared: true },
+        state: {
+          prepared: true,
+          workspaceDir: ctx.run.workspaceDir,
+          assignmentName: ctx.assignment.name,
+          assignmentSourcePath: ctx.assignment.sourcePath,
+        },
         note: "prepared once",
       },
     };
@@ -701,6 +774,12 @@ Work.
   assert.equal(initManifest.runtimeVars.prepared_dir, join(dir, "prepared"));
   assert.equal(initManifest.note, "prepared once");
   assert.equal(initManifest.hookState.prepared, true);
+  assert.equal(initManifest.hookState.workspaceDir, initialized.outcome.workspaceDir);
+  assert.equal(initManifest.hookState.assignmentName, "three-work");
+  assert.equal(
+    initManifest.hookState.assignmentSourcePath,
+    join(dir, "assignments", "three-work", "assignment.md"),
+  );
   assert.equal(initManifest.resolvedHooks[0].source.name, "freeze-prepare");
   assert.match(initManifest.resolvedHooks[0].resolvedPath, /freeze-prepare\/hook\.ts$/);
 
@@ -945,12 +1024,23 @@ test("beforeAttempt hooks persist changes before invoke and afterAttempt hooks c
     `export default {
   name: "before-attempt-note",
   beforeAttempt(ctx) {
+    if ("assignmentPath" in ctx.run) {
+      throw new Error("ctx.run.assignmentPath should not exist");
+    }
+    if ("workspacePath" in ctx.assignment) {
+      throw new Error("ctx.assignment.workspacePath should not exist");
+    }
     const count = (ctx.state.beforeAttemptCount ?? 0) + 1;
     return {
       action: "continue",
       mutate: {
         note: "before-attempt-" + count,
-        state: { beforeAttemptCount: count },
+        state: {
+          beforeAttemptCount: count,
+          beforeAttemptWorkspaceDir: ctx.run.workspaceDir,
+          beforeAttemptAssignmentName: ctx.assignment.name,
+          beforeAttemptAssignmentSourcePath: ctx.assignment.sourcePath,
+        },
       },
     };
   },
@@ -963,20 +1053,36 @@ test("beforeAttempt hooks persist changes before invoke and afterAttempt hooks c
     `export default {
   name: "reinvoke-after-attempt",
   afterAttempt(ctx) {
+    if ("assignmentPath" in ctx.run) {
+      throw new Error("ctx.run.assignmentPath should not exist");
+    }
+    if ("workspacePath" in ctx.assignment) {
+      throw new Error("ctx.assignment.workspacePath should not exist");
+    }
     if ((ctx.state.afterAttemptCount ?? 0) === 0) {
       return {
         action: "reinvoke",
         followUpPrompt: "Follow up from afterAttempt hook",
         mutate: {
           note: "after-attempt-reinvoke",
-          state: { afterAttemptCount: 1 },
+          state: {
+            afterAttemptCount: 1,
+            afterAttemptWorkspaceDir: ctx.run.workspaceDir,
+            afterAttemptAssignmentName: ctx.assignment.name,
+            afterAttemptAssignmentSourcePath: ctx.assignment.sourcePath,
+          },
         },
       };
     }
     return {
       action: "continue",
       mutate: {
-        state: { afterAttemptCount: (ctx.state.afterAttemptCount ?? 0) + 1 },
+        state: {
+          afterAttemptCount: (ctx.state.afterAttemptCount ?? 0) + 1,
+          afterAttemptWorkspaceDir: ctx.run.workspaceDir,
+          afterAttemptAssignmentName: ctx.assignment.name,
+          afterAttemptAssignmentSourcePath: ctx.assignment.sourcePath,
+        },
       },
     };
   },
@@ -1048,6 +1154,18 @@ Work.
   assert.equal(outcome.manifest.note, "before-attempt-2");
   assert.equal(outcome.manifest.hookState.beforeAttemptCount, 2);
   assert.equal(outcome.manifest.hookState.afterAttemptCount, 2);
+  assert.equal(outcome.manifest.hookState.beforeAttemptWorkspaceDir, outcome.workspaceDir);
+  assert.equal(outcome.manifest.hookState.beforeAttemptAssignmentName, "three-work");
+  assert.equal(
+    outcome.manifest.hookState.beforeAttemptAssignmentSourcePath,
+    join(dir, "assignments", "three-work", "assignment.md"),
+  );
+  assert.equal(outcome.manifest.hookState.afterAttemptWorkspaceDir, outcome.workspaceDir);
+  assert.equal(outcome.manifest.hookState.afterAttemptAssignmentName, "three-work");
+  assert.equal(
+    outcome.manifest.hookState.afterAttemptAssignmentSourcePath,
+    join(dir, "assignments", "three-work", "assignment.md"),
+  );
   assert.ok(
     outcome.manifest.hookAudits.some(
       (audit) => audit.phase === "afterAttempt" && audit.outcome === "reinvoke",
@@ -1063,13 +1181,24 @@ test("afterExit hooks persist terminal note and task patches", async () => {
     "after-exit-note",
     `export default {
   name: "after-exit-note",
-  afterExit() {
+  afterExit(ctx) {
+    if ("assignmentPath" in ctx.run) {
+      throw new Error("ctx.run.assignmentPath should not exist");
+    }
+    if ("workspacePath" in ctx.assignment) {
+      throw new Error("ctx.assignment.workspacePath should not exist");
+    }
     return {
       action: "continue",
       mutate: {
         note: "after-exit-ran",
         patchTasks: [{ taskId: "t1", notesAppend: "after-exit note" }],
-        state: { afterExitRan: true },
+        state: {
+          afterExitRan: true,
+          afterExitWorkspaceDir: ctx.run.workspaceDir,
+          afterExitAssignmentName: ctx.assignment.name,
+          afterExitAssignmentSourcePath: ctx.assignment.sourcePath,
+        },
       },
     };
   },
@@ -1115,6 +1244,12 @@ Work.
   assert.equal(manifest.status, "success");
   assert.equal(manifest.note, "after-exit-ran");
   assert.equal(manifest.hookState.afterExitRan, true);
+  assert.equal(manifest.hookState.afterExitWorkspaceDir, outcome.workspaceDir);
+  assert.equal(manifest.hookState.afterExitAssignmentName, "three-work");
+  assert.equal(
+    manifest.hookState.afterExitAssignmentSourcePath,
+    join(dir, "assignments", "three-work", "assignment.md"),
+  );
   assert.equal(manifest.finalTasks.t1.notes, "after-exit note");
   assert.ok(
     manifest.hookAudits.some(

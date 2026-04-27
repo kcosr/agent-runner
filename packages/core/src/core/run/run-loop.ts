@@ -154,7 +154,6 @@ export interface RunOutcome {
   exitCode: number;
   attemptTranscripts: string[];
   runId: string;
-  assignmentPath: string;
   workspaceDir: string;
   manifest: RunManifest;
 }
@@ -165,7 +164,6 @@ export type RunEvent =
       runId: string;
       agentName: string;
       assignmentSourcePath: string | null;
-      assignmentPath: string;
       name: string | null;
       cwd: string;
       passive: boolean;
@@ -180,7 +178,6 @@ export type RunEvent =
       runId: string;
       agentName: string;
       assignmentSourcePath: string | null;
-      assignmentPath: string;
       name: string | null;
       cwd: string;
       sessionIndex: number | null;
@@ -356,7 +353,6 @@ function buildResumeSessionManifest(
     unrestricted: boolean;
     cwd: string;
     timeoutSec: number;
-    assignmentPath: string;
     workspaceDir: string;
     maxAttemptsPerSession: number;
     execution: RunExecution;
@@ -374,7 +370,6 @@ function buildResumeSessionManifest(
     unrestricted: overrides.unrestricted,
     cwd: overrides.cwd,
     timeoutSec: overrides.timeoutSec,
-    assignmentPath: overrides.assignmentPath,
     workspaceDir: overrides.workspaceDir,
     endedAt: null,
     status: "running",
@@ -481,12 +476,13 @@ function copySeedAttachments(sourceManifest: RunManifest, targetManifest: RunMan
   }
 }
 
-function copyFrozenAssignmentSeed(sourceManifest: RunManifest, targetAssignmentPath: string): void {
+function copyFrozenAssignmentSeed(sourceManifest: RunManifest, targetWorkspaceDir: string): void {
   if (sourceManifest.assignment === null) {
     return;
   }
+  const targetAssignmentPath = workspaceAssignmentPath(targetWorkspaceDir);
   mkdirSync(dirname(targetAssignmentPath), { recursive: true });
-  copyFileSync(sourceManifest.assignmentPath, targetAssignmentPath);
+  copyFileSync(workspaceAssignmentPath(sourceManifest.workspaceDir), targetAssignmentPath);
 }
 
 function copyFrozenAgentSeed(sourceManifest: RunManifest, targetWorkspaceDir: string): void {
@@ -507,10 +503,9 @@ function buildRecurringCloneManifest(params: {
   const seed = sourceManifest.resetSeed;
   const runId = shortId();
   const workspaceDir = resolveRunWorkspaceDirForRepo(sourceManifest.repo, runId);
-  const assignmentPath = workspaceAssignmentPath(workspaceDir);
   const finalTasks = cloneTaskSnapshotRecord(seed.finalTasks);
   return {
-    schemaVersion: 13,
+    schemaVersion: 14,
     runId,
     repo: sourceManifest.repo,
     agent: {
@@ -522,8 +517,8 @@ function buildRecurringCloneManifest(params: {
       sourceManifest.assignment === null
         ? null
         : {
-            ...sourceManifest.assignment,
-            workspacePath: assignmentPath,
+            name: sourceManifest.assignment.name,
+            sourcePath: sourceManifest.assignment.sourcePath,
           },
     backend: seed.backend,
     model: seed.model,
@@ -539,7 +534,6 @@ function buildRecurringCloneManifest(params: {
     cwd: seed.cwd,
     lockedFields: [...seed.lockedFields],
     timeoutSec: seed.timeoutSec,
-    assignmentPath,
     workspaceDir,
     startedAt: now,
     endedAt: null,
@@ -959,14 +953,12 @@ function validateRequiredVars(
 
 function buildInjectedVars(params: {
   runtimeVars: Record<string, unknown>;
-  assignmentPath: string;
   runId: string;
   cwd: string;
   assignmentName: string | undefined;
 }): Record<string, unknown> {
   return {
     ...params.runtimeVars,
-    assignment_path: params.assignmentPath,
     run_id: params.runId,
     cwd: params.cwd,
     config_dir: resolveTaskRunnerConfigDir(),
@@ -1420,11 +1412,10 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const workspaceDir =
     reusingWorkspace && resume ? resume.workspaceDir : resolveRunWorkspaceDirForRepo(repo, runId);
   mkdirSync(workspaceDir, { recursive: true });
-  const assignmentPath = workspaceAssignmentPath(workspaceDir);
+  const assignmentSeedPath = workspaceAssignmentPath(workspaceDir);
   const assignmentName = loadedAssignment?.config.name ?? resume?.manifest.assignment?.name;
   let injectedVars = buildInjectedVars({
     runtimeVars,
-    assignmentPath,
     runId,
     cwd,
     assignmentName,
@@ -1503,7 +1494,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       ]),
     );
     const prepareManifest: RunManifest = {
-      schemaVersion: 13,
+      schemaVersion: 14,
       runId,
       repo,
       agent: {
@@ -1516,7 +1507,6 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         ? {
             name: loadedAssignment.config.name,
             sourcePath: loadedAssignment.sourcePath,
-            workspacePath: assignmentPath,
           }
         : null,
       backend: effectiveBackendId,
@@ -1533,7 +1523,6 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       cwd,
       lockedFields: initialLockedFields,
       timeoutSec,
-      assignmentPath,
       workspaceDir,
       startedAt: new Date().toISOString(),
       endedAt: null,
@@ -1621,7 +1610,6 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     validateRequiredVars(varsSchema, runtimeVars, "prepare");
     injectedVars = buildInjectedVars({
       runtimeVars,
-      assignmentPath,
       runId,
       cwd,
       assignmentName,
@@ -1631,7 +1619,6 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       tasks,
       buildInjectedVars({
         runtimeVars: resolvedVars.values,
-        assignmentPath,
         runId,
         cwd: prepareManifest.cwd,
         assignmentName,
@@ -1717,7 +1704,6 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       unrestricted,
       cwd,
       timeoutSec,
-      assignmentPath,
       workspaceDir,
       maxAttemptsPerSession,
       execution,
@@ -1760,7 +1746,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     const frozenCallerInstructions =
       rawCallerInstructions.length > 0 ? interpolate(rawCallerInstructions, injectedVars) : null;
     manifest = {
-      schemaVersion: 13,
+      schemaVersion: 14,
       runId,
       repo,
       agent: {
@@ -1777,7 +1763,6 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         ? {
             name: loadedAssignment.config.name,
             sourcePath: loadedAssignment.sourcePath,
-            workspacePath: assignmentPath,
           }
         : null,
       backend: effectiveBackendId,
@@ -1794,7 +1779,6 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       cwd,
       lockedFields: [...(hookLockedFields ?? frozenLockedFields)],
       timeoutSec,
-      assignmentPath,
       workspaceDir,
       startedAt: now,
       endedAt: null,
@@ -1869,14 +1853,12 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         totalSessionCount: 0,
         tasksCompleted: 0,
         tasksTotal: tasks.size,
-        assignmentPath,
         tasks: Array.from(tasks.values()),
         runId,
       },
       exitCode: 0,
       attemptTranscripts: [],
       runId,
-      assignmentPath,
       workspaceDir,
       manifest,
     };
@@ -1887,14 +1869,18 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     rmSync(`${workspaceDir}/attachments`, { recursive: true, force: true });
   }
 
-  if (loadedAssignment?.sourcePath) {
-    copyFileSync(loadedAssignment.sourcePath, `${workspaceDir}/assignment-seed.md`);
+  if ((resume === undefined || isReinitialize) && loadedAssignment?.sourcePath) {
+    if (loadedAssignment.sourcePath !== assignmentSeedPath) {
+      copyFileSync(loadedAssignment.sourcePath, assignmentSeedPath);
+    }
   } else if (isReinitialize) {
-    rmSync(`${workspaceDir}/assignment-seed.md`, { force: true });
+    rmSync(assignmentSeedPath, { force: true });
   }
 
   if ((resume === undefined || isReinitialize) && loaded.sourcePath) {
-    copyFileSync(loaded.sourcePath, workspaceAgentPath(workspaceDir));
+    if (loaded.sourcePath !== workspaceAgentPath(workspaceDir)) {
+      copyFileSync(loaded.sourcePath, workspaceAgentPath(workspaceDir));
+    }
   } else if (isReinitialize) {
     rmSync(workspaceAgentPath(workspaceDir), { force: true });
   }
@@ -1941,7 +1927,6 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       runId,
       agentName: agentConfig.name,
       assignmentSourcePath: loadedAssignment?.sourcePath ?? null,
-      assignmentPath,
       name,
       cwd,
       passive: isPassive,
@@ -1957,14 +1942,12 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         totalSessionCount: 0,
         tasksCompleted: 0,
         tasksTotal: tasks.size,
-        assignmentPath,
         tasks: Array.from(tasks.values()),
         runId,
       },
       exitCode: 0,
       attemptTranscripts: [],
       runId,
-      assignmentPath,
       workspaceDir,
       manifest,
     };
@@ -2004,7 +1987,6 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
           unrestricted,
           cwd,
           timeoutSec,
-          assignmentPath,
           workspaceDir,
           maxAttemptsPerSession,
           execution,
@@ -2095,7 +2077,6 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     runId,
     agentName: agentConfig.name,
     assignmentSourcePath: loadedAssignment?.sourcePath ?? null,
-    assignmentPath,
     name,
     cwd,
     sessionIndex: isResume ? sessionIndex : null,
@@ -2661,7 +2642,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       });
       mkdirSync(cloneManifest.workspaceDir, { recursive: true });
       copyFrozenAgentSeed(latest, cloneManifest.workspaceDir);
-      copyFrozenAssignmentSeed(latest, cloneManifest.assignmentPath);
+      copyFrozenAssignmentSeed(latest, cloneManifest.workspaceDir);
       copySeedAttachments(latest, cloneManifest);
       writeManifest(cloneManifest.workspaceDir, cloneManifest);
       latest.schedule = null;
@@ -2754,7 +2735,6 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     totalSessionCount: manifest.totalSessionCount,
     tasksCompleted,
     tasksTotal: orderedTasks.length,
-    assignmentPath,
     tasks: Array.from(tasks.values()),
     runId,
   };
@@ -2769,7 +2749,6 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     exitCode: finalTerminal.exitCode,
     attemptTranscripts,
     runId,
-    assignmentPath,
     workspaceDir,
     manifest,
   };

@@ -4,6 +4,13 @@
 
 ### Breaking Changes
 
+- Manifest schema version is now `14`. Run manifests, status DTOs, daemon
+  responses, web fixtures, hook contexts, and runtime interpolation no
+  longer expose assignment seed path fields, including the
+  `{{assignment_path}}` template variable. Assignment-backed runs still
+  write `assignment-seed.md` as an internal workspace audit snapshot; use
+  `scripts/migrate-manifests-v14.mjs` before resuming schema v13 runs.
+  ([#109](https://github.com/kcosr/task-runner/pull/109))
 - Manifest schema version is now `13`. Runs now freeze selected
   per-backend argv extras in `manifest.resolvedBackendArgs` and
   `manifest.resetSeed.resolvedBackendArgs`; use
@@ -50,8 +57,7 @@
   `hookState`, `hookAudits`) into the manifest and reset seed, and older
   pre-hook runs must be recreated or upgraded out-of-band before resume.
   Schema v9 also freezes workspace assignment capture at
-  `assignment-seed.md` for both `assignmentPath` and
-  `assignment.workspacePath`.
+  `assignment-seed.md`.
   ([#66](https://github.com/kcosr/task-runner/pull/66),
   [#68](https://github.com/kcosr/task-runner/pull/68))
 - Config-time `${...}` interpolation in prose-like definition fields now

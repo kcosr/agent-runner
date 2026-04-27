@@ -22,6 +22,7 @@ import { serveDaemon } from "../apps/cli/dist/daemon/server.js";
 import { streamEvents } from "../apps/cli/dist/daemon/sse.js";
 import { getRun as getRunDetail } from "../packages/core/dist/app/service.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
+import { ResumeError } from "../packages/core/dist/core/run/manifest.js";
 import { runAgent } from "../packages/core/dist/core/run/run-loop.js";
 import { withTaskStateLock } from "../packages/core/dist/core/run/workspace-state.js";
 import { sharedRuntimeEnv, withEnv } from "./helpers/runtime-paths.mjs";
@@ -206,7 +207,6 @@ function emitRunStarted(emitEvent, runId, cwd) {
     runId,
     agentName: "daemon-agent",
     assignmentSourcePath: null,
-    assignmentPath: "/tmp/fake/assignment-seed.md",
     name: "daemon-work",
     cwd,
     sessionIndex: 0,
@@ -224,7 +224,6 @@ function emitRunFinished(emitEvent, runId, status = "success") {
       totalSessionCount: 1,
       tasksCompleted: 1,
       tasksTotal: 1,
-      assignmentPath: "/tmp/fake/assignment-seed.md",
       tasks: [],
       runId,
     },
@@ -987,6 +986,8 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
       const detail = await httpJson(httpBaseUrl, `/api/runs/${init.runId}`);
       assert.equal(detail.status, 200);
       assert.equal(detail.body.run.assignment.name, "daemon-work");
+      assert.equal("assignmentPath" in detail.body.run, false);
+      assert.equal("workspacePath" in detail.body.run.assignment, false);
       assert.equal(detail.body.run.name, null);
       assert.equal(detail.body.run.status, "initialized");
       assert.equal(detail.body.run.effectiveStatus, "initialized");
@@ -1680,7 +1681,6 @@ test("daemon run projections expose explicit abort capability from local ownersh
         archivedAt: null,
         isLive: true,
         workspaceDir: "/tmp/fake",
-        assignmentPath: "/tmp/fake/assignment-seed.md",
         agent: {
           name: "daemon-agent",
           sourcePath: null,
@@ -1688,7 +1688,6 @@ test("daemon run projections expose explicit abort capability from local ownersh
         assignment: {
           name: "daemon-work",
           sourcePath: "/tmp/fake/source.md",
-          workspacePath: "/tmp/fake/assignment-seed.md",
         },
         backend: "codex",
         model: "gpt-5.4",
@@ -1795,7 +1794,6 @@ test("daemon run projections expose explicit abort capability from local ownersh
         runId,
         agentName: "daemon-agent",
         assignmentSourcePath: null,
-        assignmentPath: "/tmp/fake/assignment-seed.md",
         name: "Daemon-owned run",
         cwd: "/tmp/fake",
         sessionIndex: 0,
@@ -1823,7 +1821,6 @@ test("daemon run projections expose explicit abort capability from local ownersh
                 totalSessionCount: 1,
                 tasksCompleted: 0,
                 tasksTotal: 1,
-                assignmentPath: "/tmp/fake/assignment-seed.md",
                 tasks: [],
                 runId,
               },
@@ -1889,7 +1886,6 @@ test("daemon projects active run detail as live while it owns the run", async ()
         archivedAt: null,
         isLive: false,
         workspaceDir: "/tmp/fake",
-        assignmentPath: "/tmp/fake/assignment-seed.md",
         agent: {
           name: "daemon-agent",
           sourcePath: null,
@@ -1897,7 +1893,6 @@ test("daemon projects active run detail as live while it owns the run", async ()
         assignment: {
           name: "daemon-work",
           sourcePath: "/tmp/fake/source.md",
-          workspacePath: "/tmp/fake/assignment-seed.md",
         },
         backend: "codex",
         model: "gpt-5.4",
@@ -2008,7 +2003,6 @@ test("daemon projects active run detail as live while it owns the run", async ()
         runId,
         agentName: "daemon-agent",
         assignmentSourcePath: null,
-        assignmentPath: "/tmp/fake/assignment-seed.md",
         name: "Daemon live detail",
         cwd: process.cwd(),
         sessionIndex: 0,
@@ -2029,7 +2023,6 @@ test("daemon projects active run detail as live while it owns the run", async ()
                 totalSessionCount: 1,
                 tasksCompleted: 0,
                 tasksTotal: 1,
-                assignmentPath: "/tmp/fake/assignment-seed.md",
                 tasks: [],
                 runId,
               },
@@ -2098,7 +2091,6 @@ test("daemon HTTP projections preserve hook summary and detail fields", async ()
         archivedAt: null,
         isLive: false,
         workspaceDir: "/tmp/fake",
-        assignmentPath: "/tmp/fake/assignment-seed.md",
         agent: {
           name: "daemon-agent",
           sourcePath: null,
@@ -2264,7 +2256,6 @@ test("daemon subscriptions fan out run events and abort active runs", async () =
         archivedAt: null,
         isLive: status === "running",
         workspaceDir: "/tmp/fake",
-        assignmentPath: "/tmp/fake/assignment-seed.md",
         agent: {
           name: "daemon-agent",
           sourcePath: null,
@@ -2272,7 +2263,6 @@ test("daemon subscriptions fan out run events and abort active runs", async () =
         assignment: {
           name: "daemon-work",
           sourcePath: "/tmp/fake/source.md",
-          workspacePath: "/tmp/fake/assignment-seed.md",
         },
         backend: "codex",
         model: "gpt-5.4",
@@ -2330,7 +2320,6 @@ test("daemon subscriptions fan out run events and abort active runs", async () =
         totalSessionCount: 1,
         tasksCompleted: 0,
         tasksTotal: 0,
-        assignmentPath: "/tmp/fake/assignment-seed.md",
         tasks: [],
         runId,
       };
@@ -2339,7 +2328,6 @@ test("daemon subscriptions fan out run events and abort active runs", async () =
         runId,
         agentName: "daemon-agent",
         assignmentSourcePath: null,
-        assignmentPath: summary.assignmentPath,
         name: "daemon test",
         cwd: process.cwd(),
         sessionIndex: null,
@@ -2421,7 +2409,6 @@ test("daemon republishes summary and detail projections when a run retries", asy
         archivedAt: null,
         isLive: status === "running",
         workspaceDir: "/tmp/fake",
-        assignmentPath: "/tmp/fake/assignment-seed.md",
         agent: {
           name: "daemon-agent",
           sourcePath: null,
@@ -2429,7 +2416,6 @@ test("daemon republishes summary and detail projections when a run retries", asy
         assignment: {
           name: "daemon-work",
           sourcePath: "/tmp/fake/source.md",
-          workspacePath: "/tmp/fake/assignment-seed.md",
         },
         backend: "codex",
         model: "gpt-5.4",
@@ -2532,7 +2518,6 @@ test("daemon republishes summary and detail projections when a run retries", asy
         runId,
         agentName: "daemon-agent",
         assignmentSourcePath: null,
-        assignmentPath: "/tmp/fake/assignment-seed.md",
         name: "daemon retrying test",
         cwd: process.cwd(),
         sessionIndex: null,
@@ -2565,7 +2550,6 @@ test("daemon republishes summary and detail projections when a run retries", asy
           totalSessionCount: 1,
           tasksCompleted: 2,
           tasksTotal: 2,
-          assignmentPath: "/tmp/fake/assignment-seed.md",
           tasks: [],
           runId,
         },
@@ -3470,7 +3454,6 @@ test("daemon scheduler indexes clones created while a run is active", async () =
                 ...sourceManifest,
                 runId: cloneRunId,
                 workspaceDir: cloneWorkspaceDir,
-                assignmentPath: join(cloneWorkspaceDir, "assignment-seed.md"),
                 status: "ready",
                 startedAt: new Date().toISOString(),
                 endedAt: null,
@@ -3843,6 +3826,50 @@ test("daemon note and pin mutations publish summary and detail updates", async (
   });
 });
 
+test("daemon mutation publishing suppresses stale-schema projection failures", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  const projectionError = new ResumeError(
+    "manifest at /tmp/stale/run.json has schemaVersion 13; this version of task-runner requires schemaVersion 14",
+  );
+
+  const server = await serveDaemon(listenUrl, {
+    updateRunNote(target, input) {
+      return {
+        runId: target,
+        note: input.note,
+        changed: true,
+      };
+    },
+    getRunSummary() {
+      throw projectionError;
+    },
+    getRun() {
+      throw projectionError;
+    },
+  });
+  try {
+    const noted = await httpJson(httpBaseUrl, "/api/runs/stale-run/note", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ note: "survives projection miss" }),
+    });
+
+    assert.equal(noted.status, 200);
+    assert.deepEqual(noted.body.result, {
+      runId: "stale-run",
+      note: "survives projection miss",
+      changed: true,
+    });
+
+    const daemon = await httpJson(httpBaseUrl, "/api/daemon");
+    assert.equal(daemon.status, 200);
+  } finally {
+    await server.close();
+  }
+});
+
 test("daemon websocket validates events.subscribe channel and runId rules", async () => {
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
@@ -4028,7 +4055,6 @@ test("daemon SSE streams split summary, detail, and timeline subscriptions", asy
         archivedAt: null,
         isLive: status === "running",
         workspaceDir: "/tmp/fake",
-        assignmentPath: "/tmp/fake/assignment-seed.md",
         agent: {
           name: "daemon-agent",
           sourcePath: null,
@@ -4036,7 +4062,6 @@ test("daemon SSE streams split summary, detail, and timeline subscriptions", asy
         assignment: {
           name: "daemon-work",
           sourcePath: "/tmp/fake/source.md",
-          workspacePath: "/tmp/fake/assignment-seed.md",
         },
         backend: "codex",
         model: "gpt-5.4",
@@ -4151,7 +4176,6 @@ test("daemon SSE streams split summary, detail, and timeline subscriptions", asy
         runId,
         agentName: "daemon-agent",
         assignmentSourcePath: null,
-        assignmentPath: "/tmp/fake/assignment-seed.md",
         name: "daemon sse",
         cwd: process.cwd(),
         sessionIndex: null,
@@ -4181,7 +4205,6 @@ test("daemon SSE streams split summary, detail, and timeline subscriptions", asy
                 totalSessionCount: 1,
                 tasksCompleted: 0,
                 tasksTotal: 0,
-                assignmentPath: "/tmp/fake/assignment-seed.md",
                 tasks: [],
                 runId,
               },
@@ -4279,7 +4302,6 @@ test("daemon serves timeline history and cursored timeline replay over HTTP and 
         archivedAt: null,
         isLive: status === "running",
         workspaceDir: "/tmp/fake",
-        assignmentPath: "/tmp/fake/assignment-seed.md",
         agent: {
           name: "daemon-agent",
           sourcePath: null,
@@ -4287,7 +4309,6 @@ test("daemon serves timeline history and cursored timeline replay over HTTP and 
         assignment: {
           name: "daemon-work",
           sourcePath: "/tmp/fake/source.md",
-          workspacePath: "/tmp/fake/assignment-seed.md",
         },
         backend: "codex",
         model: "gpt-5.4",
@@ -4391,7 +4412,6 @@ test("daemon serves timeline history and cursored timeline replay over HTTP and 
         runId,
         agentName: "daemon-agent",
         assignmentSourcePath: null,
-        assignmentPath: "/tmp/fake/assignment-seed.md",
         name: "daemon timeline history",
         cwd: process.cwd(),
         sessionIndex: 1,
@@ -4423,7 +4443,6 @@ test("daemon serves timeline history and cursored timeline replay over HTTP and 
                 totalSessionCount: 2,
                 tasksCompleted: 1,
                 tasksTotal: 1,
-                assignmentPath: "/tmp/fake/assignment-seed.md",
                 tasks: [],
                 runId,
               },
@@ -4521,7 +4540,6 @@ test("daemon serves audit history and cursored audit replay over HTTP and websoc
         archivedAt: null,
         isLive: status === "running",
         workspaceDir: "/tmp/fake",
-        assignmentPath: "/tmp/fake/assignment-seed.md",
         agent: {
           name: "daemon-agent",
           sourcePath: null,
@@ -4647,7 +4665,6 @@ test("daemon serves audit history and cursored audit replay over HTTP and websoc
         runId,
         agentName: "daemon-agent",
         assignmentSourcePath: null,
-        assignmentPath: "/tmp/fake/assignment-seed.md",
         name: "daemon audit history",
         cwd: process.cwd(),
         sessionIndex: 0,
@@ -4708,7 +4725,6 @@ test("daemon serves audit history and cursored audit replay over HTTP and websoc
                 totalSessionCount: 1,
                 tasksCompleted: 1,
                 tasksTotal: 1,
-                assignmentPath: "/tmp/fake/assignment-seed.md",
                 tasks: [],
                 runId,
               },
@@ -4829,7 +4845,6 @@ test("daemon close aborts active runs and releases connected clients", async () 
         runId,
         agentName: "daemon-agent",
         assignmentSourcePath: null,
-        assignmentPath: "/tmp/fake/assignment-seed.md",
         name: "daemon close",
         cwd: process.cwd(),
         sessionIndex: null,
@@ -4850,7 +4865,6 @@ test("daemon close aborts active runs and releases connected clients", async () 
                 totalSessionCount: 1,
                 tasksCompleted: 0,
                 tasksTotal: 0,
-                assignmentPath: "/tmp/fake/assignment-seed.md",
                 tasks: [],
                 runId,
               },
@@ -6641,7 +6655,6 @@ test("daemon-target CLI surfaces Ctrl+C cancel failures instead of exiting as a 
                 runId: "daemon-cli-run",
                 agentName: "daemon-agent",
                 assignmentSourcePath: null,
-                assignmentPath: "/tmp/fake/assignment-seed.md",
                 name: "daemon cli",
                 cwd: process.cwd(),
                 sessionIndex: 1,
@@ -6776,7 +6789,6 @@ test("daemon-target CLI force-exits on a second Ctrl+C while daemon cancel is st
                 runId: "daemon-cli-run",
                 agentName: "daemon-agent",
                 assignmentSourcePath: null,
-                assignmentPath: "/tmp/fake/assignment-seed.md",
                 name: "daemon cli",
                 cwd: process.cwd(),
                 sessionIndex: 1,

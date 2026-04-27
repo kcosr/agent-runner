@@ -18,6 +18,7 @@ import {
   readManifest,
   resolveResumeTarget,
   workspaceAgentPath,
+  workspaceAssignmentPath,
   writeManifest,
 } from "./manifest.js";
 import {
@@ -118,7 +119,7 @@ function buildLoadedAssignment(
   if (manifest.assignment === null) {
     return undefined;
   }
-  const loaded = loadAssignmentConfig(manifest.assignmentPath);
+  const loaded = loadAssignmentConfig(workspaceAssignmentPath(manifest.workspaceDir));
   const vars = Object.fromEntries(
     Object.entries(loaded.config.vars).map(([key, def]) => [key, withCliSource(def)]),
   );
@@ -255,12 +256,13 @@ function persistReconfiguredManifest(
   emitAuditEnvelope: AuditEnvelopeEmitter | undefined,
   auditFields: { changedVarKeys: string[]; messageChanged: boolean },
 ): void {
+  const assignmentSeedPath = workspaceAssignmentPath(manifest.workspaceDir);
   if (loadedAssignment) {
-    if (loadedAssignment.sourcePath !== manifest.assignmentPath) {
-      copyFileSync(loadedAssignment.sourcePath, manifest.assignmentPath);
+    if (loadedAssignment.sourcePath !== assignmentSeedPath) {
+      copyFileSync(loadedAssignment.sourcePath, assignmentSeedPath);
     }
   } else {
-    rmSync(manifest.assignmentPath, { force: true });
+    rmSync(assignmentSeedPath, { force: true });
   }
 
   writeManifest(resolved.workspaceDir, manifest);

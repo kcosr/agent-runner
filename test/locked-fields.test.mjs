@@ -27,7 +27,7 @@ tasks:
   - id: t1
     title: First
 ---
-Work on the repo. Plan at {{assignment_path}}.
+Work on the repo. Plan at {{cwd}}.
 `;
 
 // ─── agent with default message on the assignment ───────────────────────────
@@ -49,7 +49,7 @@ tasks:
   - id: t1
     title: First
 ---
-Work on the repo. Plan at {{assignment_path}}.
+Work on the repo. Plan at {{cwd}}.
 `;
 
 // ─── agent that locks `message`; assignment carries the default value ──────
@@ -72,7 +72,7 @@ tasks:
   - id: t1
     title: First
 ---
-Work on the repo. Plan at {{assignment_path}}.
+Work on the repo. Plan at {{cwd}}.
 `;
 
 function tempDir() {
@@ -244,7 +244,7 @@ tasks:
   - id: t1
     title: First
 ---
-Work on the repo. Plan at {{assignment_path}}.
+Work on the repo. Plan at {{cwd}}.
 `,
   );
   const outcome = await runIn(dir, "plain", undefined, "plain-work");

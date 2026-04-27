@@ -191,7 +191,6 @@ describe("applyEnvelope", () => {
             totalSessionCount: 1,
             tasksCompleted: 1,
             tasksTotal: 1,
-            assignmentPath: "/tmp/assignment.md",
             tasks: [],
             runId: "run-1",
           },

@@ -429,7 +429,6 @@ function attemptContext(
     assignment: {
       name: state.manifest.assignment?.name ?? "",
       sourcePath: state.manifest.assignment?.sourcePath ?? null,
-      workspacePath: state.manifest.assignment?.workspacePath ?? null,
     },
     run: {
       runId: state.manifest.runId,
@@ -440,7 +439,6 @@ function attemptContext(
       effort: state.manifest.effort,
       cwd: state.manifest.cwd,
       workspaceDir: state.manifest.workspaceDir,
-      assignmentPath: state.manifest.assignmentPath,
       name: state.manifest.name,
       note: state.manifest.note,
       pinned: state.manifest.pinned,
