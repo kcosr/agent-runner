@@ -7,7 +7,9 @@ import type {
 import type { RunAuditHistory } from "@task-runner/core/contracts/events.js";
 import type {
   RunBackendSessionResult,
+  RunDependencyRef,
   RunDetail,
+  RunGroupResult,
   RunNoteResult,
   RunPinnedResult,
   RunSessionSummary,
@@ -73,6 +75,7 @@ export function renderRunStatus(detail: RunDetail): string {
   if (detail.parentRunId) {
     lines.push(`Parent run: ${detail.parentRunId}`);
   }
+  lines.push(`Run group: ${detail.runGroupId}`);
   lines.push(`Repo: ${detail.repo}`);
   lines.push(`Cwd: ${detail.cwd}`);
   lines.push(`Workspace: ${detail.workspaceDir}`);
@@ -124,10 +127,21 @@ export function renderRunStatus(detail: RunDetail): string {
     lines.push("");
     lines.push("Depends on:");
     for (const dependency of detail.dependencies) {
-      const status = dependency.missing
-        ? "missing"
-        : `${dependency.effectiveStatus ?? dependency.status}${dependency.satisfied ? " satisfied" : " not-ready"}`;
-      lines.push(`  - ${dependency.runId} [${status}] ${dependency.name ?? "Unnamed"}`);
+      if (dependency.type === "run") {
+        const status = dependency.missing
+          ? "missing"
+          : `${dependency.effectiveStatus ?? dependency.status}${dependency.satisfied ? " satisfied" : " not-ready"}`;
+        lines.push(`  - run ${dependency.runId} [${status}] ${dependency.name ?? "Unnamed"}`);
+      } else {
+        const status = dependency.missing
+          ? "missing"
+          : dependency.satisfied
+            ? "satisfied"
+            : "not-ready";
+        lines.push(
+          `  - group ${dependency.groupId} [${status}; ${dependency.successful}/${dependency.total} successful, ${dependency.unsatisfied} unsatisfied, ${dependency.archivedExcluded} archived excluded]`,
+        );
+      }
     }
   }
 
@@ -136,7 +150,7 @@ export function renderRunStatus(detail: RunDetail): string {
     lines.push("Required by:");
     for (const dependent of detail.dependents) {
       lines.push(
-        `  - ${dependent.runId} [${dependent.effectiveStatus ?? dependent.status}] ${dependent.name ?? "Unnamed"}`,
+        `  - ${dependent.via === "group" ? `group ${dependent.dependencyGroupId} -> ` : ""}${dependent.runId} [${dependent.effectiveStatus ?? dependent.status}] ${dependent.name ?? "Unnamed"}`,
       );
     }
   }
@@ -495,18 +509,34 @@ export function renderRunClearBackendSession(result: RunBackendSessionResult): s
     : `task-runner: run ${result.runId} already has no backend session\n`;
 }
 
+export function renderRunSetGroup(result: RunGroupResult): string {
+  return result.changed
+    ? `task-runner: set group for run ${result.runId} to ${result.runGroupId}\n`
+    : `task-runner: run ${result.runId} is already in group ${result.runGroupId}\n`;
+}
+
+export function renderRunClearGroup(result: RunGroupResult): string {
+  return result.changed
+    ? `task-runner: cleared group for run ${result.runId}; run is now in singleton group ${result.runGroupId}\n`
+    : `task-runner: run ${result.runId} is already in singleton group ${result.runGroupId}\n`;
+}
+
+function dependencyLabel(dependency: RunDependencyRef): string {
+  return dependency.type === "run" ? dependency.runId : dependency.groupId;
+}
+
 export function renderRunAddDependency(
   result: RunDependenciesResult,
-  dependencyRunId: string,
+  dependency: RunDependencyRef,
 ): string {
-  return `task-runner: added dependency ${dependencyRunId} to run ${result.runId}\n`;
+  return `task-runner: added ${dependency.type} dependency ${dependencyLabel(dependency)} to run ${result.runId}\n`;
 }
 
 export function renderRunRemoveDependency(
   result: RunDependenciesResult,
-  dependencyRunId: string,
+  dependency: RunDependencyRef,
 ): string {
-  return `task-runner: removed dependency ${dependencyRunId} from run ${result.runId}\n`;
+  return `task-runner: removed ${dependency.type} dependency ${dependencyLabel(dependency)} from run ${result.runId}\n`;
 }
 
 export function renderRunClearDependencies(result: RunDependenciesResult): string {

@@ -18,6 +18,7 @@ import {
   runDeleteResultSchema,
   runDependenciesResultSchema,
   runDetailSchema,
+  runGroupResultSchema,
   runNameResultSchema,
   runNoteResultSchema,
   runPinnedResultSchema,
@@ -30,7 +31,9 @@ import type {
   RunBackendSessionResult,
   RunDeleteResult,
   RunDependenciesResult,
+  RunDependencyRef,
   RunDetail,
+  RunGroupResult,
   RunNameResult,
   RunNoteResult,
   RunPinnedResult,
@@ -67,6 +70,7 @@ interface AttachmentContentResult {
 type RunsStartRequest = Pick<
   StartRunRequest,
   | "runId"
+  | "runGroupId"
   | "agent"
   | "assignment"
   | "definitionCwd"
@@ -82,7 +86,7 @@ interface RequestOptions {
 }
 
 interface ListRunsOptions extends RequestOptions {
-  familyOf?: string | null;
+  runGroupId?: string | null;
 }
 
 interface DefinitionRequestOptions extends RequestOptions {
@@ -364,6 +368,19 @@ async function readDependenciesResult(
   );
 }
 
+async function readGroupResult(response: Response, label: string): Promise<RunGroupResult> {
+  if (!response.ok) {
+    return await readError(response);
+  }
+  return parseField(
+    await parseResponseJson(response, label),
+    response.status,
+    "result",
+    runGroupResultSchema,
+    label,
+  );
+}
+
 async function readAttachmentList(response: Response): Promise<AttachmentListEntry[]> {
   if (!response.ok) {
     return await readError(response);
@@ -615,8 +632,8 @@ export function createApiClient(config: AppRuntimeConfig) {
     },
     async listRuns(options: ListRunsOptions = {}): Promise<RunSummary[]> {
       const params = new URLSearchParams({ includeArchived: "true" });
-      if (options.familyOf) {
-        params.set("familyOf", options.familyOf);
+      if (options.runGroupId) {
+        params.set("runGroupId", options.runGroupId);
       }
       const response = await fetch(joinPath(config.apiBasePath, `/runs?${params.toString()}`), {
         headers: { accept: "application/json" },
@@ -959,7 +976,34 @@ export function createApiClient(config: AppRuntimeConfig) {
       );
       return await readBackendSessionResult(response, "Clear backend session");
     },
-    async addDependency(runId: string, dependencyRunId: string): Promise<RunDependenciesResult> {
+    async setRunGroup(runId: string, runGroupId: string): Promise<RunGroupResult> {
+      const response = await fetch(
+        joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/group`),
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json",
+          },
+          body: JSON.stringify({ runGroupId }),
+        },
+      );
+      return await readGroupResult(response, "Set run group");
+    },
+    async clearRunGroup(runId: string): Promise<RunGroupResult> {
+      const response = await fetch(
+        joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/group/clear`),
+        {
+          method: "POST",
+          headers: { accept: "application/json" },
+        },
+      );
+      return await readGroupResult(response, "Clear run group");
+    },
+    async addDependency(
+      runId: string,
+      dependency: RunDependencyRef,
+    ): Promise<RunDependenciesResult> {
       const response = await fetch(
         joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/dependencies`),
         {
@@ -968,20 +1012,24 @@ export function createApiClient(config: AppRuntimeConfig) {
             "content-type": "application/json",
             accept: "application/json",
           },
-          body: JSON.stringify({ dependencyRunId }),
+          body: JSON.stringify(dependency),
         },
       );
       return await readDependenciesResult(response, "Add dependency");
     },
-    async removeDependency(runId: string, dependencyRunId: string): Promise<RunDependenciesResult> {
+    async removeDependency(
+      runId: string,
+      dependency: RunDependencyRef,
+    ): Promise<RunDependenciesResult> {
       const response = await fetch(
-        joinPath(
-          config.apiBasePath,
-          `/runs/${encodeURIComponent(runId)}/dependencies/${encodeURIComponent(dependencyRunId)}`,
-        ),
+        joinPath(config.apiBasePath, `/runs/${encodeURIComponent(runId)}/dependencies`),
         {
           method: "DELETE",
-          headers: { accept: "application/json" },
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json",
+          },
+          body: JSON.stringify(dependency),
         },
       );
       return await readDependenciesResult(response, "Remove dependency");

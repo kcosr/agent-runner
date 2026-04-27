@@ -70,6 +70,12 @@ If every authored source fails, task-runner then applies `default`, then
 `TASK_RUNNER_PARENT_RUN_ID`, so descendant runs can inherit parent vars
 without repeating `--var` flags.
 
+Parent lineage is separate from run grouping. `parentRunId` is the chain
+used by `sources: [parent]`; `runGroupId` controls group-scoped
+attachments, group filters, and group dependencies. Nested invocations
+also receive `TASK_RUNNER_RUN_GROUP_ID` so children join the same run
+group by default, but variable inheritance still follows parent lineage.
+
 Prepare hooks run after the initial resolution pass and can add or mutate
 runtime vars such as `worktree_path` and validated base refs such as
 `worktree_base_ref`. Fresh-run interpolation is then recomputed against

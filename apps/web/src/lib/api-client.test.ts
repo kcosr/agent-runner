@@ -10,6 +10,7 @@ function makeRunDetail(overrides: Record<string, unknown> = {}) {
   return {
     runId: "run-1",
     parentRunId: null,
+    runGroupId: "run-1",
     repo: "task-runner",
     status: "initialized",
     effectiveStatus: "initialized",
@@ -105,7 +106,7 @@ describe("api client", () => {
                 {
                   runId: "run-1",
                   parentRunId: null,
-                  familyRootRunId: null,
+                  runGroupId: "run-1",
                   repo: "task-runner",
                   status: "running",
                   archivedAt: null,
@@ -211,7 +212,7 @@ describe("api client", () => {
                 {
                   runId: "run-1",
                   parentRunId: null,
-                  familyRootRunId: "run-root",
+                  runGroupId: "run-root",
                   repo: "task-runner",
                   status: "initialized",
                   effectiveStatus: "running",
@@ -305,7 +306,7 @@ describe("api client", () => {
     await expect(api.listRuns()).resolves.toEqual([
       expect.objectContaining({
         runId: "run-1",
-        familyRootRunId: "run-root",
+        runGroupId: "run-root",
         status: "initialized",
         effectiveStatus: "running",
         notePresent: true,
@@ -325,7 +326,7 @@ describe("api client", () => {
     ]);
   });
 
-  it("adds the optional familyOf query parameter to run-list requests", async () => {
+  it("adds the optional runGroupId query parameter to run-list requests", async () => {
     const fetchMock = vi.fn(
       async () =>
         new Response(
@@ -338,10 +339,10 @@ describe("api client", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const api = createApiClient(config);
-    await expect(api.listRuns({ familyOf: "run-root" })).resolves.toEqual([]);
+    await expect(api.listRuns({ runGroupId: "run-root" })).resolves.toEqual([]);
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/runs?includeArchived=true&familyOf=run-root",
+      "/api/runs?includeArchived=true&runGroupId=run-root",
       expect.objectContaining({
         headers: { accept: "application/json" },
       }),
@@ -356,6 +357,7 @@ describe("api client", () => {
             run: {
               runId: "run-1",
               parentRunId: null,
+              runGroupId: "run-1",
               repo: "task-runner",
               status: "running",
               effectiveStatus: "running",
@@ -491,6 +493,7 @@ describe("api client", () => {
               run: {
                 runId: "run-1",
                 parentRunId: null,
+                runGroupId: "run-1",
                 repo: "task-runner",
                 status: "initialized",
                 effectiveStatus: "initialized",
@@ -607,6 +610,7 @@ describe("api client", () => {
               run: {
                 runId: "run-1",
                 parentRunId: null,
+                runGroupId: "run-1",
                 repo: "task-runner",
                 status: "initialized",
                 effectiveStatus: "initialized",
@@ -761,6 +765,7 @@ describe("api client", () => {
             run: {
               runId: "run-1",
               parentRunId: null,
+              runGroupId: "run-1",
               repo: "task-runner",
               status: "initialized",
               effectiveStatus: "initialized",
@@ -1276,7 +1281,7 @@ describe("api client", () => {
           JSON.stringify({
             result: {
               runId: "run-1",
-              dependencyRunIds: ["run-2"],
+              dependencies: [{ type: "run", runId: "run-2" }],
               changed: true,
             },
           }),
@@ -1286,19 +1291,21 @@ describe("api client", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const api = createApiClient(config);
-    await expect(api.addDependency("run-1", "run-2")).resolves.toEqual({
+    await expect(api.addDependency("run-1", { type: "run", runId: "run-2" })).resolves.toEqual({
       runId: "run-1",
-      dependencyRunIds: ["run-2"],
+      dependencies: [{ type: "run", runId: "run-2" }],
       changed: true,
     });
-    await expect(api.removeDependency("run-1", "run-2")).resolves.toEqual({
+    await expect(
+      api.removeDependency("run-1", { type: "group", groupId: "group-a" }),
+    ).resolves.toEqual({
       runId: "run-1",
-      dependencyRunIds: ["run-2"],
+      dependencies: [{ type: "run", runId: "run-2" }],
       changed: true,
     });
     await expect(api.clearDependencies("run-1")).resolves.toEqual({
       runId: "run-1",
-      dependencyRunIds: ["run-2"],
+      dependencies: [{ type: "run", runId: "run-2" }],
       changed: true,
     });
 
@@ -1307,19 +1314,68 @@ describe("api client", () => {
       "/api/runs/run-1/dependencies",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ dependencyRunId: "run-2" }),
+        body: JSON.stringify({ type: "run", runId: "run-2" }),
       }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      "/api/runs/run-1/dependencies/run-2",
+      "/api/runs/run-1/dependencies",
       expect.objectContaining({
         method: "DELETE",
+        body: JSON.stringify({ type: "group", groupId: "group-a" }),
       }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       3,
       "/api/runs/run-1/dependencies/clear",
+      expect.objectContaining({
+        method: "POST",
+      }),
+    );
+  });
+
+  it("sets and clears run groups through the HTTP API", async () => {
+    const fetchMock = vi.fn(
+      async (url: string, _init?: RequestInit) =>
+        new Response(
+          JSON.stringify({
+            result: {
+              runId: "run-1",
+              runGroupId: url.endsWith("/clear") ? "run-1" : "group-a",
+              previousRunGroupId: "run-1",
+              changed: true,
+            },
+          }),
+          { status: 200 },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createApiClient(config);
+    await expect(api.setRunGroup("run-1", "group-a")).resolves.toEqual({
+      runId: "run-1",
+      runGroupId: "group-a",
+      previousRunGroupId: "run-1",
+      changed: true,
+    });
+    await expect(api.clearRunGroup("run-1")).resolves.toEqual({
+      runId: "run-1",
+      runGroupId: "run-1",
+      previousRunGroupId: "run-1",
+      changed: true,
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/runs/run-1/group",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ runGroupId: "group-a" }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/runs/run-1/group/clear",
       expect.objectContaining({
         method: "POST",
       }),
@@ -1372,7 +1428,7 @@ describe("api client", () => {
     });
   });
 
-  it("lists attachments with family scope and parses ownerRunId", async () => {
+  it("lists attachments with group scope and parses ownerRunId", async () => {
     const fetchMock = vi.fn(
       async () =>
         new Response(
@@ -1397,14 +1453,14 @@ describe("api client", () => {
 
     const api = createApiClient(config);
 
-    await expect(api.listAttachments("run-1", { scope: "family" })).resolves.toEqual([
+    await expect(api.listAttachments("run-1", { scope: "group" })).resolves.toEqual([
       expect.objectContaining({
         id: "att-1",
         ownerRunId: "run-2",
       }),
     ]);
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/runs/run-1/attachments?scope=family",
+      "/api/runs/run-1/attachments?scope=group",
       expect.objectContaining({
         headers: { accept: "application/json" },
       }),
@@ -1808,6 +1864,7 @@ describe("api client", () => {
             run: {
               runId: "run-1",
               parentRunId: null,
+              runGroupId: "run-1",
               repo: "task-runner",
               status: "initialized",
               effectiveStatus: "initialized",

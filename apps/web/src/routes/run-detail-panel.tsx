@@ -1,6 +1,6 @@
 import type { UseQueryResult } from "@tanstack/react-query";
 import type { AttachmentListEntry } from "@task-runner/core/contracts/attachments.js";
-import type { RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
+import type { RunDependencyRef, RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
 import type { CSSProperties } from "react";
 import { AttachmentPreviewDrawer } from "../components/attachment-preview-drawer.js";
 import { ResumeRunDialog } from "../components/resume-run-dialog.js";
@@ -43,6 +43,8 @@ export function RunDetailPanel({
   onResumeMessageExpandedChange,
   onSetNote,
   onSetBackendSession,
+  onSetGroup,
+  onClearGroup,
   onSetPinned,
   onSetScheduleEnabled,
   onSelectDetailSection,
@@ -61,7 +63,7 @@ export function RunDetailPanel({
   auditState,
   timelineState,
 }: {
-  onAddDependency: (runId: string, dependencyRunId: string) => Promise<void>;
+  onAddDependency: (runId: string, dependency: RunDependencyRef) => Promise<void>;
   actionError?: string;
   actionPending?: RunActionPending;
   drawerFullscreen: boolean;
@@ -82,7 +84,7 @@ export function RunDetailPanel({
   onSelectRun: (runId: string) => void;
   onClearBackendSession: (runId: string) => Promise<void>;
   onClearSchedule: (runId: string) => Promise<void>;
-  onRemoveDependency: (runId: string, dependencyRunId: string) => Promise<void>;
+  onRemoveDependency: (runId: string, dependency: RunDependencyRef) => Promise<void>;
   onRemoveAttachment: (runId: string, attachmentId: string) => Promise<void>;
   onReset: (runId: string) => void;
   onReconfigure: (runId: string, patch: ReconfigureRunPatch) => Promise<void>;
@@ -91,6 +93,8 @@ export function RunDetailPanel({
   onResumeMessageExpandedChange: (expanded: boolean) => void;
   onSetNote: (runId: string, note: string | null) => Promise<void>;
   onSetBackendSession: (runId: string, backendSessionId: string) => Promise<void>;
+  onSetGroup: (runId: string, runGroupId: string) => Promise<void>;
+  onClearGroup: (runId: string) => Promise<void>;
   onSetPinned: (runId: string, pinned: boolean) => Promise<void>;
   onSetScheduleEnabled: (runId: string, enabled: boolean) => Promise<void>;
   onSelectDetailSection: (section: DrawerDetailSection) => void;
@@ -253,7 +257,7 @@ export function RunDetailPanel({
       <RunDetailDrawer
         activeSection={drawerView?.detailSection ?? "tasks"}
         dependencyCandidateRuns={runs}
-        onAddDependency={(dependencyRunId) => onAddDependency(selectedRun.runId, dependencyRunId)}
+        onAddDependency={(dependency) => onAddDependency(selectedRun.runId, dependency)}
         actionError={actionError}
         actionPending={actionPending}
         key={selectedRun.runId}
@@ -271,9 +275,7 @@ export function RunDetailPanel({
         onSelectRun={onSelectRun}
         onClearBackendSession={() => onClearBackendSession(selectedRun.runId)}
         onClearSchedule={() => onClearSchedule(selectedRun.runId)}
-        onRemoveDependency={(dependencyRunId) =>
-          onRemoveDependency(selectedRun.runId, dependencyRunId)
-        }
+        onRemoveDependency={(dependency) => onRemoveDependency(selectedRun.runId, dependency)}
         onRemoveAttachment={(attachmentId) => onRemoveAttachment(selectedRun.runId, attachmentId)}
         onReset={() => onReset(selectedRun.runId)}
         onReconfigure={(patch) => onReconfigure(selectedRun.runId, patch)}
@@ -282,6 +284,8 @@ export function RunDetailPanel({
         onSetBackendSession={(backendSessionId) =>
           onSetBackendSession(selectedRun.runId, backendSessionId)
         }
+        onSetGroup={(runGroupId) => onSetGroup(selectedRun.runId, runGroupId)}
+        onClearGroup={() => onClearGroup(selectedRun.runId)}
         onSetPinned={(pinned) => onSetPinned(selectedRun.runId, pinned)}
         onSetScheduleEnabled={(enabled) => onSetScheduleEnabled(selectedRun.runId, enabled)}
         onSelectSection={onSelectDetailSection}

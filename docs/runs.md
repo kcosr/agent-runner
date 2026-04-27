@@ -11,7 +11,7 @@ ${TASK_RUNNER_STATE_DIR}/runs/<repo>/<run-id>/
 
 ```text
 <workspace>/
-├── run.json               # canonical manifest (schema version 14)
+├── run.json               # canonical manifest (schema version 15)
 ├── run-events.jsonl       # append-only audit history with monotonic cursors
 ├── assignment-seed.md     # only when the run started from an assignment file
 ├── agent-seed.md          # only when the run started from an agent file
@@ -42,7 +42,7 @@ The manifest is the source of truth. Important fields:
 
 | Field | Purpose |
 |-------|---------|
-| `schemaVersion` | currently `14`; older manifests are not silently upgraded |
+| `schemaVersion` | currently `15`; older manifests are not silently upgraded |
 | `runId`, `repo`, `cwd` | identity and scope |
 | `agent` | frozen `{ name, sourcePath, instructions }` |
 | `assignment` | frozen `{ name, sourcePath }` or `null` |
@@ -64,7 +64,8 @@ The manifest is the source of truth. Important fields:
 | `brief` | composed worker handoff, frozen |
 | `callerInstructions` | operator-facing docs, never sent to backend |
 | `backendSessionId` | backend-native resume handle |
-| `dependencyRunIds` | upstream runs that must succeed before execution |
+| `runGroupId` | grouping key for run-group filters, group attachments, and group dependencies |
+| `dependencies` | typed upstream run or group refs that must be satisfied before execution |
 | `parentRunId` | direct lineage edge to the parent run when this run was launched from another run |
 | `attachments` | metadata for files under `attachments/` |
 | `totalAttemptCount`, `attemptRecords` | per-attempt execution log |
@@ -129,6 +130,9 @@ child run automatically freezes `parentRunId` and can inherit parent vars
 through assignment `sources: [parent]`. This is how planner →
 implementer → descendant worktree flows reuse values such as
 `worktree_path` and `worktree_base_ref` without repeating `--var` flags.
+Fresh child runs also inherit the parent's `runGroupId` by default. That
+group controls group-scoped attachments, filtering, and group
+dependencies; it is separate from parent lineage.
 
 ### Init, then execute later
 
@@ -218,7 +222,7 @@ task-runner run brief <run-id>
 task-runner run audit <run-id> [--output-format text|json] [--limit <n>]
 task-runner task list <run-id>
 task-runner task show <run-id> <task-id>
-task-runner attachment list <run-id> [--scope run|family]
+task-runner attachment list <run-id> [--scope run|group]
 ```
 
 - Top-level `status` reports system/environment status and takes no run id.
@@ -228,7 +232,8 @@ task-runner attachment list <run-id> [--scope run|family]
 - `run audit` text output is chronological rendering from the persisted
   audit envelopes.
 - `run status --output-format json` returns the shared `RunDetail` DTO.
-- `RunSummary` and `RunDetail` include `parentRunId` when lineage exists.
+- `RunSummary` and `RunDetail` include `parentRunId` when lineage exists
+  and always include `runGroupId`.
 - `RunSummary` and `RunDetail` include persisted `schedule` plus derived
   `scheduleState`.
 - `RunDetail` includes full `note` plus `pinned`; `RunSummary` includes
@@ -255,8 +260,12 @@ task-runner run pin <id>
 task-runner run unpin <id>
 task-runner run set-backend-session <id> <session-id>   # passive only
 task-runner run clear-backend-session <id>              # passive only
-task-runner run add-dep <id> <dep-run-id>
-task-runner run remove-dep <id> <dep-run-id>
+task-runner run set-group <id> <group-id>
+task-runner run clear-group <id>
+task-runner run add-dep <id> --run <dep-run-id>
+task-runner run add-dep <id> --group <group-id>
+task-runner run remove-dep <id> --run <dep-run-id>
+task-runner run remove-dep <id> --group <group-id>
 task-runner run clear-deps <id>
 task-runner run schedule <id|path> --at <iso>
 task-runner run schedule <id|path> --delay <duration>
@@ -269,13 +278,14 @@ task-runner run schedule clear <id|path>
 ### Reset
 
 `run reset` restores the initialized-state seed from `manifest.resetSeed`
-(model, effort, name, dependencies, timeoutSec, maxAttemptsPerSession,
-backend-specific config, resolved backend args, brief, final task
-snapshot). Attempt and session history, endedAt, exitCode, and the live
-status are cleared. Existing `run-events.jsonl` history is preserved and
-reset appends one more diagnostic record instead of truncating the file.
-Only non-running runs can be reset. `manifest.schedule` is preserved
-across manual reset because it is not part of the reset seed.
+(model, effort, name, run group, dependencies, timeoutSec,
+maxAttemptsPerSession, backend-specific config, resolved backend args,
+brief, final task snapshot). Attempt and session history, endedAt,
+exitCode, and the live status are cleared. Existing `run-events.jsonl`
+history is preserved and reset appends one more diagnostic record instead
+of truncating the file. Only non-running runs can be reset.
+`manifest.schedule` is preserved across manual reset because it is not
+part of the reset seed.
 
 ### Reconfigure
 
@@ -323,6 +333,14 @@ Passive-only metadata mutations. Update `manifest.backendSessionId` without
 changing task state, lifecycle status, attempt history, archive state, or
 dependency projections.
 
+### set-group / clear-group
+
+`run set-group` moves a non-running run into an explicit group and stores
+the same value in `manifest.resetSeed`. `run clear-group` resets a
+non-running run to its singleton group, where `runGroupId` equals
+`runId`. Both mutations are cycle-checked because group membership can
+affect dependency reachability.
+
 ### Dependencies
 
 `add-dep`, `remove-dep`, and `clear-deps` are only allowed on initialized
@@ -336,11 +354,14 @@ task-runner list runs --cwd <path>
 task-runner list runs --repo <name>
 task-runner list runs --global
 task-runner list runs --include-archived
+task-runner list runs --group-id <group-id>
 ```
 
 By default, `list runs` scopes to the caller's exact cwd. `--repo <name>`
 scopes to an exact repo bucket. `--global` lists across all buckets.
-`--include-archived` adds archived runs to any of the above.
+`--include-archived` adds archived runs to any of the above. `--group-id`
+scopes to one run group and is mutually exclusive with `--cwd`, `--repo`,
+and `--global`.
 
 ## Execution modes
 

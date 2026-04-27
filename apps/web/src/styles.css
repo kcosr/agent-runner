@@ -2140,7 +2140,7 @@ body {
   letter-spacing: 0.04em;
 }
 
-.card-family-filter {
+.card-group-filter {
   appearance: none;
   display: inline-flex;
   align-items: center;
@@ -2155,18 +2155,18 @@ body {
   transition: background 120ms, border-color 120ms, color 120ms;
 }
 
-.card-family-filter:hover {
+.card-group-filter:hover {
   border-color: color-mix(in srgb, var(--border) 92%, var(--foreground));
   color: var(--foreground);
 }
 
-.card-family-filter[data-active-filter="true"] {
+.card-group-filter[data-active-filter="true"] {
   border-color: color-mix(in srgb, var(--accent-strong, #2563eb) 24%, var(--border));
   background: color-mix(in srgb, var(--accent) 60%, transparent);
   color: color-mix(in srgb, var(--foreground) 88%, var(--accent-strong, #2563eb));
 }
 
-.card-family-filter svg {
+.card-group-filter svg {
   width: 12px;
   height: 12px;
 }
@@ -2340,6 +2340,12 @@ body {
 
 .meta-edit-row {
   flex-wrap: wrap;
+}
+
+.meta-edit-error {
+  flex: 1 1 100%;
+  color: var(--destructive);
+  font-size: 12px;
 }
 
 .drawer-title-field {

@@ -30,6 +30,7 @@
 export const TASK_RUNNER_CALL_DEPTH_ENV = "TASK_RUNNER_CALL_DEPTH";
 export const TASK_RUNNER_MAX_CALL_DEPTH_ENV = "TASK_RUNNER_MAX_CALL_DEPTH";
 export const TASK_RUNNER_PARENT_RUN_ID_ENV = "TASK_RUNNER_PARENT_RUN_ID";
+export const TASK_RUNNER_RUN_GROUP_ID_ENV = "TASK_RUNNER_RUN_GROUP_ID";
 export const DEFAULT_MAX_CALL_DEPTH = 1;
 
 export class RecursionDepthError extends Error {
@@ -51,6 +52,11 @@ export interface RecursionState {
 
 export function readParentRunIdFromEnv(env: NodeJS.ProcessEnv = process.env): string | null {
   const value = env[TASK_RUNNER_PARENT_RUN_ID_ENV]?.trim();
+  return value ? value : null;
+}
+
+export function readRunGroupIdFromEnv(env: NodeJS.ProcessEnv = process.env): string | null {
+  const value = env[TASK_RUNNER_RUN_GROUP_ID_ENV]?.trim();
   return value ? value : null;
 }
 
@@ -98,6 +104,7 @@ export function checkRecursionDepth(state: RecursionState): void {
 export function buildChildRecursionEnv(
   state: RecursionState,
   parentRunId?: string | null,
+  runGroupId?: string | null,
 ): Record<string, string> {
   const childEnv: Record<string, string> = {
     [TASK_RUNNER_CALL_DEPTH_ENV]: String(state.currentDepth + 1),
@@ -105,6 +112,9 @@ export function buildChildRecursionEnv(
   };
   if (parentRunId) {
     childEnv[TASK_RUNNER_PARENT_RUN_ID_ENV] = parentRunId;
+  }
+  if (runGroupId) {
+    childEnv[TASK_RUNNER_RUN_GROUP_ID_ENV] = runGroupId;
   }
   return childEnv;
 }

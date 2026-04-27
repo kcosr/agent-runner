@@ -15,6 +15,7 @@ import type { DaemonOperations } from "./operations.js";
 import type {
   RunScheduleParams,
   RunSetBackendSessionParams,
+  RunSetGroupParams,
   RunSetNameParams,
   RunSetNoteParams,
   RunSetPinnedParams,
@@ -31,16 +32,18 @@ import {
   optionalString,
   parseAttachmentScopeQueryValue,
   parseBooleanQueryValue,
+  parseDependencyRef,
   parseRunInputSurfaceQuery,
   parseRunScheduleParams,
   parseRunSetBackendSessionParams,
+  parseRunSetGroupParams,
   parseRunSetNameParams,
   parseRunSetNoteParams,
   parseRunSetPinnedParams,
   parseRunsReconfigureParams,
   parseWebStartRunParams,
   requiredHeaderString,
-  requiredRunIdString,
+  requiredRunGroupId,
   requiredString,
 } from "./request-parsing.js";
 import { streamEvents } from "./sse.js";
@@ -341,29 +344,43 @@ const routes: RouteDefinition[] = [
   },
   {
     method: "POST",
+    pattern: ["api", "runs", ":runId", "group"],
+    handler: async (req, res, ctx, params) => {
+      const body = await parseRunSetGroupBody(req, routeParam(params, "runId"));
+      sendJson(res, 200, ctx.operations.setGroup(body));
+    },
+  },
+  {
+    method: "POST",
+    pattern: ["api", "runs", ":runId", "group", "clear"],
+    handler: (_req, res, ctx, params) => {
+      sendJson(res, 200, ctx.operations.clearGroup(routeParam(params, "runId")));
+    },
+  },
+  {
+    method: "POST",
     pattern: ["api", "runs", ":runId", "dependencies"],
     handler: async (req, res, ctx, params) => {
-      const body = asRecord(await readJsonBody(req), "request body");
       sendJson(
         res,
         200,
         ctx.operations.addDependency(
           routeParam(params, "runId"),
-          requiredRunIdString(body.dependencyRunId, "dependencyRunId"),
+          parseDependencyRef(await readJsonBody(req), "request body"),
         ),
       );
     },
   },
   {
     method: "DELETE",
-    pattern: ["api", "runs", ":runId", "dependencies", ":dependencyRunId"],
-    handler: (_req, res, ctx, params) => {
+    pattern: ["api", "runs", ":runId", "dependencies"],
+    handler: async (req, res, ctx, params) => {
       sendJson(
         res,
         200,
         ctx.operations.removeDependency(
           routeParam(params, "runId"),
-          routeParam(params, "dependencyRunId"),
+          parseDependencyRef(await readJsonBody(req), "request body"),
         ),
       );
     },
@@ -653,6 +670,14 @@ async function parseRunSetBackendSessionBody(
   return parseRunSetBackendSessionParams({ ...body, target: runId }, "request body");
 }
 
+async function parseRunSetGroupBody(
+  req: IncomingMessage,
+  runId: string,
+): Promise<RunSetGroupParams> {
+  const body = asRecord(await readJsonBody(req), "request body");
+  return parseRunSetGroupParams({ ...body, target: runId }, "request body");
+}
+
 async function parseRunScheduleBody(
   req: IncomingMessage,
   runId: string,
@@ -742,16 +767,16 @@ function parseRunListQuery(url: URL): RunsListParams {
   const cwd = url.searchParams.get("cwd");
   const repo = url.searchParams.get("repo");
   const global = parseBooleanQueryValue(url.searchParams.get("global"), "global");
-  const familyOf = url.searchParams.get("familyOf");
+  const runGroupId = url.searchParams.get("runGroupId");
   const scopeCount =
     Number(cwd !== null) +
     Number(repo !== null) +
     Number(global === true) +
-    Number(familyOf !== null);
+    Number(runGroupId !== null);
 
   if (scopeCount > 1) {
     throw new RequestValidationError(
-      "runs.list accepts only one of cwd, repo, global=true, or familyOf",
+      "runs.list accepts only one of cwd, repo, global=true, or runGroupId",
     );
   }
   if (cwd !== null) {
@@ -778,12 +803,12 @@ function parseRunListQuery(url: URL): RunsListParams {
       scope: { kind: "global" },
     };
   }
-  if (familyOf !== null) {
+  if (runGroupId !== null) {
     return {
       includeArchived,
       scope: {
-        kind: "family",
-        targetRunId: requiredRunIdString(familyOf, "familyOf"),
+        kind: "group",
+        runGroupId: requiredRunGroupId(runGroupId, "runGroupId"),
       },
     };
   }

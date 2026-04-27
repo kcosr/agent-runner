@@ -20,7 +20,9 @@ import type {
   RunBackendSessionResult,
   RunDeleteResult,
   RunDependenciesResult,
+  RunDependencyRef,
   RunDetail,
+  RunGroupResult,
   RunNameResult,
   RunNoteResult,
   RunPinnedResult,
@@ -44,6 +46,7 @@ import {
   archiveRun,
   clearRunBackendSession,
   clearRunDependencies,
+  clearRunGroup,
   clearRunSchedule as clearRunScheduleCommand,
   deleteRun,
   downloadAttachment,
@@ -60,6 +63,7 @@ import {
   removeRunDependency,
   resetRun,
   setRunBackendSession,
+  setRunGroup,
   setRunName,
   setRunNote,
   setRunPinned,
@@ -126,6 +130,7 @@ export interface StartRunRequest {
   definitionCwd?: string;
   callerCwd?: string;
   parentRunId?: string | null;
+  runGroupId?: string | null;
   backendSessionId?: string;
   cliVars: Record<string, string>;
   webVars: Record<string, string>;
@@ -479,12 +484,32 @@ export function clearBackendSession(
   return clearRunBackendSession(target, auditContext, emitAuditEnvelope);
 }
 
-export function addDependency(target: string, dependencyRunId: string): RunDependenciesResult {
-  return addRunDependency(target, dependencyRunId);
+export function setGroup(
+  target: string,
+  input: { runGroupId: string },
+  auditContext?: MutationAuditContext,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
+): RunGroupResult {
+  return setRunGroup(target, input, auditContext, emitAuditEnvelope);
 }
 
-export function removeDependency(target: string, dependencyRunId: string): RunDependenciesResult {
-  return removeRunDependency(target, dependencyRunId);
+export function clearGroup(
+  target: string,
+  auditContext?: MutationAuditContext,
+  emitAuditEnvelope?: AuditEnvelopeEmitter,
+): RunGroupResult {
+  return clearRunGroup(target, auditContext, emitAuditEnvelope);
+}
+
+export function addDependency(target: string, dependency: RunDependencyRef): RunDependenciesResult {
+  return addRunDependency(target, dependency);
+}
+
+export function removeDependency(
+  target: string,
+  dependency: RunDependencyRef,
+): RunDependenciesResult {
+  return removeRunDependency(target, dependency);
 }
 
 export function clearDependencies(target: string): RunDependenciesResult {
@@ -583,6 +608,7 @@ export async function initRun(request: StartRunRequest): Promise<RunDetail> {
     definitionCwd: request.definitionCwd,
     callerCwd: request.callerCwd,
     parentRunId: request.parentRunId,
+    runGroupId: request.runGroupId,
     backendSessionId: request.backendSessionId,
     cliVars: request.cliVars,
     webVars: request.webVars,
@@ -603,6 +629,7 @@ export function startRun(request: StartRunRequest): Promise<RunOutcome> {
     definitionCwd: request.definitionCwd,
     callerCwd: request.callerCwd,
     parentRunId: request.parentRunId,
+    runGroupId: request.runGroupId,
     backendSessionId: request.backendSessionId,
     cliVars: request.cliVars,
     webVars: request.webVars,

@@ -31,6 +31,7 @@ const RUN_EVENT_TYPES = [
   "run.archived",
   "run.unarchived",
   "run.renamed",
+  "run.group_changed",
   "run.schedule_set",
   "run.schedule_cleared",
   "run.schedule_enabled",
@@ -667,6 +668,24 @@ export function appendRunRenamedEvent(params: {
     fields: {
       previousName: params.previousName,
       nextName: params.nextName,
+    },
+  });
+}
+
+export function appendRunGroupChangedEvent(params: {
+  manifest: Pick<RunManifest, "workspaceDir" | "runId">;
+  context: RunEventWriteContext;
+  previousRunGroupId: string;
+  nextRunGroupId: string;
+}): RunAuditEnvelope {
+  return appendRunEvent({
+    workspaceDir: params.manifest.workspaceDir,
+    runId: params.manifest.runId,
+    eventType: "run.group_changed",
+    context: params.context,
+    fields: {
+      previousRunGroupId: params.previousRunGroupId,
+      nextRunGroupId: params.nextRunGroupId,
     },
   });
 }

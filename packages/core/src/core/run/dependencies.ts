@@ -1,4 +1,5 @@
-import type { ManifestStatus, RunManifest } from "./manifest.js";
+import { listRunGroupMemberManifests } from "./groups.js";
+import type { ManifestStatus, RunDependencyRef, RunManifest } from "./manifest.js";
 import { deriveEffectiveStatus } from "./status.js";
 
 export interface RunDependencyState {
@@ -8,15 +9,52 @@ export interface RunDependencyState {
   unsatisfied: number;
 }
 
-export interface RunDependencyDetail {
-  runId: string;
-  name: string | null;
-  status: ManifestStatus | null;
-  effectiveStatus: ManifestStatus | null;
-  archivedAt: string | null;
-  satisfied: boolean;
-  missing: boolean;
-}
+export type RunDependencyDetail =
+  | {
+      type: "run";
+      runId: string;
+      name: string | null;
+      status: ManifestStatus | null;
+      effectiveStatus: ManifestStatus | null;
+      archivedAt: string | null;
+      satisfied: boolean;
+      missing: boolean;
+    }
+  | {
+      type: "group";
+      groupId: string;
+      total: number;
+      successful: number;
+      unsatisfied: number;
+      archivedExcluded: number;
+      satisfied: boolean;
+      missing: boolean;
+    };
+
+export type RunDependentDetail =
+  | {
+      type: "run";
+      via: "run";
+      runId: string;
+      name: string | null;
+      status: ManifestStatus | null;
+      effectiveStatus: ManifestStatus | null;
+      archivedAt: string | null;
+      satisfied: boolean;
+      missing: boolean;
+    }
+  | {
+      type: "run";
+      via: "group";
+      runId: string;
+      dependencyGroupId: string;
+      name: string | null;
+      status: ManifestStatus | null;
+      effectiveStatus: ManifestStatus | null;
+      archivedAt: string | null;
+      satisfied: boolean;
+      missing: boolean;
+    };
 
 export function buildRunDependencyGraph(
   manifests: Iterable<RunManifest>,
@@ -24,9 +62,17 @@ export function buildRunDependencyGraph(
   return new Map(Array.from(manifests, (manifest) => [manifest.runId, manifest]));
 }
 
-export function toRunDependencyDetail(runId: string, manifest?: RunManifest): RunDependencyDetail {
+export function dependencyRefsEqual(left: RunDependencyRef, right: RunDependencyRef): boolean {
+  if (left.type === "run") {
+    return right.type === "run" && left.runId === right.runId;
+  }
+  return right.type === "group" && left.groupId === right.groupId;
+}
+
+function toRunDependencyDetail(runId: string, manifest?: RunManifest): RunDependencyDetail {
   if (!manifest) {
     return {
+      type: "run",
       runId,
       name: null,
       status: null,
@@ -38,6 +84,7 @@ export function toRunDependencyDetail(runId: string, manifest?: RunManifest): Ru
   }
 
   return {
+    type: "run",
     runId: manifest.runId,
     name: manifest.name ?? manifest.assignment?.name ?? null,
     status: manifest.status,
@@ -48,25 +95,76 @@ export function toRunDependencyDetail(runId: string, manifest?: RunManifest): Ru
   };
 }
 
-export function deriveDependencyState(
-  manifest: Pick<RunManifest, "dependencyRunIds">,
-  graph: ReadonlyMap<string, RunManifest>,
-): RunDependencyState {
-  const successfulRunIds = new Set<string>();
-  for (const candidate of graph.values()) {
-    if (candidate.status === "success") {
-      successfulRunIds.add(candidate.runId);
-    }
+function toRunDependentDetail(
+  manifest: RunManifest,
+  via: "run" | "group",
+  dependencyGroupId?: string,
+): RunDependentDetail {
+  const base = {
+    type: "run" as const,
+    runId: manifest.runId,
+    name: manifest.name ?? manifest.assignment?.name ?? null,
+    status: manifest.status,
+    effectiveStatus: deriveEffectiveStatus(manifest),
+    archivedAt: manifest.archivedAt,
+    satisfied: manifest.status === "success",
+    missing: false,
+  };
+  if (via === "run") {
+    return {
+      ...base,
+      via,
+    };
   }
-  return deriveDependencyStateFromSatisfiedRunIds(manifest, successfulRunIds);
+  return {
+    ...base,
+    via,
+    dependencyGroupId: dependencyGroupId ?? manifest.runGroupId,
+  };
 }
 
-export function deriveDependencyStateFromSatisfiedRunIds(
-  manifest: Pick<RunManifest, "dependencyRunIds">,
-  satisfiedRunIds: ReadonlySet<string>,
+function toGroupDependencyDetail(
+  groupId: string,
+  graph: ReadonlyMap<string, RunManifest>,
+): RunDependencyDetail {
+  const members = listRunGroupMemberManifests(graph.values(), groupId, { includeArchived: true });
+  const activeMembers = members.filter((member) => member.archivedAt === null);
+  const successful = activeMembers.filter((member) => member.status === "success").length;
+  const total = activeMembers.length;
+  const unsatisfied = total - successful;
+  return {
+    type: "group",
+    groupId,
+    total,
+    successful,
+    unsatisfied,
+    archivedExcluded: members.length - activeMembers.length,
+    satisfied: total > 0 && unsatisfied === 0,
+    missing: total === 0,
+  };
+}
+
+export function resolveDependencyRef(
+  dependency: RunDependencyRef,
+  graph: ReadonlyMap<string, RunManifest>,
+): RunDependencyDetail {
+  return dependency.type === "run"
+    ? toRunDependencyDetail(dependency.runId, graph.get(dependency.runId))
+    : toGroupDependencyDetail(dependency.groupId, graph);
+}
+
+export function deriveDependencyState(
+  manifest: Pick<RunManifest, "dependencies">,
+  graph: ReadonlyMap<string, RunManifest>,
 ): RunDependencyState {
-  const total = manifest.dependencyRunIds.length;
-  const satisfied = manifest.dependencyRunIds.filter((runId) => satisfiedRunIds.has(runId)).length;
+  return deriveDependencyStateFromDetails(resolveDependencies(manifest, graph));
+}
+
+export function deriveDependencyStateFromDetails(
+  details: readonly Pick<RunDependencyDetail, "satisfied">[],
+): RunDependencyState {
+  const total = details.length;
+  const satisfied = details.filter((detail) => detail.satisfied).length;
   const unsatisfied = total - satisfied;
   return {
     ready: unsatisfied === 0,
@@ -77,72 +175,124 @@ export function deriveDependencyStateFromSatisfiedRunIds(
 }
 
 export function resolveDependencies(
-  manifest: Pick<RunManifest, "dependencyRunIds">,
+  manifest: Pick<RunManifest, "dependencies">,
   graph: ReadonlyMap<string, RunManifest>,
 ): RunDependencyDetail[] {
-  return manifest.dependencyRunIds.map((runId) => toRunDependencyDetail(runId, graph.get(runId)));
+  return manifest.dependencies.map((dependency) => resolveDependencyRef(dependency, graph));
 }
 
 export function resolveDependents(
-  manifest: Pick<RunManifest, "runId">,
+  manifest: Pick<RunManifest, "runId" | "runGroupId">,
   graph: ReadonlyMap<string, RunManifest>,
-): RunDependencyDetail[] {
-  return resolveDependentsFromManifests(
-    manifest.runId,
-    Array.from(graph.values()).filter(
-      (candidate) =>
-        candidate.runId !== manifest.runId && candidate.dependencyRunIds.includes(manifest.runId),
-    ),
-  );
-}
-
-export function resolveDependentsFromManifests(
-  targetRunId: string,
-  manifests: Iterable<RunManifest>,
-): RunDependencyDetail[] {
-  return Array.from(manifests)
-    .filter((candidate) => candidate.runId !== targetRunId)
+): RunDependentDetail[] {
+  return Array.from(graph.values())
+    .filter((candidate) => candidate.runId !== manifest.runId)
+    .flatMap((candidate) =>
+      candidate.dependencies.flatMap((dependency) => {
+        if (dependency.type === "run" && dependency.runId === manifest.runId) {
+          return [toRunDependentDetail(candidate, "run")];
+        }
+        if (dependency.type === "group" && dependency.groupId === manifest.runGroupId) {
+          return [toRunDependentDetail(candidate, "group", dependency.groupId)];
+        }
+        return [];
+      }),
+    )
     .sort((left, right) => {
-      const byTime = right.startedAt.localeCompare(left.startedAt);
+      const leftManifest = graph.get(left.runId);
+      const rightManifest = graph.get(right.runId);
+      const byTime = (rightManifest?.startedAt ?? "").localeCompare(leftManifest?.startedAt ?? "");
       return byTime !== 0 ? byTime : left.runId.localeCompare(right.runId);
-    })
-    .map((candidate) => toRunDependencyDetail(candidate.runId, candidate));
+    });
 }
 
 export function countUnsatisfiedDependencies(
-  manifest: Pick<RunManifest, "dependencyRunIds">,
+  manifest: Pick<RunManifest, "dependencies">,
   graph: ReadonlyMap<string, RunManifest>,
 ): number {
   return deriveDependencyState(manifest, graph).unsatisfied;
 }
 
-export function wouldCreateDependencyCycle(
-  graph: ReadonlyMap<string, RunManifest>,
-  targetRunId: string,
-  dependencyRunId: string,
-): boolean {
-  const stack = [dependencyRunId];
-  const seen = new Set<string>();
+function runNode(runId: string): string {
+  return `R:${runId}`;
+}
 
+function groupNode(groupId: string): string {
+  return `G:${groupId}`;
+}
+
+function dependencyNode(dependency: RunDependencyRef): string {
+  return dependency.type === "run" ? runNode(dependency.runId) : groupNode(dependency.groupId);
+}
+
+function addEdge(edges: Map<string, Set<string>>, from: string, to: string): void {
+  const existing = edges.get(from);
+  if (existing) {
+    existing.add(to);
+    return;
+  }
+  edges.set(from, new Set([to]));
+}
+
+function buildMixedDependencyEdges(
+  graph: ReadonlyMap<string, RunManifest>,
+): Map<string, Set<string>> {
+  const edges = new Map<string, Set<string>>();
+  for (const manifest of graph.values()) {
+    const run = runNode(manifest.runId);
+    for (const dependency of manifest.dependencies) {
+      addEdge(edges, run, dependencyNode(dependency));
+    }
+    if (manifest.archivedAt === null) {
+      addEdge(edges, groupNode(manifest.runGroupId), run);
+    }
+  }
+  return edges;
+}
+
+function hasPath(
+  edges: ReadonlyMap<string, ReadonlySet<string>>,
+  from: string,
+  to: string,
+): boolean {
+  const stack = [from];
+  const seen = new Set<string>();
   while (stack.length > 0) {
     const current = stack.pop();
     if (!current || seen.has(current)) {
       continue;
     }
-    if (current === targetRunId) {
+    if (current === to) {
       return true;
     }
     seen.add(current);
-    const manifest = graph.get(current);
-    if (!manifest) {
-      continue;
+    for (const next of edges.get(current) ?? []) {
+      stack.push(next);
     }
-    for (const next of manifest.dependencyRunIds) {
-      if (!seen.has(next)) {
-        stack.push(next);
+  }
+  return false;
+}
+
+export function wouldCreateDependencyCycle(
+  graph: ReadonlyMap<string, RunManifest>,
+  targetRunId: string,
+  dependency: RunDependencyRef,
+): boolean {
+  const edges = buildMixedDependencyEdges(graph);
+  const target = runNode(targetRunId);
+  const dependencyTarget = dependencyNode(dependency);
+  addEdge(edges, target, dependencyTarget);
+  return hasPath(edges, dependencyTarget, target);
+}
+
+export function hasDependencyCycle(graph: ReadonlyMap<string, RunManifest>): boolean {
+  const edges = buildMixedDependencyEdges(graph);
+  for (const from of edges.keys()) {
+    for (const to of edges.get(from) ?? []) {
+      if (hasPath(edges, to, from)) {
+        return true;
       }
     }
   }
-
   return false;
 }

@@ -13,7 +13,10 @@ export interface ParsedArgs {
   assignment?: string;
   resumeRun?: string;
   parentRun?: string;
+  groupId?: string;
   runId?: string;
+  dependencyRun?: string;
+  dependencyGroupId?: string;
   backendSessionId?: string;
   vars: Record<string, string>;
   cwd?: string;
@@ -68,7 +71,7 @@ export interface ParsedArgs {
 const EFFORT_VALUES = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const OUTPUT_FORMATS = ["text", "json"] as const;
 const BACKEND_VALUES = BACKEND_IDS;
-const ATTACHMENT_SCOPE_VALUES = ["run", "family"] as const;
+const ATTACHMENT_SCOPE_VALUES = ["run", "group"] as const;
 const SCHEDULE_MODE_VALUES = ["reuse", "reset", "clone"] as const;
 export function parseArgs(argv: string[]): ParsedArgs {
   const args = argv.slice(2);
@@ -126,6 +129,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
       args[0] === "clear-note" ||
       args[0] === "pin" ||
       args[0] === "unpin" ||
+      args[0] === "set-group" ||
+      args[0] === "clear-group" ||
       args[0] === "set-backend-session" ||
       args[0] === "clear-backend-session" ||
       args[0] === "add-dep" ||
@@ -156,11 +161,26 @@ export function parseArgs(argv: string[]): ParsedArgs {
       if (next === undefined) throw new Error("--parent-run requires a value");
       if (next.trim().length === 0) throw new Error("--parent-run cannot be empty");
       result.parentRun = next;
+    } else if (arg === "--group-id") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--group-id requires a value");
+      if (next.trim().length === 0) throw new Error("--group-id cannot be empty");
+      result.groupId = next;
     } else if (arg === "--run-id") {
       const next = args.shift();
       if (next === undefined) throw new Error("--run-id requires a value");
       if (next.trim().length === 0) throw new Error("--run-id cannot be empty");
       result.runId = next;
+    } else if (arg === "--run") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--run requires a value");
+      if (next.trim().length === 0) throw new Error("--run cannot be empty");
+      result.dependencyRun = next;
+    } else if (arg === "--group") {
+      const next = args.shift();
+      if (next === undefined) throw new Error("--group requires a value");
+      if (next.trim().length === 0) throw new Error("--group cannot be empty");
+      result.dependencyGroupId = next;
     } else if (arg === "--backend-session-id") {
       const next = args.shift();
       if (next === undefined) throw new Error("--backend-session-id requires a value");

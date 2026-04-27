@@ -1,5 +1,6 @@
 import type { RunCommandOverrides } from "@task-runner/core/app/service.js";
 import type { AttachmentScope } from "@task-runner/core/contracts/attachments.js";
+import type { RunDependencyRef } from "@task-runner/core/contracts/runs.js";
 import type {
   BackendSpecificConfig,
   CodexTransportConfig,
@@ -12,6 +13,7 @@ import {
 } from "@task-runner/core/core/backends/types.js";
 import type { RunListScopeFilter } from "@task-runner/core/core/commands/service.js";
 import { isNamedLauncherOverride } from "@task-runner/core/core/config/launchers.js";
+import { RunGroupValidationError, validateRunGroupId } from "@task-runner/core/core/run/groups.js";
 import type { ScheduleInput } from "@task-runner/core/core/run/schedule.js";
 import { trimRunName } from "@task-runner/core/util/run-name.js";
 import type {
@@ -20,6 +22,7 @@ import type {
   RunReadyParams,
   RunScheduleParams,
   RunSetBackendSessionParams,
+  RunSetGroupParams,
   RunSetNameParams,
   RunSetNoteParams,
   RunSetPinnedParams,
@@ -239,10 +242,40 @@ export function parseAttachmentScopeQueryValue(
   if (value === null) {
     return undefined;
   }
-  if (value === "run" || value === "family") {
+  if (value === "run" || value === "group") {
     return value;
   }
-  throw new RequestValidationError(`${label} must be "run" or "family"`);
+  throw new RequestValidationError(`${label} must be "run" or "group"`);
+}
+
+export function requiredRunGroupId(value: unknown, label: string): string {
+  if (typeof value !== "string") {
+    throw new RequestValidationError(`${label} must be a string`);
+  }
+  try {
+    return validateRunGroupId(value, label);
+  } catch (error) {
+    if (error instanceof RunGroupValidationError) {
+      throw new RequestValidationError(error.message);
+    }
+    throw error;
+  }
+}
+
+function optionalRunGroupId(value: unknown, label: string): string | undefined {
+  return value === undefined ? undefined : requiredRunGroupId(value, label);
+}
+
+export function parseDependencyRef(value: unknown, label: string): RunDependencyRef {
+  const record = asRecord(value, label);
+  const type = requiredString(record.type, `${label}.type`);
+  if (type === "run") {
+    return { type, runId: requiredRunIdString(record.runId, `${label}.runId`) };
+  }
+  if (type === "group") {
+    return { type, groupId: requiredRunGroupId(record.groupId, `${label}.groupId`) };
+  }
+  throw new RequestValidationError(`${label}.type must be "run" or "group"`);
 }
 
 function validateAbsoluteCodexWsUrl(value: string, label: string): string {
@@ -464,6 +497,7 @@ function parseStartRunBaseParams(value: unknown, label: string) {
     definitionCwd: optionalString(record.definitionCwd, "definitionCwd"),
     callerCwd: optionalString(record.callerCwd, "callerCwd"),
     parentRunId: optionalRunIdString(record.parentRunId, "parentRunId"),
+    runGroupId: optionalRunGroupId(record.runGroupId, "runGroupId"),
     backendSessionId: optionalString(record.backendSessionId, "backendSessionId"),
     overrides: optionalOverrides(record.overrides),
   };
@@ -487,6 +521,12 @@ export function parseWebStartRunParams(value: unknown, label: string): WebRunsSt
 
 export function parseResumeRunParams(value: unknown, label: string): RunsResumeParams {
   const record = asRecord(value, label);
+  const allowedKeys = new Set(["target", "parentRunId", "overrides"]);
+  for (const key of Object.keys(record)) {
+    if (!allowedKeys.has(key)) {
+      throw new RequestValidationError(`${label}.${key} is not supported`);
+    }
+  }
   return {
     target: requiredString(record.target, `${label}.target`),
     parentRunId: optionalRunIdString(record.parentRunId, `${label}.parentRunId`),
@@ -572,12 +612,20 @@ export function parseRunSetBackendSessionParams(
   };
 }
 
+export function parseRunSetGroupParams(value: unknown, label: string): RunSetGroupParams {
+  const record = asRecord(value, label);
+  return {
+    target: requiredString(record.target, `${label}.target`),
+    runGroupId: requiredRunGroupId(record.runGroupId, `${label}.runGroupId`),
+  };
+}
+
 function parseRunListScope(value: unknown, label: string): RunListScopeFilter | undefined {
   if (value === undefined) {
     return undefined;
   }
   const record = asRecord(value, label);
-  const kind = optionalEnum(record.kind, `${label}.kind`, ["cwd", "repo", "global", "family"]);
+  const kind = optionalEnum(record.kind, `${label}.kind`, ["cwd", "repo", "global", "group"]);
   if (kind === undefined) {
     throw new RequestValidationError(`${label}.kind is required`);
   }
@@ -593,10 +641,10 @@ function parseRunListScope(value: unknown, label: string): RunListScopeFilter | 
       repo: requiredString(record.repo, `${label}.repo`),
     };
   }
-  if (kind === "family") {
+  if (kind === "group") {
     return {
       kind,
-      targetRunId: requiredRunIdString(record.targetRunId, `${label}.targetRunId`),
+      runGroupId: requiredRunGroupId(record.runGroupId, `${label}.runGroupId`),
     };
   }
   return { kind };

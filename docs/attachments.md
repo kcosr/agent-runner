@@ -30,7 +30,7 @@ Files live at:
 ## Limits
 
 - Max file size: **25 MiB**
-- Max attachments per run: **20**
+- Max attachments per run: **100**
 - Max total size per run: **100 MiB**
 
 Additions that would violate any of these are rejected before the file is
@@ -67,15 +67,14 @@ during the stream.
 ```bash
 task-runner attachment list <run-id>
 task-runner attachment list <run-id> --scope run
-task-runner attachment list <run-id> --scope family
+task-runner attachment list <run-id> --scope group
 ```
 
-`attachment list` defaults to `--scope family`.
+`attachment list` defaults to `--scope group`.
 
 - `--scope run` lists only the target run's attachments.
-- `--scope family` walks the target run's parent chain to the lineage
-  root and includes attachments from every run that shares that root:
-  the target, its ancestors, siblings, cousins, and descendants.
+- `--scope group` lists attachments from every run whose `runGroupId`
+  matches the target run's group.
 
 JSON rows include `ownerRunId` so you can tell which run owns each file.
 
@@ -102,14 +101,13 @@ updated by filtering out the removed entry.
 
 ## Web dashboard
 
-The detail drawer's Attachments panel shows the selected run's
-attachments plus any family-scoped attachments returned by
-`attachment list --scope family`.
+The detail drawer's Attachments panel shows one combined list for the
+selected run's group, matching `attachment list --scope group`.
 
 - Attachments owned by the selected run support upload, download,
   in-app preview for `text/markdown` and `text/plain` (fenced
   `mermaid` blocks render inline), and delete.
-- Family attachments owned by other runs are read-only. They still
+- Attachments owned by other runs in the group are read-only. They still
   support preview and download, and each row shows the source
   `ownerRunId`.
 
@@ -117,9 +115,9 @@ attachments plus any family-scoped attachments returned by
 
 - **Seed context**: drop a file into the run before resume (e.g. a diff, a
   report, a summary).
-- **Handoff between runs**: attach artifacts to a planning run so an
-  implementation or review run in the same lineage family can discover
-  them via `--scope family`.
+- **Handoff between grouped runs**: attach artifacts to a planning run so
+  an implementation or review run in the same run group can discover
+  them via `--scope group`.
 - **Audit trail**: attach the exact generated draft so the manifest
   captures byte-for-byte what was handed to the next stage.
 

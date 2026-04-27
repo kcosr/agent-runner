@@ -9,6 +9,7 @@ import {
   archive,
   clearBackendSession,
   clearDependencies,
+  clearGroup,
   clearRunSchedule,
   createTask,
   deleteArchivedRun,
@@ -30,6 +31,7 @@ import {
   renameRun,
   reset,
   resumeRun,
+  setGroup,
   setRunSchedule,
   setRunScheduleEnabled,
   startRun,
@@ -54,6 +56,7 @@ import {
   resolveTaskRunnerConfigDir,
   resolveTaskRunnerStateDir,
 } from "@task-runner/core/config/runtime-paths.js";
+import type { RunDependencyRef } from "@task-runner/core/contracts/runs.js";
 import {
   type BackendSpecificConfig,
   codexTransportFromEnvValues,
@@ -102,6 +105,7 @@ import {
   renderRunAuditHistory,
   renderRunClearBackendSession,
   renderRunClearDependencies,
+  renderRunClearGroup,
   renderRunDelete,
   renderRunList,
   renderRunReady,
@@ -111,6 +115,7 @@ import {
   renderRunScheduleEnabled,
   renderRunScheduleSet,
   renderRunSetBackendSession,
+  renderRunSetGroup,
   renderRunSetName,
   renderRunSetNote,
   renderRunSetPinned,
@@ -166,8 +171,15 @@ Commands:
                           Persist a passive run backend session reference.
   run clear-backend-session <id|path>
                           Clear a passive run backend session reference.
-  run add-dep <id> <dep>  Add a dependency to an initialized run.
-  run remove-dep <id> <dep>
+  run set-group <id|path> <group-id>
+                          Set a non-running run's group.
+  run clear-group <id|path>
+                          Reset a non-running run to its singleton group.
+  run add-dep <id> --run <dep-run-id>
+  run add-dep <id> --group <group-id>
+                          Add a dependency to an initialized run.
+  run remove-dep <id> --run <dep-run-id>
+  run remove-dep <id> --group <group-id>
                           Remove a dependency from an initialized run.
   run clear-deps <id>     Remove all dependencies from an initialized run.
   init                    Prepare a run without invoking the backend.
@@ -204,7 +216,7 @@ Task command options:
   --body <text>           (task add) Optional task body.
   --name <text>           (attachment add) Optional display name.
   --mime-type <type>      (attachment add) Optional MIME type override.
-  --scope <run|family>    (attachment list) Attachment listing scope.
+  --scope <run|group>     (attachment list) Attachment listing scope.
 
 Host selection:
   --connect <ws-url>      Route the command through the daemon host.
@@ -225,6 +237,7 @@ Execution options:
   --backend-session-id    Adopt an existing backend session id.
   --resume-run <id|path>  Continue an existing run by short id or path.
   --parent-run <run-id>   Set the lineage parent for a fresh run/init.
+  --group-id <group-id>   Set the explicit run group for a fresh run/init.
   --run-id <id|path>      (init only) Overwrite an initialized run in place.
   --var <key>=<value>     Set an input variable (repeatable).
                           Nested child runs usually inherit parent-owned
@@ -1051,6 +1064,7 @@ function unsupportedFlagsForGroupedCommand(
     allowAttachmentName?: boolean;
     allowAttachmentMimeType?: boolean;
     allowAttachmentScope?: boolean;
+    allowDependencyRef?: boolean;
     allowScheduleInitFlags?: boolean;
     allowRunScheduleFlags?: boolean;
   } = {},
@@ -1062,6 +1076,10 @@ function unsupportedFlagsForGroupedCommand(
   if (parsed.runId !== undefined) unsupported.push("--run-id");
   if (parsed.backendSessionId !== undefined) unsupported.push("--backend-session-id");
   if (parsed.parentRun !== undefined) unsupported.push("--parent-run");
+  if (parsed.groupId !== undefined) unsupported.push("--group-id");
+  if (!opts.allowDependencyRef && parsed.dependencyRun !== undefined) unsupported.push("--run");
+  if (!opts.allowDependencyRef && parsed.dependencyGroupId !== undefined)
+    unsupported.push("--group");
   if (!opts.allowVars && Object.keys(parsed.vars).length > 0) unsupported.push("--var");
   if (!opts.allowRunListScope && parsed.cwd !== undefined) unsupported.push("--cwd");
   if (!opts.allowRunListScope && parsed.repo !== undefined) unsupported.push("--repo");
@@ -1172,6 +1190,7 @@ async function startOrResumeDaemonRun(
         definitionCwd: process.cwd(),
         callerCwd: process.cwd(),
         parentRunId: resolveParentRunId(parsed),
+        runGroupId: parsed.groupId,
         backendSessionId: parsed.backendSessionId,
         cliVars: parsed.vars,
         overrides,
@@ -1263,7 +1282,7 @@ async function runAttachmentCommand(
         } else {
           process.stdout.write(
             renderAttachmentList(attachments, {
-              showOwnerRunId: (parsed.attachmentScope ?? "family") !== "run",
+              showOwnerRunId: (parsed.attachmentScope ?? "group") !== "run",
             }),
           );
         }
@@ -1965,43 +1984,117 @@ async function runBackendSessionCommand(
   }
 }
 
+async function runGroupCommand(
+  parsed: ParsedArgs,
+  connect: DaemonConnectContext | undefined,
+  verb: "set-group" | "clear-group",
+): Promise<never> {
+  const [runArg, groupArg, extra] = parsed.positionals;
+  const target = normalizeTarget(runArg);
+  if (!target || (verb === "set-group" && !groupArg)) {
+    process.stderr.write(
+      `task-runner: run ${verb} requires <id-or-path>${verb === "set-group" ? " <group-id>" : ""}\n`,
+    );
+    process.exit(3);
+  }
+  if (verb === "clear-group" && groupArg !== undefined) {
+    process.stderr.write(
+      `task-runner: run clear-group takes exactly one positional (<id-or-path>); got extra "${groupArg}"\n`,
+    );
+    process.exit(3);
+  }
+  if (extra !== undefined) {
+    process.stderr.write(
+      `task-runner: run set-group takes exactly two positionals (<id-or-path> <group-id>); got extra "${extra}"\n`,
+    );
+    process.exit(3);
+  }
+  const unsupported = unsupportedFlagsForGroupedCommand(parsed);
+  if (unsupported.length > 0) {
+    process.stderr.write(
+      `task-runner: run ${verb} only supports ${verb === "set-group" ? "<id-or-path>, <group-id>" : "<id-or-path>"}, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+    );
+    process.exit(3);
+  }
+  try {
+    const result =
+      connect === undefined
+        ? verb === "set-group"
+          ? setGroup(target, { runGroupId: groupArg as string })
+          : clearGroup(target)
+        : await withDaemonClient(connect, (client) =>
+            client
+              .call<{ result: ReturnType<typeof setGroup> | ReturnType<typeof clearGroup> }>(
+                verb === "set-group" ? "runs.setGroup" : "runs.clearGroup",
+                verb === "set-group" ? { target, runGroupId: groupArg } : { target },
+              )
+              .then((response) => response.result),
+          );
+    if (parsed.outputFormat === "json") {
+      writeJson(result);
+    } else {
+      process.stdout.write(
+        verb === "set-group" ? renderRunSetGroup(result) : renderRunClearGroup(result),
+      );
+    }
+    process.exit(0);
+  } catch (err) {
+    exitCommandFailure(err, connect?.connectUrl);
+  }
+}
+
 async function runDependencyCommand(
   parsed: ParsedArgs,
   connect: DaemonConnectContext | undefined,
   verb: "add-dep" | "remove-dep" | "clear-deps",
 ): Promise<never> {
-  const [runArg, dependencyArg, extra] = parsed.positionals;
+  const [runArg, extra] = parsed.positionals;
   const target = normalizeTarget(runArg);
   if (!target) {
     process.stderr.write(
-      `task-runner: run ${verb} requires <id-or-path>${verb === "clear-deps" ? "" : " <dependency-run-id>"}\n`,
+      `task-runner: run ${verb} requires <id-or-path>${verb === "clear-deps" ? "" : " --run <dependency-run-id> or --group <group-id>"}\n`,
     );
     process.exit(3);
   }
   if (verb === "clear-deps") {
-    if (dependencyArg !== undefined) {
+    if (extra !== undefined) {
       process.stderr.write(
-        `task-runner: run clear-deps takes exactly one positional (<id-or-path>); got extra "${dependencyArg}"\n`,
+        `task-runner: run clear-deps takes exactly one positional (<id-or-path>); got extra "${extra}"\n`,
       );
       process.exit(3);
     }
-  } else if (!dependencyArg) {
-    process.stderr.write(`task-runner: run ${verb} requires <id-or-path> <dependency-run-id>\n`);
-    process.exit(3);
   } else if (extra !== undefined) {
     process.stderr.write(
-      `task-runner: run ${verb} takes exactly two positionals (<id-or-path> <dependency-run-id>); got extra "${extra}"\n`,
+      `task-runner: run ${verb} takes exactly one positional (<id-or-path>); got extra "${extra}"\n`,
     );
     process.exit(3);
   }
 
-  const unsupported = unsupportedFlagsForGroupedCommand(parsed);
+  const unsupported = unsupportedFlagsForGroupedCommand(parsed, {
+    allowDependencyRef: verb !== "clear-deps",
+  });
   if (unsupported.length > 0) {
     process.stderr.write(
-      `task-runner: run ${verb} only supports ${verb === "clear-deps" ? "<id-or-path>" : "<id-or-path>, <dependency-run-id>"}, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
+      `task-runner: run ${verb} only supports ${verb === "clear-deps" ? "<id-or-path>" : "<id-or-path>, --run or --group"}, --connect, and --output-format (got ${unsupported.join(", ")})\n`,
     );
     process.exit(3);
   }
+  const refCount =
+    Number(parsed.dependencyRun !== undefined) + Number(parsed.dependencyGroupId !== undefined);
+  if (verb !== "clear-deps" && refCount !== 1) {
+    process.stderr.write(`task-runner: run ${verb} requires exactly one of --run or --group\n`);
+    process.exit(3);
+  }
+  if (verb === "clear-deps" && refCount !== 0) {
+    process.stderr.write("task-runner: run clear-deps does not accept --run or --group\n");
+    process.exit(3);
+  }
+  const dependency: RunDependencyRef | undefined =
+    parsed.dependencyRun !== undefined
+      ? { type: "run", runId: parsed.dependencyRun }
+      : parsed.dependencyGroupId !== undefined
+        ? { type: "group", groupId: parsed.dependencyGroupId }
+        : undefined;
 
   try {
     const method =
@@ -2011,13 +2104,13 @@ async function runDependencyCommand(
           ? "runs.removeDependency"
           : "runs.clearDependencies";
     const params =
-      verb === "clear-deps" ? { target } : { target, dependencyRunId: dependencyArg as string };
+      verb === "clear-deps" ? { target } : { target, dependency: dependency as RunDependencyRef };
     const result =
       connect === undefined
         ? method === "runs.addDependency"
-          ? addDependency(target, dependencyArg as string)
+          ? addDependency(target, dependency as RunDependencyRef)
           : method === "runs.removeDependency"
-            ? removeDependency(target, dependencyArg as string)
+            ? removeDependency(target, dependency as RunDependencyRef)
             : clearDependencies(target)
         : await withDaemonClient(connect, (client) =>
             client
@@ -2032,9 +2125,9 @@ async function runDependencyCommand(
     if (parsed.outputFormat === "json") {
       writeJson(result);
     } else if (verb === "add-dep") {
-      process.stdout.write(renderRunAddDependency(result, dependencyArg as string));
+      process.stdout.write(renderRunAddDependency(result, dependency as RunDependencyRef));
     } else if (verb === "remove-dep") {
-      process.stdout.write(renderRunRemoveDependency(result, dependencyArg as string));
+      process.stdout.write(renderRunRemoveDependency(result, dependency as RunDependencyRef));
     } else {
       process.stdout.write(renderRunClearDependencies(result));
     }
@@ -2259,6 +2352,9 @@ async function runExecuteCommandEmbedded(parsed: ParsedArgs): Promise<never> {
     if (parsed.resumeRun !== undefined && parsed.parentRun !== undefined) {
       throw new RunCommandError("--parent-run cannot be combined with --resume-run");
     }
+    if (parsed.resumeRun !== undefined && parsed.groupId !== undefined) {
+      throw new RunCommandError("--group-id cannot be combined with --resume-run");
+    }
     if (isInitCommand && parsed.resumeRun !== undefined) {
       throw new RunCommandError("init cannot be combined with --resume-run");
     }
@@ -2276,6 +2372,7 @@ async function runExecuteCommandEmbedded(parsed: ParsedArgs): Promise<never> {
         assignment: normalizeTarget(parsed.assignment),
         definitionCwd: process.cwd(),
         parentRunId: resolveParentRunId(parsed),
+        runGroupId: parsed.groupId,
         backendSessionId: parsed.backendSessionId,
         cliVars: parsed.vars,
         webVars: {},
@@ -2301,6 +2398,7 @@ async function runExecuteCommandEmbedded(parsed: ParsedArgs): Promise<never> {
           assignment: normalizeTarget(parsed.assignment),
           definitionCwd: process.cwd(),
           parentRunId: resolveParentRunId(parsed),
+          runGroupId: parsed.groupId,
           backendSessionId: parsed.backendSessionId,
           cliVars: parsed.vars,
           webVars: {},
@@ -2375,6 +2473,7 @@ async function runExecuteCommandDaemon(
         definitionCwd: process.cwd(),
         callerCwd: process.cwd(),
         parentRunId: resolveParentRunId(parsed),
+        runGroupId: parsed.groupId,
         backendSessionId: parsed.backendSessionId,
         cliVars: parsed.vars,
         overrides: daemonOverrides,
@@ -2636,6 +2735,12 @@ async function main(): Promise<void> {
     }
     if (parsed.subcommand === "clear-backend-session") {
       await runBackendSessionCommand(parsed, daemonConnect, "clear-backend-session");
+    }
+    if (parsed.subcommand === "set-group") {
+      await runGroupCommand(parsed, daemonConnect, "set-group");
+    }
+    if (parsed.subcommand === "clear-group") {
+      await runGroupCommand(parsed, daemonConnect, "clear-group");
     }
     if (parsed.subcommand === "add-dep") {
       await runDependencyCommand(parsed, daemonConnect, "add-dep");

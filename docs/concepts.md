@@ -128,14 +128,16 @@ See [backends.md](backends.md).
 ## Attachments and dependencies
 
 Runs can carry **attachments** (files stored under the run workspace with
-SHA-256 integrity). `attachment list` defaults to family-scoped
-discovery across runs that share the same lineage root; use
-`--scope run` for the target run only. See
-[attachments.md](attachments.md).
+SHA-256 integrity). `attachment list` defaults to group-scoped discovery
+across runs that share the target run's `runGroupId`; use `--scope run`
+for the target run only. See [attachments.md](attachments.md).
 
-Runs can declare **dependencies** on other runs. Dependencies are metadata
-on initialized runs; execution is gated until all dependencies reach
-`success`. See [dependencies.md](dependencies.md).
+Runs can declare **dependencies** on upstream runs or run groups.
+Dependencies are metadata on initialized runs; execution is gated until
+all dependency refs are satisfied. Run-group membership is independent of
+parent lineage: `parentRunId` records who spawned a run, while
+`runGroupId` controls grouping, group-scoped attachments, filtering, and
+group dependencies. See [dependencies.md](dependencies.md).
 
 ## Daemon and web dashboard
 

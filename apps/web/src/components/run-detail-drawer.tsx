@@ -5,6 +5,9 @@ import type {
 } from "@task-runner/core/contracts/attachments.js";
 import type { RunAuditEvent } from "@task-runner/core/contracts/events.js";
 import type {
+  RunDependencyDetail,
+  RunDependencyRef,
+  RunDependentDetail,
   RunDetail,
   RunSchedule,
   RunSessionSummary,
@@ -94,6 +97,30 @@ function dependencyCandidateMeta(run: RunSummary) {
 
 function dependencyCandidateLabel(run: RunSummary) {
   return `${dependencyCandidateTitle(run)} · ${dependencyCandidateMeta(run)}`;
+}
+
+function dependencyRefKey(dependency: RunDependencyRef) {
+  return dependency.type === "run" ? `run:${dependency.runId}` : `group:${dependency.groupId}`;
+}
+
+function dependencyDetailKey(dependency: RunDependencyDetail) {
+  return dependencyRefKey(
+    dependency.type === "run"
+      ? { type: "run", runId: dependency.runId }
+      : { type: "group", groupId: dependency.groupId },
+  );
+}
+
+function dependencyDetailRef(dependency: RunDependencyDetail): RunDependencyRef {
+  return dependency.type === "run"
+    ? { type: "run", runId: dependency.runId }
+    : { type: "group", groupId: dependency.groupId };
+}
+
+function dependentDetailKey(dependent: RunDependentDetail) {
+  return dependent.via === "run"
+    ? `run:${dependent.runId}`
+    : `group:${dependent.dependencyGroupId}:run:${dependent.runId}`;
 }
 
 function matchesDependencyCandidate(run: RunSummary, search: string) {
@@ -440,6 +467,8 @@ export function RunDetailDrawer({
   onRename,
   onSetNote,
   onSetBackendSession,
+  onSetGroup,
+  onClearGroup,
   onSetPinned,
   onClearSchedule,
   onSetScheduleEnabled,
@@ -454,7 +483,7 @@ export function RunDetailDrawer({
 }: {
   activeSection: DrawerDetailSection;
   dependencyCandidateRuns: RunSummary[];
-  onAddDependency: (dependencyRunId: string) => Promise<void>;
+  onAddDependency: (dependency: RunDependencyRef) => Promise<void>;
   actionError?: string;
   actionPending?: RunActionPending;
   onAbort: () => void;
@@ -468,13 +497,15 @@ export function RunDetailDrawer({
   onOpenAttachmentPreview: (attachmentOwnerRunId: string, attachmentId: string) => void;
   onSelectRun: (runId: string) => void;
   onClearBackendSession: () => Promise<void>;
-  onRemoveDependency: (dependencyRunId: string) => Promise<void>;
+  onRemoveDependency: (dependency: RunDependencyRef) => Promise<void>;
   onRemoveAttachment: (attachmentId: string) => Promise<void>;
   onReset: () => void;
   onReconfigure: (patch: ReconfigureRunPatch) => Promise<void>;
   onRename: (name: string | null) => Promise<void>;
   onSetNote: (note: string | null) => Promise<void>;
   onSetBackendSession: (backendSessionId: string) => Promise<void>;
+  onSetGroup: (runGroupId: string) => Promise<void>;
+  onClearGroup: () => Promise<void>;
   onSetPinned: (pinned: boolean) => Promise<void>;
   onClearSchedule: () => Promise<void>;
   onSetScheduleEnabled: (enabled: boolean) => Promise<void>;
@@ -503,10 +534,13 @@ export function RunDetailDrawer({
   );
   const [editingName, setEditingName] = useState(false);
   const [editingBackendSession, setEditingBackendSession] = useState(false);
+  const [editingRunGroup, setEditingRunGroup] = useState(false);
   const [editingRuntimeVars, setEditingRuntimeVars] = useState(false);
   const [editingRunMessage, setEditingRunMessage] = useState(false);
   const [nameDraft, setNameDraft] = useState(run.name ?? "");
   const [backendSessionDraft, setBackendSessionDraft] = useState(run.backendSessionId ?? "");
+  const [runGroupDraft, setRunGroupDraft] = useState(run.runGroupId);
+  const [runGroupDraftError, setRunGroupDraftError] = useState<string | undefined>();
   const [runtimeVarDraftRows, setRuntimeVarDraftRows] = useState<RuntimeVarDraftRow[]>([]);
   const [runtimeVarDraftError, setRuntimeVarDraftError] = useState<string | undefined>();
   const [runMessageDraft, setRunMessageDraft] = useState(run.message ?? "");
@@ -514,7 +548,10 @@ export function RunDetailDrawer({
   const [confirmingReset, setConfirmingReset] = useState(false);
   const [confirmingAbort, setConfirmingAbort] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [dependencyMode, setDependencyMode] = useState<RunDependencyRef["type"]>("run");
   const [dependencyDraft, setDependencyDraft] = useState("");
+  const [dependencyGroupDraft, setDependencyGroupDraft] = useState("");
+  const [dependencyDraftError, setDependencyDraftError] = useState<string | undefined>();
   const [selectedDependencyRunId, setSelectedDependencyRunId] = useState<string | null>(null);
   const { preferences, updatePreferences } = useDashboardPreferences();
   const resize = useDrawerResize();
@@ -522,10 +559,13 @@ export function RunDetailDrawer({
   const nameInputRef = useRef<HTMLInputElement | null>(null);
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
   const backendSessionInputRef = useRef<HTMLInputElement | null>(null);
+  const runGroupInputRef = useRef<HTMLInputElement | null>(null);
   const runtimeVarNewIdRef = useRef(0);
   const backendSessionId = run.backendSessionId;
+  const groupPending = actionPending === "set-group";
   const isPassiveRun = run.backend === "passive";
   const canEditBackendSession = isPassiveRun;
+  const canEditRunGroup = run.status !== "running";
   const canReconfigure = run.capabilities.canReconfigure;
   const actionsLocked = actionPending !== undefined;
   const primaryAction = getRunPrimaryAction(run);
@@ -588,13 +628,16 @@ export function RunDetailDrawer({
     })),
   ];
   const combinedAttachmentSize = totalAttachmentSize + groupAttachmentSize;
-  const configuredDependencyIds = new Set(run.dependencies.map((dependency) => dependency.runId));
+  const configuredDependencyKeys = new Set(run.dependencies.map(dependencyDetailKey));
   const eligibleDependencyCandidates = dependencyCandidateRuns.filter(
-    (candidate) => candidate.runId !== run.runId && !configuredDependencyIds.has(candidate.runId),
+    (candidate) =>
+      candidate.runId !== run.runId &&
+      !configuredDependencyKeys.has(dependencyRefKey({ type: "run", runId: candidate.runId })),
   );
   const normalizedDependencyDraft = dependencyDraft.trim();
+  const normalizedDependencyGroupDraft = dependencyGroupDraft.trim();
   const matchingDependencyCandidates =
-    normalizedDependencyDraft.length === 0
+    dependencyMode !== "run" || normalizedDependencyDraft.length === 0
       ? []
       : eligibleDependencyCandidates
           .filter((candidate) => matchesDependencyCandidate(candidate, normalizedDependencyDraft))
@@ -604,6 +647,18 @@ export function RunDetailDrawer({
     eligibleDependencyCandidates.find(
       (candidate) => candidate.runId.toLowerCase() === normalizedDependencyDraft.toLowerCase(),
     )?.runId;
+  const resolvedDependencyRef: RunDependencyRef | null =
+    dependencyMode === "run"
+      ? resolvedDependencyRunId
+        ? { type: "run", runId: resolvedDependencyRunId }
+        : null
+      : normalizedDependencyGroupDraft.length > 0 &&
+          normalizedDependencyGroupDraft !== run.runGroupId &&
+          !configuredDependencyKeys.has(
+            dependencyRefKey({ type: "group", groupId: normalizedDependencyGroupDraft }),
+          )
+        ? { type: "group", groupId: normalizedDependencyGroupDraft }
+        : null;
   const timelineAttempts = timelineState.history?.attempts ?? [];
   const timelineSessions = Array.from(
     timelineAttempts.reduce((groups, attempt) => {
@@ -748,6 +803,59 @@ export function RunDetailDrawer({
       setEditingBackendSession(false);
     } catch {
       // actionError is surfaced by the shared mutation handler.
+    }
+  }
+
+  function startRunGroupEdit() {
+    if (actionsLocked || !canEditRunGroup) {
+      return;
+    }
+    setRunGroupDraft(run.runGroupId);
+    setRunGroupDraftError(undefined);
+    setEditingRunGroup(true);
+  }
+
+  function cancelRunGroupEdit() {
+    if (groupPending) {
+      return;
+    }
+    setRunGroupDraft(run.runGroupId);
+    setRunGroupDraftError(undefined);
+    setEditingRunGroup(false);
+  }
+
+  async function submitRunGroupEdit() {
+    if (groupPending) {
+      return;
+    }
+    const trimmed = runGroupDraft.trim();
+    if (trimmed.length === 0) {
+      setRunGroupDraftError("Run group cannot be empty.");
+      return;
+    }
+    if (trimmed === run.runGroupId) {
+      setEditingRunGroup(false);
+      return;
+    }
+    try {
+      setRunGroupDraftError(undefined);
+      await onSetGroup(trimmed);
+      setEditingRunGroup(false);
+    } catch (error) {
+      setRunGroupDraftError(error instanceof Error ? error.message : "Run group update failed.");
+    }
+  }
+
+  async function submitRunGroupClear() {
+    if (groupPending || run.runGroupId === run.runId) {
+      return;
+    }
+    try {
+      setRunGroupDraftError(undefined);
+      await onClearGroup();
+      setEditingRunGroup(false);
+    } catch (error) {
+      setRunGroupDraftError(error instanceof Error ? error.message : "Run group update failed.");
     }
   }
 
@@ -911,6 +1019,18 @@ export function RunDetailDrawer({
     }
   }
 
+  function handleRunGroupInputKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      void submitRunGroupEdit();
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cancelRunGroupEdit();
+    }
+  }
+
   useEffect(() => {
     if (editingName) {
       nameInputRef.current?.focus();
@@ -922,6 +1042,19 @@ export function RunDetailDrawer({
       backendSessionInputRef.current?.focus();
     }
   }, [editingBackendSession]);
+
+  useEffect(() => {
+    if (editingRunGroup) {
+      runGroupInputRef.current?.focus();
+    }
+  }, [editingRunGroup]);
+
+  useEffect(() => {
+    if (!editingRunGroup) {
+      setRunGroupDraft(run.runGroupId);
+      setRunGroupDraftError(undefined);
+    }
+  }, [editingRunGroup, run.runGroupId]);
 
   useEffect(() => {
     if (!editingRunMessage) {
@@ -1084,20 +1217,33 @@ export function RunDetailDrawer({
   ]);
 
   async function submitDependencyAdd() {
-    if (!resolvedDependencyRunId || addDependencyPending) {
+    if (addDependencyPending) {
+      return;
+    }
+    if (!resolvedDependencyRef) {
+      setDependencyDraftError(
+        dependencyMode === "run"
+          ? "Choose a dependency run."
+          : normalizedDependencyGroupDraft === run.runGroupId
+            ? "A run cannot depend on its own group."
+            : "Enter a dependency group.",
+      );
       return;
     }
     try {
-      await onAddDependency(resolvedDependencyRunId);
+      setDependencyDraftError(undefined);
+      await onAddDependency(resolvedDependencyRef);
       setDependencyDraft("");
+      setDependencyGroupDraft("");
       setSelectedDependencyRunId(null);
-    } catch {
-      // actionError is surfaced by the shared mutation handler.
+    } catch (error) {
+      setDependencyDraftError(error instanceof Error ? error.message : "Dependency update failed.");
     }
   }
 
   function updateDependencyDraft(nextDraft: string) {
     setDependencyDraft(nextDraft);
+    setDependencyDraftError(undefined);
     const exactRunId = eligibleDependencyCandidates.find(
       (candidate) => candidate.runId.toLowerCase() === nextDraft.trim().toLowerCase(),
     );
@@ -1107,14 +1253,15 @@ export function RunDetailDrawer({
   function selectDependencyCandidate(candidate: RunSummary) {
     setDependencyDraft(dependencyCandidateLabel(candidate));
     setSelectedDependencyRunId(candidate.runId);
+    setDependencyDraftError(undefined);
   }
 
-  async function submitDependencyRemove(dependencyRunId: string) {
+  async function submitDependencyRemove(dependency: RunDependencyRef) {
     if (removeDependencyPending) {
       return;
     }
     try {
-      await onRemoveDependency(dependencyRunId);
+      await onRemoveDependency(dependency);
     } catch {
       // actionError is surfaced by the shared mutation handler.
     }
@@ -1312,7 +1459,9 @@ export function RunDetailDrawer({
         <DrawerResizeHandle label="Resize detail drawer" resize={resize} />
         <header className="drawer-head">
           <div className="drawer-title">
-            <span className="run-id-large">{run.runId}</span>
+            <span className="run-id-large">
+              {run.runGroupId}/{run.runId}
+            </span>
             <StatusBadge status={run.effectiveStatus} />
           </div>
           <div className="drawer-actions">
@@ -1648,6 +1797,83 @@ export function RunDetailDrawer({
                 </div>
               </SummaryLongRow>
             ) : null}
+            <SummaryLongRow label="Run group">
+              {editingRunGroup ? (
+                <div className="drawer-title-edit meta-edit-row">
+                  <label className="field drawer-title-field">
+                    <input
+                      aria-label="Run group"
+                      disabled={groupPending}
+                      onChange={(event) => {
+                        setRunGroupDraft(event.target.value);
+                        setRunGroupDraftError(undefined);
+                      }}
+                      onKeyDown={handleRunGroupInputKeyDown}
+                      placeholder={run.runId}
+                      ref={runGroupInputRef}
+                      value={runGroupDraft}
+                    />
+                  </label>
+                  <button
+                    className="btn"
+                    disabled={groupPending}
+                    onClick={() => void submitRunGroupEdit()}
+                    type="button"
+                  >
+                    {groupPending ? "Saving..." : "Save"}
+                  </button>
+                  {run.runGroupId !== run.runId ? (
+                    <button
+                      className="btn"
+                      disabled={groupPending}
+                      onClick={() => void submitRunGroupClear()}
+                      type="button"
+                    >
+                      {groupPending ? "Clearing..." : "Clear"}
+                    </button>
+                  ) : null}
+                  <button
+                    className="btn"
+                    disabled={groupPending}
+                    onClick={cancelRunGroupEdit}
+                    type="button"
+                  >
+                    Cancel
+                  </button>
+                  {runGroupDraftError ? (
+                    <span className="meta-edit-error">{runGroupDraftError}</span>
+                  ) : null}
+                </div>
+              ) : (
+                <>
+                  <span className="meta-value meta-value--truncate mono" title={run.runGroupId}>
+                    {run.runGroupId}
+                  </span>
+                  <div className="meta-actions">
+                    <button
+                      aria-label="Copy run group id"
+                      className="copy"
+                      onClick={() => onCopy(run.runGroupId, "run group id")}
+                      type="button"
+                    >
+                      <CopyIcon aria-hidden="true" />
+                    </button>
+                    {canEditRunGroup ? (
+                      <button
+                        aria-label="Edit run group"
+                        className="icon-btn icon-btn--small drawer-title-edit-trigger"
+                        disabled={actionsLocked}
+                        onClick={startRunGroupEdit}
+                        title="Edit run group"
+                        type="button"
+                      >
+                        <PencilIcon aria-hidden="true" />
+                      </button>
+                    ) : null}
+                  </div>
+                </>
+              )}
+            </SummaryLongRow>
           </section>
 
           {schedule !== null ? (
@@ -1799,7 +2025,7 @@ export function RunDetailDrawer({
                   <span>
                     {combinedAttachments.length === 0
                       ? groupAttachmentsQuery.isPending
-                        ? "No run attachments yet. Loading family attachments..."
+                        ? "No run attachments yet. Loading run group attachments..."
                         : "No attachments yet."
                       : `${combinedAttachments.length} attachment${combinedAttachments.length === 1 ? "" : "s"} · ${formatBytes(combinedAttachmentSize)}`}
                   </span>
@@ -1838,18 +2064,18 @@ export function RunDetailDrawer({
                   </div>
                 ) : groupAttachmentsQuery.isError ? (
                   <div className="drawer-state">
-                    <h3>Family attachments failed to load</h3>
+                    <h3>Run group attachments failed to load</h3>
                     <p>{groupAttachmentsQuery.error.message}</p>
                   </div>
                 ) : (
                   <div className="drawer-state">
                     <h3>No attachments yet</h3>
-                    <p>No attachments are available for this run or its lineage family.</p>
+                    <p>No attachments are available for this run or its run group.</p>
                   </div>
                 )}
                 {combinedAttachments.length > 0 && groupAttachmentsQuery.isError ? (
                   <div className="drawer-state">
-                    <h3>Family attachments failed to load</h3>
+                    <h3>Run group attachments failed to load</h3>
                     <p>{groupAttachmentsQuery.error.message}</p>
                   </div>
                 ) : null}
@@ -2175,32 +2401,82 @@ export function RunDetailDrawer({
 
                 {canEditDependencies ? (
                   <div className="dependency-add-stack">
+                    <div className="task-tabs" aria-label="Dependency type" role="tablist">
+                      <button
+                        aria-selected={dependencyMode === "run"}
+                        className={dependencyMode === "run" ? "task-tab active" : "task-tab"}
+                        onClick={() => {
+                          setDependencyMode("run");
+                          setDependencyDraftError(undefined);
+                        }}
+                        role="tab"
+                        type="button"
+                      >
+                        Run
+                      </button>
+                      <button
+                        aria-selected={dependencyMode === "group"}
+                        className={dependencyMode === "group" ? "task-tab active" : "task-tab"}
+                        onClick={() => {
+                          setDependencyMode("group");
+                          setDependencyDraftError(undefined);
+                        }}
+                        role="tab"
+                        type="button"
+                      >
+                        Run group
+                      </button>
+                    </div>
                     <div className="dependency-add-row">
-                      <label className="field dependency-field">
-                        <input
-                          aria-label="Dependency run search"
-                          disabled={actionsLocked}
-                          onChange={(event) => updateDependencyDraft(event.target.value)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter") {
-                              event.preventDefault();
-                              void submitDependencyAdd();
-                            }
-                          }}
-                          placeholder="Search by name, assignment, or run id"
-                          value={dependencyDraft}
-                        />
-                      </label>
+                      <div className="field dependency-field">
+                        {dependencyMode === "run" ? (
+                          <input
+                            aria-label="Dependency run search"
+                            disabled={actionsLocked}
+                            onChange={(event) => updateDependencyDraft(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                void submitDependencyAdd();
+                              }
+                            }}
+                            placeholder="Search by name, assignment, or run id"
+                            value={dependencyDraft}
+                          />
+                        ) : (
+                          <input
+                            aria-label="Dependency run group"
+                            disabled={actionsLocked}
+                            onChange={(event) => {
+                              setDependencyGroupDraft(event.target.value);
+                              setDependencyDraftError(undefined);
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                void submitDependencyAdd();
+                              }
+                            }}
+                            placeholder="Run group id"
+                            value={dependencyGroupDraft}
+                          />
+                        )}
+                      </div>
                       <button
                         className="btn"
-                        disabled={actionsLocked || !resolvedDependencyRunId}
+                        disabled={actionsLocked || !resolvedDependencyRef}
                         onClick={() => void submitDependencyAdd()}
                         type="button"
                       >
                         {addDependencyPending ? "Adding..." : "Add dependency"}
                       </button>
                     </div>
-                    {normalizedDependencyDraft.length > 0 ? (
+                    {dependencyDraftError ? (
+                      <div className="notice" data-tone="error">
+                        <span className="notice__message">{dependencyDraftError}</span>
+                      </div>
+                    ) : null}
+                    {dependencyMode === "run" && normalizedDependencyDraft.length > 0 ? (
                       matchingDependencyCandidates.length > 0 ? (
                         <ul
                           aria-label="Dependency suggestions"
@@ -2247,33 +2523,66 @@ export function RunDetailDrawer({
                       </span>
                     </h4>
                     <ul className="dependency-list">
-                      {run.dependencies.map((dependency) => (
-                        <li className="dependency-row" key={dependency.runId}>
-                          <div className="dependency-copy">
-                            <span className="dependency-name">{dependency.name ?? "Unnamed"}</span>
-                            <span className="dependency-meta">
-                              <span className="dependency-meta-id">{dependency.runId}</span>
-                              {dependency.missing || !dependency.effectiveStatus ? (
-                                <span className="badge badge-error">missing</span>
-                              ) : (
-                                <StatusBadge status={dependency.effectiveStatus} />
-                              )}
-                            </span>
-                          </div>
-                          {canEditDependencies ? (
-                            <button
-                              aria-label={`Remove dependency ${dependency.runId}`}
-                              className="icon-btn icon-btn--destructive"
-                              disabled={actionsLocked}
-                              onClick={() => void submitDependencyRemove(dependency.runId)}
-                              title={removeDependencyPending ? "Removing..." : "Remove"}
-                              type="button"
-                            >
-                              <TrashIcon aria-hidden="true" />
-                            </button>
-                          ) : null}
-                        </li>
-                      ))}
+                      {run.dependencies.map((dependency) => {
+                        const dependencyRef = dependencyDetailRef(dependency);
+                        const dependencyId =
+                          dependency.type === "run" ? dependency.runId : dependency.groupId;
+                        return (
+                          <li className="dependency-row" key={dependencyDetailKey(dependency)}>
+                            <div className="dependency-copy">
+                              <span className="dependency-name">
+                                {dependency.type === "run"
+                                  ? (dependency.name ?? "Unnamed")
+                                  : `Run group ${dependency.groupId}`}
+                              </span>
+                              <span className="dependency-meta">
+                                <span className="dependency-meta-id">
+                                  {dependency.type === "run"
+                                    ? dependency.runId
+                                    : dependency.groupId}
+                                </span>
+                                {dependency.type === "run" ? (
+                                  dependency.missing || !dependency.effectiveStatus ? (
+                                    <span className="badge badge-error">missing</span>
+                                  ) : (
+                                    <StatusBadge status={dependency.effectiveStatus} />
+                                  )
+                                ) : (
+                                  <>
+                                    <span
+                                      className={
+                                        dependency.satisfied
+                                          ? "badge badge-completed"
+                                          : "badge badge-blocked"
+                                      }
+                                    >
+                                      {dependency.satisfied ? "satisfied" : "unsatisfied"}
+                                    </span>
+                                    <span>
+                                      {dependency.successful}/{dependency.total} successful
+                                    </span>
+                                    {dependency.archivedExcluded > 0 ? (
+                                      <span>{dependency.archivedExcluded} archived excluded</span>
+                                    ) : null}
+                                  </>
+                                )}
+                              </span>
+                            </div>
+                            {canEditDependencies ? (
+                              <button
+                                aria-label={`Remove dependency ${dependencyId}`}
+                                className="icon-btn icon-btn--destructive"
+                                disabled={actionsLocked}
+                                onClick={() => void submitDependencyRemove(dependencyRef)}
+                                title={removeDependencyPending ? "Removing..." : "Remove"}
+                                type="button"
+                              >
+                                <TrashIcon aria-hidden="true" />
+                              </button>
+                            ) : null}
+                          </li>
+                        );
+                      })}
                     </ul>
                   </div>
                 ) : null}
@@ -2288,11 +2597,16 @@ export function RunDetailDrawer({
                     </h4>
                     <ul className="dependency-list">
                       {run.dependents.map((dependent) => (
-                        <li className="dependency-row" key={dependent.runId}>
+                        <li className="dependency-row" key={dependentDetailKey(dependent)}>
                           <div className="dependency-copy">
                             <span className="dependency-name">{dependent.name ?? "Unnamed"}</span>
                             <span className="dependency-meta">
                               <span className="dependency-meta-id">{dependent.runId}</span>
+                              {dependent.via === "group" ? (
+                                <span className="dependency-meta-id">
+                                  via group {dependent.dependencyGroupId}
+                                </span>
+                              ) : null}
                               {dependent.missing || !dependent.effectiveStatus ? (
                                 <span className="badge badge-error">missing</span>
                               ) : (

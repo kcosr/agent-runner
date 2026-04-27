@@ -25,6 +25,7 @@ import {
   archiveRun,
   clearRunBackendSession,
   clearRunDependencies,
+  clearRunGroup,
   clearRunSchedule,
   downloadAttachment,
   isCommandError,
@@ -37,6 +38,7 @@ import {
   removeAttachment,
   removeRunDependency,
   setRunBackendSession,
+  setRunGroup,
   setRunName,
   setRunNote,
   setRunPinned,
@@ -1033,16 +1035,17 @@ test("command services: add/remove/clear dependency mutations validate graph sta
   });
 
   await withSharedRuntimeEnv(dir, async () => {
-    const added = addRunDependency(target.runId, dependency.runId);
+    const added = addRunDependency(target.runId, { type: "run", runId: dependency.runId });
     assert.deepEqual(added, {
       runId: target.runId,
-      dependencyRunIds: [dependency.runId],
+      dependencies: [{ type: "run", runId: dependency.runId }],
       changed: true,
     });
 
     const detail = readStatus(target.runId);
     assert.deepEqual(detail.dependencies, [
       {
+        type: "run",
         runId: dependency.runId,
         name: "svc-work",
         status: "success",
@@ -1054,24 +1057,119 @@ test("command services: add/remove/clear dependency mutations validate graph sta
     ]);
     assert.deepEqual(detail.dependents, []);
 
-    const removed = removeRunDependency(target.runId, dependency.runId);
+    const removed = removeRunDependency(target.runId, { type: "run", runId: dependency.runId });
     assert.deepEqual(removed, {
       runId: target.runId,
-      dependencyRunIds: [],
+      dependencies: [],
       changed: true,
     });
 
     const cleared = clearRunDependencies(target.runId);
     assert.deepEqual(cleared, {
       runId: target.runId,
-      dependencyRunIds: [],
+      dependencies: [],
       changed: false,
     });
   });
 
   const manifest = readManifest(target.workspaceDir);
-  assert.deepEqual(manifest.dependencyRunIds, []);
-  assert.deepEqual(manifest.resetSeed.dependencyRunIds, []);
+  assert.deepEqual(manifest.dependencies, []);
+  assert.deepEqual(manifest.resetSeed.dependencies, []);
+});
+
+test("command services: set/clear run group mutations persist manifest and reset seed", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const outcome = await initRun(dir);
+
+  await withSharedRuntimeEnv(dir, async () => {
+    const grouped = setRunGroup(outcome.runId, { runGroupId: "shared-group" });
+    assert.deepEqual(grouped, {
+      runId: outcome.runId,
+      runGroupId: "shared-group",
+      previousRunGroupId: outcome.runId,
+      changed: true,
+    });
+
+    const sameGroup = setRunGroup(outcome.runId, { runGroupId: "shared-group" });
+    assert.deepEqual(sameGroup, {
+      runId: outcome.runId,
+      runGroupId: "shared-group",
+      previousRunGroupId: "shared-group",
+      changed: false,
+    });
+
+    const cleared = clearRunGroup(outcome.runId);
+    assert.deepEqual(cleared, {
+      runId: outcome.runId,
+      runGroupId: outcome.runId,
+      previousRunGroupId: "shared-group",
+      changed: true,
+    });
+  });
+
+  const manifest = readManifest(outcome.workspaceDir);
+  assert.equal(manifest.runGroupId, outcome.runId);
+  assert.equal(manifest.resetSeed.runGroupId, outcome.runId);
+});
+
+test("command services: group dependencies project aggregate readiness and reverse edges", async () => {
+  const dir = tempDir();
+  writeBundle(dir);
+  const target = await initRun(dir);
+  const memberA = await initRun(dir);
+  const memberB = await initRun(dir);
+
+  patchManifest(memberA.workspaceDir, (manifest) => {
+    manifest.runGroupId = "blocking-group";
+    manifest.resetSeed.runGroupId = "blocking-group";
+    manifest.status = "success";
+    manifest.endedAt = "2026-04-12T10:05:00.000Z";
+    manifest.exitCode = 0;
+  });
+  patchManifest(memberB.workspaceDir, (manifest) => {
+    manifest.runGroupId = "blocking-group";
+    manifest.resetSeed.runGroupId = "blocking-group";
+  });
+
+  await withSharedRuntimeEnv(dir, async () => {
+    const added = addRunDependency(target.runId, { type: "group", groupId: "blocking-group" });
+    assert.deepEqual(added, {
+      runId: target.runId,
+      dependencies: [{ type: "group", groupId: "blocking-group" }],
+      changed: true,
+    });
+
+    const detail = readStatus(target.runId);
+    assert.deepEqual(detail.dependencies, [
+      {
+        type: "group",
+        groupId: "blocking-group",
+        total: 2,
+        successful: 1,
+        unsatisfied: 1,
+        archivedExcluded: 0,
+        satisfied: false,
+        missing: false,
+      },
+    ]);
+
+    const memberDetail = readStatus(memberA.runId);
+    assert.deepEqual(memberDetail.dependents, [
+      {
+        type: "run",
+        via: "group",
+        dependencyGroupId: "blocking-group",
+        runId: target.runId,
+        name: "svc-work",
+        status: "initialized",
+        effectiveStatus: "initialized",
+        archivedAt: null,
+        satisfied: false,
+        missing: false,
+      },
+    ]);
+  });
 });
 
 test("command services: dependency mutations reject missing runs, self edges, duplicates, cycles, and non-initialized targets", async () => {
@@ -1083,22 +1181,22 @@ test("command services: dependency mutations reject missing runs, self edges, du
 
   await withSharedRuntimeEnv(dir, async () => {
     assert.throws(
-      () => addRunDependency(target.runId, "missing-run"),
+      () => addRunDependency(target.runId, { type: "run", runId: "missing-run" }),
       (err) =>
         err instanceof CommandError &&
         /run add-dep: dependency run missing-run was not found/.test(err.message),
     );
 
     assert.throws(
-      () => addRunDependency(target.runId, target.runId),
+      () => addRunDependency(target.runId, { type: "run", runId: target.runId }),
       (err) =>
         err instanceof CommandError &&
         new RegExp(`run add-dep: run ${target.runId} cannot depend on itself`).test(err.message),
     );
 
-    addRunDependency(target.runId, dependency.runId);
+    addRunDependency(target.runId, { type: "run", runId: dependency.runId });
     assert.throws(
-      () => addRunDependency(target.runId, dependency.runId),
+      () => addRunDependency(target.runId, { type: "run", runId: dependency.runId }),
       (err) =>
         err instanceof CommandError &&
         new RegExp(`dependency ${dependency.runId} already exists on run ${target.runId}`).test(
@@ -1106,12 +1204,14 @@ test("command services: dependency mutations reject missing runs, self edges, du
         ),
     );
 
-    addRunDependency(dependency.runId, downstream.runId);
+    addRunDependency(dependency.runId, { type: "run", runId: downstream.runId });
     assert.throws(
-      () => addRunDependency(downstream.runId, target.runId),
+      () => addRunDependency(downstream.runId, { type: "run", runId: target.runId }),
       (err) =>
         err instanceof CommandError &&
-        new RegExp(`adding dependency ${target.runId} would create a cycle`).test(err.message),
+        new RegExp(`adding dependency ${target.runId} would create a dependency cycle`).test(
+          err.message,
+        ),
     );
 
     patchManifest(target.workspaceDir, (manifest) => {
@@ -1121,7 +1221,7 @@ test("command services: dependency mutations reject missing runs, self edges, du
     });
 
     assert.throws(
-      () => addRunDependency(target.runId, downstream.runId),
+      () => addRunDependency(target.runId, { type: "run", runId: downstream.runId }),
       (err) =>
         err instanceof CommandError &&
         new RegExp(`cannot add dependencies unless run ${target.runId} is initialized`).test(
@@ -1129,7 +1229,7 @@ test("command services: dependency mutations reject missing runs, self edges, du
         ),
     );
     assert.throws(
-      () => removeRunDependency(target.runId, dependency.runId),
+      () => removeRunDependency(target.runId, { type: "run", runId: dependency.runId }),
       (err) =>
         err instanceof CommandError &&
         new RegExp(`cannot remove dependencies unless run ${target.runId} is initialized`).test(
@@ -1180,7 +1280,7 @@ test("command services: readyRun promotes initialized runs and tightens task and
     assert.equal(appended.task.notes, "Ready notes");
 
     assert.throws(
-      () => addRunDependency(target.runId, dependency.runId),
+      () => addRunDependency(target.runId, { type: "run", runId: dependency.runId }),
       (err) =>
         err instanceof CommandError &&
         new RegExp(`cannot add dependencies unless run ${target.runId} is initialized`).test(
@@ -1502,7 +1602,7 @@ test("command services: listRuns supports exact cwd scope, repo scope, and unsco
   });
 });
 
-test("command services: listRuns supports family scope across branching lineages and projects familyRootRunId", async () => {
+test("command services: listRuns supports group scope across branching lineages and projects runGroupId", async () => {
   const dir = tempDir();
   writeBundle(dir);
   const root = await initRun(dir);
@@ -1512,30 +1612,30 @@ test("command services: listRuns supports family scope across branching lineages
   const different = await initRun(dir);
 
   await withSharedRuntimeEnv(dir, async () => {
-    const familyRuns = listRuns({
+    const groupRuns = listRuns({
       includeArchived: true,
       scope: {
-        kind: "family",
-        targetRunId: target.runId,
+        kind: "group",
+        runGroupId: root.runId,
       },
     });
     assert.deepEqual(
-      new Set(familyRuns.map((run) => run.runId)),
+      new Set(groupRuns.map((run) => run.runId)),
       new Set([root.runId, target.runId, peer.runId, child.runId]),
     );
-    assert.deepEqual(new Set(familyRuns.map((run) => run.familyRootRunId)), new Set([root.runId]));
+    assert.deepEqual(new Set(groupRuns.map((run) => run.runGroupId)), new Set([root.runId]));
 
     const allRuns = listRuns({ includeArchived: true });
     const summariesByRunId = new Map(allRuns.map((run) => [run.runId, run]));
-    assert.equal(summariesByRunId.get(root.runId)?.familyRootRunId, root.runId);
-    assert.equal(summariesByRunId.get(target.runId)?.familyRootRunId, root.runId);
-    assert.equal(summariesByRunId.get(peer.runId)?.familyRootRunId, root.runId);
-    assert.equal(summariesByRunId.get(child.runId)?.familyRootRunId, root.runId);
-    assert.equal(summariesByRunId.get(different.runId)?.familyRootRunId, null);
+    assert.equal(summariesByRunId.get(root.runId)?.runGroupId, root.runId);
+    assert.equal(summariesByRunId.get(target.runId)?.runGroupId, root.runId);
+    assert.equal(summariesByRunId.get(peer.runId)?.runGroupId, root.runId);
+    assert.equal(summariesByRunId.get(child.runId)?.runGroupId, root.runId);
+    assert.equal(summariesByRunId.get(different.runId)?.runGroupId, different.runId);
   });
 });
 
-test("command services: listRuns family scope rejects broken target lineage", async () => {
+test("command services: listRuns group scope ignores broken parent lineage", async () => {
   const dir = tempDir();
   writeBundle(dir);
   const root = await initRun(dir);
@@ -1546,21 +1646,21 @@ test("command services: listRuns family scope rejects broken target lineage", as
   });
 
   await withSharedRuntimeEnv(dir, async () => {
-    assert.throws(
-      () =>
-        listRuns({
-          includeArchived: true,
-          scope: {
-            kind: "family",
-            targetRunId: target.runId,
-          },
-        }),
-      /family scope could not resolve parent run "missing-parent"/,
+    const groupRuns = listRuns({
+      includeArchived: true,
+      scope: {
+        kind: "group",
+        runGroupId: root.runId,
+      },
+    });
+    assert.deepEqual(
+      new Set(groupRuns.map((run) => run.runId)),
+      new Set([root.runId, target.runId]),
     );
   });
 });
 
-test("command services: listRuns family scope ignores unrelated broken lineages", async () => {
+test("command services: listRuns group scope ignores unrelated broken lineages", async () => {
   const dir = tempDir();
   writeBundle(dir);
   const root = await initRun(dir);
@@ -1576,15 +1676,15 @@ test("command services: listRuns family scope ignores unrelated broken lineages"
   });
 
   await withSharedRuntimeEnv(dir, async () => {
-    const familyRuns = listRuns({
+    const groupRuns = listRuns({
       includeArchived: true,
       scope: {
-        kind: "family",
-        targetRunId: target.runId,
+        kind: "group",
+        runGroupId: root.runId,
       },
     });
     assert.deepEqual(
-      new Set(familyRuns.map((run) => run.runId)),
+      new Set(groupRuns.map((run) => run.runId)),
       new Set([root.runId, target.runId, peer.runId]),
     );
   });
@@ -1631,7 +1731,7 @@ test("command services: archived runs allow attachment add/list/download/remove 
   });
 });
 
-test("command services: attachment list defaults to family scope and supports explicit run scope", async () => {
+test("command services: attachment list defaults to group scope and supports explicit run scope", async () => {
   const dir = tempDir();
   writeBundle(dir);
   const root = await initRun(dir);
@@ -1657,14 +1757,14 @@ test("command services: attachment list defaults to family scope and supports ex
     await addAttachmentFromFile(child.runId, { sourcePath: childFile });
     await addAttachmentFromFile(different.runId, { sourcePath: differentFile });
 
-    const family = listAttachments(target.runId);
-    assert.equal(family.attachments.length, 4);
+    const group = listAttachments(target.runId);
+    assert.equal(group.attachments.length, 4);
     assert.deepEqual(
-      new Set(family.attachments.map((attachment) => attachment.ownerRunId)),
+      new Set(group.attachments.map((attachment) => attachment.ownerRunId)),
       new Set([root.runId, target.runId, peer.runId, child.runId]),
     );
     assert.equal(
-      family.attachments.some((attachment) => attachment.ownerRunId === different.runId),
+      group.attachments.some((attachment) => attachment.ownerRunId === different.runId),
       false,
     );
 

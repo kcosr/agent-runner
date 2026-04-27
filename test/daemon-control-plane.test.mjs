@@ -652,8 +652,8 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
       assert.ok(runs.runs.some((run) => run.runId === init.runId));
       assert.ok(runs.runs.some((run) => run.runId === passiveInit.runId));
       assert.equal(runs.runs.find((run) => run.runId === child.runId)?.parentRunId, init.runId);
-      assert.equal(runs.runs.find((run) => run.runId === init.runId)?.familyRootRunId, init.runId);
-      assert.equal(runs.runs.find((run) => run.runId === child.runId)?.familyRootRunId, init.runId);
+      assert.equal(runs.runs.find((run) => run.runId === init.runId)?.runGroupId, init.runId);
+      assert.equal(runs.runs.find((run) => run.runId === child.runId)?.runGroupId, init.runId);
 
       const cwdScoped = await client.call("runs.list", {
         scope: { kind: "cwd", cwd: otherCwd },
@@ -716,21 +716,21 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
       const dependency = await initRun(dir);
       const addedDependency = await client.call("runs.addDependency", {
         target: init.runId,
-        dependencyRunId: dependency.runId,
+        dependency: { type: "run", runId: dependency.runId },
       });
       assert.deepEqual(addedDependency.result, {
         runId: init.runId,
-        dependencyRunIds: [dependency.runId],
+        dependencies: [{ type: "run", runId: dependency.runId }],
         changed: true,
       });
 
       const removedDependency = await client.call("runs.removeDependency", {
         target: init.runId,
-        dependencyRunId: dependency.runId,
+        dependency: { type: "run", runId: dependency.runId },
       });
       assert.deepEqual(removedDependency.result, {
         runId: init.runId,
-        dependencyRunIds: [],
+        dependencies: [],
         changed: true,
       });
 
@@ -739,7 +739,7 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
       });
       assert.deepEqual(clearedDependencies.result, {
         runId: init.runId,
-        dependencyRunIds: [],
+        dependencies: [],
         changed: false,
       });
 
@@ -974,14 +974,8 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
         runs.body.runs.find((run) => run.runId === child.runId)?.parentRunId,
         init.runId,
       );
-      assert.equal(
-        runs.body.runs.find((run) => run.runId === init.runId)?.familyRootRunId,
-        init.runId,
-      );
-      assert.equal(
-        runs.body.runs.find((run) => run.runId === child.runId)?.familyRootRunId,
-        init.runId,
-      );
+      assert.equal(runs.body.runs.find((run) => run.runId === init.runId)?.runGroupId, init.runId);
+      assert.equal(runs.body.runs.find((run) => run.runId === child.runId)?.runGroupId, init.runId);
 
       const detail = await httpJson(httpBaseUrl, `/api/runs/${init.runId}`);
       assert.equal(detail.status, 200);
@@ -1040,26 +1034,28 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
       const addedDependency = await httpJson(httpBaseUrl, `/api/runs/${init.runId}/dependencies`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ dependencyRunId: dependency.runId }),
+        body: JSON.stringify({ type: "run", runId: dependency.runId }),
       });
       assert.equal(addedDependency.status, 200);
       assert.deepEqual(addedDependency.body.result, {
         runId: init.runId,
-        dependencyRunIds: [dependency.runId],
+        dependencies: [{ type: "run", runId: dependency.runId }],
         changed: true,
       });
 
       const removedDependency = await httpJson(
         httpBaseUrl,
-        `/api/runs/${init.runId}/dependencies/${dependency.runId}`,
+        `/api/runs/${init.runId}/dependencies`,
         {
           method: "DELETE",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ type: "run", runId: dependency.runId }),
         },
       );
       assert.equal(removedDependency.status, 200);
       assert.deepEqual(removedDependency.body.result, {
         runId: init.runId,
-        dependencyRunIds: [],
+        dependencies: [],
         changed: true,
       });
 
@@ -1073,7 +1069,7 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
       assert.equal(clearedDependencies.status, 200);
       assert.deepEqual(clearedDependencies.body.result, {
         runId: init.runId,
-        dependencyRunIds: [],
+        dependencies: [],
         changed: false,
       });
 
@@ -1353,7 +1349,7 @@ test("daemon attachment HTTP routes upload, list, download, remove, and reject m
   });
 });
 
-test("daemon run-list family filtering supports HTTP and RPC and rejects invalid targets", async () => {
+test("daemon run-list group filtering supports HTTP and RPC and rejects invalid targets", async () => {
   const dir = tempDir();
   writeAgent(dir, "daemon-agent", AGENT);
   writeAssignment(dir, "daemon-work", ASSIGNMENT);
@@ -1370,61 +1366,60 @@ test("daemon run-list family filtering supports HTTP and RPC and rejects invalid
     const server = await serveDaemon(listenUrl);
     const client = await DaemonClient.connect(listenUrl);
     try {
-      const httpFamily = await httpJson(httpBaseUrl, `/api/runs?familyOf=${root.runId}`);
-      assert.equal(httpFamily.status, 200);
+      const httpGroup = await httpJson(httpBaseUrl, `/api/runs?runGroupId=${root.runId}`);
+      assert.equal(httpGroup.status, 200);
       assert.deepEqual(
-        new Set(httpFamily.body.runs.map((run) => run.runId)),
+        new Set(httpGroup.body.runs.map((run) => run.runId)),
         new Set([root.runId, target.runId, peer.runId, child.runId]),
       );
       assert.equal(
-        httpFamily.body.runs.some((run) => run.runId === different.runId),
+        httpGroup.body.runs.some((run) => run.runId === different.runId),
         false,
       );
 
-      const rpcFamily = await client.call("runs.list", {
-        scope: { kind: "family", targetRunId: root.runId },
+      const rpcGroup = await client.call("runs.list", {
+        scope: { kind: "group", runGroupId: root.runId },
       });
       assert.deepEqual(
-        new Set(rpcFamily.runs.map((run) => run.runId)),
+        new Set(rpcGroup.runs.map((run) => run.runId)),
         new Set([root.runId, target.runId, peer.runId, child.runId]),
       );
 
       const conflicting = await httpJson(
         httpBaseUrl,
-        `/api/runs?familyOf=${root.runId}&repo=${encodeURIComponent("daemon-control-plane")}`,
+        `/api/runs?runGroupId=${root.runId}&repo=${encodeURIComponent("daemon-control-plane")}`,
       );
       assert.equal(conflicting.status, 400);
       assert.equal(conflicting.body.error.code, "INVALID_REQUEST");
       assert.match(
         conflicting.body.error.message,
-        /runs\.list accepts only one of cwd, repo, global=true, or familyOf/,
+        /runs\.list accepts only one of cwd, repo, global=true, or runGroupId/,
       );
 
-      const malformed = await httpJson(httpBaseUrl, "/api/runs?familyOf=../bad");
+      const malformed = await httpJson(httpBaseUrl, "/api/runs?runGroupId=../bad");
       assert.equal(malformed.status, 400);
       assert.equal(malformed.body.error.code, "INVALID_REQUEST");
-      assert.match(malformed.body.error.message, /familyOf must be a run id, not a path/);
+      assert.equal(
+        malformed.body.error.message,
+        "runGroupId cannot contain control characters, /, or \\",
+      );
 
-      const empty = await httpJson(httpBaseUrl, "/api/runs?familyOf=");
+      const empty = await httpJson(httpBaseUrl, "/api/runs?runGroupId=");
       assert.equal(empty.status, 400);
       assert.equal(empty.body.error.code, "INVALID_REQUEST");
-      assert.match(empty.body.error.message, /familyOf cannot be empty/);
+      assert.match(empty.body.error.message, /runGroupId cannot be empty/);
 
-      const missing = await httpJson(httpBaseUrl, "/api/runs?familyOf=missing-run");
-      assert.equal(missing.status, 404);
-      assert.equal(missing.body.error.code, "NOT_FOUND");
+      const missing = await httpJson(httpBaseUrl, "/api/runs?runGroupId=missing-run");
+      assert.equal(missing.status, 200);
+      assert.deepEqual(missing.body.runs, []);
 
       patchManifest(target.workspaceDir, (manifest) => {
         manifest.parentRunId = "missing-parent";
       });
 
-      const unresolved = await httpJson(httpBaseUrl, `/api/runs?familyOf=${target.runId}`);
-      assert.equal(unresolved.status, 422);
-      assert.equal(unresolved.body.error.code, "COMMAND_ERROR");
-      assert.match(
-        unresolved.body.error.message,
-        /family scope could not resolve parent run "missing-parent"/,
-      );
+      const unresolved = await httpJson(httpBaseUrl, `/api/runs?runGroupId=${target.runId}`);
+      assert.equal(unresolved.status, 200);
+      assert.deepEqual(unresolved.body.runs, []);
     } finally {
       await client.close();
       await server.close();
@@ -1432,7 +1427,7 @@ test("daemon run-list family filtering supports HTTP and RPC and rejects invalid
   });
 });
 
-test("daemon attachment HTTP routes default to family scope and reject invalid scope query values", async () => {
+test("daemon attachment HTTP routes default to group scope and reject invalid scope query values", async () => {
   const dir = tempDir();
   writeAgent(dir, "daemon-agent", AGENT);
   writeAssignment(dir, "daemon-work", ASSIGNMENT);
@@ -1493,7 +1488,7 @@ test("daemon attachment HTTP routes default to family scope and reject invalid s
       );
       assert.equal(invalid.status, 400);
       assert.equal(invalid.body.error.code, "INVALID_REQUEST");
-      assert.match(invalid.body.error.message, /scope must be "run" or "family"/);
+      assert.match(invalid.body.error.message, /scope must be "run" or "group"/);
     } finally {
       await server.close();
     }
@@ -1645,21 +1640,21 @@ test("daemon dependency mutation surfaces reject path-like dependency ids over R
       () =>
         client.call("runs.addDependency", {
           target: init.runId,
-          dependencyRunId: "../other-run",
+          dependency: { type: "run", runId: "../other-run" },
         }),
       (err) =>
         err instanceof DaemonRpcError &&
-        err.message === "dependencyRunId must be a run id, not a path",
+        err.message === "dependency.runId must be a run id, not a path",
     );
 
     const response = await httpJson(httpBaseUrl, `/api/runs/${init.runId}/dependencies`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ dependencyRunId: "../other-run" }),
+      body: JSON.stringify({ type: "run", runId: "../other-run" }),
     });
     assert.equal(response.status, 400);
     assert.equal(response.body.error.code, "INVALID_REQUEST");
-    assert.equal(response.body.error.message, "dependencyRunId must be a run id, not a path");
+    assert.equal(response.body.error.message, "request body.runId must be a run id, not a path");
   } finally {
     await client.close();
     await server.close();
@@ -2607,7 +2602,7 @@ test("daemon mutation-driven projection SSE events include dependent summary fan
   const source = await initRun(dir, "passive-daemon-agent");
   const dependent = await initRun(dir, "passive-daemon-agent");
   patchManifest(dependent.workspaceDir, (manifest) => {
-    manifest.dependencyRunIds = [source.runId];
+    manifest.dependencies = [{ type: "run", runId: source.runId }];
   });
 
   const port = await freePort();
@@ -2686,7 +2681,7 @@ test("daemon auto-starts ready dependency runs immediately when dependencies are
     try {
       await client.call("runs.addDependency", {
         target: dependent.runId,
-        dependencyRunId: source.runId,
+        dependency: { type: "run", runId: source.runId },
       });
 
       const readied = await client.call("runs.ready", { target: dependent.runId });
@@ -2695,6 +2690,54 @@ test("daemon auto-starts ready dependency runs immediately when dependencies are
       const running = await waitForRunStatus(httpBaseUrl, dependent.runId, "running");
       assert.equal(running.runId, dependent.runId);
       assert.equal(autoStartCalls, 1);
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+});
+
+test("daemon auto-starts ready group dependency runs when a member leaves the blocking group", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const source = await initRun(dir);
+  const movingMember = await initRun(dir);
+  const dependent = await initRun(dir);
+  markRunSuccessful(source.workspaceDir);
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const httpBaseUrl = deriveHttpBaseUrl(listenUrl);
+  const resumeTargets = [];
+
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl, {
+      async resumeRun({ target, emitEvent }) {
+        resumeTargets.push(target);
+        assert.equal(target, dependent.runId);
+        markRunRunning(dependent.workspaceDir);
+        emitRunStarted(emitEvent, target, dir);
+        return { runId: target };
+      },
+    });
+    const client = await DaemonClient.connect(listenUrl);
+    try {
+      await client.call("runs.setGroup", { target: source.runId, runGroupId: "group-a" });
+      await client.call("runs.setGroup", { target: movingMember.runId, runGroupId: "group-a" });
+      await client.call("runs.addDependency", {
+        target: dependent.runId,
+        dependency: { type: "group", groupId: "group-a" },
+      });
+
+      const dependentReady = await client.call("runs.ready", { target: dependent.runId });
+      assert.equal(dependentReady.run.status, "ready");
+      assert.deepEqual(resumeTargets, []);
+
+      await client.call("runs.setGroup", { target: movingMember.runId, runGroupId: "group-b" });
+      const running = await waitForRunStatus(httpBaseUrl, dependent.runId, "running");
+      assert.equal(running.runId, dependent.runId);
+      assert.deepEqual(resumeTargets, [dependent.runId]);
     } finally {
       await client.close();
       await server.close();
@@ -2736,7 +2779,7 @@ test("daemon auto-starts ready dependency runs after the final dependency succee
     try {
       await client.call("runs.addDependency", {
         target: dependent.runId,
-        dependencyRunId: source.runId,
+        dependency: { type: "run", runId: source.runId },
       });
 
       await client.call("runs.ready", { target: source.runId });
@@ -2794,7 +2837,7 @@ test("daemon startup sweep auto-starts eligible ready dependency runs", async ()
   const source = await initRun(dir);
   const dependent = await initRun(dir);
   markRunSuccessful(source.workspaceDir);
-  runCli(["run", "add-dep", dependent.runId, source.runId], { cwd: dir });
+  runCli(["run", "add-dep", dependent.runId, "--run", source.runId], { cwd: dir });
   runCli(["run", "ready", dependent.runId], { cwd: dir });
 
   const port = await freePort();
@@ -2832,7 +2875,7 @@ test("daemon suppresses duplicate dependency auto-start attempts while one is al
   const source = await initRun(dir);
   const dependent = await initRun(dir);
   markRunSuccessful(source.workspaceDir);
-  runCli(["run", "add-dep", dependent.runId, source.runId], { cwd: dir });
+  runCli(["run", "add-dep", dependent.runId, "--run", source.runId], { cwd: dir });
   runCli(["run", "ready", dependent.runId], { cwd: dir });
 
   const port = await freePort();
@@ -2886,7 +2929,7 @@ test("daemon scheduler defers due one-time schedules during pending dependency a
   const source = await initRun(dir);
   const dependent = await initRun(dir);
   markRunSuccessful(source.workspaceDir);
-  runCli(["run", "add-dep", dependent.runId, source.runId], { cwd: dir });
+  runCli(["run", "add-dep", dependent.runId, "--run", source.runId], { cwd: dir });
   runCli(["run", "ready", dependent.runId], { cwd: dir });
 
   const port = await freePort();
@@ -2953,7 +2996,7 @@ test("daemon clears pending dependency auto-start markers after resume failures"
   const source = await initRun(dir);
   const dependent = await initRun(dir);
   markRunSuccessful(source.workspaceDir);
-  runCli(["run", "add-dep", dependent.runId, source.runId], { cwd: dir });
+  runCli(["run", "add-dep", dependent.runId, "--run", source.runId], { cwd: dir });
   runCli(["run", "ready", dependent.runId], { cwd: dir });
 
   const firstPort = await freePort();
@@ -3569,7 +3612,7 @@ test("daemon scheduler misses due one-time schedules that are not runnable", asy
   markRunReady(dependencyBlocked.workspaceDir);
   markRunReady(archived.workspaceDir);
   patchManifest(dependencyBlocked.workspaceDir, (manifest) => {
-    manifest.dependencyRunIds = [blocker.runId];
+    manifest.dependencies = [{ type: "run", runId: blocker.runId }];
     manifest.schedule = oneTimeSchedule(runAt);
   });
   patchManifest(archived.workspaceDir, (manifest) => {

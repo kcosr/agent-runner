@@ -20,7 +20,7 @@ explicit concepts:
 - caller-facing documentation stays separate from worker-facing
   instructions
 
-The current manifest schema is version `14`. Older manifest shapes are not
+The current manifest schema is version `15`. Older manifest shapes are not
 silently upgraded or dual-read at runtime.
 
 ## Non-goals
@@ -125,8 +125,9 @@ The canonical record is `run.json`. Important persisted fields:
 - `callerInstructions`
 - `backendSessionId` (backend-native resume handle; Pi, Codex, Claude,
   etc. each store their own flavor here)
-- `dependencyRunIds`
-- `parentRunId`
+- `runGroupId`
+- `dependencies` (typed upstream run or group refs)
+- `parentRunId` (lineage only)
 - `resolvedHooks` (the frozen hook descriptors selected at first write)
 - `hookState` (hook-owned state bag)
 - `hookAudits` (per-hook execution audit records)
@@ -313,7 +314,11 @@ blocked with the rest completed or blocked → `blocked`; otherwise
 Nested `task-runner` invocations automatically carry
 `TASK_RUNNER_PARENT_RUN_ID`, so child runs freeze an explicit lineage
 edge at creation time. Descendants read inherited vars from the nearest
-ancestor that already froze the value.
+ancestor that already froze the value. Nested invocations also carry
+`TASK_RUNNER_RUN_GROUP_ID`, so child runs join the parent's run group by
+default. The parent edge remains lineage for variable inheritance and
+child-run hooks; run groups control group-scoped attachments, filters,
+and group dependencies.
 
 ### Init
 
@@ -434,8 +439,9 @@ Important rules:
   or `--add-task`
 - archived runs must be unarchived first
 - passive runs are not executed through `run --resume-run`
-- dependencies gate execution: all declared dependency runs must be in
-  `success`
+- dependencies gate execution: declared run dependencies must be in
+  `success`, and declared group dependencies require every non-archived
+  group member to be `success`
 
 See [resume.md](resume.md).
 
@@ -527,15 +533,15 @@ The resolved launcher is stored on both `manifest.launcher` and
 - `task-runner run audit <run-id>`
 - `task-runner task list <run-id>`
 - `task-runner task show <run-id> <task-id>`
-- `task-runner attachment list <run-id> [--scope run|family]`
+- `task-runner attachment list <run-id> [--scope run|group]`
 
 Rules:
 
 - Top-level `status` reports system/environment status and takes no run id.
 - `run status`, `run brief`, and `run audit` are run-id-only.
-- `attachment list` defaults to `family`, which walks the target run's
-  parent chain to the lineage root and includes every run that shares
-  that root. Use `--scope run` for target-only attachment listing.
+- `attachment list` defaults to `group`, which includes every run whose
+  `runGroupId` matches the target run. Use `--scope run` for target-only
+  attachment listing.
 
 ### Mutation surfaces
 
@@ -544,6 +550,7 @@ Rules:
 - `task-runner run reset|archive|unarchive|delete|set-name|`
   `set-backend-session|clear-backend-session`
 - `task-runner run schedule [set]|enable|disable|clear`
+- `task-runner run set-group|clear-group`
 - `task-runner run add-dep|remove-dep|clear-deps`
 
 `run set-backend-session` / `run clear-backend-session` are
@@ -551,7 +558,8 @@ passive-only metadata mutations. They update `manifest.backendSessionId`
 without changing task state, lifecycle status, attempt history, archive state,
 or dependency projections.
 
-Dependency mutations are only allowed on `initialized` runs.
+Dependency mutations are only allowed on `initialized` runs. Group
+mutations are allowed only for non-running runs and are cycle-checked.
 
 ### Daemon surface
 

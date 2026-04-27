@@ -33,6 +33,7 @@ import type { LockableField, VarDef } from "../config/schema.js";
 import { resolveAssignmentHooks } from "../hooks/loader.js";
 import { createHookExecutionState, runAttemptHooks, runPrepareHooks } from "../hooks/runtime.js";
 import type { ResolvedHookDescriptor } from "../hooks/types.js";
+import { validateRunGroupId } from "./groups.js";
 import { resolveFreshLauncherConfig } from "./launchers.js";
 import {
   type AttemptRecord,
@@ -46,6 +47,7 @@ import {
   type TaskSnapshot,
   applyRunResetSeed,
   buildRunResetSeed,
+  cloneRunDependencyRefs,
   cloneRuntimeVarSources,
   findRunManifestsById,
   resolveResumeTarget,
@@ -61,6 +63,7 @@ import {
   checkRecursionDepth,
   readParentRunIdFromEnv,
   readRecursionState,
+  readRunGroupIdFromEnv,
 } from "./recursion-guard.js";
 import {
   IMPLICIT_RESUME_MESSAGE,
@@ -124,6 +127,7 @@ export interface RunOptions {
   cliVars: Record<string, string>;
   webVars: Record<string, string>;
   parentRunId?: string | null;
+  runGroupId?: string | null;
   backend: Backend;
   callerCwd?: string;
   overrides?: RunOverrides;
@@ -505,7 +509,7 @@ function buildRecurringCloneManifest(params: {
   const workspaceDir = resolveRunWorkspaceDirForRepo(sourceManifest.repo, runId);
   const finalTasks = cloneTaskSnapshotRecord(seed.finalTasks);
   return {
-    schemaVersion: 14,
+    schemaVersion: 15,
     runId,
     repo: sourceManifest.repo,
     agent: {
@@ -539,7 +543,8 @@ function buildRecurringCloneManifest(params: {
     endedAt: null,
     archivedAt: null,
     status: "ready",
-    dependencyRunIds: [...seed.dependencyRunIds],
+    runGroupId: seed.runGroupId,
+    dependencies: cloneRunDependencyRefs(seed.dependencies),
     parentRunId: seed.parentRunId,
     schedule: cloneRunSchedule(schedule),
     exitCode: null,
@@ -566,7 +571,8 @@ function buildRecurringCloneManifest(params: {
       resolvedBackendArgs: cloneResolvedBackendArgs(seed.resolvedBackendArgs),
       launcher: cloneResolvedLauncherConfig(seed.launcher),
       lockedFields: [...seed.lockedFields],
-      dependencyRunIds: [...seed.dependencyRunIds],
+      runGroupId: seed.runGroupId,
+      dependencies: cloneRunDependencyRefs(seed.dependencies),
       parentRunId: seed.parentRunId,
       runtimeVars: { ...seed.runtimeVars },
       runtimeVarSources: cloneRuntimeVarSources(seed.runtimeVarSources),
@@ -1237,6 +1243,9 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     if (opts.parentRunId !== undefined && opts.parentRunId !== null) {
       throw new ResumeError("--parent-run cannot be combined with --resume-run");
     }
+    if (opts.runGroupId !== undefined && opts.runGroupId !== null) {
+      throw new ResumeError("--group-id cannot be combined with --resume-run");
+    }
     if (overrides?.cwd !== undefined) {
       throw new ResumeError(
         "--cwd cannot be combined with --resume-run — backend sessions are bound to the cwd they were created in, so a different cwd would invalidate the captured session id. Create a fresh run if you need a different cwd.",
@@ -1311,6 +1320,12 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   const parentRunId = reusesFrozenSetup
     ? (resume?.manifest.parentRunId ?? null)
     : (opts.parentRunId ?? readParentRunIdFromEnv() ?? null);
+  const explicitRunGroupId =
+    !reusesFrozenSetup && opts.runGroupId !== undefined && opts.runGroupId !== null
+      ? validateRunGroupId(opts.runGroupId)
+      : null;
+  const envRunGroupId =
+    !reusesFrozenSetup && explicitRunGroupId === null ? readRunGroupIdFromEnv() : null;
   let effectiveBackendId = backend.id;
   let currentBackend = backend;
   // When --backend overrides the agent's backend, the agent's `model`
@@ -1409,6 +1424,12 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
 
   const reusingWorkspace = resume !== undefined;
   const runId = reusingWorkspace && resume ? resume.manifest.runId : shortId();
+  let runGroupId = reusesFrozenSetup
+    ? resume.manifest.runGroupId
+    : (explicitRunGroupId ??
+      (envRunGroupId === null ? null : validateRunGroupId(envRunGroupId)) ??
+      lineageChain[0]?.manifest.runGroupId ??
+      runId);
   const workspaceDir =
     reusingWorkspace && resume ? resume.workspaceDir : resolveRunWorkspaceDirForRepo(repo, runId);
   mkdirSync(workspaceDir, { recursive: true });
@@ -1494,7 +1515,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       ]),
     );
     const prepareManifest: RunManifest = {
-      schemaVersion: 14,
+      schemaVersion: 15,
       runId,
       repo,
       agent: {
@@ -1528,7 +1549,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       endedAt: null,
       archivedAt: null,
       status: isInitialize ? "initialized" : "running",
-      dependencyRunIds: [],
+      runGroupId,
+      dependencies: [],
       parentRunId,
       schedule: initialSchedule,
       exitCode: null,
@@ -1562,7 +1584,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         name: overrideName,
         note: null,
         pinned: false,
-        dependencyRunIds: [],
+        runGroupId,
+        dependencies: [],
         parentRunId,
         unrestricted,
         timeoutSec,
@@ -1600,6 +1623,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     effort = (prepareState.manifest.effort ?? undefined) as RunOverrides["effort"];
     timeoutSec = prepareState.manifest.timeoutSec;
     unrestricted = prepareState.manifest.unrestricted;
+    runGroupId = prepareState.manifest.runGroupId;
     runtimeVars = { ...prepareState.manifest.runtimeVars };
     runtimeVarSources = cloneRuntimeVarSources(prepareState.manifest.runtimeVarSources);
     hookState = { ...prepareState.manifest.hookState };
@@ -1746,7 +1770,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     const frozenCallerInstructions =
       rawCallerInstructions.length > 0 ? interpolate(rawCallerInstructions, injectedVars) : null;
     manifest = {
-      schemaVersion: 14,
+      schemaVersion: 15,
       runId,
       repo,
       agent: {
@@ -1784,7 +1808,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       endedAt: null,
       archivedAt: null,
       status: isInitialize ? "initialized" : "running",
-      dependencyRunIds: [],
+      runGroupId,
+      dependencies: [],
       parentRunId,
       schedule: initialSchedule,
       exitCode: null,
@@ -1822,7 +1847,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
         name,
         note: hookNote,
         pinned: hookPinned,
-        dependencyRunIds: [],
+        runGroupId,
+        dependencies: [],
         parentRunId,
         unrestricted,
         timeoutSec,
@@ -2304,7 +2330,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
           // Increment recursion depth so a nested `task-runner run` spawned
           // by this backend can detect it. Always last so it overrides any
           // stale value the parent inherited.
-          ...buildChildRecursionEnv(recursionState, manifest.runId),
+          ...buildChildRecursionEnv(recursionState, manifest.runId, manifest.runGroupId),
         },
         model,
         effort,

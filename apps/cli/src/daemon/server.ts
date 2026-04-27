@@ -10,6 +10,7 @@ import {
   archive,
   clearBackendSession,
   clearDependencies,
+  clearGroup,
   clearRunSchedule,
   createTask,
   deleteArchivedRun,
@@ -34,6 +35,7 @@ import {
   renameRun,
   reset,
   resumeRun,
+  setGroup,
   setRunSchedule,
   setRunScheduleEnabled,
   startRun,
@@ -74,8 +76,9 @@ import {
 } from "@task-runner/core/core/commands/service.js";
 import {
   deriveDependencyState,
+  deriveDependencyStateFromDetails,
   resolveDependencies,
-  resolveDependentsFromManifests,
+  resolveDependents,
 } from "@task-runner/core/core/run/dependencies.js";
 import {
   type ListedRunManifest,
@@ -135,10 +138,12 @@ import {
   optionalEnum,
   optionalString,
   parseCliStartRunParams,
+  parseDependencyRef,
   parseResumeRunParams,
   parseRunReadyParams,
   parseRunScheduleParams,
   parseRunSetBackendSessionParams,
+  parseRunSetGroupParams,
   parseRunSetNameParams,
   parseRunSetNoteParams,
   parseRunSetPinnedParams,
@@ -409,6 +414,8 @@ export async function serveDaemon(
   const activeRuns = new Map<string, ActiveRunRecord>();
   const manifestEntriesByRunId = new Map<string, ListedRunManifest>();
   const dependentRunIdsByRunId = new Map<string, Set<string>>();
+  const dependentRunIdsByGroupId = new Map<string, Set<string>>();
+  const groupMemberRunIdsByGroupId = new Map<string, Set<string>>();
   const pendingDependencyAutoStarts = new Set<string>();
   const pendingScheduleStarts = new Set<string>();
   const scheduleTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -448,6 +455,8 @@ export async function serveDaemon(
     updateRunPinned,
     updateRunBackendSession,
     clearBackendSession,
+    setGroup,
+    clearGroup,
     addDependency,
     removeDependency,
     clearDependencies,
@@ -471,14 +480,23 @@ export async function serveDaemon(
   const removeManifestIndexEntry = (runId: string): void => {
     const existing = manifestEntriesByRunId.get(runId);
     if (existing) {
-      for (const dependencyRunId of existing.manifest.dependencyRunIds) {
-        const dependents = dependentRunIdsByRunId.get(dependencyRunId);
-        if (!dependents) {
-          continue;
-        }
-        dependents.delete(runId);
-        if (dependents.size === 0) {
-          dependentRunIdsByRunId.delete(dependencyRunId);
+      const groupMembers = groupMemberRunIdsByGroupId.get(existing.manifest.runGroupId);
+      groupMembers?.delete(runId);
+      if (groupMembers?.size === 0) {
+        groupMemberRunIdsByGroupId.delete(existing.manifest.runGroupId);
+      }
+      for (const dependency of existing.manifest.dependencies) {
+        const index =
+          dependency.type === "run"
+            ? dependentRunIdsByRunId.get(dependency.runId)
+            : dependentRunIdsByGroupId.get(dependency.groupId);
+        index?.delete(runId);
+        if (index?.size === 0) {
+          if (dependency.type === "run") {
+            dependentRunIdsByRunId.delete(dependency.runId);
+          } else {
+            dependentRunIdsByGroupId.delete(dependency.groupId);
+          }
         }
       }
     }
@@ -488,10 +506,16 @@ export async function serveDaemon(
   const rememberManifestIndexEntry = (entry: ListedRunManifest): void => {
     removeManifestIndexEntry(entry.manifest.runId);
     manifestEntriesByRunId.set(entry.manifest.runId, entry);
-    for (const dependencyRunId of entry.manifest.dependencyRunIds) {
-      const dependents = dependentRunIdsByRunId.get(dependencyRunId) ?? new Set<string>();
+    const groupMembers =
+      groupMemberRunIdsByGroupId.get(entry.manifest.runGroupId) ?? new Set<string>();
+    groupMembers.add(entry.manifest.runId);
+    groupMemberRunIdsByGroupId.set(entry.manifest.runGroupId, groupMembers);
+    for (const dependency of entry.manifest.dependencies) {
+      const index = dependency.type === "run" ? dependentRunIdsByRunId : dependentRunIdsByGroupId;
+      const key = dependency.type === "run" ? dependency.runId : dependency.groupId;
+      const dependents = index.get(key) ?? new Set<string>();
       dependents.add(entry.manifest.runId);
-      dependentRunIdsByRunId.set(dependencyRunId, dependents);
+      index.set(key, dependents);
     }
   };
 
@@ -499,6 +523,8 @@ export async function serveDaemon(
     const entries = listRunManifests();
     manifestEntriesByRunId.clear();
     dependentRunIdsByRunId.clear();
+    dependentRunIdsByGroupId.clear();
+    groupMemberRunIdsByGroupId.clear();
     for (const entry of entries) {
       rememberManifestIndexEntry(entry);
     }
@@ -569,20 +595,25 @@ export async function serveDaemon(
       const relatedManifests = new Map<string, RunManifest>([
         [entry.manifest.runId, entry.manifest],
       ]);
-      for (const dependencyRunId of entry.manifest.dependencyRunIds) {
-        const dependencyManifest = refreshManifestByRunId(dependencyRunId);
-        if (dependencyManifest) {
-          relatedManifests.set(dependencyRunId, dependencyManifest);
+      for (const dependency of entry.manifest.dependencies) {
+        if (dependency.type === "run") {
+          const dependencyManifest = refreshManifestByRunId(dependency.runId);
+          if (dependencyManifest) {
+            relatedManifests.set(dependency.runId, dependencyManifest);
+          }
+        } else {
+          const memberRunIds = [...(groupMemberRunIdsByGroupId.get(dependency.groupId) ?? [])];
+          for (const memberRunId of memberRunIds) {
+            const member = refreshManifestByRunId(memberRunId);
+            if (member) {
+              relatedManifests.set(member.runId, member);
+            }
+          }
         }
       }
-      const dependentRunIds = [
-        ...(dependentRunIdsByRunId.get(entry.manifest.runId) ?? new Set<string>()),
-      ];
-      const dependentManifests: RunManifest[] = [];
-      for (const dependentRunId of dependentRunIds) {
+      for (const dependentRunId of dependentRunIds(entry.manifest.runId)) {
         const dependentManifest = refreshManifestByRunId(dependentRunId);
         if (dependentManifest) {
-          dependentManifests.push(dependentManifest);
           relatedManifests.set(dependentRunId, dependentManifest);
         }
       }
@@ -590,7 +621,7 @@ export async function serveDaemon(
         manifest: entry.manifest,
         isLive: false,
         dependencies: resolveDependencies(entry.manifest, relatedManifests),
-        dependents: resolveDependentsFromManifests(entry.manifest.runId, dependentManifests),
+        dependents: resolveDependents(entry.manifest, relatedManifests),
         relatedManifests,
       });
     }
@@ -810,7 +841,15 @@ export async function serveDaemon(
   };
 
   const dependentRunIds = (runId: string): string[] => [
-    ...(dependentRunIdsByRunId.get(runId) ?? new Set<string>()),
+    ...new Set([
+      ...(dependentRunIdsByRunId.get(runId) ?? new Set<string>()),
+      ...(() => {
+        const entry = manifestEntriesByRunId.get(runId);
+        return entry
+          ? [...(dependentRunIdsByGroupId.get(entry.manifest.runGroupId) ?? new Set<string>())]
+          : [];
+      })(),
+    ]),
   ];
 
   const shouldPublishDependentSummaries = (
@@ -819,7 +858,9 @@ export async function serveDaemon(
   ): boolean =>
     previous !== null &&
     current !== null &&
-    (previous.status !== current.status || previous.effectiveStatus !== current.effectiveStatus);
+    (previous.status !== current.status ||
+      previous.effectiveStatus !== current.effectiveStatus ||
+      previous.runGroupId !== current.runGroupId);
 
   const shouldPublishDependentDetails = (
     previous: RunDetail | null,
@@ -829,7 +870,8 @@ export async function serveDaemon(
     current !== null &&
     (shouldPublishDependentSummaries(previous, current) ||
       previous.archivedAt !== current.archivedAt ||
-      previous.name !== current.name);
+      previous.name !== current.name ||
+      previous.runGroupId !== current.runGroupId);
 
   const shouldAutoStartReadyDependencyRun = (
     manifest: ListedRunManifest,
@@ -838,12 +880,10 @@ export async function serveDaemon(
     pendingAutoStart: ReadonlySet<string>,
   ): boolean =>
     detail !== null &&
-    manifest.manifest.dependencyRunIds.length > 0 &&
+    manifest.manifest.dependencies.length > 0 &&
     isDaemonAutoRunnableReadyRun({
       manifest: manifest.manifest,
-      dependencyState: {
-        unsatisfied: detail.dependencies.filter((dependency) => !dependency.satisfied).length,
-      },
+      dependencyState: deriveDependencyStateFromDetails(detail.dependencies),
       activeInDaemon:
         active.has(manifest.manifest.runId) ||
         pendingAutoStart.has(manifest.manifest.runId) ||
@@ -1014,16 +1054,18 @@ export async function serveDaemon(
     }
   };
 
-  const dependencyStateForScheduledRun = (manifest: RunManifest) =>
-    deriveDependencyState(
-      manifest,
-      new Map(
-        Array.from(manifestEntriesByRunId.values(), (entry) => [
-          entry.manifest.runId,
-          entry.manifest,
-        ]),
-      ),
+  const dependencyGraphFromIndex = (): Map<string, RunManifest> =>
+    new Map(
+      Array.from(manifestEntriesByRunId.values(), (entry) => [
+        entry.manifest.runId,
+        entry.manifest,
+      ]),
     );
+
+  const dependencyStateForScheduledRun = (
+    manifest: RunManifest,
+    dependencyGraph: ReadonlyMap<string, RunManifest>,
+  ) => deriveDependencyState(manifest, dependencyGraph);
 
   const scheduledRunActiveInDaemon = (runId: string): boolean =>
     activeRuns.has(runId) ||
@@ -1032,7 +1074,7 @@ export async function serveDaemon(
 
   const scheduleSkipReason = (
     entry: ListedRunManifest,
-    dependencyState: ReturnType<typeof dependencyStateForScheduledRun>,
+    dependencyState: RunSummary["dependencyState"],
   ): ScheduleDecisionReason | null => {
     if (entry.manifest.archivedAt !== null) {
       return "archived";
@@ -1211,7 +1253,11 @@ export async function serveDaemon(
     }
   };
 
-  const evaluateScheduledRun = async (runId: string, options: { startup: boolean }) => {
+  const evaluateScheduledRun = async (
+    runId: string,
+    options: { startup: boolean },
+    dependencyGraph: Map<string, RunManifest>,
+  ) => {
     let entry: ListedRunManifest;
     try {
       entry = refreshManifestIndexEntry(runId);
@@ -1222,6 +1268,7 @@ export async function serveDaemon(
       }
       throw error;
     }
+    dependencyGraph.set(entry.manifest.runId, entry.manifest);
 
     const schedule = entry.manifest.schedule;
     if (schedule === null || !schedule.enabled) {
@@ -1249,7 +1296,7 @@ export async function serveDaemon(
       return;
     }
 
-    const dependencyState = dependencyStateForScheduledRun(entry.manifest);
+    const dependencyState = dependencyStateForScheduledRun(entry.manifest, dependencyGraph);
     const capabilities = deriveRunCapabilities(entry.manifest, dependencyState);
     if (
       schedule.recurrence === null &&
@@ -1291,9 +1338,10 @@ export async function serveDaemon(
       Array.from(manifestEntriesByRunId.values(), (entry) => entry.manifest.runId).sort((a, b) =>
         a.localeCompare(b),
       );
+    const dependencyGraph = dependencyGraphFromIndex();
     for (const runId of runIds) {
       try {
-        await evaluateScheduledRun(runId, options);
+        await evaluateScheduledRun(runId, options, dependencyGraph);
       } catch (error) {
         publishScheduleRecovery(runId, error);
       }
@@ -1445,6 +1493,7 @@ export async function serveDaemon(
       detail?: RunDetail | null;
       publishDependentSummaries?: boolean;
       publishDependentDetails?: boolean;
+      additionalDependentRunIds?: readonly string[];
     } = {},
   ): void => {
     const finish = startDebugPerfTimer("daemon.publish.projections", {
@@ -1470,7 +1519,9 @@ export async function serveDaemon(
       return;
     }
 
-    const dependents = dependentRunIds(runId);
+    const dependents = [
+      ...new Set([...dependentRunIds(runId), ...(options.additionalDependentRunIds ?? [])]),
+    ];
 
     for (const dependentRunId of dependents) {
       let dependentSummary: RunSummary | null | undefined;
@@ -1507,6 +1558,7 @@ export async function serveDaemon(
       detail?: RunDetail | null;
       publishDependentSummaries?: boolean;
       publishDependentDetails?: boolean;
+      additionalDependentRunIds?: readonly string[];
     } = {},
   ): void => {
     publishRunProjections(runId, {
@@ -1514,6 +1566,7 @@ export async function serveDaemon(
       detail: options.detail,
       publishDependentSummaries: options.publishDependentSummaries ?? false,
       publishDependentDetails: options.publishDependentDetails ?? false,
+      additionalDependentRunIds: options.additionalDependentRunIds,
     });
   };
 
@@ -1540,6 +1593,7 @@ export async function serveDaemon(
     mutate: () => T,
     options: {
       inferDependentFanout?: boolean;
+      additionalDependentRunIds?: readonly string[];
     } = {},
   ): {
     result: T;
@@ -1548,6 +1602,13 @@ export async function serveDaemon(
   } => {
     const previous = options.inferDependentFanout ? getProjectedDetail(runId) : null;
     const result = mutate();
+    if (typeof result === "object" && result !== null && "changed" in result && !result.changed) {
+      return {
+        result,
+        summary: null,
+        detail: null,
+      };
+    }
     const detail = getProjectedDetail(runId);
     const summary = getProjectedSummary(runId);
     publishMutationResult(runId, {
@@ -1555,6 +1616,7 @@ export async function serveDaemon(
       detail,
       publishDependentSummaries: shouldPublishDependentSummaries(previous, detail),
       publishDependentDetails: shouldPublishDependentDetails(previous, detail),
+      additionalDependentRunIds: options.additionalDependentRunIds,
     });
     queueScheduleEvaluation?.(runId);
     return {
@@ -1569,6 +1631,7 @@ export async function serveDaemon(
     mutate: () => T,
     options: {
       inferDependentFanout?: boolean;
+      additionalDependentRunIds?: readonly string[];
     } = {},
   ): T => {
     return applyPublishedMutation(runId, mutate, options).result;
@@ -1579,10 +1642,14 @@ export async function serveDaemon(
     mutate: () => Promise<T>,
     options: {
       inferDependentFanout?: boolean;
+      additionalDependentRunIds?: readonly string[];
     } = {},
   ): Promise<T> => {
     const previous = options.inferDependentFanout ? getProjectedDetail(runId) : null;
     const result = await mutate();
+    if (typeof result === "object" && result !== null && "changed" in result && !result.changed) {
+      return result;
+    }
     const current = getProjectedDetail(runId);
     const summary = getProjectedSummary(runId);
     publishMutationResult(runId, {
@@ -1590,6 +1657,7 @@ export async function serveDaemon(
       detail: current,
       publishDependentSummaries: shouldPublishDependentSummaries(previous, current),
       publishDependentDetails: shouldPublishDependentDetails(previous, current),
+      additionalDependentRunIds: options.additionalDependentRunIds,
     });
     queueScheduleEvaluation?.(runId);
     return result;
@@ -2016,10 +2084,34 @@ export async function serveDaemon(
       withPublishedDetailMutation(target, () =>
         app.clearBackendSession(target, mutationAuditContext, publishAudit),
       ),
-    addDependency: (target, dependencyRunId) =>
-      withPublishedMutation(target, () => app.addDependency(target, dependencyRunId)),
-    removeDependency: (target, dependencyRunId) =>
-      withPublishedMutation(target, () => app.removeDependency(target, dependencyRunId)),
+    setGroup: (target, input) => {
+      const previousDetail = getProjectedDetail(target);
+      const previousDependents = previousDetail ? dependentRunIds(previousDetail.runId) : [];
+      return withPublishedMutation(
+        target,
+        () => app.setGroup(target, input, mutationAuditContext, publishAudit),
+        {
+          additionalDependentRunIds: previousDependents,
+          inferDependentFanout: true,
+        },
+      );
+    },
+    clearGroup: (target) => {
+      const previousDetail = getProjectedDetail(target);
+      const previousDependents = previousDetail ? dependentRunIds(previousDetail.runId) : [];
+      return withPublishedMutation(
+        target,
+        () => app.clearGroup(target, mutationAuditContext, publishAudit),
+        {
+          additionalDependentRunIds: previousDependents,
+          inferDependentFanout: true,
+        },
+      );
+    },
+    addDependency: (target, dependency) =>
+      withPublishedMutation(target, () => app.addDependency(target, dependency)),
+    removeDependency: (target, dependency) =>
+      withPublishedMutation(target, () => app.removeDependency(target, dependency)),
     clearDependencies: (target) =>
       withPublishedMutation(target, () => app.clearDependencies(target)),
     addRunAttachmentFromStream: (target, input) =>
@@ -2072,7 +2164,7 @@ export async function serveDaemon(
   queueReadyDependencyAutoStartSweep = () => {
     const eligibleRunIds = Array.from(manifestEntriesByRunId.values())
       .filter(
-        (entry) => entry.manifest.status === "ready" && entry.manifest.dependencyRunIds.length > 0,
+        (entry) => entry.manifest.status === "ready" && entry.manifest.dependencies.length > 0,
       )
       .map((entry) => entry.manifest.runId);
     for (const runId of eligibleRunIds) {
@@ -2452,6 +2544,22 @@ export async function serveDaemon(
             ),
           );
           return;
+        case "runs.setGroup": {
+          const parsed = parseRunSetGroupParams(params, "runs.setGroup params");
+          sendJson(ws, resultResponse(request.id, operations.setGroup(parsed)));
+          return;
+        }
+        case "runs.clearGroup":
+          sendJson(
+            ws,
+            resultResponse(
+              request.id,
+              operations.clearGroup(
+                requiredString(asRecord(params, "runs.clearGroup params").target, "target"),
+              ),
+            ),
+          );
+          return;
         case "runs.addDependency": {
           const parsed = asRecord(params, "runs.addDependency params");
           sendJson(
@@ -2460,7 +2568,7 @@ export async function serveDaemon(
               request.id,
               operations.addDependency(
                 requiredString(parsed.target, "target"),
-                requiredRunIdString(parsed.dependencyRunId, "dependencyRunId"),
+                parseDependencyRef(parsed.dependency, "dependency"),
               ),
             ),
           );
@@ -2474,7 +2582,7 @@ export async function serveDaemon(
               request.id,
               operations.removeDependency(
                 requiredString(parsed.target, "target"),
-                requiredRunIdString(parsed.dependencyRunId, "dependencyRunId"),
+                parseDependencyRef(parsed.dependency, "dependency"),
               ),
             ),
           );

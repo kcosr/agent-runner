@@ -11,6 +11,7 @@ import {
 import {
   type RunManifest,
   type RuntimeVarSourceRecord,
+  cloneRunDependencyRefs,
   cloneRuntimeVarSources,
 } from "../run/manifest.js";
 import {
@@ -748,7 +749,7 @@ export function cloneHookExecutionState(state: HookExecutionState): HookExecutio
     manifest: {
       ...state.manifest,
       lockedFields: [...state.manifest.lockedFields],
-      dependencyRunIds: [...state.manifest.dependencyRunIds],
+      dependencies: cloneRunDependencyRefs(state.manifest.dependencies),
       runtimeVars: { ...state.manifest.runtimeVars },
       runtimeVarSources: cloneRuntimeVarSources(state.manifest.runtimeVarSources),
       hookState: { ...state.manifest.hookState },

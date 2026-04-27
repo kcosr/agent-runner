@@ -3,11 +3,17 @@ import type { HookAuditRecord, ResolvedHookDescriptor } from "../core/hooks/type
 import {
   type RunDependencyDetail,
   type RunDependencyState,
+  type RunDependentDetail,
   deriveDependencyState,
   resolveDependencies,
   resolveDependents,
 } from "../core/run/dependencies.js";
-import type { RunExecution, RunSchedule, TaskSnapshot } from "../core/run/manifest.js";
+import type {
+  RunDependencyRef,
+  RunExecution,
+  RunSchedule,
+  TaskSnapshot,
+} from "../core/run/manifest.js";
 import type { ListedRunManifest, ManifestStatus, RunManifest } from "../core/run/manifest.js";
 import { type RunScheduleState, deriveScheduleState } from "../core/run/schedule.js";
 import { deriveEffectiveStatus } from "../core/run/status.js";
@@ -17,7 +23,12 @@ import type { RunAttachment } from "./attachments.js";
 // RunManifest remains the internal canonical record; these helpers project
 // from it without doing filesystem, env, or process work.
 export type RunStatus = ManifestStatus;
-export type { RunDependencyDetail, RunDependencyState } from "../core/run/dependencies.js";
+export type {
+  RunDependencyDetail,
+  RunDependencyState,
+  RunDependentDetail,
+} from "../core/run/dependencies.js";
+export type { RunDependencyRef } from "../core/run/manifest.js";
 export type { RunSchedule, RunScheduleState };
 
 export interface RunActiveTask {
@@ -43,7 +54,7 @@ export interface RunSessionSummary {
 export interface RunSummary {
   runId: string;
   parentRunId: string | null;
-  familyRootRunId: string | null;
+  runGroupId: string;
   repo: string;
   status: RunStatus;
   effectiveStatus: RunStatus;
@@ -122,12 +133,13 @@ export interface RunDetailInput {
   isLive: boolean;
   relatedManifests?: ReadonlyMap<string, RunManifest>;
   dependencies?: RunDependencyDetail[];
-  dependents?: RunDependencyDetail[];
+  dependents?: RunDependentDetail[];
 }
 
 export interface RunDetail {
   runId: string;
   parentRunId: string | null;
+  runGroupId: string;
   repo: string;
   status: RunStatus;
   effectiveStatus: RunStatus;
@@ -168,7 +180,7 @@ export interface RunDetail {
   hookState?: Record<string, unknown>;
   hookAudits?: HookAuditRecord[];
   dependencies: RunDependencyDetail[];
-  dependents: RunDependencyDetail[];
+  dependents: RunDependentDetail[];
   schedule: RunSchedule | null;
   scheduleState: RunScheduleState;
   tasks: RunTaskSummary[];
@@ -215,7 +227,14 @@ export interface RunBackendSessionResult {
 
 export interface RunDependenciesResult {
   runId: string;
-  dependencyRunIds: string[];
+  dependencies: RunDependencyRef[];
+  changed: boolean;
+}
+
+export interface RunGroupResult {
+  runId: string;
+  runGroupId: string;
+  previousRunGroupId: string;
   changed: boolean;
 }
 
@@ -406,7 +425,6 @@ export function toRunSummary(
     [entry.manifest.runId, entry.manifest],
   ]),
   dependencyState?: RunDependencyState,
-  familyRootRunId: string | null = null,
 ): RunSummary {
   const resolvedDependencyState =
     dependencyState ?? deriveDependencyState(entry.manifest, relatedManifests);
@@ -415,7 +433,7 @@ export function toRunSummary(
   return {
     runId: entry.manifest.runId,
     parentRunId: entry.manifest.parentRunId,
-    familyRootRunId,
+    runGroupId: entry.manifest.runGroupId,
     repo: entry.manifest.repo,
     status: entry.manifest.status,
     effectiveStatus: deriveEffectiveStatus(entry.manifest),
@@ -501,6 +519,7 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
   return {
     runId: manifest.runId,
     parentRunId: manifest.parentRunId,
+    runGroupId: manifest.runGroupId,
     repo: manifest.repo,
     status: manifest.status,
     effectiveStatus: deriveEffectiveStatus(manifest),
@@ -660,7 +679,20 @@ export function toRunDependenciesResult(result: {
 }): RunDependenciesResult {
   return {
     runId: result.manifest.runId,
-    dependencyRunIds: [...result.manifest.dependencyRunIds],
+    dependencies: result.manifest.dependencies.map((dependency) => ({ ...dependency })),
+    changed: result.changed,
+  };
+}
+
+export function toRunGroupResult(result: {
+  manifest: RunManifest;
+  previousRunGroupId: string;
+  changed: boolean;
+}): RunGroupResult {
+  return {
+    runId: result.manifest.runId,
+    runGroupId: result.manifest.runGroupId,
+    previousRunGroupId: result.previousRunGroupId,
     changed: result.changed,
   };
 }

@@ -4,6 +4,14 @@
 
 ### Breaking Changes
 
+- Manifest schema version is now `15`. Run manifests and reset seeds now
+  require `runGroupId` plus typed `dependencies` refs (`run` or
+  `group`); the former run-only dependency array is removed. Use
+  `scripts/migrate-manifests-v15.mjs` before resuming schema v14 runs.
+- Daemon, CLI, and web contracts now use run groups instead of
+  lineage-root grouping. Consumers should use `runGroupId`, `run set-group`,
+  `run clear-group`, `list runs --group-id`, and
+  `attachment list --scope group`.
 - Manifest schema version is now `14`. Run manifests, status DTOs, daemon
   responses, web fixtures, hook contexts, and runtime interpolation no
   longer expose assignment seed path fields, including the
@@ -38,10 +46,10 @@
   `tasks[].hooks[]` or native `hooks.taskTransition[].when.taskId|taskIds`
   to select guarded tasks, and stop authoring
   `require-children-success.with.taskIds`.
-- `task-runner attachment list` now uses structured `--scope run|family`
-  selection instead of `--cwd-scope`, and the default view is now
-  lineage-family attachment discovery rather than exact same-cwd
-  grouping. ([#81](https://github.com/kcosr/task-runner/pull/81))
+- `task-runner attachment list` now uses structured scope selection
+  instead of `--cwd-scope`; current manifests use `--scope run|group`,
+  and the default view is run-group attachment discovery rather than
+  exact same-cwd grouping. ([#81](https://github.com/kcosr/task-runner/pull/81))
 - Run lifecycle now includes an explicit `ready` state between
   `initialized` and `running`. Non-passive initialized runs are no longer
   directly executable: promote them with `task-runner run ready <run-id>`
@@ -84,6 +92,16 @@
 
 ### Added
 
+- Added first-class run groups across manifests, CLI, daemon APIs, and the
+  web dashboard. Fresh child runs inherit the parent run group by default,
+  `--group-id` overrides fresh run/init grouping, and
+  `run set-group` / `run clear-group` mutate non-running runs.
+- Added group dependencies with `task-runner run add-dep --group
+  <group-id>` and `run remove-dep --group <group-id>`, including cycle
+  detection, daemon auto-start readiness, and web dashboard editing.
+- Added `scripts/migrate-manifests-v15.mjs` to promote schema v14
+  manifests to schema v15 by deriving `runGroupId` and converting
+  run-only dependencies to typed run refs.
 - Added product-scope guidance for evaluating task-runner feature
   requests and linked it from the README and agent onboarding notes.
   ([#108](https://github.com/kcosr/task-runner/pull/108))
@@ -139,11 +157,10 @@
   for request timing, projection timing, task-state lock timing, and
   event-loop telemetry, plus `TASK_RUNNER_DEBUG_PERF_INTERVAL_MS` to
   tune the periodic event-loop sample interval. ([#88](https://github.com/kcosr/task-runner/pull/88))
-- Added family-scoped run filtering across the daemon and web dashboard:
-  `GET /api/runs?familyOf=<run-id>` now scopes results to one lineage
-  family, `RunSummary` now includes `familyRootRunId`, and dashboard
-  cards expose a header family toggle for filtering the board to that
-  family. ([#85](https://github.com/kcosr/task-runner/pull/85))
+- Added run-group filtering across the daemon and web dashboard:
+  `GET /api/runs?runGroupId=<group-id>` scopes results to one group,
+  `RunSummary` includes `runGroupId`, and dashboard cards expose a
+  run-group filter chip. ([#85](https://github.com/kcosr/task-runner/pull/85))
 - Added `--parent-run <run-id>` for fresh `task-runner run` / `init`
   invocations, and in connected mode the CLI now forwards parent lineage
   explicitly as structured daemon request `parentRunId` instead of
@@ -231,6 +248,16 @@
 
 ### Changed
 
+- Dependencies now accept explicit typed refs: `run add-dep --run
+  <run-id>` for one upstream run or `run add-dep --group <group-id>` for
+  all non-archived members of a group. Remove commands use the same
+  typed flags.
+- Attachment listing now defaults to group scope. Group-scoped rows
+  include `ownerRunId`, and the web dashboard presents one combined
+  attachment list with other-run rows read-only.
+- Parent lineage is now documented only as lineage and parent-var
+  inheritance. Run grouping owns group filters, group attachments, and
+  group dependency semantics.
 - Split Biome scripts so `npm run lint` runs lint-only with warnings as
   failures, `npm run lint:fix` applies lint fixes, `npm run format`
   writes formatting, `npm run imports:fix` applies import organization,
@@ -320,6 +347,10 @@
 
 ### Removed
 
+- Removed live family grouping contracts: `familyRootRunId`,
+  `familyOf=<run-id>`, and attachment `scope=family`.
+- Removed the live run-only dependency array contract from current
+  manifests and DTOs in favor of typed `dependencies`.
 - Removed redundant per-attempt task snapshots from new
   `attemptRecords`; `finalTasks` remains the canonical task state.
   ([#105](https://github.com/kcosr/task-runner/pull/105))

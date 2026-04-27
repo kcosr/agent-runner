@@ -39,6 +39,7 @@ export interface ExecuteRunCommandOptions {
   definitionCwd?: string;
   callerCwd?: string;
   parentRunId?: string | null;
+  runGroupId?: string | null;
   resumeRun?: string;
   backendSessionId?: string;
   cliVars: Record<string, string>;
@@ -87,6 +88,9 @@ function validateResumeOverrides(
   if (opts.parentRunId !== undefined && opts.parentRunId !== null) {
     return "--parent-run cannot be combined with --resume-run";
   }
+  if (opts.runGroupId !== undefined && opts.runGroupId !== null) {
+    return "--group-id cannot be combined with --resume-run";
+  }
   if (opts.overrides.cwd !== undefined) {
     return "--cwd cannot be combined with --resume-run — backend sessions are bound to the cwd they were created in, so a different cwd would invalidate the captured session id. If you need a different cwd, create a fresh run instead.";
   }
@@ -126,7 +130,7 @@ function validateResumeOverrides(
       buildRunDependencyGraph(listRunManifests().map((entry) => entry.manifest)),
     );
     if (unsatisfied > 0) {
-      return `cannot execute run ${manifest.runId} because ${unsatisfied} dependency run(s) are not successful`;
+      return `cannot execute run ${manifest.runId} because ${unsatisfied} dependency ref(s) are not successful`;
     }
     return null;
   }
@@ -227,6 +231,7 @@ export async function executeRunCommand(opts: ExecuteRunCommandOptions): Promise
     cliVars: opts.cliVars,
     webVars,
     parentRunId: opts.parentRunId,
+    runGroupId: opts.runGroupId,
     backend,
     callerCwd: opts.callerCwd,
     resume: resumeTarget,
