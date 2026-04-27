@@ -199,7 +199,7 @@ tasks:
         - the generated implementer orientation tells the
           executor to read the run's tasks first and only then
           optionally discover and download
-          `assignment-summary.md` through family-scoped attachment
+          `assignment-summary.md` through group-scoped attachment
           listing for supplemental context
 
       Missing or incorrect workflow wiring is usually HIGH

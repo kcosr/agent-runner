@@ -189,21 +189,21 @@ tasks:
           review, *also* read each touched file in full (not just
           the diff) so you can judge the change in context.
 
-      Third, inspect the implementation run's family-scoped
+      Third, inspect the implementation run's group-scoped
       attachment view and, if it includes an
       `assignment-summary.md` row from a planning run in the
-      same lineage family,
+      same run group,
       download it to a temp directory and review it for
       supplemental context. The summary is
       supplemental only; the authoritative review inputs remain
       the repository state, the requested scope, and
       `implementation_run_id`.
 
-          {{task_runner_cmd}} attachment list "{{implementation_run_id}}" --scope family --output-format json
+          {{task_runner_cmd}} attachment list "{{implementation_run_id}}" --scope group --output-format json
           mkdir -p /tmp/task-runner-review-artifacts-{{run_id}}
           {{task_runner_cmd}} attachment download <owner-run-id> <summary-attachment-id> /tmp/task-runner-review-artifacts-{{run_id}}/
 
-      In the family-scoped JSON output, find the row whose `name` is
+      In the group-scoped JSON output, find the row whose `name` is
       `assignment-summary.md` and use that row's `ownerRunId` plus
       `id` in the download command above. If no such row exists,
       continue without blocking.
