@@ -110,6 +110,7 @@ const SHARED_REVIEW_TASK_IDS = [
   "review/simplification-and-duplication",
   "review/test-coverage",
   "review/docs-drift",
+  "review/surface-completeness",
 ];
 
 test("loadAgentConfig parses a minimal agent.md from TASK_RUNNER_CONFIG_DIR", () =>
@@ -1503,7 +1504,7 @@ test("built-in code-review-direct assignment resolves shared review tasks withou
     assert.match(orient.body ?? "", /direct\/ad hoc/);
     assert.match(orient.body ?? "", /no `implementation_run_id`/);
     assert.match(synthesis.body ?? "", /top 10 highest-leverage findings/);
-    assert.match(synthesis.body ?? "", /review\/architecture.*review\/docs-drift/s);
+    assert.match(synthesis.body ?? "", /review\/architecture.*review\/surface-completeness/s);
     assert.match(approval.body ?? "", /BLOCKED -- cannot approve/);
     assert.doesNotMatch(approval.body ?? "", /plan_coverage/);
   }));

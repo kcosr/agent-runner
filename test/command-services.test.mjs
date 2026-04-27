@@ -64,6 +64,7 @@ const SHARED_REVIEW_TASK_IDS = [
   "review/simplification-and-duplication",
   "review/test-coverage",
   "review/docs-drift",
+  "review/surface-completeness",
 ];
 
 const AGENT = `---

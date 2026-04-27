@@ -24,9 +24,9 @@ callerInstructions: |
 
   The reviewer's synthesis in `synthesis.notes` is the ranked
   top-findings list. Each shared review task (`review/architecture`,
-  `review/concurrency`, ..., `review/docs-drift`) carries the raw
-  findings for its dimension with severity tags. The final decision
-  lives in `approval.notes`.
+  `review/concurrency`, ..., `review/surface-completeness`) carries
+  the raw findings for its dimension with severity tags. The final
+  decision lives in `approval.notes`.
 
   **Exit code carries the decision.** The run exits `success`
   (code 0) only if the reviewer approved the direct review target in
@@ -84,13 +84,14 @@ tasks:
   - review/simplification-and-duplication
   - review/test-coverage
   - review/docs-drift
+  - review/surface-completeness
   - id: synthesis
     title: Direct review synthesis
     body: |
       Now read back through the notes from the review-dimension tasks
-      (`review/architecture` through `review/docs-drift`) and build a
-      single ranked list of the **top 10 highest-leverage findings** from
-      the direct review. Order by severity (CRITICAL first, then HIGH,
+      (`review/architecture` through `review/surface-completeness`) and
+      build a single ranked list of the **top 10 highest-leverage findings**
+      from the direct review. Order by severity (CRITICAL first, then HIGH,
       MEDIUM, LOW) and within a severity by impact. Each entry must
       reference the original finding's file:line so the reader can jump
       back.
@@ -193,12 +194,12 @@ faster.
 
 **Re-review after agreed-upon fixes.** If this run is resumed with
 a follow-up message asking you to re-check your prior findings, do
-not re-walk all 13 tasks from scratch. Instead:
+not re-walk all 14 tasks from scratch. Instead:
 
 1. Re-read your prior notes on `review/architecture` through
-   `review/docs-drift`, plus `synthesis`. Those are your original
-   findings and synthesis. Also re-read the prior `approval`
-   decision record if it exists.
+   `review/surface-completeness`, plus `synthesis`. Those are your
+   original findings and synthesis. Also re-read the prior
+   `approval` decision record if it exists.
 2. Inspect what has changed in the repository since your prior
    review. You are in a resumed session with full context of your
    previous findings, so figure out what moved: new commits on the
@@ -217,8 +218,8 @@ not re-walk all 13 tasks from scratch. Instead:
    findings still open, new findings introduced by the fixes, and a
    one-sentence ship, ship-with-changes, or block recommendation.
 6. Leave the Notes on `review/architecture` through
-   `review/docs-drift` as the original audit trail and put the delta
-   in `synthesis` only.
+   `review/surface-completeness` as the original audit trail and
+   put the delta in `synthesis` only.
 7. Re-evaluate `approval` against the post-fix state. If every
    HIGH/CRITICAL finding is now resolved or was explicitly declined
    with justification and the synthesis recommendation is "ship",
