@@ -6381,6 +6381,90 @@ test("daemon-target CLI forwards local TASK_RUNNER_CODEX_WS_URL as a structured 
   }
 });
 
+test("daemon-target CLI forwards --message-file contents to daemon init and run", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const messagePath = join(dir, "message.md");
+  writeFileSync(messagePath, "daemon file message\n");
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const wsServer = new WebSocketServer({ host: "127.0.0.1", port });
+  const requests = [];
+  if (wsServer.address() === null) {
+    await new Promise((resolve) => wsServer.once("listening", resolve));
+  }
+
+  wsServer.on("connection", (ws) => {
+    ws.on("message", (payload) => {
+      const request = JSON.parse(payload.toString());
+      requests.push(request);
+      if (request.method === "runs.init") {
+        ws.send(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: request.id,
+            result: {
+              run: {
+                runId: "init-run",
+                message: request.params.overrides.message,
+              },
+            },
+          }),
+        );
+        return;
+      }
+      ws.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: request.id,
+          result: { runId: request.method + "-run" },
+        }),
+      );
+    });
+  });
+
+  try {
+    const init = await runCliAsync([
+      "init",
+      "--connect",
+      listenUrl,
+      "--agent",
+      "daemon-agent",
+      "--message-file",
+      messagePath,
+      "--output-format",
+      "json",
+    ]);
+    const run = await runCliAsync([
+      "run",
+      "--connect",
+      listenUrl,
+      "--agent",
+      "daemon-agent",
+      "--assignment",
+      "daemon-work",
+      "--message-file",
+      messagePath,
+      "--detach",
+      "--output-format",
+      "json",
+    ]);
+
+    assert.equal(init.code, 0);
+    assert.equal(run.code, 0);
+    assert.equal(JSON.parse(init.stdout).message, "daemon file message\n");
+    assert.equal(requests[0].params.overrides.message, "daemon file message\n");
+    assert.equal(requests[1].params.overrides.message, "daemon file message\n");
+  } finally {
+    for (const client of wsServer.clients) {
+      client.terminate();
+    }
+    await new Promise((resolve) => wsServer.close(() => resolve()));
+  }
+});
+
 test("daemon-target CLI forwards local TASK_RUNNER_CODEX_UDS_PATH as structured run/init overrides", async () => {
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;

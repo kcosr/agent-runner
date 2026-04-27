@@ -2268,7 +2268,6 @@ async function runExecuteCommandEmbedded(parsed: ParsedArgs): Promise<never> {
     if (hasRunScheduleFlags(parsed)) {
       throw new RunCommandError("--at, --delay, and --cron are only valid with run schedule");
     }
-    resolveMessageFile(parsed);
     if (isInitCommand) {
       const run = await initRun({
         runId: normalizeTarget(parsed.runId) ?? parsed.runId,
@@ -2348,6 +2347,8 @@ async function runExecuteCommandDaemon(
 ): Promise<never> {
   const isInitCommand = parsed.command === "init";
   const isJson = parsed.outputFormat === "json";
+
+  resolveMessageFile(parsed);
   const daemonOverrides = resolvedDaemonOverrides(parsed);
 
   await withDaemonClient(connect, async (client) => {
@@ -2366,7 +2367,6 @@ async function runExecuteCommandDaemon(
     if (hasRunScheduleFlags(parsed)) {
       throw new RunCommandError("--at, --delay, and --cron are only valid with run schedule");
     }
-    resolveMessageFile(parsed);
     if (isInitCommand) {
       const result = await client.call<{ run: ReturnType<typeof getRun> }>("runs.init", {
         runId: normalizeTarget(parsed.runId) ?? parsed.runId,
