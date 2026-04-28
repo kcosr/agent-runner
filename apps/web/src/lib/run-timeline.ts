@@ -149,6 +149,7 @@ export function useRunTimelineState({
   const loadAbortControllerRef = useRef<AbortController | null>(null);
   const reloadCountRef = useRef(0);
   const previousRunIdRef = useRef<string | undefined>(undefined);
+  const previousRunIsLiveRef = useRef<boolean | undefined>(undefined);
 
   useEffect(() => {
     historyRef.current = state.history;
@@ -168,6 +169,7 @@ export function useRunTimelineState({
       bufferRef.current = [];
       reloadCountRef.current = 0;
       previousRunIdRef.current = undefined;
+      previousRunIsLiveRef.current = undefined;
       setState({ history: null, isLoading: false, stale: false });
       return;
     }
@@ -253,6 +255,7 @@ export function useRunTimelineState({
     // ends), keep the already-loaded history so the drawer doesn't flash
     // through an empty "Loading…" state.
     const sameRunId = previousRunIdRef.current === runId;
+    const previousRunIsLive = sameRunId ? previousRunIsLiveRef.current : undefined;
     previousRunIdRef.current = runId;
     if (!sameRunId) {
       historyRef.current = null;
@@ -260,10 +263,12 @@ export function useRunTimelineState({
       bootstrappedRef.current = false;
       bufferRef.current = [];
       reloadCountRef.current = 0;
+      previousRunIsLiveRef.current = undefined;
       setState({ history: null, isLoading: enabled, stale: false });
     }
 
     if (!enabled) {
+      previousRunIsLiveRef.current = runIsLive;
       setState((current) => ({ ...current, isLoading: false }));
       return () => {
         disposed = true;
@@ -274,6 +279,15 @@ export function useRunTimelineState({
 
     const shouldLoadHistory =
       !bootstrappedRef.current || staleRef.current || historyRef.current === null;
+    const shouldRefreshForLiveTransition =
+      sameRunId &&
+      previousRunIsLive === false &&
+      runIsLive &&
+      !shouldLoadHistory &&
+      bootstrappedRef.current &&
+      historyRef.current !== null &&
+      historyRef.current.attempts.length > 0;
+    previousRunIsLiveRef.current = runIsLive;
 
     if (sameRunId) {
       setState((current) => ({
@@ -281,6 +295,13 @@ export function useRunTimelineState({
         error: shouldLoadHistory ? undefined : current.error,
         isLoading: shouldLoadHistory,
       }));
+    }
+
+    if (shouldRefreshForLiveTransition) {
+      // Detail can observe a resumed live attempt before timeline replay/history
+      // has projected the new attempt record. Refresh once on same-run live
+      // transition so an already-open Attempts tab catches up.
+      void loadHistory();
     }
 
     if (!runIsLive) {

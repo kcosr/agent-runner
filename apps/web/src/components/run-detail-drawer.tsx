@@ -67,7 +67,7 @@ import { RunTaskList } from "./run-task-list.js";
 import { StatusBadge } from "./status-badge.js";
 
 type TimelineTab = "message" | "prompt" | "response" | "diagnostics";
-type AttemptSelection = number | "pending" | null;
+type AttemptSelection = number | "pending" | "live" | null;
 type SummaryRow = readonly [label: string, value: string];
 type DataTab = "vars" | "hookState";
 type AuditFilter = "all" | "hooks" | "tasks" | "run";
@@ -683,17 +683,31 @@ export function RunDetailDrawer({
     (run.status === "initialized" || run.status === "ready") &&
     run.totalAttemptCount === 0 &&
     timelineAttempts.length === 0;
-  const selectedAttemptRecord =
-    (typeof selectedAttempt === "number"
-      ? timelineAttempts.find((attempt) => attempt.attemptNumber === selectedAttempt)
-      : null) ??
-    timelineAttempts[timelineAttempts.length - 1] ??
-    null;
-  const selectedPendingAttempt = pendingAttemptAvailable && selectedAttemptRecord === null;
+  const currentLiveAttemptNumber = run.currentSession?.lastAttemptNumber ?? null;
+  const currentLiveAttemptRecord =
+    currentLiveAttemptNumber === null
+      ? null
+      : (timelineAttempts.find((attempt) => attempt.attemptNumber === currentLiveAttemptNumber) ??
+        null);
+  const liveAttemptPendingAvailable =
+    run.isLive === true &&
+    run.currentSession?.status === "running" &&
+    currentLiveAttemptNumber !== null &&
+    currentLiveAttemptRecord === null;
+  const selectedLiveAttempt = selectedAttempt === "live" && liveAttemptPendingAvailable;
+  const selectedAttemptRecord = selectedLiveAttempt
+    ? null
+    : ((typeof selectedAttempt === "number"
+        ? timelineAttempts.find((attempt) => attempt.attemptNumber === selectedAttempt)
+        : null) ??
+      timelineAttempts[timelineAttempts.length - 1] ??
+      null);
+  const selectedPendingAttempt =
+    !selectedLiveAttempt && pendingAttemptAvailable && selectedAttemptRecord === null;
   const selectedAttemptNumber = selectedAttemptRecord?.attemptNumber ?? null;
   const selectedAttemptResponse = selectedAttemptRecord?.transcript ?? "";
   const selectedAttemptDiagnostics = selectedAttemptRecord?.notices ?? "";
-  const selectedAttemptLive = selectedAttemptRecord?.live ?? false;
+  const selectedAttemptLive = selectedLiveAttempt || (selectedAttemptRecord?.live ?? false);
   const selectedSessionIndex = selectedAttemptRecord?.sessionIndex ?? null;
   const selectedTimelineSession =
     selectedSessionIndex === null
@@ -1087,6 +1101,17 @@ export function RunDetailDrawer({
 
   useEffect(() => {
     const availableAttempts = new Set(timelineAttempts.map((attempt) => attempt.attemptNumber));
+    if (selectedAttempt === "live") {
+      if (liveAttemptPendingAvailable) {
+        return;
+      }
+      if (pendingAttemptAvailable) {
+        setSelectedAttempt("pending");
+        return;
+      }
+      setSelectedAttempt(timelineAttempts[timelineAttempts.length - 1]?.attemptNumber ?? null);
+      return;
+    }
     if (selectedAttempt === "pending") {
       if (pendingAttemptAvailable) {
         return;
@@ -1102,12 +1127,21 @@ export function RunDetailDrawer({
       return;
     }
     setSelectedAttempt(timelineAttempts[timelineAttempts.length - 1]?.attemptNumber ?? null);
-  }, [pendingAttemptAvailable, selectedAttempt, timelineAttempts]);
+  }, [liveAttemptPendingAvailable, pendingAttemptAvailable, selectedAttempt, timelineAttempts]);
 
   useEffect(() => {
     const latestAttempt = timelineAttempts[timelineAttempts.length - 1]?.attemptNumber ?? null;
     if (activeSection !== "events") {
       latestAttemptRef.current = latestAttempt;
+      return;
+    }
+    if (liveAttemptPendingAvailable) {
+      if (selectedAttempt !== "live") {
+        setSelectedAttempt("live");
+      }
+      if (timelineTab !== "response") {
+        setTimelineTab("response");
+      }
       return;
     }
     if (latestAttempt === null) {
@@ -1121,7 +1155,7 @@ export function RunDetailDrawer({
       return;
     }
     latestAttemptRef.current = latestAttempt;
-  }, [activeSection, timelineAttempts]);
+  }, [activeSection, liveAttemptPendingAvailable, selectedAttempt, timelineAttempts, timelineTab]);
 
   useEffect(() => {
     if (
@@ -2660,20 +2694,24 @@ export function RunDetailDrawer({
                   <p className="muted-inline">{timelineState.error}</p>
                 ) : null}
 
-                {timelineState.isLoading && timelineAttempts.length === 0 ? (
+                {timelineState.isLoading &&
+                timelineAttempts.length === 0 &&
+                !selectedLiveAttempt ? (
                   <p className="muted-inline">Loading attempt history…</p>
                 ) : null}
 
                 {!timelineState.isLoading &&
                 timelineAttempts.length === 0 &&
+                !selectedLiveAttempt &&
                 !selectedPendingAttempt ? (
                   <p className="muted-inline">No attempt history is available for this run yet.</p>
                 ) : null}
 
-                {selectedAttemptRecord || selectedPendingAttempt ? (
+                {selectedAttemptRecord || selectedPendingAttempt || selectedLiveAttempt ? (
                   <div className="timeline-attempt-panel">
                     <div className="timeline-sticky-controls">
-                      {selectedPendingAttempt || timelineAttempts.length > 1 ? (
+                      {!selectedLiveAttempt &&
+                      (selectedPendingAttempt || timelineAttempts.length > 1) ? (
                         <div className="timeline-attempts">
                           {selectedPendingAttempt ? (
                             <div className="timeline-attempt-row">
@@ -2910,7 +2948,7 @@ export function RunDetailDrawer({
                           </section>
                         ) : (
                           <p className="task-empty">
-                            {selectedAttemptRecord?.live
+                            {selectedAttemptLive
                               ? "Waiting for live response text…"
                               : "This attempt produced no transcript response."}
                           </p>
@@ -2926,7 +2964,7 @@ export function RunDetailDrawer({
                         </section>
                       ) : (
                         <p className="task-empty">
-                          {selectedAttemptRecord?.live
+                          {selectedAttemptLive
                             ? "No diagnostics have arrived yet."
                             : "This attempt produced no diagnostics."}
                         </p>

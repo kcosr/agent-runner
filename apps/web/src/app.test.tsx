@@ -2028,6 +2028,16 @@ describe("web app", () => {
       }),
     });
 
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "Response" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+    });
+    expect(screen.getByText("Waiting for live response text…")).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Live" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Pending" })).not.toBeInTheDocument();
+
     let timelineSource: MockEventSource | undefined;
     await waitFor(() => {
       timelineSource = MockEventSource.instances.find((candidate) =>
@@ -2076,6 +2086,204 @@ describe("web app", () => {
 
     await user.click(screen.getByRole("tab", { name: "Diagnostics" }));
     expect(screen.getByText("No diagnostics have arrived yet.")).toBeInTheDocument();
+  });
+
+  it("moves to a hidden live response while a completed run resume waits for timeline history", async () => {
+    const completedSession = {
+      sessionIndex: 0,
+      status: "success",
+      startedAt: "2026-04-13T05:00:00.000Z",
+      endedAt: "2026-04-13T05:02:00.000Z",
+      exitCode: 0,
+      message: null,
+      firstAttemptNumber: 1,
+      lastAttemptNumber: 1,
+      attemptCount: 1,
+      maxAttemptsPerSession: 3,
+      backendSessionIdAtStart: "thread-1",
+      backendSessionIdAtEnd: "thread-1",
+    } satisfies RunDetail["sessions"][number];
+    const runningSession = {
+      sessionIndex: 1,
+      status: "running",
+      startedAt: "2026-04-13T05:03:00.000Z",
+      endedAt: null,
+      exitCode: null,
+      message: null,
+      firstAttemptNumber: 2,
+      lastAttemptNumber: 2,
+      attemptCount: 1,
+      maxAttemptsPerSession: 3,
+      backendSessionIdAtStart: "thread-2",
+      backendSessionIdAtEnd: null,
+    } satisfies RunDetail["sessions"][number];
+    const timelineHistory: RunTimelineHistory = {
+      runId: "run-1",
+      lastCursor: 1,
+      attempts: [
+        {
+          attemptNumber: 1,
+
+          attemptIndexInSession: 0,
+          sessionIndex: 0,
+          startedAt: "2026-04-13T05:00:00.000Z",
+          endedAt: "2026-04-13T05:02:00.000Z",
+          prompt: "Initial prompt",
+          transcript: "Completed attempt",
+          notices: "",
+          exitCode: 0,
+          timedOut: false,
+          live: false,
+        },
+      ],
+    };
+    let resolveSecondTimeline: ((response: Response | PromiseLike<Response>) => void) | undefined;
+    let timelineRequestCount = 0;
+
+    const fetchMock = installFetchMock(
+      {
+        runs: [
+          makeRun({
+            status: "success",
+            effectiveStatus: "success",
+            endedAt: "2026-04-13T05:02:00.000Z",
+            totalAttemptCount: 1,
+            totalSessionCount: 1,
+            currentSession: null,
+            lastSession: completedSession,
+            activeTask: null,
+          }),
+        ],
+        details: {
+          "run-1": makeDetail({
+            status: "success",
+            effectiveStatus: "success",
+            isLive: false,
+            endedAt: "2026-04-13T05:02:00.000Z",
+            totalAttemptCount: 1,
+            totalSessionCount: 1,
+            sessions: [completedSession],
+            currentSession: null,
+            lastSession: completedSession,
+            activeTask: null,
+          }),
+        },
+      },
+      {
+        handleRequest: (url) => {
+          if (!url.endsWith("/api/runs/run-1/timeline")) {
+            return undefined;
+          }
+          timelineRequestCount += 1;
+          if (timelineRequestCount === 1) {
+            return new Response(JSON.stringify({ history: timelineHistory }), { status: 200 });
+          }
+          return new Promise<Response>((resolve) => {
+            resolveSecondTimeline = resolve;
+          });
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+
+    expect(fetchCallCount(fetchMock, (url) => url.endsWith("/api/runs/run-1/timeline"))).toBe(0);
+    expect(hasEventSource("/api/runs/run-1/events/timeline")).toBe(false);
+    expect(hasEventSource("/api/runs/run-1/events/audit")).toBe(false);
+
+    await user.click(screen.getByRole("button", { name: "Attempts" }));
+    expect(await screen.findByRole("region", { name: "Attempt response" })).toHaveTextContent(
+      "Completed attempt",
+    );
+    expect(fetchCallCount(fetchMock, (url) => url.endsWith("/api/runs/run-1/timeline"))).toBe(1);
+    expect(hasEventSource("/api/runs/run-1/events/timeline")).toBe(false);
+    expect(hasEventSource("/api/runs/run-1/events/audit")).toBe(false);
+
+    const detailSource = findEventSource("/api/runs/run-1/events/detail");
+    detailSource.emitOpen();
+    detailSource.emitMessage({
+      type: "detail_updated",
+      detail: makeDetail({
+        status: "running",
+        effectiveStatus: "running",
+        isLive: true,
+        endedAt: null,
+        totalAttemptCount: 2,
+        totalSessionCount: 2,
+        sessions: [completedSession, runningSession],
+        currentSession: runningSession,
+        lastSession: runningSession,
+        activeTask: {
+          id: "resume",
+          title: "Resume run",
+        },
+      }),
+    });
+
+    await waitFor(() => {
+      expect(fetchCallCount(fetchMock, (url) => url.endsWith("/api/runs/run-1/timeline"))).toBe(2);
+    });
+    expect(screen.getByRole("tab", { name: "Response" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("Waiting for live response text…")).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Live" })).not.toBeInTheDocument();
+    expect(hasEventSource("/api/runs/run-1/events/audit")).toBe(false);
+
+    const firstAttempt = timelineHistory.attempts[0];
+    if (!firstAttempt) {
+      throw new Error("expected first attempt");
+    }
+    timelineHistory.lastCursor = 2;
+    timelineHistory.attempts = [
+      firstAttempt,
+      {
+        attemptNumber: 2,
+
+        attemptIndexInSession: 0,
+        sessionIndex: 1,
+        startedAt: "2026-04-13T05:03:00.000Z",
+        endedAt: null,
+        prompt: "## Resume prompt",
+        transcript: "",
+        notices: "",
+        exitCode: null,
+        timedOut: false,
+        live: true,
+      },
+    ];
+    if (!resolveSecondTimeline) {
+      throw new Error("expected deferred timeline history request");
+    }
+    resolveSecondTimeline(
+      new Response(JSON.stringify({ history: timelineHistory }), { status: 200 }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "Session 2" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+    });
+
+    const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
+    timelineSource.emitOpen();
+    timelineSource.emitMessage({
+      runId: "run-1",
+      cursor: 3,
+      event: {
+        type: "agent_message_delta",
+        text: "Resumed response",
+      },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("region", { name: "Attempt response" })).toHaveTextContent(
+        "Resumed response",
+      );
+    });
+    expect(fetchCallCount(fetchMock, (url) => url.endsWith("/api/runs/run-1/timeline"))).toBe(2);
+    expect(hasEventSource("/api/runs/run-1/events/audit")).toBe(false);
   });
 
   it("auto-selects a newly started attempt and switches to response while viewing attempts", async () => {
