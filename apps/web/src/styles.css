@@ -1198,6 +1198,28 @@ body {
   margin-bottom: 0;
 }
 
+.chat-markdown--user,
+.chat-markdown--user h1,
+.chat-markdown--user h2,
+.chat-markdown--user h3,
+.chat-markdown--user h4,
+.chat-markdown--user h5,
+.chat-markdown--user h6,
+.chat-markdown--user a {
+  color: inherit;
+}
+
+.chat-markdown--user code,
+.chat-markdown--user pre {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.chat-markdown--user pre code {
+  background: transparent;
+  color: inherit;
+}
+
 .chat-secondary {
   width: min(100%, 34rem);
 }

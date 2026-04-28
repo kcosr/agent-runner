@@ -120,7 +120,7 @@ function ChatRow({ row }: { row: RunChatRow }) {
     return (
       <article className="chat-row chat-row--user">
         <div className="chat-bubble chat-bubble--user">
-          <p>{row.text}</p>
+          <MarkdownContent className="chat-markdown chat-markdown--user" text={row.text} />
         </div>
       </article>
     );

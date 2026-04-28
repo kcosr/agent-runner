@@ -1932,7 +1932,7 @@ describe("web app", () => {
               sessionIndex: 0,
               startedAt: "2026-04-13T05:00:00.000Z",
               endedAt: null,
-              prompt: "Prompt",
+              prompt: "Prompt with **markdown**\n\n- list item",
               transcript: "Streaming answer",
               notices: "backend notice",
               exitCode: null,
@@ -1950,7 +1950,9 @@ describe("web app", () => {
     const chat = await screen.findByLabelText("Run chat");
     expect(await within(chat).findByText("run-1")).toBeInTheDocument();
     expect(await within(chat).findByText("Build dashboard")).toBeInTheDocument();
-    expect(await within(chat).findByText("Prompt")).toBeInTheDocument();
+    expect(await within(chat).findByText(/Prompt with/)).toBeInTheDocument();
+    expect(within(chat).getByText("markdown").tagName).toBe("STRONG");
+    expect(within(chat).getByText("list item").closest("li")).not.toBeNull();
     expect(within(chat).queryByText("Initial dashboard request")).not.toBeInTheDocument();
     expect(await within(chat).findByText("Streaming answer")).toBeInTheDocument();
     expect(
