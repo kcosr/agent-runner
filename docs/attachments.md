@@ -65,7 +65,9 @@ during the stream.
 With `--connect`, the CLI uploads over the existing daemon WebSocket:
 metadata is exchanged with JSON-RPC and file bytes are sent as bounded
 `stream.*` notifications. The connected path does not call the daemon
-HTTP attachment upload route.
+HTTP attachment upload route. Connected upload includes a `size` hint; if
+it exceeds 25 MiB the daemon rejects the open request before any bytes are
+sent.
 
 ### List
 

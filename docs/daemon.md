@@ -362,6 +362,15 @@ callers set schedules through the explicit schedule routes.
 - `assignments.list`, `assignments.get`
 - `launchers.list`, `launchers.get`
 
+**Attachments**
+
+- `attachments.list`, `attachments.remove`
+- `attachments.upload.open`, `attachments.upload.finish`
+- `attachments.download`
+
+Attachment upload and download pair JSON-RPC metadata with `stream.*`
+notifications on the same WebSocket connection.
+
 **Subscriptions**
 
 - `events.subscribe { channel, runId? }` — returns `{ subscriptionId }`

@@ -1,5 +1,4 @@
 import { shortId } from "@task-runner/core/util/short-id.js";
-import { WebSocket } from "ws";
 import type { StreamNotification } from "./protocol.js";
 
 export const STREAM_MAX_CHUNK_BYTES = 65_536;
@@ -7,6 +6,8 @@ export const STREAM_MAX_ACTIVE_PER_CONNECTION = 8;
 export const STREAM_MAX_BUFFERED_BYTES_PER_STREAM = 1_048_576;
 export const STREAM_MAX_BUFFERED_BYTES_PER_CONNECTION = 4_194_304;
 export const STREAM_IDLE_TIMEOUT_MS = 30_000;
+
+const WEBSOCKET_OPEN = 1;
 
 export class WebSocketStreamError extends Error {
   constructor(
@@ -34,15 +35,22 @@ type OutgoingStreamState = {
   kind: "outgoing";
   streamId: string;
   idleTimer: ReturnType<typeof setTimeout>;
+  error: Error | null;
+  sending: boolean;
 };
 
 type StreamState = IncomingStreamState | OutgoingStreamState;
+
+interface WebSocketLike {
+  readonly readyState: number;
+  send(data: string, cb: (error?: Error) => void): void;
+}
 
 export class WebSocketStreamRegistry {
   private readonly streams = new Map<string, StreamState>();
   private bufferedBytes = 0;
 
-  constructor(private readonly ws: WebSocket) {}
+  constructor(private readonly ws: WebSocketLike) {}
 
   createStreamId(): string {
     let streamId: string;
@@ -75,21 +83,21 @@ export class WebSocketStreamRegistry {
       kind: "outgoing",
       streamId,
       idleTimer: this.armIdleTimer(streamId),
+      error: null,
+      sending: false,
     });
   }
 
-  releaseStream(streamId: string): void {
+  releaseStream(streamId: string, error?: Error): void {
     const state = this.streams.get(streamId);
     if (!state) {
       return;
     }
     clearTimeout(state.idleTimer);
     if (state.kind === "incoming") {
-      this.bufferedBytes -= state.bufferedBytes;
-      state.bufferedBytes = 0;
-      state.queue = [];
-      state.ended = true;
-      this.notify(state);
+      this.dropIncoming(state, error ? { error } : { ended: true });
+    } else if (error) {
+      state.error = error;
     }
     this.streams.delete(streamId);
   }
@@ -100,11 +108,9 @@ export class WebSocketStreamRegistry {
     for (const state of this.streams.values()) {
       clearTimeout(state.idleTimer);
       if (state.kind === "incoming") {
+        this.dropIncoming(state, { error });
+      } else {
         state.error = error;
-        this.bufferedBytes -= state.bufferedBytes;
-        state.bufferedBytes = 0;
-        state.queue = [];
-        this.notify(state);
       }
     }
     this.streams.clear();
@@ -120,14 +126,14 @@ export class WebSocketStreamRegistry {
         this.receiveEnd(frame.params.streamId, frame.params.seq);
         return;
       case "stream.error":
-        this.failIncoming(
+        this.failStream(
           frame.params.streamId,
           new WebSocketStreamError(frame.params.message, frame.params.code),
           false,
         );
         return;
       case "stream.cancel":
-        this.failIncoming(
+        this.failStream(
           frame.params.streamId,
           new WebSocketStreamError(
             frame.params.reason ?? `stream ${frame.params.streamId} was cancelled`,
@@ -144,11 +150,17 @@ export class WebSocketStreamRegistry {
     if (!state || state.kind !== "outgoing") {
       throw new WebSocketStreamError(`unknown stream ${streamId}`, "STREAM_UNKNOWN");
     }
+    if (state.sending) {
+      throw new WebSocketStreamError(`stream ${streamId} is already sending`, "STREAM_BUSY");
+    }
+    state.sending = true;
     let seq = 0;
     try {
       for await (const chunk of source) {
+        this.assertOutgoingActive(streamId, state);
         const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
         for (let offset = 0; offset < buffer.byteLength; offset += STREAM_MAX_CHUNK_BYTES) {
+          this.assertOutgoingActive(streamId, state);
           const slice = buffer.subarray(offset, offset + STREAM_MAX_CHUNK_BYTES);
           if (slice.byteLength === 0) {
             continue;
@@ -166,6 +178,7 @@ export class WebSocketStreamRegistry {
           seq += 1;
         }
       }
+      this.assertOutgoingActive(streamId, state);
       this.resetIdleTimer(state);
       await this.sendFrame({
         jsonrpc: "2.0",
@@ -185,21 +198,30 @@ export class WebSocketStreamRegistry {
   }
 
   async sendCancel(streamId: string, reason?: string): Promise<void> {
-    await this.sendFrame({
-      jsonrpc: "2.0",
-      method: "stream.cancel",
-      params: { streamId, reason },
-    });
-    this.releaseStream(streamId);
+    try {
+      await this.sendFrame({
+        jsonrpc: "2.0",
+        method: "stream.cancel",
+        params: { streamId, reason },
+      });
+    } finally {
+      this.releaseStream(
+        streamId,
+        new WebSocketStreamError(reason ?? `stream ${streamId} was cancelled`, "STREAM_CANCELLED"),
+      );
+    }
   }
 
   async sendStreamError(streamId: string, message: string, code?: string): Promise<void> {
-    await this.sendFrame({
-      jsonrpc: "2.0",
-      method: "stream.error",
-      params: { streamId, message, code },
-    });
-    this.releaseStream(streamId);
+    try {
+      await this.sendFrame({
+        jsonrpc: "2.0",
+        method: "stream.error",
+        params: { streamId, message, code },
+      });
+    } finally {
+      this.releaseStream(streamId, new WebSocketStreamError(message, code));
+    }
   }
 
   private assertCanOpen(streamId: string): void {
@@ -216,7 +238,7 @@ export class WebSocketStreamRegistry {
 
   private armIdleTimer(streamId: string): ReturnType<typeof setTimeout> {
     const timer = setTimeout(() => {
-      this.failIncoming(
+      this.failStream(
         streamId,
         new WebSocketStreamError(`stream ${streamId} timed out`, "STREAM_TIMEOUT"),
         true,
@@ -239,8 +261,19 @@ export class WebSocketStreamRegistry {
       );
       return;
     }
+    if (state.ended) {
+      this.failStream(
+        streamId,
+        new WebSocketStreamError(
+          `stream ${streamId} received data after end`,
+          "STREAM_BAD_SEQUENCE",
+        ),
+        true,
+      );
+      return;
+    }
     if (seq !== state.expectedSeq) {
-      this.failIncoming(
+      this.failStream(
         streamId,
         new WebSocketStreamError(
           `stream ${streamId} expected sequence ${state.expectedSeq} but received ${seq}`,
@@ -253,7 +286,7 @@ export class WebSocketStreamRegistry {
 
     const bytes = Buffer.from(data, "base64");
     if (bytes.byteLength < 1 || bytes.byteLength > STREAM_MAX_CHUNK_BYTES) {
-      this.failIncoming(
+      this.failStream(
         streamId,
         new WebSocketStreamError(
           `stream ${streamId} data chunk must decode to 1..${STREAM_MAX_CHUNK_BYTES} bytes`,
@@ -264,7 +297,7 @@ export class WebSocketStreamRegistry {
       return;
     }
     if (state.bufferedBytes + bytes.byteLength > STREAM_MAX_BUFFERED_BYTES_PER_STREAM) {
-      this.failIncoming(
+      this.failStream(
         streamId,
         new WebSocketStreamError(
           `stream ${streamId} exceeded buffered byte limit`,
@@ -275,7 +308,7 @@ export class WebSocketStreamRegistry {
       return;
     }
     if (this.bufferedBytes + bytes.byteLength > STREAM_MAX_BUFFERED_BYTES_PER_CONNECTION) {
-      this.failIncoming(
+      this.failStream(
         streamId,
         new WebSocketStreamError("connection exceeded buffered byte limit", "STREAM_BUFFER_LIMIT"),
         true,
@@ -300,7 +333,7 @@ export class WebSocketStreamRegistry {
       return;
     }
     if (seq !== state.expectedSeq) {
-      this.failIncoming(
+      this.failStream(
         streamId,
         new WebSocketStreamError(
           `stream ${streamId} expected end sequence ${state.expectedSeq} but received ${seq}`,
@@ -315,7 +348,7 @@ export class WebSocketStreamRegistry {
     this.notify(state);
   }
 
-  private failIncoming(streamId: string, error: Error, notifyPeer: boolean): void {
+  private failStream(streamId: string, error: Error, notifyPeer: boolean): void {
     const state = this.streams.get(streamId);
     if (!state) {
       if (notifyPeer) {
@@ -329,11 +362,9 @@ export class WebSocketStreamRegistry {
     }
     clearTimeout(state.idleTimer);
     if (state.kind === "incoming") {
+      this.dropIncoming(state, { error });
+    } else {
       state.error = error;
-      this.bufferedBytes -= state.bufferedBytes;
-      state.bufferedBytes = 0;
-      state.queue = [];
-      this.notify(state);
     }
     this.streams.delete(streamId);
     if (notifyPeer) {
@@ -346,6 +377,31 @@ export class WebSocketStreamRegistry {
           code: error instanceof WebSocketStreamError ? error.code : undefined,
         },
       }).catch(() => undefined);
+    }
+  }
+
+  private dropIncoming(
+    state: IncomingStreamState,
+    finalState: { ended: true } | { error: Error },
+  ): void {
+    if ("error" in finalState) {
+      state.error = finalState.error;
+      state.ended = false;
+    } else {
+      state.ended = true;
+    }
+    this.bufferedBytes -= state.bufferedBytes;
+    state.bufferedBytes = 0;
+    state.queue = [];
+    this.notify(state);
+  }
+
+  private assertOutgoingActive(streamId: string, state: OutgoingStreamState): void {
+    if (state.error) {
+      throw state.error;
+    }
+    if (this.streams.get(streamId) !== state) {
+      throw new WebSocketStreamError(`stream ${streamId} is no longer active`, "STREAM_CLOSED");
     }
   }
 
@@ -384,7 +440,7 @@ export class WebSocketStreamRegistry {
   }
 
   private async sendFrame(frame: StreamNotification): Promise<void> {
-    if (this.ws.readyState !== WebSocket.OPEN) {
+    if (this.ws.readyState !== WEBSOCKET_OPEN) {
       throw new WebSocketStreamError("daemon connection closed", "STREAM_CLOSED");
     }
     await new Promise<void>((resolve, reject) => {

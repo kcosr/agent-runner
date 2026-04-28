@@ -217,6 +217,8 @@ interface SubscriptionHandle {
 
 interface UploadStreamRecord {
   result: Promise<RunAttachment>;
+  resolveCommit(): void;
+  rejectCommit(error: Error): void;
 }
 
 const MAX_TIMELINE_BUFFER_EVENTS = 1_000;
@@ -2405,14 +2407,23 @@ export async function serveDaemon(
           }
           const streamId = streams.createStreamId();
           const source = streams.openIncomingStream(streamId);
+          let resolveCommit!: () => void;
+          let rejectCommit!: (error: Error) => void;
+          const commitSignal = new Promise<void>((resolve, reject) => {
+            resolveCommit = resolve;
+            rejectCommit = reject;
+          });
+          commitSignal.catch(() => undefined);
           const result = operations
             .addAttachment(parsed.runId, {
               name: parsed.name,
               mimeType: parsed.mimeType,
               source,
+              commitSignal,
             })
             .then((uploadResult) => uploadResult.attachment)
             .catch((error) => {
+              uploadStreams.delete(streamId);
               void streams
                 .sendStreamError(
                   streamId,
@@ -2425,6 +2436,8 @@ export async function serveDaemon(
           result.catch(() => undefined);
           uploadStreams.set(streamId, {
             result,
+            resolveCommit,
+            rejectCommit,
           });
           sendJson(
             ws,
@@ -2446,6 +2459,7 @@ export async function serveDaemon(
             throw new RequestValidationError(`unknown upload stream ${parsed.streamId}`);
           }
           try {
+            upload.resolveCommit();
             sendJson(
               ws,
               resultResponse(request.id, {
@@ -3011,6 +3025,14 @@ export async function serveDaemon(
     ws.on("close", () => {
       wsClients.delete(ws);
       removeSubscriptionsByOwner(ws);
+      for (const [streamId, upload] of uploadStreams) {
+        upload.rejectCommit(
+          new WebSocketStreamError(
+            `stream ${streamId} closed before upload finish`,
+            "STREAM_CLOSED",
+          ),
+        );
+      }
       streams.close();
       uploadStreams.clear();
     });

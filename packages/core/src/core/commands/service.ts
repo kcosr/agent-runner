@@ -1610,7 +1610,12 @@ export async function addAttachmentFromFile(
 
 export async function addAttachmentFromStream(
   target: string,
-  input: { name: string; source: AsyncIterable<Uint8Array>; mimeType?: string },
+  input: {
+    name: string;
+    source: AsyncIterable<Uint8Array>;
+    commitSignal: Promise<void>;
+    mimeType?: string;
+  },
 ): Promise<AttachmentResult> {
   const resolved = resolveRun(target);
   try {
@@ -1626,6 +1631,7 @@ export async function addAttachmentFromStream(
       id: `att-${shortId()}`,
       name: input.name,
       source: input.source,
+      commitSignal: input.commitSignal,
       mimeType: input.mimeType,
     });
     resolved.manifest.attachments = [...resolved.manifest.attachments, attachment];

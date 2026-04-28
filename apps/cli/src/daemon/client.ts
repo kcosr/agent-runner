@@ -1,11 +1,4 @@
-import {
-  closeSync,
-  createReadStream,
-  createWriteStream,
-  openSync,
-  rmSync,
-  statSync,
-} from "node:fs";
+import { createReadStream, createWriteStream, rmSync, statSync } from "node:fs";
 import { pipeline } from "node:stream/promises";
 import type {
   AttachmentScope,
@@ -324,21 +317,14 @@ export class DaemonClient {
         .catch(() => undefined);
       throw error;
     }
-    const stream = this.streams.openIncomingStream(opened.streamId);
     let createdOutput = false;
     try {
-      const fd = openSync(resolvedOutputPath, "wx");
-      createdOutput = true;
-      try {
-        await pipeline(stream, createWriteStream(resolvedOutputPath, { fd, autoClose: true }));
-      } catch (error) {
-        try {
-          closeSync(fd);
-        } catch {
-          // The write stream may already have closed the descriptor.
-        }
-        throw error;
-      }
+      const stream = this.streams.openIncomingStream(opened.streamId);
+      const output = createWriteStream(resolvedOutputPath, { flags: "wx", autoClose: true });
+      output.once("open", () => {
+        createdOutput = true;
+      });
+      await pipeline(stream, output);
     } catch (error) {
       if (createdOutput) {
         rmSync(resolvedOutputPath, { force: true });
@@ -365,9 +351,9 @@ export class DaemonClient {
   }
 
   private handleMessage(raw: string): void {
-    let parsed: JsonRpcResponse | JsonRpcNotification;
+    let parsed: unknown;
     try {
-      parsed = JSON.parse(raw) as JsonRpcResponse | JsonRpcNotification;
+      parsed = JSON.parse(raw);
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       const error = new DaemonRpcError(-32700, `daemon emitted malformed JSON-RPC: ${detail}`);
@@ -377,26 +363,30 @@ export class DaemonClient {
       }
       return;
     }
-
-    if ("id" in parsed) {
-      const pending = this.pending.get(String(parsed.id));
-      if (!pending) {
-        return;
-      }
-      this.pending.delete(String(parsed.id));
-      if (parsed.error) {
-        pending.reject(
-          new DaemonRpcError(parsed.error.code, parsed.error.message, parsed.error.data),
-        );
-        return;
-      }
-      pending.resolve(parsed.result);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       return;
     }
 
-    if (parsed.method?.startsWith("stream.")) {
+    const message = parsed as JsonRpcResponse | JsonRpcNotification;
+    if ("id" in message) {
+      const pending = this.pending.get(String(message.id));
+      if (!pending) {
+        return;
+      }
+      this.pending.delete(String(message.id));
+      if (message.error) {
+        pending.reject(
+          new DaemonRpcError(message.error.code, message.error.message, message.error.data),
+        );
+        return;
+      }
+      pending.resolve(message.result);
+      return;
+    }
+
+    if (message.method?.startsWith("stream.")) {
       try {
-        this.streams.handleFrame(parseStreamNotification(parsed));
+        this.streams.handleFrame(parseStreamNotification(message));
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
         this.failPending(
@@ -407,7 +397,7 @@ export class DaemonClient {
       return;
     }
 
-    const params = parseSubscriptionNotification(parsed);
+    const params = parseSubscriptionNotification(message);
     if (!params) {
       return;
     }

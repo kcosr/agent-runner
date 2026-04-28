@@ -21,6 +21,14 @@ import { deriveHttpBaseUrl } from "../apps/cli/dist/daemon/config.js";
 import { daemonReconfigureRun } from "../apps/cli/dist/daemon/http-client.js";
 import { serveDaemon } from "../apps/cli/dist/daemon/server.js";
 import { streamEvents } from "../apps/cli/dist/daemon/sse.js";
+import {
+  STREAM_IDLE_TIMEOUT_MS,
+  STREAM_MAX_ACTIVE_PER_CONNECTION,
+  STREAM_MAX_BUFFERED_BYTES_PER_CONNECTION,
+  STREAM_MAX_BUFFERED_BYTES_PER_STREAM,
+  STREAM_MAX_CHUNK_BYTES,
+  WebSocketStreamRegistry,
+} from "../apps/cli/dist/daemon/stream.js";
 import { getRun as getRunDetail } from "../packages/core/dist/app/service.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { ResumeError } from "../packages/core/dist/core/run/manifest.js";
@@ -301,6 +309,20 @@ async function nextRawMessage(ws) {
     ws.once("message", (data) => resolve(JSON.parse(data.toString())));
     ws.once("error", reject);
   });
+}
+
+class FakeStreamWebSocket {
+  readyState = 1;
+  sent = [];
+
+  send(data, cb) {
+    this.sent.push(JSON.parse(data));
+    cb();
+  }
+}
+
+async function flushMicrotasks() {
+  await new Promise((resolve) => setImmediate(resolve));
 }
 
 async function httpJson(baseUrl, path, opts = {}) {
@@ -1775,6 +1797,64 @@ test("daemon attachment streams handle sequential, concurrent, and disconnect cl
       raw.terminate();
       await sleep(50);
       assert.deepEqual(readManifest(init.workspaceDir).attachments, []);
+
+      const rawFinished = await openRawWebSocket(listenUrl);
+      rawFinished.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: "open-finished-disconnect",
+          method: "attachments.upload.open",
+          params: { runId: init.runId, name: "finished-disconnect.txt", size: 8 },
+        }),
+      );
+      const finishedOpened = await nextRawMessage(rawFinished);
+      rawFinished.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          method: "stream.data",
+          params: {
+            streamId: finishedOpened.result.streamId,
+            seq: 0,
+            data: Buffer.from("complete").toString("base64"),
+          },
+        }),
+      );
+      rawFinished.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          method: "stream.end",
+          params: { streamId: finishedOpened.result.streamId, seq: 1 },
+        }),
+      );
+      rawFinished.terminate();
+      await sleep(50);
+      assert.deepEqual(readManifest(init.workspaceDir).attachments, []);
+
+      const downloadCancelAttachment = await client.addAttachment(init.runId, {
+        sourcePath: firstSource,
+        name: "download-cancel.txt",
+      });
+      const downloadRaw = await openRawWebSocket(listenUrl);
+      downloadRaw.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: "download-disconnect",
+          method: "attachments.download",
+          params: { runId: init.runId, attachmentId: downloadCancelAttachment.id },
+        }),
+      );
+      const downloadOpened = await nextRawMessage(downloadRaw);
+      assert.equal(downloadOpened.result.attachment.id, downloadCancelAttachment.id);
+      const firstDownloadFrame = await nextRawMessage(downloadRaw);
+      assert.equal(firstDownloadFrame.method, "stream.data");
+      assert.equal(firstDownloadFrame.params.streamId, downloadOpened.result.streamId);
+      downloadRaw.terminate();
+      await sleep(50);
+      assert.deepEqual(
+        (await client.listAttachments(init.runId, { scope: "run" })).map((entry) => entry.id),
+        [downloadCancelAttachment.id],
+      );
+      await client.removeAttachment(init.runId, downloadCancelAttachment.id);
     } finally {
       await client.close().catch(() => undefined);
       await server.close();
@@ -4345,6 +4425,122 @@ test("daemon websocket stream frames reject unknown, cross-client, and out-of-or
       await server.close();
     }
   });
+});
+
+test("websocket stream registry enforces chunk, active stream, buffer, EOF, and idle limits", async (t) => {
+  {
+    const ws = new FakeStreamWebSocket();
+    const streams = new WebSocketStreamRegistry(ws);
+    for (let index = 0; index < STREAM_MAX_ACTIVE_PER_CONNECTION; index += 1) {
+      streams.openIncomingStream(`stream-${index}`);
+    }
+    assert.throws(() => streams.openIncomingStream("stream-over-limit"), /too many active streams/);
+    streams.close();
+  }
+
+  {
+    const ws = new FakeStreamWebSocket();
+    const streams = new WebSocketStreamRegistry(ws);
+    streams.openIncomingStream("stream-chunk");
+    streams.handleFrame({
+      jsonrpc: "2.0",
+      method: "stream.data",
+      params: {
+        streamId: "stream-chunk",
+        seq: 0,
+        data: Buffer.alloc(STREAM_MAX_CHUNK_BYTES + 1).toString("base64"),
+      },
+    });
+    await flushMicrotasks();
+    assert.equal(ws.sent.at(-1).params.code, "STREAM_CHUNK_SIZE");
+    streams.close();
+  }
+
+  {
+    const ws = new FakeStreamWebSocket();
+    const streams = new WebSocketStreamRegistry(ws);
+    const chunk = Buffer.alloc(STREAM_MAX_CHUNK_BYTES).toString("base64");
+    streams.openIncomingStream("stream-buffer");
+    const allowedChunks = STREAM_MAX_BUFFERED_BYTES_PER_STREAM / STREAM_MAX_CHUNK_BYTES;
+    for (let seq = 0; seq < allowedChunks; seq += 1) {
+      streams.handleFrame({
+        jsonrpc: "2.0",
+        method: "stream.data",
+        params: { streamId: "stream-buffer", seq, data: chunk },
+      });
+    }
+    streams.handleFrame({
+      jsonrpc: "2.0",
+      method: "stream.data",
+      params: { streamId: "stream-buffer", seq: allowedChunks, data: chunk },
+    });
+    await flushMicrotasks();
+    assert.equal(ws.sent.at(-1).params.code, "STREAM_BUFFER_LIMIT");
+    streams.close();
+  }
+
+  {
+    const ws = new FakeStreamWebSocket();
+    const streams = new WebSocketStreamRegistry(ws);
+    const chunk = Buffer.alloc(STREAM_MAX_CHUNK_BYTES).toString("base64");
+    const chunksPerStream = STREAM_MAX_BUFFERED_BYTES_PER_STREAM / STREAM_MAX_CHUNK_BYTES;
+    const fullStreams =
+      STREAM_MAX_BUFFERED_BYTES_PER_CONNECTION / STREAM_MAX_BUFFERED_BYTES_PER_STREAM;
+    for (let streamIndex = 0; streamIndex < fullStreams; streamIndex += 1) {
+      const streamId = `stream-connection-${streamIndex}`;
+      streams.openIncomingStream(streamId);
+      for (let seq = 0; seq < chunksPerStream; seq += 1) {
+        streams.handleFrame({
+          jsonrpc: "2.0",
+          method: "stream.data",
+          params: { streamId, seq, data: chunk },
+        });
+      }
+    }
+    streams.openIncomingStream("stream-connection-overflow");
+    streams.handleFrame({
+      jsonrpc: "2.0",
+      method: "stream.data",
+      params: { streamId: "stream-connection-overflow", seq: 0, data: chunk },
+    });
+    await flushMicrotasks();
+    assert.equal(ws.sent.at(-1).params.code, "STREAM_BUFFER_LIMIT");
+    streams.close();
+  }
+
+  {
+    const ws = new FakeStreamWebSocket();
+    const streams = new WebSocketStreamRegistry(ws);
+    streams.openIncomingStream("stream-ended");
+    streams.handleFrame({
+      jsonrpc: "2.0",
+      method: "stream.end",
+      params: { streamId: "stream-ended", seq: 0 },
+    });
+    streams.handleFrame({
+      jsonrpc: "2.0",
+      method: "stream.data",
+      params: {
+        streamId: "stream-ended",
+        seq: 0,
+        data: Buffer.from("late").toString("base64"),
+      },
+    });
+    await flushMicrotasks();
+    assert.equal(ws.sent.at(-1).params.code, "STREAM_BAD_SEQUENCE");
+    streams.close();
+  }
+
+  {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const ws = new FakeStreamWebSocket();
+    const streams = new WebSocketStreamRegistry(ws);
+    streams.openIncomingStream("stream-timeout");
+    t.mock.timers.tick(STREAM_IDLE_TIMEOUT_MS);
+    await flushMicrotasks();
+    assert.equal(ws.sent.at(-1).params.code, "STREAM_TIMEOUT");
+    streams.close();
+  }
 });
 
 test("daemon websocket rejects non-stream notifications and keeps sibling RPCs working", async () => {

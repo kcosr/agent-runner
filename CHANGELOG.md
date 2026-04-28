@@ -4,6 +4,11 @@
 
 ### Breaking Changes
 
+- Removed connected attachment HTTP client helpers
+  (`daemonAddAttachment`, `daemonListAttachments`,
+  `daemonRemoveAttachment`, `daemonDownloadAttachment`) from
+  `apps/cli/src/daemon/http-client.ts`; connected callers must use the
+  WebSocket RPC and stream methods.
 - Manifest schema version is now `15`. Run manifests and reset seeds now
   require `runGroupId` plus typed `dependencies` refs (`run` or
   `group`); the former run-only dependency array is removed. Use
