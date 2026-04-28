@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { createReadStream, readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { type Socket, createServer as createNetServer } from "node:net";
 import { monitorEventLoopDelay, performance } from "node:perf_hooks";
@@ -47,6 +47,7 @@ import {
 } from "@task-runner/core/app/service.js";
 import { VALID_STATUSES } from "@task-runner/core/assignment/model.js";
 import { isPathArg } from "@task-runner/core/config/runtime-paths.js";
+import type { RunAttachment } from "@task-runner/core/contracts/attachments.js";
 import type {
   RunAuditEnvelope,
   RunAuditHistory,
@@ -75,6 +76,7 @@ import {
   ConflictError,
   refreshRunSnapshotAfterTaskStateSettles,
 } from "@task-runner/core/core/commands/service.js";
+import { MAX_ATTACHMENT_BYTES } from "@task-runner/core/core/run/attachments.js";
 import {
   deriveDependencyState,
   deriveDependencyStateFromDetails,
@@ -138,6 +140,11 @@ import {
   asRecord,
   optionalEnum,
   optionalString,
+  parseAttachmentsDownloadParams,
+  parseAttachmentsListParams,
+  parseAttachmentsRemoveParams,
+  parseAttachmentsUploadFinishParams,
+  parseAttachmentsUploadOpenParams,
   parseCliStartRunParams,
   parseDependencyRef,
   parseResumeRunParams,
@@ -150,9 +157,11 @@ import {
   parseRunSetPinnedParams,
   parseRunsListParams,
   parseRunsReconfigureParams,
+  parseStreamNotification,
   requiredRunIdString,
   requiredString,
 } from "./request-parsing.js";
+import { STREAM_MAX_CHUNK_BYTES, WebSocketStreamError, WebSocketStreamRegistry } from "./stream.js";
 
 interface SummarySubscriptionRecord {
   id: string;
@@ -204,6 +213,10 @@ interface RecentAuditRecord {
 interface SubscriptionHandle {
   subscriptionId: string;
   unsubscribe(): void;
+}
+
+interface UploadStreamRecord {
+  result: Promise<RunAttachment>;
 }
 
 const MAX_TIMELINE_BUFFER_EVENTS = 1_000;
@@ -2281,7 +2294,12 @@ export async function serveDaemon(
     httpServer.listen(port, host);
   });
 
-  const handleRpcRequest = async (ws: WebSocket, request: JsonRpcRequest): Promise<void> => {
+  const handleRpcRequest = async (
+    ws: WebSocket,
+    request: JsonRpcRequest,
+    streams: WebSocketStreamRegistry,
+    uploadStreams: Map<string, UploadStreamRecord>,
+  ): Promise<void> => {
     try {
       const params = request.params;
       switch (request.method) {
@@ -2352,6 +2370,119 @@ export async function serveDaemon(
               ),
             ),
           );
+          return;
+        }
+        case "attachments.list": {
+          const parsed = parseAttachmentsListParams(params, "attachments.list params");
+          sendJson(
+            ws,
+            resultResponse(
+              request.id,
+              operations.listAttachments(parsed.runId, {
+                scope: parsed.scope,
+              }),
+            ),
+          );
+          return;
+        }
+        case "attachments.remove": {
+          const parsed = parseAttachmentsRemoveParams(params, "attachments.remove params");
+          sendJson(
+            ws,
+            resultResponse(
+              request.id,
+              operations.removeAttachment(parsed.runId, parsed.attachmentId),
+            ),
+          );
+          return;
+        }
+        case "attachments.upload.open": {
+          const parsed = parseAttachmentsUploadOpenParams(params, "attachments.upload.open params");
+          if (parsed.size !== undefined && parsed.size > MAX_ATTACHMENT_BYTES) {
+            throw new RequestValidationError(
+              `size must be less than or equal to ${MAX_ATTACHMENT_BYTES}`,
+            );
+          }
+          const streamId = streams.createStreamId();
+          const source = streams.openIncomingStream(streamId);
+          const result = operations
+            .addAttachment(parsed.runId, {
+              name: parsed.name,
+              mimeType: parsed.mimeType,
+              source,
+            })
+            .then((uploadResult) => uploadResult.attachment)
+            .catch((error) => {
+              void streams
+                .sendStreamError(
+                  streamId,
+                  error instanceof Error ? error.message : String(error),
+                  "STREAM_CONSUMER_ERROR",
+                )
+                .catch(() => undefined);
+              throw error;
+            });
+          result.catch(() => undefined);
+          uploadStreams.set(streamId, {
+            result,
+          });
+          sendJson(
+            ws,
+            resultResponse(request.id, {
+              streamId,
+              maxBytes: MAX_ATTACHMENT_BYTES,
+              maxChunkBytes: STREAM_MAX_CHUNK_BYTES,
+            }),
+          );
+          return;
+        }
+        case "attachments.upload.finish": {
+          const parsed = parseAttachmentsUploadFinishParams(
+            params,
+            "attachments.upload.finish params",
+          );
+          const upload = uploadStreams.get(parsed.streamId);
+          if (!upload) {
+            throw new RequestValidationError(`unknown upload stream ${parsed.streamId}`);
+          }
+          try {
+            sendJson(
+              ws,
+              resultResponse(request.id, {
+                attachment: await upload.result,
+              }),
+            );
+          } finally {
+            uploadStreams.delete(parsed.streamId);
+            streams.releaseStream(parsed.streamId);
+          }
+          return;
+        }
+        case "attachments.download": {
+          const parsed = parseAttachmentsDownloadParams(params, "attachments.download params");
+          const { attachment, absolutePath } = operations.getAttachment(
+            parsed.runId,
+            parsed.attachmentId,
+          );
+          const streamId = streams.createStreamId();
+          streams.openOutgoingStream(streamId);
+          sendJson(
+            ws,
+            resultResponse(request.id, {
+              attachment,
+              streamId,
+              maxChunkBytes: STREAM_MAX_CHUNK_BYTES,
+            }),
+          );
+          void streams.sendIterable(streamId, createReadStream(absolutePath)).catch((error) => {
+            if (!(error instanceof WebSocketStreamError && error.code === "STREAM_CLOSED")) {
+              console.error(
+                `task-runner daemon: attachment download stream failed for ${streamId}: ${
+                  error instanceof Error ? error.message : String(error)
+                }`,
+              );
+            }
+          });
           return;
         }
         case "agents.list":
@@ -2832,6 +2963,8 @@ export async function serveDaemon(
 
   wsServer.on("connection", (ws) => {
     wsClients.add(ws);
+    const streams = new WebSocketStreamRegistry(ws);
+    const uploadStreams = new Map<string, UploadStreamRecord>();
     ws.on("message", (payload) => {
       let parsed: unknown;
       try {
@@ -2849,16 +2982,37 @@ export async function serveDaemon(
         sendJson(ws, rpcErrorResponse(request.id ?? null, -32600, "invalid request"));
         return;
       }
-      if (request.id === undefined || typeof request.method !== "string") {
+      if (request.id === undefined) {
+        if (typeof request.method === "string" && request.method.startsWith("stream.")) {
+          try {
+            streams.handleFrame(parseStreamNotification(parsed));
+          } catch (error) {
+            sendJson(
+              ws,
+              rpcErrorResponse(
+                null,
+                -32600,
+                error instanceof Error ? error.message : "invalid stream frame",
+              ),
+            );
+          }
+          return;
+        }
+        sendJson(ws, rpcErrorResponse(null, -32600, "invalid request"));
+        return;
+      }
+      if (typeof request.method !== "string") {
         sendJson(ws, rpcErrorResponse(request.id ?? null, -32600, "invalid request"));
         return;
       }
-      void handleRpcRequest(ws, request as JsonRpcRequest);
+      void handleRpcRequest(ws, request as JsonRpcRequest, streams, uploadStreams);
     });
 
     ws.on("close", () => {
       wsClients.delete(ws);
       removeSubscriptionsByOwner(ws);
+      streams.close();
+      uploadStreams.clear();
     });
   });
 

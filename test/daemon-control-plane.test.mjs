@@ -8,6 +8,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  truncateSync,
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:net";
@@ -1490,6 +1491,292 @@ test("daemon attachment HTTP routes default to group scope and reject invalid sc
       assert.equal(invalid.body.error.code, "INVALID_REQUEST");
       assert.match(invalid.body.error.message, /scope must be "run" or "group"/);
     } finally {
+      await server.close();
+    }
+  });
+});
+
+test("connected CLI attachments use WebSocket streams for add, list, download, and remove", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const init = await initRun(dir);
+  const sourcePath = join(dir, "evidence.txt");
+  const downloadPath = join(dir, "downloaded.txt");
+  const existingPath = join(dir, "existing.txt");
+  const oversizedPath = join(dir, "oversized.bin");
+  writeFileSync(sourcePath, "connected websocket evidence\n");
+  writeFileSync(existingPath, "do not overwrite\n");
+  writeFileSync(oversizedPath, "");
+  truncateSync(oversizedPath, 25 * 1024 * 1024 + 1);
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const daemon = await startCliDaemon(dir, listenUrl);
+  try {
+    const added = JSON.parse(
+      runCli(
+        [
+          "attachment",
+          "add",
+          init.runId,
+          sourcePath,
+          "--name",
+          "remote-evidence.txt",
+          "--mime-type",
+          "text/plain",
+          "--connect",
+          listenUrl,
+          "--output-format",
+          "json",
+        ],
+        { cwd: dir },
+      ),
+    );
+    assert.deepEqual(Object.keys(added).sort(), [
+      "addedAt",
+      "id",
+      "mimeType",
+      "name",
+      "relativePath",
+      "sha256",
+      "size",
+    ]);
+    assert.equal(added.name, "remote-evidence.txt");
+    assert.equal(added.mimeType, "text/plain");
+
+    const listed = JSON.parse(
+      runCli(
+        [
+          "attachment",
+          "list",
+          init.runId,
+          "--scope",
+          "run",
+          "--connect",
+          listenUrl,
+          "--output-format",
+          "json",
+        ],
+        { cwd: dir },
+      ),
+    );
+    assert.deepEqual(
+      listed.map((entry) => ({ id: entry.id, ownerRunId: entry.ownerRunId })),
+      [{ id: added.id, ownerRunId: init.runId }],
+    );
+
+    const overwrite = runCliExpectFail(
+      ["attachment", "download", init.runId, added.id, existingPath, "--connect", listenUrl],
+      { cwd: dir },
+    );
+    assert.equal(overwrite.status, 3);
+    assert.match(overwrite.stderr, /destination file .*existing\.txt already exists/);
+    assert.equal(readFileSync(existingPath, "utf8"), "do not overwrite\n");
+
+    const downloaded = JSON.parse(
+      runCli(
+        [
+          "attachment",
+          "download",
+          init.runId,
+          added.id,
+          downloadPath,
+          "--connect",
+          listenUrl,
+          "--output-format",
+          "json",
+        ],
+        { cwd: dir },
+      ),
+    );
+    assert.equal(downloaded.outputPath, downloadPath);
+    assert.equal(downloaded.id, added.id);
+    assert.equal(readFileSync(downloadPath, "utf8"), "connected websocket evidence\n");
+
+    const oversized = runCliExpectFail(
+      ["attachment", "add", init.runId, oversizedPath, "--connect", listenUrl],
+      { cwd: dir },
+    );
+    assert.equal(oversized.status, 3);
+    assert.match(oversized.stderr, /25 MiB max|size must be less than or equal/);
+    assert.equal(readManifest(init.workspaceDir).attachments.length, 1);
+
+    const removed = JSON.parse(
+      runCli(
+        [
+          "attachment",
+          "remove",
+          init.runId,
+          added.id,
+          "--connect",
+          listenUrl,
+          "--output-format",
+          "json",
+        ],
+        { cwd: dir },
+      ),
+    );
+    assert.deepEqual(removed, {
+      runId: init.runId,
+      attachmentId: added.id,
+      changed: true,
+    });
+  } finally {
+    await daemon.stop();
+  }
+});
+
+test("connected CLI attachment commands do not use daemon attachment HTTP helpers", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const init = await initRun(dir);
+  const sourcePath = join(dir, "no-http-source.txt");
+  const downloadPath = join(dir, "no-http-download.txt");
+  const failFetchPath = join(dir, "fail-fetch.mjs");
+  writeFileSync(sourcePath, "no http helpers\n");
+  writeFileSync(
+    failFetchPath,
+    "globalThis.fetch = async () => { throw new Error('HTTP disabled for connected attachment test'); };",
+  );
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const daemon = await startCliDaemon(dir, listenUrl);
+  const env = { NODE_OPTIONS: `--import=${failFetchPath}` };
+  try {
+    const added = JSON.parse(
+      runCli(
+        [
+          "attachment",
+          "add",
+          init.runId,
+          sourcePath,
+          "--connect",
+          listenUrl,
+          "--output-format",
+          "json",
+        ],
+        { cwd: dir, env },
+      ),
+    );
+    assert.equal(added.name, "no-http-source.txt");
+    const listed = JSON.parse(
+      runCli(
+        ["attachment", "list", init.runId, "--connect", listenUrl, "--output-format", "json"],
+        { cwd: dir, env },
+      ),
+    );
+    assert.equal(listed[0].ownerRunId, init.runId);
+    const downloaded = JSON.parse(
+      runCli(
+        [
+          "attachment",
+          "download",
+          init.runId,
+          added.id,
+          downloadPath,
+          "--connect",
+          listenUrl,
+          "--output-format",
+          "json",
+        ],
+        { cwd: dir, env },
+      ),
+    );
+    assert.equal(downloaded.outputPath, downloadPath);
+    assert.equal(readFileSync(downloadPath, "utf8"), "no http helpers\n");
+    const removed = JSON.parse(
+      runCli(
+        [
+          "attachment",
+          "remove",
+          init.runId,
+          added.id,
+          "--connect",
+          listenUrl,
+          "--output-format",
+          "json",
+        ],
+        { cwd: dir, env },
+      ),
+    );
+    assert.equal(removed.changed, true);
+  } finally {
+    await daemon.stop();
+  }
+});
+
+test("daemon attachment streams handle sequential, concurrent, and disconnect cleanup", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const init = await initRun(dir);
+  const firstSource = join(dir, "first.txt");
+  const secondSource = join(dir, "second.txt");
+  const firstDownload = join(dir, "first-download.txt");
+  const secondDownload = join(dir, "second-download.txt");
+  writeFileSync(firstSource, "first stream\n");
+  writeFileSync(secondSource, "second stream\n");
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl);
+    const client = await DaemonClient.connect(listenUrl);
+    try {
+      const first = await client.addAttachment(init.runId, {
+        sourcePath: firstSource,
+        name: "first.txt",
+      });
+      const second = await client.addAttachment(init.runId, {
+        sourcePath: secondSource,
+        name: "second.txt",
+      });
+      assert.deepEqual(
+        (await client.listAttachments(init.runId, { scope: "run" })).map((entry) => entry.id),
+        [first.id, second.id],
+      );
+
+      const [firstResult, secondResult] = await Promise.all([
+        client.downloadAttachment(init.runId, first.id, firstDownload),
+        client.downloadAttachment(init.runId, second.id, secondDownload),
+      ]);
+      assert.equal(firstResult.id, first.id);
+      assert.equal(secondResult.id, second.id);
+      assert.equal(readFileSync(firstDownload, "utf8"), "first stream\n");
+      assert.equal(readFileSync(secondDownload, "utf8"), "second stream\n");
+
+      await client.removeAttachment(init.runId, first.id);
+      await client.removeAttachment(init.runId, second.id);
+      assert.deepEqual(await client.listAttachments(init.runId, { scope: "run" }), []);
+
+      const raw = await openRawWebSocket(listenUrl);
+      raw.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: "open-disconnect",
+          method: "attachments.upload.open",
+          params: { runId: init.runId, name: "disconnect.txt", size: 11 },
+        }),
+      );
+      const opened = await nextRawMessage(raw);
+      raw.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          method: "stream.data",
+          params: {
+            streamId: opened.result.streamId,
+            seq: 0,
+            data: Buffer.from("partial").toString("base64"),
+          },
+        }),
+      );
+      raw.terminate();
+      await sleep(50);
+      assert.deepEqual(readManifest(init.workspaceDir).attachments, []);
+    } finally {
+      await client.close().catch(() => undefined);
       await server.close();
     }
   });
@@ -3996,6 +4283,91 @@ test("daemon websocket validates events.subscribe channel and runId rules", asyn
   }
 });
 
+test("daemon websocket stream frames reject unknown, cross-client, and out-of-order stream ids", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const init = await initRun(dir);
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl);
+    const first = await openRawWebSocket(listenUrl);
+    const second = await openRawWebSocket(listenUrl);
+    try {
+      first.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          method: "stream.data",
+          params: { streamId: "stream-missing", seq: 0, data: Buffer.from("x").toString("base64") },
+        }),
+      );
+      const unknown = await nextRawMessage(first);
+      assert.equal(unknown.method, "stream.error");
+      assert.equal(unknown.params.code, "STREAM_UNKNOWN");
+
+      first.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: "open",
+          method: "attachments.upload.open",
+          params: { runId: init.runId, name: "cross.txt", size: 1 },
+        }),
+      );
+      const opened = await nextRawMessage(first);
+      const streamId = opened.result.streamId;
+
+      second.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          method: "stream.data",
+          params: { streamId, seq: 0, data: Buffer.from("x").toString("base64") },
+        }),
+      );
+      const crossClient = await nextRawMessage(second);
+      assert.equal(crossClient.method, "stream.error");
+      assert.equal(crossClient.params.code, "STREAM_UNKNOWN");
+
+      first.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          method: "stream.data",
+          params: { streamId, seq: 1, data: Buffer.from("x").toString("base64") },
+        }),
+      );
+      const outOfOrder = await nextRawMessage(first);
+      assert.equal(outOfOrder.method, "stream.error");
+      assert.equal(outOfOrder.params.code, "STREAM_BAD_SEQUENCE");
+    } finally {
+      first.terminate();
+      second.terminate();
+      await server.close();
+    }
+  });
+});
+
+test("daemon websocket rejects non-stream notifications and keeps sibling RPCs working", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const server = await serveDaemon(listenUrl);
+  const ws = await openRawWebSocket(listenUrl);
+  try {
+    ws.send(JSON.stringify({ jsonrpc: "2.0", method: "runs.list", params: {} }));
+    const rejectedNotification = await nextRawMessage(ws);
+    assert.equal(rejectedNotification.id, null);
+    assert.equal(rejectedNotification.error.code, -32600);
+
+    ws.send(JSON.stringify({ jsonrpc: "2.0", id: "list", method: "runs.list", params: {} }));
+    const list = await nextRawMessage(ws);
+    assert.equal(list.id, "list");
+    assert.ok(Array.isArray(list.result.runs));
+  } finally {
+    ws.terminate();
+    await server.close();
+  }
+});
+
 test("daemon client ignores malformed subscription notifications and still delivers valid ones", async () => {
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
@@ -5354,7 +5726,7 @@ test("daemon reconfigure surfaces support CLI and HTTP without replacing frozen 
   }
 });
 
-test("connected cli can reach a daemon through --connect-host and reuse the same connect context for attachment HTTP", async () => {
+test("connected cli can reach a daemon through --connect-host and stream attachments over the tunneled WebSocket", async () => {
   const dir = tempDir();
   writeAgent(dir, "daemon-agent", AGENT);
   writeAssignment(dir, "daemon-work", ASSIGNMENT);

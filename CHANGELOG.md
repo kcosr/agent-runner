@@ -94,6 +94,10 @@
 
 ### Added
 
+- Added multiplexed daemon WebSocket byte streams and moved connected CLI
+  attachment add/list/download/remove onto WebSocket RPC plus stream
+  frames, while preserving HTTP attachment endpoints for browser/API
+  callers.
 - Added first-class run groups across manifests, CLI, daemon APIs, and the
   web dashboard. Fresh child runs inherit the parent run group by default,
   `--group-id` overrides fresh run/init grouping, and

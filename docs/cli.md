@@ -284,6 +284,12 @@ task-runner attachment download <run-id|path> <attachment-id> <output-path>
 task-runner attachment remove <run-id|path> <attachment-id>
 ```
 
+All attachment subcommands accept connected mode through the global
+`--connect <ws-url>` flag. In connected mode, add and download transfer
+bytes over the existing daemon WebSocket stream notifications, while list
+and remove use WebSocket JSON-RPC. The daemon HTTP attachment endpoints
+remain available for browser/API callers.
+
 See [attachments.md](attachments.md).
 
 ## `list`

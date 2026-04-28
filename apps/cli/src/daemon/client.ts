@@ -1,3 +1,16 @@
+import {
+  closeSync,
+  createReadStream,
+  createWriteStream,
+  openSync,
+  rmSync,
+  statSync,
+} from "node:fs";
+import { pipeline } from "node:stream/promises";
+import type {
+  AttachmentScope,
+  RunAttachmentDownloadResult,
+} from "@task-runner/core/contracts/attachments.js";
 import type { RunAuditEvent, RunTimelineEvent } from "@task-runner/core/contracts/events.js";
 import {
   runAuditEventSchema,
@@ -5,9 +18,15 @@ import {
   runSummarySchema,
   runTimelineEventSchema,
 } from "@task-runner/core/contracts/run-schemas.js";
+import { resolveAttachmentOutputPath } from "@task-runner/core/core/run/attachments.js";
 import WebSocket from "ws";
 import { z } from "zod";
 import type {
+  AttachmentsDownloadResult,
+  AttachmentsListResult,
+  AttachmentsRemoveResult,
+  AttachmentsUploadFinishResult,
+  AttachmentsUploadOpenResult,
   EventsSubscribeParams,
   JsonRpcNotification,
   JsonRpcRequest,
@@ -17,6 +36,8 @@ import type {
   RunSummaryNotificationParams,
   RunTimelineNotificationParams,
 } from "./protocol.js";
+import { parseStreamNotification } from "./request-parsing.js";
+import { WebSocketStreamRegistry } from "./stream.js";
 
 export class DaemonConnectionError extends Error {
   constructor(
@@ -164,13 +185,19 @@ export class DaemonClient {
     (params: DaemonSubscriptionNotification) => void
   >();
   private readonly queuedNotifications = new Map<string, DaemonSubscriptionNotification[]>();
+  private readonly streams: WebSocketStreamRegistry;
 
   private constructor(
     private readonly ws: WebSocket,
     readonly url: string,
   ) {
+    this.streams = new WebSocketStreamRegistry(ws);
     ws.on("message", (data) => this.handleMessage(data.toString()));
-    ws.on("close", () => this.failPending(new Error("daemon connection closed")));
+    ws.on("close", () => {
+      const error = new Error("daemon connection closed");
+      this.failPending(error);
+      this.streams.close(error);
+    });
     ws.on("error", () => {
       // The connect-time error is handled by `connect()`. After the socket is
       // established, pending RPCs are rejected from the close handler.
@@ -235,6 +262,98 @@ export class DaemonClient {
     await this.call("events.unsubscribe", { subscriptionId });
   }
 
+  async listAttachments(
+    runId: string,
+    options: { scope?: AttachmentScope } = {},
+  ): Promise<AttachmentsListResult["attachments"]> {
+    return (
+      await this.call<AttachmentsListResult>("attachments.list", {
+        runId,
+        scope: options.scope,
+      })
+    ).attachments;
+  }
+
+  async addAttachment(
+    runId: string,
+    input: { sourcePath: string; name: string; mimeType?: string },
+  ): Promise<AttachmentsUploadFinishResult["attachment"]> {
+    const sourceStat = statSync(input.sourcePath);
+    const opened = await this.call<AttachmentsUploadOpenResult>("attachments.upload.open", {
+      runId,
+      name: input.name,
+      mimeType: input.mimeType,
+      size: sourceStat.size,
+    });
+    this.streams.openOutgoingStream(opened.streamId);
+    await this.streams.sendIterable(opened.streamId, createReadStream(input.sourcePath));
+    return (
+      await this.call<AttachmentsUploadFinishResult>("attachments.upload.finish", {
+        streamId: opened.streamId,
+      })
+    ).attachment;
+  }
+
+  async removeAttachment(
+    runId: string,
+    attachmentId: string,
+  ): Promise<AttachmentsRemoveResult["result"]> {
+    return (
+      await this.call<AttachmentsRemoveResult>("attachments.remove", {
+        runId,
+        attachmentId,
+      })
+    ).result;
+  }
+
+  async downloadAttachment(
+    runId: string,
+    attachmentId: string,
+    outputPath: string,
+  ): Promise<RunAttachmentDownloadResult> {
+    const opened = await this.call<AttachmentsDownloadResult>("attachments.download", {
+      runId,
+      attachmentId,
+    });
+    let resolvedOutputPath: string;
+    try {
+      resolvedOutputPath = resolveAttachmentOutputPath(outputPath, opened.attachment.name);
+    } catch (error) {
+      await this.streams
+        .sendCancel(opened.streamId, error instanceof Error ? error.message : String(error))
+        .catch(() => undefined);
+      throw error;
+    }
+    const stream = this.streams.openIncomingStream(opened.streamId);
+    let createdOutput = false;
+    try {
+      const fd = openSync(resolvedOutputPath, "wx");
+      createdOutput = true;
+      try {
+        await pipeline(stream, createWriteStream(resolvedOutputPath, { fd, autoClose: true }));
+      } catch (error) {
+        try {
+          closeSync(fd);
+        } catch {
+          // The write stream may already have closed the descriptor.
+        }
+        throw error;
+      }
+    } catch (error) {
+      if (createdOutput) {
+        rmSync(resolvedOutputPath, { force: true });
+      }
+      await this.streams
+        .sendCancel(opened.streamId, error instanceof Error ? error.message : String(error))
+        .catch(() => undefined);
+      throw error;
+    }
+    return {
+      ...opened.attachment,
+      outputPath: resolvedOutputPath,
+    };
+  }
+
   async close(): Promise<void> {
     if (this.ws.readyState === WebSocket.CLOSED) {
       return;
@@ -272,6 +391,19 @@ export class DaemonClient {
         return;
       }
       pending.resolve(parsed.result);
+      return;
+    }
+
+    if (parsed.method?.startsWith("stream.")) {
+      try {
+        this.streams.handleFrame(parseStreamNotification(parsed));
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        this.failPending(
+          new DaemonRpcError(-32600, `daemon emitted invalid stream frame: ${detail}`),
+        );
+        this.ws.close(1002, "invalid stream frame");
+      }
       return;
     }
 

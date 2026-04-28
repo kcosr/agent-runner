@@ -129,14 +129,7 @@ import {
 import { DaemonClient, DaemonConnectionError, DaemonRpcError } from "./daemon/client.js";
 import { type ResolvedHostMode, resolveHostMode, resolveListenUrl } from "./daemon/config.js";
 import { SshTunnelSetupError, openSshTunnel } from "./daemon/connect-host.js";
-import {
-  DaemonHttpError,
-  daemonAddAttachment,
-  daemonDownloadAttachment,
-  daemonGetRunAuditHistory,
-  daemonListAttachments,
-  daemonRemoveAttachment,
-} from "./daemon/http-client.js";
+import { DaemonHttpError, daemonGetRunAuditHistory } from "./daemon/http-client.js";
 import { type DaemonInfo, RPC_ERROR_COMMAND } from "./daemon/protocol.js";
 import { serveDaemon } from "./daemon/server.js";
 
@@ -1243,16 +1236,14 @@ function validateAttachmentSourceFile(sourceArg: string): string {
 
 async function resolveAttachmentTargetForDaemon(
   target: string,
-  connect: DaemonConnectContext,
+  client: DaemonClient,
 ): Promise<string> {
   if (!isPathArg(target)) {
     return target;
   }
-  return await withDaemonClient(connect, (client) =>
-    client
-      .call<{ run: ReturnType<typeof getRun> }>("runs.get", { target })
-      .then((result) => result.run.runId),
-  );
+  return await client
+    .call<{ run: ReturnType<typeof getRun> }>("runs.get", { target })
+    .then((result) => result.run.runId);
 }
 
 async function runAttachmentCommand(
@@ -1285,10 +1276,10 @@ async function runAttachmentCommand(
         const attachments =
           connect === undefined
             ? getAttachmentList(target, { scope: parsed.attachmentScope })
-            : await daemonListAttachments(
-                connect.effectiveConnectUrl,
-                await resolveAttachmentTargetForDaemon(target, connect),
-                { scope: parsed.attachmentScope },
+            : await withDaemonClient(connect, async (client) =>
+                client.listAttachments(await resolveAttachmentTargetForDaemon(target, client), {
+                  scope: parsed.attachmentScope,
+                }),
               );
         if (parsed.outputFormat === "json") {
           writeJson(attachments);
@@ -1333,8 +1324,7 @@ async function runAttachmentCommand(
       try {
         const sourcePath = validateAttachmentSourceFile(sourceArg);
         const name = parsed.attachmentName ?? basename(sourcePath);
-        const daemonRunId =
-          connect === undefined ? target : await resolveAttachmentTargetForDaemon(target, connect);
+        let daemonRunId = target;
         const attachment =
           connect === undefined
             ? await addRunAttachmentFromFile(target, {
@@ -1342,10 +1332,13 @@ async function runAttachmentCommand(
                 name: parsed.attachmentName,
                 mimeType: parsed.attachmentMimeType,
               })
-            : await daemonAddAttachment(connect.effectiveConnectUrl, daemonRunId, {
-                sourcePath,
-                name,
-                mimeType: parsed.attachmentMimeType,
+            : await withDaemonClient(connect, async (client) => {
+                daemonRunId = await resolveAttachmentTargetForDaemon(target, client);
+                return await client.addAttachment(daemonRunId, {
+                  sourcePath,
+                  name,
+                  mimeType: parsed.attachmentMimeType,
+                });
               });
         if (parsed.outputFormat === "json") {
           writeJson(attachment);
@@ -1384,10 +1377,11 @@ async function runAttachmentCommand(
         const result =
           connect === undefined
             ? removeRunAttachment(target, attachmentId)
-            : await daemonRemoveAttachment(
-                connect.effectiveConnectUrl,
-                await resolveAttachmentTargetForDaemon(target, connect),
-                attachmentId,
+            : await withDaemonClient(connect, async (client) =>
+                client.removeAttachment(
+                  await resolveAttachmentTargetForDaemon(target, client),
+                  attachmentId,
+                ),
               );
         if (parsed.outputFormat === "json") {
           writeJson(result);
@@ -1426,23 +1420,13 @@ async function runAttachmentCommand(
         const result =
           connect === undefined
             ? downloadRunAttachment(target, attachmentId, outputPath)
-            : await (async () => {
-                const runId = await resolveAttachmentTargetForDaemon(target, connect);
-                const attachment = (
-                  await daemonListAttachments(connect.effectiveConnectUrl, runId)
-                ).find((candidate) => candidate.id === attachmentId);
-                if (!attachment) {
-                  throw new AttachmentError(
-                    `attachment "${attachmentId}" not found in run ${runId}`,
-                  );
-                }
-                return await daemonDownloadAttachment(
-                  connect.effectiveConnectUrl,
-                  runId,
-                  attachment,
+            : await withDaemonClient(connect, async (client) =>
+                client.downloadAttachment(
+                  await resolveAttachmentTargetForDaemon(target, client),
+                  attachmentId,
                   outputPath,
-                );
-              })();
+                ),
+              );
         if (parsed.outputFormat === "json") {
           writeJson(result);
         } else {
