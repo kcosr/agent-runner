@@ -94,6 +94,8 @@
 
 ### Added
 
+- Added a clone-based direct code review workflow with a `git-clone`
+  prepare hook and bundled `code-review-clone` assignment.
 - Added first-class run groups across manifests, CLI, daemon APIs, and the
   web dashboard. Fresh child runs inherit the parent run group by default,
   `--group-id` overrides fresh run/init grouping, and
@@ -329,6 +331,10 @@
 
 ### Fixed
 
+- Hardened the `git-clone` hook against option-like clone inputs, rejected
+  credential-bearing HTTPS URLs before manifest persistence, made managed
+  checkouts reusable across initialized reconfigure runs, and removed managed
+  clone checkouts when runs are deleted.
 - Daemon-connected fresh `init --message-file` and fresh
   `run --message-file` now forward the file contents in
   `overrides.message` instead of snapshotting overrides before the

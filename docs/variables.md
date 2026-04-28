@@ -205,6 +205,20 @@ daemon, and web read surfaces redact env-backed values at projection time:
 Projected `RunDetail.runtimeVars` still redacts env-derived or
 inherited-env-derived values for humans.
 
+Prepare hooks can add hook-owned runtime vars. The built-in `git-clone`
+hook persists:
+
+| Key | Value |
+|-----|-------|
+| `repo_slug` | filesystem-safe slug derived from `repo_url` |
+| `checkout_path` | absolute path to the cloned checkout; this also becomes the run `cwd` |
+| `commit_sha` | checked-out `HEAD` commit SHA |
+| `resolved_ref` | supplied `ref`, or the default branch/ref when it can be determined reliably |
+
+`code-review-clone` also persists the caller-supplied `repo_url` as a
+normal runtime var. HTTPS URLs with embedded userinfo are rejected before
+the manifest is written; use SSH agents or Git credential helpers instead.
+
 ## Resume and variables
 
 Variables are resolved once at run creation and frozen. Resume rejects
@@ -228,6 +242,17 @@ task-runner run \
   --agent code-reviewer \
   --assignment code-review-direct \
   --var range=unstaged
+```
+
+For a direct review that should clone the repo first:
+
+```bash
+task-runner run \
+  --agent code-reviewer \
+  --assignment code-review-clone \
+  --var repo_url=git@github.com:org/repo.git \
+  --var ref=feature-branch \
+  --var range=origin/main..HEAD
 ```
 
 `--var` is repeatable. Values are split on the first `=`, so

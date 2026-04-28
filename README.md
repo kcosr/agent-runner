@@ -504,12 +504,13 @@ Agents (under `agents/`):
 Assignments (under `assignments/`):
 
 - `repo-orientation`, `test`, `plan-feature`, `plan-review`,
-  `code-review`, `code-review-direct`, `doc-review`, `familiarize`
+  `code-review`, `code-review-direct`, `code-review-clone`,
+  `doc-review`, `familiarize`
 
 Shared task definitions (under `tasks/`):
 
 - reusable `review/architecture` through `review/docs-drift`
-  code-review dimensions used by both code-review assignments
+  code-review dimensions used by the bundled code-review assignments
 
 Walkthrough in [docs/examples.md](docs/examples.md).
 

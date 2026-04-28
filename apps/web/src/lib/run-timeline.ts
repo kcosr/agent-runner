@@ -149,6 +149,7 @@ export function useRunTimelineState({
   const loadAbortControllerRef = useRef<AbortController | null>(null);
   const reloadCountRef = useRef(0);
   const previousRunIdRef = useRef<string | undefined>(undefined);
+  const previousRunIsLiveRef = useRef(false);
 
   useEffect(() => {
     historyRef.current = state.history;
@@ -168,6 +169,7 @@ export function useRunTimelineState({
       bufferRef.current = [];
       reloadCountRef.current = 0;
       previousRunIdRef.current = undefined;
+      previousRunIsLiveRef.current = false;
       setState({ history: null, isLoading: false, stale: false });
       return;
     }
@@ -253,7 +255,9 @@ export function useRunTimelineState({
     // ends), keep the already-loaded history so the drawer doesn't flash
     // through an empty "Loading…" state.
     const sameRunId = previousRunIdRef.current === runId;
+    const becameLive = sameRunId && !previousRunIsLiveRef.current && runIsLive;
     previousRunIdRef.current = runId;
+    previousRunIsLiveRef.current = runIsLive;
     if (!sameRunId) {
       historyRef.current = null;
       staleRef.current = false;
@@ -272,8 +276,16 @@ export function useRunTimelineState({
       };
     }
 
+    const timelineAttemptCount = historyRef.current?.attempts.length ?? 0;
+    const hasLoadedAttempts = bootstrappedRef.current && timelineAttemptCount > 0;
+    // A resumed run can flip detail back to live before the replayed timeline
+    // attempt reaches this hook; refresh once so history can project it.
+    const shouldRefreshOnLiveStart = becameLive && hasLoadedAttempts;
     const shouldLoadHistory =
-      !bootstrappedRef.current || staleRef.current || historyRef.current === null;
+      !bootstrappedRef.current ||
+      staleRef.current ||
+      historyRef.current === null ||
+      shouldRefreshOnLiveStart;
 
     if (sameRunId) {
       setState((current) => ({
@@ -299,7 +311,7 @@ export function useRunTimelineState({
         if (disposed) {
           return;
         }
-        if (!bootstrappedRef.current || staleRef.current) {
+        if (shouldLoadHistory) {
           void loadHistory();
         }
       },

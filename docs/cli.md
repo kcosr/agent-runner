@@ -130,6 +130,21 @@ Assignment task refs follow the same explicit loader model:
 - bundled assignments that need shared review tasks use named refs such
   as `review/architecture`
 
+For a clone-based direct review, let the `code-review-clone` assignment
+clone the target and switch the run cwd during prepare:
+
+```bash
+task-runner run \
+  --agent code-reviewer \
+  --assignment code-review-clone \
+  --var repo_url=git@github.com:org/repo.git \
+  --var ref=feature-branch \
+  --var range=origin/main..HEAD
+```
+
+HTTPS URLs with embedded userinfo are rejected before the run manifest is
+written; use SSH agents or Git credential helpers for private repos.
+
 ## `init`
 
 Same inputs as `run` (except no `--detach`, `--max-retries`,

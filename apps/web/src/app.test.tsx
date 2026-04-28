@@ -1,7 +1,11 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { RunAttachment } from "@task-runner/core/contracts/attachments.js";
-import type { RunAuditHistory, RunTimelineHistory } from "@task-runner/core/contracts/events.js";
+import type {
+  RunAuditHistory,
+  RunTimelineAttempt,
+  RunTimelineHistory,
+} from "@task-runner/core/contracts/events.js";
 import type { RunInputSurface } from "@task-runner/core/contracts/run-input-surface.js";
 import type { RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -2028,6 +2032,15 @@ describe("web app", () => {
       }),
     });
 
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "Response" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+    });
+    expect(screen.queryByRole("tab", { name: "Live" })).not.toBeInTheDocument();
+    expect(screen.getByText("Waiting for live response text…")).toBeInTheDocument();
+
     let timelineSource: MockEventSource | undefined;
     await waitFor(() => {
       timelineSource = MockEventSource.instances.find((candidate) =>
@@ -2153,6 +2166,173 @@ describe("web app", () => {
     });
     expect(screen.getByRole("tab", { name: "Response" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByText("Waiting for live response text…")).toBeInTheDocument();
+  });
+
+  it("refreshes and selects a resumed attempt when detail reports the run live first", async () => {
+    const completedSession = {
+      sessionIndex: 0,
+      status: "success" as const,
+      startedAt: "2026-04-13T05:00:00.000Z",
+      endedAt: "2026-04-13T05:02:00.000Z",
+      exitCode: 0,
+      message: null,
+      firstAttemptNumber: 1,
+      lastAttemptNumber: 1,
+      attemptCount: 1,
+      maxAttemptsPerSession: 3,
+      backendSessionIdAtStart: "thread-1",
+      backendSessionIdAtEnd: "thread-1",
+    };
+    const resumedSession = {
+      sessionIndex: 1,
+      status: "running" as const,
+      startedAt: "2026-04-13T05:03:00.000Z",
+      endedAt: null,
+      exitCode: null,
+      message: "Continue with the fix.",
+      firstAttemptNumber: 2,
+      lastAttemptNumber: 2,
+      attemptCount: 1,
+      maxAttemptsPerSession: 3,
+      backendSessionIdAtStart: "thread-2",
+      backendSessionIdAtEnd: null,
+    };
+    const initialDetail = makeDetail({
+      status: "success",
+      effectiveStatus: "success",
+      isLive: false,
+      endedAt: "2026-04-13T05:02:00.000Z",
+      exitCode: 0,
+      totalAttemptCount: 1,
+      totalSessionCount: 1,
+      currentSession: null,
+      lastSession: completedSession,
+      sessions: [completedSession],
+    });
+    const resumedDetail = makeDetail({
+      status: "running",
+      effectiveStatus: "running",
+      isLive: true,
+      endedAt: null,
+      exitCode: null,
+      totalAttemptCount: 1,
+      totalSessionCount: 2,
+      currentSession: resumedSession,
+      lastSession: resumedSession,
+      sessions: [completedSession, resumedSession],
+    });
+    const completedAttempt: RunTimelineAttempt = {
+      attemptNumber: 1,
+      attemptIndexInSession: 0,
+      sessionIndex: 0,
+      startedAt: "2026-04-13T05:00:00.000Z",
+      endedAt: "2026-04-13T05:02:00.000Z",
+      prompt: "Initial prompt",
+      transcript: "Attempt one output\n",
+      notices: "",
+      exitCode: 0,
+      timedOut: false,
+      live: false,
+    };
+    const resumedAttempt: RunTimelineAttempt = {
+      attemptNumber: 2,
+      attemptIndexInSession: 0,
+      sessionIndex: 1,
+      startedAt: "2026-04-13T05:03:00.000Z",
+      endedAt: null,
+      prompt: "## Resume prompt",
+      transcript: "",
+      notices: "",
+      exitCode: null,
+      timedOut: false,
+      live: true,
+    };
+    const state = {
+      runs: [
+        makeRun({
+          status: "success",
+          effectiveStatus: "success",
+          endedAt: "2026-04-13T05:02:00.000Z",
+          totalAttemptCount: 1,
+          totalSessionCount: 1,
+          currentSession: null,
+          lastSession: completedSession,
+        }),
+      ],
+      details: { "run-1": initialDetail },
+      timelineHistories: {
+        "run-1": {
+          runId: "run-1",
+          lastCursor: 1,
+          attempts: [completedAttempt],
+        },
+      },
+    };
+    const fetchMock = installFetchMock(state);
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(await findRunCard("Build dashboard"));
+    await user.click(screen.getByRole("button", { name: "Attempts" }));
+
+    await user.click(await screen.findByRole("tab", { name: "Prompt" }));
+    expect(screen.getByRole("region", { name: "Attempt prompt" })).toHaveTextContent(
+      "Initial prompt",
+    );
+    expect(fetchCallCount(fetchMock, (url) => url.endsWith("/api/runs/run-1/timeline"))).toBe(1);
+
+    state.details["run-1"] = resumedDetail;
+    state.timelineHistories["run-1"] = {
+      runId: "run-1",
+      lastCursor: 2,
+      attempts: [completedAttempt, resumedAttempt],
+    };
+    const detailSource = findEventSource("/api/runs/run-1/events/detail");
+    detailSource.emitMessage({ type: "detail_updated", detail: resumedDetail });
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "Response" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+    });
+    expect(screen.queryByRole("tab", { name: "Live" })).not.toBeInTheDocument();
+    expect(screen.getByText("Waiting for live response text…")).toBeInTheDocument();
+
+    let timelineSource: MockEventSource | undefined;
+    await waitFor(() => {
+      timelineSource = MockEventSource.instances.find((candidate) =>
+        candidate.url.endsWith("/api/runs/run-1/events/timeline"),
+      );
+      expect(timelineSource).toBeDefined();
+    });
+    if (!timelineSource) {
+      throw new Error("expected timeline EventSource after resume start");
+    }
+    timelineSource.emitOpen();
+
+    await waitFor(() => {
+      expect(fetchCallCount(fetchMock, (url) => url.endsWith("/api/runs/run-1/timeline"))).toBe(2);
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "Session 2" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+    });
+    expect(screen.getByRole("tab", { name: "Response" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("Waiting for live response text…")).toBeInTheDocument();
+
+    timelineSource.emitMessage({
+      runId: "run-1",
+      cursor: 3,
+      event: {
+        type: "agent_message_delta",
+        text: "streamed after resume",
+      },
+    });
+
+    expect(await screen.findByText("streamed after resume")).toBeInTheDocument();
   });
 
   it("separates transcript and backend notices instead of gluing them together", async () => {

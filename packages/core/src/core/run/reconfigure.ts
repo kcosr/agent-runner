@@ -2,13 +2,20 @@ import { copyFileSync, rmSync } from "node:fs";
 import { isDeepStrictEqual } from "node:util";
 import { resolveBackend } from "../../backends/registry.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../../config/loader.js";
+import {
+  resolveTaskRunnerConfigDir,
+  resolveTaskRunnerStateDir,
+} from "../../config/runtime-paths.js";
 import type { ReconfigureRunPatch, RunDetail } from "../../contracts/runs.js";
 import { toRunDetail } from "../../contracts/runs.js";
+import { resolveTaskRunnerCommand } from "../../task-runner-command.js";
 import { cloneBackendSpecificConfig, cloneResolvedBackendArgs } from "../backends/types.js";
 import { cloneResolvedLauncherConfig } from "../config/launchers.js";
 import { loadedAgentFromManifest } from "../config/loaded.js";
 import type { LoadedAgent, LoadedAssignment } from "../config/loaded.js";
 import type { LockableField, VarDef } from "../config/schema.js";
+import { resolveAssignmentHooks } from "../hooks/loader.js";
+import type { ResolvedHookDescriptor } from "../hooks/types.js";
 import {
   type ResolvedResumeTarget,
   ResumeError,
@@ -134,6 +141,52 @@ function buildLoadedAssignment(
       message: message ?? undefined,
     },
   };
+}
+
+function hookSourceKey(descriptor: ResolvedHookDescriptor): string {
+  const { source } = descriptor;
+  return `${source.builtin ?? ""}\0${source.name ?? ""}\0${source.path ?? ""}`;
+}
+
+function buildReconfigureHookVars(
+  manifest: RunManifest,
+  cliVars: Record<string, string>,
+): Record<string, unknown> {
+  return {
+    ...manifest.runtimeVars,
+    ...cliVars,
+    run_id: manifest.runId,
+    cwd: manifest.cwd,
+    config_dir: resolveTaskRunnerConfigDir(),
+    state_dir: resolveTaskRunnerStateDir(),
+    task_runner_cmd: resolveTaskRunnerCommand(),
+    ...(manifest.assignment ? { assignment_name: manifest.assignment.name } : {}),
+  };
+}
+
+function buildReconfigureResolvedHooks(
+  previous: RunManifest,
+  loadedAssignment: LoadedAssignment | undefined,
+  cliVars: Record<string, string>,
+): ResolvedHookDescriptor[] {
+  const next = resolveAssignmentHooks(
+    loadedAssignment,
+    buildReconfigureHookVars(previous, cliVars),
+  );
+  return next.map((descriptor) => {
+    const previousDescriptor = previous.resolvedHooks.find(
+      (entry) =>
+        entry.hookId === descriptor.hookId && hookSourceKey(entry) === hookSourceKey(descriptor),
+    );
+    if (!previousDescriptor) {
+      return descriptor;
+    }
+    return {
+      ...descriptor,
+      source: { ...previousDescriptor.source },
+      resolvedPath: previousDescriptor.resolvedPath,
+    };
+  });
 }
 
 function lockedFieldValue(manifest: RunManifest, field: LockableField): unknown {
@@ -318,11 +371,7 @@ async function reconfigureResolvedRun(
     resume: resolved,
     initialize: true,
     stageInitialize: true,
-    resolvedHooksOverride: previous.resolvedHooks.map((descriptor) => ({
-      ...descriptor,
-      source: { ...descriptor.source },
-      when: descriptor.when ? { ...descriptor.when } : null,
-    })),
+    resolvedHooksOverride: buildReconfigureResolvedHooks(previous, loadedAssignment, cliVars),
     overrides:
       loadedAssignment === undefined && nextMessage !== null ? { message: nextMessage } : {},
   });

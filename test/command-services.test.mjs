@@ -698,6 +698,7 @@ test("command services: showDefinition resolves built-in code-review named task 
     () => {
       const implementationReview = showDefinition("assignment", "code-review");
       const directReview = showDefinition("assignment", "code-review-direct");
+      const cloneReview = showDefinition("assignment", "code-review-clone");
 
       assert.deepEqual(
         implementationReview.loaded.config.tasks.map((task) => task.id),
@@ -707,6 +708,12 @@ test("command services: showDefinition resolves built-in code-review named task 
         directReview.loaded.config.tasks.map((task) => task.id),
         ["orient", ...SHARED_REVIEW_TASK_IDS, "synthesis", "approval"],
       );
+      assert.deepEqual(
+        cloneReview.loaded.config.tasks.map((task) => task.id),
+        ["orient", ...SHARED_REVIEW_TASK_IDS, "synthesis", "approval"],
+      );
+      assert.deepEqual(Object.keys(cloneReview.loaded.config.vars), ["repo_url", "ref", "range"]);
+      assert.equal(cloneReview.loaded.config.hooks.prepare[0]?.builtin, "git-clone");
     },
   ));
 
