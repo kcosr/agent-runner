@@ -336,11 +336,10 @@ export function RunChatPanel({
         </label>
         <textarea
           aria-keyshortcuts="Meta+Enter Ctrl+Enter"
-          disabled={!selectedRun || resumePending || selectedRun.capabilities.canResume === false}
+          disabled={!selectedRun}
           id="run-chat-message"
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={handleMessageKeyDown}
-          placeholder={selectedRun ? "Message this run" : "Select a run to chat"}
           rows={3}
           value={draft}
         />

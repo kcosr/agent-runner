@@ -33,7 +33,7 @@ A multi-surface workspace:
 - **Left** — search, grouped Filters control, preference toggles, and
   persistent Detail/Chat side-surface toggles.
 - **Center** — Board, the kanban run list grouped by run status.
-- **Right** — Detail and Chat side surfaces for the selected run.
+- **Right** — Chat and Detail side surfaces for the selected run.
 
 Board is always visible. Detail is the operational inspector for the
 selected run, and Chat is a selected-run-bound conversational projection
@@ -42,7 +42,7 @@ backend chat contract; it follows the selected run, derives messages from
 `RunDetail` plus timeline history, and streams live output through the
 existing timeline stream.
 
-Detail and Chat each have toolbar toggles plus close buttons in their
+Chat and Detail each have toolbar toggles plus close buttons in their
 panel headers. Closing one side surface hides only that panel and keeps
 the selected run intact for the other surface. Navigating back to `/`
 clears the selected run; if Chat remains open, it shows the no-run empty
@@ -56,9 +56,9 @@ resizable drawer width. Chat has its own resizable width, clamped between
 and the active board column remain transient.
 
 On wide desktop layouts, open side surfaces render inline: Board only,
-Board + Detail, Board + Chat, or Board + Detail + Chat. At narrower
+Board + Detail, Board + Chat, or Board + Chat + Detail. At narrower
 breakpoints, when both side surfaces are open, the right region exposes
-Detail and Chat selector tabs and shows one active surface at a time. If
+Chat and Detail selector tabs and shows one active surface at a time. If
 the active right surface is closed, the dashboard switches to the other
 open side surface.
 
@@ -189,10 +189,11 @@ run. It sends only non-empty trimmed messages through the existing resume
 API, using the same resume mutation path as the Detail Resume dialog.
 The composer submits from the Send button or `Cmd/Ctrl+Enter`. Success
 clears the draft and lets live timeline output appear in Chat; failure
-keeps the draft visible with the daemon error in the panel. Runs that
-cannot resume, no selected run, and pending resume requests disable the
-composer. The Detail Resume dialog remains available for existing resume
-flows, including resume-without-message where allowed.
+keeps the draft visible with the daemon error in the panel. No selected
+run disables the text field. Runs that cannot resume and pending resume
+requests keep the draft editable but disable submission. The Detail
+Resume dialog remains available for existing resume flows, including
+resume-without-message where allowed.
 
 ## Live projections
 

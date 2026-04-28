@@ -37,15 +37,6 @@ function RightSurfaceSelector({
   return (
     <div aria-label="Right surface" className="right-surface-selector" role="tablist">
       <button
-        aria-selected={activeRightSurface === "detail"}
-        className={activeRightSurface === "detail" ? "task-tab active" : "task-tab"}
-        onClick={() => onSelect("detail")}
-        role="tab"
-        type="button"
-      >
-        Detail
-      </button>
-      <button
         aria-selected={activeRightSurface === "chat"}
         className={activeRightSurface === "chat" ? "task-tab active" : "task-tab"}
         onClick={() => onSelect("chat")}
@@ -53,6 +44,15 @@ function RightSurfaceSelector({
         type="button"
       >
         Chat
+      </button>
+      <button
+        aria-selected={activeRightSurface === "detail"}
+        className={activeRightSurface === "detail" ? "task-tab active" : "task-tab"}
+        onClick={() => onSelect("detail")}
+        role="tab"
+        type="button"
+      >
+        Detail
       </button>
     </div>
   );
@@ -88,14 +88,14 @@ function DashboardSurfaces({
               onSelect={onSelectRightSurface}
             />
           ) : null}
-          {detailOpen ? (
-            <div className="dashboard-panel-shell" data-active={activeRightSurface === "detail"}>
-              {detail}
-            </div>
-          ) : null}
           {chatOpen ? (
             <div className="dashboard-panel-shell" data-active={activeRightSurface === "chat"}>
               {chat}
+            </div>
+          ) : null}
+          {detailOpen ? (
+            <div className="dashboard-panel-shell" data-active={activeRightSurface === "detail"}>
+              {detail}
             </div>
           ) : null}
         </div>

@@ -1880,15 +1880,19 @@ describe("web app", () => {
     const tablist = await screen.findByRole("tablist", { name: "Right surface" });
     const detailTab = within(tablist).getByRole("tab", { name: "Detail" });
     const chatTab = within(tablist).getByRole("tab", { name: "Chat" });
+    expect(
+      within(tablist)
+        .getAllByRole("tab")
+        .map((tab) => tab.textContent),
+    ).toEqual(["Chat", "Detail"]);
     expect(detailTab).toHaveAttribute("aria-selected", "true");
     expect(chatTab).toHaveAttribute("aria-selected", "false");
-    expect(screen.getByLabelText("Run detail").closest(".dashboard-panel-shell")).toHaveAttribute(
-      "data-active",
-      "true",
-    );
-    expect(screen.getByLabelText("Run chat").closest(".dashboard-panel-shell")).toHaveAttribute(
-      "data-active",
-      "false",
+    const detailShell = screen.getByLabelText("Run detail").closest(".dashboard-panel-shell");
+    const chatShell = screen.getByLabelText("Run chat").closest(".dashboard-panel-shell");
+    expect(detailShell).toHaveAttribute("data-active", "true");
+    expect(chatShell).toHaveAttribute("data-active", "false");
+    expect(chatShell?.compareDocumentPosition(detailShell ?? document.body)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
     );
 
     await user.click(chatTab);
@@ -2060,6 +2064,47 @@ describe("web app", () => {
     await waitFor(() => {
       expect(message).toHaveValue("");
     });
+  });
+
+  it("keeps the Chat composer editable for selected runs that cannot submit", async () => {
+    setStoredDashboardViewState({ chatOpen: true, activeRightSurface: "chat" });
+    let resumeRequestCount = 0;
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: {
+          "run-1": makeDetail({
+            capabilities: {
+              canResume: false,
+            },
+          }),
+        },
+      },
+      {
+        handleRequest: (url, init) => {
+          if (url.endsWith("/api/runs/run-1/resume") && init?.method === "POST") {
+            resumeRequestCount += 1;
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+
+    const message = await screen.findByLabelText("Message");
+    await waitFor(() => {
+      expect(message).toBeEnabled();
+    });
+    expect(message).not.toHaveAttribute("placeholder");
+    await user.type(message, "draft for later");
+    expect(message).toHaveValue("draft for later");
+
+    const sendButton = screen.getByRole("button", { name: "Send" });
+    expect(sendButton).toBeDisabled();
+    fireEvent.keyDown(message, { key: "Enter", metaKey: true });
+    expect(resumeRequestCount).toBe(0);
   });
 
   it("preserves the Chat composer draft and shows the API error after resume failure", async () => {
@@ -7226,6 +7271,15 @@ describe("web app", () => {
     expect(fullscreenDrawerLayer).not.toBeNull();
     expect(resumeDialogLayer?.[1]).toBe("60");
     expect(fullscreenDrawerLayer?.[1]).toBe("40");
+  });
+
+  it("keeps the Chat composer textarea custom and non-resizable", () => {
+    const css = readFileSync(join(process.cwd(), "src", "styles.css"), "utf8");
+    const chatTextareaRule = /\.chat-composer textarea\s*\{[\s\S]*?\n\}/.exec(css);
+
+    expect(chatTextareaRule?.[0]).toContain("resize: none;");
+    expect(chatTextareaRule?.[0]).toContain("border: 0;");
+    expect(chatTextareaRule?.[0]).toContain("box-shadow: inset 0 0 0 1px var(--border);");
   });
 
   it("clamps the transient drawer width to the current viewport", async () => {
