@@ -168,7 +168,6 @@ export function RunChatPanel({
   const [chatError, setChatError] = useState<string>();
   const listRef = useRef<HTMLDivElement | null>(null);
   const resetRunIdRef = useRef(selectedRunId);
-  const rowsRef = useRef<RunChatRow[]>([]);
   const stickToBottomRef = useRef(true);
   const selectedRun = selectedRunQuery.data;
   const rows = useMemo(
@@ -194,10 +193,9 @@ export function RunChatPanel({
   }, [selectedRunId]);
 
   useEffect(() => {
-    if (rowsRef.current === rows) {
+    if (rows.length === 0) {
       return;
     }
-    rowsRef.current = rows;
     const element = listRef.current;
     if (!element || !stickToBottomRef.current) {
       return;
@@ -223,9 +221,15 @@ export function RunChatPanel({
     try {
       setChatError(undefined);
       await onSubmitResume(runId, trimmedDraft);
+      if (resetRunIdRef.current !== runId) {
+        return;
+      }
       setDraft("");
       stickToBottomRef.current = true;
     } catch (error) {
+      if (resetRunIdRef.current !== runId) {
+        return;
+      }
       setChatError(error instanceof Error ? error.message : "Resume failed.");
     }
   }

@@ -1867,6 +1867,47 @@ describe("web app", () => {
     expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
   });
 
+  it("switches the active right surface from the Detail and Chat selector tabs", async () => {
+    setStoredDashboardViewState({ chatOpen: true, detailOpen: true });
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+
+    const tablist = await screen.findByRole("tablist", { name: "Right surface" });
+    const detailTab = within(tablist).getByRole("tab", { name: "Detail" });
+    const chatTab = within(tablist).getByRole("tab", { name: "Chat" });
+    expect(detailTab).toHaveAttribute("aria-selected", "true");
+    expect(chatTab).toHaveAttribute("aria-selected", "false");
+    expect(screen.getByLabelText("Run detail").closest(".dashboard-panel-shell")).toHaveAttribute(
+      "data-active",
+      "true",
+    );
+    expect(screen.getByLabelText("Run chat").closest(".dashboard-panel-shell")).toHaveAttribute(
+      "data-active",
+      "false",
+    );
+
+    await user.click(chatTab);
+    expect(detailTab).toHaveAttribute("aria-selected", "false");
+    expect(chatTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("Run detail").closest(".dashboard-panel-shell")).toHaveAttribute(
+      "data-active",
+      "false",
+    );
+    expect(screen.getByLabelText("Run chat").closest(".dashboard-panel-shell")).toHaveAttribute(
+      "data-active",
+      "true",
+    );
+
+    await user.click(detailTab);
+    expect(detailTab).toHaveAttribute("aria-selected", "true");
+    expect(chatTab).toHaveAttribute("aria-selected", "false");
+  });
+
   it("renders selected-run Chat, activates the existing timeline once, and streams deltas", async () => {
     setStoredDashboardViewState({ chatOpen: true, activeRightSurface: "chat" });
     const fetchMock = installFetchMock({
@@ -2012,6 +2053,63 @@ describe("web app", () => {
     const chat = await screen.findByLabelText("Run chat");
     expect(await within(chat).findAllByText("resume temporarily failed")).not.toHaveLength(0);
     expect(message).toHaveValue("retry this");
+  });
+
+  it("does not show a failed Chat resume error after the selected run changes", async () => {
+    setStoredDashboardViewState({ chatOpen: true, activeRightSurface: "chat" });
+    let resolveResume: ((response: Response) => void) | undefined;
+    installFetchMock(
+      {
+        runs: [
+          makeRun({ runId: "run-1", name: "First run", assignmentName: "First run" }),
+          makeRun({ runId: "run-2", name: "Second run", assignmentName: "Second run" }),
+        ],
+        details: {
+          "run-1": makeDetail({ runId: "run-1", name: "First run" }),
+          "run-2": makeDetail({ runId: "run-2", name: "Second run" }),
+        },
+      },
+      {
+        handleRequest: (url, init) => {
+          if (!url.endsWith("/api/runs/run-1/resume") || init?.method !== "POST") {
+            return undefined;
+          }
+          return new Promise<Response>((resolve) => {
+            resolveResume = resolve;
+          });
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+
+    const message = await screen.findByLabelText("Message");
+    await waitFor(() => {
+      expect(message).toBeEnabled();
+    });
+    await user.type(message, "resume first run");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => {
+      expect(resolveResume).toBeDefined();
+    });
+
+    await user.click(await findRunCard("Second run"));
+    const secondRunChat = await screen.findByLabelText("Run chat");
+    expect(await within(secondRunChat).findByText("run-2")).toBeInTheDocument();
+
+    resolveResume?.(
+      new Response(JSON.stringify({ error: { message: "resume temporarily failed" } }), {
+        status: 500,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Message")).toBeEnabled();
+    });
+    expect(
+      within(screen.getByLabelText("Run chat")).queryByText("resume temporarily failed"),
+    ).toBeNull();
   });
 
   it("renders attempt history in the attempts tab with nested scroll-follow behavior", async () => {
