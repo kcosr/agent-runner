@@ -2,13 +2,13 @@ import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { AppShell } from "../components/app-shell.js";
 import { RunFilters } from "../components/run-filters.js";
-import type { DashboardPreferences, DashboardRightSurface } from "../lib/settings.js";
+import type { DashboardPreferences } from "../lib/settings.js";
 import {
   isEditableEventTarget,
   resolveBoardNeighborRunId,
   resolveRunsShortcutCommand,
 } from "../lib/shortcuts.js";
-import { RunChatPanel } from "./run-chat-panel.js";
+import { RunChatView } from "./run-chat-panel.js";
 import { RunDetailPanel } from "./run-detail-panel.js";
 import { RunsBoardPanel } from "./runs-board-panel.js";
 import { useRunsDashboardState } from "./use-runs-dashboard-state.js";
@@ -27,77 +27,19 @@ function isBoardFilterShortcutCommand(command: string): command is BoardFilterSh
   return command in BOARD_FILTER_PREFERENCE_KEYS;
 }
 
-function RightSurfaceSelector({
-  activeRightSurface,
-  onSelect,
-}: {
-  activeRightSurface: DashboardRightSurface;
-  onSelect: (surface: DashboardRightSurface) => void;
-}) {
-  return (
-    <div aria-label="Right surface" className="right-surface-selector" role="tablist">
-      <button
-        aria-selected={activeRightSurface === "chat"}
-        className={activeRightSurface === "chat" ? "task-tab active" : "task-tab"}
-        onClick={() => onSelect("chat")}
-        role="tab"
-        type="button"
-      >
-        Chat
-      </button>
-      <button
-        aria-selected={activeRightSurface === "detail"}
-        className={activeRightSurface === "detail" ? "task-tab active" : "task-tab"}
-        onClick={() => onSelect("detail")}
-        role="tab"
-        type="button"
-      >
-        Detail
-      </button>
-    </div>
-  );
-}
-
 function DashboardSurfaces({
-  activeRightSurface,
   board,
-  chat,
-  chatOpen,
   detail,
-  detailOpen,
-  onSelectRightSurface,
 }: {
-  activeRightSurface: DashboardRightSurface;
   board: ReactNode;
-  chat: ReactNode;
-  chatOpen: boolean;
   detail: ReactNode;
-  detailOpen: boolean;
-  onSelectRightSurface: (surface: DashboardRightSurface) => void;
 }) {
-  const openSurfaceCount = Number(detailOpen) + Number(chatOpen);
-
   return (
     <div className="dashboard-surfaces">
       <div className="dashboard-board-surface">{board}</div>
-      {openSurfaceCount > 0 ? (
-        <div className="dashboard-right-surfaces" data-open-count={openSurfaceCount}>
-          {detailOpen && chatOpen ? (
-            <RightSurfaceSelector
-              activeRightSurface={activeRightSurface}
-              onSelect={onSelectRightSurface}
-            />
-          ) : null}
-          {chatOpen ? (
-            <div className="dashboard-panel-shell" data-active={activeRightSurface === "chat"}>
-              {chat}
-            </div>
-          ) : null}
-          {detailOpen ? (
-            <div className="dashboard-panel-shell" data-active={activeRightSurface === "detail"}>
-              {detail}
-            </div>
-          ) : null}
+      {detail ? (
+        <div className="dashboard-right-surfaces">
+          <div className="dashboard-panel-shell">{detail}</div>
         </div>
       ) : null}
     </div>
@@ -209,15 +151,7 @@ export function RunsDashboardRoute() {
 
       if (command === "run.close") {
         event.preventDefault();
-        if (currentState.activeRightSurface === "chat" && currentState.chatOpen) {
-          currentState.closeChat();
-        } else if (currentState.detailOpen) {
-          currentState.closeDetail();
-        } else if (currentState.chatOpen) {
-          currentState.closeChat();
-        } else {
-          currentState.closeRun();
-        }
+        currentState.closeRun();
         return;
       }
 
@@ -356,7 +290,6 @@ export function RunsDashboardRoute() {
     <AppShell
       primary={
         <DashboardSurfaces
-          activeRightSurface={state.activeRightSurface}
           board={
             <RunsBoardPanel
               actionPending={state.actionPending}
@@ -381,23 +314,22 @@ export function RunsDashboardRoute() {
               visibleRuns={state.visibleRuns}
             />
           }
-          chat={
-            <RunChatPanel
-              actionPending={state.actionPending}
-              detailSettling={state.detailSettling}
-              onClose={state.closeChat}
-              onSubmitResume={state.runActions.resume}
-              selectedRunId={state.selectedRunId}
-              selectedRunQuery={state.selectedRunQuery}
-              timelineState={state.timelineState}
-            />
-          }
-          chatOpen={state.chatOpen}
           detail={
             <RunDetailPanel
+              activeRightSurface={state.activeRightSurface}
               onAddDependency={state.runActions.addDependency}
               actionError={state.actionError}
               actionPending={state.actionPending}
+              chatSurface={
+                <RunChatView
+                  actionPending={state.actionPending}
+                  detailSettling={state.detailSettling}
+                  onSubmitResume={state.runActions.resume}
+                  selectedRunId={state.selectedRunId}
+                  selectedRunQuery={state.selectedRunQuery}
+                  timelineState={state.timelineState}
+                />
+              }
               drawerFullscreen={state.viewState.drawerFullscreen}
               drawerWidth={state.viewState.drawerWidth}
               drawerView={state.selectedDrawerView}
@@ -406,7 +338,7 @@ export function RunsDashboardRoute() {
               onAbort={state.runActions.abort}
               onArchive={state.runActions.archive}
               onClearDependencies={state.runActions.clearDependencies}
-              onClose={state.closeDetail}
+              onClose={state.closeRun}
               onCloseResumeDialog={state.closeSelectedRunResumeDialog}
               onCopy={state.copyText}
               onDelete={state.runActions.delete}
@@ -430,6 +362,7 @@ export function RunsDashboardRoute() {
               onSetPinned={state.runActions.setPinned}
               onSetScheduleEnabled={state.runActions.setScheduleEnabled}
               onSelectDetailSection={state.updateSelectedRunDetailSection}
+              onSelectRightSurface={state.setActiveRightSurface}
               onSubmitResume={state.submitSelectedRunResume}
               onTriggerPrimaryAction={state.triggerSelectedRunPrimaryAction}
               onUnarchive={state.runActions.unarchive}
@@ -446,19 +379,13 @@ export function RunsDashboardRoute() {
               timelineState={state.timelineState}
             />
           }
-          detailOpen={state.detailOpen}
-          onSelectRightSurface={state.setActiveRightSurface}
         />
       }
       bottomNotices={bottomNotices.length > 0 ? bottomNotices : undefined}
       topNotices={topNotices.length > 0 ? topNotices : undefined}
       toolbar={
         <RunFilters
-          chatOpen={state.chatOpen}
-          detailOpen={state.detailOpen}
           filterOptions={state.filterOptions}
-          onToggleChat={state.toggleChat}
-          onToggleDetail={state.toggleDetail}
           preferences={state.preferences}
           toggleFiltersVersion={toggleFiltersVersion}
           searchInputRef={searchInputRef}

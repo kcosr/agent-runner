@@ -8,10 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { DrawerResizeHandle } from "../components/drawer-resize-handle.js";
-import { CloseIcon } from "../components/icons.js";
 import { MarkdownContent } from "../components/markdown.js";
-import { StatusBadge } from "../components/status-badge.js";
 import {
   type RunChatAssistantEmptyState,
   type RunChatAssistantRow,
@@ -20,7 +17,6 @@ import {
   deriveRunChatRows,
 } from "../lib/run-chat.js";
 import type { RunTimelineState } from "../lib/run-timeline.js";
-import { useChatResize } from "../lib/use-chat-resize.js";
 import type { RunActionPending } from "./use-runs-dashboard-state.js";
 
 const CHAT_BOTTOM_THRESHOLD_PX = 32;
@@ -33,10 +29,6 @@ function isScrolledToBottom(element: HTMLElement) {
 
 function scrollElementToBottom(element: HTMLElement) {
   element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
-}
-
-function runIdentity(run: RunDetail) {
-  return run.runGroupId === run.runId ? run.runId : `${run.runGroupId}/${run.runId}`;
 }
 
 function assistantEmptyText(emptyState: RunChatAssistantEmptyState | undefined) {
@@ -137,10 +129,9 @@ function AssistantChatRow({ row }: { row: RunChatAssistantRow }) {
   );
 }
 
-export function RunChatPanel({
+export function RunChatView({
   actionPending,
   detailSettling,
-  onClose,
   onSubmitResume,
   selectedRunId,
   selectedRunQuery,
@@ -148,13 +139,11 @@ export function RunChatPanel({
 }: {
   actionPending?: RunActionPending;
   detailSettling: boolean;
-  onClose: () => void;
   onSubmitResume: (runId: string, message: string) => Promise<void>;
   selectedRunId?: string;
   selectedRunQuery: UseQueryResult<RunDetail, Error>;
   timelineState: RunTimelineState;
 }) {
-  const resize = useChatResize();
   const [draft, setDraft] = useState("");
   const [chatError, setChatError] = useState<string>();
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -290,20 +279,7 @@ export function RunChatPanel({
   }
 
   return (
-    <aside aria-label="Run chat" className="chat-panel" style={resize.drawerStyle}>
-      <DrawerResizeHandle label="Resize chat panel" resize={resize} />
-      <header className="drawer-head chat-panel__head">
-        <div className="drawer-title">
-          <span className="run-id-large">{selectedRun ? runIdentity(selectedRun) : "Chat"}</span>
-          {selectedRun ? <StatusBadge status={selectedRun.effectiveStatus} /> : null}
-        </div>
-        <div className="drawer-actions">
-          <button aria-label="Close chat" className="icon-btn" onClick={onClose} type="button">
-            <CloseIcon aria-hidden="true" />
-          </button>
-        </div>
-      </header>
-      {selectedRun?.name ? <div className="chat-run-name">{selectedRun.name}</div> : null}
+    <section aria-label="Run chat" className="chat-view">
       {timelineState.error ? (
         <div className="notice chat-notice" data-tone="error">
           <span className="notice__message">{timelineState.error}</span>
@@ -314,7 +290,7 @@ export function RunChatPanel({
           <span className="notice__message">{chatError}</span>
         </div>
       ) : null}
-      <div className="chat-panel__body">{renderBody()}</div>
+      <div className="chat-view__body">{renderBody()}</div>
       <form className="chat-composer" onSubmit={handleSubmit}>
         <label className="sr-only" htmlFor="run-chat-message">
           Message
@@ -332,6 +308,6 @@ export function RunChatPanel({
           {resumePending ? "Sending..." : "Send"}
         </button>
       </form>
-    </aside>
+    </section>
   );
 }

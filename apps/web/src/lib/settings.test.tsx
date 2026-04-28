@@ -75,9 +75,6 @@ function SettingsProbe() {
         onClick={() =>
           updateViewState({
             drawerWidth: 700,
-            chatWidth: 640,
-            detailOpen: false,
-            chatOpen: true,
             activeRightSurface: "chat",
             search: "task-runner-web",
           })
@@ -166,9 +163,6 @@ describe("DashboardSettingsProvider", () => {
         search: "",
         collapsedColumnKeys: [],
         drawerWidth: 540,
-        detailOpen: true,
-        chatOpen: false,
-        chatWidth: 420,
         activeRightSurface: "detail",
         drawerFullscreen: false,
         drawerViewsByRunId: {},
@@ -228,9 +222,6 @@ describe("DashboardSettingsProvider", () => {
       }),
     );
     expect(screen.getByTestId("view-state")).toHaveTextContent('"drawerWidth":540');
-    expect(screen.getByTestId("view-state")).toHaveTextContent('"detailOpen":true');
-    expect(screen.getByTestId("view-state")).toHaveTextContent('"chatOpen":false');
-    expect(screen.getByTestId("view-state")).toHaveTextContent('"chatWidth":420');
     expect(screen.getByTestId("view-state")).toHaveTextContent('"activeRightSurface":"detail"');
   });
 
@@ -249,15 +240,12 @@ describe("DashboardSettingsProvider", () => {
     expect(screen.getByTestId("view-state")).toHaveTextContent('"drawerWidth":540');
   });
 
-  it("hydrates persisted dashboard side-surface view state", () => {
+  it("hydrates persisted dashboard surface view state", () => {
     window.localStorage.setItem(
       "task-runner:web:dashboard-view-state",
       JSON.stringify({
         collapsedColumnKeys: ["running"],
         drawerWidth: 700,
-        detailOpen: false,
-        chatOpen: true,
-        chatWidth: 640,
         activeRightSurface: "chat",
       }),
     );
@@ -266,20 +254,14 @@ describe("DashboardSettingsProvider", () => {
 
     expect(screen.getByTestId("view-state")).toHaveTextContent('"collapsedColumnKeys":["running"]');
     expect(screen.getByTestId("view-state")).toHaveTextContent('"drawerWidth":700');
-    expect(screen.getByTestId("view-state")).toHaveTextContent('"detailOpen":false');
-    expect(screen.getByTestId("view-state")).toHaveTextContent('"chatOpen":true');
-    expect(screen.getByTestId("view-state")).toHaveTextContent('"chatWidth":640');
     expect(screen.getByTestId("view-state")).toHaveTextContent('"activeRightSurface":"chat"');
   });
 
-  it("defaults malformed dashboard side-surface view state and clamps chat width", () => {
+  it("defaults malformed dashboard surface view state", () => {
     window.localStorage.setItem(
       "task-runner:web:dashboard-view-state",
       JSON.stringify({
         drawerWidth: Number.NaN,
-        detailOpen: "yes",
-        chatOpen: 1,
-        chatWidth: 900,
         activeRightSurface: "messages",
       }),
     );
@@ -287,9 +269,6 @@ describe("DashboardSettingsProvider", () => {
     renderSettingsProbe();
 
     expect(screen.getByTestId("view-state")).toHaveTextContent('"drawerWidth":540');
-    expect(screen.getByTestId("view-state")).toHaveTextContent('"detailOpen":true');
-    expect(screen.getByTestId("view-state")).toHaveTextContent('"chatOpen":false');
-    expect(screen.getByTestId("view-state")).toHaveTextContent('"chatWidth":720');
     expect(screen.getByTestId("view-state")).toHaveTextContent('"activeRightSurface":"detail"');
   });
 
@@ -409,9 +388,6 @@ describe("DashboardSettingsProvider", () => {
       JSON.stringify({
         collapsedColumnKeys: ["running"],
         drawerWidth: 700,
-        detailOpen: false,
-        chatOpen: true,
-        chatWidth: 640,
         activeRightSurface: "chat",
       }),
     );

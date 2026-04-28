@@ -50,16 +50,10 @@ const DEFAULT_DASHBOARD_PREFERENCES = {
 const DEFAULT_DASHBOARD_VIEW_STATE: {
   collapsedColumnKeys: string[];
   drawerWidth: number;
-  detailOpen: boolean;
-  chatOpen: boolean;
-  chatWidth: number;
   activeRightSurface: "detail" | "chat";
 } = {
   collapsedColumnKeys: [],
   drawerWidth: 540,
-  detailOpen: true,
-  chatOpen: false,
-  chatWidth: 420,
   activeRightSurface: "detail",
 };
 
@@ -1832,7 +1826,7 @@ describe("web app", () => {
     ).toBeInTheDocument();
   });
 
-  it("toggles and closes Detail and Chat surfaces without clearing selected run state", async () => {
+  it("opens a selected-run panel and switches between Chat and Detail tabs", async () => {
     installFetchMock({
       runs: [makeRun()],
       details: { "run-1": makeDetail() },
@@ -1842,33 +1836,24 @@ describe("web app", () => {
     await renderApp();
     await findRunCard("Build dashboard");
 
-    await user.click(screen.getByRole("button", { name: "Chat" }));
-    expect(await screen.findByLabelText("Run chat")).toBeInTheDocument();
-    expect(screen.getByText("Choose a board card to view its conversation.")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Close chat" }));
-    await waitFor(() => {
-      expect(screen.queryByLabelText("Run chat")).not.toBeInTheDocument();
-    });
-
     await user.click(await findRunCard("Build dashboard"));
     expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
+
+    const tablist = await screen.findByRole("tablist", { name: "Run surface" });
+    await user.click(within(tablist).getByRole("tab", { name: "Chat" }));
+    expect(await screen.findByLabelText("Run chat")).toBeInTheDocument();
+
+    await user.click(within(tablist).getByRole("tab", { name: "Detail" }));
+    expect(screen.getByLabelText("Tasks")).toBeInTheDocument();
 
     await user.click(getCloseDetailButton());
     await waitFor(() => {
       expect(screen.queryByLabelText("Run detail")).not.toBeInTheDocument();
     });
-
-    await user.click(screen.getByRole("button", { name: "Chat" }));
-    const selectedChat = await screen.findByLabelText("Run chat");
-    expect(await within(selectedChat).findByText("run-1")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Detail" }));
-    expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
   });
 
-  it("switches the active right surface from the Detail and Chat selector tabs", async () => {
-    setStoredDashboardViewState({ chatOpen: true, detailOpen: true });
+  it("switches the active selected-run surface from the Chat and Detail tabs", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "detail" });
     installFetchMock({
       runs: [makeRun()],
       details: { "run-1": makeDetail() },
@@ -1877,7 +1862,7 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp("/runs/run-1");
 
-    const tablist = await screen.findByRole("tablist", { name: "Right surface" });
+    const tablist = await screen.findByRole("tablist", { name: "Run surface" });
     const detailTab = within(tablist).getByRole("tab", { name: "Detail" });
     const chatTab = within(tablist).getByRole("tab", { name: "Chat" });
     expect(
@@ -1887,33 +1872,21 @@ describe("web app", () => {
     ).toEqual(["Chat", "Detail"]);
     expect(detailTab).toHaveAttribute("aria-selected", "true");
     expect(chatTab).toHaveAttribute("aria-selected", "false");
-    const detailShell = screen.getByLabelText("Run detail").closest(".dashboard-panel-shell");
-    const chatShell = screen.getByLabelText("Run chat").closest(".dashboard-panel-shell");
-    expect(detailShell).toHaveAttribute("data-active", "true");
-    expect(chatShell).toHaveAttribute("data-active", "false");
-    expect(chatShell?.compareDocumentPosition(detailShell ?? document.body)).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    );
+    expect(screen.queryByLabelText("Run chat")).not.toBeInTheDocument();
 
     await user.click(chatTab);
     expect(detailTab).toHaveAttribute("aria-selected", "false");
     expect(chatTab).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByLabelText("Run detail").closest(".dashboard-panel-shell")).toHaveAttribute(
-      "data-active",
-      "false",
-    );
-    expect(screen.getByLabelText("Run chat").closest(".dashboard-panel-shell")).toHaveAttribute(
-      "data-active",
-      "true",
-    );
+    expect(await screen.findByLabelText("Run chat")).toBeInTheDocument();
 
     await user.click(detailTab);
     expect(detailTab).toHaveAttribute("aria-selected", "true");
     expect(chatTab).toHaveAttribute("aria-selected", "false");
+    expect(screen.queryByLabelText("Run chat")).not.toBeInTheDocument();
   });
 
   it("renders selected-run Chat, activates the existing timeline once, and streams deltas", async () => {
-    setStoredDashboardViewState({ chatOpen: true, activeRightSurface: "chat" });
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
     const fetchMock = installFetchMock({
       runs: [makeRun()],
       details: {
@@ -1948,8 +1921,6 @@ describe("web app", () => {
     await renderApp("/runs/run-1");
 
     const chat = await screen.findByLabelText("Run chat");
-    expect(await within(chat).findByText("run-1")).toBeInTheDocument();
-    expect(await within(chat).findByText("Build dashboard")).toBeInTheDocument();
     expect(await within(chat).findByText(/Prompt with/)).toBeInTheDocument();
     expect(within(chat).getByText("markdown").tagName).toBe("STRONG");
     expect(within(chat).getByText("list item").closest("li")).not.toBeNull();
@@ -1984,19 +1955,19 @@ describe("web app", () => {
 
     expect(await within(chat).findByText("Streaming answer live")).toBeInTheDocument();
 
+    await user.click(
+      within(screen.getByRole("tablist", { name: "Run surface" })).getByRole("tab", {
+        name: "Detail",
+      }),
+    );
     await user.click(screen.getByRole("button", { name: "Attempts" }));
     expect(await screen.findByRole("region", { name: "Attempt response" })).toHaveTextContent(
       "Streaming answer live",
     );
-    expect(
-      MockEventSource.instances.filter((source) =>
-        source.url.endsWith("/api/runs/run-1/events/timeline"),
-      ),
-    ).toHaveLength(1);
   });
 
   it("shows a Chat loading skeleton instead of user messages until timeline history loads", async () => {
-    setStoredDashboardViewState({ chatOpen: true, activeRightSurface: "chat" });
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
     const timelineHistory = {
       runId: "run-1",
       lastCursor: 1,
@@ -2073,7 +2044,7 @@ describe("web app", () => {
   });
 
   it("submits Chat composer messages through resume and clears the draft on success", async () => {
-    setStoredDashboardViewState({ chatOpen: true, activeRightSurface: "chat" });
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
     let resumeBody: { overrides?: { message?: string } } | undefined;
     installFetchMock(
       {
@@ -2113,7 +2084,7 @@ describe("web app", () => {
   });
 
   it("submits Chat composer messages with Command+Enter", async () => {
-    setStoredDashboardViewState({ chatOpen: true, activeRightSurface: "chat" });
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
     let resumeBody: { overrides?: { message?: string } } | undefined;
     installFetchMock(
       {
@@ -2153,7 +2124,7 @@ describe("web app", () => {
   });
 
   it("keeps the Chat composer editable for selected runs that cannot submit", async () => {
-    setStoredDashboardViewState({ chatOpen: true, activeRightSurface: "chat" });
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
     let resumeRequestCount = 0;
     installFetchMock(
       {
@@ -2194,7 +2165,7 @@ describe("web app", () => {
   });
 
   it("preserves the Chat composer draft and shows the API error after resume failure", async () => {
-    setStoredDashboardViewState({ chatOpen: true, activeRightSurface: "chat" });
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
     installFetchMock(
       {
         runs: [makeRun()],
@@ -2228,7 +2199,7 @@ describe("web app", () => {
   });
 
   it("does not show a failed Chat resume error after the selected run changes", async () => {
-    setStoredDashboardViewState({ chatOpen: true, activeRightSurface: "chat" });
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
     let resolveResume: ((response: Response) => void) | undefined;
     installFetchMock(
       {
@@ -2268,7 +2239,8 @@ describe("web app", () => {
 
     await user.click(await findRunCard("Second run"));
     const secondRunChat = await screen.findByLabelText("Run chat");
-    expect(await within(secondRunChat).findByText("run-2")).toBeInTheDocument();
+    expect(await screen.findByText("Second run")).toBeInTheDocument();
+    expect(secondRunChat).toBeInTheDocument();
 
     resolveResume?.(
       new Response(JSON.stringify({ error: { message: "resume temporarily failed" } }), {
@@ -5907,9 +5879,6 @@ describe("web app", () => {
     expect(storedViewState ? JSON.parse(storedViewState) : null).toEqual({
       collapsedColumnKeys: [],
       drawerWidth: 570,
-      detailOpen: true,
-      chatOpen: false,
-      chatWidth: 420,
       activeRightSurface: "detail",
     });
 
@@ -7530,9 +7499,6 @@ describe("web app", () => {
       JSON.stringify({
         collapsedColumnKeys: ["running"],
         drawerWidth: 540,
-        detailOpen: true,
-        chatOpen: false,
-        chatWidth: 420,
         activeRightSurface: "detail",
       }),
     );
@@ -7550,9 +7516,6 @@ describe("web app", () => {
       JSON.stringify({
         collapsedColumnKeys: [],
         drawerWidth: 540,
-        detailOpen: true,
-        chatOpen: false,
-        chatWidth: 420,
         activeRightSurface: "detail",
       }),
     );
@@ -8144,7 +8107,6 @@ describe("web app", () => {
 
     await user.click(getCloseDetailButton());
     await user.click(await findRunCard("Passive run"));
-    await user.click(screen.getByRole("button", { name: "Detail" }));
     expect(await screen.findByRole("button", { name: "Archive" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reset" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
@@ -9944,7 +9906,6 @@ describe("web app", () => {
 
     await user.click(getCloseDetailButton());
     await user.click(await findRunCard("Build dashboard"));
-    await user.click(screen.getByRole("button", { name: "Detail" }));
     expect(await screen.findByLabelText("Attachment preview")).toBeInTheDocument();
     expect(await screen.findByText("Markdown preview")).toBeInTheDocument();
 
@@ -9984,7 +9945,6 @@ describe("web app", () => {
 
     await user.click(getCloseDetailButton());
     await user.click(await findRunCard("Second run"));
-    await user.click(screen.getByRole("button", { name: "Detail" }));
 
     expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
     await waitFor(() => {

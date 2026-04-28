@@ -30,39 +30,30 @@ those plus the active run id.
 
 A multi-surface workspace:
 
-- **Left** — search, grouped Filters control, preference toggles, and
-  persistent Detail/Chat side-surface toggles.
+- **Left** — search, grouped Filters control, and preference toggles.
 - **Center** — Board, the kanban run list grouped by run status.
-- **Right** — Chat and Detail side surfaces for the selected run.
+- **Right** — one selected-run panel with Chat and Detail tabs.
 
-Board is always visible. Detail is the operational inspector for the
-selected run, and Chat is a selected-run-bound conversational projection
-of the same run. Opening Chat does not create a separate chat route or
-backend chat contract; it follows the selected run, derives messages from
-`RunDetail` plus timeline history, and streams live output through the
-existing timeline stream.
+Board is always visible. Selecting a run opens one resizable selected-run
+panel. Its header owns the run identity plus action toolbar, and the tabs
+below the toolbar switch between Detail, the operational inspector, and
+Chat, the conversational projection of the same run. Chat does not create
+a separate chat route or backend chat contract; it follows the selected
+run, derives messages from `RunDetail` plus timeline history, and streams
+live output through the existing timeline stream.
 
-Chat and Detail each have toolbar toggles plus close buttons in their
-panel headers. Closing one side surface hides only that panel and keeps
-the selected run intact for the other surface. Navigating back to `/`
-clears the selected run; if Chat remains open, it shows the no-run empty
-state until a board card is selected.
+Closing the selected-run panel navigates back to `/` and clears the
+selected run. Chat and Detail tab choice persists as the active right
+surface.
 
 Dashboard view state persists the durable surface layout fields:
-collapsed board columns, Detail width, Detail open state, Chat open
-state, Chat width, and the active right surface. Detail keeps the existing
-resizable drawer width. Chat has its own resizable width, clamped between
-360 and 720 pixels. Search text, fullscreen state, per-run drawer tabs,
-and the active board column remain transient.
+collapsed board columns, selected-run panel width, and the active
+Chat/Detail tab. Search text, fullscreen state, per-run drawer tabs, and
+the active board column remain transient.
 
-On wide desktop layouts, open side surfaces render inline: Board only,
-Board + Detail, Board + Chat, or Board + Chat + Detail. Medium-width
-desktop and tablet layouts keep the board usable by collapsing Chat and
-Detail into one right rail with selector tabs when both are open. Narrow
-mobile layouts show the right surface as an in-layout sheet over the board,
-again showing one active surface at a time when both are open. If the
-active right surface is closed, the dashboard switches to the other open
-side surface.
+On desktop layouts, the selected-run panel renders inline to the right of
+the board. On narrow mobile layouts, the selected-run panel becomes an
+in-layout sheet over the board.
 
 The grouped **Filters** control opens an anchored popover on desktop and a
 sheet-style overlay on narrow/mobile layouts. It applies exact-match

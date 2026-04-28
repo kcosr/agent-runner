@@ -37,6 +37,7 @@ import type { RunAuditState } from "../lib/run-audit.js";
 import { getRunPrimaryAction } from "../lib/run-primary-action.js";
 import type { RunTimelineState } from "../lib/run-timeline.js";
 import {
+  type DashboardRightSurface,
   type DrawerDetailSection,
   toggleDashboardStructuredFilter,
   useDashboardPreferences,
@@ -449,6 +450,8 @@ function InlineConfirmActions({
 
 export function RunDetailDrawer({
   activeSection,
+  activeSurface,
+  chatSurface,
   dependencyCandidateRuns,
   onAddDependency,
   actionError,
@@ -477,6 +480,7 @@ export function RunDetailDrawer({
   onClearSchedule,
   onSetScheduleEnabled,
   onSelectSection,
+  onSelectSurface,
   onTriggerPrimaryAction,
   auditState,
   timelineState,
@@ -486,6 +490,8 @@ export function RunDetailDrawer({
   run,
 }: {
   activeSection: DrawerDetailSection;
+  activeSurface: DashboardRightSurface;
+  chatSurface: ReactNode;
   dependencyCandidateRuns: RunSummary[];
   onAddDependency: (dependency: RunDependencyRef) => Promise<void>;
   actionError?: string;
@@ -514,6 +520,7 @@ export function RunDetailDrawer({
   onClearSchedule: () => Promise<void>;
   onSetScheduleEnabled: (enabled: boolean) => Promise<void>;
   onSelectSection: (section: DrawerDetailSection) => void;
+  onSelectSurface: (surface: DashboardRightSurface) => void;
   onTriggerPrimaryAction: () => Promise<void>;
   auditState: RunAuditState;
   resumeDialogOpen: boolean;
@@ -1662,1322 +1669,1360 @@ export function RunDetailDrawer({
           </div>
         </header>
 
-        <div className="drawer-body" ref={drawerBodyRef}>
-          <div className="drawer-title-block">
-            {editingName ? (
-              <div className="drawer-title-edit">
-                <label className="field drawer-title-field">
-                  <input
-                    aria-label="Run name"
+        <div aria-label="Run surface" className="selected-run-surface-tabs" role="tablist">
+          <button
+            aria-selected={activeSurface === "chat"}
+            className={activeSurface === "chat" ? "task-tab active" : "task-tab"}
+            onClick={() => onSelectSurface("chat")}
+            role="tab"
+            type="button"
+          >
+            Chat
+          </button>
+          <button
+            aria-selected={activeSurface === "detail"}
+            className={activeSurface === "detail" ? "task-tab active" : "task-tab"}
+            onClick={() => onSelectSurface("detail")}
+            role="tab"
+            type="button"
+          >
+            Detail
+          </button>
+        </div>
+
+        {activeSurface === "chat" ? (
+          <div className="drawer-body drawer-body--chat">{chatSurface}</div>
+        ) : (
+          <div className="drawer-body" ref={drawerBodyRef}>
+            <div className="drawer-title-block">
+              {editingName ? (
+                <div className="drawer-title-edit">
+                  <label className="field drawer-title-field">
+                    <input
+                      aria-label="Run name"
+                      disabled={renamePending}
+                      onChange={(event) => setNameDraft(event.target.value)}
+                      onKeyDown={handleNameInputKeyDown}
+                      placeholder="Unnamed"
+                      ref={nameInputRef}
+                      value={nameDraft}
+                    />
+                  </label>
+                  <button
+                    className="btn"
                     disabled={renamePending}
-                    onChange={(event) => setNameDraft(event.target.value)}
-                    onKeyDown={handleNameInputKeyDown}
-                    placeholder="Unnamed"
-                    ref={nameInputRef}
-                    value={nameDraft}
-                  />
-                </label>
-                <button
-                  className="btn"
-                  disabled={renamePending}
-                  onClick={() => void submitNameEdit()}
-                  type="button"
-                >
-                  {renamePending ? "Saving..." : "Save"}
-                </button>
-                <button
-                  className="btn"
-                  disabled={renamePending}
-                  onClick={cancelNameEdit}
-                  type="button"
-                >
-                  Cancel
-                </button>
-              </div>
-            ) : (
-              <div className="drawer-title-inline">
-                <h3 className="drawer-section-title">{visibleName}</h3>
-                <button
-                  aria-label="Edit run name"
-                  className="icon-btn icon-btn--small drawer-title-edit-trigger"
-                  disabled={actionsLocked}
-                  onClick={startNameEdit}
-                  title="Edit run name"
-                  type="button"
-                >
-                  <PencilIcon aria-hidden="true" />
-                </button>
-              </div>
-            )}
-          </div>
-          <section aria-label="Run summary" className="meta-grid">
-            {summaryRows(run).map(([label, value]) => (
-              <div className="meta-cell" key={label}>
-                <span className="meta-label">{label}</span>
-                <span className="meta-value">{value}</span>
-              </div>
-            ))}
-            <SummaryLongRow label="CWD">
-              <span className="meta-value meta-value--truncate mono" title={run.cwd}>
-                {run.cwd}
-              </span>
-              <div className="meta-actions">
-                <button
-                  aria-label="Copy cwd path"
-                  className="copy"
-                  onClick={() => onCopy(run.cwd, "cwd path")}
-                  type="button"
-                >
-                  <CopyIcon aria-hidden="true" />
-                </button>
-              </div>
-            </SummaryLongRow>
-            <SummaryLongRow label="Workspace">
-              <span className="meta-value meta-value--truncate mono" title={run.workspaceDir}>
-                {run.workspaceDir}
-              </span>
-              <div className="meta-actions">
-                <button
-                  aria-label="Copy workspace path"
-                  className="copy"
-                  onClick={() => onCopy(run.workspaceDir, "workspace path")}
-                  type="button"
-                >
-                  <CopyIcon aria-hidden="true" />
-                </button>
-              </div>
-            </SummaryLongRow>
-            {isPassiveRun || backendSessionId ? (
-              <SummaryLongRow label="Backend session">
-                {editingBackendSession ? (
-                  <div className="drawer-title-edit meta-edit-row">
-                    <label className="field drawer-title-field">
-                      <input
-                        aria-label="Backend session"
-                        disabled={backendSessionPending}
-                        onChange={(event) => setBackendSessionDraft(event.target.value)}
-                        onKeyDown={handleBackendSessionInputKeyDown}
-                        placeholder="Not set"
-                        ref={backendSessionInputRef}
-                        value={backendSessionDraft}
-                      />
-                    </label>
-                    <button
-                      className="btn"
-                      disabled={backendSessionPending}
-                      onClick={() => void submitBackendSessionEdit()}
-                      type="button"
-                    >
-                      {backendSessionPending ? "Saving..." : "Save"}
-                    </button>
-                    {run.backendSessionId !== null ? (
-                      <button
-                        className="btn"
-                        disabled={backendSessionPending}
-                        onClick={() => void submitBackendSessionClear()}
-                        type="button"
-                      >
-                        {backendSessionPending ? "Clearing..." : "Clear"}
-                      </button>
-                    ) : null}
-                    <button
-                      className="btn"
-                      disabled={backendSessionPending}
-                      onClick={cancelBackendSessionEdit}
-                      type="button"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    <span
-                      className="meta-value meta-value--truncate mono"
-                      title={backendSessionId ?? undefined}
-                    >
-                      {backendSessionId ?? "Not set"}
-                    </span>
-                    <div className="meta-actions">
-                      {backendSessionId ? (
-                        <button
-                          aria-label="Copy backend session id"
-                          className="copy"
-                          onClick={() => onCopy(backendSessionId, "backend session id")}
-                          type="button"
-                        >
-                          <CopyIcon aria-hidden="true" />
-                        </button>
-                      ) : null}
-                      {canEditBackendSession ? (
-                        <button
-                          aria-label="Edit backend session"
-                          className="icon-btn icon-btn--small drawer-title-edit-trigger"
-                          disabled={actionsLocked}
-                          onClick={startBackendSessionEdit}
-                          title="Edit backend session"
-                          type="button"
-                        >
-                          <PencilIcon aria-hidden="true" />
-                        </button>
-                      ) : null}
-                    </div>
-                  </>
-                )}
-              </SummaryLongRow>
-            ) : null}
-            {run.parentRunId ? (
-              <SummaryLongRow label="Parent run">
-                <button
-                  aria-label={`Open parent run ${run.parentRunId}`}
-                  className="attachment-source-run run-id"
-                  onClick={() => onSelectRun(run.parentRunId as string)}
-                  type="button"
-                >
-                  {run.parentRunId}
-                </button>
+                    onClick={() => void submitNameEdit()}
+                    type="button"
+                  >
+                    {renamePending ? "Saving..." : "Save"}
+                  </button>
+                  <button
+                    className="btn"
+                    disabled={renamePending}
+                    onClick={cancelNameEdit}
+                    type="button"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <div className="drawer-title-inline">
+                  <h3 className="drawer-section-title">{visibleName}</h3>
+                  <button
+                    aria-label="Edit run name"
+                    className="icon-btn icon-btn--small drawer-title-edit-trigger"
+                    disabled={actionsLocked}
+                    onClick={startNameEdit}
+                    title="Edit run name"
+                    type="button"
+                  >
+                    <PencilIcon aria-hidden="true" />
+                  </button>
+                </div>
+              )}
+            </div>
+            <section aria-label="Run summary" className="meta-grid">
+              {summaryRows(run).map(([label, value]) => (
+                <div className="meta-cell" key={label}>
+                  <span className="meta-label">{label}</span>
+                  <span className="meta-value">{value}</span>
+                </div>
+              ))}
+              <SummaryLongRow label="CWD">
+                <span className="meta-value meta-value--truncate mono" title={run.cwd}>
+                  {run.cwd}
+                </span>
                 <div className="meta-actions">
                   <button
-                    aria-label="Copy parent run id"
+                    aria-label="Copy cwd path"
                     className="copy"
-                    onClick={() => onCopy(run.parentRunId as string, "parent run id")}
+                    onClick={() => onCopy(run.cwd, "cwd path")}
                     type="button"
                   >
                     <CopyIcon aria-hidden="true" />
                   </button>
                 </div>
               </SummaryLongRow>
-            ) : null}
-            <SummaryLongRow label="Run group">
-              {editingRunGroup ? (
-                <div className="drawer-title-edit meta-edit-row">
-                  <label className="field drawer-title-field">
-                    <input
-                      aria-label="Run group"
-                      disabled={groupPending}
-                      onChange={(event) => {
-                        setRunGroupDraft(event.target.value);
-                        setRunGroupDraftError(undefined);
-                      }}
-                      onKeyDown={handleRunGroupInputKeyDown}
-                      placeholder={run.runId}
-                      ref={runGroupInputRef}
-                      value={runGroupDraft}
-                    />
-                  </label>
+              <SummaryLongRow label="Workspace">
+                <span className="meta-value meta-value--truncate mono" title={run.workspaceDir}>
+                  {run.workspaceDir}
+                </span>
+                <div className="meta-actions">
                   <button
-                    className="btn"
-                    disabled={groupPending}
-                    onClick={() => void submitRunGroupEdit()}
+                    aria-label="Copy workspace path"
+                    className="copy"
+                    onClick={() => onCopy(run.workspaceDir, "workspace path")}
                     type="button"
                   >
-                    {groupPending ? "Saving..." : "Save"}
+                    <CopyIcon aria-hidden="true" />
                   </button>
-                  {run.runGroupId !== run.runId ? (
-                    <button
-                      className="btn"
-                      disabled={groupPending}
-                      onClick={() => void submitRunGroupClear()}
-                      type="button"
-                    >
-                      {groupPending ? "Clearing..." : "Clear"}
-                    </button>
-                  ) : null}
-                  <button
-                    className="btn"
-                    disabled={groupPending}
-                    onClick={cancelRunGroupEdit}
-                    type="button"
-                  >
-                    Cancel
-                  </button>
-                  {runGroupDraftError ? (
-                    <span className="meta-edit-error">{runGroupDraftError}</span>
-                  ) : null}
                 </div>
-              ) : (
-                <>
+              </SummaryLongRow>
+              {isPassiveRun || backendSessionId ? (
+                <SummaryLongRow label="Backend session">
+                  {editingBackendSession ? (
+                    <div className="drawer-title-edit meta-edit-row">
+                      <label className="field drawer-title-field">
+                        <input
+                          aria-label="Backend session"
+                          disabled={backendSessionPending}
+                          onChange={(event) => setBackendSessionDraft(event.target.value)}
+                          onKeyDown={handleBackendSessionInputKeyDown}
+                          placeholder="Not set"
+                          ref={backendSessionInputRef}
+                          value={backendSessionDraft}
+                        />
+                      </label>
+                      <button
+                        className="btn"
+                        disabled={backendSessionPending}
+                        onClick={() => void submitBackendSessionEdit()}
+                        type="button"
+                      >
+                        {backendSessionPending ? "Saving..." : "Save"}
+                      </button>
+                      {run.backendSessionId !== null ? (
+                        <button
+                          className="btn"
+                          disabled={backendSessionPending}
+                          onClick={() => void submitBackendSessionClear()}
+                          type="button"
+                        >
+                          {backendSessionPending ? "Clearing..." : "Clear"}
+                        </button>
+                      ) : null}
+                      <button
+                        className="btn"
+                        disabled={backendSessionPending}
+                        onClick={cancelBackendSessionEdit}
+                        type="button"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <span
+                        className="meta-value meta-value--truncate mono"
+                        title={backendSessionId ?? undefined}
+                      >
+                        {backendSessionId ?? "Not set"}
+                      </span>
+                      <div className="meta-actions">
+                        {backendSessionId ? (
+                          <button
+                            aria-label="Copy backend session id"
+                            className="copy"
+                            onClick={() => onCopy(backendSessionId, "backend session id")}
+                            type="button"
+                          >
+                            <CopyIcon aria-hidden="true" />
+                          </button>
+                        ) : null}
+                        {canEditBackendSession ? (
+                          <button
+                            aria-label="Edit backend session"
+                            className="icon-btn icon-btn--small drawer-title-edit-trigger"
+                            disabled={actionsLocked}
+                            onClick={startBackendSessionEdit}
+                            title="Edit backend session"
+                            type="button"
+                          >
+                            <PencilIcon aria-hidden="true" />
+                          </button>
+                        ) : null}
+                      </div>
+                    </>
+                  )}
+                </SummaryLongRow>
+              ) : null}
+              {run.parentRunId ? (
+                <SummaryLongRow label="Parent run">
                   <button
-                    aria-label={`Filter by run group ${run.runGroupId}`}
-                    aria-pressed={groupFilterActive}
-                    className="meta-value meta-value--button meta-value--truncate mono"
-                    data-active-filter={groupFilterActive ? "true" : undefined}
-                    onClick={toggleRunGroupFilter}
-                    title={`Filter by run group ${run.runGroupId}`}
+                    aria-label={`Open parent run ${run.parentRunId}`}
+                    className="attachment-source-run run-id"
+                    onClick={() => onSelectRun(run.parentRunId as string)}
                     type="button"
                   >
-                    {run.runGroupId}
+                    {run.parentRunId}
                   </button>
                   <div className="meta-actions">
                     <button
-                      aria-label="Copy run group id"
+                      aria-label="Copy parent run id"
                       className="copy"
-                      onClick={() => onCopy(run.runGroupId, "run group id")}
+                      onClick={() => onCopy(run.parentRunId as string, "parent run id")}
                       type="button"
                     >
                       <CopyIcon aria-hidden="true" />
                     </button>
-                    {canEditRunGroup ? (
-                      <button
-                        aria-label="Edit run group"
-                        className="icon-btn icon-btn--small drawer-title-edit-trigger"
-                        disabled={actionsLocked}
-                        onClick={startRunGroupEdit}
-                        title="Edit run group"
-                        type="button"
-                      >
-                        <PencilIcon aria-hidden="true" />
-                      </button>
-                    ) : null}
                   </div>
-                </>
-              )}
-            </SummaryLongRow>
-          </section>
-
-          {schedule !== null ? (
-            <section aria-label="Schedule" className="schedule-detail">
-              <div className="schedule-detail__header">
-                <div className="schedule-detail__title">
-                  <ClockIcon aria-hidden="true" />
-                  <span>Schedule</span>
-                </div>
-                <div className="schedule-detail__actions">
-                  <button
-                    className="btn"
-                    disabled={actionsLocked}
-                    onClick={() => void submitScheduleEnabled(!schedule.enabled)}
-                    type="button"
-                  >
-                    {schedulePending ? "Saving..." : schedule.enabled ? "Disable" : "Enable"}
-                  </button>
-                  <button
-                    aria-disabled={!canClearSchedule || actionsLocked}
-                    className="btn"
-                    disabled={!canClearSchedule || actionsLocked}
-                    onClick={() => void submitScheduleClear()}
-                    title="Clear schedule"
-                    type="button"
-                  >
-                    {schedulePending ? "Clearing..." : "Clear"}
-                  </button>
-                </div>
-              </div>
-              <div className="schedule-detail__grid">
-                {scheduleRows(schedule, run.scheduleState).map(([label, value]) => (
-                  <ScheduleDetailRow key={label} label={label} value={value} />
-                ))}
-              </div>
-            </section>
-          ) : null}
-
-          {actionError ? (
-            <div className="notice" data-tone="error">
-              <span className="notice__message">{actionError}</span>
-            </div>
-          ) : null}
-
-          <nav aria-label="Run sections" className="tabs tabs--scrollable" ref={sectionTabsRef}>
-            <button
-              aria-selected={activeSection === "tasks"}
-              className={activeSection === "tasks" ? "tab active" : "tab"}
-              onClick={() => onSelectSection("tasks")}
-              type="button"
-            >
-              Tasks
-              {run.tasksTotal > 0 ? (
-                <span className="tab-count">
-                  {" "}
-                  {run.tasksCompleted}/{run.tasksTotal}
-                </span>
+                </SummaryLongRow>
               ) : null}
-            </button>
-            {isPassiveRun ? null : (
-              <button
-                aria-selected={activeSection === "events"}
-                className={activeSection === "events" ? "tab active" : "tab"}
-                onClick={() => onSelectSection("events")}
-                type="button"
-              >
-                Attempts
-              </button>
-            )}
-            <button
-              aria-selected={activeSection === "attachments"}
-              className={activeSection === "attachments" ? "tab active" : "tab"}
-              onClick={() => onSelectSection("attachments")}
-              type="button"
-            >
-              Attachments
-              {combinedAttachments.length > 0 ? (
-                <span className="tab-count"> {combinedAttachments.length}</span>
-              ) : null}
-            </button>
-            <button
-              aria-selected={activeSection === "data"}
-              className={activeSection === "data" ? "tab active" : "tab"}
-              onClick={() => onSelectSection("data")}
-              type="button"
-            >
-              Data
-            </button>
-            <button
-              aria-selected={activeSection === "audit"}
-              className={activeSection === "audit" ? "tab active" : "tab"}
-              onClick={() => onSelectSection("audit")}
-              type="button"
-            >
-              Audit
-              {auditEvents.length > 0 ? (
-                <span className="tab-count"> {auditEvents.length}</span>
-              ) : null}
-            </button>
-            <button
-              aria-selected={activeSection === "dependencies"}
-              className={activeSection === "dependencies" ? "tab active" : "tab"}
-              onClick={() => onSelectSection("dependencies")}
-              type="button"
-            >
-              Dependencies
-              {run.dependencies.length > 0 ? (
-                <span className="tab-count">
-                  {" "}
-                  {satisfiedDependencies}/{run.dependencies.length}
-                </span>
-              ) : null}
-            </button>
-            <button
-              aria-selected={activeSection === "notes"}
-              className={activeSection === "notes" ? "tab active" : "tab"}
-              onClick={() => onSelectSection("notes")}
-              type="button"
-            >
-              Notes
-            </button>
-          </nav>
-
-          {activeSection === "tasks" ? (
-            <section aria-label="Tasks" className="drawer-panel drawer-panel--tasks">
-              <RunTaskList tasks={run.tasks} />
-            </section>
-          ) : null}
-
-          {activeSection === "notes" ? (
-            <section aria-label="Notes" className="drawer-panel drawer-panel--notes">
-              <div className="drawer-panel-card drawer-panel-card--notes">
-                <RunNoteEditor
-                  emptyPreviewMessage="No note recorded yet."
-                  initialMode="preview"
-                  note={run.note}
-                  onSave={onSetNote}
-                  pending={notePending}
-                  textareaLabel={`Run note for ${visibleName}`}
-                />
-              </div>
-            </section>
-          ) : null}
-
-          {activeSection === "attachments" ? (
-            <section aria-label="Attachments" className="drawer-panel drawer-panel--attachments">
-              <div className="drawer-panel-card dependency-panel">
-                <div className="dependency-summary">
-                  <span>
-                    {combinedAttachments.length === 0
-                      ? groupAttachmentsQuery.isPending
-                        ? "No run attachments yet. Loading run group attachments..."
-                        : "No attachments yet."
-                      : `${combinedAttachments.length} attachment${combinedAttachments.length === 1 ? "" : "s"} · ${formatBytes(combinedAttachmentSize)}`}
-                  </span>
-                  <>
-                    <input
-                      aria-label="Upload attachment file"
-                      className="sr-only"
-                      onChange={handleAttachmentInputChange}
-                      ref={attachmentInputRef}
-                      type="file"
-                    />
+              <SummaryLongRow label="Run group">
+                {editingRunGroup ? (
+                  <div className="drawer-title-edit meta-edit-row">
+                    <label className="field drawer-title-field">
+                      <input
+                        aria-label="Run group"
+                        disabled={groupPending}
+                        onChange={(event) => {
+                          setRunGroupDraft(event.target.value);
+                          setRunGroupDraftError(undefined);
+                        }}
+                        onKeyDown={handleRunGroupInputKeyDown}
+                        placeholder={run.runId}
+                        ref={runGroupInputRef}
+                        value={runGroupDraft}
+                      />
+                    </label>
                     <button
                       className="btn"
-                      disabled={actionsLocked}
-                      onClick={() => attachmentInputRef.current?.click()}
+                      disabled={groupPending}
+                      onClick={() => void submitRunGroupEdit()}
                       type="button"
                     >
-                      {uploadAttachmentPending ? "Uploading..." : "Upload"}
+                      {groupPending ? "Saving..." : "Save"}
                     </button>
-                  </>
-                </div>
-
-                {combinedAttachments.length > 0 ? (
-                  renderAttachmentRows(combinedAttachments)
-                ) : groupAttachmentsQuery.isPending ? (
-                  <div className="drawer-state">
-                    <div className="skeleton-line skeleton-line--short" />
-                    <div
-                      className="skeleton-line skeleton-line--medium"
-                      style={{ marginTop: "12px" }}
-                    />
-                    <div
-                      className="skeleton-line skeleton-line--medium"
-                      style={{ marginTop: "12px" }}
-                    />
-                  </div>
-                ) : groupAttachmentsQuery.isError ? (
-                  <div className="drawer-state">
-                    <h3>Run group attachments failed to load</h3>
-                    <p>{groupAttachmentsQuery.error.message}</p>
-                  </div>
-                ) : (
-                  <div className="drawer-state">
-                    <h3>No attachments yet</h3>
-                    <p>No attachments are available for this run or its run group.</p>
-                  </div>
-                )}
-                {combinedAttachments.length > 0 && groupAttachmentsQuery.isError ? (
-                  <div className="drawer-state">
-                    <h3>Run group attachments failed to load</h3>
-                    <p>{groupAttachmentsQuery.error.message}</p>
-                  </div>
-                ) : null}
-              </div>
-            </section>
-          ) : null}
-
-          {activeSection === "audit" ? (
-            <section aria-label="Audit" className="drawer-panel drawer-panel--audit">
-              <div className="drawer-panel-card timeline-panel">
-                {auditState.stale ? (
-                  <div className="notice" data-tone="warning">
-                    <span className="notice__message">
-                      Audit sync is stale. Reload to resync the persisted history and live stream.
-                    </span>
-                  </div>
-                ) : null}
-
-                {auditState.error && auditEvents.length === 0 ? (
-                  <div className="drawer-state">
-                    <h3>Audit history failed to load</h3>
-                    <p>{auditState.error}</p>
-                    <button className="btn" onClick={auditState.reload} type="button">
-                      Reload audit history
-                    </button>
-                  </div>
-                ) : null}
-
-                {auditState.isLoading && auditEvents.length === 0 ? (
-                  <p className="muted-inline">Loading audit history…</p>
-                ) : null}
-
-                {!auditState.isLoading && auditEvents.length === 0 && !auditState.error ? (
-                  <div className="drawer-state">
-                    <h3>No audit events yet</h3>
-                    <p>No persisted audit history is available for this run.</p>
-                    {auditState.stale ? (
-                      <button className="btn" onClick={auditState.reload} type="button">
-                        Reconnect and reload
+                    {run.runGroupId !== run.runId ? (
+                      <button
+                        className="btn"
+                        disabled={groupPending}
+                        onClick={() => void submitRunGroupClear()}
+                        type="button"
+                      >
+                        {groupPending ? "Clearing..." : "Clear"}
                       </button>
                     ) : null}
+                    <button
+                      className="btn"
+                      disabled={groupPending}
+                      onClick={cancelRunGroupEdit}
+                      type="button"
+                    >
+                      Cancel
+                    </button>
+                    {runGroupDraftError ? (
+                      <span className="meta-edit-error">{runGroupDraftError}</span>
+                    ) : null}
                   </div>
-                ) : null}
-
-                {auditEvents.length > 0 ? (
-                  <div className="dependency-section">
-                    <div className="dependency-summary">
-                      <span>
-                        {displayedAuditEvents.length} audit event
-                        {displayedAuditEvents.length === 1 ? "" : "s"}
-                      </span>
-                      <div className="dependency-actions">
-                        <div className="task-tabs" aria-label="Audit event filter" role="tablist">
-                          {(
-                            [
-                              ["all", "All"],
-                              ["hooks", "Hooks"],
-                              ["tasks", "Tasks"],
-                              ["run", "Run"],
-                            ] as const
-                          ).map(([value, label]) => (
-                            <button
-                              aria-selected={auditFilter === value}
-                              className={auditFilter === value ? "task-tab active" : "task-tab"}
-                              key={value}
-                              onClick={() => setAuditFilter(value)}
-                              role="tab"
-                              type="button"
-                            >
-                              {label}
-                            </button>
-                          ))}
-                        </div>
-                        <button
-                          aria-pressed={preferences.auditNewestFirst}
-                          className={
-                            preferences.auditNewestFirst
-                              ? "btn btn--quiet active"
-                              : "btn btn--quiet"
-                          }
-                          onClick={() =>
-                            updatePreferences({
-                              auditNewestFirst: !preferences.auditNewestFirst,
-                            })
-                          }
-                          type="button"
-                        >
-                          {preferences.auditNewestFirst ? "Newest first" : "Oldest first"}
-                        </button>
-                        <button className="btn" onClick={auditState.reload} type="button">
-                          Reload
-                        </button>
-                      </div>
-                    </div>
-                    {auditState.error ? <p className="muted-inline">{auditState.error}</p> : null}
-                    {displayedAuditEvents.length > 0 ? (
-                      <ul aria-label="Audit events" className="dependency-list">
-                        {displayedAuditEvents.map((envelope) => {
-                          const formatted = formatAuditEvent(envelope.event, {
-                            resolvedHooks: run.resolvedHooks,
-                            tasks: run.tasks,
-                          });
-                          return (
-                            <li className="dependency-row" key={envelope.cursor}>
-                              <div className="dependency-copy">
-                                <span className="dependency-name">
-                                  {formatted.message.map((part, index) =>
-                                    renderAuditMessagePart(part, `${envelope.cursor}-${index}`),
-                                  )}
-                                </span>
-                                <span className="dependency-meta">
-                                  <span className="dependency-meta-id mono">
-                                    {formatTimestamp(envelope.event.recordedAt)}
-                                  </span>
-                                  <span className="dependency-meta-id mono">
-                                    #{envelope.cursor}
-                                  </span>
-                                  <span className="dependency-meta-id mono">
-                                    {envelope.event.source}
-                                  </span>
-                                </span>
-                              </div>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    ) : (
-                      <div className="drawer-state">
-                        <h3>No audit events match this filter</h3>
-                        <p>
-                          Change the audit filter to view the other persisted events for this run.
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                ) : null}
-              </div>
-            </section>
-          ) : null}
-
-          {activeSection === "data" ? (
-            <section aria-label="Data" className="drawer-panel drawer-panel--data">
-              <div className="drawer-panel-card dependency-panel">
-                <div className="task-tabs" role="tablist" aria-label="Data view">
-                  <button
-                    aria-selected={dataTab === "vars"}
-                    className={dataTab === "vars" ? "task-tab active" : "task-tab"}
-                    onClick={() => setDataTab("vars")}
-                    role="tab"
-                    type="button"
-                  >
-                    Vars
-                  </button>
-                  <button
-                    aria-selected={dataTab === "hookState"}
-                    className={dataTab === "hookState" ? "task-tab active" : "task-tab"}
-                    onClick={() => setDataTab("hookState")}
-                    role="tab"
-                    type="button"
-                  >
-                    Hook state
-                  </button>
-                </div>
-
-                {dataTab === "vars" ? (
+                ) : (
                   <>
-                    <div className="drawer-data-actions">
-                      <span className="muted-inline">
-                        {Object.keys(run.runtimeVars).length === 0
-                          ? "0 vars"
-                          : `${Object.keys(run.runtimeVars).length} vars`}
-                      </span>
-                      {canReconfigure && !editingRuntimeVars ? (
+                    <button
+                      aria-label={`Filter by run group ${run.runGroupId}`}
+                      aria-pressed={groupFilterActive}
+                      className="meta-value meta-value--button meta-value--truncate mono"
+                      data-active-filter={groupFilterActive ? "true" : undefined}
+                      onClick={toggleRunGroupFilter}
+                      title={`Filter by run group ${run.runGroupId}`}
+                      type="button"
+                    >
+                      {run.runGroupId}
+                    </button>
+                    <div className="meta-actions">
+                      <button
+                        aria-label="Copy run group id"
+                        className="copy"
+                        onClick={() => onCopy(run.runGroupId, "run group id")}
+                        type="button"
+                      >
+                        <CopyIcon aria-hidden="true" />
+                      </button>
+                      {canEditRunGroup ? (
                         <button
-                          aria-label="Edit run vars"
+                          aria-label="Edit run group"
                           className="icon-btn icon-btn--small drawer-title-edit-trigger"
                           disabled={actionsLocked}
-                          onClick={startRuntimeVarsEdit}
-                          title="Edit run vars"
+                          onClick={startRunGroupEdit}
+                          title="Edit run group"
                           type="button"
                         >
                           <PencilIcon aria-hidden="true" />
                         </button>
                       ) : null}
                     </div>
-                    {editingRuntimeVars ? (
-                      <form className="reconfigure-form" onSubmit={submitRuntimeVarsEdit}>
-                        <div className="runtime-var-editor-list">
-                          {runtimeVarDraftRows.map((row) => (
-                            <div className="runtime-var-editor-row" key={row.id}>
-                              {row.originalKey === null ? (
-                                <label className="field runtime-var-key-field">
-                                  <span>Key</span>
-                                  <input
-                                    disabled={reconfigurePending}
-                                    onChange={(event) =>
-                                      updateRuntimeVarDraftRow(row.id, {
-                                        key: event.target.value,
-                                      })
-                                    }
-                                    placeholder="name"
-                                    value={row.key}
-                                  />
-                                </label>
-                              ) : (
-                                <div className="runtime-var-key-readonly">
-                                  <span className="meta-label">Key</span>
-                                  <code>{row.key}</code>
+                  </>
+                )}
+              </SummaryLongRow>
+            </section>
+
+            {schedule !== null ? (
+              <section aria-label="Schedule" className="schedule-detail">
+                <div className="schedule-detail__header">
+                  <div className="schedule-detail__title">
+                    <ClockIcon aria-hidden="true" />
+                    <span>Schedule</span>
+                  </div>
+                  <div className="schedule-detail__actions">
+                    <button
+                      className="btn"
+                      disabled={actionsLocked}
+                      onClick={() => void submitScheduleEnabled(!schedule.enabled)}
+                      type="button"
+                    >
+                      {schedulePending ? "Saving..." : schedule.enabled ? "Disable" : "Enable"}
+                    </button>
+                    <button
+                      aria-disabled={!canClearSchedule || actionsLocked}
+                      className="btn"
+                      disabled={!canClearSchedule || actionsLocked}
+                      onClick={() => void submitScheduleClear()}
+                      title="Clear schedule"
+                      type="button"
+                    >
+                      {schedulePending ? "Clearing..." : "Clear"}
+                    </button>
+                  </div>
+                </div>
+                <div className="schedule-detail__grid">
+                  {scheduleRows(schedule, run.scheduleState).map(([label, value]) => (
+                    <ScheduleDetailRow key={label} label={label} value={value} />
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            {actionError ? (
+              <div className="notice" data-tone="error">
+                <span className="notice__message">{actionError}</span>
+              </div>
+            ) : null}
+
+            <nav aria-label="Run sections" className="tabs tabs--scrollable" ref={sectionTabsRef}>
+              <button
+                aria-selected={activeSection === "tasks"}
+                className={activeSection === "tasks" ? "tab active" : "tab"}
+                onClick={() => onSelectSection("tasks")}
+                type="button"
+              >
+                Tasks
+                {run.tasksTotal > 0 ? (
+                  <span className="tab-count">
+                    {" "}
+                    {run.tasksCompleted}/{run.tasksTotal}
+                  </span>
+                ) : null}
+              </button>
+              {isPassiveRun ? null : (
+                <button
+                  aria-selected={activeSection === "events"}
+                  className={activeSection === "events" ? "tab active" : "tab"}
+                  onClick={() => onSelectSection("events")}
+                  type="button"
+                >
+                  Attempts
+                </button>
+              )}
+              <button
+                aria-selected={activeSection === "attachments"}
+                className={activeSection === "attachments" ? "tab active" : "tab"}
+                onClick={() => onSelectSection("attachments")}
+                type="button"
+              >
+                Attachments
+                {combinedAttachments.length > 0 ? (
+                  <span className="tab-count"> {combinedAttachments.length}</span>
+                ) : null}
+              </button>
+              <button
+                aria-selected={activeSection === "data"}
+                className={activeSection === "data" ? "tab active" : "tab"}
+                onClick={() => onSelectSection("data")}
+                type="button"
+              >
+                Data
+              </button>
+              <button
+                aria-selected={activeSection === "audit"}
+                className={activeSection === "audit" ? "tab active" : "tab"}
+                onClick={() => onSelectSection("audit")}
+                type="button"
+              >
+                Audit
+                {auditEvents.length > 0 ? (
+                  <span className="tab-count"> {auditEvents.length}</span>
+                ) : null}
+              </button>
+              <button
+                aria-selected={activeSection === "dependencies"}
+                className={activeSection === "dependencies" ? "tab active" : "tab"}
+                onClick={() => onSelectSection("dependencies")}
+                type="button"
+              >
+                Dependencies
+                {run.dependencies.length > 0 ? (
+                  <span className="tab-count">
+                    {" "}
+                    {satisfiedDependencies}/{run.dependencies.length}
+                  </span>
+                ) : null}
+              </button>
+              <button
+                aria-selected={activeSection === "notes"}
+                className={activeSection === "notes" ? "tab active" : "tab"}
+                onClick={() => onSelectSection("notes")}
+                type="button"
+              >
+                Notes
+              </button>
+            </nav>
+
+            {activeSection === "tasks" ? (
+              <section aria-label="Tasks" className="drawer-panel drawer-panel--tasks">
+                <RunTaskList tasks={run.tasks} />
+              </section>
+            ) : null}
+
+            {activeSection === "notes" ? (
+              <section aria-label="Notes" className="drawer-panel drawer-panel--notes">
+                <div className="drawer-panel-card drawer-panel-card--notes">
+                  <RunNoteEditor
+                    emptyPreviewMessage="No note recorded yet."
+                    initialMode="preview"
+                    note={run.note}
+                    onSave={onSetNote}
+                    pending={notePending}
+                    textareaLabel={`Run note for ${visibleName}`}
+                  />
+                </div>
+              </section>
+            ) : null}
+
+            {activeSection === "attachments" ? (
+              <section aria-label="Attachments" className="drawer-panel drawer-panel--attachments">
+                <div className="drawer-panel-card dependency-panel">
+                  <div className="dependency-summary">
+                    <span>
+                      {combinedAttachments.length === 0
+                        ? groupAttachmentsQuery.isPending
+                          ? "No run attachments yet. Loading run group attachments..."
+                          : "No attachments yet."
+                        : `${combinedAttachments.length} attachment${combinedAttachments.length === 1 ? "" : "s"} · ${formatBytes(combinedAttachmentSize)}`}
+                    </span>
+                    <>
+                      <input
+                        aria-label="Upload attachment file"
+                        className="sr-only"
+                        onChange={handleAttachmentInputChange}
+                        ref={attachmentInputRef}
+                        type="file"
+                      />
+                      <button
+                        className="btn"
+                        disabled={actionsLocked}
+                        onClick={() => attachmentInputRef.current?.click()}
+                        type="button"
+                      >
+                        {uploadAttachmentPending ? "Uploading..." : "Upload"}
+                      </button>
+                    </>
+                  </div>
+
+                  {combinedAttachments.length > 0 ? (
+                    renderAttachmentRows(combinedAttachments)
+                  ) : groupAttachmentsQuery.isPending ? (
+                    <div className="drawer-state">
+                      <div className="skeleton-line skeleton-line--short" />
+                      <div
+                        className="skeleton-line skeleton-line--medium"
+                        style={{ marginTop: "12px" }}
+                      />
+                      <div
+                        className="skeleton-line skeleton-line--medium"
+                        style={{ marginTop: "12px" }}
+                      />
+                    </div>
+                  ) : groupAttachmentsQuery.isError ? (
+                    <div className="drawer-state">
+                      <h3>Run group attachments failed to load</h3>
+                      <p>{groupAttachmentsQuery.error.message}</p>
+                    </div>
+                  ) : (
+                    <div className="drawer-state">
+                      <h3>No attachments yet</h3>
+                      <p>No attachments are available for this run or its run group.</p>
+                    </div>
+                  )}
+                  {combinedAttachments.length > 0 && groupAttachmentsQuery.isError ? (
+                    <div className="drawer-state">
+                      <h3>Run group attachments failed to load</h3>
+                      <p>{groupAttachmentsQuery.error.message}</p>
+                    </div>
+                  ) : null}
+                </div>
+              </section>
+            ) : null}
+
+            {activeSection === "audit" ? (
+              <section aria-label="Audit" className="drawer-panel drawer-panel--audit">
+                <div className="drawer-panel-card timeline-panel">
+                  {auditState.stale ? (
+                    <div className="notice" data-tone="warning">
+                      <span className="notice__message">
+                        Audit sync is stale. Reload to resync the persisted history and live stream.
+                      </span>
+                    </div>
+                  ) : null}
+
+                  {auditState.error && auditEvents.length === 0 ? (
+                    <div className="drawer-state">
+                      <h3>Audit history failed to load</h3>
+                      <p>{auditState.error}</p>
+                      <button className="btn" onClick={auditState.reload} type="button">
+                        Reload audit history
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {auditState.isLoading && auditEvents.length === 0 ? (
+                    <p className="muted-inline">Loading audit history…</p>
+                  ) : null}
+
+                  {!auditState.isLoading && auditEvents.length === 0 && !auditState.error ? (
+                    <div className="drawer-state">
+                      <h3>No audit events yet</h3>
+                      <p>No persisted audit history is available for this run.</p>
+                      {auditState.stale ? (
+                        <button className="btn" onClick={auditState.reload} type="button">
+                          Reconnect and reload
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {auditEvents.length > 0 ? (
+                    <div className="dependency-section">
+                      <div className="dependency-summary">
+                        <span>
+                          {displayedAuditEvents.length} audit event
+                          {displayedAuditEvents.length === 1 ? "" : "s"}
+                        </span>
+                        <div className="dependency-actions">
+                          <div className="task-tabs" aria-label="Audit event filter" role="tablist">
+                            {(
+                              [
+                                ["all", "All"],
+                                ["hooks", "Hooks"],
+                                ["tasks", "Tasks"],
+                                ["run", "Run"],
+                              ] as const
+                            ).map(([value, label]) => (
+                              <button
+                                aria-selected={auditFilter === value}
+                                className={auditFilter === value ? "task-tab active" : "task-tab"}
+                                key={value}
+                                onClick={() => setAuditFilter(value)}
+                                role="tab"
+                                type="button"
+                              >
+                                {label}
+                              </button>
+                            ))}
+                          </div>
+                          <button
+                            aria-pressed={preferences.auditNewestFirst}
+                            className={
+                              preferences.auditNewestFirst
+                                ? "btn btn--quiet active"
+                                : "btn btn--quiet"
+                            }
+                            onClick={() =>
+                              updatePreferences({
+                                auditNewestFirst: !preferences.auditNewestFirst,
+                              })
+                            }
+                            type="button"
+                          >
+                            {preferences.auditNewestFirst ? "Newest first" : "Oldest first"}
+                          </button>
+                          <button className="btn" onClick={auditState.reload} type="button">
+                            Reload
+                          </button>
+                        </div>
+                      </div>
+                      {auditState.error ? <p className="muted-inline">{auditState.error}</p> : null}
+                      {displayedAuditEvents.length > 0 ? (
+                        <ul aria-label="Audit events" className="dependency-list">
+                          {displayedAuditEvents.map((envelope) => {
+                            const formatted = formatAuditEvent(envelope.event, {
+                              resolvedHooks: run.resolvedHooks,
+                              tasks: run.tasks,
+                            });
+                            return (
+                              <li className="dependency-row" key={envelope.cursor}>
+                                <div className="dependency-copy">
+                                  <span className="dependency-name">
+                                    {formatted.message.map((part, index) =>
+                                      renderAuditMessagePart(part, `${envelope.cursor}-${index}`),
+                                    )}
+                                  </span>
+                                  <span className="dependency-meta">
+                                    <span className="dependency-meta-id mono">
+                                      {formatTimestamp(envelope.event.recordedAt)}
+                                    </span>
+                                    <span className="dependency-meta-id mono">
+                                      #{envelope.cursor}
+                                    </span>
+                                    <span className="dependency-meta-id mono">
+                                      {envelope.event.source}
+                                    </span>
+                                  </span>
                                 </div>
-                              )}
-                              <label className="field runtime-var-value-field">
-                                <span>Value</span>
-                                <textarea
-                                  aria-label={`Value for ${row.key || "new variable"}`}
-                                  disabled={
-                                    reconfigurePending || (row.redacted && !row.replaceRedacted)
-                                  }
-                                  onChange={(event) =>
-                                    updateRuntimeVarDraftRow(row.id, {
-                                      value: event.target.value,
-                                    })
-                                  }
-                                  placeholder={row.redacted ? "Redacted" : "Value"}
-                                  value={row.value}
-                                />
-                              </label>
-                              {row.redacted ? (
-                                <label className="runtime-var-redacted-toggle">
-                                  <input
-                                    checked={row.replaceRedacted}
-                                    disabled={reconfigurePending}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      ) : (
+                        <div className="drawer-state">
+                          <h3>No audit events match this filter</h3>
+                          <p>
+                            Change the audit filter to view the other persisted events for this run.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+              </section>
+            ) : null}
+
+            {activeSection === "data" ? (
+              <section aria-label="Data" className="drawer-panel drawer-panel--data">
+                <div className="drawer-panel-card dependency-panel">
+                  <div className="task-tabs" role="tablist" aria-label="Data view">
+                    <button
+                      aria-selected={dataTab === "vars"}
+                      className={dataTab === "vars" ? "task-tab active" : "task-tab"}
+                      onClick={() => setDataTab("vars")}
+                      role="tab"
+                      type="button"
+                    >
+                      Vars
+                    </button>
+                    <button
+                      aria-selected={dataTab === "hookState"}
+                      className={dataTab === "hookState" ? "task-tab active" : "task-tab"}
+                      onClick={() => setDataTab("hookState")}
+                      role="tab"
+                      type="button"
+                    >
+                      Hook state
+                    </button>
+                  </div>
+
+                  {dataTab === "vars" ? (
+                    <>
+                      <div className="drawer-data-actions">
+                        <span className="muted-inline">
+                          {Object.keys(run.runtimeVars).length === 0
+                            ? "0 vars"
+                            : `${Object.keys(run.runtimeVars).length} vars`}
+                        </span>
+                        {canReconfigure && !editingRuntimeVars ? (
+                          <button
+                            aria-label="Edit run vars"
+                            className="icon-btn icon-btn--small drawer-title-edit-trigger"
+                            disabled={actionsLocked}
+                            onClick={startRuntimeVarsEdit}
+                            title="Edit run vars"
+                            type="button"
+                          >
+                            <PencilIcon aria-hidden="true" />
+                          </button>
+                        ) : null}
+                      </div>
+                      {editingRuntimeVars ? (
+                        <form className="reconfigure-form" onSubmit={submitRuntimeVarsEdit}>
+                          <div className="runtime-var-editor-list">
+                            {runtimeVarDraftRows.map((row) => (
+                              <div className="runtime-var-editor-row" key={row.id}>
+                                {row.originalKey === null ? (
+                                  <label className="field runtime-var-key-field">
+                                    <span>Key</span>
+                                    <input
+                                      disabled={reconfigurePending}
+                                      onChange={(event) =>
+                                        updateRuntimeVarDraftRow(row.id, {
+                                          key: event.target.value,
+                                        })
+                                      }
+                                      placeholder="name"
+                                      value={row.key}
+                                    />
+                                  </label>
+                                ) : (
+                                  <div className="runtime-var-key-readonly">
+                                    <span className="meta-label">Key</span>
+                                    <code>{row.key}</code>
+                                  </div>
+                                )}
+                                <label className="field runtime-var-value-field">
+                                  <span>Value</span>
+                                  <textarea
+                                    aria-label={`Value for ${row.key || "new variable"}`}
+                                    disabled={
+                                      reconfigurePending || (row.redacted && !row.replaceRedacted)
+                                    }
                                     onChange={(event) =>
                                       updateRuntimeVarDraftRow(row.id, {
-                                        replaceRedacted: event.target.checked,
+                                        value: event.target.value,
                                       })
                                     }
-                                    type="checkbox"
+                                    placeholder={row.redacted ? "Redacted" : "Value"}
+                                    value={row.value}
                                   />
-                                  <span>Replace redacted value</span>
                                 </label>
-                              ) : null}
-                              {row.originalKey === null ? (
+                                {row.redacted ? (
+                                  <label className="runtime-var-redacted-toggle">
+                                    <input
+                                      checked={row.replaceRedacted}
+                                      disabled={reconfigurePending}
+                                      onChange={(event) =>
+                                        updateRuntimeVarDraftRow(row.id, {
+                                          replaceRedacted: event.target.checked,
+                                        })
+                                      }
+                                      type="checkbox"
+                                    />
+                                    <span>Replace redacted value</span>
+                                  </label>
+                                ) : null}
+                                {row.originalKey === null ? (
+                                  <button
+                                    aria-label="Remove new var"
+                                    className="icon-btn icon-btn--destructive runtime-var-remove"
+                                    disabled={reconfigurePending}
+                                    onClick={() => removeRuntimeVarDraftRow(row.id)}
+                                    title="Remove new var"
+                                    type="button"
+                                  >
+                                    <TrashIcon aria-hidden="true" />
+                                  </button>
+                                ) : null}
+                              </div>
+                            ))}
+                          </div>
+                          {runtimeVarDraftError ? (
+                            <div className="notice" data-tone="error">
+                              <span className="notice__message">{runtimeVarDraftError}</span>
+                            </div>
+                          ) : null}
+                          <div className="drawer-confirm-actions">
+                            <button
+                              className="btn"
+                              disabled={reconfigurePending}
+                              onClick={addRuntimeVarDraftRow}
+                              type="button"
+                            >
+                              Add var
+                            </button>
+                            <button className="btn" disabled={reconfigurePending} type="submit">
+                              {reconfigurePending ? "Saving..." : "Save vars"}
+                            </button>
+                            <button
+                              className="btn"
+                              disabled={reconfigurePending}
+                              onClick={cancelRuntimeVarsEdit}
+                              type="button"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </form>
+                      ) : (
+                        <ReadOnlyDataEntries
+                          data={run.runtimeVars}
+                          emptyMessage="No vars"
+                          tableLabel="Vars"
+                        />
+                      )}
+                    </>
+                  ) : (
+                    <ReadOnlyDataEntries
+                      data={run.hookState}
+                      emptyMessage="No hook state"
+                      tableLabel="Hook state"
+                    />
+                  )}
+                </div>
+              </section>
+            ) : null}
+
+            {activeSection === "dependencies" ? (
+              <section
+                aria-label="Dependencies"
+                className="drawer-panel drawer-panel--dependencies"
+              >
+                <div className="drawer-panel-card dependency-panel">
+                  <div className="dependency-summary">
+                    <span>
+                      {run.dependencies.length === 0
+                        ? "No dependencies configured."
+                        : `${satisfiedDependencies}/${run.dependencies.length} dependencies satisfied.`}
+                    </span>
+                    {canEditDependencies && run.dependencies.length > 0 ? (
+                      <button
+                        className="btn btn-destructive-outline"
+                        disabled={actionsLocked}
+                        onClick={() => void submitDependencyClear()}
+                        type="button"
+                      >
+                        {clearDependenciesPending ? "Clearing..." : "Clear all"}
+                      </button>
+                    ) : null}
+                  </div>
+
+                  {canEditDependencies ? (
+                    <div className="dependency-add-stack">
+                      <div className="task-tabs" aria-label="Dependency type" role="tablist">
+                        <button
+                          aria-selected={dependencyMode === "run"}
+                          className={dependencyMode === "run" ? "task-tab active" : "task-tab"}
+                          onClick={() => {
+                            setDependencyMode("run");
+                            setDependencyDraftError(undefined);
+                          }}
+                          role="tab"
+                          type="button"
+                        >
+                          Run
+                        </button>
+                        <button
+                          aria-selected={dependencyMode === "group"}
+                          className={dependencyMode === "group" ? "task-tab active" : "task-tab"}
+                          onClick={() => {
+                            setDependencyMode("group");
+                            setDependencyDraftError(undefined);
+                          }}
+                          role="tab"
+                          type="button"
+                        >
+                          Run group
+                        </button>
+                      </div>
+                      <div className="dependency-add-row">
+                        <div className="field dependency-field">
+                          {dependencyMode === "run" ? (
+                            <input
+                              aria-label="Dependency run search"
+                              disabled={actionsLocked}
+                              onChange={(event) => updateDependencyDraft(event.target.value)}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter") {
+                                  event.preventDefault();
+                                  void submitDependencyAdd();
+                                }
+                              }}
+                              placeholder="Search by name, assignment, or run id"
+                              value={dependencyDraft}
+                            />
+                          ) : (
+                            <input
+                              aria-label="Dependency run group"
+                              disabled={actionsLocked}
+                              onChange={(event) => {
+                                setDependencyGroupDraft(event.target.value);
+                                setDependencyDraftError(undefined);
+                              }}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter") {
+                                  event.preventDefault();
+                                  void submitDependencyAdd();
+                                }
+                              }}
+                              placeholder="Run group id"
+                              value={dependencyGroupDraft}
+                            />
+                          )}
+                        </div>
+                        <button
+                          className="btn"
+                          disabled={actionsLocked || !resolvedDependencyRef}
+                          onClick={() => void submitDependencyAdd()}
+                          type="button"
+                        >
+                          {addDependencyPending ? "Adding..." : "Add dependency"}
+                        </button>
+                      </div>
+                      {dependencyDraftError ? (
+                        <div className="notice" data-tone="error">
+                          <span className="notice__message">{dependencyDraftError}</span>
+                        </div>
+                      ) : null}
+                      {dependencyMode === "run" && normalizedDependencyDraft.length > 0 ? (
+                        matchingDependencyCandidates.length > 0 ? (
+                          <ul
+                            aria-label="Dependency suggestions"
+                            className="dependency-suggestion-list"
+                          >
+                            {matchingDependencyCandidates.map((candidate) => (
+                              <li key={candidate.runId}>
                                 <button
-                                  aria-label="Remove new var"
-                                  className="icon-btn icon-btn--destructive runtime-var-remove"
-                                  disabled={reconfigurePending}
-                                  onClick={() => removeRuntimeVarDraftRow(row.id)}
-                                  title="Remove new var"
+                                  aria-pressed={candidate.runId === resolvedDependencyRunId}
+                                  className={
+                                    candidate.runId === resolvedDependencyRunId
+                                      ? "dependency-suggestion active"
+                                      : "dependency-suggestion"
+                                  }
+                                  disabled={actionsLocked}
+                                  onClick={() => selectDependencyCandidate(candidate)}
+                                  type="button"
+                                >
+                                  <span className="dependency-suggestion-title">
+                                    {dependencyCandidateTitle(candidate)}
+                                  </span>
+                                  <span className="dependency-suggestion-meta">
+                                    {dependencyCandidateMeta(candidate)}
+                                  </span>
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="muted-inline">
+                            No matching runs. Search by name, assignment, or run id.
+                          </p>
+                        )
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {run.dependencies.length > 0 ? (
+                    <div className="dependency-section">
+                      <h4 className="dependency-section-title">
+                        Depends on{" "}
+                        <span className="dependency-section-title__count">
+                          {run.dependencies.length}
+                        </span>
+                      </h4>
+                      <ul className="dependency-list">
+                        {run.dependencies.map((dependency) => {
+                          const dependencyRef = dependencyDetailRef(dependency);
+                          const dependencyId =
+                            dependency.type === "run" ? dependency.runId : dependency.groupId;
+                          return (
+                            <li className="dependency-row" key={dependencyDetailKey(dependency)}>
+                              <div className="dependency-copy">
+                                <span className="dependency-name">
+                                  {dependency.type === "run"
+                                    ? (dependency.name ?? "Unnamed")
+                                    : `Run group ${dependency.groupId}`}
+                                </span>
+                                <span className="dependency-meta">
+                                  <span className="dependency-meta-id">
+                                    {dependency.type === "run"
+                                      ? dependency.runId
+                                      : dependency.groupId}
+                                  </span>
+                                  {dependency.type === "run" ? (
+                                    dependency.missing || !dependency.effectiveStatus ? (
+                                      <span className="badge badge-error">missing</span>
+                                    ) : (
+                                      <StatusBadge status={dependency.effectiveStatus} />
+                                    )
+                                  ) : (
+                                    <>
+                                      <span
+                                        className={
+                                          dependency.satisfied
+                                            ? "badge badge-completed"
+                                            : "badge badge-blocked"
+                                        }
+                                      >
+                                        {dependency.satisfied ? "satisfied" : "unsatisfied"}
+                                      </span>
+                                      <span>
+                                        {dependency.successful}/{dependency.total} successful
+                                      </span>
+                                      {dependency.archivedExcluded > 0 ? (
+                                        <span>{dependency.archivedExcluded} archived excluded</span>
+                                      ) : null}
+                                    </>
+                                  )}
+                                </span>
+                              </div>
+                              {canEditDependencies ? (
+                                <button
+                                  aria-label={`Remove dependency ${dependencyId}`}
+                                  className="icon-btn icon-btn--destructive"
+                                  disabled={actionsLocked}
+                                  onClick={() => void submitDependencyRemove(dependencyRef)}
+                                  title={removeDependencyPending ? "Removing..." : "Remove"}
                                   type="button"
                                 >
                                   <TrashIcon aria-hidden="true" />
                                 </button>
                               ) : null}
-                            </div>
-                          ))}
-                        </div>
-                        {runtimeVarDraftError ? (
-                          <div className="notice" data-tone="error">
-                            <span className="notice__message">{runtimeVarDraftError}</span>
-                          </div>
-                        ) : null}
-                        <div className="drawer-confirm-actions">
-                          <button
-                            className="btn"
-                            disabled={reconfigurePending}
-                            onClick={addRuntimeVarDraftRow}
-                            type="button"
-                          >
-                            Add var
-                          </button>
-                          <button className="btn" disabled={reconfigurePending} type="submit">
-                            {reconfigurePending ? "Saving..." : "Save vars"}
-                          </button>
-                          <button
-                            className="btn"
-                            disabled={reconfigurePending}
-                            onClick={cancelRuntimeVarsEdit}
-                            type="button"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      </form>
-                    ) : (
-                      <ReadOnlyDataEntries
-                        data={run.runtimeVars}
-                        emptyMessage="No vars"
-                        tableLabel="Vars"
-                      />
-                    )}
-                  </>
-                ) : (
-                  <ReadOnlyDataEntries
-                    data={run.hookState}
-                    emptyMessage="No hook state"
-                    tableLabel="Hook state"
-                  />
-                )}
-              </div>
-            </section>
-          ) : null}
-
-          {activeSection === "dependencies" ? (
-            <section aria-label="Dependencies" className="drawer-panel drawer-panel--dependencies">
-              <div className="drawer-panel-card dependency-panel">
-                <div className="dependency-summary">
-                  <span>
-                    {run.dependencies.length === 0
-                      ? "No dependencies configured."
-                      : `${satisfiedDependencies}/${run.dependencies.length} dependencies satisfied.`}
-                  </span>
-                  {canEditDependencies && run.dependencies.length > 0 ? (
-                    <button
-                      className="btn btn-destructive-outline"
-                      disabled={actionsLocked}
-                      onClick={() => void submitDependencyClear()}
-                      type="button"
-                    >
-                      {clearDependenciesPending ? "Clearing..." : "Clear all"}
-                    </button>
-                  ) : null}
-                </div>
-
-                {canEditDependencies ? (
-                  <div className="dependency-add-stack">
-                    <div className="task-tabs" aria-label="Dependency type" role="tablist">
-                      <button
-                        aria-selected={dependencyMode === "run"}
-                        className={dependencyMode === "run" ? "task-tab active" : "task-tab"}
-                        onClick={() => {
-                          setDependencyMode("run");
-                          setDependencyDraftError(undefined);
-                        }}
-                        role="tab"
-                        type="button"
-                      >
-                        Run
-                      </button>
-                      <button
-                        aria-selected={dependencyMode === "group"}
-                        className={dependencyMode === "group" ? "task-tab active" : "task-tab"}
-                        onClick={() => {
-                          setDependencyMode("group");
-                          setDependencyDraftError(undefined);
-                        }}
-                        role="tab"
-                        type="button"
-                      >
-                        Run group
-                      </button>
-                    </div>
-                    <div className="dependency-add-row">
-                      <div className="field dependency-field">
-                        {dependencyMode === "run" ? (
-                          <input
-                            aria-label="Dependency run search"
-                            disabled={actionsLocked}
-                            onChange={(event) => updateDependencyDraft(event.target.value)}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter") {
-                                event.preventDefault();
-                                void submitDependencyAdd();
-                              }
-                            }}
-                            placeholder="Search by name, assignment, or run id"
-                            value={dependencyDraft}
-                          />
-                        ) : (
-                          <input
-                            aria-label="Dependency run group"
-                            disabled={actionsLocked}
-                            onChange={(event) => {
-                              setDependencyGroupDraft(event.target.value);
-                              setDependencyDraftError(undefined);
-                            }}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter") {
-                                event.preventDefault();
-                                void submitDependencyAdd();
-                              }
-                            }}
-                            placeholder="Run group id"
-                            value={dependencyGroupDraft}
-                          />
-                        )}
-                      </div>
-                      <button
-                        className="btn"
-                        disabled={actionsLocked || !resolvedDependencyRef}
-                        onClick={() => void submitDependencyAdd()}
-                        type="button"
-                      >
-                        {addDependencyPending ? "Adding..." : "Add dependency"}
-                      </button>
-                    </div>
-                    {dependencyDraftError ? (
-                      <div className="notice" data-tone="error">
-                        <span className="notice__message">{dependencyDraftError}</span>
-                      </div>
-                    ) : null}
-                    {dependencyMode === "run" && normalizedDependencyDraft.length > 0 ? (
-                      matchingDependencyCandidates.length > 0 ? (
-                        <ul
-                          aria-label="Dependency suggestions"
-                          className="dependency-suggestion-list"
-                        >
-                          {matchingDependencyCandidates.map((candidate) => (
-                            <li key={candidate.runId}>
-                              <button
-                                aria-pressed={candidate.runId === resolvedDependencyRunId}
-                                className={
-                                  candidate.runId === resolvedDependencyRunId
-                                    ? "dependency-suggestion active"
-                                    : "dependency-suggestion"
-                                }
-                                disabled={actionsLocked}
-                                onClick={() => selectDependencyCandidate(candidate)}
-                                type="button"
-                              >
-                                <span className="dependency-suggestion-title">
-                                  {dependencyCandidateTitle(candidate)}
-                                </span>
-                                <span className="dependency-suggestion-meta">
-                                  {dependencyCandidateMeta(candidate)}
-                                </span>
-                              </button>
                             </li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <p className="muted-inline">
-                          No matching runs. Search by name, assignment, or run id.
-                        </p>
-                      )
-                    ) : null}
-                  </div>
-                ) : null}
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  ) : null}
 
-                {run.dependencies.length > 0 ? (
-                  <div className="dependency-section">
-                    <h4 className="dependency-section-title">
-                      Depends on{" "}
-                      <span className="dependency-section-title__count">
-                        {run.dependencies.length}
-                      </span>
-                    </h4>
-                    <ul className="dependency-list">
-                      {run.dependencies.map((dependency) => {
-                        const dependencyRef = dependencyDetailRef(dependency);
-                        const dependencyId =
-                          dependency.type === "run" ? dependency.runId : dependency.groupId;
-                        return (
-                          <li className="dependency-row" key={dependencyDetailKey(dependency)}>
+                  {run.dependents.length > 0 ? (
+                    <div className="dependency-section">
+                      <h4 className="dependency-section-title">
+                        Required by{" "}
+                        <span className="dependency-section-title__count">
+                          {run.dependents.length}
+                        </span>
+                      </h4>
+                      <ul className="dependency-list">
+                        {run.dependents.map((dependent) => (
+                          <li className="dependency-row" key={dependentDetailKey(dependent)}>
                             <div className="dependency-copy">
-                              <span className="dependency-name">
-                                {dependency.type === "run"
-                                  ? (dependency.name ?? "Unnamed")
-                                  : `Run group ${dependency.groupId}`}
-                              </span>
+                              <span className="dependency-name">{dependent.name ?? "Unnamed"}</span>
                               <span className="dependency-meta">
-                                <span className="dependency-meta-id">
-                                  {dependency.type === "run"
-                                    ? dependency.runId
-                                    : dependency.groupId}
-                                </span>
-                                {dependency.type === "run" ? (
-                                  dependency.missing || !dependency.effectiveStatus ? (
-                                    <span className="badge badge-error">missing</span>
-                                  ) : (
-                                    <StatusBadge status={dependency.effectiveStatus} />
-                                  )
+                                <span className="dependency-meta-id">{dependent.runId}</span>
+                                {dependent.via === "group" ? (
+                                  <span className="dependency-meta-id">
+                                    via group {dependent.dependencyGroupId}
+                                  </span>
+                                ) : null}
+                                {dependent.missing || !dependent.effectiveStatus ? (
+                                  <span className="badge badge-error">missing</span>
                                 ) : (
-                                  <>
-                                    <span
-                                      className={
-                                        dependency.satisfied
-                                          ? "badge badge-completed"
-                                          : "badge badge-blocked"
-                                      }
-                                    >
-                                      {dependency.satisfied ? "satisfied" : "unsatisfied"}
-                                    </span>
-                                    <span>
-                                      {dependency.successful}/{dependency.total} successful
-                                    </span>
-                                    {dependency.archivedExcluded > 0 ? (
-                                      <span>{dependency.archivedExcluded} archived excluded</span>
-                                    ) : null}
-                                  </>
+                                  <StatusBadge status={dependent.effectiveStatus} />
                                 )}
                               </span>
                             </div>
-                            {canEditDependencies ? (
-                              <button
-                                aria-label={`Remove dependency ${dependencyId}`}
-                                className="icon-btn icon-btn--destructive"
-                                disabled={actionsLocked}
-                                onClick={() => void submitDependencyRemove(dependencyRef)}
-                                title={removeDependencyPending ? "Removing..." : "Remove"}
-                                type="button"
-                              >
-                                <TrashIcon aria-hidden="true" />
-                              </button>
-                            ) : null}
                           </li>
-                        );
-                      })}
-                    </ul>
-                  </div>
-                ) : null}
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                </div>
+              </section>
+            ) : null}
 
-                {run.dependents.length > 0 ? (
-                  <div className="dependency-section">
-                    <h4 className="dependency-section-title">
-                      Required by{" "}
-                      <span className="dependency-section-title__count">
-                        {run.dependents.length}
+            {activeSection === "events" ? (
+              <section aria-label="Attempts" className="drawer-panel drawer-panel--events">
+                <div className="drawer-panel-card timeline-panel">
+                  {timelineState.stale ? (
+                    <div className="notice" data-tone="warning">
+                      <span className="notice__message">
+                        Timeline sync is stale. The drawer is waiting for a clean reload.
                       </span>
-                    </h4>
-                    <ul className="dependency-list">
-                      {run.dependents.map((dependent) => (
-                        <li className="dependency-row" key={dependentDetailKey(dependent)}>
-                          <div className="dependency-copy">
-                            <span className="dependency-name">{dependent.name ?? "Unnamed"}</span>
-                            <span className="dependency-meta">
-                              <span className="dependency-meta-id">{dependent.runId}</span>
-                              {dependent.via === "group" ? (
-                                <span className="dependency-meta-id">
-                                  via group {dependent.dependencyGroupId}
-                                </span>
-                              ) : null}
-                              {dependent.missing || !dependent.effectiveStatus ? (
-                                <span className="badge badge-error">missing</span>
-                              ) : (
-                                <StatusBadge status={dependent.effectiveStatus} />
-                              )}
-                            </span>
+                    </div>
+                  ) : null}
+
+                  {timelineState.error && !selectedAttemptRecord ? (
+                    <p className="muted-inline">{timelineState.error}</p>
+                  ) : null}
+
+                  {timelineState.isLoading &&
+                  timelineAttempts.length === 0 &&
+                  !selectedLiveAttempt ? (
+                    <p className="muted-inline">Loading attempt history…</p>
+                  ) : null}
+
+                  {!timelineState.isLoading &&
+                  timelineAttempts.length === 0 &&
+                  !selectedLiveAttempt &&
+                  !selectedPendingAttempt ? (
+                    <p className="muted-inline">
+                      No attempt history is available for this run yet.
+                    </p>
+                  ) : null}
+
+                  {selectedAttemptRecord || selectedPendingAttempt || selectedLiveAttempt ? (
+                    <div className="timeline-attempt-panel">
+                      <div className="timeline-sticky-controls">
+                        {!selectedLiveAttempt &&
+                        (selectedPendingAttempt || timelineAttempts.length > 1) ? (
+                          <div className="timeline-attempts">
+                            {selectedPendingAttempt ? (
+                              <div className="timeline-attempt-row">
+                                <span className="timeline-attempt-row__label">Attempts</span>
+                                <div
+                                  className="timeline-attempt-tabs"
+                                  role="tablist"
+                                  aria-label="Attempts"
+                                >
+                                  <button
+                                    aria-selected={true}
+                                    className="timeline-attempt-tab active"
+                                    onClick={() => setSelectedAttempt("pending")}
+                                    role="tab"
+                                    type="button"
+                                  >
+                                    <span>Pending</span>
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <>
+                                {timelineSessions.length > 1 ? (
+                                  <div className="timeline-attempt-row">
+                                    <span className="timeline-attempt-row__label">Sessions</span>
+                                    <div
+                                      className="timeline-attempt-tabs"
+                                      role="tablist"
+                                      aria-label="Sessions"
+                                    >
+                                      {timelineSessions.map((session) => {
+                                        const sessionNumber = session.sessionIndex + 1;
+                                        const sessionLatestAttempt =
+                                          session.attempts[session.attempts.length - 1] ?? null;
+                                        return (
+                                          <button
+                                            aria-label={`Session ${sessionNumber}`}
+                                            aria-selected={
+                                              selectedSessionIndex === session.sessionIndex
+                                            }
+                                            className={
+                                              selectedSessionIndex === session.sessionIndex
+                                                ? "timeline-attempt-tab active"
+                                                : "timeline-attempt-tab"
+                                            }
+                                            key={session.sessionIndex}
+                                            onClick={() => {
+                                              if (sessionLatestAttempt) {
+                                                setSelectedAttempt(
+                                                  sessionLatestAttempt.attemptNumber,
+                                                );
+                                              }
+                                            }}
+                                            role="tab"
+                                            type="button"
+                                          >
+                                            <span>{sessionNumber}</span>
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                ) : null}
+
+                                {selectedSessionAttempts.length > 1 ? (
+                                  <div className="timeline-attempt-row">
+                                    <span className="timeline-attempt-row__label">Attempts</span>
+                                    <div
+                                      className="timeline-attempt-tabs"
+                                      role="tablist"
+                                      aria-label="Attempts"
+                                    >
+                                      {selectedSessionAttempts.map((attempt) => {
+                                        const sessionNumber = attempt.sessionIndex + 1;
+                                        const attemptNumber = attempt.attemptIndexInSession + 1;
+                                        const label = `Session ${sessionNumber} attempt ${attemptNumber}, run attempt ${attempt.attemptNumber}${
+                                          attempt.live ? ", live" : ""
+                                        }`;
+                                        return (
+                                          <button
+                                            aria-label={label}
+                                            aria-selected={
+                                              selectedAttemptRecord?.attemptNumber ===
+                                              attempt.attemptNumber
+                                            }
+                                            className={
+                                              selectedAttemptRecord?.attemptNumber ===
+                                              attempt.attemptNumber
+                                                ? "timeline-attempt-tab active"
+                                                : "timeline-attempt-tab"
+                                            }
+                                            key={attempt.attemptNumber}
+                                            onClick={() =>
+                                              setSelectedAttempt(attempt.attemptNumber)
+                                            }
+                                            role="tab"
+                                            title={label}
+                                            type="button"
+                                          >
+                                            <span>{attemptNumber}</span>
+                                            {attempt.live ? (
+                                              <span
+                                                aria-hidden="true"
+                                                className="timeline-live-dot"
+                                              />
+                                            ) : null}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                ) : null}
+                              </>
+                            )}
                           </div>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-              </div>
-            </section>
-          ) : null}
+                        ) : null}
 
-          {activeSection === "events" ? (
-            <section aria-label="Attempts" className="drawer-panel drawer-panel--events">
-              <div className="drawer-panel-card timeline-panel">
-                {timelineState.stale ? (
-                  <div className="notice" data-tone="warning">
-                    <span className="notice__message">
-                      Timeline sync is stale. The drawer is waiting for a clean reload.
-                    </span>
-                  </div>
-                ) : null}
+                        <div className="task-tabs" role="tablist" aria-label="Attempt view">
+                          <button
+                            aria-selected={timelineTab === "message"}
+                            className={timelineTab === "message" ? "task-tab active" : "task-tab"}
+                            onClick={() => setTimelineTab("message")}
+                            role="tab"
+                            type="button"
+                          >
+                            Message
+                          </button>
+                          <button
+                            aria-selected={timelineTab === "prompt"}
+                            className={timelineTab === "prompt" ? "task-tab active" : "task-tab"}
+                            onClick={() => setTimelineTab("prompt")}
+                            role="tab"
+                            type="button"
+                          >
+                            Prompt
+                          </button>
+                          <button
+                            aria-selected={timelineTab === "response"}
+                            className={timelineTab === "response" ? "task-tab active" : "task-tab"}
+                            onClick={() => setTimelineTab("response")}
+                            role="tab"
+                            type="button"
+                          >
+                            Response
+                          </button>
+                          <button
+                            aria-selected={timelineTab === "diagnostics"}
+                            className={
+                              timelineTab === "diagnostics" ? "task-tab active" : "task-tab"
+                            }
+                            onClick={() => setTimelineTab("diagnostics")}
+                            role="tab"
+                            type="button"
+                          >
+                            Diagnostics
+                          </button>
+                        </div>
+                      </div>
 
-                {timelineState.error && !selectedAttemptRecord ? (
-                  <p className="muted-inline">{timelineState.error}</p>
-                ) : null}
-
-                {timelineState.isLoading &&
-                timelineAttempts.length === 0 &&
-                !selectedLiveAttempt ? (
-                  <p className="muted-inline">Loading attempt history…</p>
-                ) : null}
-
-                {!timelineState.isLoading &&
-                timelineAttempts.length === 0 &&
-                !selectedLiveAttempt &&
-                !selectedPendingAttempt ? (
-                  <p className="muted-inline">No attempt history is available for this run yet.</p>
-                ) : null}
-
-                {selectedAttemptRecord || selectedPendingAttempt || selectedLiveAttempt ? (
-                  <div className="timeline-attempt-panel">
-                    <div className="timeline-sticky-controls">
-                      {!selectedLiveAttempt &&
-                      (selectedPendingAttempt || timelineAttempts.length > 1) ? (
-                        <div className="timeline-attempts">
-                          {selectedPendingAttempt ? (
-                            <div className="timeline-attempt-row">
-                              <span className="timeline-attempt-row__label">Attempts</span>
-                              <div
-                                className="timeline-attempt-tabs"
-                                role="tablist"
-                                aria-label="Attempts"
-                              >
+                      <div
+                        className="timeline-content-scroll"
+                        onScroll={handleTimelineContentScroll}
+                        ref={timelineContentScrollRef}
+                      >
+                        {timelineTab === "message" ? (
+                          editingRunMessage ? (
+                            <form
+                              className="reconfigure-form reconfigure-form--message"
+                              onSubmit={submitRunMessageEdit}
+                            >
+                              <label className="resume-dialog__field" htmlFor="run-message-edit">
+                                Message
+                              </label>
+                              <textarea
+                                className="resume-dialog__textarea"
+                                disabled={reconfigurePending}
+                                id="run-message-edit"
+                                onChange={(event) => setRunMessageDraft(event.target.value)}
+                                value={runMessageDraft}
+                              />
+                              <div className="drawer-confirm-actions">
+                                <button className="btn" disabled={reconfigurePending} type="submit">
+                                  {reconfigurePending ? "Saving..." : "Save message"}
+                                </button>
                                 <button
-                                  aria-selected={true}
-                                  className="timeline-attempt-tab active"
-                                  onClick={() => setSelectedAttempt("pending")}
-                                  role="tab"
+                                  className="btn"
+                                  disabled={reconfigurePending}
+                                  onClick={cancelRunMessageEdit}
                                   type="button"
                                 >
-                                  <span>Pending</span>
+                                  Cancel
                                 </button>
                               </div>
-                            </div>
+                            </form>
                           ) : (
-                            <>
-                              {timelineSessions.length > 1 ? (
-                                <div className="timeline-attempt-row">
-                                  <span className="timeline-attempt-row__label">Sessions</span>
-                                  <div
-                                    className="timeline-attempt-tabs"
-                                    role="tablist"
-                                    aria-label="Sessions"
-                                  >
-                                    {timelineSessions.map((session) => {
-                                      const sessionNumber = session.sessionIndex + 1;
-                                      const sessionLatestAttempt =
-                                        session.attempts[session.attempts.length - 1] ?? null;
-                                      return (
-                                        <button
-                                          aria-label={`Session ${sessionNumber}`}
-                                          aria-selected={
-                                            selectedSessionIndex === session.sessionIndex
-                                          }
-                                          className={
-                                            selectedSessionIndex === session.sessionIndex
-                                              ? "timeline-attempt-tab active"
-                                              : "timeline-attempt-tab"
-                                          }
-                                          key={session.sessionIndex}
-                                          onClick={() => {
-                                            if (sessionLatestAttempt) {
-                                              setSelectedAttempt(
-                                                sessionLatestAttempt.attemptNumber,
-                                              );
-                                            }
-                                          }}
-                                          role="tab"
-                                          type="button"
-                                        >
-                                          <span>{sessionNumber}</span>
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
-                                </div>
-                              ) : null}
-
-                              {selectedSessionAttempts.length > 1 ? (
-                                <div className="timeline-attempt-row">
-                                  <span className="timeline-attempt-row__label">Attempts</span>
-                                  <div
-                                    className="timeline-attempt-tabs"
-                                    role="tablist"
-                                    aria-label="Attempts"
-                                  >
-                                    {selectedSessionAttempts.map((attempt) => {
-                                      const sessionNumber = attempt.sessionIndex + 1;
-                                      const attemptNumber = attempt.attemptIndexInSession + 1;
-                                      const label = `Session ${sessionNumber} attempt ${attemptNumber}, run attempt ${attempt.attemptNumber}${
-                                        attempt.live ? ", live" : ""
-                                      }`;
-                                      return (
-                                        <button
-                                          aria-label={label}
-                                          aria-selected={
-                                            selectedAttemptRecord?.attemptNumber ===
-                                            attempt.attemptNumber
-                                          }
-                                          className={
-                                            selectedAttemptRecord?.attemptNumber ===
-                                            attempt.attemptNumber
-                                              ? "timeline-attempt-tab active"
-                                              : "timeline-attempt-tab"
-                                          }
-                                          key={attempt.attemptNumber}
-                                          onClick={() => setSelectedAttempt(attempt.attemptNumber)}
-                                          role="tab"
-                                          title={label}
-                                          type="button"
-                                        >
-                                          <span>{attemptNumber}</span>
-                                          {attempt.live ? (
-                                            <span
-                                              aria-hidden="true"
-                                              className="timeline-live-dot"
-                                            />
-                                          ) : null}
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
-                                </div>
-                              ) : null}
-                            </>
-                          )}
-                        </div>
-                      ) : null}
-
-                      <div className="task-tabs" role="tablist" aria-label="Attempt view">
-                        <button
-                          aria-selected={timelineTab === "message"}
-                          className={timelineTab === "message" ? "task-tab active" : "task-tab"}
-                          onClick={() => setTimelineTab("message")}
-                          role="tab"
-                          type="button"
-                        >
-                          Message
-                        </button>
-                        <button
-                          aria-selected={timelineTab === "prompt"}
-                          className={timelineTab === "prompt" ? "task-tab active" : "task-tab"}
-                          onClick={() => setTimelineTab("prompt")}
-                          role="tab"
-                          type="button"
-                        >
-                          Prompt
-                        </button>
-                        <button
-                          aria-selected={timelineTab === "response"}
-                          className={timelineTab === "response" ? "task-tab active" : "task-tab"}
-                          onClick={() => setTimelineTab("response")}
-                          role="tab"
-                          type="button"
-                        >
-                          Response
-                        </button>
-                        <button
-                          aria-selected={timelineTab === "diagnostics"}
-                          className={timelineTab === "diagnostics" ? "task-tab active" : "task-tab"}
-                          onClick={() => setTimelineTab("diagnostics")}
-                          role="tab"
-                          type="button"
-                        >
-                          Diagnostics
-                        </button>
-                      </div>
-                    </div>
-
-                    <div
-                      className="timeline-content-scroll"
-                      onScroll={handleTimelineContentScroll}
-                      ref={timelineContentScrollRef}
-                    >
-                      {timelineTab === "message" ? (
-                        editingRunMessage ? (
-                          <form
-                            className="reconfigure-form reconfigure-form--message"
-                            onSubmit={submitRunMessageEdit}
-                          >
-                            <label className="resume-dialog__field" htmlFor="run-message-edit">
-                              Message
-                            </label>
-                            <textarea
-                              className="resume-dialog__textarea"
-                              disabled={reconfigurePending}
-                              id="run-message-edit"
-                              onChange={(event) => setRunMessageDraft(event.target.value)}
-                              value={runMessageDraft}
-                            />
-                            <div className="drawer-confirm-actions">
-                              <button className="btn" disabled={reconfigurePending} type="submit">
-                                {reconfigurePending ? "Saving..." : "Save message"}
-                              </button>
-                              <button
-                                className="btn"
-                                disabled={reconfigurePending}
-                                onClick={cancelRunMessageEdit}
-                                type="button"
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          </form>
-                        ) : (
-                          <section aria-label="Run message">
-                            <div className="timeline-section-actions">{editRunMessageButton}</div>
-                            {run.message ? (
-                              <MarkdownContent className="timeline-content" text={run.message} />
+                            <section aria-label="Run message">
+                              <div className="timeline-section-actions">{editRunMessageButton}</div>
+                              {run.message ? (
+                                <MarkdownContent className="timeline-content" text={run.message} />
+                              ) : (
+                                <p className="task-empty">No message was provided for this run.</p>
+                              )}
+                            </section>
+                          )
+                        ) : timelineTab === "prompt" ? (
+                          selectedPendingAttempt ? (
+                            run.pendingPrompt ? (
+                              <section aria-label="Pending prompt">
+                                <MarkdownContent
+                                  className="timeline-content"
+                                  text={run.pendingPrompt}
+                                />
+                              </section>
                             ) : (
-                              <p className="task-empty">No message was provided for this run.</p>
-                            )}
-                          </section>
-                        )
-                      ) : timelineTab === "prompt" ? (
-                        selectedPendingAttempt ? (
-                          run.pendingPrompt ? (
-                            <section aria-label="Pending prompt">
+                              <p className="task-empty">
+                                No prompt preview is available for this run yet.
+                              </p>
+                            )
+                          ) : selectedAttemptRecord?.prompt ? (
+                            <section aria-label="Attempt prompt">
                               <MarkdownContent
                                 className="timeline-content"
-                                text={run.pendingPrompt}
+                                text={selectedAttemptRecord.prompt}
+                              />
+                            </section>
+                          ) : (
+                            <p className="task-empty">This attempt did not record a prompt.</p>
+                          )
+                        ) : timelineTab === "response" ? (
+                          selectedPendingAttempt ? (
+                            <p className="task-empty">
+                              No response yet — this run has not started.
+                            </p>
+                          ) : selectedAttemptResponse ? (
+                            <section aria-label="Attempt response">
+                              <MarkdownContent
+                                className="timeline-content"
+                                text={selectedAttemptResponse}
                               />
                             </section>
                           ) : (
                             <p className="task-empty">
-                              No prompt preview is available for this run yet.
+                              {selectedAttemptLive
+                                ? "Waiting for live response text…"
+                                : "This attempt produced no transcript response."}
                             </p>
                           )
-                        ) : selectedAttemptRecord?.prompt ? (
-                          <section aria-label="Attempt prompt">
+                        ) : selectedPendingAttempt ? (
+                          <p className="task-empty">
+                            No diagnostics yet — this run has not started.
+                          </p>
+                        ) : selectedAttemptDiagnostics ? (
+                          <section aria-label="Attempt diagnostics">
                             <MarkdownContent
                               className="timeline-content"
-                              text={selectedAttemptRecord.prompt}
-                            />
-                          </section>
-                        ) : (
-                          <p className="task-empty">This attempt did not record a prompt.</p>
-                        )
-                      ) : timelineTab === "response" ? (
-                        selectedPendingAttempt ? (
-                          <p className="task-empty">No response yet — this run has not started.</p>
-                        ) : selectedAttemptResponse ? (
-                          <section aria-label="Attempt response">
-                            <MarkdownContent
-                              className="timeline-content"
-                              text={selectedAttemptResponse}
+                              text={selectedAttemptDiagnostics}
                             />
                           </section>
                         ) : (
                           <p className="task-empty">
                             {selectedAttemptLive
-                              ? "Waiting for live response text…"
-                              : "This attempt produced no transcript response."}
+                              ? "No diagnostics have arrived yet."
+                              : "This attempt produced no diagnostics."}
                           </p>
-                        )
-                      ) : selectedPendingAttempt ? (
-                        <p className="task-empty">No diagnostics yet — this run has not started.</p>
-                      ) : selectedAttemptDiagnostics ? (
-                        <section aria-label="Attempt diagnostics">
-                          <MarkdownContent
-                            className="timeline-content"
-                            text={selectedAttemptDiagnostics}
-                          />
-                        </section>
-                      ) : (
-                        <p className="task-empty">
-                          {selectedAttemptLive
-                            ? "No diagnostics have arrived yet."
-                            : "This attempt produced no diagnostics."}
-                        </p>
-                      )}
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ) : null}
-              </div>
-            </section>
-          ) : null}
-        </div>
+                  ) : null}
+                </div>
+              </section>
+            ) : null}
+          </div>
+        )}
       </aside>
     </>
   );

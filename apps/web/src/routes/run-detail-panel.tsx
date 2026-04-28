@@ -1,7 +1,7 @@
 import type { UseQueryResult } from "@tanstack/react-query";
 import type { AttachmentListEntry } from "@task-runner/core/contracts/attachments.js";
 import type { RunDependencyRef, RunDetail, RunSummary } from "@task-runner/core/contracts/runs.js";
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { AttachmentPreviewDrawer } from "../components/attachment-preview-drawer.js";
 import { ResumeRunDialog } from "../components/resume-run-dialog.js";
 import { RunDetailDrawer } from "../components/run-detail-drawer.js";
@@ -9,13 +9,15 @@ import type { ReconfigureRunPatch } from "../lib/api-client.js";
 import { isNotFoundError } from "../lib/api-client.js";
 import type { RunAuditState } from "../lib/run-audit.js";
 import type { RunTimelineState } from "../lib/run-timeline.js";
-import type { DrawerDetailSection, RunDrawerView } from "../lib/settings.js";
+import type { DashboardRightSurface, DrawerDetailSection, RunDrawerView } from "../lib/settings.js";
 import type { RunActionPending } from "./use-runs-dashboard-state.js";
 
 export function RunDetailPanel({
+  activeRightSurface,
   onAddDependency,
   actionError,
   actionPending,
+  chatSurface,
   drawerFullscreen,
   drawerWidth,
   drawerView,
@@ -48,6 +50,7 @@ export function RunDetailPanel({
   onSetPinned,
   onSetScheduleEnabled,
   onSelectDetailSection,
+  onSelectRightSurface,
   onSubmitResume,
   onTriggerPrimaryAction,
   onUnarchive,
@@ -63,9 +66,11 @@ export function RunDetailPanel({
   auditState,
   timelineState,
 }: {
+  activeRightSurface: DashboardRightSurface;
   onAddDependency: (runId: string, dependency: RunDependencyRef) => Promise<void>;
   actionError?: string;
   actionPending?: RunActionPending;
+  chatSurface: ReactNode;
   drawerFullscreen: boolean;
   drawerWidth: number;
   drawerView?: RunDrawerView;
@@ -98,6 +103,7 @@ export function RunDetailPanel({
   onSetPinned: (runId: string, pinned: boolean) => Promise<void>;
   onSetScheduleEnabled: (runId: string, enabled: boolean) => Promise<void>;
   onSelectDetailSection: (section: DrawerDetailSection) => void;
+  onSelectRightSurface: (surface: DashboardRightSurface) => void;
   onSubmitResume: () => Promise<void>;
   onTriggerPrimaryAction: () => Promise<void>;
   onUnarchive: (runId: string) => void;
@@ -256,6 +262,8 @@ export function RunDetailPanel({
     <>
       <RunDetailDrawer
         activeSection={drawerView?.detailSection ?? "tasks"}
+        activeSurface={activeRightSurface}
+        chatSurface={chatSurface}
         dependencyCandidateRuns={runs}
         onAddDependency={(dependency) => onAddDependency(selectedRun.runId, dependency)}
         actionError={actionError}
@@ -289,6 +297,7 @@ export function RunDetailPanel({
         onSetPinned={(pinned) => onSetPinned(selectedRun.runId, pinned)}
         onSetScheduleEnabled={(enabled) => onSetScheduleEnabled(selectedRun.runId, enabled)}
         onSelectSection={onSelectDetailSection}
+        onSelectSurface={onSelectRightSurface}
         onTriggerPrimaryAction={onTriggerPrimaryAction}
         auditState={auditState}
         timelineState={timelineState}

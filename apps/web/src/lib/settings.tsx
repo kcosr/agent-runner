@@ -59,9 +59,6 @@ export interface DashboardViewState {
   search: string;
   collapsedColumnKeys: string[];
   drawerWidth: number;
-  detailOpen: boolean;
-  chatOpen: boolean;
-  chatWidth: number;
   activeRightSurface: DashboardRightSurface;
   drawerFullscreen: boolean;
   drawerViewsByRunId: Record<string, RunDrawerView>;
@@ -80,9 +77,6 @@ const DRAWER_WIDTH_MAX = 2400;
 const DRAWER_WIDTH_DEFAULT = 540;
 const DRAWER_SIDEBAR_ALLOWANCE = 56;
 const DRAWER_BOARD_MIN = 280;
-export const CHAT_WIDTH_MIN = 360;
-export const CHAT_WIDTH_MAX = 720;
-export const CHAT_WIDTH_DEFAULT = 420;
 
 export const DEFAULT_DASHBOARD_PREFERENCES: DashboardPreferences = {
   hideEmptyColumns: true,
@@ -101,9 +95,6 @@ const DEFAULT_DASHBOARD_VIEW_STATE: DashboardViewState = {
   search: "",
   collapsedColumnKeys: [],
   drawerWidth: DRAWER_WIDTH_DEFAULT,
-  detailOpen: true,
-  chatOpen: false,
-  chatWidth: CHAT_WIDTH_DEFAULT,
   activeRightSurface: "detail",
   drawerFullscreen: false,
   drawerViewsByRunId: {},
@@ -115,13 +106,6 @@ function clampDrawerWidth(value: number): number {
     return DRAWER_WIDTH_DEFAULT;
   }
   return Math.min(DRAWER_WIDTH_MAX, Math.max(DRAWER_WIDTH_MIN, Math.round(value)));
-}
-
-function clampChatWidth(value: number): number {
-  if (!Number.isFinite(value)) {
-    return CHAT_WIDTH_DEFAULT;
-  }
-  return Math.min(CHAT_WIDTH_MAX, Math.max(CHAT_WIDTH_MIN, Math.round(value)));
 }
 
 export function computeDrawerMaxWidth(viewportWidth: number): number {
@@ -269,18 +253,6 @@ function parseStoredDashboardViewState(value: unknown): DashboardViewState {
       typeof record.drawerWidth === "number"
         ? clampDrawerWidth(record.drawerWidth)
         : DEFAULT_DASHBOARD_VIEW_STATE.drawerWidth,
-    detailOpen:
-      typeof record.detailOpen === "boolean"
-        ? record.detailOpen
-        : DEFAULT_DASHBOARD_VIEW_STATE.detailOpen,
-    chatOpen:
-      typeof record.chatOpen === "boolean"
-        ? record.chatOpen
-        : DEFAULT_DASHBOARD_VIEW_STATE.chatOpen,
-    chatWidth:
-      typeof record.chatWidth === "number"
-        ? clampChatWidth(record.chatWidth)
-        : DEFAULT_DASHBOARD_VIEW_STATE.chatWidth,
     activeRightSurface:
       record.activeRightSurface === "detail" || record.activeRightSurface === "chat"
         ? record.activeRightSurface
@@ -329,20 +301,10 @@ export function DashboardSettingsProvider({ children }: { children: ReactNode })
       JSON.stringify({
         collapsedColumnKeys: viewState.collapsedColumnKeys,
         drawerWidth: viewState.drawerWidth,
-        detailOpen: viewState.detailOpen,
-        chatOpen: viewState.chatOpen,
-        chatWidth: viewState.chatWidth,
         activeRightSurface: viewState.activeRightSurface,
       }),
     );
-  }, [
-    viewState.activeRightSurface,
-    viewState.chatOpen,
-    viewState.chatWidth,
-    viewState.collapsedColumnKeys,
-    viewState.detailOpen,
-    viewState.drawerWidth,
-  ]);
+  }, [viewState.activeRightSurface, viewState.collapsedColumnKeys, viewState.drawerWidth]);
 
   const preferencesValue = useMemo<DashboardPreferencesContextValue>(
     () => ({
