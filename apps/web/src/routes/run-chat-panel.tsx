@@ -90,6 +90,22 @@ function RetryAttempts({ attempts }: { attempts: RunChatRetryAttempt[] }) {
   );
 }
 
+function ChatConversationSkeleton() {
+  return (
+    <div aria-label="Loading conversation" className="chat-message-list chat-message-list--loading">
+      <div className="chat-skeleton-bubble chat-skeleton-bubble--user">
+        <div className="skeleton-line skeleton-line--medium" />
+        <div className="skeleton-line skeleton-line--short" />
+      </div>
+      <div className="chat-skeleton-bubble chat-skeleton-bubble--assistant">
+        <div className="skeleton-line skeleton-line--short" />
+        <div className="skeleton-line skeleton-line--medium" />
+        <div className="skeleton-line" />
+      </div>
+    </div>
+  );
+}
+
 function ChatRow({ row }: { row: RunChatRow }) {
   if (row.kind === "user") {
     return (
@@ -145,9 +161,11 @@ export function RunChatPanel({
   const resetRunIdRef = useRef(selectedRunId);
   const stickToBottomRef = useRef(true);
   const selectedRun = selectedRunQuery.data;
+  const timelineHistory = timelineState.history;
+  const timelineReady = timelineHistory !== null;
   const rows = useMemo(
-    () => (selectedRun ? deriveRunChatRows(selectedRun, timelineState.history) : []),
-    [selectedRun, timelineState.history],
+    () => (selectedRun && timelineHistory ? deriveRunChatRows(selectedRun, timelineHistory) : []),
+    [selectedRun, timelineHistory],
   );
   const resumePending = actionPending === "resume";
   const trimmedDraft = draft.trim();
@@ -234,7 +252,7 @@ export function RunChatPanel({
     }
 
     if (detailSettling || selectedRunQuery.isPending) {
-      return <p className="chat-state chat-state--compact">Loading selected run...</p>;
+      return <ChatConversationSkeleton />;
     }
 
     if (selectedRunQuery.isError) {
@@ -249,8 +267,8 @@ export function RunChatPanel({
       );
     }
 
-    if (timelineState.isLoading && rows.length === 0) {
-      return <p className="chat-state chat-state--compact">Loading conversation history...</p>;
+    if (!timelineReady || (timelineState.isLoading && rows.length === 0)) {
+      return <ChatConversationSkeleton />;
     }
 
     if (rows.length === 0) {

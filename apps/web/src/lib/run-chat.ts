@@ -95,13 +95,7 @@ export function deriveRunChatRows(
   }
 
   const sessionsByIndex = new Map(run.sessions.map((session) => [session.sessionIndex, session]));
-  const sessionIndexes = new Set<number>([
-    ...run.sessions.map((session) => session.sessionIndex),
-    ...attemptsBySession.keys(),
-  ]);
-  if (normalizedMessage(run.message) !== null) {
-    sessionIndexes.add(0);
-  }
+  const sessionIndexes = new Set<number>(attemptsBySession.keys());
 
   const rows: RunChatRow[] = [];
   for (const sessionIndex of [...sessionIndexes].sort((left, right) => left - right)) {

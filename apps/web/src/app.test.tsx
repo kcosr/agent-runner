@@ -1995,6 +1995,83 @@ describe("web app", () => {
     ).toHaveLength(1);
   });
 
+  it("shows a Chat loading skeleton instead of user messages until timeline history loads", async () => {
+    setStoredDashboardViewState({ chatOpen: true, activeRightSurface: "chat" });
+    const timelineHistory = {
+      runId: "run-1",
+      lastCursor: 1,
+      attempts: [
+        {
+          attemptNumber: 1,
+          attemptIndexInSession: 0,
+          sessionIndex: 0,
+          startedAt: "2026-04-13T05:00:00.000Z",
+          endedAt: "2026-04-13T05:01:00.000Z",
+          prompt: "Timeline prompt",
+          transcript: "Timeline response",
+          notices: "",
+          exitCode: 0,
+          timedOut: false,
+          live: false,
+        },
+      ],
+    } satisfies RunTimelineHistory;
+    const timelineResponse = () => new Response(JSON.stringify({ history: timelineHistory }));
+    let releaseTimeline: (() => void) | undefined;
+    let timelineReleased = false;
+    installFetchMock(
+      {
+        runs: [
+          makeRun({
+            status: "success",
+            endedAt: "2026-04-13T05:02:00.000Z",
+            currentSession: null,
+          }),
+        ],
+        details: {
+          "run-1": makeDetail({
+            status: "success",
+            isLive: false,
+            endedAt: "2026-04-13T05:02:00.000Z",
+            message: "Initial dashboard request",
+            currentSession: null,
+          }),
+        },
+      },
+      {
+        handleRequest: (url, init) => {
+          if (!url.endsWith("/api/runs/run-1/timeline") || init?.method) {
+            return undefined;
+          }
+          if (timelineReleased) {
+            return timelineResponse();
+          }
+          return new Promise<Response>((resolve) => {
+            releaseTimeline = () => {
+              timelineReleased = true;
+              resolve(timelineResponse());
+            };
+          });
+        },
+      },
+    );
+
+    await renderApp("/runs/run-1");
+
+    const chat = await screen.findByLabelText("Run chat");
+    expect(await within(chat).findByLabelText("Loading conversation")).toBeInTheDocument();
+    expect(within(chat).queryByText("Initial dashboard request")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(releaseTimeline).toBeDefined();
+    });
+
+    releaseTimeline?.();
+
+    expect(await within(chat).findByText("Timeline prompt")).toBeInTheDocument();
+    expect(await within(chat).findByText("Timeline response")).toBeInTheDocument();
+    expect(within(chat).queryByLabelText("Loading conversation")).not.toBeInTheDocument();
+  });
+
   it("submits Chat composer messages through resume and clears the draft on success", async () => {
     setStoredDashboardViewState({ chatOpen: true, activeRightSurface: "chat" });
     let resumeBody: { overrides?: { message?: string } } | undefined;

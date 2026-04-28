@@ -1150,6 +1150,10 @@ body {
   padding: 18px;
 }
 
+.chat-message-list--loading {
+  pointer-events: none;
+}
+
 .chat-row {
   display: flex;
   flex-direction: column;
@@ -1184,6 +1188,25 @@ body {
 
 .chat-bubble p {
   margin: 0;
+}
+
+.chat-skeleton-bubble {
+  display: flex;
+  width: min(82%, 22rem);
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+}
+
+.chat-skeleton-bubble--user {
+  align-self: flex-end;
+}
+
+.chat-skeleton-bubble--assistant {
+  align-self: flex-start;
+  width: min(88%, 24rem);
 }
 
 .chat-markdown {

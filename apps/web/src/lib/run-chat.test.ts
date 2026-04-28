@@ -120,7 +120,7 @@ function makeRun(overrides: Partial<RunDetail> = {}): RunDetail {
 }
 
 describe("deriveRunChatRows", () => {
-  it("derives initial and resume user rows without treating blank messages as content", () => {
+  it("does not derive user rows from run or session messages before attempts exist", () => {
     const rows = deriveRunChatRows(
       makeRun({
         message: "  Initial request  ",
@@ -133,22 +133,7 @@ describe("deriveRunChatRows", () => {
       null,
     );
 
-    expect(rows).toEqual([
-      {
-        id: "session:0:user",
-        kind: "user",
-        sessionIndex: 0,
-        source: "initial",
-        text: "Initial request",
-      },
-      {
-        id: "session:2:user",
-        kind: "user",
-        sessionIndex: 2,
-        source: "resume",
-        text: "Follow-up",
-      },
-    ]);
+    expect(rows).toEqual([]);
   });
 
   it("sorts sessions and attempts, promotes the latest attempt, and keeps retries as details", () => {
@@ -174,7 +159,6 @@ describe("deriveRunChatRows", () => {
       "session:0:assistant:2",
       "session:1:user",
       "session:1:assistant:4",
-      "session:2:user",
     ]);
     expect(rows[0]).toMatchObject({
       kind: "user",
@@ -196,6 +180,32 @@ describe("deriveRunChatRows", () => {
       transcript: "latest session 1",
       retryAttempts: [{ attemptNumber: 3, transcript: "prior session 1" }],
     });
+  });
+
+  it("uses stored run and session messages only as attempt prompt fallbacks", () => {
+    const rows = deriveRunChatRows(
+      makeRun({
+        message: "Initial fallback",
+        sessions: [
+          makeSession({ sessionIndex: 0, message: null }),
+          makeSession({ sessionIndex: 1, message: "Resume fallback" }),
+          makeSession({ sessionIndex: 2, message: "Hidden until attempted" }),
+        ],
+      }),
+      makeHistory([
+        makeAttempt({ sessionIndex: 0, attemptNumber: 1, prompt: "  " }),
+        makeAttempt({ sessionIndex: 1, attemptNumber: 2, prompt: "" }),
+      ]),
+    );
+
+    expect(rows.map((row) => row.id)).toEqual([
+      "session:0:user",
+      "session:0:assistant:1",
+      "session:1:user",
+      "session:1:assistant:2",
+    ]);
+    expect(rows[0]).toMatchObject({ kind: "user", text: "Initial fallback" });
+    expect(rows[2]).toMatchObject({ kind: "user", text: "Resume fallback" });
   });
 
   it("renders attempt prompts as user rows and retains live or empty transcript states", () => {
