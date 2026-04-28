@@ -21,7 +21,6 @@ export interface RunChatRetryAttempt {
   live: boolean;
   transcript: string;
   emptyState?: RunChatAssistantEmptyState;
-  notices: string;
 }
 
 export interface RunChatAssistantRow extends RunChatRetryAttempt {
@@ -56,7 +55,6 @@ function toRetryAttempt(attempt: RunTimelineAttempt): RunChatRetryAttempt {
     live: attempt.live,
     transcript: attempt.transcript,
     emptyState: attemptEmptyState(attempt),
-    notices: attempt.notices,
   };
 }
 

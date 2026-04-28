@@ -1237,7 +1237,6 @@ body {
   padding: 8px 0 0;
 }
 
-.chat-diagnostic-block,
 .chat-retry {
   margin-top: 8px;
   border: 1px solid var(--border);
@@ -1246,20 +1245,12 @@ body {
   padding: 8px;
 }
 
-.chat-diagnostic-label,
 .chat-retry__meta {
   display: block;
   margin-bottom: 6px;
   color: var(--muted-foreground);
   font-size: 11.5px;
   font-weight: 600;
-}
-
-.chat-diagnostic-block pre {
-  max-height: 12rem;
-  margin: 0;
-  overflow: auto;
-  white-space: pre-wrap;
 }
 
 .chat-retry-list {

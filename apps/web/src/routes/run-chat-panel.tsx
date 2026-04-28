@@ -64,30 +64,6 @@ function renderAttemptMeta(attempt: RunChatRetryAttempt) {
   return meta.join(" · ");
 }
 
-function AttemptDiagnostics({
-  attempt,
-  label,
-}: {
-  attempt: RunChatRetryAttempt;
-  label: string;
-}) {
-  if (!attempt.notices.trim()) {
-    return null;
-  }
-
-  return (
-    <details className="chat-details">
-      <summary>{label}</summary>
-      {attempt.notices.trim() ? (
-        <div className="chat-diagnostic-block">
-          <span className="chat-diagnostic-label">Notices</span>
-          <pre>{attempt.notices}</pre>
-        </div>
-      ) : null}
-    </details>
-  );
-}
-
 function RetryAttempts({ attempts }: { attempts: RunChatRetryAttempt[] }) {
   if (attempts.length === 0) {
     return null;
@@ -107,7 +83,6 @@ function RetryAttempts({ attempts }: { attempts: RunChatRetryAttempt[] }) {
             ) : (
               <p className="task-empty">{assistantEmptyText(attempt.emptyState)}</p>
             )}
-            <AttemptDiagnostics attempt={attempt} label="Notices and diagnostics" />
           </article>
         ))}
       </div>
@@ -140,7 +115,6 @@ function AssistantChatRow({ row }: { row: RunChatAssistantRow }) {
         )}
       </div>
       <div className="chat-secondary">
-        <AttemptDiagnostics attempt={row} label="Notices and diagnostics" />
         <RetryAttempts attempts={row.retryAttempts} />
       </div>
     </article>
@@ -312,13 +286,6 @@ export function RunChatPanel({
         </div>
       </header>
       {selectedRun?.name ? <div className="chat-run-name">{selectedRun.name}</div> : null}
-      {timelineState.stale ? (
-        <div className="notice chat-notice" data-tone="warning">
-          <span className="notice__message">
-            Conversation updates are stale. The panel will refresh when the timeline reconnects.
-          </span>
-        </div>
-      ) : null}
       {timelineState.error ? (
         <div className="notice chat-notice" data-tone="error">
           <span className="notice__message">{timelineState.error}</span>

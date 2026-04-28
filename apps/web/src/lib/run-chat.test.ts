@@ -198,7 +198,7 @@ describe("deriveRunChatRows", () => {
     });
   });
 
-  it("renders attempt prompts as user rows and retains notices plus live or empty transcript states", () => {
+  it("renders attempt prompts as user rows and retains live or empty transcript states", () => {
     const rows = deriveRunChatRows(
       makeRun({
         sessions: [makeSession({ sessionIndex: 0, message: null })],
@@ -233,13 +233,11 @@ describe("deriveRunChatRows", () => {
       attemptNumber: 2,
       transcript: "   ",
       emptyState: "waiting_live_response",
-      notices: "live notice",
       retryAttempts: [
         {
           attemptNumber: 1,
           transcript: "",
           emptyState: "no_response_recorded",
-          notices: "backend notice",
         },
       ],
     });

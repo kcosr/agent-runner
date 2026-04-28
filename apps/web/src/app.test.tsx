@@ -1954,6 +1954,8 @@ describe("web app", () => {
     expect(within(chat).getByText("markdown").tagName).toBe("STRONG");
     expect(within(chat).getByText("list item").closest("li")).not.toBeNull();
     expect(within(chat).queryByText("Initial dashboard request")).not.toBeInTheDocument();
+    expect(within(chat).queryByText("Notices and diagnostics")).not.toBeInTheDocument();
+    expect(within(chat).queryByText("backend notice")).not.toBeInTheDocument();
     expect(await within(chat).findByText("Streaming answer")).toBeInTheDocument();
     expect(
       fetchCallCount(fetchMock, (url) => url.endsWith("/api/runs/run-1/timeline")),
@@ -1966,6 +1968,11 @@ describe("web app", () => {
 
     const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
     timelineSource.emitOpen();
+    timelineSource.emitError();
+    await waitFor(() => {
+      expect(within(chat).queryByText(/conversation updates are stale/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/live updates are temporarily stale/i)).not.toBeInTheDocument();
+    });
     timelineSource.emitMessage({
       runId: "run-1",
       cursor: 2,

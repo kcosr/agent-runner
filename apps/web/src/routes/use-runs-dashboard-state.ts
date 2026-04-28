@@ -1456,7 +1456,7 @@ export function useRunsDashboardState() {
     selectedRunQuery,
     setResumeMessageDraft,
     setResumeMessageExpanded,
-    streamStale: summaryStreamStale || detailStreamStale || timelineState.stale || auditState.stale,
+    streamStale: summaryStreamStale || detailStreamStale || auditState.stale,
     auditState,
     submitSelectedRunResume,
     timelineState,
