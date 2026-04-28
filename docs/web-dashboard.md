@@ -20,20 +20,47 @@ those plus the active run id.
 
 ## Views
 
-- `/` — Runs dashboard (board + detail drawer).
-- `/runs/:runId` — Same dashboard with a specific run's detail drawer
-  open.
+- `/` — Runs dashboard with Board, Detail, and Chat surfaces.
+- `/runs/:runId` — Same dashboard with a specific run selected for the
+  Detail and Chat surfaces.
 - `/settings/general` — General preferences.
 - `/settings/keybindings` — Keyboard shortcut reference.
 
 ### Runs dashboard
 
-A three-pane layout:
+A multi-surface workspace:
 
-- **Left** — search, grouped Filters control, preference toggles.
-- **Center** — kanban board grouped by run status.
-- **Right** — resizable detail drawer (hidden by default until you select
-  a run).
+- **Left** — search, grouped Filters control, preference toggles, and
+  persistent Detail/Chat side-surface toggles.
+- **Center** — Board, the kanban run list grouped by run status.
+- **Right** — Detail and Chat side surfaces for the selected run.
+
+Board is always visible. Detail is the operational inspector for the
+selected run, and Chat is a selected-run-bound conversational projection
+of the same run. Opening Chat does not create a separate chat route or
+backend chat contract; it follows the selected run, derives messages from
+`RunDetail` plus timeline history, and streams live output through the
+existing timeline stream.
+
+Detail and Chat each have toolbar toggles plus close buttons in their
+panel headers. Closing one side surface hides only that panel and keeps
+the selected run intact for the other surface. Navigating back to `/`
+clears the selected run; if Chat remains open, it shows the no-run empty
+state until a board card is selected.
+
+Dashboard view state persists the durable surface layout fields:
+collapsed board columns, Detail width, Detail open state, Chat open
+state, Chat width, and the active right surface. Detail keeps the existing
+resizable drawer width. Chat has its own resizable width, clamped between
+360 and 720 pixels. Search text, fullscreen state, per-run drawer tabs,
+and the active board column remain transient.
+
+On wide desktop layouts, open side surfaces render inline: Board only,
+Board + Detail, Board + Chat, or Board + Detail + Chat. At narrower
+breakpoints, when both side surfaces are open, the right region exposes
+Detail and Chat selector tabs and shows one active surface at a time. If
+the active right surface is closed, the dashboard switches to the other
+open side surface.
 
 The grouped **Filters** control opens an anchored popover on desktop and a
 sheet-style overlay on narrow/mobile layouts. It applies exact-match
@@ -144,6 +171,28 @@ within its session. The Attempts tab groups timeline rows by session and
 labels each row with its monotonic attempt number plus session-local
 attempt position.
 
+The Detail Attempts tab remains the operational timeline view. It shares
+the same timeline state as Chat, so opening Chat can activate timeline
+history and streaming without starting a duplicate timeline subscription.
+
+### Chat
+
+Chat renders the selected run as a conversational thread. Session `0`
+uses the run's initial message as the user bubble when present, resumed
+sessions use their session message, and assistant bubbles use the latest
+attempt transcript for each session. Prior attempts, notices, and
+diagnostics remain available as secondary details instead of becoming
+main chat messages.
+
+The composer is fixed at the bottom of the Chat panel for a selected
+run. It sends only non-empty trimmed messages through the existing resume
+API, using the same resume mutation path as the Detail Resume dialog.
+Success clears the draft and lets live timeline output appear in Chat;
+failure keeps the draft visible with the daemon error in the panel. Runs
+that cannot resume, no selected run, and pending resume requests disable
+the composer. The Detail Resume dialog remains available for existing
+resume flows, including resume-without-message where allowed.
+
 ## Live projections
 
 The dashboard consumes four independent streams:
@@ -153,7 +202,7 @@ The dashboard consumes four independent streams:
 | `run_summary` | `/api/events/run-summaries` | Board cards |
 | `run_detail` | `/api/runs/:runId/events/detail` | Drawer header, tabs |
 | `run_audit` | `/api/runs/:runId/events/audit` (+ `/audit` history) | Audit tab |
-| `run_timeline` | `/api/runs/:runId/events/timeline` (+ `/timeline` history) | Attempts tab |
+| `run_timeline` | `/api/runs/:runId/events/timeline` (+ `/timeline` history) | Attempts tab and Chat |
 
 The timeline and audit streams both use monotonically increasing cursors
 for ordering and reconnect safety after their tabs are first opened. Those

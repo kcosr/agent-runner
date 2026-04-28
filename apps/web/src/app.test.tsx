@@ -49,8 +49,18 @@ const DEFAULT_DASHBOARD_PREFERENCES = {
 
 const DEFAULT_DASHBOARD_VIEW_STATE: {
   collapsedColumnKeys: string[];
+  drawerWidth: number;
+  detailOpen: boolean;
+  chatOpen: boolean;
+  chatWidth: number;
+  activeRightSurface: "detail" | "chat";
 } = {
   collapsedColumnKeys: [],
+  drawerWidth: 540,
+  detailOpen: true,
+  chatOpen: false,
+  chatWidth: 420,
+  activeRightSurface: "detail",
 };
 
 class MockEventSource {
@@ -1820,6 +1830,188 @@ describe("web app", () => {
         /Audit while away/,
       ),
     ).toBeInTheDocument();
+  });
+
+  it("toggles and closes Detail and Chat surfaces without clearing selected run state", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await findRunCard("Build dashboard");
+
+    await user.click(screen.getByRole("button", { name: "Chat" }));
+    expect(await screen.findByLabelText("Run chat")).toBeInTheDocument();
+    expect(screen.getByText("Choose a board card to view its conversation.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Close chat" }));
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Run chat")).not.toBeInTheDocument();
+    });
+
+    await user.click(await findRunCard("Build dashboard"));
+    expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
+
+    await user.click(getCloseDetailButton());
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Run detail")).not.toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Chat" }));
+    const selectedChat = await screen.findByLabelText("Run chat");
+    expect(await within(selectedChat).findByText("run-1")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Detail" }));
+    expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
+  });
+
+  it("renders selected-run Chat, activates the existing timeline once, and streams deltas", async () => {
+    setStoredDashboardViewState({ chatOpen: true, activeRightSurface: "chat" });
+    const fetchMock = installFetchMock({
+      runs: [makeRun()],
+      details: {
+        "run-1": makeDetail({
+          message: "Initial dashboard request",
+        }),
+      },
+      timelineHistories: {
+        "run-1": {
+          runId: "run-1",
+          lastCursor: 1,
+          attempts: [
+            {
+              attemptNumber: 1,
+              attemptIndexInSession: 0,
+              sessionIndex: 0,
+              startedAt: "2026-04-13T05:00:00.000Z",
+              endedAt: null,
+              prompt: "Prompt",
+              transcript: "Streaming answer",
+              notices: "backend notice",
+              exitCode: null,
+              timedOut: false,
+              live: true,
+            },
+          ],
+        },
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+
+    const chat = await screen.findByLabelText("Run chat");
+    expect(await within(chat).findByText("run-1")).toBeInTheDocument();
+    expect(await within(chat).findByText("Build dashboard")).toBeInTheDocument();
+    expect(await within(chat).findByText("Initial dashboard request")).toBeInTheDocument();
+    expect(await within(chat).findByText("Streaming answer")).toBeInTheDocument();
+    expect(
+      fetchCallCount(fetchMock, (url) => url.endsWith("/api/runs/run-1/timeline")),
+    ).toBeGreaterThanOrEqual(1);
+    expect(
+      MockEventSource.instances.filter((source) =>
+        source.url.endsWith("/api/runs/run-1/events/timeline"),
+      ),
+    ).toHaveLength(1);
+
+    const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
+    timelineSource.emitOpen();
+    timelineSource.emitMessage({
+      runId: "run-1",
+      cursor: 2,
+      event: {
+        type: "agent_message_delta",
+        text: " live",
+      },
+    });
+
+    expect(await within(chat).findByText("Streaming answer live")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Attempts" }));
+    expect(await screen.findByRole("region", { name: "Attempt response" })).toHaveTextContent(
+      "Streaming answer live",
+    );
+    expect(
+      MockEventSource.instances.filter((source) =>
+        source.url.endsWith("/api/runs/run-1/events/timeline"),
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("submits Chat composer messages through resume and clears the draft on success", async () => {
+    setStoredDashboardViewState({ chatOpen: true, activeRightSurface: "chat" });
+    let resumeBody: { overrides?: { message?: string } } | undefined;
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest: (url, init) => {
+          if (!url.endsWith("/api/runs/run-1/resume") || init?.method !== "POST") {
+            return undefined;
+          }
+          resumeBody =
+            typeof init.body === "string" && init.body.length > 0
+              ? (JSON.parse(init.body) as { overrides?: { message?: string } })
+              : undefined;
+          return new Response(JSON.stringify({ runId: "run-1" }), { status: 200 });
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+
+    const message = await screen.findByLabelText("Message");
+    await waitFor(() => {
+      expect(message).toBeEnabled();
+    });
+    await user.type(message, "  Continue from chat  ");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => {
+      expect(resumeBody).toEqual({ overrides: { message: "Continue from chat" } });
+    });
+    await waitFor(() => {
+      expect(message).toHaveValue("");
+    });
+  });
+
+  it("preserves the Chat composer draft and shows the API error after resume failure", async () => {
+    setStoredDashboardViewState({ chatOpen: true, activeRightSurface: "chat" });
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest: (url, init) => {
+          if (!url.endsWith("/api/runs/run-1/resume") || init?.method !== "POST") {
+            return undefined;
+          }
+          return new Response(JSON.stringify({ error: { message: "resume temporarily failed" } }), {
+            status: 500,
+          });
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+
+    const message = await screen.findByLabelText("Message");
+    await waitFor(() => {
+      expect(message).toBeEnabled();
+    });
+    await user.type(message, "retry this");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    const chat = await screen.findByLabelText("Run chat");
+    expect(await within(chat).findAllByText("resume temporarily failed")).not.toHaveLength(0);
+    expect(message).toHaveValue("retry this");
   });
 
   it("renders attempt history in the attempts tab with nested scroll-follow behavior", async () => {
@@ -5445,6 +5637,10 @@ describe("web app", () => {
     expect(storedViewState ? JSON.parse(storedViewState) : null).toEqual({
       collapsedColumnKeys: [],
       drawerWidth: 570,
+      detailOpen: true,
+      chatOpen: false,
+      chatWidth: 420,
+      activeRightSurface: "detail",
     });
 
     cleanup();
@@ -7044,6 +7240,10 @@ describe("web app", () => {
       JSON.stringify({
         collapsedColumnKeys: ["running"],
         drawerWidth: 540,
+        detailOpen: true,
+        chatOpen: false,
+        chatWidth: 420,
+        activeRightSurface: "detail",
       }),
     );
     expect(
@@ -7060,6 +7260,10 @@ describe("web app", () => {
       JSON.stringify({
         collapsedColumnKeys: [],
         drawerWidth: 540,
+        detailOpen: true,
+        chatOpen: false,
+        chatWidth: 420,
+        activeRightSurface: "detail",
       }),
     );
     expect(
@@ -7650,6 +7854,7 @@ describe("web app", () => {
 
     await user.click(getCloseDetailButton());
     await user.click(await findRunCard("Passive run"));
+    await user.click(screen.getByRole("button", { name: "Detail" }));
     expect(await screen.findByRole("button", { name: "Archive" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reset" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
@@ -9449,6 +9654,7 @@ describe("web app", () => {
 
     await user.click(getCloseDetailButton());
     await user.click(await findRunCard("Build dashboard"));
+    await user.click(screen.getByRole("button", { name: "Detail" }));
     expect(await screen.findByLabelText("Attachment preview")).toBeInTheDocument();
     expect(await screen.findByText("Markdown preview")).toBeInTheDocument();
 
@@ -9488,6 +9694,7 @@ describe("web app", () => {
 
     await user.click(getCloseDetailButton());
     await user.click(await findRunCard("Second run"));
+    await user.click(screen.getByRole("button", { name: "Detail" }));
 
     expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
     await waitFor(() => {

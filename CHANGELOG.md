@@ -94,6 +94,9 @@
 
 ### Added
 
+- Added a selected-run Chat side surface to the web dashboard, including
+  Detail/Chat side-surface toggles, persisted Chat layout state, timeline
+  projection, and resume composer support.
 - Added first-class run groups across manifests, CLI, daemon APIs, and the
   web dashboard. Fresh child runs inherit the parent run group by default,
   `--group-id` overrides fresh run/init grouping, and

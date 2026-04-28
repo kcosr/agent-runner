@@ -24,6 +24,7 @@ import { useRunTimelineState } from "../lib/run-timeline.js";
 import { useRuntimeConfig } from "../lib/runtime-config.js";
 import {
   DEFAULT_DRAWER_VIEW,
+  type DashboardRightSurface,
   type DashboardStructuredFilters,
   type DrawerDetailSection,
   EMPTY_DASHBOARD_STRUCTURED_FILTERS,
@@ -119,6 +120,20 @@ function attachmentPreviewDrawerView(
     attachmentId,
     attachmentOwnerRunId,
   };
+}
+
+function resolveActiveRightSurface(
+  activeRightSurface: DashboardRightSurface,
+  detailOpen: boolean,
+  chatOpen: boolean,
+): DashboardRightSurface {
+  if (activeRightSurface === "detail" && !detailOpen && chatOpen) {
+    return "chat";
+  }
+  if (activeRightSurface === "chat" && !chatOpen && detailOpen) {
+    return "detail";
+  }
+  return activeRightSurface;
 }
 
 function matchesSearch(run: RunSummary, search: string): boolean {
@@ -461,12 +476,14 @@ export function useRunsDashboardState() {
     selectedViewMatchesDetailRun &&
     selectedDrawerView?.mode === "detail" &&
     selectedDrawerView.detailSection === "events";
+  const chatTimelineActive = selectedViewMatchesDetailRun && viewState.chatOpen;
   const auditActive =
     selectedViewMatchesDetailRun &&
     selectedDrawerView?.mode === "detail" &&
     selectedDrawerView.detailSection === "audit";
   const historyActivationMatchesDetailRun = historyActivation.runId === detailRunId;
   const timelineEnabled =
+    chatTimelineActive ||
     timelineActive ||
     (selectedViewMatchesDetailRun &&
       historyActivationMatchesDetailRun &&
@@ -500,6 +517,17 @@ export function useRunsDashboardState() {
         : next;
     });
   }, [auditActive, detailRunId, selectedViewMatchesDetailRun, timelineActive]);
+
+  useEffect(() => {
+    const activeRightSurface = resolveActiveRightSurface(
+      viewState.activeRightSurface,
+      viewState.detailOpen,
+      viewState.chatOpen,
+    );
+    if (activeRightSurface !== viewState.activeRightSurface) {
+      updateViewState({ activeRightSurface });
+    }
+  }, [updateViewState, viewState.activeRightSurface, viewState.chatOpen, viewState.detailOpen]);
 
   const timelineState = useRunTimelineState({
     config,
@@ -719,6 +747,59 @@ export function useRunsDashboardState() {
   const closeRun = () => {
     void navigate({ to: "/" });
   };
+
+  function setActiveRightSurface(activeRightSurface: DashboardRightSurface) {
+    if (viewState.activeRightSurface === activeRightSurface) {
+      return;
+    }
+    updateViewState({ activeRightSurface });
+  }
+
+  function closeDetail() {
+    updateViewState((current) => ({
+      detailOpen: false,
+      activeRightSurface: resolveActiveRightSurface(
+        current.activeRightSurface,
+        false,
+        current.chatOpen,
+      ),
+    }));
+  }
+
+  function closeChat() {
+    updateViewState((current) => ({
+      chatOpen: false,
+      activeRightSurface: resolveActiveRightSurface(
+        current.activeRightSurface,
+        current.detailOpen,
+        false,
+      ),
+    }));
+  }
+
+  function toggleDetail() {
+    updateViewState((current) => {
+      const detailOpen = !current.detailOpen;
+      return {
+        detailOpen,
+        activeRightSurface: detailOpen
+          ? "detail"
+          : resolveActiveRightSurface(current.activeRightSurface, detailOpen, current.chatOpen),
+      };
+    });
+  }
+
+  function toggleChat() {
+    updateViewState((current) => {
+      const chatOpen = !current.chatOpen;
+      return {
+        chatOpen,
+        activeRightSurface: chatOpen
+          ? "chat"
+          : resolveActiveRightSurface(current.activeRightSurface, current.detailOpen, chatOpen),
+      };
+    });
+  }
 
   const archiveMutation = useMutation({
     mutationFn: (runId: string) => api.archiveRun(runId),
@@ -1226,9 +1307,13 @@ export function useRunsDashboardState() {
     actionError,
     activeBoardColumnKey: viewState.activeBoardColumnKey,
     actionPending,
+    activeRightSurface: viewState.activeRightSurface,
     boardColumns,
+    chatOpen: viewState.chatOpen,
     collapsedColumnKeys: viewState.collapsedColumnKeys,
     closeRun,
+    closeChat,
+    closeDetail,
     columnActions: {
       expand: (columnKey: string) => {
         setColumnCollapsed(columnKey, false);
@@ -1237,6 +1322,7 @@ export function useRunsDashboardState() {
         setColumnCollapsed(columnKey, !collapsedColumnKeySet.has(columnKey));
       },
     },
+    detailOpen: viewState.detailOpen,
     copyText: async (value: string, label: string) => {
       if (await writeToClipboard(value)) {
         setNotices((current) =>
@@ -1402,6 +1488,9 @@ export function useRunsDashboardState() {
       }
       updateViewState({ activeBoardColumnKey: columnKey });
     },
+    setActiveRightSurface,
+    toggleChat,
+    toggleDetail,
     toggleDrawerFullscreen: () => {
       updateViewState({ drawerFullscreen: !viewState.drawerFullscreen });
     },

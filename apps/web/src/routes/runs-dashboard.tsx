@@ -1,12 +1,14 @@
+import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { AppShell } from "../components/app-shell.js";
 import { RunFilters } from "../components/run-filters.js";
-import type { DashboardPreferences } from "../lib/settings.js";
+import type { DashboardPreferences, DashboardRightSurface } from "../lib/settings.js";
 import {
   isEditableEventTarget,
   resolveBoardNeighborRunId,
   resolveRunsShortcutCommand,
 } from "../lib/shortcuts.js";
+import { RunChatPanel } from "./run-chat-panel.js";
 import { RunDetailPanel } from "./run-detail-panel.js";
 import { RunsBoardPanel } from "./runs-board-panel.js";
 import { useRunsDashboardState } from "./use-runs-dashboard-state.js";
@@ -23,6 +25,83 @@ type BoardFilterShortcutCommand = keyof typeof BOARD_FILTER_PREFERENCE_KEYS;
 
 function isBoardFilterShortcutCommand(command: string): command is BoardFilterShortcutCommand {
   return command in BOARD_FILTER_PREFERENCE_KEYS;
+}
+
+function RightSurfaceSelector({
+  activeRightSurface,
+  onSelect,
+}: {
+  activeRightSurface: DashboardRightSurface;
+  onSelect: (surface: DashboardRightSurface) => void;
+}) {
+  return (
+    <div aria-label="Right surface" className="right-surface-selector" role="tablist">
+      <button
+        aria-selected={activeRightSurface === "detail"}
+        className={activeRightSurface === "detail" ? "task-tab active" : "task-tab"}
+        onClick={() => onSelect("detail")}
+        role="tab"
+        type="button"
+      >
+        Detail
+      </button>
+      <button
+        aria-selected={activeRightSurface === "chat"}
+        className={activeRightSurface === "chat" ? "task-tab active" : "task-tab"}
+        onClick={() => onSelect("chat")}
+        role="tab"
+        type="button"
+      >
+        Chat
+      </button>
+    </div>
+  );
+}
+
+function DashboardSurfaces({
+  activeRightSurface,
+  board,
+  chat,
+  chatOpen,
+  detail,
+  detailOpen,
+  onSelectRightSurface,
+}: {
+  activeRightSurface: DashboardRightSurface;
+  board: ReactNode;
+  chat: ReactNode;
+  chatOpen: boolean;
+  detail: ReactNode;
+  detailOpen: boolean;
+  onSelectRightSurface: (surface: DashboardRightSurface) => void;
+}) {
+  const openSurfaceCount = Number(detailOpen) + Number(chatOpen);
+
+  return (
+    <div className="dashboard-surfaces">
+      <div className="dashboard-board-surface">{board}</div>
+      {openSurfaceCount > 0 ? (
+        <div className="dashboard-right-surfaces" data-open-count={openSurfaceCount}>
+          {detailOpen && chatOpen ? (
+            <RightSurfaceSelector
+              activeRightSurface={activeRightSurface}
+              onSelect={onSelectRightSurface}
+            />
+          ) : null}
+          {detailOpen ? (
+            <div className="dashboard-panel-shell" data-active={activeRightSurface === "detail"}>
+              {detail}
+            </div>
+          ) : null}
+          {chatOpen ? (
+            <div className="dashboard-panel-shell" data-active={activeRightSurface === "chat"}>
+              {chat}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export function RunsDashboardRoute() {
@@ -130,7 +209,15 @@ export function RunsDashboardRoute() {
 
       if (command === "run.close") {
         event.preventDefault();
-        currentState.closeRun();
+        if (currentState.activeRightSurface === "chat" && currentState.chatOpen) {
+          currentState.closeChat();
+        } else if (currentState.detailOpen) {
+          currentState.closeDetail();
+        } else if (currentState.chatOpen) {
+          currentState.closeChat();
+        } else {
+          currentState.closeRun();
+        }
         return;
       }
 
@@ -268,87 +355,110 @@ export function RunsDashboardRoute() {
   return (
     <AppShell
       primary={
-        <RunsBoardPanel
-          actionPending={state.actionPending}
-          activeBoardColumnKey={state.activeBoardColumnKey}
-          boardColumns={state.boardColumns}
-          collapsedColumnKeys={state.collapsedColumnKeys}
-          hasActiveStructuredFilters={state.hasActiveStructuredFilters}
-          openSelectedRunNoteRequest={openSelectedRunNoteRequest}
-          onExpandColumn={state.columnActions.expand}
-          onActiveBoardColumnKeyChange={state.setActiveBoardColumnKey}
-          onResetFilters={state.resetBoardFilters}
-          onSetNote={state.runActions.setNote}
-          onSetPinned={state.runActions.setPinned}
-          onSelectRun={state.openRun}
-          onStructuredFilterToggle={state.toggleStructuredFilter}
-          onToggleColumnCollapse={state.columnActions.toggleCollapse}
-          runs={state.runs}
-          runsQuery={state.runsQuery}
-          searchValue={state.viewState.search}
-          selectedRunId={state.selectedRunId}
-          structuredFilters={state.preferences.structuredFilters}
-          visibleRuns={state.visibleRuns}
+        <DashboardSurfaces
+          activeRightSurface={state.activeRightSurface}
+          board={
+            <RunsBoardPanel
+              actionPending={state.actionPending}
+              activeBoardColumnKey={state.activeBoardColumnKey}
+              boardColumns={state.boardColumns}
+              collapsedColumnKeys={state.collapsedColumnKeys}
+              hasActiveStructuredFilters={state.hasActiveStructuredFilters}
+              openSelectedRunNoteRequest={openSelectedRunNoteRequest}
+              onExpandColumn={state.columnActions.expand}
+              onActiveBoardColumnKeyChange={state.setActiveBoardColumnKey}
+              onResetFilters={state.resetBoardFilters}
+              onSetNote={state.runActions.setNote}
+              onSetPinned={state.runActions.setPinned}
+              onSelectRun={state.openRun}
+              onStructuredFilterToggle={state.toggleStructuredFilter}
+              onToggleColumnCollapse={state.columnActions.toggleCollapse}
+              runs={state.runs}
+              runsQuery={state.runsQuery}
+              searchValue={state.viewState.search}
+              selectedRunId={state.selectedRunId}
+              structuredFilters={state.preferences.structuredFilters}
+              visibleRuns={state.visibleRuns}
+            />
+          }
+          chat={
+            <RunChatPanel
+              actionPending={state.actionPending}
+              detailSettling={state.detailSettling}
+              onClose={state.closeChat}
+              onSubmitResume={state.runActions.resume}
+              selectedRunId={state.selectedRunId}
+              selectedRunQuery={state.selectedRunQuery}
+              timelineState={state.timelineState}
+            />
+          }
+          chatOpen={state.chatOpen}
+          detail={
+            <RunDetailPanel
+              onAddDependency={state.runActions.addDependency}
+              actionError={state.actionError}
+              actionPending={state.actionPending}
+              drawerFullscreen={state.viewState.drawerFullscreen}
+              drawerWidth={state.viewState.drawerWidth}
+              drawerView={state.selectedDrawerView}
+              runs={state.runs}
+              onBackToAttachments={state.returnSelectedRunToAttachments}
+              onAbort={state.runActions.abort}
+              onArchive={state.runActions.archive}
+              onClearDependencies={state.runActions.clearDependencies}
+              onClose={state.closeDetail}
+              onCloseResumeDialog={state.closeSelectedRunResumeDialog}
+              onCopy={state.copyText}
+              onDelete={state.runActions.delete}
+              onDownloadAttachment={state.runActions.downloadAttachment}
+              onOpenAttachmentPreview={state.openSelectedRunAttachmentPreview}
+              onReplaceAttachmentPreview={state.replaceSelectedRunAttachmentPreview}
+              onSelectRun={state.openRun}
+              onClearBackendSession={state.runActions.clearBackendSession}
+              onClearSchedule={state.runActions.clearSchedule}
+              onRemoveDependency={state.runActions.removeDependency}
+              onRemoveAttachment={state.runActions.removeAttachment}
+              onReset={state.runActions.reset}
+              onReconfigure={state.runActions.reconfigure}
+              onRename={state.runActions.rename}
+              onResumeMessageDraftChange={state.setResumeMessageDraft}
+              onResumeMessageExpandedChange={state.setResumeMessageExpanded}
+              onSetNote={state.runActions.setNote}
+              onSetBackendSession={state.runActions.setBackendSession}
+              onSetGroup={state.runActions.setGroup}
+              onClearGroup={state.runActions.clearGroup}
+              onSetPinned={state.runActions.setPinned}
+              onSetScheduleEnabled={state.runActions.setScheduleEnabled}
+              onSelectDetailSection={state.updateSelectedRunDetailSection}
+              onSubmitResume={state.submitSelectedRunResume}
+              onTriggerPrimaryAction={state.triggerSelectedRunPrimaryAction}
+              onUnarchive={state.runActions.unarchive}
+              onUploadAttachment={state.runActions.uploadAttachment}
+              resumeDialogOpen={state.resumeDialogOpen}
+              resumeRequiresMessage={state.selectedRunResumeRequiresMessage}
+              resumeMessageDraft={state.resumeMessageDraft}
+              resumeMessageExpanded={state.resumeMessageExpanded}
+              detailSettling={state.detailSettling}
+              selectedRunGroupAttachmentsQuery={state.selectedRunGroupAttachmentsQuery}
+              selectedRunId={state.selectedRunId}
+              selectedRunQuery={state.selectedRunQuery}
+              auditState={state.auditState}
+              timelineState={state.timelineState}
+            />
+          }
+          detailOpen={state.detailOpen}
+          onSelectRightSurface={state.setActiveRightSurface}
         />
       }
       bottomNotices={bottomNotices.length > 0 ? bottomNotices : undefined}
-      secondary={
-        <RunDetailPanel
-          onAddDependency={state.runActions.addDependency}
-          actionError={state.actionError}
-          actionPending={state.actionPending}
-          drawerFullscreen={state.viewState.drawerFullscreen}
-          drawerWidth={state.viewState.drawerWidth}
-          drawerView={state.selectedDrawerView}
-          runs={state.runs}
-          onBackToAttachments={state.returnSelectedRunToAttachments}
-          onAbort={state.runActions.abort}
-          onArchive={state.runActions.archive}
-          onClearDependencies={state.runActions.clearDependencies}
-          onClose={state.closeRun}
-          onCloseResumeDialog={state.closeSelectedRunResumeDialog}
-          onCopy={state.copyText}
-          onDelete={state.runActions.delete}
-          onDownloadAttachment={state.runActions.downloadAttachment}
-          onOpenAttachmentPreview={state.openSelectedRunAttachmentPreview}
-          onReplaceAttachmentPreview={state.replaceSelectedRunAttachmentPreview}
-          onSelectRun={state.openRun}
-          onClearBackendSession={state.runActions.clearBackendSession}
-          onClearSchedule={state.runActions.clearSchedule}
-          onRemoveDependency={state.runActions.removeDependency}
-          onRemoveAttachment={state.runActions.removeAttachment}
-          onReset={state.runActions.reset}
-          onReconfigure={state.runActions.reconfigure}
-          onRename={state.runActions.rename}
-          onResumeMessageDraftChange={state.setResumeMessageDraft}
-          onResumeMessageExpandedChange={state.setResumeMessageExpanded}
-          onSetNote={state.runActions.setNote}
-          onSetBackendSession={state.runActions.setBackendSession}
-          onSetGroup={state.runActions.setGroup}
-          onClearGroup={state.runActions.clearGroup}
-          onSetPinned={state.runActions.setPinned}
-          onSetScheduleEnabled={state.runActions.setScheduleEnabled}
-          onSelectDetailSection={state.updateSelectedRunDetailSection}
-          onSubmitResume={state.submitSelectedRunResume}
-          onTriggerPrimaryAction={state.triggerSelectedRunPrimaryAction}
-          onUnarchive={state.runActions.unarchive}
-          onUploadAttachment={state.runActions.uploadAttachment}
-          resumeDialogOpen={state.resumeDialogOpen}
-          resumeRequiresMessage={state.selectedRunResumeRequiresMessage}
-          resumeMessageDraft={state.resumeMessageDraft}
-          resumeMessageExpanded={state.resumeMessageExpanded}
-          detailSettling={state.detailSettling}
-          selectedRunGroupAttachmentsQuery={state.selectedRunGroupAttachmentsQuery}
-          selectedRunId={state.selectedRunId}
-          selectedRunQuery={state.selectedRunQuery}
-          auditState={state.auditState}
-          timelineState={state.timelineState}
-        />
-      }
       topNotices={topNotices.length > 0 ? topNotices : undefined}
       toolbar={
         <RunFilters
+          chatOpen={state.chatOpen}
+          detailOpen={state.detailOpen}
           filterOptions={state.filterOptions}
+          onToggleChat={state.toggleChat}
+          onToggleDetail={state.toggleDetail}
           preferences={state.preferences}
           toggleFiltersVersion={toggleFiltersVersion}
           searchInputRef={searchInputRef}

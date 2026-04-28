@@ -336,7 +336,7 @@ export function useRunTimelineState({
         const result = applyEnvelope(historyRef.current, envelope);
         if (result.requiresReload) {
           bufferRef.current = [];
-          if (result.showStaleWarning ?? true) {
+          if ((result.showStaleWarning ?? true) && !staleRef.current) {
             staleRef.current = true;
             setState((current) => ({ ...current, stale: true }));
           }
@@ -345,6 +345,10 @@ export function useRunTimelineState({
         }
 
         reloadCountRef.current = 0;
+        const previousHistory = historyRef.current;
+        if (result.history === previousHistory && !staleRef.current) {
+          return;
+        }
         historyRef.current = result.history;
         staleRef.current = false;
         setState({
@@ -355,6 +359,9 @@ export function useRunTimelineState({
       },
       onStaleChange: (stale) => {
         if (disposed || !stale) {
+          return;
+        }
+        if (staleRef.current) {
           return;
         }
         staleRef.current = true;

@@ -56,20 +56,28 @@ function useMediaQuery(query: string) {
 }
 
 export function RunFilters({
+  chatOpen,
+  detailOpen,
   preferences,
   filterOptions,
+  onToggleChat,
+  onToggleDetail,
   toggleFiltersVersion,
   searchInputRef,
   updatePreferences,
   updateViewState,
   viewState,
 }: {
+  chatOpen: boolean;
+  detailOpen: boolean;
   preferences: DashboardPreferences;
   filterOptions: {
     repo: string[];
     agent: string[];
     backend: string[];
   };
+  onToggleChat: () => void;
+  onToggleDetail: () => void;
   toggleFiltersVersion?: number;
   searchInputRef?: RefObject<HTMLInputElement | null>;
   updatePreferences: (updates: Partial<DashboardPreferences>) => void;
@@ -209,6 +217,28 @@ export function RunFilters({
             value={viewState.search}
           />
         </label>
+
+        <button
+          aria-label="Detail"
+          aria-pressed={detailOpen}
+          className="btn btn--quiet surface-toggle"
+          onClick={onToggleDetail}
+          title="Detail"
+          type="button"
+        >
+          Detail
+        </button>
+
+        <button
+          aria-label="Chat"
+          aria-pressed={chatOpen}
+          className="btn btn--quiet surface-toggle"
+          onClick={onToggleChat}
+          title="Chat"
+          type="button"
+        >
+          Chat
+        </button>
 
         <div className="filters-control">
           <button
