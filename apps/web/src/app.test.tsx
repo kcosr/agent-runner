@@ -2230,6 +2230,9 @@ describe("web app", () => {
     expect(screen.queryByRole("tab", { name: "Live" })).not.toBeInTheDocument();
     expect(hasEventSource("/api/runs/run-1/events/audit")).toBe(false);
 
+    await user.click(screen.getByRole("tab", { name: "Message" }));
+    expect(screen.getByRole("tab", { name: "Message" })).toHaveAttribute("aria-selected", "true");
+
     const firstAttempt = timelineHistory.attempts[0];
     if (!firstAttempt) {
       throw new Error("expected first attempt");

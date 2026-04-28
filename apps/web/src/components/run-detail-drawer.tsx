@@ -528,6 +528,7 @@ export function RunDetailDrawer({
   const timelineContentScrollRef = useRef<HTMLDivElement | null>(null);
   const timelineResponseAtBottomRef = useRef(false);
   const latestAttemptRef = useRef<number | null>(null);
+  const liveGapEnteredRef = useRef(false);
   const [selectedAttempt, setSelectedAttempt] = useState<AttemptSelection>(null);
   const [dataTab, setDataTab] = useState<DataTab>("vars");
   const [auditFilter, setAuditFilter] = useState<AuditFilter>("all");
@@ -1133,17 +1134,18 @@ export function RunDetailDrawer({
     const latestAttempt = timelineAttempts[timelineAttempts.length - 1]?.attemptNumber ?? null;
     if (activeSection !== "events") {
       latestAttemptRef.current = latestAttempt;
+      liveGapEnteredRef.current = false;
       return;
     }
     if (liveAttemptPendingAvailable) {
-      if (selectedAttempt !== "live") {
+      if (!liveGapEnteredRef.current) {
+        liveGapEnteredRef.current = true;
         setSelectedAttempt("live");
-      }
-      if (timelineTab !== "response") {
         setTimelineTab("response");
       }
       return;
     }
+    liveGapEnteredRef.current = false;
     if (latestAttempt === null) {
       latestAttemptRef.current = null;
       return;
@@ -1155,7 +1157,7 @@ export function RunDetailDrawer({
       return;
     }
     latestAttemptRef.current = latestAttempt;
-  }, [activeSection, liveAttemptPendingAvailable, selectedAttempt, timelineAttempts, timelineTab]);
+  }, [activeSection, liveAttemptPendingAvailable, timelineAttempts]);
 
   useEffect(() => {
     if (
