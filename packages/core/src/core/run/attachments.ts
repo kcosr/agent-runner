@@ -293,6 +293,7 @@ export async function stageAttachmentFromStream(
     id: string;
     name: string;
     source: AsyncIterable<Uint8Array>;
+    commitSignal: Promise<void>;
     mimeType?: string;
     addedAt?: string;
   },
@@ -355,6 +356,7 @@ export async function stageAttachmentFromStream(
         `attachment add: hash verification failed for ${displayName}`,
       );
     }
+    await input.commitSignal;
     rmSync(absolutePath, { force: true });
     mkdirSync(dirname(absolutePath), { recursive: true });
     copyFileSync(tempPath, absolutePath);

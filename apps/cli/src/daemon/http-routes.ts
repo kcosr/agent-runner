@@ -434,6 +434,7 @@ const routes: RouteDefinition[] = [
         await ctx.operations.addAttachment(routeParam(params, "runId"), {
           name,
           source: req,
+          commitSignal: Promise.resolve(),
           mimeType,
         }),
       );

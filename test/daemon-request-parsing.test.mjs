@@ -8,6 +8,7 @@ import {
   parseRunReadyParams,
   parseRunScheduleParams,
   parseRunsReconfigureParams,
+  parseStreamNotification,
   parseWebStartRunParams,
 } from "../apps/cli/dist/daemon/request-parsing.js";
 
@@ -377,5 +378,40 @@ test("parseRunScheduleParams requires schedule and rejects unknown schedule keys
         "runs.setSchedule params",
       ),
     /runs\.setSchedule params\.schedule\.extra is not supported/,
+  );
+});
+
+test("parseStreamNotification validates stream window credit", () => {
+  assert.deepEqual(
+    parseStreamNotification({
+      jsonrpc: "2.0",
+      method: "stream.window",
+      params: { streamId: "stream-ok", bytes: 65_536 },
+    }),
+    {
+      jsonrpc: "2.0",
+      method: "stream.window",
+      params: { streamId: "stream-ok", bytes: 65_536 },
+    },
+  );
+
+  assert.throws(
+    () =>
+      parseStreamNotification({
+        jsonrpc: "2.0",
+        method: "stream.window",
+        params: { streamId: "stream-zero", bytes: 0 },
+      }),
+    /stream\.window bytes must be a positive safe integer/,
+  );
+
+  assert.throws(
+    () =>
+      parseStreamNotification({
+        jsonrpc: "2.0",
+        method: "stream.window",
+        params: { streamId: "stream-too-large", bytes: 1_048_577 },
+      }),
+    /stream\.window bytes must be less than or equal to 1048576/,
   );
 });

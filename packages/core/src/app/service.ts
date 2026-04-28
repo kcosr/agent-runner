@@ -549,7 +549,12 @@ export function addRunAttachmentFromFile(
 
 export function addRunAttachmentFromStream(
   target: string,
-  input: { name: string; source: AsyncIterable<Uint8Array>; mimeType?: string },
+  input: {
+    name: string;
+    source: AsyncIterable<Uint8Array>;
+    commitSignal: Promise<void>;
+    mimeType?: string;
+  },
 ): Promise<RunAttachment> {
   return addAttachmentFromStream(target, input).then((result) => result.attachment);
 }

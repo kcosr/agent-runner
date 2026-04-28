@@ -66,6 +66,60 @@ export interface JsonRpcNotification {
   params?: unknown;
 }
 
+export interface StreamDataNotification {
+  jsonrpc: "2.0";
+  method: "stream.data";
+  params: {
+    streamId: string;
+    seq: number;
+    data: string;
+  };
+}
+
+export interface StreamEndNotification {
+  jsonrpc: "2.0";
+  method: "stream.end";
+  params: {
+    streamId: string;
+    seq: number;
+  };
+}
+
+export interface StreamErrorNotification {
+  jsonrpc: "2.0";
+  method: "stream.error";
+  params: {
+    streamId: string;
+    message: string;
+    code?: string;
+  };
+}
+
+export interface StreamCancelNotification {
+  jsonrpc: "2.0";
+  method: "stream.cancel";
+  params: {
+    streamId: string;
+    reason?: string;
+  };
+}
+
+export interface StreamWindowNotification {
+  jsonrpc: "2.0";
+  method: "stream.window";
+  params: {
+    streamId: string;
+    bytes: number;
+  };
+}
+
+export type StreamNotification =
+  | StreamDataNotification
+  | StreamEndNotification
+  | StreamErrorNotification
+  | StreamCancelNotification
+  | StreamWindowNotification;
+
 export interface DaemonInfo {
   daemonInstanceId: string;
   pid: number;
@@ -133,6 +187,32 @@ interface TaskAppendNotesParams extends TaskTargetParams {
 interface TaskAddParams extends RunTargetParams {
   title: string;
   body?: string;
+}
+
+export interface AttachmentsListParams {
+  runId: string;
+  scope?: "run" | "group";
+}
+
+export interface AttachmentsRemoveParams {
+  runId: string;
+  attachmentId: string;
+}
+
+export interface AttachmentsUploadOpenParams {
+  runId: string;
+  name: string;
+  mimeType?: string;
+  size?: number;
+}
+
+export interface AttachmentsUploadFinishParams {
+  streamId: string;
+}
+
+export interface AttachmentsDownloadParams {
+  runId: string;
+  attachmentId: string;
 }
 
 export interface DefinitionGetParams {
@@ -256,6 +336,35 @@ export interface TaskResult {
 }
 
 /** @protocol */
+export interface AttachmentsListResult {
+  attachments: AttachmentListEntry[];
+}
+
+/** @protocol */
+export interface AttachmentsRemoveResult {
+  result: RunAttachmentRemoveResult;
+}
+
+/** @protocol */
+export interface AttachmentsUploadOpenResult {
+  streamId: string;
+  maxBytes: number;
+  maxChunkBytes: number;
+}
+
+/** @protocol */
+export interface AttachmentsUploadFinishResult {
+  attachment: RunAttachment;
+}
+
+/** @protocol */
+export interface AttachmentsDownloadResult {
+  attachment: RunAttachment;
+  streamId: string;
+  maxChunkBytes: number;
+}
+
+/** @protocol */
 export interface AgentsListResult {
   agents: DefinitionListResult;
 }
@@ -326,11 +435,6 @@ export interface RunGroupRpcResult {
 /** @protocol */
 export interface RunsStartResult {
   runId: string;
-}
-
-/** @protocol */
-export interface AttachmentsListResult {
-  attachments: AttachmentListEntry[];
 }
 
 /** @protocol */

@@ -17,6 +17,11 @@ import { RunGroupValidationError, validateRunGroupId } from "@task-runner/core/c
 import type { ScheduleInput } from "@task-runner/core/core/run/schedule.js";
 import { trimRunName } from "@task-runner/core/util/run-name.js";
 import type {
+  AttachmentsDownloadParams,
+  AttachmentsListParams,
+  AttachmentsRemoveParams,
+  AttachmentsUploadFinishParams,
+  AttachmentsUploadOpenParams,
   CliRunsStartParams,
   RunInputSurfaceParams,
   RunReadyParams,
@@ -29,8 +34,10 @@ import type {
   RunsListParams,
   RunsReconfigureParams,
   RunsResumeParams,
+  StreamNotification,
   WebRunsStartParams,
 } from "./protocol.js";
+import { STREAM_MAX_BUFFERED_BYTES_PER_STREAM, STREAM_MAX_CHUNK_BYTES } from "./stream.js";
 
 export class RequestValidationError extends Error {
   constructor(message: string) {
@@ -196,6 +203,14 @@ function optionalNonNegativeInteger(value: unknown, label: string): number | und
     throw new RequestValidationError(`${label} must be a non-negative integer`);
   }
   return value;
+}
+
+function requiredNonNegativeInteger(value: unknown, label: string): number {
+  const integer = optionalNonNegativeInteger(value, label);
+  if (integer === undefined) {
+    throw new RequestValidationError(`${label} is required`);
+  }
+  return integer;
 }
 
 function optionalStringArray(value: unknown, label: string): string[] | undefined {
@@ -656,6 +671,173 @@ export function parseRunsListParams(value: unknown, label: string): RunsListPara
     includeArchived: optionalBoolean(record.includeArchived, `${label}.includeArchived`),
     scope: parseRunListScope(record.scope, `${label}.scope`),
   };
+}
+
+export function parseAttachmentsListParams(value: unknown, label: string): AttachmentsListParams {
+  const record = asRecord(value, label);
+  const allowedKeys = new Set(["runId", "scope"]);
+  for (const key of Object.keys(record)) {
+    if (!allowedKeys.has(key)) {
+      throw new RequestValidationError(`${label}.${key} is not supported`);
+    }
+  }
+  return {
+    runId: requiredRunIdString(record.runId, `${label}.runId`),
+    scope: optionalEnum(record.scope, `${label}.scope`, ["run", "group"]),
+  };
+}
+
+export function parseAttachmentsRemoveParams(
+  value: unknown,
+  label: string,
+): AttachmentsRemoveParams {
+  const record = asRecord(value, label);
+  const allowedKeys = new Set(["runId", "attachmentId"]);
+  for (const key of Object.keys(record)) {
+    if (!allowedKeys.has(key)) {
+      throw new RequestValidationError(`${label}.${key} is not supported`);
+    }
+  }
+  return {
+    runId: requiredRunIdString(record.runId, `${label}.runId`),
+    attachmentId: requiredNonEmptyString(record.attachmentId, `${label}.attachmentId`),
+  };
+}
+
+export function parseAttachmentsUploadOpenParams(
+  value: unknown,
+  label: string,
+): AttachmentsUploadOpenParams {
+  const record = asRecord(value, label);
+  const allowedKeys = new Set(["runId", "name", "mimeType", "size"]);
+  for (const key of Object.keys(record)) {
+    if (!allowedKeys.has(key)) {
+      throw new RequestValidationError(`${label}.${key} is not supported`);
+    }
+  }
+  return {
+    runId: requiredRunIdString(record.runId, `${label}.runId`),
+    name: requiredNonEmptyString(record.name, `${label}.name`),
+    mimeType: optionalString(record.mimeType, `${label}.mimeType`),
+    size: optionalNonNegativeInteger(record.size, `${label}.size`),
+  };
+}
+
+export function parseAttachmentsUploadFinishParams(
+  value: unknown,
+  label: string,
+): AttachmentsUploadFinishParams {
+  const record = asRecord(value, label);
+  const allowedKeys = new Set(["streamId"]);
+  for (const key of Object.keys(record)) {
+    if (!allowedKeys.has(key)) {
+      throw new RequestValidationError(`${label}.${key} is not supported`);
+    }
+  }
+  return {
+    streamId: requiredNonEmptyString(record.streamId, `${label}.streamId`),
+  };
+}
+
+export function parseAttachmentsDownloadParams(
+  value: unknown,
+  label: string,
+): AttachmentsDownloadParams {
+  const record = asRecord(value, label);
+  const allowedKeys = new Set(["runId", "attachmentId"]);
+  for (const key of Object.keys(record)) {
+    if (!allowedKeys.has(key)) {
+      throw new RequestValidationError(`${label}.${key} is not supported`);
+    }
+  }
+  return {
+    runId: requiredRunIdString(record.runId, `${label}.runId`),
+    attachmentId: requiredNonEmptyString(record.attachmentId, `${label}.attachmentId`),
+  };
+}
+
+function requiredBase64Data(value: unknown, label: string): string {
+  const data = requiredString(value, label);
+  if (data.length === 0 || data.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(data)) {
+    throw new RequestValidationError(`${label} must be base64-encoded bytes`);
+  }
+  const decoded = Buffer.from(data, "base64");
+  if (decoded.byteLength < 1 || decoded.byteLength > STREAM_MAX_CHUNK_BYTES) {
+    throw new RequestValidationError(`${label} must decode to 1..${STREAM_MAX_CHUNK_BYTES} bytes`);
+  }
+  return data;
+}
+
+function requiredStreamWindowBytes(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
+    throw new RequestValidationError(`${label} must be a positive safe integer`);
+  }
+  if (value > STREAM_MAX_BUFFERED_BYTES_PER_STREAM) {
+    throw new RequestValidationError(
+      `${label} must be less than or equal to ${STREAM_MAX_BUFFERED_BYTES_PER_STREAM}`,
+    );
+  }
+  return value;
+}
+
+export function parseStreamNotification(value: unknown): StreamNotification {
+  const record = asRecord(value, "stream notification");
+  if (record.jsonrpc !== "2.0") {
+    throw new RequestValidationError("stream notification jsonrpc must be 2.0");
+  }
+  const method = requiredString(record.method, "stream notification method");
+  const params = asRecord(record.params, `${method} params`);
+  switch (method) {
+    case "stream.data":
+      return {
+        jsonrpc: "2.0",
+        method,
+        params: {
+          streamId: requiredNonEmptyString(params.streamId, "stream.data streamId"),
+          seq: requiredNonNegativeInteger(params.seq, "stream.data seq"),
+          data: requiredBase64Data(params.data, "stream.data data"),
+        },
+      };
+    case "stream.end":
+      return {
+        jsonrpc: "2.0",
+        method,
+        params: {
+          streamId: requiredNonEmptyString(params.streamId, "stream.end streamId"),
+          seq: requiredNonNegativeInteger(params.seq, "stream.end seq"),
+        },
+      };
+    case "stream.error":
+      return {
+        jsonrpc: "2.0",
+        method,
+        params: {
+          streamId: requiredNonEmptyString(params.streamId, "stream.error streamId"),
+          message: requiredNonEmptyString(params.message, "stream.error message"),
+          code: optionalNonEmptyString(params.code, "stream.error code"),
+        },
+      };
+    case "stream.cancel":
+      return {
+        jsonrpc: "2.0",
+        method,
+        params: {
+          streamId: requiredNonEmptyString(params.streamId, "stream.cancel streamId"),
+          reason: optionalString(params.reason, "stream.cancel reason"),
+        },
+      };
+    case "stream.window":
+      return {
+        jsonrpc: "2.0",
+        method,
+        params: {
+          streamId: requiredNonEmptyString(params.streamId, "stream.window streamId"),
+          bytes: requiredStreamWindowBytes(params.bytes, "stream.window bytes"),
+        },
+      };
+    default:
+      throw new RequestValidationError(`unknown stream method: ${method}`);
+  }
 }
 
 function decodeQueryComponent(value: string, label: string): string {
