@@ -329,6 +329,10 @@
 
 ### Fixed
 
+- Attempts drawer now moves immediately to the live Response view when a
+  resumed or follow-up run reports a new active attempt before timeline
+  history has caught up.
+  ([#116](https://github.com/kcosr/task-runner/pull/116))
 - Daemon-connected fresh `init --message-file` and fresh
   `run --message-file` now forward the file contents in
   `overrides.message` instead of snapshotting overrides before the
