@@ -2920,10 +2920,11 @@ body {
   }
 
   .dashboard-right-surfaces {
-    position: fixed;
-    inset: 52px 0 0 0;
+    position: absolute;
+    inset: 0;
     z-index: 20;
     flex-direction: column;
+    background: var(--background);
   }
 
   .dashboard-right-surfaces[data-open-count="2"] .right-surface-selector {
@@ -2944,12 +2945,7 @@ body {
   }
 
   .drawer-sheet-backdrop {
-    position: fixed;
-    inset: 0;
-    display: block;
-    background: rgba(0, 0, 0, 0.24);
-    border: 0;
-    padding: 0;
+    display: none;
   }
 
   .drawer {

@@ -56,11 +56,13 @@ resizable drawer width. Chat has its own resizable width, clamped between
 and the active board column remain transient.
 
 On wide desktop layouts, open side surfaces render inline: Board only,
-Board + Detail, Board + Chat, or Board + Chat + Detail. At narrower
-breakpoints, when both side surfaces are open, the right region exposes
-Chat and Detail selector tabs and shows one active surface at a time. If
-the active right surface is closed, the dashboard switches to the other
-open side surface.
+Board + Detail, Board + Chat, or Board + Chat + Detail. Medium-width
+desktop and tablet layouts keep the board usable by collapsing Chat and
+Detail into one right rail with selector tabs when both are open. Narrow
+mobile layouts show the right surface as an in-layout sheet over the board,
+again showing one active surface at a time when both are open. If the
+active right surface is closed, the dashboard switches to the other open
+side surface.
 
 The grouped **Filters** control opens an anchored popover on desktop and a
 sheet-style overlay on narrow/mobile layouts. It applies exact-match
