@@ -67,7 +67,7 @@ import { RunTaskList } from "./run-task-list.js";
 import { StatusBadge } from "./status-badge.js";
 
 type TimelineTab = "message" | "prompt" | "response" | "diagnostics";
-type AttemptSelection = number | "pending" | null;
+type AttemptSelection = number | "live" | "pending" | null;
 type SummaryRow = readonly [label: string, value: string];
 type DataTab = "vars" | "hookState";
 type AuditFilter = "all" | "hooks" | "tasks" | "run";
@@ -683,18 +683,33 @@ export function RunDetailDrawer({
     (run.status === "initialized" || run.status === "ready") &&
     run.totalAttemptCount === 0 &&
     timelineAttempts.length === 0;
+  const currentSessionHasTimelineAttempt =
+    run.currentSession !== null &&
+    timelineAttempts.some((attempt) => attempt.sessionIndex === run.currentSession?.sessionIndex);
+  const liveAttemptPendingAvailable =
+    run.status === "running" &&
+    run.currentSession !== null &&
+    run.currentSession.status === "running" &&
+    !currentSessionHasTimelineAttempt &&
+    !timelineAttempts.some((attempt) => attempt.live);
   const selectedAttemptRecord =
-    (typeof selectedAttempt === "number"
+    typeof selectedAttempt === "number"
       ? timelineAttempts.find((attempt) => attempt.attemptNumber === selectedAttempt)
-      : null) ??
-    timelineAttempts[timelineAttempts.length - 1] ??
-    null;
+      : selectedAttempt === null ||
+          (selectedAttempt === "pending" && !pendingAttemptAvailable) ||
+          (selectedAttempt === "live" && !liveAttemptPendingAvailable)
+        ? timelineAttempts[timelineAttempts.length - 1]
+        : null;
   const selectedPendingAttempt = pendingAttemptAvailable && selectedAttemptRecord === null;
+  const selectedLiveAttempt =
+    liveAttemptPendingAvailable && selectedAttempt === "live" && selectedAttemptRecord === null;
   const selectedAttemptNumber = selectedAttemptRecord?.attemptNumber ?? null;
   const selectedAttemptResponse = selectedAttemptRecord?.transcript ?? "";
   const selectedAttemptDiagnostics = selectedAttemptRecord?.notices ?? "";
   const selectedAttemptLive = selectedAttemptRecord?.live ?? false;
-  const selectedSessionIndex = selectedAttemptRecord?.sessionIndex ?? null;
+  const selectedSessionIndex =
+    selectedAttemptRecord?.sessionIndex ??
+    (selectedLiveAttempt ? run.currentSession?.sessionIndex : null);
   const selectedTimelineSession =
     selectedSessionIndex === null
       ? null
@@ -1094,6 +1109,17 @@ export function RunDetailDrawer({
       setSelectedAttempt(timelineAttempts[timelineAttempts.length - 1]?.attemptNumber ?? null);
       return;
     }
+    if (selectedAttempt === "live") {
+      if (liveAttemptPendingAvailable) {
+        return;
+      }
+      setSelectedAttempt(timelineAttempts[timelineAttempts.length - 1]?.attemptNumber ?? null);
+      return;
+    }
+    if (liveAttemptPendingAvailable) {
+      setSelectedAttempt("live");
+      return;
+    }
     if (selectedAttempt !== null && availableAttempts.has(selectedAttempt)) {
       return;
     }
@@ -1102,12 +1128,18 @@ export function RunDetailDrawer({
       return;
     }
     setSelectedAttempt(timelineAttempts[timelineAttempts.length - 1]?.attemptNumber ?? null);
-  }, [pendingAttemptAvailable, selectedAttempt, timelineAttempts]);
+  }, [liveAttemptPendingAvailable, pendingAttemptAvailable, selectedAttempt, timelineAttempts]);
 
   useEffect(() => {
     const latestAttempt = timelineAttempts[timelineAttempts.length - 1]?.attemptNumber ?? null;
     if (activeSection !== "events") {
       latestAttemptRef.current = latestAttempt;
+      return;
+    }
+    if (liveAttemptPendingAvailable) {
+      latestAttemptRef.current = latestAttempt;
+      setSelectedAttempt("live");
+      setTimelineTab("response");
       return;
     }
     if (latestAttempt === null) {
@@ -1121,7 +1153,7 @@ export function RunDetailDrawer({
       return;
     }
     latestAttemptRef.current = latestAttempt;
-  }, [activeSection, timelineAttempts]);
+  }, [activeSection, liveAttemptPendingAvailable, timelineAttempts]);
 
   useEffect(() => {
     if (
@@ -2670,10 +2702,11 @@ export function RunDetailDrawer({
                   <p className="muted-inline">No attempt history is available for this run yet.</p>
                 ) : null}
 
-                {selectedAttemptRecord || selectedPendingAttempt ? (
+                {selectedAttemptRecord || selectedPendingAttempt || selectedLiveAttempt ? (
                   <div className="timeline-attempt-panel">
                     <div className="timeline-sticky-controls">
-                      {selectedPendingAttempt || timelineAttempts.length > 1 ? (
+                      {selectedPendingAttempt ||
+                      (!selectedLiveAttempt && timelineAttempts.length > 1) ? (
                         <div className="timeline-attempts">
                           {selectedPendingAttempt ? (
                             <div className="timeline-attempt-row">
@@ -2888,6 +2921,8 @@ export function RunDetailDrawer({
                               No prompt preview is available for this run yet.
                             </p>
                           )
+                        ) : selectedLiveAttempt ? (
+                          <p className="task-empty">Waiting for attempt prompt…</p>
                         ) : selectedAttemptRecord?.prompt ? (
                           <section aria-label="Attempt prompt">
                             <MarkdownContent
@@ -2901,6 +2936,8 @@ export function RunDetailDrawer({
                       ) : timelineTab === "response" ? (
                         selectedPendingAttempt ? (
                           <p className="task-empty">No response yet — this run has not started.</p>
+                        ) : selectedLiveAttempt ? (
+                          <p className="task-empty">Waiting for live response text…</p>
                         ) : selectedAttemptResponse ? (
                           <section aria-label="Attempt response">
                             <MarkdownContent
@@ -2917,6 +2954,8 @@ export function RunDetailDrawer({
                         )
                       ) : selectedPendingAttempt ? (
                         <p className="task-empty">No diagnostics yet — this run has not started.</p>
+                      ) : selectedLiveAttempt ? (
+                        <p className="task-empty">No diagnostics have arrived yet.</p>
                       ) : selectedAttemptDiagnostics ? (
                         <section aria-label="Attempt diagnostics">
                           <MarkdownContent
