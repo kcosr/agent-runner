@@ -338,6 +338,9 @@
 
 ### Fixed
 
+- Daemon WebSocket attachment streams now use byte-credit flow control so
+  multi-megabyte connected uploads and downloads pace to receiver
+  consumption instead of tripping stream buffer limits.
 - Attempts drawer now moves immediately to the live Response view when a
   resumed or follow-up run reports a new active attempt before timeline
   history has caught up.

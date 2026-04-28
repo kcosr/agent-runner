@@ -104,11 +104,21 @@ export interface StreamCancelNotification {
   };
 }
 
+export interface StreamWindowNotification {
+  jsonrpc: "2.0";
+  method: "stream.window";
+  params: {
+    streamId: string;
+    bytes: number;
+  };
+}
+
 export type StreamNotification =
   | StreamDataNotification
   | StreamEndNotification
   | StreamErrorNotification
-  | StreamCancelNotification;
+  | StreamCancelNotification
+  | StreamWindowNotification;
 
 export interface DaemonInfo {
   daemonInstanceId: string;

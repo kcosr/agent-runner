@@ -23,10 +23,12 @@ import { serveDaemon } from "../apps/cli/dist/daemon/server.js";
 import { streamEvents } from "../apps/cli/dist/daemon/sse.js";
 import {
   STREAM_IDLE_TIMEOUT_MS,
+  STREAM_INITIAL_WINDOW_BYTES,
   STREAM_MAX_ACTIVE_PER_CONNECTION,
   STREAM_MAX_BUFFERED_BYTES_PER_CONNECTION,
   STREAM_MAX_BUFFERED_BYTES_PER_STREAM,
   STREAM_MAX_CHUNK_BYTES,
+  WebSocketStreamError,
   WebSocketStreamRegistry,
 } from "../apps/cli/dist/daemon/stream.js";
 import { getRun as getRunDetail } from "../packages/core/dist/app/service.js";
@@ -1768,6 +1770,25 @@ test("daemon attachment streams handle sequential, concurrent, and disconnect cl
       assert.equal(secondResult.id, second.id);
       assert.equal(readFileSync(firstDownload, "utf8"), "first stream\n");
       assert.equal(readFileSync(secondDownload, "utf8"), "second stream\n");
+
+      for (const size of [2 * 1024 * 1024, 5 * 1024 * 1024]) {
+        const sourcePath = join(dir, `large-${size}.bin`);
+        const downloadPath = join(dir, `large-${size}-download.bin`);
+        const sourceBytes = Buffer.alloc(size, size % 251);
+        writeFileSync(sourcePath, sourceBytes);
+        const attachment = await client.addAttachment(init.runId, {
+          sourcePath,
+          name: `large-${size}.bin`,
+        });
+        const downloadResult = await client.downloadAttachment(
+          init.runId,
+          attachment.id,
+          downloadPath,
+        );
+        assert.equal(downloadResult.id, attachment.id);
+        assert.deepEqual(readFileSync(downloadPath), sourceBytes);
+        await client.removeAttachment(init.runId, attachment.id);
+      }
 
       await client.removeAttachment(init.runId, first.id);
       await client.removeAttachment(init.runId, second.id);
@@ -4540,6 +4561,125 @@ test("websocket stream registry enforces chunk, active stream, buffer, EOF, and 
     await flushMicrotasks();
     assert.equal(ws.sent.at(-1).params.code, "STREAM_TIMEOUT");
     streams.close();
+  }
+});
+
+test("websocket stream registry applies byte-credit flow control", async () => {
+  const initialWindowChunks = STREAM_INITIAL_WINDOW_BYTES / STREAM_MAX_CHUNK_BYTES;
+
+  {
+    const ws = new FakeStreamWebSocket();
+    const streams = new WebSocketStreamRegistry(ws);
+    streams.openOutgoingStream("stream-flow");
+    const send = streams.sendIterable("stream-flow", [
+      Buffer.alloc(STREAM_INITIAL_WINDOW_BYTES + 1),
+    ]);
+    await flushMicrotasks();
+    assert.equal(
+      ws.sent.filter((frame) => frame.method === "stream.data").length,
+      initialWindowChunks,
+    );
+    assert.equal(
+      ws.sent.some((frame) => frame.method === "stream.end"),
+      false,
+    );
+
+    streams.handleFrame({
+      jsonrpc: "2.0",
+      method: "stream.window",
+      params: { streamId: "stream-flow", bytes: 1 },
+    });
+    await send;
+    assert.equal(
+      ws.sent.filter((frame) => frame.method === "stream.data").length,
+      initialWindowChunks + 1,
+    );
+    assert.equal(ws.sent.at(-1).method, "stream.end");
+  }
+
+  {
+    const ws = new FakeStreamWebSocket();
+    const streams = new WebSocketStreamRegistry(ws);
+    streams.openOutgoingStream("stream-cancel");
+    const send = streams.sendIterable("stream-cancel", [
+      Buffer.alloc(STREAM_INITIAL_WINDOW_BYTES + 1),
+    ]);
+    await flushMicrotasks();
+    streams.releaseStream(
+      "stream-cancel",
+      new WebSocketStreamError("stream-cancel was cancelled", "STREAM_CANCELLED"),
+    );
+    await assert.rejects(send, /stream-cancel was cancelled/);
+    assert.equal(
+      ws.sent.filter((frame) => frame.method === "stream.data").length,
+      initialWindowChunks,
+    );
+  }
+
+  {
+    const ws = new FakeStreamWebSocket();
+    const streams = new WebSocketStreamRegistry(ws);
+    streams.openOutgoingStream("stream-stale");
+    streams.releaseStream("stream-stale");
+    streams.handleFrame({
+      jsonrpc: "2.0",
+      method: "stream.window",
+      params: { streamId: "stream-stale", bytes: STREAM_MAX_CHUNK_BYTES },
+    });
+    assert.deepEqual(ws.sent, []);
+  }
+
+  {
+    const firstWs = new FakeStreamWebSocket();
+    const secondWs = new FakeStreamWebSocket();
+    const firstStreams = new WebSocketStreamRegistry(firstWs);
+    const secondStreams = new WebSocketStreamRegistry(secondWs);
+    firstStreams.openOutgoingStream("stream-cross");
+    const send = firstStreams.sendIterable("stream-cross", [
+      Buffer.alloc(STREAM_INITIAL_WINDOW_BYTES + 1),
+    ]);
+    await flushMicrotasks();
+    secondStreams.handleFrame({
+      jsonrpc: "2.0",
+      method: "stream.window",
+      params: { streamId: "stream-cross", bytes: 1 },
+    });
+    await flushMicrotasks();
+    assert.equal(
+      firstWs.sent.filter((frame) => frame.method === "stream.data").length,
+      initialWindowChunks,
+    );
+    firstStreams.handleFrame({
+      jsonrpc: "2.0",
+      method: "stream.window",
+      params: { streamId: "stream-cross", bytes: 1 },
+    });
+    await send;
+    secondStreams.close();
+  }
+
+  {
+    const ws = new FakeStreamWebSocket();
+    const streams = new WebSocketStreamRegistry(ws);
+    const sends = [];
+    for (let index = 0; index < STREAM_MAX_ACTIVE_PER_CONNECTION; index += 1) {
+      const streamId = `stream-concurrent-${index}`;
+      streams.openOutgoingStream(streamId);
+      sends.push(streams.sendIterable(streamId, [Buffer.alloc(STREAM_INITIAL_WINDOW_BYTES + 1)]));
+    }
+    await flushMicrotasks();
+    assert.equal(
+      ws.sent.filter((frame) => frame.method === "stream.data").length,
+      STREAM_MAX_ACTIVE_PER_CONNECTION * initialWindowChunks,
+    );
+    for (let index = 0; index < STREAM_MAX_ACTIVE_PER_CONNECTION; index += 1) {
+      streams.handleFrame({
+        jsonrpc: "2.0",
+        method: "stream.window",
+        params: { streamId: `stream-concurrent-${index}`, bytes: 1 },
+      });
+    }
+    await Promise.all(sends);
   }
 });
 

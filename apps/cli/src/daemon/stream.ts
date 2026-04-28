@@ -5,6 +5,8 @@ export const STREAM_MAX_CHUNK_BYTES = 65_536;
 export const STREAM_MAX_ACTIVE_PER_CONNECTION = 8;
 export const STREAM_MAX_BUFFERED_BYTES_PER_STREAM = 1_048_576;
 export const STREAM_MAX_BUFFERED_BYTES_PER_CONNECTION = 4_194_304;
+export const STREAM_INITIAL_WINDOW_BYTES =
+  STREAM_MAX_BUFFERED_BYTES_PER_CONNECTION / STREAM_MAX_ACTIVE_PER_CONNECTION;
 export const STREAM_IDLE_TIMEOUT_MS = 30_000;
 
 const WEBSOCKET_OPEN = 1;
@@ -37,6 +39,8 @@ type OutgoingStreamState = {
   idleTimer: ReturnType<typeof setTimeout>;
   error: Error | null;
   sending: boolean;
+  availableWindowBytes: number;
+  windowWaiters: Array<() => void>;
 };
 
 type StreamState = IncomingStreamState | OutgoingStreamState;
@@ -85,6 +89,8 @@ export class WebSocketStreamRegistry {
       idleTimer: this.armIdleTimer(streamId),
       error: null,
       sending: false,
+      availableWindowBytes: STREAM_INITIAL_WINDOW_BYTES,
+      windowWaiters: [],
     });
   }
 
@@ -96,8 +102,11 @@ export class WebSocketStreamRegistry {
     clearTimeout(state.idleTimer);
     if (state.kind === "incoming") {
       this.dropIncoming(state, error ? { error } : { ended: true });
-    } else if (error) {
-      state.error = error;
+    } else {
+      if (error) {
+        state.error = error;
+      }
+      this.notifyOutgoing(state);
     }
     this.streams.delete(streamId);
   }
@@ -111,6 +120,7 @@ export class WebSocketStreamRegistry {
         this.dropIncoming(state, { error });
       } else {
         state.error = error;
+        this.notifyOutgoing(state);
       }
     }
     this.streams.clear();
@@ -142,6 +152,9 @@ export class WebSocketStreamRegistry {
           false,
         );
         return;
+      case "stream.window":
+        this.receiveWindow(frame.params.streamId, frame.params.bytes);
+        return;
     }
   }
 
@@ -165,6 +178,7 @@ export class WebSocketStreamRegistry {
           if (slice.byteLength === 0) {
             continue;
           }
+          await this.waitForWindow(streamId, state, slice.byteLength);
           this.resetIdleTimer(state);
           await this.sendFrame({
             jsonrpc: "2.0",
@@ -324,6 +338,16 @@ export class WebSocketStreamRegistry {
     this.notify(state);
   }
 
+  private receiveWindow(streamId: string, bytes: number): void {
+    const state = this.streams.get(streamId);
+    if (!state || state.kind !== "outgoing") {
+      return;
+    }
+    this.resetIdleTimer(state);
+    state.availableWindowBytes += bytes;
+    this.notifyOutgoing(state);
+  }
+
   private receiveEnd(streamId: string, seq: number): void {
     const state = this.streams.get(streamId);
     if (!state || state.kind !== "incoming") {
@@ -365,6 +389,7 @@ export class WebSocketStreamRegistry {
       this.dropIncoming(state, { error });
     } else {
       state.error = error;
+      this.notifyOutgoing(state);
     }
     this.streams.delete(streamId);
     if (notifyPeer) {
@@ -413,6 +438,7 @@ export class WebSocketStreamRegistry {
           if (chunk) {
             state.bufferedBytes -= chunk.byteLength;
             this.bufferedBytes -= chunk.byteLength;
+            this.sendWindow(state.streamId, chunk.byteLength);
             yield chunk;
             continue;
           }
@@ -437,6 +463,37 @@ export class WebSocketStreamRegistry {
     for (const waiter of waiters) {
       waiter();
     }
+  }
+
+  private notifyOutgoing(state: OutgoingStreamState): void {
+    const waiters = state.windowWaiters.splice(0);
+    for (const waiter of waiters) {
+      waiter();
+    }
+  }
+
+  private async waitForWindow(
+    streamId: string,
+    state: OutgoingStreamState,
+    bytes: number,
+  ): Promise<void> {
+    while (state.availableWindowBytes < bytes) {
+      this.assertOutgoingActive(streamId, state);
+      await new Promise<void>((resolve) => {
+        state.windowWaiters.push(resolve);
+      });
+      this.assertOutgoingActive(streamId, state);
+    }
+    this.assertOutgoingActive(streamId, state);
+    state.availableWindowBytes -= bytes;
+  }
+
+  private sendWindow(streamId: string, bytes: number): void {
+    void this.sendFrame({
+      jsonrpc: "2.0",
+      method: "stream.window",
+      params: { streamId, bytes },
+    }).catch(() => undefined);
   }
 
   private async sendFrame(frame: StreamNotification): Promise<void> {

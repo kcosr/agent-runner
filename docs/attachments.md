@@ -126,10 +126,12 @@ endpoints:
 - `GET /api/runs/:runId/attachments/:attachmentId/content`
 
 Connected CLI callers use the daemon WebSocket instead. Stream limits are
-65,536 bytes per decoded chunk, 8 active streams per WebSocket, 1 MiB of
-buffered unread bytes per stream, 4 MiB buffered per WebSocket, and a
-30-second idle timeout. The core attachment limits above still apply to
-committed attachments.
+65,536 bytes per decoded chunk, 8 active streams per WebSocket, 512 KiB
+of initial outgoing byte credit per stream, 1 MiB of buffered unread
+bytes per stream, 4 MiB buffered per WebSocket, and a 30-second idle
+timeout. Upload and download streams pace `stream.data` frames with
+receiver-issued `stream.window` credit grants. The core attachment
+limits above still apply to committed attachments.
 
 ## Web dashboard
 

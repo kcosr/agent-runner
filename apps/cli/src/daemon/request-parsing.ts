@@ -37,7 +37,7 @@ import type {
   StreamNotification,
   WebRunsStartParams,
 } from "./protocol.js";
-import { STREAM_MAX_CHUNK_BYTES } from "./stream.js";
+import { STREAM_MAX_BUFFERED_BYTES_PER_STREAM, STREAM_MAX_CHUNK_BYTES } from "./stream.js";
 
 export class RequestValidationError extends Error {
   constructor(message: string) {
@@ -768,6 +768,18 @@ function requiredBase64Data(value: unknown, label: string): string {
   return data;
 }
 
+function requiredStreamWindowBytes(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
+    throw new RequestValidationError(`${label} must be a positive safe integer`);
+  }
+  if (value > STREAM_MAX_BUFFERED_BYTES_PER_STREAM) {
+    throw new RequestValidationError(
+      `${label} must be less than or equal to ${STREAM_MAX_BUFFERED_BYTES_PER_STREAM}`,
+    );
+  }
+  return value;
+}
+
 export function parseStreamNotification(value: unknown): StreamNotification {
   const record = asRecord(value, "stream notification");
   if (record.jsonrpc !== "2.0") {
@@ -812,6 +824,15 @@ export function parseStreamNotification(value: unknown): StreamNotification {
         params: {
           streamId: requiredNonEmptyString(params.streamId, "stream.cancel streamId"),
           reason: optionalString(params.reason, "stream.cancel reason"),
+        },
+      };
+    case "stream.window":
+      return {
+        jsonrpc: "2.0",
+        method,
+        params: {
+          streamId: requiredNonEmptyString(params.streamId, "stream.window streamId"),
+          bytes: requiredStreamWindowBytes(params.bytes, "stream.window bytes"),
         },
       };
     default:

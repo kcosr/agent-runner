@@ -79,6 +79,8 @@ streams are JSON-RPC 2.0 notifications whose methods begin with
 - `stream.end` marks EOF with the next expected `seq`.
 - `stream.error` fails a stream.
 - `stream.cancel` requests cleanup.
+- `stream.window` grants byte credit back to an outgoing sender after
+  the receiver consumes buffered data.
 
 Stream IDs are scoped to one WebSocket connection and multiple streams
 can be active concurrently on that connection. The daemon enforces these
@@ -86,9 +88,14 @@ limits:
 
 - Max decoded stream chunk: **65,536 bytes**
 - Max active streams per WebSocket: **8**
+- Initial outgoing byte credit per stream: **512 KiB**
 - Max buffered unread bytes per stream: **1 MiB**
 - Max buffered unread bytes per WebSocket: **4 MiB**
 - Stream idle timeout: **30 seconds**
+
+Senders must honor receiver-issued `stream.window` credit grants before
+sending more `stream.data` frames. The buffer limits remain hard safety
+checks at the receiver boundary.
 
 Connected CLI attachments use this stream facility for upload and
 download. Listing and removal use WebSocket JSON-RPC methods
