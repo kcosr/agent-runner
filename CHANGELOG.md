@@ -9,6 +9,7 @@
   `daemonRemoveAttachment`, `daemonDownloadAttachment`) from
   `apps/cli/src/daemon/http-client.ts`; connected callers must use the
   WebSocket RPC and stream methods.
+  ([#117](https://github.com/kcosr/task-runner/pull/117))
 - Manifest schema version is now `15`. Run manifests and reset seeds now
   require `runGroupId` plus typed `dependencies` refs (`run` or
   `group`); the former run-only dependency array is removed. Use
@@ -102,7 +103,7 @@
 - Added multiplexed daemon WebSocket byte streams and moved connected CLI
   attachment add/list/download/remove onto WebSocket RPC plus stream
   frames, while preserving HTTP attachment endpoints for browser/API
-  callers.
+  callers. ([#117](https://github.com/kcosr/task-runner/pull/117))
 - Added first-class run groups across manifests, CLI, daemon APIs, and the
   web dashboard. Fresh child runs inherit the parent run group by default,
   `--group-id` overrides fresh run/init grouping, and
@@ -341,6 +342,7 @@
 - Daemon WebSocket attachment streams now use byte-credit flow control so
   multi-megabyte connected uploads and downloads pace to receiver
   consumption instead of tripping stream buffer limits.
+  ([#117](https://github.com/kcosr/task-runner/pull/117))
 - Attempts drawer now moves immediately to the live Response view when a
   resumed or follow-up run reports a new active attempt before timeline
   history has caught up.
