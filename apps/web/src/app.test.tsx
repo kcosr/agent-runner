@@ -1946,7 +1946,8 @@ describe("web app", () => {
     const chat = await screen.findByLabelText("Run chat");
     expect(await within(chat).findByText("run-1")).toBeInTheDocument();
     expect(await within(chat).findByText("Build dashboard")).toBeInTheDocument();
-    expect(await within(chat).findByText("Initial dashboard request")).toBeInTheDocument();
+    expect(await within(chat).findByText("Prompt")).toBeInTheDocument();
+    expect(within(chat).queryByText("Initial dashboard request")).not.toBeInTheDocument();
     expect(await within(chat).findByText("Streaming answer")).toBeInTheDocument();
     expect(
       fetchCallCount(fetchMock, (url) => url.endsWith("/api/runs/run-1/timeline")),
@@ -2015,6 +2016,46 @@ describe("web app", () => {
 
     await waitFor(() => {
       expect(resumeBody).toEqual({ overrides: { message: "Continue from chat" } });
+    });
+    await waitFor(() => {
+      expect(message).toHaveValue("");
+    });
+  });
+
+  it("submits Chat composer messages with Command+Enter", async () => {
+    setStoredDashboardViewState({ chatOpen: true, activeRightSurface: "chat" });
+    let resumeBody: { overrides?: { message?: string } } | undefined;
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest: (url, init) => {
+          if (!url.endsWith("/api/runs/run-1/resume") || init?.method !== "POST") {
+            return undefined;
+          }
+          resumeBody =
+            typeof init.body === "string" && init.body.length > 0
+              ? (JSON.parse(init.body) as { overrides?: { message?: string } })
+              : undefined;
+          return new Response(JSON.stringify({ runId: "run-1" }), { status: 200 });
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+
+    const message = await screen.findByLabelText("Message");
+    await waitFor(() => {
+      expect(message).toBeEnabled();
+    });
+    await user.type(message, "  Continue with shortcut  ");
+    fireEvent.keyDown(message, { key: "Enter", metaKey: true });
+
+    await waitFor(() => {
+      expect(resumeBody).toEqual({ overrides: { message: "Continue with shortcut" } });
     });
     await waitFor(() => {
       expect(message).toHaveValue("");

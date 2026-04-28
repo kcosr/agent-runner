@@ -177,21 +177,22 @@ history and streaming without starting a duplicate timeline subscription.
 
 ### Chat
 
-Chat renders the selected run as a conversational thread. Session `0`
-uses the run's initial message as the user bubble when present, resumed
-sessions use their session message, and assistant bubbles use the latest
-attempt transcript for each session. Prior attempts, notices, and
-diagnostics remain available as secondary details instead of becoming
+Chat renders the selected run as a conversational thread. Each session's
+latest attempt prompt is the user bubble when present, falling back to the
+stored run or session message before attempts exist. Assistant bubbles use
+the latest attempt transcript for each session. Prior attempts, notices,
+and diagnostics remain available as secondary details instead of becoming
 main chat messages.
 
 The composer is fixed at the bottom of the Chat panel for a selected
 run. It sends only non-empty trimmed messages through the existing resume
 API, using the same resume mutation path as the Detail Resume dialog.
-Success clears the draft and lets live timeline output appear in Chat;
-failure keeps the draft visible with the daemon error in the panel. Runs
-that cannot resume, no selected run, and pending resume requests disable
-the composer. The Detail Resume dialog remains available for existing
-resume flows, including resume-without-message where allowed.
+The composer submits from the Send button or `Cmd/Ctrl+Enter`. Success
+clears the draft and lets live timeline output appear in Chat; failure
+keeps the draft visible with the daemon error in the panel. Runs that
+cannot resume, no selected run, and pending resume requests disable the
+composer. The Detail Resume dialog remains available for existing resume
+flows, including resume-without-message where allowed.
 
 ## Live projections
 

@@ -22,7 +22,6 @@ export interface RunChatRetryAttempt {
   transcript: string;
   emptyState?: RunChatAssistantEmptyState;
   notices: string;
-  prompt: string;
 }
 
 export interface RunChatAssistantRow extends RunChatRetryAttempt {
@@ -58,7 +57,6 @@ function toRetryAttempt(attempt: RunTimelineAttempt): RunChatRetryAttempt {
     transcript: attempt.transcript,
     emptyState: attemptEmptyState(attempt),
     notices: attempt.notices,
-    prompt: attempt.prompt,
   };
 }
 
@@ -66,7 +64,13 @@ function sessionUserMessage(
   run: RunDetail,
   sessionIndex: number,
   session: RunSessionSummary | undefined,
+  attempts: RunTimelineAttempt[],
 ): string | null {
+  const latestPrompt = normalizedMessage(attempts.at(-1)?.prompt ?? null);
+  if (latestPrompt !== null) {
+    return latestPrompt;
+  }
+
   if (sessionIndex === 0) {
     return normalizedMessage(run.message);
   }
@@ -104,7 +108,8 @@ export function deriveRunChatRows(
   const rows: RunChatRow[] = [];
   for (const sessionIndex of [...sessionIndexes].sort((left, right) => left - right)) {
     const session = sessionsByIndex.get(sessionIndex);
-    const userMessage = sessionUserMessage(run, sessionIndex, session);
+    const attempts = attemptsBySession.get(sessionIndex) ?? [];
+    const userMessage = sessionUserMessage(run, sessionIndex, session, attempts);
     if (userMessage !== null) {
       rows.push({
         id: `session:${sessionIndex}:user`,
@@ -115,7 +120,6 @@ export function deriveRunChatRows(
       });
     }
 
-    const attempts = attemptsBySession.get(sessionIndex) ?? [];
     const primaryAttempt = attempts.at(-1);
     if (!primaryAttempt) {
       continue;

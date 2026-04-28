@@ -176,6 +176,14 @@ describe("deriveRunChatRows", () => {
       "session:1:assistant:4",
       "session:2:user",
     ]);
+    expect(rows[0]).toMatchObject({
+      kind: "user",
+      text: "Prompt text",
+    });
+    expect(rows[2]).toMatchObject({
+      kind: "user",
+      text: "Prompt text",
+    });
     expect(rows[1]).toMatchObject({
       kind: "assistant",
       attemptNumber: 2,
@@ -190,7 +198,7 @@ describe("deriveRunChatRows", () => {
     });
   });
 
-  it("retains notices, prompt diagnostics, and live or empty transcript states", () => {
+  it("renders attempt prompts as user rows and retains notices plus live or empty transcript states", () => {
     const rows = deriveRunChatRows(
       makeRun({
         sessions: [makeSession({ sessionIndex: 0, message: null })],
@@ -215,21 +223,23 @@ describe("deriveRunChatRows", () => {
       ]),
     );
 
-    expect(rows).toHaveLength(1);
+    expect(rows).toHaveLength(2);
     expect(rows[0]).toMatchObject({
+      kind: "user",
+      text: "live prompt",
+    });
+    expect(rows[1]).toMatchObject({
       kind: "assistant",
       attemptNumber: 2,
       transcript: "   ",
       emptyState: "waiting_live_response",
       notices: "live notice",
-      prompt: "live prompt",
       retryAttempts: [
         {
           attemptNumber: 1,
           transcript: "",
           emptyState: "no_response_recorded",
           notices: "backend notice",
-          prompt: "first prompt",
         },
       ],
     });

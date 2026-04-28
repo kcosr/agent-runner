@@ -96,7 +96,8 @@
 
 - Added a selected-run Chat side surface to the web dashboard, including
   Detail/Chat side-surface toggles, persisted Chat layout state, timeline
-  projection, and resume composer support.
+  projection with prompts as user messages, and resume composer support
+  from the Send button or `Cmd/Ctrl+Enter`.
   ([#118](https://github.com/kcosr/task-runner/pull/118))
 - Added first-class run groups across manifests, CLI, daemon APIs, and the
   web dashboard. Fresh child runs inherit the parent run group by default,

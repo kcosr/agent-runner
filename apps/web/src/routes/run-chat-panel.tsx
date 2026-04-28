@@ -1,6 +1,13 @@
 import type { UseQueryResult } from "@tanstack/react-query";
 import type { RunDetail } from "@task-runner/core/contracts/runs.js";
-import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { DrawerResizeHandle } from "../components/drawer-resize-handle.js";
 import { CloseIcon } from "../components/icons.js";
 import { MarkdownContent } from "../components/markdown.js";
@@ -64,7 +71,7 @@ function AttemptDiagnostics({
   attempt: RunChatRetryAttempt;
   label: string;
 }) {
-  if (!attempt.notices.trim() && !attempt.prompt.trim()) {
+  if (!attempt.notices.trim()) {
     return null;
   }
 
@@ -75,12 +82,6 @@ function AttemptDiagnostics({
         <div className="chat-diagnostic-block">
           <span className="chat-diagnostic-label">Notices</span>
           <pre>{attempt.notices}</pre>
-        </div>
-      ) : null}
-      {attempt.prompt.trim() ? (
-        <div className="chat-diagnostic-block">
-          <span className="chat-diagnostic-label">Prompt</span>
-          <pre>{attempt.prompt}</pre>
         </div>
       ) : null}
     </details>
@@ -211,8 +212,7 @@ export function RunChatPanel({
     stickToBottomRef.current = isScrolledToBottom(element);
   }
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function submitDraft() {
     if (!selectedRun || submitDisabled) {
       return;
     }
@@ -232,6 +232,21 @@ export function RunChatPanel({
       }
       setChatError(error instanceof Error ? error.message : "Resume failed.");
     }
+  }
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void submitDraft();
+  }
+
+  function handleMessageKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key !== "Enter" || (!event.metaKey && !event.ctrlKey)) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    void submitDraft();
   }
 
   function renderBody() {
@@ -315,14 +330,16 @@ export function RunChatPanel({
         </div>
       ) : null}
       <div className="chat-panel__body">{renderBody()}</div>
-      <form className="chat-composer" onSubmit={(event) => void handleSubmit(event)}>
+      <form className="chat-composer" onSubmit={handleSubmit}>
         <label className="sr-only" htmlFor="run-chat-message">
           Message
         </label>
         <textarea
+          aria-keyshortcuts="Meta+Enter Ctrl+Enter"
           disabled={!selectedRun || resumePending || selectedRun.capabilities.canResume === false}
           id="run-chat-message"
           onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={handleMessageKeyDown}
           placeholder={selectedRun ? "Message this run" : "Select a run to chat"}
           rows={3}
           value={draft}
