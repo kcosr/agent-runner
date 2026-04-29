@@ -40,7 +40,6 @@ export const EMPTY_DASHBOARD_STRUCTURED_FILTERS: DashboardStructuredFilters = {
 };
 
 export type DrawerDetailSection =
-  | "tasks"
   | "notes"
   | "attachments"
   | "dependencies"
@@ -62,7 +61,7 @@ export type RunDrawerView =
       attachmentOwnerRunId: string;
     };
 
-export type DashboardRightSurface = "detail" | "chat";
+export type DashboardRightSurface = "detail" | "chat" | "tasks";
 
 export interface DashboardViewState {
   search: string;
@@ -76,7 +75,7 @@ export interface DashboardViewState {
 
 export const DEFAULT_DRAWER_VIEW: RunDrawerView = {
   mode: "detail",
-  detailSection: "tasks",
+  detailSection: "notes",
   attachmentId: null,
   attachmentOwnerRunId: null,
 };
@@ -270,7 +269,9 @@ function parseStoredDashboardViewState(value: unknown): DashboardViewState {
         ? clampDrawerWidth(record.drawerWidth)
         : DEFAULT_DASHBOARD_VIEW_STATE.drawerWidth,
     activeRightSurface:
-      record.activeRightSurface === "detail" || record.activeRightSurface === "chat"
+      record.activeRightSurface === "detail" ||
+      record.activeRightSurface === "chat" ||
+      record.activeRightSurface === "tasks"
         ? record.activeRightSurface
         : DEFAULT_DASHBOARD_VIEW_STATE.activeRightSurface,
     collapsedColumnKeys: Array.isArray(record.collapsedColumnKeys)

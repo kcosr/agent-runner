@@ -75,6 +75,8 @@ export function RunsDashboardRoute() {
         currentState.viewState.drawerFullscreen ||
         document.querySelector(".drawer--fullscreen") !== null;
       const modalOpen = document.querySelector('dialog[open][data-modal="true"]') !== null;
+      const typingTarget =
+        isEditableEventTarget(event.target) || isEditableEventTarget(document.activeElement);
 
       const command = resolveRunsShortcutCommand(event, {
         activeBoardColumnKey: currentState.activeBoardColumnKey,
@@ -88,7 +90,7 @@ export function RunsDashboardRoute() {
         selectedRunPrimaryActionAvailable: currentState.selectedRunPrimaryActionAvailable,
         selectedDrawerView: currentState.selectedDrawerView,
         selectedRunId: currentState.selectedRunId,
-        typingTarget: isEditableEventTarget(event.target),
+        typingTarget,
       });
 
       if (!command) {
@@ -174,15 +176,37 @@ export function RunsDashboardRoute() {
         return;
       }
 
+      const closeAttachmentPreviewForSurfaceShortcut = () => {
+        if (currentState.selectedDrawerView?.mode === "attachment") {
+          currentState.returnSelectedRunToAttachments();
+        }
+      };
+
       if (command === "run.showChat") {
         event.preventDefault();
+        if (
+          currentState.activeRightSurface === "chat" &&
+          currentState.selectedDrawerView?.mode !== "attachment"
+        ) {
+          document.getElementById("run-chat-message")?.focus();
+          return;
+        }
+        closeAttachmentPreviewForSurfaceShortcut();
         currentState.setActiveRightSurface("chat");
         return;
       }
 
       if (command === "run.showDetail") {
         event.preventDefault();
+        closeAttachmentPreviewForSurfaceShortcut();
         currentState.setActiveRightSurface("detail");
+        return;
+      }
+
+      if (command === "run.showTasks") {
+        event.preventDefault();
+        closeAttachmentPreviewForSurfaceShortcut();
+        currentState.setActiveRightSurface("tasks");
         return;
       }
 
@@ -310,6 +334,11 @@ export function RunsDashboardRoute() {
               collapsedColumnKeys={state.collapsedColumnKeys}
               hasActiveStructuredFilters={state.hasActiveStructuredFilters}
               openSelectedRunNoteRequest={openSelectedRunNoteRequest}
+              onOpenSelectedRunNoteRequestHandled={(version) => {
+                setOpenSelectedRunNoteRequest((current) =>
+                  current?.version === version ? null : current,
+                );
+              }}
               onExpandColumn={state.columnActions.expand}
               onActiveBoardColumnKeyChange={state.setActiveBoardColumnKey}
               onResetFilters={state.resetBoardFilters}

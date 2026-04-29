@@ -252,10 +252,12 @@ export function RunDetailPanel({
     );
   }
 
+  const activeDetailSection = drawerView?.detailSection ?? "notes";
+
   return (
     <>
       <RunDetailDrawer
-        activeSection={drawerView?.detailSection ?? "tasks"}
+        activeSection={activeDetailSection}
         activeSurface={activeRightSurface}
         chatSurface={chatSurface}
         dependencyCandidateRuns={runs}

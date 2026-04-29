@@ -51,7 +51,7 @@ const DEFAULT_DASHBOARD_PREFERENCES = {
 const DEFAULT_DASHBOARD_VIEW_STATE: {
   collapsedColumnKeys: string[];
   drawerWidth: number;
-  activeRightSurface: "detail" | "chat";
+  activeRightSurface: "detail" | "chat" | "tasks";
 } = {
   collapsedColumnKeys: [],
   drawerWidth: 540,
@@ -1793,6 +1793,7 @@ describe("web app", () => {
     expect(hasEventSource("/api/runs/run-1/events/timeline")).toBe(false);
     expect(hasEventSource("/api/runs/run-1/events/audit")).toBe(false);
 
+    await user.click(screen.getByRole("tab", { name: "Detail" }));
     await user.click(screen.getByRole("button", { name: "Attempts" }));
     const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
     timelineSource.emitOpen();
@@ -1802,7 +1803,11 @@ describe("web app", () => {
     );
     expect(fetchCallCount(fetchMock, (url) => url.endsWith("/api/runs/run-1/timeline"))).toBe(1);
 
-    await user.click(screen.getByRole("button", { name: /^Tasks\b/ }));
+    await user.click(
+      within(screen.getByRole("tablist", { name: "Run surface" })).getByRole("tab", {
+        name: "Tasks",
+      }),
+    );
     timelineSource.emitMessage({
       runId: "run-1",
       cursor: 2,
@@ -1811,6 +1816,7 @@ describe("web app", () => {
         text: " while away",
       },
     });
+    await user.click(screen.getByRole("tab", { name: "Detail" }));
     await user.click(screen.getByRole("button", { name: "Attempts" }));
     expect(await screen.findByRole("region", { name: "Attempt response" })).toHaveTextContent(
       "Deferred response while away",
@@ -1833,7 +1839,7 @@ describe("web app", () => {
       fetchCallCount(fetchMock, (url) => /\/api\/runs\/run-1\/audit(?:\?.*)?$/.test(url)),
     ).toBe(1);
 
-    await user.click(screen.getByRole("button", { name: /^Tasks\b/ }));
+    await user.click(within(auditPanel).getByRole("tab", { name: "Tasks" }));
     auditSource.emitMessage({
       runId: "run-1",
       cursor: 2,
@@ -1874,7 +1880,7 @@ describe("web app", () => {
     expect(container.querySelector(".dashboard-right-surfaces")).toBeNull();
   });
 
-  it("opens a selected-run panel and switches between Chat and Detail tabs", async () => {
+  it("opens a selected-run panel and switches between Chat, Detail, and Tasks tabs", async () => {
     installFetchMock({
       runs: [makeRun()],
       details: { "run-1": makeDetail() },
@@ -1886,6 +1892,7 @@ describe("web app", () => {
 
     await user.click(await findRunCard("Build dashboard"));
     expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
+    expect(screen.getByLabelText("Tasks")).toBeInTheDocument();
 
     const tablist = await screen.findByRole("tablist", { name: "Run surface" });
     await user.click(within(tablist).getByRole("tab", { name: "Chat" }));
@@ -1893,10 +1900,13 @@ describe("web app", () => {
     await user.type(await screen.findByLabelText("Message"), "keep this draft");
 
     await user.click(within(tablist).getByRole("tab", { name: "Detail" }));
-    expect(screen.getByLabelText("Tasks")).toBeInTheDocument();
+    expect(screen.getByLabelText("Notes")).toBeInTheDocument();
     expect(screen.getByLabelText("Run chat").closest(".drawer-body--chat")).toHaveAttribute(
       "hidden",
     );
+
+    await user.click(within(tablist).getByRole("tab", { name: /Tasks/ }));
+    expect(screen.getByLabelText("Tasks")).toBeInTheDocument();
 
     await user.click(within(tablist).getByRole("tab", { name: "Chat" }));
     expect(await screen.findByLabelText("Message")).toHaveValue("keep this draft");
@@ -1907,7 +1917,7 @@ describe("web app", () => {
     });
   });
 
-  it("switches the active selected-run surface from the Chat and Detail tabs", async () => {
+  it("switches the active selected-run surface from the Chat, Detail, and Tasks tabs", async () => {
     setStoredDashboardViewState({ activeRightSurface: "detail" });
     installFetchMock({
       runs: [makeRun()],
@@ -1920,13 +1930,15 @@ describe("web app", () => {
     const tablist = await screen.findByRole("tablist", { name: "Run surface" });
     const detailTab = within(tablist).getByRole("tab", { name: "Detail" });
     const chatTab = within(tablist).getByRole("tab", { name: "Chat" });
+    const tasksTab = within(tablist).getByRole("tab", { name: /Tasks/ });
     expect(
       within(tablist)
         .getAllByRole("tab")
         .map((tab) => tab.textContent),
-    ).toEqual(["Chat", "Detail"]);
+    ).toEqual(["Chat", "Detail", "Tasks"]);
     expect(detailTab).toHaveAttribute("aria-selected", "true");
     expect(chatTab).toHaveAttribute("aria-selected", "false");
+    expect(tasksTab).toHaveAttribute("aria-selected", "false");
     expect(screen.getByLabelText("Run chat").closest(".drawer-body--chat")).toHaveAttribute(
       "hidden",
     );
@@ -1942,6 +1954,10 @@ describe("web app", () => {
     expect(screen.getByLabelText("Run chat").closest(".drawer-body--chat")).toHaveAttribute(
       "hidden",
     );
+
+    await user.click(tasksTab);
+    expect(tasksTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("Tasks")).toBeInTheDocument();
   });
 
   it("switches the active selected-run surface with keyboard shortcuts", async () => {
@@ -1957,6 +1973,7 @@ describe("web app", () => {
     const tablist = await screen.findByRole("tablist", { name: "Run surface" });
     const detailTab = within(tablist).getByRole("tab", { name: "Detail" });
     const chatTab = within(tablist).getByRole("tab", { name: "Chat" });
+    const tasksTab = within(tablist).getByRole("tab", { name: /Tasks/ });
     expect(detailTab).toHaveAttribute("aria-selected", "true");
 
     await user.keyboard("c");
@@ -1964,12 +1981,27 @@ describe("web app", () => {
     expect(screen.getByLabelText("Run chat").closest(".drawer-body--chat")).not.toHaveAttribute(
       "hidden",
     );
+    const message = await screen.findByLabelText("Message");
+    await waitFor(() => {
+      expect(message).toBeEnabled();
+    });
+    expect(message).not.toHaveFocus();
+
+    await user.keyboard("c");
+    expect(message).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+    expect(message).not.toHaveFocus();
 
     await user.keyboard("d");
     expect(detailTab).toHaveAttribute("aria-selected", "true");
     expect(screen.getByLabelText("Run chat").closest(".drawer-body--chat")).toHaveAttribute(
       "hidden",
     );
+
+    await user.keyboard("t");
+    expect(tasksTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("Tasks")).toBeInTheDocument();
   });
 
   it("renders selected-run Chat, activates the existing timeline once, and streams deltas", async () => {
@@ -2490,6 +2522,7 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
+    await user.click(screen.getByRole("tab", { name: "Detail" }));
     await user.click(screen.getByRole("button", { name: "Attempts" }));
 
     const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
@@ -2616,6 +2649,7 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
+    await user.click(screen.getByRole("tab", { name: "Detail" }));
     await user.click(screen.getByRole("button", { name: "Attempts" }));
 
     expect(await screen.findByRole("tab", { name: "Pending" })).toBeInTheDocument();
@@ -2816,6 +2850,7 @@ describe("web app", () => {
     expect(hasEventSource("/api/runs/run-1/events/timeline")).toBe(false);
     expect(hasEventSource("/api/runs/run-1/events/audit")).toBe(false);
 
+    await user.click(screen.getByRole("tab", { name: "Detail" }));
     await user.click(screen.getByRole("button", { name: "Attempts" }));
     expect(await screen.findByRole("region", { name: "Attempt response" })).toHaveTextContent(
       "Completed attempt",
@@ -2957,6 +2992,7 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
+    await user.click(screen.getByRole("tab", { name: "Detail" }));
     await user.click(screen.getByRole("button", { name: "Attempts" }));
 
     const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
@@ -3020,6 +3056,7 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
+    await user.click(screen.getByRole("tab", { name: "Detail" }));
     await user.click(screen.getByRole("button", { name: "Attempts" }));
 
     const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
@@ -3069,6 +3106,7 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
+    await user.click(screen.getByRole("tab", { name: "Detail" }));
     await user.click(screen.getByRole("button", { name: "Attempts" }));
 
     const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
@@ -3091,15 +3129,16 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
+    await user.click(await screen.findByRole("tab", { name: "Detail" }));
 
     const runSections = await screen.findByRole("navigation", { name: "Run sections" });
     expect(runSections).toHaveClass("tabs", "tabs--scrollable");
-    expect(runSections.querySelectorAll(":scope > .tab")).toHaveLength(7);
+    expect(runSections.querySelectorAll(":scope > .tab")).toHaveLength(6);
     expect(
       [...runSections.querySelectorAll(":scope > .tab")].map((tab) =>
         tab.textContent?.replace(/\s+\S+\/\S+$/, "").trim(),
       ),
-    ).toEqual(["Tasks", "Attempts", "Attachments", "Data", "Audit", "Dependencies", "Notes"]);
+    ).toEqual(["Attempts", "Attachments", "Data", "Audit", "Dependencies", "Notes"]);
   });
 
   it("omits Attempts but keeps Audit and Data in the passive run-section tab strip", async () => {
@@ -3115,14 +3154,15 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
+    await user.click(await screen.findByRole("tab", { name: "Detail" }));
 
     const runSections = await screen.findByRole("navigation", { name: "Run sections" });
-    expect(runSections.querySelectorAll(":scope > .tab")).toHaveLength(6);
+    expect(runSections.querySelectorAll(":scope > .tab")).toHaveLength(5);
     expect(
       [...runSections.querySelectorAll(":scope > .tab")].map((tab) =>
         tab.textContent?.replace(/\s+\S+\/\S+$/, "").trim(),
       ),
-    ).toEqual(["Tasks", "Attachments", "Data", "Audit", "Dependencies", "Notes"]);
+    ).toEqual(["Attachments", "Data", "Audit", "Dependencies", "Notes"]);
     expect(within(runSections).getByRole("button", { name: "Audit" })).toBeInTheDocument();
     expect(within(runSections).getByRole("button", { name: "Data" })).toBeInTheDocument();
     expect(within(runSections).queryByRole("button", { name: "Attempts" })).not.toBeInTheDocument();
@@ -3922,6 +3962,7 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
+    await user.click(screen.getByRole("tab", { name: "Detail" }));
     await user.click(screen.getByRole("button", { name: "Attempts" }));
 
     const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
@@ -4485,6 +4526,11 @@ describe("web app", () => {
 
     await user.click(await findRunCard("Build dashboard"));
     await screen.findByLabelText("Run detail");
+    await user.click(
+      within(screen.getByRole("tablist", { name: "Run surface" })).getByRole("tab", {
+        name: "Tasks",
+      }),
+    );
 
     expect(screen.queryByText("Ship the web UI")).not.toBeInTheDocument();
     expect(screen.queryByText("working")).not.toBeInTheDocument();
@@ -5977,8 +6023,10 @@ describe("web app", () => {
     expect(screen.getByText("Toggle notes-only filter")).toBeInTheDocument();
     expect(screen.getByLabelText("Shortcut: C")).toBeInTheDocument();
     expect(screen.getByLabelText("Shortcut: D")).toBeInTheDocument();
+    expect(screen.getByLabelText("Shortcut: T")).toBeInTheDocument();
     expect(screen.getByText("Switch to Chat")).toBeInTheDocument();
     expect(screen.getByText("Switch to Detail")).toBeInTheDocument();
+    expect(screen.getByText("Switch to Tasks")).toBeInTheDocument();
 
     await user.click(getSidebarNavigation().getByRole("button", { name: "Runs" }));
 
@@ -6107,6 +6155,11 @@ describe("web app", () => {
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
     await screen.findByLabelText("Run detail");
+    await user.click(
+      within(screen.getByRole("tablist", { name: "Run surface" })).getByRole("tab", {
+        name: "Tasks",
+      }),
+    );
     await user.click(screen.getByRole("button", { name: /render markdown/i, expanded: false }));
 
     expect(await screen.findByText("Done when:")).toBeInTheDocument();
@@ -6335,6 +6388,7 @@ describe("web app", () => {
     await user.click(screen.getByRole("button", { name: /^save$/i }));
 
     await user.click(card);
+    await user.click(screen.getByRole("tab", { name: "Detail" }));
     await user.click(screen.getByRole("button", { name: "Notes" }));
 
     expect(await screen.findByText("Dashboard polish")).toBeInTheDocument();
@@ -7591,14 +7645,14 @@ describe("web app", () => {
     expect(chatSendRule?.[0]).toContain("bottom: 10px;");
   });
 
-  it("hides inactive selected-run Chat and Detail tab bodies from layout", () => {
+  it("hides inactive selected-run surface bodies from layout", () => {
     const css = readFileSync(join(process.cwd(), "src", "styles.css"), "utf8");
     const hiddenDrawerBodyRule = /\.drawer-body\[hidden\]\s*\{[\s\S]*?\n\}/.exec(css);
 
     expect(hiddenDrawerBodyRule?.[0]).toContain("display: none;");
   });
 
-  it("shows mobile Chat and Detail surfaces as full-viewport overlays", () => {
+  it("shows mobile selected-run surfaces as full-viewport overlays", () => {
     const css = readFileSync(join(process.cwd(), "src", "styles.css"), "utf8");
 
     expect(css).toMatch(
@@ -10179,10 +10233,20 @@ describe("web app", () => {
 
     await user.click(await findRunCard("Second run"));
     expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
+    await user.click(
+      within(screen.getByRole("tablist", { name: "Run surface" })).getByRole("tab", {
+        name: "Tasks",
+      }),
+    );
     expect(
       await screen.findByRole("button", { name: /shared task/i, expanded: false }),
     ).toBeInTheDocument();
     expect(screen.queryByLabelText("Attachment preview")).not.toBeInTheDocument();
+    await user.click(
+      within(screen.getByRole("tablist", { name: "Run surface" })).getByRole("tab", {
+        name: "Detail",
+      }),
+    );
 
     await user.click(await findRunCard("Build dashboard"));
     expect(await screen.findByLabelText("Attachment preview")).toBeInTheDocument();
@@ -10681,15 +10745,10 @@ describe("web app", () => {
     screen.getByLabelText("Attachment preview").focus();
 
     await user.keyboard("{Enter}");
-    expect(await screen.findByRole("dialog", { name: "Resume run" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Resume run" })).not.toBeInTheDocument();
     expect(screen.getByLabelText("Attachment preview")).toBeInTheDocument();
     expect(screen.getByText("beta body")).toBeInTheDocument();
     expect(resumeRequestCount).toBe(0);
-
-    nativeCancel(screen.getByRole("dialog", { name: "Resume run" }));
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: "Resume run" })).not.toBeInTheDocument();
-    });
     expect(screen.getByLabelText("Attachment preview")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Expand drawer to full width" }));
@@ -10704,15 +10763,10 @@ describe("web app", () => {
     screen.getByLabelText("Attachment preview").focus();
 
     await user.keyboard("{Enter}");
-    expect(await screen.findByRole("dialog", { name: "Resume run" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Resume run" })).not.toBeInTheDocument();
     expect(screen.getByLabelText("Attachment preview")).toBeInTheDocument();
     expect(screen.getByText("beta body")).toBeInTheDocument();
     expect(resumeRequestCount).toBe(0);
-
-    nativeCancel(screen.getByRole("dialog", { name: "Resume run" }));
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: "Resume run" })).not.toBeInTheDocument();
-    });
     expect(screen.getByLabelText("Attachment preview")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Exit full-width drawer" })).toBeInTheDocument();
   });

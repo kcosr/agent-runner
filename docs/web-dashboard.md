@@ -32,23 +32,22 @@ A multi-surface workspace:
 
 - **Left** — search, grouped Filters control, and preference toggles.
 - **Center** — Board, the kanban run list grouped by run status.
-- **Right** — one selected-run panel with Chat and Detail tabs.
+- **Right** — one selected-run panel with Chat, Detail, and Tasks tabs.
 
 Board is always visible. Selecting a run opens one resizable selected-run
 panel. Its header owns the run identity plus action toolbar, and the tabs
-below the toolbar switch between Detail, the operational inspector, and
-Chat, the conversational projection of the same run. Chat does not create
-a separate chat route or backend chat contract; it follows the selected
-run, derives messages from `RunDetail` plus timeline history, and streams
-live output through the existing timeline stream.
+below the toolbar switch between Chat, Detail, and Tasks. Chat does not
+create a separate chat route or backend chat contract; it follows the
+selected run, derives messages from `RunDetail` plus timeline history,
+and streams live output through the existing timeline stream.
 
 Closing the selected-run panel navigates back to `/` and clears the
-selected run. Chat and Detail tab choice persists as the active right
+selected run. Chat, Detail, and Tasks tab choice persists as the active right
 surface.
 
 Dashboard view state persists the durable surface layout fields:
 collapsed board columns, selected-run panel width, and the active
-Chat/Detail tab. Search text, fullscreen state, per-run drawer tabs, and
+Chat/Detail/Tasks tab. Search text, fullscreen state, per-run drawer tabs, and
 the active board column remain transient.
 
 On desktop layouts, the selected-run panel renders inline to the right of
@@ -137,7 +136,7 @@ The drawer surfaces:
 - Notes tab: rendered markdown by default, explicit Preview/Edit toggle,
   save/cancel flow, and the same shared note mutation used by the card
   editor.
-- Tasks tab: expandable task rows with inline notes and status editing,
+- Tasks surface: expandable task rows with inline notes and status editing,
   gated by `taskMutation` capabilities.
 - Attachments tab: one combined group-scoped list. Rows show
   `ownerRunId`; selected-run attachments can be uploaded, previewed,
@@ -276,8 +275,9 @@ The dashboard's shortcut system is customizable from
 | `Ctrl+Shift+E` | Toggle hide-empty-columns |
 | `P` | Pin or unpin the selected run |
 | `N` | Open the selected run's note |
-| `C` | Show the selected run's Chat tab |
+| `C` | Show the selected run's Chat tab, or focus its composer when Chat is open |
 | `D` | Show the selected run's Detail tab |
+| `T` | Show the selected run's Tasks tab |
 | `A` | Archive or restore the selected run |
 | `F` | Toggle the detail drawer fullscreen |
 
@@ -285,15 +285,15 @@ Shortcuts are suppressed while typing in inputs or when a modal dialog
 is open. Native modal dialogs, including Resume and the run-note editor,
 handle Escape/back dismissal before dashboard shortcuts.
 
-When the detail drawer or attachment preview is fullscreen, `Enter`
-still triggers the selected run's primary action if one is available.
-Other dashboard shortcuts, including board movement, search, filters,
-notes, Chat/Detail tab switching, pinning, and archiving, remain
-suppressed in fullscreen drawer mode. If the primary action opens the
-Resume dialog, the dialog appears above the fullscreen drawer or preview
-surface. While the Resume or run-note dialog is open, the first `Esc`
-closes the dialog; later presses follow the existing fullscreen and
-drawer close behavior.
+When the detail drawer is fullscreen, selected-run shortcuts including
+`Enter`, `N`, `P`, `A`, and `C`/`D`/`T` remain active. Board movement,
+search, and filter shortcuts remain suppressed in fullscreen drawer
+mode. Attachment preview keeps only surface navigation, fullscreen
+toggle, and Escape shortcuts active so hidden header actions do not fire.
+If the primary action opens the Resume dialog, the dialog appears above
+the fullscreen drawer or preview surface. While the Resume or run-note
+dialog is open, the first `Esc` closes the dialog; later presses follow
+the existing fullscreen and drawer close behavior.
 
 ## Preferences
 

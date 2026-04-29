@@ -52,6 +52,7 @@ export function RunsBoardPanel({
   collapsedColumnKeys,
   hasActiveStructuredFilters,
   openSelectedRunNoteRequest,
+  onOpenSelectedRunNoteRequestHandled,
   onActiveBoardColumnKeyChange,
   onExpandColumn,
   onResetFilters,
@@ -76,6 +77,7 @@ export function RunsBoardPanel({
     runId: string;
     version: number;
   } | null;
+  onOpenSelectedRunNoteRequestHandled: (version: number) => void;
   onActiveBoardColumnKeyChange: (columnKey: string | null) => void;
   onExpandColumn: (columnKey: string) => void;
   onResetFilters: () => void;
@@ -513,6 +515,7 @@ export function RunsBoardPanel({
             key={column.key}
             motionsByRunId={motionsByRunId}
             openSelectedRunNoteRequest={openSelectedRunNoteRequest}
+            onOpenSelectedRunNoteRequestHandled={onOpenSelectedRunNoteRequestHandled}
             onSetNote={onSetNote}
             onSetPinned={onSetPinned}
             onSelectRun={onSelectRun}

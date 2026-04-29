@@ -21,6 +21,7 @@ export function RunColumn({
   columnRef,
   motionsByRunId,
   openSelectedRunNoteRequest,
+  onOpenSelectedRunNoteRequestHandled,
   onSetNote,
   onSetPinned,
   selectedRunId,
@@ -39,6 +40,7 @@ export function RunColumn({
     runId: string;
     version: number;
   } | null;
+  onOpenSelectedRunNoteRequestHandled: (version: number) => void;
   onSetNote: (runId: string, note: string | null) => Promise<void>;
   onSetPinned: (runId: string, pinned: boolean) => Promise<void>;
   selectedRunId?: string;
@@ -123,6 +125,7 @@ export function RunColumn({
             key={run.runId}
             motion={motionsByRunId[run.runId]}
             openNoteDialogRequest={openSelectedRunNoteRequest}
+            onOpenNoteDialogRequestHandled={onOpenSelectedRunNoteRequestHandled}
             onSetNote={(note) => onSetNote(run.runId, note)}
             onSetPinned={(pinned) => onSetPinned(run.runId, pinned)}
             onSelect={() => onSelectRun(run.runId)}

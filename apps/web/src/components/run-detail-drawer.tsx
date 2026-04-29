@@ -1195,7 +1195,7 @@ export function RunDetailDrawer({
 
   useEffect(() => {
     if (isPassiveRun && activeSection === "events") {
-      onSelectSection("tasks");
+      onSelectSection("notes");
     }
   }, [activeSection, isPassiveRun, onSelectSection]);
 
@@ -1695,10 +1695,25 @@ export function RunDetailDrawer({
           >
             Detail
           </button>
+          <button
+            aria-keyshortcuts="T"
+            aria-selected={activeSurface === "tasks"}
+            className={activeSurface === "tasks" ? "task-tab active" : "task-tab"}
+            onClick={() => onSelectSurface("tasks")}
+            role="tab"
+            type="button"
+          >
+            Tasks
+          </button>
         </div>
 
         <div className="drawer-body drawer-body--chat" hidden={activeSurface !== "chat"}>
           {chatSurface}
+        </div>
+        <div className="drawer-body" hidden={activeSurface !== "tasks"}>
+          <section aria-label="Tasks" className="drawer-panel drawer-panel--tasks">
+            <RunTaskList tasks={run.tasks} />
+          </section>
         </div>
         <div className="drawer-body" hidden={activeSurface !== "detail"} ref={drawerBodyRef}>
           <div className="drawer-title-block">
@@ -2015,20 +2030,6 @@ export function RunDetailDrawer({
           ) : null}
 
           <nav aria-label="Run sections" className="tabs tabs--scrollable" ref={sectionTabsRef}>
-            <button
-              aria-selected={activeSection === "tasks"}
-              className={activeSection === "tasks" ? "tab active" : "tab"}
-              onClick={() => onSelectSection("tasks")}
-              type="button"
-            >
-              Tasks
-              {run.tasksTotal > 0 ? (
-                <span className="tab-count">
-                  {" "}
-                  {run.tasksCompleted}/{run.tasksTotal}
-                </span>
-              ) : null}
-            </button>
             {isPassiveRun ? null : (
               <button
                 aria-selected={activeSection === "events"}
@@ -2092,12 +2093,6 @@ export function RunDetailDrawer({
               Notes
             </button>
           </nav>
-
-          {activeSection === "tasks" ? (
-            <section aria-label="Tasks" className="drawer-panel drawer-panel--tasks">
-              <RunTaskList tasks={run.tasks} />
-            </section>
-          ) : null}
 
           {activeSection === "notes" ? (
             <section aria-label="Notes" className="drawer-panel drawer-panel--notes">

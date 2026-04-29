@@ -75,6 +75,7 @@ export function RunCard({
   run,
   selected,
   openNoteDialogRequest,
+  onOpenNoteDialogRequestHandled,
   onSelect,
   onSetNote,
   onSetPinned,
@@ -89,6 +90,7 @@ export function RunCard({
     runId: string;
     version: number;
   } | null;
+  onOpenNoteDialogRequestHandled: (version: number) => void;
   onSelect: () => void;
   onSetNote: (note: string | null) => Promise<void>;
   onSetPinned: (pinned: boolean) => Promise<void>;
@@ -244,11 +246,12 @@ export function RunCard({
       return;
     }
     lastHandledOpenNoteDialogRequestVersionRef.current = openNoteDialogRequest.version;
+    onOpenNoteDialogRequestHandled(openNoteDialogRequest.version);
     if (!selected) {
       return;
     }
     openNoteDialog();
-  }, [openNoteDialog, openNoteDialogRequest, run.runId, selected]);
+  }, [onOpenNoteDialogRequestHandled, openNoteDialog, openNoteDialogRequest, run.runId, selected]);
 
   function handleNotePointerEnter() {
     openNotePreview();
