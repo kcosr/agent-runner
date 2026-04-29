@@ -136,7 +136,7 @@ describe("deriveRunChatRows", () => {
     expect(rows).toEqual([]);
   });
 
-  it("sorts sessions and attempts, promotes the latest attempt, and keeps retries as details", () => {
+  it("sorts sessions and renders attempts chronologically", () => {
     const rows = deriveRunChatRows(
       makeRun({
         message: "  Initial  ",
@@ -147,8 +147,20 @@ describe("deriveRunChatRows", () => {
         ],
       }),
       makeHistory([
-        makeAttempt({ sessionIndex: 1, attemptNumber: 4, transcript: "latest session 1" }),
-        makeAttempt({ sessionIndex: 0, attemptNumber: 2, transcript: "latest session 0" }),
+        makeAttempt({
+          sessionIndex: 1,
+          attemptNumber: 4,
+          attemptIndexInSession: 1,
+          prompt: "",
+          transcript: "latest session 1",
+        }),
+        makeAttempt({
+          sessionIndex: 0,
+          attemptNumber: 2,
+          attemptIndexInSession: 1,
+          prompt: "",
+          transcript: "latest session 0",
+        }),
         makeAttempt({ sessionIndex: 1, attemptNumber: 3, transcript: "prior session 1" }),
         makeAttempt({ sessionIndex: 0, attemptNumber: 1, transcript: "prior session 0" }),
       ]),
@@ -156,8 +168,10 @@ describe("deriveRunChatRows", () => {
 
     expect(rows.map((row) => row.id)).toEqual([
       "session:0:user",
+      "session:0:assistant:1",
       "session:0:assistant:2",
       "session:1:user",
+      "session:1:assistant:3",
       "session:1:assistant:4",
     ]);
     expect(rows[0]).toMatchObject({
@@ -165,22 +179,30 @@ describe("deriveRunChatRows", () => {
       source: "initial",
       text: "Initial",
     });
-    expect(rows[2]).toMatchObject({
+    expect(rows[3]).toMatchObject({
       kind: "user",
       source: "resume",
       text: "First resume",
     });
     expect(rows[1]).toMatchObject({
       kind: "assistant",
+      attemptNumber: 1,
+      transcript: "prior session 0",
+    });
+    expect(rows[2]).toMatchObject({
+      kind: "assistant",
       attemptNumber: 2,
       transcript: "latest session 0",
-      retryAttempts: [{ attemptNumber: 1, transcript: "prior session 0" }],
     });
-    expect(rows[3]).toMatchObject({
+    expect(rows[4]).toMatchObject({
+      kind: "assistant",
+      attemptNumber: 3,
+      transcript: "prior session 1",
+    });
+    expect(rows[5]).toMatchObject({
       kind: "assistant",
       attemptNumber: 4,
       transcript: "latest session 1",
-      retryAttempts: [{ attemptNumber: 3, transcript: "prior session 1" }],
     });
   });
 
@@ -200,9 +222,9 @@ describe("deriveRunChatRows", () => {
     );
 
     expect(rows.map((row) => row.id)).toEqual([
-      "session:0:system",
+      "session:0:system:1",
       "session:0:assistant:1",
-      "session:1:system",
+      "session:1:system:2",
       "session:1:assistant:2",
     ]);
     expect(rows[0]).toMatchObject({
@@ -214,6 +236,41 @@ describe("deriveRunChatRows", () => {
       kind: "system",
       source: "resume",
       text: "Resume reminder",
+    });
+  });
+
+  it("renders automatic follow-up attempt prompts as system cards", () => {
+    const rows = deriveRunChatRows(
+      makeRun({
+        message: null,
+        sessions: [makeSession({ sessionIndex: 0, message: null })],
+      }),
+      makeHistory([
+        makeAttempt({
+          attemptNumber: 1,
+          attemptIndexInSession: 0,
+          prompt: "Initial bootstrap prompt",
+          transcript: "First response",
+        }),
+        makeAttempt({
+          attemptNumber: 2,
+          attemptIndexInSession: 1,
+          prompt: "Some tasks are not yet completed. Please continue.",
+          transcript: "Follow-up response",
+        }),
+      ]),
+    );
+
+    expect(rows.map((row) => row.id)).toEqual([
+      "session:0:system:1",
+      "session:0:assistant:1",
+      "session:0:system:2",
+      "session:0:assistant:2",
+    ]);
+    expect(rows[0]).toMatchObject({ kind: "system", text: "Initial bootstrap prompt" });
+    expect(rows[2]).toMatchObject({
+      kind: "system",
+      text: "Some tasks are not yet completed. Please continue.",
     });
   });
 
@@ -275,20 +332,25 @@ describe("deriveRunChatRows", () => {
       ]),
     );
 
-    expect(rows.map((row) => row.id)).toEqual(["session:0:system", "session:0:assistant:2"]);
-    expect(rows[0]).toMatchObject({ kind: "system", text: "live prompt" });
+    expect(rows.map((row) => row.id)).toEqual([
+      "session:0:system:1",
+      "session:0:assistant:1",
+      "session:0:system:2",
+      "session:0:assistant:2",
+    ]);
+    expect(rows[0]).toMatchObject({ kind: "system", text: "first prompt" });
     expect(rows[1]).toMatchObject({
+      kind: "assistant",
+      attemptNumber: 1,
+      transcript: "",
+      emptyState: "no_response_recorded",
+    });
+    expect(rows[2]).toMatchObject({ kind: "system", text: "live prompt" });
+    expect(rows[3]).toMatchObject({
       kind: "assistant",
       attemptNumber: 2,
       transcript: "   ",
       emptyState: "waiting_live_response",
-      retryAttempts: [
-        {
-          attemptNumber: 1,
-          transcript: "",
-          emptyState: "no_response_recorded",
-        },
-      ],
     });
   });
 });

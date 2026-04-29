@@ -1255,45 +1255,6 @@ body {
   margin-bottom: 0;
 }
 
-.chat-secondary {
-  width: min(100%, 34rem);
-}
-
-.chat-details {
-  color: var(--muted-foreground);
-  font-size: 12px;
-}
-
-.chat-details summary {
-  cursor: pointer;
-}
-
-.chat-details[open] {
-  padding: 8px 0 0;
-}
-
-.chat-retry {
-  margin-top: 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--muted);
-  padding: 8px;
-}
-
-.chat-retry__meta {
-  display: block;
-  margin-bottom: 6px;
-  color: var(--muted-foreground);
-  font-size: 11.5px;
-  font-weight: 600;
-}
-
-.chat-retry-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
 .chat-composer {
   flex: 0 0 auto;
   padding: 12px;

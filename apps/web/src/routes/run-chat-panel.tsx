@@ -13,7 +13,6 @@ import { MarkdownContent } from "../components/markdown.js";
 import {
   type RunChatAssistantEmptyState,
   type RunChatAssistantRow,
-  type RunChatRetryAttempt,
   type RunChatRow,
   type RunChatSystemRow,
   deriveRunChatRows,
@@ -41,46 +40,6 @@ function assistantEmptyText(emptyState: RunChatAssistantEmptyState | undefined) 
     case undefined:
       return "";
   }
-}
-
-function renderAttemptMeta(attempt: RunChatRetryAttempt) {
-  const meta = [`Attempt ${attempt.attemptNumber}`];
-  if (attempt.live) {
-    meta.push("live");
-  }
-  if (attempt.timedOut) {
-    meta.push("timed out");
-  }
-  if (attempt.exitCode !== null) {
-    meta.push(`exit ${attempt.exitCode}`);
-  }
-  return meta.join(" · ");
-}
-
-function RetryAttempts({ attempts }: { attempts: RunChatRetryAttempt[] }) {
-  if (attempts.length === 0) {
-    return null;
-  }
-
-  return (
-    <details className="chat-details">
-      <summary>
-        {attempts.length} prior {attempts.length === 1 ? "attempt" : "attempts"}
-      </summary>
-      <div className="chat-retry-list">
-        {attempts.map((attempt) => (
-          <article className="chat-retry" key={attempt.attemptNumber}>
-            <div className="chat-retry__meta">{renderAttemptMeta(attempt)}</div>
-            {attempt.transcript.trim() ? (
-              <MarkdownContent className="chat-markdown" text={attempt.transcript} />
-            ) : (
-              <p className="task-empty">{assistantEmptyText(attempt.emptyState)}</p>
-            )}
-          </article>
-        ))}
-      </div>
-    </details>
-  );
 }
 
 function ChatConversationSkeleton() {
@@ -137,9 +96,6 @@ function AssistantChatRow({ row }: { row: RunChatAssistantRow }) {
         ) : (
           <p className="task-empty">{assistantEmptyText(row.emptyState)}</p>
         )}
-      </div>
-      <div className="chat-secondary">
-        <RetryAttempts attempts={row.retryAttempts} />
       </div>
     </article>
   );

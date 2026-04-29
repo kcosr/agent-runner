@@ -173,15 +173,15 @@ history and streaming without starting a duplicate timeline subscription.
 Chat renders the selected run as a conversational thread. Each session's
 user bubble is the stored run message for the initial session, or the stored
 session message for later resume sessions. When that user message is null or
-blank, Chat renders the latest attempt prompt as a separate System card so
+blank, Chat renders attempt prompts as separate System cards so
 daemon-synthesized prompts are not attributed to the user. Chat shows the
 existing loading skeleton until timeline history is available, so detail-only
 run/session messages do not appear as standalone user bubbles before the
-matching attempt/assistant row can be projected. Assistant output uses the
-latest attempt transcript for each session and renders inline, without a
-bubble, so the thread reads like output with user interjections. User bubbles
-render Markdown independently. Prior attempts remain available as secondary
-details; backend notices and diagnostics stay out of Chat.
+matching attempt/assistant row can be projected. Assistant output renders each
+attempt transcript chronologically and inline, without a bubble, so the thread
+reads like output with user interjections and automatic follow-up prompts.
+User bubbles render Markdown independently. Backend notices and diagnostics
+stay out of Chat.
 
 The composer is fixed at the bottom of the Chat panel for a selected
 run. It sends only non-empty trimmed messages through the existing resume

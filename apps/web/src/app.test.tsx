@@ -2110,6 +2110,19 @@ describe("web app", () => {
               timedOut: false,
               live: false,
             },
+            {
+              attemptNumber: 2,
+              attemptIndexInSession: 1,
+              sessionIndex: 0,
+              startedAt: "2026-04-13T05:02:00.000Z",
+              endedAt: "2026-04-13T05:03:00.000Z",
+              prompt: "Some tasks are not yet completed. Please continue.",
+              transcript: "Follow-up reply",
+              notices: "",
+              exitCode: 0,
+              timedOut: false,
+              live: false,
+            },
           ],
         },
       },
@@ -2118,10 +2131,15 @@ describe("web app", () => {
     await renderApp("/runs/run-1");
 
     const chat = await screen.findByLabelText("Run chat");
-    expect(await within(chat).findByText("System")).toBeInTheDocument();
+    expect(await within(chat).findAllByText("System")).toHaveLength(2);
     expect(await within(chat).findByText(/Bootstrap/)).toBeInTheDocument();
     expect(within(chat).getByText("prompt").tagName).toBe("STRONG");
     expect(await within(chat).findByText("Assistant reply")).toBeInTheDocument();
+    expect(
+      await within(chat).findByText("Some tasks are not yet completed. Please continue."),
+    ).toBeInTheDocument();
+    expect(await within(chat).findByText("Follow-up reply")).toBeInTheDocument();
+    expect(within(chat).queryByText(/prior attempt/i)).not.toBeInTheDocument();
   });
 
   it("submits Chat composer messages through resume and clears the draft on success", async () => {

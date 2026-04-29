@@ -19,7 +19,10 @@ export interface RunChatSystemRow {
   text: string;
 }
 
-export interface RunChatRetryAttempt {
+export interface RunChatAssistantRow {
+  id: string;
+  kind: "assistant";
+  sessionIndex: number;
   attemptNumber: number;
   attemptIndexInSession: number;
   startedAt: string;
@@ -29,13 +32,6 @@ export interface RunChatRetryAttempt {
   live: boolean;
   transcript: string;
   emptyState?: RunChatAssistantEmptyState;
-}
-
-export interface RunChatAssistantRow extends RunChatRetryAttempt {
-  id: string;
-  kind: "assistant";
-  sessionIndex: number;
-  retryAttempts: RunChatRetryAttempt[];
 }
 
 export type RunChatRow = RunChatUserRow | RunChatSystemRow | RunChatAssistantRow;
@@ -52,8 +48,9 @@ function attemptEmptyState(attempt: RunTimelineAttempt): RunChatAssistantEmptySt
   return attempt.live ? "waiting_live_response" : "no_response_recorded";
 }
 
-function toRetryAttempt(attempt: RunTimelineAttempt): RunChatRetryAttempt {
+function toAssistantRow(attempt: RunTimelineAttempt): Omit<RunChatAssistantRow, "id" | "kind"> {
   return {
+    sessionIndex: attempt.sessionIndex,
     attemptNumber: attempt.attemptNumber,
     attemptIndexInSession: attempt.attemptIndexInSession,
     startedAt: attempt.startedAt,
@@ -113,31 +110,28 @@ export function deriveRunChatRows(
         source,
         text: userMessage,
       });
-    } else {
-      const systemMessage = normalizedMessage(attempts.at(-1)?.prompt ?? null);
-      if (systemMessage !== null) {
+    }
+
+    for (const attempt of attempts) {
+      const systemMessage = normalizedMessage(attempt.prompt);
+      const promptCoveredByUserMessage =
+        attempt.attemptIndexInSession === 0 && userMessage !== null;
+      if (systemMessage !== null && !promptCoveredByUserMessage) {
         rows.push({
-          id: `session:${sessionIndex}:system`,
+          id: `session:${sessionIndex}:system:${attempt.attemptNumber}`,
           kind: "system",
           sessionIndex,
           source,
           text: systemMessage,
         });
       }
-    }
 
-    const primaryAttempt = attempts.at(-1);
-    if (!primaryAttempt) {
-      continue;
+      rows.push({
+        id: `session:${sessionIndex}:assistant:${attempt.attemptNumber}`,
+        kind: "assistant",
+        ...toAssistantRow(attempt),
+      });
     }
-
-    rows.push({
-      id: `session:${sessionIndex}:assistant:${primaryAttempt.attemptNumber}`,
-      kind: "assistant",
-      sessionIndex,
-      ...toRetryAttempt(primaryAttempt),
-      retryAttempts: attempts.slice(0, -1).map(toRetryAttempt),
-    });
   }
 
   return rows;
