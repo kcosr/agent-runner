@@ -45,6 +45,12 @@ function normalizeTranscriptText(text: string | null | undefined): string | null
   return normalized.length > 0 ? normalized : null;
 }
 
+function transcriptEndsWithBlock(streamed: string, finalTranscript: string): boolean {
+  if (!streamed.endsWith(finalTranscript)) return false;
+  const startIndex = streamed.length - finalTranscript.length;
+  return startIndex === 0 || /\s/.test(streamed[startIndex - 1] ?? "");
+}
+
 export function composePersistedTranscript(
   streamedText: string,
   finalText: string | null,
@@ -54,7 +60,7 @@ export function composePersistedTranscript(
 
   if (streamed === null) return finalTranscript;
   if (finalTranscript === null) return streamed;
-  if (streamed === finalTranscript) return streamed;
+  if (transcriptEndsWithBlock(streamed, finalTranscript)) return streamed;
   return `${streamed}\n\n---\n\n${finalTranscript}`;
 }
 

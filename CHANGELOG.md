@@ -337,6 +337,9 @@
 
 ### Fixed
 
+- Persisted attempt transcripts no longer append a duplicate final
+  response after a divider when that response already matches the end
+  of the streamed provisional output.
 - Web dashboard Chat/Detail tabs now remove the inactive selected-run
   tab body from layout, preventing Detail content from appearing below
   the Chat composer.
