@@ -945,7 +945,7 @@ body {
 @media (min-width: 900px) {
   .drawer--fullscreen {
     position: fixed;
-    top: 52px;
+    top: 0;
     right: 0;
     bottom: 0;
     left: 56px;
@@ -1038,6 +1038,33 @@ body {
 .dashboard-panel-shell {
   position: relative;
   flex: 0 0 auto;
+}
+
+@media (min-width: 900px) {
+  .dashboard-surfaces {
+    padding-right: var(--dashboard-right-surface-width, 0px);
+  }
+
+  .dashboard-right-surfaces {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    width: var(--dashboard-right-surface-width, 540px);
+    max-width: calc(100vw - 56px);
+  }
+
+  .dashboard-panel-shell,
+  .dashboard-right-surfaces .drawer {
+    width: 100%;
+    height: 100%;
+  }
+
+  .dashboard-right-surfaces .drawer:not(.drawer--fullscreen) {
+    flex: 1 1 auto;
+    max-width: 100%;
+  }
 }
 
 .selected-run-surface-tabs {
