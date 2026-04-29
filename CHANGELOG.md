@@ -14,6 +14,7 @@
   canonical `updatedAt`, and `RunSummary` / `RunDetail` DTOs expose it
   as a required field. Use `scripts/migrate-manifests-v16.mjs` before
   resuming schema v15 runs.
+  ([#121](https://github.com/kcosr/task-runner/pull/121))
 - Manifest schema version is now `15`. Run manifests and reset seeds now
   require `runGroupId` plus typed `dependencies` refs (`run` or
   `group`); the former run-only dependency array is removed. Use
@@ -107,6 +108,11 @@
 - Added `scripts/migrate-manifests-v16.mjs` to promote schema v15
   manifests to schema v16 by backfilling `updatedAt` from
   `endedAt ?? startedAt`.
+  ([#121](https://github.com/kcosr/task-runner/pull/121))
+- Added selected-run Notes and Tasks tabs to the web dashboard selected-run
+  panel, with `C`, `D`, `N`, and `T` shortcuts for switching between Chat,
+  Detail, Notes, and Tasks.
+  ([#121](https://github.com/kcosr/task-runner/pull/121))
 - Added multiplexed daemon WebSocket byte streams and moved connected CLI
   attachment add/list/download/remove onto WebSocket RPC plus stream
   frames, while preserving HTTP attachment endpoints for browser/API
@@ -281,6 +287,13 @@
 - The web dashboard now persists board sort field and direction
   preferences and orders columns from cached canonical run timestamps
   instead of event-arrival recency.
+  ([#121](https://github.com/kcosr/task-runner/pull/121))
+- Web dashboard selected-run detail tabs are now alphabetized with
+  Attachments as the default detail tab.
+  ([#121](https://github.com/kcosr/task-runner/pull/121))
+- The web dashboard Notes tab now supports in-place viewing and editing,
+  with `N` focusing the editor when Notes is already selected.
+  ([#121](https://github.com/kcosr/task-runner/pull/121))
 - The web run chat composer now shows live activity from the run's
   server-backed state, running status labels animate subtly, and resume
   dialogs/input clear after the resume request succeeds while cache
@@ -363,6 +376,14 @@
 
 - Web dashboard selected-run surfaces once again span the full viewport
   height on mobile, covering the app toolbar while the drawer is open.
+- Web dashboard user chat bubbles now use a stronger neutral surface in
+  both color schemes, and the Vars data tab no longer shows a redundant
+  vars-count label.
+  ([#121](https://github.com/kcosr/task-runner/pull/121))
+- Web dashboard shortcuts no longer fire from focused editable fields, so
+  Escape in the Chat composer blurs the input before closing the selected-run
+  panel.
+  ([#121](https://github.com/kcosr/task-runner/pull/121))
 - Persisted attempt transcripts no longer append a duplicate final
   response after a divider when that response already matches the end
   of the streamed provisional output.
