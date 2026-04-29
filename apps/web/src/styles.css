@@ -1154,7 +1154,7 @@ body {
 }
 
 .chat-bubble--user {
-  background: color-mix(in srgb, var(--foreground) 8%, var(--background));
+  background: color-mix(in srgb, var(--foreground) 14%, var(--background));
   border-color: var(--border-strong);
   color: var(--foreground);
 }
