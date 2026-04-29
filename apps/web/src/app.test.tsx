@@ -49,8 +49,12 @@ const DEFAULT_DASHBOARD_PREFERENCES = {
 
 const DEFAULT_DASHBOARD_VIEW_STATE: {
   collapsedColumnKeys: string[];
+  drawerWidth: number;
+  activeRightSurface: "detail" | "chat";
 } = {
   collapsedColumnKeys: [],
+  drawerWidth: 540,
+  activeRightSurface: "detail",
 };
 
 class MockEventSource {
@@ -1409,12 +1413,22 @@ function fetchCallCount(
 }
 
 function getCloseDetailButton() {
-  const closeButtons = screen.getAllByRole("button", { name: /close detail/i });
+  const closeButtons = screen.queryAllByRole("button", { name: /close selected run panel/i });
   const closeButton = closeButtons[0];
-  if (!closeButton) {
-    throw new Error("expected a close-detail button");
+  if (closeButton) {
+    return closeButton;
   }
-  return closeButton;
+  const attachmentPreviewCloseButton = screen.queryAllByRole("button", {
+    name: /close attachment preview/i,
+  })[0];
+  if (attachmentPreviewCloseButton) {
+    return attachmentPreviewCloseButton;
+  }
+  const fallbackCloseButton = screen.queryAllByRole("button", { name: /close detail/i })[0];
+  if (!fallbackCloseButton) {
+    throw new Error("expected a close-panel button");
+  }
+  return fallbackCloseButton;
 }
 
 function getSidebarNavigation() {
@@ -1820,6 +1834,532 @@ describe("web app", () => {
         /Audit while away/,
       ),
     ).toBeInTheDocument();
+  });
+
+  it("does not render the right-surface wrapper when no run is selected", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    const { container } = await renderApp();
+    await findRunCard("Build dashboard");
+
+    expect(container.querySelector(".dashboard-right-surfaces")).toBeNull();
+  });
+
+  it("opens a selected-run panel and switches between Chat and Detail tabs", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await findRunCard("Build dashboard");
+
+    await user.click(await findRunCard("Build dashboard"));
+    expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
+
+    const tablist = await screen.findByRole("tablist", { name: "Run surface" });
+    await user.click(within(tablist).getByRole("tab", { name: "Chat" }));
+    expect(await screen.findByLabelText("Run chat")).toBeInTheDocument();
+    await user.type(await screen.findByLabelText("Message"), "keep this draft");
+
+    await user.click(within(tablist).getByRole("tab", { name: "Detail" }));
+    expect(screen.getByLabelText("Tasks")).toBeInTheDocument();
+    expect(screen.getByLabelText("Run chat").closest(".drawer-body--chat")).toHaveAttribute(
+      "hidden",
+    );
+
+    await user.click(within(tablist).getByRole("tab", { name: "Chat" }));
+    expect(await screen.findByLabelText("Message")).toHaveValue("keep this draft");
+
+    await user.click(getCloseDetailButton());
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Run detail")).not.toBeInTheDocument();
+    });
+  });
+
+  it("switches the active selected-run surface from the Chat and Detail tabs", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "detail" });
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+
+    const tablist = await screen.findByRole("tablist", { name: "Run surface" });
+    const detailTab = within(tablist).getByRole("tab", { name: "Detail" });
+    const chatTab = within(tablist).getByRole("tab", { name: "Chat" });
+    expect(
+      within(tablist)
+        .getAllByRole("tab")
+        .map((tab) => tab.textContent),
+    ).toEqual(["Chat", "Detail"]);
+    expect(detailTab).toHaveAttribute("aria-selected", "true");
+    expect(chatTab).toHaveAttribute("aria-selected", "false");
+    expect(screen.getByLabelText("Run chat").closest(".drawer-body--chat")).toHaveAttribute(
+      "hidden",
+    );
+
+    await user.click(chatTab);
+    expect(detailTab).toHaveAttribute("aria-selected", "false");
+    expect(chatTab).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByLabelText("Run chat")).toBeInTheDocument();
+
+    await user.click(detailTab);
+    expect(detailTab).toHaveAttribute("aria-selected", "true");
+    expect(chatTab).toHaveAttribute("aria-selected", "false");
+    expect(screen.getByLabelText("Run chat").closest(".drawer-body--chat")).toHaveAttribute(
+      "hidden",
+    );
+  });
+
+  it("renders selected-run Chat, activates the existing timeline once, and streams deltas", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
+    const fetchMock = installFetchMock({
+      runs: [makeRun()],
+      details: {
+        "run-1": makeDetail({
+          message: "Initial dashboard request",
+        }),
+      },
+      timelineHistories: {
+        "run-1": {
+          runId: "run-1",
+          lastCursor: 1,
+          attempts: [
+            {
+              attemptNumber: 1,
+              attemptIndexInSession: 0,
+              sessionIndex: 0,
+              startedAt: "2026-04-13T05:00:00.000Z",
+              endedAt: null,
+              prompt: "Prompt with **markdown**\n\n- list item",
+              transcript: "Streaming answer",
+              notices: "backend notice",
+              exitCode: null,
+              timedOut: false,
+              live: true,
+            },
+          ],
+        },
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+
+    const chat = await screen.findByLabelText("Run chat");
+    const userMessage = await within(chat).findByText("Initial dashboard request");
+    expect(userMessage.closest(".chat-bubble--user")).not.toBeNull();
+    expect(within(chat).queryByText(/Prompt with/)).not.toBeInTheDocument();
+    expect(within(chat).queryByText("Notices and diagnostics")).not.toBeInTheDocument();
+    expect(within(chat).queryByText("backend notice")).not.toBeInTheDocument();
+    const assistantMessage = await within(chat).findByText("Streaming answer");
+    expect(assistantMessage.closest(".chat-row--assistant")).not.toBeNull();
+    expect(assistantMessage.closest(".chat-bubble")).toBeNull();
+    expect(
+      fetchCallCount(fetchMock, (url) => url.endsWith("/api/runs/run-1/timeline")),
+    ).toBeGreaterThanOrEqual(1);
+    expect(
+      MockEventSource.instances.filter((source) =>
+        source.url.endsWith("/api/runs/run-1/events/timeline"),
+      ),
+    ).toHaveLength(1);
+
+    const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
+    timelineSource.emitOpen();
+    timelineSource.emitError();
+    await waitFor(() => {
+      expect(within(chat).queryByText(/conversation updates are stale/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/live updates are temporarily stale/i)).not.toBeInTheDocument();
+    });
+    timelineSource.emitMessage({
+      runId: "run-1",
+      cursor: 2,
+      event: {
+        type: "agent_message_delta",
+        text: " live",
+      },
+    });
+
+    expect(await within(chat).findByText("Streaming answer live")).toBeInTheDocument();
+
+    await user.click(
+      within(screen.getByRole("tablist", { name: "Run surface" })).getByRole("tab", {
+        name: "Detail",
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "Attempts" }));
+    expect(await screen.findByRole("region", { name: "Attempt response" })).toHaveTextContent(
+      "Streaming answer live",
+    );
+    expect(
+      MockEventSource.instances.filter((source) =>
+        source.url.endsWith("/api/runs/run-1/events/timeline"),
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("shows a Chat loading skeleton instead of user messages until timeline history loads", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
+    const timelineHistory = {
+      runId: "run-1",
+      lastCursor: 1,
+      attempts: [
+        {
+          attemptNumber: 1,
+          attemptIndexInSession: 0,
+          sessionIndex: 0,
+          startedAt: "2026-04-13T05:00:00.000Z",
+          endedAt: "2026-04-13T05:01:00.000Z",
+          prompt: "Timeline prompt",
+          transcript: "Timeline response",
+          notices: "",
+          exitCode: 0,
+          timedOut: false,
+          live: false,
+        },
+      ],
+    } satisfies RunTimelineHistory;
+    const timelineResponse = () => new Response(JSON.stringify({ history: timelineHistory }));
+    let releaseTimeline: (() => void) | undefined;
+    let timelineReleased = false;
+    installFetchMock(
+      {
+        runs: [
+          makeRun({
+            status: "success",
+            endedAt: "2026-04-13T05:02:00.000Z",
+            currentSession: null,
+          }),
+        ],
+        details: {
+          "run-1": makeDetail({
+            status: "success",
+            isLive: false,
+            endedAt: "2026-04-13T05:02:00.000Z",
+            message: "Initial dashboard request",
+            currentSession: null,
+          }),
+        },
+      },
+      {
+        handleRequest: (url, init) => {
+          if (!url.endsWith("/api/runs/run-1/timeline") || init?.method) {
+            return undefined;
+          }
+          if (timelineReleased) {
+            return timelineResponse();
+          }
+          return new Promise<Response>((resolve) => {
+            releaseTimeline = () => {
+              timelineReleased = true;
+              resolve(timelineResponse());
+            };
+          });
+        },
+      },
+    );
+
+    await renderApp("/runs/run-1");
+
+    const chat = await screen.findByLabelText("Run chat");
+    expect(await within(chat).findByLabelText("Loading conversation")).toBeInTheDocument();
+    expect(within(chat).queryByText("Initial dashboard request")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(releaseTimeline).toBeDefined();
+    });
+
+    releaseTimeline?.();
+
+    expect(await within(chat).findByText("Initial dashboard request")).toBeInTheDocument();
+    expect(within(chat).queryByText("Timeline prompt")).not.toBeInTheDocument();
+    expect(await within(chat).findByText("Timeline response")).toBeInTheDocument();
+    expect(within(chat).queryByLabelText("Loading conversation")).not.toBeInTheDocument();
+  });
+
+  it("renders the attempt prompt as a system card when the run has no user message", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
+    installFetchMock({
+      runs: [makeRun()],
+      details: {
+        "run-1": makeDetail({
+          message: null,
+        }),
+      },
+      timelineHistories: {
+        "run-1": {
+          runId: "run-1",
+          lastCursor: 1,
+          attempts: [
+            {
+              attemptNumber: 1,
+              attemptIndexInSession: 0,
+              sessionIndex: 0,
+              startedAt: "2026-04-13T05:00:00.000Z",
+              endedAt: "2026-04-13T05:01:00.000Z",
+              prompt: "Bootstrap **prompt**",
+              transcript: "Assistant reply",
+              notices: "",
+              exitCode: 0,
+              timedOut: false,
+              live: false,
+            },
+            {
+              attemptNumber: 2,
+              attemptIndexInSession: 1,
+              sessionIndex: 0,
+              startedAt: "2026-04-13T05:02:00.000Z",
+              endedAt: "2026-04-13T05:03:00.000Z",
+              prompt: "Some tasks are not yet completed. Please continue.",
+              transcript: "Follow-up reply",
+              notices: "",
+              exitCode: 0,
+              timedOut: false,
+              live: false,
+            },
+          ],
+        },
+      },
+    });
+
+    await renderApp("/runs/run-1");
+
+    const chat = await screen.findByLabelText("Run chat");
+    expect(await within(chat).findAllByText("System")).toHaveLength(2);
+    expect(await within(chat).findByText(/Bootstrap/)).toBeInTheDocument();
+    expect(within(chat).getByText("prompt").tagName).toBe("STRONG");
+    expect(await within(chat).findByText("Assistant reply")).toBeInTheDocument();
+    expect(
+      await within(chat).findByText("Some tasks are not yet completed. Please continue."),
+    ).toBeInTheDocument();
+    expect(await within(chat).findByText("Follow-up reply")).toBeInTheDocument();
+    expect(within(chat).queryByText(/prior attempt/i)).not.toBeInTheDocument();
+  });
+
+  it("submits Chat composer messages through resume and clears the draft on success", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
+    let resumeBody: { overrides?: { message?: string } } | undefined;
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest: (url, init) => {
+          if (!url.endsWith("/api/runs/run-1/resume") || init?.method !== "POST") {
+            return undefined;
+          }
+          resumeBody =
+            typeof init.body === "string" && init.body.length > 0
+              ? (JSON.parse(init.body) as { overrides?: { message?: string } })
+              : undefined;
+          return new Response(JSON.stringify({ runId: "run-1" }), { status: 200 });
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+
+    const message = await screen.findByLabelText("Message");
+    await waitFor(() => {
+      expect(message).toBeEnabled();
+    });
+    await user.type(message, "  Continue from chat  ");
+    const sendButton = screen.getByRole("button", { name: "Send" });
+    expect(sendButton.closest(".chat-composer__surface")).toBe(
+      message.closest(".chat-composer__surface"),
+    );
+    await user.click(sendButton);
+
+    await waitFor(() => {
+      expect(resumeBody).toEqual({ overrides: { message: "Continue from chat" } });
+    });
+    await waitFor(() => {
+      expect(message).toHaveValue("");
+    });
+  });
+
+  it("submits Chat composer messages with Command+Enter", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
+    let resumeBody: { overrides?: { message?: string } } | undefined;
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest: (url, init) => {
+          if (!url.endsWith("/api/runs/run-1/resume") || init?.method !== "POST") {
+            return undefined;
+          }
+          resumeBody =
+            typeof init.body === "string" && init.body.length > 0
+              ? (JSON.parse(init.body) as { overrides?: { message?: string } })
+              : undefined;
+          return new Response(JSON.stringify({ runId: "run-1" }), { status: 200 });
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+
+    const message = await screen.findByLabelText("Message");
+    await waitFor(() => {
+      expect(message).toBeEnabled();
+    });
+    await user.type(message, "  Continue with shortcut  ");
+    fireEvent.keyDown(message, { key: "Enter", metaKey: true });
+
+    await waitFor(() => {
+      expect(resumeBody).toEqual({ overrides: { message: "Continue with shortcut" } });
+    });
+    await waitFor(() => {
+      expect(message).toHaveValue("");
+    });
+  });
+
+  it("keeps the Chat composer editable for selected runs that cannot submit", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
+    let resumeRequestCount = 0;
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: {
+          "run-1": makeDetail({
+            capabilities: {
+              canResume: false,
+            },
+          }),
+        },
+      },
+      {
+        handleRequest: (url, init) => {
+          if (url.endsWith("/api/runs/run-1/resume") && init?.method === "POST") {
+            resumeRequestCount += 1;
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+
+    const message = await screen.findByLabelText("Message");
+    await waitFor(() => {
+      expect(message).toBeEnabled();
+    });
+    expect(message).not.toHaveAttribute("placeholder");
+    await user.type(message, "draft for later");
+    expect(message).toHaveValue("draft for later");
+
+    const sendButton = screen.getByRole("button", { name: "Send" });
+    expect(sendButton).toBeDisabled();
+    fireEvent.keyDown(message, { key: "Enter", metaKey: true });
+    expect(resumeRequestCount).toBe(0);
+  });
+
+  it("preserves the Chat composer draft and shows the API error after resume failure", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
+    installFetchMock(
+      {
+        runs: [makeRun()],
+        details: { "run-1": makeDetail() },
+      },
+      {
+        handleRequest: (url, init) => {
+          if (!url.endsWith("/api/runs/run-1/resume") || init?.method !== "POST") {
+            return undefined;
+          }
+          return new Response(JSON.stringify({ error: { message: "resume temporarily failed" } }), {
+            status: 500,
+          });
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+
+    const message = await screen.findByLabelText("Message");
+    await waitFor(() => {
+      expect(message).toBeEnabled();
+    });
+    await user.type(message, "retry this");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    const chat = await screen.findByLabelText("Run chat");
+    expect(await within(chat).findAllByText("resume temporarily failed")).not.toHaveLength(0);
+    expect(message).toHaveValue("retry this");
+  });
+
+  it("does not show a failed Chat resume error after the selected run changes", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
+    let resolveResume: ((response: Response) => void) | undefined;
+    installFetchMock(
+      {
+        runs: [
+          makeRun({ runId: "run-1", name: "First run", assignmentName: "First run" }),
+          makeRun({ runId: "run-2", name: "Second run", assignmentName: "Second run" }),
+        ],
+        details: {
+          "run-1": makeDetail({ runId: "run-1", name: "First run" }),
+          "run-2": makeDetail({ runId: "run-2", name: "Second run" }),
+        },
+      },
+      {
+        handleRequest: (url, init) => {
+          if (!url.endsWith("/api/runs/run-1/resume") || init?.method !== "POST") {
+            return undefined;
+          }
+          return new Promise<Response>((resolve) => {
+            resolveResume = resolve;
+          });
+        },
+      },
+    );
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+
+    const message = await screen.findByLabelText("Message");
+    await waitFor(() => {
+      expect(message).toBeEnabled();
+    });
+    await user.type(message, "resume first run");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => {
+      expect(resolveResume).toBeDefined();
+    });
+
+    await user.click(await findRunCard("Second run"));
+    const secondRunChat = await screen.findByLabelText("Run chat");
+    expect(screen.getAllByText("Second run").length).toBeGreaterThan(0);
+    expect(secondRunChat).toBeInTheDocument();
+    const secondRunMessage = screen.getByLabelText("Message");
+    await user.type(secondRunMessage, "resume second run");
+    expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
+
+    resolveResume?.(
+      new Response(JSON.stringify({ error: { message: "resume temporarily failed" } }), {
+        status: 500,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Message")).toBeEnabled();
+    });
+    expect(
+      within(screen.getByLabelText("Run chat")).queryByText("resume temporarily failed"),
+    ).toBeNull();
   });
 
   it("renders attempt history in the attempts tab with nested scroll-follow behavior", async () => {
@@ -5445,6 +5985,7 @@ describe("web app", () => {
     expect(storedViewState ? JSON.parse(storedViewState) : null).toEqual({
       collapsedColumnKeys: [],
       drawerWidth: 570,
+      activeRightSurface: "detail",
     });
 
     cleanup();
@@ -6893,6 +7434,39 @@ describe("web app", () => {
     expect(fullscreenDrawerLayer?.[1]).toBe("40");
   });
 
+  it("keeps the Chat composer textarea custom and non-resizable", () => {
+    const css = readFileSync(join(process.cwd(), "src", "styles.css"), "utf8");
+    const chatSurfaceRule = /\.chat-composer__surface\s*\{[\s\S]*?\n\}/.exec(css);
+    const chatTextareaRule = /\.chat-composer textarea\s*\{[\s\S]*?\n\}/.exec(css);
+    const chatSendRule = /\.chat-composer__send\s*\{[\s\S]*?\n\}/.exec(css);
+
+    expect(chatSurfaceRule?.[0]).toContain("position: relative;");
+    expect(chatSurfaceRule?.[0]).toContain("box-shadow: inset 0 0 0 1px var(--border);");
+    expect(chatTextareaRule?.[0]).toContain("resize: none;");
+    expect(chatTextareaRule?.[0]).toContain("border: 0;");
+    expect(chatTextareaRule?.[0]).toContain("background: transparent;");
+    expect(chatSendRule?.[0]).toContain("position: absolute;");
+    expect(chatSendRule?.[0]).toContain("bottom: 10px;");
+  });
+
+  it("hides inactive selected-run Chat and Detail tab bodies from layout", () => {
+    const css = readFileSync(join(process.cwd(), "src", "styles.css"), "utf8");
+    const hiddenDrawerBodyRule = /\.drawer-body\[hidden\]\s*\{[\s\S]*?\n\}/.exec(css);
+
+    expect(hiddenDrawerBodyRule?.[0]).toContain("display: none;");
+  });
+
+  it("shows mobile Chat and Detail surfaces as full-viewport overlays", () => {
+    const css = readFileSync(join(process.cwd(), "src", "styles.css"), "utf8");
+
+    expect(css).toMatch(
+      /@media \(max-width: 899px\)[\s\S]*?\.dashboard-right-surfaces\s*\{\s*position: fixed;\s*inset: 0;\s*z-index: 50;\s*flex-direction: column;\s*background: var\(--background\);\s*\}/,
+    );
+    expect(css).toMatch(
+      /@media \(max-width: 899px\)[\s\S]*?\.drawer-sheet-backdrop\s*\{\s*display: none;\s*\}/,
+    );
+  });
+
   it("clamps the transient drawer width to the current viewport", async () => {
     installFetchMock({
       runs: [makeRun()],
@@ -7044,6 +7618,7 @@ describe("web app", () => {
       JSON.stringify({
         collapsedColumnKeys: ["running"],
         drawerWidth: 540,
+        activeRightSurface: "detail",
       }),
     );
     expect(
@@ -7060,6 +7635,7 @@ describe("web app", () => {
       JSON.stringify({
         collapsedColumnKeys: [],
         drawerWidth: 540,
+        activeRightSurface: "detail",
       }),
     );
     expect(
@@ -8357,7 +8933,10 @@ describe("web app", () => {
       screen.getByText("Send a follow-up message describing what the run should do next."),
     ).toBeInTheDocument();
 
-    await user.type(await screen.findByLabelText("Message"), "Pick up the failing tests.");
+    await user.type(
+      await within(screen.getByRole("dialog", { name: "Resume run" })).findByLabelText("Message"),
+      "Pick up the failing tests.",
+    );
 
     await waitFor(() => {
       expect(sendButton).toBeEnabled();
@@ -9809,7 +10388,7 @@ describe("web app", () => {
     expect(pngPreview).toHaveAttribute("src", "blob:png-preview");
     await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith("blob:svg-preview"));
 
-    await user.click(screen.getByRole("button", { name: "Close detail" }));
+    await user.click(screen.getByRole("button", { name: "Close attachment preview" }));
     await waitFor(() =>
       expect(screen.queryByLabelText("Attachment preview")).not.toBeInTheDocument(),
     );

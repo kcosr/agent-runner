@@ -20,20 +20,40 @@ those plus the active run id.
 
 ## Views
 
-- `/` — Runs dashboard (board + detail drawer).
-- `/runs/:runId` — Same dashboard with a specific run's detail drawer
-  open.
+- `/` — Runs dashboard with Board, Detail, and Chat surfaces.
+- `/runs/:runId` — Same dashboard with a specific run selected for the
+  Detail and Chat surfaces.
 - `/settings/general` — General preferences.
 - `/settings/keybindings` — Keyboard shortcut reference.
 
 ### Runs dashboard
 
-A three-pane layout:
+A multi-surface workspace:
 
-- **Left** — search, grouped Filters control, preference toggles.
-- **Center** — kanban board grouped by run status.
-- **Right** — resizable detail drawer (hidden by default until you select
-  a run).
+- **Left** — search, grouped Filters control, and preference toggles.
+- **Center** — Board, the kanban run list grouped by run status.
+- **Right** — one selected-run panel with Chat and Detail tabs.
+
+Board is always visible. Selecting a run opens one resizable selected-run
+panel. Its header owns the run identity plus action toolbar, and the tabs
+below the toolbar switch between Detail, the operational inspector, and
+Chat, the conversational projection of the same run. Chat does not create
+a separate chat route or backend chat contract; it follows the selected
+run, derives messages from `RunDetail` plus timeline history, and streams
+live output through the existing timeline stream.
+
+Closing the selected-run panel navigates back to `/` and clears the
+selected run. Chat and Detail tab choice persists as the active right
+surface.
+
+Dashboard view state persists the durable surface layout fields:
+collapsed board columns, selected-run panel width, and the active
+Chat/Detail tab. Search text, fullscreen state, per-run drawer tabs, and
+the active board column remain transient.
+
+On desktop layouts, the selected-run panel renders inline to the right of
+the board. On narrow mobile layouts, the selected-run panel becomes an
+in-layout sheet over the board.
 
 The grouped **Filters** control opens an anchored popover on desktop and a
 sheet-style overlay on narrow/mobile layouts. It applies exact-match
@@ -144,6 +164,36 @@ within its session. The Attempts tab groups timeline rows by session and
 labels each row with its monotonic attempt number plus session-local
 attempt position.
 
+The Detail Attempts tab remains the operational timeline view. It shares
+the same timeline state as Chat, so opening Chat can activate timeline
+history and streaming without starting a duplicate timeline subscription.
+
+### Chat
+
+Chat renders the selected run as a conversational thread. Each session's
+user bubble is the stored run message for the initial session, or the stored
+session message for later resume sessions. When that user message is null or
+blank, Chat renders attempt prompts as separate System cards so
+daemon-synthesized prompts are not attributed to the user. Chat shows the
+existing loading skeleton until timeline history is available, so detail-only
+run/session messages do not appear as standalone user bubbles before the
+matching attempt/assistant row can be projected. Assistant output renders each
+attempt transcript chronologically and inline, without a bubble, so the thread
+reads like output with user interjections and automatic follow-up prompts.
+User bubbles render Markdown independently. Backend notices and diagnostics
+stay out of Chat.
+
+The composer is fixed at the bottom of the Chat panel for a selected
+run. It sends only non-empty trimmed messages through the existing resume
+API, using the same resume mutation path as the Detail Resume dialog.
+The composer submits from the Send button or `Cmd/Ctrl+Enter`. Success
+clears the draft and lets live timeline output appear in Chat; failure
+keeps the draft visible with the daemon error in the panel. No selected
+run disables the text field. Runs that cannot resume and pending resume
+requests keep the draft editable but disable submission. The Detail
+Resume dialog remains available for existing resume flows, including
+resume-without-message where allowed.
+
 ## Live projections
 
 The dashboard consumes four independent streams:
@@ -153,7 +203,7 @@ The dashboard consumes four independent streams:
 | `run_summary` | `/api/events/run-summaries` | Board cards |
 | `run_detail` | `/api/runs/:runId/events/detail` | Drawer header, tabs |
 | `run_audit` | `/api/runs/:runId/events/audit` (+ `/audit` history) | Audit tab |
-| `run_timeline` | `/api/runs/:runId/events/timeline` (+ `/timeline` history) | Attempts tab |
+| `run_timeline` | `/api/runs/:runId/events/timeline` (+ `/timeline` history) | Attempts tab and Chat |
 
 The timeline and audit streams both use monotonically increasing cursors
 for ordering and reconnect safety after their tabs are first opened. Those

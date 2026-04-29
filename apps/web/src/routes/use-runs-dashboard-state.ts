@@ -24,6 +24,7 @@ import { useRunTimelineState } from "../lib/run-timeline.js";
 import { useRuntimeConfig } from "../lib/runtime-config.js";
 import {
   DEFAULT_DRAWER_VIEW,
+  type DashboardRightSurface,
   type DashboardStructuredFilters,
   type DrawerDetailSection,
   EMPTY_DASHBOARD_STRUCTURED_FILTERS,
@@ -461,12 +462,15 @@ export function useRunsDashboardState() {
     selectedViewMatchesDetailRun &&
     selectedDrawerView?.mode === "detail" &&
     selectedDrawerView.detailSection === "events";
+  const chatTimelineActive =
+    selectedViewMatchesDetailRun && viewState.activeRightSurface === "chat";
   const auditActive =
     selectedViewMatchesDetailRun &&
     selectedDrawerView?.mode === "detail" &&
     selectedDrawerView.detailSection === "audit";
   const historyActivationMatchesDetailRun = historyActivation.runId === detailRunId;
   const timelineEnabled =
+    chatTimelineActive ||
     timelineActive ||
     (selectedViewMatchesDetailRun &&
       historyActivationMatchesDetailRun &&
@@ -490,7 +494,7 @@ export function useRunsDashboardState() {
       const next = {
         audit: base.audit || auditActive,
         runId: detailRunId,
-        timeline: base.timeline || timelineActive,
+        timeline: base.timeline || timelineActive || chatTimelineActive,
       };
 
       return next.audit === current.audit &&
@@ -499,7 +503,7 @@ export function useRunsDashboardState() {
         ? current
         : next;
     });
-  }, [auditActive, detailRunId, selectedViewMatchesDetailRun, timelineActive]);
+  }, [auditActive, chatTimelineActive, detailRunId, selectedViewMatchesDetailRun, timelineActive]);
 
   const timelineState = useRunTimelineState({
     config,
@@ -719,6 +723,13 @@ export function useRunsDashboardState() {
   const closeRun = () => {
     void navigate({ to: "/" });
   };
+
+  function setActiveRightSurface(activeRightSurface: DashboardRightSurface) {
+    if (viewState.activeRightSurface === activeRightSurface) {
+      return;
+    }
+    updateViewState({ activeRightSurface });
+  }
 
   const archiveMutation = useMutation({
     mutationFn: (runId: string) => api.archiveRun(runId),
@@ -1068,6 +1079,7 @@ export function useRunsDashboardState() {
                                         : clearDependenciesMutation.isPending
                                           ? "clear-dependencies"
                                           : undefined;
+  const resumePendingRunId = resumeMutation.isPending ? resumeMutation.variables?.runId : undefined;
   const selectedRunDetailReady =
     detailRunId !== undefined &&
     detailRunId === selectedRunId &&
@@ -1226,6 +1238,7 @@ export function useRunsDashboardState() {
     actionError,
     activeBoardColumnKey: viewState.activeBoardColumnKey,
     actionPending,
+    activeRightSurface: viewState.activeRightSurface,
     boardColumns,
     collapsedColumnKeys: viewState.collapsedColumnKeys,
     closeRun,
@@ -1297,6 +1310,7 @@ export function useRunsDashboardState() {
     hasActiveStructuredFilters: hasActiveDashboardStructuredFilters(preferences.structuredFilters),
     resumeDialogOpen,
     selectedRunResumeRequiresMessage,
+    resumePendingRunId,
     resumeMessageDraft,
     resumeMessageExpanded,
     runActions: {
@@ -1370,7 +1384,7 @@ export function useRunsDashboardState() {
     selectedRunQuery,
     setResumeMessageDraft,
     setResumeMessageExpanded,
-    streamStale: summaryStreamStale || detailStreamStale || timelineState.stale || auditState.stale,
+    streamStale: summaryStreamStale || detailStreamStale || auditState.stale,
     auditState,
     submitSelectedRunResume,
     timelineState,
@@ -1402,6 +1416,7 @@ export function useRunsDashboardState() {
       }
       updateViewState({ activeBoardColumnKey: columnKey });
     },
+    setActiveRightSurface,
     toggleDrawerFullscreen: () => {
       updateViewState({ drawerFullscreen: !viewState.drawerFullscreen });
     },

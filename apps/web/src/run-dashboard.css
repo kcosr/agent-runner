@@ -92,7 +92,7 @@ body {
   -moz-osx-font-smoothing: grayscale;
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  min-height: 100dvh;
   position: relative;
 }
 /* Faint texture (borrowed from t3code) */

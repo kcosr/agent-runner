@@ -104,6 +104,14 @@
   attachment add/list/download/remove onto WebSocket RPC plus stream
   frames, while preserving HTTP attachment endpoints for browser/API
   callers. ([#117](https://github.com/kcosr/task-runner/pull/117))
+- Added a selected-run Chat tab to the web dashboard selected-run panel,
+  including persisted Chat/Detail tab state, timeline projection with
+  stored run/session messages as Markdown user bubbles, daemon-synthesized
+  prompts as System cards, inline assistant output without backend
+  notices/diagnostics, loading skeletons while timeline history hydrates,
+  mobile-safe sheet behavior, and resume composer support from the inset Send
+  button or `Cmd/Ctrl+Enter`.
+  ([#119](https://github.com/kcosr/task-runner/pull/119))
 - Added first-class run groups across manifests, CLI, daemon APIs, and the
   web dashboard. Fresh child runs inherit the parent run group by default,
   `--group-id` overrides fresh run/init grouping, and
@@ -339,6 +347,31 @@
 
 ### Fixed
 
+- Web dashboard selected-run surfaces once again span the full viewport
+  height on mobile, covering the app toolbar while the drawer is open.
+- Persisted attempt transcripts no longer append a duplicate final
+  response after a divider when that response already matches the end
+  of the streamed provisional output.
+- Web dashboard Chat/Detail tabs now remove the inactive selected-run
+  tab body from layout, preventing Detail content from appearing below
+  the Chat composer.
+- Web dashboard Chat now renders automatic follow-up attempt prompts as
+  System cards inline instead of hiding prior attempt output behind a
+  retry disclosure.
+- Web dashboard Chat now renders the user's typed message as a plain
+  user bubble and shows daemon-synthesized prompts (worker brief, added
+  tasks reminder, implicit continue) as a separate "System" card
+  instead of attributing the system text to the user.
+- Wide content in Chat assistant bubbles (Markdown tables and code
+  blocks) now wraps and scrolls inside the bubble instead of forcing
+  the chat area to scroll horizontally.
+- Web dashboard no longer renders an empty opaque right-surface overlay
+  on mobile when no run is selected; the wrapper only mounts when the
+  detail panel has content. The board is visible at `/` on narrow
+  viewports.
+- Web dashboard body uses `100dvh` for its minimum height so the page
+  matches the visible viewport on mobile browsers and does not require
+  a small downward scroll when the URL bar is shown.
 - Daemon WebSocket attachment streams now use byte-credit flow control so
   multi-megabyte connected uploads and downloads pace to receiver
   consumption instead of tripping stream buffer limits.

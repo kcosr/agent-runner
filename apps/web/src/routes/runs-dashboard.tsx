@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { AppShell } from "../components/app-shell.js";
 import { RunFilters } from "../components/run-filters.js";
@@ -7,6 +8,7 @@ import {
   resolveBoardNeighborRunId,
   resolveRunsShortcutCommand,
 } from "../lib/shortcuts.js";
+import { RunChatView } from "./run-chat-panel.js";
 import { RunDetailPanel } from "./run-detail-panel.js";
 import { RunsBoardPanel } from "./runs-board-panel.js";
 import { useRunsDashboardState } from "./use-runs-dashboard-state.js";
@@ -23,6 +25,25 @@ type BoardFilterShortcutCommand = keyof typeof BOARD_FILTER_PREFERENCE_KEYS;
 
 function isBoardFilterShortcutCommand(command: string): command is BoardFilterShortcutCommand {
   return command in BOARD_FILTER_PREFERENCE_KEYS;
+}
+
+function DashboardSurfaces({
+  board,
+  detail,
+}: {
+  board: ReactNode;
+  detail: ReactNode;
+}) {
+  return (
+    <div className="dashboard-surfaces">
+      <div className="dashboard-board-surface">{board}</div>
+      {detail ? (
+        <div className="dashboard-right-surfaces">
+          <div className="dashboard-panel-shell">{detail}</div>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export function RunsDashboardRoute() {
@@ -268,83 +289,100 @@ export function RunsDashboardRoute() {
   return (
     <AppShell
       primary={
-        <RunsBoardPanel
-          actionPending={state.actionPending}
-          activeBoardColumnKey={state.activeBoardColumnKey}
-          boardColumns={state.boardColumns}
-          collapsedColumnKeys={state.collapsedColumnKeys}
-          hasActiveStructuredFilters={state.hasActiveStructuredFilters}
-          openSelectedRunNoteRequest={openSelectedRunNoteRequest}
-          onExpandColumn={state.columnActions.expand}
-          onActiveBoardColumnKeyChange={state.setActiveBoardColumnKey}
-          onResetFilters={state.resetBoardFilters}
-          onSetNote={state.runActions.setNote}
-          onSetPinned={state.runActions.setPinned}
-          onSelectRun={state.openRun}
-          onStructuredFilterToggle={state.toggleStructuredFilter}
-          onToggleColumnCollapse={state.columnActions.toggleCollapse}
-          runs={state.runs}
-          runsQuery={state.runsQuery}
-          searchValue={state.viewState.search}
-          selectedRunId={state.selectedRunId}
-          structuredFilters={state.preferences.structuredFilters}
-          visibleRuns={state.visibleRuns}
+        <DashboardSurfaces
+          board={
+            <RunsBoardPanel
+              actionPending={state.actionPending}
+              activeBoardColumnKey={state.activeBoardColumnKey}
+              boardColumns={state.boardColumns}
+              collapsedColumnKeys={state.collapsedColumnKeys}
+              hasActiveStructuredFilters={state.hasActiveStructuredFilters}
+              openSelectedRunNoteRequest={openSelectedRunNoteRequest}
+              onExpandColumn={state.columnActions.expand}
+              onActiveBoardColumnKeyChange={state.setActiveBoardColumnKey}
+              onResetFilters={state.resetBoardFilters}
+              onSetNote={state.runActions.setNote}
+              onSetPinned={state.runActions.setPinned}
+              onSelectRun={state.openRun}
+              onStructuredFilterToggle={state.toggleStructuredFilter}
+              onToggleColumnCollapse={state.columnActions.toggleCollapse}
+              runs={state.runs}
+              runsQuery={state.runsQuery}
+              searchValue={state.viewState.search}
+              selectedRunId={state.selectedRunId}
+              structuredFilters={state.preferences.structuredFilters}
+              visibleRuns={state.visibleRuns}
+            />
+          }
+          detail={
+            state.selectedRunId ? (
+              <RunDetailPanel
+                activeRightSurface={state.activeRightSurface}
+                onAddDependency={state.runActions.addDependency}
+                actionError={state.actionError}
+                actionPending={state.actionPending}
+                chatSurface={
+                  <RunChatView
+                    detailSettling={state.detailSettling}
+                    onSubmitResume={state.runActions.resume}
+                    resumePending={state.resumePendingRunId === state.selectedRunId}
+                    selectedRunId={state.selectedRunId}
+                    selectedRunQuery={state.selectedRunQuery}
+                    timelineState={state.timelineState}
+                  />
+                }
+                drawerFullscreen={state.viewState.drawerFullscreen}
+                drawerWidth={state.viewState.drawerWidth}
+                drawerView={state.selectedDrawerView}
+                runs={state.runs}
+                onBackToAttachments={state.returnSelectedRunToAttachments}
+                onAbort={state.runActions.abort}
+                onArchive={state.runActions.archive}
+                onClearDependencies={state.runActions.clearDependencies}
+                onClose={state.closeRun}
+                onCloseResumeDialog={state.closeSelectedRunResumeDialog}
+                onCopy={state.copyText}
+                onDelete={state.runActions.delete}
+                onDownloadAttachment={state.runActions.downloadAttachment}
+                onOpenAttachmentPreview={state.openSelectedRunAttachmentPreview}
+                onReplaceAttachmentPreview={state.replaceSelectedRunAttachmentPreview}
+                onSelectRun={state.openRun}
+                onClearBackendSession={state.runActions.clearBackendSession}
+                onClearSchedule={state.runActions.clearSchedule}
+                onRemoveDependency={state.runActions.removeDependency}
+                onRemoveAttachment={state.runActions.removeAttachment}
+                onReset={state.runActions.reset}
+                onReconfigure={state.runActions.reconfigure}
+                onRename={state.runActions.rename}
+                onResumeMessageDraftChange={state.setResumeMessageDraft}
+                onResumeMessageExpandedChange={state.setResumeMessageExpanded}
+                onSetNote={state.runActions.setNote}
+                onSetBackendSession={state.runActions.setBackendSession}
+                onSetGroup={state.runActions.setGroup}
+                onClearGroup={state.runActions.clearGroup}
+                onSetPinned={state.runActions.setPinned}
+                onSetScheduleEnabled={state.runActions.setScheduleEnabled}
+                onSelectDetailSection={state.updateSelectedRunDetailSection}
+                onSelectRightSurface={state.setActiveRightSurface}
+                onSubmitResume={state.submitSelectedRunResume}
+                onTriggerPrimaryAction={state.triggerSelectedRunPrimaryAction}
+                onUnarchive={state.runActions.unarchive}
+                onUploadAttachment={state.runActions.uploadAttachment}
+                resumeDialogOpen={state.resumeDialogOpen}
+                resumeRequiresMessage={state.selectedRunResumeRequiresMessage}
+                resumeMessageDraft={state.resumeMessageDraft}
+                resumeMessageExpanded={state.resumeMessageExpanded}
+                detailSettling={state.detailSettling}
+                selectedRunGroupAttachmentsQuery={state.selectedRunGroupAttachmentsQuery}
+                selectedRunQuery={state.selectedRunQuery}
+                auditState={state.auditState}
+                timelineState={state.timelineState}
+              />
+            ) : null
+          }
         />
       }
       bottomNotices={bottomNotices.length > 0 ? bottomNotices : undefined}
-      secondary={
-        <RunDetailPanel
-          onAddDependency={state.runActions.addDependency}
-          actionError={state.actionError}
-          actionPending={state.actionPending}
-          drawerFullscreen={state.viewState.drawerFullscreen}
-          drawerWidth={state.viewState.drawerWidth}
-          drawerView={state.selectedDrawerView}
-          runs={state.runs}
-          onBackToAttachments={state.returnSelectedRunToAttachments}
-          onAbort={state.runActions.abort}
-          onArchive={state.runActions.archive}
-          onClearDependencies={state.runActions.clearDependencies}
-          onClose={state.closeRun}
-          onCloseResumeDialog={state.closeSelectedRunResumeDialog}
-          onCopy={state.copyText}
-          onDelete={state.runActions.delete}
-          onDownloadAttachment={state.runActions.downloadAttachment}
-          onOpenAttachmentPreview={state.openSelectedRunAttachmentPreview}
-          onReplaceAttachmentPreview={state.replaceSelectedRunAttachmentPreview}
-          onSelectRun={state.openRun}
-          onClearBackendSession={state.runActions.clearBackendSession}
-          onClearSchedule={state.runActions.clearSchedule}
-          onRemoveDependency={state.runActions.removeDependency}
-          onRemoveAttachment={state.runActions.removeAttachment}
-          onReset={state.runActions.reset}
-          onReconfigure={state.runActions.reconfigure}
-          onRename={state.runActions.rename}
-          onResumeMessageDraftChange={state.setResumeMessageDraft}
-          onResumeMessageExpandedChange={state.setResumeMessageExpanded}
-          onSetNote={state.runActions.setNote}
-          onSetBackendSession={state.runActions.setBackendSession}
-          onSetGroup={state.runActions.setGroup}
-          onClearGroup={state.runActions.clearGroup}
-          onSetPinned={state.runActions.setPinned}
-          onSetScheduleEnabled={state.runActions.setScheduleEnabled}
-          onSelectDetailSection={state.updateSelectedRunDetailSection}
-          onSubmitResume={state.submitSelectedRunResume}
-          onTriggerPrimaryAction={state.triggerSelectedRunPrimaryAction}
-          onUnarchive={state.runActions.unarchive}
-          onUploadAttachment={state.runActions.uploadAttachment}
-          resumeDialogOpen={state.resumeDialogOpen}
-          resumeRequiresMessage={state.selectedRunResumeRequiresMessage}
-          resumeMessageDraft={state.resumeMessageDraft}
-          resumeMessageExpanded={state.resumeMessageExpanded}
-          detailSettling={state.detailSettling}
-          selectedRunGroupAttachmentsQuery={state.selectedRunGroupAttachmentsQuery}
-          selectedRunId={state.selectedRunId}
-          selectedRunQuery={state.selectedRunQuery}
-          auditState={state.auditState}
-          timelineState={state.timelineState}
-        />
-      }
       topNotices={topNotices.length > 0 ? topNotices : undefined}
       toolbar={
         <RunFilters

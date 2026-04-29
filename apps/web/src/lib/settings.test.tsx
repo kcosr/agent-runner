@@ -75,6 +75,7 @@ function SettingsProbe() {
         onClick={() =>
           updateViewState({
             drawerWidth: 700,
+            activeRightSurface: "chat",
             search: "task-runner-web",
           })
         }
@@ -162,6 +163,7 @@ describe("DashboardSettingsProvider", () => {
         search: "",
         collapsedColumnKeys: [],
         drawerWidth: 540,
+        activeRightSurface: "detail",
         drawerFullscreen: false,
         drawerViewsByRunId: {},
         activeBoardColumnKey: null,
@@ -220,6 +222,7 @@ describe("DashboardSettingsProvider", () => {
       }),
     );
     expect(screen.getByTestId("view-state")).toHaveTextContent('"drawerWidth":540');
+    expect(screen.getByTestId("view-state")).toHaveTextContent('"activeRightSurface":"detail"');
   });
 
   it("hydrates the persisted recent-updates preference while keeping unsaved view-state fields transient", () => {
@@ -235,6 +238,38 @@ describe("DashboardSettingsProvider", () => {
       '"structuredFilters":{"repo":null,"agent":null,"backend":null,"runGroupId":null}',
     );
     expect(screen.getByTestId("view-state")).toHaveTextContent('"drawerWidth":540');
+  });
+
+  it("hydrates persisted dashboard surface view state", () => {
+    window.localStorage.setItem(
+      "task-runner:web:dashboard-view-state",
+      JSON.stringify({
+        collapsedColumnKeys: ["running"],
+        drawerWidth: 700,
+        activeRightSurface: "chat",
+      }),
+    );
+
+    renderSettingsProbe();
+
+    expect(screen.getByTestId("view-state")).toHaveTextContent('"collapsedColumnKeys":["running"]');
+    expect(screen.getByTestId("view-state")).toHaveTextContent('"drawerWidth":700');
+    expect(screen.getByTestId("view-state")).toHaveTextContent('"activeRightSurface":"chat"');
+  });
+
+  it("defaults malformed dashboard surface view state", () => {
+    window.localStorage.setItem(
+      "task-runner:web:dashboard-view-state",
+      JSON.stringify({
+        drawerWidth: Number.NaN,
+        activeRightSurface: "messages",
+      }),
+    );
+
+    renderSettingsProbe();
+
+    expect(screen.getByTestId("view-state")).toHaveTextContent('"drawerWidth":540');
+    expect(screen.getByTestId("view-state")).toHaveTextContent('"activeRightSurface":"detail"');
   });
 
   it("hydrates persisted collapsed column keys while defaulting unsaved columns to expanded", () => {
@@ -353,6 +388,7 @@ describe("DashboardSettingsProvider", () => {
       JSON.stringify({
         collapsedColumnKeys: ["running"],
         drawerWidth: 700,
+        activeRightSurface: "chat",
       }),
     );
   });

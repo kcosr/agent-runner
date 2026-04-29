@@ -37,6 +37,7 @@ import type { RunAuditState } from "../lib/run-audit.js";
 import { getRunPrimaryAction } from "../lib/run-primary-action.js";
 import type { RunTimelineState } from "../lib/run-timeline.js";
 import {
+  type DashboardRightSurface,
   type DrawerDetailSection,
   toggleDashboardStructuredFilter,
   useDashboardPreferences,
@@ -449,6 +450,8 @@ function InlineConfirmActions({
 
 export function RunDetailDrawer({
   activeSection,
+  activeSurface,
+  chatSurface,
   dependencyCandidateRuns,
   onAddDependency,
   actionError,
@@ -477,6 +480,7 @@ export function RunDetailDrawer({
   onClearSchedule,
   onSetScheduleEnabled,
   onSelectSection,
+  onSelectSurface,
   onTriggerPrimaryAction,
   auditState,
   timelineState,
@@ -486,6 +490,8 @@ export function RunDetailDrawer({
   run,
 }: {
   activeSection: DrawerDetailSection;
+  activeSurface: DashboardRightSurface;
+  chatSurface: ReactNode;
   dependencyCandidateRuns: RunSummary[];
   onAddDependency: (dependency: RunDependencyRef) => Promise<void>;
   actionError?: string;
@@ -514,6 +520,7 @@ export function RunDetailDrawer({
   onClearSchedule: () => Promise<void>;
   onSetScheduleEnabled: (enabled: boolean) => Promise<void>;
   onSelectSection: (section: DrawerDetailSection) => void;
+  onSelectSurface: (surface: DashboardRightSurface) => void;
   onTriggerPrimaryAction: () => Promise<void>;
   auditState: RunAuditState;
   resumeDialogOpen: boolean;
@@ -1495,13 +1502,13 @@ export function RunDetailDrawer({
   return (
     <>
       <button
-        aria-label="Close detail sheet"
+        aria-label="Close selected run panel sheet"
         className="drawer-sheet-backdrop"
         onClick={onClose}
         type="button"
       />
       <aside
-        aria-label="Run detail"
+        aria-label={activeSurface === "chat" ? "Selected run panel" : "Run detail"}
         className={isFullscreen ? "drawer drawer--fullscreen" : "drawer"}
         onKeyDownCapture={handleDrawerKeyDownCapture}
         ref={drawerRef}
@@ -1656,13 +1663,42 @@ export function RunDetailDrawer({
                 <ExpandIcon aria-hidden="true" />
               )}
             </button>
-            <button aria-label="Close detail" className="icon-btn" onClick={onClose} type="button">
+            <button
+              aria-label="Close selected run panel"
+              className="icon-btn"
+              onClick={onClose}
+              type="button"
+            >
               <CloseIcon aria-hidden="true" />
             </button>
           </div>
         </header>
 
-        <div className="drawer-body" ref={drawerBodyRef}>
+        <div aria-label="Run surface" className="selected-run-surface-tabs" role="tablist">
+          <button
+            aria-selected={activeSurface === "chat"}
+            className={activeSurface === "chat" ? "task-tab active" : "task-tab"}
+            onClick={() => onSelectSurface("chat")}
+            role="tab"
+            type="button"
+          >
+            Chat
+          </button>
+          <button
+            aria-selected={activeSurface === "detail"}
+            className={activeSurface === "detail" ? "task-tab active" : "task-tab"}
+            onClick={() => onSelectSurface("detail")}
+            role="tab"
+            type="button"
+          >
+            Detail
+          </button>
+        </div>
+
+        <div className="drawer-body drawer-body--chat" hidden={activeSurface !== "chat"}>
+          {chatSurface}
+        </div>
+        <div className="drawer-body" hidden={activeSurface !== "detail"} ref={drawerBodyRef}>
           <div className="drawer-title-block">
             {editingName ? (
               <div className="drawer-title-edit">

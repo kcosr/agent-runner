@@ -53,10 +53,13 @@ export type RunDrawerView =
       attachmentOwnerRunId: string;
     };
 
+export type DashboardRightSurface = "detail" | "chat";
+
 export interface DashboardViewState {
   search: string;
   collapsedColumnKeys: string[];
   drawerWidth: number;
+  activeRightSurface: DashboardRightSurface;
   drawerFullscreen: boolean;
   drawerViewsByRunId: Record<string, RunDrawerView>;
   activeBoardColumnKey: string | null;
@@ -92,6 +95,7 @@ const DEFAULT_DASHBOARD_VIEW_STATE: DashboardViewState = {
   search: "",
   collapsedColumnKeys: [],
   drawerWidth: DRAWER_WIDTH_DEFAULT,
+  activeRightSurface: "detail",
   drawerFullscreen: false,
   drawerViewsByRunId: {},
   activeBoardColumnKey: null,
@@ -249,10 +253,12 @@ function parseStoredDashboardViewState(value: unknown): DashboardViewState {
       typeof record.drawerWidth === "number"
         ? clampDrawerWidth(record.drawerWidth)
         : DEFAULT_DASHBOARD_VIEW_STATE.drawerWidth,
+    activeRightSurface:
+      record.activeRightSurface === "detail" || record.activeRightSurface === "chat"
+        ? record.activeRightSurface
+        : DEFAULT_DASHBOARD_VIEW_STATE.activeRightSurface,
     collapsedColumnKeys: Array.isArray(record.collapsedColumnKeys)
-      ? record.collapsedColumnKeys
-          .filter((key): key is string => typeof key === "string")
-          .map((key) => (key === "pending" ? "initialized" : key))
+      ? record.collapsedColumnKeys.filter((key): key is string => typeof key === "string")
       : DEFAULT_DASHBOARD_VIEW_STATE.collapsedColumnKeys,
   };
 }
@@ -295,9 +301,10 @@ export function DashboardSettingsProvider({ children }: { children: ReactNode })
       JSON.stringify({
         collapsedColumnKeys: viewState.collapsedColumnKeys,
         drawerWidth: viewState.drawerWidth,
+        activeRightSurface: viewState.activeRightSurface,
       }),
     );
-  }, [viewState.collapsedColumnKeys, viewState.drawerWidth]);
+  }, [viewState.activeRightSurface, viewState.collapsedColumnKeys, viewState.drawerWidth]);
 
   const preferencesValue = useMemo<DashboardPreferencesContextValue>(
     () => ({
