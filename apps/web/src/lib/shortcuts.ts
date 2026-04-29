@@ -12,6 +12,8 @@ type RunsShortcutCommand =
   | "ui.toggleArchived"
   | "ui.toggleHideEmptyColumns"
   | "run.openNote"
+  | "run.showChat"
+  | "run.showDetail"
   | "run.toggleArchived"
   | "run.togglePinned"
   | "ui.toggleFilters"
@@ -310,6 +312,12 @@ export function resolveRunsShortcutCommand(
   }
   if (matchesShortcut(event, { key: "n" }) && context.selectedRunId) {
     return "run.openNote";
+  }
+  if (matchesShortcut(event, { key: "c" }) && context.selectedRunId) {
+    return "run.showChat";
+  }
+  if (matchesShortcut(event, { key: "d" }) && context.selectedRunId) {
+    return "run.showDetail";
   }
   if (matchesShortcut(event, { key: "p" }) && context.selectedRunId) {
     return "run.togglePinned";

@@ -21,7 +21,7 @@ type ShortcutSection = {
 const SHORTCUT_SECTIONS: readonly ShortcutSection[] = [
   {
     description:
-      "Available while the dashboard is visible. Fullscreen drawers keep Enter and Escape active while suppressing board, search, filter, note, pin, and archive shortcuts.",
+      "Available while the dashboard is visible. Fullscreen drawers keep Enter and Escape active while suppressing board, search, filter, note, Chat, Detail, pin, and archive shortcuts.",
     shortcuts: [
       {
         description: "Move selection between runs on the board.",
@@ -87,6 +87,16 @@ const SHORTCUT_SECTIONS: readonly ShortcutSection[] = [
         title: "Open run note",
       },
       {
+        description: "Show the selected run's Chat tab.",
+        keys: ["C"],
+        title: "Switch to Chat",
+      },
+      {
+        description: "Show the selected run's Detail tab.",
+        keys: ["D"],
+        title: "Switch to Detail",
+      },
+      {
         description: "Pin or unpin the selected run.",
         keys: ["P"],
         title: "Toggle pin",
@@ -104,7 +114,7 @@ const SHORTCUT_SECTIONS: readonly ShortcutSection[] = [
       },
       {
         description:
-          "Clear the focused search when it has text, then blur it on a second press. When the drawer is fullscreen, exit fullscreen first. Otherwise close attachment preview or selected run detail.",
+          "Blur the focused Chat composer, or clear the focused search when it has text and blur it on a second press. When the drawer is fullscreen, exit fullscreen first. Otherwise close attachment preview or selected run detail.",
         keys: ["Escape"],
         title: "Back or close",
       },

@@ -1944,6 +1944,34 @@ describe("web app", () => {
     );
   });
 
+  it("switches the active selected-run surface with keyboard shortcuts", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "detail" });
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+
+    const tablist = await screen.findByRole("tablist", { name: "Run surface" });
+    const detailTab = within(tablist).getByRole("tab", { name: "Detail" });
+    const chatTab = within(tablist).getByRole("tab", { name: "Chat" });
+    expect(detailTab).toHaveAttribute("aria-selected", "true");
+
+    await user.keyboard("c");
+    expect(chatTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("Run chat").closest(".drawer-body--chat")).not.toHaveAttribute(
+      "hidden",
+    );
+
+    await user.keyboard("d");
+    expect(detailTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("Run chat").closest(".drawer-body--chat")).toHaveAttribute(
+      "hidden",
+    );
+  });
+
   it("renders selected-run Chat, activates the existing timeline once, and streams deltas", async () => {
     setStoredDashboardViewState({ activeRightSurface: "chat" });
     const fetchMock = installFetchMock({
@@ -2249,6 +2277,35 @@ describe("web app", () => {
     });
     await waitFor(() => {
       expect(message).toHaveValue("");
+    });
+  });
+
+  it("blurs the Chat composer on Escape before closing the selected run", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+
+    const message = await screen.findByLabelText("Message");
+    await waitFor(() => {
+      expect(message).toBeEnabled();
+    });
+    await user.type(message, "draft stays");
+    expect(message).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+
+    expect(message).not.toHaveFocus();
+    expect(message).toHaveValue("draft stays");
+    expect(screen.getByRole("tablist", { name: "Run surface" })).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(screen.queryByRole("tablist", { name: "Run surface" })).not.toBeInTheDocument();
     });
   });
 
@@ -5918,6 +5975,10 @@ describe("web app", () => {
     expect(screen.getByLabelText("Shortcut: Ctrl + Shift + A")).toBeInTheDocument();
     expect(screen.getByLabelText("Shortcut: Ctrl + Shift + E")).toBeInTheDocument();
     expect(screen.getByText("Toggle notes-only filter")).toBeInTheDocument();
+    expect(screen.getByLabelText("Shortcut: C")).toBeInTheDocument();
+    expect(screen.getByLabelText("Shortcut: D")).toBeInTheDocument();
+    expect(screen.getByText("Switch to Chat")).toBeInTheDocument();
+    expect(screen.getByText("Switch to Detail")).toBeInTheDocument();
 
     await user.click(getSidebarNavigation().getByRole("button", { name: "Runs" }));
 

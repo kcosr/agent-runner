@@ -193,6 +193,13 @@ export function RunChatView({
   }
 
   function handleMessageKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      event.currentTarget.blur();
+      return;
+    }
+
     if (event.key !== "Enter" || (!event.metaKey && !event.ctrlKey)) {
       return;
     }
@@ -263,7 +270,7 @@ export function RunChatView({
         </label>
         <div className="chat-composer__surface">
           <textarea
-            aria-keyshortcuts="Meta+Enter Ctrl+Enter"
+            aria-keyshortcuts="Meta+Enter Ctrl+Enter Escape"
             disabled={!selectedRun}
             id="run-chat-message"
             onChange={(event) => setDraft(event.target.value)}

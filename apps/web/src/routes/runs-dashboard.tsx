@@ -174,6 +174,18 @@ export function RunsDashboardRoute() {
         return;
       }
 
+      if (command === "run.showChat") {
+        event.preventDefault();
+        currentState.setActiveRightSurface("chat");
+        return;
+      }
+
+      if (command === "run.showDetail") {
+        event.preventDefault();
+        currentState.setActiveRightSurface("detail");
+        return;
+      }
+
       if (command === "run.togglePinned") {
         if (!currentState.selectedRunId || currentState.actionPending !== undefined) {
           return;

@@ -247,6 +247,30 @@ describe("resolveRunsShortcutCommand", () => {
         {
           altKey: false,
           ctrlKey: false,
+          key: "c",
+          metaKey: false,
+          shiftKey: false,
+        },
+        context,
+      ),
+    ).toBe("run.showChat");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "d",
+          metaKey: false,
+          shiftKey: false,
+        },
+        context,
+      ),
+    ).toBe("run.showDetail");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
           key: "p",
           metaKey: false,
           shiftKey: false,
@@ -341,6 +365,30 @@ describe("resolveRunsShortcutCommand", () => {
         context,
       ),
     ).toBe("run.openNote");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "c",
+          metaKey: false,
+          shiftKey: false,
+        },
+        context,
+      ),
+    ).toBe("run.showChat");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "d",
+          metaKey: false,
+          shiftKey: false,
+        },
+        context,
+      ),
+    ).toBe("run.showDetail");
     expect(
       resolveRunsShortcutCommand(
         {
@@ -476,6 +524,21 @@ describe("resolveRunsShortcutCommand", () => {
           altKey: false,
           ctrlKey: false,
           key: "n",
+          metaKey: false,
+          shiftKey: false,
+        },
+        {
+          ...context,
+          typingTarget: true,
+        },
+      ),
+    ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "c",
           metaKey: false,
           shiftKey: false,
         },
@@ -643,6 +706,18 @@ describe("resolveRunsShortcutCommand", () => {
           altKey: false,
           ctrlKey: true,
           key: "f",
+          metaKey: false,
+          shiftKey: false,
+        },
+        fullscreenContext,
+      ),
+    ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "c",
           metaKey: false,
           shiftKey: false,
         },

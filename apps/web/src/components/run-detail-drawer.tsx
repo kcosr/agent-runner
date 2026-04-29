@@ -1676,6 +1676,7 @@ export function RunDetailDrawer({
 
         <div aria-label="Run surface" className="selected-run-surface-tabs" role="tablist">
           <button
+            aria-keyshortcuts="C"
             aria-selected={activeSurface === "chat"}
             className={activeSurface === "chat" ? "task-tab active" : "task-tab"}
             onClick={() => onSelectSurface("chat")}
@@ -1685,6 +1686,7 @@ export function RunDetailDrawer({
             Chat
           </button>
           <button
+            aria-keyshortcuts="D"
             aria-selected={activeSurface === "detail"}
             className={activeSurface === "detail" ? "task-tab active" : "task-tab"}
             onClick={() => onSelectSurface("detail")}

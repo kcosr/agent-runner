@@ -264,6 +264,7 @@ The dashboard's shortcut system is customizable from
 |----------|--------|
 | `/` or `Ctrl+K` | Focus search |
 | `Esc` (in search) | Clear search and blur |
+| `Esc` (in chat composer) | Blur the composer without closing the drawer |
 | `Esc` (drawer open) | Close drawer |
 | `Esc` (attachment preview) | Back to attachments |
 | `Enter` | Primary action for the selected card (Resume, etc.) |
@@ -275,6 +276,8 @@ The dashboard's shortcut system is customizable from
 | `Ctrl+Shift+E` | Toggle hide-empty-columns |
 | `P` | Pin or unpin the selected run |
 | `N` | Open the selected run's note |
+| `C` | Show the selected run's Chat tab |
+| `D` | Show the selected run's Detail tab |
 | `A` | Archive or restore the selected run |
 | `F` | Toggle the detail drawer fullscreen |
 
@@ -285,11 +288,12 @@ handle Escape/back dismissal before dashboard shortcuts.
 When the detail drawer or attachment preview is fullscreen, `Enter`
 still triggers the selected run's primary action if one is available.
 Other dashboard shortcuts, including board movement, search, filters,
-notes, pinning, and archiving, remain suppressed in fullscreen drawer
-mode. If the primary action opens the Resume dialog, the dialog appears
-above the fullscreen drawer or preview surface. While the Resume or
-run-note dialog is open, the first `Esc` closes the dialog; later presses
-follow the existing fullscreen and drawer close behavior.
+notes, Chat/Detail tab switching, pinning, and archiving, remain
+suppressed in fullscreen drawer mode. If the primary action opens the
+Resume dialog, the dialog appears above the fullscreen drawer or preview
+surface. While the Resume or run-note dialog is open, the first `Esc`
+closes the dialog; later presses follow the existing fullscreen and
+drawer close behavior.
 
 ## Preferences
 
