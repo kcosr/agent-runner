@@ -14,6 +14,7 @@ import {
   type RunChatAssistantRow,
   type RunChatRetryAttempt,
   type RunChatRow,
+  type RunChatSystemRow,
   deriveRunChatRows,
 } from "../lib/run-chat.js";
 import type { RunTimelineState } from "../lib/run-timeline.js";
@@ -103,13 +104,28 @@ function ChatRow({ row }: { row: RunChatRow }) {
     return (
       <article className="chat-row chat-row--user">
         <div className="chat-bubble chat-bubble--user">
-          <MarkdownContent className="chat-markdown chat-markdown--user" text={row.text} />
+          <p className="chat-bubble__text">{row.text}</p>
         </div>
       </article>
     );
   }
 
+  if (row.kind === "system") {
+    return <SystemChatRow row={row} />;
+  }
+
   return <AssistantChatRow row={row} />;
+}
+
+function SystemChatRow({ row }: { row: RunChatSystemRow }) {
+  return (
+    <article className="chat-row chat-row--system">
+      <div className="chat-bubble chat-bubble--system">
+        <span className="chat-bubble__label">System</span>
+        <MarkdownContent className="chat-markdown" text={row.text} />
+      </div>
+    </article>
+  );
 }
 
 function AssistantChatRow({ row }: { row: RunChatAssistantRow }) {

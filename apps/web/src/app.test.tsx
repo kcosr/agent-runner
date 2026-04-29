@@ -1933,10 +1933,8 @@ describe("web app", () => {
     await renderApp("/runs/run-1");
 
     const chat = await screen.findByLabelText("Run chat");
-    expect(await within(chat).findByText(/Prompt with/)).toBeInTheDocument();
-    expect(within(chat).getByText("markdown").tagName).toBe("STRONG");
-    expect(within(chat).getByText("list item").closest("li")).not.toBeNull();
-    expect(within(chat).queryByText("Initial dashboard request")).not.toBeInTheDocument();
+    expect(await within(chat).findByText("Initial dashboard request")).toBeInTheDocument();
+    expect(within(chat).queryByText(/Prompt with/)).not.toBeInTheDocument();
     expect(within(chat).queryByText("Notices and diagnostics")).not.toBeInTheDocument();
     expect(within(chat).queryByText("backend notice")).not.toBeInTheDocument();
     expect(await within(chat).findByText("Streaming answer")).toBeInTheDocument();
@@ -2050,9 +2048,51 @@ describe("web app", () => {
 
     releaseTimeline?.();
 
-    expect(await within(chat).findByText("Timeline prompt")).toBeInTheDocument();
+    expect(await within(chat).findByText("Initial dashboard request")).toBeInTheDocument();
+    expect(within(chat).queryByText("Timeline prompt")).not.toBeInTheDocument();
     expect(await within(chat).findByText("Timeline response")).toBeInTheDocument();
     expect(within(chat).queryByLabelText("Loading conversation")).not.toBeInTheDocument();
+  });
+
+  it("renders the attempt prompt as a system card when the run has no user message", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
+    installFetchMock({
+      runs: [makeRun()],
+      details: {
+        "run-1": makeDetail({
+          message: null,
+        }),
+      },
+      timelineHistories: {
+        "run-1": {
+          runId: "run-1",
+          lastCursor: 1,
+          attempts: [
+            {
+              attemptNumber: 1,
+              attemptIndexInSession: 0,
+              sessionIndex: 0,
+              startedAt: "2026-04-13T05:00:00.000Z",
+              endedAt: "2026-04-13T05:01:00.000Z",
+              prompt: "Bootstrap **prompt**",
+              transcript: "Assistant reply",
+              notices: "",
+              exitCode: 0,
+              timedOut: false,
+              live: false,
+            },
+          ],
+        },
+      },
+    });
+
+    await renderApp("/runs/run-1");
+
+    const chat = await screen.findByLabelText("Run chat");
+    expect(await within(chat).findByText("System")).toBeInTheDocument();
+    expect(await within(chat).findByText(/Bootstrap/)).toBeInTheDocument();
+    expect(within(chat).getByText("prompt").tagName).toBe("STRONG");
+    expect(await within(chat).findByText("Assistant reply")).toBeInTheDocument();
   });
 
   it("submits Chat composer messages through resume and clears the draft on success", async () => {

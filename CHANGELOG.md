@@ -336,6 +336,13 @@
 
 ### Fixed
 
+- Web dashboard Chat now renders the user's typed message as a plain
+  user bubble and shows daemon-synthesized prompts (worker brief, added
+  tasks reminder, implicit continue) as a separate "System" card
+  instead of attributing the system text to the user.
+- Wide content in Chat assistant bubbles (Markdown tables and code
+  blocks) now wraps and scrolls inside the bubble instead of forcing
+  the chat area to scroll horizontally.
 - Web dashboard no longer renders an empty opaque right-surface overlay
   on mobile when no run is selected; the wrapper only mounts when the
   detail panel has content. The board is visible at `/` on narrow

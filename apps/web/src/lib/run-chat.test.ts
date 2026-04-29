@@ -139,11 +139,11 @@ describe("deriveRunChatRows", () => {
   it("sorts sessions and attempts, promotes the latest attempt, and keeps retries as details", () => {
     const rows = deriveRunChatRows(
       makeRun({
-        message: "Initial",
+        message: "  Initial  ",
         sessions: [
           makeSession({ sessionIndex: 2, message: "Second resume" }),
           makeSession({ sessionIndex: 0, message: null }),
-          makeSession({ sessionIndex: 1, message: "First resume" }),
+          makeSession({ sessionIndex: 1, message: " First resume " }),
         ],
       }),
       makeHistory([
@@ -162,11 +162,13 @@ describe("deriveRunChatRows", () => {
     ]);
     expect(rows[0]).toMatchObject({
       kind: "user",
-      text: "Prompt text",
+      source: "initial",
+      text: "Initial",
     });
     expect(rows[2]).toMatchObject({
       kind: "user",
-      text: "Prompt text",
+      source: "resume",
+      text: "First resume",
     });
     expect(rows[1]).toMatchObject({
       kind: "assistant",
@@ -182,19 +184,59 @@ describe("deriveRunChatRows", () => {
     });
   });
 
-  it("uses stored run and session messages only as attempt prompt fallbacks", () => {
+  it("emits a system row from the attempt prompt when the session has no user message", () => {
     const rows = deriveRunChatRows(
       makeRun({
-        message: "Initial fallback",
+        message: null,
         sessions: [
           makeSession({ sessionIndex: 0, message: null }),
-          makeSession({ sessionIndex: 1, message: "Resume fallback" }),
-          makeSession({ sessionIndex: 2, message: "Hidden until attempted" }),
+          makeSession({ sessionIndex: 1, message: "   " }),
         ],
       }),
       makeHistory([
-        makeAttempt({ sessionIndex: 0, attemptNumber: 1, prompt: "  " }),
-        makeAttempt({ sessionIndex: 1, attemptNumber: 2, prompt: "" }),
+        makeAttempt({ sessionIndex: 0, attemptNumber: 1, prompt: "Initial bootstrap prompt" }),
+        makeAttempt({ sessionIndex: 1, attemptNumber: 2, prompt: " Resume reminder " }),
+      ]),
+    );
+
+    expect(rows.map((row) => row.id)).toEqual([
+      "session:0:system",
+      "session:0:assistant:1",
+      "session:1:system",
+      "session:1:assistant:2",
+    ]);
+    expect(rows[0]).toMatchObject({
+      kind: "system",
+      source: "initial",
+      text: "Initial bootstrap prompt",
+    });
+    expect(rows[2]).toMatchObject({
+      kind: "system",
+      source: "resume",
+      text: "Resume reminder",
+    });
+  });
+
+  it("prefers the user message over the prompt when both are present", () => {
+    const rows = deriveRunChatRows(
+      makeRun({
+        message: "User typed initial",
+        sessions: [
+          makeSession({ sessionIndex: 0, message: null }),
+          makeSession({ sessionIndex: 1, message: "User typed resume" }),
+        ],
+      }),
+      makeHistory([
+        makeAttempt({
+          sessionIndex: 0,
+          attemptNumber: 1,
+          prompt: "agent prefix\n\nUser typed initial",
+        }),
+        makeAttempt({
+          sessionIndex: 1,
+          attemptNumber: 2,
+          prompt: "tasks-reminder\n\nUser typed resume",
+        }),
       ]),
     );
 
@@ -204,11 +246,11 @@ describe("deriveRunChatRows", () => {
       "session:1:user",
       "session:1:assistant:2",
     ]);
-    expect(rows[0]).toMatchObject({ kind: "user", text: "Initial fallback" });
-    expect(rows[2]).toMatchObject({ kind: "user", text: "Resume fallback" });
+    expect(rows[0]).toMatchObject({ kind: "user", text: "User typed initial" });
+    expect(rows[2]).toMatchObject({ kind: "user", text: "User typed resume" });
   });
 
-  it("renders attempt prompts as user rows and retains live or empty transcript states", () => {
+  it("retains live or empty transcript states on the assistant row", () => {
     const rows = deriveRunChatRows(
       makeRun({
         sessions: [makeSession({ sessionIndex: 0, message: null })],
@@ -233,11 +275,8 @@ describe("deriveRunChatRows", () => {
       ]),
     );
 
-    expect(rows).toHaveLength(2);
-    expect(rows[0]).toMatchObject({
-      kind: "user",
-      text: "live prompt",
-    });
+    expect(rows.map((row) => row.id)).toEqual(["session:0:system", "session:0:assistant:2"]);
+    expect(rows[0]).toMatchObject({ kind: "system", text: "live prompt" });
     expect(rows[1]).toMatchObject({
       kind: "assistant",
       attemptNumber: 2,

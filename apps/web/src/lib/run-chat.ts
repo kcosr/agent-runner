@@ -11,6 +11,14 @@ export interface RunChatUserRow {
   text: string;
 }
 
+export interface RunChatSystemRow {
+  id: string;
+  kind: "system";
+  sessionIndex: number;
+  source: "initial" | "resume";
+  text: string;
+}
+
 export interface RunChatRetryAttempt {
   attemptNumber: number;
   attemptIndexInSession: number;
@@ -30,7 +38,7 @@ export interface RunChatAssistantRow extends RunChatRetryAttempt {
   retryAttempts: RunChatRetryAttempt[];
 }
 
-export type RunChatRow = RunChatUserRow | RunChatAssistantRow;
+export type RunChatRow = RunChatUserRow | RunChatSystemRow | RunChatAssistantRow;
 
 function normalizedMessage(value: string | null): string | null {
   const normalized = value?.trim() ?? "";
@@ -62,20 +70,14 @@ function sessionUserMessage(
   run: RunDetail,
   sessionIndex: number,
   session: RunSessionSummary | undefined,
-  attempts: RunTimelineAttempt[],
 ): string | null {
-  const latestPrompt = normalizedMessage(attempts.at(-1)?.prompt ?? null);
-  if (latestPrompt !== null) {
-    return latestPrompt;
-  }
-
   if (sessionIndex === 0) {
     return normalizedMessage(run.message);
   }
   return normalizedMessage(session?.message ?? null);
 }
 
-function sessionUserSource(sessionIndex: number): RunChatUserRow["source"] {
+function sessionSource(sessionIndex: number): "initial" | "resume" {
   return sessionIndex === 0 ? "initial" : "resume";
 }
 
@@ -101,15 +103,27 @@ export function deriveRunChatRows(
   for (const sessionIndex of [...sessionIndexes].sort((left, right) => left - right)) {
     const session = sessionsByIndex.get(sessionIndex);
     const attempts = attemptsBySession.get(sessionIndex) ?? [];
-    const userMessage = sessionUserMessage(run, sessionIndex, session, attempts);
+    const userMessage = sessionUserMessage(run, sessionIndex, session);
+    const source = sessionSource(sessionIndex);
     if (userMessage !== null) {
       rows.push({
         id: `session:${sessionIndex}:user`,
         kind: "user",
         sessionIndex,
-        source: sessionUserSource(sessionIndex),
+        source,
         text: userMessage,
       });
+    } else {
+      const systemMessage = normalizedMessage(attempts.at(-1)?.prompt ?? null);
+      if (systemMessage !== null) {
+        rows.push({
+          id: `session:${sessionIndex}:system`,
+          kind: "system",
+          sessionIndex,
+          source,
+          text: systemMessage,
+        });
+      }
     }
 
     const primaryAttempt = attempts.at(-1);
