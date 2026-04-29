@@ -134,6 +134,7 @@ export function RunChatView({
     trimmedDraft.length === 0 ||
     resumePending ||
     !selectedRun.capabilities.canResume;
+  const composerActivityVisible = selectedRun?.isLive === true;
 
   useEffect(() => {
     if (resetRunIdRef.current === selectedRunId) {
@@ -253,7 +254,10 @@ export function RunChatView({
         </div>
       ) : null}
       <div className="chat-view__body">{renderBody()}</div>
-      <form className="chat-composer" onSubmit={handleSubmit}>
+      <form
+        className={`chat-composer${composerActivityVisible ? " chat-composer--active" : ""}`}
+        onSubmit={handleSubmit}
+      >
         <label className="sr-only" htmlFor="run-chat-message">
           Message
         </label>

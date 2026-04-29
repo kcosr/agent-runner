@@ -772,7 +772,7 @@ pre {
   opacity: 0.85;
 }
 .badge-running {
-  background: color-mix(in srgb, var(--info) var(--status-tint-alpha) * 100%, transparent);
+  background: transparent;
   color: var(--info-foreground);
 }
 .badge-ready {
@@ -796,6 +796,50 @@ pre {
 .badge-pending {
   background: var(--secondary);
   color: var(--muted-foreground);
+}
+
+@keyframes running-badge-gradient {
+  0%,
+  100% {
+    background-position: 100% 0;
+    filter: drop-shadow(0 0 0 transparent);
+  }
+
+  50% {
+    background-position: 0% 0;
+    filter: drop-shadow(0 0 2px color-mix(in srgb, var(--info) 38%, transparent));
+  }
+}
+
+@supports ((background-clip: text) or (-webkit-background-clip: text)) {
+  .badge-running {
+    background-image: linear-gradient(
+      105deg,
+      var(--info-foreground) 0%,
+      color-mix(in srgb, var(--info-foreground) 58%, var(--background)) 42%,
+      var(--info-foreground) 78%
+    );
+    background-size: 220% 100%;
+    background-position: 100% 0;
+    background-clip: text;
+    color: transparent;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: running-badge-gradient 3.4s ease-in-out infinite;
+  }
+
+  .badge-running svg {
+    color: var(--info-foreground);
+    -webkit-text-fill-color: var(--info-foreground);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .badge-running {
+    animation: none;
+    background-position: 50% 0;
+    filter: none;
+  }
 }
 
 .pill {
