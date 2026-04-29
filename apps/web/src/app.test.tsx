@@ -7456,11 +7456,11 @@ describe("web app", () => {
     expect(hiddenDrawerBodyRule?.[0]).toContain("display: none;");
   });
 
-  it("keeps mobile Chat and Detail surfaces inside the dashboard layout", () => {
+  it("shows mobile Chat and Detail surfaces as full-viewport overlays", () => {
     const css = readFileSync(join(process.cwd(), "src", "styles.css"), "utf8");
 
     expect(css).toMatch(
-      /@media \(max-width: 899px\)[\s\S]*?\.dashboard-right-surfaces\s*\{\s*position: absolute;\s*inset: 0;\s*z-index: 20;\s*flex-direction: column;\s*background: var\(--background\);\s*\}/,
+      /@media \(max-width: 899px\)[\s\S]*?\.dashboard-right-surfaces\s*\{\s*position: fixed;\s*inset: 0;\s*z-index: 50;\s*flex-direction: column;\s*background: var\(--background\);\s*\}/,
     );
     expect(css).toMatch(
       /@media \(max-width: 899px\)[\s\S]*?\.drawer-sheet-backdrop\s*\{\s*display: none;\s*\}/,

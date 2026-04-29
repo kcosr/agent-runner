@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { AppShell } from "../components/app-shell.js";
 import { RunFilters } from "../components/run-filters.js";
@@ -30,21 +30,12 @@ function isBoardFilterShortcutCommand(command: string): command is BoardFilterSh
 function DashboardSurfaces({
   board,
   detail,
-  rightSurfaceWidth,
 }: {
   board: ReactNode;
   detail: ReactNode;
-  rightSurfaceWidth?: number;
 }) {
-  const style =
-    rightSurfaceWidth === undefined
-      ? undefined
-      : ({
-          "--dashboard-right-surface-width": `${rightSurfaceWidth}px`,
-        } as CSSProperties);
-
   return (
-    <div className="dashboard-surfaces" style={style}>
+    <div className="dashboard-surfaces">
       <div className="dashboard-board-surface">{board}</div>
       {detail ? (
         <div className="dashboard-right-surfaces">
@@ -389,7 +380,6 @@ export function RunsDashboardRoute() {
               />
             ) : null
           }
-          rightSurfaceWidth={state.selectedRunId ? state.viewState.drawerWidth : undefined}
         />
       }
       bottomNotices={bottomNotices.length > 0 ? bottomNotices : undefined}

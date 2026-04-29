@@ -338,8 +338,7 @@
 ### Fixed
 
 - Web dashboard selected-run surfaces once again span the full viewport
-  height on desktop, covering the top toolbar area while preserving board
-  space for the drawer width.
+  height on mobile, covering the app toolbar while the drawer is open.
 - Persisted attempt transcripts no longer append a duplicate final
   response after a divider when that response already matches the end
   of the streamed provisional output.
