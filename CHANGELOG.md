@@ -4,6 +4,12 @@
 
 ### Breaking Changes
 
+- Removed connected attachment HTTP client helpers
+  (`daemonAddAttachment`, `daemonListAttachments`,
+  `daemonRemoveAttachment`, `daemonDownloadAttachment`) from
+  `apps/cli/src/daemon/http-client.ts`; connected callers must use the
+  WebSocket RPC and stream methods.
+  ([#117](https://github.com/kcosr/task-runner/pull/117))
 - Manifest schema version is now `15`. Run manifests and reset seeds now
   require `runGroupId` plus typed `dependencies` refs (`run` or
   `group`); the former run-only dependency array is removed. Use
@@ -94,6 +100,10 @@
 
 ### Added
 
+- Added multiplexed daemon WebSocket byte streams and moved connected CLI
+  attachment add/list/download/remove onto WebSocket RPC plus stream
+  frames, while preserving HTTP attachment endpoints for browser/API
+  callers. ([#117](https://github.com/kcosr/task-runner/pull/117))
 - Added a selected-run Chat tab to the web dashboard selected-run panel,
   including persisted Chat/Detail tab state, timeline projection with
   stored run/session messages as Markdown user bubbles, daemon-synthesized
@@ -362,6 +372,10 @@
 - Web dashboard body uses `100dvh` for its minimum height so the page
   matches the visible viewport on mobile browsers and does not require
   a small downward scroll when the URL bar is shown.
+- Daemon WebSocket attachment streams now use byte-credit flow control so
+  multi-megabyte connected uploads and downloads pace to receiver
+  consumption instead of tripping stream buffer limits.
+  ([#117](https://github.com/kcosr/task-runner/pull/117))
 - Attempts drawer now moves immediately to the live Response view when a
   resumed or follow-up run reports a new active attempt before timeline
   history has caught up.

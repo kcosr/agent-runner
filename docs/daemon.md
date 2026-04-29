@@ -3,7 +3,9 @@
 `task-runner serve` starts a local control plane. It exposes:
 
 - **WebSocket JSON-RPC** for CLI clients (via `--connect` /
-  `TASK_RUNNER_CONNECT`) and for the bundled web UI.
+  `TASK_RUNNER_CONNECT`) and for the bundled web UI. The same WebSocket
+  also carries multiplexed byte-stream notifications for connected CLI
+  features that need bounded file transfer.
 - **HTTP API** for browser clients and scripting.
 - **Server-Sent Events (SSE)** for live summary, detail, and timeline
   projections.
@@ -68,6 +70,37 @@ Connected mode can optionally add an invocation-scoped SSH tunnel:
 
 Connected mode is how multiple terminals can share state and how the web
 UI and CLI stay in sync. `run --detach` only works in connected mode.
+
+Connected clients use JSON-RPC requests/responses for commands. Byte
+streams are JSON-RPC 2.0 notifications whose methods begin with
+`stream.`:
+
+- `stream.data` carries base64 bytes with a zero-based `seq`.
+- `stream.end` marks EOF with the next expected `seq`.
+- `stream.error` fails a stream.
+- `stream.cancel` requests cleanup.
+- `stream.window` grants byte credit back to an outgoing sender after
+  the receiver consumes buffered data.
+
+Stream IDs are scoped to one WebSocket connection and multiple streams
+can be active concurrently on that connection. The daemon enforces these
+limits:
+
+- Max decoded stream chunk: **65,536 bytes**
+- Max active streams per WebSocket: **8**
+- Initial outgoing byte credit per stream: **512 KiB**
+- Max buffered unread bytes per stream: **1 MiB**
+- Max buffered unread bytes per WebSocket: **4 MiB**
+- Stream idle timeout: **30 seconds**
+
+Senders must honor receiver-issued `stream.window` credit grants before
+sending more `stream.data` frames. The buffer limits remain hard safety
+checks at the receiver boundary.
+
+Connected CLI attachments use this stream facility for upload and
+download. Listing and removal use WebSocket JSON-RPC methods
+(`attachments.list` and `attachments.remove`). SSH-agent forwarding is a
+possible future stream consumer; it is not implemented.
 
 Nested `task-runner` invocations launched by a worker also preserve
 lineage through `TASK_RUNNER_PARENT_RUN_ID`. Shared `RunSummary` /
@@ -258,6 +291,10 @@ List routes return the shared `DefinitionListResult` shape with
 | `DELETE` | `/api/runs/:runId/attachments/:attachmentId` | Delete |
 | `GET` | `/api/runs/:runId/attachments/:attachmentId/content` | Download; sets `content-disposition`, `x-task-runner-attachment-id`, `x-task-runner-sha256` |
 
+These HTTP attachment endpoints remain the browser/API surface. Connected
+CLI attachment commands use the daemon WebSocket instead of these HTTP
+routes.
+
 ### Streams
 
 | Path | Stream |
@@ -331,6 +368,15 @@ callers set schedules through the explicit schedule routes.
 - `agents.list`, `agents.get`
 - `assignments.list`, `assignments.get`
 - `launchers.list`, `launchers.get`
+
+**Attachments**
+
+- `attachments.list`, `attachments.remove`
+- `attachments.upload.open`, `attachments.upload.finish`
+- `attachments.download`
+
+Attachment upload and download pair JSON-RPC metadata with `stream.*`
+notifications on the same WebSocket connection.
 
 **Subscriptions**
 

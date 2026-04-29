@@ -8,6 +8,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  truncateSync,
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:net";
@@ -20,6 +21,16 @@ import { deriveHttpBaseUrl } from "../apps/cli/dist/daemon/config.js";
 import { daemonReconfigureRun } from "../apps/cli/dist/daemon/http-client.js";
 import { serveDaemon } from "../apps/cli/dist/daemon/server.js";
 import { streamEvents } from "../apps/cli/dist/daemon/sse.js";
+import {
+  STREAM_IDLE_TIMEOUT_MS,
+  STREAM_INITIAL_WINDOW_BYTES,
+  STREAM_MAX_ACTIVE_PER_CONNECTION,
+  STREAM_MAX_BUFFERED_BYTES_PER_CONNECTION,
+  STREAM_MAX_BUFFERED_BYTES_PER_STREAM,
+  STREAM_MAX_CHUNK_BYTES,
+  WebSocketStreamError,
+  WebSocketStreamRegistry,
+} from "../apps/cli/dist/daemon/stream.js";
 import { getRun as getRunDetail } from "../packages/core/dist/app/service.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import { ResumeError } from "../packages/core/dist/core/run/manifest.js";
@@ -300,6 +311,20 @@ async function nextRawMessage(ws) {
     ws.once("message", (data) => resolve(JSON.parse(data.toString())));
     ws.once("error", reject);
   });
+}
+
+class FakeStreamWebSocket {
+  readyState = 1;
+  sent = [];
+
+  send(data, cb) {
+    this.sent.push(JSON.parse(data));
+    cb();
+  }
+}
+
+async function flushMicrotasks() {
+  await new Promise((resolve) => setImmediate(resolve));
 }
 
 async function httpJson(baseUrl, path, opts = {}) {
@@ -1490,6 +1515,369 @@ test("daemon attachment HTTP routes default to group scope and reject invalid sc
       assert.equal(invalid.body.error.code, "INVALID_REQUEST");
       assert.match(invalid.body.error.message, /scope must be "run" or "group"/);
     } finally {
+      await server.close();
+    }
+  });
+});
+
+test("connected CLI attachments use WebSocket streams for add, list, download, and remove", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const init = await initRun(dir);
+  const sourcePath = join(dir, "evidence.txt");
+  const downloadPath = join(dir, "downloaded.txt");
+  const existingPath = join(dir, "existing.txt");
+  const oversizedPath = join(dir, "oversized.bin");
+  writeFileSync(sourcePath, "connected websocket evidence\n");
+  writeFileSync(existingPath, "do not overwrite\n");
+  writeFileSync(oversizedPath, "");
+  truncateSync(oversizedPath, 25 * 1024 * 1024 + 1);
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const daemon = await startCliDaemon(dir, listenUrl);
+  try {
+    const added = JSON.parse(
+      runCli(
+        [
+          "attachment",
+          "add",
+          init.runId,
+          sourcePath,
+          "--name",
+          "remote-evidence.txt",
+          "--mime-type",
+          "text/plain",
+          "--connect",
+          listenUrl,
+          "--output-format",
+          "json",
+        ],
+        { cwd: dir },
+      ),
+    );
+    assert.deepEqual(Object.keys(added).sort(), [
+      "addedAt",
+      "id",
+      "mimeType",
+      "name",
+      "relativePath",
+      "sha256",
+      "size",
+    ]);
+    assert.equal(added.name, "remote-evidence.txt");
+    assert.equal(added.mimeType, "text/plain");
+
+    const listed = JSON.parse(
+      runCli(
+        [
+          "attachment",
+          "list",
+          init.runId,
+          "--scope",
+          "run",
+          "--connect",
+          listenUrl,
+          "--output-format",
+          "json",
+        ],
+        { cwd: dir },
+      ),
+    );
+    assert.deepEqual(
+      listed.map((entry) => ({ id: entry.id, ownerRunId: entry.ownerRunId })),
+      [{ id: added.id, ownerRunId: init.runId }],
+    );
+
+    const overwrite = runCliExpectFail(
+      ["attachment", "download", init.runId, added.id, existingPath, "--connect", listenUrl],
+      { cwd: dir },
+    );
+    assert.equal(overwrite.status, 3);
+    assert.match(overwrite.stderr, /destination file .*existing\.txt already exists/);
+    assert.equal(readFileSync(existingPath, "utf8"), "do not overwrite\n");
+
+    const downloaded = JSON.parse(
+      runCli(
+        [
+          "attachment",
+          "download",
+          init.runId,
+          added.id,
+          downloadPath,
+          "--connect",
+          listenUrl,
+          "--output-format",
+          "json",
+        ],
+        { cwd: dir },
+      ),
+    );
+    assert.equal(downloaded.outputPath, downloadPath);
+    assert.equal(downloaded.id, added.id);
+    assert.equal(readFileSync(downloadPath, "utf8"), "connected websocket evidence\n");
+
+    const oversized = runCliExpectFail(
+      ["attachment", "add", init.runId, oversizedPath, "--connect", listenUrl],
+      { cwd: dir },
+    );
+    assert.equal(oversized.status, 3);
+    assert.match(oversized.stderr, /25 MiB max|size must be less than or equal/);
+    assert.equal(readManifest(init.workspaceDir).attachments.length, 1);
+
+    const removed = JSON.parse(
+      runCli(
+        [
+          "attachment",
+          "remove",
+          init.runId,
+          added.id,
+          "--connect",
+          listenUrl,
+          "--output-format",
+          "json",
+        ],
+        { cwd: dir },
+      ),
+    );
+    assert.deepEqual(removed, {
+      runId: init.runId,
+      attachmentId: added.id,
+      changed: true,
+    });
+  } finally {
+    await daemon.stop();
+  }
+});
+
+test("connected CLI attachment commands do not use daemon attachment HTTP helpers", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const init = await initRun(dir);
+  const sourcePath = join(dir, "no-http-source.txt");
+  const downloadPath = join(dir, "no-http-download.txt");
+  const failFetchPath = join(dir, "fail-fetch.mjs");
+  writeFileSync(sourcePath, "no http helpers\n");
+  writeFileSync(
+    failFetchPath,
+    "globalThis.fetch = async () => { throw new Error('HTTP disabled for connected attachment test'); };",
+  );
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const daemon = await startCliDaemon(dir, listenUrl);
+  const env = { NODE_OPTIONS: `--import=${failFetchPath}` };
+  try {
+    const added = JSON.parse(
+      runCli(
+        [
+          "attachment",
+          "add",
+          init.runId,
+          sourcePath,
+          "--connect",
+          listenUrl,
+          "--output-format",
+          "json",
+        ],
+        { cwd: dir, env },
+      ),
+    );
+    assert.equal(added.name, "no-http-source.txt");
+    const listed = JSON.parse(
+      runCli(
+        ["attachment", "list", init.runId, "--connect", listenUrl, "--output-format", "json"],
+        { cwd: dir, env },
+      ),
+    );
+    assert.equal(listed[0].ownerRunId, init.runId);
+    const downloaded = JSON.parse(
+      runCli(
+        [
+          "attachment",
+          "download",
+          init.runId,
+          added.id,
+          downloadPath,
+          "--connect",
+          listenUrl,
+          "--output-format",
+          "json",
+        ],
+        { cwd: dir, env },
+      ),
+    );
+    assert.equal(downloaded.outputPath, downloadPath);
+    assert.equal(readFileSync(downloadPath, "utf8"), "no http helpers\n");
+    const removed = JSON.parse(
+      runCli(
+        [
+          "attachment",
+          "remove",
+          init.runId,
+          added.id,
+          "--connect",
+          listenUrl,
+          "--output-format",
+          "json",
+        ],
+        { cwd: dir, env },
+      ),
+    );
+    assert.equal(removed.changed, true);
+  } finally {
+    await daemon.stop();
+  }
+});
+
+test("daemon attachment streams handle sequential, concurrent, and disconnect cleanup", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const init = await initRun(dir);
+  const firstSource = join(dir, "first.txt");
+  const secondSource = join(dir, "second.txt");
+  const firstDownload = join(dir, "first-download.txt");
+  const secondDownload = join(dir, "second-download.txt");
+  writeFileSync(firstSource, "first stream\n");
+  writeFileSync(secondSource, "second stream\n");
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl);
+    const client = await DaemonClient.connect(listenUrl);
+    try {
+      const first = await client.addAttachment(init.runId, {
+        sourcePath: firstSource,
+        name: "first.txt",
+      });
+      const second = await client.addAttachment(init.runId, {
+        sourcePath: secondSource,
+        name: "second.txt",
+      });
+      assert.deepEqual(
+        (await client.listAttachments(init.runId, { scope: "run" })).map((entry) => entry.id),
+        [first.id, second.id],
+      );
+
+      const [firstResult, secondResult] = await Promise.all([
+        client.downloadAttachment(init.runId, first.id, firstDownload),
+        client.downloadAttachment(init.runId, second.id, secondDownload),
+      ]);
+      assert.equal(firstResult.id, first.id);
+      assert.equal(secondResult.id, second.id);
+      assert.equal(readFileSync(firstDownload, "utf8"), "first stream\n");
+      assert.equal(readFileSync(secondDownload, "utf8"), "second stream\n");
+
+      for (const size of [2 * 1024 * 1024, 5 * 1024 * 1024]) {
+        const sourcePath = join(dir, `large-${size}.bin`);
+        const downloadPath = join(dir, `large-${size}-download.bin`);
+        const sourceBytes = Buffer.alloc(size, size % 251);
+        writeFileSync(sourcePath, sourceBytes);
+        const attachment = await client.addAttachment(init.runId, {
+          sourcePath,
+          name: `large-${size}.bin`,
+        });
+        const downloadResult = await client.downloadAttachment(
+          init.runId,
+          attachment.id,
+          downloadPath,
+        );
+        assert.equal(downloadResult.id, attachment.id);
+        assert.deepEqual(readFileSync(downloadPath), sourceBytes);
+        await client.removeAttachment(init.runId, attachment.id);
+      }
+
+      await client.removeAttachment(init.runId, first.id);
+      await client.removeAttachment(init.runId, second.id);
+      assert.deepEqual(await client.listAttachments(init.runId, { scope: "run" }), []);
+
+      const raw = await openRawWebSocket(listenUrl);
+      raw.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: "open-disconnect",
+          method: "attachments.upload.open",
+          params: { runId: init.runId, name: "disconnect.txt", size: 11 },
+        }),
+      );
+      const opened = await nextRawMessage(raw);
+      raw.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          method: "stream.data",
+          params: {
+            streamId: opened.result.streamId,
+            seq: 0,
+            data: Buffer.from("partial").toString("base64"),
+          },
+        }),
+      );
+      raw.terminate();
+      await sleep(50);
+      assert.deepEqual(readManifest(init.workspaceDir).attachments, []);
+
+      const rawFinished = await openRawWebSocket(listenUrl);
+      rawFinished.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: "open-finished-disconnect",
+          method: "attachments.upload.open",
+          params: { runId: init.runId, name: "finished-disconnect.txt", size: 8 },
+        }),
+      );
+      const finishedOpened = await nextRawMessage(rawFinished);
+      rawFinished.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          method: "stream.data",
+          params: {
+            streamId: finishedOpened.result.streamId,
+            seq: 0,
+            data: Buffer.from("complete").toString("base64"),
+          },
+        }),
+      );
+      rawFinished.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          method: "stream.end",
+          params: { streamId: finishedOpened.result.streamId, seq: 1 },
+        }),
+      );
+      rawFinished.terminate();
+      await sleep(50);
+      assert.deepEqual(readManifest(init.workspaceDir).attachments, []);
+
+      const downloadCancelAttachment = await client.addAttachment(init.runId, {
+        sourcePath: firstSource,
+        name: "download-cancel.txt",
+      });
+      const downloadRaw = await openRawWebSocket(listenUrl);
+      downloadRaw.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: "download-disconnect",
+          method: "attachments.download",
+          params: { runId: init.runId, attachmentId: downloadCancelAttachment.id },
+        }),
+      );
+      const downloadOpened = await nextRawMessage(downloadRaw);
+      assert.equal(downloadOpened.result.attachment.id, downloadCancelAttachment.id);
+      const firstDownloadFrame = await nextRawMessage(downloadRaw);
+      assert.equal(firstDownloadFrame.method, "stream.data");
+      assert.equal(firstDownloadFrame.params.streamId, downloadOpened.result.streamId);
+      downloadRaw.terminate();
+      await sleep(50);
+      assert.deepEqual(
+        (await client.listAttachments(init.runId, { scope: "run" })).map((entry) => entry.id),
+        [downloadCancelAttachment.id],
+      );
+      await client.removeAttachment(init.runId, downloadCancelAttachment.id);
+    } finally {
+      await client.close().catch(() => undefined);
       await server.close();
     }
   });
@@ -3996,6 +4384,326 @@ test("daemon websocket validates events.subscribe channel and runId rules", asyn
   }
 });
 
+test("daemon websocket stream frames reject unknown, cross-client, and out-of-order stream ids", async () => {
+  const dir = tempDir();
+  writeAgent(dir, "daemon-agent", AGENT);
+  writeAssignment(dir, "daemon-work", ASSIGNMENT);
+  const init = await initRun(dir);
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+
+  await withEnv(sharedRuntimeEnv(dir), async () => {
+    const server = await serveDaemon(listenUrl);
+    const first = await openRawWebSocket(listenUrl);
+    const second = await openRawWebSocket(listenUrl);
+    try {
+      first.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          method: "stream.data",
+          params: { streamId: "stream-missing", seq: 0, data: Buffer.from("x").toString("base64") },
+        }),
+      );
+      const unknown = await nextRawMessage(first);
+      assert.equal(unknown.method, "stream.error");
+      assert.equal(unknown.params.code, "STREAM_UNKNOWN");
+
+      first.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: "open",
+          method: "attachments.upload.open",
+          params: { runId: init.runId, name: "cross.txt", size: 1 },
+        }),
+      );
+      const opened = await nextRawMessage(first);
+      const streamId = opened.result.streamId;
+
+      second.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          method: "stream.data",
+          params: { streamId, seq: 0, data: Buffer.from("x").toString("base64") },
+        }),
+      );
+      const crossClient = await nextRawMessage(second);
+      assert.equal(crossClient.method, "stream.error");
+      assert.equal(crossClient.params.code, "STREAM_UNKNOWN");
+
+      first.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          method: "stream.data",
+          params: { streamId, seq: 1, data: Buffer.from("x").toString("base64") },
+        }),
+      );
+      const outOfOrder = await nextRawMessage(first);
+      assert.equal(outOfOrder.method, "stream.error");
+      assert.equal(outOfOrder.params.code, "STREAM_BAD_SEQUENCE");
+    } finally {
+      first.terminate();
+      second.terminate();
+      await server.close();
+    }
+  });
+});
+
+test("websocket stream registry enforces chunk, active stream, buffer, EOF, and idle limits", async (t) => {
+  {
+    const ws = new FakeStreamWebSocket();
+    const streams = new WebSocketStreamRegistry(ws);
+    for (let index = 0; index < STREAM_MAX_ACTIVE_PER_CONNECTION; index += 1) {
+      streams.openIncomingStream(`stream-${index}`);
+    }
+    assert.throws(() => streams.openIncomingStream("stream-over-limit"), /too many active streams/);
+    streams.close();
+  }
+
+  {
+    const ws = new FakeStreamWebSocket();
+    const streams = new WebSocketStreamRegistry(ws);
+    streams.openIncomingStream("stream-chunk");
+    streams.handleFrame({
+      jsonrpc: "2.0",
+      method: "stream.data",
+      params: {
+        streamId: "stream-chunk",
+        seq: 0,
+        data: Buffer.alloc(STREAM_MAX_CHUNK_BYTES + 1).toString("base64"),
+      },
+    });
+    await flushMicrotasks();
+    assert.equal(ws.sent.at(-1).params.code, "STREAM_CHUNK_SIZE");
+    streams.close();
+  }
+
+  {
+    const ws = new FakeStreamWebSocket();
+    const streams = new WebSocketStreamRegistry(ws);
+    const chunk = Buffer.alloc(STREAM_MAX_CHUNK_BYTES).toString("base64");
+    streams.openIncomingStream("stream-buffer");
+    const allowedChunks = STREAM_MAX_BUFFERED_BYTES_PER_STREAM / STREAM_MAX_CHUNK_BYTES;
+    for (let seq = 0; seq < allowedChunks; seq += 1) {
+      streams.handleFrame({
+        jsonrpc: "2.0",
+        method: "stream.data",
+        params: { streamId: "stream-buffer", seq, data: chunk },
+      });
+    }
+    streams.handleFrame({
+      jsonrpc: "2.0",
+      method: "stream.data",
+      params: { streamId: "stream-buffer", seq: allowedChunks, data: chunk },
+    });
+    await flushMicrotasks();
+    assert.equal(ws.sent.at(-1).params.code, "STREAM_BUFFER_LIMIT");
+    streams.close();
+  }
+
+  {
+    const ws = new FakeStreamWebSocket();
+    const streams = new WebSocketStreamRegistry(ws);
+    const chunk = Buffer.alloc(STREAM_MAX_CHUNK_BYTES).toString("base64");
+    const chunksPerStream = STREAM_MAX_BUFFERED_BYTES_PER_STREAM / STREAM_MAX_CHUNK_BYTES;
+    const fullStreams =
+      STREAM_MAX_BUFFERED_BYTES_PER_CONNECTION / STREAM_MAX_BUFFERED_BYTES_PER_STREAM;
+    for (let streamIndex = 0; streamIndex < fullStreams; streamIndex += 1) {
+      const streamId = `stream-connection-${streamIndex}`;
+      streams.openIncomingStream(streamId);
+      for (let seq = 0; seq < chunksPerStream; seq += 1) {
+        streams.handleFrame({
+          jsonrpc: "2.0",
+          method: "stream.data",
+          params: { streamId, seq, data: chunk },
+        });
+      }
+    }
+    streams.openIncomingStream("stream-connection-overflow");
+    streams.handleFrame({
+      jsonrpc: "2.0",
+      method: "stream.data",
+      params: { streamId: "stream-connection-overflow", seq: 0, data: chunk },
+    });
+    await flushMicrotasks();
+    assert.equal(ws.sent.at(-1).params.code, "STREAM_BUFFER_LIMIT");
+    streams.close();
+  }
+
+  {
+    const ws = new FakeStreamWebSocket();
+    const streams = new WebSocketStreamRegistry(ws);
+    streams.openIncomingStream("stream-ended");
+    streams.handleFrame({
+      jsonrpc: "2.0",
+      method: "stream.end",
+      params: { streamId: "stream-ended", seq: 0 },
+    });
+    streams.handleFrame({
+      jsonrpc: "2.0",
+      method: "stream.data",
+      params: {
+        streamId: "stream-ended",
+        seq: 0,
+        data: Buffer.from("late").toString("base64"),
+      },
+    });
+    await flushMicrotasks();
+    assert.equal(ws.sent.at(-1).params.code, "STREAM_BAD_SEQUENCE");
+    streams.close();
+  }
+
+  {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const ws = new FakeStreamWebSocket();
+    const streams = new WebSocketStreamRegistry(ws);
+    streams.openIncomingStream("stream-timeout");
+    t.mock.timers.tick(STREAM_IDLE_TIMEOUT_MS);
+    await flushMicrotasks();
+    assert.equal(ws.sent.at(-1).params.code, "STREAM_TIMEOUT");
+    streams.close();
+  }
+});
+
+test("websocket stream registry applies byte-credit flow control", async () => {
+  const initialWindowChunks = STREAM_INITIAL_WINDOW_BYTES / STREAM_MAX_CHUNK_BYTES;
+
+  {
+    const ws = new FakeStreamWebSocket();
+    const streams = new WebSocketStreamRegistry(ws);
+    streams.openOutgoingStream("stream-flow");
+    const send = streams.sendIterable("stream-flow", [
+      Buffer.alloc(STREAM_INITIAL_WINDOW_BYTES + 1),
+    ]);
+    await flushMicrotasks();
+    assert.equal(
+      ws.sent.filter((frame) => frame.method === "stream.data").length,
+      initialWindowChunks,
+    );
+    assert.equal(
+      ws.sent.some((frame) => frame.method === "stream.end"),
+      false,
+    );
+
+    streams.handleFrame({
+      jsonrpc: "2.0",
+      method: "stream.window",
+      params: { streamId: "stream-flow", bytes: 1 },
+    });
+    await send;
+    assert.equal(
+      ws.sent.filter((frame) => frame.method === "stream.data").length,
+      initialWindowChunks + 1,
+    );
+    assert.equal(ws.sent.at(-1).method, "stream.end");
+  }
+
+  {
+    const ws = new FakeStreamWebSocket();
+    const streams = new WebSocketStreamRegistry(ws);
+    streams.openOutgoingStream("stream-cancel");
+    const send = streams.sendIterable("stream-cancel", [
+      Buffer.alloc(STREAM_INITIAL_WINDOW_BYTES + 1),
+    ]);
+    await flushMicrotasks();
+    streams.releaseStream(
+      "stream-cancel",
+      new WebSocketStreamError("stream-cancel was cancelled", "STREAM_CANCELLED"),
+    );
+    await assert.rejects(send, /stream-cancel was cancelled/);
+    assert.equal(
+      ws.sent.filter((frame) => frame.method === "stream.data").length,
+      initialWindowChunks,
+    );
+  }
+
+  {
+    const ws = new FakeStreamWebSocket();
+    const streams = new WebSocketStreamRegistry(ws);
+    streams.openOutgoingStream("stream-stale");
+    streams.releaseStream("stream-stale");
+    streams.handleFrame({
+      jsonrpc: "2.0",
+      method: "stream.window",
+      params: { streamId: "stream-stale", bytes: STREAM_MAX_CHUNK_BYTES },
+    });
+    assert.deepEqual(ws.sent, []);
+  }
+
+  {
+    const firstWs = new FakeStreamWebSocket();
+    const secondWs = new FakeStreamWebSocket();
+    const firstStreams = new WebSocketStreamRegistry(firstWs);
+    const secondStreams = new WebSocketStreamRegistry(secondWs);
+    firstStreams.openOutgoingStream("stream-cross");
+    const send = firstStreams.sendIterable("stream-cross", [
+      Buffer.alloc(STREAM_INITIAL_WINDOW_BYTES + 1),
+    ]);
+    await flushMicrotasks();
+    secondStreams.handleFrame({
+      jsonrpc: "2.0",
+      method: "stream.window",
+      params: { streamId: "stream-cross", bytes: 1 },
+    });
+    await flushMicrotasks();
+    assert.equal(
+      firstWs.sent.filter((frame) => frame.method === "stream.data").length,
+      initialWindowChunks,
+    );
+    firstStreams.handleFrame({
+      jsonrpc: "2.0",
+      method: "stream.window",
+      params: { streamId: "stream-cross", bytes: 1 },
+    });
+    await send;
+    secondStreams.close();
+  }
+
+  {
+    const ws = new FakeStreamWebSocket();
+    const streams = new WebSocketStreamRegistry(ws);
+    const sends = [];
+    for (let index = 0; index < STREAM_MAX_ACTIVE_PER_CONNECTION; index += 1) {
+      const streamId = `stream-concurrent-${index}`;
+      streams.openOutgoingStream(streamId);
+      sends.push(streams.sendIterable(streamId, [Buffer.alloc(STREAM_INITIAL_WINDOW_BYTES + 1)]));
+    }
+    await flushMicrotasks();
+    assert.equal(
+      ws.sent.filter((frame) => frame.method === "stream.data").length,
+      STREAM_MAX_ACTIVE_PER_CONNECTION * initialWindowChunks,
+    );
+    for (let index = 0; index < STREAM_MAX_ACTIVE_PER_CONNECTION; index += 1) {
+      streams.handleFrame({
+        jsonrpc: "2.0",
+        method: "stream.window",
+        params: { streamId: `stream-concurrent-${index}`, bytes: 1 },
+      });
+    }
+    await Promise.all(sends);
+  }
+});
+
+test("daemon websocket rejects non-stream notifications and keeps sibling RPCs working", async () => {
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const server = await serveDaemon(listenUrl);
+  const ws = await openRawWebSocket(listenUrl);
+  try {
+    ws.send(JSON.stringify({ jsonrpc: "2.0", method: "runs.list", params: {} }));
+    const rejectedNotification = await nextRawMessage(ws);
+    assert.equal(rejectedNotification.id, null);
+    assert.equal(rejectedNotification.error.code, -32600);
+
+    ws.send(JSON.stringify({ jsonrpc: "2.0", id: "list", method: "runs.list", params: {} }));
+    const list = await nextRawMessage(ws);
+    assert.equal(list.id, "list");
+    assert.ok(Array.isArray(list.result.runs));
+  } finally {
+    ws.terminate();
+    await server.close();
+  }
+});
+
 test("daemon client ignores malformed subscription notifications and still delivers valid ones", async () => {
   const port = await freePort();
   const listenUrl = `ws://127.0.0.1:${port}/`;
@@ -5354,7 +6062,7 @@ test("daemon reconfigure surfaces support CLI and HTTP without replacing frozen 
   }
 });
 
-test("connected cli can reach a daemon through --connect-host and reuse the same connect context for attachment HTTP", async () => {
+test("connected cli can reach a daemon through --connect-host and stream attachments over the tunneled WebSocket", async () => {
   const dir = tempDir();
   writeAgent(dir, "daemon-agent", AGENT);
   writeAssignment(dir, "daemon-work", ASSIGNMENT);

@@ -62,6 +62,13 @@ task-runner attachment add <run-id> <path> \
 The file is streamed to the workspace; size and SHA-256 are computed
 during the stream.
 
+With `--connect`, the CLI uploads over the existing daemon WebSocket:
+metadata is exchanged with JSON-RPC and file bytes are sent as bounded
+`stream.*` notifications. The connected path does not call the daemon
+HTTP attachment upload route. Connected upload includes a `size` hint; if
+it exceeds 25 MiB the daemon rejects the open request before any bytes are
+sent.
+
 ### List
 
 ```bash
@@ -77,6 +84,8 @@ task-runner attachment list <run-id> --scope group
   matches the target run's group.
 
 JSON rows include `ownerRunId` so you can tell which run owns each file.
+With `--connect`, list uses the `attachments.list` WebSocket JSON-RPC
+method.
 
 ### Download
 
@@ -89,6 +98,10 @@ filename is derived from the attachment. Otherwise it is treated as an
 exact file path. The command errors if the destination already exists or
 the parent directory is missing.
 
+With `--connect`, metadata is returned by `attachments.download` and
+file bytes are streamed over the same WebSocket. If the stream fails
+after the destination file is created, the CLI removes the partial file.
+
 ### Remove
 
 ```bash
@@ -98,6 +111,27 @@ task-runner attachment remove <run-id> <attachment-id>
 Removes the file and its per-attachment directory, then removes the empty
 `attachments/` directory if it was the last one. Manifest metadata is
 updated by filtering out the removed entry.
+
+With `--connect`, remove uses the `attachments.remove` WebSocket JSON-RPC
+method.
+
+## Daemon transports
+
+Browser and API callers continue to use the daemon HTTP attachment
+endpoints:
+
+- `GET /api/runs/:runId/attachments`
+- `POST /api/runs/:runId/attachments`
+- `DELETE /api/runs/:runId/attachments/:attachmentId`
+- `GET /api/runs/:runId/attachments/:attachmentId/content`
+
+Connected CLI callers use the daemon WebSocket instead. Stream limits are
+65,536 bytes per decoded chunk, 8 active streams per WebSocket, 512 KiB
+of initial outgoing byte credit per stream, 1 MiB of buffered unread
+bytes per stream, 4 MiB buffered per WebSocket, and a 30-second idle
+timeout. Upload and download streams pace `stream.data` frames with
+receiver-issued `stream.window` credit grants. The core attachment
+limits above still apply to committed attachments.
 
 ## Web dashboard
 
