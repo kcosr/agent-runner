@@ -1933,11 +1933,14 @@ describe("web app", () => {
     await renderApp("/runs/run-1");
 
     const chat = await screen.findByLabelText("Run chat");
-    expect(await within(chat).findByText("Initial dashboard request")).toBeInTheDocument();
+    const userMessage = await within(chat).findByText("Initial dashboard request");
+    expect(userMessage.closest(".chat-bubble--user")).not.toBeNull();
     expect(within(chat).queryByText(/Prompt with/)).not.toBeInTheDocument();
     expect(within(chat).queryByText("Notices and diagnostics")).not.toBeInTheDocument();
     expect(within(chat).queryByText("backend notice")).not.toBeInTheDocument();
-    expect(await within(chat).findByText("Streaming answer")).toBeInTheDocument();
+    const assistantMessage = await within(chat).findByText("Streaming answer");
+    expect(assistantMessage.closest(".chat-row--assistant")).not.toBeNull();
+    expect(assistantMessage.closest(".chat-bubble")).toBeNull();
     expect(
       fetchCallCount(fetchMock, (url) => url.endsWith("/api/runs/run-1/timeline")),
     ).toBeGreaterThanOrEqual(1);

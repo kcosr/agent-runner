@@ -176,10 +176,11 @@ stored run or session message only when that session already has a
 timeline attempt with a blank prompt. Chat shows the existing loading
 skeleton until timeline history is available, so detail-only run/session
 messages do not appear as standalone user bubbles before the matching
-attempt/assistant row can be projected. Assistant bubbles use the latest
-attempt transcript for each session. User and assistant bubbles render
-Markdown independently. Prior attempts remain available as secondary
-details; backend notices and diagnostics stay out of Chat.
+attempt/assistant row can be projected. Assistant output uses the latest
+attempt transcript for each session and renders inline, without a bubble,
+so the thread reads like output with user interjections. User bubbles render
+Markdown independently. Prior attempts remain available as secondary details;
+backend notices and diagnostics stay out of Chat.
 
 The composer is fixed at the bottom of the Chat panel for a selected
 run. It sends only non-empty trimmed messages through the existing resume

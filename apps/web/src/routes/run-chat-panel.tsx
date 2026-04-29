@@ -104,7 +104,7 @@ function ChatRow({ row }: { row: RunChatRow }) {
     return (
       <article className="chat-row chat-row--user">
         <div className="chat-bubble chat-bubble--user">
-          <p className="chat-bubble__text">{row.text}</p>
+          <MarkdownContent className="chat-markdown chat-markdown--user" text={row.text} />
         </div>
       </article>
     );
@@ -131,7 +131,7 @@ function SystemChatRow({ row }: { row: RunChatSystemRow }) {
 function AssistantChatRow({ row }: { row: RunChatAssistantRow }) {
   return (
     <article className="chat-row chat-row--assistant">
-      <div className="chat-bubble chat-bubble--assistant">
+      <div className="chat-output">
         {row.transcript.trim() ? (
           <MarkdownContent className="chat-markdown" text={row.transcript} />
         ) : (

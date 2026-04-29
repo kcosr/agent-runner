@@ -1123,8 +1123,9 @@ body {
 }
 
 .chat-row--assistant {
-  align-self: flex-start;
-  align-items: flex-start;
+  align-self: stretch;
+  align-items: stretch;
+  max-width: 100%;
 }
 
 .chat-row--system {
@@ -1146,13 +1147,43 @@ body {
   color: var(--background);
 }
 
-.chat-bubble--user .chat-bubble__text {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+.chat-bubble--user .chat-markdown,
+.chat-bubble--user .markdown h1,
+.chat-bubble--user .markdown h2,
+.chat-bubble--user .markdown h3,
+.chat-bubble--user .markdown h4,
+.chat-bubble--user .markdown h5,
+.chat-bubble--user .markdown h6,
+.chat-bubble--user .markdown a,
+.chat-bubble--user .markdown code {
+  color: inherit;
 }
 
-.chat-bubble--assistant {
-  background: var(--card);
+.chat-bubble--user .markdown a {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.chat-bubble--user .markdown code,
+.chat-bubble--user .markdown pre {
+  background: color-mix(in srgb, var(--background) 16%, transparent);
+}
+
+.chat-output {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.chat-output .chat-markdown pre {
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.chat-output .markdown-table-wrap {
+  max-width: 100%;
 }
 
 .chat-bubble--system {
