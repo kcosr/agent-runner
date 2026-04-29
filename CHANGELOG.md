@@ -101,7 +101,7 @@
   notices/diagnostics, loading skeletons while timeline history hydrates,
   mobile-safe sheet behavior, and resume composer support from the inset Send
   button or `Cmd/Ctrl+Enter`.
-  ([#118](https://github.com/kcosr/task-runner/pull/118))
+  ([#119](https://github.com/kcosr/task-runner/pull/119))
 - Added first-class run groups across manifests, CLI, daemon APIs, and the
   web dashboard. Fresh child runs inherit the parent run group by default,
   `--group-id` overrides fresh run/init grouping, and
