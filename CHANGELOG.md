@@ -337,6 +337,9 @@
 
 ### Fixed
 
+- Web dashboard Chat/Detail tabs now remove the inactive selected-run
+  tab body from layout, preventing Detail content from appearing below
+  the Chat composer.
 - Web dashboard Chat now renders the user's typed message as a plain
   user bubble and shows daemon-synthesized prompts (worker brief, added
   tasks reminder, implicit continue) as a separate "System" card

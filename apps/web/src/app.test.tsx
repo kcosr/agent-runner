@@ -7431,6 +7431,13 @@ describe("web app", () => {
     expect(chatSendRule?.[0]).toContain("bottom: 10px;");
   });
 
+  it("hides inactive selected-run Chat and Detail tab bodies from layout", () => {
+    const css = readFileSync(join(process.cwd(), "src", "styles.css"), "utf8");
+    const hiddenDrawerBodyRule = /\.drawer-body\[hidden\]\s*\{[\s\S]*?\n\}/.exec(css);
+
+    expect(hiddenDrawerBodyRule?.[0]).toContain("display: none;");
+  });
+
   it("keeps mobile Chat and Detail surfaces inside the dashboard layout", () => {
     const css = readFileSync(join(process.cwd(), "src", "styles.css"), "utf8");
 

@@ -1532,6 +1532,10 @@ body {
   overscroll-behavior-x: contain;
 }
 
+.drawer-body[hidden] {
+  display: none;
+}
+
 .drawer-body--chat {
   gap: 0;
   overflow: hidden;
