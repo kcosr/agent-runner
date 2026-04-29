@@ -1,9 +1,11 @@
 import type { AppRuntimeConfig } from "@task-runner/core/contracts/app-config.js";
-import type { RunSummaryStreamEvent } from "@task-runner/core/contracts/events.js";
-import type { RunSummary } from "@task-runner/core/contracts/runs.js";
 import { type ReactNode, createContext, useContext, useEffect, useRef, useState } from "react";
 import { queryClient, runQueryKeys } from "./query.js";
-import { sortRunsByStartedAtDesc } from "./run-order.js";
+import {
+  removeRunFromListCache,
+  updateRunListCacheQueries,
+  upsertRunSummaryInListCache,
+} from "./run-list-cache.js";
 import { subscribeToRunSummaryEvents } from "./sse.js";
 
 interface RunEventsState {
@@ -13,66 +15,6 @@ interface RunEventsState {
 const RunEventsContext = createContext<RunEventsState>({
   streamStale: false,
 });
-
-function upsertSummary(
-  current: RunSummary[] | undefined,
-  incoming: RunSummary,
-): RunSummary[] | undefined {
-  if (!current) {
-    return current;
-  }
-  const existingIndex = current.findIndex((run) => run.runId === incoming.runId);
-  if (existingIndex === -1) {
-    return sortRunsByStartedAtDesc([...current, incoming]);
-  }
-  const next = [...current];
-  next[existingIndex] = incoming;
-  return next;
-}
-
-function updateExistingSummary(
-  current: RunSummary[] | undefined,
-  incoming: RunSummary,
-): RunSummary[] | undefined {
-  if (!current) {
-    return current;
-  }
-  const existingIndex = current.findIndex((run) => run.runId === incoming.runId);
-  if (existingIndex === -1) {
-    return current;
-  }
-  const next = [...current];
-  next[existingIndex] = incoming;
-  return next;
-}
-
-function applySummaryEvent(
-  current: RunSummary[] | undefined,
-  event: RunSummaryStreamEvent,
-): RunSummary[] | undefined {
-  if (event.type === "summary_upsert") {
-    return upsertSummary(current, event.summary);
-  }
-  return current?.filter((run) => run.runId !== event.runId);
-}
-
-function hasRunGroupFilter(queryKey: readonly unknown[]): boolean {
-  const last = queryKey.at(-1);
-  if (!last || typeof last !== "object" || Array.isArray(last)) {
-    return false;
-  }
-  return typeof (last as { runGroupId?: unknown }).runGroupId === "string";
-}
-
-function isDefaultRunListQueryKey(queryKey: readonly unknown[]): boolean {
-  const last = queryKey.at(-1);
-  return Boolean(
-    last &&
-      typeof last === "object" &&
-      !Array.isArray(last) &&
-      (last as { runGroupId?: unknown }).runGroupId === null,
-  );
-}
 
 export function RunEventsProvider({
   children,
@@ -127,32 +69,14 @@ export function RunEventsProvider({
           setStreamStale(false);
         }
         if (payload.type === "summary_upsert") {
-          queryClient.setQueriesData<RunSummary[] | undefined>(
-            {
-              queryKey: runQueryKeys.lists(),
-              predicate: (query) => !isDefaultRunListQueryKey(query.queryKey),
-            },
-            (current) => updateExistingSummary(current, payload.summary),
+          updateRunListCacheQueries(queryClient, (current, metadata) =>
+            upsertRunSummaryInListCache(current, payload.summary, metadata),
           );
-          queryClient.setQueryData<RunSummary[] | undefined>(runQueryKeys.list(), (current) =>
-            upsertSummary(current, payload.summary),
-          );
-          const activeRunGroupQueries = queryClient
-            .getQueryCache()
-            .findAll({ queryKey: runQueryKeys.lists(), type: "active" })
-            .filter((query) => hasRunGroupFilter(query.queryKey));
-          for (const query of activeRunGroupQueries) {
-            void queryClient.refetchQueries(
-              { queryKey: query.queryKey, exact: true, type: "active" },
-              { throwOnError: false },
-            );
-          }
           return;
         }
-        queryClient.setQueriesData<RunSummary[] | undefined>(
-          { queryKey: runQueryKeys.lists() },
-          (current) => applySummaryEvent(current, payload),
-        );
+        updateRunListCacheQueries(queryClient, (current) => {
+          return removeRunFromListCache(current, payload.runId);
+        });
       },
       onStaleChange: (stale) => {
         if (!stale) {

@@ -328,7 +328,78 @@ describe("api client", () => {
     ]);
   });
 
-  it("adds the optional runGroupId query parameter to run-list requests", async () => {
+  it("requests non-archived run lists by default", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            runs: [],
+          }),
+          { status: 200 },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createApiClient(config);
+    await expect(api.listRuns()).resolves.toEqual([]);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs?includeArchived=false",
+      expect.objectContaining({
+        headers: { accept: "application/json" },
+      }),
+    );
+  });
+
+  it("requests archived-inclusive run lists when requested", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            runs: [],
+          }),
+          { status: 200 },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createApiClient(config);
+    await expect(api.listRuns({ includeArchived: true })).resolves.toEqual([]);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs?includeArchived=true",
+      expect.objectContaining({
+        headers: { accept: "application/json" },
+      }),
+    );
+  });
+
+  it("composes archived-inclusive and runGroupId query parameters for run-list requests", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            runs: [],
+          }),
+          { status: 200 },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createApiClient(config);
+    await expect(api.listRuns({ includeArchived: true, runGroupId: "run-root" })).resolves.toEqual(
+      [],
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs?includeArchived=true&runGroupId=run-root",
+      expect.objectContaining({
+        headers: { accept: "application/json" },
+      }),
+    );
+  });
+
+  it("adds the optional runGroupId query parameter to default run-list requests", async () => {
     const fetchMock = vi.fn(
       async () =>
         new Response(
@@ -344,7 +415,7 @@ describe("api client", () => {
     await expect(api.listRuns({ runGroupId: "run-root" })).resolves.toEqual([]);
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/runs?includeArchived=true&runGroupId=run-root",
+      "/api/runs?includeArchived=false&runGroupId=run-root",
       expect.objectContaining({
         headers: { accept: "application/json" },
       }),
