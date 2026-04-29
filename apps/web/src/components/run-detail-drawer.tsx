@@ -2042,16 +2042,6 @@ export function RunDetailDrawer({
           ) : null}
 
           <nav aria-label="Run sections" className="tabs tabs--scrollable" ref={sectionTabsRef}>
-            {isPassiveRun ? null : (
-              <button
-                aria-selected={activeSection === "events"}
-                className={activeSection === "events" ? "tab active" : "tab"}
-                onClick={() => onSelectSection("events")}
-                type="button"
-              >
-                Attempts
-              </button>
-            )}
             <button
               aria-selected={activeSection === "attachments"}
               className={activeSection === "attachments" ? "tab active" : "tab"}
@@ -2063,14 +2053,16 @@ export function RunDetailDrawer({
                 <span className="tab-count"> {combinedAttachments.length}</span>
               ) : null}
             </button>
-            <button
-              aria-selected={activeSection === "data"}
-              className={activeSection === "data" ? "tab active" : "tab"}
-              onClick={() => onSelectSection("data")}
-              type="button"
-            >
-              Data
-            </button>
+            {isPassiveRun ? null : (
+              <button
+                aria-selected={activeSection === "events"}
+                className={activeSection === "events" ? "tab active" : "tab"}
+                onClick={() => onSelectSection("events")}
+                type="button"
+              >
+                Attempts
+              </button>
+            )}
             <button
               aria-selected={activeSection === "audit"}
               className={activeSection === "audit" ? "tab active" : "tab"}
@@ -2081,6 +2073,14 @@ export function RunDetailDrawer({
               {auditEvents.length > 0 ? (
                 <span className="tab-count"> {auditEvents.length}</span>
               ) : null}
+            </button>
+            <button
+              aria-selected={activeSection === "data"}
+              className={activeSection === "data" ? "tab active" : "tab"}
+              onClick={() => onSelectSection("data")}
+              type="button"
+            >
+              Data
             </button>
             <button
               aria-selected={activeSection === "dependencies"}

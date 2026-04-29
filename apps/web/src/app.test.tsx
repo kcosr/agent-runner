@@ -3170,7 +3170,7 @@ describe("web app", () => {
       [...runSections.querySelectorAll(":scope > .tab")].map((tab) =>
         tab.textContent?.replace(/\s+\S+\/\S+$/, "").trim(),
       ),
-    ).toEqual(["Attempts", "Attachments", "Data", "Audit", "Dependencies"]);
+    ).toEqual(["Attachments", "Attempts", "Audit", "Data", "Dependencies"]);
   });
 
   it("omits Attempts but keeps Audit and Data in the passive run-section tab strip", async () => {
@@ -3194,7 +3194,7 @@ describe("web app", () => {
       [...runSections.querySelectorAll(":scope > .tab")].map((tab) =>
         tab.textContent?.replace(/\s+\S+\/\S+$/, "").trim(),
       ),
-    ).toEqual(["Attachments", "Data", "Audit", "Dependencies"]);
+    ).toEqual(["Attachments", "Audit", "Data", "Dependencies"]);
     expect(within(runSections).getByRole("button", { name: "Audit" })).toBeInTheDocument();
     expect(within(runSections).getByRole("button", { name: "Data" })).toBeInTheDocument();
     expect(within(runSections).queryByRole("button", { name: "Attempts" })).not.toBeInTheDocument();
