@@ -3079,7 +3079,7 @@ body {
   }
 
   .topbar-spacer {
-    display: none;
+    display: block;
   }
 
   .toolbar-matrix {
@@ -3087,9 +3087,10 @@ body {
     justify-content: space-between;
   }
 
-  .field.search,
-  .field.select {
-    width: 100%;
+  .field.search {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
   }
 
   .filters-panel {

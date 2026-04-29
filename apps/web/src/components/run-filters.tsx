@@ -215,18 +215,7 @@ export function RunFilters({
         ) : null}
       </span>
       <span className="topbar-spacer" />
-      <div className="toolbar-matrix">
-        <label className="field search">
-          <SearchIcon aria-hidden="true" />
-          <input
-            onChange={(event) => updateViewState({ search: event.target.value })}
-            placeholder="Search runs"
-            ref={searchInputRef}
-            type="search"
-            value={viewState.search}
-          />
-        </label>
-
+      <div className="sort-controls">
         <label className="field select sort-field" title={sortFieldTitle}>
           <ClockIcon aria-hidden="true" />
           <select
@@ -258,6 +247,19 @@ export function RunFilters({
         >
           <ChevronIcon aria-hidden="true" />
         </button>
+      </div>
+
+      <div className="toolbar-matrix">
+        <label className="field search">
+          <SearchIcon aria-hidden="true" />
+          <input
+            onChange={(event) => updateViewState({ search: event.target.value })}
+            placeholder="Search runs"
+            ref={searchInputRef}
+            type="search"
+            value={viewState.search}
+          />
+        </label>
 
         <div className="filters-control">
           <button
