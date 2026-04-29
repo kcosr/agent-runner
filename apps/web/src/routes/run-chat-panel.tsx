@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { SendIcon } from "../components/icons.js";
 import { MarkdownContent } from "../components/markdown.js";
 import {
   type RunChatAssistantEmptyState,
@@ -309,18 +310,26 @@ export function RunChatView({
         <label className="sr-only" htmlFor="run-chat-message">
           Message
         </label>
-        <textarea
-          aria-keyshortcuts="Meta+Enter Ctrl+Enter"
-          disabled={!selectedRun}
-          id="run-chat-message"
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={handleMessageKeyDown}
-          rows={3}
-          value={draft}
-        />
-        <button className="btn btn--primary" disabled={submitDisabled} type="submit">
-          {resumePending ? "Sending..." : "Send"}
-        </button>
+        <div className="chat-composer__surface">
+          <textarea
+            aria-keyshortcuts="Meta+Enter Ctrl+Enter"
+            disabled={!selectedRun}
+            id="run-chat-message"
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={handleMessageKeyDown}
+            rows={3}
+            value={draft}
+          />
+          <button
+            aria-label="Send"
+            className="chat-composer__send"
+            disabled={submitDisabled}
+            title={resumePending ? "Sending..." : "Send"}
+            type="submit"
+          >
+            <SendIcon aria-hidden="true" />
+          </button>
+        </div>
       </form>
     </section>
   );

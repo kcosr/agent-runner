@@ -2154,7 +2154,11 @@ describe("web app", () => {
       expect(message).toBeEnabled();
     });
     await user.type(message, "  Continue from chat  ");
-    await user.click(screen.getByRole("button", { name: "Send" }));
+    const sendButton = screen.getByRole("button", { name: "Send" });
+    expect(sendButton.closest(".chat-composer__surface")).toBe(
+      message.closest(".chat-composer__surface"),
+    );
+    await user.click(sendButton);
 
     await waitFor(() => {
       expect(resumeBody).toEqual({ overrides: { message: "Continue from chat" } });
@@ -7414,11 +7418,17 @@ describe("web app", () => {
 
   it("keeps the Chat composer textarea custom and non-resizable", () => {
     const css = readFileSync(join(process.cwd(), "src", "styles.css"), "utf8");
+    const chatSurfaceRule = /\.chat-composer__surface\s*\{[\s\S]*?\n\}/.exec(css);
     const chatTextareaRule = /\.chat-composer textarea\s*\{[\s\S]*?\n\}/.exec(css);
+    const chatSendRule = /\.chat-composer__send\s*\{[\s\S]*?\n\}/.exec(css);
 
+    expect(chatSurfaceRule?.[0]).toContain("position: relative;");
+    expect(chatSurfaceRule?.[0]).toContain("box-shadow: inset 0 0 0 1px var(--border);");
     expect(chatTextareaRule?.[0]).toContain("resize: none;");
     expect(chatTextareaRule?.[0]).toContain("border: 0;");
-    expect(chatTextareaRule?.[0]).toContain("box-shadow: inset 0 0 0 1px var(--border);");
+    expect(chatTextareaRule?.[0]).toContain("background: transparent;");
+    expect(chatSendRule?.[0]).toContain("position: absolute;");
+    expect(chatSendRule?.[0]).toContain("bottom: 10px;");
   });
 
   it("keeps mobile Chat and Detail surfaces inside the dashboard layout", () => {
