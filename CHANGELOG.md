@@ -105,6 +105,10 @@
 
 ### Added
 
+- Added read-only reusable task definition inspection with
+  `task-runner list tasks`, `task-runner show task <name|path>`, daemon
+  `taskDefinitions.list/get` RPC methods, `/api/task-definitions` HTTP
+  routes, and browser API client helpers.
 - Added `scripts/migrate-manifests-v16.mjs` to promote schema v15
   manifests to schema v16 by backfilling `updatedAt` from
   `endedAt ?? startedAt`.
@@ -172,7 +176,7 @@
 - Added reusable named task definitions under
   `${TASK_RUNNER_CONFIG_DIR}/tasks/<task-id>.md`, plus mixed assignment
   `tasks:` authoring that can combine named refs, explicit path refs,
-  and inline task objects while keeping task resolution loader-only.
+  and inline task objects for assignment task resolution.
   ([#91](https://github.com/kcosr/task-runner/pull/91))
 - Added `@task-runner/core/core/run/static-input-surface.js` to resolve
   the static fresh-run input surface for core consumers, including

@@ -1681,6 +1681,39 @@ describe("api client", () => {
             }),
             { status: 200 },
           );
+        case "/api/task-definitions":
+          return new Response(
+            JSON.stringify({
+              taskDefinitions: {
+                kind: "task",
+                entries: [
+                  {
+                    name: "review/architecture",
+                    path: "/tmp/tasks/review/architecture.md",
+                    root: "config",
+                  },
+                ],
+                warnings: ["Invalid task config at /tmp/tasks/review/bad.md:\n  - id mismatch"],
+              },
+            }),
+            { status: 200 },
+          );
+        case "/api/task-definitions/review%2Farchitecture":
+          return new Response(
+            JSON.stringify({
+              taskDefinition: {
+                kind: "task",
+                task: {
+                  id: "review/architecture",
+                  title: "Architecture review",
+                  body: "Review module boundaries.",
+                  hooks: [{ builtin: "require-children-success" }],
+                },
+                sourcePath: "/tmp/tasks/review/architecture.md",
+              },
+            }),
+            { status: 200 },
+          );
         default:
           throw new Error(`unexpected fetch ${String(input)}`);
       }
@@ -1714,6 +1747,21 @@ describe("api client", () => {
       kind: "launcher",
       definition: expect.objectContaining({ name: "ssh-wrap" }),
     });
+    await expect(api.listTaskDefinitions()).resolves.toMatchObject({
+      kind: "task",
+      entries: [expect.objectContaining({ name: "review/architecture" })],
+      warnings: [expect.stringContaining("Invalid task config")],
+    });
+    await expect(api.getTaskDefinition("review/architecture")).resolves.toEqual({
+      kind: "task",
+      task: {
+        id: "review/architecture",
+        title: "Architecture review",
+        body: "Review module boundaries.",
+        hooks: [{ builtin: "require-children-success" }],
+      },
+      sourcePath: "/tmp/tasks/review/architecture.md",
+    });
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
@@ -1743,6 +1791,16 @@ describe("api client", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(
       6,
       "/api/launchers/ssh-wrap",
+      expect.objectContaining({ headers: { accept: "application/json" } }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      7,
+      "/api/task-definitions",
+      expect.objectContaining({ headers: { accept: "application/json" } }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      8,
+      "/api/task-definitions/review%2Farchitecture",
       expect.objectContaining({ headers: { accept: "application/json" } }),
     );
   });
@@ -1778,6 +1836,44 @@ describe("api client", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/launchers/.%2Flaunchers%2Fdirect.yaml?cwd=%2Ftmp%2Fconfig-root",
+      expect.objectContaining({
+        headers: { accept: "application/json" },
+      }),
+    );
+  });
+
+  it("encodes direct-path task definition targets and forwards cwd", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            taskDefinition: {
+              kind: "task",
+              task: {
+                id: "review/local",
+                title: "Local review",
+                body: "Review local task.",
+                hooks: [],
+              },
+              sourcePath: "/tmp/config-root/tasks/review/local.md",
+            },
+          }),
+          { status: 200 },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createApiClient(config);
+
+    await expect(
+      api.getTaskDefinition("./tasks/review/local.md", { cwd: "/tmp/config-root" }),
+    ).resolves.toMatchObject({
+      kind: "task",
+      task: expect.objectContaining({ id: "review/local", body: "Review local task." }),
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/task-definitions/.%2Ftasks%2Freview%2Flocal.md?cwd=%2Ftmp%2Fconfig-root",
       expect.objectContaining({
         headers: { accept: "application/json" },
       }),
@@ -2096,6 +2192,54 @@ describe("api client", () => {
     const api = createApiClient(config);
 
     await expect(api.listAgents()).rejects.toMatchObject({
+      code: "INVALID_RESPONSE",
+      name: "ApiError",
+      status: 200,
+    });
+  });
+
+  it("rejects definition payloads whose kind does not match the requested resource", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            taskDefinitions: {
+              kind: "agent",
+              entries: [],
+              warnings: [],
+            },
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            taskDefinition: {
+              kind: "agent",
+              config: {
+                schemaVersion: 1,
+                name: "planner",
+                backend: "passive",
+              },
+              instructions: "Plan.",
+              sourcePath: "/tmp/agents/planner/agent.md",
+            },
+          }),
+          { status: 200 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createApiClient(config);
+
+    await expect(api.listTaskDefinitions()).rejects.toMatchObject({
+      code: "INVALID_RESPONSE",
+      name: "ApiError",
+      status: 200,
+    });
+    await expect(api.getTaskDefinition("review/architecture")).rejects.toMatchObject({
       code: "INVALID_RESPONSE",
       name: "ApiError",
       status: 200,

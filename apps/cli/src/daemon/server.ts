@@ -2550,6 +2550,23 @@ export async function serveDaemon(
           );
           return;
         }
+        case "taskDefinitions.list":
+          sendJson(ws, resultResponse(request.id, operations.listTaskDefinitions()));
+          return;
+        case "taskDefinitions.get": {
+          const parsed = asRecord(params, "taskDefinitions.get params");
+          sendJson(
+            ws,
+            resultResponse(
+              request.id,
+              operations.getTaskDefinition({
+                target: requiredString(parsed.target, "target"),
+                cwd: optionalString(parsed.cwd, "cwd"),
+              }),
+            ),
+          );
+          return;
+        }
         case "runs.ready": {
           const parsed = parseRunReadyParams(params, "runs.ready params");
           sendJson(ws, resultResponse(request.id, operations.readyRun(parsed)));

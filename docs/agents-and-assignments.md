@@ -292,8 +292,8 @@ Read the shared review checklist.
 - `loadAssignmentConfig()` resolves named and path refs into the normal
   plain task objects before runtime; later `{{var}}` interpolation still
   happens during run construction
-- named tasks are loader-only in this pass; there is no top-level
-  `task-runner list tasks` or `show task` definition surface
+- inspect reusable task definitions with `task-runner list tasks` and
+  `task-runner show task <name|path>` without creating or mutating runs
 
 Assignment schedules use the same input shape as CLI/API schedule
 requests. Define exactly one of:
@@ -579,17 +579,15 @@ This runtime `{{key}}` interpolation is distinct from the config-time
 ```bash
 task-runner list agents
 task-runner list assignments
+task-runner list tasks
 
 task-runner show agent <name|path>
 task-runner show assignment <name|path>
+task-runner show task <name|path>
 ```
 
-These surfaces render the parsed frontmatter, interpolation hooks, and task
-list for human review.
-
-Reusable named task definitions are intentionally not a first-class
-`list/show` CLI kind yet. They are inspected through assignment loading
-and rendering only.
+These surfaces render parsed frontmatter, interpolation hooks, task lists,
+and reusable task definition title/body/hooks for human review.
 
 ## Authoring hook modules
 

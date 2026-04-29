@@ -4,6 +4,12 @@ Tasks are the canonical unit of work. Task state is stored in
 `manifest.finalTasks` and is mutated through the `task-runner task ...`
 CLI, never through workspace files.
 
+Reusable task definition files are a separate authoring surface under
+`${TASK_RUNNER_CONFIG_DIR}/tasks`. Inspect them with
+`task-runner list tasks` and `task-runner show task <name|path>`. Those
+commands read markdown definition source files only; they do not read or
+mutate run task status, notes, or manifests.
+
 ## Task shape
 
 ```ts

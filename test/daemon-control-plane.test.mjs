@@ -13,7 +13,7 @@ import {
 } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join, resolve as resolvePath } from "node:path";
+import { dirname, join, resolve as resolvePath } from "node:path";
 import { test } from "node:test";
 import WebSocket, { WebSocketServer } from "ws";
 import { DaemonClient, DaemonRpcError } from "../apps/cli/dist/daemon/client.js";
@@ -107,6 +107,13 @@ function writeAssignment(baseDir, name, body) {
   const dir = join(baseDir, "assignments", name);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "assignment.md"), body);
+}
+
+function writeTask(baseDir, name, body) {
+  const path = join(baseDir, "tasks", `${name}.md`);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, body);
+  return path;
 }
 
 function writeLauncher(baseDir, name, body, ext = ".yaml") {
@@ -6545,7 +6552,70 @@ args: [prod, --]
   }
 });
 
-test("daemon classifies launcher lookup and config errors as command errors across WS and HTTP", async () => {
+test("daemon rpc exposes task definitions without overloading run task RPCs", async () => {
+  const daemonDir = tempDir();
+  writeAgent(daemonDir, "daemon-agent", AGENT);
+  writeAssignment(daemonDir, "daemon-work", ASSIGNMENT);
+  const taskPath = writeTask(
+    daemonDir,
+    "review/architecture",
+    `---
+schemaVersion: 1
+title: Architecture review
+---
+Review module boundaries.
+`,
+  );
+  const init = await initRun(daemonDir);
+  const clientDir = tempDir();
+
+  const port = await freePort();
+  const listenUrl = `ws://127.0.0.1:${port}/`;
+  const daemon = await startCliDaemon(daemonDir, listenUrl);
+  const client = await DaemonClient.connect(listenUrl);
+  try {
+    const taskDefinitions = await client.call("taskDefinitions.list", {});
+    assert.deepEqual(taskDefinitions.taskDefinitions, {
+      kind: "task",
+      entries: [{ name: "review/architecture", path: taskPath, root: "config" }],
+      warnings: [],
+    });
+
+    const taskDefinition = await client.call("taskDefinitions.get", {
+      target: "review/architecture",
+    });
+    assert.deepEqual(taskDefinition.taskDefinition, {
+      kind: "task",
+      task: {
+        id: "review/architecture",
+        title: "Architecture review",
+        body: "Review module boundaries.",
+        hooks: [],
+      },
+      sourcePath: taskPath,
+    });
+
+    const connectedList = runCli(["list", "tasks", "--connect", listenUrl], { cwd: clientDir });
+    assert.equal(connectedList, "  review/architecture\n");
+
+    const runTasks = await client.call("tasks.list", { target: init.runId });
+    assert.deepEqual(
+      runTasks.tasks.map((task) => task.id),
+      ["t1"],
+    );
+    assert.equal("taskDefinitions" in runTasks, false);
+
+    const runTask = await client.call("tasks.get", { target: init.runId, taskId: "t1" });
+    assert.equal(runTask.task.id, "t1");
+    assert.equal(runTask.task.status, "pending");
+    assert.equal("sourcePath" in runTask.task, false);
+  } finally {
+    await client.close();
+    await daemon.stop();
+  }
+});
+
+test("daemon classifies definition lookup and config errors as command errors across WS and HTTP", async () => {
   const daemonDir = tempDir();
   writeLauncher(
     daemonDir,
@@ -6553,6 +6623,17 @@ test("daemon classifies launcher lookup and config errors as command errors acro
     `schemaVersion: 1
 name: other-name
 command: ssh
+`,
+  );
+  writeTask(
+    daemonDir,
+    "review/bad",
+    `---
+schemaVersion: 1
+id: review/wrong
+title: Bad task
+---
+Bad body.
 `,
   );
 
@@ -6569,12 +6650,31 @@ command: ssh
         err.code === -32003 &&
         /Launcher not found: missing-launcher/.test(err.message),
     );
+    await assert.rejects(
+      () => client.call("taskDefinitions.get", { target: "missing-task" }),
+      (err) =>
+        err instanceof DaemonRpcError &&
+        err.code === -32003 &&
+        /Task not found: missing-task/.test(err.message),
+    );
 
     const targetedInvalidPath = encodeURIComponent("./launchers/bad-name.yaml");
+    const targetedInvalidTaskPath = encodeURIComponent("./tasks/review/bad.md");
     await assert.rejects(
       () =>
         client.call("launchers.get", {
           target: "./launchers/bad-name.yaml",
+          cwd: daemonDir,
+        }),
+      (err) =>
+        err instanceof DaemonRpcError &&
+        err.code === -32003 &&
+        /must match canonical id/.test(err.message),
+    );
+    await assert.rejects(
+      () =>
+        client.call("taskDefinitions.get", {
+          target: "./tasks/review/bad.md",
           cwd: daemonDir,
         }),
       (err) =>
@@ -6587,9 +6687,16 @@ command: ssh
       httpBaseUrl,
       `/api/launchers/${targetedInvalidPath}?cwd=${encodeURIComponent(daemonDir)}`,
     );
+    const invalidTaskHttp = await httpJson(
+      httpBaseUrl,
+      `/api/task-definitions/${targetedInvalidTaskPath}?cwd=${encodeURIComponent(daemonDir)}`,
+    );
     assert.equal(invalidLauncherHttp.status, 422);
+    assert.equal(invalidTaskHttp.status, 422);
     assert.equal(invalidLauncherHttp.body.error.code, "INVALID_COMMAND");
+    assert.equal(invalidTaskHttp.body.error.code, "INVALID_COMMAND");
     assert.match(invalidLauncherHttp.body.error.message, /must match canonical id/);
+    assert.match(invalidTaskHttp.body.error.message, /must match canonical id/);
   } finally {
     await client.close();
     await daemon.stop();
@@ -6600,6 +6707,16 @@ test("daemon HTTP exposes definition routes with WS parity and direct-path suppo
   const daemonDir = tempDir();
   writeAgent(daemonDir, "daemon-agent", AGENT);
   writeAssignment(daemonDir, "daemon-work", ASSIGNMENT);
+  writeTask(
+    daemonDir,
+    "review/architecture",
+    `---
+schemaVersion: 1
+title: Architecture review
+---
+Review module boundaries.
+`,
+  );
   writeLauncher(
     daemonDir,
     "ssh-wrap",
@@ -6619,19 +6736,27 @@ args: [prod, --]
     const agentListHttp = await httpJson(httpBaseUrl, "/api/agents");
     const assignmentListHttp = await httpJson(httpBaseUrl, "/api/assignments");
     const launcherListHttp = await httpJson(httpBaseUrl, "/api/launchers");
+    const taskListHttp = await httpJson(httpBaseUrl, "/api/task-definitions");
     assert.equal(agentListHttp.status, 200);
     assert.equal(assignmentListHttp.status, 200);
     assert.equal(launcherListHttp.status, 200);
+    assert.equal(taskListHttp.status, 200);
     assert.deepEqual(agentListHttp.body, await client.call("agents.list"));
     assert.deepEqual(assignmentListHttp.body, await client.call("assignments.list"));
     assert.deepEqual(launcherListHttp.body, await client.call("launchers.list"));
+    assert.deepEqual(taskListHttp.body, await client.call("taskDefinitions.list"));
 
     const agentDetailHttp = await httpJson(httpBaseUrl, "/api/agents/daemon-agent");
     const assignmentDetailHttp = await httpJson(httpBaseUrl, "/api/assignments/daemon-work");
     const launcherDetailHttp = await httpJson(httpBaseUrl, "/api/launchers/ssh-wrap");
+    const taskDetailHttp = await httpJson(
+      httpBaseUrl,
+      "/api/task-definitions/review%2Farchitecture",
+    );
     assert.equal(agentDetailHttp.status, 200);
     assert.equal(assignmentDetailHttp.status, 200);
     assert.equal(launcherDetailHttp.status, 200);
+    assert.equal(taskDetailHttp.status, 200);
     assert.deepEqual(
       agentDetailHttp.body,
       await client.call("agents.get", { target: "daemon-agent" }),
@@ -6644,10 +6769,15 @@ args: [prod, --]
       launcherDetailHttp.body,
       await client.call("launchers.get", { target: "ssh-wrap" }),
     );
+    assert.deepEqual(
+      taskDetailHttp.body,
+      await client.call("taskDefinitions.get", { target: "review/architecture" }),
+    );
 
     const agentTarget = encodeURIComponent("./agents/daemon-agent/agent.md");
     const assignmentTarget = encodeURIComponent("./assignments/daemon-work/assignment.md");
     const launcherTarget = encodeURIComponent("./launchers/ssh-wrap.yaml");
+    const taskTarget = encodeURIComponent("./tasks/review/architecture.md");
     const cwdQuery = `cwd=${encodeURIComponent(daemonDir)}`;
 
     const directAgent = await httpJson(httpBaseUrl, `/api/agents/${agentTarget}?${cwdQuery}`);
@@ -6659,27 +6789,37 @@ args: [prod, --]
       httpBaseUrl,
       `/api/launchers/${launcherTarget}?${cwdQuery}`,
     );
+    const directTask = await httpJson(
+      httpBaseUrl,
+      `/api/task-definitions/${taskTarget}?${cwdQuery}`,
+    );
     assert.equal(directAgent.status, 200);
     assert.equal(directAssignment.status, 200);
     assert.equal(directLauncher.status, 200);
+    assert.equal(directTask.status, 200);
     assert.deepEqual(directAgent.body, agentDetailHttp.body);
     assert.deepEqual(directAssignment.body, assignmentDetailHttp.body);
     assert.deepEqual(directLauncher.body, launcherDetailHttp.body);
+    assert.deepEqual(directTask.body, taskDetailHttp.body);
 
     const missingAgent = await httpJson(httpBaseUrl, "/api/agents/missing-agent");
     const missingAssignment = await httpJson(httpBaseUrl, "/api/assignments/missing-assignment");
     const missingLauncher = await httpJson(httpBaseUrl, "/api/launchers/missing-launcher");
+    const missingTask = await httpJson(httpBaseUrl, "/api/task-definitions/missing-task");
     assert.equal(missingAgent.status, 404);
     assert.equal(missingAssignment.status, 404);
     assert.equal(missingLauncher.status, 404);
+    assert.equal(missingTask.status, 404);
     assert.equal(missingAgent.body.error.code, "NOT_FOUND");
     assert.equal(missingAssignment.body.error.code, "NOT_FOUND");
     assert.equal(missingLauncher.body.error.code, "NOT_FOUND");
+    assert.equal(missingTask.body.error.code, "NOT_FOUND");
 
     for (const path of [
       "/api/agents/%E0%A4%A",
       "/api/assignments/%E0%A4%A",
       "/api/launchers/%E0%A4%A",
+      "/api/task-definitions/%E0%A4%A",
     ]) {
       const response = await httpJson(httpBaseUrl, path);
       assert.equal(response.status, 400);

@@ -7,6 +7,7 @@ import {
   DEFAULT_AGENT_TIMEOUT_SEC,
   DEFAULT_AGENT_UNRESTRICTED,
   type LockableField,
+  type TaskDef,
 } from "./schema.js";
 
 // Reserved agent name for CLI-synthesized ad-hoc runs. `loadAgentConfig`
@@ -27,6 +28,11 @@ export interface LoadedAgent {
 export interface LoadedAssignment {
   config: AssignmentConfig;
   instructions: string;
+  sourcePath: string;
+}
+
+export interface LoadedTaskDefinition {
+  task: TaskDef;
   sourcePath: string;
 }
 

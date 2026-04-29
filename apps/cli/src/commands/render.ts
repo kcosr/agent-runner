@@ -1,3 +1,4 @@
+import type { DefinitionDetail } from "@task-runner/core/app/service.js";
 import type {
   AttachmentListEntry,
   RunAttachment,
@@ -15,7 +16,6 @@ import type {
   RunSessionSummary,
 } from "@task-runner/core/contracts/runs.js";
 import type {
-  DefinitionDetailsResult,
   DefinitionListResult,
   RunArchiveResult,
   RunDeleteResult,
@@ -246,9 +246,9 @@ export function renderDefinitionList(result: DefinitionListResult): string {
   return `${result.entries.map((entry) => `  ${entry.name}`).join("\n")}\n`;
 }
 
-export function renderDefinitionDetails(result: DefinitionDetailsResult): string {
+export function renderDefinitionDetails(result: DefinitionDetail): string {
   if (result.kind === "launcher") {
-    const { loaded } = result;
+    const loaded = result.definition;
     const lines: string[] = [];
     lines.push(`Launcher: ${loaded.name}`);
     if (loaded.kind === "direct") {
@@ -265,7 +265,7 @@ export function renderDefinitionDetails(result: DefinitionDetailsResult): string
   }
 
   if (result.kind === "agent") {
-    const { loaded } = result;
+    const loaded = result;
     const lines: string[] = [];
     lines.push(`Agent: ${loaded.config.name}`);
     lines.push(`  backend:      ${loaded.config.backend}`);
@@ -289,7 +289,29 @@ export function renderDefinitionDetails(result: DefinitionDetailsResult): string
     return `${lines.join("\n")}\n`;
   }
 
-  const { loaded } = result;
+  if (result.kind === "task") {
+    const lines: string[] = [];
+    lines.push(`Task: ${result.task.id}`);
+    lines.push(`  title:        ${result.task.title}`);
+    lines.push(`  hooks:        ${result.task.hooks.length}`);
+    for (const hook of result.task.hooks) {
+      if (hook.builtin !== undefined) {
+        lines.push(`    - builtin: ${hook.builtin}`);
+      } else if (hook.name !== undefined) {
+        lines.push(`    - name: ${hook.name}`);
+      } else if (hook.path !== undefined) {
+        lines.push(`    - path: ${hook.path}`);
+      }
+    }
+    lines.push(`  source:       ${result.sourcePath}`);
+    if (result.task.body) {
+      lines.push("");
+      lines.push(result.task.body);
+    }
+    return `${lines.join("\n")}\n`;
+  }
+
+  const loaded = result;
   const lines: string[] = [];
   lines.push(`Assignment: ${loaded.config.name}`);
   if (loaded.config.cwd !== undefined) {

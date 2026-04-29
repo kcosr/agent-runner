@@ -11,14 +11,18 @@ import {
   DefinitionListError,
   LauncherConfigError,
   LauncherNotFoundError,
+  TaskConfigError,
+  TaskNotFoundError,
   listAgentDefinitions,
   listAgents,
   listAssignmentDefinitions,
   listAssignments,
   listLaunchers,
+  listTaskDefinitions,
   loadAgentConfig,
   loadAssignmentConfig,
   loadLauncherConfig,
+  loadTaskConfig,
   resolveAgentPath,
   resolveAssignmentPath,
   resolveLauncherPath,
@@ -1392,6 +1396,210 @@ Assignment body.
     const loaded = loadAssignmentConfig("external-task-ref", rootDir);
     assert.equal(loaded.config.tasks[0].id, "review/reuse");
     assert.equal(loaded.config.tasks[0].title, "External reuse pass");
+  }));
+
+test("loadTaskConfig loads named config-root task definitions", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    const sourcePath = writeTask(
+      configDir,
+      "orient",
+      `---
+schemaVersion: 1
+title: Orient repo
+hooks:
+  - builtin: require-children-success
+---
+Read README.md.
+`,
+    );
+
+    const loaded = loadTaskConfig("orient", rootDir);
+
+    assert.equal(loaded.sourcePath, sourcePath);
+    assert.deepEqual(loaded.task, {
+      id: "orient",
+      title: "Orient repo",
+      body: "Read README.md.",
+      hooks: [{ builtin: "require-children-success" }],
+    });
+  }));
+
+test("loadTaskConfig treats slashful task ids as named config refs", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    const sourcePath = writeTask(
+      configDir,
+      "review/architecture",
+      `---
+schemaVersion: 1
+id: review/architecture
+title: Architecture review
+---
+Review module boundaries.
+`,
+    );
+
+    const loaded = loadTaskConfig("review/architecture", rootDir);
+
+    assert.equal(loaded.sourcePath, sourcePath);
+    assert.equal(loaded.task.id, "review/architecture");
+    assert.equal(loaded.task.body, "Review module boundaries.");
+  }));
+
+test("loadTaskConfig direct paths outside the config root may use authored ids", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir }) => {
+    const externalTaskPath = join(rootDir, "external-tasks", "review", "reuse.md");
+    mkdirSync(dirname(externalTaskPath), { recursive: true });
+    writeFileSync(
+      externalTaskPath,
+      `---
+schemaVersion: 1
+id: review/reuse
+title: External reuse pass
+---
+Check external reusable pieces.
+`,
+    );
+
+    const loaded = loadTaskConfig(externalTaskPath, rootDir);
+
+    assert.equal(loaded.sourcePath, externalTaskPath);
+    assert.equal(loaded.task.id, "review/reuse");
+    assert.equal(loaded.task.title, "External reuse pass");
+  }));
+
+test("listTaskDefinitions recursively lists sorted config-root task definitions", () =>
+  withRuntimeRoots("task-runner-loader-", ({ configDir }) => {
+    const alphaPath = writeTask(
+      configDir,
+      "alpha",
+      `---
+schemaVersion: 1
+title: Alpha
+---
+Alpha body.
+`,
+    );
+    const reviewPath = writeTask(
+      configDir,
+      "review/architecture",
+      `---
+schemaVersion: 1
+title: Architecture review
+---
+Architecture body.
+`,
+    );
+    const zetaPath = writeTask(
+      configDir,
+      "zeta",
+      `---
+schemaVersion: 1
+title: Zeta
+---
+Zeta body.
+`,
+    );
+
+    const result = listTaskDefinitions();
+
+    assert.deepEqual(
+      result.entries.map((entry) => entry.name),
+      ["alpha", "review/architecture", "zeta"],
+    );
+    assert.deepEqual(
+      result.entries.map((entry) => entry.path),
+      [alphaPath, reviewPath, zetaPath],
+    );
+    assert.deepEqual(
+      result.entries.map((entry) => entry.root),
+      ["config", "config", "config"],
+    );
+    assert.deepEqual(result.warnings, []);
+  }));
+
+test("listTaskDefinitions warn-skips identity mismatches while direct load fails", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    writeTask(
+      configDir,
+      "review/good",
+      `---
+schemaVersion: 1
+title: Good review
+---
+Good body.
+`,
+    );
+    const badPath = writeTask(
+      configDir,
+      "review/bad",
+      `---
+schemaVersion: 1
+id: review/wrong
+title: Bad review
+---
+Bad body.
+`,
+    );
+
+    const result = listTaskDefinitions();
+
+    assert.deepEqual(
+      result.entries.map((entry) => entry.name),
+      ["review/good"],
+    );
+    assert.equal(result.warnings.length, 1);
+    assert.ok(result.warnings[0].includes(badPath));
+    assert.match(result.warnings[0], /review\/wrong/);
+    assert.match(result.warnings[0], /must match canonical id "review\/bad"/);
+    assert.match(result.warnings[0], /definition skipped/);
+
+    assert.throws(
+      () => loadTaskConfig("review/bad", rootDir),
+      (error) => {
+        assert.ok(error instanceof TaskConfigError);
+        assert.match(error.message, /must match canonical id "review\/bad"/);
+        assert.doesNotMatch(error.message, /definition skipped/);
+        return true;
+      },
+    );
+  }));
+
+test("loadTaskConfig rejects malformed task config", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    writeTask(
+      configDir,
+      "bad",
+      `---
+schemaVersion: 1
+---
+Missing required title.
+`,
+    );
+
+    assert.throws(
+      () => loadTaskConfig("bad", rootDir),
+      (error) => {
+        assert.ok(error instanceof TaskConfigError);
+        assert.match(error.message, /Invalid task config/);
+        assert.match(error.message, /title/);
+        return true;
+      },
+    );
+  }));
+
+test("loadTaskConfig reports searched paths for missing named tasks", () =>
+  withRuntimeRoots("task-runner-loader-", ({ rootDir, configDir }) => {
+    assert.throws(
+      () => loadTaskConfig("missing/task", rootDir),
+      (error) => {
+        assert.ok(error instanceof TaskNotFoundError);
+        assert.equal(error.arg, "missing/task");
+        assert.deepEqual(error.searched, [join(configDir, "tasks", "missing", "task.md")]);
+        assert.match(error.message, /Task not found: missing\/task/);
+        assert.match(error.message, /searched:/);
+        return true;
+      },
+    );
   }));
 
 test("built-in shared review task files are valid config-root named task definitions", () =>

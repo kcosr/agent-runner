@@ -32,6 +32,7 @@ import type { DefinitionListResult } from "@task-runner/core/core/commands/servi
 import type { RunListFilter } from "@task-runner/core/core/commands/service.js";
 import type { ScheduleInput } from "@task-runner/core/core/run/schedule.js";
 
+type TaskDefinitionDetail = Extract<DefinitionDetail, { kind: "task" }>;
 type RunEventChannel = "run_summary" | "run_detail" | "run_timeline" | "run_audit";
 
 export const DEFAULT_DAEMON_URL = "ws://127.0.0.1:4773/";
@@ -380,6 +381,11 @@ export interface LaunchersListResult {
 }
 
 /** @protocol */
+export interface TaskDefinitionsListResult {
+  taskDefinitions: DefinitionListResult;
+}
+
+/** @protocol */
 export interface AgentResult {
   agent: DefinitionDetail;
 }
@@ -392,6 +398,11 @@ export interface AssignmentResult {
 /** @protocol */
 export interface LauncherResult {
   launcher: DefinitionDetail;
+}
+
+/** @protocol */
+export interface TaskDefinitionResult {
+  taskDefinition: TaskDefinitionDetail;
 }
 
 /** @protocol */

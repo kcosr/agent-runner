@@ -13,7 +13,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { WebSocketServer } from "ws";
-import { getRunTimelineHistory } from "../packages/core/dist/app/service.js";
+import {
+  getDefinition,
+  getDefinitionList,
+  getRunTimelineHistory,
+} from "../packages/core/dist/app/service.js";
 import { encodePiSessionDir } from "../packages/core/dist/backends/pi.js";
 import { loadAgentConfig, loadAssignmentConfig } from "../packages/core/dist/config/loader.js";
 import {
@@ -708,6 +712,50 @@ args: [worker]
     assert.equal(launcher.loaded.kind, "prefix");
   });
 });
+
+test("command services: task definitions flow through command and app services", () =>
+  withEnv(
+    {
+      TASK_RUNNER_CONFIG_DIR: REPO_ROOT,
+      TASK_RUNNER_CONNECT: undefined,
+      TASK_RUNNER_LISTEN: undefined,
+    },
+    () => {
+      const tasks = listDefinitions("task");
+      const appTasks = getDefinitionList("task");
+      const task = showDefinition("task", "review/architecture");
+      const appTask = getDefinition("task", "review/architecture", REPO_ROOT);
+
+      assert.equal(tasks.kind, "task");
+      assert.deepEqual(tasks.warnings, []);
+      assert.ok(
+        tasks.entries.some(
+          (entry) =>
+            entry.name === "review/architecture" &&
+            entry.path?.endsWith("/tasks/review/architecture.md") &&
+            entry.root === "config",
+        ),
+      );
+      assert.deepEqual(appTasks, tasks);
+
+      assert.equal(task.kind, "task");
+      assert.equal(task.loaded.task.id, "review/architecture");
+      assert.equal(task.loaded.task.title, "Architecture & module boundaries");
+      assert.match(task.loaded.task.body, /Review the module layout/);
+      assert.deepEqual(task.loaded.task.hooks, []);
+      assert.ok(task.loaded.sourcePath.endsWith("/tasks/review/architecture.md"));
+
+      assert.deepEqual(Object.keys(appTask), ["kind", "task", "sourcePath"]);
+      assert.equal(appTask.kind, "task");
+      assert.deepEqual(Object.keys(appTask.task), ["id", "title", "body", "hooks"]);
+      assert.equal(appTask.task.id, "review/architecture");
+      assert.ok(appTask.sourcePath.endsWith("/tasks/review/architecture.md"));
+      for (const runStateField of ["status", "notes", "manifest", "runId", "workspaceDir"]) {
+        assert.equal(runStateField in appTask, false);
+        assert.equal(runStateField in appTask.task, false);
+      }
+    },
+  ));
 
 test("command services: showDefinition resolves built-in code-review named task refs", () =>
   withEnv(
