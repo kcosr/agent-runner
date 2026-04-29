@@ -22,15 +22,8 @@ export interface RunChatSystemRow {
 export interface RunChatAssistantRow {
   id: string;
   kind: "assistant";
-  sessionIndex: number;
-  attemptNumber: number;
-  attemptIndexInSession: number;
-  startedAt: string;
-  endedAt: string | null;
-  exitCode: number | null;
-  timedOut: boolean;
-  live: boolean;
   transcript: string;
+  hasTranscript: boolean;
   emptyState?: RunChatAssistantEmptyState;
 }
 
@@ -41,25 +34,16 @@ function normalizedMessage(value: string | null): string | null {
   return normalized.length > 0 ? normalized : null;
 }
 
-function attemptEmptyState(attempt: RunTimelineAttempt): RunChatAssistantEmptyState | undefined {
-  if (attempt.transcript.trim().length > 0) {
-    return undefined;
-  }
-  return attempt.live ? "waiting_live_response" : "no_response_recorded";
-}
-
 function toAssistantRow(attempt: RunTimelineAttempt): Omit<RunChatAssistantRow, "id" | "kind"> {
+  const hasTranscript = attempt.transcript.trim().length > 0;
   return {
-    sessionIndex: attempt.sessionIndex,
-    attemptNumber: attempt.attemptNumber,
-    attemptIndexInSession: attempt.attemptIndexInSession,
-    startedAt: attempt.startedAt,
-    endedAt: attempt.endedAt,
-    exitCode: attempt.exitCode,
-    timedOut: attempt.timedOut,
-    live: attempt.live,
     transcript: attempt.transcript,
-    emptyState: attemptEmptyState(attempt),
+    hasTranscript,
+    emptyState: hasTranscript
+      ? undefined
+      : attempt.live
+        ? "waiting_live_response"
+        : "no_response_recorded",
   };
 }
 
@@ -78,12 +62,9 @@ function sessionSource(sessionIndex: number): "initial" | "resume" {
   return sessionIndex === 0 ? "initial" : "resume";
 }
 
-export function deriveRunChatRows(
-  run: RunDetail,
-  history: RunTimelineHistory | null,
-): RunChatRow[] {
+export function deriveRunChatRows(run: RunDetail, history: RunTimelineHistory): RunChatRow[] {
   const attemptsBySession = new Map<number, RunTimelineAttempt[]>();
-  for (const attempt of history?.attempts ?? []) {
+  for (const attempt of history.attempts) {
     const attempts = attemptsBySession.get(attempt.sessionIndex) ?? [];
     attempts.push(attempt);
     attemptsBySession.set(attempt.sessionIndex, attempts);

@@ -130,7 +130,7 @@ describe("deriveRunChatRows", () => {
           makeSession({ sessionIndex: 2, message: " Follow-up " }),
         ],
       }),
-      null,
+      makeHistory([]),
     );
 
     expect(rows).toEqual([]);
@@ -186,22 +186,18 @@ describe("deriveRunChatRows", () => {
     });
     expect(rows[1]).toMatchObject({
       kind: "assistant",
-      attemptNumber: 1,
       transcript: "prior session 0",
     });
     expect(rows[2]).toMatchObject({
       kind: "assistant",
-      attemptNumber: 2,
       transcript: "latest session 0",
     });
     expect(rows[4]).toMatchObject({
       kind: "assistant",
-      attemptNumber: 3,
       transcript: "prior session 1",
     });
     expect(rows[5]).toMatchObject({
       kind: "assistant",
-      attemptNumber: 4,
       transcript: "latest session 1",
     });
   });
@@ -341,15 +337,15 @@ describe("deriveRunChatRows", () => {
     expect(rows[0]).toMatchObject({ kind: "system", text: "first prompt" });
     expect(rows[1]).toMatchObject({
       kind: "assistant",
-      attemptNumber: 1,
       transcript: "",
+      hasTranscript: false,
       emptyState: "no_response_recorded",
     });
     expect(rows[2]).toMatchObject({ kind: "system", text: "live prompt" });
     expect(rows[3]).toMatchObject({
       kind: "assistant",
-      attemptNumber: 2,
       transcript: "   ",
+      hasTranscript: false,
       emptyState: "waiting_live_response",
     });
   });

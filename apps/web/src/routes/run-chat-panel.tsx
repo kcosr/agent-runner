@@ -91,7 +91,7 @@ function AssistantChatRow({ row }: { row: RunChatAssistantRow }) {
   return (
     <article className="chat-row chat-row--assistant">
       <div className="chat-output">
-        {row.transcript.trim() ? (
+        {row.hasTranscript ? (
           <MarkdownContent className="chat-markdown" text={row.transcript} />
         ) : (
           <p className="task-empty">{assistantEmptyText(row.emptyState)}</p>
@@ -112,7 +112,7 @@ export function RunChatView({
   detailSettling: boolean;
   onSubmitResume: (runId: string, message: string) => Promise<void>;
   resumePending: boolean;
-  selectedRunId?: string;
+  selectedRunId: string;
   selectedRunQuery: UseQueryResult<RunDetail, Error>;
   timelineState: RunTimelineState;
 }) {
@@ -202,15 +202,6 @@ export function RunChatView({
   }
 
   function renderBody() {
-    if (!selectedRunId) {
-      return (
-        <div className="chat-state">
-          <h3>Select a run</h3>
-          <p>Choose a board card to view its conversation.</p>
-        </div>
-      );
-    }
-
     if (detailSettling || selectedRunQuery.isPending) {
       return <ChatConversationSkeleton />;
     }
