@@ -287,6 +287,10 @@
 - The web dashboard now requests and caches only non-archived runs by
   default, and drops archived-inclusive list caches when archived runs are
   hidden.
+  ([#122](https://github.com/kcosr/task-runner/pull/122))
+- Generated implementer plans now stop after PR publication at an
+  approval-gated merge and fast-forward task.
+  ([#122](https://github.com/kcosr/task-runner/pull/122))
 - The web dashboard now persists board sort field and direction
   preferences and orders columns from cached canonical run timestamps
   instead of event-arrival recency.
