@@ -1418,9 +1418,15 @@ function getCloseDetailButton() {
   if (closeButton) {
     return closeButton;
   }
+  const attachmentPreviewCloseButton = screen.queryAllByRole("button", {
+    name: /close attachment preview/i,
+  })[0];
+  if (attachmentPreviewCloseButton) {
+    return attachmentPreviewCloseButton;
+  }
   const fallbackCloseButton = screen.queryAllByRole("button", { name: /close detail/i })[0];
   if (!fallbackCloseButton) {
-    throw new Error("expected a close-detail button");
+    throw new Error("expected a close-panel button");
   }
   return fallbackCloseButton;
 }
@@ -10347,7 +10353,7 @@ describe("web app", () => {
     expect(pngPreview).toHaveAttribute("src", "blob:png-preview");
     await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith("blob:svg-preview"));
 
-    await user.click(screen.getByRole("button", { name: "Close detail" }));
+    await user.click(screen.getByRole("button", { name: "Close attachment preview" }));
     await waitFor(() =>
       expect(screen.queryByLabelText("Attachment preview")).not.toBeInTheDocument(),
     );

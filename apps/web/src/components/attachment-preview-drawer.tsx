@@ -190,7 +190,7 @@ export function AttachmentPreviewDrawer({
   return (
     <>
       <button
-        aria-label="Close detail sheet"
+        aria-label="Close attachment preview sheet"
         className="drawer-sheet-backdrop"
         onClick={onClose}
         type="button"
@@ -289,7 +289,12 @@ export function AttachmentPreviewDrawer({
                 <ExpandIcon aria-hidden="true" />
               )}
             </button>
-            <button aria-label="Close detail" className="icon-btn" onClick={onClose} type="button">
+            <button
+              aria-label="Close attachment preview"
+              className="icon-btn"
+              onClick={onClose}
+              type="button"
+            >
               <CloseIcon aria-hidden="true" />
             </button>
           </div>
