@@ -1256,10 +1256,74 @@ body {
 }
 
 .chat-composer {
+  position: relative;
   flex: 0 0 auto;
   padding: 12px;
   border-top: 1px solid var(--border);
   background: var(--background);
+}
+
+.chat-composer::before {
+  position: absolute;
+  top: -1px;
+  right: 0;
+  left: 0;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: linear-gradient(
+      90deg,
+      transparent 0%,
+      color-mix(in srgb, var(--primary) 20%, var(--border)) 50%,
+      transparent 100%
+    ), color-mix(in srgb, var(--border) 88%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  transform: scaleX(0.94);
+  transform-origin: center;
+  transition: opacity 160ms ease, transform 180ms ease;
+  content: "";
+}
+
+.chat-composer::after {
+  position: absolute;
+  top: -1px;
+  left: 0;
+  width: 38%;
+  height: 3px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--primary) 74%, var(--foreground) 6%) 22%,
+    var(--primary) 50%,
+    color-mix(in srgb, var(--primary) 74%, var(--foreground) 6%) 78%,
+    transparent 100%
+  );
+  opacity: 0;
+  pointer-events: none;
+  content: "";
+  transform: translateX(-140%);
+}
+
+.chat-composer--active::before {
+  opacity: 1;
+  transform: scaleX(1);
+}
+
+.chat-composer--active::after {
+  opacity: 1;
+  animation: chat-composer-activity-slide 1.4s ease-in-out infinite;
+}
+
+@keyframes chat-composer-activity-slide {
+  0% {
+    transform: translateX(-140%);
+  }
+
+  100% {
+    transform: translateX(360%);
+  }
 }
 
 .chat-composer__surface {
@@ -1328,6 +1392,17 @@ body {
 .chat-composer__send svg {
   width: 16px;
   height: 16px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-composer::before {
+    transition: none;
+  }
+
+  .chat-composer--active::after {
+    animation: none;
+    transform: translateX(80%);
+  }
 }
 
 .board-region {

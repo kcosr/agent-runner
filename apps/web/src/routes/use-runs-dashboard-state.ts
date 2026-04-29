@@ -795,10 +795,10 @@ export function useRunsDashboardState() {
     onError: (error: Error) => {
       setActionError(error.message);
     },
-    onSuccess: async (_result, { runId }) => {
+    onSuccess: (_result, { runId }) => {
       setActionError(undefined);
       markRunTouched(runId);
-      await invalidateRunQueries(runId);
+      void invalidateRunQueries(runId);
     },
   });
   const abortMutation = useRunActionMutation(api.abortRun, setActionError, {
