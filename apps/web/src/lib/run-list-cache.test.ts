@@ -4,6 +4,7 @@ import { runQueryKeys } from "./query.js";
 import {
   removeRunFromListCache,
   runBelongsInListCache,
+  runListQueryMetadata,
   upsertRunSummaryInListCache,
 } from "./run-list-cache.js";
 
@@ -82,26 +83,97 @@ describe("run list cache helpers", () => {
     expect(groupKey.slice(0, prefix.length)).toEqual(prefix);
   });
 
-  it("applies archived and run-group membership rules", () => {
-    const activeRun = makeRun();
-    const archivedRun = makeRun({
-      archivedAt: "2026-04-13T06:00:00.000Z",
-      runId: "run-archived",
-    });
-    const otherGroupRun = makeRun({ runGroupId: "group-b", runId: "run-other" });
-
-    expect(runBelongsInListCache(activeRun, { includeArchived: false, runGroupId: null })).toBe(
-      true,
-    );
-    expect(runBelongsInListCache(archivedRun, { includeArchived: false, runGroupId: null })).toBe(
-      false,
-    );
-    expect(runBelongsInListCache(archivedRun, { includeArchived: true, runGroupId: null })).toBe(
-      true,
-    );
+  it("reads metadata only from well-shaped list keys", () => {
     expect(
-      runBelongsInListCache(otherGroupRun, { includeArchived: true, runGroupId: "group-a" }),
-    ).toBe(false);
+      runListQueryMetadata(runQueryKeys.list({ includeArchived: true, runGroupId: "group-a" })),
+    ).toEqual({ includeArchived: true, runGroupId: "group-a" });
+    expect(runListQueryMetadata(runQueryKeys.lists())).toBeNull();
+    expect(
+      runListQueryMetadata(["runs", "list", { includeArchived: "true", runGroupId: null }]),
+    ).toBeNull();
+    expect(
+      runListQueryMetadata(["runs", "list", { includeArchived: true, runGroupId: 1 }]),
+    ).toBeNull();
+  });
+
+  it("applies archived and run-group membership rules", () => {
+    const cases: Array<{
+      description: string;
+      metadata: { includeArchived: boolean; runGroupId: string | null };
+      summary: RunSummary;
+      expected: boolean;
+    }> = [
+      {
+        description: "active global hidden list",
+        metadata: { includeArchived: false, runGroupId: null },
+        summary: makeRun(),
+        expected: true,
+      },
+      {
+        description: "archived global hidden list",
+        metadata: { includeArchived: false, runGroupId: null },
+        summary: makeRun({
+          archivedAt: "2026-04-13T06:00:00.000Z",
+          runId: "run-archived",
+        }),
+        expected: false,
+      },
+      {
+        description: "archived global archived-inclusive list",
+        metadata: { includeArchived: true, runGroupId: null },
+        summary: makeRun({
+          archivedAt: "2026-04-13T06:00:00.000Z",
+          runId: "run-archived",
+        }),
+        expected: true,
+      },
+      {
+        description: "active matching scoped hidden list",
+        metadata: { includeArchived: false, runGroupId: "group-a" },
+        summary: makeRun({ runId: "run-matching" }),
+        expected: true,
+      },
+      {
+        description: "active other scoped hidden list",
+        metadata: { includeArchived: false, runGroupId: "group-a" },
+        summary: makeRun({ runGroupId: "group-b", runId: "run-other" }),
+        expected: false,
+      },
+      {
+        description: "archived matching scoped hidden list",
+        metadata: { includeArchived: false, runGroupId: "group-a" },
+        summary: makeRun({
+          archivedAt: "2026-04-13T06:00:00.000Z",
+          runId: "run-archived",
+        }),
+        expected: false,
+      },
+      {
+        description: "archived other scoped archived-inclusive list",
+        metadata: { includeArchived: true, runGroupId: "group-a" },
+        summary: makeRun({
+          archivedAt: "2026-04-13T06:00:00.000Z",
+          runGroupId: "group-b",
+          runId: "run-other-archived",
+        }),
+        expected: false,
+      },
+      {
+        description: "archived matching scoped archived-inclusive list",
+        metadata: { includeArchived: true, runGroupId: "group-a" },
+        summary: makeRun({
+          archivedAt: "2026-04-13T06:00:00.000Z",
+          runId: "run-archived",
+        }),
+        expected: true,
+      },
+    ];
+
+    for (const testCase of cases) {
+      expect(runBelongsInListCache(testCase.summary, testCase.metadata), testCase.description).toBe(
+        testCase.expected,
+      );
+    }
   });
 
   it("removes or upserts summaries according to cache metadata", () => {

@@ -8,8 +8,23 @@ export interface RunListQueryMetadata {
   runGroupId: string | null;
 }
 
-export function runListQueryMetadata(queryKey: QueryKey): RunListQueryMetadata {
-  return queryKey[queryKey.length - 1] as RunListQueryMetadata;
+export function runListQueryMetadata(queryKey: QueryKey): RunListQueryMetadata | null {
+  const metadata = queryKey.at(-1);
+  if (
+    !metadata ||
+    typeof metadata !== "object" ||
+    Array.isArray(metadata) ||
+    typeof (metadata as { includeArchived?: unknown }).includeArchived !== "boolean"
+  ) {
+    return null;
+  }
+
+  const runGroupId = (metadata as { runGroupId?: unknown }).runGroupId;
+  if (runGroupId !== null && typeof runGroupId !== "string") {
+    return null;
+  }
+
+  return metadata as RunListQueryMetadata;
 }
 
 export function runBelongsInListCache(
@@ -88,8 +103,12 @@ export function updateRunListCacheQueries(
   const queries = queryClient.getQueryCache().findAll({ queryKey: runQueryKeys.lists() });
   for (const query of queries) {
     const queryKey = query.queryKey;
+    const metadata = runListQueryMetadata(queryKey);
+    if (!metadata) {
+      continue;
+    }
     queryClient.setQueryData<RunSummary[] | undefined>(queryKey, (current) =>
-      update(current, runListQueryMetadata(queryKey)),
+      update(current, metadata),
     );
   }
 }

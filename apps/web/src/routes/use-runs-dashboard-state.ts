@@ -427,7 +427,6 @@ export function useRunsDashboardState() {
   const detailStreamStaleRef = useRef(detailStreamStale);
   const runGroupFilter = preferences.structuredFilters.runGroupId;
   const includeArchived = preferences.showArchived;
-  const previousIncludeArchivedRef = useRef(includeArchived);
 
   const runsQuery = useQuery({
     queryKey: runQueryKeys.list({ includeArchived, runGroupId: runGroupFilter }),
@@ -440,14 +439,12 @@ export function useRunsDashboardState() {
   });
 
   useEffect(() => {
-    const previousIncludeArchived = previousIncludeArchivedRef.current;
-    previousIncludeArchivedRef.current = includeArchived;
-    if (!previousIncludeArchived || includeArchived) {
+    if (includeArchived) {
       return;
     }
     queryClient.removeQueries({
       queryKey: runQueryKeys.lists(),
-      predicate: (query) => runListQueryMetadata(query.queryKey).includeArchived,
+      predicate: (query) => runListQueryMetadata(query.queryKey)?.includeArchived === true,
     });
   }, [includeArchived]);
 

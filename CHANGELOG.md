@@ -284,6 +284,9 @@
 
 ### Changed
 
+- The web dashboard now requests and caches only non-archived runs by
+  default, and drops archived-inclusive list caches when archived runs are
+  hidden.
 - The web dashboard now persists board sort field and direction
   preferences and orders columns from cached canonical run timestamps
   instead of event-arrival recency.

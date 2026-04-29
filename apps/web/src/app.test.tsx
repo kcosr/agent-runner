@@ -7114,6 +7114,52 @@ describe("web app", () => {
     ).toBeUndefined();
   });
 
+  it("removes archived list queries after archived visibility is toggled off from settings", async () => {
+    setStoredDashboardPreferences({ showArchived: true });
+    installFetchMock({
+      runs: [
+        makeRun({ assignmentName: "Active dashboard", name: "Active dashboard" }),
+        makeRun({
+          runId: "run-archived",
+          assignmentName: "Archived dashboard",
+          archivedAt: "2026-04-13T06:00:00.000Z",
+          name: "Archived dashboard",
+          status: "success",
+        }),
+      ],
+      details: {
+        "run-1": makeDetail({
+          assignment: { name: "Active dashboard", sourcePath: "/tmp/active.md" },
+          name: "Active dashboard",
+        }),
+        "run-archived": makeDetail({
+          runId: "run-archived",
+          archivedAt: "2026-04-13T06:00:00.000Z",
+          assignment: { name: "Archived dashboard", sourcePath: "/tmp/archived.md" },
+          name: "Archived dashboard",
+          status: "success",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    expect(await findRunCard("Archived dashboard")).toBeInTheDocument();
+    const archivedKey = runQueryKeys.list({ includeArchived: true, runGroupId: null });
+    expect(queryClient.getQueryState(archivedKey)).toBeDefined();
+
+    await user.click(getSidebarNavigation().getByRole("button", { name: "Settings" }));
+    expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
+    await user.click(screen.getByRole("checkbox", { name: "Show archived runs" }));
+    expect(screen.getByRole("checkbox", { name: "Show archived runs" })).not.toBeChecked();
+
+    await user.click(getSidebarNavigation().getByRole("button", { name: "Runs" }));
+    expect(await findRunCard("Active dashboard")).toBeInTheDocument();
+    await waitFor(() => expect(queryClient.getQueryState(archivedKey)).toBeUndefined());
+    expect(screen.queryByRole("button", { name: /Archived dashboard/i })).not.toBeInTheDocument();
+  });
+
   it("sorts pinned runs first within each status column and persists the pinned-only filter", async () => {
     installFetchMock({
       runs: [
