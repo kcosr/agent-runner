@@ -271,6 +271,10 @@
 
 ### Changed
 
+- The web run chat composer now shows live activity from the run's
+  server-backed state, running status labels animate subtly, and resume
+  dialogs/input clear after the resume request succeeds while cache
+  refresh continues in the background. ([#120](https://github.com/kcosr/task-runner/pull/120))
 - The web run detail drawer now starts Attempts timeline and Audit history
   loading only when those tabs are first opened, then keeps those streams
   active while the run remains selected. ([#113](https://github.com/kcosr/task-runner/pull/113))
