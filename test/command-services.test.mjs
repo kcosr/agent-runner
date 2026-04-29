@@ -210,6 +210,10 @@ function readManifest(workspaceDir) {
   return JSON.parse(readFileSync(join(workspaceDir, "run.json"), "utf8"));
 }
 
+function assertTimestampAdvanced(before, after, label) {
+  assert.ok(after > before, `${label}: expected ${after} to be after ${before}`);
+}
+
 function patchManifest(workspaceDir, mutator) {
   const manifestPath = join(workspaceDir, "run.json");
   const manifest = readManifest(workspaceDir);
@@ -326,24 +330,41 @@ test("command services: passive backend session mutations update only metadata a
   };
 
   await withSharedRuntimeEnv(dir, async () => {
-    assert.deepEqual(setRunBackendSession(passiveRun.runId, { backendSessionId: "thread-42" }), {
+    const setResult = setRunBackendSession(passiveRun.runId, { backendSessionId: "thread-42" });
+    const afterSet = readManifest(passiveRun.workspaceDir).updatedAt;
+    assert.deepEqual(setResult, {
       runId: passiveRun.runId,
       backendSessionId: "thread-42",
+      updatedAt: afterSet,
       changed: true,
     });
-    assert.deepEqual(setRunBackendSession(passiveRun.runId, { backendSessionId: " thread-42 " }), {
+    assertTimestampAdvanced(before.updatedAt, afterSet, "setRunBackendSession updatedAt");
+
+    const setAgainResult = setRunBackendSession(passiveRun.runId, {
+      backendSessionId: " thread-42 ",
+    });
+    assert.deepEqual(setAgainResult, {
       runId: passiveRun.runId,
       backendSessionId: "thread-42",
+      updatedAt: afterSet,
       changed: false,
     });
-    assert.deepEqual(clearRunBackendSession(passiveRun.runId), {
+    assert.equal(readManifest(passiveRun.workspaceDir).updatedAt, afterSet);
+
+    const clearResult = clearRunBackendSession(passiveRun.runId);
+    const afterClear = readManifest(passiveRun.workspaceDir).updatedAt;
+    assert.deepEqual(clearResult, {
       runId: passiveRun.runId,
       backendSessionId: null,
+      updatedAt: afterClear,
       changed: true,
     });
+    assertTimestampAdvanced(afterSet, afterClear, "clearRunBackendSession updatedAt");
+
     assert.deepEqual(clearRunBackendSession(passiveRun.runId), {
       runId: passiveRun.runId,
       backendSessionId: null,
+      updatedAt: afterClear,
       changed: false,
     });
 
@@ -974,6 +995,7 @@ test("command services: setTask, listTasks, showTask, and appendTaskNotes persis
   const dir = tempDir();
   writeBundle(dir);
   const outcome = await initRun(dir);
+  const initialUpdatedAt = readManifest(outcome.workspaceDir).updatedAt;
 
   await withSharedRuntimeEnv(dir, async () => {
     const updated = await setTask(outcome.runId, "t1", {
@@ -982,9 +1004,13 @@ test("command services: setTask, listTasks, showTask, and appendTaskNotes persis
     });
     assert.equal(updated.task.status, "in_progress");
     assert.equal(updated.task.notes, "Investigating.");
+    const afterSetTask = readManifest(outcome.workspaceDir).updatedAt;
+    assertTimestampAdvanced(initialUpdatedAt, afterSetTask, "setTask updatedAt");
 
     const appended = await appendTaskNotes(outcome.runId, "t1", "Waiting on confirmation.");
     assert.equal(appended.task.notes, "Investigating.\nWaiting on confirmation.");
+    const afterAppendNotes = readManifest(outcome.workspaceDir).updatedAt;
+    assertTimestampAdvanced(afterSetTask, afterAppendNotes, "appendTaskNotes updatedAt");
 
     const list = listTasks(outcome.runId);
     const single = showTask(outcome.runId, "t1");
@@ -1005,6 +1031,7 @@ test("command services: addTask returns the new snapshot and persists it", async
   const dir = tempDir();
   writeBundle(dir);
   const outcome = await initRun(dir);
+  const before = readManifest(outcome.workspaceDir).updatedAt;
 
   await withSharedRuntimeEnv(dir, async () => {
     const added = await addTask(outcome.runId, {
@@ -1019,6 +1046,7 @@ test("command services: addTask returns the new snapshot and persists it", async
   });
 
   const manifest = readManifest(outcome.workspaceDir);
+  assertTimestampAdvanced(before, manifest.updatedAt, "addTask updatedAt");
   assert.equal(manifest.tasksTotal, 3);
   assert.ok(Object.values(manifest.finalTasks).some((task) => task.title === "CLI follow-up"));
 });
@@ -1034,14 +1062,20 @@ test("command services: add/remove/clear dependency mutations validate graph sta
     manifest.endedAt = "2026-04-12T10:05:00.000Z";
     manifest.exitCode = 0;
   });
+  let previousUpdatedAt = readManifest(target.workspaceDir).updatedAt;
 
   await withSharedRuntimeEnv(dir, async () => {
     const added = addRunDependency(target.runId, { type: "run", runId: dependency.runId });
     assert.deepEqual(added, {
       runId: target.runId,
       dependencies: [{ type: "run", runId: dependency.runId }],
+      updatedAt: added.updatedAt,
       changed: true,
     });
+    const afterAdd = readManifest(target.workspaceDir).updatedAt;
+    assert.equal(added.updatedAt, afterAdd);
+    assertTimestampAdvanced(previousUpdatedAt, afterAdd, "addRunDependency updatedAt");
+    previousUpdatedAt = afterAdd;
 
     const detail = readStatus(target.runId);
     assert.deepEqual(detail.dependencies, [
@@ -1062,15 +1096,22 @@ test("command services: add/remove/clear dependency mutations validate graph sta
     assert.deepEqual(removed, {
       runId: target.runId,
       dependencies: [],
+      updatedAt: removed.updatedAt,
       changed: true,
     });
+    const afterRemove = readManifest(target.workspaceDir).updatedAt;
+    assert.equal(removed.updatedAt, afterRemove);
+    assertTimestampAdvanced(previousUpdatedAt, afterRemove, "removeRunDependency updatedAt");
+    previousUpdatedAt = afterRemove;
 
     const cleared = clearRunDependencies(target.runId);
     assert.deepEqual(cleared, {
       runId: target.runId,
       dependencies: [],
+      updatedAt: previousUpdatedAt,
       changed: false,
     });
+    assert.equal(readManifest(target.workspaceDir).updatedAt, previousUpdatedAt);
   });
 
   const manifest = readManifest(target.workspaceDir);
@@ -1082,6 +1123,7 @@ test("command services: set/clear run group mutations persist manifest and reset
   const dir = tempDir();
   writeBundle(dir);
   const outcome = await initRun(dir);
+  let previousUpdatedAt = readManifest(outcome.workspaceDir).updatedAt;
 
   await withSharedRuntimeEnv(dir, async () => {
     const grouped = setRunGroup(outcome.runId, { runGroupId: "shared-group" });
@@ -1089,24 +1131,35 @@ test("command services: set/clear run group mutations persist manifest and reset
       runId: outcome.runId,
       runGroupId: "shared-group",
       previousRunGroupId: outcome.runId,
+      updatedAt: grouped.updatedAt,
       changed: true,
     });
+    const afterSet = readManifest(outcome.workspaceDir).updatedAt;
+    assert.equal(grouped.updatedAt, afterSet);
+    assertTimestampAdvanced(previousUpdatedAt, afterSet, "setRunGroup updatedAt");
+    previousUpdatedAt = afterSet;
 
     const sameGroup = setRunGroup(outcome.runId, { runGroupId: "shared-group" });
     assert.deepEqual(sameGroup, {
       runId: outcome.runId,
       runGroupId: "shared-group",
       previousRunGroupId: "shared-group",
+      updatedAt: previousUpdatedAt,
       changed: false,
     });
+    assert.equal(readManifest(outcome.workspaceDir).updatedAt, previousUpdatedAt);
 
     const cleared = clearRunGroup(outcome.runId);
     assert.deepEqual(cleared, {
       runId: outcome.runId,
       runGroupId: outcome.runId,
       previousRunGroupId: "shared-group",
+      updatedAt: cleared.updatedAt,
       changed: true,
     });
+    const afterClear = readManifest(outcome.workspaceDir).updatedAt;
+    assert.equal(cleared.updatedAt, afterClear);
+    assertTimestampAdvanced(previousUpdatedAt, afterClear, "clearRunGroup updatedAt");
   });
 
   const manifest = readManifest(outcome.workspaceDir);
@@ -1138,8 +1191,10 @@ test("command services: group dependencies project aggregate readiness and rever
     assert.deepEqual(added, {
       runId: target.runId,
       dependencies: [{ type: "group", groupId: "blocking-group" }],
+      updatedAt: added.updatedAt,
       changed: true,
     });
+    assert.equal(added.updatedAt, readManifest(target.workspaceDir).updatedAt);
 
     const detail = readStatus(target.runId);
     assert.deepEqual(detail.dependencies, [
@@ -1295,6 +1350,7 @@ test("command services: schedule mutations persist schedule state and audit thro
   const dir = tempDir();
   writeBundle(dir);
   const target = await initRun(dir);
+  let previousUpdatedAt = readManifest(target.workspaceDir).updatedAt;
 
   await withSharedRuntimeEnv(dir, async () => {
     const scheduled = setRunSchedule(target.runId, {
@@ -1302,14 +1358,23 @@ test("command services: schedule mutations persist schedule state and audit thro
     });
     assert.equal(scheduled.schedule.runAt, "2099-04-25T12:00:00.000Z");
     assert.equal(scheduled.scheduleState, "future");
+    const afterSchedule = readManifest(target.workspaceDir).updatedAt;
+    assertTimestampAdvanced(previousUpdatedAt, afterSchedule, "setRunSchedule updatedAt");
+    previousUpdatedAt = afterSchedule;
 
     const disabled = setRunScheduleEnabled(target.runId, false);
     assert.equal(disabled.schedule.enabled, false);
     assert.equal(disabled.scheduleState, "paused");
+    const afterDisable = readManifest(target.workspaceDir).updatedAt;
+    assertTimestampAdvanced(previousUpdatedAt, afterDisable, "setRunScheduleEnabled updatedAt");
+    previousUpdatedAt = afterDisable;
 
     const cleared = clearRunSchedule(target.runId);
     assert.equal(cleared.schedule, null);
     assert.equal(cleared.scheduleState, "none");
+    const afterClear = readManifest(target.workspaceDir).updatedAt;
+    assertTimestampAdvanced(previousUpdatedAt, afterClear, "clearRunSchedule updatedAt");
+    previousUpdatedAt = afterClear;
 
     const ready = readyRun(target.runId, {
       cron: "0 9 * * *",
@@ -1321,6 +1386,8 @@ test("command services: schedule mutations persist schedule state and audit thro
     assert.equal(ready.schedule.recurrence.schedule.expression, "0 9 * * *");
     assert.equal(ready.schedule.recurrence.mode, "reset");
     assert.equal(ready.schedule.recurrence.continueOnFailure, true);
+    const afterReady = readManifest(target.workspaceDir).updatedAt;
+    assertTimestampAdvanced(previousUpdatedAt, afterReady, "readyRun schedule updatedAt");
 
     const manifest = readManifest(target.workspaceDir);
     assert.deepEqual(manifest.schedule, ready.schedule);
@@ -1803,6 +1870,7 @@ test("command services: setRunName propagates codex thread rename and clear valu
       assert.deepEqual(renamed, {
         runId: outcome.runId,
         name: "Codex rename",
+        updatedAt: renamed.updatedAt,
         changed: true,
       });
 
@@ -1810,6 +1878,7 @@ test("command services: setRunName propagates codex thread rename and clear valu
       assert.deepEqual(cleared, {
         runId: outcome.runId,
         name: null,
+        updatedAt: cleared.updatedAt,
         changed: true,
       });
     });
@@ -1827,42 +1896,61 @@ test("command services: setRunNote and setRunPinned are idempotent and preserve 
   const dir = tempDir();
   writeBundle(dir);
   const outcome = await initRun(dir);
+  let previousUpdatedAt = readManifest(outcome.workspaceDir).updatedAt;
 
   await withSharedRuntimeEnv(dir, async () => {
     const noted = setRunNote(outcome.runId, { note: "# Follow-up\n\nKeep the review sharp." });
     assert.deepEqual(noted, {
       runId: outcome.runId,
       note: "# Follow-up\n\nKeep the review sharp.",
+      updatedAt: noted.updatedAt,
       changed: true,
     });
+    const afterNote = readManifest(outcome.workspaceDir).updatedAt;
+    assert.equal(noted.updatedAt, afterNote);
+    assertTimestampAdvanced(previousUpdatedAt, afterNote, "setRunNote updatedAt");
+    previousUpdatedAt = afterNote;
 
     const notedAgain = setRunNote(outcome.runId, { note: "# Follow-up\n\nKeep the review sharp." });
     assert.deepEqual(notedAgain, {
       runId: outcome.runId,
       note: "# Follow-up\n\nKeep the review sharp.",
+      updatedAt: previousUpdatedAt,
       changed: false,
     });
+    assert.equal(readManifest(outcome.workspaceDir).updatedAt, previousUpdatedAt);
 
     const pinned = setRunPinned(outcome.runId, { pinned: true });
     assert.deepEqual(pinned, {
       runId: outcome.runId,
       pinned: true,
+      updatedAt: pinned.updatedAt,
       changed: true,
     });
+    const afterPin = readManifest(outcome.workspaceDir).updatedAt;
+    assert.equal(pinned.updatedAt, afterPin);
+    assertTimestampAdvanced(previousUpdatedAt, afterPin, "setRunPinned updatedAt");
+    previousUpdatedAt = afterPin;
 
     const pinnedAgain = setRunPinned(outcome.runId, { pinned: true });
     assert.deepEqual(pinnedAgain, {
       runId: outcome.runId,
       pinned: true,
+      updatedAt: previousUpdatedAt,
       changed: false,
     });
+    assert.equal(readManifest(outcome.workspaceDir).updatedAt, previousUpdatedAt);
 
     const cleared = setRunNote(outcome.runId, { note: "   " });
     assert.deepEqual(cleared, {
       runId: outcome.runId,
       note: null,
+      updatedAt: cleared.updatedAt,
       changed: true,
     });
+    const afterClear = readManifest(outcome.workspaceDir).updatedAt;
+    assert.equal(cleared.updatedAt, afterClear);
+    assertTimestampAdvanced(previousUpdatedAt, afterClear, "clear note updatedAt");
   });
 
   const manifest = readManifest(outcome.workspaceDir);
@@ -1898,6 +1986,7 @@ test("command services: setRunName keeps manifest update when codex propagation 
       assert.deepEqual(renamed, {
         runId: outcome.runId,
         name: "Still persisted",
+        updatedAt: renamed.updatedAt,
         changed: true,
       });
     });
@@ -1947,6 +2036,7 @@ test("command services: setRunName does not hang on codex post-open transport er
       assert.deepEqual(renamed, {
         runId: outcome.runId,
         name: "Post-open failure",
+        updatedAt: renamed.updatedAt,
         changed: true,
       });
     });
@@ -2004,6 +2094,7 @@ test("command services: setRunName propagates pi session renames into the sessio
       assert.deepEqual(renamed, {
         runId: outcome.runId,
         name: "Pi rename",
+        updatedAt: renamed.updatedAt,
         changed: true,
       });
     }),
@@ -2022,24 +2113,33 @@ test("command services: archiveRun and unarchiveRun are idempotent and reject ru
   const dir = tempDir();
   writeBundle(dir);
   const outcome = await initRun(dir);
+  let previousUpdatedAt = readManifest(outcome.workspaceDir).updatedAt;
 
   await withSharedRuntimeEnv(dir, async () => {
     const archived = archiveRun(outcome.runId);
     assert.equal(archived.changed, true);
     assert.ok(archived.archivedAt);
     assert.equal(archived.runId, outcome.runId);
+    const afterArchive = readManifest(outcome.workspaceDir).updatedAt;
+    assertTimestampAdvanced(previousUpdatedAt, afterArchive, "archiveRun updatedAt");
+    previousUpdatedAt = afterArchive;
 
     const archivedAgain = archiveRun(outcome.runId);
     assert.equal(archivedAgain.changed, false);
     assert.equal(archivedAgain.archivedAt, archived.archivedAt);
+    assert.equal(readManifest(outcome.workspaceDir).updatedAt, previousUpdatedAt);
 
     const unarchived = unarchiveRun(outcome.runId);
     assert.equal(unarchived.changed, true);
     assert.equal(unarchived.archivedAt, null);
+    const afterUnarchive = readManifest(outcome.workspaceDir).updatedAt;
+    assertTimestampAdvanced(previousUpdatedAt, afterUnarchive, "unarchiveRun updatedAt");
+    previousUpdatedAt = afterUnarchive;
 
     const unarchivedAgain = unarchiveRun(outcome.runId);
     assert.equal(unarchivedAgain.changed, false);
     assert.equal(unarchivedAgain.archivedAt, null);
+    assert.equal(readManifest(outcome.workspaceDir).updatedAt, previousUpdatedAt);
   });
 
   patchManifest(outcome.workspaceDir, (manifest) => {

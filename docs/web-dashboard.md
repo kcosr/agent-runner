@@ -20,9 +20,9 @@ those plus the active run id.
 
 ## Views
 
-- `/` — Runs dashboard with Board, Detail, and Chat surfaces.
+- `/` — Runs dashboard with Board, Chat, Detail, Notes, and Tasks surfaces.
 - `/runs/:runId` — Same dashboard with a specific run selected for the
-  Detail and Chat surfaces.
+  selected-run surfaces.
 - `/settings/general` — General preferences.
 - `/settings/keybindings` — Keyboard shortcut reference.
 
@@ -32,23 +32,22 @@ A multi-surface workspace:
 
 - **Left** — search, grouped Filters control, and preference toggles.
 - **Center** — Board, the kanban run list grouped by run status.
-- **Right** — one selected-run panel with Chat and Detail tabs.
+- **Right** — one selected-run panel with Chat, Detail, Notes, and Tasks tabs.
 
 Board is always visible. Selecting a run opens one resizable selected-run
 panel. Its header owns the run identity plus action toolbar, and the tabs
-below the toolbar switch between Detail, the operational inspector, and
-Chat, the conversational projection of the same run. Chat does not create
-a separate chat route or backend chat contract; it follows the selected
-run, derives messages from `RunDetail` plus timeline history, and streams
-live output through the existing timeline stream.
+below the toolbar switch between Chat, Detail, Notes, and Tasks. Chat does not
+create a separate chat route or backend chat contract; it follows the
+selected run, derives messages from `RunDetail` plus timeline history,
+and streams live output through the existing timeline stream.
 
 Closing the selected-run panel navigates back to `/` and clears the
-selected run. Chat and Detail tab choice persists as the active right
+selected run. Chat, Detail, Notes, and Tasks tab choice persists as the active right
 surface.
 
 Dashboard view state persists the durable surface layout fields:
 collapsed board columns, selected-run panel width, and the active
-Chat/Detail tab. Search text, fullscreen state, per-run drawer tabs, and
+Chat/Detail/Notes/Tasks tab. Search text, fullscreen state, per-run drawer tabs, and
 the active board column remain transient.
 
 On desktop layouts, the selected-run panel renders inline to the right of
@@ -92,6 +91,13 @@ Pinned runs sort first within their current status column while still
 using the active column comparator inside the pinned and unpinned
 buckets. Pinning does not move a run across columns.
 
+The board has one global sort field and direction, applied independently
+inside every status column after pinned-first bucketing. The sortable
+fields are started time, last updated, and ended time. Last updated uses
+the canonical `RunSummary.updatedAt` timestamp from the manifest, not
+event arrival order. Ended-time sorting keeps active runs with no
+`endedAt` last in both directions.
+
 The note affordance opens a rendered-markdown preview on desktop
 hover/focus when a note exists, and clicking/tapping opens the shared
 note editor. Desktop defaults that editor to **Edit** mode; touch-style
@@ -127,10 +133,10 @@ The drawer surfaces:
   disabled but not cleared.
 - Run group metadata and editor. Non-running runs can be moved into a
   different group or reset to their singleton group.
-- Notes tab: rendered markdown by default, explicit Preview/Edit toggle,
-  save/cancel flow, and the same shared note mutation used by the card
-  editor.
-- Tasks tab: expandable task rows with inline notes and status editing,
+- Notes surface: rendered markdown by default, an Edit action that exposes
+  save/cancel controls, and the same shared note mutation used by the card
+  editor. `N` opens the surface; pressing `N` again focuses the editor.
+- Tasks surface: expandable task rows with inline notes and status editing,
   gated by `taskMutation` capabilities.
 - Attachments tab: one combined group-scoped list. Rows show
   `ownerRunId`; selected-run attachments can be uploaded, previewed,
@@ -257,6 +263,7 @@ The dashboard's shortcut system is customizable from
 |----------|--------|
 | `/` or `Ctrl+K` | Focus search |
 | `Esc` (in search) | Clear search and blur |
+| `Esc` (in chat composer) | Blur the composer without closing the drawer |
 | `Esc` (drawer open) | Close drawer |
 | `Esc` (attachment preview) | Back to attachments |
 | `Enter` | Primary action for the selected card (Resume, etc.) |
@@ -267,7 +274,10 @@ The dashboard's shortcut system is customizable from
 | `Ctrl+Shift+A` | Toggle archived filter |
 | `Ctrl+Shift+E` | Toggle hide-empty-columns |
 | `P` | Pin or unpin the selected run |
-| `N` | Open the selected run's note |
+| `C` | Show the selected run's Chat tab, or focus its composer when Chat is open |
+| `D` | Show the selected run's Detail tab |
+| `N` | Show the selected run's Notes tab, or focus its editor when Notes is open |
+| `T` | Show the selected run's Tasks tab |
 | `A` | Archive or restore the selected run |
 | `F` | Toggle the detail drawer fullscreen |
 
@@ -275,14 +285,15 @@ Shortcuts are suppressed while typing in inputs or when a modal dialog
 is open. Native modal dialogs, including Resume and the run-note editor,
 handle Escape/back dismissal before dashboard shortcuts.
 
-When the detail drawer or attachment preview is fullscreen, `Enter`
-still triggers the selected run's primary action if one is available.
-Other dashboard shortcuts, including board movement, search, filters,
-notes, pinning, and archiving, remain suppressed in fullscreen drawer
-mode. If the primary action opens the Resume dialog, the dialog appears
-above the fullscreen drawer or preview surface. While the Resume or
-run-note dialog is open, the first `Esc` closes the dialog; later presses
-follow the existing fullscreen and drawer close behavior.
+When the detail drawer is fullscreen, selected-run shortcuts including
+`Enter`, `N`, `P`, `A`, and `C`/`D`/`N`/`T` remain active. Board movement,
+search, and filter shortcuts remain suppressed in fullscreen drawer
+mode. Attachment preview keeps only surface navigation, fullscreen
+toggle, and Escape shortcuts active so hidden header actions do not fire.
+If the primary action opens the Resume dialog, the dialog appears above
+the fullscreen drawer or preview surface. While the Resume or run-note
+dialog is open, the first `Esc` closes the dialog; later presses follow
+the existing fullscreen and drawer close behavior.
 
 ## Preferences
 
@@ -290,7 +301,8 @@ Preferences are persisted to `localStorage` and include:
 
 - Hide empty columns.
 - Collapse failure states into a single column.
-- Sort by recent updates.
+- Board sort field (`startedAt`, `updatedAt`, or `endedAt`) and direction
+  (`desc` or `asc`).
 - Show archived runs.
 - Show runs with notes only.
 - Show pinned runs only.
@@ -330,7 +342,8 @@ is no standalone web server in the shipped runtime.
 1. App boots and fetches `/app-config.json` for the API paths.
 2. Subscribes to the global summary stream; mutations arrive as
    `summary_upsert` / `summary_removed` events and update the
-   TanStack React Query cache.
+   TanStack React Query cache. Board sorting is recomputed from cached
+   canonical summary timestamps.
 3. Selecting a run subscribes to its detail stream; opening Attempts or
    Audit starts the corresponding history load and live stream, which remain
    active while that run stays selected.

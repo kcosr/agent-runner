@@ -73,6 +73,7 @@ function makeRun(overrides: Partial<RunDetail> = {}): RunDetail {
     unrestricted: false,
     timeoutSec: 3600,
     startedAt: "2026-04-28T10:00:00.000Z",
+    updatedAt: "2026-04-28T10:05:00.000Z",
     endedAt: "2026-04-28T10:05:00.000Z",
     exitCode: 0,
     totalAttemptCount: 0,

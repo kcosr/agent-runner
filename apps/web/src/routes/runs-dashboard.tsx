@@ -49,10 +49,7 @@ function DashboardSurfaces({
 export function RunsDashboardRoute() {
   const state = useRunsDashboardState();
   const [toggleFiltersVersion, setToggleFiltersVersion] = useState(0);
-  const [openSelectedRunNoteRequest, setOpenSelectedRunNoteRequest] = useState<{
-    runId: string;
-    version: number;
-  } | null>(null);
+  const [noteEditRequestVersion, setNoteEditRequestVersion] = useState(0);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const latestStateRef = useRef(state);
   const navigableBoardColumns = state.boardColumns.filter(
@@ -75,6 +72,8 @@ export function RunsDashboardRoute() {
         currentState.viewState.drawerFullscreen ||
         document.querySelector(".drawer--fullscreen") !== null;
       const modalOpen = document.querySelector('dialog[open][data-modal="true"]') !== null;
+      const typingTarget =
+        isEditableEventTarget(event.target) || isEditableEventTarget(document.activeElement);
 
       const command = resolveRunsShortcutCommand(event, {
         activeBoardColumnKey: currentState.activeBoardColumnKey,
@@ -88,7 +87,7 @@ export function RunsDashboardRoute() {
         selectedRunPrimaryActionAvailable: currentState.selectedRunPrimaryActionAvailable,
         selectedDrawerView: currentState.selectedDrawerView,
         selectedRunId: currentState.selectedRunId,
-        typingTarget: isEditableEventTarget(event.target),
+        typingTarget,
       });
 
       if (!command) {
@@ -161,16 +160,51 @@ export function RunsDashboardRoute() {
         return;
       }
 
-      if (command === "run.openNote") {
-        if (!currentState.selectedRunId || currentState.actionPending !== undefined) {
+      const closeAttachmentPreviewForSurfaceShortcut = () => {
+        if (currentState.selectedDrawerView?.mode === "attachment") {
+          currentState.returnSelectedRunToAttachments();
+        }
+      };
+
+      if (command === "run.showChat") {
+        event.preventDefault();
+        if (
+          currentState.activeRightSurface === "chat" &&
+          currentState.selectedDrawerView?.mode !== "attachment"
+        ) {
+          document.getElementById("run-chat-message")?.focus();
           return;
         }
+        closeAttachmentPreviewForSurfaceShortcut();
+        currentState.setActiveRightSurface("chat");
+        return;
+      }
+
+      if (command === "run.showDetail") {
         event.preventDefault();
-        const selectedRunId = currentState.selectedRunId;
-        setOpenSelectedRunNoteRequest((current) => ({
-          runId: selectedRunId,
-          version: (current?.version ?? 0) + 1,
-        }));
+        closeAttachmentPreviewForSurfaceShortcut();
+        currentState.setActiveRightSurface("detail");
+        return;
+      }
+
+      if (command === "run.showNotes") {
+        event.preventDefault();
+        if (
+          currentState.activeRightSurface === "notes" &&
+          currentState.selectedDrawerView?.mode !== "attachment"
+        ) {
+          setNoteEditRequestVersion((current) => current + 1);
+          return;
+        }
+        closeAttachmentPreviewForSurfaceShortcut();
+        currentState.setActiveRightSurface("notes");
+        return;
+      }
+
+      if (command === "run.showTasks") {
+        event.preventDefault();
+        closeAttachmentPreviewForSurfaceShortcut();
+        currentState.setActiveRightSurface("tasks");
         return;
       }
 
@@ -297,7 +331,6 @@ export function RunsDashboardRoute() {
               boardColumns={state.boardColumns}
               collapsedColumnKeys={state.collapsedColumnKeys}
               hasActiveStructuredFilters={state.hasActiveStructuredFilters}
-              openSelectedRunNoteRequest={openSelectedRunNoteRequest}
               onExpandColumn={state.columnActions.expand}
               onActiveBoardColumnKeyChange={state.setActiveBoardColumnKey}
               onResetFilters={state.resetBoardFilters}
@@ -334,6 +367,7 @@ export function RunsDashboardRoute() {
                 drawerFullscreen={state.viewState.drawerFullscreen}
                 drawerWidth={state.viewState.drawerWidth}
                 drawerView={state.selectedDrawerView}
+                noteEditRequestVersion={noteEditRequestVersion}
                 runs={state.runs}
                 onBackToAttachments={state.returnSelectedRunToAttachments}
                 onAbort={state.runActions.abort}

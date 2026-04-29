@@ -2,6 +2,7 @@ import type { RefObject } from "react";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type {
   DashboardPreferences,
+  DashboardSortField,
   DashboardStructuredFilters,
   DashboardViewState,
 } from "../lib/settings.js";
@@ -13,6 +14,7 @@ import { TopbarPrimaryNav } from "./app-shell.js";
 import {
   AlertIcon,
   ArchiveIcon,
+  ChevronIcon,
   ChevronsRightLeftIcon,
   ClockIcon,
   FilterIcon,
@@ -23,6 +25,18 @@ import {
 import { useNativeModalDialog } from "./native-dialog.js";
 
 const MOBILE_FILTERS_MEDIA_QUERY = "(max-width: 900px)";
+
+const SORT_FIELD_LABELS: Record<DashboardSortField, string> = {
+  startedAt: "Started",
+  updatedAt: "Updated",
+  endedAt: "Ended",
+};
+
+const SORT_FIELD_TITLES: Record<DashboardSortField, string> = {
+  startedAt: "Sort by started time",
+  updatedAt: "Sort by last updated",
+  endedAt: "Sort by ended time",
+};
 
 function mediaQueryMatches(query: string) {
   if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
@@ -86,6 +100,9 @@ export function RunFilters({
   const hasActiveStructuredFilter = hasActiveDashboardStructuredFilters(
     preferences.structuredFilters,
   );
+  const sortFieldTitle = SORT_FIELD_TITLES[preferences.sortField];
+  const sortDirectionTitle =
+    preferences.sortDirection === "desc" ? "Latest first" : "Earliest first";
 
   const closeFilters = useCallback(({ focusTrigger = false }: { focusTrigger?: boolean } = {}) => {
     setFiltersOpen(false);
@@ -198,6 +215,40 @@ export function RunFilters({
         ) : null}
       </span>
       <span className="topbar-spacer" />
+      <div className="sort-controls">
+        <label className="field select sort-field" title={sortFieldTitle}>
+          <ClockIcon aria-hidden="true" />
+          <select
+            aria-label={sortFieldTitle}
+            onChange={(event) =>
+              updatePreferences({ sortField: event.target.value as DashboardSortField })
+            }
+            value={preferences.sortField}
+          >
+            {Object.entries(SORT_FIELD_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <button
+          aria-label={sortDirectionTitle}
+          className="icon-btn sort-direction-btn"
+          data-direction={preferences.sortDirection}
+          onClick={() =>
+            updatePreferences({
+              sortDirection: preferences.sortDirection === "desc" ? "asc" : "desc",
+            })
+          }
+          title={sortDirectionTitle}
+          type="button"
+        >
+          <ChevronIcon aria-hidden="true" />
+        </button>
+      </div>
+
       <div className="toolbar-matrix">
         <label className="field search">
           <SearchIcon aria-hidden="true" />

@@ -36,7 +36,8 @@ const DEFAULT_DASHBOARD_PREFERENCES = {
   showNotesOnly: false,
   showScheduledOnly: false,
   showPinnedOnly: false,
-  sortByRecentUpdates: false,
+  sortField: "startedAt",
+  sortDirection: "desc",
   auditNewestFirst: false,
   visibleFocusIndicators: false,
   structuredFilters: {
@@ -50,7 +51,7 @@ const DEFAULT_DASHBOARD_PREFERENCES = {
 const DEFAULT_DASHBOARD_VIEW_STATE: {
   collapsedColumnKeys: string[];
   drawerWidth: number;
-  activeRightSurface: "detail" | "chat";
+  activeRightSurface: "detail" | "chat" | "notes" | "tasks";
 } = {
   collapsedColumnKeys: [],
   drawerWidth: 540,
@@ -140,6 +141,7 @@ function makeRun(
     name: "Build dashboard",
     cwd: "/tmp/task-runner",
     startedAt: "2026-04-13T05:00:00.000Z",
+    updatedAt: "2026-04-13T05:00:00.000Z",
     endedAt: null,
     totalAttemptCount: 1,
     totalSessionCount: 1,
@@ -281,6 +283,7 @@ function makeDetail(
     unrestricted: false,
     timeoutSec: 3600,
     startedAt: "2026-04-13T05:00:00.000Z",
+    updatedAt: "2026-04-13T05:00:00.000Z",
     endedAt: null,
     exitCode: null,
     totalAttemptCount: 1,
@@ -670,6 +673,7 @@ function installFetchMock(
             model: detail.model,
             cwd: detail.cwd,
             startedAt: detail.startedAt,
+            updatedAt: detail.updatedAt,
             endedAt: detail.endedAt,
             totalAttemptCount: detail.totalAttemptCount,
             totalSessionCount: detail.totalSessionCount,
@@ -945,6 +949,7 @@ function installFetchMock(
               changed: true,
               runId,
               status: "success",
+              updatedAt: detail.updatedAt,
             },
           }),
           { status: 200 },
@@ -974,6 +979,7 @@ function installFetchMock(
               changed: true,
               runId,
               status: "success",
+              updatedAt: detail.updatedAt,
             },
           }),
           { status: 200 },
@@ -1068,7 +1074,10 @@ function installFetchMock(
       const changed = detail.name !== name;
       state.details[runId] = { ...detail, name };
       state.runs = state.runs.map((run) => (run.runId === runId ? { ...run, name } : run));
-      return new Response(JSON.stringify({ result: { runId, name, changed } }), { status: 200 });
+      return new Response(
+        JSON.stringify({ result: { runId, updatedAt: detail.updatedAt, name, changed } }),
+        { status: 200 },
+      );
     }
 
     const noteMatch = /\/api\/runs\/([^/]+)\/note$/.exec(url);
@@ -1090,7 +1099,10 @@ function installFetchMock(
       state.runs = state.runs.map((run) =>
         run.runId === runId ? { ...run, notePresent: note !== null } : run,
       );
-      return new Response(JSON.stringify({ result: { runId, note, changed } }), { status: 200 });
+      return new Response(
+        JSON.stringify({ result: { runId, updatedAt: detail.updatedAt, note, changed } }),
+        { status: 200 },
+      );
     }
 
     const pinnedMatch = /\/api\/runs\/([^/]+)\/pinned$/.exec(url);
@@ -1110,7 +1122,10 @@ function installFetchMock(
       const changed = detail.pinned !== pinned;
       state.details[runId] = { ...detail, pinned };
       state.runs = state.runs.map((run) => (run.runId === runId ? { ...run, pinned } : run));
-      return new Response(JSON.stringify({ result: { runId, pinned, changed } }), { status: 200 });
+      return new Response(
+        JSON.stringify({ result: { runId, updatedAt: detail.updatedAt, pinned, changed } }),
+        { status: 200 },
+      );
     }
 
     const backendSessionMatch = /\/api\/runs\/([^/]+)\/backend-session$/.exec(url);
@@ -1134,9 +1149,12 @@ function installFetchMock(
       }
       const changed = detail.backendSessionId !== backendSessionId;
       state.details[runId] = { ...detail, backendSessionId };
-      return new Response(JSON.stringify({ result: { runId, backendSessionId, changed } }), {
-        status: 200,
-      });
+      return new Response(
+        JSON.stringify({
+          result: { runId, updatedAt: detail.updatedAt, backendSessionId, changed },
+        }),
+        { status: 200 },
+      );
     }
 
     const clearBackendSessionMatch = /\/api\/runs\/([^/]+)\/backend-session\/clear$/.exec(url);
@@ -1150,9 +1168,12 @@ function installFetchMock(
       }
       const changed = detail.backendSessionId !== null;
       state.details[runId] = { ...detail, backendSessionId: null };
-      return new Response(JSON.stringify({ result: { runId, backendSessionId: null, changed } }), {
-        status: 200,
-      });
+      return new Response(
+        JSON.stringify({
+          result: { runId, updatedAt: detail.updatedAt, backendSessionId: null, changed },
+        }),
+        { status: 200 },
+      );
     }
 
     const setGroupMatch = /\/api\/runs\/([^/]+)\/group$/.exec(url);
@@ -1176,6 +1197,7 @@ function installFetchMock(
         JSON.stringify({
           result: {
             runId,
+            updatedAt: detail.updatedAt,
             runGroupId,
             previousRunGroupId,
             changed: previousRunGroupId !== runGroupId,
@@ -1203,6 +1225,7 @@ function installFetchMock(
         JSON.stringify({
           result: {
             runId,
+            updatedAt: detail.updatedAt,
             runGroupId: runId,
             previousRunGroupId,
             changed: previousRunGroupId !== runId,
@@ -1258,6 +1281,7 @@ function installFetchMock(
         JSON.stringify({
           result: {
             runId,
+            updatedAt: detail.updatedAt,
             dependencies: detail.dependencies.map((dependency) =>
               dependency.type === "run"
                 ? { type: "run", runId: dependency.runId }
@@ -1310,6 +1334,7 @@ function installFetchMock(
         JSON.stringify({
           result: {
             runId,
+            updatedAt: detail.updatedAt,
             dependencies: detail.dependencies.map((dependency) =>
               dependency.type === "run"
                 ? { type: "run", runId: dependency.runId }
@@ -1348,6 +1373,7 @@ function installFetchMock(
         JSON.stringify({
           result: {
             runId,
+            updatedAt: detail.updatedAt,
             dependencies: [],
             changed: priorDependencyIds.length > 0,
           },
@@ -1767,6 +1793,7 @@ describe("web app", () => {
     expect(hasEventSource("/api/runs/run-1/events/timeline")).toBe(false);
     expect(hasEventSource("/api/runs/run-1/events/audit")).toBe(false);
 
+    await user.click(screen.getByRole("tab", { name: "Detail" }));
     await user.click(screen.getByRole("button", { name: "Attempts" }));
     const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
     timelineSource.emitOpen();
@@ -1776,7 +1803,11 @@ describe("web app", () => {
     );
     expect(fetchCallCount(fetchMock, (url) => url.endsWith("/api/runs/run-1/timeline"))).toBe(1);
 
-    await user.click(screen.getByRole("button", { name: /^Tasks\b/ }));
+    await user.click(
+      within(screen.getByRole("tablist", { name: "Run surface" })).getByRole("tab", {
+        name: "Tasks",
+      }),
+    );
     timelineSource.emitMessage({
       runId: "run-1",
       cursor: 2,
@@ -1785,6 +1816,7 @@ describe("web app", () => {
         text: " while away",
       },
     });
+    await user.click(screen.getByRole("tab", { name: "Detail" }));
     await user.click(screen.getByRole("button", { name: "Attempts" }));
     expect(await screen.findByRole("region", { name: "Attempt response" })).toHaveTextContent(
       "Deferred response while away",
@@ -1807,7 +1839,7 @@ describe("web app", () => {
       fetchCallCount(fetchMock, (url) => /\/api\/runs\/run-1\/audit(?:\?.*)?$/.test(url)),
     ).toBe(1);
 
-    await user.click(screen.getByRole("button", { name: /^Tasks\b/ }));
+    await user.click(within(auditPanel).getByRole("tab", { name: "Tasks" }));
     auditSource.emitMessage({
       runId: "run-1",
       cursor: 2,
@@ -1848,7 +1880,7 @@ describe("web app", () => {
     expect(container.querySelector(".dashboard-right-surfaces")).toBeNull();
   });
 
-  it("opens a selected-run panel and switches between Chat and Detail tabs", async () => {
+  it("opens a selected-run panel and switches between Chat, Detail, Notes, and Tasks tabs", async () => {
     installFetchMock({
       runs: [makeRun()],
       details: { "run-1": makeDetail() },
@@ -1860,6 +1892,7 @@ describe("web app", () => {
 
     await user.click(await findRunCard("Build dashboard"));
     expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
+    expect(screen.getByLabelText("Tasks")).toBeInTheDocument();
 
     const tablist = await screen.findByRole("tablist", { name: "Run surface" });
     await user.click(within(tablist).getByRole("tab", { name: "Chat" }));
@@ -1867,10 +1900,16 @@ describe("web app", () => {
     await user.type(await screen.findByLabelText("Message"), "keep this draft");
 
     await user.click(within(tablist).getByRole("tab", { name: "Detail" }));
-    expect(screen.getByLabelText("Tasks")).toBeInTheDocument();
+    expect(screen.getByLabelText("Attachments")).toBeInTheDocument();
     expect(screen.getByLabelText("Run chat").closest(".drawer-body--chat")).toHaveAttribute(
       "hidden",
     );
+
+    await user.click(within(tablist).getByRole("tab", { name: "Notes" }));
+    expect(screen.getByLabelText("Notes")).toBeInTheDocument();
+
+    await user.click(within(tablist).getByRole("tab", { name: /Tasks/ }));
+    expect(screen.getByLabelText("Tasks")).toBeInTheDocument();
 
     await user.click(within(tablist).getByRole("tab", { name: "Chat" }));
     expect(await screen.findByLabelText("Message")).toHaveValue("keep this draft");
@@ -1881,7 +1920,7 @@ describe("web app", () => {
     });
   });
 
-  it("switches the active selected-run surface from the Chat and Detail tabs", async () => {
+  it("switches the active selected-run surface from the Chat, Detail, Notes, and Tasks tabs", async () => {
     setStoredDashboardViewState({ activeRightSurface: "detail" });
     installFetchMock({
       runs: [makeRun()],
@@ -1894,13 +1933,17 @@ describe("web app", () => {
     const tablist = await screen.findByRole("tablist", { name: "Run surface" });
     const detailTab = within(tablist).getByRole("tab", { name: "Detail" });
     const chatTab = within(tablist).getByRole("tab", { name: "Chat" });
+    const notesTab = within(tablist).getByRole("tab", { name: "Notes" });
+    const tasksTab = within(tablist).getByRole("tab", { name: /Tasks/ });
     expect(
       within(tablist)
         .getAllByRole("tab")
         .map((tab) => tab.textContent),
-    ).toEqual(["Chat", "Detail"]);
+    ).toEqual(["Chat", "Detail", "Notes", "Tasks"]);
     expect(detailTab).toHaveAttribute("aria-selected", "true");
     expect(chatTab).toHaveAttribute("aria-selected", "false");
+    expect(notesTab).toHaveAttribute("aria-selected", "false");
+    expect(tasksTab).toHaveAttribute("aria-selected", "false");
     expect(screen.getByLabelText("Run chat").closest(".drawer-body--chat")).toHaveAttribute(
       "hidden",
     );
@@ -1916,6 +1959,81 @@ describe("web app", () => {
     expect(screen.getByLabelText("Run chat").closest(".drawer-body--chat")).toHaveAttribute(
       "hidden",
     );
+
+    await user.click(notesTab);
+    expect(notesTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("Notes")).toBeInTheDocument();
+
+    await user.click(tasksTab);
+    expect(tasksTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("Tasks")).toBeInTheDocument();
+  });
+
+  it("switches the active selected-run surface with keyboard shortcuts", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "detail" });
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+
+    const tablist = await screen.findByRole("tablist", { name: "Run surface" });
+    const detailTab = within(tablist).getByRole("tab", { name: "Detail" });
+    const chatTab = within(tablist).getByRole("tab", { name: "Chat" });
+    const notesTab = within(tablist).getByRole("tab", { name: "Notes" });
+    const tasksTab = within(tablist).getByRole("tab", { name: /Tasks/ });
+    expect(detailTab).toHaveAttribute("aria-selected", "true");
+
+    await user.keyboard("c");
+    expect(chatTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("Run chat").closest(".drawer-body--chat")).not.toHaveAttribute(
+      "hidden",
+    );
+    const message = await screen.findByLabelText("Message");
+    await waitFor(() => {
+      expect(message).toBeEnabled();
+    });
+    expect(message).not.toHaveFocus();
+
+    await user.keyboard("c");
+    expect(message).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+    expect(message).not.toHaveFocus();
+
+    await user.keyboard("d");
+    expect(detailTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("Run chat").closest(".drawer-body--chat")).toHaveAttribute(
+      "hidden",
+    );
+
+    await user.keyboard("n");
+    expect(notesTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("Notes")).toBeInTheDocument();
+    const noteInput = screen.queryByRole("textbox", {
+      name: /run note for build dashboard/i,
+    });
+    expect(noteInput).not.toBeInTheDocument();
+
+    await user.keyboard("n");
+    expect(
+      await screen.findByRole("textbox", {
+        name: /run note for build dashboard/i,
+      }),
+    ).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+    expect(
+      screen.queryByRole("textbox", {
+        name: /run note for build dashboard/i,
+      }),
+    ).not.toBeInTheDocument();
+
+    await user.keyboard("t");
+    expect(tasksTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("Tasks")).toBeInTheDocument();
   });
 
   it("renders selected-run Chat, activates the existing timeline once, and streams deltas", async () => {
@@ -2226,6 +2344,35 @@ describe("web app", () => {
     });
   });
 
+  it("blurs the Chat composer on Escape before closing the selected run", async () => {
+    setStoredDashboardViewState({ activeRightSurface: "chat" });
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    const user = userEvent.setup();
+    await renderApp("/runs/run-1");
+
+    const message = await screen.findByLabelText("Message");
+    await waitFor(() => {
+      expect(message).toBeEnabled();
+    });
+    await user.type(message, "draft stays");
+    expect(message).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+
+    expect(message).not.toHaveFocus();
+    expect(message).toHaveValue("draft stays");
+    expect(screen.getByRole("tablist", { name: "Run surface" })).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(screen.queryByRole("tablist", { name: "Run surface" })).not.toBeInTheDocument();
+    });
+  });
+
   it("keeps the Chat composer editable for selected runs that cannot submit", async () => {
     setStoredDashboardViewState({ activeRightSurface: "chat" });
     let resumeRequestCount = 0;
@@ -2407,6 +2554,7 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
+    await user.click(screen.getByRole("tab", { name: "Detail" }));
     await user.click(screen.getByRole("button", { name: "Attempts" }));
 
     const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
@@ -2533,6 +2681,7 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
+    await user.click(screen.getByRole("tab", { name: "Detail" }));
     await user.click(screen.getByRole("button", { name: "Attempts" }));
 
     expect(await screen.findByRole("tab", { name: "Pending" })).toBeInTheDocument();
@@ -2733,6 +2882,7 @@ describe("web app", () => {
     expect(hasEventSource("/api/runs/run-1/events/timeline")).toBe(false);
     expect(hasEventSource("/api/runs/run-1/events/audit")).toBe(false);
 
+    await user.click(screen.getByRole("tab", { name: "Detail" }));
     await user.click(screen.getByRole("button", { name: "Attempts" }));
     expect(await screen.findByRole("region", { name: "Attempt response" })).toHaveTextContent(
       "Completed attempt",
@@ -2874,6 +3024,7 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
+    await user.click(screen.getByRole("tab", { name: "Detail" }));
     await user.click(screen.getByRole("button", { name: "Attempts" }));
 
     const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
@@ -2937,6 +3088,7 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
+    await user.click(screen.getByRole("tab", { name: "Detail" }));
     await user.click(screen.getByRole("button", { name: "Attempts" }));
 
     const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
@@ -2986,6 +3138,7 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
+    await user.click(screen.getByRole("tab", { name: "Detail" }));
     await user.click(screen.getByRole("button", { name: "Attempts" }));
 
     const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
@@ -3008,15 +3161,16 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
+    await user.click(await screen.findByRole("tab", { name: "Detail" }));
 
     const runSections = await screen.findByRole("navigation", { name: "Run sections" });
     expect(runSections).toHaveClass("tabs", "tabs--scrollable");
-    expect(runSections.querySelectorAll(":scope > .tab")).toHaveLength(7);
+    expect(runSections.querySelectorAll(":scope > .tab")).toHaveLength(5);
     expect(
       [...runSections.querySelectorAll(":scope > .tab")].map((tab) =>
         tab.textContent?.replace(/\s+\S+\/\S+$/, "").trim(),
       ),
-    ).toEqual(["Tasks", "Attempts", "Attachments", "Data", "Audit", "Dependencies", "Notes"]);
+    ).toEqual(["Attachments", "Attempts", "Audit", "Data", "Dependencies"]);
   });
 
   it("omits Attempts but keeps Audit and Data in the passive run-section tab strip", async () => {
@@ -3032,14 +3186,15 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
+    await user.click(await screen.findByRole("tab", { name: "Detail" }));
 
     const runSections = await screen.findByRole("navigation", { name: "Run sections" });
-    expect(runSections.querySelectorAll(":scope > .tab")).toHaveLength(6);
+    expect(runSections.querySelectorAll(":scope > .tab")).toHaveLength(4);
     expect(
       [...runSections.querySelectorAll(":scope > .tab")].map((tab) =>
         tab.textContent?.replace(/\s+\S+\/\S+$/, "").trim(),
       ),
-    ).toEqual(["Tasks", "Attachments", "Data", "Audit", "Dependencies", "Notes"]);
+    ).toEqual(["Attachments", "Audit", "Data", "Dependencies"]);
     expect(within(runSections).getByRole("button", { name: "Audit" })).toBeInTheDocument();
     expect(within(runSections).getByRole("button", { name: "Data" })).toBeInTheDocument();
     expect(within(runSections).queryByRole("button", { name: "Attempts" })).not.toBeInTheDocument();
@@ -3839,6 +3994,7 @@ describe("web app", () => {
     const user = userEvent.setup();
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
+    await user.click(screen.getByRole("tab", { name: "Detail" }));
     await user.click(screen.getByRole("button", { name: "Attempts" }));
 
     const timelineSource = findEventSource("/api/runs/run-1/events/timeline");
@@ -4402,6 +4558,11 @@ describe("web app", () => {
 
     await user.click(await findRunCard("Build dashboard"));
     await screen.findByLabelText("Run detail");
+    await user.click(
+      within(screen.getByRole("tablist", { name: "Run surface" })).getByRole("tab", {
+        name: "Tasks",
+      }),
+    );
 
     expect(screen.queryByText("Ship the web UI")).not.toBeInTheDocument();
     expect(screen.queryByText("working")).not.toBeInTheDocument();
@@ -5892,6 +6053,12 @@ describe("web app", () => {
     expect(screen.getByLabelText("Shortcut: Ctrl + Shift + A")).toBeInTheDocument();
     expect(screen.getByLabelText("Shortcut: Ctrl + Shift + E")).toBeInTheDocument();
     expect(screen.getByText("Toggle notes-only filter")).toBeInTheDocument();
+    expect(screen.getByLabelText("Shortcut: C")).toBeInTheDocument();
+    expect(screen.getByLabelText("Shortcut: D")).toBeInTheDocument();
+    expect(screen.getByLabelText("Shortcut: T")).toBeInTheDocument();
+    expect(screen.getByText("Switch to Chat")).toBeInTheDocument();
+    expect(screen.getByText("Switch to Detail")).toBeInTheDocument();
+    expect(screen.getByText("Switch to Tasks")).toBeInTheDocument();
 
     await user.click(getSidebarNavigation().getByRole("button", { name: "Runs" }));
 
@@ -6020,6 +6187,11 @@ describe("web app", () => {
     await renderApp();
     await user.click(await findRunCard("Build dashboard"));
     await screen.findByLabelText("Run detail");
+    await user.click(
+      within(screen.getByRole("tablist", { name: "Run surface" })).getByRole("tab", {
+        name: "Tasks",
+      }),
+    );
     await user.click(screen.getByRole("button", { name: /render markdown/i, expanded: false }));
 
     expect(await screen.findByText("Done when:")).toBeInTheDocument();
@@ -6248,7 +6420,12 @@ describe("web app", () => {
     await user.click(screen.getByRole("button", { name: /^save$/i }));
 
     await user.click(card);
-    await user.click(screen.getByRole("button", { name: "Notes" }));
+    await user.click(screen.getByRole("tab", { name: "Detail" }));
+    await user.click(
+      within(screen.getByRole("tablist", { name: "Run surface" })).getByRole("tab", {
+        name: "Notes",
+      }),
+    );
 
     expect(await screen.findByText("Dashboard polish")).toBeInTheDocument();
     expect(screen.getByText("Saved from card")).toBeInTheDocument();
@@ -6308,7 +6485,8 @@ describe("web app", () => {
       }),
     );
 
-    expect(screen.getByRole("button", { name: "View" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Edit" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "View" })).not.toBeInTheDocument();
     expect(await screen.findByText("Touch-first note")).toBeInTheDocument();
     expect(
       screen.queryByRole("textbox", { name: /run note for build dashboard/i }),
@@ -6705,6 +6883,51 @@ describe("web app", () => {
     await waitFor(() => expect(screen.getAllByText("group-b/run-1").length).toBeGreaterThan(0));
   });
 
+  it("persists compact toolbar sort controls", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: {
+        "run-1": makeDetail(),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await findRunCard("Build dashboard");
+
+    expect(screen.getByRole("combobox", { name: "Sort by started time" })).toHaveValue("startedAt");
+    expect(screen.getByRole("button", { name: "Latest first" })).toHaveAttribute(
+      "title",
+      "Latest first",
+    );
+
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Sort by started time" }),
+      "updatedAt",
+    );
+    expect(screen.getByRole("combobox", { name: "Sort by last updated" })).toHaveValue("updatedAt");
+
+    await user.click(screen.getByRole("button", { name: "Latest first" }));
+    expect(screen.getByRole("button", { name: "Earliest first" })).toHaveAttribute(
+      "title",
+      "Earliest first",
+    );
+
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Sort by last updated" }),
+      "endedAt",
+    );
+    expect(screen.getByRole("combobox", { name: "Sort by ended time" })).toHaveValue("endedAt");
+
+    const stored = window.localStorage.getItem("task-runner:web:dashboard-preferences");
+    expect(stored ? JSON.parse(stored) : null).toEqual(
+      expect.objectContaining({
+        sortField: "endedAt",
+        sortDirection: "asc",
+      }),
+    );
+  });
+
   it("keeps toolbar toggles and settings rows synchronized through persisted preferences", async () => {
     installFetchMock({
       runs: [
@@ -6786,7 +7009,8 @@ describe("web app", () => {
       name: "Show scheduled runs only",
     });
     const showPinnedOnly = screen.getByRole("checkbox", { name: "Show pinned runs only" });
-    const sortByRecentUpdates = screen.getByRole("checkbox", { name: "Sort by recent updates" });
+    const boardSortField = screen.getByRole("combobox", { name: "Board sort field" });
+    const boardSortDirection = screen.getByRole("combobox", { name: "Board sort direction" });
     const visibleFocusIndicators = screen.getByRole("checkbox", {
       name: "Visible focus indicators",
     });
@@ -6797,12 +7021,13 @@ describe("web app", () => {
     expect(showArchived).toBeChecked();
     expect(showScheduledOnly).not.toBeChecked();
     expect(showPinnedOnly).not.toBeChecked();
-    expect(sortByRecentUpdates).not.toBeChecked();
+    expect(boardSortField).toHaveValue("startedAt");
+    expect(boardSortDirection).toHaveValue("desc");
     expect(visibleFocusIndicators).not.toBeChecked();
 
-    await user.click(sortByRecentUpdates);
+    await user.selectOptions(boardSortField, "updatedAt");
     await user.click(visibleFocusIndicators);
-    expect(sortByRecentUpdates).toBeChecked();
+    expect(boardSortField).toHaveValue("updatedAt");
     expect(visibleFocusIndicators).toBeChecked();
     expect(appShell).toHaveAttribute("data-focus-indicators", "on");
 
@@ -6814,7 +7039,8 @@ describe("web app", () => {
       showNotesOnly: false,
       showScheduledOnly: false,
       showPinnedOnly: false,
-      sortByRecentUpdates: true,
+      sortField: "updatedAt",
+      sortDirection: "desc",
       auditNewestFirst: false,
       visibleFocusIndicators: true,
       structuredFilters: {
@@ -6832,7 +7058,8 @@ describe("web app", () => {
     await user.click(getSidebarNavigation().getByRole("button", { name: "Settings" }));
     expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Show archived runs" })).toBeChecked();
-    expect(screen.getByRole("checkbox", { name: "Sort by recent updates" })).toBeChecked();
+    expect(screen.getByRole("combobox", { name: "Board sort field" })).toHaveValue("updatedAt");
+    expect(screen.getByRole("combobox", { name: "Board sort direction" })).toHaveValue("desc");
     expect(screen.getByRole("checkbox", { name: "Visible focus indicators" })).toBeChecked();
     expect(document.querySelector(".app")).toHaveAttribute("data-focus-indicators", "on");
 
@@ -6999,7 +7226,7 @@ describe("web app", () => {
     expect(screen.queryByRole("button", { name: /plain dashboard/i })).not.toBeInTheDocument();
   });
 
-  it("pins a selected run without forcing list and detail refetches while streams are healthy", async () => {
+  it("pins a selected run and updates canonical timestamps from the mutation result", async () => {
     const fetchMock = installFetchMock({
       runs: [makeRun({ assignmentName: "Build dashboard" })],
       details: {
@@ -7032,7 +7259,7 @@ describe("web app", () => {
     expect(callsAfter).toEqual(["/api/runs/run-1/pinned"]);
   });
 
-  it("opens the selected run note modal with n, suppresses board shortcuts, and closes on native cancel", async () => {
+  it("opens the selected run Notes tab with n, focuses the editor, and saves with Alt+Enter", async () => {
     const fetchMock = installFetchMock({
       runs: [makeRun({ assignmentName: "Build dashboard" })],
       details: {
@@ -7050,22 +7277,66 @@ describe("web app", () => {
     await user.click(await findRunCard("Build dashboard"));
 
     await user.keyboard("n");
+    const tablist = await screen.findByRole("tablist", { name: "Run surface" });
+    expect(within(tablist).getByRole("tab", { name: "Notes" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.queryByRole("dialog", { name: "Build dashboard" })).not.toBeInTheDocument();
+
+    await user.keyboard("n");
     const noteInput = await screen.findByRole("textbox", {
       name: /run note for build dashboard/i,
     });
     expect(noteInput).toHaveFocus();
-    const noteDialog = screen.getByRole("dialog", { name: "Build dashboard" });
 
     const callsBeforeSuppressedPin = fetchMock.mock.calls.length;
+    await user.type(noteInput, "Keyboard note");
     await user.keyboard("p");
     expect(
       fetchMock.mock.calls
         .slice(callsBeforeSuppressedPin)
         .some(([input]) => String(input).endsWith("/api/runs/run-1/pinned")),
     ).toBe(false);
-    expect(noteDialog).toBeInTheDocument();
+    expect(noteInput).toHaveValue("Keyboard notep");
 
-    nativeCancel(noteDialog);
+    fireEvent.keyDown(noteInput, { altKey: true, key: "Enter" });
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/runs/run-1/note",
+        expect.objectContaining({
+          body: JSON.stringify({ note: "Keyboard notep" }),
+          method: "POST",
+        }),
+      ),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("textbox", { name: /run note for build dashboard/i }),
+      ).not.toBeInTheDocument(),
+    );
+
+    await user.keyboard("n");
+    const dirtyNoteInput = await screen.findByRole("textbox", {
+      name: /run note for build dashboard/i,
+    });
+    await user.type(dirtyNoteInput, " dirty");
+    await user.keyboard("{Escape}");
+    const confirmDialog = await screen.findByRole("dialog", { name: "Save note changes?" });
+    await user.click(within(confirmDialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Save note changes?" })).not.toBeInTheDocument(),
+    );
+    expect(dirtyNoteInput).toHaveFocus();
+    await user.keyboard("{Escape}");
+    await user.click(
+      within(await screen.findByRole("dialog", { name: "Save note changes?" })).getByRole(
+        "button",
+        {
+          name: "Discard",
+        },
+      ),
+    );
     await waitFor(() =>
       expect(
         screen.queryByRole("textbox", { name: /run note for build dashboard/i }),
@@ -7300,7 +7571,10 @@ describe("web app", () => {
     expect(screen.queryByRole("checkbox", { name: "Hide empty columns" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("checkbox", { name: "Collapse failure states" }));
     await user.click(screen.getByRole("checkbox", { name: "Show archived runs" }));
-    await user.click(screen.getByRole("checkbox", { name: "Sort by recent updates" }));
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Board sort field" }),
+      "updatedAt",
+    );
     await user.click(screen.getByRole("checkbox", { name: "Visible focus indicators" }));
     expect(document.querySelector(".app")).toHaveAttribute("data-focus-indicators", "on");
 
@@ -7309,7 +7583,8 @@ describe("web app", () => {
     expect(screen.queryByRole("checkbox", { name: "Hide empty columns" })).not.toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Collapse failure states" })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "Show archived runs" })).not.toBeChecked();
-    expect(screen.getByRole("checkbox", { name: "Sort by recent updates" })).not.toBeChecked();
+    expect(screen.getByRole("combobox", { name: "Board sort field" })).toHaveValue("startedAt");
+    expect(screen.getByRole("combobox", { name: "Board sort direction" })).toHaveValue("desc");
     expect(screen.getByRole("checkbox", { name: "Visible focus indicators" })).not.toBeChecked();
     expect(document.querySelector(".app")).toHaveAttribute("data-focus-indicators", "off");
     expect(screen.getByRole("button", { name: "Restore defaults" })).toBeDisabled();
@@ -7351,7 +7626,8 @@ describe("web app", () => {
       showNotesOnly: false,
       showScheduledOnly: false,
       showPinnedOnly: false,
-      sortByRecentUpdates: false,
+      sortField: "startedAt",
+      sortDirection: "desc",
       auditNewestFirst: false,
       visibleFocusIndicators: false,
       structuredFilters: {
@@ -7393,7 +7669,8 @@ describe("web app", () => {
       showNotesOnly: false,
       showScheduledOnly: false,
       showPinnedOnly: false,
-      sortByRecentUpdates: false,
+      sortField: "startedAt",
+      sortDirection: "desc",
       auditNewestFirst: false,
       visibleFocusIndicators: false,
       structuredFilters: {
@@ -7449,14 +7726,14 @@ describe("web app", () => {
     expect(chatSendRule?.[0]).toContain("bottom: 10px;");
   });
 
-  it("hides inactive selected-run Chat and Detail tab bodies from layout", () => {
+  it("hides inactive selected-run surface bodies from layout", () => {
     const css = readFileSync(join(process.cwd(), "src", "styles.css"), "utf8");
     const hiddenDrawerBodyRule = /\.drawer-body\[hidden\]\s*\{[\s\S]*?\n\}/.exec(css);
 
     expect(hiddenDrawerBodyRule?.[0]).toContain("display: none;");
   });
 
-  it("shows mobile Chat and Detail surfaces as full-viewport overlays", () => {
+  it("shows mobile selected-run surfaces as full-viewport overlays", () => {
     const css = readFileSync(join(process.cwd(), "src", "styles.css"), "utf8");
 
     expect(css).toMatch(
@@ -7505,7 +7782,8 @@ describe("web app", () => {
         collapseFailureStates: "yes",
         hideEmptyColumns: "no",
         showArchived: "sure",
-        sortByRecentUpdates: "yes",
+        sortField: "changedAt",
+        sortDirection: "newest",
         visibleFocusIndicators: "sure",
       }),
     );
@@ -7575,7 +7853,8 @@ describe("web app", () => {
 
     await user.click(getSidebarNavigation().getByRole("button", { name: "Settings" }));
     expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
-    expect(screen.getByRole("checkbox", { name: "Sort by recent updates" })).not.toBeChecked();
+    expect(screen.getByRole("combobox", { name: "Board sort field" })).toHaveValue("startedAt");
+    expect(screen.getByRole("combobox", { name: "Board sort direction" })).toHaveValue("desc");
   });
 
   it("collapses and expands a board column on desktop", async () => {
@@ -9617,8 +9896,8 @@ describe("web app", () => {
     expect(fetchMock).toHaveBeenCalledTimes(callsBefore);
   });
 
-  it("promotes an updated run to the top of its column in recent-updates mode", async () => {
-    setStoredDashboardPreferences({ sortByRecentUpdates: true });
+  it("promotes an updated run to the top of its column in last-updated sort mode", async () => {
+    setStoredDashboardPreferences({ sortField: "updatedAt", sortDirection: "desc" });
     const fetchMock = installFetchMock({
       runs: [
         makeRun({
@@ -9626,12 +9905,14 @@ describe("web app", () => {
           assignmentName: "Newest run",
           name: "Newest run",
           startedAt: "2026-04-13T05:05:00.000Z",
+          updatedAt: "2026-04-13T05:05:00.000Z",
         }),
         makeRun({
           runId: "run-older",
           assignmentName: "Older run",
           name: "Older run",
           startedAt: "2026-04-13T05:00:00.000Z",
+          updatedAt: "2026-04-13T05:00:00.000Z",
         }),
       ],
       details: {
@@ -9643,6 +9924,7 @@ describe("web app", () => {
           },
           name: "Newest run",
           startedAt: "2026-04-13T05:05:00.000Z",
+          updatedAt: "2026-04-13T05:05:00.000Z",
         }),
         "run-older": makeDetail({
           runId: "run-older",
@@ -9652,6 +9934,7 @@ describe("web app", () => {
           },
           name: "Older run",
           startedAt: "2026-04-13T05:00:00.000Z",
+          updatedAt: "2026-04-13T05:00:00.000Z",
         }),
       },
     });
@@ -9675,6 +9958,7 @@ describe("web app", () => {
         assignmentName: "Older run",
         name: "Older run",
         startedAt: "2026-04-13T05:00:00.000Z",
+        updatedAt: "2026-04-13T05:10:00.000Z",
       }),
     });
 
@@ -9686,7 +9970,7 @@ describe("web app", () => {
   });
 
   it("promotes a selected run into the top of its destination column from detail SSE", async () => {
-    setStoredDashboardPreferences({ sortByRecentUpdates: true });
+    setStoredDashboardPreferences({ sortField: "updatedAt", sortDirection: "desc" });
     installFetchMock({
       runs: [
         makeRun({
@@ -9694,12 +9978,14 @@ describe("web app", () => {
           assignmentName: "Selected run",
           name: "Selected run",
           startedAt: "2026-04-13T05:00:00.000Z",
+          updatedAt: "2026-04-13T05:00:00.000Z",
         }),
         makeRun({
           runId: "run-complete",
           assignmentName: "Completed run",
           name: "Completed run",
           startedAt: "2026-04-13T05:04:00.000Z",
+          updatedAt: "2026-04-13T05:04:00.000Z",
           status: "success",
         }),
       ],
@@ -9712,6 +9998,7 @@ describe("web app", () => {
           },
           name: "Selected run",
           startedAt: "2026-04-13T05:00:00.000Z",
+          updatedAt: "2026-04-13T05:00:00.000Z",
         }),
         "run-complete": makeDetail({
           runId: "run-complete",
@@ -9721,6 +10008,7 @@ describe("web app", () => {
           },
           name: "Completed run",
           startedAt: "2026-04-13T05:04:00.000Z",
+          updatedAt: "2026-04-13T05:04:00.000Z",
           status: "success",
         }),
       },
@@ -9743,6 +10031,7 @@ describe("web app", () => {
         },
         name: "Selected run",
         startedAt: "2026-04-13T05:00:00.000Z",
+        updatedAt: "2026-04-13T05:10:00.000Z",
         status: "success",
       }),
     });
@@ -9752,8 +10041,8 @@ describe("web app", () => {
     });
   });
 
-  it("marks brand-new runs as inserts and places them at the top in recent-updates mode", async () => {
-    setStoredDashboardPreferences({ sortByRecentUpdates: true });
+  it("marks brand-new runs as inserts and places them at the top in last-updated sort mode", async () => {
+    setStoredDashboardPreferences({ sortField: "updatedAt", sortDirection: "desc" });
     installFetchMock({
       runs: [
         makeRun({
@@ -9761,6 +10050,7 @@ describe("web app", () => {
           assignmentName: "Existing run",
           name: "Existing run",
           startedAt: "2026-04-13T05:05:00.000Z",
+          updatedAt: "2026-04-13T05:05:00.000Z",
         }),
       ],
       details: {
@@ -9772,6 +10062,7 @@ describe("web app", () => {
           },
           name: "Existing run",
           startedAt: "2026-04-13T05:05:00.000Z",
+          updatedAt: "2026-04-13T05:05:00.000Z",
         }),
       },
     });
@@ -9792,6 +10083,7 @@ describe("web app", () => {
         assignmentName: "Inserted run",
         name: "Inserted run",
         startedAt: "2026-04-13T04:50:00.000Z",
+        updatedAt: "2026-04-13T05:10:00.000Z",
       }),
     });
 
@@ -9824,7 +10116,7 @@ describe("web app", () => {
     );
 
     try {
-      setStoredDashboardPreferences({ sortByRecentUpdates: true });
+      setStoredDashboardPreferences({ sortField: "updatedAt", sortDirection: "desc" });
       installFetchMock({
         runs: [
           makeRun({
@@ -9832,12 +10124,14 @@ describe("web app", () => {
             assignmentName: "Newest run",
             name: "Newest run",
             startedAt: "2026-04-13T05:05:00.000Z",
+            updatedAt: "2026-04-13T05:05:00.000Z",
           }),
           makeRun({
             runId: "run-older",
             assignmentName: "Older run",
             name: "Older run",
             startedAt: "2026-04-13T05:00:00.000Z",
+            updatedAt: "2026-04-13T05:00:00.000Z",
           }),
         ],
         details: {
@@ -9849,6 +10143,7 @@ describe("web app", () => {
             },
             name: "Newest run",
             startedAt: "2026-04-13T05:05:00.000Z",
+            updatedAt: "2026-04-13T05:05:00.000Z",
           }),
           "run-older": makeDetail({
             runId: "run-older",
@@ -9858,6 +10153,7 @@ describe("web app", () => {
             },
             name: "Older run",
             startedAt: "2026-04-13T05:00:00.000Z",
+            updatedAt: "2026-04-13T05:00:00.000Z",
           }),
         },
       });
@@ -9878,6 +10174,7 @@ describe("web app", () => {
           assignmentName: "Older run",
           name: "Older run",
           startedAt: "2026-04-13T05:00:00.000Z",
+          updatedAt: "2026-04-13T05:10:00.000Z",
         }),
       });
 
@@ -10017,10 +10314,20 @@ describe("web app", () => {
 
     await user.click(await findRunCard("Second run"));
     expect(await screen.findByLabelText("Run detail")).toBeInTheDocument();
+    await user.click(
+      within(screen.getByRole("tablist", { name: "Run surface" })).getByRole("tab", {
+        name: "Tasks",
+      }),
+    );
     expect(
       await screen.findByRole("button", { name: /shared task/i, expanded: false }),
     ).toBeInTheDocument();
     expect(screen.queryByLabelText("Attachment preview")).not.toBeInTheDocument();
+    await user.click(
+      within(screen.getByRole("tablist", { name: "Run surface" })).getByRole("tab", {
+        name: "Detail",
+      }),
+    );
 
     await user.click(await findRunCard("Build dashboard"));
     expect(await screen.findByLabelText("Attachment preview")).toBeInTheDocument();
@@ -10519,15 +10826,10 @@ describe("web app", () => {
     screen.getByLabelText("Attachment preview").focus();
 
     await user.keyboard("{Enter}");
-    expect(await screen.findByRole("dialog", { name: "Resume run" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Resume run" })).not.toBeInTheDocument();
     expect(screen.getByLabelText("Attachment preview")).toBeInTheDocument();
     expect(screen.getByText("beta body")).toBeInTheDocument();
     expect(resumeRequestCount).toBe(0);
-
-    nativeCancel(screen.getByRole("dialog", { name: "Resume run" }));
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: "Resume run" })).not.toBeInTheDocument();
-    });
     expect(screen.getByLabelText("Attachment preview")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Expand drawer to full width" }));
@@ -10542,15 +10844,10 @@ describe("web app", () => {
     screen.getByLabelText("Attachment preview").focus();
 
     await user.keyboard("{Enter}");
-    expect(await screen.findByRole("dialog", { name: "Resume run" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Resume run" })).not.toBeInTheDocument();
     expect(screen.getByLabelText("Attachment preview")).toBeInTheDocument();
     expect(screen.getByText("beta body")).toBeInTheDocument();
     expect(resumeRequestCount).toBe(0);
-
-    nativeCancel(screen.getByRole("dialog", { name: "Resume run" }));
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: "Resume run" })).not.toBeInTheDocument();
-    });
     expect(screen.getByLabelText("Attachment preview")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Exit full-width drawer" })).toBeInTheDocument();
   });

@@ -270,6 +270,7 @@ export const runSummarySchema: z.ZodType<RunSummary> = z.object({
   model: z.string().nullable(),
   cwd: z.string(),
   startedAt: z.string(),
+  updatedAt: z.string(),
   endedAt: z.string().nullable(),
   totalAttemptCount: z.number(),
   totalSessionCount: z.number(),
@@ -320,6 +321,7 @@ export const runDetailSchema: z.ZodType<RunDetail> = z.object({
   unrestricted: z.boolean(),
   timeoutSec: z.number(),
   startedAt: z.string(),
+  updatedAt: z.string(),
   endedAt: z.string().nullable(),
   exitCode: z.number().nullable(),
   totalAttemptCount: z.number(),
@@ -353,6 +355,7 @@ export const runDetailSchema: z.ZodType<RunDetail> = z.object({
 
 export const runArchiveResultSchema: z.ZodType<RunArchiveResult> = z.object({
   runId: z.string(),
+  updatedAt: z.string(),
   status: runStatusSchema,
   archivedAt: z.string().nullable(),
   changed: z.boolean(),
@@ -360,36 +363,42 @@ export const runArchiveResultSchema: z.ZodType<RunArchiveResult> = z.object({
 
 export const runNameResultSchema: z.ZodType<RunNameResult> = z.object({
   runId: z.string(),
+  updatedAt: z.string(),
   name: z.string().nullable(),
   changed: z.boolean(),
 });
 
 export const runNoteResultSchema: z.ZodType<RunNoteResult> = z.object({
   runId: z.string(),
+  updatedAt: z.string(),
   note: z.string().nullable(),
   changed: z.boolean(),
 });
 
 export const runPinnedResultSchema: z.ZodType<RunPinnedResult> = z.object({
   runId: z.string(),
+  updatedAt: z.string(),
   pinned: z.boolean(),
   changed: z.boolean(),
 });
 
 export const runBackendSessionResultSchema: z.ZodType<RunBackendSessionResult> = z.object({
   runId: z.string(),
+  updatedAt: z.string(),
   backendSessionId: z.string().nullable(),
   changed: z.boolean(),
 });
 
 export const runDependenciesResultSchema: z.ZodType<RunDependenciesResult> = z.object({
   runId: z.string(),
+  updatedAt: z.string(),
   dependencies: z.array(runDependencyRefSchema),
   changed: z.boolean(),
 });
 
 export const runGroupResultSchema: z.ZodType<RunGroupResult> = z.object({
   runId: z.string(),
+  updatedAt: z.string(),
   runGroupId: z.string(),
   previousRunGroupId: z.string(),
   changed: z.boolean(),

@@ -195,13 +195,13 @@ export interface RunSchedule {
 // `timeoutSec` are all captured at init / fresh-run time and preserved
 // across all subsequent sessions.
 //
-// schemaVersion: 15 is the current manifest-canonical generation. Manifests written
+// schemaVersion: 16 is the current manifest-canonical generation. Manifests written
 // by earlier task-runner versions are not resumable by this version —
 // `isRunManifest` rejects them and
 // `resolveResumeTarget` surfaces a clear error telling the caller to
 // run the manifest migration.
 export interface RunManifest {
-  schemaVersion: 15;
+  schemaVersion: 16;
   runId: string;
   repo: string;
   agent: {
@@ -237,6 +237,7 @@ export interface RunManifest {
   timeoutSec: number;
   workspaceDir: string;
   startedAt: string;
+  updatedAt: string;
   endedAt: string | null;
   archivedAt: string | null;
   status: ManifestStatus;
@@ -413,8 +414,39 @@ function isValidRunSchedule(value: unknown): value is RunSchedule | null {
   );
 }
 
+function nextUpdatedAt(previous: string): string {
+  const now = new Date();
+  const previousMs = new Date(previous).getTime();
+  if (Number.isFinite(previousMs) && now.getTime() <= previousMs) {
+    return new Date(previousMs + 1).toISOString();
+  }
+  return now.toISOString();
+}
+
+function readPersistedUpdatedAt(path: string): string | null {
+  let raw: string;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    if (err.code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+  const parsed = JSON.parse(raw) as { updatedAt?: unknown };
+  if (typeof parsed.updatedAt !== "string") {
+    throw new Error(`manifest at ${path} is missing updatedAt`);
+  }
+  return parsed.updatedAt;
+}
+
 export function writeManifest(workspaceDir: string, manifest: RunManifest): void {
   const path = join(workspaceDir, MANIFEST_FILENAME);
+  const persistedUpdatedAt = readPersistedUpdatedAt(path);
+  if (persistedUpdatedAt !== null) {
+    manifest.updatedAt = nextUpdatedAt(persistedUpdatedAt);
+  }
   writeTextFileAtomic(path, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
@@ -456,39 +488,18 @@ export interface ListedRunManifest {
   manifest: RunManifest;
 }
 
-function normalizeRunManifest(
-  parsed: RunManifest & {
-    archivedAt?: string | null;
-    note?: string | null;
-    pinned?: boolean;
-    parentRunId?: string | null;
-    runtimeVarSources?: Record<string, RuntimeVarSourceRecord>;
-    resetSeed: RunManifest["resetSeed"] & {
-      parentRunId?: string | null;
-      runtimeVarSources?: Record<string, RuntimeVarSourceRecord>;
-    };
-  },
-): RunManifest {
+function normalizeRunManifest(parsed: RunManifest): RunManifest {
   return {
     ...parsed,
     launcher: cloneResolvedLauncherConfig(parsed.launcher),
     dependencies: cloneRunDependencyRefs(parsed.dependencies),
-    archivedAt: parsed.archivedAt ?? null,
-    note: parsed.note ?? null,
-    pinned: parsed.pinned ?? false,
-    parentRunId: parsed.parentRunId ?? null,
-    runtimeVarSources: cloneRuntimeVarSources(parsed.runtimeVarSources ?? {}),
+    runtimeVarSources: cloneRuntimeVarSources(parsed.runtimeVarSources),
     resetSeed: {
       ...parsed.resetSeed,
       launcher: cloneResolvedLauncherConfig(parsed.resetSeed.launcher),
       resolvedBackendArgs: cloneResolvedBackendArgs(parsed.resetSeed.resolvedBackendArgs),
       dependencies: cloneRunDependencyRefs(parsed.resetSeed.dependencies),
-      note: parsed.resetSeed.note ?? parsed.note ?? null,
-      pinned: parsed.resetSeed.pinned ?? parsed.pinned ?? false,
-      parentRunId: parsed.resetSeed.parentRunId ?? parsed.parentRunId ?? null,
-      runtimeVarSources: cloneRuntimeVarSources(
-        parsed.resetSeed.runtimeVarSources ?? parsed.runtimeVarSources ?? {},
-      ),
+      runtimeVarSources: cloneRuntimeVarSources(parsed.resetSeed.runtimeVarSources),
     },
   };
 }
@@ -510,16 +521,16 @@ function readManifestCandidate(candidate: string): RunManifest {
     typeof parsed === "object" &&
     "schemaVersion" in parsed &&
     typeof (parsed as { schemaVersion: unknown }).schemaVersion === "number" &&
-    (parsed as { schemaVersion: number }).schemaVersion !== 15
+    (parsed as { schemaVersion: number }).schemaVersion !== 16
   ) {
     const version = (parsed as { schemaVersion: number }).schemaVersion;
-    if (version === 14) {
+    if (version === 15) {
       throw new ResumeError(
-        `manifest at ${candidate} has schemaVersion 14; this version of task-runner requires schemaVersion 15. Run scripts/migrate-manifests-v15.mjs to migrate existing workspaces.`,
+        `manifest at ${candidate} has schemaVersion 15; this version of task-runner requires schemaVersion 16. Run scripts/migrate-manifests-v16.mjs to migrate existing workspaces.`,
       );
     }
     throw new ResumeError(
-      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 15. Run manifest migrations in order, ending with scripts/migrate-manifests-v15.mjs.`,
+      `manifest at ${candidate} has schemaVersion ${version}; this version of task-runner requires schemaVersion 16. Run manifest migrations in order, ending with scripts/migrate-manifests-v16.mjs.`,
     );
   }
   if (!isRunManifest(parsed)) {
@@ -671,7 +682,7 @@ export function findRunManifestsById(
 function isRunManifest(value: unknown): value is RunManifest {
   if (!value || typeof value !== "object") return false;
   const obj = value as Record<string, unknown>;
-  if (obj.schemaVersion !== 15) return false;
+  if (obj.schemaVersion !== 16) return false;
   if (typeof obj.runId !== "string") return false;
   if (typeof obj.repo !== "string") return false;
 
@@ -679,28 +690,17 @@ function isRunManifest(value: unknown): value is RunManifest {
   if ("assignmentPath" in obj) return false;
   if (typeof obj.backend !== "string") return false;
   if (obj.name !== null && typeof obj.name !== "string") return false;
-  if (obj.note !== undefined && obj.note !== null && typeof obj.note !== "string") return false;
-  if (obj.pinned !== undefined && typeof obj.pinned !== "boolean") return false;
+  if (obj.note !== null && typeof obj.note !== "string") return false;
+  if (typeof obj.pinned !== "boolean") return false;
   if (typeof obj.cwd !== "string") return false;
   if (typeof obj.workspaceDir !== "string") return false;
   if (typeof obj.startedAt !== "string") return false;
+  if (typeof obj.updatedAt !== "string") return false;
   if (!isManifestStatus(obj.status)) return false;
   if (!isValidRunGroupId(obj.runGroupId)) return false;
   if (!isValidRunDependencyRefs(obj.dependencies)) return false;
-  if (
-    obj.parentRunId !== undefined &&
-    obj.parentRunId !== null &&
-    typeof obj.parentRunId !== "string"
-  ) {
-    return false;
-  }
-  if (
-    obj.archivedAt !== undefined &&
-    obj.archivedAt !== null &&
-    typeof obj.archivedAt !== "string"
-  ) {
-    return false;
-  }
+  if (obj.parentRunId !== null && typeof obj.parentRunId !== "string") return false;
+  if (obj.archivedAt !== null && typeof obj.archivedAt !== "string") return false;
   if (!isValidRunSchedule(obj.schedule)) return false;
   if (typeof obj.timeoutSec !== "number") return false;
   if (typeof obj.unrestricted !== "boolean") return false;
@@ -846,34 +846,17 @@ function isRunManifest(value: unknown): value is RunManifest {
   if (!Array.isArray(resetSeed.lockedFields)) return false;
   if (resetSeed.message !== null && typeof resetSeed.message !== "string") return false;
   if (resetSeed.name !== null && typeof resetSeed.name !== "string") return false;
-  if (
-    resetSeed.note !== undefined &&
-    resetSeed.note !== null &&
-    typeof resetSeed.note !== "string"
-  ) {
-    return false;
-  }
-  if (resetSeed.pinned !== undefined && typeof resetSeed.pinned !== "boolean") return false;
+  if (resetSeed.note !== null && typeof resetSeed.note !== "string") return false;
+  if (typeof resetSeed.pinned !== "boolean") return false;
   if (!isValidRunGroupId(resetSeed.runGroupId)) return false;
   if (!isValidRunDependencyRefs(resetSeed.dependencies)) return false;
-  if (
-    resetSeed.parentRunId !== undefined &&
-    resetSeed.parentRunId !== null &&
-    typeof resetSeed.parentRunId !== "string"
-  ) {
-    return false;
-  }
+  if (resetSeed.parentRunId !== null && typeof resetSeed.parentRunId !== "string") return false;
   if (typeof resetSeed.unrestricted !== "boolean") return false;
   if (typeof resetSeed.timeoutSec !== "number") return false;
   if (typeof resetSeed.maxAttemptsPerSession !== "number") return false;
   if (typeof resetSeed.brief !== "string") return false;
   if (!resetSeed.runtimeVars || typeof resetSeed.runtimeVars !== "object") return false;
-  if (
-    resetSeed.runtimeVarSources !== undefined &&
-    (!resetSeed.runtimeVarSources || typeof resetSeed.runtimeVarSources !== "object")
-  ) {
-    return false;
-  }
+  if (!resetSeed.runtimeVarSources || typeof resetSeed.runtimeVarSources !== "object") return false;
   if (!resetSeed.hookState || typeof resetSeed.hookState !== "object") return false;
   if (!Array.isArray(resetSeed.attachments)) return false;
   if (!resetSeed.finalTasks || typeof resetSeed.finalTasks !== "object") return false;

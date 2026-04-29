@@ -139,6 +139,10 @@ function readManifest(workspaceDir) {
   return JSON.parse(readFileSync(join(workspaceDir, "run.json"), "utf8"));
 }
 
+function assertTimestampAdvanced(before, after, label) {
+  assert.ok(after > before, `${label}: expected ${after} to be after ${before}`);
+}
+
 test("passive agent: init creates manifest with backend=passive, status=initialized", async () => {
   const dir = tempDir();
   writeAgent(dir, "passive-agent", PASSIVE_AGENT);
@@ -216,16 +220,20 @@ test("passive auto-finalize: status flips to success when every task is complete
   writeAgent(dir, "passive-agent", PASSIVE_AGENT);
   writeAssignment(dir, "two-task", TWO_TASK_ASSIGNMENT);
   const outcome = await initPassive(dir);
+  const initialUpdatedAt = readManifest(outcome.workspaceDir).updatedAt;
 
   runCli(["task", "set", outcome.runId, "t1", "--status", "completed"], { cwd: dir });
   // Still work to do — status should remain initialized
   let m = readManifest(outcome.workspaceDir);
+  assertTimestampAdvanced(initialUpdatedAt, m.updatedAt, "passive first task updatedAt");
+  const afterFirstTask = m.updatedAt;
   assert.equal(m.status, "initialized");
   assert.equal(m.exitCode, null);
   assert.equal(m.endedAt, null);
 
   runCli(["task", "set", outcome.runId, "t2", "--status", "completed"], { cwd: dir });
   m = readManifest(outcome.workspaceDir);
+  assertTimestampAdvanced(afterFirstTask, m.updatedAt, "passive finalization updatedAt");
   assert.equal(m.status, "success");
   assert.equal(m.exitCode, 0);
   assert.ok(m.endedAt, "endedAt set when finalizing");
@@ -313,10 +321,12 @@ test("passive self-healing: reopening a completed task on a success run flips ba
 
   runCli(["task", "set", outcome.runId, "t1", "--status", "completed"], { cwd: dir });
   runCli(["task", "set", outcome.runId, "t2", "--status", "completed"], { cwd: dir });
-  assert.equal(readManifest(outcome.workspaceDir).status, "success");
+  const finalized = readManifest(outcome.workspaceDir);
+  assert.equal(finalized.status, "success");
 
   runCli(["task", "set", outcome.runId, "t1", "--status", "in_progress"], { cwd: dir });
   const m = readManifest(outcome.workspaceDir);
+  assertTimestampAdvanced(finalized.updatedAt, m.updatedAt, "passive self-healing updatedAt");
   assert.equal(m.status, "initialized");
   assert.equal(m.exitCode, null);
   assert.equal(m.endedAt, null);
@@ -548,6 +558,7 @@ test("passive finalized run: notes-only task set preserves endedAt and exitCode"
   assert.equal(finalized.status, "success");
   assert.equal(finalized.exitCode, 0);
   const originalEndedAt = finalized.endedAt;
+  const originalUpdatedAt = finalized.updatedAt;
   assert.ok(originalEndedAt, "endedAt stamped on finalization");
 
   // Brief pause so a Date.now() rewrite would produce a different
@@ -577,6 +588,7 @@ test("passive finalized run: notes-only task set preserves endedAt and exitCode"
     originalEndedAt,
     "endedAt preserved across notes-only edit on terminal run",
   );
+  assertTimestampAdvanced(originalUpdatedAt, afterNote.updatedAt, "terminal notes-only updatedAt");
   assert.equal(
     afterNote.finalTasks.t1.notes,
     "Post-hoc annotation added after finalization.",

@@ -440,10 +440,11 @@ without fetching full detail.
 - WS notification method: `run.detail`
 - Event carries a full `RunDetail` snapshot.
 
-Drives the detail drawer. Passive backend-session edits are detail
-mutations: the daemon publishes a fresh `RunDetail` on set/clear. Note
-and pin mutations publish both detail and summary updates so the board
-and the selected drawer stay synchronized.
+Drives the detail drawer. Passive backend-session edits publish fresh
+`RunDetail` and `RunSummary` projections on changed set/clear operations
+because the persisted manifest `updatedAt` changes. Note and pin
+mutations also publish both detail and summary updates so the board and
+the selected drawer stay synchronized.
 
 `RunDetail` now carries hook data inside the existing payload:
 

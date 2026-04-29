@@ -68,6 +68,7 @@ export interface RunSummary {
   model: string | null;
   cwd: string;
   startedAt: string;
+  updatedAt: string;
   endedAt: string | null;
   totalAttemptCount: number;
   totalSessionCount: number;
@@ -165,6 +166,7 @@ export interface RunDetail {
   unrestricted: boolean;
   timeoutSec: number;
   startedAt: string;
+  updatedAt: string;
   endedAt: string | null;
   exitCode: number | null;
   totalAttemptCount: number;
@@ -196,6 +198,7 @@ export interface RunDetail {
 
 export interface RunArchiveResult {
   runId: string;
+  updatedAt: string;
   status: RunStatus;
   archivedAt: string | null;
   changed: boolean;
@@ -203,36 +206,42 @@ export interface RunArchiveResult {
 
 export interface RunNameResult {
   runId: string;
+  updatedAt: string;
   name: string | null;
   changed: boolean;
 }
 
 export interface RunNoteResult {
   runId: string;
+  updatedAt: string;
   note: string | null;
   changed: boolean;
 }
 
 export interface RunPinnedResult {
   runId: string;
+  updatedAt: string;
   pinned: boolean;
   changed: boolean;
 }
 
 export interface RunBackendSessionResult {
   runId: string;
+  updatedAt: string;
   backendSessionId: string | null;
   changed: boolean;
 }
 
 export interface RunDependenciesResult {
   runId: string;
+  updatedAt: string;
   dependencies: RunDependencyRef[];
   changed: boolean;
 }
 
 export interface RunGroupResult {
   runId: string;
+  updatedAt: string;
   runGroupId: string;
   previousRunGroupId: string;
   changed: boolean;
@@ -447,6 +456,7 @@ export function toRunSummary(
     model: entry.manifest.model,
     cwd: entry.manifest.cwd,
     startedAt: entry.manifest.startedAt,
+    updatedAt: entry.manifest.updatedAt,
     endedAt: entry.manifest.endedAt,
     totalAttemptCount: entry.manifest.totalAttemptCount,
     totalSessionCount: entry.manifest.totalSessionCount,
@@ -547,6 +557,7 @@ export function toRunDetail(result: RunDetailInput): RunDetail {
     unrestricted: manifest.unrestricted,
     timeoutSec: manifest.timeoutSec,
     startedAt: manifest.startedAt,
+    updatedAt: manifest.updatedAt,
     endedAt: manifest.endedAt,
     exitCode: manifest.exitCode,
     totalAttemptCount: manifest.totalAttemptCount,
@@ -623,6 +634,7 @@ export function toRunArchiveResult(result: {
 }): RunArchiveResult {
   return {
     runId: result.manifest.runId,
+    updatedAt: result.manifest.updatedAt,
     status: result.manifest.status,
     archivedAt: result.manifest.archivedAt,
     changed: result.changed,
@@ -635,6 +647,7 @@ export function toRunNameResult(result: {
 }): RunNameResult {
   return {
     runId: result.manifest.runId,
+    updatedAt: result.manifest.updatedAt,
     name: result.manifest.name,
     changed: result.changed,
   };
@@ -646,6 +659,7 @@ export function toRunNoteResult(result: {
 }): RunNoteResult {
   return {
     runId: result.manifest.runId,
+    updatedAt: result.manifest.updatedAt,
     note: result.manifest.note,
     changed: result.changed,
   };
@@ -657,6 +671,7 @@ export function toRunPinnedResult(result: {
 }): RunPinnedResult {
   return {
     runId: result.manifest.runId,
+    updatedAt: result.manifest.updatedAt,
     pinned: result.manifest.pinned,
     changed: result.changed,
   };
@@ -668,6 +683,7 @@ export function toRunBackendSessionResult(result: {
 }): RunBackendSessionResult {
   return {
     runId: result.manifest.runId,
+    updatedAt: result.manifest.updatedAt,
     backendSessionId: result.manifest.backendSessionId,
     changed: result.changed,
   };
@@ -679,6 +695,7 @@ export function toRunDependenciesResult(result: {
 }): RunDependenciesResult {
   return {
     runId: result.manifest.runId,
+    updatedAt: result.manifest.updatedAt,
     dependencies: result.manifest.dependencies.map((dependency) => ({ ...dependency })),
     changed: result.changed,
   };
@@ -691,6 +708,7 @@ export function toRunGroupResult(result: {
 }): RunGroupResult {
   return {
     runId: result.manifest.runId,
+    updatedAt: result.manifest.updatedAt,
     runGroupId: result.manifest.runGroupId,
     previousRunGroupId: result.previousRunGroupId,
     changed: result.changed,

@@ -21,6 +21,7 @@ export function RunDetailPanel({
   drawerFullscreen,
   drawerWidth,
   drawerView,
+  noteEditRequestVersion,
   runs,
   onBackToAttachments,
   onAbort,
@@ -73,6 +74,7 @@ export function RunDetailPanel({
   drawerFullscreen: boolean;
   drawerWidth: number;
   drawerView?: RunDrawerView;
+  noteEditRequestVersion: number;
   runs: RunSummary[];
   onBackToAttachments: () => void;
   onAbort: (runId: string) => void;
@@ -252,13 +254,16 @@ export function RunDetailPanel({
     );
   }
 
+  const activeDetailSection = drawerView?.detailSection ?? "attachments";
+
   return (
     <>
       <RunDetailDrawer
-        activeSection={drawerView?.detailSection ?? "tasks"}
+        activeSection={activeDetailSection}
         activeSurface={activeRightSurface}
         chatSurface={chatSurface}
         dependencyCandidateRuns={runs}
+        noteEditRequestVersion={noteEditRequestVersion}
         onAddDependency={(dependency) => onAddDependency(selectedRun.runId, dependency)}
         actionError={actionError}
         actionPending={actionPending}

@@ -18,7 +18,7 @@ import { type ReconfigureRunPatch, createApiClient, isNotFoundError } from "../l
 import { queryClient, runQueryKeys } from "../lib/query.js";
 import { useRunAuditState } from "../lib/run-audit.js";
 import { useRunEvents } from "../lib/run-events.js";
-import { compareRunsByStartedAtDesc, sortRunsWithPinnedFirst } from "../lib/run-order.js";
+import { createRunComparator, sortRunsWithPinnedFirst } from "../lib/run-order.js";
 import { getRunPrimaryAction } from "../lib/run-primary-action.js";
 import { useRunTimelineState } from "../lib/run-timeline.js";
 import { useRuntimeConfig } from "../lib/runtime-config.js";
@@ -190,30 +190,6 @@ function buildColumns(
   }));
 }
 
-function compareRunsByRecentUpdate(
-  left: RunSummary,
-  right: RunSummary,
-  recentUpdateSequenceByRunId: Record<string, number>,
-): number {
-  const leftSequence = recentUpdateSequenceByRunId[left.runId] ?? 0;
-  const rightSequence = recentUpdateSequenceByRunId[right.runId] ?? 0;
-  if (leftSequence !== rightSequence) {
-    return rightSequence - leftSequence;
-  }
-  return compareRunsByStartedAtDesc(left, right);
-}
-
-function createRunComparator(
-  sortByRecentUpdates: boolean,
-  recentUpdateSequenceByRunId: Record<string, number>,
-) {
-  if (sortByRecentUpdates) {
-    return (left: RunSummary, right: RunSummary) =>
-      compareRunsByRecentUpdate(left, right, recentUpdateSequenceByRunId);
-  }
-  return compareRunsByStartedAtDesc;
-}
-
 function appendNotice(current: NoticeState[], notice: NoticeState): NoticeState[] {
   if (current.some((entry) => entry.id === notice.id)) {
     return current;
@@ -293,24 +269,35 @@ function updateRunCaches(
   }
 }
 
+function updateRunUpdatedAtCaches(runId: string, updatedAt: string) {
+  updateRunCaches(runId, {
+    detail: (run) => ({ ...run, updatedAt }),
+    summary: (run) => ({ ...run, updatedAt }),
+  });
+}
+
 function updateRunNameCaches(result: RunNameResult) {
   updateRunCaches(result.runId, {
-    detail: (run) => ({ ...run, name: result.name }),
-    summary: (run) => ({ ...run, name: result.name }),
+    detail: (run) => ({ ...run, name: result.name, updatedAt: result.updatedAt }),
+    summary: (run) => ({ ...run, name: result.name, updatedAt: result.updatedAt }),
   });
 }
 
 function updateRunNoteCaches(result: RunNoteResult) {
   updateRunCaches(result.runId, {
-    detail: (run) => ({ ...run, note: result.note }),
-    summary: (run) => ({ ...run, notePresent: result.note !== null }),
+    detail: (run) => ({ ...run, note: result.note, updatedAt: result.updatedAt }),
+    summary: (run) => ({
+      ...run,
+      notePresent: result.note !== null,
+      updatedAt: result.updatedAt,
+    }),
   });
 }
 
 function updateRunPinnedCaches(result: RunPinnedResult) {
   updateRunCaches(result.runId, {
-    detail: (run) => ({ ...run, pinned: result.pinned }),
-    summary: (run) => ({ ...run, pinned: result.pinned }),
+    detail: (run) => ({ ...run, pinned: result.pinned, updatedAt: result.updatedAt }),
+    summary: (run) => ({ ...run, pinned: result.pinned, updatedAt: result.updatedAt }),
   });
 }
 
@@ -319,6 +306,7 @@ function updateRunArchivedCaches(result: RunArchiveResult) {
     detail: (run) => ({
       ...run,
       archivedAt: result.archivedAt,
+      updatedAt: result.updatedAt,
       capabilities: {
         ...run.capabilities,
         canArchive: result.archivedAt === null && run.status !== "running",
@@ -328,6 +316,7 @@ function updateRunArchivedCaches(result: RunArchiveResult) {
     summary: (run) => ({
       ...run,
       archivedAt: result.archivedAt,
+      updatedAt: result.updatedAt,
       capabilities: {
         ...run.capabilities,
         canArchive: result.archivedAt === null && run.status !== "running",
@@ -356,6 +345,7 @@ function syncRunSummaryFromDetail(detail: RunDetail) {
             model: detail.model,
             cwd: detail.cwd,
             startedAt: detail.startedAt,
+            updatedAt: detail.updatedAt,
             endedAt: detail.endedAt,
             tasksCompleted: detail.tasksCompleted,
             tasksTotal: detail.tasksTotal,
@@ -380,10 +370,6 @@ async function invalidateRunQueries(runId: string) {
   ]);
 }
 
-async function invalidateRunDetailQuery(runId: string) {
-  await queryClient.invalidateQueries({ queryKey: runQueryKeys.detail(runId) });
-}
-
 function shouldInvalidateSimpleRunMutation(
   runId: string,
   options: {
@@ -395,16 +381,25 @@ function shouldInvalidateSimpleRunMutation(
   return options.summaryStreamStale || (options.detailRunId === runId && options.detailStreamStale);
 }
 
+async function invalidateIfChangedAndStale(
+  result: { changed: boolean; runId: string },
+  options: {
+    detailRunId?: string;
+    summaryStreamStale: boolean;
+    detailStreamStale: boolean;
+  },
+) {
+  if (result.changed && shouldInvalidateSimpleRunMutation(result.runId, options)) {
+    await invalidateRunQueries(result.runId);
+  }
+}
+
 export function useRunsDashboardState() {
   const config = useRuntimeConfig();
   const api = useMemo(() => createApiClient(config), [config]);
   const { preferences, updatePreferences } = useDashboardPreferences();
   const { viewState, updateViewState } = useDashboardViewState();
-  const {
-    markRunTouched,
-    recentUpdateSequenceByRunId,
-    streamStale: summaryStreamStale,
-  } = useRunEvents();
+  const { streamStale: summaryStreamStale } = useRunEvents();
   const deferredSearch = useDeferredValue(viewState.search);
   const navigate = useNavigate();
   const runRouteParams = useParams({ strict: false });
@@ -574,8 +569,8 @@ export function useRunsDashboardState() {
     [viewState.collapsedColumnKeys],
   );
   const compareRuns = useMemo(
-    () => createRunComparator(preferences.sortByRecentUpdates, recentUpdateSequenceByRunId),
-    [preferences.sortByRecentUpdates, recentUpdateSequenceByRunId],
+    () => createRunComparator(preferences.sortField, preferences.sortDirection),
+    [preferences.sortDirection, preferences.sortField],
   );
   const columns = useMemo(
     () => buildColumns(visibleRuns, preferences.collapseFailureStates, compareRuns),
@@ -701,7 +696,6 @@ export function useRunsDashboardState() {
           detailStreamStaleRef.current = false;
           setDetailStreamStale(false);
         }
-        markRunTouched(payload.detail.runId);
         syncRunSummaryFromDetail(payload.detail);
         queryClient.setQueryData(runQueryKeys.detail(runId), payload.detail);
       },
@@ -718,7 +712,7 @@ export function useRunsDashboardState() {
       disposed = true;
       unsubscribe();
     };
-  }, [config, detailRunId, markRunTouched]);
+  }, [config, detailRunId]);
 
   const closeRun = () => {
     void navigate({ to: "/" });
@@ -738,17 +732,14 @@ export function useRunsDashboardState() {
     },
     onSuccess: async (result) => {
       setActionError(undefined);
-      updateRunArchivedCaches(result);
-      markRunTouched(result.runId);
-      if (
-        shouldInvalidateSimpleRunMutation(result.runId, {
-          detailRunId,
-          summaryStreamStale,
-          detailStreamStale: detailStreamStaleRef.current,
-        })
-      ) {
-        await invalidateRunQueries(result.runId);
+      if (result.changed) {
+        updateRunArchivedCaches(result);
       }
+      await invalidateIfChangedAndStale(result, {
+        detailRunId,
+        summaryStreamStale,
+        detailStreamStale: detailStreamStaleRef.current,
+      });
     },
   });
   const unarchiveMutation = useMutation({
@@ -758,25 +749,18 @@ export function useRunsDashboardState() {
     },
     onSuccess: async (result) => {
       setActionError(undefined);
-      updateRunArchivedCaches(result);
-      markRunTouched(result.runId);
-      if (
-        shouldInvalidateSimpleRunMutation(result.runId, {
-          detailRunId,
-          summaryStreamStale,
-          detailStreamStale: detailStreamStaleRef.current,
-        })
-      ) {
-        await invalidateRunQueries(result.runId);
+      if (result.changed) {
+        updateRunArchivedCaches(result);
       }
+      await invalidateIfChangedAndStale(result, {
+        detailRunId,
+        summaryStreamStale,
+        detailStreamStale: detailStreamStaleRef.current,
+      });
     },
   });
-  const resetMutation = useRunActionMutation(api.resetRun, setActionError, {
-    onSuccess: markRunTouched,
-  });
-  const readyMutation = useRunActionMutation(api.readyRun, setActionError, {
-    onSuccess: markRunTouched,
-  });
+  const resetMutation = useRunActionMutation(api.resetRun, setActionError);
+  const readyMutation = useRunActionMutation(api.readyRun, setActionError);
   const deleteMutation = useMutation({
     mutationFn: (runId: string) => api.deleteRun(runId),
     onError: (error: Error) => {
@@ -797,32 +781,26 @@ export function useRunsDashboardState() {
     },
     onSuccess: (_result, { runId }) => {
       setActionError(undefined);
-      markRunTouched(runId);
       void invalidateRunQueries(runId);
     },
   });
-  const abortMutation = useRunActionMutation(api.abortRun, setActionError, {
-    onSuccess: markRunTouched,
-  });
+  const abortMutation = useRunActionMutation(api.abortRun, setActionError);
   const renameMutation = useMutation({
     mutationFn: ({ name, runId }: { runId: string; name: string | null }) =>
       api.setRunName(runId, name),
     onError: (error: Error) => {
       setActionError(error.message);
     },
-    onSuccess: async (result, { runId }) => {
+    onSuccess: async (result) => {
       setActionError(undefined);
-      updateRunNameCaches(result);
-      markRunTouched(runId);
-      if (
-        shouldInvalidateSimpleRunMutation(runId, {
-          detailRunId,
-          summaryStreamStale,
-          detailStreamStale: detailStreamStaleRef.current,
-        })
-      ) {
-        await invalidateRunQueries(runId);
+      if (result.changed) {
+        updateRunNameCaches(result);
       }
+      await invalidateIfChangedAndStale(result, {
+        detailRunId,
+        summaryStreamStale,
+        detailStreamStale: detailStreamStaleRef.current,
+      });
     },
   });
   const noteMutation = useMutation({
@@ -833,17 +811,14 @@ export function useRunsDashboardState() {
     },
     onSuccess: async (result) => {
       setActionError(undefined);
-      updateRunNoteCaches(result);
-      markRunTouched(result.runId);
-      if (
-        shouldInvalidateSimpleRunMutation(result.runId, {
-          detailRunId,
-          summaryStreamStale,
-          detailStreamStale: detailStreamStaleRef.current,
-        })
-      ) {
-        await invalidateRunQueries(result.runId);
+      if (result.changed) {
+        updateRunNoteCaches(result);
       }
+      await invalidateIfChangedAndStale(result, {
+        detailRunId,
+        summaryStreamStale,
+        detailStreamStale: detailStreamStaleRef.current,
+      });
     },
   });
   const pinnedMutation = useMutation({
@@ -854,17 +829,14 @@ export function useRunsDashboardState() {
     },
     onSuccess: async (result) => {
       setActionError(undefined);
-      updateRunPinnedCaches(result);
-      markRunTouched(result.runId);
-      if (
-        shouldInvalidateSimpleRunMutation(result.runId, {
-          detailRunId,
-          summaryStreamStale,
-          detailStreamStale: detailStreamStaleRef.current,
-        })
-      ) {
-        await invalidateRunQueries(result.runId);
+      if (result.changed) {
+        updateRunPinnedCaches(result);
       }
+      await invalidateIfChangedAndStale(result, {
+        detailRunId,
+        summaryStreamStale,
+        detailStreamStale: detailStreamStaleRef.current,
+      });
     },
   });
   const backendSessionMutation = useMutation({
@@ -883,7 +855,21 @@ export function useRunsDashboardState() {
     },
     onSuccess: async (result) => {
       setActionError(undefined);
-      await invalidateRunDetailQuery(result.runId);
+      if (result.changed) {
+        updateRunCaches(result.runId, {
+          detail: (run) => ({
+            ...run,
+            backendSessionId: result.backendSessionId,
+            updatedAt: result.updatedAt,
+          }),
+          summary: (run) => ({ ...run, updatedAt: result.updatedAt }),
+        });
+      }
+      await invalidateIfChangedAndStale(result, {
+        detailRunId,
+        summaryStreamStale,
+        detailStreamStale: detailStreamStaleRef.current,
+      });
     },
   });
   const scheduleMutation = useMutation({
@@ -898,7 +884,6 @@ export function useRunsDashboardState() {
       setActionError(undefined);
       queryClient.setQueryData(runQueryKeys.detail(detail.runId), detail);
       syncRunSummaryFromDetail(detail);
-      markRunTouched(detail.runId);
       if (
         shouldInvalidateSimpleRunMutation(detail.runId, {
           detailRunId,
@@ -920,7 +905,6 @@ export function useRunsDashboardState() {
       setActionError(undefined);
       queryClient.setQueryData(runQueryKeys.detail(detail.runId), detail);
       syncRunSummaryFromDetail(detail);
-      markRunTouched(detail.runId);
       if (
         shouldInvalidateSimpleRunMutation(detail.runId, {
           detailRunId,
@@ -947,12 +931,21 @@ export function useRunsDashboardState() {
     },
     onSuccess: async (result: RunGroupResult) => {
       setActionError(undefined);
-      updateRunCaches(result.runId, {
-        detail: (run) => ({ ...run, runGroupId: result.runGroupId }),
-        summary: (run) => ({ ...run, runGroupId: result.runGroupId }),
-      });
-      markRunTouched(result.runId);
-      await invalidateRunQueries(result.runId);
+      if (result.changed) {
+        updateRunCaches(result.runId, {
+          detail: (run) => ({
+            ...run,
+            runGroupId: result.runGroupId,
+            updatedAt: result.updatedAt,
+          }),
+          summary: (run) => ({
+            ...run,
+            runGroupId: result.runGroupId,
+            updatedAt: result.updatedAt,
+          }),
+        });
+        await invalidateRunQueries(result.runId);
+      }
     },
   });
   const addDependencyMutation = useMutation({
@@ -963,8 +956,10 @@ export function useRunsDashboardState() {
     },
     onSuccess: async (result) => {
       setActionError(undefined);
-      markRunTouched(result.runId);
-      await invalidateRunQueries(result.runId);
+      if (result.changed) {
+        updateRunUpdatedAtCaches(result.runId, result.updatedAt);
+        await invalidateRunQueries(result.runId);
+      }
     },
   });
   const removeDependencyMutation = useMutation({
@@ -975,8 +970,10 @@ export function useRunsDashboardState() {
     },
     onSuccess: async (result) => {
       setActionError(undefined);
-      markRunTouched(result.runId);
-      await invalidateRunQueries(result.runId);
+      if (result.changed) {
+        updateRunUpdatedAtCaches(result.runId, result.updatedAt);
+        await invalidateRunQueries(result.runId);
+      }
     },
   });
   const clearDependenciesMutation = useMutation({
@@ -986,8 +983,10 @@ export function useRunsDashboardState() {
     },
     onSuccess: async (result) => {
       setActionError(undefined);
-      markRunTouched(result.runId);
-      await invalidateRunQueries(result.runId);
+      if (result.changed) {
+        updateRunUpdatedAtCaches(result.runId, result.updatedAt);
+        await invalidateRunQueries(result.runId);
+      }
     },
   });
   const uploadAttachmentMutation = useMutation({
@@ -998,7 +997,6 @@ export function useRunsDashboardState() {
     },
     onSuccess: async (_result, { runId }) => {
       setActionError(undefined);
-      markRunTouched(runId);
       await invalidateRunQueries(runId);
     },
   });
@@ -1010,7 +1008,6 @@ export function useRunsDashboardState() {
     },
     onSuccess: async (result) => {
       setActionError(undefined);
-      markRunTouched(result.runId);
       await invalidateRunQueries(result.runId);
     },
   });

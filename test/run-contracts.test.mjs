@@ -32,7 +32,7 @@ function buildManifest(overrides = {}) {
   };
 
   return {
-    schemaVersion: 15,
+    schemaVersion: 16,
     runId: "run123",
     runGroupId: "run123",
     repo: "demo-repo",
@@ -63,6 +63,7 @@ function buildManifest(overrides = {}) {
     timeoutSec: 3600,
     workspaceDir: "/state/runs/demo/run123",
     startedAt: "2026-04-12T10:00:00.000Z",
+    updatedAt: "2026-04-12T10:00:00.000Z",
     endedAt: null,
     archivedAt: null,
     status: "initialized",
@@ -164,6 +165,7 @@ test("run contracts: toRunSummary maps listed manifest rows to the neutral summa
     name: "demo session",
     cwd: "/repo",
     startedAt: "2026-04-12T10:00:00.000Z",
+    updatedAt: "2026-04-12T10:00:00.000Z",
     endedAt: "2026-04-12T10:05:00.000Z",
     totalAttemptCount: 0,
     totalSessionCount: 0,
@@ -286,6 +288,7 @@ test("run contracts: toRunDetail maps status results to the neutral detail DTO",
     unrestricted: false,
     timeoutSec: 3600,
     startedAt: "2026-04-12T10:00:00.000Z",
+    updatedAt: "2026-04-12T10:00:00.000Z",
     endedAt: "2026-04-12T10:05:00.000Z",
     exitCode: 0,
     totalAttemptCount: 1,
@@ -497,11 +500,13 @@ test("run contracts: note and pin metadata project through summary, detail, and 
   assert.equal(detail.pinned, true);
   assert.deepEqual(toRunNoteResult({ manifest, changed: true }), {
     runId: "run123",
+    updatedAt: "2026-04-12T10:00:00.000Z",
     note: "# Follow-up\n\nKeep the active note preview.",
     changed: true,
   });
   assert.deepEqual(toRunPinnedResult({ manifest, changed: true }), {
     runId: "run123",
+    updatedAt: "2026-04-12T10:00:00.000Z",
     pinned: true,
     changed: true,
   });
@@ -947,6 +952,7 @@ test("run contracts: toRunArchiveResult maps manifest-plus-change to the neutral
       runId: "run123",
       status: "success",
       archivedAt: "2026-04-12T11:00:00.000Z",
+      updatedAt: "2026-04-12T10:00:00.000Z",
       changed: true,
     },
   );
@@ -965,6 +971,7 @@ test("run contracts: toRunDependenciesResult maps manifest-plus-change to the de
     {
       runId: "run123",
       dependencies: [{ type: "run", runId: "run456" }],
+      updatedAt: "2026-04-12T10:00:00.000Z",
       changed: true,
     },
   );
@@ -983,6 +990,7 @@ test("run contracts: toRunBackendSessionResult maps manifest-plus-change to the 
     {
       runId: "run123",
       backendSessionId: "thread-42",
+      updatedAt: "2026-04-12T10:00:00.000Z",
       changed: true,
     },
   );

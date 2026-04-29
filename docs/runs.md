@@ -11,7 +11,7 @@ ${TASK_RUNNER_STATE_DIR}/runs/<repo>/<run-id>/
 
 ```text
 <workspace>/
-├── run.json               # canonical manifest (schema version 15)
+├── run.json               # canonical manifest (schema version 16)
 ├── run-events.jsonl       # append-only audit history with monotonic cursors
 ├── assignment-seed.md     # only when the run started from an assignment file
 ├── agent-seed.md          # only when the run started from an agent file
@@ -42,7 +42,7 @@ The manifest is the source of truth. Important fields:
 
 | Field | Purpose |
 |-------|---------|
-| `schemaVersion` | currently `15`; older manifests are not silently upgraded |
+| `schemaVersion` | currently `16`; older manifests are not silently upgraded |
 | `runId`, `repo`, `cwd` | identity and scope |
 | `agent` | frozen `{ name, sourcePath, instructions }` |
 | `assignment` | frozen `{ name, sourcePath }` or `null` |
@@ -56,7 +56,7 @@ The manifest is the source of truth. Important fields:
 | `pinned` | persisted board-order hint for summaries and the web dashboard |
 | `schedule` | persisted `RunSchedule` or `null`; source of truth for delayed and recurring execution |
 | `status` | current lifecycle state |
-| `startedAt`, `endedAt` | ISO 8601 timestamps |
+| `startedAt`, `updatedAt`, `endedAt` | ISO 8601 timestamps |
 | `archivedAt` | ISO timestamp when archived, else `null` |
 | `exitCode` | final exit code or `null` |
 | `finalTasks` | canonical task state |
@@ -236,6 +236,8 @@ task-runner attachment list <run-id> [--scope run|group]
   and always include `runGroupId`.
 - `RunSummary` and `RunDetail` include persisted `schedule` plus derived
   `scheduleState`.
+- `RunSummary` and `RunDetail` include persisted `updatedAt`, which
+  reflects the latest meaningful `run.json` write.
 - `RunDetail` includes full `note` plus `pinned`; `RunSummary` includes
   `notePresent` plus `pinned`.
 - Text `run status` may show `Pinned: yes` and `Note: present`, but does

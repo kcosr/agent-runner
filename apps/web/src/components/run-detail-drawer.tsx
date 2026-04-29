@@ -72,6 +72,11 @@ type AttemptSelection = number | "pending" | "live" | null;
 type SummaryRow = readonly [label: string, value: string];
 type DataTab = "vars" | "hookState";
 type AuditFilter = "all" | "hooks" | "tasks" | "run";
+type SelectedRunSurfaceTab = {
+  label: string;
+  shortcut: string;
+  surface: DashboardRightSurface;
+};
 interface RuntimeVarDraftRow {
   id: string;
   key: string;
@@ -83,6 +88,12 @@ interface RuntimeVarDraftRow {
 }
 
 const TIMELINE_BOTTOM_THRESHOLD_PX = 24;
+const SELECTED_RUN_SURFACE_TABS: readonly SelectedRunSurfaceTab[] = [
+  { label: "Chat", shortcut: "C", surface: "chat" },
+  { label: "Detail", shortcut: "D", surface: "detail" },
+  { label: "Notes", shortcut: "N", surface: "notes" },
+  { label: "Tasks", shortcut: "T", surface: "tasks" },
+];
 
 function dependencyCandidateTitle(run: RunSummary) {
   return run.name ?? run.assignmentName ?? "Unnamed";
@@ -453,6 +464,7 @@ export function RunDetailDrawer({
   activeSurface,
   chatSurface,
   dependencyCandidateRuns,
+  noteEditRequestVersion,
   onAddDependency,
   actionError,
   actionPending,
@@ -493,6 +505,7 @@ export function RunDetailDrawer({
   activeSurface: DashboardRightSurface;
   chatSurface: ReactNode;
   dependencyCandidateRuns: RunSummary[];
+  noteEditRequestVersion: number;
   onAddDependency: (dependency: RunDependencyRef) => Promise<void>;
   actionError?: string;
   actionPending?: RunActionPending;
@@ -1195,7 +1208,7 @@ export function RunDetailDrawer({
 
   useEffect(() => {
     if (isPassiveRun && activeSection === "events") {
-      onSelectSection("tasks");
+      onSelectSection("attachments");
     }
   }, [activeSection, isPassiveRun, onSelectSection]);
 
@@ -1675,28 +1688,44 @@ export function RunDetailDrawer({
         </header>
 
         <div aria-label="Run surface" className="selected-run-surface-tabs" role="tablist">
-          <button
-            aria-selected={activeSurface === "chat"}
-            className={activeSurface === "chat" ? "task-tab active" : "task-tab"}
-            onClick={() => onSelectSurface("chat")}
-            role="tab"
-            type="button"
-          >
-            Chat
-          </button>
-          <button
-            aria-selected={activeSurface === "detail"}
-            className={activeSurface === "detail" ? "task-tab active" : "task-tab"}
-            onClick={() => onSelectSurface("detail")}
-            role="tab"
-            type="button"
-          >
-            Detail
-          </button>
+          {SELECTED_RUN_SURFACE_TABS.map((tab) => (
+            <button
+              aria-keyshortcuts={tab.shortcut}
+              aria-selected={activeSurface === tab.surface}
+              className={activeSurface === tab.surface ? "task-tab active" : "task-tab"}
+              key={tab.surface}
+              onClick={() => onSelectSurface(tab.surface)}
+              role="tab"
+              type="button"
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
 
         <div className="drawer-body drawer-body--chat" hidden={activeSurface !== "chat"}>
           {chatSurface}
+        </div>
+        <div className="drawer-body" hidden={activeSurface !== "tasks"}>
+          <section aria-label="Tasks" className="drawer-panel drawer-panel--tasks">
+            <RunTaskList tasks={run.tasks} />
+          </section>
+        </div>
+        <div className="drawer-body drawer-body--notes" hidden={activeSurface !== "notes"}>
+          <section aria-label="Notes" className="drawer-panel drawer-panel--notes">
+            <div className="drawer-panel-card drawer-panel-card--notes">
+              <RunNoteEditor
+                autoFocusEditor={true}
+                editRequestVersion={noteEditRequestVersion}
+                emptyPreviewMessage="No note recorded yet."
+                initialMode="preview"
+                note={run.note}
+                onSave={onSetNote}
+                pending={notePending}
+                textareaLabel={`Run note for ${visibleName}`}
+              />
+            </div>
+          </section>
         </div>
         <div className="drawer-body" hidden={activeSurface !== "detail"} ref={drawerBodyRef}>
           <div className="drawer-title-block">
@@ -2014,17 +2043,14 @@ export function RunDetailDrawer({
 
           <nav aria-label="Run sections" className="tabs tabs--scrollable" ref={sectionTabsRef}>
             <button
-              aria-selected={activeSection === "tasks"}
-              className={activeSection === "tasks" ? "tab active" : "tab"}
-              onClick={() => onSelectSection("tasks")}
+              aria-selected={activeSection === "attachments"}
+              className={activeSection === "attachments" ? "tab active" : "tab"}
+              onClick={() => onSelectSection("attachments")}
               type="button"
             >
-              Tasks
-              {run.tasksTotal > 0 ? (
-                <span className="tab-count">
-                  {" "}
-                  {run.tasksCompleted}/{run.tasksTotal}
-                </span>
+              Attachments
+              {combinedAttachments.length > 0 ? (
+                <span className="tab-count"> {combinedAttachments.length}</span>
               ) : null}
             </button>
             {isPassiveRun ? null : (
@@ -2038,25 +2064,6 @@ export function RunDetailDrawer({
               </button>
             )}
             <button
-              aria-selected={activeSection === "attachments"}
-              className={activeSection === "attachments" ? "tab active" : "tab"}
-              onClick={() => onSelectSection("attachments")}
-              type="button"
-            >
-              Attachments
-              {combinedAttachments.length > 0 ? (
-                <span className="tab-count"> {combinedAttachments.length}</span>
-              ) : null}
-            </button>
-            <button
-              aria-selected={activeSection === "data"}
-              className={activeSection === "data" ? "tab active" : "tab"}
-              onClick={() => onSelectSection("data")}
-              type="button"
-            >
-              Data
-            </button>
-            <button
               aria-selected={activeSection === "audit"}
               className={activeSection === "audit" ? "tab active" : "tab"}
               onClick={() => onSelectSection("audit")}
@@ -2066,6 +2073,14 @@ export function RunDetailDrawer({
               {auditEvents.length > 0 ? (
                 <span className="tab-count"> {auditEvents.length}</span>
               ) : null}
+            </button>
+            <button
+              aria-selected={activeSection === "data"}
+              className={activeSection === "data" ? "tab active" : "tab"}
+              onClick={() => onSelectSection("data")}
+              type="button"
+            >
+              Data
             </button>
             <button
               aria-selected={activeSection === "dependencies"}
@@ -2081,36 +2096,7 @@ export function RunDetailDrawer({
                 </span>
               ) : null}
             </button>
-            <button
-              aria-selected={activeSection === "notes"}
-              className={activeSection === "notes" ? "tab active" : "tab"}
-              onClick={() => onSelectSection("notes")}
-              type="button"
-            >
-              Notes
-            </button>
           </nav>
-
-          {activeSection === "tasks" ? (
-            <section aria-label="Tasks" className="drawer-panel drawer-panel--tasks">
-              <RunTaskList tasks={run.tasks} />
-            </section>
-          ) : null}
-
-          {activeSection === "notes" ? (
-            <section aria-label="Notes" className="drawer-panel drawer-panel--notes">
-              <div className="drawer-panel-card drawer-panel-card--notes">
-                <RunNoteEditor
-                  emptyPreviewMessage="No note recorded yet."
-                  initialMode="preview"
-                  note={run.note}
-                  onSave={onSetNote}
-                  pending={notePending}
-                  textareaLabel={`Run note for ${visibleName}`}
-                />
-              </div>
-            </section>
-          ) : null}
 
           {activeSection === "attachments" ? (
             <section aria-label="Attachments" className="drawer-panel drawer-panel--attachments">
@@ -2337,11 +2323,6 @@ export function RunDetailDrawer({
                 {dataTab === "vars" ? (
                   <>
                     <div className="drawer-data-actions">
-                      <span className="muted-inline">
-                        {Object.keys(run.runtimeVars).length === 0
-                          ? "0 vars"
-                          : `${Object.keys(run.runtimeVars).length} vars`}
-                      </span>
                       {canReconfigure && !editingRuntimeVars ? (
                         <button
                           aria-label="Edit run vars"

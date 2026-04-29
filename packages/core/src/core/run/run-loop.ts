@@ -509,7 +509,7 @@ function buildRecurringCloneManifest(params: {
   const workspaceDir = resolveRunWorkspaceDirForRepo(sourceManifest.repo, runId);
   const finalTasks = cloneTaskSnapshotRecord(seed.finalTasks);
   return {
-    schemaVersion: 15,
+    schemaVersion: 16,
     runId,
     repo: sourceManifest.repo,
     agent: {
@@ -540,6 +540,7 @@ function buildRecurringCloneManifest(params: {
     timeoutSec: seed.timeoutSec,
     workspaceDir,
     startedAt: now,
+    updatedAt: now,
     endedAt: null,
     archivedAt: null,
     status: "ready",
@@ -1499,6 +1500,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
   }
 
   const trimmedMessage = message?.trim() ?? "";
+  const now = new Date().toISOString();
 
   if (!isResume && !priorReady) {
     const defaultInitialPrompt = buildFreshInitialPrompt(
@@ -1515,7 +1517,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       ]),
     );
     const prepareManifest: RunManifest = {
-      schemaVersion: 15,
+      schemaVersion: 16,
       runId,
       repo,
       agent: {
@@ -1545,7 +1547,8 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       lockedFields: initialLockedFields,
       timeoutSec,
       workspaceDir,
-      startedAt: new Date().toISOString(),
+      startedAt: now,
+      updatedAt: now,
       endedAt: null,
       archivedAt: null,
       status: isInitialize ? "initialized" : "running",
@@ -1712,7 +1715,6 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     );
   }
 
-  const now = new Date().toISOString();
   let priorAttemptCount = isResume && resume ? resume.manifest.attemptRecords.length : 0;
   let priorSessionCount = isResume && resume ? resume.manifest.sessions.length : 0;
   // Ready-start runs begin at session 0 — init/ready created no session.
@@ -1770,7 +1772,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
     const frozenCallerInstructions =
       rawCallerInstructions.length > 0 ? interpolate(rawCallerInstructions, injectedVars) : null;
     manifest = {
-      schemaVersion: 15,
+      schemaVersion: 16,
       runId,
       repo,
       agent: {
@@ -1805,6 +1807,7 @@ export async function runAgent(opts: RunOptions): Promise<RunOutcome> {
       timeoutSec,
       workspaceDir,
       startedAt: now,
+      updatedAt: now,
       endedAt: null,
       archivedAt: null,
       status: isInitialize ? "initialized" : "running",

@@ -21,7 +21,7 @@ type ShortcutSection = {
 const SHORTCUT_SECTIONS: readonly ShortcutSection[] = [
   {
     description:
-      "Available while the dashboard is visible. Fullscreen drawers keep Enter and Escape active while suppressing board, search, filter, note, pin, and archive shortcuts.",
+      "Available while the dashboard is visible. Fullscreen drawers keep selected-run shortcuts active while suppressing board, search, and filter shortcuts.",
     shortcuts: [
       {
         description: "Move selection between runs on the board.",
@@ -82,9 +82,24 @@ const SHORTCUT_SECTIONS: readonly ShortcutSection[] = [
         title: "Run primary action",
       },
       {
-        description: "Open the selected run's note modal from the board.",
+        description: "Show the selected run's Chat tab, or focus its composer when Chat is open.",
+        keys: ["C"],
+        title: "Switch to Chat",
+      },
+      {
+        description: "Show the selected run's Detail tab.",
+        keys: ["D"],
+        title: "Switch to Detail",
+      },
+      {
+        description: "Show the selected run's Notes tab, or focus its editor when Notes is open.",
         keys: ["N"],
-        title: "Open run note",
+        title: "Switch to Notes",
+      },
+      {
+        description: "Show the selected run's Tasks tab.",
+        keys: ["T"],
+        title: "Switch to Tasks",
       },
       {
         description: "Pin or unpin the selected run.",
@@ -104,7 +119,7 @@ const SHORTCUT_SECTIONS: readonly ShortcutSection[] = [
       },
       {
         description:
-          "Clear the focused search when it has text, then blur it on a second press. When the drawer is fullscreen, exit fullscreen first. Otherwise close attachment preview or selected run detail.",
+          "Blur the focused Chat composer, or clear the focused search when it has text and blur it on a second press. When the drawer is fullscreen, exit fullscreen first. Otherwise close attachment preview or selected run detail.",
         keys: ["Escape"],
         title: "Back or close",
       },

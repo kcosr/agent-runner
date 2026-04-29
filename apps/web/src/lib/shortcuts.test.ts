@@ -241,7 +241,43 @@ describe("resolveRunsShortcutCommand", () => {
         },
         context,
       ),
-    ).toBe("run.openNote");
+    ).toBe("run.showNotes");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "c",
+          metaKey: false,
+          shiftKey: false,
+        },
+        context,
+      ),
+    ).toBe("run.showChat");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "d",
+          metaKey: false,
+          shiftKey: false,
+        },
+        context,
+      ),
+    ).toBe("run.showDetail");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "t",
+          metaKey: false,
+          shiftKey: false,
+        },
+        context,
+      ),
+    ).toBe("run.showTasks");
     expect(
       resolveRunsShortcutCommand(
         {
@@ -340,7 +376,43 @@ describe("resolveRunsShortcutCommand", () => {
         },
         context,
       ),
-    ).toBe("run.openNote");
+    ).toBe("run.showNotes");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "c",
+          metaKey: false,
+          shiftKey: false,
+        },
+        context,
+      ),
+    ).toBe("run.showChat");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "d",
+          metaKey: false,
+          shiftKey: false,
+        },
+        context,
+      ),
+    ).toBe("run.showDetail");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "t",
+          metaKey: false,
+          shiftKey: false,
+        },
+        context,
+      ),
+    ).toBe("run.showTasks");
     expect(
       resolveRunsShortcutCommand(
         {
@@ -420,6 +492,115 @@ describe("resolveRunsShortcutCommand", () => {
     ).toBe("ui.clearStructuredFilters");
   });
 
+  it("keeps surface navigation but suppresses selected-run actions while viewing an attachment", () => {
+    const attachmentContext = {
+      ...context,
+      selectedDrawerView: {
+        attachmentId: "attachment-1",
+        attachmentOwnerRunId: "run-running-1",
+        detailSection: "attachments",
+        mode: "attachment",
+      },
+    } as const;
+
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "c",
+          metaKey: false,
+          shiftKey: false,
+        },
+        attachmentContext,
+      ),
+    ).toBe("run.showChat");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "d",
+          metaKey: false,
+          shiftKey: false,
+        },
+        attachmentContext,
+      ),
+    ).toBe("run.showDetail");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "n",
+          metaKey: false,
+          shiftKey: false,
+        },
+        attachmentContext,
+      ),
+    ).toBe("run.showNotes");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "t",
+          metaKey: false,
+          shiftKey: false,
+        },
+        attachmentContext,
+      ),
+    ).toBe("run.showTasks");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "Escape",
+          metaKey: false,
+          shiftKey: false,
+        },
+        attachmentContext,
+      ),
+    ).toBe("run.closeAttachmentPreview");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "Enter",
+          metaKey: false,
+          shiftKey: false,
+        },
+        attachmentContext,
+      ),
+    ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "p",
+          metaKey: false,
+          shiftKey: false,
+        },
+        attachmentContext,
+      ),
+    ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "a",
+          metaKey: false,
+          shiftKey: false,
+        },
+        attachmentContext,
+      ),
+    ).toBeNull();
+  });
+
   it("blurs a focused search on Enter without triggering run actions", () => {
     expect(
       resolveRunsShortcutCommand(
@@ -467,6 +648,7 @@ describe("resolveRunsShortcutCommand", () => {
         {
           ...context,
           drawerFullscreen: true,
+          typingTarget: true,
         },
       ),
     ).toBeNull();
@@ -491,6 +673,36 @@ describe("resolveRunsShortcutCommand", () => {
           altKey: false,
           ctrlKey: false,
           key: "ArrowRight",
+          metaKey: false,
+          shiftKey: false,
+        },
+        {
+          ...context,
+          typingTarget: true,
+        },
+      ),
+    ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "t",
+          metaKey: false,
+          shiftKey: false,
+        },
+        {
+          ...context,
+          typingTarget: true,
+        },
+      ),
+    ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "c",
           metaKey: false,
           shiftKey: false,
         },
@@ -607,7 +819,7 @@ describe("resolveRunsShortcutCommand", () => {
     ).toBeNull();
   });
 
-  it("allows Enter primary action but blocks other dashboard shortcuts while the drawer is fullscreen", () => {
+  it("allows selected-run actions but blocks board shortcuts while the drawer is fullscreen", () => {
     const fullscreenContext = {
       ...context,
       drawerFullscreen: true,
@@ -618,13 +830,37 @@ describe("resolveRunsShortcutCommand", () => {
         {
           altKey: false,
           ctrlKey: false,
-          key: "ArrowRight",
+          key: "c",
           metaKey: false,
           shiftKey: false,
         },
         fullscreenContext,
       ),
-    ).toBeNull();
+    ).toBe("run.showChat");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "d",
+          metaKey: false,
+          shiftKey: false,
+        },
+        fullscreenContext,
+      ),
+    ).toBe("run.showDetail");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "t",
+          metaKey: false,
+          shiftKey: false,
+        },
+        fullscreenContext,
+      ),
+    ).toBe("run.showTasks");
     expect(
       resolveRunsShortcutCommand(
         {
@@ -643,6 +879,18 @@ describe("resolveRunsShortcutCommand", () => {
           altKey: false,
           ctrlKey: true,
           key: "f",
+          metaKey: false,
+          shiftKey: false,
+        },
+        fullscreenContext,
+      ),
+    ).toBeNull();
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "ArrowRight",
           metaKey: false,
           shiftKey: false,
         },
@@ -673,6 +921,42 @@ describe("resolveRunsShortcutCommand", () => {
         fullscreenContext,
       ),
     ).toBe("run.primaryAction");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "n",
+          metaKey: false,
+          shiftKey: false,
+        },
+        fullscreenContext,
+      ),
+    ).toBe("run.showNotes");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "p",
+          metaKey: false,
+          shiftKey: false,
+        },
+        fullscreenContext,
+      ),
+    ).toBe("run.togglePinned");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "a",
+          metaKey: false,
+          shiftKey: false,
+        },
+        fullscreenContext,
+      ),
+    ).toBe("run.toggleArchived");
     expect(
       resolveRunsShortcutCommand(
         {

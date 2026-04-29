@@ -222,17 +222,18 @@ test("resolveResumeTarget rejects a manifest with a session missing brief", () =
   );
 });
 
-test("resolveResumeTarget accepts a well-formed v15 manifest from the unknown bucket", () => {
+test("resolveResumeTarget accepts a well-formed v16 manifest from the unknown bucket", () => {
   const dir = tempDir();
   const workspaceDir = join(dir, "runs", "unknown", "wellformed");
   writeManifest(dir, "unknown", "wellformed", baseManifest("wellformed", workspaceDir));
 
   const resolved = withStateRoot(dir, () => resolveResumeTarget("wellformed", dir));
   assert.equal(resolved.manifest.runId, "wellformed");
-  assert.equal(resolved.manifest.schemaVersion, 15);
+  assert.equal(resolved.manifest.schemaVersion, 16);
+  assert.equal(resolved.manifest.updatedAt, "2026-04-11T16:05:00Z");
 });
 
-test("resolveResumeTarget rejects a v15 manifest carrying legacy assignment.workspacePath", () => {
+test("resolveResumeTarget rejects a v16 manifest carrying legacy assignment.workspacePath", () => {
   const dir = tempDir();
   const workspaceDir = join(dir, "runs", "unknown", "legacy-workspace-path");
   const manifest = baseManifest("legacy-workspace-path", workspaceDir);
@@ -263,7 +264,7 @@ test("resolveResumeTarget rejects a v15 manifest carrying legacy assignment.work
 
 function baseManifest(runId, workspaceDir) {
   return {
-    schemaVersion: 15,
+    schemaVersion: 16,
     runId,
     repo: "unknown",
     agent: {
@@ -282,12 +283,16 @@ function baseManifest(runId, workspaceDir) {
     },
     message: null,
     name: null,
+    note: null,
+    pinned: false,
+    parentRunId: null,
     unrestricted: false,
     cwd: process.cwd(),
     lockedFields: [],
     timeoutSec: 3600,
     workspaceDir,
     startedAt: "2026-04-11T16:00:00Z",
+    updatedAt: "2026-04-11T16:05:00Z",
     endedAt: "2026-04-11T16:05:00Z",
     archivedAt: null,
     status: "success",
@@ -301,6 +306,7 @@ function baseManifest(runId, workspaceDir) {
     tasksTotal: 1,
     backendSessionId: "sess-base",
     runtimeVars: {},
+    runtimeVarSources: {},
     resolvedHooks: [],
     hookState: {},
     hookAudits: [],
@@ -328,6 +334,7 @@ function baseManifest(runId, workspaceDir) {
       name: null,
       note: null,
       pinned: false,
+      parentRunId: null,
       runGroupId: runId,
       dependencies: [],
       unrestricted: false,
@@ -335,6 +342,7 @@ function baseManifest(runId, workspaceDir) {
       maxAttemptsPerSession: 4,
       brief: "seed prompt",
       runtimeVars: {},
+      runtimeVarSources: {},
       hookState: {},
       attachments: [],
       finalTasks: {
