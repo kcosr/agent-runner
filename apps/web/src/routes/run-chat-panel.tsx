@@ -18,7 +18,6 @@ import {
   deriveRunChatRows,
 } from "../lib/run-chat.js";
 import type { RunTimelineState } from "../lib/run-timeline.js";
-import type { RunActionPending } from "./use-runs-dashboard-state.js";
 
 const CHAT_BOTTOM_THRESHOLD_PX = 32;
 
@@ -146,16 +145,16 @@ function AssistantChatRow({ row }: { row: RunChatAssistantRow }) {
 }
 
 export function RunChatView({
-  actionPending,
   detailSettling,
   onSubmitResume,
+  resumePending,
   selectedRunId,
   selectedRunQuery,
   timelineState,
 }: {
-  actionPending?: RunActionPending;
   detailSettling: boolean;
   onSubmitResume: (runId: string, message: string) => Promise<void>;
+  resumePending: boolean;
   selectedRunId?: string;
   selectedRunQuery: UseQueryResult<RunDetail, Error>;
   timelineState: RunTimelineState;
@@ -172,7 +171,6 @@ export function RunChatView({
     () => (selectedRun && timelineHistory ? deriveRunChatRows(selectedRun, timelineHistory) : []),
     [selectedRun, timelineHistory],
   );
-  const resumePending = actionPending === "resume";
   const trimmedDraft = draft.trim();
   const submitDisabled =
     !selectedRun ||

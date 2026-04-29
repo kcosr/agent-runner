@@ -323,9 +323,9 @@ export function RunsDashboardRoute() {
                 actionPending={state.actionPending}
                 chatSurface={
                   <RunChatView
-                    actionPending={state.actionPending}
                     detailSettling={state.detailSettling}
                     onSubmitResume={state.runActions.resume}
+                    resumePending={state.resumePendingRunId === state.selectedRunId}
                     selectedRunId={state.selectedRunId}
                     selectedRunQuery={state.selectedRunQuery}
                     timelineState={state.timelineState}

@@ -1413,12 +1413,16 @@ function fetchCallCount(
 }
 
 function getCloseDetailButton() {
-  const closeButtons = screen.getAllByRole("button", { name: /close detail/i });
+  const closeButtons = screen.queryAllByRole("button", { name: /close selected run panel/i });
   const closeButton = closeButtons[0];
-  if (!closeButton) {
+  if (closeButton) {
+    return closeButton;
+  }
+  const fallbackCloseButton = screen.queryAllByRole("button", { name: /close detail/i })[0];
+  if (!fallbackCloseButton) {
     throw new Error("expected a close-detail button");
   }
-  return closeButton;
+  return fallbackCloseButton;
 }
 
 function getSidebarNavigation() {
@@ -1854,9 +1858,16 @@ describe("web app", () => {
     const tablist = await screen.findByRole("tablist", { name: "Run surface" });
     await user.click(within(tablist).getByRole("tab", { name: "Chat" }));
     expect(await screen.findByLabelText("Run chat")).toBeInTheDocument();
+    await user.type(await screen.findByLabelText("Message"), "keep this draft");
 
     await user.click(within(tablist).getByRole("tab", { name: "Detail" }));
     expect(screen.getByLabelText("Tasks")).toBeInTheDocument();
+    expect(screen.getByLabelText("Run chat").closest(".drawer-body--chat")).toHaveAttribute(
+      "hidden",
+    );
+
+    await user.click(within(tablist).getByRole("tab", { name: "Chat" }));
+    expect(await screen.findByLabelText("Message")).toHaveValue("keep this draft");
 
     await user.click(getCloseDetailButton());
     await waitFor(() => {
@@ -1884,7 +1895,9 @@ describe("web app", () => {
     ).toEqual(["Chat", "Detail"]);
     expect(detailTab).toHaveAttribute("aria-selected", "true");
     expect(chatTab).toHaveAttribute("aria-selected", "false");
-    expect(screen.queryByLabelText("Run chat")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Run chat").closest(".drawer-body--chat")).toHaveAttribute(
+      "hidden",
+    );
 
     await user.click(chatTab);
     expect(detailTab).toHaveAttribute("aria-selected", "false");
@@ -1894,7 +1907,9 @@ describe("web app", () => {
     await user.click(detailTab);
     expect(detailTab).toHaveAttribute("aria-selected", "true");
     expect(chatTab).toHaveAttribute("aria-selected", "false");
-    expect(screen.queryByLabelText("Run chat")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Run chat").closest(".drawer-body--chat")).toHaveAttribute(
+      "hidden",
+    );
   });
 
   it("renders selected-run Chat, activates the existing timeline once, and streams deltas", async () => {
@@ -1977,6 +1992,11 @@ describe("web app", () => {
     expect(await screen.findByRole("region", { name: "Attempt response" })).toHaveTextContent(
       "Streaming answer live",
     );
+    expect(
+      MockEventSource.instances.filter((source) =>
+        source.url.endsWith("/api/runs/run-1/events/timeline"),
+      ),
+    ).toHaveLength(1);
   });
 
   it("shows a Chat loading skeleton instead of user messages until timeline history loads", async () => {
@@ -2294,8 +2314,11 @@ describe("web app", () => {
 
     await user.click(await findRunCard("Second run"));
     const secondRunChat = await screen.findByLabelText("Run chat");
-    expect(await screen.findByText("Second run")).toBeInTheDocument();
+    expect(screen.getAllByText("Second run").length).toBeGreaterThan(0);
     expect(secondRunChat).toBeInTheDocument();
+    const secondRunMessage = screen.getByLabelText("Message");
+    await user.type(secondRunMessage, "resume second run");
+    expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
 
     resolveResume?.(
       new Response(JSON.stringify({ error: { message: "resume temporarily failed" } }), {
@@ -8869,7 +8892,10 @@ describe("web app", () => {
       screen.getByText("Send a follow-up message describing what the run should do next."),
     ).toBeInTheDocument();
 
-    await user.type(await screen.findByLabelText("Message"), "Pick up the failing tests.");
+    await user.type(
+      await within(screen.getByRole("dialog", { name: "Resume run" })).findByLabelText("Message"),
+      "Pick up the failing tests.",
+    );
 
     await waitFor(() => {
       expect(sendButton).toBeEnabled();

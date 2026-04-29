@@ -494,7 +494,7 @@ export function useRunsDashboardState() {
       const next = {
         audit: base.audit || auditActive,
         runId: detailRunId,
-        timeline: base.timeline || timelineActive,
+        timeline: base.timeline || timelineActive || chatTimelineActive,
       };
 
       return next.audit === current.audit &&
@@ -503,7 +503,7 @@ export function useRunsDashboardState() {
         ? current
         : next;
     });
-  }, [auditActive, detailRunId, selectedViewMatchesDetailRun, timelineActive]);
+  }, [auditActive, chatTimelineActive, detailRunId, selectedViewMatchesDetailRun, timelineActive]);
 
   const timelineState = useRunTimelineState({
     config,
@@ -1079,6 +1079,7 @@ export function useRunsDashboardState() {
                                         : clearDependenciesMutation.isPending
                                           ? "clear-dependencies"
                                           : undefined;
+  const resumePendingRunId = resumeMutation.isPending ? resumeMutation.variables?.runId : undefined;
   const selectedRunDetailReady =
     detailRunId !== undefined &&
     detailRunId === selectedRunId &&
@@ -1309,6 +1310,7 @@ export function useRunsDashboardState() {
     hasActiveStructuredFilters: hasActiveDashboardStructuredFilters(preferences.structuredFilters),
     resumeDialogOpen,
     selectedRunResumeRequiresMessage,
+    resumePendingRunId,
     resumeMessageDraft,
     resumeMessageExpanded,
     runActions: {
