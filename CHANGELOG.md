@@ -336,6 +336,13 @@
 
 ### Fixed
 
+- Web dashboard no longer renders an empty opaque right-surface overlay
+  on mobile when no run is selected; the wrapper only mounts when the
+  detail panel has content. The board is visible at `/` on narrow
+  viewports.
+- Web dashboard body uses `100dvh` for its minimum height so the page
+  matches the visible viewport on mobile browsers and does not require
+  a small downward scroll when the URL bar is shown.
 - Attempts drawer now moves immediately to the live Response view when a
   resumed or follow-up run reports a new active attempt before timeline
   history has caught up.

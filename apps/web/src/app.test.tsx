@@ -1826,6 +1826,18 @@ describe("web app", () => {
     ).toBeInTheDocument();
   });
 
+  it("does not render the right-surface wrapper when no run is selected", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: { "run-1": makeDetail() },
+    });
+
+    const { container } = await renderApp();
+    await findRunCard("Build dashboard");
+
+    expect(container.querySelector(".dashboard-right-surfaces")).toBeNull();
+  });
+
   it("opens a selected-run panel and switches between Chat and Detail tabs", async () => {
     installFetchMock({
       runs: [makeRun()],

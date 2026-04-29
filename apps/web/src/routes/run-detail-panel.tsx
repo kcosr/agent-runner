@@ -61,7 +61,6 @@ export function RunDetailPanel({
   resumeMessageExpanded,
   detailSettling,
   selectedRunGroupAttachmentsQuery,
-  selectedRunId,
   selectedRunQuery,
   auditState,
   timelineState,
@@ -114,15 +113,10 @@ export function RunDetailPanel({
   resumeMessageExpanded: boolean;
   detailSettling: boolean;
   selectedRunGroupAttachmentsQuery: UseQueryResult<AttachmentListEntry[], Error>;
-  selectedRunId?: string;
   selectedRunQuery: UseQueryResult<RunDetail, Error>;
   auditState: RunAuditState;
   timelineState: RunTimelineState;
 }) {
-  if (!selectedRunId) {
-    return undefined;
-  }
-
   const drawerStyle = { "--drawer-width": `${drawerWidth}px` } as CSSProperties;
   const drawerClassName = drawerFullscreen ? "drawer drawer--fullscreen" : "drawer";
 
