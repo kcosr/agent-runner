@@ -2323,11 +2323,6 @@ export function RunDetailDrawer({
                 {dataTab === "vars" ? (
                   <>
                     <div className="drawer-data-actions">
-                      <span className="muted-inline">
-                        {Object.keys(run.runtimeVars).length === 0
-                          ? "0 vars"
-                          : `${Object.keys(run.runtimeVars).length} vars`}
-                      </span>
                       {canReconfigure && !editingRuntimeVars ? (
                         <button
                           aria-label="Edit run vars"
