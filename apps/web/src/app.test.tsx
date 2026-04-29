@@ -8,7 +8,8 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./app.js";
-import { queryClient } from "./lib/query.js";
+import { queryClient, runQueryKeys } from "./lib/query.js";
+import { runBelongsInListCache } from "./lib/run-list-cache.js";
 import { router } from "./router.js";
 import attachmentMermaidMarkdown from "./test/fixtures/attachment-mermaid.md?raw";
 
@@ -712,6 +713,7 @@ function installFetchMock(
     return null;
   }
 
+  const UrlConstructor = URL;
   const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
     const override = await options?.handleRequest?.(url, init);
@@ -722,14 +724,13 @@ function installFetchMock(
       return new Response(JSON.stringify(APP_CONFIG), { status: 200 });
     }
 
-    if (url.includes("/api/runs?includeArchived=true")) {
-      const queryStart = url.indexOf("?");
-      const query = queryStart === -1 ? "" : url.slice(queryStart + 1);
-      const runGroupId = new URLSearchParams(query).get("runGroupId");
-      const runs =
-        runGroupId === null
-          ? state.runs
-          : state.runs.filter((run) => run.runGroupId === runGroupId);
+    const parsedUrl = new UrlConstructor(url, "http://task-runner.test");
+    if (parsedUrl.pathname === "/api/runs" && (!init?.method || init.method === "GET")) {
+      const includeArchived = parsedUrl.searchParams.get("includeArchived") === "true";
+      const runGroupId = parsedUrl.searchParams.get("runGroupId");
+      const runs = state.runs.filter((run) =>
+        runBelongsInListCache(run, { includeArchived, runGroupId }),
+      );
       return new Response(JSON.stringify({ runs }), { status: 200 });
     }
 
@@ -5059,41 +5060,31 @@ describe("web app", () => {
         name: "Group child",
       }),
     ];
-    const fetchMock = installFetchMock(
-      {
-        runs: [
-          ...groupRuns,
-          makeRun({
-            runId: "run-outside",
-            assignmentName: "Outside run",
-            name: "Outside run",
-          }),
-        ],
-        details: {
-          "run-root": makeDetail({
-            runId: "run-root",
-            runGroupId: "run-root",
-            assignment: { name: "Group root", sourcePath: "/tmp/group-root-assignment.md" },
-            name: "Group root",
-          }),
-          "run-child": makeDetail({
-            runId: "run-child",
-            parentRunId: "run-root",
-            runGroupId: "run-root",
-            assignment: { name: "Group child", sourcePath: "/tmp/group-child-assignment.md" },
-            name: "Group child",
-          }),
-        },
+    const fetchMock = installFetchMock({
+      runs: [
+        ...groupRuns,
+        makeRun({
+          runId: "run-outside",
+          assignmentName: "Outside run",
+          name: "Outside run",
+        }),
+      ],
+      details: {
+        "run-root": makeDetail({
+          runId: "run-root",
+          runGroupId: "run-root",
+          assignment: { name: "Group root", sourcePath: "/tmp/group-root-assignment.md" },
+          name: "Group root",
+        }),
+        "run-child": makeDetail({
+          runId: "run-child",
+          parentRunId: "run-root",
+          runGroupId: "run-root",
+          assignment: { name: "Group child", sourcePath: "/tmp/group-child-assignment.md" },
+          name: "Group child",
+        }),
       },
-      {
-        handleRequest: (url) => {
-          if (url.includes("/api/runs?includeArchived=true&runGroupId=run-root")) {
-            return new Response(JSON.stringify({ runs: groupRuns }), { status: 200 });
-          }
-          return undefined;
-        },
-      },
-    );
+    });
 
     const user = userEvent.setup();
     await renderApp();
@@ -5113,7 +5104,7 @@ describe("web app", () => {
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/runs?includeArchived=true&runGroupId=run-root",
+        "/api/runs?includeArchived=false&runGroupId=run-root",
         expect.objectContaining({
           headers: { accept: "application/json" },
         }),
@@ -5197,7 +5188,7 @@ describe("web app", () => {
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/runs?includeArchived=true&runGroupId=run-root",
+        "/api/runs?includeArchived=false&runGroupId=run-root",
         expect.objectContaining({
           headers: { accept: "application/json" },
         }),
@@ -5221,7 +5212,7 @@ describe("web app", () => {
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/runs?includeArchived=true",
+        "/api/runs?includeArchived=false",
         expect.objectContaining({
           headers: { accept: "application/json" },
         }),
@@ -5268,29 +5259,19 @@ describe("web app", () => {
         pinned: true,
       }),
     ];
-    installFetchMock(
-      {
-        runs: [
-          ...groupRuns,
-          makeRun({
-            runId: "run-outside",
-            assignmentName: "Outside run",
-            name: "Outside run",
-            notePresent: true,
-            pinned: true,
-          }),
-        ],
-        details: {},
-      },
-      {
-        handleRequest: (url) => {
-          if (url.includes("/api/runs?includeArchived=true&runGroupId=run-root")) {
-            return new Response(JSON.stringify({ runs: groupRuns }), { status: 200 });
-          }
-          return undefined;
-        },
-      },
-    );
+    installFetchMock({
+      runs: [
+        ...groupRuns,
+        makeRun({
+          runId: "run-outside",
+          assignmentName: "Outside run",
+          name: "Outside run",
+          notePresent: true,
+          pinned: true,
+        }),
+      ],
+      details: {},
+    });
 
     const user = userEvent.setup();
     await renderApp();
@@ -5341,7 +5322,7 @@ describe("web app", () => {
       },
       {
         handleRequest: (url) => {
-          if (!url.includes("/api/runs?includeArchived=true&runGroupId=run-root")) {
+          if (!url.includes("/api/runs?includeArchived=false&runGroupId=run-root")) {
             return undefined;
           }
           if (failGroupFetch) {
@@ -5376,7 +5357,7 @@ describe("web app", () => {
 
     expect(await findRunCard("Group child")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/runs?includeArchived=true&runGroupId=run-root",
+      "/api/runs?includeArchived=false&runGroupId=run-root",
       expect.objectContaining({
         headers: { accept: "application/json" },
       }),
@@ -7069,6 +7050,116 @@ describe("web app", () => {
     expect(getBoardColumn("Aborted")).toBeInTheDocument();
   });
 
+  it("uses separate archived and hidden list queries when toggling archived visibility", async () => {
+    const fetchMock = installFetchMock({
+      runs: [
+        makeRun({ assignmentName: "Active dashboard", name: "Active dashboard" }),
+        makeRun({
+          runId: "run-archived",
+          assignmentName: "Archived dashboard",
+          archivedAt: "2026-04-13T06:00:00.000Z",
+          name: "Archived dashboard",
+          status: "success",
+        }),
+      ],
+      details: {
+        "run-1": makeDetail({
+          assignment: { name: "Active dashboard", sourcePath: "/tmp/active.md" },
+          name: "Active dashboard",
+        }),
+        "run-archived": makeDetail({
+          runId: "run-archived",
+          archivedAt: "2026-04-13T06:00:00.000Z",
+          assignment: { name: "Archived dashboard", sourcePath: "/tmp/archived.md" },
+          name: "Archived dashboard",
+          status: "success",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    expect(await findRunCard("Active dashboard")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Archived dashboard/i })).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs?includeArchived=false",
+      expect.objectContaining({ headers: { accept: "application/json" } }),
+    );
+    expect(
+      queryClient
+        .getQueryData<RunSummary[]>(runQueryKeys.list({ includeArchived: false, runGroupId: null }))
+        ?.map((run) => run.runId),
+    ).toEqual(["run-1"]);
+
+    await user.click(screen.getByRole("button", { name: /show archived runs/i }));
+    expect(await findRunCard("Archived dashboard")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs?includeArchived=true",
+      expect.objectContaining({ headers: { accept: "application/json" } }),
+    );
+    expect(
+      queryClient
+        .getQueryData<RunSummary[]>(runQueryKeys.list({ includeArchived: true, runGroupId: null }))
+        ?.map((run) => run.runId)
+        .sort(),
+    ).toEqual(["run-1", "run-archived"]);
+
+    await user.click(screen.getByRole("button", { name: /show archived runs/i }));
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: /Archived dashboard/i })).not.toBeInTheDocument();
+    });
+    expect(
+      queryClient.getQueryState(runQueryKeys.list({ includeArchived: true, runGroupId: null })),
+    ).toBeUndefined();
+  });
+
+  it("removes archived list queries after archived visibility is toggled off from settings", async () => {
+    setStoredDashboardPreferences({ showArchived: true });
+    installFetchMock({
+      runs: [
+        makeRun({ assignmentName: "Active dashboard", name: "Active dashboard" }),
+        makeRun({
+          runId: "run-archived",
+          assignmentName: "Archived dashboard",
+          archivedAt: "2026-04-13T06:00:00.000Z",
+          name: "Archived dashboard",
+          status: "success",
+        }),
+      ],
+      details: {
+        "run-1": makeDetail({
+          assignment: { name: "Active dashboard", sourcePath: "/tmp/active.md" },
+          name: "Active dashboard",
+        }),
+        "run-archived": makeDetail({
+          runId: "run-archived",
+          archivedAt: "2026-04-13T06:00:00.000Z",
+          assignment: { name: "Archived dashboard", sourcePath: "/tmp/archived.md" },
+          name: "Archived dashboard",
+          status: "success",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+
+    expect(await findRunCard("Archived dashboard")).toBeInTheDocument();
+    const archivedKey = runQueryKeys.list({ includeArchived: true, runGroupId: null });
+    expect(queryClient.getQueryState(archivedKey)).toBeDefined();
+
+    await user.click(getSidebarNavigation().getByRole("button", { name: "Settings" }));
+    expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
+    await user.click(screen.getByRole("checkbox", { name: "Show archived runs" }));
+    expect(screen.getByRole("checkbox", { name: "Show archived runs" })).not.toBeChecked();
+
+    await user.click(getSidebarNavigation().getByRole("button", { name: "Runs" }));
+    expect(await findRunCard("Active dashboard")).toBeInTheDocument();
+    await waitFor(() => expect(queryClient.getQueryState(archivedKey)).toBeUndefined());
+    expect(screen.queryByRole("button", { name: /Archived dashboard/i })).not.toBeInTheDocument();
+  });
+
   it("sorts pinned runs first within each status column and persists the pinned-only filter", async () => {
     installFetchMock({
       runs: [
@@ -7408,6 +7499,11 @@ describe("web app", () => {
       .slice(callsBeforeArchive)
       .map(([input]) => (typeof input === "string" ? input : input.toString()));
     expect(callsAfterArchive).toEqual(["/api/runs/run-1/archive"]);
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: /Archive ready/i })).not.toBeInTheDocument();
+    });
+    expect(screen.getByLabelText("Run detail")).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/runs/run-1");
   });
 
   it("uses Ctrl+Shift shortcuts for board filters without replacing plain selected-run actions", async () => {
@@ -9771,7 +9867,7 @@ describe("web app", () => {
     };
     installFetchMock(state, {
       handleRequest: (url) => {
-        if (url.includes("/api/runs?includeArchived=true") && failNextRunsFetch) {
+        if (url.includes("/api/runs?includeArchived=false") && failNextRunsFetch) {
           failNextRunsFetch = false;
           return new Response(
             JSON.stringify({ error: { message: "temporary failure", code: "server_error" } }),
@@ -9894,6 +9990,134 @@ describe("web app", () => {
       await screen.findByRole("button", { name: /updated without refetch/i }),
     ).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(callsBefore);
+  });
+
+  it("filters archived summary SSE upserts by list cache visibility", async () => {
+    const activeRun = makeRun({ assignmentName: "Active from fetch", name: "Active from fetch" });
+    installFetchMock({
+      runs: [activeRun],
+      details: {
+        "run-1": makeDetail({
+          assignment: {
+            name: "Active from fetch",
+            sourcePath: "/tmp/active.md",
+          },
+          name: "Active from fetch",
+        }),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    expect(await findRunCard("Active from fetch")).toBeInTheDocument();
+
+    const source = MockEventSource.instances[0];
+    if (!source) {
+      throw new Error("expected an EventSource subscription");
+    }
+    source.emitOpen();
+
+    const hiddenKey = runQueryKeys.list({ includeArchived: false, runGroupId: null });
+    const archivedKey = runQueryKeys.list({ includeArchived: true, runGroupId: null });
+    const archivedSummary = makeRun({
+      runId: "run-archived-sse",
+      assignmentName: "Archived from SSE",
+      archivedAt: "2026-04-13T06:00:00.000Z",
+      name: "Archived from SSE",
+      status: "success",
+    });
+    queryClient.setQueryData<RunSummary[]>(hiddenKey, [activeRun, archivedSummary]);
+
+    source.emitMessage({ type: "summary_upsert", summary: archivedSummary });
+
+    await waitFor(() =>
+      expect(
+        queryClient
+          .getQueryData<RunSummary[]>(hiddenKey)
+          ?.some((run) => run.runId === "run-archived-sse"),
+      ).toBe(false),
+    );
+    expect(screen.queryByRole("button", { name: /Archived from SSE/i })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /show archived runs/i }));
+    source.emitMessage({ type: "summary_upsert", summary: archivedSummary });
+
+    expect(await findRunCard("Archived from SSE")).toBeInTheDocument();
+    expect(
+      queryClient
+        .getQueryData<RunSummary[]>(archivedKey)
+        ?.some((run) => run.runId === "run-archived-sse"),
+    ).toBe(true);
+  });
+
+  it("filters summary SSE upserts by scoped run-group list metadata", async () => {
+    installFetchMock({
+      runs: [
+        makeRun({
+          runId: "run-group-root",
+          assignmentName: "Group root",
+          name: "Group root",
+          runGroupId: "group-a",
+        }),
+        makeRun({
+          runId: "run-outside",
+          assignmentName: "Outside run",
+          name: "Outside run",
+          runGroupId: "group-b",
+        }),
+      ],
+      details: {},
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await user.click(
+      within(await findRunCard("Group root")).getByLabelText("Filter by run group group-a"),
+    );
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: /Outside run/i })).not.toBeInTheDocument();
+    });
+
+    const source = MockEventSource.instances[0];
+    if (!source) {
+      throw new Error("expected an EventSource subscription");
+    }
+    source.emitOpen();
+
+    const scopedKey = runQueryKeys.list({ includeArchived: false, runGroupId: "group-a" });
+    source.emitMessage({
+      type: "summary_upsert",
+      summary: makeRun({
+        runId: "run-other-sse",
+        assignmentName: "Other group SSE",
+        name: "Other group SSE",
+        runGroupId: "group-b",
+      }),
+    });
+
+    expect(screen.queryByRole("button", { name: /Other group SSE/i })).not.toBeInTheDocument();
+    expect(
+      queryClient
+        .getQueryData<RunSummary[]>(scopedKey)
+        ?.some((run) => run.runId === "run-other-sse"),
+    ).toBe(false);
+
+    source.emitMessage({
+      type: "summary_upsert",
+      summary: makeRun({
+        runId: "run-matching-sse",
+        assignmentName: "Matching group SSE",
+        name: "Matching group SSE",
+        runGroupId: "group-a",
+      }),
+    });
+
+    expect(await findRunCard("Matching group SSE")).toBeInTheDocument();
+    expect(
+      queryClient
+        .getQueryData<RunSummary[]>(scopedKey)
+        ?.some((run) => run.runId === "run-matching-sse"),
+    ).toBe(true);
   });
 
   it("promotes an updated run to the top of its column in last-updated sort mode", async () => {

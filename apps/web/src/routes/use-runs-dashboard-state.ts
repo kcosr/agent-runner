@@ -18,6 +18,13 @@ import { type ReconfigureRunPatch, createApiClient, isNotFoundError } from "../l
 import { queryClient, runQueryKeys } from "../lib/query.js";
 import { useRunAuditState } from "../lib/run-audit.js";
 import { useRunEvents } from "../lib/run-events.js";
+import {
+  runBelongsInListCache,
+  runListQueryMetadata,
+  updateRunListCacheQueries,
+  updateRunSummaryInListCache,
+  upsertRunSummaryInListCache,
+} from "../lib/run-list-cache.js";
 import { createRunComparator, sortRunsWithPinnedFirst } from "../lib/run-order.js";
 import { getRunPrimaryAction } from "../lib/run-primary-action.js";
 import { useRunTimelineState } from "../lib/run-timeline.js";
@@ -145,12 +152,6 @@ function matchesStructuredFilters(
   );
 }
 
-function updateRunListCaches(
-  update: (runs: RunSummary[] | undefined) => RunSummary[] | undefined,
-): void {
-  queryClient.setQueriesData<RunSummary[] | undefined>({ queryKey: runQueryKeys.lists() }, update);
-}
-
 function buildColumns(
   runs: RunSummary[],
   collapseFailureStates: boolean,
@@ -263,8 +264,8 @@ function updateRunCaches(
   }
   const updateSummary = update.summary;
   if (updateSummary) {
-    updateRunListCaches((current) =>
-      current?.map((run) => (run.runId === runId ? updateSummary(run) : run)),
+    updateRunListCacheQueries(queryClient, (current, metadata) =>
+      updateRunSummaryInListCache(current, runId, metadata, updateSummary),
     );
   }
 }
@@ -327,39 +328,42 @@ function updateRunArchivedCaches(result: RunArchiveResult) {
 }
 
 function syncRunSummaryFromDetail(detail: RunDetail) {
-  updateRunListCaches((current) =>
-    current?.map((run) =>
-      run.runId === detail.runId
-        ? {
-            ...run,
-            repo: detail.repo,
-            status: detail.status,
-            effectiveStatus: detail.effectiveStatus,
-            archivedAt: detail.archivedAt,
-            pinned: detail.pinned,
-            notePresent: detail.note !== null,
-            agentName: detail.agent.name,
-            name: detail.name,
-            assignmentName: detail.assignment?.name ?? null,
-            backend: detail.backend,
-            model: detail.model,
-            cwd: detail.cwd,
-            startedAt: detail.startedAt,
-            updatedAt: detail.updatedAt,
-            endedAt: detail.endedAt,
-            tasksCompleted: detail.tasksCompleted,
-            tasksTotal: detail.tasksTotal,
-            dependencyState: deriveDependencyStateFromDetails(detail.dependencies),
-            schedule: detail.schedule,
-            scheduleState: detail.scheduleState,
-            attachmentCount: detail.attachments.length,
-            runGroupId: detail.runGroupId,
-            activeTask: detail.activeTask,
-            execution: detail.execution,
-            capabilities: detail.capabilities,
-          }
-        : run,
-    ),
+  const summary: RunSummary = {
+    runId: detail.runId,
+    parentRunId: detail.parentRunId,
+    repo: detail.repo,
+    status: detail.status,
+    effectiveStatus: detail.effectiveStatus,
+    archivedAt: detail.archivedAt,
+    pinned: detail.pinned,
+    notePresent: detail.note !== null,
+    agentName: detail.agent.name,
+    name: detail.name,
+    assignmentName: detail.assignment?.name ?? null,
+    backend: detail.backend,
+    model: detail.model,
+    cwd: detail.cwd,
+    startedAt: detail.startedAt,
+    updatedAt: detail.updatedAt,
+    endedAt: detail.endedAt,
+    totalAttemptCount: detail.totalAttemptCount,
+    totalSessionCount: detail.totalSessionCount,
+    maxAttemptsPerSession: detail.maxAttemptsPerSession,
+    currentSession: detail.currentSession,
+    lastSession: detail.lastSession,
+    tasksCompleted: detail.tasksCompleted,
+    tasksTotal: detail.tasksTotal,
+    dependencyState: deriveDependencyStateFromDetails(detail.dependencies),
+    schedule: detail.schedule,
+    scheduleState: detail.scheduleState,
+    attachmentCount: detail.attachments.length,
+    runGroupId: detail.runGroupId,
+    activeTask: detail.activeTask,
+    execution: detail.execution,
+    capabilities: detail.capabilities,
+  };
+  updateRunListCacheQueries(queryClient, (current, metadata) =>
+    upsertRunSummaryInListCache(current, summary, metadata),
   );
 }
 
@@ -422,11 +426,27 @@ export function useRunsDashboardState() {
   const noticeTimersRef = useRef(new Map<string, number>());
   const detailStreamStaleRef = useRef(detailStreamStale);
   const runGroupFilter = preferences.structuredFilters.runGroupId;
+  const includeArchived = preferences.showArchived;
 
   const runsQuery = useQuery({
-    queryKey: runQueryKeys.list(runGroupFilter),
-    queryFn: ({ signal }) => api.listRuns({ runGroupId: runGroupFilter, signal }),
+    queryKey: runQueryKeys.list({ includeArchived, runGroupId: runGroupFilter }),
+    queryFn: async ({ signal }) => {
+      const runs = await api.listRuns({ includeArchived, runGroupId: runGroupFilter, signal });
+      return runs.filter((run) =>
+        runBelongsInListCache(run, { includeArchived, runGroupId: runGroupFilter }),
+      );
+    },
   });
+
+  useEffect(() => {
+    if (includeArchived) {
+      return;
+    }
+    queryClient.removeQueries({
+      queryKey: runQueryKeys.lists(),
+      predicate: (query) => runListQueryMetadata(query.queryKey)?.includeArchived === true,
+    });
+  }, [includeArchived]);
 
   const selectedRunQuery = useQuery({
     queryKey: detailRunId ? runQueryKeys.detail(detailRunId) : runQueryKeys.detail("__none__"),

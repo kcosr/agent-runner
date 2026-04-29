@@ -86,6 +86,7 @@ interface RequestOptions {
 }
 
 interface ListRunsOptions extends RequestOptions {
+  includeArchived?: boolean;
   runGroupId?: string | null;
 }
 
@@ -631,7 +632,9 @@ export function createApiClient(config: AppRuntimeConfig) {
       return await readRunInputSurface(response);
     },
     async listRuns(options: ListRunsOptions = {}): Promise<RunSummary[]> {
-      const params = new URLSearchParams({ includeArchived: "true" });
+      const params = new URLSearchParams({
+        includeArchived: options.includeArchived === true ? "true" : "false",
+      });
       if (options.runGroupId) {
         params.set("runGroupId", options.runGroupId);
       }
