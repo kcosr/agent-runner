@@ -74,8 +74,6 @@ export function RunCard({
   actionPending,
   run,
   selected,
-  openNoteDialogRequest,
-  onOpenNoteDialogRequestHandled,
   onSelect,
   onSetNote,
   onSetPinned,
@@ -86,11 +84,6 @@ export function RunCard({
   actionPending?: RunActionPending;
   run: RunSummary;
   selected: boolean;
-  openNoteDialogRequest?: {
-    runId: string;
-    version: number;
-  } | null;
-  onOpenNoteDialogRequestHandled: (version: number) => void;
   onSelect: () => void;
   onSetNote: (note: string | null) => Promise<void>;
   onSetPinned: (pinned: boolean) => Promise<void>;
@@ -103,7 +96,6 @@ export function RunCard({
   const notePreviewRef = useRef<HTMLDivElement | null>(null);
   const notePreviewCloseTimeoutRef = useRef<number | null>(null);
   const noteControlSuppressedUntilRef = useRef(0);
-  const lastHandledOpenNoteDialogRequestVersionRef = useRef<number | undefined>(undefined);
   const prefersReducedMotion = usePrefersReducedMotion();
   const preferredNoteEditorMode = usePreferredRunNoteEditorMode();
   const previewFirstNoteMode = preferredNoteEditorMode === "preview";
@@ -235,23 +227,6 @@ export function RunCard({
     true,
     closeNoteDialog,
   );
-
-  useEffect(() => {
-    if (
-      openNoteDialogRequest === null ||
-      openNoteDialogRequest === undefined ||
-      openNoteDialogRequest.runId !== run.runId ||
-      openNoteDialogRequest.version === lastHandledOpenNoteDialogRequestVersionRef.current
-    ) {
-      return;
-    }
-    lastHandledOpenNoteDialogRequestVersionRef.current = openNoteDialogRequest.version;
-    onOpenNoteDialogRequestHandled(openNoteDialogRequest.version);
-    if (!selected) {
-      return;
-    }
-    openNoteDialog();
-  }, [onOpenNoteDialogRequestHandled, openNoteDialog, openNoteDialogRequest, run.runId, selected]);
 
   function handleNotePointerEnter() {
     openNotePreview();

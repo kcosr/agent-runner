@@ -20,9 +20,9 @@ those plus the active run id.
 
 ## Views
 
-- `/` — Runs dashboard with Board, Detail, and Chat surfaces.
+- `/` — Runs dashboard with Board, Chat, Detail, Notes, and Tasks surfaces.
 - `/runs/:runId` — Same dashboard with a specific run selected for the
-  Detail and Chat surfaces.
+  selected-run surfaces.
 - `/settings/general` — General preferences.
 - `/settings/keybindings` — Keyboard shortcut reference.
 
@@ -32,22 +32,22 @@ A multi-surface workspace:
 
 - **Left** — search, grouped Filters control, and preference toggles.
 - **Center** — Board, the kanban run list grouped by run status.
-- **Right** — one selected-run panel with Chat, Detail, and Tasks tabs.
+- **Right** — one selected-run panel with Chat, Detail, Notes, and Tasks tabs.
 
 Board is always visible. Selecting a run opens one resizable selected-run
 panel. Its header owns the run identity plus action toolbar, and the tabs
-below the toolbar switch between Chat, Detail, and Tasks. Chat does not
+below the toolbar switch between Chat, Detail, Notes, and Tasks. Chat does not
 create a separate chat route or backend chat contract; it follows the
 selected run, derives messages from `RunDetail` plus timeline history,
 and streams live output through the existing timeline stream.
 
 Closing the selected-run panel navigates back to `/` and clears the
-selected run. Chat, Detail, and Tasks tab choice persists as the active right
+selected run. Chat, Detail, Notes, and Tasks tab choice persists as the active right
 surface.
 
 Dashboard view state persists the durable surface layout fields:
 collapsed board columns, selected-run panel width, and the active
-Chat/Detail/Tasks tab. Search text, fullscreen state, per-run drawer tabs, and
+Chat/Detail/Notes/Tasks tab. Search text, fullscreen state, per-run drawer tabs, and
 the active board column remain transient.
 
 On desktop layouts, the selected-run panel renders inline to the right of
@@ -133,9 +133,9 @@ The drawer surfaces:
   disabled but not cleared.
 - Run group metadata and editor. Non-running runs can be moved into a
   different group or reset to their singleton group.
-- Notes tab: rendered markdown by default, explicit Preview/Edit toggle,
-  save/cancel flow, and the same shared note mutation used by the card
-  editor.
+- Notes surface: rendered markdown by default, an Edit action that exposes
+  save/cancel controls, and the same shared note mutation used by the card
+  editor. `N` opens the surface; pressing `N` again focuses the editor.
 - Tasks surface: expandable task rows with inline notes and status editing,
   gated by `taskMutation` capabilities.
 - Attachments tab: one combined group-scoped list. Rows show
@@ -274,9 +274,9 @@ The dashboard's shortcut system is customizable from
 | `Ctrl+Shift+A` | Toggle archived filter |
 | `Ctrl+Shift+E` | Toggle hide-empty-columns |
 | `P` | Pin or unpin the selected run |
-| `N` | Open the selected run's note |
 | `C` | Show the selected run's Chat tab, or focus its composer when Chat is open |
 | `D` | Show the selected run's Detail tab |
+| `N` | Show the selected run's Notes tab, or focus its editor when Notes is open |
 | `T` | Show the selected run's Tasks tab |
 | `A` | Archive or restore the selected run |
 | `F` | Toggle the detail drawer fullscreen |
@@ -286,7 +286,7 @@ is open. Native modal dialogs, including Resume and the run-note editor,
 handle Escape/back dismissal before dashboard shortcuts.
 
 When the detail drawer is fullscreen, selected-run shortcuts including
-`Enter`, `N`, `P`, `A`, and `C`/`D`/`T` remain active. Board movement,
+`Enter`, `N`, `P`, `A`, and `C`/`D`/`N`/`T` remain active. Board movement,
 search, and filter shortcuts remain suppressed in fullscreen drawer
 mode. Attachment preview keeps only surface navigation, fullscreen
 toggle, and Escape shortcuts active so hidden header actions do not fire.

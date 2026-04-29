@@ -51,7 +51,7 @@ const DEFAULT_DASHBOARD_PREFERENCES = {
 const DEFAULT_DASHBOARD_VIEW_STATE: {
   collapsedColumnKeys: string[];
   drawerWidth: number;
-  activeRightSurface: "detail" | "chat" | "tasks";
+  activeRightSurface: "detail" | "chat" | "notes" | "tasks";
 } = {
   collapsedColumnKeys: [],
   drawerWidth: 540,
@@ -1880,7 +1880,7 @@ describe("web app", () => {
     expect(container.querySelector(".dashboard-right-surfaces")).toBeNull();
   });
 
-  it("opens a selected-run panel and switches between Chat, Detail, and Tasks tabs", async () => {
+  it("opens a selected-run panel and switches between Chat, Detail, Notes, and Tasks tabs", async () => {
     installFetchMock({
       runs: [makeRun()],
       details: { "run-1": makeDetail() },
@@ -1900,10 +1900,13 @@ describe("web app", () => {
     await user.type(await screen.findByLabelText("Message"), "keep this draft");
 
     await user.click(within(tablist).getByRole("tab", { name: "Detail" }));
-    expect(screen.getByLabelText("Notes")).toBeInTheDocument();
+    expect(screen.getByLabelText("Attachments")).toBeInTheDocument();
     expect(screen.getByLabelText("Run chat").closest(".drawer-body--chat")).toHaveAttribute(
       "hidden",
     );
+
+    await user.click(within(tablist).getByRole("tab", { name: "Notes" }));
+    expect(screen.getByLabelText("Notes")).toBeInTheDocument();
 
     await user.click(within(tablist).getByRole("tab", { name: /Tasks/ }));
     expect(screen.getByLabelText("Tasks")).toBeInTheDocument();
@@ -1917,7 +1920,7 @@ describe("web app", () => {
     });
   });
 
-  it("switches the active selected-run surface from the Chat, Detail, and Tasks tabs", async () => {
+  it("switches the active selected-run surface from the Chat, Detail, Notes, and Tasks tabs", async () => {
     setStoredDashboardViewState({ activeRightSurface: "detail" });
     installFetchMock({
       runs: [makeRun()],
@@ -1930,14 +1933,16 @@ describe("web app", () => {
     const tablist = await screen.findByRole("tablist", { name: "Run surface" });
     const detailTab = within(tablist).getByRole("tab", { name: "Detail" });
     const chatTab = within(tablist).getByRole("tab", { name: "Chat" });
+    const notesTab = within(tablist).getByRole("tab", { name: "Notes" });
     const tasksTab = within(tablist).getByRole("tab", { name: /Tasks/ });
     expect(
       within(tablist)
         .getAllByRole("tab")
         .map((tab) => tab.textContent),
-    ).toEqual(["Chat", "Detail", "Tasks"]);
+    ).toEqual(["Chat", "Detail", "Notes", "Tasks"]);
     expect(detailTab).toHaveAttribute("aria-selected", "true");
     expect(chatTab).toHaveAttribute("aria-selected", "false");
+    expect(notesTab).toHaveAttribute("aria-selected", "false");
     expect(tasksTab).toHaveAttribute("aria-selected", "false");
     expect(screen.getByLabelText("Run chat").closest(".drawer-body--chat")).toHaveAttribute(
       "hidden",
@@ -1954,6 +1959,10 @@ describe("web app", () => {
     expect(screen.getByLabelText("Run chat").closest(".drawer-body--chat")).toHaveAttribute(
       "hidden",
     );
+
+    await user.click(notesTab);
+    expect(notesTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("Notes")).toBeInTheDocument();
 
     await user.click(tasksTab);
     expect(tasksTab).toHaveAttribute("aria-selected", "true");
@@ -1973,6 +1982,7 @@ describe("web app", () => {
     const tablist = await screen.findByRole("tablist", { name: "Run surface" });
     const detailTab = within(tablist).getByRole("tab", { name: "Detail" });
     const chatTab = within(tablist).getByRole("tab", { name: "Chat" });
+    const notesTab = within(tablist).getByRole("tab", { name: "Notes" });
     const tasksTab = within(tablist).getByRole("tab", { name: /Tasks/ });
     expect(detailTab).toHaveAttribute("aria-selected", "true");
 
@@ -1998,6 +2008,28 @@ describe("web app", () => {
     expect(screen.getByLabelText("Run chat").closest(".drawer-body--chat")).toHaveAttribute(
       "hidden",
     );
+
+    await user.keyboard("n");
+    expect(notesTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("Notes")).toBeInTheDocument();
+    const noteInput = screen.queryByRole("textbox", {
+      name: /run note for build dashboard/i,
+    });
+    expect(noteInput).not.toBeInTheDocument();
+
+    await user.keyboard("n");
+    expect(
+      await screen.findByRole("textbox", {
+        name: /run note for build dashboard/i,
+      }),
+    ).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+    expect(
+      screen.queryByRole("textbox", {
+        name: /run note for build dashboard/i,
+      }),
+    ).not.toBeInTheDocument();
 
     await user.keyboard("t");
     expect(tasksTab).toHaveAttribute("aria-selected", "true");
@@ -3133,12 +3165,12 @@ describe("web app", () => {
 
     const runSections = await screen.findByRole("navigation", { name: "Run sections" });
     expect(runSections).toHaveClass("tabs", "tabs--scrollable");
-    expect(runSections.querySelectorAll(":scope > .tab")).toHaveLength(6);
+    expect(runSections.querySelectorAll(":scope > .tab")).toHaveLength(5);
     expect(
       [...runSections.querySelectorAll(":scope > .tab")].map((tab) =>
         tab.textContent?.replace(/\s+\S+\/\S+$/, "").trim(),
       ),
-    ).toEqual(["Attempts", "Attachments", "Data", "Audit", "Dependencies", "Notes"]);
+    ).toEqual(["Attempts", "Attachments", "Data", "Audit", "Dependencies"]);
   });
 
   it("omits Attempts but keeps Audit and Data in the passive run-section tab strip", async () => {
@@ -3157,12 +3189,12 @@ describe("web app", () => {
     await user.click(await screen.findByRole("tab", { name: "Detail" }));
 
     const runSections = await screen.findByRole("navigation", { name: "Run sections" });
-    expect(runSections.querySelectorAll(":scope > .tab")).toHaveLength(5);
+    expect(runSections.querySelectorAll(":scope > .tab")).toHaveLength(4);
     expect(
       [...runSections.querySelectorAll(":scope > .tab")].map((tab) =>
         tab.textContent?.replace(/\s+\S+\/\S+$/, "").trim(),
       ),
-    ).toEqual(["Attachments", "Data", "Audit", "Dependencies", "Notes"]);
+    ).toEqual(["Attachments", "Data", "Audit", "Dependencies"]);
     expect(within(runSections).getByRole("button", { name: "Audit" })).toBeInTheDocument();
     expect(within(runSections).getByRole("button", { name: "Data" })).toBeInTheDocument();
     expect(within(runSections).queryByRole("button", { name: "Attempts" })).not.toBeInTheDocument();
@@ -6389,7 +6421,11 @@ describe("web app", () => {
 
     await user.click(card);
     await user.click(screen.getByRole("tab", { name: "Detail" }));
-    await user.click(screen.getByRole("button", { name: "Notes" }));
+    await user.click(
+      within(screen.getByRole("tablist", { name: "Run surface" })).getByRole("tab", {
+        name: "Notes",
+      }),
+    );
 
     expect(await screen.findByText("Dashboard polish")).toBeInTheDocument();
     expect(screen.getByText("Saved from card")).toBeInTheDocument();
@@ -6449,7 +6485,8 @@ describe("web app", () => {
       }),
     );
 
-    expect(screen.getByRole("button", { name: "View" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Edit" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "View" })).not.toBeInTheDocument();
     expect(await screen.findByText("Touch-first note")).toBeInTheDocument();
     expect(
       screen.queryByRole("textbox", { name: /run note for build dashboard/i }),
@@ -7222,7 +7259,7 @@ describe("web app", () => {
     expect(callsAfter).toEqual(["/api/runs/run-1/pinned"]);
   });
 
-  it("opens the selected run note modal with n, suppresses board shortcuts, and closes on native cancel", async () => {
+  it("opens the selected run Notes tab with n, focuses the editor, and saves with Alt+Enter", async () => {
     const fetchMock = installFetchMock({
       runs: [makeRun({ assignmentName: "Build dashboard" })],
       details: {
@@ -7240,22 +7277,66 @@ describe("web app", () => {
     await user.click(await findRunCard("Build dashboard"));
 
     await user.keyboard("n");
+    const tablist = await screen.findByRole("tablist", { name: "Run surface" });
+    expect(within(tablist).getByRole("tab", { name: "Notes" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.queryByRole("dialog", { name: "Build dashboard" })).not.toBeInTheDocument();
+
+    await user.keyboard("n");
     const noteInput = await screen.findByRole("textbox", {
       name: /run note for build dashboard/i,
     });
     expect(noteInput).toHaveFocus();
-    const noteDialog = screen.getByRole("dialog", { name: "Build dashboard" });
 
     const callsBeforeSuppressedPin = fetchMock.mock.calls.length;
+    await user.type(noteInput, "Keyboard note");
     await user.keyboard("p");
     expect(
       fetchMock.mock.calls
         .slice(callsBeforeSuppressedPin)
         .some(([input]) => String(input).endsWith("/api/runs/run-1/pinned")),
     ).toBe(false);
-    expect(noteDialog).toBeInTheDocument();
+    expect(noteInput).toHaveValue("Keyboard notep");
 
-    nativeCancel(noteDialog);
+    fireEvent.keyDown(noteInput, { altKey: true, key: "Enter" });
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/runs/run-1/note",
+        expect.objectContaining({
+          body: JSON.stringify({ note: "Keyboard notep" }),
+          method: "POST",
+        }),
+      ),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("textbox", { name: /run note for build dashboard/i }),
+      ).not.toBeInTheDocument(),
+    );
+
+    await user.keyboard("n");
+    const dirtyNoteInput = await screen.findByRole("textbox", {
+      name: /run note for build dashboard/i,
+    });
+    await user.type(dirtyNoteInput, " dirty");
+    await user.keyboard("{Escape}");
+    const confirmDialog = await screen.findByRole("dialog", { name: "Save note changes?" });
+    await user.click(within(confirmDialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Save note changes?" })).not.toBeInTheDocument(),
+    );
+    expect(dirtyNoteInput).toHaveFocus();
+    await user.keyboard("{Escape}");
+    await user.click(
+      within(await screen.findByRole("dialog", { name: "Save note changes?" })).getByRole(
+        "button",
+        {
+          name: "Discard",
+        },
+      ),
+    );
     await waitFor(() =>
       expect(
         screen.queryByRole("textbox", { name: /run note for build dashboard/i }),

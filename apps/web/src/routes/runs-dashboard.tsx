@@ -49,10 +49,7 @@ function DashboardSurfaces({
 export function RunsDashboardRoute() {
   const state = useRunsDashboardState();
   const [toggleFiltersVersion, setToggleFiltersVersion] = useState(0);
-  const [openSelectedRunNoteRequest, setOpenSelectedRunNoteRequest] = useState<{
-    runId: string;
-    version: number;
-  } | null>(null);
+  const [noteEditRequestVersion, setNoteEditRequestVersion] = useState(0);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const latestStateRef = useRef(state);
   const navigableBoardColumns = state.boardColumns.filter(
@@ -163,19 +160,6 @@ export function RunsDashboardRoute() {
         return;
       }
 
-      if (command === "run.openNote") {
-        if (!currentState.selectedRunId || currentState.actionPending !== undefined) {
-          return;
-        }
-        event.preventDefault();
-        const selectedRunId = currentState.selectedRunId;
-        setOpenSelectedRunNoteRequest((current) => ({
-          runId: selectedRunId,
-          version: (current?.version ?? 0) + 1,
-        }));
-        return;
-      }
-
       const closeAttachmentPreviewForSurfaceShortcut = () => {
         if (currentState.selectedDrawerView?.mode === "attachment") {
           currentState.returnSelectedRunToAttachments();
@@ -200,6 +184,20 @@ export function RunsDashboardRoute() {
         event.preventDefault();
         closeAttachmentPreviewForSurfaceShortcut();
         currentState.setActiveRightSurface("detail");
+        return;
+      }
+
+      if (command === "run.showNotes") {
+        event.preventDefault();
+        if (
+          currentState.activeRightSurface === "notes" &&
+          currentState.selectedDrawerView?.mode !== "attachment"
+        ) {
+          setNoteEditRequestVersion((current) => current + 1);
+          return;
+        }
+        closeAttachmentPreviewForSurfaceShortcut();
+        currentState.setActiveRightSurface("notes");
         return;
       }
 
@@ -333,12 +331,6 @@ export function RunsDashboardRoute() {
               boardColumns={state.boardColumns}
               collapsedColumnKeys={state.collapsedColumnKeys}
               hasActiveStructuredFilters={state.hasActiveStructuredFilters}
-              openSelectedRunNoteRequest={openSelectedRunNoteRequest}
-              onOpenSelectedRunNoteRequestHandled={(version) => {
-                setOpenSelectedRunNoteRequest((current) =>
-                  current?.version === version ? null : current,
-                );
-              }}
               onExpandColumn={state.columnActions.expand}
               onActiveBoardColumnKeyChange={state.setActiveBoardColumnKey}
               onResetFilters={state.resetBoardFilters}
@@ -375,6 +367,7 @@ export function RunsDashboardRoute() {
                 drawerFullscreen={state.viewState.drawerFullscreen}
                 drawerWidth={state.viewState.drawerWidth}
                 drawerView={state.selectedDrawerView}
+                noteEditRequestVersion={noteEditRequestVersion}
                 runs={state.runs}
                 onBackToAttachments={state.returnSelectedRunToAttachments}
                 onAbort={state.runActions.abort}

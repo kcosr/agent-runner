@@ -1588,6 +1588,11 @@ body {
   overflow: hidden;
 }
 
+.drawer-body--notes {
+  min-height: 0;
+  overflow: hidden;
+}
+
 .tabs {
   position: sticky;
   top: 0;
@@ -1597,6 +1602,27 @@ body {
 .drawer-panel {
   min-height: 0;
   min-width: 0;
+}
+
+.drawer-panel--notes {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.drawer-body--notes .drawer-panel-card--notes {
+  box-sizing: border-box;
+}
+
+.drawer-body--notes .note-editor {
+  height: 100%;
+}
+
+.drawer-body--notes .note-editor__field,
+.drawer-body--notes .note-editor__preview,
+.drawer-body--notes .note-editor__textarea {
+  min-height: 0;
 }
 
 .drawer-panel--tasks {

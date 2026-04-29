@@ -241,7 +241,7 @@ describe("resolveRunsShortcutCommand", () => {
         },
         context,
       ),
-    ).toBe("run.openNote");
+    ).toBe("run.showNotes");
     expect(
       resolveRunsShortcutCommand(
         {
@@ -376,7 +376,7 @@ describe("resolveRunsShortcutCommand", () => {
         },
         context,
       ),
-    ).toBe("run.openNote");
+    ).toBe("run.showNotes");
     expect(
       resolveRunsShortcutCommand(
         {
@@ -515,6 +515,30 @@ describe("resolveRunsShortcutCommand", () => {
         attachmentContext,
       ),
     ).toBe("run.showChat");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "d",
+          metaKey: false,
+          shiftKey: false,
+        },
+        attachmentContext,
+      ),
+    ).toBe("run.showDetail");
+    expect(
+      resolveRunsShortcutCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "n",
+          metaKey: false,
+          shiftKey: false,
+        },
+        attachmentContext,
+      ),
+    ).toBe("run.showNotes");
     expect(
       resolveRunsShortcutCommand(
         {
@@ -908,7 +932,7 @@ describe("resolveRunsShortcutCommand", () => {
         },
         fullscreenContext,
       ),
-    ).toBe("run.openNote");
+    ).toBe("run.showNotes");
     expect(
       resolveRunsShortcutCommand(
         {

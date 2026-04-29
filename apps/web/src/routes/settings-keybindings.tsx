@@ -82,11 +82,6 @@ const SHORTCUT_SECTIONS: readonly ShortcutSection[] = [
         title: "Run primary action",
       },
       {
-        description: "Open the selected run's note modal from the board.",
-        keys: ["N"],
-        title: "Open run note",
-      },
-      {
         description: "Show the selected run's Chat tab, or focus its composer when Chat is open.",
         keys: ["C"],
         title: "Switch to Chat",
@@ -95,6 +90,11 @@ const SHORTCUT_SECTIONS: readonly ShortcutSection[] = [
         description: "Show the selected run's Detail tab.",
         keys: ["D"],
         title: "Switch to Detail",
+      },
+      {
+        description: "Show the selected run's Notes tab, or focus its editor when Notes is open.",
+        keys: ["N"],
+        title: "Switch to Notes",
       },
       {
         description: "Show the selected run's Tasks tab.",

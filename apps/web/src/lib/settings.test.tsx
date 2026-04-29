@@ -251,7 +251,7 @@ describe("DashboardSettingsProvider", () => {
       JSON.stringify({
         collapsedColumnKeys: ["running"],
         drawerWidth: 700,
-        activeRightSurface: "chat",
+        activeRightSurface: "notes",
       }),
     );
 
@@ -259,7 +259,7 @@ describe("DashboardSettingsProvider", () => {
 
     expect(screen.getByTestId("view-state")).toHaveTextContent('"collapsedColumnKeys":["running"]');
     expect(screen.getByTestId("view-state")).toHaveTextContent('"drawerWidth":700');
-    expect(screen.getByTestId("view-state")).toHaveTextContent('"activeRightSurface":"chat"');
+    expect(screen.getByTestId("view-state")).toHaveTextContent('"activeRightSurface":"notes"');
   });
 
   it("defaults malformed dashboard surface view state", () => {

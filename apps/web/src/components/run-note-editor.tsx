@@ -1,6 +1,7 @@
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useEffect, useId, useRef, useState } from "react";
 import { MarkdownContent } from "./markdown.js";
+import { useNativeModalDialog } from "./native-dialog.js";
 
 type RunNoteEditorMode = "preview" | "edit";
 
@@ -61,6 +62,7 @@ export function RunNoteEditor({
   autoFocusEditor = false,
   closeOnCancel = false,
   closeOnSave = false,
+  editRequestVersion,
   emptyPreviewMessage,
   initialMode,
   note,
@@ -72,6 +74,7 @@ export function RunNoteEditor({
   autoFocusEditor?: boolean;
   closeOnCancel?: boolean;
   closeOnSave?: boolean;
+  editRequestVersion?: number;
   emptyPreviewMessage: string;
   initialMode: RunNoteEditorMode;
   note: string | null;
@@ -82,9 +85,17 @@ export function RunNoteEditor({
 }) {
   const [draft, setDraft] = useState(note ?? "");
   const [mode, setMode] = useState<RunNoteEditorMode>(initialMode);
+  const [confirmExitOpen, setConfirmExitOpen] = useState(false);
   const noteRef = useRef(note);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const lastEditRequestVersionRef = useRef(editRequestVersion);
   const textareaId = useId();
+  const confirmTitleId = useId();
+  const dirty = draft !== (note ?? "");
+  const { dialogProps: confirmDialogProps, ref: confirmDialogRef } = useNativeModalDialog(
+    confirmExitOpen,
+    () => setConfirmExitOpen(false),
+  );
 
   useEffect(() => {
     if (noteRef.current === note) {
@@ -96,9 +107,25 @@ export function RunNoteEditor({
   }, [initialMode, note]);
 
   useEffect(() => {
+    if (
+      editRequestVersion === undefined ||
+      editRequestVersion === lastEditRequestVersionRef.current
+    ) {
+      return;
+    }
+    lastEditRequestVersionRef.current = editRequestVersion;
+    setMode("edit");
+    window.setTimeout(focusTextareaEnd, 0);
+  }, [editRequestVersion]);
+
+  useEffect(() => {
     if (!autoFocusEditor || mode !== "edit" || pending) {
       return;
     }
+    focusTextareaEnd();
+  }, [autoFocusEditor, mode, pending]);
+
+  function focusTextareaEnd() {
     const textarea = textareaRef.current;
     if (!textarea) {
       return;
@@ -106,13 +133,20 @@ export function RunNoteEditor({
     textarea.focus({ preventScroll: true });
     const selectionStart = textarea.value.length;
     textarea.setSelectionRange(selectionStart, selectionStart);
-  }, [autoFocusEditor, mode, pending]);
-
-  function handleCancel() {
-    if (pending) {
-      return;
+    const scrollToBottom = () => {
+      textarea.scrollTop = textarea.scrollHeight;
+    };
+    scrollToBottom();
+    if (typeof window.requestAnimationFrame === "function") {
+      window.requestAnimationFrame(scrollToBottom);
+    } else {
+      window.setTimeout(scrollToBottom, 0);
     }
+  }
+
+  function finishCancel() {
     setDraft(note ?? "");
+    setConfirmExitOpen(false);
     if (closeOnCancel) {
       onClose?.();
       return;
@@ -120,30 +154,46 @@ export function RunNoteEditor({
     setMode("preview");
   }
 
-  async function handleSave() {
+  function handleCancel() {
     if (pending) {
       return;
     }
+    if (dirty) {
+      setConfirmExitOpen(true);
+      return;
+    }
+    finishCancel();
+  }
+
+  async function saveDraft(): Promise<boolean> {
+    if (pending) {
+      return false;
+    }
     const nextNote = draft.trim().length === 0 ? null : draft;
     if (nextNote === note) {
-      if (closeOnSave) {
-        onClose?.();
-        return;
-      }
-      setMode("preview");
-      return;
+      return true;
     }
 
     try {
       await onSave(nextNote);
-      if (closeOnSave) {
-        onClose?.();
-        return;
-      }
-      setMode("preview");
+      return true;
     } catch {
       // The shared mutation path surfaces errors elsewhere in the UI.
+      return false;
     }
+  }
+
+  async function handleSave() {
+    const saved = await saveDraft();
+    if (!saved) {
+      return;
+    }
+    setConfirmExitOpen(false);
+    if (closeOnSave) {
+      onClose?.();
+      return;
+    }
+    setMode("preview");
   }
 
   function handleTextareaKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
@@ -153,7 +203,7 @@ export function RunNoteEditor({
       handleCancel();
       return;
     }
-    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey || event.altKey)) {
       event.preventDefault();
       event.stopPropagation();
       void handleSave();
@@ -162,34 +212,22 @@ export function RunNoteEditor({
 
   return (
     <div className="note-editor">
-      <div className="note-editor__toolbar">
-        <div aria-label="Note view" className="note-editor__mode-switch" role="toolbar">
+      {mode === "preview" ? (
+        <div aria-label="Run note preview" className="note-editor__preview">
           <button
-            aria-pressed={mode === "preview"}
-            className={mode === "preview" ? "btn btn--quiet active" : "btn btn--quiet"}
-            onClick={() => setMode("preview")}
-            type="button"
-          >
-            View
-          </button>
-          <button
-            aria-pressed={mode === "edit"}
-            className={mode === "edit" ? "btn btn--quiet active" : "btn btn--quiet"}
+            className="btn btn--quiet note-editor__edit-button"
             onClick={() => setMode("edit")}
             type="button"
           >
             Edit
           </button>
-        </div>
-      </div>
-
-      {mode === "preview" ? (
-        <div aria-label="Run note preview" className="note-editor__preview">
-          {note ? (
-            <MarkdownContent className="note-editor__markdown" text={note} />
-          ) : (
-            <p className="note-editor__empty">{emptyPreviewMessage}</p>
-          )}
+          <div className="note-editor__preview-content">
+            {note ? (
+              <MarkdownContent className="note-editor__markdown" text={note} />
+            ) : (
+              <p className="note-editor__empty">{emptyPreviewMessage}</p>
+            )}
+          </div>
         </div>
       ) : (
         <label className="note-editor__field" htmlFor={textareaId}>
@@ -214,16 +252,62 @@ export function RunNoteEditor({
             Cancel
           </button>
           <button
-            aria-keyshortcuts="Meta+Enter Ctrl+Enter"
+            aria-keyshortcuts="Alt+Enter Meta+Enter Ctrl+Enter"
             className="btn btn-primary"
             disabled={pending}
             onClick={() => void handleSave()}
-            title="Save note (Cmd/Ctrl+Enter)"
+            title="Save note (Alt/Cmd/Ctrl+Enter)"
             type="button"
           >
             {pending ? "Saving..." : "Save"}
           </button>
         </div>
+      ) : null}
+
+      {confirmExitOpen ? (
+        <dialog
+          aria-labelledby={confirmTitleId}
+          className="note-dialog-backdrop"
+          {...confirmDialogProps}
+          ref={confirmDialogRef}
+        >
+          <div className="note-dialog note-dialog--confirm" role="document">
+            <div className="note-dialog__header">
+              <div>
+                <h3 className="note-dialog__title" id={confirmTitleId}>
+                  Save note changes?
+                </h3>
+                <p className="note-dialog__copy">
+                  Your note has unsaved changes. Save them before leaving edit mode?
+                </p>
+              </div>
+            </div>
+            <div className="note-editor__actions">
+              <button
+                className="btn btn--quiet"
+                disabled={pending}
+                onClick={() => {
+                  setConfirmExitOpen(false);
+                  window.setTimeout(focusTextareaEnd, 0);
+                }}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button className="btn" disabled={pending} onClick={finishCancel} type="button">
+                Discard
+              </button>
+              <button
+                className="btn btn-primary"
+                disabled={pending}
+                onClick={() => void handleSave()}
+                type="button"
+              >
+                {pending ? "Saving..." : "Save"}
+              </button>
+            </div>
+          </div>
+        </dialog>
       ) : null}
     </div>
   );

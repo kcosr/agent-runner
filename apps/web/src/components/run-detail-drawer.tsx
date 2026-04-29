@@ -453,6 +453,7 @@ export function RunDetailDrawer({
   activeSurface,
   chatSurface,
   dependencyCandidateRuns,
+  noteEditRequestVersion,
   onAddDependency,
   actionError,
   actionPending,
@@ -493,6 +494,7 @@ export function RunDetailDrawer({
   activeSurface: DashboardRightSurface;
   chatSurface: ReactNode;
   dependencyCandidateRuns: RunSummary[];
+  noteEditRequestVersion: number;
   onAddDependency: (dependency: RunDependencyRef) => Promise<void>;
   actionError?: string;
   actionPending?: RunActionPending;
@@ -1195,7 +1197,7 @@ export function RunDetailDrawer({
 
   useEffect(() => {
     if (isPassiveRun && activeSection === "events") {
-      onSelectSection("notes");
+      onSelectSection("attachments");
     }
   }, [activeSection, isPassiveRun, onSelectSection]);
 
@@ -1696,6 +1698,16 @@ export function RunDetailDrawer({
             Detail
           </button>
           <button
+            aria-keyshortcuts="N"
+            aria-selected={activeSurface === "notes"}
+            className={activeSurface === "notes" ? "task-tab active" : "task-tab"}
+            onClick={() => onSelectSurface("notes")}
+            role="tab"
+            type="button"
+          >
+            Notes
+          </button>
+          <button
             aria-keyshortcuts="T"
             aria-selected={activeSurface === "tasks"}
             className={activeSurface === "tasks" ? "task-tab active" : "task-tab"}
@@ -1713,6 +1725,22 @@ export function RunDetailDrawer({
         <div className="drawer-body" hidden={activeSurface !== "tasks"}>
           <section aria-label="Tasks" className="drawer-panel drawer-panel--tasks">
             <RunTaskList tasks={run.tasks} />
+          </section>
+        </div>
+        <div className="drawer-body drawer-body--notes" hidden={activeSurface !== "notes"}>
+          <section aria-label="Notes" className="drawer-panel drawer-panel--notes">
+            <div className="drawer-panel-card drawer-panel-card--notes">
+              <RunNoteEditor
+                autoFocusEditor={true}
+                editRequestVersion={noteEditRequestVersion}
+                emptyPreviewMessage="No note recorded yet."
+                initialMode="preview"
+                note={run.note}
+                onSave={onSetNote}
+                pending={notePending}
+                textareaLabel={`Run note for ${visibleName}`}
+              />
+            </div>
           </section>
         </div>
         <div className="drawer-body" hidden={activeSurface !== "detail"} ref={drawerBodyRef}>
@@ -2084,30 +2112,7 @@ export function RunDetailDrawer({
                 </span>
               ) : null}
             </button>
-            <button
-              aria-selected={activeSection === "notes"}
-              className={activeSection === "notes" ? "tab active" : "tab"}
-              onClick={() => onSelectSection("notes")}
-              type="button"
-            >
-              Notes
-            </button>
           </nav>
-
-          {activeSection === "notes" ? (
-            <section aria-label="Notes" className="drawer-panel drawer-panel--notes">
-              <div className="drawer-panel-card drawer-panel-card--notes">
-                <RunNoteEditor
-                  emptyPreviewMessage="No note recorded yet."
-                  initialMode="preview"
-                  note={run.note}
-                  onSave={onSetNote}
-                  pending={notePending}
-                  textareaLabel={`Run note for ${visibleName}`}
-                />
-              </div>
-            </section>
-          ) : null}
 
           {activeSection === "attachments" ? (
             <section aria-label="Attachments" className="drawer-panel drawer-panel--attachments">

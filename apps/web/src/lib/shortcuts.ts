@@ -11,9 +11,9 @@ type RunsShortcutCommand =
   | "ui.toggleNotesOnly"
   | "ui.toggleArchived"
   | "ui.toggleHideEmptyColumns"
-  | "run.openNote"
   | "run.showChat"
   | "run.showDetail"
+  | "run.showNotes"
   | "run.showTasks"
   | "run.toggleArchived"
   | "run.togglePinned"
@@ -159,7 +159,10 @@ function canTriggerSelectedRunShortcut(context: RunsShortcutContext): boolean {
 function resolveRunSurfaceShortcut(
   event: ShortcutEventLike,
   context: RunsShortcutContext,
-): Extract<RunsShortcutCommand, "run.showChat" | "run.showDetail" | "run.showTasks"> | null {
+): Extract<
+  RunsShortcutCommand,
+  "run.showChat" | "run.showDetail" | "run.showNotes" | "run.showTasks"
+> | null {
   if (
     context.typingTarget ||
     context.modalOpen ||
@@ -174,6 +177,9 @@ function resolveRunSurfaceShortcut(
   }
   if (matchesShortcut(event, { key: "d" })) {
     return "run.showDetail";
+  }
+  if (matchesShortcut(event, { key: "n" })) {
+    return "run.showNotes";
   }
   if (matchesShortcut(event, { key: "t" })) {
     return "run.showTasks";
@@ -284,9 +290,6 @@ export function resolveRunsShortcutCommand(
     if (context.selectedDrawerView?.mode === "attachment") {
       return null;
     }
-    if (matchesShortcut(event, { key: "n" }) && canTriggerSelectedRunShortcut(context)) {
-      return "run.openNote";
-    }
     if (matchesShortcut(event, { key: "p" }) && canTriggerSelectedRunShortcut(context)) {
       return "run.togglePinned";
     }
@@ -371,9 +374,6 @@ export function resolveRunsShortcutCommand(
   }
   if (matchesShortcut(event, { key: "enter" }) && canTriggerPrimaryAction(context)) {
     return "run.primaryAction";
-  }
-  if (matchesShortcut(event, { key: "n" }) && canTriggerSelectedRunShortcut(context)) {
-    return "run.openNote";
   }
   if (matchesShortcut(event, { key: "p" }) && canTriggerSelectedRunShortcut(context)) {
     return "run.togglePinned";
