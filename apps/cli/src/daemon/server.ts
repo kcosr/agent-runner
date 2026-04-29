@@ -2113,11 +2113,11 @@ export async function serveDaemon(
     updateRunPinned: (target, input) =>
       withPublishedMutation(target, () => app.updateRunPinned(target, input)),
     updateRunBackendSession: (target, input) =>
-      withPublishedDetailMutation(target, () =>
+      withPublishedMutation(target, () =>
         app.updateRunBackendSession(target, input, mutationAuditContext, publishAudit),
       ),
     clearBackendSession: (target) =>
-      withPublishedDetailMutation(target, () =>
+      withPublishedMutation(target, () =>
         app.clearBackendSession(target, mutationAuditContext, publishAudit),
       ),
     setGroup: (target, input) => {

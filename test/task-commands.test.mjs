@@ -129,6 +129,10 @@ function readManifest(workspaceDir) {
   return JSON.parse(readFileSync(join(workspaceDir, "run.json"), "utf8"));
 }
 
+function assertTimestampAdvanced(before, after, label) {
+  assert.ok(after > before, `${label}: expected ${after} to be after ${before}`);
+}
+
 function readCapabilities(runId, cwd) {
   return JSON.parse(
     runCli(["run", "status", runId, "--output-format", "json", "--field", "capabilities"], {
@@ -192,11 +196,13 @@ test("task set: updates status only on initialized run", async () => {
   const dir = tempDir();
   writeBundle(dir);
   const outcome = await initRun(dir);
+  const before = readManifest(outcome.workspaceDir).updatedAt;
 
   const out = runCli(["task", "set", outcome.runId, "t1", "--status", "in_progress"], { cwd: dir });
   assert.match(out, /updated t1 \(status=in_progress\)/);
 
   const manifest = readManifest(outcome.workspaceDir);
+  assertTimestampAdvanced(before, manifest.updatedAt, "task set updatedAt");
   assert.equal(manifest.finalTasks.t1.status, "in_progress");
   assert.equal(manifest.finalTasks.t1.notes, "");
   assert.equal(manifest.finalTasks.t2.status, "pending");
@@ -676,10 +682,12 @@ test("task append-notes: allowed while manifest status=running", async () => {
   const dir = tempDir();
   writeBundle(dir);
   const outcome = await initRun(dir);
+  const before = readManifest(outcome.workspaceDir).updatedAt;
 
   patchManifest(outcome.workspaceDir, (manifest) => {
     manifest.status = "running";
   });
+  const runningUpdatedAt = readManifest(outcome.workspaceDir).updatedAt;
 
   const out = runCli(["task", "append-notes", outcome.runId, "t2", "--text", "Captured detail"], {
     cwd: dir,
@@ -687,6 +695,8 @@ test("task append-notes: allowed while manifest status=running", async () => {
   assert.match(out, /updated t2 \(status=pending\)/);
 
   const manifest = readManifest(outcome.workspaceDir);
+  assert.equal(runningUpdatedAt, before);
+  assertTimestampAdvanced(runningUpdatedAt, manifest.updatedAt, "task append-notes updatedAt");
   assert.equal(manifest.status, "running");
   assert.equal(manifest.finalTasks.t2.notes, "Captured detail");
   assert.deepEqual(readCapabilities(outcome.runId, dir), {
@@ -712,11 +722,13 @@ test("task add: appends new task with cli-* id to initialized run", async () => 
   const dir = tempDir();
   writeBundle(dir);
   const outcome = await initRun(dir);
+  const before = readManifest(outcome.workspaceDir).updatedAt;
 
   const out = runCli(["task", "add", outcome.runId, "--title", "Third thing"], { cwd: dir });
   assert.match(out, /added task cli-[a-z0-9]+ "Third thing"/);
 
   const manifest = readManifest(outcome.workspaceDir);
+  assertTimestampAdvanced(before, manifest.updatedAt, "task add updatedAt");
   const ids = Object.keys(manifest.finalTasks);
   assert.equal(ids.length, 3);
   assert.equal(ids[0], "t1");
@@ -804,11 +816,13 @@ test("run reset: restores the original initialized task snapshot after task muta
       cwd: dir,
     }),
   );
+  const beforeReset = readManifest(outcome.workspaceDir).updatedAt;
 
   const out = runCli(["run", "reset", outcome.runId], { cwd: dir });
   assert.match(out, new RegExp(`reset run ${outcome.runId} to initialized state`));
 
   const manifest = readManifest(outcome.workspaceDir);
+  assertTimestampAdvanced(beforeReset, manifest.updatedAt, "run reset updatedAt");
   assert.equal(manifest.status, "initialized");
   assert.equal(manifest.brief, originalPrompt);
   assert.deepEqual(Object.keys(manifest.finalTasks), ["t1", "t2"]);
@@ -895,6 +909,7 @@ test("run reset: json output restores initialized state and removes attempt arti
       },
     ];
   });
+  const beforeReset = readManifest(outcome.workspaceDir).updatedAt;
   mkdirSync(join(outcome.workspaceDir, "attempts"), { recursive: true });
   writeFileSync(
     join(outcome.workspaceDir, "attempts", "01.json"),
@@ -916,6 +931,7 @@ test("run reset: json output restores initialized state and removes attempt arti
   assert.deepEqual(JSON.parse(out), { runId: outcome.runId, status: "initialized" });
 
   const manifest = readManifest(outcome.workspaceDir);
+  assertTimestampAdvanced(beforeReset, manifest.updatedAt, "run reset json updatedAt");
   assert.equal(manifest.status, "initialized");
   assert.equal(manifest.endedAt, null);
   assert.equal(manifest.exitCode, null);

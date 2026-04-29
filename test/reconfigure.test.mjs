@@ -36,6 +36,10 @@ function readManifest(workspaceDir) {
   return JSON.parse(readFileSync(join(workspaceDir, "run.json"), "utf8"));
 }
 
+function assertTimestampAdvanced(before, after, label) {
+  assert.ok(after > before, `${label}: expected ${after} to be after ${before}`);
+}
+
 function writeManifest(workspaceDir, manifest) {
   writeFileSync(join(workspaceDir, "run.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 }
@@ -143,6 +147,7 @@ Assignment for {{target}} on {{branch}}.
 
   assert.equal(detail.runId, init.runId);
   assert.equal(manifest.status, "initialized");
+  assertTimestampAdvanced(initialManifest.updatedAt, manifest.updatedAt, "reconfigure updatedAt");
   assert.equal(manifest.message, "replacement message\n");
   assert.equal(manifest.runtimeVars.target, "alpha");
   assert.equal(manifest.runtimeVars.branch, "release");

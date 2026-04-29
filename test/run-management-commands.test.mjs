@@ -131,6 +131,10 @@ function readManifest(workspaceDir) {
   return JSON.parse(readFileSync(join(workspaceDir, "run.json"), "utf8"));
 }
 
+function assertTimestampAdvanced(before, after, label) {
+  assert.ok(after > before, `${label}: expected ${after} to be after ${before}`);
+}
+
 function patchManifest(workspaceDir, mutator) {
   const manifestPath = join(workspaceDir, "run.json");
   const manifest = readManifest(workspaceDir);
@@ -307,10 +311,14 @@ test("run archive and run unarchive expose idempotent text and json results", as
   writeAgent(dir, "run-mgmt-agent", AGENT);
   writeAssignment(dir, "run-mgmt-work", ASSIGNMENT);
   const outcome = await initRun(dir);
+  let previousUpdatedAt = readManifest(outcome.workspaceDir).updatedAt;
 
   const archivedText = runCli(["run", "archive", outcome.runId], { cwd: dir });
   assert.match(archivedText, new RegExp(`archived run ${outcome.runId}`));
-  assert.ok(readManifest(outcome.workspaceDir).archivedAt);
+  let manifest = readManifest(outcome.workspaceDir);
+  assert.ok(manifest.archivedAt);
+  assertTimestampAdvanced(previousUpdatedAt, manifest.updatedAt, "run archive updatedAt");
+  previousUpdatedAt = manifest.updatedAt;
 
   const archivedAgainJson = runCli(["run", "archive", outcome.runId, "--output-format", "json"], {
     cwd: dir,
@@ -318,10 +326,14 @@ test("run archive and run unarchive expose idempotent text and json results", as
   const archivedAgain = JSON.parse(archivedAgainJson);
   assert.equal(archivedAgain.changed, false);
   assert.ok(archivedAgain.archivedAt);
+  assert.equal(readManifest(outcome.workspaceDir).updatedAt, previousUpdatedAt);
 
   const unarchivedText = runCli(["run", "unarchive", outcome.runId], { cwd: dir });
   assert.match(unarchivedText, new RegExp(`unarchived run ${outcome.runId}`));
-  assert.equal(readManifest(outcome.workspaceDir).archivedAt, null);
+  manifest = readManifest(outcome.workspaceDir);
+  assert.equal(manifest.archivedAt, null);
+  assertTimestampAdvanced(previousUpdatedAt, manifest.updatedAt, "run unarchive updatedAt");
+  previousUpdatedAt = manifest.updatedAt;
 
   const unarchivedAgainJson = runCli(
     ["run", "unarchive", outcome.runId, "--output-format", "json"],
@@ -330,6 +342,7 @@ test("run archive and run unarchive expose idempotent text and json results", as
   const unarchivedAgain = JSON.parse(unarchivedAgainJson);
   assert.equal(unarchivedAgain.changed, false);
   assert.equal(unarchivedAgain.archivedAt, null);
+  assert.equal(readManifest(outcome.workspaceDir).updatedAt, previousUpdatedAt);
 });
 
 test("run ready promotes initialized runs and returns text and json results", async () => {
@@ -337,12 +350,14 @@ test("run ready promotes initialized runs and returns text and json results", as
   writeAgent(dir, "run-mgmt-agent", AGENT);
   writeAssignment(dir, "run-mgmt-work", ASSIGNMENT);
   const outcome = await initRun(dir);
+  const before = readManifest(outcome.workspaceDir).updatedAt;
 
   const text = runCli(["run", "ready", outcome.runId], { cwd: dir });
   assert.match(text, new RegExp(`promoted run ${outcome.runId} to ready`));
 
   let manifest = readManifest(outcome.workspaceDir);
   assert.equal(manifest.status, "ready");
+  assertTimestampAdvanced(before, manifest.updatedAt, "run ready updatedAt");
 
   const second = await initRun(dir);
   const json = runCli(["run", "ready", second.runId, "--output-format", "json"], { cwd: dir });
@@ -443,12 +458,15 @@ test("run reconfigure accepts --message-file and rejects message-file conflicts 
   const outcome = await initRun(dir);
   const messagePath = join(dir, "new-message.md");
   writeFileSync(messagePath, "replacement from file\n");
+  const beforeReconfigure = readManifest(outcome.workspaceDir).updatedAt;
 
   const text = runCli(["run", "reconfigure", outcome.runId, "--message-file", messagePath], {
     cwd: dir,
   });
   assert.equal(text, `task-runner: reconfigured run ${outcome.runId}\n`);
-  assert.equal(readManifest(outcome.workspaceDir).message, "replacement from file\n");
+  const manifest = readManifest(outcome.workspaceDir);
+  assert.equal(manifest.message, "replacement from file\n");
+  assertTimestampAdvanced(beforeReconfigure, manifest.updatedAt, "run reconfigure updatedAt");
 
   const before = readFileSync(join(outcome.workspaceDir, "run.json"), "utf8");
   const conflict = runCliExpectFail(
@@ -527,12 +545,16 @@ test("run schedule sets, toggles, clears, and run ready accepts schedule flags",
   writeAgent(dir, "run-mgmt-agent", AGENT);
   writeAssignment(dir, "run-mgmt-work", ASSIGNMENT);
   const outcome = await initRun(dir);
+  let previousUpdatedAt = readManifest(outcome.workspaceDir).updatedAt;
 
   const setText = runCli(["run", "schedule", outcome.runId, "--at", "2099-04-25T12:00:00.000Z"], {
     cwd: dir,
   });
   assert.match(setText, /set schedule/);
-  assert.equal(readManifest(outcome.workspaceDir).schedule.runAt, "2099-04-25T12:00:00.000Z");
+  let manifest = readManifest(outcome.workspaceDir);
+  assert.equal(manifest.schedule.runAt, "2099-04-25T12:00:00.000Z");
+  assertTimestampAdvanced(previousUpdatedAt, manifest.updatedAt, "run schedule set updatedAt");
+  previousUpdatedAt = manifest.updatedAt;
 
   const disableJson = JSON.parse(
     runCli(["run", "schedule", "disable", outcome.runId, "--output-format", "json"], {
@@ -540,10 +562,15 @@ test("run schedule sets, toggles, clears, and run ready accepts schedule flags",
     }),
   );
   assert.equal(disableJson.schedule.enabled, false);
+  manifest = readManifest(outcome.workspaceDir);
+  assertTimestampAdvanced(previousUpdatedAt, manifest.updatedAt, "run schedule disable updatedAt");
+  previousUpdatedAt = manifest.updatedAt;
 
   const clearText = runCli(["run", "schedule", "clear", outcome.runId], { cwd: dir });
   assert.match(clearText, /cleared schedule/);
-  assert.equal(readManifest(outcome.workspaceDir).schedule, null);
+  manifest = readManifest(outcome.workspaceDir);
+  assert.equal(manifest.schedule, null);
+  assertTimestampAdvanced(previousUpdatedAt, manifest.updatedAt, "run schedule clear updatedAt");
 
   const recurring = await initRun(dir);
   runCli(
@@ -577,6 +604,7 @@ test("run schedule sets, toggles, clears, and run ready accepts schedule flags",
   assert.notEqual(enabledRecurring.schedule.runAt, "2026-04-25T13:23:00.000Z");
 
   const ready = await initRun(dir);
+  const readyBefore = readManifest(ready.workspaceDir).updatedAt;
   const readyJson = JSON.parse(
     runCli(
       [
@@ -600,15 +628,26 @@ test("run schedule sets, toggles, clears, and run ready accepts schedule flags",
   assert.equal(readyJson.schedule.recurrence.schedule.expression, "0 9 * * *");
   assert.equal(readyJson.schedule.recurrence.mode, "clone");
   assert.equal(readyJson.schedule.recurrence.continueOnFailure, true);
+  let readyManifest = readManifest(ready.workspaceDir);
+  assertTimestampAdvanced(readyBefore, readyManifest.updatedAt, "run ready schedule updatedAt");
 
   const recurringClearText = runCli(["run", "schedule", "clear", ready.runId], { cwd: dir });
   assert.match(recurringClearText, /cleared schedule/);
-  assert.equal(readManifest(ready.workspaceDir).schedule, null);
+  const beforeReadyClear = readyManifest.updatedAt;
+  readyManifest = readManifest(ready.workspaceDir);
+  assert.equal(readyManifest.schedule, null);
+  assertTimestampAdvanced(
+    beforeReadyClear,
+    readyManifest.updatedAt,
+    "run schedule clear ready updatedAt",
+  );
 
+  const beforeReset = readyManifest.updatedAt;
   runCli(["run", "reset", ready.runId], { cwd: dir });
   const resetManifest = readManifest(ready.workspaceDir);
   assert.equal(resetManifest.status, "initialized");
   assert.equal(resetManifest.schedule, null);
+  assertTimestampAdvanced(beforeReset, resetManifest.updatedAt, "run reset updatedAt");
 });
 
 test("run schedule validates required target and schedule flag combinations", async () => {
@@ -650,6 +689,7 @@ test("run set-name updates, clears, and preserves reset seed", async () => {
   writeAgent(dir, "run-mgmt-passive-agent", PASSIVE_AGENT);
   writeAssignment(dir, "run-mgmt-work", ASSIGNMENT);
   const outcome = await initRun(dir);
+  let previousUpdatedAt = readManifest(outcome.workspaceDir).updatedAt;
 
   const setText = runCli(["run", "set-name", outcome.runId, "Run naming redesign"], { cwd: dir });
   assert.match(setText, /set name for run .*"Run naming redesign"/);
@@ -657,6 +697,8 @@ test("run set-name updates, clears, and preserves reset seed", async () => {
   let manifest = readManifest(outcome.workspaceDir);
   assert.equal(manifest.name, "Run naming redesign");
   assert.equal(manifest.resetSeed.name, "Run naming redesign");
+  assertTimestampAdvanced(previousUpdatedAt, manifest.updatedAt, "run set-name updatedAt");
+  previousUpdatedAt = manifest.updatedAt;
 
   const setAgainJson = runCli(
     ["run", "set-name", outcome.runId, "Run naming redesign", "--output-format", "json"],
@@ -665,8 +707,10 @@ test("run set-name updates, clears, and preserves reset seed", async () => {
   assert.deepEqual(JSON.parse(setAgainJson), {
     runId: outcome.runId,
     name: "Run naming redesign",
+    updatedAt: previousUpdatedAt,
     changed: false,
   });
+  assert.equal(readManifest(outcome.workspaceDir).updatedAt, previousUpdatedAt);
 
   const clearText = runCli(["run", "set-name", outcome.runId, "--clear"], { cwd: dir });
   assert.match(clearText, /cleared name for run/);
@@ -674,6 +718,8 @@ test("run set-name updates, clears, and preserves reset seed", async () => {
   manifest = readManifest(outcome.workspaceDir);
   assert.equal(manifest.name, null);
   assert.equal(manifest.resetSeed.name, null);
+  assertTimestampAdvanced(previousUpdatedAt, manifest.updatedAt, "run clear name updatedAt");
+  previousUpdatedAt = manifest.updatedAt;
 
   const clearAgainJson = runCli(
     ["run", "set-name", outcome.runId, "--clear", "--output-format", "json"],
@@ -682,8 +728,10 @@ test("run set-name updates, clears, and preserves reset seed", async () => {
   assert.deepEqual(JSON.parse(clearAgainJson), {
     runId: outcome.runId,
     name: null,
+    updatedAt: previousUpdatedAt,
     changed: false,
   });
+  assert.equal(readManifest(outcome.workspaceDir).updatedAt, previousUpdatedAt);
 });
 
 test("run set-name validates required args and empty names", async () => {
@@ -737,6 +785,7 @@ test("run set-backend-session and clear-backend-session mutate passive metadata 
   assert.deepEqual(JSON.parse(setAgainJson), {
     runId: passiveRun.runId,
     backendSessionId: "thread-42",
+    updatedAt: manifest.updatedAt,
     changed: false,
   });
 
@@ -753,6 +802,7 @@ test("run set-backend-session and clear-backend-session mutate passive metadata 
   assert.deepEqual(JSON.parse(clearAgainJson), {
     runId: passiveRun.runId,
     backendSessionId: null,
+    updatedAt: manifest.updatedAt,
     changed: false,
   });
 
@@ -798,13 +848,16 @@ test("run add-dep, remove-dep, and clear-deps expose text/json results and persi
     ["run", "remove-dep", target.runId, "--run", dependency.runId, "--output-format", "json"],
     { cwd: dir },
   );
-  assert.deepEqual(JSON.parse(removedJson), {
+  const removedResult = JSON.parse(removedJson);
+  assert.deepEqual(removedResult, {
     runId: target.runId,
     dependencies: [],
+    updatedAt: removedResult.updatedAt,
     changed: true,
   });
 
   manifest = readManifest(target.workspaceDir);
+  assert.equal(removedResult.updatedAt, manifest.updatedAt);
   assert.deepEqual(manifest.dependencies, []);
 
   const clearedJson = runCli(["run", "clear-deps", target.runId, "--output-format", "json"], {
@@ -813,6 +866,7 @@ test("run add-dep, remove-dep, and clear-deps expose text/json results and persi
   assert.deepEqual(JSON.parse(clearedJson), {
     runId: target.runId,
     dependencies: [],
+    updatedAt: manifest.updatedAt,
     changed: false,
   });
 
@@ -836,14 +890,17 @@ test("run set-group and clear-group expose text/json results and persist reset s
   const clearedJson = runCli(["run", "clear-group", target.runId, "--output-format", "json"], {
     cwd: dir,
   });
-  assert.deepEqual(JSON.parse(clearedJson), {
+  const clearedResult = JSON.parse(clearedJson);
+  assert.deepEqual(clearedResult, {
     runId: target.runId,
     runGroupId: target.runId,
     previousRunGroupId: "shared-group",
+    updatedAt: clearedResult.updatedAt,
     changed: true,
   });
 
   manifest = readManifest(target.workspaceDir);
+  assert.equal(clearedResult.updatedAt, manifest.updatedAt);
   assert.equal(manifest.runGroupId, target.runId);
   assert.equal(manifest.resetSeed.runGroupId, target.runId);
 });

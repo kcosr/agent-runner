@@ -162,18 +162,19 @@ function readManifest(workspaceDir) {
   return JSON.parse(readFileSync(join(workspaceDir, "run.json"), "utf8"));
 }
 
-test("manifest schemaVersion is 15 and captures repo", async () => {
+test("manifest schemaVersion is 16, captures repo, and initializes updatedAt", async () => {
   const dir = tempDir();
   writeAgent(dir, "canonical-claude", CLAUDE_AGENT);
   writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
   const outcome = await freshRun(dir, { initialize: true });
-  assert.equal(outcome.manifest.schemaVersion, 15);
+  assert.equal(outcome.manifest.schemaVersion, 16);
   assert.equal(outcome.manifest.repo, "unknown");
+  assert.equal(outcome.manifest.updatedAt, outcome.manifest.startedAt);
   assert.equal(outcome.manifest.archivedAt, null);
   assert.equal(outcome.manifest.schedule, null);
 });
 
-test("resolveResumeTarget treats missing archivedAt on current manifests as unarchived", async () => {
+test("resolveResumeTarget rejects current manifests missing archivedAt", async () => {
   const dir = tempDir();
   writeAgent(dir, "canonical-claude", CLAUDE_AGENT);
   writeAssignment(dir, "canonical-work", BASIC_ASSIGNMENT);
@@ -184,8 +185,13 @@ test("resolveResumeTarget treats missing archivedAt on current manifests as unar
   manifest.archivedAt = undefined;
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
-  const resolved = withSharedRuntimeEnv(dir, () => resolveResumeTarget(outcome.runId, dir));
-  assert.equal(resolved.manifest.archivedAt, null);
+  assert.throws(
+    () => withSharedRuntimeEnv(dir, () => resolveResumeTarget(outcome.runId, dir)),
+    (err) => {
+      assert.match(err.message, /does not look like a task-runner run\.json/);
+      return true;
+    },
+  );
 });
 
 test("first write freezes agent.instructions, lockedFields, and timeoutSec", async () => {
@@ -504,7 +510,7 @@ test("schemaVersion mismatch: resume rejects a v1 manifest with a clear error", 
       () => resolveResumeTarget("stale01", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 1/);
-        assert.match(err.message, /requires schemaVersion 15/);
+        assert.match(err.message, /requires schemaVersion 16/);
         return true;
       },
     );
@@ -555,7 +561,7 @@ test("schemaVersion mismatch: resume rejects a v2 manifest with a clear error", 
       () => resolveResumeTarget("stale02", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 2/);
-        assert.match(err.message, /requires schemaVersion 15/);
+        assert.match(err.message, /requires schemaVersion 16/);
         return true;
       },
     );
@@ -607,7 +613,7 @@ test("schemaVersion mismatch: resume rejects a v7 manifest with a clear error", 
       () => resolveResumeTarget("stale07", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 7/);
-        assert.match(err.message, /requires schemaVersion 15/);
+        assert.match(err.message, /requires schemaVersion 16/);
         return true;
       },
     );
@@ -659,14 +665,14 @@ test("schemaVersion mismatch: resume rejects a v10 manifest with a clear error",
       () => resolveResumeTarget("stale10", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 10/);
-        assert.match(err.message, /requires schemaVersion 15/);
+        assert.match(err.message, /requires schemaVersion 16/);
         return true;
       },
     );
   });
 });
 
-test("schemaVersion mismatch: resume rejects a v12 manifest with the v15 migration hint", async () => {
+test("schemaVersion mismatch: resume rejects a v12 manifest with the v16 migration chain hint", async () => {
   const dir = tempDir();
   const workspaceDir = join(dir, "runs", "unknown", "stale12");
   mkdirSync(workspaceDir, { recursive: true });
@@ -680,15 +686,16 @@ test("schemaVersion mismatch: resume rejects a v12 manifest with the v15 migrati
       () => resolveResumeTarget("stale12", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 12/);
-        assert.match(err.message, /requires schemaVersion 15/);
-        assert.match(err.message, /scripts\/migrate-manifests-v15\.mjs/);
+        assert.match(err.message, /requires schemaVersion 16/);
+        assert.match(err.message, /scripts\/migrate-manifests-v16\.mjs/);
+        assert.match(err.message, /migrations in order/);
         return true;
       },
     );
   });
 });
 
-test("schemaVersion mismatch: resume rejects a v13 manifest with the v15 migration chain hint", async () => {
+test("schemaVersion mismatch: resume rejects a v13 manifest with the v16 migration chain hint", async () => {
   const dir = tempDir();
   const workspaceDir = join(dir, "runs", "unknown", "stale13");
   mkdirSync(workspaceDir, { recursive: true });
@@ -702,9 +709,31 @@ test("schemaVersion mismatch: resume rejects a v13 manifest with the v15 migrati
       () => resolveResumeTarget("stale13", dir),
       (err) => {
         assert.match(err.message, /schemaVersion 13/);
-        assert.match(err.message, /requires schemaVersion 15/);
-        assert.match(err.message, /scripts\/migrate-manifests-v15\.mjs/);
+        assert.match(err.message, /requires schemaVersion 16/);
+        assert.match(err.message, /scripts\/migrate-manifests-v16\.mjs/);
         assert.match(err.message, /migrations in order/);
+        return true;
+      },
+    );
+  });
+});
+
+test("schemaVersion mismatch: resume rejects a v15 manifest with the v16 migration hint", async () => {
+  const dir = tempDir();
+  const workspaceDir = join(dir, "runs", "unknown", "stale15");
+  mkdirSync(workspaceDir, { recursive: true });
+  writeFileSync(
+    join(workspaceDir, "run.json"),
+    `${JSON.stringify({ schemaVersion: 15, runId: "stale15", workspaceDir }, null, 2)}\n`,
+  );
+
+  await withSharedRuntimeEnv(dir, async () => {
+    assert.throws(
+      () => resolveResumeTarget("stale15", dir),
+      (err) => {
+        assert.match(err.message, /schemaVersion 15/);
+        assert.match(err.message, /requires schemaVersion 16/);
+        assert.match(err.message, /scripts\/migrate-manifests-v16\.mjs/);
         return true;
       },
     );

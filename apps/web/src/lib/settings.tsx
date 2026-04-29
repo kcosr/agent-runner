@@ -1,5 +1,13 @@
 import type { ReactNode } from "react";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import {
+  type DashboardSortDirection,
+  type DashboardSortField,
+  isDashboardSortDirection,
+  isDashboardSortField,
+} from "./run-order.js";
+
+export type { DashboardSortDirection, DashboardSortField };
 
 export interface DashboardPreferences {
   hideEmptyColumns: boolean;
@@ -8,7 +16,8 @@ export interface DashboardPreferences {
   showNotesOnly: boolean;
   showScheduledOnly: boolean;
   showPinnedOnly: boolean;
-  sortByRecentUpdates: boolean;
+  sortField: DashboardSortField;
+  sortDirection: DashboardSortDirection;
   auditNewestFirst: boolean;
   visibleFocusIndicators: boolean;
   structuredFilters: DashboardStructuredFilters;
@@ -85,7 +94,8 @@ export const DEFAULT_DASHBOARD_PREFERENCES: DashboardPreferences = {
   showNotesOnly: false,
   showScheduledOnly: false,
   showPinnedOnly: false,
-  sortByRecentUpdates: false,
+  sortField: "startedAt",
+  sortDirection: "desc",
   auditNewestFirst: false,
   visibleFocusIndicators: false,
   structuredFilters: EMPTY_DASHBOARD_STRUCTURED_FILTERS,
@@ -177,6 +187,8 @@ function parseStoredDashboardPreferences(value: unknown): DashboardPreferences {
   }
 
   const record = value as Record<string, unknown>;
+  const legacySortByRecentUpdates =
+    typeof record.sortByRecentUpdates === "boolean" ? record.sortByRecentUpdates : undefined;
   return {
     hideEmptyColumns:
       typeof record.hideEmptyColumns === "boolean"
@@ -202,10 +214,14 @@ function parseStoredDashboardPreferences(value: unknown): DashboardPreferences {
       typeof record.showPinnedOnly === "boolean"
         ? record.showPinnedOnly
         : DEFAULT_DASHBOARD_PREFERENCES.showPinnedOnly,
-    sortByRecentUpdates:
-      typeof record.sortByRecentUpdates === "boolean"
-        ? record.sortByRecentUpdates
-        : DEFAULT_DASHBOARD_PREFERENCES.sortByRecentUpdates,
+    sortField: isDashboardSortField(record.sortField)
+      ? record.sortField
+      : legacySortByRecentUpdates === true
+        ? "updatedAt"
+        : DEFAULT_DASHBOARD_PREFERENCES.sortField,
+    sortDirection: isDashboardSortDirection(record.sortDirection)
+      ? record.sortDirection
+      : DEFAULT_DASHBOARD_PREFERENCES.sortDirection,
     auditNewestFirst:
       typeof record.auditNewestFirst === "boolean"
         ? record.auditNewestFirst

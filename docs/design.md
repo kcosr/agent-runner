@@ -20,7 +20,7 @@ explicit concepts:
 - caller-facing documentation stays separate from worker-facing
   instructions
 
-The current manifest schema is version `15`. Older manifest shapes are not
+The current manifest schema is version `16`. Older manifest shapes are not
 silently upgraded or dual-read at runtime.
 
 ## Non-goals
@@ -117,7 +117,7 @@ The canonical record is `run.json`. Important persisted fields:
   `maxAttemptsPerSession`, `launcher`
 - `lockedFields` (union of agent and assignment locks)
 - `status`, `exitCode`
-- `startedAt`, `endedAt`, `archivedAt`
+- `startedAt`, `updatedAt`, `endedAt`, `archivedAt`
 - `schedule` (`RunSchedule | null`)
 - `finalTasks` (canonical task state)
 - `tasksCompleted`, `tasksTotal`
@@ -619,16 +619,21 @@ initialized-only `canReconfigure` gate, plus the `taskMutation`
 sub-booleans. Browser and daemon clients should use those booleans
 directly instead of reproducing lifecycle state checks locally.
 
-Passive backend-session editing is an explicit detail-surface mutation,
-not a summary mutation: the daemon publishes a fresh `RunDetail` after
-set/clear, but does not fan out summary or dependent-run updates because
-`backendSessionId` does not participate in `RunSummary`.
+Passive backend-session editing is an explicit detail-surface mutation.
+Because set/clear writes `run.json` and advances `updatedAt`, the daemon
+publishes fresh `RunSummary` and `RunDetail` projections after changed
+backend-session edits so update-order consumers stay synchronized.
 
 `RunSummary` and `RunDetail` both expose derived `activeTask` data so
 live consumers do not need to re-scan task arrays to render the current
 in-progress task label. Timeline and audit consumers subscribe first,
 fetch `/api/runs/:runId/timeline` or `/api/runs/:runId/audit`, then
 apply buffered live envelopes where `cursor > history.lastCursor`.
+
+`RunSummary` and `RunDetail` also expose the persisted manifest
+`updatedAt` timestamp. Browser and daemon clients use that factual
+timestamp for durable dashboard ordering; the daemon does not persist
+dashboard-specific ordering fields.
 
 ## Workspace layout
 

@@ -707,6 +707,17 @@ body {
   accent-color: var(--foreground);
 }
 
+.settings-select {
+  min-width: 150px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+}
+
 .settings-placeholder {
   display: grid;
   gap: 10px;

@@ -36,6 +36,7 @@ function makeRunDetail(overrides: Record<string, unknown> = {}) {
     unrestricted: false,
     timeoutSec: 3600,
     startedAt: "2026-04-13T05:00:00.000Z",
+    updatedAt: "2026-04-13T05:00:00.000Z",
     endedAt: null,
     exitCode: null,
     totalAttemptCount: 0,
@@ -226,6 +227,7 @@ describe("api client", () => {
                   model: null,
                   cwd: "/tmp/task-runner",
                   startedAt: "2026-04-13T05:00:00.000Z",
+                  updatedAt: "2026-04-13T05:00:00.000Z",
                   endedAt: null,
                   totalAttemptCount: 1,
                   totalSessionCount: 1,
@@ -377,6 +379,7 @@ describe("api client", () => {
               unrestricted: false,
               timeoutSec: 60,
               startedAt: "2026-04-13T05:00:00.000Z",
+              updatedAt: "2026-04-13T05:00:00.000Z",
               endedAt: null,
               exitCode: null,
               totalAttemptCount: 1,
@@ -513,6 +516,7 @@ describe("api client", () => {
                 unrestricted: false,
                 timeoutSec: 60,
                 startedAt: "2026-04-13T05:00:00.000Z",
+                updatedAt: "2026-04-13T05:00:00.000Z",
                 endedAt: null,
                 exitCode: null,
                 totalAttemptCount: 0,
@@ -630,6 +634,7 @@ describe("api client", () => {
                 unrestricted: false,
                 timeoutSec: 60,
                 startedAt: "2026-04-13T05:00:00.000Z",
+                updatedAt: "2026-04-13T05:00:00.000Z",
                 endedAt: null,
                 exitCode: null,
                 totalAttemptCount: 0,
@@ -785,6 +790,7 @@ describe("api client", () => {
               unrestricted: false,
               timeoutSec: 60,
               startedAt: "2026-04-13T05:00:00.000Z",
+              updatedAt: "2026-04-13T05:00:00.000Z",
               endedAt: null,
               exitCode: null,
               totalAttemptCount: 0,
@@ -920,6 +926,7 @@ describe("api client", () => {
           JSON.stringify({
             result: {
               runId: "run-1",
+              updatedAt: "2026-04-13T05:10:00.000Z",
               note: "# Follow-up\n\nKeep the pinned card flow.",
               changed: true,
             },
@@ -935,6 +942,7 @@ describe("api client", () => {
       api.setRunNote("run-1", "# Follow-up\n\nKeep the pinned card flow."),
     ).resolves.toEqual({
       runId: "run-1",
+      updatedAt: "2026-04-13T05:10:00.000Z",
       note: "# Follow-up\n\nKeep the pinned card flow.",
       changed: true,
     });
@@ -956,6 +964,7 @@ describe("api client", () => {
           JSON.stringify({
             result: {
               runId: "run-1",
+              updatedAt: "2026-04-13T05:10:00.000Z",
               pinned: true,
               changed: true,
             },
@@ -969,6 +978,7 @@ describe("api client", () => {
 
     await expect(api.setRunPinned("run-1", true)).resolves.toEqual({
       runId: "run-1",
+      updatedAt: "2026-04-13T05:10:00.000Z",
       pinned: true,
       changed: true,
     });
@@ -1192,6 +1202,7 @@ describe("api client", () => {
           JSON.stringify({
             result: {
               runId: "run-1",
+              updatedAt: "2026-04-13T05:10:00.000Z",
               name: "Dashboard polish",
               changed: true,
             },
@@ -1204,6 +1215,7 @@ describe("api client", () => {
     const api = createApiClient(config);
     await expect(api.setRunName("run-1", "Dashboard polish")).resolves.toEqual({
       runId: "run-1",
+      updatedAt: "2026-04-13T05:10:00.000Z",
       name: "Dashboard polish",
       changed: true,
     });
@@ -1224,6 +1236,7 @@ describe("api client", () => {
           JSON.stringify({
             result: {
               runId: "run-1",
+              updatedAt: "2026-04-13T05:10:00.000Z",
               backendSessionId: "thread-42",
               changed: true,
             },
@@ -1236,6 +1249,7 @@ describe("api client", () => {
           JSON.stringify({
             result: {
               runId: "run-1",
+              updatedAt: "2026-04-13T05:11:00.000Z",
               backendSessionId: null,
               changed: true,
             },
@@ -1248,11 +1262,13 @@ describe("api client", () => {
     const api = createApiClient(config);
     await expect(api.setBackendSession("run-1", "thread-42")).resolves.toEqual({
       runId: "run-1",
+      updatedAt: "2026-04-13T05:10:00.000Z",
       backendSessionId: "thread-42",
       changed: true,
     });
     await expect(api.clearBackendSession("run-1")).resolves.toEqual({
       runId: "run-1",
+      updatedAt: "2026-04-13T05:11:00.000Z",
       backendSessionId: null,
       changed: true,
     });
@@ -1281,6 +1297,7 @@ describe("api client", () => {
           JSON.stringify({
             result: {
               runId: "run-1",
+              updatedAt: "2026-04-13T05:10:00.000Z",
               dependencies: [{ type: "run", runId: "run-2" }],
               changed: true,
             },
@@ -1293,6 +1310,7 @@ describe("api client", () => {
     const api = createApiClient(config);
     await expect(api.addDependency("run-1", { type: "run", runId: "run-2" })).resolves.toEqual({
       runId: "run-1",
+      updatedAt: "2026-04-13T05:10:00.000Z",
       dependencies: [{ type: "run", runId: "run-2" }],
       changed: true,
     });
@@ -1300,11 +1318,13 @@ describe("api client", () => {
       api.removeDependency("run-1", { type: "group", groupId: "group-a" }),
     ).resolves.toEqual({
       runId: "run-1",
+      updatedAt: "2026-04-13T05:10:00.000Z",
       dependencies: [{ type: "run", runId: "run-2" }],
       changed: true,
     });
     await expect(api.clearDependencies("run-1")).resolves.toEqual({
       runId: "run-1",
+      updatedAt: "2026-04-13T05:10:00.000Z",
       dependencies: [{ type: "run", runId: "run-2" }],
       changed: true,
     });
@@ -1341,6 +1361,7 @@ describe("api client", () => {
           JSON.stringify({
             result: {
               runId: "run-1",
+              updatedAt: "2026-04-13T05:10:00.000Z",
               runGroupId: url.endsWith("/clear") ? "run-1" : "group-a",
               previousRunGroupId: "run-1",
               changed: true,
@@ -1354,12 +1375,14 @@ describe("api client", () => {
     const api = createApiClient(config);
     await expect(api.setRunGroup("run-1", "group-a")).resolves.toEqual({
       runId: "run-1",
+      updatedAt: "2026-04-13T05:10:00.000Z",
       runGroupId: "group-a",
       previousRunGroupId: "run-1",
       changed: true,
     });
     await expect(api.clearRunGroup("run-1")).resolves.toEqual({
       runId: "run-1",
+      updatedAt: "2026-04-13T05:10:00.000Z",
       runGroupId: "run-1",
       previousRunGroupId: "run-1",
       changed: true,
@@ -1884,6 +1907,7 @@ describe("api client", () => {
               unrestricted: false,
               timeoutSec: 60,
               startedAt: "2026-04-13T05:00:00.000Z",
+              updatedAt: "2026-04-13T05:00:00.000Z",
               endedAt: null,
               exitCode: null,
               totalAttemptCount: 0,

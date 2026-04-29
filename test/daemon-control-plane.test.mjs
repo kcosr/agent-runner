@@ -746,6 +746,7 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
       assert.deepEqual(addedDependency.result, {
         runId: init.runId,
         dependencies: [{ type: "run", runId: dependency.runId }],
+        updatedAt: addedDependency.result.updatedAt,
         changed: true,
       });
 
@@ -756,6 +757,7 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
       assert.deepEqual(removedDependency.result, {
         runId: init.runId,
         dependencies: [],
+        updatedAt: removedDependency.result.updatedAt,
         changed: true,
       });
 
@@ -765,6 +767,7 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
       assert.deepEqual(clearedDependencies.result, {
         runId: init.runId,
         dependencies: [],
+        updatedAt: removedDependency.result.updatedAt,
         changed: false,
       });
 
@@ -775,6 +778,7 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
       assert.deepEqual(renamed.result, {
         runId: init.runId,
         name: "RPC renamed run",
+        updatedAt: renamed.result.updatedAt,
         changed: true,
       });
 
@@ -788,6 +792,7 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
       assert.deepEqual(cleared.result, {
         runId: init.runId,
         name: null,
+        updatedAt: cleared.result.updatedAt,
         changed: true,
       });
 
@@ -798,6 +803,7 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
       assert.deepEqual(noted.result, {
         runId: init.runId,
         note: "RPC note for the shared editor",
+        updatedAt: noted.result.updatedAt,
         changed: true,
       });
 
@@ -808,6 +814,7 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
       assert.deepEqual(pinned.result, {
         runId: init.runId,
         pinned: true,
+        updatedAt: pinned.result.updatedAt,
         changed: true,
       });
 
@@ -827,6 +834,7 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
       assert.deepEqual(setBackendSession.result, {
         runId: passiveInit.runId,
         backendSessionId: "rpc-thread-9",
+        updatedAt: setBackendSession.result.updatedAt,
         changed: true,
       });
 
@@ -836,6 +844,7 @@ test("daemon rpc mirrors shared run and definition DTOs", async () => {
       assert.deepEqual(clearedBackendSession.result, {
         runId: passiveInit.runId,
         backendSessionId: null,
+        updatedAt: clearedBackendSession.result.updatedAt,
         changed: true,
       });
 
@@ -1065,6 +1074,7 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
       assert.deepEqual(addedDependency.body.result, {
         runId: init.runId,
         dependencies: [{ type: "run", runId: dependency.runId }],
+        updatedAt: addedDependency.body.result.updatedAt,
         changed: true,
       });
 
@@ -1081,6 +1091,7 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
       assert.deepEqual(removedDependency.body.result, {
         runId: init.runId,
         dependencies: [],
+        updatedAt: removedDependency.body.result.updatedAt,
         changed: true,
       });
 
@@ -1095,6 +1106,7 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
       assert.deepEqual(clearedDependencies.body.result, {
         runId: init.runId,
         dependencies: [],
+        updatedAt: removedDependency.body.result.updatedAt,
         changed: false,
       });
 
@@ -1107,6 +1119,7 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
       assert.deepEqual(renamed.body.result, {
         runId: init.runId,
         name: "HTTP renamed run",
+        updatedAt: renamed.body.result.updatedAt,
         changed: true,
       });
 
@@ -1123,6 +1136,7 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
       assert.deepEqual(cleared.body.result, {
         runId: init.runId,
         name: null,
+        updatedAt: cleared.body.result.updatedAt,
         changed: true,
       });
 
@@ -1135,6 +1149,7 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
       assert.deepEqual(noted.body.result, {
         runId: init.runId,
         note: "HTTP note for the drawer tab",
+        updatedAt: noted.body.result.updatedAt,
         changed: true,
       });
 
@@ -1147,6 +1162,7 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
       assert.deepEqual(pinned.body.result, {
         runId: init.runId,
         pinned: true,
+        updatedAt: pinned.body.result.updatedAt,
         changed: true,
       });
 
@@ -1174,6 +1190,7 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
       assert.deepEqual(setBackendSession.body.result, {
         runId: passiveInit.runId,
         backendSessionId: "http-thread-5",
+        updatedAt: setBackendSession.body.result.updatedAt,
         changed: true,
       });
 
@@ -1188,6 +1205,7 @@ test("daemon HTTP routes mirror shared run/task DTOs and error envelopes", async
       assert.deepEqual(clearedBackendSession.body.result, {
         runId: passiveInit.runId,
         backendSessionId: null,
+        updatedAt: clearedBackendSession.body.result.updatedAt,
         changed: true,
       });
 
@@ -4253,6 +4271,7 @@ test("daemon note and pin mutations publish summary and detail updates", async (
       assert.deepEqual(noteResponse.body.result, {
         runId: init.runId,
         note: "SSE note",
+        updatedAt: noteResponse.body.result.updatedAt,
         changed: true,
       });
 
@@ -4274,6 +4293,7 @@ test("daemon note and pin mutations publish summary and detail updates", async (
       assert.deepEqual(pinResponse.body.result, {
         runId: init.runId,
         pinned: true,
+        updatedAt: pinResponse.body.result.updatedAt,
         changed: true,
       });
 
@@ -4306,6 +4326,7 @@ test("daemon mutation publishing suppresses stale-schema projection failures", a
       return {
         runId: target,
         note: input.note,
+        updatedAt: "2026-04-29T14:45:00.000Z",
         changed: true,
       };
     },
@@ -4327,6 +4348,7 @@ test("daemon mutation publishing suppresses stale-schema projection failures", a
     assert.deepEqual(noted.body.result, {
       runId: "stale-run",
       note: "survives projection miss",
+      updatedAt: noted.body.result.updatedAt,
       changed: true,
     });
 

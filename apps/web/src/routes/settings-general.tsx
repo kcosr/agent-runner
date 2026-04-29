@@ -7,10 +7,15 @@ import {
 import {
   DEFAULT_DASHBOARD_PREFERENCES,
   type DashboardPreferenceKey,
+  type DashboardSortDirection,
+  type DashboardSortField,
   useDashboardPreferences,
 } from "../lib/settings.js";
 
-type TogglePreferenceKey = Exclude<DashboardPreferenceKey, "structuredFilters">;
+type TogglePreferenceKey = Exclude<
+  DashboardPreferenceKey,
+  "sortDirection" | "sortField" | "structuredFilters"
+>;
 
 interface PreferenceRowDefinition {
   description: string;
@@ -40,12 +45,17 @@ const BOARD_PREFERENCE_ROWS: PreferenceRowDefinition[] = [
     title: "Show pinned runs only",
     description: "Keep only pinned runs visible on the board until you turn the filter back off.",
   },
-  {
-    key: "sortByRecentUpdates",
-    title: "Sort by recent updates",
-    description:
-      "Promote touched runs to the top of their columns instead of keeping the board in pure started-time order. The touched-run ordering is in-memory only and resets on page restart.",
-  },
+];
+
+const SORT_FIELD_OPTIONS: { label: string; value: DashboardSortField }[] = [
+  { label: "Started time", value: "startedAt" },
+  { label: "Last updated", value: "updatedAt" },
+  { label: "Ended time", value: "endedAt" },
+];
+
+const SORT_DIRECTION_OPTIONS: { label: string; value: DashboardSortDirection }[] = [
+  { label: "Newest first", value: "desc" },
+  { label: "Oldest first", value: "asc" },
 ];
 
 const DISPLAY_PREFERENCE_ROWS: PreferenceRowDefinition[] = [
@@ -62,9 +72,10 @@ export function SettingsGeneralRoute() {
     useDashboardPreferences();
   const preferenceRows = [...BOARD_PREFERENCE_ROWS, ...DISPLAY_PREFERENCE_ROWS];
 
-  const allDefaults = preferenceRows.every(
-    ({ key }) => preferences[key] === DEFAULT_DASHBOARD_PREFERENCES[key],
-  );
+  const allDefaults =
+    preferenceRows.every(({ key }) => preferences[key] === DEFAULT_DASHBOARD_PREFERENCES[key]) &&
+    preferences.sortField === DEFAULT_DASHBOARD_PREFERENCES.sortField &&
+    preferences.sortDirection === DEFAULT_DASHBOARD_PREFERENCES.sortDirection;
 
   function renderPreferenceRow({ description, key, title }: PreferenceRowDefinition) {
     const checked = preferences[key];
@@ -112,6 +123,62 @@ export function SettingsGeneralRoute() {
         title="Board preferences"
       >
         {BOARD_PREFERENCE_ROWS.map(renderPreferenceRow)}
+        <SettingsRow
+          action={
+            <SettingsResetButton
+              disabled={preferences.sortField === DEFAULT_DASHBOARD_PREFERENCES.sortField}
+              onClick={() => resetPreference("sortField")}
+              settingLabel="Board sort field"
+            />
+          }
+          control={
+            <select
+              aria-label="Board sort field"
+              className="settings-select"
+              onChange={(event) =>
+                updatePreferences({ sortField: event.target.value as DashboardSortField })
+              }
+              value={preferences.sortField}
+            >
+              {SORT_FIELD_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          }
+          description="Choose the timestamp used to order runs within every board column."
+          title="Board sort field"
+        />
+        <SettingsRow
+          action={
+            <SettingsResetButton
+              disabled={preferences.sortDirection === DEFAULT_DASHBOARD_PREFERENCES.sortDirection}
+              onClick={() => resetPreference("sortDirection")}
+              settingLabel="Board sort direction"
+            />
+          }
+          control={
+            <select
+              aria-label="Board sort direction"
+              className="settings-select"
+              onChange={(event) =>
+                updatePreferences({
+                  sortDirection: event.target.value as DashboardSortDirection,
+                })
+              }
+              value={preferences.sortDirection}
+            >
+              {SORT_DIRECTION_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          }
+          description="Choose whether the selected board timestamp is sorted newest-first or oldest-first."
+          title="Board sort direction"
+        />
       </SettingsSection>
       <SettingsSection
         description="Persisted dashboard display preferences that apply across the app shell."

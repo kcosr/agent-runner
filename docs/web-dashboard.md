@@ -92,6 +92,13 @@ Pinned runs sort first within their current status column while still
 using the active column comparator inside the pinned and unpinned
 buckets. Pinning does not move a run across columns.
 
+The board has one global sort field and direction, applied independently
+inside every status column after pinned-first bucketing. The sortable
+fields are started time, last updated, and ended time. Last updated uses
+the canonical `RunSummary.updatedAt` timestamp from the manifest, not
+event arrival order. Ended-time sorting keeps active runs with no
+`endedAt` last in both directions.
+
 The note affordance opens a rendered-markdown preview on desktop
 hover/focus when a note exists, and clicking/tapping opens the shared
 note editor. Desktop defaults that editor to **Edit** mode; touch-style
@@ -290,7 +297,8 @@ Preferences are persisted to `localStorage` and include:
 
 - Hide empty columns.
 - Collapse failure states into a single column.
-- Sort by recent updates.
+- Board sort field (`startedAt`, `updatedAt`, or `endedAt`) and direction
+  (`desc` or `asc`).
 - Show archived runs.
 - Show runs with notes only.
 - Show pinned runs only.
@@ -330,7 +338,8 @@ is no standalone web server in the shipped runtime.
 1. App boots and fetches `/app-config.json` for the API paths.
 2. Subscribes to the global summary stream; mutations arrive as
    `summary_upsert` / `summary_removed` events and update the
-   TanStack React Query cache.
+   TanStack React Query cache. Board sorting is recomputed from cached
+   canonical summary timestamps.
 3. Selecting a run subscribes to its detail stream; opening Attempts or
    Audit starts the corresponding history load and live stream, which remain
    active while that run stays selected.

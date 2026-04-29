@@ -36,7 +36,8 @@ const DEFAULT_DASHBOARD_PREFERENCES = {
   showNotesOnly: false,
   showScheduledOnly: false,
   showPinnedOnly: false,
-  sortByRecentUpdates: false,
+  sortField: "startedAt",
+  sortDirection: "desc",
   auditNewestFirst: false,
   visibleFocusIndicators: false,
   structuredFilters: {
@@ -140,6 +141,7 @@ function makeRun(
     name: "Build dashboard",
     cwd: "/tmp/task-runner",
     startedAt: "2026-04-13T05:00:00.000Z",
+    updatedAt: "2026-04-13T05:00:00.000Z",
     endedAt: null,
     totalAttemptCount: 1,
     totalSessionCount: 1,
@@ -281,6 +283,7 @@ function makeDetail(
     unrestricted: false,
     timeoutSec: 3600,
     startedAt: "2026-04-13T05:00:00.000Z",
+    updatedAt: "2026-04-13T05:00:00.000Z",
     endedAt: null,
     exitCode: null,
     totalAttemptCount: 1,
@@ -670,6 +673,7 @@ function installFetchMock(
             model: detail.model,
             cwd: detail.cwd,
             startedAt: detail.startedAt,
+            updatedAt: detail.updatedAt,
             endedAt: detail.endedAt,
             totalAttemptCount: detail.totalAttemptCount,
             totalSessionCount: detail.totalSessionCount,
@@ -945,6 +949,7 @@ function installFetchMock(
               changed: true,
               runId,
               status: "success",
+              updatedAt: detail.updatedAt,
             },
           }),
           { status: 200 },
@@ -974,6 +979,7 @@ function installFetchMock(
               changed: true,
               runId,
               status: "success",
+              updatedAt: detail.updatedAt,
             },
           }),
           { status: 200 },
@@ -1068,7 +1074,10 @@ function installFetchMock(
       const changed = detail.name !== name;
       state.details[runId] = { ...detail, name };
       state.runs = state.runs.map((run) => (run.runId === runId ? { ...run, name } : run));
-      return new Response(JSON.stringify({ result: { runId, name, changed } }), { status: 200 });
+      return new Response(
+        JSON.stringify({ result: { runId, updatedAt: detail.updatedAt, name, changed } }),
+        { status: 200 },
+      );
     }
 
     const noteMatch = /\/api\/runs\/([^/]+)\/note$/.exec(url);
@@ -1090,7 +1099,10 @@ function installFetchMock(
       state.runs = state.runs.map((run) =>
         run.runId === runId ? { ...run, notePresent: note !== null } : run,
       );
-      return new Response(JSON.stringify({ result: { runId, note, changed } }), { status: 200 });
+      return new Response(
+        JSON.stringify({ result: { runId, updatedAt: detail.updatedAt, note, changed } }),
+        { status: 200 },
+      );
     }
 
     const pinnedMatch = /\/api\/runs\/([^/]+)\/pinned$/.exec(url);
@@ -1110,7 +1122,10 @@ function installFetchMock(
       const changed = detail.pinned !== pinned;
       state.details[runId] = { ...detail, pinned };
       state.runs = state.runs.map((run) => (run.runId === runId ? { ...run, pinned } : run));
-      return new Response(JSON.stringify({ result: { runId, pinned, changed } }), { status: 200 });
+      return new Response(
+        JSON.stringify({ result: { runId, updatedAt: detail.updatedAt, pinned, changed } }),
+        { status: 200 },
+      );
     }
 
     const backendSessionMatch = /\/api\/runs\/([^/]+)\/backend-session$/.exec(url);
@@ -1134,9 +1149,12 @@ function installFetchMock(
       }
       const changed = detail.backendSessionId !== backendSessionId;
       state.details[runId] = { ...detail, backendSessionId };
-      return new Response(JSON.stringify({ result: { runId, backendSessionId, changed } }), {
-        status: 200,
-      });
+      return new Response(
+        JSON.stringify({
+          result: { runId, updatedAt: detail.updatedAt, backendSessionId, changed },
+        }),
+        { status: 200 },
+      );
     }
 
     const clearBackendSessionMatch = /\/api\/runs\/([^/]+)\/backend-session\/clear$/.exec(url);
@@ -1150,9 +1168,12 @@ function installFetchMock(
       }
       const changed = detail.backendSessionId !== null;
       state.details[runId] = { ...detail, backendSessionId: null };
-      return new Response(JSON.stringify({ result: { runId, backendSessionId: null, changed } }), {
-        status: 200,
-      });
+      return new Response(
+        JSON.stringify({
+          result: { runId, updatedAt: detail.updatedAt, backendSessionId: null, changed },
+        }),
+        { status: 200 },
+      );
     }
 
     const setGroupMatch = /\/api\/runs\/([^/]+)\/group$/.exec(url);
@@ -1176,6 +1197,7 @@ function installFetchMock(
         JSON.stringify({
           result: {
             runId,
+            updatedAt: detail.updatedAt,
             runGroupId,
             previousRunGroupId,
             changed: previousRunGroupId !== runGroupId,
@@ -1203,6 +1225,7 @@ function installFetchMock(
         JSON.stringify({
           result: {
             runId,
+            updatedAt: detail.updatedAt,
             runGroupId: runId,
             previousRunGroupId,
             changed: previousRunGroupId !== runId,
@@ -1258,6 +1281,7 @@ function installFetchMock(
         JSON.stringify({
           result: {
             runId,
+            updatedAt: detail.updatedAt,
             dependencies: detail.dependencies.map((dependency) =>
               dependency.type === "run"
                 ? { type: "run", runId: dependency.runId }
@@ -1310,6 +1334,7 @@ function installFetchMock(
         JSON.stringify({
           result: {
             runId,
+            updatedAt: detail.updatedAt,
             dependencies: detail.dependencies.map((dependency) =>
               dependency.type === "run"
                 ? { type: "run", runId: dependency.runId }
@@ -1348,6 +1373,7 @@ function installFetchMock(
         JSON.stringify({
           result: {
             runId,
+            updatedAt: detail.updatedAt,
             dependencies: [],
             changed: priorDependencyIds.length > 0,
           },
@@ -6705,6 +6731,51 @@ describe("web app", () => {
     await waitFor(() => expect(screen.getAllByText("group-b/run-1").length).toBeGreaterThan(0));
   });
 
+  it("persists compact toolbar sort controls", async () => {
+    installFetchMock({
+      runs: [makeRun()],
+      details: {
+        "run-1": makeDetail(),
+      },
+    });
+
+    const user = userEvent.setup();
+    await renderApp();
+    await findRunCard("Build dashboard");
+
+    expect(screen.getByRole("combobox", { name: "Sort by started time" })).toHaveValue("startedAt");
+    expect(screen.getByRole("button", { name: "Latest first" })).toHaveAttribute(
+      "title",
+      "Latest first",
+    );
+
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Sort by started time" }),
+      "updatedAt",
+    );
+    expect(screen.getByRole("combobox", { name: "Sort by last updated" })).toHaveValue("updatedAt");
+
+    await user.click(screen.getByRole("button", { name: "Latest first" }));
+    expect(screen.getByRole("button", { name: "Earliest first" })).toHaveAttribute(
+      "title",
+      "Earliest first",
+    );
+
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Sort by last updated" }),
+      "endedAt",
+    );
+    expect(screen.getByRole("combobox", { name: "Sort by ended time" })).toHaveValue("endedAt");
+
+    const stored = window.localStorage.getItem("task-runner:web:dashboard-preferences");
+    expect(stored ? JSON.parse(stored) : null).toEqual(
+      expect.objectContaining({
+        sortField: "endedAt",
+        sortDirection: "asc",
+      }),
+    );
+  });
+
   it("keeps toolbar toggles and settings rows synchronized through persisted preferences", async () => {
     installFetchMock({
       runs: [
@@ -6786,7 +6857,8 @@ describe("web app", () => {
       name: "Show scheduled runs only",
     });
     const showPinnedOnly = screen.getByRole("checkbox", { name: "Show pinned runs only" });
-    const sortByRecentUpdates = screen.getByRole("checkbox", { name: "Sort by recent updates" });
+    const boardSortField = screen.getByRole("combobox", { name: "Board sort field" });
+    const boardSortDirection = screen.getByRole("combobox", { name: "Board sort direction" });
     const visibleFocusIndicators = screen.getByRole("checkbox", {
       name: "Visible focus indicators",
     });
@@ -6797,12 +6869,13 @@ describe("web app", () => {
     expect(showArchived).toBeChecked();
     expect(showScheduledOnly).not.toBeChecked();
     expect(showPinnedOnly).not.toBeChecked();
-    expect(sortByRecentUpdates).not.toBeChecked();
+    expect(boardSortField).toHaveValue("startedAt");
+    expect(boardSortDirection).toHaveValue("desc");
     expect(visibleFocusIndicators).not.toBeChecked();
 
-    await user.click(sortByRecentUpdates);
+    await user.selectOptions(boardSortField, "updatedAt");
     await user.click(visibleFocusIndicators);
-    expect(sortByRecentUpdates).toBeChecked();
+    expect(boardSortField).toHaveValue("updatedAt");
     expect(visibleFocusIndicators).toBeChecked();
     expect(appShell).toHaveAttribute("data-focus-indicators", "on");
 
@@ -6814,7 +6887,8 @@ describe("web app", () => {
       showNotesOnly: false,
       showScheduledOnly: false,
       showPinnedOnly: false,
-      sortByRecentUpdates: true,
+      sortField: "updatedAt",
+      sortDirection: "desc",
       auditNewestFirst: false,
       visibleFocusIndicators: true,
       structuredFilters: {
@@ -6832,7 +6906,8 @@ describe("web app", () => {
     await user.click(getSidebarNavigation().getByRole("button", { name: "Settings" }));
     expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Show archived runs" })).toBeChecked();
-    expect(screen.getByRole("checkbox", { name: "Sort by recent updates" })).toBeChecked();
+    expect(screen.getByRole("combobox", { name: "Board sort field" })).toHaveValue("updatedAt");
+    expect(screen.getByRole("combobox", { name: "Board sort direction" })).toHaveValue("desc");
     expect(screen.getByRole("checkbox", { name: "Visible focus indicators" })).toBeChecked();
     expect(document.querySelector(".app")).toHaveAttribute("data-focus-indicators", "on");
 
@@ -6999,7 +7074,7 @@ describe("web app", () => {
     expect(screen.queryByRole("button", { name: /plain dashboard/i })).not.toBeInTheDocument();
   });
 
-  it("pins a selected run without forcing list and detail refetches while streams are healthy", async () => {
+  it("pins a selected run and updates canonical timestamps from the mutation result", async () => {
     const fetchMock = installFetchMock({
       runs: [makeRun({ assignmentName: "Build dashboard" })],
       details: {
@@ -7300,7 +7375,10 @@ describe("web app", () => {
     expect(screen.queryByRole("checkbox", { name: "Hide empty columns" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("checkbox", { name: "Collapse failure states" }));
     await user.click(screen.getByRole("checkbox", { name: "Show archived runs" }));
-    await user.click(screen.getByRole("checkbox", { name: "Sort by recent updates" }));
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Board sort field" }),
+      "updatedAt",
+    );
     await user.click(screen.getByRole("checkbox", { name: "Visible focus indicators" }));
     expect(document.querySelector(".app")).toHaveAttribute("data-focus-indicators", "on");
 
@@ -7309,7 +7387,8 @@ describe("web app", () => {
     expect(screen.queryByRole("checkbox", { name: "Hide empty columns" })).not.toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Collapse failure states" })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "Show archived runs" })).not.toBeChecked();
-    expect(screen.getByRole("checkbox", { name: "Sort by recent updates" })).not.toBeChecked();
+    expect(screen.getByRole("combobox", { name: "Board sort field" })).toHaveValue("startedAt");
+    expect(screen.getByRole("combobox", { name: "Board sort direction" })).toHaveValue("desc");
     expect(screen.getByRole("checkbox", { name: "Visible focus indicators" })).not.toBeChecked();
     expect(document.querySelector(".app")).toHaveAttribute("data-focus-indicators", "off");
     expect(screen.getByRole("button", { name: "Restore defaults" })).toBeDisabled();
@@ -7351,7 +7430,8 @@ describe("web app", () => {
       showNotesOnly: false,
       showScheduledOnly: false,
       showPinnedOnly: false,
-      sortByRecentUpdates: false,
+      sortField: "startedAt",
+      sortDirection: "desc",
       auditNewestFirst: false,
       visibleFocusIndicators: false,
       structuredFilters: {
@@ -7393,7 +7473,8 @@ describe("web app", () => {
       showNotesOnly: false,
       showScheduledOnly: false,
       showPinnedOnly: false,
-      sortByRecentUpdates: false,
+      sortField: "startedAt",
+      sortDirection: "desc",
       auditNewestFirst: false,
       visibleFocusIndicators: false,
       structuredFilters: {
@@ -7505,7 +7586,8 @@ describe("web app", () => {
         collapseFailureStates: "yes",
         hideEmptyColumns: "no",
         showArchived: "sure",
-        sortByRecentUpdates: "yes",
+        sortField: "changedAt",
+        sortDirection: "newest",
         visibleFocusIndicators: "sure",
       }),
     );
@@ -7575,7 +7657,8 @@ describe("web app", () => {
 
     await user.click(getSidebarNavigation().getByRole("button", { name: "Settings" }));
     expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
-    expect(screen.getByRole("checkbox", { name: "Sort by recent updates" })).not.toBeChecked();
+    expect(screen.getByRole("combobox", { name: "Board sort field" })).toHaveValue("startedAt");
+    expect(screen.getByRole("combobox", { name: "Board sort direction" })).toHaveValue("desc");
   });
 
   it("collapses and expands a board column on desktop", async () => {
@@ -9617,8 +9700,8 @@ describe("web app", () => {
     expect(fetchMock).toHaveBeenCalledTimes(callsBefore);
   });
 
-  it("promotes an updated run to the top of its column in recent-updates mode", async () => {
-    setStoredDashboardPreferences({ sortByRecentUpdates: true });
+  it("promotes an updated run to the top of its column in last-updated sort mode", async () => {
+    setStoredDashboardPreferences({ sortField: "updatedAt", sortDirection: "desc" });
     const fetchMock = installFetchMock({
       runs: [
         makeRun({
@@ -9626,12 +9709,14 @@ describe("web app", () => {
           assignmentName: "Newest run",
           name: "Newest run",
           startedAt: "2026-04-13T05:05:00.000Z",
+          updatedAt: "2026-04-13T05:05:00.000Z",
         }),
         makeRun({
           runId: "run-older",
           assignmentName: "Older run",
           name: "Older run",
           startedAt: "2026-04-13T05:00:00.000Z",
+          updatedAt: "2026-04-13T05:00:00.000Z",
         }),
       ],
       details: {
@@ -9643,6 +9728,7 @@ describe("web app", () => {
           },
           name: "Newest run",
           startedAt: "2026-04-13T05:05:00.000Z",
+          updatedAt: "2026-04-13T05:05:00.000Z",
         }),
         "run-older": makeDetail({
           runId: "run-older",
@@ -9652,6 +9738,7 @@ describe("web app", () => {
           },
           name: "Older run",
           startedAt: "2026-04-13T05:00:00.000Z",
+          updatedAt: "2026-04-13T05:00:00.000Z",
         }),
       },
     });
@@ -9675,6 +9762,7 @@ describe("web app", () => {
         assignmentName: "Older run",
         name: "Older run",
         startedAt: "2026-04-13T05:00:00.000Z",
+        updatedAt: "2026-04-13T05:10:00.000Z",
       }),
     });
 
@@ -9686,7 +9774,7 @@ describe("web app", () => {
   });
 
   it("promotes a selected run into the top of its destination column from detail SSE", async () => {
-    setStoredDashboardPreferences({ sortByRecentUpdates: true });
+    setStoredDashboardPreferences({ sortField: "updatedAt", sortDirection: "desc" });
     installFetchMock({
       runs: [
         makeRun({
@@ -9694,12 +9782,14 @@ describe("web app", () => {
           assignmentName: "Selected run",
           name: "Selected run",
           startedAt: "2026-04-13T05:00:00.000Z",
+          updatedAt: "2026-04-13T05:00:00.000Z",
         }),
         makeRun({
           runId: "run-complete",
           assignmentName: "Completed run",
           name: "Completed run",
           startedAt: "2026-04-13T05:04:00.000Z",
+          updatedAt: "2026-04-13T05:04:00.000Z",
           status: "success",
         }),
       ],
@@ -9712,6 +9802,7 @@ describe("web app", () => {
           },
           name: "Selected run",
           startedAt: "2026-04-13T05:00:00.000Z",
+          updatedAt: "2026-04-13T05:00:00.000Z",
         }),
         "run-complete": makeDetail({
           runId: "run-complete",
@@ -9721,6 +9812,7 @@ describe("web app", () => {
           },
           name: "Completed run",
           startedAt: "2026-04-13T05:04:00.000Z",
+          updatedAt: "2026-04-13T05:04:00.000Z",
           status: "success",
         }),
       },
@@ -9743,6 +9835,7 @@ describe("web app", () => {
         },
         name: "Selected run",
         startedAt: "2026-04-13T05:00:00.000Z",
+        updatedAt: "2026-04-13T05:10:00.000Z",
         status: "success",
       }),
     });
@@ -9752,8 +9845,8 @@ describe("web app", () => {
     });
   });
 
-  it("marks brand-new runs as inserts and places them at the top in recent-updates mode", async () => {
-    setStoredDashboardPreferences({ sortByRecentUpdates: true });
+  it("marks brand-new runs as inserts and places them at the top in last-updated sort mode", async () => {
+    setStoredDashboardPreferences({ sortField: "updatedAt", sortDirection: "desc" });
     installFetchMock({
       runs: [
         makeRun({
@@ -9761,6 +9854,7 @@ describe("web app", () => {
           assignmentName: "Existing run",
           name: "Existing run",
           startedAt: "2026-04-13T05:05:00.000Z",
+          updatedAt: "2026-04-13T05:05:00.000Z",
         }),
       ],
       details: {
@@ -9772,6 +9866,7 @@ describe("web app", () => {
           },
           name: "Existing run",
           startedAt: "2026-04-13T05:05:00.000Z",
+          updatedAt: "2026-04-13T05:05:00.000Z",
         }),
       },
     });
@@ -9792,6 +9887,7 @@ describe("web app", () => {
         assignmentName: "Inserted run",
         name: "Inserted run",
         startedAt: "2026-04-13T04:50:00.000Z",
+        updatedAt: "2026-04-13T05:10:00.000Z",
       }),
     });
 
@@ -9824,7 +9920,7 @@ describe("web app", () => {
     );
 
     try {
-      setStoredDashboardPreferences({ sortByRecentUpdates: true });
+      setStoredDashboardPreferences({ sortField: "updatedAt", sortDirection: "desc" });
       installFetchMock({
         runs: [
           makeRun({
@@ -9832,12 +9928,14 @@ describe("web app", () => {
             assignmentName: "Newest run",
             name: "Newest run",
             startedAt: "2026-04-13T05:05:00.000Z",
+            updatedAt: "2026-04-13T05:05:00.000Z",
           }),
           makeRun({
             runId: "run-older",
             assignmentName: "Older run",
             name: "Older run",
             startedAt: "2026-04-13T05:00:00.000Z",
+            updatedAt: "2026-04-13T05:00:00.000Z",
           }),
         ],
         details: {
@@ -9849,6 +9947,7 @@ describe("web app", () => {
             },
             name: "Newest run",
             startedAt: "2026-04-13T05:05:00.000Z",
+            updatedAt: "2026-04-13T05:05:00.000Z",
           }),
           "run-older": makeDetail({
             runId: "run-older",
@@ -9858,6 +9957,7 @@ describe("web app", () => {
             },
             name: "Older run",
             startedAt: "2026-04-13T05:00:00.000Z",
+            updatedAt: "2026-04-13T05:00:00.000Z",
           }),
         },
       });
@@ -9878,6 +9978,7 @@ describe("web app", () => {
           assignmentName: "Older run",
           name: "Older run",
           startedAt: "2026-04-13T05:00:00.000Z",
+          updatedAt: "2026-04-13T05:10:00.000Z",
         }),
       });
 

@@ -304,6 +304,9 @@ pre {
 .field.search {
   width: 240px;
 }
+.field.sort-field {
+  width: 104px;
+}
 .field.select select {
   appearance: none;
   cursor: pointer;
@@ -423,6 +426,9 @@ pre {
 .icon-btn svg {
   width: 14px;
   height: 14px;
+}
+.sort-direction-btn[data-direction="asc"] svg {
+  transform: rotate(180deg);
 }
 
 /* ─── layout ─────────────────────────────────────────── */

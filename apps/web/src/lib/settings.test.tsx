@@ -21,12 +21,13 @@ function SettingsProbe() {
       <button
         onClick={() =>
           updatePreferences({
-            sortByRecentUpdates: true,
+            sortField: "updatedAt",
+            sortDirection: "desc",
           })
         }
         type="button"
       >
-        Enable recent updates sort
+        Enable updated-at sort
       </button>
       <button onClick={() => updatePreferences({ auditNewestFirst: true })} type="button">
         Enable newest-first audit
@@ -147,7 +148,8 @@ describe("DashboardSettingsProvider", () => {
         showNotesOnly: false,
         showScheduledOnly: false,
         showPinnedOnly: false,
-        sortByRecentUpdates: false,
+        sortField: "startedAt",
+        sortDirection: "desc",
         auditNewestFirst: false,
         visibleFocusIndicators: false,
         structuredFilters: {
@@ -210,7 +212,8 @@ describe("DashboardSettingsProvider", () => {
         showNotesOnly: false,
         showScheduledOnly: false,
         showPinnedOnly: false,
-        sortByRecentUpdates: true,
+        sortField: "updatedAt",
+        sortDirection: "desc",
         auditNewestFirst: false,
         visibleFocusIndicators: true,
         structuredFilters: {
@@ -225,7 +228,7 @@ describe("DashboardSettingsProvider", () => {
     expect(screen.getByTestId("view-state")).toHaveTextContent('"activeRightSurface":"detail"');
   });
 
-  it("hydrates the persisted recent-updates preference while keeping unsaved view-state fields transient", () => {
+  it("migrates the legacy recent-updates preference while keeping unsaved view-state fields transient", () => {
     window.localStorage.setItem(
       "task-runner:web:dashboard-preferences",
       JSON.stringify({ sortByRecentUpdates: true }),
@@ -233,7 +236,9 @@ describe("DashboardSettingsProvider", () => {
 
     renderSettingsProbe();
 
-    expect(screen.getByTestId("preferences")).toHaveTextContent('"sortByRecentUpdates":true');
+    expect(screen.getByTestId("preferences")).toHaveTextContent('"sortField":"updatedAt"');
+    expect(screen.getByTestId("preferences")).toHaveTextContent('"sortDirection":"desc"');
+    expect(screen.getByTestId("preferences")).not.toHaveTextContent("sortByRecentUpdates");
     expect(screen.getByTestId("preferences")).toHaveTextContent(
       '"structuredFilters":{"repo":null,"agent":null,"backend":null,"runGroupId":null}',
     );
@@ -358,7 +363,7 @@ describe("DashboardSettingsProvider", () => {
     fireEvent.click(screen.getByRole("button", { name: "Enable notes only" }));
     fireEvent.click(screen.getByRole("button", { name: "Enable scheduled only" }));
     fireEvent.click(screen.getByRole("button", { name: "Enable pinned only" }));
-    fireEvent.click(screen.getByRole("button", { name: "Enable recent updates sort" }));
+    fireEvent.click(screen.getByRole("button", { name: "Enable updated-at sort" }));
     fireEvent.click(screen.getByRole("button", { name: "Enable visible focus indicators" }));
     fireEvent.click(screen.getByRole("button", { name: "Update view state" }));
     fireEvent.click(screen.getByRole("button", { name: "Collapse running" }));
@@ -371,7 +376,8 @@ describe("DashboardSettingsProvider", () => {
         showNotesOnly: true,
         showScheduledOnly: true,
         showPinnedOnly: true,
-        sortByRecentUpdates: true,
+        sortField: "updatedAt",
+        sortDirection: "desc",
         auditNewestFirst: false,
         visibleFocusIndicators: true,
         structuredFilters: {
@@ -407,7 +413,8 @@ describe("DashboardSettingsProvider", () => {
         showNotesOnly: false,
         showScheduledOnly: false,
         showPinnedOnly: false,
-        sortByRecentUpdates: false,
+        sortField: "startedAt",
+        sortDirection: "desc",
         auditNewestFirst: false,
         visibleFocusIndicators: false,
         structuredFilters: {
@@ -434,7 +441,8 @@ describe("DashboardSettingsProvider", () => {
         showNotesOnly: false,
         showScheduledOnly: false,
         showPinnedOnly: false,
-        sortByRecentUpdates: false,
+        sortField: "startedAt",
+        sortDirection: "desc",
         auditNewestFirst: false,
         visibleFocusIndicators: false,
         structuredFilters: {

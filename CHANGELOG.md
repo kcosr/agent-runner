@@ -10,6 +10,10 @@
   `apps/cli/src/daemon/http-client.ts`; connected callers must use the
   WebSocket RPC and stream methods.
   ([#117](https://github.com/kcosr/task-runner/pull/117))
+- Manifest schema version is now `16`. Run manifests now require
+  canonical `updatedAt`, and `RunSummary` / `RunDetail` DTOs expose it
+  as a required field. Use `scripts/migrate-manifests-v16.mjs` before
+  resuming schema v15 runs.
 - Manifest schema version is now `15`. Run manifests and reset seeds now
   require `runGroupId` plus typed `dependencies` refs (`run` or
   `group`); the former run-only dependency array is removed. Use
@@ -100,6 +104,9 @@
 
 ### Added
 
+- Added `scripts/migrate-manifests-v16.mjs` to promote schema v15
+  manifests to schema v16 by backfilling `updatedAt` from
+  `endedAt ?? startedAt`.
 - Added multiplexed daemon WebSocket byte streams and moved connected CLI
   attachment add/list/download/remove onto WebSocket RPC plus stream
   frames, while preserving HTTP attachment endpoints for browser/API
@@ -271,6 +278,9 @@
 
 ### Changed
 
+- The web dashboard now persists board sort field and direction
+  preferences and orders columns from cached canonical run timestamps
+  instead of event-arrival recency.
 - The web run chat composer now shows live activity from the run's
   server-backed state, running status labels animate subtly, and resume
   dialogs/input clear after the resume request succeeds while cache

@@ -166,7 +166,7 @@ test("manifest: run.json is written and matches outcome.manifest", async () => {
   assert.equal(log.stderr, "raw stderr text");
 });
 
-test("manifest: older root-like manifests without parentRunId normalize to null on resume", async () => {
+test("manifest: current manifests missing parentRunId are rejected on resume", async () => {
   const dir = tempDir();
   writeAgentAndAssignment(dir);
 
@@ -195,11 +195,13 @@ test("manifest: older root-like manifests without parentRunId normalize to null 
   Reflect.deleteProperty(manifest.resetSeed, "runtimeVarSources");
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
-  const resumed = withSharedRuntimeEnv(dir, () => resolveResumeTarget(outcome.runId, dir));
-  assert.equal(resumed.manifest.parentRunId, null);
-  assert.deepEqual(resumed.manifest.runtimeVarSources, {});
-  assert.equal(resumed.manifest.resetSeed.parentRunId, null);
-  assert.deepEqual(resumed.manifest.resetSeed.runtimeVarSources, {});
+  assert.throws(
+    () => withSharedRuntimeEnv(dir, () => resolveResumeTarget(outcome.runId, dir)),
+    (err) => {
+      assert.match(err.message, /does not look like a task-runner run\.json/);
+      return true;
+    },
+  );
 });
 
 test("manifest: TASK_RUNNER_FULL_ATTEMPT_LOGS opt-in preserves stdout in attempt logs", async () => {
