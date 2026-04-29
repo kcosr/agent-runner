@@ -89,6 +89,9 @@ export function RunNoteEditor({
   const noteRef = useRef(note);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const lastEditRequestVersionRef = useRef(editRequestVersion);
+  const focusTimeoutRef = useRef<number | null>(null);
+  const scrollFrameRef = useRef<number | null>(null);
+  const scrollTimeoutRef = useRef<number | null>(null);
   const textareaId = useId();
   const confirmTitleId = useId();
   const dirty = draft !== (note ?? "");
@@ -115,8 +118,16 @@ export function RunNoteEditor({
     }
     lastEditRequestVersionRef.current = editRequestVersion;
     setMode("edit");
-    window.setTimeout(focusTextareaEnd, 0);
+    scheduleFocusTextareaEnd();
   }, [editRequestVersion]);
+
+  useEffect(
+    () => () => {
+      cancelScheduledFocus();
+      cancelScheduledScroll();
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!autoFocusEditor || mode !== "edit" || pending) {
@@ -124,6 +135,55 @@ export function RunNoteEditor({
     }
     focusTextareaEnd();
   }, [autoFocusEditor, mode, pending]);
+
+  function cancelScheduledFocus() {
+    if (focusTimeoutRef.current === null) {
+      return;
+    }
+    window.clearTimeout(focusTimeoutRef.current);
+    focusTimeoutRef.current = null;
+  }
+
+  function cancelScheduledScroll() {
+    if (scrollFrameRef.current !== null && typeof window.cancelAnimationFrame === "function") {
+      window.cancelAnimationFrame(scrollFrameRef.current);
+    }
+    if (scrollTimeoutRef.current !== null) {
+      window.clearTimeout(scrollTimeoutRef.current);
+    }
+    scrollFrameRef.current = null;
+    scrollTimeoutRef.current = null;
+  }
+
+  function scheduleFocusTextareaEnd() {
+    cancelScheduledFocus();
+    focusTimeoutRef.current = window.setTimeout(() => {
+      focusTimeoutRef.current = null;
+      focusTextareaEnd();
+    }, 0);
+  }
+
+  function scheduleScrollTextareaToBottom(textarea: HTMLTextAreaElement) {
+    cancelScheduledScroll();
+    const scrollToBottom = () => {
+      if (textareaRef.current !== textarea) {
+        return;
+      }
+      textarea.scrollTop = Math.max(0, textarea.scrollHeight - textarea.clientHeight);
+    };
+    scrollToBottom();
+    if (typeof window.requestAnimationFrame === "function") {
+      scrollFrameRef.current = window.requestAnimationFrame(() => {
+        scrollFrameRef.current = null;
+        scrollToBottom();
+      });
+      return;
+    }
+    scrollTimeoutRef.current = window.setTimeout(() => {
+      scrollTimeoutRef.current = null;
+      scrollToBottom();
+    }, 0);
+  }
 
   function focusTextareaEnd() {
     const textarea = textareaRef.current;
@@ -133,15 +193,7 @@ export function RunNoteEditor({
     textarea.focus({ preventScroll: true });
     const selectionStart = textarea.value.length;
     textarea.setSelectionRange(selectionStart, selectionStart);
-    const scrollToBottom = () => {
-      textarea.scrollTop = textarea.scrollHeight;
-    };
-    scrollToBottom();
-    if (typeof window.requestAnimationFrame === "function") {
-      window.requestAnimationFrame(scrollToBottom);
-    } else {
-      window.setTimeout(scrollToBottom, 0);
-    }
+    scheduleScrollTextareaToBottom(textarea);
   }
 
   function finishCancel() {
@@ -288,7 +340,7 @@ export function RunNoteEditor({
                 disabled={pending}
                 onClick={() => {
                   setConfirmExitOpen(false);
-                  window.setTimeout(focusTextareaEnd, 0);
+                  scheduleFocusTextareaEnd();
                 }}
                 type="button"
               >

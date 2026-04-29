@@ -72,6 +72,11 @@ type AttemptSelection = number | "pending" | "live" | null;
 type SummaryRow = readonly [label: string, value: string];
 type DataTab = "vars" | "hookState";
 type AuditFilter = "all" | "hooks" | "tasks" | "run";
+type SelectedRunSurfaceTab = {
+  label: string;
+  shortcut: string;
+  surface: DashboardRightSurface;
+};
 interface RuntimeVarDraftRow {
   id: string;
   key: string;
@@ -83,6 +88,12 @@ interface RuntimeVarDraftRow {
 }
 
 const TIMELINE_BOTTOM_THRESHOLD_PX = 24;
+const SELECTED_RUN_SURFACE_TABS: readonly SelectedRunSurfaceTab[] = [
+  { label: "Chat", shortcut: "C", surface: "chat" },
+  { label: "Detail", shortcut: "D", surface: "detail" },
+  { label: "Notes", shortcut: "N", surface: "notes" },
+  { label: "Tasks", shortcut: "T", surface: "tasks" },
+];
 
 function dependencyCandidateTitle(run: RunSummary) {
   return run.name ?? run.assignmentName ?? "Unnamed";
@@ -1677,46 +1688,19 @@ export function RunDetailDrawer({
         </header>
 
         <div aria-label="Run surface" className="selected-run-surface-tabs" role="tablist">
-          <button
-            aria-keyshortcuts="C"
-            aria-selected={activeSurface === "chat"}
-            className={activeSurface === "chat" ? "task-tab active" : "task-tab"}
-            onClick={() => onSelectSurface("chat")}
-            role="tab"
-            type="button"
-          >
-            Chat
-          </button>
-          <button
-            aria-keyshortcuts="D"
-            aria-selected={activeSurface === "detail"}
-            className={activeSurface === "detail" ? "task-tab active" : "task-tab"}
-            onClick={() => onSelectSurface("detail")}
-            role="tab"
-            type="button"
-          >
-            Detail
-          </button>
-          <button
-            aria-keyshortcuts="N"
-            aria-selected={activeSurface === "notes"}
-            className={activeSurface === "notes" ? "task-tab active" : "task-tab"}
-            onClick={() => onSelectSurface("notes")}
-            role="tab"
-            type="button"
-          >
-            Notes
-          </button>
-          <button
-            aria-keyshortcuts="T"
-            aria-selected={activeSurface === "tasks"}
-            className={activeSurface === "tasks" ? "task-tab active" : "task-tab"}
-            onClick={() => onSelectSurface("tasks")}
-            role="tab"
-            type="button"
-          >
-            Tasks
-          </button>
+          {SELECTED_RUN_SURFACE_TABS.map((tab) => (
+            <button
+              aria-keyshortcuts={tab.shortcut}
+              aria-selected={activeSurface === tab.surface}
+              className={activeSurface === tab.surface ? "task-tab active" : "task-tab"}
+              key={tab.surface}
+              onClick={() => onSelectSurface(tab.surface)}
+              role="tab"
+              type="button"
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
 
         <div className="drawer-body drawer-body--chat" hidden={activeSurface !== "chat"}>

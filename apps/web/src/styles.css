@@ -1611,10 +1611,6 @@ body {
   min-height: 0;
 }
 
-.drawer-body--notes .drawer-panel-card--notes {
-  box-sizing: border-box;
-}
-
 .drawer-body--notes .note-editor {
   height: 100%;
 }
