@@ -179,7 +179,7 @@ values using `runtimeVarSources`.
 
 ## Manifest upgrades
 
-The current manifest schema is version `14`. Older manifests are not
+The current manifest schema is version `17`. Older manifests are not
 silently upgraded at runtime — resuming a run with an older schema fails
 with a clear error. The repo ships migration scripts under `scripts/`:
 
@@ -199,6 +199,18 @@ with a clear error. The repo ships migration scripts under `scripts/`:
   assignment seed path fields from manifests; dry-run by default,
   `--write` to apply, supports repeated `--repo <name>` and `--file
   <path>` filters plus `--root <path>`)
+- `scripts/migrate-manifests-v15.mjs` — v14 → v15 (adds `runGroupId`
+  and typed dependencies; dry-run by default, `--write` to apply,
+  supports repeated `--repo <name>` and `--file <path>` filters plus
+  `--root <path>`)
+- `scripts/migrate-manifests-v16.mjs` — v15 → v16 (adds canonical
+  `updatedAt`; dry-run by default, `--write` to apply, supports repeated
+  `--repo <name>` and `--file <path>` filters plus `--root <path>`)
+- `scripts/migrate-manifests-v17.mjs` — v16 → v17 (renames selected
+  Codex `backendSpecific` data to `backendConfig` and removes obsolete
+  config fields; dry-run by default, `--write` to apply, supports
+  repeated `--repo <name>` and `--file <path>` filters plus `--root
+  <path>`)
 - `scripts/migrate-manifests-v11.mjs` — v10 → v11 (normalizes session
   and attempt records plus hook audits)
 - `scripts/migrate-manifests-v10.mjs` — v9 → v10 (freezes launcher

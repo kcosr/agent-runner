@@ -7,7 +7,8 @@
 - Manifest schema version is now `17`. Runs now freeze selected
   backend-owned config on `manifest.backendConfig`, and the old
   per-backend manifest, reset-seed, daemon override, and hook-context config
-  contract is removed. Recreate or migrate older runs before resuming them.
+  contract is removed. Use `scripts/migrate-manifests-v17.mjs` before
+  resuming schema v16 runs.
 - Removed connected attachment HTTP client helpers
   (`daemonAddAttachment`, `daemonListAttachments`,
   `daemonRemoveAttachment`, `daemonDownloadAttachment`) from
@@ -116,6 +117,9 @@
   a matching backend id without conflicting with built-in names, install their
   dependencies under the config directory, and receive `ctx.cwd` for native
   backend cwd handling.
+- Added `scripts/migrate-manifests-v17.mjs` to promote schema v16
+  manifests to schema v17 by moving selected Codex `backendSpecific` data to
+  `backendConfig` and removing obsolete per-backend config fields.
 - Added opt-in shared bearer-token protection for daemon `/api/*`,
   WebSocket, SSE, connected CLI, and web dashboard requests, with
   Settings -> General token storage for the dashboard.
